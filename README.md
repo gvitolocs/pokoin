@@ -1,42 +1,83 @@
-# Hermes
+# Pokoin
 
-Hermes è un assistente conversazionale per Telegram e, opzionalmente, Discord. Usa un provider compatibile con le API ChatGPT/OpenAI per rispondere ai messaggi, Honcho per la memoria conversazionale e può integrare ComfyUI per generare immagini o Cursor Agent per lavorare su un progetto software.
+Pokoin is an ecosystem for Pokemon-card commerce, wallet experiences, and a
+native Proof-of-Stake chain. This repository currently contains **Hermes**, the
+Pokoin conversational assistant service used to connect Telegram, optional
+Discord, an OpenAI-compatible model provider, Honcho memory, optional ComfyUI
+image generation, and optional Cursor Agent project automation.
 
-Il progetto è pensato per girare localmente durante lo sviluppo e su un host Oracle peer1 in produzione.
+This README documents the verified contents of this repository plus public
+references from related Pokoin repositories. Where details are not available,
+the ecosystem section says so explicitly.
 
-## Funzionalità principali
+## Ecosystem And Related Projects
 
-- Bot Telegram basato su `telegraf`, con long polling o webhook HTTPS.
-- Bot Discord opzionale basato su `discord.js`, attivo in DM o quando viene menzionato.
-- Risposte testuali tramite API compatibili con OpenAI Chat Completions.
-- Analisi di immagini ricevute su Telegram tramite endpoint di ispezione immagini del provider configurato.
-- Memoria conversazionale con Honcho, disattivabile cambiando `MEMORY_PROVIDER`.
-- Generazione immagini opzionale tramite ComfyUI e workflow JSON incluso.
-- Esecuzione opzionale di task di sviluppo tramite Cursor Agent CLI.
-- Endpoint HTTP `/health` per verificare lo stato del servizio.
+| Project | Verified status | Links and notes |
+| --- | --- | --- |
+| CardVault | Public Flutter web app for the Pokoin ecosystem. Its README describes CardVault marketplace routes and an integrated Pokoin Wallet served from one Flutter web deployment. | [gvitolocs/cardvault](https://github.com/gvitolocs/cardvault), production site listed as `https://pokoin.com/`, wallet route listed as `https://pokoin.com/wallet`. |
+| Wallet | The current wallet is documented as integrated into CardVault at `/wallet`. A separate older `pokoinwallet` repository exists and describes a Flutter app with Firebase Functions v2, Firestore, a deployable node API, transaction validation, mempool, manual mining, and locked-down Firestore rules. | [gvitolocs/pokoinwallet](https://github.com/gvitolocs/pokoinwallet). Treat this as legacy/prototype unless the owner confirms its current role. |
+| Hypemeter | Public repository exists, with a TypeScript/Next.js app and homepage metadata. No README or product description was found. | [gvitolocs/hypemeter](https://github.com/gvitolocs/hypemeter), homepage listed as `https://hypemeter-beta.vercel.app`. Details coming soon. |
+| Card Extension | Chrome extension that turns Pokemon card listing titles from eBay, Vinted, CardTrader, and Cardmarket into Pokoin marketplace links. Its README says it extracts metadata, matches cards through Pokoin/CardVault APIs, injects buttons, and opens matched cards in a Chrome side panel. | [gvitolocs/pokemon-card-extension](https://github.com/gvitolocs/pokemon-card-extension). |
+| PokoinPoS | Native Proof-of-Stake chain used by the Pokoin/CardVault ecosystem. Its README documents public RPC, health endpoints, Docker deployment, peer auto-updates, wallet compatibility, chain ID `26062026`, and native currency `PKN`. | [gvitolocs/pokoinpos](https://github.com/gvitolocs/pokoinpos), RPC listed as `https://rpc.pokoin.com/rpc`, explorer listed as `https://explorer.pokoin.com`. |
 
-## Stack tecnico
+## Verified Features In This Repository
 
-- Node.js ESM, con requisito `node >=20`.
-- `telegraf` per Telegram.
-- `discord.js` per Discord.
-- `@honcho-ai/sdk` per la memoria.
-- `dotenv` per caricare `.env.local` e `.env`.
-- Script Bash per installazione Honcho e deploy su peer1.
+- Telegram bot powered by `telegraf`, using either long polling or HTTPS webhook mode.
+- Optional Discord bot powered by `discord.js`, responding in direct messages or when mentioned.
+- OpenAI-compatible Chat Completions integration for reply planning and text responses.
+- Telegram image inspection through a provider endpoint derived from `OPENAI_BASE_URL` and `/v1/inspect`.
+- Honcho-backed conversation memory, with a no-memory fallback when `MEMORY_PROVIDER` is changed.
+- Optional ComfyUI image generation using `workflows/comfyui-text-to-image.json`.
+- Optional Cursor Agent CLI task execution for project work when explicitly enabled.
+- Local Telegram chat registry written to `data/telegram-chats.json`.
+- HTTP health endpoint at `GET /health`.
+- Bash scripts for installing Honcho and deploying the service to an Oracle `peer1` host.
 
-## Prerequisiti
+## Architecture And Tech Stack
 
-- Node.js 20 o superiore e npm.
-- Un token Telegram Bot API (`TELEGRAM_BOT_TOKEN`).
-- Una chiave API per il provider OpenAI-compatible (`OPENAI_API_KEY`).
-- Facoltativo: Honcho raggiungibile da `HONCHO_URL` se si usa la memoria.
-- Facoltativo: token Discord e Message Content Intent abilitato nel Discord Developer Portal.
-- Facoltativo: Cursor Agent CLI e `CURSOR_API_KEY` per i task sul progetto.
-- Facoltativo: un'istanza ComfyUI raggiungibile via HTTP per generare immagini.
+- Runtime: Node.js ESM, requiring Node.js `>=20`.
+- Package manager: npm, with scripts in `package.json`.
+- Messaging: `telegraf` for Telegram and `discord.js` for optional Discord support.
+- Model provider: OpenAI-compatible HTTP APIs configured through `OPENAI_BASE_URL`, `OPENAI_MODEL`, and `OPENAI_API_KEY`.
+- Memory: `@honcho-ai/sdk` with configurable Honcho URL, workspace, agent peer, and optional vector-search context settings.
+- Image generation: ComfyUI workflow JSON plus a Colab helper notebook under `notebooks/`.
+- Automation: Cursor Agent CLI wrapper in `src/cursor-agent.js`.
+- Deployment: Bash scripts and a systemd service target for an Oracle `peer1` host.
 
-Per il deploy su peer1 servono anche accesso SSH, `sudo` sull'host remoto e, per Honcho, Docker/Compose.
+Project layout:
 
-## Installazione
+```text
+.
+|-- src/
+|   |-- index.js              # HTTP server, Telegram startup, Discord startup
+|   |-- config.js             # Environment loading and validation
+|   |-- telegram.js           # Telegram bot handlers
+|   |-- discord.js            # Optional Discord bot handlers
+|   |-- openai.js             # OpenAI-compatible planning, replies, image inspection
+|   |-- image-generation.js   # ComfyUI client
+|   |-- cursor-agent.js       # Cursor Agent CLI wrapper
+|   |-- chat-registry.js      # Telegram chat registry persistence
+|   `-- memory/honcho.js      # Honcho memory provider
+|-- notebooks/                # ComfyUI Colab helper files
+|-- workflows/                # ComfyUI workflow JSON
+|-- scripts/                  # Peer deployment and Honcho install scripts
+|-- data/                     # Runtime data, ignored by Git
+|-- .env.example              # Configuration template
+`-- package.json              # npm scripts and dependencies
+```
+
+## Prerequisites
+
+- Node.js 20 or newer and npm.
+- Telegram Bot API token in `TELEGRAM_BOT_TOKEN`.
+- API key for an OpenAI-compatible provider in `OPENAI_API_KEY`.
+- Optional Honcho service reachable through `HONCHO_URL`.
+- Optional Discord bot token and Message Content Intent for Discord support.
+- Optional ComfyUI HTTP endpoint for generated images.
+- Optional Cursor Agent CLI plus `CURSOR_API_KEY` for project automation.
+- For Oracle `peer1` deployment: SSH access, sudo access on the remote host, and Docker/Compose for Honcho setup.
+
+## Setup
 
 ```bash
 git clone https://github.com/gvitolocs/pokoin.git
@@ -45,180 +86,141 @@ npm install
 cp .env.example .env.local
 ```
 
-Modifica `.env.local` inserendo almeno:
+Edit `.env.local` and set at least:
 
 ```env
 OPENAI_API_KEY=...
 TELEGRAM_BOT_TOKEN=...
 ```
 
-Il file `.env.local` contiene segreti locali ed è ignorato da Git. Non va committato né condiviso.
+Do not commit `.env.local`, API keys, SSH keys, generated runtime data, or the
+`apikeys` directory.
 
-## Configurazione
+## Configuration
 
-Le variabili disponibili sono documentate in `.env.example`.
+All supported variables are listed in `.env.example`.
 
-### Servizio Hermes
+Core service:
 
-- `NODE_ENV`: ambiente di runtime, default `development`.
-- `HERMES_PORT`: porta HTTP del servizio, default `8788`.
-- `HERMES_PUBLIC_URL`: se vuoto usa il long polling Telegram; se impostato a un URL HTTPS configura un webhook Telegram.
-- `HERMES_CHAT_REGISTRY_PATH`: file JSON dove salvare i riferimenti alle chat Telegram viste dal bot.
+- `NODE_ENV`: runtime environment, default `development`.
+- `HERMES_PORT`: HTTP server port, default `8788`.
+- `HERMES_PUBLIC_URL`: when empty, Telegram polling is used; when set to an HTTPS URL, Hermes registers a Telegram webhook.
+- `HERMES_CHAT_REGISTRY_PATH`: JSON path for the Telegram chat registry.
 
-### Provider OpenAI-compatible
+Model provider:
 
-- `OPENAI_API_KEY`: chiave API richiesta.
-- `OPENAI_BASE_URL`: base URL del provider, default `https://api.openai.com/v1`.
-- `OPENAI_MODEL`: modello da usare, default `gpt-4o-mini`.
-- `OPENAI_REASONING_EFFORT`: opzione passata al provider se valorizzata.
-- `OPENAI_TIMEOUT_MS`: timeout delle richieste, default `30000`.
+- `OPENAI_API_KEY`: required provider key.
+- `OPENAI_BASE_URL`: OpenAI-compatible base URL, default `https://api.openai.com/v1`.
+- `OPENAI_MODEL`: chat model, default `gpt-4o-mini`.
+- `OPENAI_REASONING_EFFORT`: optional provider-specific setting.
+- `OPENAI_TIMEOUT_MS`: provider request timeout, default `30000`.
 
-Nota: l'analisi immagini usa l'endpoint `/v1/inspect` costruito a partire da `OPENAI_BASE_URL`; verifica che il provider configurato lo supporti.
+Messaging:
 
-### Telegram
+- `TELEGRAM_BOT_TOKEN`: required Telegram token.
+- `TELEGRAM_WEBHOOK_SECRET`: optional Telegram webhook secret.
+- `TELEGRAM_ALLOWED_CHAT_IDS`: optional comma-separated allowlist.
+- `DISCORD_BOT_TOKEN`: enables Discord when set.
+- `DISCORD_ALLOWED_CHANNEL_IDS`: optional comma-separated Discord channel allowlist.
+- `DISCORD_ALLOWED_USER_IDS`: optional comma-separated Discord user allowlist.
 
-- `TELEGRAM_BOT_TOKEN`: token richiesto per avviare il bot.
-- `TELEGRAM_WEBHOOK_SECRET`: secret opzionale per webhook Telegram.
-- `TELEGRAM_ALLOWED_CHAT_IDS`: lista separata da virgole per limitare le chat autorizzate. Se vuota, il bot risponde a tutte le chat.
+Optional integrations:
 
-### Discord opzionale
+- `IMAGE_PROVIDER`: default `pokemon-artwork`; set to `comfyui` to use ComfyUI.
+- `COMFYUI_BASE_URL`: public ComfyUI endpoint.
+- `COMFYUI_WORKFLOW_PATH`: workflow path, default `workflows/comfyui-text-to-image.json`.
+- `IMAGE_TIMEOUT_MS`: image-generation timeout, default `180000`.
+- `HERMES_CURSOR_ENABLED`: set to `true` to enable Cursor Agent tasks.
+- `CURSOR_API_KEY`: Cursor API key.
+- `HERMES_CURSOR_AGENT_PATH`: Cursor Agent CLI path.
+- `HERMES_PROJECT_DIR`: workspace path for Cursor Agent tasks.
+- `HERMES_CURSOR_MODEL`: Cursor Agent model.
+- `HERMES_CURSOR_TIMEOUT_MS`: Cursor task timeout; `0` disables the timeout.
+- `MEMORY_PROVIDER`: default `honcho`; set to another value to disable Honcho-backed memory.
+- `HONCHO_URL`, `HONCHO_API_KEY`, `HONCHO_WORKSPACE_ID`, `HONCHO_AGENT_PEER_ID`, `HONCHO_USE_VECTOR_SEARCH`: Honcho memory settings.
 
-- `DISCORD_BOT_TOKEN`: abilita il bot Discord quando valorizzato.
-- `DISCORD_ALLOWED_CHANNEL_IDS`: lista separata da virgole di canali autorizzati.
-- `DISCORD_ALLOWED_USER_IDS`: lista separata da virgole di utenti autorizzati.
+Deployment variables:
 
-### Immagini opzionali
+- `PEER1_HOST`, `PEER1_USER`, `PEER1_SERVICE_USER`, `PEER1_REMOTE_DIR`, `PEER1_HONCHO_DIR`, and optional `PEER1_KEY` are read by the peer deployment scripts.
 
-- `IMAGE_PROVIDER`: default `pokemon-artwork`; impostare `comfyui` per usare ComfyUI.
-- `COMFYUI_BASE_URL`: URL pubblico dell'istanza ComfyUI.
-- `COMFYUI_WORKFLOW_PATH`: workflow JSON, default `workflows/comfyui-text-to-image.json`.
-- `IMAGE_TIMEOUT_MS`: timeout generazione immagini, default `180000`.
+## Run
 
-### Cursor Agent opzionale
-
-- `HERMES_CURSOR_ENABLED`: impostare `true` per abilitare task Cursor.
-- `CURSOR_API_KEY`: chiave API Cursor.
-- `HERMES_CURSOR_AGENT_PATH`: percorso del binario Agent CLI.
-- `HERMES_PROJECT_DIR`: workspace su cui eseguire i task.
-- `HERMES_CURSOR_MODEL`: modello Agent CLI.
-- `HERMES_CURSOR_TIMEOUT_MS`: timeout dei task; `0` disabilita il timeout.
-
-### Memoria Honcho
-
-- `MEMORY_PROVIDER`: default `honcho`.
-- `HONCHO_URL`: URL Honcho, default `http://127.0.0.1:8000`.
-- `HONCHO_API_KEY`: chiave Honcho opzionale.
-- `HONCHO_WORKSPACE_ID`: workspace Honcho.
-- `HONCHO_AGENT_PEER_ID`: peer ID dell'assistente.
-- `HONCHO_USE_VECTOR_SEARCH`: abilita opzioni di ricerca vettoriale quando `true`.
-
-### Deploy peer1
-
-- `PEER1_HOST`: host remoto.
-- `PEER1_USER`: utente SSH.
-- `PEER1_SERVICE_USER`: utente con cui avviare il servizio systemd.
-- `PEER1_REMOTE_DIR`: directory remota di Hermes.
-- `PEER1_HONCHO_DIR`: directory remota di Honcho.
-- `PEER1_KEY`: variabile opzionale per sovrascrivere il percorso della chiave SSH usata dagli script.
-
-## Esecuzione
-
-Controlla la sintassi dei file principali:
+Check JavaScript syntax for the main source files:
 
 ```bash
 npm run check
 ```
 
-Avvia in sviluppo caricando `.env.local`:
+Start locally with `.env.local`:
 
 ```bash
 npm run dev
 ```
 
-Avvio standard:
+Start without the npm dev env-file flag:
 
 ```bash
 npm start
 ```
 
-Con `HERMES_PUBLIC_URL` vuoto, Hermes rimuove eventuali webhook Telegram e usa il polling. Con `HERMES_PUBLIC_URL` impostato a un URL HTTPS, registra il webhook su `/telegram/<TELEGRAM_BOT_TOKEN>`.
+When `HERMES_PUBLIC_URL` is empty, Hermes removes any Telegram webhook and uses
+polling. When `HERMES_PUBLIC_URL` is set, it registers the webhook path
+`/telegram/<TELEGRAM_BOT_TOKEN>`.
 
-L'endpoint di salute è disponibile su:
+Health check:
 
 ```text
 GET /health
 ```
 
-## Uso
+## Usage
 
-Su Telegram, invia `/start` per verificare che il bot sia online. I messaggi testuali vengono trasformati in risposte, richieste di generazione immagini o task Cursor in base alla pianificazione del modello. Le foto ricevute vengono analizzate e memorizzate nella conversazione.
+On Telegram, send `/start` to confirm the bot is online. Text messages are
+planned as a normal reply, an image-generation request, or a Cursor Agent project
+task. Photos sent to Telegram are inspected through the configured image
+inspection endpoint and stored in memory when memory is enabled.
 
-Su Discord, quando `DISCORD_BOT_TOKEN` è configurato, Hermes risponde ai DM e ai messaggi in cui il bot viene menzionato. Per leggere il contenuto dei messaggi nei server è necessario abilitare Message Content Intent nel portale Discord.
+On Discord, set `DISCORD_BOT_TOKEN` and enable Message Content Intent in the
+Discord Developer Portal. Hermes responds to direct messages and to server
+messages that mention the bot.
 
-## Generazione immagini con ComfyUI
+For ComfyUI image generation, start the Colab workflow in
+`notebooks/comfyui_colab_minimal.md`, copy the printed
+`COMFYUI_BASE_URL=https://...trycloudflare.com`, set `IMAGE_PROVIDER=comfyui`,
+and restart or redeploy Hermes.
 
-Hermes può usare una istanza temporanea ComfyUI su Google Colab.
+## Deployment
 
-1. Apri Google Colab e crea un runtime GPU.
-2. Copia le celle da `notebooks/comfyui_colab_minimal.md` ed eseguile in ordine.
-3. Copia il valore stampato `COMFYUI_BASE_URL=https://...trycloudflare.com`.
-4. Aggiorna `.env.local`:
-
-```env
-IMAGE_PROVIDER=comfyui
-COMFYUI_BASE_URL=https://your-colab-tunnel.trycloudflare.com
-```
-
-5. Riavvia Hermes o ridistribuisci il servizio.
-
-Quando il runtime Colab si ferma, anche il tunnel scade: avvia nuovamente Colab e aggiorna `COMFYUI_BASE_URL`.
-
-## Deploy su peer1
-
-Installa o aggiorna Honcho sull'host peer1:
+Install or update Honcho on the configured Oracle `peer1` host:
 
 ```bash
 ./scripts/install-honcho-peer1.sh
 ```
 
-Distribuisci Hermes su peer1:
+Deploy Hermes to `peer1`:
 
 ```bash
 ./scripts/deploy-peer1.sh
 ```
 
-Gli script leggono la configurazione da `.env.local`, copiano il progetto remoto escludendo `node_modules`, `.git` e `apikeys`, installano le dipendenze di produzione e configurano un servizio systemd `hermes`.
+The deploy script reads `.env.local`, archives the project while excluding
+`node_modules`, `.git`, and `apikeys`, installs production dependencies on the
+remote host, and configures a systemd service named `hermes`.
 
-## Struttura del progetto
+## Contributing
 
-```text
-.
-├── src/
-│   ├── index.js              # Avvio servizio HTTP, Telegram e Discord
-│   ├── config.js             # Lettura e validazione configurazione
-│   ├── telegram.js           # Integrazione Telegram
-│   ├── discord.js            # Integrazione Discord opzionale
-│   ├── openai.js             # Chiamate al provider OpenAI-compatible
-│   ├── image-generation.js   # Client ComfyUI
-│   ├── cursor-agent.js       # Wrapper Cursor Agent CLI
-│   └── memory/honcho.js      # Memoria Honcho
-├── notebooks/                # Notebook/celle Colab per ComfyUI
-├── workflows/                # Workflow ComfyUI
-├── scripts/                  # Script deploy e installazione Honcho
-├── data/                     # Dati runtime locali, ignorati da Git
-└── .env.example              # Template configurazione
-```
-
-## Contribuire
-
-Non sono presenti linee guida di contribuzione dedicate. Prima di proporre modifiche, esegui almeno:
+No dedicated contribution guide is currently present. Before opening a change,
+run:
 
 ```bash
 npm run check
 ```
 
-Mantieni fuori dal repository `.env.local`, `apikeys`, `node_modules` e i file generati in `data/`.
+Keep secrets and generated data out of version control, including `.env.local`,
+`.env.*` files other than `.env.example`, `apikeys`, `node_modules`, and
+runtime files under `data/`.
 
-## Licenza
+## License
 
-Nel repository non è presente un file di licenza. TODO: aggiungere una licenza se il progetto deve essere distribuito o riusato da terzi.
+No license file was found in this repository. Add a license before publishing,
+redistributing, or accepting external reuse contributions.
