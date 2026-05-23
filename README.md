@@ -168,6 +168,19 @@ Known module configuration from the repositories:
 Secrets, private keys, API keys, Firebase credentials, wallet keys, and local
 environment files must not be committed.
 
+## Deployment Status
+
+This repository has no verified deployment workflow of its own. The tracked file
+inventory is currently `README.md` only; there is no package manifest, CI/CD
+workflow, Vercel/Netlify/Render/Firebase/Cloudflare configuration, Dockerfile,
+Compose file, VPS script, or deploy script in this repository.
+
+Because no build artifact or hosting target is declared here, there are no
+repository-local build, test, or deploy commands to run. Deployments for the
+runnable Pokoin surfaces are handled in the related module repositories and
+require the target platform, credentials, environment variables, and hosting
+settings for those modules.
+
 ## Usage
 
 - Visit `https://pokoin.com/` for the public Pokoin/CardVault web surface.
