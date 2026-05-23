@@ -1,226 +1,210 @@
 # Pokoin
 
-Pokoin is an ecosystem for Pokemon-card commerce, wallet experiences, and a
-native Proof-of-Stake chain. This repository currently contains **Hermes**, the
-Pokoin conversational assistant service used to connect Telegram, optional
-Discord, an OpenAI-compatible model provider, Honcho memory, optional ComfyUI
-image generation, and optional Cursor Agent project automation.
+Pokoin is a Pokemon card commerce and wallet ecosystem built around CardVault,
+the Pokoin Wallet, the PokoinPoS chain, marketplace tooling, and market-signal
+apps.
 
-This README documents the verified contents of this repository plus public
-references from related Pokoin repositories. Where details are not available,
-the ecosystem section says so explicitly.
+This repository is currently an ecosystem entry point. The `pokoin` repository
+contains this README only; runnable application source, package manifests,
+deployment scripts, and CI configuration live in the related repositories listed
+below.
 
-## Ecosystem And Related Projects
+## Ecosystem And Modules
 
-| Project | Verified status | Links and notes |
+| Module | Repository | Verified status |
 | --- | --- | --- |
-| CardVault | Public Flutter web app for the Pokoin ecosystem. Its README describes CardVault marketplace routes and an integrated Pokoin Wallet served from one Flutter web deployment. | [gvitolocs/cardvault](https://github.com/gvitolocs/cardvault), production site listed as `https://pokoin.com/`, wallet route listed as `https://pokoin.com/wallet`. |
-| Wallet | The current wallet is documented as integrated into CardVault at `/wallet`. A separate older `pokoinwallet` repository exists and describes a Flutter app with Firebase Functions v2, Firestore, a deployable node API, transaction validation, mempool, manual mining, and locked-down Firestore rules. | [gvitolocs/pokoinwallet](https://github.com/gvitolocs/pokoinwallet). Treat this as legacy/prototype unless the owner confirms its current role. |
-| Hypemeter | Public repository exists, with a TypeScript/Next.js app and homepage metadata. No README or product description was found. | [gvitolocs/hypemeter](https://github.com/gvitolocs/hypemeter), homepage listed as `https://hypemeter-beta.vercel.app`. Details coming soon. |
-| Card Extension | Chrome extension that turns Pokemon card listing titles from eBay, Vinted, CardTrader, and Cardmarket into Pokoin marketplace links. Its README says it extracts metadata, matches cards through Pokoin/CardVault APIs, injects buttons, and opens matched cards in a Chrome side panel. | [gvitolocs/pokemon-card-extension](https://github.com/gvitolocs/pokemon-card-extension). |
-| PokoinPoS | Native Proof-of-Stake chain used by the Pokoin/CardVault ecosystem. Its README documents public RPC, health endpoints, Docker deployment, peer auto-updates, wallet compatibility, chain ID `26062026`, and native currency `PKN`. | [gvitolocs/pokoinpos](https://github.com/gvitolocs/pokoinpos), RPC listed as `https://rpc.pokoin.com/rpc`, explorer listed as `https://explorer.pokoin.com`. |
+| Pokoin | [`gvitolocs/pokoin`](https://github.com/gvitolocs/pokoin) | Ecosystem README and public project entry point. No runnable code is currently present in this repository. |
+| CardVault | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) | Flutter web app for the Pokoin marketplace and wallet surfaces. The repository documents `https://pokoin.com/`, `/marketplace`, `/profile`, `/orders`, `/scan`, `/health`, and `/wallet` routes. |
+| Wallet | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) and [`gvitolocs/pokoinwallet`](https://github.com/gvitolocs/pokoinwallet) | The current wallet is documented as integrated into CardVault at `https://pokoin.com/wallet`. The separate `pokoinwallet` repository contains an older Flutter/Firebase Functions prototype. |
+| Hypemeter | [`gvitolocs/hypemeter`](https://github.com/gvitolocs/hypemeter) | Next.js app named `hypemeter`. Its metadata describes Pokoin News as a live signal hub for Pokemon news, TCG market hype, crypto gaming signals, earn trends, and card-market momentum. |
+| Card Extension | [`gvitolocs/pokemon-card-extension`](https://github.com/gvitolocs/pokemon-card-extension) | Chrome Manifest V3 extension that adds Pokoin card links to supported Pokemon marketplace listings. |
+| PokoinPoS | [`gvitolocs/pokoinpos`](https://github.com/gvitolocs/pokoinpos) | Native Proof-of-Stake chain and node runtime for the Pokoin/CardVault ecosystem. Public network values are documented in the repository. |
 
-## Verified Features In This Repository
+## Verified Features
 
-- Telegram bot powered by `telegraf`, using either long polling or HTTPS webhook mode.
-- Optional Discord bot powered by `discord.js`, responding in direct messages or when mentioned.
-- OpenAI-compatible Chat Completions integration for reply planning and text responses.
-- Telegram image inspection through a provider endpoint derived from `OPENAI_BASE_URL` and `/v1/inspect`.
-- Honcho-backed conversation memory, with a no-memory fallback when `MEMORY_PROVIDER` is changed.
-- Optional ComfyUI image generation using `workflows/comfyui-text-to-image.json`.
-- Optional Cursor Agent CLI task execution for project work when explicitly enabled.
-- Local Telegram chat registry written to `data/telegram-chats.json`.
-- HTTP health endpoint at `GET /health`.
-- Bash scripts for installing Honcho and deploying the service to an Oracle `peer1` host.
+### Pokoin Repository
+
+- Provides the public README for the Pokoin ecosystem.
+- Does not currently include application source code, tests, package manifests,
+  deployment configuration, or a license file.
+
+### CardVault
+
+- Flutter web app named `pokoin` with description
+  `Pokoin marketplace, wallet, and card reserve app`.
+- Marketplace routes and app pages are served from a single Flutter web bundle.
+- Vercel rewrites app routes such as `/marketplace`, `/wallet`, `/scan`,
+  `/health`, and `/docs` back into the SPA.
+- Firebase Auth and Firestore are documented for accounts, profiles, balances,
+  orders, wallet addresses, listings, and withdraw requests.
+- Firestore rules include authenticated user ownership checks and read/write
+  boundaries for user, wallet, balance, order, and card listing documents.
+- The app documents a MetaMask/Pokoin network bridge and the integrated wallet
+  route at `https://pokoin.com/wallet`.
+
+### Wallet
+
+- The active wallet surface is documented as part of CardVault at `/wallet`.
+- Public PokoinPoS wallet values are documented as:
+  - Network name: `PokoinPoS`
+  - Chain ID: `26062026`
+  - Network ID: `26062026`
+  - Native currency: `PKN`
+  - Decimals: `18`
+  - RPC URL: `https://rpc.pokoin.com/rpc`
+  - Explorer URL: `https://explorer.pokoin.com`
+- Wallet compatibility docs state that MetaMask-style wallets can add the
+  network, read chain metadata, read balances, submit signed transfers through
+  `eth_sendRawTransaction`, and poll transactions and receipts.
+- The older `pokoinwallet` repository documents a Flutter app with Firebase
+  Functions v2, Firestore, a deployable Node API, transaction validation,
+  mempool, manual mining, and Firestore rules that block direct client writes.
+
+### Hypemeter
+
+- Next.js app using Node `22.x`, Next `16.2.1`, React `19.2.4`, TypeScript,
+  Tailwind CSS, Vitest, and `better-sqlite3`.
+- Vercel configuration declares the framework as `nextjs`.
+- Vercel cron jobs revalidate `/api/cron/revalidate-home` twice every
+  three-hour window.
+- App metadata identifies the live surface as `https://news.pokoin.com` and
+  describes Pokemon news, TCG hype, crypto game, earn trend, and market-signal
+  tracking.
+- Details coming soon: public product README, deployment owner, and production
+  operating notes.
+
+### Card Extension
+
+- Chrome Manifest V3 extension named `Pokemon Card Trader Linker`.
+- Supports eBay, Vinted, CardTrader, Cardmarket, and Pokoin host permissions.
+- Extracts card metadata from listings, matches cards through Pokoin/CardVault
+  APIs, injects Pokoin buttons, and opens matched cards in a Chrome side panel.
+- Uses `https://pokoin.com` as the Pokoin/CardVault API base URL.
+- Includes Node test files for extension workflow and live CardVault API smoke
+  checks.
+
+### PokoinPoS
+
+- Go node runtime for the native PokoinPoS chain.
+- Chain ID and network ID: `26062026`; native currency: `PKN`.
+- Public RPC: `https://rpc.pokoin.com/rpc`.
+- Public explorer/static metadata host: `https://explorer.pokoin.com`.
+- Public web and wallet surface: `https://pokoin.com` and
+  `https://pokoin.com/wallet`.
+- The node exposes health, readiness, chain status, metrics, endpoint catalog,
+  and EVM-style JSON-RPC compatibility endpoints.
+- Docker Compose deployment uses the `newisdom/pokoinpos-peer:latest` image by
+  default and includes a Watchtower updater service.
+- Documentation covers wallet compatibility, public-network metadata, Docker
+  peer deployment, bootstrap peers, disaster recovery, and security operations.
 
 ## Architecture And Tech Stack
 
-- Runtime: Node.js ESM, requiring Node.js `>=20`.
-- Package manager: npm, with scripts in `package.json`.
-- Messaging: `telegraf` for Telegram and `discord.js` for optional Discord support.
-- Model provider: OpenAI-compatible HTTP APIs configured through `OPENAI_BASE_URL`, `OPENAI_MODEL`, and `OPENAI_API_KEY`.
-- Memory: `@honcho-ai/sdk` with configurable Honcho URL, workspace, agent peer, and optional vector-search context settings.
-- Image generation: ComfyUI workflow JSON plus a Colab helper notebook under `notebooks/`.
-- Automation: Cursor Agent CLI wrapper in `src/cursor-agent.js`.
-- Deployment: Bash scripts and a systemd service target for an Oracle `peer1` host.
-
-Project layout:
-
-```text
-.
-|-- src/
-|   |-- index.js              # HTTP server, Telegram startup, Discord startup
-|   |-- config.js             # Environment loading and validation
-|   |-- telegram.js           # Telegram bot handlers
-|   |-- discord.js            # Optional Discord bot handlers
-|   |-- openai.js             # OpenAI-compatible planning, replies, image inspection
-|   |-- image-generation.js   # ComfyUI client
-|   |-- cursor-agent.js       # Cursor Agent CLI wrapper
-|   |-- chat-registry.js      # Telegram chat registry persistence
-|   `-- memory/honcho.js      # Honcho memory provider
-|-- notebooks/                # ComfyUI Colab helper files
-|-- workflows/                # ComfyUI workflow JSON
-|-- scripts/                  # Peer deployment and Honcho install scripts
-|-- data/                     # Runtime data, ignored by Git
-|-- .env.example              # Configuration template
-`-- package.json              # npm scripts and dependencies
-```
-
-## Prerequisites
-
-- Node.js 20 or newer and npm.
-- Telegram Bot API token in `TELEGRAM_BOT_TOKEN`.
-- API key for an OpenAI-compatible provider in `OPENAI_API_KEY`.
-- Optional Honcho service reachable through `HONCHO_URL`.
-- Optional Discord bot token and Message Content Intent for Discord support.
-- Optional ComfyUI HTTP endpoint for generated images.
-- Optional Cursor Agent CLI plus `CURSOR_API_KEY` for project automation.
-- For Oracle `peer1` deployment: SSH access, sudo access on the remote host, and Docker/Compose for Honcho setup.
+| Area | Verified stack |
+| --- | --- |
+| Marketplace and integrated wallet | Flutter web, Dart, Riverpod, GoRouter, Firebase Auth, Cloud Firestore, Hive/shared preferences, Vercel SPA routing |
+| Legacy wallet prototype | Flutter, Firebase Functions v2 on Node 20, Express, Firestore, `tweetnacl` signatures |
+| Market signals and news | Next.js, React, TypeScript, Tailwind CSS, Vercel, Vercel Cron, SQLite via `better-sqlite3` |
+| Browser extension | Chrome Manifest V3, JavaScript modules, side panel, content scripts, local storage |
+| Chain and RPC | Go, Proof-of-Stake node runtime, EVM-style JSON-RPC compatibility, Docker Compose, Watchtower, Oracle/Docker node deployment |
+| Public hosting boundary | Vercel hosts web/static surfaces; node infrastructure backs `rpc.pokoin.com` chain and RPC endpoints |
 
 ## Setup
+
+Clone this entry repository:
 
 ```bash
 git clone https://github.com/gvitolocs/pokoin.git
 cd pokoin
+```
+
+There is no install command for this repository yet because it currently
+contains documentation only.
+
+Work on a module from its own repository:
+
+```bash
+git clone https://github.com/gvitolocs/cardvault.git
+cd cardvault/pokemon_card_vault
+flutter pub get
+flutter run -d chrome
+```
+
+```bash
+git clone https://github.com/gvitolocs/hypemeter.git
+cd hypemeter
 npm install
-cp .env.example .env.local
-```
-
-Edit `.env.local` and set at least:
-
-```env
-OPENAI_API_KEY=...
-TELEGRAM_BOT_TOKEN=...
-```
-
-Do not commit `.env.local`, API keys, SSH keys, generated runtime data, or the
-`apikeys` directory.
-
-## Configuration
-
-All supported variables are listed in `.env.example`.
-
-Core service:
-
-- `NODE_ENV`: runtime environment, default `development`.
-- `HERMES_PORT`: HTTP server port, default `8788`.
-- `HERMES_PUBLIC_URL`: when empty, Telegram polling is used; when set to an HTTPS URL, Hermes registers a Telegram webhook.
-- `HERMES_CHAT_REGISTRY_PATH`: JSON path for the Telegram chat registry.
-
-Model provider:
-
-- `OPENAI_API_KEY`: required provider key.
-- `OPENAI_BASE_URL`: OpenAI-compatible base URL, default `https://api.openai.com/v1`.
-- `OPENAI_MODEL`: chat model, default `gpt-4o-mini`.
-- `OPENAI_REASONING_EFFORT`: optional provider-specific setting.
-- `OPENAI_TIMEOUT_MS`: provider request timeout, default `30000`.
-
-Messaging:
-
-- `TELEGRAM_BOT_TOKEN`: required Telegram token.
-- `TELEGRAM_WEBHOOK_SECRET`: optional Telegram webhook secret.
-- `TELEGRAM_ALLOWED_CHAT_IDS`: optional comma-separated allowlist.
-- `DISCORD_BOT_TOKEN`: enables Discord when set.
-- `DISCORD_ALLOWED_CHANNEL_IDS`: optional comma-separated Discord channel allowlist.
-- `DISCORD_ALLOWED_USER_IDS`: optional comma-separated Discord user allowlist.
-
-Optional integrations:
-
-- `IMAGE_PROVIDER`: default `pokemon-artwork`; set to `comfyui` to use ComfyUI.
-- `COMFYUI_BASE_URL`: public ComfyUI endpoint.
-- `COMFYUI_WORKFLOW_PATH`: workflow path, default `workflows/comfyui-text-to-image.json`.
-- `IMAGE_TIMEOUT_MS`: image-generation timeout, default `180000`.
-- `HERMES_CURSOR_ENABLED`: set to `true` to enable Cursor Agent tasks.
-- `CURSOR_API_KEY`: Cursor API key.
-- `HERMES_CURSOR_AGENT_PATH`: Cursor Agent CLI path.
-- `HERMES_PROJECT_DIR`: workspace path for Cursor Agent tasks.
-- `HERMES_CURSOR_MODEL`: Cursor Agent model.
-- `HERMES_CURSOR_TIMEOUT_MS`: Cursor task timeout; `0` disables the timeout.
-- `MEMORY_PROVIDER`: default `honcho`; set to another value to disable Honcho-backed memory.
-- `HONCHO_URL`, `HONCHO_API_KEY`, `HONCHO_WORKSPACE_ID`, `HONCHO_AGENT_PEER_ID`, `HONCHO_USE_VECTOR_SEARCH`: Honcho memory settings.
-
-Deployment variables:
-
-- `PEER1_HOST`, `PEER1_USER`, `PEER1_SERVICE_USER`, `PEER1_REMOTE_DIR`, `PEER1_HONCHO_DIR`, and optional `PEER1_KEY` are read by the peer deployment scripts.
-
-## Run
-
-Check JavaScript syntax for the main source files:
-
-```bash
-npm run check
-```
-
-Start locally with `.env.local`:
-
-```bash
 npm run dev
 ```
 
-Start without the npm dev env-file flag:
+```bash
+git clone https://github.com/gvitolocs/pokoinpos.git
+cd pokoinpos/peer
+go test ./...
+```
 
 ```bash
-npm start
+git clone https://github.com/gvitolocs/pokemon-card-extension.git
+cd pokemon-card-extension
+# Load this folder from chrome://extensions with Developer mode enabled.
 ```
 
-When `HERMES_PUBLIC_URL` is empty, Hermes removes any Telegram webhook and uses
-polling. When `HERMES_PUBLIC_URL` is set, it registers the webhook path
-`/telegram/<TELEGRAM_BOT_TOKEN>`.
+## Configuration
 
-Health check:
+This repository has no local configuration file.
 
-```text
-GET /health
-```
+Known module configuration from the repositories:
+
+- CardVault uses Firebase project configuration and `firestore.rules` from
+  `cardvault/pokemon_card_vault`.
+- CardVault web routing is configured through
+  `cardvault/pokemon_card_vault/web/vercel.json`.
+- The card extension uses `https://pokoin.com` as its API base URL.
+- Hypemeter is configured for Vercel as a Next.js project and includes cron
+  revalidation for `/api/cron/revalidate-home`.
+- PokoinPoS peers are configured with `POKOINPOS_*` environment variables in
+  `docker-compose.peer.yml` and `deploy/env/peer.env.example`.
+
+Secrets, private keys, API keys, Firebase credentials, wallet keys, and local
+environment files must not be committed.
 
 ## Usage
 
-On Telegram, send `/start` to confirm the bot is online. Text messages are
-planned as a normal reply, an image-generation request, or a Cursor Agent project
-task. Photos sent to Telegram are inspected through the configured image
-inspection endpoint and stored in memory when memory is enabled.
-
-On Discord, set `DISCORD_BOT_TOKEN` and enable Message Content Intent in the
-Discord Developer Portal. Hermes responds to direct messages and to server
-messages that mention the bot.
-
-For ComfyUI image generation, start the Colab workflow in
-`notebooks/comfyui_colab_minimal.md`, copy the printed
-`COMFYUI_BASE_URL=https://...trycloudflare.com`, set `IMAGE_PROVIDER=comfyui`,
-and restart or redeploy Hermes.
-
-## Deployment
-
-Install or update Honcho on the configured Oracle `peer1` host:
-
-```bash
-./scripts/install-honcho-peer1.sh
-```
-
-Deploy Hermes to `peer1`:
-
-```bash
-./scripts/deploy-peer1.sh
-```
-
-The deploy script reads `.env.local`, archives the project while excluding
-`node_modules`, `.git`, and `apikeys`, installs production dependencies on the
-remote host, and configures a systemd service named `hermes`.
+- Visit `https://pokoin.com/` for the public Pokoin/CardVault web surface.
+- Open `https://pokoin.com/wallet` for the integrated wallet route.
+- Use `https://rpc.pokoin.com/rpc` as the documented public PokoinPoS RPC URL.
+- Use `https://explorer.pokoin.com` as the documented public explorer URL.
+- Load the Card Extension locally in Chrome to add Pokoin links on supported
+  marketplace pages.
+- Use the module repositories for development, testing, and deployment commands.
 
 ## Contributing
 
-No dedicated contribution guide is currently present. Before opening a change,
-run:
+Keep changes tied to verified repository content. If a feature, URL, deployment
+target, or configuration value is not documented in the repositories, write
+`details coming soon` until it is confirmed.
+
+Before opening a change in a module repository, run the checks documented by
+that module, for example:
 
 ```bash
-npm run check
-```
+# cardvault/pokemon_card_vault
+flutter analyze
 
-Keep secrets and generated data out of version control, including `.env.local`,
-`.env.*` files other than `.env.example`, `apikeys`, `node_modules`, and
-runtime files under `data/`.
+# hypemeter
+npm run lint
+npm run test
+
+# pokoinpos/peer
+go test ./...
+
+# pokemon-card-extension
+node --test tests/extension-workflow.test.js
+```
 
 ## License
 
-No license file was found in this repository. Add a license before publishing,
-redistributing, or accepting external reuse contributions.
+No license file was found in this repository. License details coming soon.
+
+Check each related module repository for its own license files or release
+packaging notes before reusing or redistributing code.
