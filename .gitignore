@@ -1,0 +1,7 @@
+.cursor/
+.cursorignore
+AGENTS.md
+.codevira/
+.codevira-cache/
+*.apkm
+.DS_Store
