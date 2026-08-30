@@ -4,16 +4,25 @@ Pokoin is a Pokemon card commerce and wallet ecosystem built around CardVault,
 the Pokoin Wallet, the PokoinPoS chain, marketplace tooling, and market-signal
 apps.
 
-This repository is currently an ecosystem entry point. The `pokoin` repository
-contains this README only; runnable application source, package manifests,
-deployment scripts, and CI configuration live in the related repositories listed
-below.
+This repository holds the **pokoin.com root landing** (`index.html`, `home/`)
+and the React marketplace (`market/`). Product APIs still live in CardVault.
+The Flutter Android/iOS app is unchanged.
+
+See [docs/LANDING.md](docs/LANDING.md) for the landing pipeline and
+[docs/MARKET.md](docs/MARKET.md) for the React marketplace + page APIs.
+
+See [docs/LANDING.md](docs/LANDING.md) for the edit→sync→deploy pipeline, every
+file in this repo and in CardVault, the action map, stack choice, security PDF
+notes, peer proof, and cache gotchas. React marketplace: [docs/MARKET.md](docs/MARKET.md).
+Motion vs [get.rarecandy.com](https://get.rarecandy.com/)
+is in [docs/ANIMATIONS.md](docs/ANIMATIONS.md). Public vs operator peer JSON:
+[docs/BOOTSTRAP_PEERS.md](docs/BOOTSTRAP_PEERS.md).
 
 ## Ecosystem And Modules
 
 | Module | Repository | Verified status |
 | --- | --- | --- |
-| Pokoin | [`gvitolocs/pokoin`](https://github.com/gvitolocs/pokoin) | Ecosystem README and public project entry point. No runnable code is currently present in this repository. |
+| Pokoin | [`gvitolocs/pokoin`](https://github.com/gvitolocs/pokoin) | Landing (`index.html`, `home/`) and React marketplace (`market/`). |
 | CardVault | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) | Flutter web app for the Pokoin marketplace and wallet surfaces. The repository documents `https://pokoin.com/`, `/marketplace`, `/profile`, `/orders`, `/scan`, `/health`, and `/wallet` routes. |
 | Wallet | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) and [`gvitolocs/pokoinwallet`](https://github.com/gvitolocs/pokoinwallet) | The current wallet is documented as integrated into CardVault at `https://pokoin.com/wallet`. The separate `pokoinwallet` repository contains an older Flutter/Firebase Functions prototype. |
 | Hypemeter | [`gvitolocs/hypemeter`](https://github.com/gvitolocs/hypemeter) | Next.js app named `hypemeter`. Its metadata describes Pokoin News as a live signal hub for Pokemon news, TCG market hype, crypto gaming signals, earn trends, and card-market momentum. |
@@ -25,8 +34,8 @@ below.
 ### Pokoin Repository
 
 - Provides the public README for the Pokoin ecosystem.
-- Does not currently include application source code, tests, package manifests,
-  deployment configuration, or a license file.
+- Holds the pokoin.com landing (`index.html`, `home/`) and the React
+  marketplace (`market/`).
 
 ### CardVault
 
@@ -102,7 +111,8 @@ below.
 
 | Area | Verified stack |
 | --- | --- |
-| Marketplace and integrated wallet | Flutter web, Dart, Riverpod, GoRouter, Firebase Auth, Cloud Firestore, Hive/shared preferences, Vercel SPA routing |
+| Public marketplace (web) | React + Vite in `market/`; humans hit `/marketplace`; bots keep SEO stubs |
+| Marketplace and integrated wallet (app) | Flutter web, Dart, Riverpod, GoRouter, Firebase Auth, Cloud Firestore, Hive/shared preferences, Vercel SPA routing |
 | Legacy wallet prototype | Flutter, Firebase Functions v2 on Node 20, Express, Firestore, `tweetnacl` signatures |
 | Market signals and news | Next.js, React, TypeScript, Tailwind CSS, Vercel, Vercel Cron, SQLite via `better-sqlite3` |
 | Browser extension | Chrome Manifest V3, JavaScript modules, side panel, content scripts, local storage |
@@ -118,8 +128,14 @@ git clone https://github.com/gvitolocs/pokoin.git
 cd pokoin
 ```
 
-There is no install command for this repository yet because it currently
-contains documentation only.
+Landing is static HTML. The React marketplace:
+
+```bash
+cd market
+npm install
+npm run dev
+# http://127.0.0.1:5174/marketplace
+```
 
 Work on a module from its own repository:
 
@@ -151,7 +167,9 @@ cd pokemon-card-extension
 
 ## Configuration
 
-This repository has no local configuration file.
+Landing has none. The React marketplace uses the public Firebase web config
+in `market/src/auth.jsx` (same project as Flutter `DefaultFirebaseOptions.web`)
+and talks to `https://api.pokoin.com`.
 
 Known module configuration from the repositories:
 
@@ -170,16 +188,14 @@ environment files must not be committed.
 
 ## Deployment Status
 
-This repository has no verified deployment workflow of its own. The tracked file
-inventory is currently `README.md` only; there is no package manifest, CI/CD
-workflow, Vercel/Netlify/Render/Firebase/Cloudflare configuration, Dockerfile,
-Compose file, VPS script, or deploy script in this repository.
+Landing and the React marketplace live in this repo. Production still ships
+through CardVault Vercel project `web`: `scripts/sync-landing.sh` and
+`scripts/sync-market.sh`, then `vercel --prebuilt --prod` from CardVault
+`build/web`. Details: [docs/LANDING.md](docs/LANDING.md),
+[docs/MARKET.md](docs/MARKET.md).
 
-Because no build artifact or hosting target is declared here, there are no
-repository-local build, test, or deploy commands to run. Deployments for the
-runnable Pokoin surfaces are handled in the related module repositories and
-require the target platform, credentials, environment variables, and hosting
-settings for those modules.
+`https://pokoin.com/marketplace` still serves the older Flutter card page until
+that sync is run. Local Vite is the Flutter action-first layout.
 
 ## Usage
 
