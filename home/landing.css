@@ -930,6 +930,24 @@ html:not(.js) .reveal {
   }
 }
 
+@media (max-width: 480px) {
+  .nav {
+    padding: env(safe-area-inset-top) 1rem 0;
+    min-height: calc(4.5rem + env(safe-area-inset-top));
+  }
+
+  .hero-inner {
+    padding-top: calc(7.25rem + env(safe-area-inset-top));
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .cta-box {
+    margin: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

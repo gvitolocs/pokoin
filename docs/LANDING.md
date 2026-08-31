@@ -1,8 +1,9 @@
 # Pokoin.com root landing — pipeline and files
 
 Static get.rarecandy-style page. Source of truth: this repo (`gvitolocs/pokoin`).
-Production host: CardVault Vercel project `web` (`prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`).
-Live URL: `https://pokoin.com/`.
+This repo is the public web. CardVault is the Flutter app. Production host:
+Vercel project `web` (`prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`). Live URL:
+`https://pokoin.com/`.
 
 Action map canvas (clicks, not files): [landing-action-map.canvas.tsx](/home/nez/.cursor/projects/home-nez-Projects-pokoin-web/canvases/landing-action-map.canvas.tsx).
 
@@ -11,117 +12,73 @@ Action map canvas (clicks, not files): [landing-action-map.canvas.tsx](/home/nez
 ## Pipeline (edit → live)
 
 ```
-pokoin-web/                  CardVault web/              Flutter build          Vercel
-───────────                  ─────────────              ────────────          ──────
-index.html  ──sync──►        web/home.html  ──flutter──►  build/web/home.html
-home/*      ──sync──►        web/home/*      ──copy──►    build/web/home/*
-                                                          build/web/index.html  (Flutter shell)
-                                                          │
-                                                          deploy-pokoin-web.sh
-                                                          ├─ Flutter shell → app.html
-                                                          └─ landing      → index.html
-                                                                             │
-                                                                             vercel --prod
-                                                                             │
-                                                                             pokoin.com/
-                                                                             GET /              = index.html (landing)
-                                                                             GET /marketplace*   = market/index.html (humans)
-                                                                             GET /*              = app.html (Flutter)
+pokoin-web/                 scripts/build-web.sh          Vercel project `web`
+index.html + home/  ──►     dist-web/                    pokoin.com/
+market/             ──►     dist-web/market/
+vercel.json                 GET /              = landing
+                            GET /marketplace*   = React market
+                            /api/*              = api.pokoin.com
 ```
+
+Wallet, auth, cart, forum, signal, and the rest of Flutter live on
+`https://app.pokoin.com` (Vercel `pokoin-flutter`). Links are in
+[CHROME.md](CHROME.md). Do not deploy `cardvault/.../build/web` as pokoin.com.
 
 ### Step 1 — Edit here
 
 Work in `/home/nez/Projects/pokoin-web` (this repo).
 
-Local preview (relative `home/` URLs, no CardVault):
+Local landing preview (relative `home/` URLs):
 
 ```bash
 python3 -m http.server 8766 --bind 0.0.0.0 --directory /home/nez/Projects/pokoin-web
 ```
 
-Cursor’s browser on the Mac cannot use `127.0.0.1` on this host. Use Tailscale `http://100.107.164.33:8766/` or LAN `http://192.168.178.55:8766/` (port 8766 must be reachable).
-
-### Step 2 — Sync into CardVault
+React market:
 
 ```bash
-/home/nez/Projects/pokoin-web/scripts/sync-landing.sh
+cd /home/nez/Projects/pokoin-web/market
+npm install
+npm run dev
+# http://127.0.0.1:5174/marketplace
 ```
 
-Override destination with `CARDVAULT_WEB` if the CardVault clone is not at `/home/nez/Projects/cardvault/pokemon_card_vault/web`.
+Cursor’s browser on the Mac cannot use `127.0.0.1` on this host. Use Tailscale
+`http://100.107.164.33:8766/` or LAN `http://192.168.178.55:8766/`.
 
-The script:
+### Step 2 — Build and deploy this repo
 
-1. Copies `index.html` → `web/home.html`.
-2. Replaces `web/home/` with this repo’s `home/`.
-3. Rewrites `href="home/` and `src="home/` to `/home/` so production asset URLs are absolute.
-
-Do **not** copy onto `web/index.html`. That file is the Flutter web shell.
-
-### Step 3 — Tests (CardVault)
+Do **not** sync into CardVault. Do **not** run `deploy-pokoin-web.sh`.
 
 ```bash
-node --test /home/nez/Projects/cardvault/pokemon_card_vault/scripts/landing-root.test.js
-```
-
-### Step 4 — Deploy
-
-Canonical (rebuilds Flutter, then swaps HTML):
-
-```bash
-cd /home/nez/Projects/cardvault/pokemon_card_vault
-env -u VERCEL_TOKEN \
-  ORACLE_API_BASE_URL=https://api.pokoin.com \
-  USE_ORACLE_API=1 \
-  ./deploy-pokoin-web.sh
-```
-
-| Flag | Why |
-| --- | --- |
-| `env -u VERCEL_TOKEN` | A stale `VERCEL_TOKEN` in the environment fails CLI login. CLI session `giuseppevitolo17` works. |
-| `USE_ORACLE_API=1` | Hobby plan cannot ship the local serverless function set. APIs stay on `api.pokoin.com`. |
-| `--pwa-strategy=none` | Already in the deploy script’s `flutter build web`. Landing also unregisters leftover service workers. |
-
-What the script does after `flutter build web`:
-
-1. Requires `build/web/home.html` (copied from `web/` by Flutter).
-2. `cp build/web/index.html build/web/app.html` (keep Flutter).
-3. `cp build/web/home.html build/web/index.html` (landing wins at `/`).
-4. Oracle mode: strip `build/web/api/*.js` so Vercel does not try to host 12+ functions.
-5. `vercel pull` / `vercel build --prod` / `vercel deploy --prebuilt --prod`.
-6. `scripts/verify-production-aliases.js --set-aliases`.
-
-Landing-only shortcut (no Flutter rebuild) when `build/web/` is already a recent Oracle-mode production output:
-
-```bash
-/home/nez/Projects/pokoin-web/scripts/sync-landing.sh
-WEB=/home/nez/Projects/cardvault/pokemon_card_vault
-cp "$WEB/web/home.html" "$WEB/build/web/home.html"
-cp "$WEB/web/home.html" "$WEB/build/web/index.html"
-rm -rf "$WEB/build/web/home" && cp -a "$WEB/web/home" "$WEB/build/web/home"
-cd "$WEB/build/web"
+cd /home/nez/Projects/pokoin-web
 env -u VERCEL_TOKEN vercel pull --yes --environment=production
 env -u VERCEL_TOKEN vercel build --prod --yes
 env -u VERCEL_TOKEN vercel deploy --prebuilt --prod --yes --archive=tgz
 ```
 
-`vercel deploy --prod` already aliases `pokoin.com`. Extra aliases (`www`, `wallet`, `forum`, `cards`, …) need `env -u VERCEL_TOKEN vercel alias set`. **Do not** alias `explorer.pokoin.com` to this Vercel project — that host is Caddy on the explorer VM.
+| Flag / file | Why |
+| --- | --- |
+| `env -u VERCEL_TOKEN` | A stale `VERCEL_TOKEN` in the environment fails CLI login. CLI session `giuseppevitolo17` works. |
+| `vercel.json` `buildCommand` | `scripts/build-web.sh` writes `dist-web/` (landing with `/home/` paths + Vite `market/`). |
+| `outputDirectory` | `dist-web`. Never upload the GitHub source tree as static — that ships Vite `src/main.jsx` and 404s `/marketplace`. |
 
-### Step 5 — What Vercel serves
+`vercel deploy --prod` aliases `pokoin.com`. **Do not** alias `explorer.pokoin.com` to this project — that host is Caddy.
 
-Filesystem `index.html` is evaluated **before** rewrites. That is why the landing must sit on `index.html`, not only on `home.html`.
+`scripts/sync-landing.sh` / `scripts/sync-market.sh` copy into CardVault. They are leftover and not the production path.
+
+### Step 3 — What Vercel serves
+
+Filesystem `index.html` is evaluated **before** rewrites.
 
 | Request | File | App |
 | --- | --- | --- |
 | `GET /` | `index.html` (landing) | Static HTML |
-| `GET /home.html` | rewrite → `/home.html` | Same landing (copy) |
 | `GET /home/landing.css` | `home/landing.css` | Static |
-| `GET /marketplace` (humans) | `/market/index.html` | React SPA (`pokoin-web/market`) |
-| `GET /marketplace` (bots) | `/marketplace.html` | SEO stub |
-| Other app routes (`/wallet`, `/cart`, `/auth`, …) | rewrite `/(.*)` → `/app.html` | Flutter SPA |
+| `GET /marketplace` (and search / sets / cards, **with or without trailing `/`**) | `/market/index.html` | React SPA |
 | `GET /api/*` | Oracle proxy | `api.pokoin.com` |
-| `https://explorer.pokoin.com/` | not this project | Caddy “PokoinPoS Explorer” |
-
-`vercel.json` also rewrites `/` → `/home.html`. That is belt-and-suspenders. Production `/` is the swapped `index.html`.
+| `GET /wallet`, `/auth`, `/cart`, `/forum`, … | not this host | Punch-out to `https://app.pokoin.com/…` |
+| `https://explorer.pokoin.com/` | not this project | Caddy |
 
 `www.pokoin.com/` 301s to `https://pokoin.com/`.
 
@@ -133,8 +90,8 @@ Filesystem `index.html` is evaluated **before** rewrites. That is why the landin
 
 | Path | Cache-Control |
 | --- | --- |
-| `/`, `/index.html`, `/home.html`, `/app.html` | `max-age=0, must-revalidate` |
-| `/home/:path*` (css, js, font, logo) | `max-age=0, must-revalidate` (was 1h; that kept Rare Candy lime after HTML updates) |
+| `/`, `/index.html`, `/market/index.html` | `max-age=0, must-revalidate` |
+| `/home/:path*` (css, js, font, logo) | `max-age=0, must-revalidate` |
 
 After a landing-only deploy, bump `?v=` on `landing.css` / `landing.js` if a browser still holds an old sheet. Origin is `must-revalidate`; query strings defeat leftover 1h caches from before this header change.
 
@@ -166,14 +123,18 @@ A tiny inline script in `<head>` sets `document.documentElement.classList.add("j
 | `home/landing.js` | Nav, reveals, counters, idle RPC, SW unregister. |
 | `home/logo.png` | Nav + hero mark (7339 bytes). |
 | `home/satoshi.woff2` | Self-hosted Satoshi variable font. |
-| `scripts/sync-landing.sh` | Copy into CardVault `web/home.html` + `web/home/`, rewrite asset paths to `/home/`. |
+| `scripts/build-web.sh` | Production build: landing + `market/` into `dist-web/`. |
+| `vercel.json` | Headers, www redirect, `/marketplace*` (slash and no-slash) → `/market/index.html`, card shortlinks → Oracle 302, `/api/*` → `api.pokoin.com`. |
+| `scripts/sync-landing.sh` | Leftover CardVault copy. Not production. |
 | `docs/LANDING.md` | This file: pipeline, inventory, copy rules, proof. |
+| `docs/CHROME.md` | Icon / punch-out map. `pokoin.com` vs `app.pokoin.com`. |
+| `docs/NEWS.md` | `news.pokoin.com` on `pokoin-a1` behind Cloudflare Tunnel. |
 | `docs/BOOTSTRAP_PEERS.md` | Public vs operator peer JSON (OWASP API3). |
 | `docs/ANIMATIONS.md` | get.rarecandy.com IX2 inventory and Pokoin mapping. |
 | `README.md` | Ecosystem README. Points here for the landing. |
-| `.gitignore` | Ignores `.cursor/`, `.codevira/`, etc. |
+| `.gitignore` | Ignores `dist-web/`, `.vercel/`, `market/node_modules/`, `.cursor/`. |
 
-Not in this repo: Flutter, `vercel.json`, the audit PDF, OG banner `pokoin-project-banner-1360x430.png`, favicon. Those live in CardVault `web/`.
+OG banner, favicon, and the security PDF still live on the old CardVault static files. Those URLs 404 unless they are added to this repo.
 
 Visual reference only (not deployed): `/home/nez/Projects/candyext` (get.rarecandy clone). Lime `#cbf062` there. This page uses Flutter Pokoin gold `#FFD33D`, not Tailwind `#facc15` (that still reads as lime on a black page).
 
@@ -184,7 +145,7 @@ Visual reference only (not deployed): `/home/nez/Projects/candyext` (get.rarecan
 | Head | title, description, OG/Twitter, canonical, JSON-LD Organization | No “wrapped liquidity”. `theme-color` `#000`. |
 | Skip | `.skip-link` → `#main` | Yellow on focus. |
 | Header | logo `/`, marketplace, wallet, scan, `/docs`, forum | Hamburger `.nav-toggle` on ≤991px. |
-| Hero | H1 white “The marketplace belongs to the collectors.” + yellow “Buy. Sell. Settle in PKN.” | Lede: global P2P for collectors. CTAs: Explore cards `/marketplace`, Start selling `/inventory`. |
+| Hero | H1 white “The market belongs to the collectors.” + yellow “Buy. Sell. Settle in PKN.” | Lede: global P2P marketplace built for everyone. CTAs: Explore cards `/marketplace`, Start selling `/inventory`. |
 | Features | three `<a class="feature">` | `/marketplace`, `/wallet`, `/scan`. |
 | Live | marquee + four `.stat` | Height/peers/health live-updated. Chain ID `26062026` static. |
 | Security | two `.card` | May 2026 PDF. Reserve proof (renounced, JSON, BscScan, Pancake). |
@@ -196,9 +157,9 @@ Visual reference only (not deployed): `/home/nez/Projects/candyext` (get.rarecan
 
 Hero copy (locked):
 
-> The marketplace belongs to the collectors.
+> The market belongs to the collectors.
 > Buy. Sell. Settle in PKN.
-> A global peer-to-peer marketplace built for Pokémon card collectors.
+> A global peer-to-peer marketplace built for everyone.
 > Explore cards → Start selling (`/marketplace`, `/inventory`).
 
 Tab / OG title uses a colon (`Pokoin: …`), not an em dash.
@@ -211,7 +172,11 @@ Accent: `--yellow: #FFD33D` (Flutter `Color(0xFFFFD33D)`). Not Rare Candy lime `
 
 `/home/*` Cache-Control is `max-age=0, must-revalidate`. HTML also cache-busts `landing.css?v=…` so a stale hour-long sheet cannot keep the old lime.
 
-Crawlers get this HTML at `GET /`. The Flutter shell is `app.html`. Bot-only rewrites still serve the thin `marketplace.html` (and similar) stubs.
+Phone (iPhone 16 393×852 CSS px): `viewport-fit=cover` and `≤480px` safe-area
+padding on the fixed nav, hero, and yellow CTA. Do not change desktop landing
+rules for this. [MOBILE.md](MOBILE.md).
+
+Crawlers get this HTML at `GET /`. `/marketplace` is the React market, not Flutter.
 
 ### `home/landing.css` — classes that matter
 
@@ -223,7 +188,10 @@ Nav toggle + scroll tint; SW unregister; reveal observer (150ms sibling stagger,
 
 ---
 
-## Every file — CardVault (`pokemon_card_vault`) that this pipeline touches
+## CardVault (the app) — not pokoin.com
+
+CardVault is Flutter Android/iOS. The tables below are leftover from when
+pokoin.com was a Flutter web bundle. Do not deploy `build/web` as production.
 
 ### Generated / copied (do not hand-edit; re-run sync)
 
@@ -295,11 +263,12 @@ Callers of `goPublicHome`:
 | --- | --- |
 | `pokoin.com` | This landing |
 | `www.pokoin.com` | 301 → `pokoin.com` |
-| `wallet.pokoin.com`, `cards.pokoin.com`, `cardcaveau.pokoin.com`, `cardvault.pokoin.com` | Same Vercel project (Flutter + landing) |
-| `forum.pokoin.com` | Same project; Flutter Forum at `/`. `goPublicHome` stays in SPA. |
+| `app.pokoin.com` | Flutter app (Vercel `pokoin-flutter`). Wallet, forum, signal, cart, auth. |
+| `forum.pokoin.com` | Legacy alias on project `web`. Use `app.pokoin.com/forum`. |
 | `explorer.pokoin.com` | **Caddy**, not Vercel. Do not `vercel alias` this name. |
 | `rpc.pokoin.com` | PokoinPoS RPC (health, bootstrap peers, `eth_chainId`) |
 | `api.pokoin.com` | Oracle marketplace API |
+| `news.pokoin.com` | Hypemeter on `pokoin-a1` via Cloudflare Tunnel. [NEWS.md](NEWS.md). |
 
 Vercel project name: `web`. Inspect example: `https://vercel.com/giuseppevitolo17s-projects/web`.
 
@@ -394,12 +363,13 @@ Local `qwen3.8:27b-128k` was given a copy brief.
 ## Verify
 
 ```bash
-curl -sS https://pokoin.com/ | grep -F 'The marketplace belongs to the collectors'
+curl -sS https://pokoin.com/ | grep -F 'The market belongs to the collectors'
+curl -sS https://pokoin.com/ | grep -F 'built for everyone'
 curl -sS https://pokoin.com/ | grep -F 'Buy. Sell. Settle in PKN'
 curl -sS https://pokoin.com/ | grep -F 'btn-yellow'
 curl -sS https://pokoin.com/home/landing.css | grep -F '#ffd33d'
 curl -sI https://pokoin.com/marketplace | head
-curl -sS https://pokoin.com/audit/PokoinPOS_Official_Security_Audit_2026-05-28.pdf | head -c 8
+curl -sS https://pokoin.com/marketplace | grep -F '/market/assets/'
 ```
 
 Hard-refresh if a cached `landing.css` still shows lime; the live sheet is `#ffd33d`.

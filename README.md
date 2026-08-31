@@ -4,28 +4,28 @@ Pokoin is a Pokemon card commerce and wallet ecosystem built around CardVault,
 the Pokoin Wallet, the PokoinPoS chain, marketplace tooling, and market-signal
 apps.
 
-This repository holds the **pokoin.com root landing** (`index.html`, `home/`)
-and the React marketplace (`market/`). Product APIs still live in CardVault.
-The Flutter Android/iOS app is unchanged.
+This repository is the **public web**: landing (`index.html`, `home/`) and the
+React market (`market/`). CardVault is the Flutter app. Product APIs stay on
+`api.pokoin.com`.
 
-See [docs/LANDING.md](docs/LANDING.md) for the landing pipeline and
-[docs/MARKET.md](docs/MARKET.md) for the React marketplace + page APIs.
-
-See [docs/LANDING.md](docs/LANDING.md) for the edit→sync→deploy pipeline, every
-file in this repo and in CardVault, the action map, stack choice, security PDF
-notes, peer proof, and cache gotchas. React marketplace: [docs/MARKET.md](docs/MARKET.md).
+See [docs/LANDING.md](docs/LANDING.md) for the landing pipeline, copy, and
+deploy. React market: [docs/MARKET.md](docs/MARKET.md). Pokoin News
+(`news.pokoin.com`) on Oracle behind a Cloudflare Tunnel:
+[docs/NEWS.md](docs/NEWS.md).
 Motion vs [get.rarecandy.com](https://get.rarecandy.com/)
 is in [docs/ANIMATIONS.md](docs/ANIMATIONS.md). Public vs operator peer JSON:
-[docs/BOOTSTRAP_PEERS.md](docs/BOOTSTRAP_PEERS.md).
+[docs/BOOTSTRAP_PEERS.md](docs/BOOTSTRAP_PEERS.md). Chrome icons punch out to
+the Flutter app on [app.pokoin.com](https://app.pokoin.com): [docs/CHROME.md](docs/CHROME.md).
+Phone (iPhone 16 393×852): [docs/MOBILE.md](docs/MOBILE.md).
 
 ## Ecosystem And Modules
 
 | Module | Repository | Verified status |
 | --- | --- | --- |
-| Pokoin | [`gvitolocs/pokoin`](https://github.com/gvitolocs/pokoin) | Landing (`index.html`, `home/`) and React marketplace (`market/`). |
-| CardVault | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) | Flutter web app for the Pokoin marketplace and wallet surfaces. The repository documents `https://pokoin.com/`, `/marketplace`, `/profile`, `/orders`, `/scan`, `/health`, and `/wallet` routes. |
+| Pokoin | [`gvitolocs/pokoin`](https://github.com/gvitolocs/pokoin) | Public web: landing (`index.html`, `home/`) and React market (`market/`) on `https://pokoin.com`. |
+| CardVault | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) | Flutter app (Android/iOS). Not the pokoin.com web host. Wallet, auth, cart, forum stay here until those routes exist on the web. |
 | Wallet | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) and [`gvitolocs/pokoinwallet`](https://github.com/gvitolocs/pokoinwallet) | The current wallet is documented as integrated into CardVault at `https://pokoin.com/wallet`. The separate `pokoinwallet` repository contains an older Flutter/Firebase Functions prototype. |
-| Hypemeter | [`gvitolocs/hypemeter`](https://github.com/gvitolocs/hypemeter) | Next.js app named `hypemeter`. Its metadata describes Pokoin News as a live signal hub for Pokemon news, TCG market hype, crypto gaming signals, earn trends, and card-market momentum. |
+| Hypemeter | [`gvitolocs/hypemeter`](https://github.com/gvitolocs/hypemeter) | Next.js Pokoin News at `https://news.pokoin.com`, hosted on Always Free Ampere A1 behind a Cloudflare named tunnel. Pipeline: [docs/NEWS.md](docs/NEWS.md). |
 | Card Extension | [`gvitolocs/pokemon-card-extension`](https://github.com/gvitolocs/pokemon-card-extension) | Chrome Manifest V3 extension that adds Pokoin card links to supported Pokemon marketplace listings. |
 | PokoinPoS | [`gvitolocs/pokoinpos`](https://github.com/gvitolocs/pokoinpos) | Native Proof-of-Stake chain and node runtime for the Pokoin/CardVault ecosystem. Public network values are documented in the repository. |
 
@@ -35,9 +35,13 @@ is in [docs/ANIMATIONS.md](docs/ANIMATIONS.md). Public vs operator peer JSON:
 
 - Provides the public README for the Pokoin ecosystem.
 - Holds the pokoin.com landing (`index.html`, `home/`) and the React
-  marketplace (`market/`).
+  market (`market/`). Deploys itself to Vercel project `web`.
 
 ### CardVault
+
+Flutter app (Android/iOS). Not the pokoin.com web host. The notes below
+describe the app repo; they are not a claim that Flutter still serves
+`https://pokoin.com/marketplace`.
 
 - Flutter web app named `pokoin` with description
   `Pokoin marketplace, wallet, and card reserve app`.
@@ -73,14 +77,13 @@ is in [docs/ANIMATIONS.md](docs/ANIMATIONS.md). Public vs operator peer JSON:
 
 - Next.js app using Node `22.x`, Next `16.2.1`, React `19.2.4`, TypeScript,
   Tailwind CSS, Vitest, and `better-sqlite3`.
-- Vercel configuration declares the framework as `nextjs`.
-- Vercel cron jobs revalidate `/api/cron/revalidate-home` twice every
-  three-hour window.
-- App metadata identifies the live surface as `https://news.pokoin.com` and
-  describes Pokemon news, TCG hype, crypto game, earn trend, and market-signal
-  tracking.
-- Details coming soon: public product README, deployment owner, and production
-  operating notes.
+- Production is Oracle Always Free Ampere (`pokoin-a1`) bound to
+  `127.0.0.1:3000`, published only through Cloudflare Tunnel `pokoin-news`.
+  Hunt, compose, tunnel, 15-minute revalidate timer, and DNS cutover:
+  [docs/NEWS.md](docs/NEWS.md).
+- Vercel project `hypemeter` / `https://monmeter.vercel.app` stays up as
+  rollback until you approve teardown. Do not delete it until then.
+- App metadata identifies the live surface as `https://news.pokoin.com`.
 
 ### Card Extension
 
@@ -178,8 +181,8 @@ Known module configuration from the repositories:
 - CardVault web routing is configured through
   `cardvault/pokemon_card_vault/web/vercel.json`.
 - The card extension uses `https://pokoin.com` as its API base URL.
-- Hypemeter is configured for Vercel as a Next.js project and includes cron
-  revalidation for `/api/cron/revalidate-home`.
+- Hypemeter production is Oracle + Cloudflare Tunnel (`docs/NEWS.md`).
+  A systemd timer calls `/api/cron/revalidate-home` every 15 minutes.
 - PokoinPoS peers are configured with `POKOINPOS_*` environment variables in
   `docker-compose.peer.yml` and `deploy/env/peer.env.example`.
 
@@ -188,19 +191,15 @@ environment files must not be committed.
 
 ## Deployment Status
 
-Landing and the React marketplace live in this repo. Production still ships
-through CardVault Vercel project `web`: `scripts/sync-landing.sh` and
-`scripts/sync-market.sh`, then `vercel --prebuilt --prod` from CardVault
-`build/web`. Details: [docs/LANDING.md](docs/LANDING.md),
+This repo is the public web. CardVault is the Flutter app. Production is
+Vercel project `web` (`pokoin.com`): `vercel.json` runs `scripts/build-web.sh`,
+then `vercel --prebuilt --prod`. Details: [docs/LANDING.md](docs/LANDING.md),
 [docs/MARKET.md](docs/MARKET.md).
-
-`https://pokoin.com/marketplace` still serves the older Flutter card page until
-that sync is run. Local Vite is the Flutter action-first layout.
 
 ## Usage
 
-- Visit `https://pokoin.com/` for the public Pokoin/CardVault web surface.
-- Open `https://pokoin.com/wallet` for the integrated wallet route.
+- Visit `https://pokoin.com/` for the landing and `https://pokoin.com/marketplace` for the React market.
+- Wallet, auth, cart, and forum are still the Flutter app; those URLs 404 on the web until they are built here.
 - Use `https://rpc.pokoin.com/rpc` as the documented public PokoinPoS RPC URL.
 - Use `https://explorer.pokoin.com` as the documented public explorer URL.
 - Load the Card Extension locally in Chrome to add Pokoin links on supported

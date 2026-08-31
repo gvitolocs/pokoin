@@ -2,12 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Pokoin marketplace</title>
     <meta name="theme-color" content="#000000" />
+    <style>
+      html, body, #root { margin: 0; min-height: 100%; background: #000; color: #fff; }
+    </style>
     <link rel="icon" href="https://pokoin.com/favicon.ico" sizes="any" />
     <link rel="preload" href="/home/satoshi.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/home/logo.png" as="image" />
+    <script>
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function (regs) {
+          regs.forEach(function (r) { r.unregister(); });
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

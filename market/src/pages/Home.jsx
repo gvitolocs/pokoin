@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchHome, readRecentCardIds, setSlug } from '../api.js';
+import { fetchExpansion, fetchHome, readRecentCardIds, setSlug } from '../api.js';
+import { FLUTTER } from '../punchouts.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
-import Carousel from '../components/Carousel.jsx';
+import Carousel, { SkeletonTile } from '../components/Carousel.jsx';
 
 function cardsForIds(cards, ids) {
   const byId = new Map(cards.map((card) => [String(card.id), card]));
@@ -16,6 +17,7 @@ export default function Home() {
 
   useEffect(() => {
     document.title = 'Pokoin marketplace';
+    fetchExpansion({ slug: 'mega-evolution', limit: 48 }).catch(() => {});
     let cancelled = false;
     fetchHome(readRecentCardIds())
       .then((data) => {
@@ -34,8 +36,15 @@ export default function Home() {
   }, []);
 
   const sections = useMemo(() => {
+    const empty = {
+      recentlySeen: [],
+      newCards: [],
+      bestSellers: [],
+      featured: [],
+      spotlight: [],
+    };
     if (!payload) {
-      return null;
+      return empty;
     }
     const cards = payload.cards || [];
     const ids = payload.sections || {};
@@ -50,18 +59,13 @@ export default function Home() {
     };
   }, [payload]);
 
-  if (error) {
-    return <p className="status error">{error}</p>;
-  }
-  if (!sections) {
-    return <p className="status">Loading marketplace…</p>;
-  }
-
+  const loading = !payload && !error;
   const newSet = sections.newCards[0]?.set;
   const mega = sections.newCards[0] || sections.spotlight[0];
 
   return (
-    <div className="page">
+    <div className="page" aria-busy={loading ? 'true' : undefined}>
+      {error ? <p className="status error">{error}</p> : null}
       <section className="promo" aria-label="Featured">
         <div>
           <p className="eyebrow">Pokémon TCG</p>
@@ -70,6 +74,9 @@ export default function Home() {
           <Link
             className="btn"
             to="/marketplace/sets/mega-evolution"
+            onPointerEnter={() => {
+              fetchExpansion({ slug: 'mega-evolution', limit: 48 }).catch(() => {});
+            }}
             onClick={() => track(Action.clickBanner, mega || { id: '703382', name: 'Mega Evolution' })}
           >
             Browse Mega Evolution
@@ -77,16 +84,17 @@ export default function Home() {
         </div>
       </section>
 
-      <Carousel title="Recently seen" cards={sections.recentlySeen} />
+      <Carousel title="Recently seen" cards={sections.recentlySeen} placeholders={loading ? 8 : 0} />
       <Carousel
         title="New cards"
         cards={sections.newCards}
         href={newSet ? `/marketplace/sets/${setSlug(newSet)}` : undefined}
+        placeholders={loading ? 8 : 0}
       />
-      <Carousel title="Best sellers" cards={sections.bestSellers} />
-      <Carousel title="Featured" cards={sections.featured} />
+      <Carousel title="Best sellers" cards={sections.bestSellers} placeholders={loading ? 8 : 0} />
+      <Carousel title="Featured" cards={sections.featured} placeholders={loading ? 8 : 0} />
 
-      <a className="callout" href="/inventory" onClick={() => track(Action.sell, mega || { id: '703382', name: 'sell' })}>
+      <a className="callout" href={FLUTTER.inventory} onClick={() => track(Action.sell, mega || { id: '703382', name: 'sell' })}>
         Sell your cards for PKN
         <span>Get started →</span>
       </a>
@@ -96,9 +104,11 @@ export default function Home() {
           <h2>Marketplace</h2>
         </div>
         <div className="grid">
-          {sections.spotlight.map((card, index) => (
-            <CardTile key={card.id} card={card} rank={index} />
-          ))}
+          {loading
+            ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} />)
+            : sections.spotlight.map((card, index) => (
+                <CardTile key={card.id} card={card} rank={index} />
+              ))}
         </div>
       </section>
     </div>

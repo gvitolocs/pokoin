@@ -1,0 +1,131 @@
+{
+  "installCommand": "true",
+  "buildCommand": "bash scripts/build-web.sh",
+  "outputDirectory": "dist-web",
+  "headers": [
+    {
+      "source": "/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/home/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/market/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/",
+      "has": [{ "type": "host", "value": "www.pokoin.com" }],
+      "destination": "https://pokoin.com/",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "www.pokoin.com" }],
+      "destination": "https://pokoin.com/:path*",
+      "permanent": true
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/marketplace/search/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/search",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/sets/:slug/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/sets/:slug",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/cards/:cardId/:cardSlug/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/cards/:cardId/:cardSlug",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/cards/:cardId/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/cards/:cardId",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:cardId(\\d+)/",
+      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/marketplace/:cardId"
+    },
+    {
+      "source": "/marketplace/:cardId(\\d+)",
+      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/marketplace/:cardId"
+    },
+    {
+      "source": "/:cardId(\\d+)/:cardSlug/",
+      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/:cardId/:cardSlug"
+    },
+    {
+      "source": "/:cardId(\\d+)/:cardSlug",
+      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/:cardId/:cardSlug"
+    },
+    {
+      "source": "/:cardId(\\d+)/",
+      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/:cardId"
+    },
+    {
+      "source": "/:cardId(\\d+)",
+      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/:cardId"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://api.pokoin.com/api/:path*"
+    },
+    {
+      "source": "/card-images/:path*",
+      "destination": "https://cdn.pokoin.com/:path*"
+    }
+  ]
+}

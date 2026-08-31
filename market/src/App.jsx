@@ -12,10 +12,15 @@ export default function App() {
       <Chrome>
         <Routes>
           <Route path="/marketplace" element={<Home />} />
+          <Route path="/marketplace/" element={<Home />} />
           <Route path="/marketplace/search" element={<Search />} />
+          <Route path="/marketplace/search/" element={<Search />} />
           <Route path="/marketplace/sets/:slug" element={<Expansion />} />
+          <Route path="/marketplace/sets/:slug/" element={<Expansion />} />
           <Route path="/marketplace/:lang/cards/:cardId/:slug" element={<Card />} />
+          <Route path="/marketplace/:lang/cards/:cardId/:slug/" element={<Card />} />
           <Route path="/marketplace/:lang/cards/:cardId" element={<Card />} />
+          <Route path="/marketplace/:lang/cards/:cardId/" element={<Card />} />
           <Route path="*" element={<Navigate to="/marketplace" replace />} />
         </Routes>
       </Chrome>

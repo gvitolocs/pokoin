@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { fetchSearch } from '../api.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
+import { SkeletonTile } from '../components/Carousel.jsx';
 
 export default function Search() {
   const [params] = useSearchParams();
@@ -55,17 +56,20 @@ export default function Search() {
   }
 
   return (
-    <div className="page">
+    <div className="page" aria-busy={loading ? 'true' : undefined}>
       <h1>{query || 'Search'}</h1>
       {!loading && !error ? (
         <p className="muted">{cards.length ? `${cards.length}${hasMore ? '+' : ''} results` : 'No cards match that search.'}</p>
-      ) : null}
+      ) : (
+        <p className="muted">{'\u00a0'}</p>
+      )}
       {error ? <p className="status error">{error}</p> : null}
-      {loading ? <p className="status">Searching…</p> : null}
       <div className="grid">
-        {cards.map((card, index) => (
-          <CardTile key={card.id} card={card} rank={index} />
-        ))}
+        {loading
+          ? Array.from({ length: 24 }, (_, index) => <SkeletonTile key={index} />)
+          : cards.map((card, index) => (
+              <CardTile key={card.id} card={card} rank={index} />
+            ))}
       </div>
       {hasMore ? (
         <button className="more" type="button" onClick={loadMore}>Load more</button>

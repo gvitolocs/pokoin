@@ -2,9 +2,22 @@ import { useRef } from 'react';
 import { Link } from 'react-router-dom';
 import CardTile from './CardTile.jsx';
 
-export default function Carousel({ title, cards, href }) {
+export function SkeletonTile() {
+  return (
+    <div className="tile tile-skel" aria-hidden="true">
+      <span className="tile-art"><span className="tile-ph" /></span>
+      <div className="tile-meta">
+        <strong className="skel-line" />
+        <span className="skel-line skel-line-sm" />
+      </div>
+    </div>
+  );
+}
+
+export default function Carousel({ title, cards, href, placeholders = 0 }) {
   const scroller = useRef(null);
-  if (!cards?.length) {
+  const ready = Boolean(cards?.length);
+  if (!ready && placeholders < 1) {
     return null;
   }
 
@@ -24,9 +37,13 @@ export default function Carousel({ title, cards, href }) {
       </div>
       <div className="rail-wrap">
         <div className="carousel-track" ref={scroller}>
-          {cards.map((card, index) => (
-            <CardTile key={card.id} card={card} rank={index} />
-          ))}
+          {ready
+            ? cards.map((card, index) => (
+                <CardTile key={card.id} card={card} rank={index} />
+              ))
+            : Array.from({ length: placeholders }, (_, index) => (
+                <SkeletonTile key={index} />
+              ))}
         </div>
         <button className="rail-next" type="button" onClick={next} aria-label="Next">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>

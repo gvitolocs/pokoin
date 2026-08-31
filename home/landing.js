@@ -163,7 +163,37 @@ function peerRow(peer, fallbackHeight) {
 }
 
 const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 400));
+
+function prefetchMarketplace() {
+  if (window.__pokoinMarketPrefetch) return;
+  window.__pokoinMarketPrefetch = true;
+  fetch("/marketplace", { credentials: "same-origin" })
+    .then((r) => r.text())
+    .then((html) => {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      doc.querySelectorAll("script[src], link[rel='stylesheet'], link[rel='modulepreload']").forEach((el) => {
+        const href = el.getAttribute("src") || el.getAttribute("href");
+        if (!href) return;
+        const link = document.createElement("link");
+        link.rel = el.tagName === "SCRIPT" || el.getAttribute("rel") === "modulepreload" ? "modulepreload" : "prefetch";
+        link.href = href;
+        document.head.appendChild(link);
+      });
+    })
+    .catch(() => {});
+  fetch("/api/marketplace-home-page", { headers: { Accept: "application/json" } }).catch(() => {});
+  fetch("/api/marketplace-expansion-page?limit=48&offset=0&productType=card&slug=mega-evolution", {
+    headers: { Accept: "application/json" },
+  }).catch(() => {});
+}
+
+document.querySelectorAll('a[href="/marketplace"], a[href="/marketplace/"]').forEach((a) => {
+  a.addEventListener("pointerenter", prefetchMarketplace, { once: true });
+  a.addEventListener("focus", prefetchMarketplace, { once: true });
+});
+
 idle(() => {
+  prefetchMarketplace();
   fetch("https://rpc.pokoin.com/health", { cache: "no-store" })
     .then((r) => r.json())
     .then((d) => {

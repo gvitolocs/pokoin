@@ -1,5 +1,7 @@
 market/node_modules/
 market/dist/
+dist-web/
+.vercel/
 .playwright-cli/
 _unsloth_temporary_saved_buffers/
 unsloth_compiled_cache/

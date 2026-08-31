@@ -1,3 +1,5 @@
+import { appHref } from './punchouts.js';
+
 const RECENT_KEY = 'pokoin.recentCardIds';
 const WATCH_KEY = 'pokoin.watchlistIds';
 
@@ -140,7 +142,18 @@ export function artistHref(name, lang = 'en') {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   const language = String(lang || 'en').toLowerCase() || 'en';
-  return slug ? `/marketplace/${language}/artists/${slug}` : '';
+  return slug ? appHref(`/marketplace/${language}/artists/${slug}`) : '';
+}
+
+const expansionCache = new Map();
+const expansionInflight = new Map();
+
+function expansionCacheKey({ slug = '', expansionName = '', limit = 48, offset = 0 } = {}) {
+  return JSON.stringify({ slug, expansionName, limit: Number(limit), offset: Number(offset) });
+}
+
+export function peekExpansion(opts = {}) {
+  return expansionCache.get(expansionCacheKey(opts)) || null;
 }
 
 export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offset = 0 } = {}) {
@@ -155,7 +168,60 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
   if (expansionName) {
     params.set('expansionName', expansionName);
   }
-  return getJson(`/api/marketplace-expansion-page?${params}`);
+  const key = expansionCacheKey({ slug, expansionName, limit, offset });
+  if (offset === 0 && expansionCache.has(key)) {
+    return Promise.resolve(expansionCache.get(key));
+  }
+  if (offset === 0 && expansionInflight.has(key)) {
+    return expansionInflight.get(key);
+  }
+  const pending = getJson(`/api/marketplace-expansion-page?${params}`).then((data) => {
+    if (offset === 0) {
+      expansionCache.set(key, data);
+      expansionInflight.delete(key);
+    }
+    return data;
+  }, (err) => {
+    expansionInflight.delete(key);
+    throw err;
+  });
+  if (offset === 0) {
+    expansionInflight.set(key, pending);
+  }
+  return pending;
+}
+
+/** Page at 48 as defense. Oracle used to hard-cap SQL at 64 and lie hasMore=false. */
+const EXPANSION_PAGE = 48;
+
+export async function fetchExpansionCards({ slug = '', expansionName = '' } = {}) {
+  const cards = [];
+  const seen = new Set();
+  let offset = 0;
+  let expansion = null;
+  for (let page = 0; page < 40; page += 1) {
+    const data = await fetchExpansion({
+      slug,
+      expansionName,
+      limit: EXPANSION_PAGE,
+      offset,
+    });
+    expansion = data.expansion || expansion;
+    const chunk = data.cards || [];
+    for (const row of chunk) {
+      const id = String(row.id || row.card_id || '');
+      if (!id || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      cards.push(row);
+    }
+    if (chunk.length < EXPANSION_PAGE) {
+      return { cards, hasMore: false, expansion };
+    }
+    offset += chunk.length;
+  }
+  return { cards, hasMore: true, expansion };
 }
 
 export function fetchAutocomplete(query, { limit = 8, signal } = {}) {
@@ -266,6 +332,14 @@ export function formatPkn(value) {
   return `${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} PKN`;
 }
 
+export function prettySlug(slug) {
+  return String(slug || '')
+    .split('-')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 export function setSlug(name) {
   return String(name || '')
     .normalize('NFKD')
@@ -277,6 +351,4 @@ export function setSlug(name) {
     .slice(0, 140);
 }
 
-export function authFrom(path) {
-  return `/auth?from=${encodeURIComponent(path || '/marketplace')}`;
-}
+export { authFrom } from './punchouts.js';

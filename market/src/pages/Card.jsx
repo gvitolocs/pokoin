@@ -6,7 +6,7 @@ import {
   cardHref,
   createListing,
   fetchCard,
-  fetchExpansion,
+  fetchExpansionCards,
   fetchListings,
   formatPkn,
   imageSrc,
@@ -17,6 +17,7 @@ import {
   toggleWatchlist,
   readWatchlistIds,
 } from '../api.js';
+import { appHref } from '../punchouts.js';
 import { useAuth } from '../auth.jsx';
 import { printingIdentity } from '../identity.js';
 import { Action, track } from '../track.js';
@@ -373,6 +374,25 @@ function ListingForm({ card, identity, suggestedPrice, fromPath, onListed }) {
   );
 }
 
+function collectorRank(card) {
+  const match = String(printingIdentity(card).number || '').match(/(\d+)/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+function Chevron({ dir }) {
+  const left = dir === 'left';
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d={left
+          ? 'M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z'
+          : 'M8.59 16.59 13.17 12 8.59 7.41 10 6l6 6-6 6z'}
+      />
+    </svg>
+  );
+}
+
 export default function Card() {
   const { lang = 'en', cardId, slug = '' } = useParams();
   const navigate = useNavigate();
@@ -408,7 +428,7 @@ export default function Card() {
     setDealLang('');
     setDealCond('');
     setWatched(readWatchlistIds().includes(String(cardId)));
-    if (!stubCard || String(stubCard.id) !== String(cardId)) {
+    if (!stubCard) {
       setPayload(null);
     }
     fetchCard(cardId, { lang, slug, includeOffers: false })
@@ -453,14 +473,14 @@ export default function Card() {
     };
   }, [cardId, lang, slug, navigate]);
 
-  const setName = payload?.card ? printingIdentity(payload.card).set : '';
+  const setName = printingIdentity(payload?.card || stubCard || {}).set || '';
 
   useEffect(() => {
     if (!setName) {
       return undefined;
     }
     let cancelled = false;
-    fetchExpansion({ expansionName: setName, limit: 200 })
+    fetchExpansionCards({ expansionName: setName })
       .then((data) => {
         if (cancelled) {
           return;
@@ -502,7 +522,7 @@ export default function Card() {
     return sortOffers(filtered, offerSort);
   }, [payload, offerSort, condition, language]);
 
-  if (error) {
+  if (error && !payload?.card && !stubCard) {
     return (
       <div className="status error">
         <p>Card market not found.</p>
@@ -510,32 +530,55 @@ export default function Card() {
       </div>
     );
   }
-  if (!payload?.card) {
-    return <p className="status">Loading card…</p>;
+  if (!payload?.card && !stubCard) {
+    return (
+      <article className="card-page flutter-page" aria-busy="true">
+        <header className="asset-header">
+          <div className="prod-badges">
+            <span className="badge-poke">Pokémon</span>
+          </div>
+          <div className="asset-title">
+            <h1><span className="skel-line skel-title" /></h1>
+            <p className="asset-sub"><span className="skel-line skel-line-sm" /></p>
+          </div>
+        </header>
+        <div className="card-desk">
+          <div className="hero-art-col">
+            <section className="panel art-panel">
+              <span className="tile-ph" />
+            </section>
+          </div>
+        </div>
+      </article>
+    );
   }
 
-  const card = payload.card;
+  const card = payload?.card || stubCard;
   const identity = printingIdentity(card);
   const fromPath = card.canonicalPath || window.location.pathname;
-  const versions = payload.versions || [];
+  const versions = payload?.versions || [];
   const otherPrintings = versions.filter((row) => String(row.id) !== String(card.id));
   const art = imageSrc(card, 'hero');
   const setHref = setName ? `/marketplace/sets/${setSlug(setName)}` : '';
-  const artist = identity.artist || payload.artist?.name || payload.artist?.illustrator || '';
+  const artist = identity.artist || payload?.artist?.name || payload?.artist?.illustrator || '';
   const artistPath = artist ? artistHref(artist, lang) : '';
   const typeLabel = /^card$|^single$/i.test(String(card.type || card.productType || card.itemKind || 'Card'))
     ? 'Card'
     : (card.type || card.productType || 'Card');
   const identityEmoji = card.emoji || card.cardIdentityEmoji || '';
-  const versionsPath = `${(card.canonicalPath || cardHref(card)).replace(/\/$/, '')}/versions`;
-  const siblingIndex = siblings.findIndex((row) => publicCardId(row) === publicCardId(card));
-  const prevCard = siblingIndex >= 0 && siblings.length > 1
-    ? (siblingIndex > 0 ? siblings[siblingIndex - 1] : (siblingsWrap ? siblings[siblings.length - 1] : null))
+  const versionsPath = appHref(`${(card.canonicalPath || cardHref(card)).replace(/\/$/, '')}/versions`);
+  const orderedSiblings = [...siblings].sort((a, b) => {
+    const byNumber = collectorRank(a) - collectorRank(b);
+    return byNumber !== 0 ? byNumber : Number(publicCardId(a)) - Number(publicCardId(b));
+  });
+  const siblingIndex = orderedSiblings.findIndex((row) => publicCardId(row) === publicCardId(card));
+  const prevCard = siblingIndex >= 0 && orderedSiblings.length > 1
+    ? (siblingIndex > 0 ? orderedSiblings[siblingIndex - 1] : (siblingsWrap ? orderedSiblings[orderedSiblings.length - 1] : null))
     : null;
-  const nextCard = siblingIndex >= 0 && siblings.length > 1
-    ? (siblingIndex < siblings.length - 1 ? siblings[siblingIndex + 1] : (siblingsWrap ? siblings[0] : null))
+  const nextCard = siblingIndex >= 0 && orderedSiblings.length > 1
+    ? (siblingIndex < orderedSiblings.length - 1 ? orderedSiblings[siblingIndex + 1] : (siblingsWrap ? orderedSiblings[0] : null))
     : null;
-  const nativeLive = pricedOffers(payload.offers);
+  const nativeLive = pricedOffers(payload?.offers);
   const dealPick = dealLang || dealCond
     ? matchDeal(nativeLive, dealLang || null, dealCond || null)
     : preferredDeal(nativeLive);
@@ -553,9 +596,9 @@ export default function Card() {
     )));
   const shownLang = dealLang || offerLang(dealPick) || '';
   const shownCond = dealCond || (dealPick ? conditionKey(dealPick.condition) : '');
-  const languages = [...new Set((payload.offers || []).map((row) => String(row.language || '').toUpperCase()).filter(Boolean))];
+  const languages = [...new Set((payload?.offers || []).map((row) => String(row.language || '').toUpperCase()).filter(Boolean))];
   const dealCopy = !offersReady
-    ? 'Checking listings…'
+    ? '\u00a0'
     : !nativeLive.length
       ? 'No sellers yet. Be the first to list this card.'
       : !dealPick
@@ -566,6 +609,11 @@ export default function Card() {
     : '';
   const holo = Boolean(card.isHolo || card.holo);
   const collector = identity.number || '—';
+  const versionRows = versions.length
+    ? (versions.some((row) => String(row.id) === String(card.id))
+      ? versions
+      : [{ id: card.id, name: card.name, set: setName, set_name: setName, number: collector }, ...versions])
+    : [{ id: card.id, name: card.name, set: setName, set_name: setName, number: collector }];
 
   async function share() {
     const url = `${window.location.origin}${card.canonicalPath || cardHref(card)}`;
@@ -594,7 +642,7 @@ export default function Card() {
   }
 
   function goVersion(event) {
-    const row = versions.find((item) => String(item.id) === event.target.value);
+    const row = versionRows.find((item) => String(item.id) === event.target.value);
     if (!row || String(row.id) === String(card.id)) {
       return;
     }
@@ -624,7 +672,7 @@ export default function Card() {
         </div>
         <div className="asset-actions">
           <span className={inStock && floor ? 'quote-pill' : 'quote-pill oos'}>
-            Floor {offersReady ? (floor || '—') : '…'}
+            Floor {offersReady ? (floor || '—') : '—'}
           </span>
           <span className="quote-pill oos" title="No sold-card series yet">24h —</span>
           <button type="button" className={watched ? 'icon-btn on' : 'icon-btn'} onClick={onWatch} title={watched ? 'Remove from watchlist' : 'Add to watchlist'}>
@@ -648,9 +696,9 @@ export default function Card() {
                   aria-label="Previous card in set"
                   onClick={() => track(Action.prevCard, prevCard)}
                 >
-                  ‹
+                  <Chevron dir="left" />
                 </Link>
-              ) : <span className="art-nav ghost" aria-hidden="true">‹</span>}
+              ) : <span className="art-nav ghost" aria-hidden="true"><Chevron dir="left" /></span>}
               <span className="collector-badge">{collector}</span>
               {nextCard ? (
                 <Link
@@ -660,9 +708,9 @@ export default function Card() {
                   aria-label="Next card in set"
                   onClick={() => track(Action.nextCard, nextCard)}
                 >
-                  ›
+                  <Chevron dir="right" />
                 </Link>
-              ) : <span className="art-nav ghost" aria-hidden="true">›</span>}
+              ) : <span className="art-nav ghost" aria-hidden="true"><Chevron dir="right" /></span>}
             </div>
             <button
               type="button"
@@ -674,23 +722,23 @@ export default function Card() {
             >
               {art ? <img src={art} alt={card.name} fetchPriority="high" decoding="async" /> : <span className="tile-ph" />}
             </button>
-            {versions.length ? (
-              <label className="sort version-select">
-                <span className="sr-only">Version</span>
-                <select value={String(card.id)} onChange={goVersion}>
-                  {versions.map((row) => {
-                    const rowId = printingIdentity(row);
-                    return (
-                      <option key={row.id} value={row.id}>
-                        {[row.set || row.set_name, rowId.number].filter(Boolean).join(' ') || row.name}
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
-            ) : (
-              <p className="version-fallback">{setName} {collector}</p>
-            )}
+            <label className="sort version-select">
+              <span className="sr-only">Version</span>
+              <select
+                value={String(card.id)}
+                onChange={goVersion}
+                disabled={versionRows.length < 2}
+              >
+                {versionRows.map((row) => {
+                  const rowId = printingIdentity(row);
+                  return (
+                    <option key={row.id} value={row.id}>
+                      {[row.set || row.set_name, rowId.number].filter(Boolean).join(' ') || row.name}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
             <p className="set-link tight">
               <a href={versionsPath}>View all versions</a>
             </p>
@@ -725,7 +773,7 @@ export default function Card() {
               </a>
             </div>
             <div className={canBuy ? 'prod-px' : 'prod-px oos'}>
-              {offersReady ? (canBuy ? formatPkn(dealPick.pricePkn) : '—') : '…'}
+              {offersReady ? (canBuy ? formatPkn(dealPick.pricePkn) : '—') : '—'}
             </div>
             <p className="muted own-k">{dealCopy}</p>
             <div className="deal-selects">
@@ -788,7 +836,7 @@ export default function Card() {
         <section className="panel shop-panel shop-terminal">
           <header className="panel-head">
             <h2>Shop</h2>
-            {payload.offers?.length ? (
+            {payload?.offers?.length ? (
               <label className="sort">
                 Sort
                 <select value={offerSort} onChange={(event) => setOfferSort(event.target.value)}>
@@ -800,7 +848,7 @@ export default function Card() {
               </label>
             ) : null}
           </header>
-          {payload.offers?.length ? (
+          {payload?.offers?.length ? (
             <div className="listing-filters">
               <label className="sort">
                 Condition
@@ -854,7 +902,7 @@ export default function Card() {
           ) : (
             <div className="empty-shop">
               <p className="status">
-                {offersReady ? 'No items found' : 'Checking listings…'}
+                {offersReady ? 'No items found' : '\u00a0'}
               </p>
               {offersReady ? (
                 <div className="actions">
