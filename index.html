@@ -12,10 +12,11 @@
   <meta name="theme-color" content="#000000">
   <link rel="canonical" href="https://pokoin.com/">
   <link rel="sitemap" type="application/xml" href="/sitemap.xml">
-  <link rel="icon" href="https://pokoin.com/favicon.ico" sizes="any">
-  <link rel="icon" type="image/png" sizes="32x32" href="https://pokoin.com/favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="192x192" href="https://pokoin.com/pokoin-192.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="https://pokoin.com/apple-touch-icon.png">
+  <link rel="icon" href="/favicon.ico?v=20260831-tab" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=20260831-tab">
+  <link rel="icon" type="image/png" sizes="192x192" href="/pokoin-192.png?v=20260831-tab">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260831-tab">
+  <link rel="shortcut icon" href="/favicon.ico?v=20260831-tab">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Pokoin">
   <meta property="og:locale" content="en_US">
@@ -35,7 +36,7 @@
   <link rel="preload" href="home/satoshi.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="home/logo.png" as="image">
   <script>document.documentElement.classList.add("js");</script>
-  <link rel="stylesheet" href="home/landing.css?v=20260831-iphone16">
+  <link rel="stylesheet" href="home/landing.css?v=20260901-react">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -98,10 +99,10 @@
       </a>
       <nav class="nav-links" aria-label="Primary">
         <a href="/marketplace">marketplace</a>
-        <a href="https://app.pokoin.com/wallet">wallet</a>
-        <a href="https://app.pokoin.com/scan">scan</a>
-        <a href="https://app.pokoin.com/docs">host node</a>
-        <a href="https://app.pokoin.com/forum">forum</a>
+        <a href="/wallet">wallet</a>
+        <a href="/scan">scan</a>
+        <a href="/docs">host node</a>
+        <a href="/forum">forum</a>
       </nav>
       <div class="nav-end">
         <button class="nav-toggle" type="button" aria-label="Menu" aria-expanded="false">
@@ -123,7 +124,7 @@
               <a class="store-btn btn-white reveal" href="/marketplace" data-delay="300">
                 <span class="label">Explore<strong>cards</strong></span>
               </a>
-              <a class="store-btn btn-yellow reveal" href="https://app.pokoin.com/inventory" data-delay="450">
+              <a class="store-btn btn-yellow reveal" href="/inventory" data-delay="450">
                 <span class="label">Start<strong>selling</strong></span>
               </a>
             </div>
@@ -144,21 +145,21 @@
           <div class="features-grid">
             <a class="feature reveal" href="/marketplace">
               <div class="feature-icon" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M7 4h10l1 4H6zm-1 6h12l-1 10H7z"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><rect x="8" y="3.5" width="11.5" height="15.5" rx="2"/><rect x="4.5" y="5.5" width="11.5" height="15.5" rx="2"/></svg>
               </div>
               <h3>Card Reserve</h3>
               <p>Live Pokémon listings. Seller offers. Signal.</p>
             </a>
-            <a class="feature reveal" href="https://app.pokoin.com/wallet">
+            <a class="feature reveal" href="/wallet">
               <div class="feature-icon" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M21 7H3a1 1 0 0 0-1 1v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a1 1 0 0 0-1-1zm-3.5 7.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM3 5h18v1H3z"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M5.5 6.25h13A1.75 1.75 0 0 1 20.25 8v10.5A1.75 1.75 0 0 1 18.5 20.25h-13A1.75 1.75 0 0 1 3.75 18.5V8A1.75 1.75 0 0 1 5.5 6.25zm11.25 7.5a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2z"/><rect x="4" y="4" width="16" height="1.75" rx="0.6"/></svg>
               </div>
               <h3>PKN wallet</h3>
               <p>Native PKN on PokoinPoS. Chain ID 26062026.</p>
             </a>
-            <a class="feature reveal" href="https://app.pokoin.com/scan">
+            <a class="feature reveal" href="/scan">
               <div class="feature-icon" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M4 14.5A1.5 1.5 0 0 1 5.5 16v2.5H9a1.5 1.5 0 0 1 0 3H5A2.5 2.5 0 0 1 2.5 19v-3A1.5 1.5 0 0 1 4 14.5Zm16 0a1.5 1.5 0 0 1 1.5 1.5v3a2.5 2.5 0 0 1-2.5 2.5h-4a1.5 1.5 0 0 1 0-3h3.5V16a1.5 1.5 0 0 1 1.5-1.5Z"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H6a2 2 0 0 0-2 2v2M16 4h2a2 2 0 0 1 2 2v2M4 16v2a2 2 0 0 0 2 2h2M20 16v2a2 2 0 0 1-2 2h-2"/></svg>
               </div>
               <h3>Scan</h3>
               <p>Explorer, health, and card camera.</p>
@@ -251,7 +252,7 @@
             Live status: <a href="https://rpc.pokoin.com/network/peer-status.json">rpc.pokoin.com/network/peer-status.json</a>
             · <a href="https://rpc.pokoin.com/rpc">RPC</a>
             · <a href="https://explorer.pokoin.com">explorer.pokoin.com</a>
-            · <a href="https://app.pokoin.com/health">/health</a>
+            · <a href="/health">/health</a>
           </p>
         </div>
       </div>
@@ -303,9 +304,9 @@
               <p class="reveal reveal-fade">Cards, wallet, and chain in the browser. No App Store or Play listing yet.</p>
               <div class="cta-row">
                 <a class="btn-dark reveal" href="/marketplace">Marketplace</a>
-                <a class="btn-dark reveal" href="https://app.pokoin.com/marketplace/signal">Signal</a>
-                <a class="btn-dark reveal" href="https://app.pokoin.com/forum">Forum</a>
-                <a class="btn-dark reveal" href="https://app.pokoin.com/cardscan">Card scan</a>
+                <a class="btn-dark reveal" href="/marketplace/signal">Signal</a>
+                <a class="btn-dark reveal" href="/forum">Forum</a>
+                <a class="btn-dark reveal" href="/scan">Card scan</a>
               </div>
               <div class="downloads">
                 <span class="store-btn btn-white is-soon reveal" aria-disabled="true">
@@ -339,31 +340,31 @@
           <div class="reveal">
             <h3>Use</h3>
             <a href="/marketplace">Marketplace</a>
-            <a href="https://app.pokoin.com/wallet">Wallet</a>
-            <a href="https://app.pokoin.com/scan">PokoinScan</a>
-            <a href="https://app.pokoin.com/cardscan">Card scan</a>
-            <a href="https://app.pokoin.com/forum">Forum</a>
-            <a href="https://app.pokoin.com/buy">Buy PKN</a>
+            <a href="/wallet">Wallet</a>
+            <a href="/scan">PokoinScan</a>
+            <a href="/scan">Card scan</a>
+            <a href="/forum">Forum</a>
+            <a href="/buy">Buy PKN</a>
           </div>
           <div class="reveal">
             <h3>Network</h3>
-            <a href="https://app.pokoin.com/health">Health</a>
-            <a href="https://app.pokoin.com/docs">Host a node</a>
+            <a href="/health">Health</a>
+            <a href="/docs">Host a node</a>
             <a href="https://rpc.pokoin.com/rpc">RPC</a>
             <a href="https://explorer.pokoin.com/wpkn-reserve.json">Reserve proof</a>
             <a href="https://coinmarketcap.com/dexscan/bsc/0x86294c008542c2707b9f67e3e4ba2d03b7bf7451/">DexScan pair</a>
           </div>
           <div class="reveal">
             <h3>Account</h3>
-            <a href="https://app.pokoin.com/profile">My account</a>
-            <a href="https://app.pokoin.com/earn">Earn PKN</a>
-            <a href="https://app.pokoin.com/about">About</a>
-            <a href="https://app.pokoin.com/contact">Contact</a>
-            <a href="https://app.pokoin.com/privacy">Privacy</a>
+            <a href="/profile">My account</a>
+            <a href="/earn">Earn PKN</a>
+            <a href="/about">About</a>
+            <a href="/contact">Contact</a>
+            <a href="/privacy">Privacy</a>
           </div>
           <div class="reveal">
             <h3>Docs</h3>
-            <a href="https://app.pokoin.com/whitepaper">Whitepaper</a>
+            <a href="/whitepaper">Whitepaper</a>
             <a href="/audit/PokoinPOS_Official_Security_Audit_2026-05-28.pdf">Security PDF</a>
             <a href="https://coinmarketcap.com/">CoinMarketCap</a>
             <a href="mailto:contact@pokoin.com">contact@pokoin.com</a>

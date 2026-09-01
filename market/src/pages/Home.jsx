@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchExpansion, fetchHome, readRecentCardIds, setSlug } from '../api.js';
-import { FLUTTER } from '../punchouts.js';
+import { fetchHome, readRecentCardIds, setSlug } from '../api.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
 import Carousel, { SkeletonTile } from '../components/Carousel.jsx';
+import PromoCarousel from '../components/PromoCarousel.jsx';
 
 function cardsForIds(cards, ids) {
   const byId = new Map(cards.map((card) => [String(card.id), card]));
@@ -17,7 +17,6 @@ export default function Home() {
 
   useEffect(() => {
     document.title = 'Pokoin marketplace';
-    fetchExpansion({ slug: 'mega-evolution', limit: 48 }).catch(() => {});
     let cancelled = false;
     fetchHome(readRecentCardIds())
       .then((data) => {
@@ -41,6 +40,7 @@ export default function Home() {
       newCards: [],
       bestSellers: [],
       featured: [],
+      topSold: [],
       spotlight: [],
     };
     if (!payload) {
@@ -53,6 +53,7 @@ export default function Home() {
       newCards: cardsForIds(cards, ids.newArrivalIds),
       bestSellers: cardsForIds(cards, ids.bestSellerIds),
       featured: cardsForIds(cards, ids.featuredIds),
+      topSold: cardsForIds(cards, ids.topSoldIds),
       spotlight: cardsForIds(cards, ids.spotlightIds).length
         ? cardsForIds(cards, ids.spotlightIds)
         : cards,
@@ -66,23 +67,7 @@ export default function Home() {
   return (
     <div className="page" aria-busy={loading ? 'true' : undefined}>
       {error ? <p className="status error">{error}</p> : null}
-      <section className="promo" aria-label="Featured">
-        <div>
-          <p className="eyebrow">Pokémon TCG</p>
-          <h1>Shop the Mega Era</h1>
-          <p className="muted">Singles from Mega Evolution, priced in PKN. Identity is set + number + public card id.</p>
-          <Link
-            className="btn"
-            to="/marketplace/sets/mega-evolution"
-            onPointerEnter={() => {
-              fetchExpansion({ slug: 'mega-evolution', limit: 48 }).catch(() => {});
-            }}
-            onClick={() => track(Action.clickBanner, mega || { id: '703382', name: 'Mega Evolution' })}
-          >
-            Browse Mega Evolution
-          </Link>
-        </div>
-      </section>
+      <PromoCarousel />
 
       <Carousel title="Recently seen" cards={sections.recentlySeen} placeholders={loading ? 8 : 0} />
       <Carousel
@@ -93,11 +78,12 @@ export default function Home() {
       />
       <Carousel title="Best sellers" cards={sections.bestSellers} placeholders={loading ? 8 : 0} />
       <Carousel title="Featured" cards={sections.featured} placeholders={loading ? 8 : 0} />
+      <Carousel title="Popular" cards={sections.topSold} placeholders={loading ? 8 : 0} />
 
-      <a className="callout" href={FLUTTER.inventory} onClick={() => track(Action.sell, mega || { id: '703382', name: 'sell' })}>
+      <Link className="callout" to="/inventory" onClick={() => track(Action.sell, mega || { id: '703382', name: 'sell' })}>
         Sell your cards for PKN
         <span>Get started →</span>
-      </a>
+      </Link>
 
       <section>
         <div className="carousel-head">

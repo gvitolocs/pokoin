@@ -4,9 +4,11 @@ Hypemeter (Next.js) is the Pokoin News app. Target live host:
 `https://news.pokoin.com`, on Oracle behind a Cloudflare named tunnel.
 
 **Today:** DNS for `news.pokoin.com` is still Vercel Hobby (`hypemeter` /
-`monmeter.vercel.app`). Always Free Ampere `pokoin-a1` is not RUNNING yet
-(Frankfurt capacity). Leave Vercel up until cutover is verified. Do not
-delete that project until you say so.
+`monmeter.vercel.app`). Frankfurt Ampere `pokoin-a1` is not RUNNING and that
+hunt is stopped. Marketplace Ampere is **Madrid 3**
+([MADRID_MARKETPLACE.md](MADRID_MARKETPLACE.md)) — do not put Hypemeter on
+that box until Postgres + Meili + refresh have spare RAM. Leave Vercel up
+until a news cutover is verified. Do not delete that project until you say so.
 
 ## Pipeline
 

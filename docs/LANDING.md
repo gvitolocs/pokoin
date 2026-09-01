@@ -1,11 +1,11 @@
 # Pokoin.com root landing — pipeline and files
 
 Static get.rarecandy-style page. Source of truth: this repo (`gvitolocs/pokoin`).
-This repo is the public web. CardVault is the Flutter app. Production host:
-Vercel project `web` (`prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`). Live URL:
-`https://pokoin.com/`.
+This repo is the public web. Production host: Vercel project `web`
+(`prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`). Live URL: `https://pokoin.com/`.
+Android/iOS CardVault is a separate app: [APP.md](APP.md).
 
-Action map canvas (clicks, not files): [landing-action-map.canvas.tsx](/home/nez/.cursor/projects/home-nez-Projects-pokoin-web/canvases/landing-action-map.canvas.tsx).
+Action map canvas (clicks, not files): [pokoin-react-action-map.canvas.tsx](/home/nez/.cursor/projects/home-nez-Projects-pokoin-web/canvases/pokoin-react-action-map.canvas.tsx). Landing-only hops: [landing-action-map.canvas.tsx](/home/nez/.cursor/projects/home-nez-Projects-pokoin-web/canvases/landing-action-map.canvas.tsx).
 
 ---
 
@@ -20,9 +20,10 @@ vercel.json                 GET /              = landing
                             /api/*              = api.pokoin.com
 ```
 
-Wallet, auth, cart, forum, signal, and the rest of Flutter live on
-`https://app.pokoin.com` (Vercel `pokoin-flutter`). Links are in
-[CHROME.md](CHROME.md). Do not deploy `cardvault/.../build/web` as pokoin.com.
+Wallet, auth, cart, checkout, forum, signal, scan, inventory, and docs are
+React on this host. Android/iOS stays on `https://app.pokoin.com`. Links:
+[CHROME.md](CHROME.md). App leftovers: [APP.md](APP.md). Do not deploy
+`cardvault/.../build/web` as pokoin.com.
 
 ### Step 1 — Edit here
 
@@ -48,7 +49,8 @@ Cursor’s browser on the Mac cannot use `127.0.0.1` on this host. Use Tailscale
 
 ### Step 2 — Build and deploy this repo
 
-Do **not** sync into CardVault. Do **not** run `deploy-pokoin-web.sh`.
+Do **not** copy into CardVault for production. Do **not** run
+`deploy-pokoin-web.sh`. See [APP.md](APP.md).
 
 ```bash
 cd /home/nez/Projects/pokoin-web
@@ -77,7 +79,7 @@ Filesystem `index.html` is evaluated **before** rewrites.
 | `GET /home/landing.css` | `home/landing.css` | Static |
 | `GET /marketplace` (and search / sets / cards, **with or without trailing `/`**) | `/market/index.html` | React SPA |
 | `GET /api/*` | Oracle proxy | `api.pokoin.com` |
-| `GET /wallet`, `/auth`, `/cart`, `/forum`, … | not this host | Punch-out to `https://app.pokoin.com/…` |
+| `GET /wallet`, `/auth`, `/cart`, `/forum`, `/scan`, `/docs`, … | `/market/index.html` | React SPA |
 | `https://explorer.pokoin.com/` | not this project | Caddy |
 
 `www.pokoin.com/` 301s to `https://pokoin.com/`.
@@ -99,7 +101,7 @@ After a landing-only deploy, bump `?v=` on `landing.css` / `landing.js` if a bro
 
 ## Runtime (browser, after paint)
 
-No Flutter wasm. Deferred `home/landing.js`:
+No wasm on `/`. Deferred `home/landing.js`:
 
 - Mobile nav toggle (hamburger `400ms` inOutQuint; overlay slides from the right).
 - Navbar tint: transparent → `rgba(0,0,0,0.4)` after a few pixels of scroll.
@@ -119,24 +121,26 @@ A tiny inline script in `<head>` sets `document.documentElement.classList.add("j
 | Path | Role |
 | --- | --- |
 | `index.html` | Source HTML for `pokoin.com/`. Relative `home/` URLs for local preview. |
-| `home/landing.css` | Satoshi, Pokoin gold `#FFD33D` (Flutter landing), layout, `.reveal`, marquee, CTA glow, store icons, coming-soon cards. |
+| `home/landing.css` | Satoshi, Pokoin gold `#FFD33D`, layout, `.reveal`, marquee, CTA glow, store icons, coming-soon cards. |
 | `home/landing.js` | Nav, reveals, counters, idle RPC, SW unregister. |
 | `home/logo.png` | Nav + hero mark (7339 bytes). |
 | `home/satoshi.woff2` | Self-hosted Satoshi variable font. |
 | `scripts/build-web.sh` | Production build: landing + `market/` into `dist-web/`. |
-| `vercel.json` | Headers, www redirect, `/marketplace*` (slash and no-slash) → `/market/index.html`, card shortlinks → Oracle 302, `/api/*` → `api.pokoin.com`. |
+| `vercel.json` | Headers, www redirect, `/marketplace*` (slash and no-slash) → `/market/index.html`, card shortlinks → Oracle 302 (fallback; live hop is Cloudflare Worker `pokoin-shortlink`), `/api/*` → `api.pokoin.com`. |
 | `scripts/sync-landing.sh` | Leftover CardVault copy. Not production. |
 | `docs/LANDING.md` | This file: pipeline, inventory, copy rules, proof. |
-| `docs/CHROME.md` | Icon / punch-out map. `pokoin.com` vs `app.pokoin.com`. |
+| `docs/CHROME.md` | Icon / route map. `pokoin.com` vs `app.pokoin.com`. |
+| `docs/APP.md` | Android/iOS CardVault only. Flutter-web leftovers. |
 | `docs/NEWS.md` | `news.pokoin.com` on `pokoin-a1` behind Cloudflare Tunnel. |
 | `docs/BOOTSTRAP_PEERS.md` | Public vs operator peer JSON (OWASP API3). |
 | `docs/ANIMATIONS.md` | get.rarecandy.com IX2 inventory and Pokoin mapping. |
 | `README.md` | Ecosystem README. Points here for the landing. |
 | `.gitignore` | Ignores `dist-web/`, `.vercel/`, `market/node_modules/`, `.cursor/`. |
 
-OG banner, favicon, and the security PDF still live on the old CardVault static files. Those URLs 404 unless they are added to this repo.
+OG banner, favicon, and the security PDF still 404 unless copied into this
+repo. Historical CardVault `web/` paths: [APP.md](APP.md).
 
-Visual reference only (not deployed): `/home/nez/Projects/candyext` (get.rarecandy clone). Lime `#cbf062` there. This page uses Flutter Pokoin gold `#FFD33D`, not Tailwind `#facc15` (that still reads as lime on a black page).
+Visual reference only (not deployed): `/home/nez/Projects/candyext` (get.rarecandy clone). Lime `#cbf062` there. This page uses Pokoin gold `#FFD33D`, not Tailwind `#facc15` (that still reads as lime on a black page).
 
 ### `index.html` — document map
 
@@ -152,7 +156,7 @@ Visual reference only (not deployed): `/home/nez/Projects/candyext` (get.rarecan
 | Peers | `[data-peer-list]` | Snapshot then idle refresh. |
 | Coming next | three `.soon-card` | iOS/Android: not in stores (web is live). More peers: permissioned, no open intake. |
 | CTA | yellow `.cta-box` | Live: marketplace, signal, forum, cardscan. Placeholders: App Store / Play (`aria-disabled`). |
-| Footer | four columns | Same destinations as old Flutter `SiteFooter`. |
+| Footer | four columns | Marketplace, account, network, legal. |
 | Script | `home/landing.js` `defer` | Last. |
 
 Hero copy (locked):
@@ -168,7 +172,7 @@ Do not put “wrapped liquidity” or “Live peers — not testimonials” on t
 
 Peer rows show city, country, and flag only — not hostnames and not host:port. Idle refresh: `https://rpc.pokoin.com/network/peer-status.json`. Do not fetch or link `bootstrap-peers.json` from this page (join list, IPs). Split and rationale: `docs/BOOTSTRAP_PEERS.md`.
 
-Accent: `--yellow: #FFD33D` (Flutter `Color(0xFFFFD33D)`). Not Rare Candy lime `#cbf062`. Not Tailwind `#facc15`.
+Accent: `--yellow: #FFD33D`. Not Rare Candy lime `#cbf062`. Not Tailwind `#facc15`.
 
 `/home/*` Cache-Control is `max-age=0, must-revalidate`. HTML also cache-busts `landing.css?v=…` so a stale hour-long sheet cannot keep the old lime.
 
@@ -176,7 +180,7 @@ Phone (iPhone 16 393×852 CSS px): `viewport-fit=cover` and `≤480px` safe-area
 padding on the fixed nav, hero, and yellow CTA. Do not change desktop landing
 rules for this. [MOBILE.md](MOBILE.md).
 
-Crawlers get this HTML at `GET /`. `/marketplace` is the React market, not Flutter.
+Crawlers get this HTML at `GET /`. `/marketplace` is the React market.
 
 ### `home/landing.css` — classes that matter
 
@@ -188,72 +192,11 @@ Nav toggle + scroll tint; SW unregister; reveal observer (150ms sibling stagger,
 
 ---
 
-## CardVault (the app) — not pokoin.com
+## App vs this landing
 
-CardVault is Flutter Android/iOS. The tables below are leftover from when
-pokoin.com was a Flutter web bundle. Do not deploy `build/web` as production.
-
-### Generated / copied (do not hand-edit; re-run sync)
-
-| Path | Role |
-| --- | --- |
-| `web/home.html` | Production landing HTML with `/home/` asset URLs. |
-| `web/home/landing.css` | Copy of pokoin-web CSS. |
-| `web/home/landing.js` | Copy of pokoin-web JS. |
-| `web/home/logo.png` | Copy. |
-| `web/home/satoshi.woff2` | Copy. |
-| `build/web/home.html` | Flutter-copied `web/home.html`. |
-| `build/web/home/*` | Same assets in the deploy folder. |
-| `build/web/index.html` | **After deploy swap:** landing. **After flutter build, before swap:** Flutter shell. |
-| `build/web/app.html` | Flutter shell, created by the deploy script. |
-
-### Routing and deploy (edit in CardVault)
-
-| Path | Role |
-| --- | --- |
-| `web/index.html` | Flutter web shell. **Never overwrite with the landing.** |
-| `vercel.json` | Headers, host redirects, `/` → `/home.html`, catchall `/(.*)` → `/app.html`. |
-| `deploy-pokoin-web.sh` | Flutter build, index/app swap, Oracle API strip, Vercel deploy, verifier. Project id `prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`, org `team_WIppHrH49qzR3JDOj6AynDiC`. |
-| `scripts/landing-root.test.js` | Rewrite order + landing copy assertions. |
-| `scripts/verify-production-aliases.js` | Health checks. Full route set only on `pokoin.com` and `www.pokoin.com`. Explorer is HTTP 200 on `/` only (Caddy). |
-| `docs/landing-root.md` | Short pointer back to this spec. |
-
-`vercel.json` landing-related entries:
-
-- Headers: `/`, `/index.html`, `/home.html`, `/app.html` (no-store-ish), `/home/:path*` (1h cache).
-- Redirect: `www.pokoin.com` → `pokoin.com`. `explorer.pokoin.com` `/` → `/scan` **if** that host were on this project (it is not).
-- Rewrites: `/` → `/home.html` then later `/(.*)` → `/app.html`.
-
-### Flutter punch-out (in-app “Home” must leave the SPA)
-
-Production `/` is static. In-app Home does a **full navigation** to `/`, except explorer/forum hosts.
-
-| Path | Role |
-| --- | --- |
-| `lib/utils/public_home.dart` | `goPublicHome()`: explorer/forum → `context.go('/')`; else `assignPublicHome()`. |
-| `lib/utils/browser_location.dart` | Conditional export. |
-| `lib/utils/browser_location_web.dart` | `window.location.assign('/')`. |
-| `lib/utils/browser_location_stub.dart` | No-op for VM/tests. |
-
-Callers of `goPublicHome`:
-
-`lib/widgets/site_footer.dart`, `lib/screens/home_screen.dart`, `home_screen` (marketplace Home), `scan_screen.dart`, `card_scan_screen.dart`, `buy_pkn_screen.dart`, `contact_screen.dart`, `whitepaper_screen.dart`, `privacy_screen.dart`, `about_screen.dart`, `not_found_screen.dart`, `profile_screen.dart`, `docs_screen.dart`, `forum_screen.dart`, `health_screen.dart`.
-
-### Flutter still compiled, not production `/`
-
-| Path | Role |
-| --- | --- |
-| `lib/screens/landing_screen.dart` | Old marketing UI. Still the GoRoute for `/` **inside** the SPA (`lib/main.dart`). Used by `flutter run`, `explorer`/`forum` host exceptions do not use it. Production Vercel `/` never loads this file. |
-| `lib/main.dart` | `GoRoute path: '/'` → `LandingScreen` (or Scan/Forum by host). |
-
-### Static files the landing **links to** (CardVault `web/`, not this repo)
-
-| URL | File / origin |
-| --- | --- |
-| `/audit/PokoinPOS_Official_Security_Audit_2026-05-28.pdf` | `web/audit/…` |
-| `/favicon.ico`, `/pokoin-512.png` | `web/` |
-| OG image `/pokoin-project-banner-1360x430.png` | `web/` |
-| `/bootstrap-peers.json` | Join-only host:port for nodes. Not linked from the landing. |
+Android/iOS CardVault, leftover Flutter-web `web/home.html` / `app.html` /
+`deploy-pokoin-web.sh`, and files that still 404 (`/audit/…`, OG banner):
+**[APP.md](APP.md)**. Do not put those pipelines in this file.
 
 ---
 
@@ -263,8 +206,8 @@ Callers of `goPublicHome`:
 | --- | --- |
 | `pokoin.com` | This landing |
 | `www.pokoin.com` | 301 → `pokoin.com` |
-| `app.pokoin.com` | Flutter app (Vercel `pokoin-flutter`). Wallet, forum, signal, cart, auth. |
-| `forum.pokoin.com` | Legacy alias on project `web`. Use `app.pokoin.com/forum`. |
+| `app.pokoin.com` | Flutter CardVault (Android/iOS). Public chrome is `pokoin.com`. [APP.md](APP.md). |
+| `forum.pokoin.com` | Legacy alias. Use `https://pokoin.com/forum`. |
 | `explorer.pokoin.com` | **Caddy**, not Vercel. Do not `vercel alias` this name. |
 | `rpc.pokoin.com` | PokoinPoS RPC (health, bootstrap peers, `eth_chainId`) |
 | `api.pokoin.com` | Oracle marketplace API |
@@ -305,48 +248,20 @@ Vercel project name: `web`. Inspect example: `https://vercel.com/giuseppevitolo1
 
 ## Why this stack
 
-Marketing `/` must be fast. Flutter web is the rest of the product and is too heavy for a first paint.
+Marketing `/` must be fast.
 
 - **Static HTML + CSS** is the performance ceiling for a one-pager.
 - **Astro** if the marketing site grows. A single file does not need it.
-- Do **not** put Next.js/React or Flutter wasm on `/`.
+- Do **not** put Next.js/React on `/`. The market SPA starts at `/marketplace`.
 - Self-host Satoshi, preload font + logo, defer a tiny script, LCP is H1 + logo (visible without JS).
 
 ---
 
-## Previous `/` (Flutter `LandingScreen`)
+## Previous `/`
 
-What visitors could do **before** this replacement. Viewport gap: under 820px the header hid Wallet / Host node / Forum.
-
-### Header
-
-| Control | Viewport | Destination |
-| --- | --- | --- |
-| Logo | All | `/` (no-op) |
-| Wallet | ≥820px | `/wallet` |
-| Host node | ≥820px | `/docs` |
-| Forum | ≥820px | `/forum` |
-| Marketplace | All | `/marketplace` |
-
-### Hero and cards
-
-Marketplace, Join the network `/docs`, Wallet roles `/wallet`, Open forum `/forum`, token card Open marketplace, Enter market / Use wallet / Host node / Discuss.
-
-### Marketplace stack
-
-Open marketplace, `/marketplace/signal`, Wallet, `/scan`, yellow Open marketplace.
-
-### Footer Explore
-
-`/` `/about` `/earn` `/whitepaper` `/docs` `/contact` `/privacy` `/scan` `/cardscan` `/health`
-
-### Footer Account and network
-
-`/profile` `/buy` RPC, reserve JSON, wPKN BscScan, PancakeSwap, generic CMC, `mailto:contact@pokoin.com`
-
-### Not actions
-
-700ms offscreen `HomeScreen` warmup. Feature/roadmap cards were text-only.
+Before this static landing, `/` was a Flutter `LandingScreen` (under 820px the
+header hid Wallet / Host node / Forum). That UI is app history:
+[APP.md](APP.md). Current header/hero/footer actions are in the tables above.
 
 ---
 

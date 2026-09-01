@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloudflare Tunnel for news.pokoin.com
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/pokoin-news.token
+
+[Install]
+WantedBy=multi-user.target

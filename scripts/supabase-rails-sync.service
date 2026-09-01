@@ -1,0 +1,12 @@
+[Unit]
+Description=Publish Pokoin marketplace browse rails to Supabase
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/home/ubuntu/pokoin-oracle-api.docker.env
+Environment=API_ORIGIN=http://127.0.0.1:18080
+ExecStart=/usr/bin/python3 /home/ubuntu/bin/sync-supabase-rails.py
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

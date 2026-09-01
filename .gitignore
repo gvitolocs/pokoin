@@ -1,7 +1,11 @@
 market/node_modules/
 market/dist/
+market/.env
+market/.env.local
+market/.env.*.local
 dist-web/
 .vercel/
+.wrangler/
 .playwright-cli/
 _unsloth_temporary_saved_buffers/
 unsloth_compiled_cache/

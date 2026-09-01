@@ -1,31 +1,37 @@
-export const APP_ORIGIN = 'https://app.pokoin.com';
+/** Same-origin routes on pokoin.com. Never prefix https://app.pokoin.com. */
 
-export function appHref(path = '/') {
-  const next = path.startsWith('/') ? path : `/${path}`;
-  return `${APP_ORIGIN}${next}`;
+function route(path) {
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || path.includes('://')) {
+    throw new Error(`pokoin.com route must be a relative path, got ${JSON.stringify(path)}`);
+  }
+  return path;
 }
 
 export function authFrom(path) {
-  return appHref(`/auth?from=${encodeURIComponent(path || '/marketplace')}`);
+  return route(`/auth?from=${encodeURIComponent(path || '/marketplace')}`);
 }
 
-export const FLUTTER = {
-  home: appHref('/'),
-  forum: appHref('/forum'),
-  signal: appHref('/marketplace/signal'),
-  competitive: appHref('/marketplace/competitive'),
-  wallet: appHref('/wallet'),
-  cart: appHref('/cart'),
-  profile: appHref('/profile'),
-  inventory: appHref('/inventory'),
-  scan: appHref('/scan'),
-  docs: appHref('/docs'),
-  cardscan: appHref('/cardscan'),
-  health: appHref('/health'),
-  buy: appHref('/buy'),
-  earn: appHref('/earn'),
-  about: appHref('/about'),
-  contact: appHref('/contact'),
-  privacy: appHref('/privacy'),
-  whitepaper: appHref('/whitepaper'),
+export const APP = {
+  home: route('/'),
+  forum: route('/forum'),
+  signal: route('/marketplace/signal'),
+  competitive: route('/marketplace/competitive'),
+  wallet: route('/wallet'),
+  cart: route('/cart'),
+  profile: route('/profile'),
+  inventory: route('/inventory'),
+  scan: route('/scan'),
+  docs: route('/docs'),
+  cardscan: route('/scan'),
+  health: route('/health'),
+  buy: route('/buy'),
+  admin: route('/admin'),
+  earn: route('/earn'),
+  about: route('/about'),
+  contact: route('/contact'),
+  privacy: route('/privacy'),
+  whitepaper: route('/whitepaper'),
+  nft: route('/nft'),
+  checkout: route('/checkout'),
+  orders: route('/orders'),
 };

@@ -1,0 +1,21 @@
+{
+  "name": "pokoin-shortlink",
+  "main": "workers/pokoin-shortlink.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "cache": { "enabled": true },
+  "rules": [
+    { "type": "Data", "globs": ["**/*.gz"], "fallthrough": true }
+  ],
+  "routes": [
+    {
+      "pattern": "pokoin.com/*",
+      "zone_name": "pokoin.com"
+    },
+    {
+      "pattern": "www.pokoin.com/*",
+      "zone_name": "pokoin.com"
+    }
+  ]
+}

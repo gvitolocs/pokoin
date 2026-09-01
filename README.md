@@ -5,8 +5,8 @@ the Pokoin Wallet, the PokoinPoS chain, marketplace tooling, and market-signal
 apps.
 
 This repository is the **public web**: landing (`index.html`, `home/`) and the
-React market (`market/`). CardVault is the Flutter app. Product APIs stay on
-`api.pokoin.com`.
+React market (`market/`). Android/iOS CardVault is a separate app
+([docs/APP.md](docs/APP.md)). Product APIs stay on `api.pokoin.com`.
 
 See [docs/LANDING.md](docs/LANDING.md) for the landing pipeline, copy, and
 deploy. React market: [docs/MARKET.md](docs/MARKET.md). Pokoin News
@@ -14,8 +14,9 @@ deploy. React market: [docs/MARKET.md](docs/MARKET.md). Pokoin News
 [docs/NEWS.md](docs/NEWS.md).
 Motion vs [get.rarecandy.com](https://get.rarecandy.com/)
 is in [docs/ANIMATIONS.md](docs/ANIMATIONS.md). Public vs operator peer JSON:
-[docs/BOOTSTRAP_PEERS.md](docs/BOOTSTRAP_PEERS.md). Chrome icons punch out to
-the Flutter app on [app.pokoin.com](https://app.pokoin.com): [docs/CHROME.md](docs/CHROME.md).
+[docs/BOOTSTRAP_PEERS.md](docs/BOOTSTRAP_PEERS.md). Chrome routes:
+[docs/CHROME.md](docs/CHROME.md). Android/iOS:
+[docs/APP.md](docs/APP.md) (`https://app.pokoin.com`).
 Phone (iPhone 16 393×852): [docs/MOBILE.md](docs/MOBILE.md).
 
 ## Ecosystem And Modules
@@ -23,8 +24,8 @@ Phone (iPhone 16 393×852): [docs/MOBILE.md](docs/MOBILE.md).
 | Module | Repository | Verified status |
 | --- | --- | --- |
 | Pokoin | [`gvitolocs/pokoin`](https://github.com/gvitolocs/pokoin) | Public web: landing (`index.html`, `home/`) and React market (`market/`) on `https://pokoin.com`. |
-| CardVault | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) | Flutter app (Android/iOS). Not the pokoin.com web host. Wallet, auth, cart, forum stay here until those routes exist on the web. |
-| Wallet | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) and [`gvitolocs/pokoinwallet`](https://github.com/gvitolocs/pokoinwallet) | The current wallet is documented as integrated into CardVault at `https://pokoin.com/wallet`. The separate `pokoinwallet` repository contains an older Flutter/Firebase Functions prototype. |
+| CardVault | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) | Flutter Android/iOS on `https://app.pokoin.com`. Not the pokoin.com web host. [docs/APP.md](docs/APP.md). |
+| Wallet | This repo (`/wallet`) and [`gvitolocs/pokoinpos`](https://github.com/gvitolocs/pokoinpos) | MetaMask + PokoinPoS on the React SPA. The `pokoinwallet` repository is an older Flutter/Firebase Functions prototype. |
 | Hypemeter | [`gvitolocs/hypemeter`](https://github.com/gvitolocs/hypemeter) | Next.js Pokoin News at `https://news.pokoin.com`, hosted on Always Free Ampere A1 behind a Cloudflare named tunnel. Pipeline: [docs/NEWS.md](docs/NEWS.md). |
 | Card Extension | [`gvitolocs/pokemon-card-extension`](https://github.com/gvitolocs/pokemon-card-extension) | Chrome Manifest V3 extension that adds Pokoin card links to supported Pokemon marketplace listings. |
 | PokoinPoS | [`gvitolocs/pokoinpos`](https://github.com/gvitolocs/pokoinpos) | Native Proof-of-Stake chain and node runtime for the Pokoin/CardVault ecosystem. Public network values are documented in the repository. |
@@ -39,26 +40,16 @@ Phone (iPhone 16 393×852): [docs/MOBILE.md](docs/MOBILE.md).
 
 ### CardVault
 
-Flutter app (Android/iOS). Not the pokoin.com web host. The notes below
-describe the app repo; they are not a claim that Flutter still serves
-`https://pokoin.com/marketplace`.
+Flutter Android/iOS. Not the pokoin.com web host. Details: [docs/APP.md](docs/APP.md).
 
-- Flutter web app named `pokoin` with description
-  `Pokoin marketplace, wallet, and card reserve app`.
-- Marketplace routes and app pages are served from a single Flutter web bundle.
-- Vercel rewrites app routes such as `/marketplace`, `/wallet`, `/scan`,
-  `/health`, and `/docs` back into the SPA.
-- Firebase Auth and Firestore are documented for accounts, profiles, balances,
-  orders, wallet addresses, listings, and withdraw requests.
-- Firestore rules include authenticated user ownership checks and read/write
-  boundaries for user, wallet, balance, order, and card listing documents.
-- The app documents a MetaMask/Pokoin network bridge and the integrated wallet
-  route at `https://pokoin.com/wallet`.
+- App name `pokoin`: marketplace, wallet, and card reserve on device.
+- Shares Firebase project `pokoin` with this SPA.
+- Do not deploy `cardvault/.../build/web` as `https://pokoin.com`.
 
 ### Wallet
 
-- The active wallet surface is documented as part of CardVault at `/wallet`.
-- Public PokoinPoS wallet values are documented as:
+- Public wallet UI: `https://pokoin.com/wallet` in this React SPA.
+- Public PokoinPoS values:
   - Network name: `PokoinPoS`
   - Chain ID: `26062026`
   - Network ID: `26062026`
@@ -89,9 +80,9 @@ describe the app repo; they are not a claim that Flutter still serves
 
 - Chrome Manifest V3 extension named `Pokemon Card Trader Linker`.
 - Supports eBay, Vinted, CardTrader, Cardmarket, and Pokoin host permissions.
-- Extracts card metadata from listings, matches cards through Pokoin/CardVault
-  APIs, injects Pokoin buttons, and opens matched cards in a Chrome side panel.
-- Uses `https://pokoin.com` as the Pokoin/CardVault API base URL.
+- Extracts card metadata from listings, matches cards through Pokoin APIs,
+  injects Pokoin buttons, and opens matched cards in a Chrome side panel.
+- Uses `https://pokoin.com` as the API base URL.
 - Includes Node test files for extension workflow and live CardVault API smoke
   checks.
 
@@ -114,8 +105,8 @@ describe the app repo; they are not a claim that Flutter still serves
 
 | Area | Verified stack |
 | --- | --- |
-| Public marketplace (web) | React + Vite in `market/`; humans hit `/marketplace`; bots keep SEO stubs |
-| Marketplace and integrated wallet (app) | Flutter web, Dart, Riverpod, GoRouter, Firebase Auth, Cloud Firestore, Hive/shared preferences, Vercel SPA routing |
+| Public marketplace (web) | React + Vite in `market/`; humans hit `/marketplace` |
+| Android/iOS app | Flutter, Dart, Riverpod, GoRouter, Firebase Auth, Cloud Firestore. Host `app.pokoin.com`. [docs/APP.md](docs/APP.md). |
 | Legacy wallet prototype | Flutter, Firebase Functions v2 on Node 20, Express, Firestore, `tweetnacl` signatures |
 | Market signals and news | Next.js, React, TypeScript, Tailwind CSS, Vercel, Vercel Cron, SQLite via `better-sqlite3` |
 | Browser extension | Chrome Manifest V3, JavaScript modules, side panel, content scripts, local storage |
@@ -171,15 +162,13 @@ cd pokemon-card-extension
 ## Configuration
 
 Landing has none. The React marketplace uses the public Firebase web config
-in `market/src/auth.jsx` (same project as Flutter `DefaultFirebaseOptions.web`)
-and talks to `https://api.pokoin.com`.
+in `market/src/auth.jsx` (same project as Android/iOS
+`DefaultFirebaseOptions.web`) and talks to `https://api.pokoin.com`.
 
 Known module configuration from the repositories:
 
-- CardVault uses Firebase project configuration and `firestore.rules` from
-  `cardvault/pokemon_card_vault`.
-- CardVault web routing is configured through
-  `cardvault/pokemon_card_vault/web/vercel.json`.
+- CardVault Firebase and `firestore.rules`: `cardvault/pokemon_card_vault`.
+  App routing: [docs/APP.md](docs/APP.md).
 - The card extension uses `https://pokoin.com` as its API base URL.
 - Hypemeter production is Oracle + Cloudflare Tunnel (`docs/NEWS.md`).
   A systemd timer calls `/api/cron/revalidate-home` every 15 minutes.
@@ -191,15 +180,15 @@ environment files must not be committed.
 
 ## Deployment Status
 
-This repo is the public web. CardVault is the Flutter app. Production is
-Vercel project `web` (`pokoin.com`): `vercel.json` runs `scripts/build-web.sh`,
-then `vercel --prebuilt --prod`. Details: [docs/LANDING.md](docs/LANDING.md),
-[docs/MARKET.md](docs/MARKET.md).
+This repo is the public web. Android/iOS is CardVault. Production is Vercel
+project `web` (`pokoin.com`): `vercel.json` runs `scripts/build-web.sh`, then
+`vercel --prebuilt --prod`. Details: [docs/LANDING.md](docs/LANDING.md),
+[docs/MARKET.md](docs/MARKET.md), [docs/APP.md](docs/APP.md).
 
 ## Usage
 
 - Visit `https://pokoin.com/` for the landing and `https://pokoin.com/marketplace` for the React market.
-- Wallet, auth, cart, and forum are still the Flutter app; those URLs 404 on the web until they are built here.
+- Wallet, auth, cart, checkout, forum, scan, and buy are this SPA (`/wallet`, `/auth`, `/cart`, `/checkout`, `/forum`, `/scan`, `/buy`).
 - Use `https://rpc.pokoin.com/rpc` as the documented public PokoinPoS RPC URL.
 - Use `https://explorer.pokoin.com` as the documented public explorer URL.
 - Load the Card Extension locally in Chrome to add Pokoin links on supported

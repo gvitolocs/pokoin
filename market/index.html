@@ -8,7 +8,11 @@
     <style>
       html, body, #root { margin: 0; min-height: 100%; background: #000; color: #fff; }
     </style>
-    <link rel="icon" href="https://pokoin.com/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.ico?v=20260831-tab" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=20260831-tab" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pokoin-192.png?v=20260831-tab" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260831-tab" />
+    <link rel="shortcut icon" href="/favicon.ico?v=20260831-tab" />
     <link rel="preload" href="/home/satoshi.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/home/logo.png" as="image" />
     <script>
@@ -17,6 +21,32 @@
           regs.forEach(function (r) { r.unregister(); });
         });
       }
+      (function () {
+        var path = location.pathname.replace(/\/$/, "");
+        var match = path.match(/^\/marketplace\/([a-z]{2}(?:-[a-z]{2})?)\/cards\/(\d+)$/i);
+        if (!match) {
+          return;
+        }
+        var lang = match[1].toLowerCase();
+        var id = match[2];
+        fetch("/api/marketplace-card-url?cardId=" + encodeURIComponent(id) + "&language=" + encodeURIComponent(lang), {
+          headers: { Accept: "application/json" },
+        }).then(function (res) {
+          return res.ok ? res.json() : null;
+        }).then(function (data) {
+          var next = data && (data.canonicalPath || data.canonical_path);
+          if (!next) {
+            return;
+          }
+          var clean = String(next).split(/[?#]/)[0].replace(/\/$/, "");
+          if (clean && clean !== location.pathname.replace(/\/$/, "")) {
+            history.replaceState(history.state, "", next);
+          }
+        }).catch(function () {});
+        fetch("/api/marketplace-card-page?cardId=" + encodeURIComponent(id) + "&lang=" + encodeURIComponent(lang), {
+          headers: { Accept: "application/json" },
+        }).catch(function () {});
+      })();
     </script>
   </head>
   <body>

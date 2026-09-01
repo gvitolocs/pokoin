@@ -1,0 +1,8 @@
+[Unit]
+Description=Warm Hypemeter home cache (localhost only)
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/hypemeter/cron.env
+ExecStart=/usr/bin/curl -fsS --max-time 120 -H "Authorization: Bearer ${CRON_SECRET}" http://127.0.0.1:3000/api/cron/revalidate-home

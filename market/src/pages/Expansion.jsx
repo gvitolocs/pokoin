@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { fetchExpansion, peekExpansion, prettySlug } from '../api.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
+import CardArt from '../components/CardArt.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 
 export default function Expansion() {
@@ -58,13 +59,13 @@ export default function Expansion() {
   return (
     <div className="page" aria-busy={loading ? 'true' : undefined}>
       <nav className="crumbs">
-        <Link to="/marketplace">Marketplace</Link>
+        <Link to="/marketplace/sets">Sets</Link>
         <span>/</span>
         <span>{name}</span>
       </nav>
       <div className="set-head">
         {symbol ? (
-          <img className="set-sym" src={symbol} alt="" />
+          <CardArt className="set-sym" src={symbol} alt="" fallback="hide" />
         ) : loading ? (
           <span className="set-sym skel-box" aria-hidden="true" />
         ) : null}

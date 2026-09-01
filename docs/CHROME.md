@@ -1,112 +1,78 @@
-# Chrome icons → Flutter (`app.pokoin.com`)
+# Chrome icons → React (`pokoin.com`)
 
-The React market on `pokoin.com` does not implement wallet, forum, signal,
-competitive, cart, auth, inventory, scan, or profile. Those controls are
-**full-page links** into the Flutter app.
+Public chrome is this SPA. Android/iOS CardVault is a separate app on
+`app.pokoin.com`. App-only history and Flutter-web leftovers:
+[APP.md](APP.md). Do not alias that host onto Vercel project `web`.
 
 | Host | Vercel project | What |
 | --- | --- | --- |
 | `https://pokoin.com` | `web` (`prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`) | Landing + React market |
 | `https://app.pokoin.com` | `pokoin-flutter` (`prj_nrmYJjDGMPh4fZVO7dexZ77BTPls`) | Flutter CardVault |
 
-Never alias `app.pokoin.com` onto project `web`. Never alias
-`explorer.pokoin.com` to either Vercel project.
+Never alias `explorer.pokoin.com` to either Vercel project.
 
-The EN flag is visual only (English). Language switching stays in Flutter.
+The EN flag is visual only (English).
 
 Home (house icon) stays on the web: `https://pokoin.com/`.
 
----
-
-## Why the icons looked broken
-
-They already used `<a href="/forum">` (and friends), not React Router. After
-pokoin.com stopped serving Flutter:
-
-1. Same-origin paths **404** on `pokoin.com`.
-2. `/marketplace/signal` and `/marketplace/competitive` were swallowed by the
-   Vite SPA fallback and bounced back to marketplace home.
-
-They are not supposed to become React pages yet. They leave the origin.
+Action inventory: [pokoin-react-action-map.canvas.tsx](/home/nez/.cursor/projects/home-nez-Projects-pokoin-web/canvases/pokoin-react-action-map.canvas.tsx).
 
 ---
 
 ## Icon map (market top bar)
 
-Source: `market/src/punchouts.js`. Chrome: `market/src/components/Chrome.jsx`.
+Source: `market/src/components/Chrome.jsx`. Routes: `market/src/punchouts.js`.
+Every control is a **same-origin** path on `pokoin.com`. Never
+`https://app.pokoin.com/…` for these icons.
 
-| Control | href |
+| Control | href on pokoin.com |
 | --- | --- |
-| Logo / Marketplace | `/marketplace` (React) |
-| Home | `/` (landing) |
-| Forum | `https://app.pokoin.com/forum` |
-| Signal | `https://app.pokoin.com/marketplace/signal` |
-| Competitive | `https://app.pokoin.com/marketplace/competitive` |
-| 0 PKN | `https://app.pokoin.com/wallet` |
-| Profile / Sign in | `https://app.pokoin.com/profile` or `…/auth?from=` |
-| Cart | `https://app.pokoin.com/cart` |
+| Logo / Marketplace | `/marketplace` |
+| Home | `/` (static landing, full page) |
+| Forum | `/forum` |
+| Signal | `/marketplace/signal` |
+| Competitive | `/marketplace/competitive` |
+| PKN chip | `/wallet` |
+| Profile / Sign in | `/profile` or `/auth?from=` |
+| Cart | `/cart` (`pokoin.cartItems`) |
 | EN | not a link |
 
-Same origin table for landing nav/footer (wallet, scan, forum, inventory,
-signal, cardscan, docs, health, buy, profile, earn, about, contact, privacy,
-whitepaper). Explore cards / marketplace stay on `pokoin.com`.
+Footer and burger also include Explore, Portfolio, Sets, Watchlist, Docs, Scan.
 
-On viewports `≤720px` the icon row is replaced by the burger panel (same hrefs).
-Search submit becomes an icon at `≤480px`. Phone layout: [MOBILE.md](MOBILE.md).
+On viewports `≤720px` the icon row is the burger panel. Search submit becomes
+an icon at `≤480px`. Phone layout: [MOBILE.md](MOBILE.md).
 
-Card page: Sign in, artist, View all versions, listing rows → `app.pokoin.com`.
+Card page: Sign in → `/auth`. Artist and versions stay in this SPA. Add to cart
+writes the local cart and opens `/cart`.
 
 ---
 
 ## Pipeline (edit → live)
 
 ```
-Chrome hrefs          punchouts.js APP_ORIGIN
+Chrome hrefs          punchouts.js APP
      │
      ▼
 pokoin-web  ──build-web.sh──►  dist-web/          Vercel `web`     pokoin.com
 CardVault   ──deploy-pokoin-flutter-new-project.sh──►  Vercel `pokoin-flutter`
-                                                          │
                                                           alias app.pokoin.com
-                                                          DNS CNAME app →
-                                                          b0495ddbae9afb9b.vercel-dns-017.com
-                                                          (Cloudflare, DNS only, not proxied)
 ```
 
-1. Change a punch-out URL in `market/src/punchouts.js` (and landing
-   `index.html` if it is a marketing link).
-2. Deploy the **web**:
+1. Change a route in `market/src/punchouts.js` (and landing `index.html` if it
+   is a marketing link).
+2. Deploy the **web** (`scripts/build-web.sh` / Vercel project `web`).
+3. Change Android/iOS UI in CardVault, then deploy **only** `pokoin-flutter`.
+   Do **not** alias `pokoin.com`. See [APP.md](APP.md).
 
-```bash
-cd /home/nez/Projects/pokoin-web
-env -u VERCEL_TOKEN vercel pull --yes --environment=production
-env -u VERCEL_TOKEN vercel build --prod --yes
-env -u VERCEL_TOKEN vercel deploy --prebuilt --prod --yes --archive=tgz
-```
-
-3. Change Flutter UI in CardVault, then deploy **only** `pokoin-flutter`
-   (`deploy-pokoin-flutter-new-project.sh`). Do **not** alias `pokoin.com`.
-4. First-time host (already done 30 Aug 2026):
-
-```bash
-env -u VERCEL_TOKEN vercel domains add app.pokoin.com pokoin-flutter --scope giuseppevitolo17s-projects
-# Cloudflare CNAME app → b0495ddbae9afb9b.vercel-dns-017.com, proxied=false
-env -u VERCEL_TOKEN vercel alias set <pokoin-flutter-deployment>.vercel.app app.pokoin.com
-```
-
-Do not copy Flutter `app.html` into `dist-web`. The web repo stays React.
+Do not copy Flutter `app.html` into `dist-web`.
 
 ---
 
-## Verify
+## Live check
 
-```bash
-dig +short app.pokoin.com CNAME
-curl -sS -o /dev/null -w '%{http_code}\n' -A 'Mozilla/5.0' https://app.pokoin.com/wallet
-curl -sS -o /dev/null -w '%{http_code}\n' -A 'Mozilla/5.0' https://app.pokoin.com/forum
-curl -sS https://pokoin.com/marketplace | grep -F 'app.pokoin.com'
-curl -sS https://pokoin.com/ | grep -F 'https://app.pokoin.com/wallet'
-```
+`https://pokoin.com` sits behind Cloudflare Bot Fight. Datacenter curls from
+this host get **403** / JS challenge. Use a real browser.
 
-Click Forum / Signal / wallet chip on `https://pokoin.com/marketplace` — the
-browser origin must become `app.pokoin.com`.
+Forum, Signal, Competitive, Wallet, Profile, and Cart on
+`https://pokoin.com/marketplace` are same-origin React routes. They must not
+open `app.pokoin.com`.

@@ -38,6 +38,51 @@
           "value": "public, max-age=0, must-revalidate"
         }
       ]
+    },
+    {
+      "source": "/favicon.ico",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/favicon-32x32.png",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/apple-touch-icon.png",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/pokoin-192.png",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/pokoin-512.png",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
     }
   ],
   "redirects": [
@@ -56,6 +101,302 @@
   ],
   "rewrites": [
     {
+      "source": "/cardscan/identify",
+      "destination": "https://cardscan.pokoin.com/identify"
+    },
+    {
+      "source": "/chain/:path*",
+      "destination": "https://rpc.pokoin.com/chain/:path*"
+    },
+    {
+      "source": "/admin/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/admin/:path*/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/admin/:path*/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/admin/:path*",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/admin/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/admin",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/competitive/:path*/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/competitive/:path*",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/competitive/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/competitive",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/portfolio/:path*/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/portfolio/:path*",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/portfolio/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/portfolio",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/signal/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/signal",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/forum/:path*/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/forum/:path*",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/forum/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/forum",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/wallet/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/wallet",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/swap/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/swap",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/cart/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/cart",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/auth/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/auth",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/profile/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/profile",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/scan/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/scan",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/cardscan/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/cardscan",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/scancard/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/scancard",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/inventory/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/inventory",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/docs/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/docs",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/about/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/about",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/contact/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/contact",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/privacy/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/buy/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/buy",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/earn/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/earn",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/whitepaper/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/whitepaper",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/health/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/health",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/nft/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/nft",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/checkout/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/checkout",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/orders/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/orders",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/collection/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/collection",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/explore/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/explore",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/watchlist/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/watchlist",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/favorites/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/favorites",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/product/:kind/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/product/:kind",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/marketplace/search/",
       "destination": "/market/index.html"
     },
@@ -64,11 +405,51 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/marketplace/sets/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/sets",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/marketplace/sets/:slug/",
       "destination": "/market/index.html"
     },
     {
       "source": "/marketplace/sets/:slug",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/artists/:artistSlug/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/artists/:artistSlug",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/artists/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/artists",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/cards/:cardId/:cardSlug/versions/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/cards/:cardId/:cardSlug/versions",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/cards/:cardId/versions/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/cards/:cardId/versions",
       "destination": "/market/index.html"
     },
     {

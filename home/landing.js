@@ -181,10 +181,6 @@ function prefetchMarketplace() {
       });
     })
     .catch(() => {});
-  fetch("/api/marketplace-home-page", { headers: { Accept: "application/json" } }).catch(() => {});
-  fetch("/api/marketplace-expansion-page?limit=48&offset=0&productType=card&slug=mega-evolution", {
-    headers: { Accept: "application/json" },
-  }).catch(() => {});
 }
 
 document.querySelectorAll('a[href="/marketplace"], a[href="/marketplace/"]').forEach((a) => {

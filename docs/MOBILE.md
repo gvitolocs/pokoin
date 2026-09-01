@@ -41,7 +41,9 @@ at the same 393×852 viewport.
 | Query | What it is for |
 | --- | --- |
 | `(max-width: 1100px)` | Card desk drops the three-column wide layout |
-| `(max-width: 960px)` | Tablet card stack: Best Deal → art → shop → list form (Flutter narrow) |
+| `(max-width: 960px)` | Tablet card stack: Best Deal → art → shop → list form |
+| `(max-width: 720px)` | Burger + logo + search. Icon nav moves into the burger panel. **Top bar columns:** `auto auto minmax(0, 1fr)` so search fills the leftover row (the old `auto 1fr auto` parked the logo in the flexible column and squeezed it). |
+| `(max-width: 480px)` | **Phone aesthetics** (iPhone 16). See below. Desktop is not in this query. |
 | `(max-width: 720px)` | Burger + logo + search. Icon nav moves into the burger panel. **Top bar columns:** `auto auto minmax(0, 1fr)` so search fills the leftover row (the old `auto 1fr auto` parked the logo in the flexible column and squeezed it). |
 | `(max-width: 480px)` | **Phone aesthetics** (iPhone 16). See below. Desktop is not in this query. |
 
@@ -55,19 +57,19 @@ Source: `market/src/styles.css` (block at the bottom). Chrome markup:
 | Top bar | Safe-area padding; 32px logo; 44px burger; search submit is a magnifying-glass icon (the word “Search” stays on desktop) | 393px cannot fit burger + logo + long placeholder + “Search” without crowding |
 | Search input | `font-size: 16px` | iOS Safari zooms the page if the field is smaller than 16px |
 | Main | Tighter padding `0.75rem 0.85rem` | Recover horizontal room for two tile columns |
-| Mega Era promo | Less padding, 1.65rem title, **full-width** yellow CTA (min-height 44px) | Thumb reach; less empty navy |
+| Expansion promo | Fan above copy, still overflowing the box; 1.65rem title; **full-width** yellow CTA (min-height 44px); 44px arrows | Thumb reach; overlay chase cards |
 | Rails | Tile width `9.6rem`, tighter gap, touch momentum scroll | ~2 cards plus a peek instead of one oversized tile |
 | Grid | Forced **two columns** `minmax(0, 1fr)` | `auto-fill` / `10.5rem` was borderline at 393px |
 | Sell callout | Stacks label above “Get started” | Horizontal flex overflowed |
-| **Card desk** | Areas: **art → Best Deal → shop → list form** | Flutter tablet order puts Best Deal first; on a 852px-tall phone that hid the scan. Phone shows the printing first |
+| **Card desk** | Areas: **art → Best Deal → shop → list form** | Tablet `≤960px` puts Best Deal first; on a 852px-tall phone that hid the scan. Phone shows the printing first |
 | Asset header | Smaller title, tighter padding | Stop the name wrapping into a wall of navy |
 | Art ‹ › | 44×44 tap targets (SVG chevrons, collector-number order) | Apple HIG; centering is in the SVG, not `‹`/`›` glyphs |
 | Shop filters | Full-width stacked selects | Two dropdowns side by side were unreadable |
 | Footer | Extra `safe-area-inset-bottom` | Home indicator |
 | Burger panel | 44px-tall rows + bottom safe area | Same menu as `≤720px`, easier to hit |
 
-What phone CSS does **not** change: gold `#FFD33D`, punch-outs to
-`app.pokoin.com`, `card_id` identity, listing `nativeOnly`, honest `24h —`,
+What phone CSS does **not** change: gold `#FFD33D`, `card_id` identity, listing
+`nativeOnly`, honest `24h —`, JPEG heroes, Satoshi.
 no Sell in the header.
 
 ## Phone-only — landing
@@ -95,7 +97,8 @@ drawer) were already there and still apply.
 ## Check after a CSS change
 
 1. **393×852** marketplace home: burger, logo, search icon in one row; promo
-   CTA full width; two New cards tiles with a peek of a third.
+   CTA full width; 3-card fan overflows the banner; arrows change expansion;
+   two New cards tiles with a peek of a third.
 2. Open a card: **scan is in the first viewport** (name + art, then Best Deal).
    Left ‹ goes to the previous collector number.
 3. Rotate or 430×932 (Plus): still two columns, no horizontal page scroll.

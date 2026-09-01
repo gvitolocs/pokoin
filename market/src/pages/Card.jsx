@@ -2,26 +2,40 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   artistHref,
-  authFrom,
+  versionsHref,
   cardHref,
+  cardtraderHref,
   createListing,
   fetchCard,
-  fetchExpansionCards,
+  fetchCanonicalPath,
+  fetchCardmarketRedirect,
   fetchListings,
   formatPkn,
   imageSrc,
+  invalidateListings,
+  peekCard,
+  peekCanonicalPath,
+  peekListings,
+  neighborsOrPeek,
   postWatchlist,
   publicCardId,
   rememberCardId,
+  rememberNeighbors,
   setSlug,
   toggleWatchlist,
+  unlockSilver,
+  warmupCard,
+  warmupNeighbors,
   readWatchlistIds,
+  vintedHref,
 } from '../api.js';
-import { appHref } from '../punchouts.js';
+import { authFrom } from '../punchouts.js';
 import { useAuth } from '../auth.jsx';
+import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { printingIdentity } from '../identity.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
+import CardArt from '../components/CardArt.jsx';
 
 const CONDITIONS = [
   { value: '', label: 'Any condition' },
@@ -144,6 +158,7 @@ function defaultFoil(card) {
 }
 
 function ListingForm({ card, identity, suggestedPrice, fromPath, onListed }) {
+  const navigate = useNavigate();
   const { signedIn, ready, sellerName, getBearer } = useAuth();
   const [price, setPrice] = useState('');
   const [qty, setQty] = useState('1');
@@ -194,7 +209,7 @@ function ListingForm({ card, identity, suggestedPrice, fromPath, onListed }) {
 
   async function submit() {
     if (!signedIn) {
-      window.location.href = authFrom(fromPath);
+      navigate(authFrom(fromPath));
       return;
     }
     const amount = Number(price || suggestedPrice);
@@ -213,7 +228,7 @@ function ListingForm({ card, identity, suggestedPrice, fromPath, onListed }) {
     try {
       const token = await getBearer();
       if (!token) {
-        window.location.href = authFrom(fromPath);
+        navigate(authFrom(fromPath));
         return;
       }
       await createListing({
@@ -250,7 +265,7 @@ function ListingForm({ card, identity, suggestedPrice, fromPath, onListed }) {
       onListed?.();
     } catch (err) {
       if (err.status === 401) {
-        window.location.href = authFrom(fromPath);
+        navigate(authFrom(fromPath));
         return;
       }
       setError(err.message || 'Listing failed.');
@@ -266,9 +281,9 @@ function ListingForm({ card, identity, suggestedPrice, fromPath, onListed }) {
         {signedIn ? (
           <span className="seller-chip">{sellerName}</span>
         ) : (
-          <a className="signin-link" href={authFrom(fromPath)} onClick={() => track(Action.sell, card)}>
+          <Link className="signin-link" to={authFrom(fromPath)} onClick={() => track(Action.sell, card)}>
             Sign in
-          </a>
+          </Link>
         )}
       </div>
       <div className="sell-row">
@@ -374,11 +389,6 @@ function ListingForm({ card, identity, suggestedPrice, fromPath, onListed }) {
   );
 }
 
-function collectorRank(card) {
-  const match = String(printingIdentity(card).number || '').match(/(\d+)/);
-  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
-}
-
 function Chevron({ dir }) {
   const left = dir === 'left';
   return (
@@ -393,15 +403,122 @@ function Chevron({ dir }) {
   );
 }
 
+function SilverHead({ card, fromPath }) {
+  const navigate = useNavigate();
+  const { signedIn, silver, availablePkn, getBearer } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const id = publicCardId(card);
+  const name = card?.name || '';
+
+  async function unlock() {
+    if (!signedIn) {
+      navigate(authFrom(fromPath));
+      return;
+    }
+    setBusy(true);
+    setMessage('');
+    try {
+      const token = await getBearer();
+      const data = await unlockSilver(token);
+      setMessage(data.silverUntil ? `Silver until ${data.silverUntil}` : 'Silver unlocked.');
+    } catch (err) {
+      setMessage(err.message || 'Unlock failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openCardmarket() {
+    setMessage('');
+    try {
+      const url = await fetchCardmarketRedirect(id);
+      if (!url) {
+        throw new Error('Cardmarket did not return a URL.');
+      }
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setMessage(err.message || 'Cardmarket unavailable.');
+    }
+  }
+
+  if (silver) {
+    return (
+      <div className="silver-tools">
+        <div className="silver-pills">
+          <a className="silver-pill" href={cardtraderHref(id)} target="_blank" rel="noreferrer">CT</a>
+          <button className="silver-pill" type="button" onClick={openCardmarket}>CM</button>
+          <a className="silver-pill" href={vintedHref(name)} target="_blank" rel="noreferrer">VT</a>
+        </div>
+        {message ? <p className="muted silver-note">{message}</p> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="silver-tools">
+      {signedIn ? (
+        <button className="silver-link" type="button" disabled={busy} onClick={unlock}>
+          {busy ? 'Unlocking…' : `Unlock Silver · 20 PKN`}
+        </button>
+      ) : (
+        <Link className="silver-link" to={authFrom(fromPath)}>Sign in to unlock</Link>
+      )}
+      <p className="muted silver-note">
+        {signedIn
+          ? `Site balance ${availablePkn.toLocaleString()} PKN. CT / CM / VT stay hidden until Silver.`
+          : 'CT / CM / VT need Silver on this session.'}
+      </p>
+      {message ? <p className="muted silver-note">{message}</p> : null}
+    </div>
+  );
+}
+
+function cleanPath(path) {
+  return String(path || '').split(/[?#]/)[0].replace(/\/$/, '') || '/';
+}
+
+function replaceToCanonical(path, navigate, card, routerPath) {
+  const next = cleanPath(path);
+  if (!path || !next) {
+    return;
+  }
+  const here = cleanPath(routerPath || (typeof window === 'undefined' ? '' : window.location.pathname));
+  if (next === here) {
+    return;
+  }
+  navigate(path, { replace: true, state: card ? { card } : undefined });
+}
+
 export default function Card() {
   const { lang = 'en', cardId, slug = '' } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const { signedIn } = useAuth();
+  const { addItem } = useCart();
   const stubCard = location.state?.card && String(location.state.card.id) === String(cardId)
     ? location.state.card
     : null;
-  const [payload, setPayload] = useState(stubCard ? { card: stubCard, offers: [], versions: [] } : null);
+  const [payload, setPayload] = useState(() => {
+    const cached = peekCard(cardId, { lang });
+    if (cached) {
+      const listed = peekListings(cardId);
+      return {
+        ...cached,
+        neighbors: neighborsOrPeek(cardId, cached.neighbors),
+        ...(listed ? { offers: listed.listings || [] } : {}),
+      };
+    }
+    if (stubCard) {
+      return {
+        card: stubCard,
+        offers: [],
+        versions: [],
+        neighbors: neighborsOrPeek(cardId),
+      };
+    }
+    return null;
+  });
   const [error, setError] = useState('');
   const [zoom, setZoom] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -412,15 +529,24 @@ export default function Card() {
   const [dealLang, setDealLang] = useState('');
   const [dealCond, setDealCond] = useState('');
   const [offersReady, setOffersReady] = useState(false);
-  const [siblings, setSiblings] = useState([]);
-  const [siblingsWrap, setSiblingsWrap] = useState(false);
   const zoomRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (slug) {
+      return;
+    }
+    const known = peekCanonicalPath(cardId, { lang })
+      || stubCard?.canonicalPath
+      || stubCard?.canonical_path;
+    if (known) {
+      replaceToCanonical(known, navigate, stubCard, location.pathname);
+    }
+  }, [cardId, lang, slug, navigate, stubCard, location.pathname]);
 
   useEffect(() => {
     let cancelled = false;
     setZoom(false);
     setCopied(false);
-    setOffersReady(false);
     setError('');
     setCondition('');
     setLanguage('');
@@ -428,36 +554,88 @@ export default function Card() {
     setDealLang('');
     setDealCond('');
     setWatched(readWatchlistIds().includes(String(cardId)));
-    if (!stubCard) {
-      setPayload(null);
+    if (!slug) {
+      const known = peekCanonicalPath(cardId, { lang })
+        || stubCard?.canonicalPath
+        || stubCard?.canonical_path;
+      if (known) {
+        replaceToCanonical(known, navigate, stubCard, location.pathname);
+      } else {
+        fetchCanonicalPath(cardId, { lang })
+          .then((path) => {
+            if (!cancelled && path) {
+              replaceToCanonical(path, navigate, stubCard, location.pathname);
+            }
+          })
+          .catch(() => {});
+      }
     }
-    fetchCard(cardId, { lang, slug, includeOffers: false })
-      .then((data) => {
-        if (cancelled) {
-          return;
+    const cached = peekCard(cardId, { lang });
+    const listed = peekListings(cardId);
+    if (cached) {
+      setPayload({
+        ...cached,
+        neighbors: neighborsOrPeek(cardId, cached.neighbors),
+        ...(listed ? { offers: listed.listings || [] } : {}),
+      });
+      setOffersReady(Boolean(listed));
+      rememberNeighbors(cached.card, cached.neighbors);
+    } else if (stubCard) {
+      setPayload({
+        card: stubCard,
+        offers: listed?.listings || [],
+        versions: [],
+        neighbors: neighborsOrPeek(cardId),
+      });
+      setOffersReady(Boolean(listed));
+    } else {
+      setPayload(null);
+      setOffersReady(false);
+    }
+
+    function showCard(data) {
+      if (cancelled) {
+        return null;
+      }
+      rememberNeighbors(data.card, data.neighbors);
+      const neighborWindow = neighborsOrPeek(cardId, data.neighbors);
+      warmupNeighbors(neighborWindow, { lang });
+      const card = data.card;
+      setPayload((current) => {
+        const next = {
+          ...data,
+          neighbors: neighborWindow,
+        };
+        return current?.offers?.length
+          ? { ...next, offers: current.offers }
+          : next;
+      });
+      document.title = data.seo?.title || `${card.name} · Pokoin`;
+      rememberCardId(card.id);
+      setWatched(readWatchlistIds().includes(String(card.id)));
+      track(Action.viewCard, card);
+      if (card.canonicalPath) {
+        replaceToCanonical(card.canonicalPath, navigate, card, location.pathname);
+      }
+      const cachedList = peekListings(card.id);
+      const listingsPromise = cachedList
+        ? Promise.resolve(cachedList)
+        : fetchListings(card.id);
+      return listingsPromise.then((list) => {
+        if (!cancelled) {
+          setPayload((current) => (
+            current ? { ...current, offers: list.listings || [] } : current
+          ));
+          setOffersReady(true);
         }
-        setPayload(data);
-        const card = data.card;
-        document.title = data.seo?.title || `${card.name} · Pokoin`;
-        rememberCardId(card.id);
-        setWatched(readWatchlistIds().includes(String(card.id)));
-        track(Action.viewCard, card);
-        if (card.canonicalPath) {
-          const next = card.canonicalPath.split(/[?#]/)[0].replace(/\/$/, '') || card.canonicalPath;
-          const here = window.location.pathname.replace(/\/$/, '') || '/';
-          if (next !== here) {
-            navigate(card.canonicalPath, { replace: true, state: { card } });
-          }
-        }
-        return fetchListings(card.id).then((list) => {
-          if (!cancelled) {
-            setPayload((current) => (
-              current ? { ...current, offers: list.listings || [] } : current
-            ));
-            setOffersReady(true);
-          }
-        });
-      })
+      });
+    }
+
+    const pending = cached
+      ? Promise.resolve(cached)
+      : fetchCard(cardId, { lang, slug, includeOffers: false });
+    pending
+      .then(showCard)
       .catch((err) => {
         if (!cancelled) {
           setError(err.message || 'Card not found.');
@@ -471,32 +649,7 @@ export default function Card() {
     return () => {
       cancelled = true;
     };
-  }, [cardId, lang, slug, navigate]);
-
-  const setName = printingIdentity(payload?.card || stubCard || {}).set || '';
-
-  useEffect(() => {
-    if (!setName) {
-      return undefined;
-    }
-    let cancelled = false;
-    fetchExpansionCards({ expansionName: setName })
-      .then((data) => {
-        if (cancelled) {
-          return;
-        }
-        setSiblings(data.cards || []);
-        setSiblingsWrap(!data.hasMore);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSiblings([]);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [setName]);
+  }, [cardId, lang, navigate]);
 
   useLayoutEffect(() => {
     if (!zoom) {
@@ -559,6 +712,7 @@ export default function Card() {
   const versions = payload?.versions || [];
   const otherPrintings = versions.filter((row) => String(row.id) !== String(card.id));
   const art = imageSrc(card, 'hero');
+  const setName = identity.set || '';
   const setHref = setName ? `/marketplace/sets/${setSlug(setName)}` : '';
   const artist = identity.artist || payload?.artist?.name || payload?.artist?.illustrator || '';
   const artistPath = artist ? artistHref(artist, lang) : '';
@@ -566,18 +720,10 @@ export default function Card() {
     ? 'Card'
     : (card.type || card.productType || 'Card');
   const identityEmoji = card.emoji || card.cardIdentityEmoji || '';
-  const versionsPath = appHref(`${(card.canonicalPath || cardHref(card)).replace(/\/$/, '')}/versions`);
-  const orderedSiblings = [...siblings].sort((a, b) => {
-    const byNumber = collectorRank(a) - collectorRank(b);
-    return byNumber !== 0 ? byNumber : Number(publicCardId(a)) - Number(publicCardId(b));
-  });
-  const siblingIndex = orderedSiblings.findIndex((row) => publicCardId(row) === publicCardId(card));
-  const prevCard = siblingIndex >= 0 && orderedSiblings.length > 1
-    ? (siblingIndex > 0 ? orderedSiblings[siblingIndex - 1] : (siblingsWrap ? orderedSiblings[orderedSiblings.length - 1] : null))
-    : null;
-  const nextCard = siblingIndex >= 0 && orderedSiblings.length > 1
-    ? (siblingIndex < orderedSiblings.length - 1 ? orderedSiblings[siblingIndex + 1] : (siblingsWrap ? orderedSiblings[0] : null))
-    : null;
+  const versionsPath = versionsHref(card, lang);
+  const neighborWindow = neighborsOrPeek(publicCardId(card), payload?.neighbors);
+  const prevCard = neighborWindow.prev?.[0] || null;
+  const nextCard = neighborWindow.next?.[0] || null;
   const nativeLive = pricedOffers(payload?.offers);
   const dealPick = dealLang || dealCond
     ? matchDeal(nativeLive, dealLang || null, dealCond || null)
@@ -666,7 +812,7 @@ export default function Card() {
             ) : null}
             {collector ? <> {collector} · </> : ' · '}
             {artist && artistPath ? (
-              <a href={artistPath} onClick={() => track(Action.clickArtist, card)}>{artist}</a>
+              <Link to={artistPath} onClick={() => track(Action.clickArtist, card)}>{artist}</Link>
             ) : <span>{artist || typeLabel}</span>}
           </p>
         </div>
@@ -694,6 +840,7 @@ export default function Card() {
                   to={cardHref(prevCard)}
                   state={{ card: prevCard }}
                   aria-label="Previous card in set"
+                  onPointerEnter={() => warmupCard(prevCard, { lang, listings: true })}
                   onClick={() => track(Action.prevCard, prevCard)}
                 >
                   <Chevron dir="left" />
@@ -706,6 +853,7 @@ export default function Card() {
                   to={cardHref(nextCard)}
                   state={{ card: nextCard }}
                   aria-label="Next card in set"
+                  onPointerEnter={() => warmupCard(nextCard, { lang, listings: true })}
                   onClick={() => track(Action.nextCard, nextCard)}
                 >
                   <Chevron dir="right" />
@@ -720,7 +868,7 @@ export default function Card() {
                 track(Action.zoomArt, card);
               }}
             >
-              {art ? <img src={art} alt={card.name} fetchPriority="high" decoding="async" /> : <span className="tile-ph" />}
+              {art ? <CardArt src={art} alt={card.name} fetchPriority="high" /> : <span className="tile-ph" />}
             </button>
             <label className="sort version-select">
               <span className="sr-only">Version</span>
@@ -740,7 +888,7 @@ export default function Card() {
               </select>
             </label>
             <p className="set-link tight">
-              <a href={versionsPath}>View all versions</a>
+              <Link to={versionsPath}>View all versions</Link>
             </p>
           </section>
         </div>
@@ -755,6 +903,7 @@ export default function Card() {
             suggestedPrice={suggested}
             fromPath={fromPath}
             onListed={() => {
+              invalidateListings(card.id);
               fetchListings(card.id).then((list) => {
                 setPayload((current) => (
                   current ? { ...current, offers: list.listings || [] } : current
@@ -768,9 +917,7 @@ export default function Card() {
           <section className="panel add-panel">
             <div className="add-head">
               <h2>Best Deal</h2>
-              <a className="silver-link" href={authFrom(fromPath)}>
-                {signedIn ? 'Unlock Silver' : 'Sign in to unlock'}
-              </a>
+              <SilverHead card={card} fromPath={fromPath} />
             </div>
             <div className={canBuy ? 'prod-px' : 'prod-px oos'}>
               {offersReady ? (canBuy ? formatPkn(dealPick.pricePkn) : '—') : '—'}
@@ -811,13 +958,17 @@ export default function Card() {
               </label>
             </div>
             {canBuy ? (
-              <a
+              <button
                 className="btn buy-btn"
-                href={authFrom(fromPath)}
-                onClick={() => track(Action.buyIntent, card)}
+                type="button"
+                onClick={() => {
+                  track(Action.buyIntent, card);
+                  addItem(cartItemFromOffer(card, dealPick));
+                  navigate('/cart');
+                }}
               >
                 Add to cart
-              </a>
+              </button>
             ) : (
               <span className="btn ghost buy-btn">Unavailable</span>
             )}
@@ -879,11 +1030,15 @@ export default function Card() {
           {offers.length ? (
             <div className="shop-list">
               {offers.map((offer, index) => (
-                <a
+                <button
+                  type="button"
                   key={offer.id || `${offer.sellerName}-${offer.pricePkn}-${index}`}
                   className="shop-row"
-                  href={authFrom(fromPath)}
-                  onClick={() => track(Action.clickListing, card, { resultRank: index })}
+                  onClick={() => {
+                    track(Action.clickListing, card, { resultRank: index });
+                    addItem(cartItemFromOffer(card, offer));
+                    navigate('/cart');
+                  }}
                 >
                   <span className="shop-brand">{offer.sellerName || offer.sellerDisplayName || 'Pokoin'}</span>
                   <span className="shop-txt">
@@ -896,7 +1051,7 @@ export default function Card() {
                   <span className="shop-act">
                     {offer.quantityAvailable || 1}
                   </span>
-                </a>
+                </button>
               ))}
             </div>
           ) : (
@@ -909,9 +1064,9 @@ export default function Card() {
                   <button type="button" className={watched ? 'btn' : 'btn ghost'} onClick={onWatch}>
                     {watched ? 'In watchlist' : 'Add to watchlist'}
                   </button>
-                  <a className="btn ghost" href={authFrom(fromPath)} onClick={() => track(Action.sell, card)}>
+                  <Link className="btn ghost" to={authFrom(fromPath)} onClick={() => track(Action.sell, card)}>
                     Sell this card
-                  </a>
+                  </Link>
                 </div>
               ) : null}
             </div>
@@ -951,7 +1106,7 @@ export default function Card() {
           }}
         >
           {art ? (
-            <img
+            <CardArt
               src={art}
               alt={card.name}
               onClick={() => setZoom(false)}
