@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   createForumPost,
@@ -10,16 +10,83 @@ import {
 } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
+import { Alert, FilePill, PageHead, SkeletonThreads } from '../components/Desk.jsx';
+import '../forum.css';
+
+function initials(name) {
+  const bits = String(name || 'C').trim().split(/\s+/).filter(Boolean);
+  const letters = `${bits[0]?.[0] || 'C'}${bits[1]?.[0] || ''}`;
+  return letters.toUpperCase();
+}
+
+function when(value) {
+  if (!value) return '';
+  const date = typeof value?.toDate === 'function'
+    ? value.toDate()
+    : typeof value?.seconds === 'number'
+      ? new Date(value.seconds * 1000)
+      : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().slice(0, 10);
+}
+
+function excerptOf(row) {
+  const text = String(row.excerpt || row.body || row.preview || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length > 140 ? `${text.slice(0, 137)}…` : text;
+}
+
+function repliesOf(row) {
+  const n = Number(row.replyCount ?? row.replies ?? row.postCount ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function categoryOf(row, categories) {
+  const id = row.categoryId || row.category_id || row.category;
+  return categories.find((cat) => cat.id === id) || null;
+}
 
 function Media({ rows }) {
   const list = Array.isArray(rows) ? rows : [];
   return list.map((row, index) => {
     const src = mediaUrl(row);
-    if (!src) {
-      return null;
-    }
+    if (!src) return null;
     return <img className="forum-media" key={src || index} src={src} alt="" />;
   });
+}
+
+function CatIcon({ name }) {
+  const d = {
+    forum: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z',
+    cards: 'M4 6h12v12H4V6zm14 2h2v12H8v-2h10V8z',
+    token: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm-2-5h1.5V9H10V7.5h4V9h-1.5v6H14V16.5h-4V15z',
+    validators: 'M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z',
+  }[name] || 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z';
+  return (
+    <span className="forum-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d={d} /></svg>
+    </span>
+  );
+}
+
+function Avatar({ name }) {
+  return <span className="forum-avatar" aria-hidden="true">{initials(name)}</span>;
+}
+
+function streamOf(topic, posts) {
+  const rows = Array.isArray(posts) ? [...posts] : [];
+  if (!topic?.body) return rows;
+  const first = rows[0];
+  const same = first && (first.body === topic.body || first.id === topic.firstPostId);
+  if (same) return rows;
+  return [{
+    id: `op-${topic.id}`,
+    authorName: topic.authorName || topic.author || 'Collector',
+    body: topic.body,
+    createdAt: topic.createdAt || topic.created_at,
+    media: topic.media || topic.images,
+    op: true,
+  }, ...rows];
 }
 
 export default function Forum() {
@@ -34,6 +101,8 @@ export default function Forum() {
   const [topicFile, setTopicFile] = useState(null);
   const [replyFile, setReplyFile] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeCategory, setComposeCategory] = useState('');
 
   useEffect(() => {
     document.title = 'Forum · Pokoin';
@@ -58,11 +127,31 @@ export default function Forum() {
   const topics = data?.topics || [];
   const topic = data?.topic || null;
   const posts = data?.posts || [];
+  const stream = useMemo(() => streamOf(topic, posts), [topic, posts]);
+  const activeCategory = categories.find((row) => row.id === categoryId) || null;
 
-  async function maybeUpload({ topicId: id, postId, file, token }) {
-    if (!file || !id) {
+  useEffect(() => {
+    setComposeCategory(categoryId || data?.categories?.[0]?.id || 'general');
+  }, [categoryId, data]);
+
+  useEffect(() => {
+    if (topic?.title) document.title = `${topic.title} · Forum · Pokoin`;
+  }, [topic]);
+
+  function needAuth() {
+    navigate(authFrom(window.location.pathname + window.location.search));
+  }
+
+  function openComposer() {
+    if (!signedIn) {
+      needAuth();
       return;
     }
+    setComposeOpen(true);
+  }
+
+  async function maybeUpload({ topicId: id, postId, file, token }) {
+    if (!file || !id) return;
     const imageBase64 = await fileToDataUrl(file);
     await uploadForumMedia({ topicId: id, postId, imageBase64 }, token);
   }
@@ -70,7 +159,7 @@ export default function Forum() {
   async function startTopic(event) {
     event.preventDefault();
     if (!signedIn) {
-      navigate(authFrom(window.location.pathname));
+      needAuth();
       return;
     }
     setBusy(true);
@@ -78,7 +167,7 @@ export default function Forum() {
     try {
       const token = await getBearer();
       const created = await createForumTopic({
-        categoryId: categoryId || categories[0]?.id || 'general',
+        categoryId: composeCategory || categoryId || categories[0]?.id || 'general',
         title: title.trim(),
         body: body.trim(),
       }, token);
@@ -91,6 +180,7 @@ export default function Forum() {
       setTitle('');
       setBody('');
       setTopicFile(null);
+      setComposeOpen(false);
       if (id) navigate(`/forum/topic/${id}`);
     } catch (err) {
       setError(err.message || 'Could not create topic.');
@@ -102,7 +192,7 @@ export default function Forum() {
   async function sendReply(event) {
     event.preventDefault();
     if (!signedIn) {
-      navigate(authFrom(window.location.pathname));
+      needAuth();
       return;
     }
     setBusy(true);
@@ -127,97 +217,183 @@ export default function Forum() {
     }
   }
 
-  return (
-    <div className="page app-page">
-      <div className="comp-head">
-        <div>
-          <p className="eyebrow">Community</p>
-          <h1>{topic ? topic.title : 'Forum'}</h1>
-          <p className="muted">Public reads. Posts need a signed-in Firebase session. Images upload after the topic or reply id exists.</p>
-        </div>
-        <Link className="more" to="/forum" style={{ margin: 0 }}>All topics</Link>
+  const composer = (
+    <form className="forum-composer" onSubmit={startTopic}>
+      {!categoryId ? (
+        <label className="sell-field">
+          Category
+          <select value={composeCategory} onChange={(event) => setComposeCategory(event.target.value)}>
+            {categories.map((row) => (
+              <option key={row.id} value={row.id}>{row.title || row.id}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <label className="sell-field">
+        Title
+        <input value={title} onChange={(event) => setTitle(event.target.value)} minLength={6} required placeholder="What’s this about?" />
+      </label>
+      <label className="sell-field">
+        Post
+        <textarea value={body} onChange={(event) => setBody(event.target.value)} minLength={12} rows={6} required placeholder="Write the first post…" />
+      </label>
+      <div className="forum-composer-actions">
+        <FilePill accept="image/*" onChange={(event) => setTopicFile(event.target.files?.[0] || null)}>
+          {topicFile ? topicFile.name : 'Attach image'}
+        </FilePill>
+        <button className="btn" type="submit" disabled={busy}>{busy ? 'Posting…' : 'Post discussion'}</button>
+        <button className="btn ghost" type="button" onClick={() => setComposeOpen(false)}>Cancel</button>
       </div>
-      {error ? <p className="status error">{error}</p> : null}
-      {!data && !error ? <p className="muted">Loading forum…</p> : null}
+    </form>
+  );
 
-      {!topicId ? (
-        <>
-          {categories.length ? (
-            <nav className="comp-tabs" aria-label="Categories">
-              <Link className={!categoryId ? 'on' : undefined} to="/forum">All</Link>
-              {categories.map((row) => (
-                <Link key={row.id} className={categoryId === row.id ? 'on' : undefined} to={`/forum/category/${row.id}`}>
-                  {row.title || row.id}
-                </Link>
-              ))}
-            </nav>
+  return (
+    <div className="page desk forum-page">
+      {topicId && topic ? (
+        <nav className="forum-crumbs">
+          <Link to="/forum">Forum</Link>
+          <span>/</span>
+          {categoryOf(topic, categories) ? (
+            <>
+              <Link to={`/forum/category/${categoryOf(topic, categories).id}`}>{categoryOf(topic, categories).title}</Link>
+              <span>/</span>
+            </>
           ) : null}
-          <form className="panel auth-card" onSubmit={startTopic}>
-            <h2>Start a discussion</h2>
-            <label className="sell-field">
-              Title
-              <input value={title} onChange={(event) => setTitle(event.target.value)} minLength={6} required />
-            </label>
-            <label className="sell-field">
-              Body
-              <textarea value={body} onChange={(event) => setBody(event.target.value)} minLength={12} rows={4} required />
-            </label>
-            <label className="sell-field">
-              Image
-              <input type="file" accept="image/*" onChange={(event) => setTopicFile(event.target.files?.[0] || null)} />
-            </label>
-            <button
-              className="btn"
-              type={signedIn ? 'submit' : 'button'}
-              disabled={busy}
-              onClick={signedIn ? undefined : () => navigate(authFrom(window.location.pathname))}
-            >
-              {signedIn ? 'Post topic' : 'Sign in to post'}
-            </button>
-          </form>
-          <div className="forum-list">
-            {topics.map((row) => (
-              <Link className="forum-row" key={row.id} to={`/forum/topic/${row.id}`}>
-                <strong>{row.title}</strong>
-                <span className="muted">{row.authorName || 'Collector'} · {row.replyCount || 0} replies</span>
+          <span>{topic.title}</span>
+        </nav>
+      ) : null}
+
+      <PageHead
+        kicker="Community"
+        title={topic ? topic.title : (activeCategory?.title || 'Forum')}
+        lede={topic
+          ? [topic.authorName || 'Collector', when(topic.createdAt || topic.created_at)].filter(Boolean).join(' · ')
+          : (activeCategory?.description || 'Discuss cards, PKN, and the network. Public to read.')}
+      >
+        {topicId ? (
+          <Link className="btn ghost" to={categoryId ? `/forum/category/${categoryId}` : '/forum'}>All discussions</Link>
+        ) : (
+          <button className="btn" type="button" onClick={openComposer}>New discussion</button>
+        )}
+      </PageHead>
+      <Alert>{error}</Alert>
+      {!data && !error ? <SkeletonThreads rows={6} /> : null}
+
+      {data && !topicId ? (
+        <>
+          <div className="forum-cats">
+            {categories.map((row) => (
+              <Link
+                key={row.id}
+                className={categoryId === row.id ? 'forum-cat on' : 'forum-cat'}
+                to={categoryId === row.id ? '/forum' : `/forum/category/${row.id}`}
+              >
+                <div className="forum-cat-top">
+                  <CatIcon name={row.icon_name || row.icon} />
+                  <strong>{row.title || row.id}</strong>
+                </div>
+                {row.description ? <p>{row.description}</p> : null}
+                <div className="forum-cat-meta">
+                  <span><b>{row.topic_count ?? row.topicCount ?? 0}</b> topics</span>
+                  <span><b>{row.post_count ?? row.postCount ?? 0}</b> posts</span>
+                </div>
               </Link>
             ))}
-            {data && !topics.length ? <p className="muted">No topics in this category yet.</p> : null}
           </div>
+
+          <div className="forum-toolbar">
+            <p className="result-count">
+              {topics.length
+                ? <><strong>{topics.length}</strong> {topics.length === 1 ? 'discussion' : 'discussions'}{activeCategory ? ` in ${activeCategory.title}` : ''}</>
+                : (activeCategory ? `No discussions in ${activeCategory.title}` : 'No discussions yet')}
+            </p>
+            {categoryId ? <Link className="btn ghost" to="/forum">All categories</Link> : null}
+          </div>
+
+          {topics.length ? (
+            <div className="forum-topics">
+              {topics.map((row) => {
+                const cat = categoryOf(row, categories);
+                const n = repliesOf(row);
+                const author = row.authorName || row.author || 'Collector';
+                return (
+                  <Link className="forum-topic" key={row.id} to={`/forum/topic/${row.id}`}>
+                    <Avatar name={author} />
+                    <span>
+                      <strong className="forum-topic-title">{row.title}</strong>
+                      {excerptOf(row) ? <span className="forum-topic-excerpt">{excerptOf(row)}</span> : null}
+                      <span className="forum-topic-meta">
+                        {cat ? <span className="forum-chip">{cat.title}</span> : null}
+                        <span>{author}</span>
+                        {when(row.updatedAt || row.lastPostedAt || row.createdAt) ? (
+                          <span>{when(row.updatedAt || row.lastPostedAt || row.createdAt)}</span>
+                        ) : null}
+                      </span>
+                    </span>
+                    <span className="forum-replies">
+                      {n}
+                      <small>{n === 1 ? 'reply' : 'replies'}</small>
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="forum-topics">
+              <div className="forum-empty">
+                <Avatar name="Pokoin" />
+                <strong>Be the first</strong>
+                <p>This board is public to read. Start a discussion after you sign in — we do not seed fake threads.</p>
+                <button className="btn" type="button" onClick={openComposer}>New discussion</button>
+              </div>
+            </div>
+          )}
+
+          {composeOpen ? composer : null}
         </>
-      ) : (
+      ) : null}
+
+      {data && topicId ? (
         <>
-          {topic ? <p className="lede-copy">{topic.body}</p> : null}
-          {topic ? <Media rows={topic.media || topic.images} /> : null}
-          <div className="forum-list">
-            {posts.map((row) => (
-              <article className="forum-row" key={row.id}>
-                <strong>{row.authorName || 'Collector'}</strong>
-                <p>{row.body}</p>
-                <Media rows={row.media || row.images} />
+          <div className="forum-post-stream">
+            {stream.length ? stream.map((row) => (
+              <article className="forum-post" key={row.id}>
+                <Avatar name={row.authorName || row.author || 'Collector'} />
+                <div>
+                  <div className="forum-post-head">
+                    <strong>{row.authorName || row.author || 'Collector'}</strong>
+                    {row.op ? <span className="forum-chip on">Original</span> : null}
+                    {when(row.createdAt || row.created_at) ? <time>{when(row.createdAt || row.created_at)}</time> : null}
+                  </div>
+                  <p className="forum-post-body">{row.body}</p>
+                  <Media rows={row.media || row.images} />
+                </div>
               </article>
-            ))}
+            )) : (
+              <div className="forum-empty">
+                <strong>No posts in this thread</strong>
+                <p>Reply below if you are signed in.</p>
+              </div>
+            )}
           </div>
-          <form className="panel auth-card" onSubmit={sendReply}>
+          <form className="forum-composer" onSubmit={sendReply}>
             <label className="sell-field">
               Reply
-              <textarea value={reply} onChange={(event) => setReply(event.target.value)} minLength={3} rows={3} required />
+              <textarea value={reply} onChange={(event) => setReply(event.target.value)} minLength={3} rows={5} required placeholder={signedIn ? 'Write a reply…' : 'Sign in to reply'} />
             </label>
-            <label className="sell-field">
-              Image
-              <input type="file" accept="image/*" onChange={(event) => setReplyFile(event.target.files?.[0] || null)} />
-            </label>
-            <button
-              className="btn"
-              type={signedIn ? 'submit' : 'button'}
-              disabled={busy}
-              onClick={signedIn ? undefined : () => navigate(authFrom(window.location.pathname))}
-            >
-              {signedIn ? 'Reply' : 'Sign in to reply'}
-            </button>
+            <div className="forum-composer-actions">
+              <FilePill accept="image/*" onChange={(event) => setReplyFile(event.target.files?.[0] || null)}>
+                {replyFile ? replyFile.name : 'Attach image'}
+              </FilePill>
+              {signedIn ? (
+                <button className="btn" type="submit" disabled={busy}>{busy ? 'Sending…' : 'Reply'}</button>
+              ) : (
+                <button className="btn" type="button" onClick={needAuth}>Sign in to reply</button>
+              )}
+            </div>
           </form>
         </>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import CardArt from '../components/CardArt.jsx';
 import CompetitiveNav from '../components/CompetitiveNav.jsx';
+import { DeskPanel } from '../components/Desk.jsx';
 import {
   SPRITE,
   competitiveData,
@@ -23,18 +24,16 @@ function DecksList() {
   }, []);
 
   return (
-    <div className="page comp-page">
+    <div className="page desk comp-page">
       <CompetitiveNav />
-      <div className="comp-toolbar">
-        <label className="sort">
-          Rank by
-          <select value={rank} onChange={(event) => setRank(event.target.value)}>
-            <option value="points">Points</option>
-            <option value="share">Share</option>
-          </select>
-        </label>
-        <span className="muted">Format: {data.format}</span>
+      <div className="shop-toolbar">
+        <p className="result-count"><strong>{rows.length}</strong> decks · {data.format}</p>
+        <select value={rank} onChange={(event) => setRank(event.target.value)} aria-label="Rank by">
+          <option value="points">Points</option>
+          <option value="share">Share</option>
+        </select>
       </div>
+      <DeskPanel flush>
       <div className="comp-table-wrap">
         <table className="comp-table">
           <thead>
@@ -68,6 +67,7 @@ function DecksList() {
           </tbody>
         </table>
       </div>
+      </DeskPanel>
     </div>
   );
 }
@@ -87,7 +87,7 @@ function DeckDetail() {
 
   if (!deck) {
     return (
-      <div className="page comp-page">
+      <div className="page desk comp-page">
         <CompetitiveNav />
         <p className="status error">That deck is not in the snapshot.</p>
       </div>
@@ -95,7 +95,7 @@ function DeckDetail() {
   }
 
   return (
-    <div className="page comp-page">
+    <div className="page desk comp-page">
       <CompetitiveNav />
       <nav className="crumbs">
         <Link to="/marketplace/competitive/decks">Decks</Link>

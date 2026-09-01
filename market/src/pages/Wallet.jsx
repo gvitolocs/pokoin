@@ -18,6 +18,7 @@ import {
   shortAddress,
   useWallet,
 } from '../wallet.jsx';
+import { Alert, DeskPanel, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 
 function poolsOf(data) {
   const rows = Array.isArray(data) ? data : (data?.pools || data?.items || []);
@@ -196,30 +197,12 @@ export default function Wallet() {
   }
 
   return (
-    <div className="page app-page">
-      <div className="comp-head">
-        <div>
-          <p className="eyebrow">Network</p>
-          <h1>PKN wallet</h1>
-          <p className="muted">PokoinPoS chain ID {POKOIN_CHAIN_ID}. RPC {POKOIN_RPC.replace('https://', '')}. Router 0x…2606.</p>
-        </div>
-      </div>
-      <div className="stat-strip">
-        <div><strong>{address ? shortAddress(address) : 'Not connected'}</strong><span>Account</span></div>
-        <div><strong>{balance ? balance.toLocaleString('en-US', { maximumFractionDigits: 4 }) : '0'}</strong><span>Chain PKN</span></div>
-        <div><strong>{availablePkn.toLocaleString()}</strong><span>Site PKN</span></div>
-        <div><strong>{chainId || '—'}</strong><span>{onPokoin || !chainId ? 'Chain' : 'Wrong chain'}</span></div>
-      </div>
-      {error ? <p className="status error">{error}</p> : null}
-      {txHash ? (
-        <p className="lede-copy">
-          Swap sent.{' '}
-          <a href={`https://explorer.pokoin.com/tx/${txHash}`} target="_blank" rel="noreferrer">
-            {shortAddress(txHash)}
-          </a>
-        </p>
-      ) : null}
-      <div className="actions">
+    <div className="page desk">
+      <PageHead
+        kicker="Network"
+        title="Wallet"
+        lede={`PokoinPoS ${POKOIN_CHAIN_ID}. ${POKOIN_RPC.replace('https://', '')}. Send is chain PKN; site balance is separate.`}
+      >
         {address ? (
           <button className="btn ghost" type="button" onClick={disconnect}>Disconnect</button>
         ) : (
@@ -229,12 +212,52 @@ export default function Wallet() {
         )}
         <Link className="btn ghost" to="/buy">Buy PKN</Link>
         <a className="btn ghost" href="https://explorer.pokoin.com">Explorer</a>
-      </div>
+      </PageHead>
 
-      <section className="panel site-block">
-        <h2>Send PKN</h2>
-        <p className="muted">Native chain transfer from the connected account. Not site balance.</p>
-        <div className="swap-grid">
+      <MetricGrid>
+        <Metric value={address ? shortAddress(address) : '—'} label="Account" hint={address ? 'Connected' : 'Not connected'} />
+        <Metric value={balance ? balance.toLocaleString('en-US', { maximumFractionDigits: 4 }) : '0'} label="Chain PKN" />
+        <Metric value={availablePkn.toLocaleString()} label="Site PKN" />
+        <Metric value={chainId || '—'} label={onPokoin || !chainId ? 'Chain' : 'Wrong chain'} />
+      </MetricGrid>
+      <Alert>{error}</Alert>
+      {txHash ? (
+        <p className="desk-ok">
+          Swap sent.{' '}
+          <a href={`https://explorer.pokoin.com/tx/${txHash}`} target="_blank" rel="noreferrer">{shortAddress(txHash)}</a>
+        </p>
+      ) : null}
+
+      <div className="wallet-desk">
+        <DeskPanel
+          title="Send PKN"
+          actions={(
+            <button
+              className="btn"
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                if (!address) {
+                  await onConnect();
+                  return;
+                }
+                setBusy(true);
+                setError('');
+                try {
+                  const hash = await sendPkn({ from: address, to: sendTo, amount: sendAmount });
+                  setSendHash(hash);
+                } catch (err) {
+                  setError(err.message || 'Send failed.');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {address ? 'Send' : 'Connect and send'}
+            </button>
+          )}
+        >
+          <p className="page-lede">Native chain transfer from the connected account. Not site balance.</p>
           <label className="sell-field">
             To
             <input value={sendTo} onChange={(event) => setSendTo(event.target.value)} placeholder="0x…" />
@@ -243,114 +266,87 @@ export default function Wallet() {
             Amount
             <input inputMode="decimal" value={sendAmount} onChange={(event) => setSendAmount(event.target.value)} />
           </label>
-        </div>
-        {sendHash ? (
-          <p className="lede-copy">
-            Sent.{' '}
-            <a href={`https://explorer.pokoin.com/tx/${sendHash}`} target="_blank" rel="noreferrer">{shortAddress(sendHash)}</a>
-          </p>
-        ) : null}
-        <button
-          className="btn"
-          type="button"
-          disabled={busy}
-          onClick={async () => {
-            if (!address) {
-              await onConnect();
-              return;
-            }
-            setBusy(true);
-            setError('');
-            try {
-              const hash = await sendPkn({ from: address, to: sendTo, amount: sendAmount });
-              setSendHash(hash);
-            } catch (err) {
-              setError(err.message || 'Send failed.');
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {address ? 'Send' : 'Connect and send'}
-        </button>
-      </section>
+          {sendHash ? (
+            <p className="page-lede">
+              Sent.{' '}
+              <a href={`https://explorer.pokoin.com/tx/${sendHash}`} target="_blank" rel="noreferrer">{shortAddress(sendHash)}</a>
+            </p>
+          ) : null}
+        </DeskPanel>
 
-      <section className="panel site-block">
-        <h2>AMM swap</h2>
-        <p className="muted">Quote is integer amountIn against rpc.pokoin.com. 0.5% min-out except WPKN pools.</p>
-        <div className="swap-grid">
-          <label className="sell-field">
-            Pair
-            <select value={asset} onChange={(event) => setAsset(event.target.value)}>
-              {pools.map((row) => (
-                <option key={row.id || row.asset} value={row.asset}>{row.asset} / PKN</option>
-              ))}
-            </select>
-          </label>
-          <label className="sell-field">
-            Direction
-            <select value={fromPkn ? 'pkn' : 'out'} onChange={(event) => setFromPkn(event.target.value === 'pkn')}>
-              <option value="pkn">PKN → {asset}</option>
-              <option value="out">{asset} → PKN</option>
-            </select>
-          </label>
-          <label className="sell-field">
-            Amount in
-            <input
-              inputMode="numeric"
-              value={amountIn}
-              onChange={(event) => setAmountIn(event.target.value)}
-            />
-          </label>
-        </div>
-        {quote ? (
-          <p className="lede-copy">
-            Out {Number(quote.amountOut || 0).toLocaleString()} {quote.assetOut || assetOut}
-            {quote.price ? ` · ${quote.price}` : ''}
-          </p>
-        ) : null}
-        <div className="actions">
-          <button className="btn ghost" type="button" onClick={quoteAmm}>Quote</button>
-          <button className="btn" type="button" disabled={busy} onClick={swapAmm}>
-            {address ? 'Swap' : 'Connect and swap'}
-          </button>
-        </div>
-      </section>
+        <div>
+          <DeskPanel
+            title="AMM swap"
+            actions={(
+              <>
+                <button className="btn ghost" type="button" onClick={quoteAmm}>Quote</button>
+                <button className="btn" type="button" disabled={busy} onClick={swapAmm}>
+                  {address ? 'Swap' : 'Connect and swap'}
+                </button>
+              </>
+            )}
+          >
+            <p className="page-lede">Integer amountIn against live pools. 0.5% min-out except WPKN.</p>
+            <label className="sell-field">
+              Pair
+              <select value={asset} onChange={(event) => setAsset(event.target.value)}>
+                {pools.map((row) => (
+                  <option key={row.id || row.asset} value={row.asset}>{row.asset} / PKN</option>
+                ))}
+              </select>
+            </label>
+            <label className="sell-field">
+              Direction
+              <select value={fromPkn ? 'pkn' : 'out'} onChange={(event) => setFromPkn(event.target.value === 'pkn')}>
+                <option value="pkn">PKN → {asset}</option>
+                <option value="out">{asset} → PKN</option>
+              </select>
+            </label>
+            <label className="sell-field">
+              Amount in
+              <input inputMode="numeric" value={amountIn} onChange={(event) => setAmountIn(event.target.value)} />
+            </label>
+            {quote ? (
+              <p className="page-lede">
+                Out {Number(quote.amountOut || 0).toLocaleString()} {quote.assetOut || assetOut}
+                {quote.price ? ` · ${quote.price}` : ''}
+              </p>
+            ) : null}
+          </DeskPanel>
 
-      <section className="panel site-block">
-        <h2>WPKN</h2>
-        <p className="muted">Site PKN ↔ wrapped PKN. Needs a signed-in Firebase session and a receiving address.</p>
-        <div className="swap-grid">
-          <label className="sell-field">
-            Direction
-            <select value={wpknDirection} onChange={(event) => setWpknDirection(event.target.value)}>
-              <option value="pkn_to_wpkn">Site PKN → WPKN</option>
-              <option value="wpkn_to_pkn">WPKN → site PKN</option>
-            </select>
-          </label>
-          <label className="sell-field">
-            Amount
-            <input
-              inputMode="numeric"
-              value={wpknAmount}
-              onChange={(event) => setWpknAmount(event.target.value)}
-            />
-          </label>
+          <DeskPanel
+            title="WPKN"
+            actions={(
+              <>
+                <button className="btn ghost" type="button" onClick={quoteWpkn}>Public quote</button>
+                <button className="btn" type="button" disabled={busy} onClick={requestWpkn}>
+                  {signedIn ? 'Request exchange' : 'Sign in to exchange'}
+                </button>
+              </>
+            )}
+          >
+            <p className="page-lede">Site PKN ↔ wrapped PKN. Needs a signed-in session and a receiving address.</p>
+            <label className="sell-field">
+              Direction
+              <select value={wpknDirection} onChange={(event) => setWpknDirection(event.target.value)}>
+                <option value="pkn_to_wpkn">Site PKN → WPKN</option>
+                <option value="wpkn_to_pkn">WPKN → site PKN</option>
+              </select>
+            </label>
+            <label className="sell-field">
+              Amount
+              <input inputMode="numeric" value={wpknAmount} onChange={(event) => setWpknAmount(event.target.value)} />
+            </label>
+            {wpknQuote ? (
+              <p className="page-lede">
+                Quote {Number(wpknQuote.amountOut || wpknQuote.out || 0).toLocaleString()}
+                {wpknQuote.quoteId ? ` · ${wpknQuote.quoteId}` : ''}
+              </p>
+            ) : null}
+            {wpknMsg ? <p className="page-lede">{wpknMsg}</p> : null}
+          </DeskPanel>
         </div>
-        {wpknQuote ? (
-          <p className="lede-copy">
-            Quote {Number(wpknQuote.amountOut || wpknQuote.out || 0).toLocaleString()}
-            {wpknQuote.quoteId ? ` · ${wpknQuote.quoteId}` : ''}
-          </p>
-        ) : null}
-        {wpknMsg ? <p className="lede-copy">{wpknMsg}</p> : null}
-        <div className="actions">
-          <button className="btn ghost" type="button" onClick={quoteWpkn}>Public quote</button>
-          <button className="btn" type="button" disabled={busy} onClick={requestWpkn}>
-            {signedIn ? 'Request exchange' : 'Sign in to exchange'}
-          </button>
-        </div>
-      </section>
+      </div>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import CardArt from '../components/CardArt.jsx';
 import CompetitiveNav from '../components/CompetitiveNav.jsx';
+import { DeskPanel, EmptyDesk } from '../components/Desk.jsx';
 import {
   ALL_FORMATS,
   ALL_REGIONS,
@@ -43,9 +44,10 @@ function toggleIn(set, value) {
 
 function TournamentTable({ rows, winner = true }) {
   if (!rows.length) {
-    return <p className="muted">No events in this snapshot.</p>;
+    return <EmptyDesk title="No events" lede="Nothing in this snapshot tab." />;
   }
   return (
+    <DeskPanel flush>
     <div className="comp-table-wrap">
       <table className="comp-table">
         <thead>
@@ -87,6 +89,7 @@ function TournamentTable({ rows, winner = true }) {
         </tbody>
       </table>
     </div>
+    </DeskPanel>
   );
 }
 
@@ -111,7 +114,7 @@ function TournamentList() {
   }, [tab, types, formats, regions, data.cityLeagues]);
 
   return (
-    <div className="page comp-page">
+    <div className="page desk comp-page">
       <CompetitiveNav />
       <nav className="comp-tabs" aria-label="Tournament lists">
         {TABS.map((row) => (
@@ -203,7 +206,7 @@ function TournamentDetail() {
 
   if (!event) {
     return (
-      <div className="page comp-page">
+      <div className="page desk comp-page">
         <CompetitiveNav />
         <p className="status error">That tournament is not in the snapshot.</p>
       </div>
@@ -211,7 +214,7 @@ function TournamentDetail() {
   }
 
   return (
-    <div className="page comp-page">
+    <div className="page desk comp-page">
       <CompetitiveNav />
       <nav className="crumbs">
         <Link to="/marketplace/competitive/tournaments">Tournaments</Link>

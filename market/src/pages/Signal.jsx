@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchHome } from '../api.js';
 import { loadCatalog, usdMoney } from '../catalog.js';
+import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 
 export default function Signal() {
   const [home, setHome] = useState(null);
@@ -32,32 +33,43 @@ export default function Signal() {
   const homeCards = home?.cards?.length || 0;
 
   return (
-    <div className="page app-page">
-      <div className="comp-head">
-        <div>
-          <p className="eyebrow">Market</p>
-          <h1>Marketplace Signal</h1>
-          <p className="muted">Honest snapshot. No fabricated 24h %. Dump asking is the candyext Collectr catalog, not completed sales.</p>
-        </div>
-        <Link className="more" to="/marketplace" style={{ margin: 0 }}>Shop</Link>
+    <div className="page desk">
+      <PageHead
+        kicker="Market"
+        title="Signal"
+        lede="Honest snapshot. No fabricated 24h %. Dump asking is the Collectr catalog dump, not completed sales."
+      >
+        <Link className="btn" to="/marketplace">Shop</Link>
+      </PageHead>
+      <Alert>{error}</Alert>
+      <MetricGrid>
+        <Metric value={listings ? listings.toLocaleString() : '—'} label="Dump listings" />
+        <Metric value={asking ? usdMoney(asking) : '—'} label="Dump asking" />
+        <Metric value={copies ? copies.toLocaleString() : '—'} label="Dump copies" />
+        <Metric value={homeCards || '—'} label="Home rail cards" />
+      </MetricGrid>
+      <div className="forum-desk">
+        <DeskPanel title="Native shop">
+          <p className="page-lede">GET listings with nativeOnly. Empty sales stay empty. Do not invent a 24h % from spread.</p>
+          <div className="page-actions">
+            <Link className="btn" to="/marketplace">Open marketplace</Link>
+            <Link className="btn ghost" to="/marketplace/watchlist">Watchlist</Link>
+          </div>
+        </DeskPanel>
+        <DeskPanel title="Catalog dump">
+          {catalog ? (
+            <>
+              <p className="page-lede">candyext Collectr snapshot used by Explore and Portfolio. Asking is not a sale.</p>
+              <div className="page-actions">
+                <Link className="btn ghost" to="/marketplace/explore">Explore</Link>
+                <Link className="btn ghost" to="/marketplace/portfolio">Portfolio</Link>
+              </div>
+            </>
+          ) : (
+            <EmptyDesk title="Dump not loaded" lede="Explore and Portfolio read public/data/catalog.json." />
+          )}
+        </DeskPanel>
       </div>
-      {error ? <p className="status error">{error}</p> : null}
-      <div className="stat-strip">
-        <div><strong>{listings ? listings.toLocaleString() : '—'}</strong><span>Dump listings</span></div>
-        <div><strong>{asking ? usdMoney(asking) : '—'}</strong><span>Dump asking</span></div>
-        <div><strong>{copies ? copies.toLocaleString() : '—'}</strong><span>Dump copies</span></div>
-        <div><strong>{homeCards || '—'}</strong><span>Home rail cards</span></div>
-      </div>
-      <p className="muted">
-        Native shop uses GET listings with nativeOnly. Explore the
-        {' '}
-        <Link to="/marketplace/explore">dump</Link>
-        {' '}
-        or
-        {' '}
-        <Link to="/marketplace/portfolio">portfolio</Link>
-        .
-      </p>
     </div>
   );
 }

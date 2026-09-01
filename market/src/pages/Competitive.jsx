@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import CardArt from '../components/CardArt.jsx';
 import CompetitiveNav from '../components/CompetitiveNav.jsx';
+import { DeskPanel } from '../components/Desk.jsx';
 import {
   FORMAT,
   competitiveData,
@@ -38,7 +39,7 @@ export default function Competitive() {
   }, []);
 
   return (
-    <div className="page comp-page">
+    <div className="page desk comp-page">
       <CompetitiveNav />
       <section>
         <div className="carousel-head">
@@ -69,42 +70,43 @@ export default function Competitive() {
         </div>
       </section>
       <div className="comp-split">
-        <section>
-          <div className="carousel-head">
-            <h2>Recent tournaments</h2>
-            <Link className="see-all" to="/marketplace/competitive/tournaments">All completed</Link>
-          </div>
+        <DeskPanel
+          flush
+          title="Recent tournaments"
+          extra={<Link className="see-all" to="/marketplace/competitive/tournaments">All completed</Link>}
+        >
           <div className="event-list">
             {recent.map((event) => <EventRow key={event.id} event={event} />)}
           </div>
-        </section>
-        <section>
-          <div className="carousel-head">
-            <h2>Upcoming</h2>
-            <Link className="see-all" to="/marketplace/competitive/tournaments?tab=upcoming">All upcoming</Link>
-          </div>
-          <div className="event-list">
-            {upcoming.map((event) => <EventRow key={event.id} event={event} />)}
-          </div>
-          <div className="carousel-head" style={{ marginTop: '1.5rem' }}>
-            <h2>City leagues</h2>
-            <Link className="see-all" to="/marketplace/competitive/tournaments?tab=city">All leagues</Link>
-          </div>
-          <div className="event-list">
-            {leagues.map((event) => <EventRow key={event.id} event={event} />)}
-          </div>
-        </section>
-      </div>
-      <section>
-        <div className="carousel-head">
-          <h2>Notes</h2>
+        </DeskPanel>
+        <div>
+          <DeskPanel
+            flush
+            title="Upcoming"
+            extra={<Link className="see-all" to="/marketplace/competitive/tournaments?tab=upcoming">All upcoming</Link>}
+          >
+            <div className="event-list">
+              {upcoming.map((event) => <EventRow key={event.id} event={event} />)}
+            </div>
+          </DeskPanel>
+          <DeskPanel
+            flush
+            title="City leagues"
+            extra={<Link className="see-all" to="/marketplace/competitive/tournaments?tab=city">All leagues</Link>}
+          >
+            <div className="event-list">
+              {leagues.map((event) => <EventRow key={event.id} event={event} />)}
+            </div>
+          </DeskPanel>
         </div>
-        <p className="muted">
+      </div>
+      <DeskPanel title="Notes">
+        <p className="page-lede">
           This page is the candyext Limitless dump ({data.formatLabel}): {data.tournaments.length} events,
           {' '}{data.decks.length} archetypes, Worlds standings, and {Object.keys(data.lists).length} representative lists.
           It is not a live Limitless scrape and not Oracle `/api/marketplace-competitive`.
         </p>
-      </section>
+      </DeskPanel>
     </div>
   );
 }

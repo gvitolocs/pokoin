@@ -97,6 +97,36 @@
       "has": [{ "type": "host", "value": "www.pokoin.com" }],
       "destination": "https://pokoin.com/:path*",
       "permanent": true
+    },
+    {
+      "source": "/marketplace/:cardId(\\d+)/",
+      "destination": "/marketplace/en/cards/:cardId",
+      "permanent": false
+    },
+    {
+      "source": "/marketplace/:cardId(\\d+)",
+      "destination": "/marketplace/en/cards/:cardId",
+      "permanent": false
+    },
+    {
+      "source": "/:cardId(\\d+)/:cardSlug/",
+      "destination": "/marketplace/en/cards/:cardId/:cardSlug",
+      "permanent": false
+    },
+    {
+      "source": "/:cardId(\\d+)/:cardSlug",
+      "destination": "/marketplace/en/cards/:cardId/:cardSlug",
+      "permanent": false
+    },
+    {
+      "source": "/:cardId(\\d+)/",
+      "destination": "/marketplace/en/cards/:cardId",
+      "permanent": false
+    },
+    {
+      "source": "/:cardId(\\d+)",
+      "destination": "/marketplace/en/cards/:cardId",
+      "permanent": false
     }
   ],
   "rewrites": [
@@ -475,30 +505,6 @@
     {
       "source": "/marketplace",
       "destination": "/market/index.html"
-    },
-    {
-      "source": "/marketplace/:cardId(\\d+)/",
-      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/marketplace/:cardId"
-    },
-    {
-      "source": "/marketplace/:cardId(\\d+)",
-      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/marketplace/:cardId"
-    },
-    {
-      "source": "/:cardId(\\d+)/:cardSlug/",
-      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/:cardId/:cardSlug"
-    },
-    {
-      "source": "/:cardId(\\d+)/:cardSlug",
-      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/:cardId/:cardSlug"
-    },
-    {
-      "source": "/:cardId(\\d+)/",
-      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/:cardId"
-    },
-    {
-      "source": "/:cardId(\\d+)",
-      "destination": "https://api.pokoin.com/api/marketplace-card-shortlink?path=/:cardId"
     },
     {
       "source": "/api/:path*",

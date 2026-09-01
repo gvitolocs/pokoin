@@ -5,6 +5,7 @@ import { useAuth } from '../auth.jsx';
 import { CHECKOUT_SHIPPING_PKN, CHECKOUT_TAX_RATE, useCart } from '../cart.jsx';
 import { authFrom } from '../punchouts.js';
 import CardArt from '../components/CardArt.jsx';
+import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 
 function snapshot(row, fulfillmentMode, notes) {
   const qty = Number(row.qty) || 1;
@@ -56,7 +57,7 @@ export default function Checkout() {
   ]), [subtotalPkn, taxPkn, shippingPkn, totalPkn]);
 
   if (!ready) {
-    return <div className="page"><p className="muted">Checking session…</p></div>;
+    return <SessionWait />;
   }
   if (!signedIn) {
     return <Navigate to={authFrom(location.pathname || '/checkout')} replace />;
@@ -92,87 +93,95 @@ export default function Checkout() {
   }
 
   return (
-    <div className="page app-page">
-      <div className="comp-head">
-        <div>
-          <p className="eyebrow">Shop</p>
-          <h1>Checkout</h1>
-          <p className="muted">Pays site PKN via POST /api/marketplace-orders. Physical shipping is a temporary {formatPkn(CHECKOUT_SHIPPING_PKN)} line.</p>
-        </div>
-        <Link className="more" to="/cart" style={{ margin: 0 }}>Cart</Link>
-      </div>
-      <div className="stat-strip">
-        <div><strong>{count}</strong><span>Items</span></div>
-        <div><strong>{availablePkn.toLocaleString()}</strong><span>Site PKN</span></div>
-        <div><strong>{formatPkn(totalPkn)}</strong><span>Due</span></div>
-      </div>
-      {error ? <p className="status error">{error}</p> : null}
+    <div className="page desk">
+      <PageHead
+        kicker="Shop"
+        title="Checkout"
+        lede={`Pays site PKN. Physical shipping is a temporary ${formatPkn(CHECKOUT_SHIPPING_PKN)} line until a rate API exists.`}
+      >
+        <Link className="btn ghost" to="/cart">Cart</Link>
+      </PageHead>
+      <MetricGrid>
+        <Metric value={count} label="Items" />
+        <Metric value={availablePkn.toLocaleString()} label="Site PKN" />
+        <Metric value={formatPkn(totalPkn)} label="Due" />
+      </MetricGrid>
+      <Alert>{error}</Alert>
       {orderId ? (
-        <p className="lede-copy">
+        <p className="desk-ok">
           Paid order {orderId}.{' '}
           <Link to="/orders">View orders</Link>
           {nft ? <> · <Link to="/nft">NFT holdings</Link></> : null}
         </p>
       ) : null}
       {!items.length && !orderId ? (
-        <p className="muted">Cart is empty. <Link to="/marketplace">Marketplace</Link></p>
+        <EmptyDesk title="Nothing to pay" lede="Add a native listing from Shop, then return here.">
+          <Link className="btn" to="/marketplace">Marketplace</Link>
+        </EmptyDesk>
       ) : null}
       {items.length ? (
-        <>
-          <div className="cart-list">
-            {items.map((row) => (
-              <article className="cart-row" key={row.id}>
-                <Link to={row.href || '/marketplace'} className="cart-art">
-                  {row.image ? <CardArt src={row.image} alt="" /> : <span className="suggest-ph" />}
-                </Link>
-                <div>
-                  <strong>{row.name}</strong>
-                  <p className="muted">{row.condition} · {row.sellerName} · qty {row.qty}</p>
-                </div>
-                <strong>{formatPkn((Number(row.pricePkn) || 0) * (Number(row.qty) || 1))}</strong>
-              </article>
-            ))}
-          </div>
-          {canNftOnly ? (
-            <label className="muted">
-              <input type="checkbox" checked={nft} onChange={(event) => setNftOnly(event.target.checked)} />
-              NFT only (no physical ship, shipping 0)
+        <div className="wallet-desk">
+          <DeskPanel title="Order">
+            <div className="bag-list">
+              {items.map((row) => (
+                <article className="bag-row summary" key={row.id}>
+                  <Link to={row.href || '/marketplace'} className="bag-art">
+                    {row.image ? <CardArt src={row.image} alt="" /> : <span className="suggest-ph" />}
+                  </Link>
+                  <div className="bag-info">
+                    <strong className="bag-name">{row.name}</strong>
+                    <p className="bag-seller">{row.condition} · {row.sellerName} · qty {row.qty}</p>
+                  </div>
+                  <strong className="bag-price">{formatPkn((Number(row.pricePkn) || 0) * (Number(row.qty) || 1))}</strong>
+                </article>
+              ))}
+            </div>
+            {canNftOnly ? (
+              <label className="page-lede">
+                <input type="checkbox" checked={nft} onChange={(event) => setNftOnly(event.target.checked)} />
+                {' '}NFT only — no physical ship, shipping 0
+              </label>
+            ) : (
+              <p className="page-lede">NFT-only checkout needs every row flagged nftAvailable or reserveAvailable.</p>
+            )}
+            <label className="sell-field">
+              Notes
+              <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} />
             </label>
-          ) : (
-            <p className="muted">NFT-only checkout needs every row flagged nftAvailable or reserveAvailable.</p>
-          )}
-          <label className="sell-field">
-            Notes
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} />
-          </label>
-          <dl className="fee-lines">
-            {totals.map(([label, value]) => (
-              <div key={label}><dt>{label}</dt><dd>{formatPkn(value)}</dd></div>
-            ))}
-          </dl>
-          {confirm ? (
-            <div className="panel site-block">
-              <p className="lede-copy">
-                {nft
-                  ? `Pay ${formatPkn(totalPkn)} from site balance, create one NFT-only order, no physical card ships now.`
-                  : `Pay ${formatPkn(totalPkn)} from site balance and notify each seller once.`}
-              </p>
-              <div className="actions">
+          </DeskPanel>
+          <DeskPanel
+            title="Pay"
+            actions={confirm ? (
+              <>
                 <button className="btn" type="button" disabled={busy} onClick={place}>
                   {busy ? 'Paying…' : 'Confirm order'}
                 </button>
                 <button className="btn ghost" type="button" onClick={() => setConfirm(false)}>Review again</button>
-              </div>
-            </div>
-          ) : (
-            <div className="actions">
-              <button className="btn" type="button" disabled={busy || missingListing} onClick={() => setConfirm(true)}>
-                Place order
-              </button>
-              <button className="btn ghost" type="button" onClick={() => navigate('/cart')}>Back to cart</button>
-            </div>
-          )}
-        </>
+              </>
+            ) : (
+              <>
+                <button className="btn" type="button" disabled={busy || missingListing} onClick={() => setConfirm(true)}>
+                  Place order
+                </button>
+                <button className="btn ghost" type="button" onClick={() => navigate('/cart')}>Back to cart</button>
+              </>
+            )}
+          >
+            <dl className="fee-lines">
+              {totals.map(([label, value]) => (
+                <div key={label}><dt>{label}</dt><dd>{formatPkn(value)}</dd></div>
+              ))}
+            </dl>
+            {confirm ? (
+              <p className="page-lede">
+                {nft
+                  ? `Pay ${formatPkn(totalPkn)} from site balance, create one NFT-only order, no physical card ships now.`
+                  : `Pay ${formatPkn(totalPkn)} from site balance and notify each seller once.`}
+              </p>
+            ) : null}
+            {missingListing ? <Alert>A cart row is missing listingId. Add the offer from Shop again.</Alert> : null}
+          </DeskPanel>
+        </div>
       ) : null}
     </div>
   );

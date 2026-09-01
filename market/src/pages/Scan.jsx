@@ -7,6 +7,7 @@ import {
   publicIdFromScanHit,
   scanHitsOf,
 } from '../api.js';
+import { Alert, DeskPanel, FilePill, PageHead, Thread } from '../components/Desk.jsx';
 
 export default function Scan() {
   const navigate = useNavigate();
@@ -78,51 +79,69 @@ export default function Scan() {
   }
 
   return (
-    <div className="page app-page">
-      <div className="comp-head">
-        <div>
-          <p className="eyebrow">Identify</p>
-          <h1>Card scan</h1>
-          <p className="muted">Photo posts to /cardscan/identify. Public card_id is CardTrader blueprint × 2. TCGplayer ids are ignored.</p>
-        </div>
-      </div>
-      <form className="panel auth-card" onSubmit={identify}>
-        <label className="sell-field">
-          Photo
-          <input type="file" accept="image/*" capture="environment" onChange={onFile} />
-        </label>
-        {preview ? <img className="scan-preview" src={preview} alt="Selected card" /> : null}
-        <label className="sell-field">
-          Search catalog
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Card name" />
-        </label>
-        {error ? <p className="status error">{error}</p> : null}
-        <div className="actions">
-          <button className="btn" type="submit" disabled={busy}>
-            {busy ? 'Identifying…' : (file ? 'Identify photo' : 'Search marketplace')}
-          </button>
-          <button className="btn ghost" type="button" onClick={search}>Search catalog</button>
-        </div>
+    <div className="page desk">
+      <PageHead
+        kicker="Identify"
+        title="Card scan"
+        lede="Photo posts to /cardscan/identify. Public card_id is CardTrader blueprint × 2. TCGplayer ids are ignored."
+      >
+        <Link className="btn ghost" to="/marketplace">Shop</Link>
+      </PageHead>
+      <form onSubmit={identify}>
+        <DeskPanel
+          title="Photo or name"
+          actions={(
+            <>
+              <button className="btn" type="submit" disabled={busy}>
+                {busy ? 'Identifying…' : (file ? 'Identify photo' : 'Search marketplace')}
+              </button>
+              <button className="btn ghost" type="button" onClick={search}>Search catalog</button>
+            </>
+          )}
+        >
+          <div className="scan-stage">
+            <div>
+              {preview ? <img className="scan-preview" src={preview} alt="Selected card" /> : (
+                <div className="empty-art" style={{ width: '100%', height: 220, borderRadius: 12 }}>No photo</div>
+              )}
+            </div>
+            <div className="scan-fields">
+              <FilePill accept="image/*" capture="environment" onChange={onFile}>
+                {file ? file.name : 'Choose or capture a card'}
+              </FilePill>
+              <label className="sell-field">
+                Search catalog
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Card name" />
+              </label>
+              <Alert>{error}</Alert>
+            </div>
+          </div>
+        </DeskPanel>
       </form>
       {hits.length ? (
-        <div className="forum-list">
-          {hits.map((row, index) => {
-            const href = row.card ? cardHref(row.card) : (row.publicId ? `/marketplace/en/cards/${row.publicId}` : '');
-            return href ? (
-              <Link className="forum-row" key={`${row.publicId || row.name}-${index}`} to={href}>
-                <strong>{row.name}</strong>
-                <span className="muted">{[row.set, row.number].filter(Boolean).join(' · ') || 'Matched printing'}</span>
-              </Link>
-            ) : (
-              <article className="forum-row" key={`${row.name}-${index}`}>
-                <strong>{row.name}</strong>
-                <span className="muted">No catalog match. TCGplayer id ignored.</span>
-              </article>
-            );
-          })}
-        </div>
+        <DeskPanel title="Matches">
+          <div className="thread-list">
+            {hits.map((row, index) => {
+              const href = row.card ? cardHref(row.card) : (row.publicId ? `/marketplace/en/cards/${row.publicId}` : '');
+              return href ? (
+                <Thread
+                  key={`${row.publicId || row.name}-${index}`}
+                  to={href}
+                  title={row.name}
+                  meta={[row.set, row.number].filter(Boolean).join(' · ') || 'Matched printing'}
+                />
+              ) : (
+                <article className="thread" key={`${row.name}-${index}`}>
+                  <span className="thread-main">
+                    <strong className="thread-title">{row.name}</strong>
+                    <span className="thread-meta">No catalog match. TCGplayer id ignored.</span>
+                  </span>
+                </article>
+              );
+            })}
+          </div>
+        </DeskPanel>
       ) : null}
-      <p className="muted"><Link to="/marketplace">Open the shop</Link> without a photo.</p>
     </div>
   );
 }

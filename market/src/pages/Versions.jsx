@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { cardFromCatalogRow, cardHref, fetchCard } from '../api.js';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
+import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
 export default function Versions() {
   const { lang = 'en', cardId, slug } = useParams();
@@ -33,7 +34,7 @@ export default function Versions() {
   const rows = versions.length ? versions : (card ? [cardFromCatalogRow(card)] : []);
 
   return (
-    <div className="page">
+    <div className="page desk">
       <nav className="crumbs">
         <Link to="/marketplace">Marketplace</Link>
         <span>/</span>
@@ -41,20 +42,28 @@ export default function Versions() {
         <span>/</span>
         <span>Versions</span>
       </nav>
-      <p className="eyebrow">Printings</p>
-      <h1>{card?.name || 'Versions'}</h1>
-      <p className="muted">
-        From marketplace-card-page.versions. Do not use the timed-out marketplace-card-versions endpoint.
-      </p>
-      {error ? <p className="status error">{error}</p> : null}
-      <div className="grid">
-        {!payload && !error
-          ? Array.from({ length: 8 }, (_, index) => <SkeletonTile key={index} />)
-          : rows.map((row, index) => (
-              <CardTile key={row.id} card={row} rank={index} />
-            ))}
+      <PageHead
+        kicker="Printings"
+        title={card?.name || 'Versions'}
+        lede="From marketplace-card-page.versions. The timed-out marketplace-card-versions endpoint is not used."
+      />
+      <div className="shop-toolbar">
+        <p className="result-count">
+          {payload ? <><strong>{rows.length}</strong> printings</> : 'Loading…'}
+        </p>
       </div>
-      {payload && !rows.length ? <p className="muted">No other printings on this page response.</p> : null}
+      <Alert>{error}</Alert>
+      {payload && !rows.length ? (
+        <EmptyDesk title="No other printings" lede="This page response has a single version." />
+      ) : (
+        <div className="grid">
+          {!payload && !error
+            ? Array.from({ length: 8 }, (_, index) => <SkeletonTile key={index} />)
+            : rows.map((row, index) => (
+                <CardTile key={row.id} card={row} rank={index} />
+              ))}
+        </div>
+      )}
     </div>
   );
 }

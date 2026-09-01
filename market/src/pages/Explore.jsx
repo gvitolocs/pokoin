@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import CardArt from '../components/CardArt.jsx';
 import DumpNav from '../components/DumpNav.jsx';
+import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import {
   dumpItemHref,
   dumpWatchIds,
@@ -101,8 +102,10 @@ export default function Explore() {
 
   if (error) {
     return (
-      <div className="page">
-        <p className="status error">{error}</p>
+      <div className="page desk">
+        <PageHead kicker="Shop dump" title="Explore" />
+        <DumpNav />
+        <Alert>{error}</Alert>
       </div>
     );
   }
@@ -110,92 +113,104 @@ export default function Explore() {
   const visible = filtered.slice(0, shown);
 
   return (
-    <div className="page port-page">
+    <div className="page desk port-page">
+      <PageHead
+        kicker="Shop dump"
+        title="Explore"
+        lede="Candyext CardTrader snapshot. Asking prices, not sold comps."
+      />
       <DumpNav />
-      <p className="eyebrow">Find a product</p>
-      <h1>Explore</h1>
       <form
-        className="explore-find"
+        className="shop-toolbar"
         onSubmit={(event) => {
           event.preventDefault();
           setShown(PAGE);
         }}
       >
-        <input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search any sealed or unsealed product…"
-          aria-label="Search dump products"
-        />
-        <button className="more" type="submit" style={{ margin: 0 }}>Search</button>
-        <button
-          className="more"
-          type="button"
-          style={{ margin: 0 }}
-          onClick={() => {
-            setQuery('');
-            setType('all');
-            setMin('');
-            setMax('');
-            setWatchOnly(false);
-            setGames(new Set());
-            setLangs(new Set());
-            setSort('value');
-          }}
-        >
-          Clear
-        </button>
-      </form>
-      <div className="comp-toolbar">
-        <label className="sort">
-          Sort by
-          <select value={sort} onChange={(event) => setSort(event.target.value)}>
+        <p className="result-count">
+          {!catalog
+            ? 'Loading dump…'
+            : (
+              <>
+                Showing <strong>{visible.length.toLocaleString('en-US')}</strong>
+                {' of '}
+                {filtered.length.toLocaleString('en-US')}
+                {' · '}
+                {(catalog.totals.qty || 0).toLocaleString('en-US')} copies
+              </>
+            )}
+        </p>
+        <div className="toolbar-right">
+          <input
+            className="shop-search"
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search sealed or singles…"
+            aria-label="Search dump products"
+          />
+          <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort">
             <option value="value">Most valuable</option>
             <option value="name">Name</option>
             <option value="qty">Most copies</option>
           </select>
-        </label>
-      </div>
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => {
+              setQuery('');
+              setType('all');
+              setMin('');
+              setMax('');
+              setWatchOnly(false);
+              setGames(new Set());
+              setLangs(new Set());
+              setSort('value');
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      </form>
       <div className="explore-layout">
-        <aside className="explore-filters" aria-label="Filters">
-          <div>
-            <h2>Watchlist</h2>
-            <label>
+        <aside className="filter-rail" aria-label="Filters">
+          <div className="filter-group">
+            <span className="filter-label">Watchlist</span>
+            <label className="filter-option">
               <input type="checkbox" checked={watchOnly} onChange={(event) => setWatchOnly(event.target.checked)} />
               Dump watchlist only
             </label>
           </div>
-          <div>
-            <h2>Product type</h2>
+          <div className="filter-group">
+            <span className="filter-label">Product type</span>
             {['all', 'cards', 'sealed'].map((value) => (
-              <label key={value}>
+              <label className="filter-option" key={value}>
                 <input type="radio" name="explore-type" checked={type === value} onChange={() => setType(value)} />
                 {value === 'all' ? 'All' : value === 'cards' ? 'Cards only' : 'Sealed only'}
               </label>
             ))}
           </div>
-          <div>
-            <h2>Price (USD)</h2>
+          <div className="filter-group">
+            <span className="filter-label">Price (USD)</span>
             <div className="explore-price">
               <input type="number" min="0" step="0.01" placeholder="Min" value={min} onChange={(event) => setMin(event.target.value)} />
               <span>to</span>
               <input type="number" min="0" step="0.01" placeholder="Max" value={max} onChange={(event) => setMax(event.target.value)} />
             </div>
           </div>
-          <div>
-            <h2>Language</h2>
+          <div className="filter-group">
+            <span className="filter-label">Language</span>
             {langNames.map((lang) => (
-              <label key={lang}>
+              <label className="filter-option" key={lang}>
                 <input type="checkbox" checked={langs.has(lang)} onChange={() => toggleSet(setLangs, lang)} />
                 {lang}
               </label>
             ))}
           </div>
-          <div>
-            <h2>Category</h2>
+          <div className="filter-group">
+            <span className="filter-label">Category</span>
             {gameNames.map((game) => (
-              <label key={game}>
+              <label className="filter-option" key={game}>
                 <input type="checkbox" checked={games.has(game)} onChange={() => toggleSet(setGames, game)} />
                 {game}
               </label>
@@ -203,40 +218,34 @@ export default function Explore() {
           </div>
         </aside>
         <section>
-          {!catalog ? (
-            <p className="muted">Loading candyext CardTrader dump…</p>
+          {catalog && !filtered.length ? (
+            <EmptyDesk title="No products match" lede="Clear filters or search a different name." />
           ) : (
-            <p className="muted">
-              Showing {visible.length.toLocaleString('en-US')} of {filtered.length.toLocaleString('en-US')}
-              {' · '}
-              {(catalog.totals.qty || 0).toLocaleString('en-US')} copies in shop
-            </p>
+            <div className="explore-grid">
+              {visible.map((item) => (
+                <article className="explore-card" key={item.id}>
+                  <Link to={dumpItemHref(item)}>
+                    <CardArt src={item.img} alt="" loading="lazy" />
+                    <strong>{item.name}</strong>
+                    <span className="muted">{[item.expansion, item.rarity].filter(Boolean).join(' · ')}</span>
+                    <span className="muted">{finishLabel(item)}{item.qty > 1 ? ` · ×${item.qty}` : ''}</span>
+                    <em>{usdMoney(item.usd)}</em>
+                  </Link>
+                  <button
+                    className={dumpWatchedAt(item.id, watchTick) ? 'explore-add on' : 'explore-add'}
+                    type="button"
+                    aria-label="Add to dump watchlist"
+                    onClick={() => {
+                      toggleDumpWatch(item.id);
+                      setWatchTick((value) => value + 1);
+                    }}
+                  >
+                    +
+                  </button>
+                </article>
+              ))}
+            </div>
           )}
-          <div className="explore-grid">
-            {visible.map((item) => (
-              <article className="explore-card" key={item.id}>
-                <Link to={dumpItemHref(item)}>
-                  <CardArt src={item.img} alt="" loading="lazy" />
-                  <strong>{item.name}</strong>
-                  <span className="muted">{[item.expansion, item.rarity].filter(Boolean).join(' · ')}</span>
-                  <span className="muted">{finishLabel(item)}{item.qty > 1 ? ` · ×${item.qty}` : ''}</span>
-                  <em>{usdMoney(item.usd)}</em>
-                </Link>
-                <button
-                  className={dumpWatchedAt(item.id, watchTick) ? 'explore-add on' : 'explore-add'}
-                  type="button"
-                  aria-label="Add to dump watchlist"
-                  onClick={() => {
-                    toggleDumpWatch(item.id);
-                    setWatchTick((value) => value + 1);
-                  }}
-                >
-                  +
-                </button>
-              </article>
-            ))}
-          </div>
-          {catalog && !filtered.length ? <p className="muted">No products match those filters.</p> : null}
           <div ref={sentinel} />
         </section>
       </div>

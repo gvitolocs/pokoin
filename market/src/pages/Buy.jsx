@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { createPknCheckout } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
+import { Alert, DeskPanel, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 
 const RATE = 0.005;
 const PACKAGES = [
@@ -79,44 +80,45 @@ export default function Buy() {
   }
 
   return (
-    <div className="page app-page">
-      <div className="comp-head">
-        <div>
-          <p className="eyebrow">PKN</p>
-          <h1>Buy PKN</h1>
-          <p className="muted">Fixed packages at 1 PKN = {RATE} USDT. Credits site balance after Stripe webhook, not chain PKN.</p>
-        </div>
-      </div>
-      <div className="stat-strip">
-        <div><strong>{availablePkn.toLocaleString()}</strong><span>Site PKN</span></div>
-        <div><strong>{preview.toLocaleString()}</strong><span>{selected.label} package</span></div>
-        <div><strong>€{(selected.fiatCents / 100).toFixed(2)}</strong><span>Card charge</span></div>
-      </div>
-      {sessionId && !signedIn ? (
-        <p className="lede-copy">Stripe returned a session. Sign in to confirm it against site balance.</p>
-      ) : null}
-      {message ? <p className="lede-copy">{message}</p> : null}
-      {error ? <p className="status error">{error}</p> : null}
-      <div className="pkg-grid">
-        {PACKAGES.map((item) => (
-          <button
-            key={item.lookupKey}
-            type="button"
-            className={`panel pkg-card ${selected.lookupKey === item.lookupKey ? 'on' : ''}`}
-            onClick={() => setSelected(item)}
-          >
-            <strong>{item.label}</strong>
-            <span>{pknAmount(item).toLocaleString()} PKN</span>
-            <em>€{(item.fiatCents / 100).toFixed(2)}</em>
+    <div className="page desk">
+      <PageHead
+        kicker="PKN"
+        title="Buy PKN"
+        lede={`Fixed packages at 1 PKN = ${RATE} USDT. Credits site balance after Stripe, not chain PKN.`}
+      >
+        <Link className="btn ghost" to="/wallet">Wallet</Link>
+      </PageHead>
+      <MetricGrid>
+        <Metric value={availablePkn.toLocaleString()} label="Site PKN" />
+        <Metric value={preview.toLocaleString()} label={`${selected.label} package`} />
+        <Metric value={`€${(selected.fiatCents / 100).toFixed(2)}`} label="Card charge" />
+      </MetricGrid>
+      {sessionId && !signedIn ? <p className="desk-ok">Stripe returned a session. Sign in to confirm it against site balance.</p> : null}
+      {message ? <p className="desk-ok">{message}</p> : null}
+      <Alert>{error}</Alert>
+      <DeskPanel
+        title="Packages"
+        actions={(
+          <button className="btn" type="button" disabled={busy} onClick={pay}>
+            {busy ? 'Opening Stripe…' : (signedIn ? 'Pay with card' : 'Sign in to buy')}
           </button>
-        ))}
-      </div>
-      <div className="actions">
-        <button className="btn" type="button" disabled={busy} onClick={pay}>
-          {busy ? 'Opening Stripe…' : (signedIn ? 'Pay with card' : 'Sign in to buy')}
-        </button>
-        <Link className="btn ghost" to="/wallet">Wallet / swap</Link>
-      </div>
+        )}
+      >
+        <div className="pkg-grid">
+          {PACKAGES.map((item) => (
+            <button
+              key={item.lookupKey}
+              type="button"
+              className={`pkg-card ${selected.lookupKey === item.lookupKey ? 'on' : ''}`}
+              onClick={() => setSelected(item)}
+            >
+              <strong>{item.label}</strong>
+              <span>{pknAmount(item).toLocaleString()} PKN</span>
+              <em>€{(item.fiatCents / 100).toFixed(2)}</em>
+            </button>
+          ))}
+        </div>
+      </DeskPanel>
     </div>
   );
 }

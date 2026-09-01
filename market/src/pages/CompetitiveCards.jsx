@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import CardArt from '../components/CardArt.jsx';
 import CompetitiveNav from '../components/CompetitiveNav.jsx';
+import { EmptyDesk } from '../components/Desk.jsx';
 import { competitiveData, scanUrl } from '../competitive.js';
 
 function CardsList() {
@@ -23,27 +24,31 @@ function CardsList() {
   }
 
   return (
-    <div className="page comp-page">
+    <div className="page desk comp-page">
       <CompetitiveNav />
-      <form className="comp-toolbar" onSubmit={submit}>
+      <form className="shop-toolbar" onSubmit={submit}>
+        <p className="result-count"><strong>{rows.length}</strong> cards</p>
         <input
+          className="shop-search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search snapshot cards"
           aria-label="Search competitive cards"
         />
-        <button className="more" type="submit" style={{ margin: 0 }}>Search</button>
       </form>
-      <div className="comp-card-grid">
-        {rows.map((card) => (
-          <Link className="comp-card-tile" key={card.id} to={`/marketplace/competitive/cards/${card.id}`}>
-            <CardArt src={scanUrl(card.set, card.num)} alt={card.name} />
-            <strong>{card.name}</strong>
-            <span className="muted">{card.set} {card.num} · {card.type}</span>
-          </Link>
-        ))}
-      </div>
-      {rows.length ? null : <p className="muted">No cards match that search.</p>}
+      {rows.length ? (
+        <div className="comp-card-grid">
+          {rows.map((card) => (
+            <Link className="comp-card-tile" key={card.id} to={`/marketplace/competitive/cards/${card.id}`}>
+              <CardArt src={scanUrl(card.set, card.num)} alt={card.name} />
+              <strong>{card.name}</strong>
+              <span className="muted">{card.set} {card.num} · {card.type}</span>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <EmptyDesk title="No cards match" lede="Try a set code or a shorter name." />
+      )}
     </div>
   );
 }
@@ -62,7 +67,7 @@ function CardDetail() {
 
   if (!card) {
     return (
-      <div className="page comp-page">
+      <div className="page desk comp-page">
         <CompetitiveNav />
         <p className="status error">That card is not in the snapshot.</p>
       </div>
@@ -70,7 +75,7 @@ function CardDetail() {
   }
 
   return (
-    <div className="page comp-page">
+    <div className="page desk comp-page">
       <CompetitiveNav />
       <nav className="crumbs">
         <Link to="/marketplace/competitive/cards">Cards</Link>

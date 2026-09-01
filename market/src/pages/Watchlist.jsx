@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { clearWatchlist, hydrateWatchlist } from '../api.js';
 import CardTile from '../components/CardTile.jsx';
+import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
 export default function Watchlist() {
   const [cards, setCards] = useState(null);
@@ -23,18 +24,12 @@ export default function Watchlist() {
   }, []);
 
   return (
-    <div className="page">
-      <div className="comp-head">
-        <div>
-          <p className="eyebrow">Account</p>
-          <h1>Watchlist</h1>
-          <p className="muted">Saved on this browser until you sign in.</p>
-        </div>
+    <div className="page desk">
+      <PageHead kicker="Account" title="Watchlist" lede="Saved on this browser until you sign in. Not a server list.">
         {cards?.length ? (
           <button
-            className="more"
+            className="btn ghost"
             type="button"
-            style={{ margin: 0 }}
             onClick={() => {
               clearWatchlist();
               setCards([]);
@@ -43,15 +38,14 @@ export default function Watchlist() {
             Clear
           </button>
         ) : null}
-      </div>
-      {error ? <p className="status error">{error}</p> : null}
-      {cards == null ? <p className="muted">Loading watchlist…</p> : null}
+        <Link className="btn ghost" to="/marketplace">Shop</Link>
+      </PageHead>
+      <Alert>{error}</Alert>
+      {cards == null ? <div className="skeleton-line" /> : null}
       {cards && !cards.length ? (
-        <p className="muted">
-          Nothing watched yet. Open a card and tap the star, or browse the
-          {' '}
-          <Link to="/marketplace">marketplace</Link>.
-        </p>
+        <EmptyDesk title="Nothing watched" lede="Open a card and tap the star.">
+          <Link className="btn" to="/marketplace">Browse marketplace</Link>
+        </EmptyDesk>
       ) : null}
       <div className="grid">
         {(cards || []).map((card, index) => (

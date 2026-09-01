@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import CardArt from '../components/CardArt.jsx';
 import CompetitiveNav from '../components/CompetitiveNav.jsx';
+import { DeskPanel } from '../components/Desk.jsx';
 import {
   FLAG,
   competitiveData,
@@ -24,20 +25,19 @@ function PlayersList() {
   }, []);
 
   return (
-    <div className="page comp-page">
+    <div className="page desk comp-page">
       <CompetitiveNav />
-      <div className="comp-toolbar">
-        <label className="sort">
-          Rank by
-          <select value={rank} onChange={(event) => setRank(event.target.value)}>
-            <option value="points">Points</option>
-            <option value="earnings">Earnings</option>
-            <option value="day2">Day 2 finishes</option>
-            <option value="top8">Top 8 finishes</option>
-            <option value="wins">Tournament wins</option>
-          </select>
-        </label>
+      <div className="shop-toolbar">
+        <p className="result-count"><strong>{rows.length}</strong> players</p>
+        <select value={rank} onChange={(event) => setRank(event.target.value)} aria-label="Rank by">
+          <option value="points">Points</option>
+          <option value="earnings">Earnings</option>
+          <option value="day2">Day 2 finishes</option>
+          <option value="top8">Top 8 finishes</option>
+          <option value="wins">Tournament wins</option>
+        </select>
       </div>
+      <DeskPanel flush>
       <div className="comp-table-wrap">
         <table className="comp-table">
           <thead>
@@ -71,6 +71,7 @@ function PlayersList() {
           </tbody>
         </table>
       </div>
+      </DeskPanel>
     </div>
   );
 }
@@ -89,7 +90,7 @@ function PlayerDetail() {
 
   if (!player) {
     return (
-      <div className="page comp-page">
+      <div className="page desk comp-page">
         <CompetitiveNav />
         <p className="status error">That player is not in the snapshot.</p>
       </div>
@@ -97,7 +98,7 @@ function PlayerDetail() {
   }
 
   return (
-    <div className="page comp-page">
+    <div className="page desk comp-page">
       <CompetitiveNav />
       <nav className="crumbs">
         <Link to="/marketplace/competitive/players">Rankings</Link>

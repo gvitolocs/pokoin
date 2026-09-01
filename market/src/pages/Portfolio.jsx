@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import CardArt from '../components/CardArt.jsx';
 import DumpNav from '../components/DumpNav.jsx';
+import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 import {
   catalogItemById,
   dumpItemHref,
@@ -141,18 +142,19 @@ function PortfolioList() {
 
   if (error) {
     return (
-      <div className="page">
-        <p className="status error">{error}</p>
+      <div className="page desk">
+        <PageHead kicker="Shop dump" title="Portfolio" />
+        <DumpNav />
+        <Alert>{error}</Alert>
       </div>
     );
   }
 
   if (!catalog) {
     return (
-      <div className="page">
-        <p className="eyebrow">Portfolio</p>
-        <h1>Shop snapshot</h1>
-        <p className="muted">Loading candyext CardTrader dump…</p>
+      <div className="page desk">
+        <PageHead kicker="Portfolio" title="Shop snapshot" lede="Loading candyext CardTrader dump…" />
+        <DumpNav />
       </div>
     );
   }
@@ -164,28 +166,21 @@ function PortfolioList() {
   const stamp = String(catalog.generated || '').slice(0, 10);
 
   return (
-    <div className="page port-page">
+    <div className="page desk port-page">
+      <PageHead
+        kicker="Portfolio"
+        title={[seller.username || 'RotationMotionTGC', seller.country, seller.pro ? 'PRO' : '']
+          .filter(Boolean)
+          .join(' · ')}
+        lede={`Candyext dump of the public CardTrader shop (${stamp || '2026-08-30'}). Asking prices, not sold comps.`}
+      />
       <DumpNav />
-      <section className="port-hero">
-        <p className="eyebrow">Portfolio</p>
-        <h1>
-          {seller.username || 'RotationMotionTGC'}
-          {seller.country ? ` · ${seller.country}` : ''}
-          {seller.pro ? ' · PRO' : ''}
-        </h1>
-        <p className="port-value">{usdMoney(displayed)}</p>
-        <p className="muted">
-          {usdMoney(catalog.totals.usd)} asking
-          {' · '}
-          {(catalog.totals.qty || 0).toLocaleString('en-US')} copies
-          {' · '}
-          {(catalog.totals.listings || 0).toLocaleString('en-US')} listings
-          {seller.feedback != null ? ` · ${seller.feedback}% feedback` : ''}
-        </p>
-        <p className="muted">
-          Candyext dump of the public CardTrader shop ({stamp || '2026-08-30'}). Asking prices, not sold comps, not live Pokoin inventory. No synthetic 24h %.
-        </p>
-      </section>
+      <MetricGrid>
+        <Metric value={usdMoney(displayed)} label="Asking" hint={usdMoney(catalog.totals.usd)} />
+        <Metric value={(catalog.totals.qty || 0).toLocaleString('en-US')} label="Copies" />
+        <Metric value={(catalog.totals.listings || 0).toLocaleString('en-US')} label="Listings" />
+        <Metric value={seller.feedback != null ? `${seller.feedback}%` : '—'} label="Feedback" />
+      </MetricGrid>
 
       <section>
         <div className="carousel-head">
@@ -209,44 +204,45 @@ function PortfolioList() {
       <Rail title="Most copies" items={ranked.copies} />
 
       <section>
-        <div className="carousel-head">
-          <h2>Holdings</h2>
-          <label className="port-search">
-            <span className="sr-only">Search this portfolio</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search this portfolio…"
-            />
-          </label>
+        <div className="shop-toolbar">
+          <p className="result-count">Holdings</p>
+          <input
+            className="shop-search"
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search this portfolio…"
+            aria-label="Search this portfolio"
+          />
         </div>
-        <div className="port-holdings">
-          {visible.map((item) => (
-            <Link className="port-hold" key={item.id} to={dumpItemHref(item)}>
-              <CardArt src={item.img} alt="" loading="lazy" />
-              <div>
-                <strong>{item.name}</strong>
-                <span className="muted">
-                  {item.game}
-                  {' · '}
-                  {item.expansion}
-                  {' · '}
-                  {finishLabel(item)}
-                  {' · ×'}
-                  {item.qty}
-                </span>
-              </div>
-              <em>{usdMoney(item.usdTotal)}</em>
-            </Link>
-          ))}
-        </div>
+        <DeskPanel flush>
+          <div className="port-holdings">
+            {visible.map((item) => (
+              <Link className="port-hold" key={item.id} to={dumpItemHref(item)}>
+                <CardArt src={item.img} alt="" loading="lazy" />
+                <div>
+                  <strong>{item.name}</strong>
+                  <span className="muted">
+                    {item.game}
+                    {' · '}
+                    {item.expansion}
+                    {' · '}
+                    {finishLabel(item)}
+                    {' · ×'}
+                    {item.qty}
+                  </span>
+                </div>
+                <em>{usdMoney(item.usdTotal)}</em>
+              </Link>
+            ))}
+          </div>
+        </DeskPanel>
         {ranked.holdings.length ? (
-          <p className="muted">
+          <p className="page-lede">
             Showing {visible.length.toLocaleString('en-US')} of {ranked.holdings.length.toLocaleString('en-US')}
           </p>
         ) : (
-          <p className="muted">No holdings match that search.</p>
+          <EmptyDesk nested title="No holdings match" lede="Try a shorter name." />
         )}
         <div ref={sentinel} />
       </section>
@@ -281,25 +277,26 @@ function HoldingDetail() {
 
   if (error) {
     return (
-      <div className="page">
-        <p className="status error">{error}</p>
+      <div className="page desk">
+        <DumpNav />
+        <Alert>{error}</Alert>
       </div>
     );
   }
 
   if (!catalog) {
     return (
-      <div className="page">
-        <p className="muted">Loading candyext CardTrader dump…</p>
+      <div className="page desk">
+        <p className="page-lede">Loading candyext CardTrader dump…</p>
       </div>
     );
   }
 
   if (!item) {
     return (
-      <div className="page">
-        <p className="status error">That listing is not in the snapshot.</p>
-        <Link to="/marketplace/portfolio">Back to portfolio</Link>
+      <div className="page desk">
+        <Alert>That listing is not in the snapshot.</Alert>
+        <Link className="btn ghost" to="/marketplace/portfolio">Back to portfolio</Link>
       </div>
     );
   }
@@ -307,7 +304,7 @@ function HoldingDetail() {
   const live = dumpMarketplaceHref(item);
 
   return (
-    <div className="page port-page">
+    <div className="page desk port-page">
       <nav className="crumbs">
         <Link to="/marketplace/portfolio">Portfolio</Link>
         <span>/</span>

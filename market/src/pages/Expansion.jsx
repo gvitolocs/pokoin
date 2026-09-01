@@ -5,6 +5,7 @@ import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
 import CardArt from '../components/CardArt.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
+import { Alert, PageHead } from '../components/Desk.jsx';
 
 export default function Expansion() {
   const { slug } = useParams();
@@ -57,25 +58,20 @@ export default function Expansion() {
   const symbol = payload?.expansion?.defaultSymbolUrl || payload?.expansion?.symbolImageUrl;
 
   return (
-    <div className="page" aria-busy={loading ? 'true' : undefined}>
+    <div className="page desk" aria-busy={loading ? 'true' : undefined}>
       <nav className="crumbs">
         <Link to="/marketplace/sets">Sets</Link>
         <span>/</span>
         <span>{name}</span>
       </nav>
-      <div className="set-head">
-        {symbol ? (
-          <CardArt className="set-sym" src={symbol} alt="" fallback="hide" />
-        ) : loading ? (
-          <span className="set-sym skel-box" aria-hidden="true" />
-        ) : null}
-        <div>
-          <p className="eyebrow">Set</p>
-          <h1>{name}</h1>
-          <p className="muted">{loading ? '\u00a0' : `${cards.length}${payload?.hasMore ? '+' : ''} cards`}</p>
-        </div>
-      </div>
-      {error ? <p className="status error">{error}</p> : null}
+      <PageHead
+        kicker="Set"
+        title={name}
+        lede={loading ? 'Loading cards…' : `${cards.length}${payload?.hasMore ? '+' : ''} cards`}
+      >
+        {symbol ? <CardArt className="set-sym" src={symbol} alt="" fallback="hide" /> : null}
+      </PageHead>
+      <Alert>{error}</Alert>
       <div className="grid">
         {loading
           ? Array.from({ length: 24 }, (_, index) => <SkeletonTile key={index} />)

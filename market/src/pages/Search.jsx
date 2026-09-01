@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { fetchSearch } from '../api.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
+import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
 export default function Search() {
   const [params] = useSearchParams();
@@ -56,21 +57,37 @@ export default function Search() {
   }
 
   return (
-    <div className="page" aria-busy={loading ? 'true' : undefined}>
-      <h1>{query || 'Search'}</h1>
-      {!loading && !error ? (
-        <p className="muted">{cards.length ? `${cards.length}${hasMore ? '+' : ''} results` : 'No cards match that search.'}</p>
-      ) : (
-        <p className="muted">{'\u00a0'}</p>
-      )}
-      {error ? <p className="status error">{error}</p> : null}
-      <div className="grid">
-        {loading
-          ? Array.from({ length: 24 }, (_, index) => <SkeletonTile key={index} />)
-          : cards.map((card, index) => (
-              <CardTile key={card.id} card={card} rank={index} />
-            ))}
+    <div className="page desk" aria-busy={loading ? 'true' : undefined}>
+      <PageHead
+        kicker="Catalog"
+        title={query || 'Search'}
+        lede={query ? `Matches for “${query}”. Use the bar above to refine.` : 'Search a card, set, or product from the bar above.'}
+      >
+        <Link className="btn ghost" to="/marketplace">Shop</Link>
+      </PageHead>
+      <div className="shop-toolbar">
+        <p className="result-count">
+          {loading
+            ? 'Searching…'
+            : (cards.length
+              ? <><strong>{cards.length.toLocaleString('en-US')}{hasMore ? '+' : ''}</strong> results</>
+              : 'No cards match that search.')}
+        </p>
       </div>
+      <Alert>{error}</Alert>
+      {!loading && !cards.length && !error ? (
+        <EmptyDesk title="No matches" lede="Try a collector number, a set name, or a shorter card name.">
+          <Link className="btn" to="/marketplace">Browse marketplace</Link>
+        </EmptyDesk>
+      ) : (
+        <div className="grid">
+          {loading
+            ? Array.from({ length: 24 }, (_, index) => <SkeletonTile key={index} />)
+            : cards.map((card, index) => (
+                <CardTile key={card.id} card={card} rank={index} />
+              ))}
+        </div>
+      )}
       {hasMore ? (
         <button className="more" type="button" onClick={loadMore}>Load more</button>
       ) : null}

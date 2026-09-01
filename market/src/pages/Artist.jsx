@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { fetchArtist, fetchArtistSummaries } from '../api.js';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
+import { Alert, DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -39,27 +40,30 @@ function ArtistsIndex() {
   }, []);
 
   return (
-    <div className="page">
-      <p className="eyebrow">Catalog</p>
-      <h1>Artists</h1>
-      {error ? <p className="status error">{error}</p> : null}
-      {artists == null && !error ? <p className="muted">Loading artists…</p> : null}
+    <div className="page desk">
+      <PageHead kicker="Catalog" title="Artists" lede="Illustrators from marketplace-artist summaries." />
+      <Alert>{error}</Alert>
+      {artists == null && !error ? <p className="page-lede">Loading artists…</p> : null}
       {artists && !artists.length ? (
-        <p className="muted">No artist summaries from the API right now. Open an artist from a card page.</p>
-      ) : null}
-      <div className="set-index">
-        {(artists || []).map((row) => {
-          const slug = row.slug || row.artistSlug;
-          const name = row.name || row.artist || slug;
-          if (!slug) return null;
-          return (
-            <Link className="set-index-row" key={slug} to={`/marketplace/en/artists/${slug}`}>
-              <strong>{name}</strong>
-              <span className="muted">{row.count || row.cardCount || ''}</span>
-            </Link>
-          );
-        })}
-      </div>
+        <EmptyDesk title="No artist summaries" lede="Open an artist from a card page." />
+      ) : (
+        <DeskPanel flush>
+          <div className="set-index">
+            {(artists || []).map((row) => {
+              const slug = row.slug || row.artistSlug;
+              const name = row.name || row.artist || slug;
+              if (!slug) return null;
+              return (
+                <Link className="set-index-row" key={slug} to={`/marketplace/en/artists/${slug}`}>
+                  <span className="set-sym" />
+                  <strong>{name}</strong>
+                  <span className="muted">{row.count || row.cardCount || ''}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </DeskPanel>
+      )}
     </div>
   );
 }
@@ -94,14 +98,13 @@ function ArtistDesk() {
   const name = payload?.artist?.name || payload?.name || artistSlug;
 
   return (
-    <div className="page">
+    <div className="page desk">
       <nav className="crumbs">
         <Link to={`/marketplace/${lang}/artists`}>Artists</Link>
         <span>/</span>
         <span>{name}</span>
       </nav>
-      <p className="eyebrow">Artist</p>
-      <h1>{name}</h1>
+      <PageHead kicker="Artist" title={name} lede="Printings attributed to this illustrator." />
       <nav className="comp-tabs" aria-label="Artist filters">
         {FILTERS.map((row) => (
           <button
@@ -114,12 +117,14 @@ function ArtistDesk() {
           </button>
         ))}
       </nav>
-      {error ? <p className="status error">{error}</p> : null}
-      <p className="muted">
-        {payload
-          ? (cards.length ? `${cards.length} cards` : 'No cards for this artist from the API.')
-          : 'Loading…'}
-      </p>
+      <div className="shop-toolbar">
+        <p className="result-count">
+          {payload
+            ? (cards.length ? <><strong>{cards.length}</strong> cards</> : 'No cards for this artist from the API.')
+            : 'Loading…'}
+        </p>
+      </div>
+      <Alert>{error}</Alert>
       <div className="grid">
         {!payload && !error
           ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} />)

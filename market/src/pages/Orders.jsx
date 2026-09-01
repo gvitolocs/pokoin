@@ -4,6 +4,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { formatPkn } from '../api.js';
 import { firestore, useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
+import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
 
 function stamp(value) {
   if (!value) return '';
@@ -34,39 +35,41 @@ export default function Orders() {
     }, (err) => setError(err.message || 'Orders failed.'));
   }, [user?.uid]);
 
-  if (!ready) {
-    return <div className="page"><p className="muted">Checking session…</p></div>;
-  }
+  if (!ready) return <SessionWait />;
   if (!signedIn) {
     return <Navigate to={authFrom(location.pathname || '/orders')} replace />;
   }
 
   return (
-    <div className="page app-page">
-      <div className="comp-head">
-        <div>
-          <p className="eyebrow">Account</p>
-          <h1>Orders</h1>
-          <p className="muted">Firestore orders for this Firebase uid. Empty until a paid checkout lands.</p>
-        </div>
-        <Link className="more" to="/profile" style={{ margin: 0 }}>Profile</Link>
-      </div>
-      {error ? <p className="status error">{error}</p> : null}
-      {rows == null && !error ? <p className="muted">Loading orders…</p> : null}
+    <div className="page desk">
+      <PageHead kicker="Account" title="Orders" lede="Paid checkouts for this Firebase uid. Empty until a checkout lands.">
+        <Link className="btn ghost" to="/cart">Cart</Link>
+      </PageHead>
+      <Alert>{error}</Alert>
+      {rows == null && !error ? (
+        <DeskPanel title="History"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
+      ) : null}
       {rows && !rows.length ? (
-        <p className="muted">No orders yet. <Link to="/cart">Cart</Link></p>
-      ) : (
-        <div className="forum-list">
-          {(rows || []).map((row) => (
-            <article className="forum-row" key={row.id}>
-              <strong>{row.id}</strong>
-              <span className="muted">
-                {row.status || row.paymentStatus || 'order'} · {formatPkn(row.totalPkn)} · {stamp(row.createdAt) || '—'}
-              </span>
-            </article>
-          ))}
-        </div>
-      )}
+        <EmptyDesk title="No orders yet" lede="Checkout a native listing with site PKN.">
+          <Link className="btn" to="/marketplace">Shop</Link>
+        </EmptyDesk>
+      ) : null}
+      {rows?.length ? (
+        <DeskPanel flush title={`${rows.length} order${rows.length === 1 ? '' : 's'}`}>
+          <div className="thread-list">
+            {rows.map((row) => (
+              <article className="thread" key={row.id}>
+                <span className="thread-main">
+                  <strong className="thread-title">{row.id}</strong>
+                  <span className="thread-meta">
+                    {row.status || row.paymentStatus || 'order'} · {formatPkn(row.totalPkn)} · {stamp(row.createdAt) || '—'}
+                  </span>
+                </span>
+              </article>
+            ))}
+          </div>
+        </DeskPanel>
+      ) : null}
     </div>
   );
 }

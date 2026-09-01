@@ -242,9 +242,15 @@ button, input, select { font: inherit; color: inherit; }
   place-items: center;
   width: 2.15rem;
   height: 2.15rem;
+  overflow: visible;
   border-radius: 999px;
-  color: #cbd5e1;
+  color: var(--muted);
   text-transform: none;
+}
+
+.icon-nav a svg {
+  display: block;
+  overflow: visible;
 }
 
 .icon-nav a:hover,
@@ -619,8 +625,8 @@ h1, h2 { margin: 0 0 0.85rem; }
 
 .btn:disabled,
 .list-btn:disabled {
-  background: #374151;
-  color: #cbd5e1;
+  background: var(--g3);
+  color: var(--muted);
   cursor: not-allowed;
 }
 
@@ -930,9 +936,9 @@ h1, h2 { margin: 0 0 0.85rem; }
   padding: 0.12rem 0.5rem;
 }
 
-.badge-poke { color: #7dd3fc !important; border-color: #38bdf8 !important; }
-.badge-rare { color: #facc15 !important; border-color: #facc15 !important; }
-.badge-holo { color: #c4b5fd !important; border-color: #a78bfa !important; }
+.badge-poke { color: var(--yellow) !important; border-color: rgb(255 211 61 / 0.45) !important; }
+.badge-rare { color: var(--text) !important; border-color: var(--g5) !important; }
+.badge-holo { color: var(--yellow) !important; border-color: rgb(255 211 61 / 0.35) !important; }
 
 .asset-header {
   display: grid;
@@ -957,11 +963,11 @@ h1, h2 { margin: 0 0 0.85rem; }
 
 .asset-sub {
   margin: 0.35rem 0 0;
-  color: #b8c4e6;
+  color: var(--muted);
   font-size: 0.92rem;
 }
 
-.asset-sub a { color: #38bdf8; font-weight: 700; }
+.asset-sub a { color: var(--yellow); font-weight: 700; }
 
 .asset-actions {
   display: flex;
@@ -977,7 +983,7 @@ h1, h2 { margin: 0 0 0.85rem; }
   border: 1px solid var(--g5);
   border-radius: 999px;
   padding: 0.28rem 0.65rem;
-  background: #0f1735;
+  background: var(--g2);
 }
 
 .quote-pill.oos { color: var(--muted); }
@@ -1040,9 +1046,9 @@ h1, h2 { margin: 0 0 0.85rem; }
   padding: 0;
   flex-shrink: 0;
   border-radius: 999px;
-  background: #0f1735;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  color: #cbd5e1;
+  background: var(--g2);
+  border: 1px solid var(--g5);
+  color: var(--text);
 }
 
 .art-nav svg {
@@ -1063,8 +1069,8 @@ h1, h2 { margin: 0 0 0.85rem; }
   font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.04em;
-  color: #7dd3fc;
-  border: 1px solid #38bdf8;
+  color: var(--yellow);
+  border: 1px solid rgb(255 211 61 / 0.45);
   border-radius: 999px;
   padding: 0.2rem 0.7rem;
 }
@@ -1075,7 +1081,7 @@ h1, h2 { margin: 0 0 0.85rem; }
   padding: 10px;
   border: 0;
   border-radius: 22px;
-  background: #15203a;
+  background: var(--g2);
   cursor: zoom-in;
 }
 
@@ -1411,18 +1417,18 @@ h1, h2 { margin: 0 0 0.85rem; }
   min-height: 13.75rem;
   display: grid;
   place-items: center;
-  background: #111936;
+  background: var(--g2);
 }
 
 .analytics-empty p {
   margin: 0;
   max-width: 22rem;
   text-align: center;
-  color: #93a4c8;
+  color: var(--muted);
   line-height: 1.45;
 }
 
-.sell-form { background: #0f1735; }
+.sell-form { background: var(--surface); }
 
 .sell-msg {
   margin: 0.55rem 0 0;
@@ -1434,7 +1440,7 @@ h1, h2 { margin: 0 0 0.85rem; }
 .sell-msg.ok { color: var(--yellow); }
 
 .seller-chip {
-  color: #93a4c8;
+  color: var(--muted);
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -1450,7 +1456,7 @@ h1, h2 { margin: 0 0 0.85rem; }
 .sell-field {
   display: grid;
   gap: 0.28rem;
-  color: #93a4c8;
+  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -1464,9 +1470,10 @@ h1, h2 { margin: 0 0 0.85rem; }
 .sell-field select,
 .sell-field textarea {
   width: 100%;
-  background: #111936;
-  border: 1px solid rgb(255 255 255 / 0.1);
-  border-radius: 12px;
+  background: var(--g2);
+  border: 1px solid var(--g5);
+  color: inherit;
+  border-radius: 10px;
   padding: 0.7rem 0.75rem;
 }
 
@@ -1486,13 +1493,13 @@ h1, h2 { margin: 0 0 0.85rem; }
 }
 
 .sell-chips button {
-  border: 1px solid rgb(255 255 255 / 0.12);
-  background: #111936;
+  border: 1px solid var(--g5);
+  background: var(--g2);
   border-radius: 999px;
   padding: 0.28rem 0.7rem;
   font-size: 0.75rem;
   font-weight: 800;
-  color: #93a4c8;
+  color: var(--muted);
   cursor: pointer;
 }
 
@@ -1512,12 +1519,12 @@ h1, h2 { margin: 0 0 0.85rem; }
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
-  color: #93a4c8;
+  color: var(--muted);
   font-size: 0.78rem;
 }
 
 .fee-lines dt { margin: 0; }
-.fee-lines dd { margin: 0; color: #cbd5e1; }
+.fee-lines dd { margin: 0; color: var(--text); }
 
 .reserve-blurb h2 {
   color: var(--yellow);
@@ -1528,7 +1535,7 @@ h1, h2 { margin: 0 0 0.85rem; }
 
 .reserve-blurb p {
   margin: 0.5rem 0 0;
-  color: #b8c4e6;
+  color: var(--muted);
   line-height: 1.45;
 }
 

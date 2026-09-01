@@ -4,6 +4,7 @@ import { signOut } from 'firebase/auth';
 import { firebaseAuth, useAuth } from '../auth.jsx';
 import { useWallet, shortAddress } from '../wallet.jsx';
 import { useCart } from '../cart.jsx';
+import { DeskPanel, Metric, MetricGrid, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
 
 export default function Profile() {
   const location = useLocation();
@@ -15,55 +16,47 @@ export default function Profile() {
     document.title = 'Profile · Pokoin';
   }, []);
 
-  if (!ready) {
-    return <div className="page"><p className="muted">Checking session…</p></div>;
-  }
+  if (!ready) return <SessionWait />;
   if (!signedIn) {
     return <Navigate to={`/auth?from=${encodeURIComponent(location.pathname || '/profile')}`} replace />;
   }
 
+  const silverLine = silver
+    ? `Silver${profile?.silverUntil ? ` until ${profile.silverUntil.toISOString?.().slice(0, 10) || profile.silverUntil}` : ''}`
+    : 'No Silver on this session. Unlock from a card Best Deal for 20 site PKN.';
+
   return (
-    <div className="page app-page">
-      <div className="comp-head">
-        <div>
-          <p className="eyebrow">Account</p>
-          <h1>{user.displayName || user.email || 'Collector'}</h1>
-          <p className="muted">{user.email}</p>
-        </div>
-        <button
-          className="more"
-          type="button"
-          style={{ margin: 0 }}
-          onClick={() => signOut(firebaseAuth)}
-        >
-          Sign out
-        </button>
+    <div className="page desk">
+      <PageHead
+        kicker="Account"
+        title={user.displayName || user.email || 'Collector'}
+        lede={user.email || 'Signed in'}
+      >
+        <button className="btn ghost" type="button" onClick={() => signOut(firebaseAuth)}>Sign out</button>
+      </PageHead>
+      <MetricGrid>
+        <Metric value={count} label="Cart items" />
+        <Metric value={availablePkn.toLocaleString()} label="Site PKN" />
+        <Metric value={balance ? balance.toFixed(2) : '0'} label="Chain PKN" />
+        <Metric value={address ? shortAddress(address) : '—'} label="Wallet" />
+      </MetricGrid>
+      <div className="profile-grid">
+        <DeskPanel title="Status">
+          <p className="page-lede">{silverLine}{admin ? ' · Admin' : ''}</p>
+        </DeskPanel>
+        <DeskPanel flush title="Go to">
+          <div className="thread-list">
+            <Thread to="/marketplace/watchlist" title="Watchlist" meta="Local list on this browser" />
+            <Thread to="/inventory" title="My listings" meta="Seller inventory" />
+            <Thread to="/orders" title="Orders" meta="Paid checkouts" />
+            <Thread to="/wallet" title="Wallet" meta="Send, swap, WPKN" />
+            <Thread to="/buy" title="Buy PKN" meta="Stripe site balance" />
+            <Thread to="/nft" title="NFT holdings" meta="nft_only checkouts" />
+            <Thread to="/forum" title="Forum" meta="Community" />
+            {admin ? <Thread to="/admin" title="Admin" meta="Expansion logos" /> : null}
+          </div>
+        </DeskPanel>
       </div>
-      <div className="stat-strip">
-        <div><strong>{count}</strong><span>Cart items</span></div>
-        <div><strong>{availablePkn.toLocaleString()}</strong><span>Site PKN</span></div>
-        <div><strong>{balance ? balance.toFixed(2) : '0'}</strong><span>PKN on chain</span></div>
-        <div><strong>{address ? shortAddress(address) : '—'}</strong><span>Wallet</span></div>
-      </div>
-      <p className="muted">
-        {silver
-          ? `Silver${profile?.silverUntil ? ` until ${profile.silverUntil.toISOString?.().slice(0, 10) || profile.silverUntil}` : ''}`
-          : 'No Silver on this session. Unlock from a card Best Deal for 20 site PKN.'}
-        {admin ? ' · Admin' : ''}
-      </p>
-      <nav className="link-list">
-        <Link to="/marketplace/watchlist">Watchlist</Link>
-        <Link to="/inventory">My listings</Link>
-        <Link to="/cart">Cart</Link>
-        <Link to="/checkout">Checkout</Link>
-        <Link to="/orders">Orders</Link>
-        <Link to="/wallet">Wallet</Link>
-        <Link to="/buy">Buy PKN</Link>
-        <Link to="/nft">NFT holdings</Link>
-        <Link to="/marketplace/portfolio">Portfolio dump</Link>
-        <Link to="/forum">Forum</Link>
-        {admin ? <Link to="/admin">Admin</Link> : null}
-      </nav>
     </div>
   );
 }

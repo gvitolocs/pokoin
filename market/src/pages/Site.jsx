@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { POKOIN_CHAIN_ID, POKOIN_RPC } from '../wallet.jsx';
+import { DeskPanel, PageHead } from '../components/Desk.jsx';
 
 const PAGES = {
   '/docs': {
@@ -85,22 +86,15 @@ export default function Site() {
   }, [page.title, path]);
 
   return (
-    <div className="page app-page">
-      <div className="comp-head">
-        <div>
-          <p className="eyebrow">{page.eyebrow}</p>
-          <h1>{page.title}</h1>
-          <p className="muted">{page.lead}</p>
-        </div>
-      </div>
-      {rpc ? <p className="lede-copy">{rpc}</p> : null}
+    <div className="page desk">
+      <PageHead kicker={page.eyebrow} title={page.title} lede={page.lead} />
+      {rpc ? <p className="desk-ok">{rpc}</p> : null}
       {page.body.map(([heading, copy]) => (
-        <section key={heading} className="panel site-block">
-          <h2>{heading}</h2>
-          <p>{copy}</p>
-        </section>
+        <DeskPanel key={heading} title={heading}>
+          <p className="page-lede">{copy}</p>
+        </DeskPanel>
       ))}
-      <p className="muted">
+      <p className="page-lede">
         <Link to="/marketplace">Marketplace</Link>
         {' · '}
         <Link to="/docs">Docs</Link>

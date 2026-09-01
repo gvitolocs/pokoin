@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { fetchSearch } from '../api.js';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
+import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
 const PRODUCTS = {
   box: { title: 'Booster boxes', query: 'booster box', productType: 'booster_box' },
@@ -54,9 +55,14 @@ export default function Products() {
   }
 
   return (
-    <div className="page">
-      <p className="eyebrow">Products</p>
-      <h1>{spec.title}</h1>
+    <div className="page desk">
+      <PageHead
+        kicker="Products"
+        title={spec.title}
+        lede={kind === 'nft'
+          ? 'Live NFT catalog search. Owned holdings and shipping requests live on /nft after nft_only checkout.'
+          : `Marketplace search for ${spec.query}. Empty query + booster_box is not used here.`}
+      />
       <nav className="comp-tabs" aria-label="Product types">
         {Object.entries(PRODUCTS).map(([id, row]) => (
           <Link key={id} className={kind === id ? 'on' : undefined} to={`/product/${id}`}>
@@ -64,22 +70,29 @@ export default function Products() {
           </Link>
         ))}
       </nav>
-      {kind === 'nft' ? (
-        <p className="muted">
-          Live NFT catalog search. Owned holdings and shipping requests live on /nft after nft_only checkout.
+      <div className="shop-toolbar">
+        <p className="result-count">
+          {loading
+            ? 'Loading…'
+            : (cards.length
+              ? <><strong>{cards.length.toLocaleString('en-US')}{hasMore ? '+' : ''}</strong> products</>
+              : 'No products in that search.')}
         </p>
-      ) : (
-        <p className="muted">Marketplace search for {spec.query}.</p>
-      )}
-      {error ? <p className="status error">{error}</p> : null}
-      <div className="grid">
-        {loading
-          ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} />)
-          : cards.map((card, index) => (
-              <CardTile key={card.id} card={card} rank={index} />
-            ))}
       </div>
-      {!loading && !cards.length && !error ? <p className="muted">No products in that search.</p> : null}
+      <Alert>{error}</Alert>
+      {!loading && !cards.length && !error ? (
+        <EmptyDesk title="Nothing in this aisle" lede="Try another product type or search from the bar.">
+          <Link className="btn" to="/marketplace">Shop</Link>
+        </EmptyDesk>
+      ) : (
+        <div className="grid">
+          {loading
+            ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} />)
+            : cards.map((card, index) => (
+                <CardTile key={card.id} card={card} rank={index} />
+              ))}
+        </div>
+      )}
       {hasMore ? <button className="more" type="button" onClick={loadMore}>Load more</button> : null}
     </div>
   );

@@ -37,7 +37,7 @@ export default function CompetitiveDecklist() {
 
   if (!list) {
     return (
-      <div className="page comp-page">
+      <div className="page desk comp-page">
         <CompetitiveNav />
         <p className="status error">That decklist is not in the snapshot.</p>
       </div>
@@ -45,7 +45,7 @@ export default function CompetitiveDecklist() {
   }
 
   return (
-    <div className="page comp-page">
+    <div className="page desk comp-page">
       <CompetitiveNav />
       <nav className="crumbs">
         <Link to="/marketplace/competitive/decks">Decks</Link>
