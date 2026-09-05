@@ -4,8 +4,9 @@ import { createPknCheckout } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { Alert, DeskPanel, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
+import { PKN_USDT_PRICE } from '../pkn.js';
 
-const RATE = 0.005;
+const RATE = PKN_USDT_PRICE;
 const PACKAGES = [
   { label: 'Starter', fiatCents: 500, lookupKey: 'pkn_starter_1000_pkn_500_eur' },
   { label: 'Collector', fiatCents: 2500, lookupKey: 'pkn_collector_5000_pkn_2500_eur' },

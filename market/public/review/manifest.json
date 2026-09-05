@@ -1,0 +1,211 @@
+{
+  "revision": "2026-09-02-deskew-variants-gpu",
+  "generatedAt": "2026-09-02T08:05:31.298Z",
+  "host": "test.pokoin.com",
+  "path": "/sanitize",
+  "url": "https://test.pokoin.com/sanitize",
+  "gpu": {
+    "device": "AMD Radeon Graphics",
+    "appliedDeg": 1.58,
+    "measuredBrightDeg": -1.58,
+    "variants": [
+      {
+        "variant": "supersample",
+        "width": 765,
+        "height": 1041,
+        "gpu_ms": 343.2,
+        "out": "/tmp/charizard-deskew-variants/variant-supersample.png"
+      },
+      {
+        "variant": "mask_nn",
+        "width": 765,
+        "height": 1041,
+        "gpu_ms": 407.4,
+        "out": "/tmp/charizard-deskew-variants/variant-mask-nn.png"
+      },
+      {
+        "variant": "crop_rotate",
+        "width": 723,
+        "height": 1012,
+        "gpu_ms": 350.5,
+        "out": "/tmp/charizard-deskew-variants/variant-crop-rotate.png"
+      }
+    ]
+  },
+  "deferred": [
+    {
+      "title": "Milotic C League",
+      "reason": "Border rebuild still wrong — held back."
+    },
+    {
+      "title": "Swampert theme deck",
+      "reason": "Clipped yellow + deskew still wrong — held back."
+    }
+  ],
+  "sections": [
+    {
+      "id": "charizard-before",
+      "title": "Mega Charizard X ex · source",
+      "kicker": "Local leftover 356916_ · no CardTrader",
+      "live": "https://pokoin.com/marketplace/en/cards/713832",
+      "note": "Bright outer edge -1.58°. Three GPU deskew variants below — pick one before ?v=ct3.",
+      "pairs": [
+        {
+          "before": {
+            "file": "charizard-leftover.jpg",
+            "label": "Before · local leftover",
+            "caption": "737×1021 · bright -1.58°",
+            "width": 737,
+            "height": 1021,
+            "brightSkewDeg": -1.58,
+            "outerSkewDeg": -1.7,
+            "attackSharpness": 28.24,
+            "details": [
+              "Local CDN mirror only — not CardTrader download.",
+              "Attack-band horiz gradient 28.24 (higher = sharper text)."
+            ]
+          },
+          "after": {
+            "file": "cdn-leftover-bright-edge.jpg",
+            "label": "Baseline · CPU bright-edge",
+            "caption": "+1.58° · bright -0.07°",
+            "width": 765,
+            "height": 1041,
+            "brightSkewDeg": -0.07,
+            "outerSkewDeg": 0.02,
+            "cornerLightSpecks": 0,
+            "attackSharpness": 27.5,
+            "punched": 2137,
+            "job": {
+              "action": "diecut-only",
+              "reason": "gold-foil",
+              "family": "yellow",
+              "tMed": 0,
+              "overNumber": null,
+              "deskewDeg": 1.5823848486651406,
+              "innerAfterDeskew": -0.040394801436648364
+            },
+            "details": [
+              "Existing Node deskew (full-raster rotate + fringe).",
+              "Attack sharpness 27.5 (was 28.24)."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "charizard-variants",
+      "title": "GPU deskew variants",
+      "kicker": "AMD Radeon Graphics · parallel workers",
+      "note": "A = supersample, B = nearest RGB / mask, C = crop-rotate-crop. Hairlines on for red-line test. Interior text: higher attack sharpness is better.",
+      "pairs": [
+        {
+          "before": {
+            "file": "charizard-leftover.jpg",
+            "label": "Before",
+            "caption": "bright -1.58°",
+            "brightSkewDeg": -1.58,
+            "attackSharpness": 28.24
+          },
+          "after": {
+            "file": "charizard-variant-supersample.jpg",
+            "label": "A · 2× supersample + GPU rotate",
+            "caption": "bright -0.16° · sharp 18.02",
+            "width": 716,
+            "height": 1014,
+            "brightSkewDeg": -0.16,
+            "outerSkewDeg": 1.13,
+            "cornerLightSpecks": 0,
+            "attackSharpness": 18.02,
+            "punched": 783,
+            "job": {
+              "action": "diecut-only",
+              "reason": "gold-foil",
+              "family": "yellow",
+              "tMed": 0,
+              "overNumber": null,
+              "deskewDeg": 0
+            },
+            "details": [
+              "Upsample 2× on RX 7900, bilinear rotate, downsample — less text ringing than 1× JPEG rotate.",
+              "Remaining bright edge -0.16° · silhouette 1.13°.",
+              "Attack sharpness 18.02 (source 28.24, baseline 27.5).",
+              "Corner light specks 0 · punched 783."
+            ]
+          }
+        },
+        {
+          "before": {
+            "file": "charizard-leftover.jpg",
+            "label": "Before",
+            "caption": "bright -1.58°",
+            "brightSkewDeg": -1.58,
+            "attackSharpness": 28.24
+          },
+          "after": {
+            "file": "charizard-variant-mask-nn.jpg",
+            "label": "B · mask / nearest RGB",
+            "caption": "bright -0.1° · sharp 27.43",
+            "width": 714,
+            "height": 1012,
+            "brightSkewDeg": -0.1,
+            "outerSkewDeg": 1.12,
+            "cornerLightSpecks": 0,
+            "attackSharpness": 27.43,
+            "punched": 3838,
+            "job": {
+              "action": "diecut-only",
+              "reason": "gold-foil",
+              "family": "yellow",
+              "tMed": 50,
+              "overNumber": null,
+              "deskewDeg": 0
+            },
+            "details": [
+              "Nearest-neighbor RGB rotate (keeps foil/text pixels) + bilinear alpha; fringe punch only on edges.",
+              "Remaining bright edge -0.1° · silhouette 1.12°.",
+              "Attack sharpness 27.43 (source 28.24, baseline 27.5).",
+              "Corner light specks 0 · punched 3838."
+            ]
+          }
+        },
+        {
+          "before": {
+            "file": "charizard-leftover.jpg",
+            "label": "Before",
+            "caption": "bright -1.58°",
+            "brightSkewDeg": -1.58,
+            "attackSharpness": 28.24
+          },
+          "after": {
+            "file": "charizard-variant-crop-rotate.jpg",
+            "label": "C · crop → rotate → crop",
+            "caption": "bright -0.14° · sharp 21.1",
+            "width": 716,
+            "height": 1014,
+            "brightSkewDeg": -0.14,
+            "outerSkewDeg": 1.15,
+            "cornerLightSpecks": 1,
+            "attackSharpness": 21.1,
+            "punched": 1367,
+            "job": {
+              "action": "diecut-only",
+              "reason": "gold-foil",
+              "family": "yellow",
+              "tMed": 0,
+              "overNumber": null,
+              "deskewDeg": 0
+            },
+            "details": [
+              "Tight matte crop first, GPU rotate the small canvas, recrop — less resample footprint.",
+              "Remaining bright edge -0.14° · silhouette 1.15°.",
+              "Attack sharpness 21.1 (source 28.24, baseline 27.5).",
+              "Corner light specks 1 · punched 1367."
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "strip": null
+}

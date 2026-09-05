@@ -1,0 +1,18 @@
+[Unit]
+Description=Pokoin Oracle card-image CDN (api2 / cdn origin)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+Environment=POKOIN_CDN_ROOT=/home/ubuntu/pokoin-cdn
+Environment=PORT=18090
+ExecStart=/usr/bin/node /home/ubuntu/bin/pokoin-oracle-cdn-server.js
+Restart=always
+RestartSec=2
+Nice=10
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

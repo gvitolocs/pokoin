@@ -126,7 +126,7 @@ A tiny inline script in `<head>` sets `document.documentElement.classList.add("j
 | `home/logo.png` | Nav + hero mark (7339 bytes). |
 | `home/satoshi.woff2` | Self-hosted Satoshi variable font. |
 | `scripts/build-web.sh` | Production build: landing + `market/` into `dist-web/`. |
-| `vercel.json` | Headers, www redirect, `/marketplace*` (slash and no-slash) → `/market/index.html`, card shortlinks → Oracle 302 (fallback; live hop is Cloudflare Worker `pokoin-shortlink`), `/api/*` → `api.pokoin.com`. |
+| `vercel.json` | Headers, www redirect, `/marketplace*` (slash and no-slash) → `/market/index.html`, card shortlinks 302 to `/marketplace/en/cards/:id` (fallback; live hop is Cloudflare Worker `pokoin-shortlink`), `/api/*` → `api.pokoin.com`. |
 | `scripts/sync-landing.sh` | Leftover CardVault copy. Not production. |
 | `docs/LANDING.md` | This file: pipeline, inventory, copy rules, proof. |
 | `docs/CHROME.md` | Icon / route map. `pokoin.com` vs `app.pokoin.com`. |
@@ -206,11 +206,13 @@ Android/iOS CardVault, leftover Flutter-web `web/home.html` / `app.html` /
 | --- | --- |
 | `pokoin.com` | This landing |
 | `www.pokoin.com` | 301 → `pokoin.com` |
+| `onepiece.pokoin.com` | 307 → `/marketplace` (shared React market SPA, One Piece catalog) |
+| `riftbound.pokoin.com` | 307 → `/marketplace` (shared React market SPA, Riftbound catalog) |
 | `app.pokoin.com` | Flutter CardVault (Android/iOS). Public chrome is `pokoin.com`. [APP.md](APP.md). |
 | `forum.pokoin.com` | Legacy alias. Use `https://pokoin.com/forum`. |
 | `explorer.pokoin.com` | **Caddy**, not Vercel. Do not `vercel alias` this name. |
 | `rpc.pokoin.com` | PokoinPoS RPC (health, bootstrap peers, `eth_chainId`) |
-| `api.pokoin.com` | Oracle marketplace API |
+| `api.pokoin.com` | Oracle marketplace API (`?game=one_piece` / `riftbound` for satellite catalogs) |
 | `news.pokoin.com` | Hypemeter on `pokoin-a1` via Cloudflare Tunnel. [NEWS.md](NEWS.md). |
 
 Vercel project name: `web`. Inspect example: `https://vercel.com/giuseppevitolo17s-projects/web`.

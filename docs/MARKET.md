@@ -3,12 +3,34 @@
 Source of truth for the **public web**: this repo (`gvitolocs/pokoin`).
 Production is Vercel project `web`. Android/iOS CardVault is a separate app:
 [APP.md](APP.md). Do not alias `app.pokoin.com` onto project `web`.
+HTTP API map: [API.md](API.md). Home first paint (auth, cache, images):
+[HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md). Live index:
+`GET https://api.pokoin.com/api/__routes?group=1`.
+
+**Multi-game:** the same SPA also serves `onepiece.pokoin.com` and
+`riftbound.pokoin.com` ([GAMES.md](GAMES.md), `market/src/game.js`). Those hosts
+append `?game=one_piece` / `?game=riftbound` on `/api/marketplace-*`. Public
+card ids are still `ct_id * 2` on every game. Pokemon stays the default when
+`game` is omitted.
 
 Humans and bots hitting `/marketplace`, search, card, sets (with or without a
 trailing slash), competitive, explore, portfolio, watchlist, products, auth,
 profile, cart, checkout, orders, wallet, forum, signal, scan, inventory, nft,
 admin, and the static docs pages get `market/index.html`. Chrome:
 [CHROME.md](CHROME.md).
+
+**Discord / Slack / X previews:** those crawlers do not run the SPA. Worker
+`pokoin-origin` detects `Discordbot` (and peers) on
+`/marketplace/{lang}/cards/{id}…`, loads `GET api.pokoin.com/api/marketplace-card-page`,
+and returns HTML with `og:title` / `og:description` / `og:image` (absolute
+`https://pokoin.com/card-images/…`). Humans still get the SPA. Force with
+`?og=1` while debugging. Cache TTL 1h. Verified: Discordbot UA from the LAN
+Pi gets 200 + Drifloon meta; datacenter IPs (Oracle, this laptop) often get
+Cloudflare **403** — that is IP/ASN blocking, not missing tags. Discord’s own
+crawlers are not on those ASNs. If an old paste still has no card, Discord
+cached the failed fetch — re-paste with `?v=2` or delete and send again.
+Free plan is at **5/5** custom WAF skip rules; do not add a sixth without
+merging an existing skip.
 
 Visual language follows `/home/nez/Projects/candyext`: Rare Candy shop chrome
 (dark rails, chips, gold `#FFD33D` not lime `#cbf062`). **Card detail is an
@@ -52,10 +74,9 @@ then Best Deal.
    punches `/auth`. Do not send `listingId` in events. Reserve copy stays
    informational until a reserve API exists.
 4. Right: Best Deal (Silver CT/CM/VT, language/condition,
-   Add to cart only with a native listing else Unavailable, estimated total /
-   escrow 0.30% / slippage 1.00%) + POKOIN CARD RESERVE copy
-5. Shop table below: filters/sort when listings exist; empty `No items found` +
-   watchlist + Sell this card
+   Add to cart only with a native listing else Unavailable)
+   + POKOIN CARD RESERVE copy
+5. Shop table below: filters/sort when listings exist; empty `No items found`
 6. Other printings rail
 
 Click the scan to zoom (React lightbox). Do not navigate Home on art tap.
@@ -65,12 +86,14 @@ dialog.
 Header does **not** pin Mega Evolution / Phantasmal Flames / Black Bolt. Top
 bar: search, EN flag (visual only), Home, Forum, Signal, Competitive, PKN
 chip, profile/sign-in, cart. Sell stays off the global bar. Routes:
-[CHROME.md](CHROME.md). On **phone** (`≤720px`) that icon row is the burger
-panel; `≤480px` search submit is an icon. Layout notes: [MOBILE.md](MOBILE.md).
+[CHROME.md](CHROME.md). Search submit is a magnifying-glass icon (all widths).
+On **phone** (`≤720px`) the icon row is a left side drawer. Layout notes:
+[MOBILE.md](MOBILE.md).
 
 Marketplace home (`/marketplace`) paints a 5-expansion promo carousel (Mega
 Evolution, Phantasmal Flames, Black Bolt, White Flare, Destined Rivals), rails,
-and grid immediately. Each slide is official-set copy plus a 3-card fan that
+and grid immediately. When that home payload lands, idle `warmupSearchBar()`
+opens Meili suggest (and Pokemon token-predict warmup). Each slide is official-set copy plus a 3-card fan that
 overflows the banner; autoplay pauses on hover, with arrows and dots. Set browse (`/marketplace/sets/:slug`) and search do the same —
 skeleton tiles, never “Loading set…” / “Searching…”. Card pages seed from the
 tile you clicked. The landing page prefetches this SPA and `/api/marketplace-home-page`
@@ -80,7 +103,7 @@ on idle and on hover of Explore cards.
 
 | Surface | Control | What happens |
 | --- | --- | --- |
-| Top bar | Search | Autocomplete → card page; submit → `/marketplace/search` |
+| Top bar | Search | Autocomplete → card page; submit → `/marketplace/search`. Rows match CardTrader **density** (set mark, thumb, bold `Name - number`, expansion `#n`, Singles, View all versions) on the dark gold chrome. Spec: [CHROME.md](CHROME.md#header-search-cardtrader-style-rows). |
 | Top bar | Logo | Marketplace home |
 | Top bar | Home | Landing `/` |
 | Top bar | Forum | `/forum` (GET `/api/forum`, 8s timeout) |
@@ -92,7 +115,7 @@ on idle and on hover of Explore cards.
 | Header | Set name | `/marketplace/sets/:slug` |
 | Header | Artist | `/marketplace/{lang}/artists/{slug}` |
 | Header | Watch | `localStorage pokoin.watchlistIds` + `POST /api/marketplace-watchlist` |
-| Header | Share | Web Share or clipboard |
+| Header | Share | iOS/Android: system share sheet. Desktop: copy URL + Copied |
 | Art | Prev / next | Same-set sibling via expansion page; do not clear siblings on cardId change |
 | Art | Scan click | Lightbox zoom |
 | Art | Version select | Always in the art column. Seeded with this printing. |
@@ -100,12 +123,12 @@ on idle and on hover of Explore cards.
 | Center | Listing fields | Local form state only |
 | Center | Extra chips | Toggle 1st Ed. / Sealed / Graded / Signed / Shipping |
 | Center | Sign in / List card | Sign in → `/auth`; signed-in List card POSTs with Firebase bearer |
-| Best Deal | Language / condition | Filter native listings |
+| Best Deal | Language / condition | Always enabled (all langs / conditions). Filters Best Deal when listings exist; seeds List your card |
 | Best Deal | Add to cart / Unavailable | Native listing → local cart then `/cart` |
-| Best Deal | Silver CT / CM / VT | Unsigned → `/auth`. Signed-in unlock `POST /api/unlock-silver` (20 site PKN). Silver: CT `/api/cardtrader-redirect`, CM JSON then URL (409 honest), VT Vinted search. Gold pills, not Cardmarket blue. |
+| Best Deal | Silver CT / CM / VT | Unsigned → `/auth`. Signed-in unlock `POST /api/unlock-silver` (20 site PKN). Silver: **CT** leftover `cardtrader.com/en/cards/{ct_id}` via `window.open` noreferrer (Sanji `818358` → `409179`; no pokoin 302 in the tab). **CM** JSON URL then `window.open` noreferrer (Pokemon stored/product, else Singles `{name} {collector}` like VT `dawn 129`; OP `/en/OnePiece/Products/Search`; RB `/en/Riftbound/Products/Search`). Do not fetch cardmarket.com from Oracle/nezopt (Cloudflare 403). **VT** Vinted `search_text`: Pokemon `{name} {collector}` (`Gumshoos 184`; name-only → 500+) plus `catalog[]=4824` (Hobby e collezionismo). OP `One Piece Card Game {name} {number}`. RB `Riftbound TCG {name} {number}`. Skip English set names (Vinted AND + IT titles). All three pills `window.open(..., 'noopener,noreferrer')` so CT/CM/VT see a direct visit, not pokoin.com. Do not cloak as Google. Gold pills. |
 | Shop | Sort / condition / language | Client filter of native listings |
 | Shop | Listing row | Adds that offer to the local cart |
-| Shop empty | Watchlist / Sell this card | Watch toggles local ids; Sell → `/auth` if unsigned |
+| Shop empty | No items found | List form above is the sell path; header heart is watchlist |
 
 Do not send `listingId` in `marketplace-event`.
 
@@ -115,14 +138,14 @@ Do not send `listingId` in `marketplace-event`.
 | --- | --- |
 | `/marketplace` | Promo slides, rails, grid, Sell callout → `/inventory` |
 | `/marketplace/search` | Query, load more, tile → card |
-| `/marketplace/explore` | Type/price/lang/game filters, dump watch, page 48 |
-| `/marketplace/portfolio` | Game bars, rails, search holdings, holding desk |
+| `/marketplace/explore` | Pokoin catalog in PKN, filters, page 48 |
+| `/marketplace/portfolio` | Set bars, rails, search holdings, holding desk (PKN, `GET /api/marketplace-portfolio`, no CardTrader leftover art) |
 | `/marketplace/sets` | Expansion index (limit 80) → set desk |
 | `/marketplace/watchlist` | Hydrate ids, clear, tiles |
 | `/product/:kind` | Seeded search (box/pack/graded/nft). Empty `query=` times out — do not. |
 | `/marketplace/competitive…` | Candyext Limitless dump: tournaments, decks, lists, players, cards |
 | `/forum` | Categories, topics, create (bearer), replies, image upload after topic/post id |
-| `/marketplace/signal` | Dump asking + home rail counts. No fake 24h. |
+| `/marketplace/signal` | Native PKN asking + home rail counts. No fake 24h. |
 | `/wallet` | Connect MetaMask, send PKN, AMM quote/swap on `0x…2606`, WPKN quote + signed request |
 | `/buy` | Stripe PKN packages (Starter/Collector/Validator). Return `?session_id=` confirms. |
 | `/auth` | Email/password, Google, return `?from=` |
@@ -147,7 +170,7 @@ address bar.
 | URL | What happens |
 | --- | --- |
 | `/marketplace/{lang}/cards/{id}/{slug}` | Canonical. SPA. Cloudflare Worker passes through to Vercel. |
-| `/marketplace/{lang}/cards/{id}` | Cloudflare Worker 302 from KV (`POKOIN_CARD_PATHS`) to the canonical slug URL. |
+| `/marketplace/{lang}/cards/{id}` | Cloudflare Worker 302 from the packed slug index to the canonical slug URL. |
 | Same paths with a trailing `/` | Same. Vercel must still rewrite the slash form of the SPA to `/market/index.html` or it 404s (`x-vercel-error: NOT_FOUND`). |
 | `/marketplace/{id}` | Same Worker 302 (`https://pokoin.com/marketplace/239324`). |
 | `/{id}` | Same Worker 302 (`https://pokoin.com/239324`). |
@@ -159,13 +182,14 @@ Example (Gambler 239324):
 - Canonical: `https://pokoin.com/marketplace/en/cards/239324/card-gambler-060-062-fossil`
 
 Worker: `workers/pokoin-shortlink.js`, routes `pokoin.com/*` and `www.pokoin.com/*`.
-Canonical slugs are a packed in-Worker index (`card-ids.bin`,
-`card-starts.bin`, `card-slug-blob.gz`) dumped from Postgres. Lookup is a
-binary search in the isolate — no KV and no Oracle on the request path, so
-there is no cold KV read. 302s set `Cache-Control` / `s-maxage` and Workers
-Caching is on. Unknown ids (not in the packed index) **404** with `no-store` —
-they must not 302 to `/marketplace/en/cards/{id}/card` (that fake slug was
-getting cached). Refresh the map with
+A tiny `pokoin-origin` Worker owns the more specific routes (`/marketplace/en*`,
+`/api/*`, `/market*`, `/home*`) so the card page after the 302 does not cold-start
+the 74k slug index. Slugs are a packed in-Worker index (`card-ids.bin`,
+`card-starts.bin`, `card-slug-blob.gz` inflated to text at deploy) so the 302
+does not gunzip on the request. Lookup is a binary search — no KV and no Oracle
+on the Worker path. 302s set `Cache-Control` / `s-maxage` and Workers Caching is
+on. Unknown ids **404** with `no-store`. Vercel origin fallback is a 302 to
+`/marketplace/en/cards/{id}` (SPA), not `marketplace-card-shortlink` on Oracle. Refresh the map with
 `scripts/dump-shortlink-slugs.sh` then redeploy the Worker. Do not `wrangler kv
 bulk put` on the Free plan. `pokoin.com/card-images/*` stays on
 `pokoin-cdn-card-images`. Do not put shortlinks on Supabase. Do not point
@@ -215,7 +239,10 @@ Deal, and Add to cart use `GET /api/marketplace-listings?nativeOnly=1` after
 first paint. Catalog `card.price` is not a buyable ask. Empty native listings:
 Floor `—`, **Unavailable**, “No sellers yet.” Unsigned Best Deal unlock goes
 to `/auth`. Signed-in unlock posts `/api/unlock-silver` (20 site PKN).
-CT/CM/VT pills render only when Firestore says Silver (or admin). List card
+CT/CM/VT pills render only when Firestore says Silver (or admin). Silver **VT**
+opens Vinted Italy with Pokemon `{name} {collector}` (`Gumshoos 184`); OP/RB
+keep their game prefix plus collector. English set names zero the catalog.
+Name-only Gumshoos is 500+ listings. List card
 already sends a Firebase ID token.
 
 Do **not** clone Collectr’s ungraded/graded SVG history or affiliate TCGPlayer /
@@ -245,8 +272,9 @@ The page BFF still concatenates CardTrader `expansion_number` into `number`
 `rarity`. `market/src/identity.js` splits that before render and before
 `marketplace-event`. Do not show `Card` as a rarity.
 
-Images: `gridImageUrl` / `heroImageUrl` from the page BFF. Never `/previews/`.
-Autocomplete thumbs use `cdn_image_url` only if it is not a preview path.
+Images: `gridImageUrl` / `heroImageUrl` from the page BFF. Never `/previews/`
+on the card desk. Header suggest thumbs may fall back to a CardTrader
+`preview_` URL when no leftover JPEG exists — empty grey squares are worse.
 
 Contract: `GET https://api.pokoin.com/api/__contract` version `2026-08-30.2`.
 
@@ -283,7 +311,8 @@ live contract. Page BFFs are **GET**.
 
 | URL | When |
 | --- | --- |
-| `GET /api/marketplace-home-page` | Home (not `marketplace-home`) |
+| `GET /api/marketplace-home` | Homepage **vector** from Supabase rails. Worker Cache API on **pokoin.com** (stable key, SWR). No recently seen. **Not** the Flutter hydrate on api.pokoin.com (~170 KB). |
+| `GET /api/marketplace-card-tiles?ids=` | Public tile payloads for recents not in the vector. Worker on pokoin.com; Oracle 404. After first paint only. |
 | `GET /api/marketplace-search-page?query=` | Search + load more |
 | `GET /api/marketplace-card-page?cardId=` | Detail shell. `includeOffers=0` by default |
 | `GET /api/marketplace-listings?cardId=&nativeOnly=1` | Listings table after first paint |
@@ -293,7 +322,7 @@ live contract. Page BFFs are **GET**.
 | `POST /api/create-pkn-checkout-session` | Stripe PKN packages |
 | `POST /api/unlock-silver` | 20 site PKN Silver |
 | `GET /api/marketplace-expansion-page?slug=` | Set browse |
-| `GET /api/marketplace-suggest?q=` | Header typeahead (Meili-only, grouped printings, ~120ms debounce). Plain prefix → base name first (`mimik` → Mimikyu). |
+| `GET /api/marketplace-suggest?q=` | Header typeahead (Meili-only, grouped printings, ~120ms debounce). Plain prefix → base name first (`mimik` → Mimikyu). UI flattens groups into CardTrader-style rows; `count` drives “View all N results”. |
 | `POST /api/marketplace-event` | Actions above |
 
 Same-origin `https://pokoin.com/api/marketplace-suggest` rewrites to
@@ -333,9 +362,174 @@ This repo is the public web. Do not ship the marketplace through
 `cardvault/.../build/web`. App host: [APP.md](APP.md).
 
 Empty **Recently seen** skeletons used to wait on Oracle `GET /api/marketplace-home-page`.
-Browse rails now read **Supabase** (`marketplace_rails` / `marketplace_card_tiles`),
-published every 10 min from the marketplace box. Oracle Postgres stays search +
-source of truth. See [MADRID_MARKETPLACE.md](MADRID_MARKETPLACE.md).
+Browse rails now read **Supabase** (`marketplace_rails` / `marketplace_card_tiles` /
+`marketplace_card_weights`). Oracle Postgres stores seller listings, CardTrader
+snapshots, and sold/removed history. A 15-minute job rolls those into card
+weights; rails sync publishes the ranked lists **with PKN prices**. Snapshots
+(883 MB) stay on Oracle. Do not seq-scan
+`cardtrader_market_listing_snapshots` (the usable index is
+`COALESCE(blueprint_id, cardtrader_blueprint_id)`).
+
+**PKN conversion (one rate everywhere):** `1 PKN = 0.005 USDT`. Oracle
+`marketplace_price_pkn_from_cardtrader` and the SPA (`market/src/pkn.js`) use
+the same number. EUR (and USDT) asks convert as `PKN = EUR / 0.005`.
+Example: Dragonite FB hub ask **€62.29 → 12,458 PKN** (cached column may
+already store PKN); median sold €67.54 → **13,508 PKN**. Stripe Buy packages
+use this rate too (`€5.00 → 1,000 PKN`).
+
+### Price on a homepage tile
+
+1. CardTrader hub cache `cheapest_price_pkn` (~868 hot blueprints, already
+   converted).
+2. Else sold-median EUR from `marketplace_card_weights` ÷ 0.005.
+3. Else **live** CardTrader `GET /marketplace/products?blueprint_id=` — Near
+   Mint English, unsigned, non-altered, non-vacation; cheapest EUR ÷ 0.005.
+   Used for New cards / Marketplace grid when the hub cache has no live-set
+   rows (Mega Evolution is not in those 868).
+4. Else **—** (not “Out of stock”). Shop / Floor / Add to cart stay
+   **native listings only**. Homepage PKN is a market reference, not a
+   buyable native ask.
+
+### Homepage rails
+
+The SPA (`Home.jsx`) reads one **vector** assembled from Supabase
+`marketplace_rails` (new / featured / best / spotlight / popular). Full
+first-paint notes, measured sizes, and industry map:
+[HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md).
+
+The Worker caches that JSON at a **stable** Cache API key (no Supabase
+`updated_at` round-trip on the user path) and revalidates in `waitUntil`
+when rails change ([RFC 5861](https://datatracker.ietf.org/doc/html/rfc5861)).
+Browsers may keep the JSON 120s fresh and a day stale. The SPA also keeps the
+last public vector in `sessionStorage pokoin.homeVector.{game}` (10 min) so a
+return visit paints rails before the network.
+
+Recently seen is **not** in that cache. Recents are `localStorage
+pokoin.recentCardIds` first; Firestore merges **after** Firebase `ready`.
+Extra tile JSON runs only for ids missing from the vector, after New cards
+already painted.
+
+Tiles show `formatPkn` plus `printingIdentity().tileLine`. Grid art is the
+240px `_homepage.webp` sibling (catalog JPEG stays on the card desk and the
+home promo fan). First eight visible tiles are `loading=eager`; the first
+four use `fetchPriority=high`.
+
+### Homepage first paint (do not regress)
+
+Checklist only — rationale and file map are in
+[HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md).
+
+1. Promo carousel (local).
+2. `sessionStorage` public vector if present → paint New / Best / Featured /
+   Popular / grid immediately.
+3. Rails vector with **no** auth wait. Attach recents **synchronously**.
+4. Grid images: `/card-images/{leftover-key}_homepage.webp`, then JPEG.
+
+Deferred (skeletons only on Recently seen if local ids are not in the vector):
+
+5. Tile JSON for leftover recents.
+6. After Firebase `ready`, `syncRemoteRecentCardIds()`.
+
+Do **not** gate `fetchHome` on `useAuth().ready`. Do **not** `await`
+`getDoc(user_card_recent_views)` before the public vector. Do **not** put
+`fetchCardTiles` inside `Promise.all` with the rails. Worker cache lookup
+must not call Supabase `updated_at` before `caches.default.match`. Do **not**
+treat Flutter `api.pokoin.com/api/marketplace-home` as the SPA vector.
+
+| Rail | What it is | Rank | Price on the tile |
+| --- | --- | --- | --- |
+| Promo | Five current English sets | local `PromoCarousel` | set page, not this row |
+| Recently seen | Last 24 card ids | localStorage, or Firestore `user_card_recent_views` if signed in | not in the 1-day vector |
+| New cards | **Shop mix**, unique **names**: one chase (`n>m`) + one in-set (`n≤m`, not Energy) per live English set (Mega Evolution, Phantasmal Flames, Black Bolt, White Flare, Destined Rivals) | collector number + `card_id` desc | waterfall above, live CT overlay |
+| Best sellers | **Units sold (7d)** among cards **listed now** in the hub, median sold ≤ €15 (playables not chase gold). Skip basic Energy. Unique names. | `sold_qty_7d DESC` | hub cache or median PKN |
+| Featured | **Shelf speed**: `sell_through DESC` then `demand_score`, among cards with **≥8 listings** (avoids 3-copy promo “fake tight”). Disjoint from Best sellers by name, max 2 per set. | `sell_through`, `demand_score` | same |
+| Popular | Same pool as Best sellers filters: units then demand among listed cards | `sold_qty_7d DESC`, `demand_score` | same |
+| Marketplace grid | Same shop mix as New cards (up to 16) | same as New cards | same |
+
+High PKN on a gold or SR is the rate, not a conversion bug: €1 = 200 PKN
+(`EUR / 0.005`). Mega Lucario ex gold ~€150 → ~30,128 PKN. Two tiles named
+Victini were two printings (Black Bolt 171/086 vs White Flare 172/086); the
+mix now keeps one name. Levincia gold 244/182 is a stadium — Iono is in
+the art, the catalog name is Levincia.
+
+### Listing pipeline (Oracle → Supabase)
+
+```
+CardTrader daily (03:20 UTC, flock)
+  GET /marketplace/products?expansion_id=  → snapshots (Oracle only)
+  sold comps from removed_history if reason is inferred_sale /
+    quantity_decreased / missing_from_cardtrader_market_snapshot
+    (dropped_from_cheapest_25 is not a sale)
+
+Native POST /api/marketplace-listings
+  appear / qty-down / sold_out → marketplace_user_listing_events
+
+every 15 min  refresh-listing-weights.py
+  stats_daily → marketplace_card_weights (unit / sell-through formulas)
+
+every 10 min  sync-supabase-rails.py
+  SQL tiles + PKN + live CT overlay for new sets
+  Valkey `pkn:ct:{blueprint}` TTL 6h (misses 5 min)
+  → Supabase marketplace_rails / _card_tiles / _card_weights
+
+Worker GET /api/marketplace-home  (pokoin-origin)
+  stable Cache API key, SWR revalidate via waitUntil
+  recently seen stays local / Firebase (after paint)
+
+SPA Home.jsx
+  sessionStorage vector → fetchHome (no auth wait)
+  attachRecentsToHome sync → tiles fetch for missing ids only
+  CardTile: _homepage.webp then JPEG; formatPkn(price) or —
+```
+
+On **pokoin.com**, `GET /api/marketplace-home` is the Worker vector (1 day).
+The Flutter app still calls **api.pokoin.com** `GET /api/marketplace-home`
+(Valkey 30s, ~170 KB). The SPA must not use that payload. First paint:
+[HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md).
+Oracle `GET /api/marketplace-home-page` remains the fallback if Worker and
+Supabase rails are both unavailable.
+
+**Valkey, not Redis.** Honcho on nezopt and Nextcloud’s cache image are
+`valkey/valkey`. Marketplace runs a **32 MB** Valkey on
+`pokoin-marketplace` (`127.0.0.1:6379`, host network, no persistence).
+Do **not** put Valkey or Redis on `pokoin-peer1`. The 1 GB micro cannot
+hold a large cache; Madrid A1 is where this can grow. Supabase rails stay
+the SPA source of truth.
+
+**Card images / R2:** public URLs stay `https://cdn.pokoin.com/…` (set by
+`POKOIN_CARD_CDN_BASE_URL` at import). Oracle origin is
+`https://api2.pokoin.com` on peer1 (same paths + public→leftover remap).
+See [GAMES.md](GAMES.md). Do not rewrite DB URLs — cut over `cdn.pokoin.com`
+DNS to peer1 after the R2→disk sync. Catalog masters are leftover-key JPEGs.
+Home/search tiles use the `_homepage.webp` sibling (240px, q82) generated by
+`cardvault/.../scripts/generate-oracle-homepage-card-images.js` (R2) and
+`generate-oracle-disk-homepage-webp.py` (peer1 disk). `imageSrc(..., 'grid')`
+rewrites `.jpg` → `_homepage.webp` and `CardArt` falls back to JPEG on 404.
+Desk/hero and the home promo fan use leftover JPEG (`CardArt full` /
+`preferFullImage`); `CardArt` does not upgrade a JPEG src to the homepage
+derivative. Grid/search tiles still use `_homepage.webp` and fall back to
+JPEG on 404.
+
+Install: `scripts/install-marketplace-valkey.sh` then
+`scripts/install-listing-pipeline.sh`.
+
+```
+PKN            = EUR / 0.005
+best_seller    = sold_qty_7d                    (integer; publisher also filters listed_now>0, median≤€15)
+demand         = ln(1 + 80 × ((qty/7)/listed)) if qty≥3 and listed>0
+featured       = demand + 2×sell_through×ln(1+qty)   (no hot_score)
+combined       = sold_qty_7d + 10×demand + native
+```
+
+**Why the old rows looked the same.** Featured still used raw `hot_score_24h` (values ~400–1000), so Supreme Victors FB promos with tiny listed counts beat Fezandipiti/Galvantula. Best sellers included vintage cards with **zero** hub listings (Magneton 227 units, listed=0). The fix is simpler sorts on real columns, not nationality filters.
+
+Publisher: `scripts/sync-supabase-rails.py` on `pokoin-marketplace`
+(`supabase-rails-sync.timer`). Weights: `scripts/refresh-listing-weights.py`
+(`listing-weights.timer`). Formula SQL:
+`scripts/sql/listing-weight-formulas.sql`. Install:
+`scripts/install-listing-pipeline.sh`.
+
+See [MADRID_MARKETPLACE.md](MADRID_MARKETPLACE.md).
 
 ```
 pokoin-web/                 scripts/build-web.sh          Vercel project `web`

@@ -6,6 +6,11 @@ CDN miss. It is the React home BFF waiting on Postgres while a CardTrader
 refresh saturates the Frankfurt 1 GB micro. The fix that actually fits Always
 Free is **Madrid 3 Ampere**, not another Frankfurt hunt.
 
+**5 Sep 2026:** the SPA no longer waits on Oracle `marketplace-home-page`,
+Firebase, or Firestore before painting New / Best / Featured. That first-paint
+path is [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md). This file stays the Madrid
+hosting note. The grey-row screenshot below is the **old** Oracle stall.
+
 Tenancy IDs, keys, and hunt paths live in the private two-tenancies note
 (not git). This file is the public-web pipeline.
 
@@ -21,10 +26,10 @@ on `GET /api/marketplace-home-page`. Until that JSON arrives, **Recently seen /
 New cards / Best sellers / Featured** are eight skeleton tiles (`placeholders={8}`).
 That is the grey row.
 
-If the BFF had returned, tiles would show **name + price** even with broken
-art. `/card-images/…` and `cdn.pokoin.com` returned 200 (CDN worker
-`pokoin-cdn-card-images`). `pokoin-shortlink` only 302s numeric card paths;
-`/api/*` is pass-through to Vercel → `api.pokoin.com`.
+If the BFF had returned, tiles would show **name + PKN** (or **—**). A missing
+ask is not “Out of stock”. `/card-images/…` and `cdn.pokoin.com` returned 200
+(CDN worker `pokoin-cdn-card-images`). `pokoin-shortlink` only 302s numeric
+card paths; `/api/*` is pass-through to Vercel → `api.pokoin.com`.
 
 ```
 browser  →  Cloudflare (pokoin.com orange-cloud)
@@ -154,9 +159,15 @@ You cannot give the marketplace VM more RAM. Always Free AMD is two **fixed
 (no A1 hosts / quota ghosts). Hypemeter must not land on this box either
 ([NEWS.md](NEWS.md)).
 
-Stopgap only (until Madrid exists): pause the daily refresh during browsing
-hours; do not cache empty home snapshots; abort SQL on `withTimeout`. That
-makes the rail honest. It does not make 883 MB of snapshots fit in 512 MiB.
+Stopgap only (until Madrid exists): **one CardTrader refresh per day** at
+`03:20 UTC` (`pokoin-cardtrader-daily-market-refresh.timer`); do not cache
+empty home snapshots (Valkey `home:react` / `home:flutter` skip empty);
+abort SQL on `withTimeout`. Listing sold/new stats
+roll up from `cardtrader_market_listing_removed_history` plus native
+`marketplace_user_listings` into `marketplace_card_weights` (small). Rails
+on Supabase get those weights, not the 883 MB snapshot table.
+
+That makes the rail honest. It does not make 883 MB of snapshots fit in 512 MiB.
 
 ---
 
@@ -224,6 +235,16 @@ and VCN are already in the Madrid deploy dir.
   resume off-peak.
 - In oracle-api: do not cache empty timeout snapshots; `statement_timeout`
   on the refresh function lower than “run for 40 s per batch”.
+- Listing pipeline: `scripts/install-listing-pipeline.sh` (Oracle stats +
+  weights, daily flock, 15-min weight timer). Rails sync publishes ranked
+  homepage rails to Supabase **with PKN** (`1 PKN = 0.005 USDT`,
+  `PKN = EUR / 0.005`). Hub cache is ~868 hot blueprints; live English sets
+  are not in it yet, so New cards overlay CardTrader NM/EN asks at publish
+  time and store them in **Valkey** (`pkn:ct:{blueprint}`, 6 h). New cards
+  is a chase + in-set mix per live set, unique names. Recents merge PKN
+  from rails instead of shadowing priced tiles. Snapshots
+  stay on Oracle. Install Valkey with `scripts/install-marketplace-valkey.sh`
+  (32 MB, localhost, not on peer1).
 
 ### 1 — Hunt Madrid (gvitolocs profile only)
 

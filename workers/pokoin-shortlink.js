@@ -1,27 +1,9 @@
-import idsBin from './card-ids.bin';
-import startsBin from './card-starts.bin';
-import blobGz from './card-slug-blob.gz';
-import {
-  canonicalRedirectUrl,
-  shortlinkCardId,
-  slugFromPackedIndex,
-  u32View,
-} from './shortlink-path.js';
+import { lookupSlug } from './shortlink-lookup.js';
+import { canonicalRedirectUrl, shortlinkCardId } from './shortlink-path.js';
 
 const SITE = 'https://pokoin.com';
 const REDIRECT_CACHE_CONTROL =
-  'public, max-age=300, s-maxage=86400, stale-while-revalidate=604800';
-
-const ids = u32View(idsBin);
-const starts = u32View(startsBin);
-let blobPromise;
-
-function slugBlob() {
-  blobPromise ||= new Response(
-    new Response(blobGz).body.pipeThrough(new DecompressionStream('gzip')),
-  ).text();
-  return blobPromise;
-}
+  'public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800';
 
 function redirectTo(url, via) {
   return new Response(null, {
@@ -45,8 +27,7 @@ export default {
     if (!cardId) {
       return fetch(request);
     }
-    const blob = await slugBlob();
-    const slug = slugFromPackedIndex(cardId, ids, starts, blob);
+    const slug = lookupSlug(cardId);
     if (!slug) {
       return new Response('Not found', {
         status: 404,

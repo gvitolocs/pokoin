@@ -1,0 +1,11 @@
+_unsloth_temporary_saved_buffers/
+unsloth_compiled_cache/
+.cursor/
+.codevira/
+.codevira-cache/
+market/node_modules/
+market/dist/
+.playwright-cli/
+*.apkm
+.git/
+agent-transcripts/

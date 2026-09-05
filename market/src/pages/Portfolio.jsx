@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { cardHref, fetchPortfolio, formatPkn, imageSrc } from '../api.js';
+import { game } from '../game.js';
 import CardArt from '../components/CardArt.jsx';
 import DumpNav from '../components/DumpNav.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
-import {
-  catalogItemById,
-  dumpItemHref,
-  dumpMarketplaceHref,
-  dumpSearchHref,
-  finishLabel,
-  loadCatalog,
-  usdMoney,
-} from '../catalog.js';
 
 const PAGE = 40;
+
+function holdingHref(item) {
+  return item?.id ? `/marketplace/portfolio/${item.id}` : '/marketplace/portfolio';
+}
+
+function money(value) {
+  return formatPkn(value) || '—';
+}
 
 function useCountUp(target) {
   const [value, setValue] = useState(0);
@@ -40,11 +41,11 @@ function useCountUp(target) {
 
 function Mini({ item }) {
   return (
-    <Link className="port-mini" to={dumpItemHref(item)}>
-      <CardArt src={item.img} alt="" loading="lazy" />
+    <Link className="port-mini" to={holdingHref(item)}>
+      <CardArt src={imageSrc(item, 'hero')} alt="" loading="lazy" />
       <strong>{item.name}</strong>
       <span className="muted">{item.expansion}</span>
-      <em>{usdMoney(item.usdTotal)}</em>
+      <em>{money(item.totalPkn)}</em>
     </Link>
   );
 }
@@ -80,22 +81,23 @@ function Rail({ title, items }) {
 }
 
 function PortfolioList() {
+  const site = game();
   const [catalog, setCatalog] = useState(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(PAGE);
   const sentinel = useRef(null);
-  const displayed = useCountUp(catalog?.totals?.usd || 0);
+  const displayed = useCountUp(catalog?.totals?.pkn || 0);
 
   useEffect(() => {
     document.title = 'Portfolio · Pokoin';
     let cancelled = false;
-    loadCatalog()
+    fetchPortfolio()
       .then((data) => {
         if (!cancelled) setCatalog(data);
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message || 'Catalog dump failed.');
+        if (!cancelled) setError(err.message || 'Portfolio failed.');
       });
     return () => {
       cancelled = true;
@@ -107,9 +109,9 @@ function PortfolioList() {
       return { valuable: [], unit: [], copies: [], holdings: [] };
     }
     const items = catalog.items || [];
-    const byTotal = [...items].sort((a, b) => b.usdTotal - a.usdTotal);
-    const byUnit = [...items].sort((a, b) => b.usd - a.usd);
-    const byQty = [...items].sort((a, b) => b.qty - a.qty || b.usdTotal - a.usdTotal);
+    const byTotal = [...items].sort((a, b) => (b.totalPkn || 0) - (a.totalPkn || 0));
+    const byUnit = [...items].sort((a, b) => (b.pricePkn || 0) - (a.pricePkn || 0));
+    const byQty = [...items].sort((a, b) => (b.qty || 0) - (a.qty || 0) || (b.totalPkn || 0) - (a.totalPkn || 0));
     const needle = query.trim().toLowerCase();
     const holdings = needle
       ? byTotal.filter((item) => `${item.name} ${item.expansion} ${item.game}`.toLowerCase().includes(needle))
@@ -143,7 +145,7 @@ function PortfolioList() {
   if (error) {
     return (
       <div className="page desk">
-        <PageHead kicker="Shop dump" title="Portfolio" />
+        <PageHead kicker="Market" title="Portfolio" />
         <DumpNav />
         <Alert>{error}</Alert>
       </div>
@@ -153,51 +155,49 @@ function PortfolioList() {
   if (!catalog) {
     return (
       <div className="page desk">
-        <PageHead kicker="Portfolio" title="Shop snapshot" lede="Loading candyext CardTrader dump…" />
+        <PageHead kicker="Portfolio" title="Live asking" lede="Loading Pokoin catalog…" />
         <DumpNav />
       </div>
     );
   }
 
-  const seller = catalog.seller || {};
-  const games = catalog.games || [];
-  const maxUsd = Math.max(1, ...games.map((game) => game.usd));
+  const sets = catalog.sets || [];
+  const maxPkn = Math.max(1, ...sets.map((row) => row.pkn || 0));
   const visible = ranked.holdings.slice(0, shown);
-  const stamp = String(catalog.generated || '').slice(0, 10);
 
   return (
     <div className="page desk port-page">
       <PageHead
         kicker="Portfolio"
-        title={[seller.username || 'RotationMotionTGC', seller.country, seller.pro ? 'PRO' : '']
-          .filter(Boolean)
-          .join(' · ')}
-        lede={`Candyext dump of the public CardTrader shop (${stamp || '2026-08-30'}). Asking prices, not sold comps.`}
+        title={`${site.brand} · live listings`}
+        lede="Pokoin catalog in PKN. Art from cdn.pokoin.com. Asking overlays live native listings when they exist."
       />
       <DumpNav />
       <MetricGrid>
-        <Metric value={usdMoney(displayed)} label="Asking" hint={usdMoney(catalog.totals.usd)} />
+        <Metric value={money(displayed)} label="Asking" hint={money(catalog.totals.pkn)} />
         <Metric value={(catalog.totals.qty || 0).toLocaleString('en-US')} label="Copies" />
         <Metric value={(catalog.totals.listings || 0).toLocaleString('en-US')} label="Listings" />
-        <Metric value={seller.feedback != null ? `${seller.feedback}%` : '—'} label="Feedback" />
+        <Metric value={(catalog.totals.cards || 0).toLocaleString('en-US')} label="Cards" />
       </MetricGrid>
 
-      <section>
-        <div className="carousel-head">
-          <h2>By game</h2>
-        </div>
-        <div className="port-games">
-          {games.map((game) => (
-            <div className="port-game" key={game.name}>
-              <strong>{game.name}</strong>
-              <div className="port-bar">
-                <i style={{ width: `${(game.usd / maxUsd) * 100}%` }} />
+      {sets.length ? (
+        <section>
+          <div className="carousel-head">
+            <h2>By set</h2>
+          </div>
+          <div className="port-games">
+            {sets.map((row) => (
+              <div className="port-game" key={row.name}>
+                <strong>{row.name}</strong>
+                <div className="port-bar">
+                  <i style={{ width: `${((row.pkn || 0) / maxPkn) * 100}%` }} />
+                </div>
+                <span>{money(row.pkn)} · {(row.qty || 0).toLocaleString('en-US')} copies</span>
               </div>
-              <span>{usdMoney(game.usd)} · {(game.qty || 0).toLocaleString('en-US')} copies</span>
-            </div>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <Rail title="Most valuable" items={ranked.valuable} />
       <Rail title="Highest unit price" items={ranked.unit} />
@@ -218,21 +218,21 @@ function PortfolioList() {
         <DeskPanel flush>
           <div className="port-holdings">
             {visible.map((item) => (
-              <Link className="port-hold" key={item.id} to={dumpItemHref(item)}>
-                <CardArt src={item.img} alt="" loading="lazy" />
+              <Link className="port-hold" key={item.id} to={holdingHref(item)}>
+                <CardArt src={imageSrc(item, 'hero')} alt="" loading="lazy" />
                 <div>
                   <strong>{item.name}</strong>
                   <span className="muted">
                     {item.game}
                     {' · '}
                     {item.expansion}
-                    {' · '}
-                    {finishLabel(item)}
+                    {item.number ? ` · ${item.number}` : ''}
+                    {item.condition ? ` · ${item.condition}` : ''}
                     {' · ×'}
                     {item.qty}
                   </span>
                 </div>
-                <em>{usdMoney(item.usdTotal)}</em>
+                <em>{money(item.totalPkn)}</em>
               </Link>
             ))}
           </div>
@@ -242,7 +242,9 @@ function PortfolioList() {
             Showing {visible.length.toLocaleString('en-US')} of {ranked.holdings.length.toLocaleString('en-US')}
           </p>
         ) : (
-          <EmptyDesk nested title="No holdings match" lede="Try a shorter name." />
+          <EmptyDesk nested title="No Pokoin cards" lede="Catalog is empty for this game.">
+            <Link className="btn" to="/marketplace">Shop</Link>
+          </EmptyDesk>
         )}
         <div ref={sentinel} />
       </section>
@@ -257,19 +259,21 @@ function HoldingDetail() {
 
   useEffect(() => {
     let cancelled = false;
-    loadCatalog()
+    fetchPortfolio({ id: listingId })
       .then((data) => {
         if (!cancelled) setCatalog(data);
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message || 'Catalog dump failed.');
+        if (!cancelled) setError(err.message || 'Portfolio failed.');
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [listingId]);
 
-  const item = catalog ? catalogItemById(catalog, listingId) : null;
+  const item = (catalog?.items || []).find((row) => String(row.id) === String(listingId))
+    || catalog?.items?.[0]
+    || null;
 
   useEffect(() => {
     document.title = `${item?.name || 'Holding'} · Portfolio · Pokoin`;
@@ -287,7 +291,7 @@ function HoldingDetail() {
   if (!catalog) {
     return (
       <div className="page desk">
-        <p className="page-lede">Loading candyext CardTrader dump…</p>
+        <p className="page-lede">Loading live PKN holding…</p>
       </div>
     );
   }
@@ -295,13 +299,13 @@ function HoldingDetail() {
   if (!item) {
     return (
       <div className="page desk">
-        <Alert>That listing is not in the snapshot.</Alert>
+        <Alert>No Pokoin card for that id.</Alert>
         <Link className="btn ghost" to="/marketplace/portfolio">Back to portfolio</Link>
       </div>
     );
   }
 
-  const live = dumpMarketplaceHref(item);
+  const live = item.canonicalPath || cardHref(item);
 
   return (
     <div className="page desk port-page">
@@ -311,28 +315,26 @@ function HoldingDetail() {
         <span>{item.name}</span>
       </nav>
       <div className="port-detail">
-        <CardArt src={item.img} alt={item.name} />
+        <CardArt src={imageSrc(item, 'hero')} alt={item.name} />
         <div>
           <p className="eyebrow">{item.game}</p>
           <h1>{item.name}</h1>
           <p className="muted">
             {item.expansion}
-            {' · '}
-            {finishLabel(item)}
+            {item.number ? ` · ${item.number}` : ''}
+            {item.condition ? ` · ${item.condition}` : ''}
             {item.language ? ` · ${item.language}` : ''}
-            {item.rarity ? ` · ${item.rarity}` : ''}
             {' · ×'}
             {item.qty}
           </p>
-          <p className="port-value">{usdMoney(item.usdTotal)}</p>
+          <p className="port-value">{money(item.totalPkn)}</p>
           <p className="muted">
-            {usdMoney(item.usd)} asking each · CardTrader listing {item.id}
-            {item.blueprint ? ` · blueprint ${item.blueprint}` : ''}
+            {money(item.pricePkn)} floor · {item.listingCount} native listing{item.listingCount === 1 ? '' : 's'}
           </p>
-          <p className="muted">Snapshot asking price from the candyext dump. Not a sold comp. Not live Pokoin inventory.</p>
+          <p className="muted">Pokoin PKN. Catalog art from cdn.pokoin.com. Not USD. Not a CardTrader leftover image.</p>
           <p className="comp-subnav">
-            <Link to={dumpSearchHref(item)}>Search marketplace</Link>
-            {live.startsWith('/marketplace/en/cards/') ? <Link to={live}>Pokoin card {Number(item.blueprint) * 2}</Link> : null}
+            <Link to={live}>Open card desk</Link>
+            <Link to="/marketplace/portfolio">All holdings</Link>
           </p>
         </div>
       </div>

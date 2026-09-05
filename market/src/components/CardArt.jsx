@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { rasterSiblings } from '../api.js';
+import { rasterSiblings } from '../image-urls.js';
 
 export default function CardArt({
   src,
@@ -8,10 +8,11 @@ export default function CardArt({
   fetchPriority,
   className,
   fallback = 'placeholder',
+  full = false,
   onClick,
   onLoad,
 }) {
-  const urls = useMemo(() => rasterSiblings(src), [src]);
+  const urls = useMemo(() => rasterSiblings(src, { full }), [src, full]);
   const [index, setIndex] = useState(0);
   const [dead, setDead] = useState(false);
   const imgRef = useRef(null);

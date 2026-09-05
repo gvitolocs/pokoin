@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { fetchSearch } from '../api.js';
+import { useSearchLang } from '../locale.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
@@ -9,6 +10,7 @@ import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 export default function Search() {
   const [params] = useSearchParams();
   const query = (params.get('q') || params.get('query') || '').trim();
+  const lang = useSearchLang();
   const [cards, setCards] = useState([]);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState('');
@@ -18,7 +20,7 @@ export default function Search() {
     document.title = query ? `${query} · Pokoin` : 'Search · Pokoin';
     let cancelled = false;
     setLoading(true);
-    fetchSearch({ query, offset: 0, limit: 48 })
+    fetchSearch({ query, offset: 0, limit: 48, lang })
       .then((data) => {
         if (cancelled) {
           return;
@@ -44,10 +46,10 @@ export default function Search() {
     return () => {
       cancelled = true;
     };
-  }, [query]);
+  }, [query, lang]);
 
   async function loadMore() {
-    const data = await fetchSearch({ query, offset: cards.length, limit: 48 });
+    const data = await fetchSearch({ query, offset: cards.length, limit: 48, lang });
     const extra = data.cards || [];
     setCards((current) => [...current, ...extra]);
     setHasMore(Boolean(data.hasMore));

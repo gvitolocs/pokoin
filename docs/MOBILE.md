@@ -42,9 +42,9 @@ at the same 393×852 viewport.
 | --- | --- |
 | `(max-width: 1100px)` | Card desk drops the three-column wide layout |
 | `(max-width: 960px)` | Tablet card stack: Best Deal → art → shop → list form |
-| `(max-width: 720px)` | Burger + logo + search. Icon nav moves into the burger panel. **Top bar columns:** `auto auto minmax(0, 1fr)` so search fills the leftover row (the old `auto 1fr auto` parked the logo in the flexible column and squeezed it). |
+| `(max-width: 720px)` | Burger + logo + search + language flag. Icon nav moves into the burger panel. **Top bar columns:** `auto auto minmax(0, 1fr) auto` so search fills the leftover row and the flag stays on the right. Suggest hides the right-hand Singles / versions column. |
 | `(max-width: 480px)` | **Phone aesthetics** (iPhone 16). See below. Desktop is not in this query. |
-| `(max-width: 720px)` | Burger + logo + search. Icon nav moves into the burger panel. **Top bar columns:** `auto auto minmax(0, 1fr)` so search fills the leftover row (the old `auto 1fr auto` parked the logo in the flexible column and squeezed it). |
+| `(max-width: 720px)` | Burger + logo + search + language flag. Icon nav moves into the burger panel. **Top bar columns:** `auto auto minmax(0, 1fr) auto` so search fills the leftover row and the flag stays on the right. Suggest hides the right-hand Singles / versions column. |
 | `(max-width: 480px)` | **Phone aesthetics** (iPhone 16). See below. Desktop is not in this query. |
 
 ## Phone-only (`≤480px`) — market
@@ -54,8 +54,8 @@ Source: `market/src/styles.css` (block at the bottom). Chrome markup:
 
 | Surface | What changes | Why |
 | --- | --- | --- |
-| Top bar | Safe-area padding; 32px logo; 44px burger; search submit is a magnifying-glass icon (the word “Search” stays on desktop) | 393px cannot fit burger + logo + long placeholder + “Search” without crowding |
-| Search input | `font-size: 16px` | iOS Safari zooms the page if the field is smaller than 16px |
+| Top bar | Safe-area padding; 32px logo; 44px burger; search submit is a magnifying-glass icon; language flag on the right | 393px cannot fit burger + logo + long placeholder + a text “Search” without crowding |
+| Search suggest | Full viewport width minus the 0.75rem chrome gutters | The panel is a child of the search pill, which is squeezed between logo and flag |
 | Main | Tighter padding `0.75rem 0.85rem` | Recover horizontal room for two tile columns |
 | Expansion promo | Fan above copy, still overflowing the box; 1.65rem title; **full-width** yellow CTA (min-height 44px); 44px arrows | Thumb reach; overlay chase cards |
 | Rails | Tile width `9.6rem`, tighter gap, touch momentum scroll | ~2 cards plus a peek instead of one oversized tile |
@@ -66,7 +66,7 @@ Source: `market/src/styles.css` (block at the bottom). Chrome markup:
 | Art ‹ › | 44×44 tap targets (SVG chevrons, collector-number order) | Apple HIG; centering is in the SVG, not `‹`/`›` glyphs |
 | Shop filters | Full-width stacked selects | Two dropdowns side by side were unreadable |
 | Footer | Extra `safe-area-inset-bottom` | Home indicator |
-| Burger panel | 44px-tall rows + bottom safe area | Same menu as `≤720px`, easier to hit |
+| Burger panel | Full-height left side drawer over the chrome; dim scrim from y=0; 3-column gold icon tiles | Same destinations as `≤720px`; tap dim to close |
 
 What phone CSS does **not** change: gold `#FFD33D`, `card_id` identity, listing
 `nativeOnly`, honest `24h —`, JPEG heroes, Satoshi.
@@ -90,7 +90,7 @@ drawer) were already there and still apply.
 | --- | --- |
 | `market/index.html`, `index.html` | `viewport-fit=cover` |
 | `market/src/styles.css` | `≤720px` top-bar grid; `≤480px` phone sheet |
-| `market/src/components/Chrome.jsx` | Search button: `.search-go-text` + `.search-go-icon` |
+| `market/src/components/Chrome.jsx` | Search submit: gold `.search-go-icon`; CardTrader-style suggest rows |
 | `home/landing.css` | `≤480px` safe-area nav / hero / CTA |
 | `docs/MARKET.md` | Card stack exception on phone |
 

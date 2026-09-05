@@ -19,14 +19,14 @@ export default function Cart() {
       <PageHead
         kicker="Shop"
         title="Cart"
-        lede={`${count} ${count === 1 ? 'item' : 'items'} on this browser. Checkout pays site PKN, not chain PKN.`}
+        lede={`${count} ${count === 1 ? 'item' : 'items'} on this browser. Checkout pays PKN.`}
       >
         {items.length ? <button className="btn ghost" type="button" onClick={clear}>Clear</button> : null}
         <Link className="btn ghost" to="/marketplace">Keep shopping</Link>
       </PageHead>
 
       {!items.length ? (
-        <EmptyDesk title="Cart is empty" lede="Open a card desk and add a native listing from Shop.">
+        <EmptyDesk icon="cart" title="Cart is empty" lede="Open a card desk and add a native listing from Shop.">
           <Link className="btn" to="/marketplace">Browse marketplace</Link>
         </EmptyDesk>
       ) : (

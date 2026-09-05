@@ -4,11 +4,12 @@ import {
   artistHref,
   versionsHref,
   cardHref,
-  cardtraderHref,
+  cardtraderPublicUrl,
   createListing,
   fetchCard,
   fetchCanonicalPath,
   fetchCardmarketRedirect,
+  fetchCardtraderRedirect,
   fetchListings,
   formatPkn,
   imageSrc,
@@ -157,7 +158,15 @@ function defaultFoil(card) {
   return 'standard';
 }
 
-function ListingForm({ card, identity, suggestedPrice, fromPath, onListed }) {
+function ListingForm({
+  card,
+  identity,
+  suggestedPrice,
+  fromPath,
+  onListed,
+  preferredLanguage,
+  preferredCondition,
+}) {
   const navigate = useNavigate();
   const { signedIn, ready, sellerName, getBearer } = useAuth();
   const [price, setPrice] = useState('');
@@ -200,6 +209,18 @@ function ListingForm({ card, identity, suggestedPrice, fromPath, onListed }) {
     setError('');
     setDone('');
   }, [card.id]);
+
+  useEffect(() => {
+    if (preferredLanguage) {
+      setLanguage(preferredLanguage);
+    }
+  }, [preferredLanguage]);
+
+  useEffect(() => {
+    if (preferredCondition) {
+      setCondition(preferredCondition);
+    }
+  }, [preferredCondition]);
 
   const hint = !price && suggestedPrice ? String(suggestedPrice) : '';
 
@@ -408,8 +429,6 @@ function SilverHead({ card, fromPath }) {
   const { signedIn, silver, availablePkn, getBearer } = useAuth();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const id = publicCardId(card);
-  const name = card?.name || '';
 
   async function unlock() {
     if (!signedIn) {
@@ -429,26 +448,53 @@ function SilverHead({ card, fromPath }) {
     }
   }
 
+  function openOffsite(url) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  async function openCardtrader() {
+    setMessage('');
+    try {
+      const url = cardtraderPublicUrl(card) || await fetchCardtraderRedirect(card);
+      if (!url) {
+        throw new Error('CardTrader did not return a URL.');
+      }
+      openOffsite(url);
+    } catch (err) {
+      setMessage(err.message || 'CardTrader unavailable.');
+    }
+  }
+
   async function openCardmarket() {
     setMessage('');
     try {
-      const url = await fetchCardmarketRedirect(id);
+      const url = await fetchCardmarketRedirect(card);
       if (!url) {
         throw new Error('Cardmarket did not return a URL.');
       }
-      window.open(url, '_blank', 'noopener,noreferrer');
+      openOffsite(url);
     } catch (err) {
       setMessage(err.message || 'Cardmarket unavailable.');
     }
+  }
+
+  function openVinted() {
+    setMessage('');
+    const url = vintedHref(card);
+    if (!url || /search_text=?$/.test(url)) {
+      setMessage('Vinted search is empty.');
+      return;
+    }
+    openOffsite(url);
   }
 
   if (silver) {
     return (
       <div className="silver-tools">
         <div className="silver-pills">
-          <a className="silver-pill" href={cardtraderHref(id)} target="_blank" rel="noreferrer">CT</a>
+          <button className="silver-pill" type="button" onClick={openCardtrader}>CT</button>
           <button className="silver-pill" type="button" onClick={openCardmarket}>CM</button>
-          <a className="silver-pill" href={vintedHref(name)} target="_blank" rel="noreferrer">VT</a>
+          <button className="silver-pill" type="button" onClick={openVinted}>VT</button>
         </div>
         {message ? <p className="muted silver-note">{message}</p> : null}
       </div>
@@ -472,6 +518,33 @@ function SilverHead({ card, fromPath }) {
       {message ? <p className="muted silver-note">{message}</p> : null}
     </div>
   );
+}
+
+function canUseNativeShare() {
+  if (typeof navigator === 'undefined' || typeof navigator.share !== 'function') {
+    return false;
+  }
+  const ua = String(navigator.userAgent || '');
+  if (/iPhone|iPad|iPod|Android/i.test(ua)) {
+    return true;
+  }
+  return navigator.platform === 'MacIntel' && Number(navigator.maxTouchPoints || 0) > 1;
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.left = '-9999px';
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand('copy');
+  input.remove();
 }
 
 function cleanPath(path) {
@@ -530,6 +603,7 @@ export default function Card() {
   const [dealCond, setDealCond] = useState('');
   const [offersReady, setOffersReady] = useState(false);
   const zoomRef = useRef(null);
+  const copiedTimer = useRef(0);
 
   useLayoutEffect(() => {
     if (slug) {
@@ -611,7 +685,7 @@ export default function Card() {
           : next;
       });
       document.title = data.seo?.title || `${card.name} · Pokoin`;
-      rememberCardId(card.id);
+      rememberCardId(card);
       setWatched(readWatchlistIds().includes(String(card.id)));
       track(Action.viewCard, card);
       if (card.canonicalPath) {
@@ -731,25 +805,18 @@ export default function Card() {
   const floor = formatPkn(nativeLive[0]?.pricePkn);
   const inStock = offersReady && nativeLive.length > 0;
   const canBuy = Boolean(dealPick);
-  const dealLangs = [...new Set(nativeLive
-    .filter((row) => !dealCond || conditionKey(row.condition) === dealCond)
-    .map(offerLang)
-    .filter(Boolean))];
-  const dealConds = CONDITIONS
-    .map((row) => row.value)
-    .filter((code) => code && nativeLive.some((row) => (
-      (!dealLang || offerLang(row) === dealLang) && conditionKey(row.condition) === code
-    )));
+  const dealLangs = LIST_LANGS;
+  const dealConds = CONDITIONS.map((row) => row.value).filter(Boolean);
   const shownLang = dealLang || offerLang(dealPick) || '';
   const shownCond = dealCond || (dealPick ? conditionKey(dealPick.condition) : '');
   const languages = [...new Set((payload?.offers || []).map((row) => String(row.language || '').toUpperCase()).filter(Boolean))];
   const dealCopy = !offersReady
-    ? '\u00a0'
+    ? null
     : !nativeLive.length
       ? 'No sellers yet. Be the first to list this card.'
       : !dealPick
         ? 'No listing matches this selection.'
-        : 'Estimated total in PKN. Escrow 0.30%. Slippage guard 1.00%.';
+        : null;
   const suggested = nativeLive[0]?.pricePkn > 0
     ? Number(nativeLive[0].pricePkn).toLocaleString('en-US', { maximumFractionDigits: 2 })
     : '';
@@ -764,20 +831,28 @@ export default function Card() {
   async function share() {
     const url = `${window.location.origin}${card.canonicalPath || cardHref(card)}`;
     track(Action.share, card);
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: card.name, url });
+    if (canUseNativeShare()) {
+      try {
+        await navigator.share({
+          title: card.name || 'Pokoin',
+          text: card.name || '',
+          url,
+        });
         return;
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          return;
+        }
       }
-    } catch (_) {
-      // clipboard fallback
     }
     try {
-      await navigator.clipboard.writeText(url);
+      await copyText(url);
+      setCopied(true);
+      window.clearTimeout(copiedTimer.current);
+      copiedTimer.current = window.setTimeout(() => setCopied(false), 2000);
     } catch (_) {
-      // http Vite
+      setCopied(false);
     }
-    setCopied(true);
   }
 
   function onWatch() {
@@ -824,9 +899,16 @@ export default function Card() {
           <button type="button" className={watched ? 'icon-btn on' : 'icon-btn'} onClick={onWatch} title={watched ? 'Remove from watchlist' : 'Add to watchlist'}>
             {watched ? '♥' : '♡'}
           </button>
-          <button type="button" className="icon-btn" onClick={share} title={copied ? 'Copied' : 'Share'}>
-            ↗
+          <button
+            type="button"
+            className={copied ? 'icon-btn on' : 'icon-btn'}
+            onClick={share}
+            aria-label={copied ? 'Copied' : 'Share'}
+            title={copied ? 'Copied' : 'Share'}
+          >
+            {copied ? '✓' : '↗'}
           </button>
+          {copied ? <span className="share-copied" role="status">Copied</span> : null}
         </div>
       </header>
 
@@ -868,7 +950,7 @@ export default function Card() {
                 track(Action.zoomArt, card);
               }}
             >
-              {art ? <CardArt src={art} alt={card.name} fetchPriority="high" /> : <span className="tile-ph" />}
+              {art ? <CardArt src={art} alt={card.name} fetchPriority="high" full /> : <span className="tile-ph" />}
             </button>
             <label className="sort version-select">
               <span className="sr-only">Version</span>
@@ -902,6 +984,8 @@ export default function Card() {
             identity={identity}
             suggestedPrice={suggested}
             fromPath={fromPath}
+            preferredLanguage={dealLang}
+            preferredCondition={dealCond}
             onListed={() => {
               invalidateListings(card.id);
               fetchListings(card.id).then((list) => {
@@ -922,13 +1006,12 @@ export default function Card() {
             <div className={canBuy ? 'prod-px' : 'prod-px oos'}>
               {offersReady ? (canBuy ? formatPkn(dealPick.pricePkn) : '—') : '—'}
             </div>
-            <p className="muted own-k">{dealCopy}</p>
+            {dealCopy ? <p className="muted own-k">{dealCopy}</p> : null}
             <div className="deal-selects">
               <label className="sort deal-select">
                 <span className="sr-only">Language</span>
                 <select
                   value={shownLang}
-                  disabled={!nativeLive.length}
                   onChange={(event) => setDealLang(event.target.value)}
                 >
                   <option value="">Select language</option>
@@ -944,7 +1027,6 @@ export default function Card() {
                 <span className="sr-only">Condition</span>
                 <select
                   value={shownCond}
-                  disabled={!nativeLive.length}
                   onChange={(event) => setDealCond(event.target.value)}
                 >
                   <option value="">Select condition</option>
@@ -972,11 +1054,6 @@ export default function Card() {
             ) : (
               <span className="btn ghost buy-btn">Unavailable</span>
             )}
-            <dl className="fee-lines">
-              <div><dt>Estimated total</dt><dd>{canBuy ? formatPkn(dealPick.pricePkn) : '—'}</dd></div>
-              <div><dt>Network / escrow fee</dt><dd>0.30%</dd></div>
-              <div><dt>Slippage guard</dt><dd>1.00%</dd></div>
-            </dl>
           </section>
           <section className="panel reserve-blurb">
             <h2>POKOIN CARD RESERVE</h2>
@@ -1059,19 +1136,8 @@ export default function Card() {
               <p className="status">
                 {offersReady ? 'No items found' : '\u00a0'}
               </p>
-              {offersReady ? (
-                <div className="actions">
-                  <button type="button" className={watched ? 'btn' : 'btn ghost'} onClick={onWatch}>
-                    {watched ? 'In watchlist' : 'Add to watchlist'}
-                  </button>
-                  <Link className="btn ghost" to={authFrom(fromPath)} onClick={() => track(Action.sell, card)}>
-                    Sell this card
-                  </Link>
-                </div>
-              ) : null}
             </div>
           )}
-          <p className="affiliate">Prices in PKN.</p>
         </section>
       </div>
 
@@ -1109,6 +1175,7 @@ export default function Card() {
             <CardArt
               src={art}
               alt={card.name}
+              full
               onClick={() => setZoom(false)}
             />
           ) : null}

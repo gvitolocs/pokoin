@@ -1,0 +1,12 @@
+[Unit]
+Description=Roll Pokoin listing sold/new stats into Oracle card weights
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /home/ubuntu/bin/refresh-listing-weights.py
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=240

@@ -8,7 +8,7 @@ const LINKS = [
 export default function DumpNav() {
   const location = useLocation();
   return (
-    <nav className="comp-tabs" aria-label="Shop dump">
+    <nav className="comp-tabs" aria-label="Market holdings">
       {LINKS.map((row) => (
         <Link key={row.to} className={row.match(location.pathname) ? 'on' : undefined} to={row.to}>
           {row.label}

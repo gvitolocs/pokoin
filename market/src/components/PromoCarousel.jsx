@@ -67,7 +67,7 @@ function shuffle(list) {
 }
 
 function pickSecretRares(cards, n = 3) {
-  const withArt = (cards || []).filter((card) => imageSrc(card, 'hero') || imageSrc(card, 'grid'));
+  const withArt = (cards || []).filter((card) => imageSrc(card, 'hero'));
   const secrets = withArt.filter(isSecretRare);
   const picked = [];
   const seen = new Set();
@@ -106,14 +106,14 @@ function fanSlots(cards) {
 
 function PromoFanCard({ card, role, index, onPointerEnter }) {
   const [ready, setReady] = useState(false);
-  const art = imageSrc(card, 'hero') || imageSrc(card, 'grid');
+  const art = imageSrc(card, 'hero');
   if (!art) {
     return null;
   }
   if (!ready) {
     return (
       <span className="promo-card-preload" aria-hidden="true">
-        <CardArt src={art} alt="" fallback="hide" onLoad={() => setReady(true)} />
+        <CardArt src={art} alt="" fallback="hide" full onLoad={() => setReady(true)} />
       </span>
     );
   }
@@ -131,6 +131,7 @@ function PromoFanCard({ card, role, index, onPointerEnter }) {
           src={art}
           alt={card.name}
           fallback="hide"
+          full
           fetchPriority={role === 'center' ? 'high' : 'low'}
         />
       </span>

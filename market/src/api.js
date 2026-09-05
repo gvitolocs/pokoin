@@ -1,15 +1,19 @@
-import { fetchCardTiles, fetchExpansionFromLists, fetchHomeFromLists, fetchSetIndexFromLists } from './lists.js';
+import { attachRecentsToHome, fetchCardTiles, fetchExpansionFromLists, fetchHomeFromLists, fetchSetIndexFromLists, isPublicRailsVector } from './lists.js';
+import { applyTilePrice } from './pkn.js';
+import { readRecentCardIds, rememberCardId } from './recents.js';
+import { withGameQuery, isPokemonGame, gameRequestHeaders, game } from './game.js';
+import { vintedSearchUrl } from './identity.js';
+import { getSearchLang } from './locale.js';
+import {
+  homepageDerivativeUrl,
+  preferFullImage,
+  rasterSiblings,
+  rewritePublicImage,
+} from './image-urls.js';
 
-const RECENT_KEY = 'pokoin.recentCardIds';
+export { readRecentCardIds, rememberCardId, homepageDerivativeUrl, preferFullImage, rasterSiblings, fetchCardTiles, attachRecentsToHome, isPublicRailsVector };
+
 const WATCH_KEY = 'pokoin.watchlistIds';
-
-export function readRecentCardIds() {
-  return readIdList(RECENT_KEY);
-}
-
-export function rememberCardId(cardId) {
-  writeIdList(RECENT_KEY, cardId, 24);
-}
 
 export function readWatchlistIds() {
   return readIdList(WATCH_KEY);
@@ -39,18 +43,13 @@ function readIdList(key) {
   }
 }
 
-function writeIdList(key, cardId, max) {
-  const id = String(cardId || '');
-  if (!/^\d+$/.test(id)) {
-    return;
-  }
-  const next = [id, ...readIdList(key).filter((value) => value !== id)].slice(0, max);
-  localStorage.setItem(key, JSON.stringify(next));
-}
-
 export async function getJson(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { Accept: 'application/json', ...(options.headers || {}) },
+  const response = await fetch(withGameQuery(path), {
+    headers: {
+      Accept: 'application/json',
+      ...gameRequestHeaders(),
+      ...(options.headers || {}),
+    },
     method: options.method || 'GET',
     body: options.body,
     signal: options.signal,
@@ -65,21 +64,45 @@ export async function getJson(path, options = {}) {
   return response.json();
 }
 
-export async function fetchHome(recentIds = []) {
+function isViteDev() {
   try {
-    const cached = await fetchHomeFromLists(recentIds);
-    if (cached?.cards?.length || cached?.sections?.newArrivalIds?.length) {
-      return cached;
-    }
+    return Boolean(typeof import.meta !== 'undefined' && import.meta.env?.DEV);
   } catch (_) {
-    /* Oracle fallback below */
+    return false;
   }
-  const params = new URLSearchParams();
-  if (recentIds.length) {
-    params.set('recentCardIds', recentIds.join(','));
+}
+
+export async function fetchHome(recentIds = []) {
+  // Pokemon SPA wants the public rails vector (New + Featured + Best).
+  // `GET /api/marketplace-home` on api.pokoin.com is Flutter hydrate (~170 KB,
+  // no newArrivalIds). On pokoin.com the origin Worker serves the rails vector
+  // instead. Vite proxies /api to api.pokoin.com, so skip that hop in dev.
+  // Recents attach synchronously. Missing tiles are Home's job after paint.
+  if (isPokemonGame()) {
+    if (!isViteDev()) {
+      try {
+        const payload = await getJson('/api/marketplace-home?v=units7d');
+        if (isPublicRailsVector(payload)) {
+          return attachRecentsToHome(payload, recentIds);
+        }
+      } catch (_) {
+        /* lists / oracle below */
+      }
+    }
+    try {
+      const listed = await fetchHomeFromLists(recentIds);
+      if (listed?.cards?.length || listed?.sections?.newArrivalIds?.length) {
+        return listed;
+      }
+    } catch (_) {
+      /* oracle below */
+    }
   }
-  const query = params.toString();
-  return getJson(`/api/marketplace-home-page${query ? `?${query}` : ''}`);
+  const payload = await getJson('/api/marketplace-home-page');
+  if (payload?.cards?.length) {
+    payload.cards = payload.cards.map((card) => applyTilePrice(card));
+  }
+  return attachRecentsToHome(payload, recentIds);
 }
 
 export function fetchSearch({
@@ -88,12 +111,14 @@ export function fetchSearch({
   limit = 48,
   productType = '',
   productSearchOnly = false,
+  lang,
 } = {}) {
   const params = new URLSearchParams({
     query: query || '',
     limit: String(limit),
     offset: String(offset),
     includeFacets: '0',
+    lang: lang || getSearchLang(),
   });
   if (productType) {
     params.set('productType', productType);
@@ -104,13 +129,49 @@ export function fetchSearch({
   return getJson(`/api/marketplace-search-page?${params}`);
 }
 
-export function fetchSuggest(query, { limit = 12, signal } = {}) {
+export function fetchSuggest(query, { limit = 12, signal, lang } = {}) {
   const params = new URLSearchParams({
     q: query || '',
     limit: String(limit),
-    search_language: 'en',
+    search_language: lang || getSearchLang(),
   });
   return getJson(`/api/marketplace-suggest?${params}`, { signal });
+}
+
+const SEARCH_WARMUP_TTL_MS = 5 * 60 * 1000;
+let searchWarmupAt = 0;
+let searchWarmupTimer = 0;
+
+/**
+ * After marketplace home paints: wake the typeahead path so the first keystroke
+ * is not a cold Meili/TLS hit. Same idea as Flutter `_ensureFirstCharWarmup`.
+ * Token-predict warmup is Pokemon-only (name-token table). Best-effort; never
+ * throws into UI.
+ */
+export function warmupSearchBar() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (Date.now() - searchWarmupAt < SEARCH_WARMUP_TTL_MS) {
+    return;
+  }
+  if (searchWarmupTimer) {
+    return;
+  }
+  const run = () => {
+    searchWarmupTimer = 0;
+    searchWarmupAt = Date.now();
+    const lang = getSearchLang();
+    fetchSuggest('m', { limit: 4, lang }).catch(() => {});
+    if (isPokemonGame()) {
+      getJson(`/api/searchbar-token-predict?warmup=1&limit=1&search_language=${encodeURIComponent(lang)}`).catch(() => {});
+    }
+  };
+  if (typeof window.requestIdleCallback === 'function') {
+    searchWarmupTimer = window.requestIdleCallback(run, { timeout: 800 });
+    return;
+  }
+  searchWarmupTimer = window.setTimeout(run, 0);
 }
 
 const cardCache = new Map();
@@ -329,7 +390,7 @@ export function cardFromCatalogRow(row = {}) {
     || '',
   );
   const path = row.canonicalPath || row.canonical_path || '';
-  return {
+  return applyTilePrice({
     ...row,
     id,
     card_id: id,
@@ -352,7 +413,7 @@ export function cardFromCatalogRow(row = {}) {
     price: row.price || row.lowest_price_pkn || null,
     isMarketAvailable: row.isMarketAvailable === true || row.inStock === true,
     inStock: row.isMarketAvailable === true || row.inStock === true,
-  };
+  });
 }
 
 export function fetchArtist(slug, { limit = 240 } = {}) {
@@ -436,11 +497,30 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
   const pending = (Number(offset) === 0 && slug
     ? fetchExpansionFromLists({ slug, limit, offset }).catch(() => null)
     : Promise.resolve(null)
-  ).then((cached) => {
-    if (cached?.cards?.length) {
+  ).then(async (cached) => {
+    if (!cached?.cards?.length) {
+      return getJson(`/api/marketplace-expansion-page?${params}`);
+    }
+    const have = Number(cached.expansion?.cardCount || cached.total || 0);
+    if (have > 0) {
       return cached;
     }
-    return getJson(`/api/marketplace-expansion-page?${params}`);
+    try {
+      const metaParams = new URLSearchParams(params);
+      metaParams.set('limit', '1');
+      const meta = await getJson(`/api/marketplace-expansion-page?${metaParams}`);
+      const total = Number(meta?.expansion?.cardCount || meta?.total || 0);
+      if (total > 0) {
+        return {
+          ...cached,
+          total,
+          expansion: { ...(cached.expansion || {}), cardCount: total },
+        };
+      }
+    } catch (_) {
+      /* lists tiles still render */
+    }
+    return cached;
   }).then((data) => {
     if (offset === 0) {
       expansionCache.set(key, data);
@@ -601,7 +681,7 @@ export function fetchAutocomplete(query, { limit = 8, signal } = {}) {
     body: JSON.stringify({
       search_term: query,
       result_limit: limit,
-      search_language: 'en',
+      search_language: getSearchLang(),
     }),
     signal,
   });
@@ -636,7 +716,7 @@ export function cardHref(card) {
     return card.canonicalPath || card.canonical_path;
   }
   if (card?.id || card?.card_id) {
-    return `/marketplace/en/cards/${card.id || card.card_id}`;
+    return `/marketplace/${getSearchLang()}/cards/${card.id || card.card_id}`;
   }
   return '/marketplace';
 }
@@ -647,52 +727,44 @@ export function publicCardId(card) {
 
 export function imageSrc(card, kind = 'grid') {
   if (kind === 'hero') {
-    return preferFullImage(card?.heroImageUrl || card?.imageUrl || card?.cdn_image_url || card?.image_url);
+    return preferFullImage(
+      card?.heroImageUrl
+      || card?.imageUrl
+      || card?.cdn_image_url
+      || card?.image_url
+      || card?.gridImageUrl
+      || card?.tileImageUrl
+      || card?.homepageImageUrl
+      || card?.homepage_image_url,
+    );
   }
   if (kind === 'suggest') {
-    return preferFullImage(card?.gridImageUrl || card?.cdn_image_url || card?.image_url || card?.imageUrl);
-  }
-  return preferFullImage(card?.gridImageUrl || card?.imageUrl || card?.cdn_image_url || card?.image_url);
-}
-
-export function preferFullImage(value) {
-  const text = String(value || '').trim();
-  if (!text) {
-    return '';
-  }
-  if (/\/previews\//i.test(text) || /\/preview_/i.test(text)) {
-    return '';
-  }
-  let next = text;
-  try {
-    const url = new URL(text, 'https://pokoin.com');
-    if (url.hostname === 'cdn.pokoin.com') {
-      next = `/card-images${url.pathname}${url.search}`;
+    const tile = homepageDerivativeUrl(
+      card?.tileImageUrl || card?.homepageImageUrl || card?.homepage_image_url || card?.gridImageUrl,
+    );
+    if (tile) {
+      return tile;
     }
-  } catch (_) {
-    next = text;
+    const full = preferFullImage(
+      card?.gridImageUrl || card?.cdn_image_url || card?.image_url || card?.imageUrl || card?.image,
+    );
+    if (full) {
+      return full;
+    }
+    return rewritePublicImage(
+      card?.gridImageUrl || card?.cdn_image_url || card?.image_url || card?.imageUrl || card?.image,
+      { allowPreview: true },
+    );
   }
-  if (/_homepage\.webp(?:\?|$)/i.test(next)) {
-    return next;
-  }
-  return next.replace(/\.(png|webp)(\?|$)/i, '.jpg$2');
-}
-
-/** Catalog art is JPEG. Homepage tiles stay `_homepage.webp`. */
-export function rasterSiblings(value) {
-  const text = String(value || '').trim();
-  if (!text) {
-    return [];
-  }
-  if (/_homepage\.webp(?:\?|$)/i.test(text)) {
-    return [text];
-  }
-  const match = text.match(/^(.*)\.(jpe?g|png|webp)(\?.*)?$/i);
-  if (!match) {
-    return [text];
-  }
-  const jpeg = `${match[1]}.jpg${match[3] || ''}`;
-  return text === jpeg ? [jpeg] : [jpeg, text];
+  return homepageDerivativeUrl(
+    card?.tileImageUrl
+    || card?.homepageImageUrl
+    || card?.homepage_image_url
+    || card?.gridImageUrl
+    || card?.imageUrl
+    || card?.cdn_image_url
+    || card?.image_url,
+  );
 }
 
 export function cardFromAutocomplete(row = {}) {
@@ -708,6 +780,7 @@ export function cardFromAutocomplete(row = {}) {
     itemKind: row.item_kind,
     productType: row.product_type,
     canonicalPath: row.canonicalPath || row.canonical_path || row.href,
+    image: row.image || row.cdn_image_url || row.image_url,
     image_url: row.image || row.cdn_image_url || row.image_url,
     gridImageUrl: preferFullImage(row.image || row.cdn_image_url || row.image_url),
     heroImageUrl: preferFullImage(row.image || row.cdn_image_url || row.image_url),
@@ -931,30 +1004,68 @@ export function mediaUrl(row) {
   return row?.public_url || row?.publicUrl || row?.url || '';
 }
 
-export async function fetchCardmarketRedirect(cardId) {
+export async function fetchCardmarketRedirect(card) {
+  const id = typeof card === 'object' ? publicCardId(card) : String(card || '');
+  const leftover = leftoverBlueprintId(card);
   const params = new URLSearchParams({
-    id: String(cardId || ''),
+    id,
     format: 'json',
   });
-  const response = await fetch(`/api/cardmarket-redirect?${params}`, {
-    headers: { Accept: 'application/json' },
-  });
-  const data = await response.json().catch(() => ({}));
-  if (response.status === 409) {
-    throw new Error(data.error || data.message || 'Cardmarket has no listing for this printing.');
+  if (leftover && leftover !== id) {
+    params.set('blueprintId', leftover);
   }
-  if (!response.ok) {
-    throw new Error(data.error || data.message || `Cardmarket failed (${response.status})`);
-  }
+  const data = await getJson(`/api/cardmarket-redirect?${params}`);
   return data.url || data.redirect || data.href || '';
 }
 
-export function cardtraderHref(cardId) {
-  return `/api/cardtrader-redirect?id=${encodeURIComponent(String(cardId || ''))}`;
+/** CardTrader leftover blueprint. Never a public card_id (those 404 on cardtrader.com). */
+export function leftoverBlueprintId(card) {
+  if (card && typeof card === 'object') {
+    const ct = Number(card.ct_id ?? card.ctId);
+    if (Number.isSafeInteger(ct) && ct > 0) {
+      return String(ct);
+    }
+  }
+  return '';
 }
 
-export function vintedHref(name) {
-  return `https://www.vinted.it/catalog?search_text=${encodeURIComponent(String(name || '').trim())}`;
+/** Leftover CardTrader page. Empty when the SPA still needs /api/cardtrader-redirect. */
+export function cardtraderPublicUrl(card) {
+  const leftover = leftoverBlueprintId(card);
+  return leftover ? `https://www.cardtrader.com/en/cards/${leftover}` : '';
+}
+
+export async function fetchCardtraderRedirect(card) {
+  const direct = cardtraderPublicUrl(card);
+  if (direct) {
+    return direct;
+  }
+  const id = typeof card === 'object' ? publicCardId(card) : String(card || '');
+  const params = new URLSearchParams({
+    id,
+    format: 'json',
+  });
+  const data = await getJson(`/api/cardtrader-redirect?${params}`);
+  return data.url || data.redirect || data.href || '';
+}
+
+/** Direct leftover URL when known so the browser never 302s through pokoin.com. */
+export function cardtraderHref(card) {
+  const direct = cardtraderPublicUrl(card);
+  if (direct) {
+    return direct;
+  }
+  const id = typeof card === 'object' ? publicCardId(card) : String(card || '');
+  const leftover = leftoverBlueprintId(card);
+  const params = new URLSearchParams({ id });
+  if (leftover && leftover !== id) {
+    params.set('blueprintId', leftover);
+  }
+  return withGameQuery(`/api/cardtrader-redirect?${params}`);
+}
+
+export function vintedHref(card, hostname) {
+  return vintedSearchUrl(card, game(hostname).id);
 }
 
 export function fileToDataUrl(file) {
@@ -1063,4 +1174,15 @@ export function fetchSellerListings(sellerUid, token, { limit = 40 } = {}) {
   return getJson(`/api/marketplace-listings?${params}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
+}
+
+export function fetchPortfolio({ id = '', limit } = {}) {
+  const cap = Number.isFinite(Number(limit))
+    ? Number(limit)
+    : (isPokemonGame() ? 400 : 2000);
+  const params = new URLSearchParams({ limit: String(cap) });
+  if (id) {
+    params.set('id', String(id));
+  }
+  return getJson(`/api/marketplace-portfolio?${params}`);
 }

@@ -181,6 +181,7 @@ function prefetchMarketplace() {
       });
     })
     .catch(() => {});
+  fetch("/api/marketplace-home?v=units7d", { credentials: "same-origin" }).catch(() => {});
 }
 
 document.querySelectorAll('a[href="/marketplace"], a[href="/marketplace/"]').forEach((a) => {

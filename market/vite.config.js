@@ -68,7 +68,8 @@ function rewriteMarketplace(server) {
       return;
     }
         if (
-      url === '/marketplace' || url.startsWith('/marketplace/')
+      url === '/sanitize' || url.startsWith('/sanitize/')
+      || url === '/marketplace' || url.startsWith('/marketplace/')
       || url === '/favorites' || url.startsWith('/favorites/')
       || url === '/product' || url.startsWith('/product/')
       || url === '/forum' || url.startsWith('/forum/')

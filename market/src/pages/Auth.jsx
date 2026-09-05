@@ -87,6 +87,7 @@ export default function Auth() {
             <Alert>{error}</Alert>
             <button className="btn" type="submit" disabled={busy}>{busy ? 'Working…' : (mode === 'signup' ? 'Create account' : 'Sign in')}</button>
             <button className="btn ghost" type="button" disabled={busy} onClick={onGoogle}>Continue with Google</button>
+            <Link className="btn ghost" to="/wallet">Continue with wallet</Link>
             <p className="page-lede">
               {mode === 'signup' ? 'Already have an account?' : 'Need an account?'}
               {' '}
@@ -94,7 +95,6 @@ export default function Auth() {
                 {mode === 'signup' ? 'Sign in' : 'Create one'}
               </button>
             </p>
-            <p className="page-lede"><Link to="/wallet">Connect a wallet</Link> without an email.</p>
           </div>
         </form>
       </div>

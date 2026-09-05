@@ -6,6 +6,8 @@ market/.env.*.local
 dist-web/
 .vercel/
 .wrangler/
+.dev.vars
+workers/card-slug-blob.txt
 .playwright-cli/
 _unsloth_temporary_saved_buffers/
 unsloth_compiled_cache/
@@ -16,3 +18,5 @@ AGENTS.md
 .codevira-cache/
 *.apkm
 .DS_Store
+__pycache__/
+*.pyc

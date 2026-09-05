@@ -43,10 +43,25 @@ export default function Expansion() {
       offset: (payload?.cards || []).length,
     });
     const extra = data.cards || [];
-    setPayload((current) => ({
-      ...data,
-      cards: [...(current?.cards || []), ...extra],
-    }));
+    setPayload((current) => {
+      const cardCount = Number(
+        current?.expansion?.cardCount ||
+        data?.expansion?.cardCount ||
+        current?.total ||
+        data?.total ||
+        0,
+      );
+      return {
+        ...data,
+        cards: [...(current?.cards || []), ...extra],
+        total: cardCount || current?.total || data?.total,
+        expansion: {
+          ...(current?.expansion || {}),
+          ...(data.expansion || {}),
+          ...(cardCount > 0 ? { cardCount } : {}),
+        },
+      };
+    });
     if (extra[0]) {
       track(Action.loadMore, extra[0], { query: slug });
     }
@@ -56,6 +71,10 @@ export default function Expansion() {
   const name = payload?.expansion?.name || prettySlug(slug);
   const cards = payload?.cards || [];
   const symbol = payload?.expansion?.defaultSymbolUrl || payload?.expansion?.symbolImageUrl;
+  const total = Number(payload?.expansion?.cardCount || payload?.total || 0);
+  const lede = loading
+    ? 'Loading cards…'
+    : `${(total > 0 ? total : cards.length).toLocaleString()} cards`;
 
   return (
     <div className="page desk" aria-busy={loading ? 'true' : undefined}>
@@ -67,7 +86,7 @@ export default function Expansion() {
       <PageHead
         kicker="Set"
         title={name}
-        lede={loading ? 'Loading cards…' : `${cards.length}${payload?.hasMore ? '+' : ''} cards`}
+        lede={lede}
       >
         {symbol ? <CardArt className="set-sym" src={symbol} alt="" fallback="hide" /> : null}
       </PageHead>

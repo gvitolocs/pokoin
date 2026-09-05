@@ -1,0 +1,26 @@
+{
+  "name": "pokoin-origin",
+  "main": "workers/pokoin-origin.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "vars": {
+    "SUPABASE_URL": "https://ruvtchmbtxvjqmquobij.supabase.co"
+  },
+  "routes": [
+    { "pattern": "pokoin.com/marketplace/en*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/api/*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/market*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/home*", "zone_name": "pokoin.com" },
+    { "pattern": "www.pokoin.com/marketplace/en*", "zone_name": "pokoin.com" },
+    { "pattern": "www.pokoin.com/api/*", "zone_name": "pokoin.com" },
+    { "pattern": "www.pokoin.com/market*", "zone_name": "pokoin.com" },
+    { "pattern": "www.pokoin.com/home*", "zone_name": "pokoin.com" },
+    { "pattern": "onepiece.pokoin.com/marketplace/en*", "zone_name": "pokoin.com" },
+    { "pattern": "onepiece.pokoin.com/api/*", "zone_name": "pokoin.com" },
+    { "pattern": "onepiece.pokoin.com/market*", "zone_name": "pokoin.com" },
+    { "pattern": "riftbound.pokoin.com/marketplace/en*", "zone_name": "pokoin.com" },
+    { "pattern": "riftbound.pokoin.com/api/*", "zone_name": "pokoin.com" },
+    { "pattern": "riftbound.pokoin.com/market*", "zone_name": "pokoin.com" }
+  ]
+}

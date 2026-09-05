@@ -5,7 +5,11 @@
   "workers_dev": true,
   "observability": { "enabled": true },
   "cache": { "enabled": true },
+  "build": {
+    "command": "gzip -dc workers/card-slug-blob.gz > workers/card-slug-blob.txt"
+  },
   "rules": [
+    { "type": "Text", "globs": ["workers/card-slug-blob.txt"], "fallthrough": true },
     { "type": "Data", "globs": ["**/*.gz"], "fallthrough": true }
   ],
   "routes": [

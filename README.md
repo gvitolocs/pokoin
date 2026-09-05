@@ -9,7 +9,9 @@ React market (`market/`). Android/iOS CardVault is a separate app
 ([docs/APP.md](docs/APP.md)). Product APIs stay on `api.pokoin.com`.
 
 See [docs/LANDING.md](docs/LANDING.md) for the landing pipeline, copy, and
-deploy. React market: [docs/MARKET.md](docs/MARKET.md). Pokoin News
+deploy. React market: [docs/MARKET.md](docs/MARKET.md). Home first paint:
+[docs/HOME_FIRST_PAINT.md](docs/HOME_FIRST_PAINT.md). HTTP API map:
+[docs/API.md](docs/API.md). Pokoin News
 (`news.pokoin.com`) on Oracle behind a Cloudflare Tunnel:
 [docs/NEWS.md](docs/NEWS.md).
 Motion vs [get.rarecandy.com](https://get.rarecandy.com/)

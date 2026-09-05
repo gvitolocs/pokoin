@@ -1,10 +1,12 @@
-/** Read-only marketplace lists on Supabase. Oracle Postgres stays search + source of truth. */
+import { applyTilePrice, tilePricePkn } from './pkn.js';
+
+const viteEnv = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 
 export const SUPABASE_URL = String(
-  import.meta.env.VITE_SUPABASE_URL || 'https://ruvtchmbtxvjqmquobij.supabase.co',
+  viteEnv.VITE_SUPABASE_URL || 'https://ruvtchmbtxvjqmquobij.supabase.co',
 ).replace(/\/$/, '');
 
-export const SUPABASE_ANON_KEY = String(import.meta.env.VITE_SUPABASE_ANON_KEY || '');
+export const SUPABASE_ANON_KEY = String(viteEnv.VITE_SUPABASE_ANON_KEY || '');
 
 const RAIL = {
   newCards: 'new_cards',
@@ -21,6 +23,30 @@ export function setRailId(slug) {
 
 export function listsConfigured() {
   return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+}
+
+function isViteDev() {
+  try {
+    return Boolean(viteEnv.DEV);
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Worker/Supabase rails vector. Reject Flutter hydrate and Oracle newest-only page. */
+export function isPublicRailsVector(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+  if (payload.source === 'supabase') {
+    return true;
+  }
+  const sections = payload.sections || {};
+  return Boolean(
+    (sections.newArrivalIds || []).length
+    && (sections.featuredIds || []).length
+    && (sections.bestSellerIds || []).length
+  );
 }
 
 function headers() {
@@ -75,7 +101,26 @@ export async function fetchRail(id) {
 
 export async function fetchCardTiles(ids) {
   const wanted = [...new Set((ids || []).map((id) => String(id)).filter((id) => /^\d+$/.test(id)))];
-  if (!listsConfigured() || !wanted.length) {
+  if (!wanted.length) {
+    return [];
+  }
+  if (!isViteDev()) {
+    try {
+      const response = await fetch(`/api/marketplace-card-tiles?ids=${wanted.join(',')}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (response.ok) {
+        const body = await response.json();
+        const cards = Array.isArray(body?.cards) ? body.cards : [];
+        if (cards.length) {
+          return cards.filter((card) => cardId(card));
+        }
+      }
+    } catch (_) {
+      /* supabase fallback below */
+    }
+  }
+  if (!listsConfigured()) {
     return [];
   }
   const rows = await rest(
@@ -84,51 +129,98 @@ export async function fetchCardTiles(ids) {
   return (rows || []).map((row) => row.payload).filter((card) => cardId(card));
 }
 
+export function attachRecentsToHome(payload, recentIds = [], extraCards = []) {
+  const ids = [...new Set((recentIds || []).map(String).filter((id) => /^\d+$/.test(id)))].slice(0, 24);
+  const byId = new Map();
+  function remember(cards) {
+    for (const card of asCards(cards)) {
+      const id = cardId(card);
+      if (!id) {
+        continue;
+      }
+      const next = applyTilePrice({ ...card, id, card_id: card.card_id || id });
+      const prev = byId.get(id);
+      if (!prev) {
+        byId.set(id, next);
+        continue;
+      }
+      const merged = { ...prev, ...next };
+      if (!tilePricePkn(next) && tilePricePkn(prev)) {
+        merged.price = prev.price;
+        merged.lowest_price_pkn = prev.lowest_price_pkn;
+      }
+      byId.set(id, applyTilePrice(merged));
+    }
+  }
+  remember(payload?.cards);
+  remember(extraCards);
+  const missingRecentIds = ids.filter((id) => !byId.has(id));
+  return {
+    ...payload,
+    source: payload?.source || 'supabase',
+    cards: [...byId.values()],
+    missingRecentIds,
+    sections: {
+      ...(payload?.sections || {}),
+      recentlySeenIds: ids.filter((id) => byId.has(id)),
+    },
+  };
+}
+
 export async function fetchHomeFromLists(recentIds = []) {
   if (!listsConfigured()) {
     return null;
   }
-  const [newCards, featured, bestSellers, spotlight, topSold, recents] = await Promise.all([
+  const [newCards, featured, bestSellers, spotlight, topSold] = await Promise.all([
     fetchRail(RAIL.newCards),
     fetchRail(RAIL.featured),
     fetchRail(RAIL.bestSellers),
     fetchRail(RAIL.spotlight),
     fetchRail(RAIL.topSold),
-    fetchCardTiles(recentIds),
   ]);
   const rails = [newCards, featured, bestSellers, spotlight, topSold].filter(Boolean);
-  if (!rails.length && !recents.length) {
-    return null;
+  if (!rails.length) {
+    return attachRecentsToHome({ source: 'supabase', cards: [], sections: {} }, recentIds);
   }
 
   const byId = new Map();
   function remember(cards) {
     for (const card of asCards(cards)) {
       const id = cardId(card);
-      if (id && !byId.has(id)) {
-        byId.set(id, { ...card, id, card_id: card.card_id || id });
+      if (!id) {
+        continue;
       }
+      const next = applyTilePrice({ ...card, id, card_id: card.card_id || id });
+      const prev = byId.get(id);
+      if (!prev) {
+        byId.set(id, next);
+        continue;
+      }
+      const merged = { ...prev, ...next };
+      if (!tilePricePkn(next) && tilePricePkn(prev)) {
+        merged.price = prev.price;
+        merged.lowest_price_pkn = prev.lowest_price_pkn;
+      }
+      byId.set(id, applyTilePrice(merged));
     }
   }
-  remember(recents);
   for (const rail of rails) {
     remember(rail.cards);
   }
 
   const idsOf = (rail, n) => asCards(rail?.cards).map(cardId).filter(Boolean).slice(0, n);
 
-  return {
+  return attachRecentsToHome({
     source: 'supabase',
     cards: [...byId.values()],
     sections: {
-      recentlySeenIds: (recentIds || []).map(String).filter((id) => byId.has(id)),
       newArrivalIds: idsOf(newCards, 12),
       featuredIds: idsOf(featured, 12),
       bestSellerIds: idsOf(bestSellers, 12),
       spotlightIds: idsOf(spotlight, 16),
       topSoldIds: idsOf(topSold, 24),
     },
-  };
+  }, recentIds);
 }
 
 export async function fetchSetIndexFromLists() {
@@ -151,14 +243,17 @@ export async function fetchExpansionFromLists({ slug = '', limit = 48, offset = 
   if (!rail?.cards?.length) {
     return null;
   }
-  const cards = rail.cards.slice(0, Number(limit) || 48);
+  const cards = (rail.cards || []).slice(0, Number(limit) || 48).map(applyTilePrice);
+  const expansion = rail.meta?.expansion || { slug, name: rail.meta?.name || slug };
+  const cardCount = Number(expansion.cardCount || rail.meta?.cardCount || rail.meta?.total || 0);
   return {
     source: 'supabase',
     cards,
-    expansion: rail.meta?.expansion || { slug, name: rail.meta?.name || slug },
+    expansion: cardCount > 0 ? { ...expansion, cardCount } : expansion,
     expansions: [],
     hasMore: Boolean(rail.meta?.hasMore),
     limit: Number(limit) || 48,
     offset: 0,
+    ...(cardCount > 0 ? { total: cardCount } : {}),
   };
 }

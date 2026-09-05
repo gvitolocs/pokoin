@@ -1,9 +1,10 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider } from './auth.jsx';
 import { CartProvider } from './cart.jsx';
 import { WalletProvider } from './wallet.jsx';
 import Chrome from './components/Chrome.jsx';
 import Home from './pages/Home.jsx';
+import Sanitize from './pages/Sanitize.jsx';
 import Search from './pages/Search.jsx';
 import Card from './pages/Card.jsx';
 import Expansion from './pages/Expansion.jsx';
@@ -47,67 +48,78 @@ export default function App() {
     <AuthProvider>
       <WalletProvider>
         <CartProvider>
-          <Chrome>
-            <Routes>
-              {both('/marketplace', <Home />)}
-              {both('/marketplace/search', <Search />)}
-              {both('/marketplace/explore', <Explore />)}
-              {both('/marketplace/portfolio', <Portfolio />)}
-              {both('/marketplace/portfolio/:listingId', <Portfolio />)}
-              {both('/marketplace/watchlist', <Watchlist />)}
-              {both('/favorites', <Watchlist />)}
-              {both('/nft', <Nft />)}
-              {both('/product', <Navigate to="/product/box" replace />)}
-              {both('/product/:kind', <Products />)}
-              {both('/marketplace/signal', <Signal />)}
-              {both('/marketplace/competitive', <Competitive />)}
-              {both('/marketplace/competitive/tournaments', <CompetitiveTournaments />)}
-              {both('/marketplace/competitive/tournaments/:id', <CompetitiveTournaments />)}
-              {both('/marketplace/competitive/decks', <CompetitiveDecks />)}
-              {both('/marketplace/competitive/decks/:deckId', <CompetitiveDecks />)}
-              {both('/marketplace/competitive/decklists/:decklistId', <CompetitiveDecklist />)}
-              {both('/marketplace/competitive/players', <CompetitivePlayers />)}
-              {both('/marketplace/competitive/players/:playerId', <CompetitivePlayers />)}
-              {both('/marketplace/competitive/cards', <CompetitiveCards />)}
-              {both('/marketplace/competitive/cards/:cardId', <CompetitiveCards />)}
-              {both('/marketplace/sets', <Sets />)}
-              {both('/marketplace/sets/:slug', <Expansion />)}
-              {both('/admin', <Admin />)}
-              {both('/marketplace/admin', <Admin />)}
-              {both('/marketplace/admin/edit', <Admin />)}
-              {both('/marketplace/:lang/artists', <Artist />)}
-              {both('/marketplace/:lang/artists/:artistSlug', <Artist />)}
-              {both('/marketplace/:lang/cards/:cardId/:slug/versions', <Versions />)}
-              {both('/marketplace/:lang/cards/:cardId/versions', <Versions />)}
-              {both('/marketplace/:lang/cards/:cardId/:slug?', <Card />)}
-              {both('/auth', <Auth />)}
-              {both('/profile', <Profile />)}
-              {both('/cart', <Cart />)}
-              {both('/wallet', <Wallet />)}
-              {both('/swap', <Navigate to="/wallet" replace />)}
-              {both('/checkout', <Checkout />)}
-              {both('/orders', <Orders />)}
-              {both('/collection', <Navigate to="/nft" replace />)}
-              {both('/forum', <Forum />)}
-              {both('/forum/category/:categoryId', <Forum />)}
-              {both('/forum/topic/:topicId', <Forum />)}
-              {both('/scan', <Scan />)}
-              {both('/cardscan', <Scan />)}
-              {both('/scancard', <Scan />)}
-              {both('/inventory', <Inventory />)}
-              {both('/docs', <Site />)}
-              {both('/about', <Site />)}
-              {both('/contact', <Site />)}
-              {both('/privacy', <Site />)}
-              {both('/buy', <Buy />)}
-              {both('/earn', <Site />)}
-              {both('/whitepaper', <Site />)}
-              {both('/health', <Site />)}
-              <Route path="*" element={<Navigate to="/marketplace" replace />} />
-            </Routes>
-          </Chrome>
+          <AppShell />
         </CartProvider>
       </WalletProvider>
     </AuthProvider>
   );
+}
+
+function AppShell() {
+  const { pathname } = useLocation();
+  const board = pathname.replace(/\/$/, '') === '/sanitize';
+  const routes = (
+    <Routes>
+      {both('/sanitize', <Sanitize />)}
+      {both('/marketplace', <Home />)}
+      {both('/marketplace/search', <Search />)}
+      {both('/marketplace/explore', <Explore />)}
+      {both('/marketplace/portfolio', <Portfolio />)}
+      {both('/marketplace/portfolio/:listingId', <Portfolio />)}
+      {both('/marketplace/watchlist', <Watchlist />)}
+      {both('/favorites', <Watchlist />)}
+      {both('/nft', <Nft />)}
+      {both('/product', <Navigate to="/product/box" replace />)}
+      {both('/product/:kind', <Products />)}
+      {both('/marketplace/signal', <Signal />)}
+      {both('/marketplace/competitive', <Competitive />)}
+      {both('/marketplace/competitive/tournaments', <CompetitiveTournaments />)}
+      {both('/marketplace/competitive/tournaments/:id', <CompetitiveTournaments />)}
+      {both('/marketplace/competitive/decks', <CompetitiveDecks />)}
+      {both('/marketplace/competitive/decks/:deckId', <CompetitiveDecks />)}
+      {both('/marketplace/competitive/decklists/:decklistId', <CompetitiveDecklist />)}
+      {both('/marketplace/competitive/players', <CompetitivePlayers />)}
+      {both('/marketplace/competitive/players/:playerId', <CompetitivePlayers />)}
+      {both('/marketplace/competitive/cards', <CompetitiveCards />)}
+      {both('/marketplace/competitive/cards/:cardId', <CompetitiveCards />)}
+      {both('/marketplace/sets', <Sets />)}
+      {both('/marketplace/sets/:slug', <Expansion />)}
+      {both('/admin', <Admin />)}
+      {both('/marketplace/admin', <Admin />)}
+      {both('/marketplace/admin/edit', <Admin />)}
+      {both('/marketplace/:lang/artists', <Artist />)}
+      {both('/marketplace/:lang/artists/:artistSlug', <Artist />)}
+      {both('/marketplace/:lang/cards/:cardId/:slug/versions', <Versions />)}
+      {both('/marketplace/:lang/cards/:cardId/versions', <Versions />)}
+      {both('/marketplace/:lang/cards/:cardId/:slug?', <Card />)}
+      {both('/auth', <Auth />)}
+      {both('/profile', <Profile />)}
+      {both('/cart', <Cart />)}
+      {both('/wallet', <Wallet />)}
+      {both('/swap', <Navigate to="/wallet" replace />)}
+      {both('/checkout', <Checkout />)}
+      {both('/orders', <Orders />)}
+      {both('/collection', <Navigate to="/nft" replace />)}
+      {both('/forum', <Forum />)}
+      {both('/forum/category/:categoryId', <Forum />)}
+      {both('/forum/topic/:topicId', <Forum />)}
+      {both('/scan', <Scan />)}
+      {both('/cardscan', <Scan />)}
+      {both('/scancard', <Scan />)}
+      {both('/inventory', <Inventory />)}
+      {both('/docs', <Site />)}
+      {both('/about', <Site />)}
+      {both('/contact', <Site />)}
+      {both('/privacy', <Site />)}
+      {both('/buy', <Buy />)}
+      {both('/earn', <Site />)}
+      {both('/whitepaper', <Site />)}
+      {both('/health', <Site />)}
+      <Route path="*" element={<Navigate to="/marketplace" replace />} />
+    </Routes>
+  );
+  if (board) {
+    return routes;
+  }
+  return <Chrome>{routes}</Chrome>;
 }
