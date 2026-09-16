@@ -1,0 +1,398 @@
+{
+  "revision": "2026-09-13-ocr-10-v5",
+  "generatedAt": "2026-09-13T08:18:08Z",
+  "host": "test.pokoin.com",
+  "path": "/ocr",
+  "url": "https://test.pokoin.com/ocr",
+  "engine": "PaddleOCR 3.3 PP-OCRv5 server-det + en_PP-OCRv5_mobile_rec",
+  "device": "CPU (Paddle has no ROCm wheel); same leftover/hires files as the EasyOCR pass",
+  "upsample": "LANCZOS 2× only when source height < 800px",
+  "rule": "Same 10 cards as the EasyOCR board. English-only recognizer (PP-OCRv5). EasyOCR 1.7 en+ja mashed spaces and artist names; PP-OCRv5 is the 2026 printed-English default. JP/CN prints are still in the set but this pass does not load Japanese/Chinese rec.",
+  "cards": [
+    {
+      "ct_id": 129685,
+      "card_id": 259370,
+      "name": "Alolan Muk",
+      "expansion": "team up",
+      "number": "84/181",
+      "illustrator": "Midori Harada",
+      "nationality": "western",
+      "desk": "https://pokoin.com/marketplace/en/cards/259370",
+      "image": "/review/ocr-10/129685.png",
+      "source_kind": "pokemontcg.io hires PNG",
+      "source_size": "734×1024",
+      "leftover_size": "734×1024 JPG",
+      "ocr_s": 1.29,
+      "work_size": "734×1024",
+      "line_count": 17,
+      "name_zone": [
+        "STAGEL Alolan Muk 120",
+        "HP",
+        "Evolves from Alolan Grimer"
+      ],
+      "attack_zone": [
+        "D",
+        "NO. 089 Sludge Pokémon HT: 3'03\" WT: 114.6 Ibs.",
+        "Ability Adventurous Appetite",
+        "When you play this Pokémon from your hand to evolve",
+        "I of your Pokémon during g your turn, n,you may look at the",
+        "top 6 cards of your deck and discard any",
+        "number of Item caro you find there. Your opponent",
+        "shuffles the other cards back into their deck.",
+        "Gunk Shot 80",
+        "Your opponent's Active Pokémon is now Poisoned.",
+        "it's unexpectedly quiet and friendly, if it's"
+      ],
+      "artist_zone": [
+        "weakness ×2 resistance -20 retreat",
+        "Illus. Midori Harada While · it's unexpectedly quiet and friendly, if it's",
+        "84/181 not fed any trash for a while, it will smash its",
+        "©2019 Pokémon Trainer's furnishings and eat up the fragments"
+      ],
+      "full_text": "STAGEL Alolan Muk 120\nHP\nEvolves from Alolan Grimer\nD\nNO. 089 Sludge Pokémon HT: 3'03\" WT: 114.6 Ibs.\nAbility Adventurous Appetite\nWhen you play this Pokémon from your hand to evolve\nI of your Pokémon during g your turn, n,you may look at the\ntop 6 cards of your deck and discard any\nnumber of Item caro you find there. Your opponent\nshuffles the other cards back into their deck.\nGunk Shot 80\nYour opponent's Active Pokémon is now Poisoned.\nweakness ×2 resistance -20 retreat\nIllus. Midori Harada While it's unexpectedly quiet and friendly, if it's\n84/181 not fed any trash for a while, it will smash its\n©2019 Pokémon Trainer's furnishings and eat up the fragments",
+      "artist_ocr": "Midori Harada",
+      "artist_hit": true
+    },
+    {
+      "ct_id": 130999,
+      "card_id": 261998,
+      "name": "Houndoom",
+      "expansion": "league promos",
+      "number": "League Promo | 5/90",
+      "illustrator": "",
+      "nationality": "western",
+      "desk": "https://pokoin.com/marketplace/en/cards/261998",
+      "image": "/review/ocr-10/130999.jpg",
+      "source_kind": "leftover JPEG",
+      "source_size": "324×450",
+      "leftover_size": "324×450 JPG",
+      "ocr_s": 2.69,
+      "work_size": "1296×1800",
+      "line_count": 13,
+      "name_zone": [
+        "Houndoom HP90",
+        "STAGE Ivohws fram Haundour"
+      ],
+      "attack_zone": [
+        "NO220 DarP0mon H14:07: WT7721s",
+        "Fire Counterattack 20+",
+        "If your opponent has any \" Pokemon in play, this attack",
+        "does 20 damage plus 60 more damage",
+        "Dark Roar 50",
+        "Your opporent discards a card from his or her hand."
+      ],
+      "artist_zone": [
+        "Upom hearingsts corde homls, seher Polrmon get the hivers and head straighet",
+        "bick to their wests Abt. KogemcrHimeoo",
+        "weakness resistunce retreatcost",
+        "x2 -20",
+        "590 40"
+      ],
+      "full_text": "Houndoom HP90\nSTAGE Ivohws fram Haundour\nNO220 DarP0mon H14:07: WT7721s\nFire Counterattack 20+\nIf your opponent has any \" Pokemon in play, this attack\ndoes 20 damage plus 60 more damage\nDark Roar 50\nYour opporent discards a card from his or her hand.\nUpom hearingsts corde homls, seher Polrmon get the hivers and head straighet\nbick to their wests Abt. KogemcrHimeoo\nweakness resistunce retreatcost\nx2 -20\n590 40",
+      "artist_ocr": "",
+      "artist_hit": false
+    },
+    {
+      "ct_id": 154042,
+      "card_id": 308084,
+      "name": "Single Strike Style Mustard",
+      "expansion": "battle styles",
+      "number": "Rainbow Secret Rare | 177/163",
+      "illustrator": "Mitsuhiro Arita",
+      "nationality": "western",
+      "desk": "https://pokoin.com/marketplace/en/cards/308084",
+      "image": "/review/ocr-10/154042.png",
+      "source_kind": "pokemontcg.io hires PNG",
+      "source_size": "734×1024",
+      "leftover_size": "467×650 JPG",
+      "ocr_s": 0.96,
+      "work_size": "734×1024",
+      "line_count": 12,
+      "name_zone": [
+        "TRAINER Supporter",
+        "Single Strike Style Mustard",
+        "STRIKE"
+      ],
+      "attack_zone": [
+        "You can play this card only when it is the last card in",
+        "your hand.",
+        "Search your deck for a Single Strike Pokémon and put",
+        "it onto your Bench. Then, shuffle your deck. If you",
+        "searched your deck in this way, draw 5 cards.",
+        "may play only I Supporter card during"
+      ],
+      "artist_zone": [
+        "Illus. Mitsuhiro Arita You · may play only I Supporter card during",
+        "0 your turn.",
+        "177/163",
+        "©2021 Pokémon / Nintendo / Creatures / GAME FREAK"
+      ],
+      "full_text": "TRAINER Supporter\nSingle Strike Style Mustard\nSTRIKE\nYou can play this card only when it is the last card in\nyour hand.\nSearch your deck for a Single Strike Pokémon and put\nit onto your Bench. Then, shuffle your deck. If you\nsearched your deck in this way, draw 5 cards.\nIllus. Mitsuhiro Arita You may play only I Supporter card during\n0 your turn.\n177/163\n©2021 Pokémon / Nintendo / Creatures / GAME FREAK",
+      "artist_ocr": "Mitsuhiro Arita",
+      "artist_hit": true
+    },
+    {
+      "ct_id": 124288,
+      "card_id": 248576,
+      "name": "Suicune",
+      "expansion": "pop series 2",
+      "number": "Holo Promo | 4/17",
+      "illustrator": "Kouki Saitou",
+      "nationality": "western",
+      "desk": "https://pokoin.com/marketplace/en/cards/248576",
+      "image": "/review/ocr-10/124288.png",
+      "source_kind": "pokemontcg.io hires PNG",
+      "source_size": "600×825",
+      "leftover_size": "319×450 JPG",
+      "ocr_s": 0.79,
+      "work_size": "600×825",
+      "line_count": 13,
+      "name_zone": [
+        "Suicune 70HP"
+      ],
+      "attack_zone": [
+        "BASIC Kouki Saitou",
+        "Poke-BODY Mirror Coat",
+        "If Suicune is Burned or Poisoned by an",
+        "opponent's attack (even if Suicune is Knocked",
+        "Out), the Attacking Pokémon is now affected",
+        "by the same Special Conditions (I if there is",
+        "only 1).",
+        "6 * Bubblebeam 20",
+        "Flip a coin. If heads, the Defending Pokémon"
+      ],
+      "artist_zone": [
+        "Illus. Kouki Saitou",
+        "is now Paralyzed.",
+        "weakness resistance retreat cost",
+        "Q71-889-HD3 ©2005.Pokémon/Nintendo 4/17"
+      ],
+      "full_text": "Suicune 70HP\nBASIC Kouki Saitou\nPoke-BODY Mirror Coat\nIf Suicune is Burned or Poisoned by an\nopponent's attack (even if Suicune is Knocked\nOut), the Attacking Pokémon is now affected\nby the same Special Conditions (I if there is\nonly 1).\n6 * Bubblebeam 20\nFlip a coin. If heads, the Defending Pokémon\nis now Paralyzed.\nweakness resistance retreat cost\nQ71-889-HD3 ©2005.Pokémon/Nintendo 4/17",
+      "artist_ocr": "Kouki Saitou",
+      "artist_hit": true
+    },
+    {
+      "ct_id": 286917,
+      "card_id": 573834,
+      "name": "Numel",
+      "expansion": "gift box mew lucario",
+      "number": "GBML 001Y",
+      "illustrator": "",
+      "nationality": "",
+      "desk": "https://pokoin.com/marketplace/en/cards/573834",
+      "image": "/review/ocr-10/286917.jpg",
+      "source_kind": "leftover JPEG",
+      "source_size": "444×620",
+      "leftover_size": "444×620 JPG",
+      "ocr_s": 3.07,
+      "work_size": "1332×1860",
+      "line_count": 8,
+      "name_zone": [
+        "KXL HP50"
+      ],
+      "attack_zone": [
+        "* Thiy",
+        "@IS#PIIC",
+        "O 20",
+        "1E1a"
+      ],
+      "artist_zone": [
+        "Illus. Arsuko Nishido · 1E1a",
+        "MLACA EHA",
+        "*",
+        "TRRAK 001/015"
+      ],
+      "full_text": "KXL HP50\n1E1a Illus Arsuko Nishido\n* Thiy\n@IS#PIIC\nO 20\nMLACA EHA\n*\nTRRAK 001/015",
+      "artist_ocr": "Arsuko Nishido",
+      "artist_hit": false
+    },
+    {
+      "ct_id": 326513,
+      "card_id": 653026,
+      "name": "Slowpoke",
+      "expansion": "sm p sun moon promos",
+      "number": "Indonesian KFC Promo 183/SM-P",
+      "illustrator": "",
+      "nationality": "",
+      "desk": "https://pokoin.com/marketplace/en/cards/653026",
+      "image": "/review/ocr-10/326513.jpg",
+      "source_kind": "leftover JPEG",
+      "source_size": "500×698",
+      "leftover_size": "500×698 JPG",
+      "ocr_s": 1.72,
+      "work_size": "1000×1396",
+      "line_count": 13,
+      "name_zone": [
+        "BASIC Slowpoke HP70"
+      ],
+      "attack_zone": [
+        "#079 Pokémon Kurang Cerdas Tinggi, 1.2m Berat,36.Okg KFC",
+        "Geraman",
+        "Pada giliran lawan berikutnya, kerusakan dari serangan",
+        "Pokémon yang menerima serangan ini berkurang",
+        "sejumlah 20. (sebelum disesuaikan dengan Kelemahan dan",
+        "Resistansi.)",
+        "Cambukan Ekor 20",
+        "ekor mereka, yang putus secara alami, dapat"
+      ],
+      "artist_zone": [
+        "Kelemahan ×2 Resistansi Mundur *",
+        "Illus. Kouki Saitou Walaupun · ekor mereka, yang putus secara alami, dapat",
+        "PROMO ditemukan di berbagai tempat, mereka adalah bahan berharga",
+        "2020 Pokemon",
+        "183/SM-P untuk dimasak."
+      ],
+      "full_text": "BASIC Slowpoke HP70\n#079 Pokémon Kurang Cerdas Tinggi, 1.2m Berat,36.Okg KFC\nGeraman\nPada giliran lawan berikutnya, kerusakan dari serangan\nPokémon yang menerima serangan ini berkurang\nsejumlah 20. (sebelum disesuaikan dengan Kelemahan dan\nResistansi.)\nCambukan Ekor 20\nKelemahan ×2 Resistansi Mundur *\nIllus.Kouki Saitou Walaupun ekor mereka, yang putus secara alami, dapat\nPROMO ditemukan di berbagai tempat, mereka adalah bahan berharga\n2020 Pokemon\n183/SM-P untuk dimasak.",
+      "artist_ocr": "Kouki Saitou",
+      "artist_hit": false
+    },
+    {
+      "ct_id": 240193,
+      "card_id": 480386,
+      "name": "Escape Rope",
+      "expansion": "single strike master",
+      "number": "061/070",
+      "illustrator": "",
+      "nationality": "japanese",
+      "desk": "https://pokoin.com/marketplace/en/cards/480386",
+      "image": "/review/ocr-10/240193.jpg",
+      "source_kind": "leftover JPEG",
+      "source_size": "500×698",
+      "leftover_size": "500×698 JPG",
+      "ocr_s": 1.58,
+      "work_size": "1000×1396",
+      "line_count": 8,
+      "name_zone": [
+        "TRAINER'S DO",
+        "StE"
+      ],
+      "attack_zone": [
+        "DL- GIA",
+        "AEAIS Dy aue BE1",
+        "5.F-"
+      ],
+      "artist_zone": [
+        "Illus.sadaji CSN IA SARU X 2t",
+        "s51 E 061/070 U",
+        "©2021 Pokémon/Nintendo/Creatures/GAME FREAK."
+      ],
+      "full_text": "TRAINER'S DO\nStE\nDL- GIA\nAEAIS Dy aue BE1\n5.F-\nIllus.sadaji CSN IA SARU X 2t\ns51 E 061/070 U\n©2021 Pokémon/Nintendo/Creatures/GAME FREAK.",
+      "artist_ocr": "",
+      "artist_hit": false
+    },
+    {
+      "ct_id": 140819,
+      "card_id": 281638,
+      "name": "Gourgeist",
+      "expansion": "phantom gate",
+      "number": "Holo Rare | 044/088",
+      "illustrator": "",
+      "nationality": "japanese",
+      "desk": "https://pokoin.com/marketplace/en/cards/281638",
+      "image": "/review/ocr-10/140819.png",
+      "source_kind": "local leftover PNG",
+      "source_size": "427×602",
+      "leftover_size": "427×602 JPG",
+      "ocr_s": 2.69,
+      "work_size": "1281×1806",
+      "line_count": 13,
+      "name_zone": [
+        "TTC W7 100",
+        "HP"
+      ],
+      "attack_zone": [
+        "M07807",
+        "SE COES",
+        "COADENOINT-NOUCUBNS.COMOEORNAHP FUTE",
+        "if200J1CU6.",
+        "©** tS-J-r 10×",
+        "$300×109x-2"
+      ],
+      "artist_zone": [
+        "×2 ERN -20 Ho He te T",
+        "8UG86 AHE 31t5",
+        "5I tous cs obona,",
+        "sos.Koncke to 044/068R",
+        "MHmonINSA"
+      ],
+      "full_text": "TTC W7 100\nHP\nM07807\nSE COES\nCOADENOINT-NOUCUBNS.COMOEORNAHP FUTE\nif200J1CU6.\n©** tS-J-r 10×\n$300×109x-2\n×2 ERN -20 Ho He te T\n8UG86 AHE 31t5\n5I tous cs obona,\nsos.Koncke to 044/068R\nMHmonINSA",
+      "artist_ocr": "",
+      "artist_hit": false
+    },
+    {
+      "ct_id": 139277,
+      "card_id": 278554,
+      "name": "Misty",
+      "expansion": "gym booster 1 leaders stadium",
+      "number": "139277",
+      "illustrator": "",
+      "nationality": "japanese",
+      "desk": "https://pokoin.com/marketplace/en/cards/278554",
+      "image": "/review/ocr-10/139277.jpg",
+      "source_kind": "leftover JPEG",
+      "source_size": "247×350",
+      "leftover_size": "247×350 JPG",
+      "ocr_s": 2.49,
+      "work_size": "1235×1750",
+      "line_count": 10,
+      "name_zone": [
+        "TRAINER",
+        "AZE"
+      ],
+      "attack_zone": [
+        "131",
+        "F5-AL",
+        "Un-KRUU",
+        "DEORSEDMESDUDWNRK",
+        "TEIEX-USX3BS.COENU.",
+        "Z0x-9t[+20 2n3. (2",
+        "5EUOYX-UIZOE)"
+      ],
+      "artist_zone": [
+        "DusKat Sigo"
+      ],
+      "full_text": "TRAINER\nAZE\n131\nF5-AL\nUn-KRUU\nDEORSEDMESDUDWNRK\nTEIEX-USX3BS.COENU.\nZ0x-9t[+20 2n3. (2\n5EUOYX-UIZOE)\nDusKat Sigo",
+      "artist_ocr": "",
+      "artist_hit": false
+    },
+    {
+      "ct_id": 337150,
+      "card_id": 674300,
+      "name": "Umbreon V",
+      "expansion": "cs4a nine colors gathering friends",
+      "number": "Ultra Rare | 162/132",
+      "illustrator": "",
+      "nationality": "japanese",
+      "desk": "https://pokoin.com/marketplace/en/cards/674300",
+      "image": "/review/ocr-10/337150.jpg",
+      "source_kind": "leftover JPEG",
+      "source_size": "344×480",
+      "leftover_size": "344×480 JPG",
+      "ocr_s": 1.98,
+      "work_size": "1032×1440",
+      "line_count": 13,
+      "name_zone": [
+        "ARAT V 200",
+        "HP",
+        "5 INGLESTRIKE",
+        "E"
+      ],
+      "attack_zone": [
+        "MEES 30",
+        "T-MNTEEENHIENESO.EAM",
+        "AXZ 80 +",
+        "A0R8RT9OERMCEHTB. W810A80",
+        "GM."
+      ],
+      "artist_zone": [
+        "00 ×2 It a",
+        "Aaliyt VAN",
+        "Cs4eC C 162/132 CSR SXE9VBRM. XF88G2BXRS.",
+        "©20Z4Pokamon/Nirtendo/CreatireL/GAMEFRLAA."
+      ],
+      "full_text": "ARAT V 200\nHP\n5 INGLESTRIKE\nE\nMEES 30\nT-MNTEEENHIENESO.EAM\nAXZ 80 +\nA0R8RT9OERMCEHTB. W810A80\nGM.\n00 ×2 It a\nAaliyt VAN\nCs4eC C 162/132 CSR SXE9VBRM. XF88G2BXRS.\n©20Z4Pokamon/Nirtendo/CreatireL/GAMEFRLAA.",
+      "artist_ocr": "",
+      "artist_hit": false
+    }
+  ]
+}

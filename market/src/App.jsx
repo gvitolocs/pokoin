@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider } from './auth.jsx';
 import { CartProvider } from './cart.jsx';
@@ -5,6 +6,10 @@ import { WalletProvider } from './wallet.jsx';
 import Chrome from './components/Chrome.jsx';
 import Home from './pages/Home.jsx';
 import Sanitize from './pages/Sanitize.jsx';
+import Espurr from './pages/Espurr.jsx';
+import Ocr from './pages/Ocr.jsx';
+import OcrArtists from './pages/OcrArtists.jsx';
+import ArtworkHover from './pages/ArtworkHover.jsx';
 import Search from './pages/Search.jsx';
 import Card from './pages/Card.jsx';
 import Expansion from './pages/Expansion.jsx';
@@ -18,11 +23,18 @@ import Portfolio from './pages/Portfolio.jsx';
 import Explore from './pages/Explore.jsx';
 import Watchlist from './pages/Watchlist.jsx';
 import Sets from './pages/Sets.jsx';
+import Era from './pages/Era.jsx';
 import Versions from './pages/Versions.jsx';
 import Artist from './pages/Artist.jsx';
+import PokemonHub from './pages/PokemonHub.jsx';
+import RarityHub from './pages/RarityHub.jsx';
+import LanguageHub from './pages/LanguageHub.jsx';
+import Guides from './pages/Guides.jsx';
 import Products from './pages/Products.jsx';
 import Auth from './pages/Auth.jsx';
+import ExtensionAuthBridge from './pages/ExtensionAuthBridge.jsx';
 import Profile from './pages/Profile.jsx';
+import Seller from './pages/Seller.jsx';
 import Cart from './pages/Cart.jsx';
 import Wallet from './pages/Wallet.jsx';
 import Forum from './pages/Forum.jsx';
@@ -34,7 +46,13 @@ import Admin from './pages/Admin.jsx';
 import Checkout from './pages/Checkout.jsx';
 import Orders from './pages/Orders.jsx';
 import Nft from './pages/Nft.jsx';
+import Protection from './pages/Protection.jsx';
 import Site from './pages/Site.jsx';
+import About from './pages/About.jsx';
+import WorkingOnIt from './components/WorkingOnIt.jsx';
+import CookieBanner from './components/CookieBanner.jsx';
+import { framedByChromeExtension } from './extension-auth-bridge.js';
+import { subscribeOriginDown } from './working-page.js';
 
 function both(path, element) {
   return [
@@ -57,10 +75,28 @@ export default function App() {
 
 function AppShell() {
   const { pathname } = useLocation();
-  const board = pathname.replace(/\/$/, '') === '/sanitize';
+  const [originDown, setOriginDown] = useState(() => (
+    typeof window !== 'undefined' && Boolean(window.__pokoinOriginDown)
+  ));
+  useEffect(() => subscribeOriginDown(() => setOriginDown(true)), []);
+  useEffect(() => {
+    const on = framedByChromeExtension();
+    document.documentElement.classList.toggle('is-extension-desk', on);
+    return () => document.documentElement.classList.remove('is-extension-desk');
+  }, []);
+  const stripped = pathname.replace(/\/$/, '');
+  const board = stripped === '/sanitize' || stripped === '/espurr' || stripped === '/ocr' || stripped === '/ocr/artists' || stripped === '/artwork' || stripped === '/extension/auth-bridge';
+  const framed = framedByChromeExtension();
+  if (originDown && !board && !framed) {
+    return <WorkingOnIt />;
+  }
   const routes = (
     <Routes>
       {both('/sanitize', <Sanitize />)}
+      {both('/espurr', <Espurr />)}
+      {both('/ocr', <Ocr />)}
+      {both('/ocr/artists', <OcrArtists />)}
+      {both('/artwork', <ArtworkHover />)}
       {both('/marketplace', <Home />)}
       {both('/marketplace/search', <Search />)}
       {both('/marketplace/explore', <Explore />)}
@@ -83,16 +119,28 @@ function AppShell() {
       {both('/marketplace/competitive/cards', <CompetitiveCards />)}
       {both('/marketplace/competitive/cards/:cardId', <CompetitiveCards />)}
       {both('/marketplace/sets', <Sets />)}
+      {both('/marketplace/eras', <Era />)}
+      {both('/marketplace/eras/:eraId', <Era />)}
       {both('/marketplace/sets/:slug', <Expansion />)}
       {both('/admin', <Admin />)}
       {both('/marketplace/admin', <Admin />)}
       {both('/marketplace/admin/edit', <Admin />)}
       {both('/marketplace/:lang/artists', <Artist />)}
       {both('/marketplace/:lang/artists/:artistSlug', <Artist />)}
+      {both('/marketplace/:lang/users/:username', <Seller />)}
+      {both('/marketplace/:lang/pokemon', <PokemonHub />)}
+      {both('/marketplace/:lang/pokemon/:slug', <PokemonHub />)}
+      {both('/marketplace/:lang/rarities', <RarityHub />)}
+      {both('/marketplace/:lang/rarities/:slug', <RarityHub />)}
+      {both('/marketplace/:lang/languages', <LanguageHub />)}
+      {both('/marketplace/:lang/languages/:slug', <LanguageHub />)}
+      {both('/marketplace/:lang/guides', <Guides />)}
+      {both('/marketplace/:lang/guides/:slug', <Guides />)}
       {both('/marketplace/:lang/cards/:cardId/:slug/versions', <Versions />)}
       {both('/marketplace/:lang/cards/:cardId/versions', <Versions />)}
       {both('/marketplace/:lang/cards/:cardId/:slug?', <Card />)}
       {both('/auth', <Auth />)}
+      {both('/extension/auth-bridge', <ExtensionAuthBridge />)}
       {both('/profile', <Profile />)}
       {both('/cart', <Cart />)}
       {both('/wallet', <Wallet />)}
@@ -108,9 +156,10 @@ function AppShell() {
       {both('/scancard', <Scan />)}
       {both('/inventory', <Inventory />)}
       {both('/docs', <Site />)}
-      {both('/about', <Site />)}
+      {both('/about', <About />)}
       {both('/contact', <Site />)}
       {both('/privacy', <Site />)}
+      {both('/protection', <Protection />)}
       {both('/buy', <Buy />)}
       {both('/earn', <Site />)}
       {both('/whitepaper', <Site />)}
@@ -121,5 +170,10 @@ function AppShell() {
   if (board) {
     return routes;
   }
-  return <Chrome>{routes}</Chrome>;
+  return (
+    <>
+      <Chrome>{routes}</Chrome>
+      <CookieBanner />
+    </>
+  );
 }

@@ -5,19 +5,32 @@ import {
   versionsHref,
   cardHref,
   cardtraderPublicUrl,
+  cancelListing,
   createListing,
+  dropListing,
+  cardFromCatalogRow,
   fetchCard,
+  fetchCardSales,
   fetchCanonicalPath,
   fetchCardmarketRedirect,
   fetchCardtraderRedirect,
+  fetchExactNameCards,
   fetchListings,
+  fetchPrintNationality,
+  fetchVersionSet,
   formatPkn,
+  formatPknNumber,
   imageSrc,
   invalidateListings,
+  mergeCreatedListing,
+  omitListings,
   peekCard,
   peekCanonicalPath,
+  peekHasListingRows,
   peekListings,
+  rememberCreatedListing,
   neighborsOrPeek,
+  peekRecentTile,
   postWatchlist,
   publicCardId,
   rememberCardId,
@@ -30,13 +43,53 @@ import {
   readWatchlistIds,
   vintedHref,
 } from '../api.js';
+import {
+  activeSoldIndex,
+  formatSoldAxisTick,
+  formatSoldDay,
+  isSoldGraphClick,
+  nearestSoldIndex,
+  soldDateLocale,
+  soldGraphScale,
+  soldGraphTipMods,
+  soldGraphY,
+  soldConditionLabel,
+  soldGraphTone,
+  soldLanguageLabel,
+  soldFilterValue,
+  soldFilterShowsAll,
+  soldUnitCount,
+  formatSoldSampleCount,
+  SOLD_GRAPH_PAD,
+} from '../sold-graph.js';
+import { soldGraphView, soldTraitsForGraphDay } from '../sold-sales.js';
+import { peekCardSales, rememberStaleCardSales, saveCardSales } from '../sold-sales-cache.js';
 import { authFrom } from '../punchouts.js';
 import { useAuth } from '../auth.jsx';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
-import { printingIdentity } from '../identity.js';
+import { deskClipCandidates, deskSetShortcuts, deskShowMoreVersions, mergePrintingRows, rarityVersions, versionOptionLabel } from '../card-versions.js';
+import { cardDocumentTitle, displayName, printingIdentity } from '../identity.js';
+import { defaultCardLanguage, getSearchLang, languagesForNationality, rewriteCatalogLang, searchLangFromPath } from '../locale.js';
+import ExpansionMark from '../components/ExpansionMark.jsx';
 import { Action, track } from '../track.js';
-import CardTile from '../components/CardTile.jsx';
+import { LIST_CURRENCIES, listPriceHint, listingPriceToPkn } from '../pkn.js';
+import { cardStubFromRoute, mergeDeskCard, realPublicCardId } from '../card-stub.js';
 import CardArt from '../components/CardArt.jsx';
+import RelatedCards from '../components/RelatedCards.jsx';
+import SeoCrumbs from '../components/SeoCrumbs.jsx';
+import SeoHead from '../components/SeoHead.jsx';
+import { tcgEra, eraHref } from '../set-logos.js';
+import { speciesFromCard, pokemonHref } from '../pokemon-hubs.js';
+import ShopListingRow from '../components/ShopListing.jsx';
+import {
+  breadcrumbJsonLd,
+  cardImageAlt,
+  cardSeoDescription,
+  languageHrefFromNationality,
+  pickRelatedCards,
+  productJsonLd,
+  rarityHref,
+} from '../seo.js';
 
 const CONDITIONS = [
   { value: '', label: 'Any condition' },
@@ -72,9 +125,12 @@ const LIST_CHIPS = [
   { key: 'firstEd', label: '1st Ed.' },
   { key: 'sealed', label: 'Sealed' },
   { key: 'graded', label: 'Graded' },
-  { key: 'signed', label: 'Signed' },
   { key: 'shipping', label: 'Shipping' },
 ];
+
+function catalogPrintings(rows) {
+  return (rows || []).map(cardFromCatalogRow).filter((row) => row.id);
+}
 
 function sortOffers(rows, key) {
   const list = [...(rows || [])];
@@ -100,21 +156,6 @@ function conditionKey(value) {
   return text;
 }
 
-function listingTags(offer) {
-  const tags = [];
-  if (offer.language) tags.push(String(offer.language).toUpperCase());
-  if (offer.reverse) tags.push('Reverse');
-  if (offer.firstEdition) tags.push('1st Ed.');
-  if (offer.sealed) tags.push('Sealed');
-  if (offer.graded) {
-    tags.push([offer.gradingCompany, offer.grade].filter(Boolean).join(' ') || 'Graded');
-  }
-  if (offer.signed) tags.push('Signed');
-  if (offer.reserveAvailable) tags.push('Reserve');
-  if (offer.nftAvailable) tags.push('NFT');
-  return tags;
-}
-
 function offerLang(offer) {
   if (!offer) {
     return '';
@@ -126,6 +167,387 @@ function pricedOffers(rows) {
   return [...(rows || [])]
     .filter((offer) => Number(offer.pricePkn) > 0)
     .sort((a, b) => Number(a.pricePkn || 0) - Number(b.pricePkn || 0));
+}
+
+function formatChange24h(pct) {
+  if (pct == null || !Number.isFinite(Number(pct))) {
+    return { text: '24h —', empty: true };
+  }
+  const value = Number(pct) * 100;
+  const sign = value > 0 ? '+' : '';
+  return {
+    text: `24h ${sign}${value.toFixed(1)}%`,
+    empty: false,
+    up: value >= 0,
+  };
+}
+
+function stopSoldPointer(event) {
+  event.stopPropagation();
+}
+
+function SoldGraphFilter({
+  label,
+  allLabel,
+  options,
+  value,
+  onChange,
+  encode = (opt) => opt,
+  optionLabel = (opt) => opt,
+}) {
+  if (!options.length) {
+    return null;
+  }
+  const showAll = soldFilterShowsAll(options);
+  return (
+    <select
+      aria-label={label}
+      className={showAll ? undefined : 'is-solo'}
+      value={soldFilterValue(options, value, encode)}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {showAll ? <option value="">{allLabel}</option> : null}
+      {options.map((opt) => (
+        <option key={String(opt)} value={encode(opt)}>
+          {optionLabel(opt)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function SoldGraphToggle({ label, pressed, onToggle }) {
+  return (
+    <button
+      type="button"
+      className={pressed ? 'on' : undefined}
+      aria-pressed={pressed}
+      onClick={() => onToggle(!pressed)}
+    >
+      {label}
+    </button>
+  );
+}
+
+function SoldGraphFilters({
+  conditions,
+  languages,
+  condition,
+  language,
+  reverse,
+  firstEdition,
+  graded,
+  unitsLabel,
+  onCondition,
+  onLanguage,
+  onReverse,
+  onFirstEdition,
+  onGraded,
+}) {
+  if (!conditions.length && !languages.length && !reverse && !firstEdition && !graded) {
+    return null;
+  }
+  return (
+    <div
+      className="sold-graph-filters"
+      onPointerDown={stopSoldPointer}
+      onPointerMove={stopSoldPointer}
+      onPointerUp={stopSoldPointer}
+    >
+      <SoldGraphToggle
+        label="Reverse"
+        pressed={reverse}
+        onToggle={onReverse}
+      />
+      <SoldGraphToggle
+        label="1st Ed."
+        pressed={firstEdition}
+        onToggle={onFirstEdition}
+      />
+      <SoldGraphToggle
+        label="Graded"
+        pressed={graded}
+        onToggle={onGraded}
+      />
+      <SoldGraphFilter
+        label="Sold language"
+        allLabel="All languages"
+        options={languages}
+        value={language}
+        onChange={onLanguage}
+        optionLabel={soldLanguageLabel}
+      />
+      <SoldGraphFilter
+        label="Sold condition"
+        allLabel="All conditions"
+        options={conditions}
+        value={condition}
+        onChange={onCondition}
+        optionLabel={soldConditionLabel}
+      />
+      {unitsLabel ? <p className="sold-graph-units">{unitsLabel}</p> : null}
+    </div>
+  );
+}
+
+function SoldPriceGraph({
+  series,
+  filters,
+  condition,
+  language,
+  reverse,
+  firstEdition,
+  graded,
+  onCondition,
+  onLanguage,
+  onReverse,
+  onFirstEdition,
+  onGraded,
+  onPickDay,
+}) {
+  const wrapRef = useRef(null);
+  const touchPointerActiveRef = useRef(false);
+  const pointerStartRef = useRef(null);
+  const [size, setSize] = useState(null);
+  const [hover, setHover] = useState(null);
+  const days = Array.isArray(series?.days) ? series.days : [];
+  const unitCount = Number(series?.soldQty) > 0
+    ? Math.trunc(Number(series.soldQty))
+    : (Number(series?.sampleCount) > 0
+      ? Math.trunc(Number(series.sampleCount))
+      : soldUnitCount(days));
+  const unitsLabel = unitCount > 0 ? formatSoldSampleCount(unitCount) : '';
+  const conditions = Array.isArray(filters?.conditions) ? filters.conditions : [];
+  const languages = Array.isArray(filters?.languages) ? filters.languages : [];
+  const tone = soldGraphTone(soldFilterValue(conditions, condition));
+  const graphClass = `panel sold-graph is-${tone}`;
+  const filterBar = (
+    <SoldGraphFilters
+      conditions={conditions}
+      languages={languages}
+      condition={condition}
+      language={language}
+      reverse={reverse}
+      firstEdition={firstEdition}
+      graded={graded}
+      unitsLabel={unitsLabel}
+      onCondition={onCondition}
+      onLanguage={onLanguage}
+      onReverse={onReverse}
+      onFirstEdition={onFirstEdition}
+      onGraded={onGraded}
+    />
+  );
+  useLayoutEffect(() => {
+    const node = wrapRef.current;
+    if (!node) {
+      return undefined;
+    }
+    const apply = (width, height) => {
+      const w = Math.max(240, Math.round(width));
+      const h = Math.max(120, Math.round(height));
+      setSize((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
+    };
+    apply(node.clientWidth, node.clientHeight);
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect) {
+        apply(rect.width, rect.height);
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [days.length]);
+  if (!days.length) {
+    return (
+      <section
+        className={graphClass}
+        aria-label="Daily sold median"
+        aria-busy={series == null || undefined}
+      >
+        {filterBar}
+        {series == null ? null : (
+          <p className="sold-graph-empty">No sold-card analytics yet for this printing.</p>
+        )}
+      </section>
+    );
+  }
+  if (!size) {
+    return (
+      <section ref={wrapRef} className={graphClass} aria-label="Daily sold median">
+        {filterBar}
+      </section>
+    );
+  }
+  const width = size.w;
+  const height = size.h;
+  const pad = SOLD_GRAPH_PAD;
+  const values = days.map((row) => Number(row.medianPkn) || 0);
+  const scale = soldGraphScale(Math.max(0, ...values));
+  const start = Date.parse(`${days[0].day}T00:00:00Z`);
+  const end = Date.parse(`${days[days.length - 1].day}T00:00:00Z`);
+  const range = Math.max(1, end - start);
+  const plotW = width - pad.l - pad.r;
+  const plotH = height - pad.t - pad.b;
+  const dateLocale = soldDateLocale();
+  const points = days.map((row) => {
+    const x = pad.l + (days.length === 1 || range <= 1
+      ? plotW / 2
+      : ((Date.parse(`${row.day}T00:00:00Z`) - start) / range) * plotW);
+    const y = soldGraphY(row.medianPkn, scale.max, pad.t, plotH);
+    return [x, y];
+  });
+  const line = points.map(([x, y]) => `${x},${y}`).join(' ');
+  const area = `${pad.l},${pad.t + plotH} ${line} ${pad.l + plotW},${pad.t + plotH}`;
+  const first = days[0];
+  const last = days[days.length - 1];
+  const firstLabel = formatSoldDay(first.day, dateLocale);
+  const lastLabel = formatSoldDay(last.day, dateLocale);
+  const hoverIndex = activeSoldIndex(hover, days.length);
+  const active = hoverIndex == null ? null : days[hoverIndex];
+  const activePt = hoverIndex == null ? null : points[hoverIndex];
+  const tipMods = activePt ? soldGraphTipMods(activePt[0], activePt[1], width, pad) : [];
+  const price = active ? (formatPkn(active.medianPkn) || '0 PKN') : '';
+  const hoverLabel = active ? formatSoldDay(active.day, dateLocale) : '';
+
+  function hoverFromPointer(event) {
+    const node = wrapRef.current;
+    const rect = node?.getBoundingClientRect();
+    if (!rect?.width) {
+      return;
+    }
+    const x = ((event.clientX - rect.left) / rect.width) * width;
+    setHover(nearestSoldIndex(points.map(([px]) => px), x));
+  }
+
+  function beginHover(event) {
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+    if (event.pointerType === 'touch') {
+      touchPointerActiveRef.current = true;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    }
+    hoverFromPointer(event);
+  }
+
+  function pickDayFromPointer(event) {
+    if (!onPickDay || !isSoldGraphClick(pointerStartRef.current, event)) {
+      return;
+    }
+    const node = wrapRef.current;
+    const rect = node?.getBoundingClientRect();
+    if (!rect?.width) {
+      return;
+    }
+    const x = ((event.clientX - rect.left) / rect.width) * width;
+    const index = nearestSoldIndex(points.map(([px]) => px), x);
+    const day = days[index]?.day;
+    if (day) {
+      onPickDay(day);
+    }
+  }
+
+  function moveHover(event) {
+    if (event.pointerType === 'touch' && !touchPointerActiveRef.current) {
+      return;
+    }
+    hoverFromPointer(event);
+  }
+
+  function clearHover(event) {
+    pointerStartRef.current = null;
+    if (!event || event.pointerType === 'touch') {
+      touchPointerActiveRef.current = false;
+    }
+    setHover(null);
+  }
+
+  return (
+    <section
+      ref={wrapRef}
+      className={graphClass}
+      aria-label="Daily sold median"
+      onPointerMove={moveHover}
+      onPointerDown={beginHover}
+      onPointerUp={(event) => {
+        pickDayFromPointer(event);
+        pointerStartRef.current = null;
+        if (event.pointerType === 'touch') {
+          clearHover(event);
+        }
+      }}
+      onPointerLeave={clearHover}
+      onPointerCancel={clearHover}
+    >
+      {filterBar}
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        aria-hidden="true"
+      >
+        {scale.ticks.map((tick) => {
+          const y = soldGraphY(tick, scale.max, pad.t, plotH);
+          return (
+            <g key={tick}>
+              <line
+                x1={pad.l}
+                x2={pad.l + plotW}
+                y1={y}
+                y2={y}
+                className="sold-graph-grid"
+              />
+              <text
+                x={pad.l - 4}
+                y={y + 3}
+                textAnchor="end"
+                className="sold-graph-axis"
+              >
+                {formatSoldAxisTick(tick)}
+              </text>
+            </g>
+          );
+        })}
+        <polygon points={area} className="sold-graph-fill" />
+        <polyline points={line} className="sold-graph-line" />
+        {activePt ? (
+          <line
+            x1={activePt[0]}
+            x2={activePt[0]}
+            y1={pad.t}
+            y2={pad.t + plotH}
+            className="sold-graph-guide"
+          />
+        ) : null}
+        {points.map(([x, y], index) => (
+          <circle
+            key={days[index].day}
+            cx={x}
+            cy={y}
+            r={index === hoverIndex ? 4.4 : (days.length === 1 ? 3.5 : 2.4)}
+            className={index === hoverIndex ? 'sold-graph-dot is-active' : 'sold-graph-dot'}
+          />
+        ))}
+        <text x={pad.l} y={height - 7} className="sold-graph-axis">{firstLabel}</text>
+        <text x={width - 8} y={height - 7} textAnchor="end" className="sold-graph-axis">{lastLabel}</text>
+        <rect x="0" y="0" width={width} height={height} className="sold-graph-hit" />
+      </svg>
+      {activePt ? (
+        <div
+          className={['sold-graph-tip', ...tipMods].join(' ')}
+          style={{
+            left: `${(activePt[0] / width) * 100}%`,
+            top: `${(activePt[1] / height) * 100}%`,
+          }}
+          role="status"
+        >
+          <strong>{price}</strong>
+          <span>{hoverLabel}</span>
+          {Number(active.soldQty || active.sampleCount) > 0
+            ? <span>{formatSoldSampleCount(active.soldQty || active.sampleCount)}</span>
+            : null}
+          {active.comments?.[0] ? <em>{active.comments[0]}</em> : null}
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function matchDeal(rows, language, condition) {
@@ -140,10 +562,11 @@ function matchDeal(rows, language, condition) {
   }) || null;
 }
 
-function preferredDeal(rows) {
-  return matchDeal(rows, 'EN', 'NM')
+function preferredDeal(rows, nationality) {
+  const lang = defaultCardLanguage(nationality);
+  return matchDeal(rows, lang, 'NM')
     || matchDeal(rows, null, 'NM')
-    || matchDeal(rows, 'EN', null)
+    || matchDeal(rows, lang, null)
     || matchDeal(rows);
 }
 
@@ -170,15 +593,15 @@ function ListingForm({
   const navigate = useNavigate();
   const { signedIn, ready, sellerName, getBearer } = useAuth();
   const [price, setPrice] = useState('');
+  const [currency, setCurrency] = useState('PKN');
   const [qty, setQty] = useState('1');
   const [condition, setCondition] = useState('NM');
-  const [language, setLanguage] = useState('EN');
+  const [language, setLanguage] = useState(() => defaultCardLanguage(card?.nationality));
   const [foil, setFoil] = useState(defaultFoil(card));
   const [chips, setChips] = useState({
     firstEd: false,
     sealed: false,
     graded: false,
-    signed: false,
     shipping: true,
   });
   const [comment, setComment] = useState('');
@@ -188,18 +611,20 @@ function ListingForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
+  const sellLangs = languagesForNationality(card.nationality, LIST_LANGS);
+  const listLangs = sellLangs.length ? sellLangs : LIST_LANGS;
 
   useEffect(() => {
     setPrice('');
+    setCurrency('PKN');
     setQty('1');
     setCondition('NM');
-    setLanguage('EN');
+    setLanguage(defaultCardLanguage(card.nationality));
     setFoil(defaultFoil(card));
     setChips({
       firstEd: false,
       sealed: false,
       graded: false,
-      signed: false,
       shipping: true,
     });
     setComment('');
@@ -211,10 +636,16 @@ function ListingForm({
   }, [card.id]);
 
   useEffect(() => {
-    if (preferredLanguage) {
+    const langs = languagesForNationality(card.nationality, LIST_LANGS);
+    const allowed = langs.length ? langs : LIST_LANGS;
+    if (preferredLanguage && allowed.includes(preferredLanguage)) {
       setLanguage(preferredLanguage);
+      return;
     }
-  }, [preferredLanguage]);
+    setLanguage((current) => (
+      allowed.includes(current) ? current : defaultCardLanguage(card.nationality)
+    ));
+  }, [preferredLanguage, card.nationality]);
 
   useEffect(() => {
     if (preferredCondition) {
@@ -222,7 +653,10 @@ function ListingForm({
     }
   }, [preferredCondition]);
 
-  const hint = !price && suggestedPrice ? String(suggestedPrice) : '';
+  const hint = !price && suggestedPrice ? listPriceHint(suggestedPrice, currency) : '';
+  const listedPkn = price
+    ? listingPriceToPkn(price, currency)
+    : listingPriceToPkn(suggestedPrice, 'PKN');
 
   function toggleChip(key) {
     setChips((current) => ({ ...current, [key]: !current[key] }));
@@ -233,7 +667,9 @@ function ListingForm({
       navigate(authFrom(fromPath));
       return;
     }
-    const amount = Number(price || suggestedPrice);
+    const amount = price
+      ? listingPriceToPkn(price, currency)
+      : listingPriceToPkn(suggestedPrice, 'PKN');
     const quantity = Number.parseInt(qty, 10);
     if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99) {
       setError('Enter a valid price and quantity.');
@@ -252,7 +688,7 @@ function ListingForm({
         navigate(authFrom(fromPath));
         return;
       }
-      await createListing({
+      const created = await createListing({
         cardId: publicCardId(card),
         sellerName,
         sellerCountry: 'EU',
@@ -261,7 +697,7 @@ function ListingForm({
         language,
         pricePkn: amount,
         quantityAvailable: quantity,
-        signed: chips.signed,
+        signed: false,
         reverse: foil === 'reverse',
         firstEdition: chips.firstEd,
         foilState: foil,
@@ -283,7 +719,7 @@ function ListingForm({
       track(Action.sell, card);
       setDone('Listing created.');
       setQty('1');
-      onListed?.();
+      onListed?.(created);
     } catch (err) {
       if (err.status === 401) {
         navigate(authFrom(fromPath));
@@ -319,8 +755,10 @@ function ListingForm({
         </label>
         <label className="sell-field currency">
           Currency
-          <select value="PKN" disabled>
-            <option value="PKN">PKN</option>
+          <select value={currency} onChange={(event) => setCurrency(event.target.value)}>
+            {LIST_CURRENCIES.map((code) => (
+              <option key={code} value={code}>{code}</option>
+            ))}
           </select>
         </label>
         <label className="sell-field qty">
@@ -341,44 +779,47 @@ function ListingForm({
           {saving ? 'Listing…' : 'List card'}
         </button>
       </div>
-      <div className="sell-row">
-        <label className="sell-field grow">
-          Condition
+      {currency !== 'PKN' && listedPkn ? (
+        <p className="sell-pkn-eq">Lists at {formatPkn(listedPkn)}</p>
+      ) : null}
+      <div className="sell-options-row">
+        <label className="sell-field sell-pick condition-pick">
+          <span className="sr-only">Condition</span>
           <select value={condition} onChange={(event) => setCondition(event.target.value)}>
             {MOOD_CONDS.map((row) => (
               <option key={row.value} value={row.value}>{row.label}</option>
             ))}
           </select>
         </label>
-        <label className="sell-field grow">
-          Language
+        <label className="sell-field sell-pick language-pick">
+          <span className="sr-only">Language</span>
           <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-            {LIST_LANGS.map((code) => (
+            {listLangs.map((code) => (
               <option key={code} value={code}>{code}</option>
             ))}
           </select>
         </label>
-        <label className="sell-field grow">
-          Foil
+        <label className="sell-field sell-pick foil-pick">
+          <span className="sr-only">Foil</span>
           <select value={foil} onChange={(event) => setFoil(event.target.value)}>
             {FOILS.map((row) => (
               <option key={row.value} value={row.value}>{row.label}</option>
             ))}
           </select>
         </label>
-      </div>
-      <div className="sell-chips" role="group" aria-label="Listing extras">
-        {LIST_CHIPS.map((chip) => (
-          <button
-            key={chip.key}
-            type="button"
-            className={chips[chip.key] ? 'on' : ''}
-            aria-pressed={chips[chip.key]}
-            onClick={() => toggleChip(chip.key)}
-          >
-            {chip.label}
-          </button>
-        ))}
+        <div className="sell-chips" role="group" aria-label="Listing extras">
+          {LIST_CHIPS.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className={chips[chip.key] ? 'on' : ''}
+              aria-pressed={chips[chip.key]}
+              onClick={() => toggleChip(chip.key)}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
       </div>
       {chips.graded ? (
         <div className="sell-row">
@@ -426,7 +867,7 @@ function Chevron({ dir }) {
 
 function SilverHead({ card, fromPath }) {
   const navigate = useNavigate();
-  const { signedIn, silver, availablePkn, getBearer } = useAuth();
+  const { signedIn, silver, ready, profile, availablePkn, getBearer } = useAuth();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -492,13 +933,17 @@ function SilverHead({ card, fromPath }) {
     return (
       <div className="silver-tools">
         <div className="silver-pills">
-          <button className="silver-pill" type="button" onClick={openCardtrader}>CT</button>
-          <button className="silver-pill" type="button" onClick={openCardmarket}>CM</button>
-          <button className="silver-pill" type="button" onClick={openVinted}>VT</button>
+          <button className="silver-pill is-ct" type="button" onClick={openCardtrader}>CT</button>
+          <button className="silver-pill is-cm" type="button" onClick={openCardmarket}>CM</button>
+          <button className="silver-pill is-vt" type="button" onClick={openVinted}>VT</button>
         </div>
         {message ? <p className="muted silver-note">{message}</p> : null}
       </div>
     );
+  }
+
+  if (!ready || (signedIn && !profile)) {
+    return <div className="silver-tools is-pending" aria-hidden="true" />;
   }
 
   return (
@@ -512,7 +957,7 @@ function SilverHead({ card, fromPath }) {
       )}
       <p className="muted silver-note">
         {signedIn
-          ? `Site balance ${availablePkn.toLocaleString()} PKN. CT / CM / VT stay hidden until Silver.`
+          ? `Site balance ${formatPknNumber(availablePkn)} PKN. CT / CM / VT stay hidden until Silver.`
           : 'CT / CM / VT need Silver on this session.'}
       </p>
       {message ? <p className="muted silver-note">{message}</p> : null}
@@ -552,26 +997,35 @@ function cleanPath(path) {
 }
 
 function replaceToCanonical(path, navigate, card, routerPath) {
-  const next = cleanPath(path);
-  if (!path || !next) {
+  const here = cleanPath(routerPath || (typeof window === 'undefined' ? '' : window.location.pathname));
+  const titleLang = searchLangFromPath(here) || getSearchLang();
+  const next = cleanPath(rewriteCatalogLang(path, titleLang));
+  if (!next) {
     return;
   }
-  const here = cleanPath(routerPath || (typeof window === 'undefined' ? '' : window.location.pathname));
   if (next === here) {
     return;
   }
-  navigate(path, { replace: true, state: card ? { card } : undefined });
+  navigate(next, { replace: true, state: card ? { card } : undefined });
 }
 
 export default function Card() {
-  const { lang = 'en', cardId, slug = '' } = useParams();
+  const { lang = 'en', cardId: rawCardId, slug = '' } = useParams();
+  const cardId = realPublicCardId(rawCardId);
   const navigate = useNavigate();
   const location = useLocation();
-  const { signedIn } = useAuth();
+  const { user, getBearer } = useAuth();
   const { addItem } = useCart();
-  const stubCard = location.state?.card && String(location.state.card.id) === String(cardId)
-    ? location.state.card
-    : null;
+  const stubCard = useMemo(() => {
+    const route = cardStubFromRoute({ cardId, lang, slug });
+    const fromState = location.state?.card;
+    const stateCard = fromState && String(fromState.id || fromState.card_id) === String(cardId)
+      ? fromState
+      : null;
+    return mergeDeskCard(mergeDeskCard(route, peekRecentTile(cardId)), stateCard);
+  }, [cardId, lang, slug, location.state]);
+  const stubCardRef = useRef(stubCard);
+  stubCardRef.current = stubCard;
   const [payload, setPayload] = useState(() => {
     const cached = peekCard(cardId, { lang });
     if (cached) {
@@ -579,7 +1033,7 @@ export default function Card() {
       return {
         ...cached,
         neighbors: neighborsOrPeek(cardId, cached.neighbors),
-        ...(listed ? { offers: listed.listings || [] } : {}),
+        ...(peekHasListingRows(listed) ? { offers: listed.listings } : {}),
       };
     }
     if (stubCard) {
@@ -602,10 +1056,38 @@ export default function Card() {
   const [dealLang, setDealLang] = useState('');
   const [dealCond, setDealCond] = useState('');
   const [offersReady, setOffersReady] = useState(false);
+  const [listingBusy, setListingBusy] = useState(false);
+  const [shopError, setShopError] = useState('');
+  const [namePrintings, setNamePrintings] = useState([]);
+  const [artPrintings, setArtPrintings] = useState([]);
+  const [salesSlices, setSalesSlices] = useState(() => peekCardSales(cardId)?.slices ?? null);
+  const [salesCondition, setSalesCondition] = useState('');
+  const [salesLanguage, setSalesLanguage] = useState('');
+  const [salesReverse, setSalesReverse] = useState(false);
+  const [salesFirstEdition, setSalesFirstEdition] = useState(false);
+  const [salesGraded, setSalesGraded] = useState(false);
+  const [setNationality, setSetNationality] = useState('');
+  const salesCardRef = useRef(cardId);
+  if (salesCardRef.current !== cardId) {
+    salesCardRef.current = cardId;
+    setSalesCondition('');
+    setSalesLanguage('');
+    setSalesReverse(false);
+    setSalesFirstEdition(false);
+    setSalesGraded(false);
+    setSalesSlices(peekCardSales(cardId)?.slices ?? null);
+    setSetNationality('');
+  }
   const zoomRef = useRef(null);
   const copiedTimer = useRef(0);
+  const listingsSeq = useRef(0);
 
   useLayoutEffect(() => {
+    if (String(rawCardId) !== String(cardId)) {
+      const next = `${location.pathname.replace(`/cards/${rawCardId}`, `/cards/${cardId}`)}${location.search}`;
+      navigate(next, { replace: true, state: location.state });
+      return;
+    }
     if (slug) {
       return;
     }
@@ -615,10 +1097,13 @@ export default function Card() {
     if (known) {
       replaceToCanonical(known, navigate, stubCard, location.pathname);
     }
-  }, [cardId, lang, slug, navigate, stubCard, location.pathname]);
+  }, [rawCardId, cardId, lang, slug, navigate, stubCard, location.pathname, location.search, location.state]);
 
   useEffect(() => {
     let cancelled = false;
+    listingsSeq.current += 1;
+    const seq = listingsSeq.current;
+    const stubCard = stubCardRef.current;
     setZoom(false);
     setCopied(false);
     setError('');
@@ -627,6 +1112,14 @@ export default function Card() {
     setOfferSort('price');
     setDealLang('');
     setDealCond('');
+    setListingBusy(false);
+    setShopError('');
+    const cached = peekCard(cardId, { lang });
+    const listed = peekListings(cardId);
+    setArtPrintings(
+      (cached?.versions || []).map(cardFromCatalogRow).filter((row) => row.id),
+    );
+    setNamePrintings(catalogPrintings(cached?.rarities));
     setWatched(readWatchlistIds().includes(String(cardId)));
     if (!slug) {
       const known = peekCanonicalPath(cardId, { lang })
@@ -644,86 +1137,243 @@ export default function Card() {
           .catch(() => {});
       }
     }
-    const cached = peekCard(cardId, { lang });
-    const listed = peekListings(cardId);
+    if (cached?.card) {
+      rememberCardId(cached.card);
+    } else if (stubCard?.id && stubCard.name) {
+      rememberCardId(stubCard);
+    }
     if (cached) {
       setPayload({
         ...cached,
         neighbors: neighborsOrPeek(cardId, cached.neighbors),
-        ...(listed ? { offers: listed.listings || [] } : {}),
+        ...(peekHasListingRows(listed) ? { offers: listed.listings } : {}),
       });
-      setOffersReady(Boolean(listed));
+      setOffersReady(peekHasListingRows(listed));
       rememberNeighbors(cached.card, cached.neighbors);
     } else if (stubCard) {
-      setPayload({
-        card: stubCard,
-        offers: listed?.listings || [],
-        versions: [],
-        neighbors: neighborsOrPeek(cardId),
+      setPayload((current) => {
+        if (current?.card && String(current.card.id || current.card.card_id) === String(cardId)) {
+          const card = mergeDeskCard(current.card, stubCard);
+          return {
+            ...current,
+            card,
+            offers: peekHasListingRows(listed) ? listed.listings : current.offers || [],
+            neighbors: current.neighbors || neighborsOrPeek(cardId),
+          };
+        }
+        return {
+          card: stubCard,
+          offers: peekHasListingRows(listed) ? listed.listings : [],
+          versions: [],
+          neighbors: neighborsOrPeek(cardId),
+        };
       });
-      setOffersReady(Boolean(listed));
+      setOffersReady(peekHasListingRows(listed));
+      if (stubCard.name) {
+        document.title = cardDocumentTitle(stubCard);
+      }
     } else {
       setPayload(null);
       setOffersReady(false);
     }
 
-    function showCard(data) {
-      if (cancelled) {
-        return null;
+    const listingsSeqAtLoad = seq;
+    fetchListings(cardId, { fresh: true }).then((list) => {
+      if (cancelled || listingsSeqAtLoad !== listingsSeq.current) {
+        return;
       }
-      rememberNeighbors(data.card, data.neighbors);
+      const rows = list.listings || [];
+      setPayload((current) => {
+        if (!current) {
+          return current;
+        }
+        if (!rows.length && current.offers?.length) {
+          return current;
+        }
+        return { ...current, offers: rows };
+      });
+      setOffersReady(true);
+    }).catch(() => {
+      if (!cancelled && listingsSeqAtLoad === listingsSeq.current) {
+        setOffersReady(true);
+      }
+    });
+
+    function showCard(data) {
+      if (cancelled || !data?.card) {
+        return;
+      }
       const neighborWindow = neighborsOrPeek(cardId, data.neighbors);
       warmupNeighbors(neighborWindow, { lang });
-      const card = data.card;
       setPayload((current) => {
-        const next = {
-          ...data,
+        const { offers: _pageOffers, ...page } = data;
+        const card = mergeDeskCard(current?.card, data.card);
+        rememberCardId(card);
+        return {
+          ...page,
+          card,
+          version: data.version || card.version || current?.version || '',
           neighbors: neighborWindow,
+          offers: current?.offers || [],
         };
-        return current?.offers?.length
-          ? { ...next, offers: current.offers }
-          : next;
       });
-      document.title = data.seo?.title || `${card.name} · Pokoin`;
-      rememberCardId(card);
+      document.title = cardDocumentTitle(mergeDeskCard(stubCard, data.card));
+      const card = mergeDeskCard(stubCard, data.card);
+      rememberNeighbors(card, data.neighbors);
+      const clip = (data.versions || []).map(cardFromCatalogRow).filter((row) => row.id);
+      if (clip.length) {
+        setArtPrintings(clip);
+      }
+      const rarities = catalogPrintings(data.rarities);
+      if (rarities.length) {
+        setNamePrintings((current) => mergePrintingRows(current, rarities));
+      }
       setWatched(readWatchlistIds().includes(String(card.id)));
       track(Action.viewCard, card);
       if (card.canonicalPath) {
         replaceToCanonical(card.canonicalPath, navigate, card, location.pathname);
       }
-      const cachedList = peekListings(card.id);
-      const listingsPromise = cachedList
-        ? Promise.resolve(cachedList)
-        : fetchListings(card.id);
-      return listingsPromise.then((list) => {
-        if (!cancelled) {
-          setPayload((current) => (
-            current ? { ...current, offers: list.listings || [] } : current
-          ));
-          setOffersReady(true);
-        }
-      });
     }
 
-    const pending = cached
-      ? Promise.resolve(cached)
-      : fetchCard(cardId, { lang, slug, includeOffers: false });
-    pending
+    fetchCard(cardId, { lang, slug, includeOffers: false, fresh: Boolean(cached) })
       .then(showCard)
       .catch((err) => {
-        if (!cancelled) {
-          setError(err.message || 'Card not found.');
+        if (cancelled) {
+          return;
         }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setOffersReady(true);
+        if (err.status === 404) {
+          setPayload(null);
+          setError(err.message || 'Card not found.');
+          return;
+        }
+        if (!cached && !stubCard) {
+          setError(err.message || 'Card not found.');
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [cardId, lang, navigate]);
+  }, [cardId, lang, slug, navigate]);
+
+  const setNameForNationality = payload?.card?.set
+    || payload?.card?.set_name
+    || stubCard?.set
+    || stubCard?.set_name
+    || '';
+  useEffect(() => {
+    const slug = setSlug(setNameForNationality);
+    if (!slug) {
+      setSetNationality('');
+      return undefined;
+    }
+    let cancelled = false;
+    fetchPrintNationality(slug).then((value) => {
+      if (!cancelled) {
+        setSetNationality(value);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cardId, setNameForNationality]);
+
+  const salesNationality = payload?.card?.nationality || stubCard?.nationality || setNationality;
+  const salesView = useMemo(
+    () => soldGraphView(salesSlices || [], {
+      nationality: salesNationality,
+      language: salesLanguage,
+      condition: salesCondition,
+      reverse: salesReverse,
+      firstEdition: salesFirstEdition,
+      graded: salesGraded,
+    }),
+    [
+      salesSlices,
+      salesNationality,
+      salesLanguage,
+      salesCondition,
+      salesReverse,
+      salesFirstEdition,
+      salesGraded,
+    ],
+  );
+  const salesSeries = salesSlices == null ? null : salesView.series;
+  const salesFilters = salesView.filters;
+  const graphLangs = languagesForNationality(salesNationality, salesFilters.languages);
+
+  useEffect(() => {
+    const cached = peekCardSales(cardId);
+    if (cached) {
+      setSalesSlices(cached.slices);
+    }
+    let cancelled = false;
+    fetchCardSales(cardId, { slices: true }).then((data) => {
+      if (cancelled) {
+        return;
+      }
+      if (!Array.isArray(data?.slices)) {
+        if (!cached) {
+          setSalesSlices([]);
+        }
+        return;
+      }
+      saveCardSales(cardId, data.slices);
+      setSalesSlices(data.slices);
+    }).catch(() => {
+      if (cancelled) {
+        return;
+      }
+      if (cached) {
+        return;
+      }
+      const stale = rememberStaleCardSales(cardId);
+      setSalesSlices(stale?.slices ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cardId]);
+
+  useEffect(() => {
+    const name = String(payload?.card?.name || stubCard?.name || '').trim();
+    if (!name) {
+      return undefined;
+    }
+    const ac = new AbortController();
+    fetchExactNameCards(name, { signal: ac.signal, lang })
+      .then((rows) => {
+        if (ac.signal.aborted || !rows.length) {
+          return;
+        }
+        setNamePrintings((current) => mergePrintingRows(current, rows));
+      })
+      .catch((err) => {
+        if (err?.name === 'AbortError' || ac.signal.aborted) {
+          return;
+        }
+      });
+    return () => ac.abort();
+  }, [lang, payload?.card?.name, stubCard?.name]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchVersionSet(cardId)
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        const rows = (data?.printings || []).map(cardFromCatalogRow).filter((row) => row.id);
+        if (rows.length) {
+          setArtPrintings(rows);
+        }
+      })
+      .catch(() => {
+        /* Keep marketplace-card-page `versions` so 2–6 reprints still paint. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cardId]);
 
   useLayoutEffect(() => {
     if (!zoom) {
@@ -737,19 +1387,64 @@ export default function Card() {
   }, [zoom]);
 
   const offers = useMemo(() => {
+    const nationality = payload?.card?.nationality || stubCard?.nationality || setNationality;
+    const allowed = languagesForNationality(nationality, language ? [language] : []);
+    const shopLanguage = allowed.length ? language : '';
     const filtered = (payload?.offers || []).filter((offer) => {
       if (condition && conditionKey(offer.condition) !== condition) {
         return false;
       }
-      if (language && String(offer.language || '').toUpperCase() !== language) {
+      if (shopLanguage && String(offer.language || '').toUpperCase() !== shopLanguage) {
         return false;
       }
       return true;
     });
     return sortOffers(filtered, offerSort);
-  }, [payload, offerSort, condition, language]);
+  }, [payload, stubCard, setNationality, offerSort, condition, language]);
 
-  if (error && !payload?.card && !stubCard) {
+  const mineIds = useMemo(() => {
+    const uid = String(user?.uid || '');
+    if (!uid) {
+      return [];
+    }
+    return (payload?.offers || [])
+      .filter((row) => String(row.sellerUid || '') === uid)
+      .map((row) => row.id)
+      .filter(Boolean);
+  }, [payload, user?.uid]);
+
+  async function cancelMine(ids) {
+    const listingIds = (ids || []).filter(Boolean);
+    if (!listingIds.length || listingBusy) {
+      return;
+    }
+    const noun = listingIds.length === 1 ? 'this listing' : `${listingIds.length} listings`;
+    if (!window.confirm(`Remove ${noun} from the shop?`)) {
+      return;
+    }
+    setListingBusy(true);
+    setShopError('');
+    try {
+      const token = await getBearer();
+      if (!token) {
+        navigate(authFrom(location.pathname || '/marketplace'));
+        return;
+      }
+      await Promise.all(listingIds.map((id) => cancelListing(id, token, user.uid)));
+      listingIds.forEach((id) => dropListing(cardId, id));
+      setPayload((current) => omitListings(current, listingIds));
+    } catch (err) {
+      if (err.status === 401) {
+        navigate(authFrom(location.pathname || '/marketplace'));
+        return;
+      }
+      setShopError(err.message || 'Could not cancel the listing.');
+    } finally {
+      setListingBusy(false);
+    }
+  }
+
+  if (error && !payload?.card) {
     return (
       <div className="status error">
         <p>Card market not found.</p>
@@ -761,11 +1456,10 @@ export default function Card() {
     return (
       <article className="card-page flutter-page" aria-busy="true">
         <header className="asset-header">
-          <div className="prod-badges">
-            <span className="badge-poke">Pokémon</span>
-          </div>
-          <div className="asset-title">
+          <div className="asset-title-row">
             <h1><span className="skel-line skel-title" /></h1>
+          </div>
+          <div className="asset-sub-row">
             <p className="asset-sub"><span className="skel-line skel-line-sm" /></p>
           </div>
         </header>
@@ -780,36 +1474,41 @@ export default function Card() {
     );
   }
 
-  const card = payload?.card || stubCard;
+  const card = (() => {
+    const row = payload?.card || stubCard;
+    const nationality = String(row?.nationality || setNationality || '').trim();
+    if (!row || !nationality || row.nationality === nationality) {
+      return row;
+    }
+    return { ...row, nationality };
+  })();
   const identity = printingIdentity(card);
   const fromPath = card.canonicalPath || window.location.pathname;
-  const versions = payload?.versions || [];
-  const otherPrintings = versions.filter((row) => String(row.id) !== String(card.id));
   const art = imageSrc(card, 'hero');
   const setName = identity.set || '';
   const setHref = setName ? `/marketplace/sets/${setSlug(setName)}` : '';
   const artist = identity.artist || payload?.artist?.name || payload?.artist?.illustrator || '';
   const artistPath = artist ? artistHref(artist, lang) : '';
-  const typeLabel = /^card$|^single$/i.test(String(card.type || card.productType || card.itemKind || 'Card'))
-    ? 'Card'
-    : (card.type || card.productType || 'Card');
   const identityEmoji = card.emoji || card.cardIdentityEmoji || '';
-  const versionsPath = versionsHref(card, lang);
   const neighborWindow = neighborsOrPeek(publicCardId(card), payload?.neighbors);
   const prevCard = neighborWindow.prev?.[0] || null;
   const nextCard = neighborWindow.next?.[0] || null;
   const nativeLive = pricedOffers(payload?.offers);
   const dealPick = dealLang || dealCond
     ? matchDeal(nativeLive, dealLang || null, dealCond || null)
-    : preferredDeal(nativeLive);
-  const floor = formatPkn(nativeLive[0]?.pricePkn);
-  const inStock = offersReady && nativeLive.length > 0;
+    : preferredDeal(nativeLive, card.nationality);
+  const lastDayPkn = formatPkn(salesSeries?.lastMedianPkn);
+  const change24h = formatChange24h(salesSeries?.change24hPct);
   const canBuy = Boolean(dealPick);
-  const dealLangs = LIST_LANGS;
+  const dealLangs = languagesForNationality(card.nationality, LIST_LANGS);
   const dealConds = CONDITIONS.map((row) => row.value).filter(Boolean);
-  const shownLang = dealLang || offerLang(dealPick) || '';
+  const shownLangRaw = dealLang || offerLang(dealPick) || '';
+  const shownLang = !shownLangRaw || dealLangs.includes(shownLangRaw) ? shownLangRaw : '';
   const shownCond = dealCond || (dealPick ? conditionKey(dealPick.condition) : '');
-  const languages = [...new Set((payload?.offers || []).map((row) => String(row.language || '').toUpperCase()).filter(Boolean))];
+  const languages = languagesForNationality(
+    card.nationality,
+    [...new Set((payload?.offers || []).map((row) => String(row.language || '').toUpperCase()).filter(Boolean))],
+  );
   const dealCopy = !offersReady
     ? null
     : !nativeLive.length
@@ -818,15 +1517,52 @@ export default function Card() {
         ? 'No listing matches this selection.'
         : null;
   const suggested = nativeLive[0]?.pricePkn > 0
-    ? Number(nativeLive[0].pricePkn).toLocaleString('en-US', { maximumFractionDigits: 2 })
+    ? Number(nativeLive[0].pricePkn)
     : '';
-  const holo = Boolean(card.isHolo || card.holo);
-  const collector = identity.number || '—';
-  const versionRows = versions.length
-    ? (versions.some((row) => String(row.id) === String(card.id))
-      ? versions
-      : [{ id: card.id, name: card.name, set: setName, set_name: setName, number: collector }, ...versions])
-    : [{ id: card.id, name: card.name, set: setName, set_name: setName, number: collector }];
+  const collector = identity.number || '';
+  const versionRows = rarityVersions(card, namePrintings);
+  const versionLabel = versionOptionLabel(card) || collector;
+  const canSwitchVersion = versionRows.length > 1;
+  const prevNav = prevCard;
+  const nextNav = nextCard;
+  const clipPrintings = deskClipCandidates(artPrintings, payload?.versions);
+  const setShortcuts = deskSetShortcuts(card, clipPrintings);
+  const showMoreVersions = deskShowMoreVersions(card, {
+    nameRows: namePrintings,
+    clipRows: clipPrintings,
+    versionCount: payload?.versionCount,
+  });
+  const species = speciesFromCard(card);
+  const eraName = tcgEra(card);
+  const eraPath = eraName ? eraHref(eraName) : '';
+  const rarityPath = identity.rarity ? rarityHref(identity.rarity, lang) : '';
+  const related = pickRelatedCards(card, [
+    clipPrintings,
+    namePrintings,
+    neighborWindow.prev,
+    neighborWindow.next,
+  ], 12);
+  const cardPath = card.canonicalPath || cardHref(card);
+  const seoCrumbs = [
+    { name: 'Marketplace', href: '/marketplace' },
+    species
+      ? { name: species.name, href: pokemonHref(card, lang) }
+      : { name: 'Pokémon', href: `/marketplace/${lang}/pokemon` },
+    eraName ? { name: eraName, href: eraPath } : null,
+    setName ? { name: setName, href: setHref } : null,
+    { name: displayName(card) || 'Card' },
+  ];
+  const relatedHubs = [
+    species ? { name: `All ${species.name}`, href: pokemonHref(card, lang) } : null,
+    setName && setHref ? { name: setName, href: setHref } : null,
+    artist && artistPath ? { name: artist, href: artistPath } : null,
+    eraName && eraPath ? { name: eraName, href: eraPath } : null,
+    identity.rarity && rarityPath ? { name: identity.rarity, href: rarityPath } : null,
+    card.nationality ? {
+      name: `${String(card.nationality).charAt(0).toUpperCase()}${String(card.nationality).slice(1)} print`,
+      href: languageHrefFromNationality(card.nationality, lang),
+    } : null,
+  ].filter(Boolean);
 
   async function share() {
     const url = `${window.location.origin}${card.canonicalPath || cardHref(card)}`;
@@ -834,8 +1570,8 @@ export default function Card() {
     if (canUseNativeShare()) {
       try {
         await navigator.share({
-          title: card.name || 'Pokoin',
-          text: card.name || '',
+          title: displayName(card) || 'Pokoin',
+          text: displayName(card) || '',
           url,
         });
         return;
@@ -873,42 +1609,75 @@ export default function Card() {
 
   return (
     <article className="card-page flutter-page">
+      <SeoHead
+        title={cardDocumentTitle(card)}
+        description={cardSeoDescription(card)}
+        canonical={cardPath}
+        image={art}
+        imageAlt={cardImageAlt(card)}
+        jsonLd={[
+          productJsonLd(card, { url: `https://pokoin.com${cardPath}`, offers: nativeLive }),
+          breadcrumbJsonLd(seoCrumbs.map((crumb) => ({
+            name: crumb.name,
+            href: crumb.href,
+          }))),
+        ]}
+      />
       <header className="asset-header">
-        <div className="prod-badges">
-          <span className="badge-poke">Pokémon</span>
-          {identity.rarity ? <span className="badge-rare">{identity.rarity}</span> : null}
-          {holo ? <span className="badge-holo">Holo</span> : null}
+        <div className="asset-title-row">
+          <h1>{displayName(card)}{identityEmoji ? <span className="asset-emoji"> {identityEmoji}</span> : null}</h1>
+          <div className="asset-title-tools">
+            <button type="button" className={watched ? 'icon-btn on' : 'icon-btn'} onClick={onWatch} title={watched ? 'Remove from watchlist' : 'Add to watchlist'}>
+              {watched ? '♥' : '♡'}
+            </button>
+            <button
+              type="button"
+              className={copied ? 'icon-btn on' : 'icon-btn'}
+              onClick={share}
+              aria-label={copied ? 'Copied' : 'Share'}
+              title={copied ? 'Copied' : 'Share'}
+            >
+              {copied ? '✓' : '↗'}
+            </button>
+            {copied ? <span className="share-copied" role="status">Copied</span> : null}
+          </div>
         </div>
-        <div className="asset-title">
-          <h1>{card.name}{identityEmoji ? <span className="asset-emoji"> {identityEmoji}</span> : null}</h1>
+        <div className="asset-sub-row">
           <p className="asset-sub">
             {setName ? (
               <Link to={setHref} onClick={() => track(Action.clickSet, card)}>{setName}</Link>
             ) : null}
-            {collector ? <> {collector} · </> : ' · '}
-            {artist && artistPath ? (
-              <Link to={artistPath} onClick={() => track(Action.clickArtist, card)}>{artist}</Link>
-            ) : <span>{artist || typeLabel}</span>}
+            {collector ? (
+              <>
+                {setName ? ' ' : null}
+                {collector}
+              </>
+            ) : null}
+            {artist ? (
+              <>
+                {' · '}
+                {artistPath ? (
+                  <Link to={artistPath} onClick={() => track(Action.clickArtist, card)}>{artist}</Link>
+                ) : (
+                  <span>{artist}</span>
+                )}
+              </>
+            ) : null}
           </p>
-        </div>
-        <div className="asset-actions">
-          <span className={inStock && floor ? 'quote-pill' : 'quote-pill oos'}>
-            Floor {offersReady ? (floor || '—') : '—'}
-          </span>
-          <span className="quote-pill oos" title="No sold-card series yet">24h —</span>
-          <button type="button" className={watched ? 'icon-btn on' : 'icon-btn'} onClick={onWatch} title={watched ? 'Remove from watchlist' : 'Add to watchlist'}>
-            {watched ? '♥' : '♡'}
-          </button>
-          <button
-            type="button"
-            className={copied ? 'icon-btn on' : 'icon-btn'}
-            onClick={share}
-            aria-label={copied ? 'Copied' : 'Share'}
-            title={copied ? 'Copied' : 'Share'}
-          >
-            {copied ? '✓' : '↗'}
-          </button>
-          {copied ? <span className="share-copied" role="status">Copied</span> : null}
+          <div className="asset-quotes">
+            <span
+              className={lastDayPkn ? 'quote-pill quote-pkn' : 'quote-pill quote-pkn oos'}
+              title="Last day's median inferred sold price in PKN"
+            >
+              {salesSeries == null ? '—' : (lastDayPkn || '—')}
+            </span>
+            <span
+              className={change24h.empty ? 'quote-pill oos' : 'quote-pill'}
+              title="Day-over-day median of sold prices"
+            >
+              {change24h.text}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -916,27 +1685,42 @@ export default function Card() {
         <div className="hero-art-col">
           <section className="panel art-panel">
             <div className="art-num-row">
-              {prevCard ? (
+              {prevNav ? (
                 <Link
                   className="art-nav"
-                  to={cardHref(prevCard)}
-                  state={{ card: prevCard }}
+                  to={cardHref(prevNav)}
+                  state={{ card: prevNav }}
                   aria-label="Previous card in set"
-                  onPointerEnter={() => warmupCard(prevCard, { lang, listings: true })}
-                  onClick={() => track(Action.prevCard, prevCard)}
+                  onPointerEnter={() => warmupCard(prevNav, { lang, listings: true })}
+                  onClick={() => track(Action.prevCard, prevNav)}
                 >
                   <Chevron dir="left" />
                 </Link>
               ) : <span className="art-nav ghost" aria-hidden="true"><Chevron dir="left" /></span>}
-              <span className="collector-badge">{collector}</span>
-              {nextCard ? (
+              {canSwitchVersion ? (
+                <select
+                  className="collector-badge version-badge"
+                  value={String(card.id)}
+                  onChange={goVersion}
+                  aria-label="Version"
+                >
+                  {versionRows.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {versionOptionLabel(row)}
+                    </option>
+                  ))}
+                </select>
+              ) : versionLabel ? (
+                <span className="collector-badge">{versionLabel}</span>
+              ) : <span />}
+              {nextNav ? (
                 <Link
                   className="art-nav"
-                  to={cardHref(nextCard)}
-                  state={{ card: nextCard }}
+                  to={cardHref(nextNav)}
+                  state={{ card: nextNav }}
                   aria-label="Next card in set"
-                  onPointerEnter={() => warmupCard(nextCard, { lang, listings: true })}
-                  onClick={() => track(Action.nextCard, nextCard)}
+                  onPointerEnter={() => warmupCard(nextNav, { lang, listings: true })}
+                  onClick={() => track(Action.nextCard, nextNav)}
                 >
                   <Chevron dir="right" />
                 </Link>
@@ -950,35 +1734,98 @@ export default function Card() {
                 track(Action.zoomArt, card);
               }}
             >
-              {art ? <CardArt src={art} alt={card.name} fetchPriority="high" full /> : <span className="tile-ph" />}
+              {art ? <CardArt src={art} alt={cardImageAlt(card)} fetchPriority="high" full /> : <span className="tile-ph" />}
             </button>
-            <label className="sort version-select">
-              <span className="sr-only">Version</span>
-              <select
-                value={String(card.id)}
-                onChange={goVersion}
-                disabled={versionRows.length < 2}
-              >
-                {versionRows.map((row) => {
-                  const rowId = printingIdentity(row);
-                  return (
-                    <option key={row.id} value={row.id}>
-                      {[row.set || row.set_name, rowId.number].filter(Boolean).join(' ') || row.name}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-            <p className="set-link tight">
-              <Link to={versionsPath}>View all versions</Link>
-            </p>
+            {(setShortcuts.length || showMoreVersions) ? (
+              <div className="set-link tight version-links">
+                {setShortcuts.length ? (
+                  <div className="version-shortcuts">
+                    {setShortcuts.map((row) => {
+                      const on = String(row.id) === String(card.id);
+                      const ident = printingIdentity(row);
+                      const label = [ident.set, ident.number].filter(Boolean).join(' ');
+                      const mark = (
+                        <ExpansionMark
+                          setName={ident.set}
+                          symbolUrl={row.expansionSymbolUrl || row.defaultSymbolUrl}
+                        />
+                      );
+                      if (on) {
+                        return (
+                          <span
+                            key={row.id}
+                            className="set-shortcut is-on"
+                            title={label}
+                            aria-label={label}
+                            aria-current="page"
+                          >
+                            {mark}
+                          </span>
+                        );
+                      }
+                      return (
+                        <Link
+                          key={row.id}
+                          className="set-shortcut"
+                          to={cardHref(row)}
+                          state={{ card: row }}
+                          title={label}
+                          aria-label={label}
+                          onPointerEnter={() => warmupCard(row, { lang, listings: true })}
+                          onClick={() => track(Action.clickVersion, row)}
+                        >
+                          {mark}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {showMoreVersions ? (
+                  <Link
+                    className={['more-versions', setShortcuts.length ? '' : 'is-solo'].filter(Boolean).join(' ')}
+                    to={versionsHref(card, lang)}
+                  >
+                    More versions...
+                  </Link>
+                ) : null}
+              </div>
+            ) : null}
           </section>
         </div>
 
         <div className="hero-center">
-          <section className="panel analytics-empty">
-            <p>No sold-card analytics yet. Condition lines will populate after completed purchases.</p>
-          </section>
+          <SoldPriceGraph
+            series={salesSeries}
+            filters={{ ...salesFilters, languages: graphLangs }}
+            condition={salesCondition}
+            language={salesLanguage}
+            reverse={salesReverse}
+            firstEdition={salesFirstEdition}
+            graded={salesGraded}
+            onCondition={setSalesCondition}
+            onLanguage={setSalesLanguage}
+            onReverse={setSalesReverse}
+            onFirstEdition={setSalesFirstEdition}
+            onGraded={setSalesGraded}
+            onPickDay={(day) => {
+              const traits = soldTraitsForGraphDay(salesSlices || [], {
+                nationality: salesNationality,
+                language: salesLanguage,
+                condition: salesCondition,
+                reverse: salesReverse,
+                firstEdition: salesFirstEdition,
+                graded: salesGraded,
+              }, day);
+              if (!traits) {
+                return;
+              }
+              setSalesCondition(traits.condition);
+              setSalesLanguage(traits.language);
+              setSalesReverse(Boolean(traits.reverse));
+              setSalesFirstEdition(Boolean(traits.firstEdition));
+              setSalesGraded(Boolean(traits.graded));
+            }}
+          />
           <ListingForm
             card={card}
             identity={identity}
@@ -986,13 +1833,28 @@ export default function Card() {
             fromPath={fromPath}
             preferredLanguage={dealLang}
             preferredCondition={dealCond}
-            onListed={() => {
+            onListed={(created) => {
+              listingsSeq.current += 1;
+              const seq = listingsSeq.current;
               invalidateListings(card.id);
-              fetchListings(card.id).then((list) => {
-                setPayload((current) => (
-                  current ? { ...current, offers: list.listings || [] } : current
-                ));
-              });
+              rememberCreatedListing(card.id, created);
+              setPayload((current) => mergeCreatedListing(current, created));
+              setOffersReady(true);
+              fetchListings(card.id, { fresh: true }).then((list) => {
+                if (seq !== listingsSeq.current) {
+                  return;
+                }
+                const rows = list.listings || [];
+                setPayload((current) => {
+                  if (!current) {
+                    return current;
+                  }
+                  if (!rows.length && current.offers?.length) {
+                    return current;
+                  }
+                  return { ...current, offers: rows };
+                });
+              }).catch(() => {});
             }}
           />
         </div>
@@ -1006,7 +1868,9 @@ export default function Card() {
             <div className={canBuy ? 'prod-px' : 'prod-px oos'}>
               {offersReady ? (canBuy ? formatPkn(dealPick.pricePkn) : '—') : '—'}
             </div>
-            {dealCopy ? <p className="muted own-k">{dealCopy}</p> : null}
+            {canBuy && offersReady ? null : (
+              <p className="muted own-k">{dealCopy || '\u00a0'}</p>
+            )}
             <div className="deal-selects">
               <label className="sort deal-select">
                 <span className="sr-only">Language</span>
@@ -1062,74 +1926,61 @@ export default function Card() {
         </div>
 
         <section className="panel shop-panel shop-terminal">
-          <header className="panel-head">
+          <header className="panel-head shop-head">
             <h2>Shop</h2>
             {payload?.offers?.length ? (
-              <label className="sort">
-                Sort
-                <select value={offerSort} onChange={(event) => setOfferSort(event.target.value)}>
-                  <option value="price">Lowest price</option>
-                  <option value="price-desc">Highest price</option>
-                  <option value="qty">Most quantity</option>
-                  <option value="seller">Seller</option>
-                </select>
-              </label>
-            ) : null}
-          </header>
-          {payload?.offers?.length ? (
-            <div className="listing-filters">
-              <label className="sort">
-                Condition
-                <select value={condition} onChange={(event) => setCondition(event.target.value)}>
-                  {CONDITIONS.map((row) => (
-                    <option key={row.value || 'any'} value={row.value}>{row.label}</option>
-                  ))}
-                </select>
-              </label>
-              {languages.length ? (
+              <div className="shop-tools">
                 <label className="sort">
-                  Language
-                  <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-                    <option value="">Any</option>
-                    {languages.map((code) => (
-                      <option key={code} value={code}>{code}</option>
+                  Condition
+                  <select value={condition} onChange={(event) => setCondition(event.target.value)}>
+                    {CONDITIONS.map((row) => (
+                      <option key={row.value || 'any'} value={row.value}>{row.label}</option>
                     ))}
                   </select>
                 </label>
-              ) : null}
-              {condition || language ? (
-                <button type="button" className="linkish" onClick={() => { setCondition(''); setLanguage(''); }}>
-                  Clear filters
-                </button>
-              ) : null}
-            </div>
-          ) : null}
+                {languages.length ? (
+                  <label className="sort">
+                    Language
+                    <select value={language} onChange={(event) => setLanguage(event.target.value)}>
+                      <option value="">Any</option>
+                      {languages.map((code) => (
+                        <option key={code} value={code}>{code}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                <label className="sort">
+                  Sort
+                  <select value={offerSort} onChange={(event) => setOfferSort(event.target.value)}>
+                    <option value="price">Lowest price</option>
+                    <option value="price-desc">Highest price</option>
+                    <option value="qty">Most quantity</option>
+                    <option value="seller">Seller</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+          </header>
+          {shopError ? <p className="sell-msg error">{shopError}</p> : null}
           {offers.length ? (
             <div className="shop-list">
-              {offers.map((offer, index) => (
-                <button
-                  type="button"
-                  key={offer.id || `${offer.sellerName}-${offer.pricePkn}-${index}`}
-                  className="shop-row"
-                  onClick={() => {
-                    track(Action.clickListing, card, { resultRank: index });
-                    addItem(cartItemFromOffer(card, offer));
-                    navigate('/cart');
-                  }}
-                >
-                  <span className="shop-brand">{offer.sellerName || offer.sellerDisplayName || 'Pokoin'}</span>
-                  <span className="shop-txt">
-                    {offer.condition || 'NM'}
-                    {listingTags(offer).map((tag) => (
-                      <em key={tag} className="meta-chip">{tag}</em>
-                    ))}
-                  </span>
-                  <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>
-                  <span className="shop-act">
-                    {offer.quantityAvailable || 1}
-                  </span>
-                </button>
-              ))}
+              {offers.map((offer, index) => {
+                const mine = mineIds.includes(offer.id);
+                return (
+                  <ShopListingRow
+                    key={offer.id || `${offer.sellerName}-${offer.pricePkn}-${index}`}
+                    offer={offer}
+                    mine={mine}
+                    listingBusy={listingBusy}
+                    onBuy={() => {
+                      track(Action.clickListing, card, { resultRank: index });
+                      addItem(cartItemFromOffer(card, offer));
+                      navigate('/cart');
+                    }}
+                    onCancel={() => cancelMine([offer.id])}
+                  />
+                );
+              })}
             </div>
           ) : (
             <div className="empty-shop">
@@ -1141,24 +1992,26 @@ export default function Card() {
         </section>
       </div>
 
-      {otherPrintings.length ? (
-        <section className="printings">
-          <h2>Printings</h2>
-          <div className="carousel-track">
-            {otherPrintings.map((row, index) => (
-              <CardTile key={row.id} card={row} action={Action.clickVersion} rank={index} />
+      <RelatedCards
+        card={card}
+        related={related}
+        speciesName={species?.name}
+        speciesHref={species ? pokemonHref(card, lang) : ''}
+      />
+      <details className="catalog-fold">
+        <summary>More in the catalog</summary>
+        <SeoCrumbs items={seoCrumbs} />
+        {relatedHubs.length ? (
+          <p className="related-hubs">
+            {relatedHubs.map((hub, index) => (
+              <span key={hub.href}>
+                {index ? ' · ' : null}
+                <Link to={hub.href}>{hub.name}</Link>
+              </span>
             ))}
-          </div>
-        </section>
-      ) : null}
-
-      {setName ? (
-        <p className="set-link">
-          <Link to={setHref} onClick={() => track(Action.clickSet, card)}>
-            View all {setName}
-          </Link>
-        </p>
-      ) : null}
+          </p>
+        ) : null}
+      </details>
 
       {zoom ? (
         <dialog
@@ -1174,7 +2027,7 @@ export default function Card() {
           {art ? (
             <CardArt
               src={art}
-              alt={card.name}
+              alt={cardImageAlt(card)}
               full
               onClick={() => setZoom(false)}
             />

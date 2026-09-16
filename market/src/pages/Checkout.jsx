@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { createMarketplaceOrder, formatPkn } from '../api.js';
+import { createMarketplaceOrder, formatPkn, formatPknNumber } from '../api.js';
+import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { useAuth } from '../auth.jsx';
 import { CHECKOUT_SHIPPING_PKN, CHECKOUT_TAX_RATE, useCart } from '../cart.jsx';
 import { authFrom } from '../punchouts.js';
@@ -97,13 +98,14 @@ export default function Checkout() {
       <PageHead
         kicker="Shop"
         title="Checkout"
-        lede={`Pays site PKN. Physical shipping is a temporary ${formatPkn(CHECKOUT_SHIPPING_PKN)} line until a rate API exists.`}
+        lede={nft ? 'NFT-only pays site PKN now and writes holdings. No physical ship.' : `${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}
       >
         <Link className="btn ghost" to="/cart">Cart</Link>
+        {nft ? null : <Link className="btn ghost" to="/protection">Buyer protection</Link>}
       </PageHead>
       <MetricGrid>
         <Metric value={count} label="Items" />
-        <Metric value={availablePkn.toLocaleString()} label="Site PKN" />
+        <Metric value={formatPknNumber(availablePkn)} label="Site PKN" />
         <Metric value={formatPkn(totalPkn)} label="Due" />
       </MetricGrid>
       <Alert>{error}</Alert>
@@ -176,7 +178,7 @@ export default function Checkout() {
               <p className="page-lede">
                 {nft
                   ? `Pay ${formatPkn(totalPkn)} from site balance, create one NFT-only order, no physical card ships now.`
-                  : `Pay ${formatPkn(totalPkn)} from site balance and notify each seller once.`}
+                  : `Pay ${formatPkn(totalPkn)} from site balance. ${ESCROW_LINE}`}
               </p>
             ) : null}
             {missingListing ? <Alert>A cart row is missing listingId. Add the offer from Shop again.</Alert> : null}

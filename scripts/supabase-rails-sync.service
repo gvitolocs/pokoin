@@ -1,13 +1,1 @@
-[Unit]
-Description=Publish Pokoin marketplace browse rails to Supabase
-
-[Service]
-Type=oneshot
-User=root
-EnvironmentFile=-/home/ubuntu/pokoin-oracle-api.docker.env
-Environment=API_ORIGIN=http://127.0.0.1:18080
-ExecStart=/usr/bin/python3 /home/ubuntu/bin/sync-supabase-rails.py
-TimeoutStartSec=240
-Nice=10
-IOSchedulingClass=best-effort
-IOSchedulingPriority=7
+# removed 2026-09-06 - use marketplace-rails-sync.service on the Pi

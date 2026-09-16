@@ -7,12 +7,7 @@ DEST_HOST="${1:-oracle-peer1}"
 DEST_PATH="${2:-/home/ubuntu/pokoin-cdn}"
 CONCURRENCY="${CONCURRENCY:-8}"
 
-if [[ -f /home/nez/secrets/deploy/supabase-pokoin.env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source /home/nez/secrets/deploy/cloudflare-r2.env 2>/dev/null || true
-  set +a
-fi
+# No Supabase. CDN objects live on the Pi + R2 backup.
 # Prefer dedicated r2 env; fall back to marketplace docker env names on host.
 for f in \
   /home/nez/secrets/deploy/cloudflare-r2.env \
@@ -95,4 +90,4 @@ fi
 ssh -o BatchMode=yes "$DEST_HOST" "mkdir -p '$DEST_PATH'"
 rsync -a --info=stats2 "$STAGING"/ "$DEST_HOST:$DEST_PATH"/
 ssh -o BatchMode=yes "$DEST_HOST" "du -sh '$DEST_PATH'; find '$DEST_PATH' -type f | wc -l"
-echo "sync complete (R2 untouched — delete separately after verify)"
+echo "sync complete (R2 untouched — keep _homepage.webp on R2; delete catalog JPEGs from R2 after api2 verify)"

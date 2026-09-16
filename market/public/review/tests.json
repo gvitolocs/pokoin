@@ -1,0 +1,34 @@
+{
+  "tests": [
+    {
+      "path": "/sanitize",
+      "label": "Sanitize",
+      "note": "Leftover JPEG deskew",
+      "date": "2026-09-02"
+    },
+    {
+      "path": "/espurr",
+      "label": "Espurr",
+      "note": "Same artwork, JP/EN/CN",
+      "date": "2026-09-06"
+    },
+    {
+      "path": "/ocr",
+      "label": "OCR",
+      "note": "Qwen3-VL leftover print",
+      "date": "2026-09-13"
+    },
+    {
+      "path": "/ocr/artists",
+      "label": "Artists",
+      "note": "OCR Illus. matched to pokemontcg.io",
+      "date": "2026-09-13"
+    },
+    {
+      "path": "/artwork",
+      "label": "Artwork",
+      "note": "Pokémon-only hover masks",
+      "date": "2026-09-16"
+    }
+  ]
+}

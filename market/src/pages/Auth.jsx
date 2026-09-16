@@ -3,11 +3,14 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
+  getRedirectResult,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   updateProfile,
 } from 'firebase/auth';
 import { firebaseAuth } from '../auth.jsx';
+import { googleAuthPopupFailed, isAuthFramed, topLevelLoginUrl } from '../auth-google.js';
 import { Alert, PageHead } from '../components/Desk.jsx';
 
 export default function Auth() {
@@ -25,6 +28,31 @@ export default function Auth() {
   useEffect(() => {
     document.title = mode === 'signup' ? 'Create account · Pokoin' : 'Sign in · Pokoin';
   }, [mode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getRedirectResult(firebaseAuth)
+      .then((result) => {
+        if (cancelled || !result?.user) {
+          return;
+        }
+        navigate(safeFrom, { replace: true });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message || 'Google sign-in failed.');
+        }
+      });
+    const stop = firebaseAuth.onAuthStateChanged((user) => {
+      if (!cancelled && user) {
+        navigate(safeFrom, { replace: true });
+      }
+    });
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [navigate, safeFrom]);
 
   async function onEmail(event) {
     event.preventDefault();
@@ -51,9 +79,22 @@ export default function Auth() {
     setBusy(true);
     setError('');
     try {
+      // Extension side panel is COEP/COOP isolated. A Firebase popup from that
+      // iframe is blank or auth/popup-blocked. Finish Google on a real tab.
+      if (isAuthFramed()) {
+        const opened = window.open(topLevelLoginUrl(window.location.origin, safeFrom), 'pokoin-google-auth');
+        if (!opened) {
+          throw new Error('Allow popups for pokoin.com, then try Google sign-in again.');
+        }
+        return;
+      }
       await signInWithPopup(firebaseAuth, new GoogleAuthProvider());
       navigate(safeFrom, { replace: true });
     } catch (err) {
+      if (googleAuthPopupFailed(err)) {
+        await signInWithRedirect(firebaseAuth, new GoogleAuthProvider());
+        return;
+      }
       setError(err.message || 'Google sign-in failed.');
     } finally {
       setBusy(false);

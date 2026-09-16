@@ -1,3 +1,4 @@
+download/*.zip
 market/node_modules/
 market/dist/
 market/.env
@@ -18,5 +19,7 @@ AGENTS.md
 .codevira-cache/
 *.apkm
 .DS_Store
+._*
+scripts/out/
 __pycache__/
 *.pyc

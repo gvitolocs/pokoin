@@ -15,6 +15,12 @@ test('root id and marketplace id shortlinks', () => {
   assert.equal(shortlinkCardId('/marketplace/239324/'), '239324');
 });
 
+test('999 Storm Emeralda placeholders rewrite to leftover × 2', () => {
+  assert.equal(shortlinkCardId('/999806370'), '806370');
+  assert.equal(shortlinkCardId('/marketplace/999806370'), '806370');
+  assert.equal(shortlinkCardId('/marketplace/en/cards/999806370'), '806370');
+});
+
 test('SPA card path without slug is a shortlink; with slug is not', () => {
   assert.equal(shortlinkCardId('/marketplace/en/cards/239324'), '239324');
   assert.equal(shortlinkCardId('/marketplace/en/cards/239324/'), '239324');

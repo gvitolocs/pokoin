@@ -181,7 +181,7 @@ function prefetchMarketplace() {
       });
     })
     .catch(() => {});
-  fetch("/api/marketplace-home?v=units7d", { credentials: "same-origin" }).catch(() => {});
+  fetch("/api/marketplace-home?v=rising-month", { credentials: "same-origin", cache: "no-store" }).catch(() => {});
 }
 
 document.querySelectorAll('a[href="/marketplace"], a[href="/marketplace/"]').forEach((a) => {
@@ -211,3 +211,33 @@ idle(() => {
     })
     .catch(() => {});
 });
+
+const COOKIE_KEY = "pokoin.cookieConsent";
+const COOKIE_NAME = "pokoin_cookie_consent";
+const cookieBanner = document.querySelector("[data-cookie-banner]");
+if (cookieBanner) {
+  const accepted = (() => {
+    try {
+      if (localStorage.getItem(COOKIE_KEY) === "1") return true;
+    } catch (_) {}
+    try {
+      return /(?:^|;\s*)pokoin_cookie_consent=1(?:;|$)/.test(document.cookie);
+    } catch (_) {
+      return false;
+    }
+  })();
+  if (accepted) {
+    cookieBanner.remove();
+  } else {
+    cookieBanner.querySelector("[data-cookie-accept]")?.addEventListener("click", () => {
+      try {
+        localStorage.setItem(COOKIE_KEY, "1");
+      } catch (_) {}
+      try {
+        const secure = location.protocol === "https:" ? "; Secure" : "";
+        document.cookie = `${COOKIE_NAME}=1; Max-Age=31536000; Path=/; SameSite=Lax${secure}`;
+      } catch (_) {}
+      cookieBanner.remove();
+    });
+  }
+}

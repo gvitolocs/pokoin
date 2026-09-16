@@ -1,0 +1,10 @@
+[Unit]
+Description=Keep nezopt 15T Pi card-image replica in sync
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=3m
+
+[Install]
+WantedBy=timers.target

@@ -1,55 +1,221 @@
-import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { fetchSearch } from '../api.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router-dom';
+import { fetchSearch, fetchSellerByUsername, fetchSuggest } from '../api.js';
+import { isPokemonGame } from '../game.js';
+import { takeHotSearchPage } from '../search-hot.js';
+import {
+  fetchSetAwareCards,
+  isNumberAwareQuery,
+  isSetAwareQuery,
+  isSetOnlyQuery,
+  parseTypedQuery,
+  printingMatchesNumberFilter,
+  typedMeiliQuery,
+} from '../suggest-rank.js';
 import { useSearchLang } from '../locale.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
-import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
+import { Alert, EmptyDesk } from '../components/Desk.jsx';
+import SeoHead from '../components/SeoHead.jsx';
+import SearchTabs from '../components/SearchTabs.jsx';
+import SearchToolbar from '../components/SearchToolbar.jsx';
+import {
+  filterSearchCards,
+  searchRarity,
+  searchSet,
+  uniqueSearchOptions,
+} from '../search-filters.js';
+import { normalizeSearchTab, searchFetchOptions, searchHref, uniqueSellers } from '../search-kind.js';
+import { sellerHref } from '../listing-meta.js';
+import { rememberPageView, restoredPageView } from '../scroll-restore.js';
 
 export default function Search() {
-  const [params] = useSearchParams();
-  const query = (params.get('q') || params.get('query') || '').trim();
+  const location = useLocation();
+  const navType = useNavigationType();
+  const restored = restoredPageView(navType, location.key, `${location.pathname}${location.search}`);
+  const [params, setParams] = useSearchParams();
+  const typedQuery = (params.get('q') || params.get('query') || '').trim();
+  const tab = normalizeSearchTab(params.get('tab'));
+  const parsed = parseTypedQuery(typedQuery);
+  const setAware = isPokemonGame()
+    && (isSetAwareQuery(parsed) || isSetOnlyQuery(parsed))
+    && tab !== 'users';
+  const query = setAware
+    ? typedQuery
+    : (isPokemonGame()
+      ? typedMeiliQuery(typedQuery)
+      : typedQuery);
   const lang = useSearchLang();
   const [cards, setCards] = useState([]);
+  const [sellers, setSellers] = useState([]);
   const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [rarity, setRarity] = useState(() => String(restored?.rarity || ''));
+  const [setName, setSetName] = useState(() => String(restored?.setName || ''));
+  const [sort, setSort] = useState(() => restored?.sort || 'match');
+  const skipFilterReset = useRef(Boolean(restored));
+
+  function setTab(next) {
+    const kind = normalizeSearchTab(next);
+    if (kind === tab) {
+      return;
+    }
+    const nextParams = new URLSearchParams(params);
+    if (kind === 'singles') {
+      nextParams.delete('tab');
+    } else {
+      nextParams.set('tab', kind);
+    }
+    setLoading(true);
+    setCards([]);
+    setSellers([]);
+    setError('');
+    setParams(nextParams, { replace: true });
+  }
 
   useEffect(() => {
-    document.title = query ? `${query} · Pokoin` : 'Search · Pokoin';
+    document.title = query ? `${query} · Search | Pokoin` : 'Search · Pokoin';
     let cancelled = false;
-    setLoading(true);
-    fetchSearch({ query, offset: 0, limit: 48, lang })
-      .then((data) => {
-        if (cancelled) {
-          return;
-        }
-        const next = data.cards || [];
-        setCards(next);
-        setHasMore(Boolean(data.hasMore));
-        setError('');
-        if (next[0]) {
-          track(Action.searchSubmit, next[0], { query, resultCount: next.length });
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err.message || 'Search failed.');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
+    if (skipFilterReset.current) {
+      skipFilterReset.current = false;
+    } else {
+      setRarity('');
+      setSetName('');
+      setSort('match');
+    }
+    setSellers([]);
+    const fetchOpts = searchFetchOptions(tab);
+    const hot = setAware || tab === 'users' ? null : takeHotSearchPage(query, lang, tab);
+    function apply(data, totalHits) {
+      if (cancelled) {
+        return;
+      }
+      const next = data?.cards || [];
+      setCards(next);
+      setHasMore(setAware || tab === 'users' ? false : Boolean(data?.hasMore));
+      setError('');
+      if (totalHits != null) {
+        setTotal(Number(totalHits) || 0);
+      } else if (setAware) {
+        setTotal(next.length);
+      }
+      if (next[0]) {
+        track(Action.searchSubmit, next[0], { query, resultCount: next.length });
+      }
+      setLoading(false);
+    }
+    if (tab === 'users') {
+      setLoading(true);
+      setCards([]);
+      setTotal(0);
+      fetchSellerByUsername(typedQuery, { limit: 48 })
+        .then((data) => {
+          if (cancelled) {
+            return;
+          }
+          const listings = Array.isArray(data?.listings) ? data.listings : [];
+          const people = uniqueSellers(listings, typedQuery);
+          setSellers(people);
+          setTotal(people.length);
+          setError('');
           setLoading(false);
-        }
-      });
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setSellers([]);
+            setError(err?.status === 404 || /not found/i.test(err?.message || '') ? '' : (err.message || 'Search failed.'));
+            setLoading(false);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (hot?.data) {
+      apply(hot.data, hot.count);
+    } else {
+      setLoading(true);
+      setCards([]);
+      setTotal(hot?.count || 0);
+      const pending = setAware
+        ? fetchSetAwareCards(parsed, { fetchSearch, lang }).then((rows) => ({
+          cards: rows,
+          hasMore: false,
+        }))
+        : (hot?.promise || fetchSearch({ query, offset: 0, limit: 48, lang, ...fetchOpts }));
+      pending
+        .then((data) => {
+          if (data) {
+            apply(data, setAware ? data.cards?.length : hot?.count);
+            return;
+          }
+          if (cancelled) {
+            return;
+          }
+          return fetchSearch({ query, offset: 0, limit: 48, lang, ...fetchOpts }).then((fresh) => apply(fresh, hot?.count));
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setError(err.message || 'Search failed.');
+            setLoading(false);
+          }
+        });
+    }
+    if (!setAware && tab === 'singles' && query.length >= 2 && !(hot?.count > 0)) {
+      fetchSuggest(query, { limit: 1, lang })
+        .then((suggest) => {
+          if (!cancelled) {
+            setTotal(Number(suggest?.count) || 0);
+          }
+        })
+        .catch(() => {});
+    }
     return () => {
       cancelled = true;
     };
-  }, [query, lang]);
+  }, [query, lang, tab, typedQuery]);
+
+  useEffect(() => {
+    rememberPageView(location.key, { rarity, setName, sort });
+  }, [location.key, rarity, setName, sort]);
+
+  const rarities = useMemo(() => uniqueSearchOptions(cards, searchRarity), [cards]);
+  const sets = useMemo(() => uniqueSearchOptions(cards, searchSet), [cards]);
+  const shown = useMemo(() => {
+    if (tab === 'users') {
+      return [];
+    }
+    const rows = filterSearchCards(cards, {
+      type: tab === 'product' ? 'sealed' : 'singles',
+      rarity,
+      set: setName,
+      sort,
+    });
+    if (sort !== 'match' || !isNumberAwareQuery(parsed)) {
+      return rows;
+    }
+    return [...rows].sort((left, right) => {
+      const leftHit = printingMatchesNumberFilter(left, parsed) ? 0 : 1;
+      const rightHit = printingMatchesNumberFilter(right, parsed) ? 0 : 1;
+      return leftHit - rightHit;
+    });
+  }, [cards, tab, rarity, setName, sort, typedQuery]);
+  const filtersOn = rarity || setName || sort !== 'match';
 
   async function loadMore() {
-    const data = await fetchSearch({ query, offset: cards.length, limit: 48, lang });
+    if (setAware || tab === 'users') {
+      return;
+    }
+    const data = await fetchSearch({
+      query,
+      offset: cards.length,
+      limit: 48,
+      lang,
+      ...searchFetchOptions(tab),
+    });
     const extra = data.cards || [];
     setCards((current) => [...current, ...extra]);
     setHasMore(Boolean(data.hasMore));
@@ -58,39 +224,103 @@ export default function Search() {
     }
   }
 
+  function clearFilters() {
+    setRarity('');
+    setSetName('');
+    setSort('match');
+  }
+
+  const emptyTitle = tab === 'users'
+    ? 'No sellers match'
+    : (tab === 'product' ? 'No products match' : 'No matches');
+  const emptyLede = tab === 'users'
+    ? 'Try an exact seller username.'
+    : 'Try a collector number, a set name, or a shorter card name.';
+
   return (
     <div className="page desk" aria-busy={loading ? 'true' : undefined}>
-      <PageHead
-        kicker="Catalog"
-        title={query || 'Search'}
-        lede={query ? `Matches for “${query}”. Use the bar above to refine.` : 'Search a card, set, or product from the bar above.'}
-      >
-        <Link className="btn ghost" to="/marketplace">Shop</Link>
-      </PageHead>
-      <div className="shop-toolbar">
+      <SeoHead
+        title={query ? `${query} · Search | Pokoin` : 'Search · Pokoin'}
+        description={query ? `Search results for ${query} on Pokoin.` : 'Search Pokémon cards on Pokoin.'}
+        canonical="/marketplace/search"
+        noindex
+      />
+      <h1 className="sr-only">{query || 'Search'}</h1>
+      <SearchTabs value={tab} onChange={setTab} />
+      <div className="shop-toolbar search-toolbar">
         <p className="result-count">
           {loading
             ? 'Searching…'
-            : (cards.length
-              ? <><strong>{cards.length.toLocaleString('en-US')}{hasMore ? '+' : ''}</strong> results</>
-              : 'No cards match that search.')}
+            : (tab === 'users'
+              ? (sellers.length
+                ? <><strong>{sellers.length.toLocaleString('en-US')}</strong> sellers</>
+                : 'No sellers match that search.')
+              : (!cards.length
+                ? (tab === 'product' ? 'No products match that search.' : 'No cards match that search.')
+                : (filtersOn
+                  ? <><strong>{shown.length.toLocaleString('en-US')}</strong> matching</>
+                  : (total || !hasMore
+                    ? <><strong>{(total || cards.length).toLocaleString('en-US')}</strong> results</>
+                    : 'Searching…'))))}
         </p>
+        {tab !== 'users' ? (
+          <SearchToolbar
+            sort={sort}
+            onSort={setSort}
+            rarity={rarity}
+            onRarity={setRarity}
+            rarities={rarities}
+            setName={setName}
+            onSet={setSetName}
+            sets={sets}
+            filtersOn={filtersOn}
+            onClear={clearFilters}
+          />
+        ) : null}
       </div>
       <Alert>{error}</Alert>
-      {!loading && !cards.length && !error ? (
-        <EmptyDesk title="No matches" lede="Try a collector number, a set name, or a shorter card name.">
+      {tab === 'users' ? (
+        !loading && !sellers.length && !error ? (
+          <EmptyDesk title={emptyTitle} lede={emptyLede}>
+            <Link className="btn" to="/marketplace">Browse marketplace</Link>
+          </EmptyDesk>
+        ) : (
+          <ul className="seller-results">
+            {sellers.map((seller) => (
+              <li key={seller.id}>
+                <Link className="seller-result" to={sellerHref({ sellerName: seller.username })}>
+                  <span className="suggest-user-mark" aria-hidden="true">
+                    {seller.name.slice(0, 1).toUpperCase()}
+                  </span>
+                  <span>
+                    <strong>{seller.name}</strong>
+                    {seller.count ? (
+                      <em>{seller.count} listing{seller.count === 1 ? '' : 's'}</em>
+                    ) : null}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : !loading && !cards.length && !error ? (
+        <EmptyDesk title={emptyTitle} lede={emptyLede}>
           <Link className="btn" to="/marketplace">Browse marketplace</Link>
+        </EmptyDesk>
+      ) : !loading && cards.length && !shown.length ? (
+        <EmptyDesk title="No cards match those filters" lede="Clear a filter to see more of this search.">
+          <button className="btn" type="button" onClick={clearFilters}>Clear filters</button>
         </EmptyDesk>
       ) : (
         <div className="grid">
           {loading
             ? Array.from({ length: 24 }, (_, index) => <SkeletonTile key={index} />)
-            : cards.map((card, index) => (
+            : shown.map((card, index) => (
                 <CardTile key={card.id} card={card} rank={index} />
               ))}
         </div>
       )}
-      {hasMore ? (
+      {hasMore && tab !== 'users' ? (
         <button className="more" type="button" onClick={loadMore}>Load more</button>
       ) : null}
     </div>

@@ -1,0 +1,19 @@
+{
+  "name": "pokoin-extension-download",
+  "main": "workers/pokoin-extension-download.js",
+  "compatibility_date": "2026-09-08",
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "r2_buckets": [
+    {
+      "binding": "DOWNLOADS",
+      "bucket_name": "cardvault-images"
+    }
+  ],
+  "routes": [
+    { "pattern": "pokoin.com/download/extension.zip", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/download/extention.zip", "zone_name": "pokoin.com" },
+    { "pattern": "www.pokoin.com/download/extension.zip", "zone_name": "pokoin.com" },
+    { "pattern": "www.pokoin.com/download/extention.zip", "zone_name": "pokoin.com" }
+  ]
+}

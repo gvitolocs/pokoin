@@ -2,9 +2,11 @@ import { useEffect } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { firebaseAuth, useAuth } from '../auth.jsx';
+import { accountHeading, accountLede } from '../auth-session.js';
 import { useWallet, shortAddress } from '../wallet.jsx';
 import { useCart } from '../cart.jsx';
 import { DeskPanel, Metric, MetricGrid, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
+import { formatPknNumber } from '../pkn.js';
 
 export default function Profile() {
   const location = useLocation();
@@ -29,14 +31,14 @@ export default function Profile() {
     <div className="page desk">
       <PageHead
         kicker="Account"
-        title={user.displayName || user.email || 'Collector'}
-        lede={user.email || 'Signed in'}
+        title={accountHeading(user, profile)}
+        lede={accountLede(user)}
       >
         <button className="btn ghost" type="button" onClick={() => signOut(firebaseAuth)}>Sign out</button>
       </PageHead>
       <MetricGrid>
         <Metric value={count} label="Cart items" />
-        <Metric value={availablePkn.toLocaleString()} label="Site PKN" />
+        <Metric value={formatPknNumber(availablePkn)} label="Site PKN" />
         <Metric value={balance ? balance.toFixed(2) : '0'} label="Chain PKN" />
         <Metric value={address ? shortAddress(address) : '—'} label="Wallet" />
       </MetricGrid>

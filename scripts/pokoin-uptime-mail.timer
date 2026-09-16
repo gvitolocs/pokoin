@@ -1,0 +1,12 @@
+[Unit]
+Description=Pokoin public /healthz uptime mail (nezopt)
+
+[Timer]
+OnBootSec=30
+OnCalendar=*:0/2
+Persistent=true
+AccuracySec=15s
+Unit=pokoin-uptime-mail.service
+
+[Install]
+WantedBy=timers.target

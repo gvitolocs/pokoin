@@ -1,5 +1,14 @@
 # MIT License
 
+Circle-flag SVGs (`jp.svg`, `zh.svg`, `eu.svg`, `us.svg`, `ko.svg`, `id.svg`,
+`th.svg`, `fr.svg`, `de.svg`, and the US/EU halves inside `euus.svg` / JP/KO
+halves inside `jpko.svg` / ID/TH halves inside `idth.svg`) are
+[HatScripts/circle-flags](https://github.com/HatScripts/circle-flags).
+
+`euus.png` is Pokoin’s circular raster of the supplied western mark (not
+HatScripts). `ko.png` is the circular raster of the supplied Taegeukgi.
+`eu.png` / `us.png` are 512px rasters of the matching SVGs.
+
 Copyright (c) 2026 HatScripts
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

@@ -1,0 +1,12 @@
+[Unit]
+Description=Pokoin: sysrq reboot when USB root is emergency_ro
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh /usr/local/sbin/pokoin-pi-ro-watch.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

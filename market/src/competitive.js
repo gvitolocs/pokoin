@@ -1,18 +1,7 @@
 import DATA from './data/limitless.json';
+import { FLAG, FORMAT, SPRITE, scanUrl } from './competitive-assets.js';
 
-export const FLAG = (cc) => (cc ? `https://r2.limitlesstcg.net/flags/${cc}.png` : '');
-export const SPRITE = (name) => (
-  name ? `https://r2.limitlesstcg.net/pokemon/gen9/${name}.png` : ''
-);
-export const FORMAT = (id) => (
-  id ? `https://limitless3.nyc3.cdn.digitaloceanspaces.com/formats/${id}.png` : ''
-);
-
-export function scanUrl(set, num) {
-  const code = String(set || '').toUpperCase();
-  const n = String(num || '').replace(/^0+/, '') || '0';
-  return `https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpci/${code}/${code}_${n.padStart(3, '0')}_R_EN.png`;
-}
+export { FLAG, FORMAT, SPRITE, scanUrl };
 
 export const TYPE_LABEL = {
   worlds: 'Worlds',

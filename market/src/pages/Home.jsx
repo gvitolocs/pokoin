@@ -1,22 +1,90 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { attachRecentsToHome, fetchCardTiles, fetchHome, setSlug, warmupSearchBar } from '../api.js';
+import { attachRecentsToHome, fetchCard, fetchCardTiles, fetchExpansion, fetchExpansions, fetchHome, fillMissingLastMedianPrices, setSlug, warmupSearchBar } from '../api.js';
+import { ASSET_COVERAGE_LINE } from '../buyer-protection.js';
+import { tileHasName } from '../lists.js';
+import { isSetDeskCard } from '../search-filters.js';
 import { useAuth } from '../auth.jsx';
-import { game } from '../game.js';
+import { game, isPokemonGame } from '../game.js';
+import {
+  HOME_BROWSE_BLOCK,
+  createEnglishBrowseState,
+  fillEnglishBrowse,
+} from '../home-browse.js';
 import { readHomeVectorCache, writeHomeVectorCache } from '../home-cache.js';
-import { readRecentCardIds, syncRemoteRecentCardIds } from '../recents.js';
+import { tilePricePkn } from '../pkn.js';
+import { readRecentCardIds, readRecentTiles, rememberRecentTiles, syncRemoteRecentCardIds } from '../recents.js';
 import { Action, track } from '../track.js';
+import { isOriginDownError, noteOriginDown, publicErrorMessage } from '../working-page.js';
+import { framedByChromeExtension } from '../extension-auth-bridge.js';
 import CardTile from '../components/CardTile.jsx';
 import Carousel, { SkeletonTile } from '../components/Carousel.jsx';
 import PromoCarousel from '../components/PromoCarousel.jsx';
+import SeoHead from '../components/SeoHead.jsx';
 
 function cardsForIds(cards, ids) {
-  const byId = new Map(cards.map((card) => [String(card.id), card]));
-  return (ids || []).map((id) => byId.get(String(id))).filter(Boolean);
+  const byId = new Map((cards || []).map((card) => [String(card.id), card]));
+  return (ids || []).map((id) => byId.get(String(id))).filter(tileHasName).filter(isSetDeskCard);
+}
+
+function spotlightBrowse(payload) {
+  return cardsForIds(payload?.cards, payload?.sections?.spotlightIds);
 }
 
 function paintHome(payload, recentIds, extraCards = []) {
   return attachRecentsToHome(payload, recentIds, extraCards);
+}
+
+function localExtras(tiles = []) {
+  return [...readRecentTiles(), ...tiles];
+}
+
+function seedHome(cached) {
+  const ids = readRecentCardIds();
+  const extras = localExtras();
+  if (cached) {
+    return paintHome(cached, ids, extras);
+  }
+  if (!extras.length) {
+    return null;
+  }
+  return paintHome({ cards: [], sections: {} }, ids, extras);
+}
+
+function railsReady(payload) {
+  return Boolean(payload?.sections?.newArrivalIds?.length);
+}
+
+function recentsNeedingTiles(payload, ids) {
+  const byId = new Map((payload?.cards || []).map((card) => [String(card.id), card]));
+  return (ids || []).filter((id) => {
+    const card = byId.get(String(id));
+    return !tileHasName(card) || tilePricePkn(card) == null;
+  });
+}
+
+async function fillMissingRecents(payload, ids, already = []) {
+  const first = paintHome(payload, ids, localExtras(already));
+  const need = recentsNeedingTiles(first, ids);
+  if (!need.length) {
+    return first;
+  }
+  const tiles = await fetchCardTiles(need).catch(() => []);
+  rememberRecentTiles(tiles);
+  const filled = paintHome(payload, ids, localExtras([...already, ...tiles]));
+  const still = recentsNeedingTiles(filled, ids).filter((id) => {
+    const card = (filled.cards || []).find((row) => String(row.id) === String(id));
+    return !tileHasName(card);
+  });
+  if (!still.length) {
+    return filled;
+  }
+  const extras = await Promise.all(
+    still.slice(0, 8).map((id) => fetchCard(id).then((row) => row?.card || null).catch(() => null)),
+  );
+  const hydrated = extras.filter(Boolean);
+  rememberRecentTiles(hydrated);
+  return paintHome(payload, ids, localExtras([...already, ...tiles, ...hydrated]));
 }
 
 export default function Home() {
@@ -24,8 +92,7 @@ export default function Home() {
   const site = game();
   const payloadRef = useRef(null);
   const [payload, setPayload] = useState(() => {
-    const cached = readHomeVectorCache(site.id);
-    const next = cached ? paintHome(cached, readRecentCardIds()) : null;
+    const next = seedHome(readHomeVectorCache(site.id));
     payloadRef.current = next;
     return next;
   });
@@ -35,6 +102,12 @@ export default function Home() {
     const seen = payloadRef.current?.sections?.recentlySeenIds || [];
     return ids.length > 0 && seen.length < ids.length;
   });
+  const englishBrowse = isPokemonGame();
+  const browseRef = useRef(null);
+  const [browseCards, setBrowseCards] = useState([]);
+  const [browseHasMore, setBrowseHasMore] = useState(englishBrowse);
+  const [browseLoading, setBrowseLoading] = useState(englishBrowse);
+  const [browseMoreBusy, setBrowseMoreBusy] = useState(false);
 
   function commit(next) {
     payloadRef.current = next;
@@ -56,24 +129,38 @@ export default function Home() {
         }
         writeHomeVectorCache(site.id, data);
         const ids = readRecentCardIds();
-        const painted = paintHome(data, ids);
+        const painted = paintHome(data, ids, localExtras());
         commit(painted);
         warmupSearchBar();
-        const missing = painted.missingRecentIds || [];
-        if (!missing.length) {
+        let next = painted;
+        if (!recentsNeedingTiles(painted, ids).length) {
           setRecentPending(false);
-          return;
+        } else {
+          next = await fillMissingRecents(data, readRecentCardIds());
+          if (cancelled) {
+            return;
+          }
+          commit(next);
+          setRecentPending(false);
         }
-        const tiles = await fetchCardTiles(missing).catch(() => []);
+        const priced = await fillMissingLastMedianPrices(next.cards || []);
         if (cancelled) {
           return;
         }
-        commit(paintHome(data, readRecentCardIds(), tiles));
-        setRecentPending(false);
+        next = { ...next, cards: priced };
+        writeHomeVectorCache(site.id, next);
+        commit(next);
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err.message || 'Marketplace home failed.');
+          if (isOriginDownError(err, err?.status, err?.message)) {
+            if (!framedByChromeExtension()) {
+              noteOriginDown();
+            }
+            setRecentPending(false);
+            return;
+          }
+          setError(publicErrorMessage(err, 'Marketplace home failed.'));
           setRecentPending(false);
         }
       });
@@ -96,19 +183,19 @@ export default function Home() {
         if (!current) {
           return;
         }
-        const next = paintHome(current, ids);
+        const next = paintHome(current, ids, localExtras());
         commit(next);
-        const missing = next.missingRecentIds || [];
-        if (!missing.length) {
+        if (!recentsNeedingTiles(next, ids).length) {
           setRecentPending(false);
           return;
         }
         setRecentPending(true);
-        const tiles = await fetchCardTiles(missing).catch(() => []);
+        const filled = await fillMissingRecents(payloadRef.current || next, ids);
         if (cancelled) {
           return;
         }
-        commit(paintHome(payloadRef.current || next, ids, tiles));
+        const priced = await fillMissingLastMedianPrices(filled.cards || []);
+        commit({ ...filled, cards: priced });
         setRecentPending(false);
       })
       .catch(() => {});
@@ -117,13 +204,82 @@ export default function Home() {
     };
   }, [ready]);
 
+  useEffect(() => {
+    if (!englishBrowse) {
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchExpansions({ limit: 500 });
+        if (cancelled) {
+          return;
+        }
+        browseRef.current = createEnglishBrowseState(data.expansions || data.sets || []);
+        const next = await fillEnglishBrowse(browseRef.current, {
+          fetchExpansionPage: fetchExpansion,
+        });
+        if (cancelled) {
+          return;
+        }
+        const filled = next.cards.length ? next.cards : spotlightBrowse(payloadRef.current);
+        setBrowseCards(filled);
+        setBrowseHasMore(next.hasMore && next.cards.length > 0);
+        if (!filled.length) {
+          return;
+        }
+        const priced = await fillMissingLastMedianPrices(filled);
+        if (cancelled) {
+          return;
+        }
+        setBrowseCards(priced);
+      } catch (_) {
+        if (!cancelled) {
+          const fallback = spotlightBrowse(payloadRef.current);
+          if (fallback.length) {
+            setBrowseCards(fallback);
+          }
+          setBrowseHasMore(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setBrowseLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [englishBrowse]);
+
+  async function loadMoreEnglish() {
+    if (!browseRef.current || browseMoreBusy) {
+      return;
+    }
+    setBrowseMoreBusy(true);
+    try {
+      const next = await fillEnglishBrowse(browseRef.current, {
+        fetchExpansionPage: fetchExpansion,
+      });
+      setBrowseCards((current) => [...current, ...next.cards]);
+      setBrowseHasMore(next.hasMore);
+      const priced = await fillMissingLastMedianPrices(next.cards);
+      const byId = new Map(priced.map((card) => [String(card.id), card]));
+      setBrowseCards((current) => current.map((card) => byId.get(String(card.id)) || card));
+      if (next.cards[0]) {
+        track(Action.loadMore, next.cards[0], { query: 'home-english', resultCount: browseCards.length + next.cards.length });
+      }
+    } finally {
+      setBrowseMoreBusy(false);
+    }
+  }
+
   const sections = useMemo(() => {
     const empty = {
       recentlySeen: [],
       newCards: [],
       bestSellers: [],
       featured: [],
-      topSold: [],
       spotlight: [],
     };
     if (!payload) {
@@ -132,24 +288,41 @@ export default function Home() {
     const cards = payload.cards || [];
     const ids = payload.sections || {};
     return {
-      recentlySeen: cardsForIds(cards, ids.recentlySeenIds),
+      recentlySeen: cardsForIds(cards, ids.recentlySeenIds).slice(0, 20),
       newCards: cardsForIds(cards, ids.newArrivalIds),
       bestSellers: cardsForIds(cards, ids.bestSellerIds),
       featured: cardsForIds(cards, ids.featuredIds),
-      topSold: cardsForIds(cards, ids.topSoldIds),
       spotlight: cardsForIds(cards, ids.spotlightIds).length
         ? cardsForIds(cards, ids.spotlightIds)
         : cards,
     };
   }, [payload]);
 
-  const loading = !payload && !error;
+  const loading = !railsReady(payload) && !error;
   const newSet = sections.newCards[0]?.set || sections.newCards[0]?.set_name;
-  const mega = sections.newCards[0] || sections.spotlight[0];
+  const mega = sections.newCards[0] || sections.spotlight[0] || browseCards[0];
   const recentPlaceholders = recentPending && !sections.recentlySeen.length ? 8 : 0;
-
+  const gridCards = englishBrowse ? browseCards : sections.spotlight;
+  const gridLoading = englishBrowse ? browseLoading && !browseCards.length : loading;
+  const gridPlaceholders = englishBrowse ? HOME_BROWSE_BLOCK : 12;
   return (
-    <div className="page" aria-busy={loading || recentPending ? 'true' : undefined}>
+    <div className="page home" aria-busy={loading || recentPending ? 'true' : undefined}>
+      <SeoHead
+        title={site.title}
+        description="Buy and sell Pokémon TCG cards in PKN. Browse Pokémon, sets, eras, artists, and listings."
+        canonical="/marketplace"
+        jsonLd={{
+          '@context': 'https://schema.org',
+          '@type': 'WebSite',
+          name: 'Pokoin',
+          url: 'https://pokoin.com/',
+          potentialAction: {
+            '@type': 'SearchAction',
+            target: 'https://pokoin.com/marketplace/search?q={search_term_string}',
+            'query-input': 'required name=search_term_string',
+          },
+        }}
+      />
       {error ? <p className="status error">{error}</p> : null}
       {site.features.promoCarousel ? <PromoCarousel /> : null}
 
@@ -161,8 +334,12 @@ export default function Home() {
         placeholders={loading ? 8 : 0}
       />
       <Carousel title="Best sellers" cards={sections.bestSellers} placeholders={loading ? 8 : 0} />
-      <Carousel title="Featured" cards={sections.featured} placeholders={loading ? 8 : 0} />
-      <Carousel title="Popular" cards={sections.topSold} placeholders={loading ? 8 : 0} />
+      <Carousel title="Spotlight" cards={sections.featured} placeholders={loading ? 8 : 0} />
+
+      <Link className="callout protect-callout" to="/protection">
+        {ASSET_COVERAGE_LINE}
+        <span>Buyer protection →</span>
+      </Link>
 
       <Link className="callout" to="/inventory" onClick={() => track(Action.sell, mega || { id: '703382', name: 'sell' })}>
         Sell your cards for PKN
@@ -174,12 +351,17 @@ export default function Home() {
           <h2>Marketplace</h2>
         </div>
         <div className="grid">
-          {loading
-            ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} />)
-            : sections.spotlight.map((card, index) => (
+          {gridLoading
+            ? Array.from({ length: gridPlaceholders }, (_, index) => <SkeletonTile key={index} />)
+            : gridCards.map((card, index) => (
                 <CardTile key={card.id} card={card} rank={index} />
               ))}
         </div>
+        {englishBrowse && browseHasMore ? (
+          <button className="more" type="button" onClick={loadMoreEnglish} disabled={browseMoreBusy}>
+            {browseMoreBusy ? 'Loading…' : 'Show more'}
+          </button>
+        ) : null}
       </section>
     </div>
   );

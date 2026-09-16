@@ -1,5 +1,7 @@
 /** Numeric shortlinks that should 302 to the stored canonical path. */
 
+import { realPublicCardId } from './public-card-id.js';
+
 export function shortlinkCardId(pathname) {
   const path = String(pathname || '').split(/[?#]/)[0].replace(/\/$/, '') || '/';
   const patterns = [
@@ -12,7 +14,7 @@ export function shortlinkCardId(pathname) {
   for (const pattern of patterns) {
     const match = path.match(pattern);
     if (match && /^[1-9]\d*$/.test(match[1])) {
-      return match[1];
+      return realPublicCardId(match[1]);
     }
   }
   return '';

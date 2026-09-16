@@ -1,14 +1,18 @@
-/** Homepage vector from Supabase rails. Cached 1 day. No recently-seen. */
+import { expandProvisionalCardIds, realPublicCardId, rewriteCanonicalCardPath } from './public-card-id.js';
+import { WORKING_MESSAGE } from './working-page.js';
+
+/** Homepage vector from Pi rails. Cached 1 day. No recently-seen. */
 
 export const HOME_CACHE_TTL_SEC = 86400;
 export const HOME_BROWSER_TTL_SEC = 120;
 
+export const NEW_CARDS_LIMIT = 20;
+export const FEATURED_LIMIT = 30;
 export const HOME_RAILS = [
-  ['new_cards', 'newArrivalIds', 12],
-  ['featured', 'featuredIds', 12],
+  ['new_cards', 'newArrivalIds', NEW_CARDS_LIMIT],
+  ['featured', 'featuredIds', FEATURED_LIMIT],
   ['best_sellers', 'bestSellerIds', 12],
   ['spotlight', 'spotlightIds', 16],
-  ['top_sold', 'topSoldIds', 24],
 ];
 
 const JSON_HEADERS = {
@@ -32,7 +36,18 @@ export function isTilesPath(pathname) {
 }
 
 export function cardId(card) {
-  return String(card?.id || card?.card_id || '');
+  return realPublicCardId(String(card?.id || card?.card_id || ''));
+}
+
+function withPublicId(card, id) {
+  const path = rewriteCanonicalCardPath(card?.canonicalPath || card?.canonical_path, id);
+  return applyTilePrice({
+    ...card,
+    id,
+    card_id: id,
+    canonicalPath: path || card?.canonicalPath,
+    canonical_path: path || card?.canonical_path,
+  });
 }
 
 export function applyTilePrice(card) {
@@ -79,7 +94,7 @@ export function assembleHomeVector(rows, generatedAt = new Date().toISOString())
       if (!id) {
         continue;
       }
-      const next = applyTilePrice({ ...card, id, card_id: card.card_id || id });
+      const next = withPublicId(card, id);
       const prev = byId.get(id);
       if (!prev) {
         byId.set(id, next);
@@ -106,7 +121,7 @@ export function assembleHomeVector(rows, generatedAt = new Date().toISOString())
   }
 
   return {
-    source: 'supabase',
+    source: 'pi',
     cacheTtl: HOME_CACHE_TTL_SEC,
     generatedAt,
     pknUsdt,
@@ -116,7 +131,8 @@ export function assembleHomeVector(rows, generatedAt = new Date().toISOString())
 }
 
 function parseIds(raw, max = 60) {
-  return [...new Set(String(raw || '').split(',').map((id) => id.trim()).filter((id) => /^\d+$/.test(id)))].slice(0, max);
+  const ids = [...new Set(String(raw || '').split(',').map((id) => id.trim()).filter((id) => /^\d+$/.test(id)))];
+  return expandProvisionalCardIds(ids, max);
 }
 
 function jsonResponse(body, extra = {}, status = 200) {
@@ -126,50 +142,64 @@ function jsonResponse(body, extra = {}, status = 200) {
   });
 }
 
-async function supabaseGet(env, path) {
-  const base = String(env.SUPABASE_URL || 'https://ruvtchmbtxvjqmquobij.supabase.co').replace(/\/$/, '');
-  const key = String(env.SUPABASE_ANON_KEY || '');
-  if (!key) {
-    throw new Error('missing supabase anon key');
-  }
-  const response = await fetch(`${base}/rest/v1/${path}`, {
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      Accept: 'application/json',
+export function homeOriginFailureResponse() {
+  return jsonResponse(
+    { error: WORKING_MESSAGE },
+    {
+      'cache-control': 'private, no-store',
+      'cdn-cache-control': 'no-store',
+      'x-pokoin-home-cache': 'error',
+      'x-pokoin-working': '1',
     },
+    503,
+  );
+}
+
+const PI_API = 'https://api.pokoin.com';
+
+async function piGet(path) {
+  const response = await fetch(`${PI_API}${path}`, {
+    headers: { Accept: 'application/json' },
   });
   if (!response.ok) {
-    throw new Error(`supabase ${response.status}`);
+    throw new Error(`pi ${response.status}`);
   }
   return response.json();
 }
 
 async function buildHome(env) {
-  const ids = HOME_RAILS.map((row) => row[0]).join(',');
-  const rows = await supabaseGet(
-    env,
-    `marketplace_rails?id=in.(${ids})&select=id,cards,meta,updated_at`,
-  );
-  const vector = assembleHomeVector(rows);
-  if (!vector.cards.length) {
+  const body = await piGet('/api/marketplace-home-page?limit=48');
+  if (!body?.cards?.length) {
     throw new Error('empty home vector');
   }
-  return vector;
+  return { ...body, source: 'pi', cacheTtl: HOME_CACHE_TTL_SEC };
 }
 
 async function buildTiles(env, ids) {
   if (!ids.length) {
     return { cards: [] };
   }
-  const rows = await supabaseGet(
-    env,
-    `marketplace_card_tiles?card_id=in.(${ids.join(',')})&select=card_id,payload`,
-  );
-  const cards = (rows || [])
-    .map((row) => applyTilePrice(row?.payload || {}))
-    .filter((card) => cardId(card));
-  return { source: 'supabase', cards };
+  const body = await piGet(`/api/marketplace-card-tiles?ids=${ids.join(',')}`);
+  const byId = new Map();
+  for (const card of asCards(body?.cards)) {
+    const id = cardId(card);
+    if (!id) {
+      continue;
+    }
+    const next = withPublicId(card, id);
+    const prev = byId.get(id);
+    if (!prev) {
+      byId.set(id, next);
+      continue;
+    }
+    const merged = { ...prev, ...next };
+    if (!(Number(next.price) > 0) && Number(prev.price) > 0) {
+      merged.price = prev.price;
+      merged.lowest_price_pkn = prev.lowest_price_pkn;
+    }
+    byId.set(id, applyTilePrice(merged));
+  }
+  return { source: 'pi', cards: [...byId.values()] };
 }
 
 export function stableHomeCacheRequest(url) {
@@ -181,12 +211,8 @@ export function stableHomeCacheRequest(url) {
 }
 
 async function railsVersion(env) {
-  const ids = HOME_RAILS.map((row) => row[0]).join(',');
-  const rows = await supabaseGet(
-    env,
-    `marketplace_rails?select=updated_at&id=in.(${ids})&order=updated_at.desc&limit=1`,
-  );
-  return String(rows?.[0]?.updated_at || '0');
+  const body = await piGet('/api/marketplace-home-page?limit=1');
+  return String(body?.updatedAt || body?.generatedAt || '0');
 }
 
 async function putHome(cache, cacheRequest, body, version, cacheState) {
@@ -229,7 +255,7 @@ export async function handleMarketplaceHomeRequest(request, env, ctx) {
     return null;
   }
 
-  // One Piece / Riftbound use Oracle ?game= — do not serve Pokemon Supabase rails.
+  // One Piece / Riftbound use ?game= — do not serve Pokemon Pi rails.
   const host = String(url.hostname || '').toLowerCase();
   const game = String(url.searchParams.get('game') || '').toLowerCase();
   if (
@@ -275,8 +301,11 @@ export async function handleMarketplaceHomeRequest(request, env, ctx) {
       buildHome(env),
       railsVersion(env).catch(() => ''),
     ]);
-  } catch (_) {
-    return null;
+  } catch (err) {
+    if (String(err?.message || '') === 'empty home vector') {
+      return null;
+    }
+    return homeOriginFailureResponse();
   }
 
   const response = jsonResponse(body, {

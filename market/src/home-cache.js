@@ -3,7 +3,7 @@
 const MAX_AGE_MS = 10 * 60 * 1000;
 
 export function homeVectorCacheKey(gameId = 'pokemon') {
-  return `pokoin.homeVector.${String(gameId || 'pokemon')}`;
+  return `pokoin.homeVector.${String(gameId || 'pokemon')}.rising`;
 }
 
 function store(override) {

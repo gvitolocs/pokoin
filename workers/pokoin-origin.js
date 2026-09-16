@@ -1,5 +1,7 @@
 import { handleMarketplaceCardOgRequest } from './marketplace-card-og.js';
+import { handleMarketplaceHubOgRequest } from './marketplace-hub-og.js';
 import { handleMarketplaceHomeRequest } from './marketplace-home.js';
+import { fetchOriginOrWorking } from './working-page.js';
 
 /** Inject ?game= / x-pokoin-game for satellite hosts so Oracle never defaults to Pokemon. */
 export function withSatelliteMarketplaceGame(request) {
@@ -28,6 +30,81 @@ export function withSatelliteMarketplaceGame(request) {
   });
 }
 
+export function isMarketplaceDeskPath(pathname = '') {
+  return /^\/marketplace\/[a-z]{2}\/cards\/[^/]+/i.test(String(pathname || ''));
+}
+
+export function isMarketplaceSellerPath(pathname = '') {
+  return /^\/marketplace\/[a-z]{2}\/users\/[^/]+/i.test(String(pathname || ''));
+}
+
+const EXTENSION_ACCOUNT_PATHS = new Set([
+  '/profile',
+  '/auth',
+  '/cart',
+  '/wallet',
+  '/checkout',
+  '/orders',
+  '/inventory',
+  '/nft',
+  '/buy',
+]);
+
+/** Card desks, seller pages, and account routes the side-panel iframe can open. */
+export function isExtensionFramePath(pathname = '') {
+  const path = String(pathname || '');
+  if (isMarketplaceDeskPath(path) || isMarketplaceSellerPath(path)) {
+    return true;
+  }
+  const stripped = path.replace(/\/$/, '') || '/';
+  return EXTENSION_ACCOUNT_PATHS.has(stripped);
+}
+
+/** Fetch origin HTML without the chrome-extension iframe Referer that Bot Fight flags. */
+export function originDeskRequest(request) {
+  const url = new URL(request.url);
+  const headers = new Headers();
+  const accept = request.headers.get('Accept');
+  const userAgent = request.headers.get('User-Agent');
+  const language = request.headers.get('Accept-Language');
+  headers.set('Accept', accept || 'text/html,application/xhtml+xml');
+  if (userAgent) {
+    headers.set('User-Agent', userAgent);
+  }
+  if (language) {
+    headers.set('Accept-Language', language);
+  }
+  return new Request(url.toString(), {
+    method: 'GET',
+    headers,
+    redirect: 'follow',
+  });
+}
+
+/** Let the Chrome extension iframe Pokoin desk pages. */
+export function allowExtensionDeskFrame(response) {
+  const headers = new Headers(response.headers);
+  headers.delete('X-Frame-Options');
+  headers.delete('x-frame-options');
+  const existing = String(headers.get('Content-Security-Policy') || '')
+    .replace(/;\s*$/, '')
+    .replace(/(?:^|;)\s*frame-ancestors[^;]*/ig, '')
+    .replace(/^\s*;\s*/, '')
+    .trim();
+  const frameAncestors = "frame-ancestors 'self' chrome-extension:";
+  headers.set(
+    'Content-Security-Policy',
+    existing ? `${existing}; ${frameAncestors}` : frameAncestors,
+  );
+  headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  headers.set('x-pokoin-extension-frame', '1');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 /** More-specific routes so SPA/API/assets skip the fat shortlink Worker. */
 export default {
   async fetch(request, env, ctx) {
@@ -36,10 +113,24 @@ export default {
     if (og) {
       return og;
     }
+    const hub = await handleMarketplaceHubOgRequest(satelliteRequest, env, ctx);
+    if (hub) {
+      return hub;
+    }
     const home = await handleMarketplaceHomeRequest(satelliteRequest, env, ctx);
     if (home) {
       return home;
     }
-    return fetch(satelliteRequest);
+    let url;
+    try {
+      url = new URL(satelliteRequest.url);
+    } catch (_) {
+      return fetchOriginOrWorking(satelliteRequest);
+    }
+    if (isExtensionFramePath(url.pathname)) {
+      const response = await fetchOriginOrWorking(originDeskRequest(satelliteRequest), satelliteRequest);
+      return allowExtensionDeskFrame(response);
+    }
+    return fetchOriginOrWorking(satelliteRequest);
   },
 };

@@ -1,151 +1,102 @@
-import { Timestamp, doc, getDoc, setDoc } from 'firebase/firestore';
-import { firebaseAuth, firestore } from './auth.jsx';
+import { doc, getDoc } from 'firebase/firestore';
+import { firebaseAuth, firestore, getBearer } from './auth.jsx';
+import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
+import {
+  RECENT_MAX,
+  mergeRecentIds,
+  readRecentCardIds,
+  rememberLocalCardId,
+  writeLocalIds,
+} from './recents-storage.js';
 
-const RECENT_KEY = 'pokoin.recentCardIds';
-const RECENT_MAX = 24;
-const FIRESTORE_MAX = 60;
+export {
+  RECENT_MAX,
+  compactRecentTile,
+  peekRecentTile,
+  readRecentCardIds,
+  readRecentTiles,
+  rememberRecentTiles,
+} from './recents-storage.js';
 
-function asId(value) {
-  return String(value || '').trim();
-}
+let remoteWriteTimer = 0;
 
-export function readRecentCardIds() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed.map(asId).filter((id) => /^\d+$/.test(id));
-  } catch (_) {
+async function readFirestoreRecentIds() {
+  if (framedByChromeExtension()) {
     return [];
   }
-}
-
-function writeLocalIds(ids) {
-  localStorage.setItem(RECENT_KEY, JSON.stringify(ids.slice(0, RECENT_MAX)));
-}
-
-function mergeIds(...lists) {
-  const seen = new Set();
-  const out = [];
-  for (const list of lists) {
-    for (const raw of list || []) {
-      const id = asId(raw);
-      if (!/^\d+$/.test(id) || seen.has(id)) {
-        continue;
-      }
-      seen.add(id);
-      out.push(id);
-      if (out.length >= RECENT_MAX) {
-        return out;
-      }
-    }
-  }
-  return out;
-}
-
-function stubCard(card, id) {
-  const viewedAt = Timestamp.now();
-  return {
-    cardId: id,
-    name: String(card?.name || ''),
-    expansion: String(card?.set || card?.set_name || ''),
-    number: String(card?.number || card?.card_number || ''),
-    imageUrl: String(card?.imageUrl || card?.heroImageUrl || card?.gridImageUrl || ''),
-    previewImageUrl: String(card?.gridImageUrl || card?.imageUrl || ''),
-    homepageImageUrl: String(card?.tileImageUrl || card?.gridImageUrl || card?.imageUrl || ''),
-    viewedAt,
-    itemKind: String(card?.itemKind || 'single'),
-    productType: String(card?.productType || 'card'),
-    canonicalPath: String(card?.canonicalPath || card?.canonical_path || ''),
-    publicNumber: String(card?.number || ''),
-    available: Boolean(card?.isMarketAvailable || card?.inStock),
-    inStock: Boolean(card?.inStock || card?.isMarketAvailable),
-    listingCount: 0,
-    listedQuantity: 0,
-    emoji: '',
-    cardPalette: {},
-  };
-}
-
-async function readFirebaseRecent() {
   const uid = firebaseAuth.currentUser?.uid;
   if (!uid) {
-    return { ids: [], cards: [] };
+    return [];
   }
   const snap = await getDoc(doc(firestore, 'user_card_recent_views', uid));
   const data = snap.data() || {};
-  const ids = (Array.isArray(data.cardIds) ? data.cardIds : []).map(asId).filter((id) => /^\d+$/.test(id));
-  const cards = Array.isArray(data.cards) ? data.cards : [];
-  return { ids, cards };
+  return (Array.isArray(data.cardIds) ? data.cardIds : [])
+    .map((id) => String(id || '').trim())
+    .filter((id) => /^\d+$/.test(id));
 }
 
-async function writeFirebaseRecent(ids, existingCards = [], extraCard = null) {
-  const uid = firebaseAuth.currentUser?.uid;
-  if (!uid) {
-    return;
+async function fetchRemoteRecentIds(token) {
+  const res = await fetch(publicApiUrl('/api/marketplace-recents'), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    return [];
   }
-  const limited = ids.slice(0, FIRESTORE_MAX);
-  const byId = new Map();
-  for (const row of existingCards) {
-    const id = asId(row?.cardId || row?.id);
-    if (id) {
-      byId.set(id, row);
-    }
-  }
-  if (extraCard) {
-    const id = asId(extraCard.id || extraCard.card_id);
-    if (id) {
-      byId.set(id, stubCard(extraCard, id));
-    }
-  }
-  const cards = limited.map((id) => byId.get(id) || stubCard(null, id));
-  await setDoc(
-    doc(firestore, 'user_card_recent_views', uid),
-    {
-      cardIds: limited,
-      cards,
-      updatedAt: Timestamp.now(),
-      expiresAt: Timestamp.fromDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
+  const body = await res.json().catch(() => ({}));
+  return mergeRecentIds(body.cardIds || body.card_ids || []);
+}
+
+async function putRemoteRecentIds(token, ids) {
+  await fetch(publicApiUrl('/api/marketplace-recents'), {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
     },
-    { merge: true },
-  );
+    body: JSON.stringify({ cardIds: ids.slice(0, RECENT_MAX) }),
+    keepalive: true,
+  });
+}
+
+function scheduleRemoteWrite(ids) {
+  globalThis.clearTimeout(remoteWriteTimer);
+  remoteWriteTimer = globalThis.setTimeout(() => {
+    void getBearer()
+      .then((token) => (token ? putRemoteRecentIds(token, ids) : null))
+      .catch(() => {});
+  }, 250);
 }
 
 export async function loadRecentCardIds() {
   return syncRemoteRecentCardIds();
 }
 
-/** Firestore merge. Do not call on the home LCP path — localStorage is enough to paint. */
+/** Account recents after auth. Do not call on the home LCP path. */
 export async function syncRemoteRecentCardIds() {
   const local = readRecentCardIds();
   try {
-    const remote = await readFirebaseRecent();
-    const merged = mergeIds(local, remote.ids);
-    if (firebaseAuth.currentUser && merged.length) {
-      writeLocalIds(merged);
-      if (merged.join(',') !== remote.ids.slice(0, RECENT_MAX).join(',')) {
-        void writeFirebaseRecent(merged, remote.cards);
-      }
+    const token = await getBearer();
+    if (!token) {
+      return local;
+    }
+    const [remote, legacy] = await Promise.all([
+      fetchRemoteRecentIds(token),
+      readFirestoreRecentIds().catch(() => []),
+    ]);
+    const merged = mergeRecentIds(local, remote, legacy);
+    writeLocalIds(merged);
+    if (merged.join(',') !== remote.join(',')) {
+      await putRemoteRecentIds(token, merged).catch(() => {});
     }
     return merged;
-  } catch (_) {
+  } catch {
     return local;
   }
 }
 
 export function rememberCardId(cardOrId) {
-  const card = cardOrId && typeof cardOrId === 'object' ? cardOrId : null;
-  const id = asId(card?.id || card?.card_id || cardOrId);
-  if (!/^\d+$/.test(id)) {
-    return;
+  const next = rememberLocalCardId(cardOrId);
+  if (next.length) {
+    scheduleRemoteWrite(next);
   }
-  const next = mergeIds([id], readRecentCardIds());
-  writeLocalIds(next);
-  if (!firebaseAuth.currentUser) {
-    return;
-  }
-  void readFirebaseRecent()
-    .then((remote) => writeFirebaseRecent(mergeIds([id], remote.ids, next), remote.cards, card))
-    .catch(() => {});
 }

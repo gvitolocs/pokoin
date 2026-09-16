@@ -1,0 +1,10 @@
+[Unit]
+Description=Pokoin Pi pipeline watchdog (postgres, api, cdn, meili, valkey, tunnel)
+After=network-online.target
+Wants=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pokoin-pi-watchdog.sh
+Nice=5
+TimeoutStartSec=120

@@ -15,15 +15,6 @@ const PAGES = {
       ['Health', 'Use /health here or the live RPC. Explorer is Caddy, not Vercel.'],
     ],
   },
-  '/about': {
-    eyebrow: 'Pokoin',
-    title: 'About',
-    lead: 'A peer-to-peer Pokémon card marketplace. Buy. Sell. Settle in PKN.',
-    body: [
-      ['Public web', 'This React SPA on pokoin.com. Android/iOS CardVault is a separate app on app.pokoin.com.'],
-      ['Identity', 'Public card_id is CardTrader blueprint × 2. Never divide it in the URL.'],
-    ],
-  },
   '/contact': {
     eyebrow: 'Support',
     title: 'Contact',
@@ -70,8 +61,8 @@ const PAGES = {
 
 export default function Site() {
   const { pathname } = useLocation();
-  const path = pathname.replace(/\/$/, '') || '/about';
-  const page = PAGES[path] || PAGES['/about'];
+  const path = pathname.replace(/\/$/, '') || '/docs';
+  const page = PAGES[path] || PAGES['/docs'];
   const [rpc, setRpc] = useState(path === '/health' ? 'Checking RPC…' : '');
 
   useEffect(() => {

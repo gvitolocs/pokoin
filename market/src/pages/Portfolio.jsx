@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, useNavigationType, useParams } from 'react-router-dom';
 import { cardHref, fetchPortfolio, formatPkn, imageSrc } from '../api.js';
 import { game } from '../game.js';
 import CardArt from '../components/CardArt.jsx';
 import DumpNav from '../components/DumpNav.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
+import { bindRailControls, stepRail } from '../rail-scroll.js';
+import { rememberPageView, restoredPageView } from '../scroll-restore.js';
 
 const PAGE = 40;
 
@@ -52,6 +54,7 @@ function Mini({ item }) {
 
 function Rail({ title, items }) {
   const scroller = useRef(null);
+  useLayoutEffect(() => bindRailControls(scroller.current), [items]);
   if (!items.length) {
     return null;
   }
@@ -61,17 +64,24 @@ function Rail({ title, items }) {
         <h2>{title}</h2>
       </div>
       <div className="rail-wrap">
-        <div className="carousel-track" ref={scroller}>
-          {items.map((item) => <Mini key={item.id} item={item} />)}
+        <button
+          className="rail-prev"
+          type="button"
+          aria-label="Previous"
+          onClick={() => stepRail(scroller.current, -1)}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m15.75 19.5-7.5-7.5 7.5-7.5" /></svg>
+        </button>
+        <div className="rail-scroll" ref={scroller}>
+          <div className="carousel-track">
+            {items.map((item) => <Mini key={item.id} item={item} />)}
+          </div>
         </div>
         <button
           className="rail-next"
           type="button"
           aria-label="Next"
-          onClick={() => scroller.current?.scrollBy({
-            left: Math.max(220, (scroller.current?.clientWidth || 0) * 0.8),
-            behavior: 'smooth',
-          })}
+          onClick={() => stepRail(scroller.current, 1)}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
         </button>
@@ -82,11 +92,18 @@ function Rail({ title, items }) {
 
 function PortfolioList() {
   const site = game();
+  const location = useLocation();
+  const navType = useNavigationType();
+  const restored = restoredPageView(navType, location.key, `${location.pathname}${location.search}`);
   const [catalog, setCatalog] = useState(null);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
-  const [shown, setShown] = useState(PAGE);
+  const [query, setQuery] = useState(() => String(restored?.query || ''));
+  const [shown, setShown] = useState(() => {
+    const count = Number(restored?.shown);
+    return count > PAGE ? count : PAGE;
+  });
   const sentinel = useRef(null);
+  const suppressShownReset = useRef(Boolean(restored));
   const displayed = useCountUp(catalog?.totals?.pkn || 0);
 
   useEffect(() => {
@@ -125,8 +142,16 @@ function PortfolioList() {
   }, [catalog, query]);
 
   useEffect(() => {
+    if (suppressShownReset.current) {
+      suppressShownReset.current = false;
+      return;
+    }
     setShown(PAGE);
   }, [query]);
+
+  useEffect(() => {
+    rememberPageView(location.key, { shown, query });
+  }, [location.key, shown, query]);
 
   useEffect(() => {
     const node = sentinel.current;

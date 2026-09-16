@@ -4,7 +4,7 @@ import { createPknCheckout } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { Alert, DeskPanel, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
-import { PKN_USDT_PRICE } from '../pkn.js';
+import { formatPknNumber, PKN_USDT_PRICE } from '../pkn.js';
 
 const RATE = PKN_USDT_PRICE;
 const PACKAGES = [
@@ -90,8 +90,8 @@ export default function Buy() {
         <Link className="btn ghost" to="/wallet">Wallet</Link>
       </PageHead>
       <MetricGrid>
-        <Metric value={availablePkn.toLocaleString()} label="Site PKN" />
-        <Metric value={preview.toLocaleString()} label={`${selected.label} package`} />
+        <Metric value={formatPknNumber(availablePkn)} label="Site PKN" />
+        <Metric value={formatPknNumber(preview)} label={`${selected.label} package`} />
         <Metric value={`€${(selected.fiatCents / 100).toFixed(2)}`} label="Card charge" />
       </MetricGrid>
       {sessionId && !signedIn ? <p className="desk-ok">Stripe returned a session. Sign in to confirm it against site balance.</p> : null}
@@ -114,7 +114,7 @@ export default function Buy() {
               onClick={() => setSelected(item)}
             >
               <strong>{item.label}</strong>
-              <span>{pknAmount(item).toLocaleString()} PKN</span>
+              <span>{formatPknNumber(pknAmount(item))} PKN</span>
               <em>€{(item.fiatCents / 100).toFixed(2)}</em>
             </button>
           ))}

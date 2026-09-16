@@ -6,16 +6,17 @@ import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait, Thread } from '../c
 
 export default function Inventory() {
   const location = useLocation();
-  const { user, ready, signedIn, getBearer } = useAuth();
+  const { user, ready, signedIn, profile, getBearer } = useAuth();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     document.title = 'Inventory · Pokoin';
-    if (!signedIn) return undefined;
+    const uid = user?.uid || profile?.uid;
+    if (!signedIn || !uid) return undefined;
     let cancelled = false;
     getBearer()
-      .then((token) => fetchSellerListings(user.uid, token))
+      .then((token) => fetchSellerListings(uid, token))
       .then((data) => {
         if (!cancelled) setRows(data.listings || data.items || []);
       })
@@ -25,7 +26,7 @@ export default function Inventory() {
     return () => {
       cancelled = true;
     };
-  }, [signedIn, user?.uid, getBearer]);
+  }, [signedIn, user?.uid, profile?.uid, getBearer]);
 
   if (!ready) return <SessionWait />;
   if (!signedIn) {

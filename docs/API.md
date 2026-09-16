@@ -1,18 +1,24 @@
 # Pokoin API map (web)
 
 Handlers live in CardVault, not this repo. Do not add Vercel serverless
-functions here. `pokoin.com/api/*` rewrites to `https://api.pokoin.com/api/*`.
+functions here. `pokoin.com/api/*` rewrites to `https://api.pokoin.com/api/*`
+on **pi-home**. Oracle `pokoin-marketplace` is the CardTrader dump / Postgres
+**writer**, not the public first hop. Topology: [GAMES.md](GAMES.md).
+Non-Pokemon **ingest** APIs are Oracle `127.0.0.1:18082` `/api/ingest/{game}`
+writing isolated 15T databases. Pokemon stays on this Pi map. Plan:
+[MULTIGAME_REIMPORT.md](MULTIGAME_REIMPORT.md).
 
 **Navigate live**
 
 | URL | What |
 | --- | --- |
 | `GET /api/__contract` | React/Flutter identity, images, page BFFs, route families |
+| `GET /healthz` | Pipeline: Postgres, Valkey, Meili, Pi CDN. **503** if any is down. Not a Node liveness ping. Page BFFs never return `ECONNREFUSED` / `127.0.0.1:5432`; they return **503** `{error:"We are working on a solution."}`. SPA swaps to `WorkingOnIt`. Uptime mail from **nezopt** (`scripts/pokoin-uptime-mail.sh`) goes to `vitologiuseppe17@gmail.com` on down / recovery after **two consecutive** 2-minute samples (so a single CDN `/health` timeout does not spam Gmail). |
 | `GET /api/__routes` | Every hosted handler + `family` |
 | `GET /api/__routes?group=1` | Same list grouped |
 | `GET /api/__routes?family=page-bff` | One family |
 
-Do not move CardVault `api/*.js` into subfolders. The Oracle server maps
+Do not move CardVault `api/*.js` into subfolders. The Pi API maps
 `/api/foo` → `api/foo.js`. Families are `server/api-route-families.js`.
 
 **Human docs (CardVault `pokemon_card_vault/docs/`)**
@@ -22,24 +28,34 @@ Do not move CardVault `api/*.js` into subfolders. The Oracle server maps
 - `oracle-api-migration.md` — generated from `server/api-route-manifest.js`
 - `api-route-catalog.json` — machine catalog (now includes `family`)
 - `pokoin-api.md` — auth examples
+- pokoin-web `docs/ARTISTS.md` — leftover artists PK vs public `card_id` display cache
 
 **React page BFFs (pokoin-web)**
 
 | Page | API |
 | --- | --- |
-| Home | Rails vector: Worker `GET /api/marketplace-home` on pokoin.com, else Supabase `marketplace_rails`, else Oracle `GET /api/marketplace-home-page`. Recents are client-side. Do not use Flutter `api.pokoin.com/api/marketplace-home` (~170 KB). First paint: [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md). |
-| Search | `GET /api/marketplace-search-page` + `GET /api/marketplace-suggest` |
-| Card | `GET /api/marketplace-card-page` |
-| Set desk | `GET /api/marketplace-expansion-page?slug=` |
+| Home | Rails vector: Worker `GET /api/marketplace-home` on pokoin.com (origin `api.pokoin.com`), else Pi `GET /api/marketplace-rails`, else Pi `GET /api/marketplace-home-page`. Recents: 24 ids locally, signed-in `GET/PUT /api/marketplace-recents` (15T). Do not use Flutter `api.pokoin.com/api/marketplace-home` (~170 KB). **No Supabase.** First paint: [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md). |
+| Search | `GET /api/marketplace-search-page` + `GET /api/marketplace-suggest` (print_language; western tie-break on equal Meili score; suggest ids can stay hot for search-page) |
+| Scan | `POST /cardscan/identify?catalog=pokemon_generic` — leftover-JPEG singles like old Milo; live default is TCGPlayer. Desk uses `public_id`. Leftover `ct_id` × 2 if `public_id` is missing. [SCAN.md](SCAN.md), [MARKET.md](MARKET.md) |
+| Extension auth | `/extension/auth-bridge` — Firebase ID token `postMessage` (`pokoin-auth-token` / `accessToken`) for the Chrome extension. Not an API. Skip marketplace chrome. |
+| Card | Desk first paint from the URL slug (no BFF). `GET /api/marketplace-card-page` hydrates in the background (`version` / `card.version` is the CLIP `pokoin_version_sets` key; `versionCount` is `member_count`, the **same-artwork** count; `rarities` is same English name + expansion for the desk `<select>`; `card.artist` is denormalized on candidates by public `card_id`). Set-symbol circles under the scan are `GET /api/marketplace-version-set?cardId=` (this illustration’s expansions), refetched when the select changes. Listings are a parallel `GET /api/marketplace-listings` (`listings-cache.js`; empty `[]` is a hit — invalidate after POST). Seller username on a Shop row opens `/marketplace/{lang}/users/{username}` (`GET /api/marketplace-listings?sellerUsername=&nativeOnly=1`; resolve `seller_uid` from `marketplace_user_listings.seller_name` first, Firebase `usernames` / `usernameLower` only when that misses). Related cards on the desk cap at **12** tiles. Sold-price graph loads `GET /api/marketplace-card-sales?cardId=&slices=1` (every stored daily combination). Filter toggles stay local (`sold-sales.js`). `localStorage` `pokoin.cardSales.v11.` paints first (TTL 15 days) then the desk refetches so a new persist day is not frozen. Header last-day PKN is the current local series (`lastMedianPkn`). Japanese/Korean printings keep Asian langs only in the SPA. Graph geometry: `market/src/sold-graph.js`. |
+| Protection | `/protection`. Physical checkout escrows site PKN. Confirm delivery on `/orders` releases the seller. No-ship after 7 days refunds the buyer. Disputes: first reply 48 hours, decision 5 business days. |
+| Versions | `{canonicalPath}/versions` — title is `{name} - {set}` with the rarity count once beside it. **Rarity Lineup** (rarities in this set), then CLIP printings grouped by TCG era (Mega Evolution through Original; see [TCG_ERAS.md](TCG_ERAS.md)). Tile price is listed cheapest from `cheapest_homepage_cache_blueprint`, then last-day sold median for leftovers. Map: [VERSIONS.md](VERSIONS.md). |
+| Set desk | Skeletons until `fetchExpansionCards` finishes (`hasMore === false`). Walk is `GET /api/marketplace-expansion-page?slug=&limit=48` pages. SQL leftover `card_id` desc is not shown. Default sort Number, Official when a checklist exists (Celebrations, Lost Origin). Homepage webps then load 12 at a time from that order. The next 12 wait for a scroll. [MARKET.md](MARKET.md#set-desk-first-paint). |
+| Sets index | `GET /api/marketplace-expansion-page?limit=2000` (era catalog in `Sets.jsx` / `set-logos.js`). Watchtower slugs → `/card-images/expansions/wordmarks/{slug}.png`; leftover slugs → `/card-images/expansions/logos/{slug}.png`. Reverse-holo variants stay hidden unless the filter query matches. |
 | Portfolio / Explore | `GET /api/marketplace-portfolio` (Pokoin catalog + native PKN overlay; `?id=` public id or leftover `ct_id`; `?game=` OP/RB). Never CardTrader leftover images. Never USD. |
 
 Set lede uses `expansion.cardCount` / `total`. That is stored
-`catalog_card_count` (grid singles with art), not the first page of 48 and
-not TCGDex printedTotal. Schema:
+`catalog_card_count` (grid singles with art), not TCGDex printedTotal.
+The desk does **not** flash 48 leftover-id tiles; skeletons stay up until
+the walk completes. [MARKET.md](MARKET.md#set-desk-first-paint). Schema:
 `oracle-postgres/schema/029_marketplace_set_catalog_counts.sql`. Refresh:
 `SELECT public.refresh_marketplace_set_catalog_counts();`.
+`expansion.nationality` is `pokoin_pokemon_expansions.nationality`
+(japanese / chinese / western / …). JP/CN circle flags go **left of**
+`h1.page-title` only; [PRINT_FLAGS.md](PRINT_FLAGS.md).
 
-**Silver CT / CM / VT** (Best Deal pills, Firestore Silver)
+**Silver CT / CM / VT** (Best Deal pills; Firestore Silver **or** `pokoin.auth.session`)
 
 | Pill | Behavior |
 | --- | --- |
@@ -51,13 +67,14 @@ not TCGDex printedTotal. Schema:
 
 | Worker | Job |
 | --- | --- |
-| `pokoin-origin` | OG HTML for card paths, plus homepage rails Cache API (`marketplace-home.js`) |
+| `pokoin-origin` | OG HTML for card paths, plus homepage rails Cache API (`marketplace-home.js`). Origin 530 / Cloudflare 1033 becomes the working page, not tunnel copy. |
+| `pokoin-working` | `api.pokoin.com` / `api2.pokoin.com`: same working page when the Pi tunnel is down. GIF is on Vercel (`/home/working.gif`). |
 | `pokoin-shortlink` | `/{digits}` → canonical card path |
-| `marketplace-home` | Edge rails vector + `marketplace-card-tiles`. Match before Supabase `updated_at`. |
-| `marketplace-card-og` | Card OG image |
+| `marketplace-home` | Edge rails vector + `marketplace-card-tiles`. Origin is `https://api.pokoin.com`. |
+| `marketplace-card-og` | OG **HTML** for link-preview bots (not an image file). Leftover image rewrite; `?og=1` / `?bot=1`; satellite hosts. |
 
 **This repo also**
 
 - `market/src/api.js` — SPA client
 - `vercel.json` — SPA routes + `/api/*` rewrite
-- `scripts/sql/` — marketplace SQL applied on pokoin-marketplace
+- `scripts/sql/` — marketplace SQL applied on the Oracle dump **primary**. The Pi API reads a streaming replica (`127.0.0.1:5432`). Never migrate or dump-write on the replica.

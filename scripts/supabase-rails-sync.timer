@@ -1,11 +1,1 @@
-[Unit]
-Description=Publish Pokoin marketplace browse rails to Supabase every 10 min
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=10min
-AccuracySec=30s
-Persistent=true
-
-[Install]
-WantedBy=timers.target
+# removed 2026-09-06 - use marketplace-rails-sync.timer on the Pi

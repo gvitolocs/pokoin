@@ -8,8 +8,10 @@ Free is **Madrid 3 Ampere**, not another Frankfurt hunt.
 
 **5 Sep 2026:** the SPA no longer waits on Oracle `marketplace-home-page`,
 Firebase, or Firestore before painting New / Best / Featured. That first-paint
-path is [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md). This file stays the Madrid
-hosting note. The grey-row screenshot below is the **old** Oracle stall.
+path is [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md). **Live origin is the
+Raspberry Pi** (`api.pokoin.com` / `cdn.pokoin.com`) — [GAMES.md](GAMES.md).
+This file stays the Madrid hosting note if the Pi is abandoned. The grey-row
+screenshot below is the **old** Oracle stall.
 
 Tenancy IDs, keys, and hunt paths live in the private two-tenancies note
 (not git). This file is the public-web pipeline.
@@ -26,8 +28,8 @@ on `GET /api/marketplace-home-page`. Until that JSON arrives, **Recently seen /
 New cards / Best sellers / Featured** are eight skeleton tiles (`placeholders={8}`).
 That is the grey row.
 
-If the BFF had returned, tiles would show **name + PKN** (or **—**). A missing
-ask is not “Out of stock”. `/card-images/…` and `cdn.pokoin.com` returned 200
+If the BFF had returned, tiles would show **name + PKN** (or **Out of stock**). A missing
+ask is “Out of stock”. `/card-images/…` and `cdn.pokoin.com` returned 200
 (CDN worker `pokoin-cdn-card-images`). `pokoin-shortlink` only 302s numeric
 card paths; `/api/*` is pass-through to Vercel → `api.pokoin.com`.
 
@@ -106,8 +108,7 @@ Live logs on the API container (same window as the screenshot):
 - Flutter `marketplace-home` **500** at ~30 s:
   `canceling statement due to statement timeout`
 - Meili search **408**
-- Forum still `getaddrinfo ENOTFOUND` for the old Supabase host (unused for
-  marketplace data; leftover)
+- Forum still uses PostgREST (`api/_supabase.js`); marketplace browse does not.
 
 A later curl, between refresh batches: home **200 in 0.49 s**, `__contract`
 **1.27 s**. The endpoint is fine when Postgres is not writing snapshots.
@@ -160,12 +161,14 @@ You cannot give the marketplace VM more RAM. Always Free AMD is two **fixed
 ([NEWS.md](NEWS.md)).
 
 Stopgap only (until Madrid exists): **one CardTrader refresh per day** at
-`03:20 UTC` (`pokoin-cardtrader-daily-market-refresh.timer`); do not cache
+`01:00 UTC` (`pokoin-cardtrader-daily-market-refresh.timer` on the Pi writer);
+`GET /marketplace/products?blueprint_id=` (full listing book, qty-diff per
+listing, every language/condition/reverse/1st/graded combo). Do not cache
 empty home snapshots (Valkey `home:react` / `home:flutter` skip empty);
 abort SQL on `withTimeout`. Listing sold/new stats
 roll up from `cardtrader_market_listing_removed_history` plus native
 `marketplace_user_listings` into `marketplace_card_weights` (small). Rails
-on Supabase get those weights, not the 883 MB snapshot table.
+on Pi `marketplace_rails` get those weights, not the 883 MB snapshot table.
 
 That makes the rail honest. It does not make 883 MB of snapshots fit in 512 MiB.
 
@@ -237,7 +240,7 @@ and VCN are already in the Madrid deploy dir.
   on the refresh function lower than “run for 40 s per batch”.
 - Listing pipeline: `scripts/install-listing-pipeline.sh` (Oracle stats +
   weights, daily flock, 15-min weight timer). Rails sync publishes ranked
-  homepage rails to Supabase **with PKN** (`1 PKN = 0.005 USDT`,
+  homepage rails to Oracle Postgres primary (Pi replica follows) **with PKN** (`1 PKN = 0.005 USDT`,
   `PKN = EUR / 0.005`). Hub cache is ~868 hot blueprints; live English sets
   are not in it yet, so New cards overlay CardTrader NM/EN asks at publish
   time and store them in **Valkey** (`pkn:ct:{blueprint}`, 6 h). New cards
@@ -315,7 +318,7 @@ stopped. Leave both boot volumes.
 - CardTrader daily refresh **only on Madrid**, nice’d / systemd timer at
   night, not a 5-hour unnamed `docker run`.
 - oracle-api: skip empty home cache; cancel timed-out queries; stop calling
-  dead Supabase from forum.
+  dead PostgREST from forum until that handler is ported.
 - Hypemeter stays on Vercel until 12 GB still has headroom after Meili +
   Postgres + refresh. Do not install Next on this VM in the same change.
 - Frankfurt marketplace VM stays as rollback. No volume deletes.

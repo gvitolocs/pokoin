@@ -12,11 +12,12 @@
   <meta name="theme-color" content="#000000">
   <link rel="canonical" href="https://pokoin.com/">
   <link rel="sitemap" type="application/xml" href="/sitemap.xml">
-  <link rel="icon" href="/favicon.ico?v=20260831-tab" sizes="any">
-  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=20260831-tab">
-  <link rel="icon" type="image/png" sizes="192x192" href="/pokoin-192.png?v=20260831-tab">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260831-tab">
-  <link rel="shortcut icon" href="/favicon.ico?v=20260831-tab">
+  <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png">
+  <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/pokoin-192.png">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Pokoin">
   <meta property="og:locale" content="en_US">
@@ -35,8 +36,11 @@
   <meta name="twitter:image:alt" content="Pokoin: Buy. Sell. Settle in PKN.">
   <link rel="preload" href="home/satoshi.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="home/logo.png" as="image">
-  <script>document.documentElement.classList.add("js");</script>
-  <link rel="stylesheet" href="home/landing.css?v=20260901-react">
+  <script>
+    document.documentElement.classList.add("js");
+    try { if (localStorage.getItem("pokoin.cookieConsent") === "1" || /(?:^|;\s*)pokoin_cookie_consent=1(?:;|$)/.test(document.cookie)) document.documentElement.classList.add("cookies-ok"); } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="home/landing.css?v=20260910-protect2">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -165,6 +169,36 @@
               <p>Explorer, health, and card camera.</p>
             </a>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="protection" aria-labelledby="protection-heading">
+      <div class="glow glow-olive-left"></div>
+      <div class="pad">
+        <div class="wrap section-pad">
+          <div class="title-block center">
+            <h2 id="protection-heading" class="reveal reveal-fade">You're protected when you buy on Pokoin</h2>
+            <p class="reveal reveal-fade">If a seller does not ship within 7 days, we return your PKN from escrow.</p>
+          </div>
+          <p class="protection-escrow reveal reveal-fade">Funds released only after delivery confirmed.</p>
+          <div class="features-grid">
+            <div class="feature reveal reveal-fade">
+              <h3>PKN escrow</h3>
+              <p>Checkout takes site PKN from the buyer and holds it. The seller is not paid until you confirm the card arrived.</p>
+            </div>
+            <div class="feature reveal reveal-fade">
+              <h3>Seller does not ship</h3>
+              <p>If a seller does not ship within 7 days, we return your PKN from escrow.</p>
+            </div>
+            <div class="feature reveal reveal-fade">
+              <h3>Disputes</h3>
+              <p>Report a problem from Orders. First reply within 48 hours. Decision within 5 business days. contact@pokoin.com.</p>
+            </div>
+          </div>
+          <p class="protection-more reveal reveal-fade">
+            <a class="store-btn btn-yellow" href="/protection">How buyer protection works</a>
+          </p>
         </div>
       </div>
     </section>
@@ -360,6 +394,7 @@
             <a href="/earn">Earn PKN</a>
             <a href="/about">About</a>
             <a href="/contact">Contact</a>
+            <a href="/protection">Buyer protection</a>
             <a href="/privacy">Privacy</a>
           </div>
           <div class="reveal">
@@ -377,6 +412,10 @@
       </div>
     </div>
   </footer>
-  <script src="home/landing.js?v=20260831-iphone16" defer></script>
+  <div class="cookie-banner" data-cookie-banner role="dialog" aria-label="Cookies">
+    <p>We use cookies to keep you signed in, remember your cart, and run the marketplace. <a href="/privacy">Privacy</a></p>
+    <button type="button" data-cookie-accept>Accept</button>
+  </div>
+  <script src="home/landing.js?v=20260910-cookies-persist" defer></script>
 </body>
 </html>

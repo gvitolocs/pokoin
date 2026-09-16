@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Pokoin Pi pipeline watchdog every 5 minutes
+
+[Timer]
+OnBootSec=20
+OnCalendar=*:0/5
+Persistent=true
+AccuracySec=10s
+Unit=pokoin-pi-watchdog.service
+
+[Install]
+WantedBy=timers.target

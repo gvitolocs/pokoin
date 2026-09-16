@@ -530,6 +530,25 @@ html:not(.js) .reveal {
   color: var(--muted);
 }
 
+.protection-escrow {
+  margin: 0 auto 1.5rem;
+  max-width: 40rem;
+  text-align: center;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--yellow);
+}
+
+.protection-more {
+  display: flex;
+  justify-content: center;
+  margin: 1.75rem 0 0;
+}
+
+.protection-more .store-btn {
+  min-width: 16rem;
+}
+
 .feature-icon {
   width: 2.625rem;
   height: 2.625rem;
@@ -985,4 +1004,51 @@ html:not(.js) .reveal {
   .cta-box .btn-dark {
     transition: none;
   }
+}
+
+.cookie-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem 1.25rem;
+  padding: 0.95rem 1.25rem calc(0.95rem + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border-top: 1px solid rgb(255 211 61 / 0.45);
+  color: var(--text);
+  box-shadow: 0 -12px 40px rgb(0 0 0 / 0.45);
+}
+
+html.cookies-ok .cookie-banner {
+  display: none;
+}
+
+.cookie-banner p {
+  margin: 0;
+  flex: 1 1 16rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.cookie-banner a {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.cookie-banner button {
+  flex: 0 0 auto;
+  background: var(--yellow);
+  color: #111;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.5rem 1.15rem;
+  font-weight: 700;
+  cursor: pointer;
 }

@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { artCutVars } from '../art-cut.js';
+import { artworkFigureMaskSrc } from '../art-figure-mask.js';
 import { rasterSiblings } from '../image-urls.js';
+import { isCardTraderPlaceholderSize, MISSING_CARD_SRC } from '../missing-card.js';
 
 export default function CardArt({
   src,
@@ -9,33 +12,91 @@ export default function CardArt({
   className,
   fallback = 'placeholder',
   full = false,
+  cut = false,
+  cutSurface,
+  card,
   onClick,
   onLoad,
+  onError,
 }) {
   const urls = useMemo(() => rasterSiblings(src, { full }), [src, full]);
   const [index, setIndex] = useState(0);
   const [dead, setDead] = useState(false);
   const imgRef = useRef(null);
+  const errorSent = useRef(false);
+  const indexRef = useRef(0);
+  const urlsRef = useRef(urls);
+  urlsRef.current = urls;
+  indexRef.current = index;
 
   useEffect(() => {
     setIndex(0);
+    indexRef.current = 0;
     setDead(false);
+    errorSent.current = false;
   }, [src]);
 
   const current = urls[index] || '';
+  const figureMask = cut && cutSurface === 'album' ? artworkFigureMaskSrc(card) : '';
 
-  useEffect(() => {
-    const img = imgRef.current;
-    if (img?.complete && img.naturalWidth > 0) {
-      onLoad?.();
+  function failCurrent() {
+    const next = indexRef.current + 1;
+    if (next < urlsRef.current.length) {
+      indexRef.current = next;
+      setIndex(next);
+      return;
     }
-  }, [current, onLoad]);
-
-  if (!current || dead) {
-    return fallback === 'hide' ? null : <span className="tile-ph" />;
+    setDead(true);
+    if (!errorSent.current) {
+      errorSent.current = true;
+      onError?.();
+    }
   }
 
-  return (
+  function acceptIfScan(img) {
+    if (!img || !img.complete || img.naturalWidth <= 0) {
+      return;
+    }
+    if (isCardTraderPlaceholderSize(img.naturalWidth, img.naturalHeight)) {
+      failCurrent();
+      return;
+    }
+    onLoad?.();
+  }
+
+  useEffect(() => {
+    acceptIfScan(imgRef.current);
+  }, [current, onLoad]);
+
+  useEffect(() => {
+    if (urls.length || errorSent.current) {
+      return;
+    }
+    errorSent.current = true;
+    onError?.();
+  }, [urls.length, onError]);
+
+  if (!current || dead) {
+    if (fallback === 'hide') {
+      return null;
+    }
+    const placeholder = (
+      <img
+        className={['missing-card', className].filter(Boolean).join(' ')}
+        src={MISSING_CARD_SRC}
+        alt={alt}
+        width="630"
+        height="880"
+        onClick={onClick}
+      />
+    );
+    if (cut) {
+      return <span className="art-cut" style={artCutVars(card, cutSurface)}>{placeholder}</span>;
+    }
+    return placeholder;
+  }
+
+  const image = (
     <img
       ref={imgRef}
       className={className}
@@ -43,16 +104,40 @@ export default function CardArt({
       alt={alt}
       loading={loading}
       fetchPriority={fetchPriority}
-      decoding="async"
+      decoding={full ? 'sync' : 'async'}
       onClick={onClick}
-      onLoad={onLoad}
-      onError={() => {
-        if (index + 1 < urls.length) {
-          setIndex(index + 1);
-          return;
-        }
-        setDead(true);
-      }}
+      onLoad={(event) => acceptIfScan(event.currentTarget)}
+      onError={failCurrent}
     />
+  );
+
+  if (!cut) {
+    return image;
+  }
+  return (
+    <span className="art-cut" style={artCutVars(card, cutSurface)}>
+      {image}
+      {figureMask ? (
+        <>
+          <img
+            className="art-figure-layer art-figure-shadow"
+            src={figureMask}
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+            decoding="async"
+          />
+          <img
+            className="art-figure-layer art-figure-hover"
+            src={current}
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+            decoding="async"
+            style={{ '--art-figure-mask': `url("${figureMask}")` }}
+          />
+        </>
+      ) : null}
+    </span>
   );
 }

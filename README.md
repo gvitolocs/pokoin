@@ -9,7 +9,11 @@ React market (`market/`). Android/iOS CardVault is a separate app
 ([docs/APP.md](docs/APP.md)). Product APIs stay on `api.pokoin.com`.
 
 See [docs/LANDING.md](docs/LANDING.md) for the landing pipeline, copy, and
-deploy. React market: [docs/MARKET.md](docs/MARKET.md). Home first paint:
+deploy. React market: [docs/MARKET.md](docs/MARKET.md). Card-art surfaces:
+[docs/CARD_ART.md](docs/CARD_ART.md). Pi CDN + nezopt 15T replica (crop/CLIP
+here, not on the Pi): [docs/GAMES.md](docs/GAMES.md). Scan catalogs:
+[docs/SCAN.md](docs/SCAN.md). Public card id is leftover
+`ct_id` × 2; Milo `id` is that leftover, not TCGplayer. Home first paint:
 [docs/HOME_FIRST_PAINT.md](docs/HOME_FIRST_PAINT.md). HTTP API map:
 [docs/API.md](docs/API.md). Pokoin News
 (`news.pokoin.com`) on Oracle behind a Cloudflare Tunnel:
@@ -19,7 +23,11 @@ is in [docs/ANIMATIONS.md](docs/ANIMATIONS.md). Public vs operator peer JSON:
 [docs/BOOTSTRAP_PEERS.md](docs/BOOTSTRAP_PEERS.md). Chrome routes:
 [docs/CHROME.md](docs/CHROME.md). Android/iOS:
 [docs/APP.md](docs/APP.md) (`https://app.pokoin.com`).
-Phone (iPhone 16 393×852): [docs/MOBILE.md](docs/MOBILE.md).
+Phone (iPhone 16 393×852): [docs/MOBILE.md](docs/MOBILE.md). Competitive
+(Oracle sprites/scans/flags): [docs/COMPETITIVE.md](docs/COMPETITIVE.md).
+Print flags (JP/CN/EU): [docs/PRINT_FLAGS.md](docs/PRINT_FLAGS.md). Same-art
+versions: [docs/VERSIONS.md](docs/VERSIONS.md). Illustrators (leftover PK vs
+public `card_id` display cache): [docs/ARTISTS.md](docs/ARTISTS.md).
 
 ## Ecosystem And Modules
 
@@ -70,10 +78,11 @@ Flutter Android/iOS. Not the pokoin.com web host. Details: [docs/APP.md](docs/AP
 
 - Next.js app using Node `22.x`, Next `16.2.1`, React `19.2.4`, TypeScript,
   Tailwind CSS, Vitest, and `better-sqlite3`.
-- Production is Oracle Always Free Ampere (`pokoin-a1`) bound to
+- Target live host is Oracle Always Free Ampere (`pokoin-a1`) bound to
   `127.0.0.1:3000`, published only through Cloudflare Tunnel `pokoin-news`.
-  Hunt, compose, tunnel, 15-minute revalidate timer, and DNS cutover:
-  [docs/NEWS.md](docs/NEWS.md).
+  **Today** `news.pokoin.com` DNS is still Vercel Hobby (`hypemeter` /
+  `monmeter.vercel.app`) until that cutover is verified. Hunt, compose,
+  tunnel, 15-minute revalidate timer: [docs/NEWS.md](docs/NEWS.md).
 - Vercel project `hypemeter` / `https://monmeter.vercel.app` stays up as
   rollback until you approve teardown. Do not delete it until then.
 - App metadata identifies the live surface as `https://news.pokoin.com`.
@@ -172,8 +181,9 @@ Known module configuration from the repositories:
 - CardVault Firebase and `firestore.rules`: `cardvault/pokemon_card_vault`.
   App routing: [docs/APP.md](docs/APP.md).
 - The card extension uses `https://pokoin.com` as its API base URL.
-- Hypemeter production is Oracle + Cloudflare Tunnel (`docs/NEWS.md`).
-  A systemd timer calls `/api/cron/revalidate-home` every 15 minutes.
+- Hypemeter **target** is Oracle + Cloudflare Tunnel; **today** DNS is still
+  Vercel (`docs/NEWS.md`). A systemd timer on the A1 box will call
+  `/api/cron/revalidate-home` every 15 minutes after cutover.
 - PokoinPoS peers are configured with `POKOINPOS_*` environment variables in
   `docker-compose.peer.yml` and `deploy/env/peer.env.example`.
 

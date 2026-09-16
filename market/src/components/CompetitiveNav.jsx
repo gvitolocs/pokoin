@@ -12,7 +12,7 @@ export default function CompetitiveNav() {
       <PageHead
         kicker="Play"
         title={title}
-        lede={`${data.formatLabel} · Limitless snapshot, not live sync`}
+        lede={`${data.formatLabel} · Pokoin snapshot (Oracle assets, not Limitless CDN)`}
       />
       <nav className="comp-tabs" aria-label="Competitive">
         {COMP_NAV.map((row) => (

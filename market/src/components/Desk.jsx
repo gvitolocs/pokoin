@@ -1,11 +1,20 @@
 import { Link } from 'react-router-dom';
+import { flagSrc } from '../locale.js';
 
-export function PageHead({ kicker, title, lede, children }) {
+export function PageHead({ kicker, title, lede, printFlag, children }) {
   return (
     <header className="page-head">
       <div>
         {kicker ? <p className="page-kicker">{kicker}</p> : null}
-        <h1 className="page-title">{title}</h1>
+        <h1 className={printFlag ? 'page-title has-print-flag' : 'page-title'}>
+          {printFlag ? (
+            <span className="page-print-flag">
+              <img src={flagSrc(printFlag.code)} alt="" width="44" height="44" />
+              <span className="sr-only">{printFlag.label}</span>
+            </span>
+          ) : null}
+          {title}
+        </h1>
         {lede ? <p className="page-lede">{lede}</p> : null}
       </div>
       {children ? <div className="page-actions">{children}</div> : null}

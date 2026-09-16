@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigationType } from 'react-router-dom';
 import { fetchPortfolio, formatPkn, imageSrc } from '../api.js';
 import CardArt from '../components/CardArt.jsx';
 import DumpNav from '../components/DumpNav.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import { dumpWatchIds, toggleDumpWatch } from '../catalog.js';
+import { rememberPageView, restoredPageView } from '../scroll-restore.js';
 
 const PAGE = 48;
 
@@ -13,18 +14,25 @@ function money(value) {
 }
 
 export default function Explore() {
+  const location = useLocation();
+  const navType = useNavigationType();
+  const restored = restoredPageView(navType, location.key, `${location.pathname}${location.search}`);
   const [catalog, setCatalog] = useState(null);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
-  const [sort, setSort] = useState('value');
-  const [type, setType] = useState('all');
-  const [min, setMin] = useState('');
-  const [max, setMax] = useState('');
-  const [watchOnly, setWatchOnly] = useState(false);
-  const [langs, setLangs] = useState(() => new Set());
-  const [shown, setShown] = useState(PAGE);
+  const [query, setQuery] = useState(() => String(restored?.query || ''));
+  const [sort, setSort] = useState(() => restored?.sort || 'value');
+  const [type, setType] = useState(() => restored?.type || 'all');
+  const [min, setMin] = useState(() => String(restored?.min || ''));
+  const [max, setMax] = useState(() => String(restored?.max || ''));
+  const [watchOnly, setWatchOnly] = useState(() => Boolean(restored?.watchOnly));
+  const [langs, setLangs] = useState(() => new Set(restored?.langs || []));
+  const [shown, setShown] = useState(() => {
+    const count = Number(restored?.shown);
+    return count > PAGE ? count : PAGE;
+  });
   const [watchTick, setWatchTick] = useState(0);
   const sentinel = useRef(null);
+  const suppressShownReset = useRef(Boolean(restored));
 
   useEffect(() => {
     document.title = 'Explore · Pokoin';
@@ -70,8 +78,25 @@ export default function Explore() {
   }, [catalog, query, sort, type, min, max, watchOnly, langs, watchTick]);
 
   useEffect(() => {
+    if (suppressShownReset.current) {
+      suppressShownReset.current = false;
+      return;
+    }
     setShown(PAGE);
   }, [query, sort, type, min, max, watchOnly, langs]);
+
+  useEffect(() => {
+    rememberPageView(location.key, {
+      shown,
+      query,
+      sort,
+      type,
+      min,
+      max,
+      watchOnly,
+      langs: [...langs],
+    });
+  }, [location.key, shown, query, sort, type, min, max, watchOnly, langs]);
 
   useEffect(() => {
     const node = sentinel.current;

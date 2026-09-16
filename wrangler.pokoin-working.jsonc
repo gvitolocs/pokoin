@@ -1,0 +1,11 @@
+{
+  "name": "pokoin-working",
+  "main": "workers/pokoin-working.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "routes": [
+    { "pattern": "api.pokoin.com/*", "zone_name": "pokoin.com" },
+    { "pattern": "api2.pokoin.com/*", "zone_name": "pokoin.com" }
+  ]
+}

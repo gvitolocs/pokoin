@@ -62,7 +62,7 @@ export default function Scan() {
       }
       setHits(resolved);
       if (!resolved.length) {
-        setError('No OCR match. Search the catalog below — Scan Fast ids are TCGplayer, never public card_id.');
+        setError('No match. Search the catalog below.');
       }
     } catch (err) {
       setError(err.message || 'Scan identify failed.');
@@ -83,7 +83,7 @@ export default function Scan() {
       <PageHead
         kicker="Identify"
         title="Card scan"
-        lede="Photo posts to /cardscan/identify. Public card_id is CardTrader blueprint × 2. TCGplayer ids are ignored."
+        lede="Photo posts to /cardscan/identify on leftover JPEG singles (pokemon_generic). TCGPlayer product ids are not desk URLs."
       >
         <Link className="btn ghost" to="/marketplace">Shop</Link>
       </PageHead>

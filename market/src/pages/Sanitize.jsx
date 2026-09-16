@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import TestDock from '../components/TestDock.jsx';
 import manifest from '../../public/review/manifest.json';
 
 const asset = (file) => `${import.meta.env.BASE_URL}review/${file}?v=${manifest.revision}`;
@@ -151,6 +152,8 @@ export default function Sanitize() {
           </section>
         ) : null}
       </main>
+
+      <TestDock />
 
       {zoom ? (
         <dialog

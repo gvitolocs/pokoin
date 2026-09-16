@@ -1,7 +1,7 @@
 {
   "format": "TEF-PBL",
   "formatLabel": "Temporal Forces – Pitch Black",
-  "latest": { "label": "Worlds", "href": "limitless-tournament.html?id=515" },
+  "latest": { "label": "Worlds", "href": "/marketplace/competitive/tournaments/515" },
   "decks": [
     {"id":"284","name":"Dragapult ex","short":"Dragapult","points":949,"share":34.97,"sprite":"dragapult","set":"TWM","num":"130","featured":{"place":"1st Place","event":"World Championships 2026","player":"Andrew Hedrick","list":"28752"}},
     {"id":"339","name":"Ogerpon Box","short":"Ogerpon Box","points":410,"share":15.11,"sprite":"ogerpon","set":"TWM","num":"25","featured":{"place":"8th Place","event":"World Championships 2026","player":"Nathan Spry","list":"28758"}},

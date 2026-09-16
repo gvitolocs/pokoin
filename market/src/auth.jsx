@@ -1,7 +1,19 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged } from 'firebase/auth';
 import { doc, getFirestore, onSnapshot } from 'firebase/firestore';
+import {
+  clearAuthSession,
+  profileFromSession,
+  readAuthSession,
+  writeAuthSession,
+} from './auth-session.js';
+import {
+  EXTENSION_DESK_SESSION_REQUEST,
+  framedByChromeExtension,
+  isExtensionDeskSession,
+} from './extension-auth-bridge.js';
+import { fetchDeskUserDocuments } from './firestore-rest.js';
 
 /** Same public web config as Flutter `DefaultFirebaseOptions.web`. */
 const firebaseApp = initializeApp({
@@ -13,8 +25,44 @@ const firebaseApp = initializeApp({
   appId: '1:36941064114:web:e6ca84f2723df9ee71e6ab',
 });
 
-export const firebaseAuth = getAuth(firebaseApp);
+function createFirebaseAuth(app) {
+  if (typeof window !== 'undefined' && framedByChromeExtension()) {
+    try {
+      return initializeAuth(app, { persistence: inMemoryPersistence });
+    } catch (_) {
+      return getAuth(app);
+    }
+  }
+  return getAuth(app);
+}
+
+export const firebaseAuth = createFirebaseAuth(firebaseApp);
 export const firestore = getFirestore(firebaseApp);
+
+let injectedDeskSession = { token: '', uid: '', expiresAt: 0 };
+
+function isTrustedDeskSessionEvent(event) {
+  const origin = String(event?.origin || '');
+  if (origin.startsWith('chrome-extension:')) {
+    return true;
+  }
+  try {
+    return origin === window.location.origin;
+  } catch (_) {
+    return false;
+  }
+}
+
+function applyInjectedDeskSession(data = {}) {
+  const token = String(data.token || '').trim();
+  const uid = String(data.uid || '').trim();
+  const expiresAt = Number(data.expiresAt) || 0;
+  if (token.length <= 20 || !uid) {
+    return false;
+  }
+  injectedDeskSession = { token, uid, expiresAt };
+  return true;
+}
 
 export function sellerNameOf(user) {
   if (!user) {
@@ -24,9 +72,14 @@ export function sellerNameOf(user) {
 }
 
 export async function getBearer(forceRefresh = false) {
+  const injected = String(injectedDeskSession.token || '').trim();
+  const expiresAt = Number(injectedDeskSession.expiresAt) || 0;
+  if (injected && (!expiresAt || expiresAt > Date.now() + 60 * 1000)) {
+    return injected;
+  }
   const user = firebaseAuth.currentUser;
   if (!user) {
-    return '';
+    return injected;
   }
   return user.getIdToken(forceRefresh);
 }
@@ -74,47 +127,193 @@ const AuthContext = createContext({
 });
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const hint = useMemo(() => readAuthSession(), []);
+  const [user, setUser] = useState(() => firebaseAuth.currentUser);
   const [ready, setReady] = useState(false);
-  const [profile, setProfile] = useState(null);
-  const [availablePkn, setAvailablePkn] = useState(0);
+  const [extensionUid, setExtensionUid] = useState(() => injectedDeskSession.uid || '');
+  const [profile, setProfile] = useState(() => profileFromSession(hint));
+  const [availablePkn, setAvailablePkn] = useState(() => hint?.availablePkn || 0);
+  const persistRef = useRef({
+    uid: hint?.uid || '',
+    admin: Boolean(hint?.admin),
+    silver: Boolean(hint?.silver),
+    silverUntil: hint?.silverUntil || null,
+    availablePkn: hint?.availablePkn || 0,
+  });
+
+  function persistSession(partial) {
+    persistRef.current = { ...persistRef.current, ...partial };
+    const next = persistRef.current;
+    if (!next.uid) {
+      return;
+    }
+    writeAuthSession(next);
+  }
+
+  async function hydrateInjectedDeskProfile() {
+    const uid = injectedDeskSession.uid;
+    const token = injectedDeskSession.token;
+    if (!uid || String(token || '').length <= 20) {
+      return;
+    }
+    try {
+      const docs = await fetchDeskUserDocuments(uid, token);
+      if (injectedDeskSession.uid !== uid) {
+        return;
+      }
+      const next = profileFrom(docs.user || {}, uid);
+      const nextPkn = Number(docs.balance?.availablePkn || 0);
+      setProfile(next);
+      setAvailablePkn(nextPkn);
+      persistSession({
+        uid,
+        admin: next.admin,
+        silver: next.silver,
+        silverUntil: next.silverUntil,
+        availablePkn: nextPkn,
+      });
+    } catch (_) {
+      if (injectedDeskSession.uid !== uid) {
+        return;
+      }
+      setProfile((current) => current?.uid === uid ? current : profileFrom({}, uid));
+    }
+  }
+
+  useEffect(() => {
+    function requestDeskSession() {
+      const payload = { type: EXTENSION_DESK_SESSION_REQUEST, source: 'pokoin-web' };
+      window.postMessage(payload, window.location.origin);
+      try {
+        window.parent?.postMessage(payload, '*');
+      } catch (_) {
+        /* credentialless / sandboxed parent */
+      }
+    }
+
+    function onMessage(event) {
+      if (!isTrustedDeskSessionEvent(event) || !isExtensionDeskSession(event.data)) {
+        return;
+      }
+      if (!applyInjectedDeskSession(event.data)) {
+        return;
+      }
+      const uid = injectedDeskSession.uid;
+      setExtensionUid(uid);
+      persistSession({ uid });
+      const hinted = persistRef.current.admin || persistRef.current.silver
+        ? profileFromSession({
+          uid,
+          signedIn: true,
+          admin: persistRef.current.admin,
+          silver: persistRef.current.silver,
+          silverUntil: persistRef.current.silverUntil,
+        })
+        : null;
+      setProfile((current) => (current?.uid === uid && current?.silver ? current : hinted));
+      setReady(true);
+      void hydrateInjectedDeskProfile();
+    }
+
+    window.addEventListener('message', onMessage);
+    requestDeskSession();
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
 
   useEffect(() => onAuthStateChanged(firebaseAuth, (next) => {
     setUser(next);
-    setReady(true);
     if (!next) {
+      if (injectedDeskSession.token && injectedDeskSession.uid) {
+        setExtensionUid(injectedDeskSession.uid);
+        persistSession({ uid: injectedDeskSession.uid });
+        setReady(true);
+        return;
+      }
+      if (framedByChromeExtension()) {
+        setReady(true);
+        return;
+      }
+      persistRef.current = {
+        uid: '',
+        admin: false,
+        silver: false,
+        silverUntil: null,
+        availablePkn: 0,
+      };
+      setExtensionUid('');
       setProfile(null);
       setAvailablePkn(0);
+      clearAuthSession();
+      setReady(true);
+      return;
     }
+    persistRef.current = {
+      ...persistRef.current,
+      uid: next.uid,
+    };
+    setProfile((current) => (current?.uid && current.uid !== next.uid ? null : current));
+    persistSession({ uid: next.uid });
+    setReady(true);
   }), []);
 
   useEffect(() => {
+    if (framedByChromeExtension()) {
+      if (extensionUid && injectedDeskSession.token) {
+        void hydrateInjectedDeskProfile();
+      }
+      return undefined;
+    }
+    if (!user?.uid && extensionUid && injectedDeskSession.token) {
+      void hydrateInjectedDeskProfile();
+      return undefined;
+    }
     if (!user?.uid) {
       return undefined;
     }
     const unsubUser = onSnapshot(doc(firestore, 'users', user.uid), (snap) => {
-      setProfile(profileFrom(snap.data() || {}, user.uid));
-    }, () => setProfile(profileFrom({}, user.uid)));
+      const next = profileFrom(snap.data() || {}, user.uid);
+      setProfile(next);
+      persistSession({
+        uid: user.uid,
+        admin: next.admin,
+        silver: next.silver,
+        silverUntil: next.silverUntil,
+      });
+    }, () => {
+      const next = profileFrom({}, user.uid);
+      setProfile(next);
+      persistSession({
+        uid: user.uid,
+        admin: next.admin,
+        silver: next.silver,
+        silverUntil: next.silverUntil,
+      });
+    });
     const unsubBal = onSnapshot(doc(firestore, 'balances', user.uid), (snap) => {
-      setAvailablePkn(Number(snap.data()?.availablePkn || 0));
-    }, () => setAvailablePkn(0));
+      const nextPkn = Number(snap.data()?.availablePkn || 0);
+      setAvailablePkn(nextPkn);
+      persistSession({ uid: user.uid, availablePkn: nextPkn });
+    }, () => {
+      setAvailablePkn(0);
+      persistSession({ uid: user.uid, availablePkn: 0 });
+    });
     return () => {
       unsubUser();
       unsubBal();
     };
-  }, [user?.uid]);
+  }, [user?.uid, extensionUid]);
 
   const value = useMemo(() => ({
     user,
     ready,
-    signedIn: Boolean(user),
+    signedIn: Boolean(user) || Boolean(extensionUid) || (!ready && Boolean(hint?.signedIn)),
     sellerName: sellerNameOf(user),
     profile,
     availablePkn,
     admin: Boolean(profile?.admin),
     silver: Boolean(profile?.silver),
     getBearer,
-  }), [user, ready, profile, availablePkn]);
+  }), [user, ready, hint, profile, availablePkn, extensionUid]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

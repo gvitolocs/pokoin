@@ -31,7 +31,43 @@
       ]
     },
     {
+      "source": "/working.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
       "source": "/market/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/marketplace",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/marketplace/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/marketplace/:path*",
       "headers": [
         {
           "key": "Cache-Control",
@@ -50,6 +86,68 @@
     },
     {
       "source": "/favicon-32x32.png",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/favicon-48x48.png",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/favicon-96x96.png",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/robots.txt",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/sitemap.xml",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Content-Type",
+          "value": "application/xml; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/sitemap-:name.xml",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Content-Type",
+          "value": "application/xml; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/site.webmanifest",
       "headers": [
         {
           "key": "Cache-Control",
@@ -81,6 +179,48 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/download/extension.zip",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/zip"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment; filename=\"pokemon-card-extension-12.0.21.zip\""
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "X-Pokoin-Extension-Version",
+          "value": "12.0.21"
+        }
+      ]
+    },
+    {
+      "source": "/download/extention.zip",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/zip"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment; filename=\"pokemon-card-extension-12.0.21.zip\""
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "X-Pokoin-Extension-Version",
+          "value": "12.0.21"
         }
       ]
     }
@@ -145,9 +285,158 @@
       "source": "/:cardId(\\d+)",
       "destination": "/marketplace/en/cards/:cardId",
       "permanent": false
+    },
+    {
+      "source": "/pokemon",
+      "destination": "/marketplace/en/pokemon",
+      "permanent": true
+    },
+    {
+      "source": "/pokemon/:slug/",
+      "destination": "/marketplace/en/pokemon/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/pokemon/:slug",
+      "destination": "/marketplace/en/pokemon/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/sets",
+      "destination": "/marketplace/sets",
+      "permanent": true
+    },
+    {
+      "source": "/sets/:slug/",
+      "destination": "/marketplace/sets/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/sets/:slug",
+      "destination": "/marketplace/sets/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/eras",
+      "destination": "/marketplace/eras",
+      "permanent": true
+    },
+    {
+      "source": "/eras/:eraId/",
+      "destination": "/marketplace/eras/:eraId",
+      "permanent": true
+    },
+    {
+      "source": "/eras/:eraId",
+      "destination": "/marketplace/eras/:eraId",
+      "permanent": true
+    },
+    {
+      "source": "/artists",
+      "destination": "/marketplace/en/artists",
+      "permanent": true
+    },
+    {
+      "source": "/artists/:slug/",
+      "destination": "/marketplace/en/artists/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/artists/:slug",
+      "destination": "/marketplace/en/artists/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/rarities",
+      "destination": "/marketplace/en/rarities",
+      "permanent": true
+    },
+    {
+      "source": "/rarities/:slug/",
+      "destination": "/marketplace/en/rarities/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/rarities/:slug",
+      "destination": "/marketplace/en/rarities/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/languages",
+      "destination": "/marketplace/en/languages",
+      "permanent": true
+    },
+    {
+      "source": "/languages/:slug/",
+      "destination": "/marketplace/en/languages/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/languages/:slug",
+      "destination": "/marketplace/en/languages/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/guides",
+      "destination": "/marketplace/en/guides",
+      "permanent": true
+    },
+    {
+      "source": "/guides/:slug/",
+      "destination": "/marketplace/en/guides/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/guides/:slug",
+      "destination": "/marketplace/en/guides/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/marketplace/pokemon",
+      "destination": "/marketplace/en/pokemon",
+      "permanent": true
+    },
+    {
+      "source": "/marketplace/pokemon/:slug",
+      "destination": "/marketplace/en/pokemon/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/marketplace/rarities",
+      "destination": "/marketplace/en/rarities",
+      "permanent": true
+    },
+    {
+      "source": "/marketplace/rarities/:slug",
+      "destination": "/marketplace/en/rarities/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/marketplace/languages",
+      "destination": "/marketplace/en/languages",
+      "permanent": true
+    },
+    {
+      "source": "/marketplace/languages/:slug",
+      "destination": "/marketplace/en/languages/:slug",
+      "permanent": true
+    },
+    {
+      "source": "/marketplace/guides",
+      "destination": "/marketplace/en/guides",
+      "permanent": true
+    },
+    {
+      "source": "/marketplace/guides/:slug",
+      "destination": "/marketplace/en/guides/:slug",
+      "permanent": true
     }
   ],
   "rewrites": [
+    {
+      "source": "/working",
+      "destination": "/working.html"
+    },
     {
       "source": "/cardscan/identify",
       "destination": "https://cardscan.pokoin.com/identify"
@@ -162,6 +451,38 @@
     },
     {
       "source": "/sanitize",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/espurr/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/espurr",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ocr/artists/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ocr/artists",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ocr/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ocr",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/artwork/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/artwork",
       "destination": "/market/index.html"
     },
     {
@@ -285,6 +606,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/extension/auth-bridge/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/extension/auth-bridge",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/profile/",
       "destination": "/market/index.html"
     },
@@ -354,6 +683,14 @@
     },
     {
       "source": "/privacy",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/protection/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/protection",
       "destination": "/market/index.html"
     },
     {
@@ -477,6 +814,86 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/marketplace/eras/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/eras",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/eras/:eraId/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/eras/:eraId",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/pokemon/:slug/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/pokemon/:slug",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/pokemon/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/pokemon",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/rarities/:slug/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/rarities/:slug",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/rarities/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/rarities",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/languages/:slug/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/languages/:slug",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/languages/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/languages",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/guides/:slug/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/guides/:slug",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/guides/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/guides",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/marketplace/:language/artists/:artistSlug/",
       "destination": "/market/index.html"
     },
@@ -490,6 +907,14 @@
     },
     {
       "source": "/marketplace/:language/artists",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/users/:username/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/marketplace/:language/users/:username",
       "destination": "/market/index.html"
     },
     {

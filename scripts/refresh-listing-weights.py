@@ -7,14 +7,17 @@ statement/lock timeouts are short; a busy box skips until the next timer.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import os
 import subprocess
 import sys
+
+POSTGRES = os.environ.get("POKOIN_MARKETPLACE_POSTGRES") or "pokoin-marketplace-postgres-replica"
 
 PSQL = [
     "docker",
     "exec",
     "-i",
-    "pokoin-marketplace-postgres",
+    POSTGRES,
     "psql",
     "-U",
     "pokoin_marketplace",
@@ -26,15 +29,15 @@ PSQL = [
 ]
 
 
-def psql(sql: str, timeout: int = 70) -> str:
+def psql(sql: str, timeout: int = 200) -> str:
     return subprocess.check_output(PSQL, input=sql.encode(), timeout=timeout).decode()
 
 
-def run_one(label: str, sql: str) -> str:
+def run_one(label: str, sql: str, timeout: int = 200) -> str:
     try:
         out = psql(
-            "SET statement_timeout = '45s';\nSET lock_timeout = '4s';\n" + sql,
-            timeout=70,
+            "SET statement_timeout = '180s';\nSET lock_timeout = '4s';\n" + sql,
+            timeout=timeout,
         )
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as error:
         print(f"{label} skipped: {error}", file=sys.stderr)
@@ -46,13 +49,20 @@ def main() -> None:
     today = datetime.now(timezone.utc).date()
     yesterday = today - timedelta(days=1)
     parts = [
+        run_one(
+            "population_today",
+            f"SELECT 'population=' || public.refresh_cardtrader_blueprint_population('{today}'::date, false);",
+            timeout=150,
+        ),
         run_one("stats_yesterday", f"SELECT 'stats_yesterday=' || public.refresh_marketplace_listing_stats('{yesterday}'::date);"),
         run_one("stats_today", f"SELECT 'stats_today=' || public.refresh_marketplace_listing_stats('{today}'::date);"),
         run_one("weights", "SELECT 'weights=' || public.refresh_marketplace_card_weights();"),
         run_one(
             "counts",
             "SELECT 'weight_rows=' || count(*) FROM public.marketplace_card_weights;\n"
-            "SELECT 'sold_7d_cards=' || count(*) FROM public.marketplace_card_weights WHERE sold_7d > 0;",
+            "SELECT 'sold_7d_cards=' || count(*) FROM public.marketplace_card_weights WHERE sold_7d > 0;\n"
+            "SELECT 'pop_today=' || count(*) FROM public.cardtrader_blueprint_population_daily "
+            f"WHERE observed_day = '{today}'::date;",
         ),
     ]
     text = "\n".join(part for part in parts if part)

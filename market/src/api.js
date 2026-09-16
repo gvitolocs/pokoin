@@ -1,17 +1,55 @@
+import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 import { attachRecentsToHome, fetchCardTiles, fetchExpansionFromLists, fetchHomeFromLists, fetchSetIndexFromLists, isPublicRailsVector } from './lists.js';
-import { applyTilePrice } from './pkn.js';
-import { readRecentCardIds, rememberCardId } from './recents.js';
+import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsMissingTilePrice, lastMedianFromSales, tilePricePkn } from './pkn.js';
+export { formatPkn, formatPknNumber };
+import { readRecentCardIds, rememberCardId, peekRecentTile } from './recents.js';
+import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
 import { withGameQuery, isPokemonGame, gameRequestHeaders, game } from './game.js';
-import { vintedSearchUrl } from './identity.js';
+import { sanitizeCardName, vintedSearchUrl } from './identity.js';
+import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { getSearchLang } from './locale.js';
+import { artistSlug } from './artist-name.js';
+import { rememberSuggestGroups } from './suggest-live.js';
+import { expansionNationality } from './suggest-catalog.js';
+import { collectPrintingThumbUrls, preloadSuggestThumbs } from './suggest-images.js';
+import { realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
+export { artistNameFromSlug, artistSlug } from './artist-name.js';
+import { peekStoredCardPage, rememberStoredCardPage } from './card-page-cache.js';
+import {
+  clearListingsInflight,
+  dropListing,
+  invalidateListings,
+  listingsFetchEpoch,
+  listingsInflightFor,
+  mergeCreatedListing,
+  omitListings,
+  peekHasListingRows,
+  peekListings,
+  peekSellerListings,
+  rememberCreatedListing,
+  rememberListings,
+  rememberSellerListings,
+  setListingsInflight,
+} from './listings-cache.js';
 import {
   homepageDerivativeUrl,
+  homepageMatchesCatalog,
+  leftoverKeyMatchesCard,
+  ownCatalogImage,
   preferFullImage,
   rasterSiblings,
   rewritePublicImage,
 } from './image-urls.js';
+import {
+  WORKING_MESSAGE,
+  isApiRequestPath,
+  isNetworkError,
+  isOriginDownError,
+  noteOriginDown,
+  isTunnelHtml,
+} from './working-page.js';
 
-export { readRecentCardIds, rememberCardId, homepageDerivativeUrl, preferFullImage, rasterSiblings, fetchCardTiles, attachRecentsToHome, isPublicRailsVector };
+export { readRecentCardIds, rememberCardId, peekRecentTile, homepageDerivativeUrl, preferFullImage, rasterSiblings, fetchCardTiles, attachRecentsToHome, isPublicRailsVector, publicIdFromScanHit };
 
 const WATCH_KEY = 'pokoin.watchlistIds';
 
@@ -44,24 +82,65 @@ function readIdList(key) {
 }
 
 export async function getJson(path, options = {}) {
-  const response = await fetch(withGameQuery(path), {
-    headers: {
-      Accept: 'application/json',
-      ...gameRequestHeaders(),
-      ...(options.headers || {}),
-    },
-    method: options.method || 'GET',
-    body: options.body,
-    signal: options.signal,
-  });
+  const framed = framedByChromeExtension();
+  let response;
+  try {
+    response = await fetch(publicApiUrl(withGameQuery(path)), {
+      headers: {
+        Accept: 'application/json',
+        ...gameRequestHeaders(),
+        ...(options.headers || {}),
+      },
+      method: options.method || 'GET',
+      body: options.body,
+      signal: options.signal,
+      cache: options.cache,
+    });
+  } catch (err) {
+    if (isApiRequestPath(path) && isNetworkError(err)) {
+      if (!framed) {
+        noteOriginDown();
+      }
+      const error = new Error(WORKING_MESSAGE);
+      error.cause = err;
+      throw error;
+    }
+    throw err;
+  }
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
+    const raw = await response.text();
+    let body = {};
+    try {
+      body = JSON.parse(raw);
+    } catch (_) {
+      body = {};
+    }
+    if (isOriginDownError({ message: body.error || body.message || '' }, response.status, raw) || isTunnelHtml(raw)) {
+      if (!framed) {
+        noteOriginDown();
+      }
+      const error = new Error(WORKING_MESSAGE);
+      error.status = response.status;
+      error.body = body;
+      throw error;
+    }
     const error = new Error(body.error || body.message || body.detail || `Request failed (${response.status})`);
     error.status = response.status;
     error.body = body;
     throw error;
   }
-  return response.json();
+  const raw = await response.text();
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    if (isTunnelHtml(raw)) {
+      if (!framed) {
+        noteOriginDown();
+      }
+      throw new Error(WORKING_MESSAGE);
+    }
+    throw err;
+  }
 }
 
 function isViteDev() {
@@ -73,7 +152,7 @@ function isViteDev() {
 }
 
 export async function fetchHome(recentIds = []) {
-  // Pokemon SPA wants the public rails vector (New + Featured + Best).
+  // Pokemon SPA wants the public rails vector (New + Rising + Featured).
   // `GET /api/marketplace-home` on api.pokoin.com is Flutter hydrate (~170 KB,
   // no newArrivalIds). On pokoin.com the origin Worker serves the rails vector
   // instead. Vite proxies /api to api.pokoin.com, so skip that hop in dev.
@@ -81,11 +160,14 @@ export async function fetchHome(recentIds = []) {
   if (isPokemonGame()) {
     if (!isViteDev()) {
       try {
-        const payload = await getJson('/api/marketplace-home?v=units7d');
+        const payload = await getJson('/api/marketplace-home?v=rising-month', { cache: 'no-store' });
         if (isPublicRailsVector(payload)) {
           return attachRecentsToHome(payload, recentIds);
         }
-      } catch (_) {
+      } catch (err) {
+        if (isOriginDownError(err, err?.status, err?.message)) {
+          throw err;
+        }
         /* lists / oracle below */
       }
     }
@@ -94,7 +176,10 @@ export async function fetchHome(recentIds = []) {
       if (listed?.cards?.length || listed?.sections?.newArrivalIds?.length) {
         return listed;
       }
-    } catch (_) {
+    } catch (err) {
+      if (isOriginDownError(err, err?.status, err?.message)) {
+        throw err;
+      }
       /* oracle below */
     }
   }
@@ -112,6 +197,7 @@ export function fetchSearch({
   productType = '',
   productSearchOnly = false,
   lang,
+  signal,
 } = {}) {
   const params = new URLSearchParams({
     query: query || '',
@@ -119,6 +205,7 @@ export function fetchSearch({
     offset: String(offset),
     includeFacets: '0',
     lang: lang || getSearchLang(),
+    search_language: lang || getSearchLang(),
   });
   if (productType) {
     params.set('productType', productType);
@@ -126,14 +213,55 @@ export function fetchSearch({
   if (productSearchOnly) {
     params.set('productSearchOnly', '1');
   }
-  return getJson(`/api/marketplace-search-page?${params}`);
+  return getJson(`/api/marketplace-search-page?${params}`, { signal });
 }
 
-export function fetchSuggest(query, { limit = 12, signal, lang } = {}) {
+export async function fetchExactNameCards(name, {
+  excludeId,
+  signal,
+  lang,
+  limit = 96,
+} = {}) {
+  const query = exactNameQuery(name);
+  if (!query) {
+    return [];
+  }
+  const pageSize = Math.min(96, Math.max(12, Number(limit) || 96));
+  let offset = 0;
+  const collected = [];
+  const seen = new Set();
+  for (let page = 0; page < 8; page += 1) {
+    const data = await fetchSearch({
+      query,
+      offset,
+      limit: pageSize,
+      lang,
+      signal,
+    });
+    const rows = filterExactNameRows(data?.cards || [], name, { excludeId })
+      .map(cardFromCatalogRow)
+      .filter((card) => card.id);
+    for (const card of rows) {
+      if (seen.has(String(card.id))) {
+        continue;
+      }
+      seen.add(String(card.id));
+      collected.push(card);
+    }
+    if (!data?.hasMore || !rows.length) {
+      break;
+    }
+    offset += pageSize;
+  }
+  return collected;
+}
+
+export function fetchSuggest(query, { limit = 20, signal, lang, printLang } = {}) {
   const params = new URLSearchParams({
     q: query || '',
     limit: String(limit),
     search_language: lang || getSearchLang(),
+    print_language: printLang || 'all',
   });
   return getJson(`/api/marketplace-suggest?${params}`, { signal });
 }
@@ -162,7 +290,14 @@ export function warmupSearchBar() {
     searchWarmupTimer = 0;
     searchWarmupAt = Date.now();
     const lang = getSearchLang();
-    fetchSuggest('m', { limit: 4, lang }).catch(() => {});
+    fetchSuggest('m', { limit: 4, lang })
+      .then((data) => {
+        rememberSuggestGroups(data.groups);
+        preloadSuggestThumbs(collectPrintingThumbUrls(data.groups, (printing) => (
+          imageSrc(cardFromAutocomplete(printing), 'suggest')
+        )));
+      })
+      .catch(() => {});
     if (isPokemonGame()) {
       getJson(`/api/searchbar-token-predict?warmup=1&limit=1&search_language=${encodeURIComponent(lang)}`).catch(() => {});
     }
@@ -176,8 +311,6 @@ export function warmupSearchBar() {
 
 const cardCache = new Map();
 const cardInflight = new Map();
-const listingsCache = new Map();
-const listingsInflight = new Map();
 
 function cardCacheKey(cardId, lang = 'en') {
   return `${String(lang || 'en')}:${String(cardId)}`;
@@ -192,7 +325,16 @@ function rememberMap(map, key, value, max) {
 }
 
 export function peekCard(cardId, { lang = 'en' } = {}) {
-  return cardCache.get(cardCacheKey(cardId, lang)) || null;
+  const key = cardCacheKey(cardId, lang);
+  if (cardCache.has(key)) {
+    return cardCache.get(key);
+  }
+  const stored = peekStoredCardPage(cardId, { lang });
+  if (stored) {
+    rememberMap(cardCache, key, stored, 24);
+    return stored;
+  }
+  return null;
 }
 
 const canonicalPathCache = new Map();
@@ -240,12 +382,124 @@ export function fetchCanonicalPath(cardId, { lang = 'en' } = {}) {
   return pending;
 }
 
-export function fetchCard(cardId, { lang = 'en', slug = '', includeOffers = false } = {}) {
+export function fetchCardSales(cardId, {
+  condition,
+  language,
+  reverse,
+  firstEdition,
+  graded,
+  slices,
+} = {}) {
+  const id = String(cardId || '').trim();
+  if (!/^\d+$/.test(id)) {
+    return Promise.resolve({
+      rows: [],
+      slices: [],
+      series: { days: [], change24hPct: null },
+      filters: {
+        conditions: [], languages: [], reverse: [], firstEdition: [], graded: [],
+      },
+      slice: {
+        condition: null, language: null, reverse: null, firstEdition: null, graded: null,
+      },
+    });
+  }
+  const params = new URLSearchParams({ cardId: id });
+  if (slices === true || slices === '1') {
+    params.set('slices', '1');
+    return getJson(`/api/marketplace-card-sales?${params}`);
+  }
+  if (condition) {
+    params.set('condition', condition);
+  }
+  if (language) {
+    params.set('language', language);
+  }
+  if (reverse === true || reverse === false || reverse === '0' || reverse === '1') {
+    params.set('reverse', reverse === true || reverse === '1' ? '1' : '0');
+  }
+  if (firstEdition === true || firstEdition === '1') {
+    params.set('firstEdition', '1');
+  }
+  if (graded === true || graded === '1') {
+    params.set('graded', '1');
+  }
+  return getJson(`/api/marketplace-card-sales?${params}`);
+}
+
+/** Tile / versions last-median: series only, never `slices=1`. */
+export async function fetchLastMedianPknMap(cardIds) {
+  const ids = [...new Set((cardIds || []).map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id)))].slice(0, 48);
+  if (!ids.length) {
+    return {};
+  }
+  const pairs = await Promise.all(ids.map(async (id) => {
+    try {
+      const data = await fetchCardSales(id);
+      return [id, lastMedianFromSales(data)];
+    } catch (_) {
+      return [id, null];
+    }
+  }));
+  const byId = {};
+  for (const [id, pkn] of pairs) {
+    if (pkn > 0) {
+      byId[id] = pkn;
+    }
+  }
+  return byId;
+}
+
+export async function fillMissingLastMedianPrices(cards) {
+  const ids = idsMissingTilePrice(cards);
+  if (!ids.length) {
+    return cards || [];
+  }
+  const medians = await fetchLastMedianPknMap(ids);
+  if (!Object.keys(medians).length) {
+    return cards || [];
+  }
+  return applyLastMedianPrices(cards, medians);
+}
+
+export async function overlayCatalogTilePrices(cards) {
+  const ids = idsMissingTilePrice(cards);
+  if (!ids.length) {
+    return cards || [];
+  }
+  const wanted = ids.slice(0, 48);
+  let rows = [];
+  try {
+    const body = await getJson(`/api/marketplace-card-tiles?ids=${wanted.join(',')}`);
+    rows = Array.isArray(body?.cards) ? body.cards : [];
+  } catch (_) {
+    return cards || [];
+  }
+  const medians = {};
+  for (const row of rows) {
+    const priced = applyTilePrice(cardFromCatalogRow(row));
+    const pkn = tilePricePkn(priced);
+    if (pkn != null) {
+      medians[String(priced.id)] = pkn;
+    }
+  }
+  if (!Object.keys(medians).length) {
+    return cards || [];
+  }
+  return applyLastMedianPrices(cards, medians);
+}
+
+export async function fillMissingTilePrices(cards) {
+  const fromTiles = await overlayCatalogTilePrices(cards);
+  return fillMissingLastMedianPrices(fromTiles);
+}
+
+export function fetchCard(cardId, { lang = 'en', slug = '', includeOffers = false, fresh = false } = {}) {
   const key = cardCacheKey(cardId, lang);
-  if (!includeOffers && cardCache.has(key)) {
+  if (!fresh && !includeOffers && cardCache.has(key)) {
     return Promise.resolve(cardCache.get(key));
   }
-  if (!includeOffers && cardInflight.has(key)) {
+  if (!fresh && !includeOffers && cardInflight.has(key)) {
     return cardInflight.get(key);
   }
   const params = new URLSearchParams({ cardId: String(cardId) });
@@ -268,6 +522,7 @@ export function fetchCard(cardId, { lang = 'en', slug = '', includeOffers = fals
         }
       }
       rememberMap(cardCache, key, next, 24);
+      rememberStoredCardPage(cardId, next, { lang });
       cardInflight.delete(key);
       return next;
     }
@@ -282,38 +537,58 @@ export function fetchCard(cardId, { lang = 'en', slug = '', includeOffers = fals
   return pending;
 }
 
-export function peekListings(cardId) {
-  return listingsCache.get(String(cardId || '')) || null;
+export function fetchVersionSet(cardId) {
+  const id = String(cardId || '').trim();
+  if (!id) {
+    return Promise.reject(new Error('cardId is required.'));
+  }
+  return getJson(`/api/marketplace-version-set?cardId=${encodeURIComponent(id)}`);
 }
 
-export function invalidateListings(cardId) {
-  const id = String(cardId || '');
-  listingsCache.delete(id);
-  listingsInflight.delete(id);
-}
+export {
+  dropListing,
+  invalidateListings,
+  mergeCreatedListing,
+  omitListings,
+  peekHasListingRows,
+  peekListings,
+  rememberCreatedListing,
+};
 
-export function fetchListings(cardId, { limit = 40 } = {}) {
+export function fetchListings(cardId, { limit = 40, fresh = false } = {}) {
   const id = String(cardId || '');
-  if (listingsCache.has(id)) {
-    return Promise.resolve(listingsCache.get(id));
+  if (!fresh) {
+    const cached = peekListings(id);
+    if (cached) {
+      return Promise.resolve(cached);
+    }
+    const inflight = listingsInflightFor(id);
+    if (inflight) {
+      return inflight;
+    }
   }
-  if (listingsInflight.has(id)) {
-    return listingsInflight.get(id);
-  }
+  const epoch = listingsFetchEpoch(id);
   const params = new URLSearchParams({
     cardId: id,
     nativeOnly: '1',
     limit: String(limit),
   });
-  const pending = getJson(`/api/marketplace-listings?${params}`).then((data) => {
-    rememberMap(listingsCache, id, data, 24);
-    listingsInflight.delete(id);
-    return data;
+  if (fresh) {
+    params.set('_', String(Date.now()));
+  }
+  const pending = getJson(`/api/marketplace-listings?${params}`, {
+    cache: 'no-store',
+  }).then((data) => {
+    const kept = rememberListings(id, data, epoch);
+    clearListingsInflight(id);
+    return kept;
   }, (err) => {
-    listingsInflight.delete(id);
+    if (listingsFetchEpoch(id) === epoch) {
+      clearListingsInflight(id);
+    }
     throw err;
   });
-  listingsInflight.set(id, pending);
+  setListingsInflight(id, pending);
   return pending;
 }
 
@@ -328,12 +603,28 @@ export function createListing(body, token) {
   });
 }
 
+export function cancelListing(listingId, token, sellerUid) {
+  const id = String(listingId || '');
+  const params = new URLSearchParams({ id });
+  return getJson(`/api/marketplace-listings?${params}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      sellerUid,
+      status: 'inactive',
+    }),
+  });
+}
+
 export function postWatchlist(cardId, action) {
   const id = Number(cardId);
   if (!Number.isSafeInteger(id) || id <= 0) {
     return;
   }
-  fetch('/api/marketplace-watchlist', {
+  fetch(publicApiUrl('/api/marketplace-watchlist'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -342,16 +633,6 @@ export function postWatchlist(cardId, action) {
     }),
     keepalive: true,
   }).catch(() => {});
-}
-
-export function artistSlug(name) {
-  return String(name || '')
-    .replace(/é/g, 'e')
-    .replace(/É/g, 'E')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
 }
 
 export function artistHref(name, lang = 'en', filter = '') {
@@ -366,21 +647,30 @@ export function artistHref(name, lang = 'en', filter = '') {
     : `/marketplace/${language}/artists/${slug}`;
 }
 
-export function versionsHref(card, lang = 'en') {
+export function versionsHref(card, lang = 'en', hash = '') {
   const canonical = String(card?.canonicalPath || card?.canonical_path || '').replace(/\/$/, '');
-  if (canonical) {
-    return `${canonical}/versions`;
-  }
   const id = publicCardId(card);
   const language = String(lang || card?.lang || 'en').toLowerCase() || 'en';
-  return id ? `/marketplace/${language}/cards/${id}/versions` : '/marketplace';
+  const path = canonical
+    ? `${canonical}/versions`
+    : (id ? `/marketplace/${language}/cards/${id}/versions` : '');
+  if (!path) {
+    return '/marketplace';
+  }
+  const frag = String(hash || '').replace(/^#/, '');
+  return frag ? `${path}#${frag}` : path;
 }
 
 export function cardFromCatalogRow(row = {}) {
   const id = String(row.id || row.card_id || '');
   const setName = row.set || row.set_name || row.expansion_name || '';
   const number = row.number || row.card_number || row.expansion_number || row.product_variant || '';
-  const image = preferFullImage(
+  const image = ownCatalogImage({
+    ...row,
+    id,
+    name: row.name || '',
+    canonicalPath: row.canonicalPath || row.canonical_path || '',
+  }, preferFullImage(
     row.gridImageUrl
     || row.heroImageUrl
     || row.cdn_image_url
@@ -388,13 +678,13 @@ export function cardFromCatalogRow(row = {}) {
     || row.imageUrl
     || row.cdnImageUrl
     || '',
-  );
+  ));
   const path = row.canonicalPath || row.canonical_path || '';
   return applyTilePrice({
     ...row,
     id,
     card_id: id,
-    name: row.name || '',
+    name: sanitizeCardName(row.name || ''),
     set: setName,
     set_name: setName,
     number,
@@ -405,46 +695,110 @@ export function cardFromCatalogRow(row = {}) {
     canonical_path: path,
     artist: row.artist || row.illustrator || '',
     illustrator: row.illustrator || row.artist || '',
+    nationality: row.nationality || expansionNationality(setName) || '',
     trainerName: row.trainer_name || row.trainerName || '',
     gridImageUrl: image,
     heroImageUrl: preferFullImage(row.heroImageUrl || image),
     imageUrl: image,
     emoji: row.emoji || row.cardIdentityEmoji || '',
+    artShade: row.artShade || row.art_shade || '',
+    artLayout: row.artLayout || row.art_layout || '',
+    version: row.version || row.version_set || '',
+    pokedexNum: Number(row.pokedex_num || row.pokedexNum) || 0,
+    expansionSort: Number(row.expansion_sort || row.expansionSort) || 0,
+    collectorSort: Number(row.collector_sort || row.collectorSort) || 0,
+    artworkClusterSort: Number(row.artwork_cluster_sort || row.artworkClusterSort) || 0,
+    pokedexSort: Number(row.pokedex_sort || row.pokedexSort) || 0,
     price: row.price || row.lowest_price_pkn || null,
     isMarketAvailable: row.isMarketAvailable === true || row.inStock === true,
     inStock: row.isMarketAvailable === true || row.inStock === true,
   });
 }
 
+const artistPageCache = new Map();
+const artistPageInflight = new Map();
+let artistSummariesCache = null;
+
+function artistPageKey(slug, limit) {
+  return `${String(slug || '').trim().toLowerCase()}:${Number(limit) || 0}`;
+}
+
+export function peekArtist(slug, limit = 5000) {
+  return artistPageCache.get(artistPageKey(slug, limit)) || null;
+}
+
 export function fetchArtist(slug, { limit = 240 } = {}) {
+  const key = artistPageKey(slug, limit);
+  const hit = artistPageCache.get(key);
+  if (hit) {
+    return Promise.resolve(hit);
+  }
+  if (artistPageInflight.has(key)) {
+    return artistPageInflight.get(key);
+  }
   const params = new URLSearchParams({
     artistSlug: String(slug || ''),
     limit: String(limit),
   });
-  return getJson(`/api/marketplace-artist-cards?${params}`).then((data) => ({
-    ...data,
-    cards: (data.cards || []).map(cardFromCatalogRow).filter((card) => card.id),
-  }));
+  const pending = getJson(`/api/marketplace-artist-cards?${params}`)
+    .then((data) => {
+      const mapped = {
+        ...data,
+        cards: (data.cards || []).map(cardFromCatalogRow).filter((card) => card.id),
+      };
+      artistPageCache.delete(key);
+      artistPageCache.set(key, mapped);
+      while (artistPageCache.size > 8) {
+        artistPageCache.delete(artistPageCache.keys().next().value);
+      }
+      return mapped;
+    })
+    .finally(() => {
+      artistPageInflight.delete(key);
+    });
+  artistPageInflight.set(key, pending);
+  return pending;
 }
 
-export function fetchArtistSummaries({ limit = 80 } = {}) {
+export function fetchArtistSummaries({ limit = 1000 } = {}) {
+  if (artistSummariesCache) {
+    return Promise.resolve(artistSummariesCache);
+  }
   const params = new URLSearchParams({
     summaries: '1',
     limit: String(limit),
   });
-  return getJson(`/api/marketplace-artist-cards?${params}`);
+  return getJson(`/api/marketplace-artist-cards?${params}`).then((data) => {
+    artistSummariesCache = data;
+    return data;
+  });
+}
+
+export function resetArtistCacheForTests() {
+  artistPageCache.clear();
+  artistPageInflight.clear();
+  artistSummariesCache = null;
 }
 
 export async function fetchExpansions({ limit = 500 } = {}) {
+  const cap = Number(limit) || 500;
+  let cached = null;
   try {
-    const cached = await fetchSetIndexFromLists();
-    if (cached?.expansions?.length) {
-      return { ...cached, expansions: cached.expansions.slice(0, Number(limit) || 500) };
+    cached = await fetchSetIndexFromLists();
+    if (cached?.expansions?.length >= cap) {
+      return { ...cached, expansions: cached.expansions.slice(0, cap) };
     }
   } catch (_) {
     /* Oracle fallback below */
   }
-  return getJson(`/api/marketplace-expansion-page?limit=${encodeURIComponent(String(limit))}`);
+  try {
+    return await getJson(`/api/marketplace-expansion-page?limit=${encodeURIComponent(String(cap))}`);
+  } catch (err) {
+    if (cached?.expansions?.length) {
+      return { ...cached, expansions: cached.expansions.slice(0, cap) };
+    }
+    throw err;
+  }
 }
 
 export function clearWatchlist() {
@@ -466,6 +820,8 @@ export async function hydrateWatchlist() {
 
 const expansionCache = new Map();
 const expansionInflight = new Map();
+/** Page at 48 as defense. The old Oracle SQL cap was 64 and lied hasMore=false. */
+const EXPANSION_PAGE = 48;
 
 function expansionCacheKey({ slug = '', expansionName = '', limit = 48, offset = 0 } = {}) {
   return JSON.stringify({ slug, expansionName, limit: Number(limit), offset: Number(offset) });
@@ -475,7 +831,154 @@ export function peekExpansion(opts = {}) {
   return expansionCache.get(expansionCacheKey(opts)) || null;
 }
 
-export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offset = 0 } = {}) {
+const printNationalityCache = new Map();
+const printNationalityInflight = new Map();
+
+/** Expansion nationality for the card desk. Cards themselves often omit the field. */
+export function fetchPrintNationality(slug) {
+  const key = String(slug || '').trim();
+  if (!key) {
+    return Promise.resolve('');
+  }
+  if (printNationalityCache.has(key)) {
+    return Promise.resolve(printNationalityCache.get(key));
+  }
+  const peeked = peekExpansion({ slug: key, limit: EXPANSION_PAGE, offset: 0 });
+  const fromPeek = String(peeked?.expansion?.nationality || '').trim();
+  if (fromPeek) {
+    printNationalityCache.set(key, fromPeek);
+    return Promise.resolve(fromPeek);
+  }
+  if (printNationalityInflight.has(key)) {
+    return printNationalityInflight.get(key);
+  }
+  const params = new URLSearchParams({ slug: key, limit: '1' });
+  const pending = getJson(`/api/marketplace-expansion-page?${params}`)
+    .then((data) => {
+      const value = String(data?.expansion?.nationality || '').trim();
+      printNationalityCache.set(key, value);
+      return value;
+    })
+    .catch(() => '')
+    .finally(() => {
+      printNationalityInflight.delete(key);
+    });
+  printNationalityInflight.set(key, pending);
+  return pending;
+}
+
+function rememberCompleteExpansion({ slug = '', expansionName = '' } = {}, data) {
+  if (!data) {
+    return data;
+  }
+  const complete = { ...data, hasMore: false };
+  expansionCache.set(expansionCacheKey({ slug, expansionName, limit: EXPANSION_PAGE, offset: 0 }), complete);
+  if (expansionName) {
+    expansionCache.set(expansionCacheKey({ slug, expansionName: '', limit: EXPANSION_PAGE, offset: 0 }), complete);
+  }
+  return complete;
+}
+
+const promoFanCache = new Map();
+const promoFanInflight = new Map();
+
+export function peekPromoFanPool(slug) {
+  return promoFanCache.get(String(slug || '').trim()) || null;
+}
+
+/** Set-rail chase pool for the home fan. No PKN overlay — the fan does not show price. */
+export function fetchPromoFanPool(slug) {
+  const key = String(slug || '').trim();
+  if (!key) {
+    return Promise.resolve([]);
+  }
+  if (promoFanCache.has(key)) {
+    return Promise.resolve(promoFanCache.get(key));
+  }
+  if (promoFanInflight.has(key)) {
+    return promoFanInflight.get(key);
+  }
+  const pending = fetchExpansionFromLists({ slug: key, limit: 200, offset: 0 })
+    .catch(() => null)
+    .then(async (rail) => {
+      const fromRail = (rail?.cards || []).filter((card) => card?.id);
+      if (fromRail.length) {
+        promoFanCache.set(key, fromRail);
+        return fromRail;
+      }
+      const params = new URLSearchParams({
+        slug: key,
+        limit: '120',
+        offset: '0',
+        productType: 'card',
+      });
+      const page = mapExpansionCards(await getJson(`/api/marketplace-expansion-page?${params}`).catch(() => null));
+      const cards = (page?.cards || []).filter((card) => card?.id);
+      promoFanCache.set(key, cards);
+      return cards;
+    })
+    .finally(() => {
+      promoFanInflight.delete(key);
+    });
+  promoFanInflight.set(key, pending);
+  return pending;
+}
+
+function mapExpansionCards(data) {
+  if (!data) {
+    return data;
+  }
+  const nationality = String(data.expansion?.nationality || '').trim();
+  return {
+    ...data,
+    cards: (data.cards || []).map((row) => {
+      const card = cardFromCatalogRow(row);
+      if (!card.id) {
+        return null;
+      }
+      if (card.nationality || !nationality) {
+        return card;
+      }
+      return { ...card, nationality };
+    }).filter(Boolean),
+  };
+}
+
+function mergeExpansionPayload(base, page) {
+  if (!page) {
+    return base;
+  }
+  if (!base?.cards?.length) {
+    return page;
+  }
+  const total = Number(page?.expansion?.cardCount || page?.total || base.total || 0);
+  const incoming = new Map((page.cards || []).map((card) => [String(card.id), card]));
+  const cards = (base.cards || []).map((card) => {
+    const next = incoming.get(String(card.id));
+    if (!next) {
+      return card;
+    }
+    const merged = { ...card, ...next };
+    if (tilePricePkn(card) != null && tilePricePkn(next) == null) {
+      merged.price = card.price;
+      merged.lowest_price_pkn = card.lowest_price_pkn ?? card.price;
+    }
+    return applyTilePrice(merged);
+  });
+  return {
+    ...base,
+    total: total || base.total,
+    cards,
+    expansion: {
+      ...(base.expansion || {}),
+      ...(page.expansion || {}),
+      ...(total > 0 ? { cardCount: total } : {}),
+    },
+    hasMore: page.hasMore ?? base.hasMore,
+  };
+}
+
+export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offset = 0, onUpdate } = {}) {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
@@ -494,36 +997,47 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
   if (offset === 0 && expansionInflight.has(key)) {
     return expansionInflight.get(key);
   }
-  const pending = (Number(offset) === 0 && slug
+  const fromLists = slug
     ? fetchExpansionFromLists({ slug, limit, offset }).catch(() => null)
-    : Promise.resolve(null)
-  ).then(async (cached) => {
-    if (!cached?.cards?.length) {
-      return getJson(`/api/marketplace-expansion-page?${params}`);
+    : Promise.resolve(null);
+  const pageSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(6000)
+    : undefined;
+  const fromPage = getJson(`/api/marketplace-expansion-page?${params}`, { signal: pageSignal }).catch(() => null);
+  const pending = fromLists.then(async (cached) => {
+    // Rail / first SQL page is metadata only. The set desk waits for
+    // fetchExpansionCards (hasMore false) before painting tiles.
+    const fromRail = mapExpansionCards(cached);
+    if (fromRail?.cards?.length) {
+      const pricedRail = {
+        ...fromRail,
+        cards: await fillMissingTilePrices(fromRail.cards),
+      };
+      expansionCache.set(key, pricedRail);
+      void fromPage.then(async (page) => {
+        if (!page) {
+          return;
+        }
+        const merged = mergeExpansionPayload(pricedRail, mapExpansionCards(page));
+        merged.cards = await fillMissingTilePrices(merged.cards || []);
+        expansionCache.set(key, merged);
+        onUpdate?.(merged);
+      });
+      return pricedRail;
     }
-    const have = Number(cached.expansion?.cardCount || cached.total || 0);
-    if (have > 0) {
-      return cached;
+    const page = mapExpansionCards(await fromPage);
+    if (page?.cards?.length) {
+      return {
+        ...page,
+        cards: await fillMissingTilePrices(page.cards),
+      };
     }
-    try {
-      const metaParams = new URLSearchParams(params);
-      metaParams.set('limit', '1');
-      const meta = await getJson(`/api/marketplace-expansion-page?${metaParams}`);
-      const total = Number(meta?.expansion?.cardCount || meta?.total || 0);
-      if (total > 0) {
-        return {
-          ...cached,
-          total,
-          expansion: { ...(cached.expansion || {}), cardCount: total },
-        };
-      }
-    } catch (_) {
-      /* lists tiles still render */
-    }
-    return cached;
+    throw new Error('Expansion failed.');
   }).then((data) => {
     if (offset === 0) {
-      expansionCache.set(key, data);
+      if (!expansionCache.has(key) && data) {
+        expansionCache.set(key, data);
+      }
       expansionInflight.delete(key);
     }
     return data;
@@ -536,9 +1050,6 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
   }
   return pending;
 }
-
-/** Page at 48 as defense. Oracle used to hard-cap SQL at 64 and lie hasMore=false. */
-const EXPANSION_PAGE = 48;
 
 export async function fetchExpansionCards({ slug = '', expansionName = '' } = {}) {
   const cards = [];
@@ -563,7 +1074,7 @@ export async function fetchExpansionCards({ slug = '', expansionName = '' } = {}
       cards.push(row);
     }
     if (chunk.length < EXPANSION_PAGE) {
-      return { cards, hasMore: false, expansion };
+      return rememberCompleteExpansion({ slug, expansionName }, { cards, hasMore: false, expansion });
     }
     offset += chunk.length;
   }
@@ -700,10 +1211,10 @@ export function postEvent({ cardId, eventType, metadata = {} }) {
   });
   if (navigator.sendBeacon) {
     const blob = new Blob([body], { type: 'application/json' });
-    navigator.sendBeacon('/api/marketplace-event', blob);
+    navigator.sendBeacon(publicApiUrl('/api/marketplace-event'), blob);
     return;
   }
-  fetch('/api/marketplace-event', {
+  fetch(publicApiUrl('/api/marketplace-event'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
@@ -712,22 +1223,21 @@ export function postEvent({ cardId, eventType, metadata = {} }) {
 }
 
 export function cardHref(card) {
-  if (card?.canonicalPath || card?.canonical_path) {
-    return card.canonicalPath || card.canonical_path;
-  }
-  if (card?.id || card?.card_id) {
-    return `/marketplace/${getSearchLang()}/cards/${card.id || card.card_id}`;
+  const id = realPublicCardId(card?.id || card?.card_id || '');
+  const path = rewriteCanonicalCardPath(card?.canonicalPath || card?.canonical_path, id, getSearchLang());
+  if (path) {
+    return path;
   }
   return '/marketplace';
 }
 
 export function publicCardId(card) {
-  return String(card?.id || card?.card_id || '');
+  return realPublicCardId(String(card?.id || card?.card_id || ''));
 }
 
 export function imageSrc(card, kind = 'grid') {
   if (kind === 'hero') {
-    return preferFullImage(
+    return ownCatalogImage(card, preferFullImage(
       card?.heroImageUrl
       || card?.imageUrl
       || card?.cdn_image_url
@@ -736,64 +1246,68 @@ export function imageSrc(card, kind = 'grid') {
       || card?.tileImageUrl
       || card?.homepageImageUrl
       || card?.homepage_image_url,
-    );
+    ));
   }
   if (kind === 'suggest') {
-    const tile = homepageDerivativeUrl(
-      card?.tileImageUrl || card?.homepageImageUrl || card?.homepage_image_url || card?.gridImageUrl,
-    );
-    if (tile) {
-      return tile;
-    }
-    const full = preferFullImage(
+    const full = ownCatalogImage(card, preferFullImage(
       card?.gridImageUrl || card?.cdn_image_url || card?.image_url || card?.imageUrl || card?.image,
-    );
+    ));
+    const advertised = card?.tileImageUrl || card?.homepageImageUrl || card?.homepage_image_url || '';
+    if (advertised && leftoverKeyMatchesCard(advertised, publicCardId(card)) && homepageMatchesCatalog(advertised, full || advertised)) {
+      return homepageDerivativeUrl(advertised);
+    }
     if (full) {
-      return full;
+      return homepageDerivativeUrl(full);
     }
     return rewritePublicImage(
       card?.gridImageUrl || card?.cdn_image_url || card?.image_url || card?.imageUrl || card?.image,
       { allowPreview: true },
     );
   }
-  return homepageDerivativeUrl(
-    card?.tileImageUrl
-    || card?.homepageImageUrl
-    || card?.homepage_image_url
-    || card?.gridImageUrl
+  const full = ownCatalogImage(card, preferFullImage(
+    card?.gridImageUrl
     || card?.imageUrl
     || card?.cdn_image_url
     || card?.image_url,
-  );
+  ));
+  const advertised = card?.tileImageUrl || card?.homepageImageUrl || card?.homepage_image_url || '';
+  if (advertised && leftoverKeyMatchesCard(advertised, publicCardId(card)) && homepageMatchesCatalog(advertised, full || advertised)) {
+    return homepageDerivativeUrl(advertised);
+  }
+  return homepageDerivativeUrl(full || advertised);
 }
 
 export function cardFromAutocomplete(row = {}) {
   const id = String(row.card_id || row.id || '');
+  const live = row.live === true || id.startsWith('live:');
+  const image = ownCatalogImage({
+    id,
+    name: row.name,
+    canonicalPath: row.canonicalPath || row.canonical_path || row.href,
+  }, preferFullImage(row.image || row.cdn_image_url || row.image_url));
   return {
     id,
     card_id: id,
     ct_id: row.ct_id,
-    name: row.name,
+    name: sanitizeCardName(row.name),
+    localized_name: sanitizeCardName(row.localized_name || row.localizedName || ''),
     set: row.set_name || row.set,
+    localized_set: row.localized_set || row.localizedSet || '',
     number: row.card_number || row.number,
     rarity: row.rarity,
+    localized_rarity: row.localized_rarity || row.localizedRarity || '',
     itemKind: row.item_kind,
     productType: row.product_type,
     canonicalPath: row.canonicalPath || row.canonical_path || row.href,
-    image: row.image || row.cdn_image_url || row.image_url,
-    image_url: row.image || row.cdn_image_url || row.image_url,
-    gridImageUrl: preferFullImage(row.image || row.cdn_image_url || row.image_url),
-    heroImageUrl: preferFullImage(row.image || row.cdn_image_url || row.image_url),
+    image,
+    image_url: image,
+    gridImageUrl: image,
+    heroImageUrl: image,
     isMarketAvailable: row.isMarketAvailable === true,
+    nationality: row.nationality || expansionNationality(row.set_name || row.set) || '',
+    expansionSymbolUrl: row.expansionSymbolUrl || row.expansion_symbol_url || row.defaultSymbolUrl || row.symbolImageUrl || '',
+    live,
   };
-}
-
-export function formatPkn(value) {
-  const amount = Number(value);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return '';
-  }
-  return `${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} PKN`;
 }
 
 export function prettySlug(slug) {
@@ -891,6 +1405,39 @@ export function createMarketplaceOrder(body, token) {
   });
 }
 
+export function confirmMarketplaceDelivery(orderId, token) {
+  return getJson('/api/marketplace-orders?action=confirm-delivery', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ orderId }),
+  });
+}
+
+export function markMarketplaceShipped(orderId, token) {
+  return getJson('/api/marketplace-orders?action=mark-shipped', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ orderId }),
+  });
+}
+
+export function reportMarketplaceProblem({ orderId, reason, notes }, token) {
+  return getJson('/api/marketplace-orders?action=report-problem', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ orderId, reason, notes }),
+  });
+}
+
 export function requestNftShipping(body, token) {
   return getJson('/api/marketplace-orders?action=nft-shipping-request', {
     method: 'POST',
@@ -979,25 +1526,13 @@ export function saveExpansionSymbol(body, token) {
 export async function identifyScan(file) {
   const body = new FormData();
   body.append('file', file, file.name || 'card.jpg');
-  const response = await fetch('/cardscan/identify', { method: 'POST', body });
+  const params = new URLSearchParams({ catalog: scanCatalogId() });
+  const response = await fetch(`/cardscan/identify?${params}`, { method: 'POST', body });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.detail || data.error || `Scan failed (${response.status})`);
   }
   return data;
-}
-
-/** Scan Fast/Milo `id` is TCGplayer. Public card_id is CardTrader blueprint × 2. */
-export function publicIdFromScanHit(hit) {
-  const blueprint = String(hit?.blueprint_id || hit?.blueprintId || '').trim();
-  if (!/^\d+$/.test(blueprint)) {
-    return '';
-  }
-  try {
-    return (BigInt(blueprint) * 2n).toString();
-  } catch (_) {
-    return '';
-  }
 }
 
 export function mediaUrl(row) {
@@ -1084,12 +1619,19 @@ export function fileToDataUrl(file) {
 }
 
 export function scanHitsOf(data) {
+  const identity = String(data?.identity || '');
+  const catalog = String(data?.catalog || '');
   const rows = data?.hits || data?.results || data?.predictions || data?.data?.hits || [];
+  const stamp = (hit) => (
+    hit && typeof hit === 'object'
+      ? { ...hit, identity: hit.identity || identity, catalog: hit.catalog || catalog }
+      : hit
+  );
   if (Array.isArray(rows) && rows.length) {
-    return rows;
+    return rows.map(stamp);
   }
   if (data?.name || data?.blueprint_id || data?.blueprintId) {
-    return [data];
+    return [stamp(data)];
   }
   return [];
 }
@@ -1163,6 +1705,38 @@ export async function catalogFromScanHit(hit) {
     return { id: publicId, card_id: publicId, name, set, number };
   }
   return null;
+}
+
+const sellerInflight = new Map();
+
+export function fetchSellerByUsername(username, { limit = 20, signal } = {}) {
+  const handle = String(username || '').trim();
+  if (!handle) {
+    return Promise.resolve({ listings: [] });
+  }
+  const cached = peekSellerListings(handle);
+  if (cached) {
+    return Promise.resolve(cached);
+  }
+  const key = handle.toLowerCase();
+  const pending = sellerInflight.get(key);
+  if (pending) {
+    return pending;
+  }
+  const params = new URLSearchParams({
+    sellerUsername: handle,
+    nativeOnly: '1',
+    limit: String(limit),
+  });
+  const request = getJson(`/api/marketplace-listings?${params}`, { signal }).then((data) => {
+    sellerInflight.delete(key);
+    return rememberSellerListings(handle, data);
+  }, (err) => {
+    sellerInflight.delete(key);
+    throw err;
+  });
+  sellerInflight.set(key, request);
+  return request;
 }
 
 export function fetchSellerListings(sellerUid, token, { limit = 40 } = {}) {

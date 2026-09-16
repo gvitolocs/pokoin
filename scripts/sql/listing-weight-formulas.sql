@@ -4,10 +4,14 @@
 -- not filter by expansion nationality — that is merchandising, not a weight.
 --
 -- Best sellers (Cardmarket EN singles, WooCommerce "sold count", Layers):
---   7-day *units*. Revenue/GMV ranks expensive SKUs and reads as a price list.
---   A tiny log-GMV term only breaks ties. Window is 7d (trend catalog).
+--   7-day *units* times ln(1+copies). Copies come from the daily CardTrader
+--   cheap-25 dump, not the 868-row hub cache. Zero population → not a seller.
 -- Featured / trending (Algolia, Shopify "What's Hot", Rankify 48h–7d):
 --   recent velocity + sell-through, *not* lifetime GMV and not 50% of best-seller.
+-- Popular: copies that appeared in the last 30 days (snapshot first_seen),
+-- not dump size and not another units sort. The first huge first_seen day is
+-- the census import, not growth — exclude it. Cap each listing at 25 copies
+-- so one warehouse lot cannot own the rail.
 -- Demand (OP.LOG): (weekly_units/7)/supply, min sales floor, no GMV multiply.
 --   That is a tightness metric, not a homepage sort by itself.
 
@@ -38,11 +42,28 @@ alter table public.marketplace_card_weights
 alter table public.marketplace_card_weights
   add column if not exists featured_score numeric not null default 0;
 
+alter table public.marketplace_card_weights
+  add column if not exists listed_qty_now integer not null default 0;
+
+alter table public.marketplace_card_weights
+  add column if not exists popular_score numeric not null default 0;
+
 create index if not exists marketplace_card_weights_best_seller_idx
   on public.marketplace_card_weights (best_seller_score desc, combined_weight desc);
 
 create index if not exists marketplace_card_weights_featured_idx
   on public.marketplace_card_weights (featured_score desc, combined_weight desc);
+
+create index if not exists marketplace_card_weights_popular_idx
+  on public.marketplace_card_weights (popular_score desc, listed_qty_now desc);
+
+do $$
+begin
+  if to_regclass('public.cardtrader_market_listing_snapshots') is not null then
+    execute 'create index if not exists cardtrader_snapshots_first_seen_idx
+      on public.cardtrader_market_listing_snapshots (first_seen_at)';
+  end if;
+end $$;
 
 create or replace function public.refresh_marketplace_listing_stats(
   target_day date default ((timezone('utc', now()))::date)
@@ -116,21 +137,60 @@ begin
     source,
     listed_count,
     listed_quantity,
+    seller_count,
+    new_listings,
+    new_quantity,
     refreshed_at
   )
   select
-    coalesce(nullif(cache.pokoin_card_id, ''), (cache.blueprint_id * 2)::text),
+    (pop.blueprint_id * 2)::text,
     v_day,
     'cardtrader',
-    coalesce(cache.eligible_listing_count, 0),
-    coalesce(cache.eligible_quantity, 0),
+    coalesce(pop.listing_count, 0),
+    coalesce(pop.listed_quantity, 0),
+    coalesce(pop.seller_count, 0),
+    coalesce(pop.new_listings, 0),
+    coalesce(pop.new_quantity, 0),
     now()
-  from public.cardtrader_blueprint_listing_cache cache
-  where coalesce(nullif(cache.pokoin_card_id, ''), (cache.blueprint_id * 2)::text) is not null
+  from public.cardtrader_blueprint_population_daily pop
+  where pop.observed_day = v_day
+    and pop.blueprint_id is not null
   on conflict (card_id, observed_day, source) do update set
     listed_count = excluded.listed_count,
     listed_quantity = excluded.listed_quantity,
+    seller_count = excluded.seller_count,
+    new_listings = excluded.new_listings,
+    new_quantity = excluded.new_quantity,
     refreshed_at = now();
+
+  if not exists (
+    select 1
+    from public.cardtrader_blueprint_population_daily
+    where observed_day = v_day
+    limit 1
+  ) and v_day = (timezone('utc', now()))::date then
+    insert into public.marketplace_listing_stats_daily (
+      card_id,
+      observed_day,
+      source,
+      listed_count,
+      listed_quantity,
+      refreshed_at
+    )
+    select
+      coalesce(nullif(cache.pokoin_card_id, ''), (cache.blueprint_id * 2)::text),
+      v_day,
+      'cardtrader',
+      coalesce(cache.eligible_listing_count, 0),
+      coalesce(cache.eligible_quantity, 0),
+      now()
+    from public.cardtrader_blueprint_listing_cache cache
+    where coalesce(nullif(cache.pokoin_card_id, ''), (cache.blueprint_id * 2)::text) is not null
+    on conflict (card_id, observed_day, source) do update set
+      listed_count = excluded.listed_count,
+      listed_quantity = excluded.listed_quantity,
+      refreshed_at = now();
+  end if;
 
   insert into public.marketplace_listing_stats_daily (
     card_id,
@@ -182,7 +242,7 @@ declare
   v_run timestamptz := now();
 begin
   perform set_config('lock_timeout', '4s', true);
-  perform set_config('statement_timeout', '90s', true);
+  perform set_config('statement_timeout', '180s', true);
 
   if p_card_id is not null and p_card_id <> '' then
     delete from public.marketplace_card_weights where card_id = p_card_id;
@@ -204,6 +264,8 @@ begin
     new_1d,
     new_7d,
     listed_now,
+    listed_qty_now,
+    popular_score,
     native_listed,
     native_sold_7d,
     native_new_7d,
@@ -214,7 +276,44 @@ begin
     combined_weight,
     updated_at
   )
-  with keys as (
+  with census_day as (
+    select d
+    from (
+      select (first_seen_at at time zone 'utc')::date as d, count(*) as n
+      from public.cardtrader_market_listing_snapshots
+      group by 1
+      order by n desc
+      limit 1
+    ) biggest
+  ),
+  pop_growth as (
+    select
+      public.pokoin_public_card_id(
+        snapshot.pokoin_card_id,
+        snapshot.blueprint_id,
+        snapshot.cardtrader_blueprint_id
+      ) as card_id,
+      sum(least(greatest(coalesce(snapshot.quantity, 0), 0), 25))::numeric as copies_added
+    from public.cardtrader_market_listing_snapshots snapshot
+    cross join census_day
+    where snapshot.first_seen_at >= (now() - interval '30 days')
+      and (snapshot.first_seen_at at time zone 'utc')::date is distinct from census_day.d
+      and public.pokoin_public_card_id(
+        snapshot.pokoin_card_id,
+        snapshot.blueprint_id,
+        snapshot.cardtrader_blueprint_id
+      ) is not null
+      and (
+        p_card_id is null
+        or public.pokoin_public_card_id(
+          snapshot.pokoin_card_id,
+          snapshot.blueprint_id,
+          snapshot.cardtrader_blueprint_id
+        ) = p_card_id
+      )
+    group by 1
+  ),
+  keys as (
     select distinct card_id
     from public.marketplace_listing_stats_daily
     where observed_day >= v_from
@@ -233,6 +332,10 @@ begin
     select (blueprint_id * 2)::text
     from public.marketplace_hot_blueprints
     where (p_card_id is null or (blueprint_id * 2)::text = p_card_id)
+    union
+    select pop_growth.card_id
+    from pop_growth
+    where pop_growth.card_id is not null
   ),
   rolled as (
     select
@@ -295,26 +398,23 @@ begin
       coalesce(rolled.native_sold_7d, 0) as native_sold_7d,
       coalesce(rolled.native_new_7d, 0) as native_new_7d,
       coalesce(rolled.ct_sold_7d, 0) as ct_sold_7d,
-      coalesce(rolled.ct_new_7d, 0) as ct_new_7d
+      coalesce(rolled.ct_new_7d, 0) as ct_new_7d,
+      coalesce(pop_growth.copies_added, 0) as popular_copies
     from keys
     left join rolled on rolled.card_id = keys.card_id
     left join native_live on native_live.card_id = keys.card_id
+    left join pop_growth on pop_growth.card_id = keys.card_id
   ),
   with_hot as (
     select
       scored.*,
-      coalesce((
-        select h.hot_score_24h
-        from public.marketplace_hot_blueprints h
-        where h.blueprint_id::text = scored.card_id
-           or (scored.ct_id is not null and h.blueprint_id = scored.ct_id)
-        order by h.hot_score_24h desc nulls last
-        limit 1
-      ), 0) as hot_score_24h,
+      coalesce(h.hot_score_24h, 0) as hot_score_24h,
       coalesce(c.search_weight, 0) as catalog_search_weight
     from scored
     left join public.marketplace_search_candidates c
       on c.card_id::text = scored.card_id
+    left join public.marketplace_hot_blueprints h
+      on scored.ct_id is not null and h.blueprint_id = scored.ct_id
   ),
   formula as (
     select
@@ -328,8 +428,10 @@ begin
         then (with_hot.listed_qty::numeric * 7.0) / with_hot.sold_qty_7d
         else null
       end as days_of_supply,
-      -- Dead simple: integer 7-day units. Publisher sorts this column.
-      with_hot.sold_qty_7d::numeric as best_seller_score,
+      -- Units sold, scaled by dump copy population so cheap-25 churn on a
+      -- 3-copy printing cannot beat a staple with 80 copies that also moves.
+      (with_hot.sold_qty_7d::numeric * ln(1.0 + with_hot.listed_qty)) as best_seller_score,
+      with_hot.popular_copies as popular_score,
       -- OP.LOG demand pressure: (qty/7)/listed, min 3 sales, needs supply.
       case
         when with_hot.sold_qty_7d >= 3 and with_hot.listed_qty > 0
@@ -363,6 +465,8 @@ begin
     formula.new_1d,
     formula.new_7d,
     formula.listed_now,
+    formula.listed_qty as listed_qty_now,
+    formula.popular_score,
     formula.native_listed,
     formula.native_sold_7d,
     formula.native_new_7d,
@@ -393,6 +497,8 @@ begin
     new_1d = excluded.new_1d,
     new_7d = excluded.new_7d,
     listed_now = excluded.listed_now,
+    listed_qty_now = excluded.listed_qty_now,
+    popular_score = excluded.popular_score,
     native_listed = excluded.native_listed,
     native_sold_7d = excluded.native_sold_7d,
     native_new_7d = excluded.native_new_7d,

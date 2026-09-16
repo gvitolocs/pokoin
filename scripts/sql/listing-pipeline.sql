@@ -1,5 +1,5 @@
 -- Listing pipeline: native appear/sold + CardTrader removed/sold → card weights.
--- Oracle stays the store. Do not copy snapshot rows into Supabase.
+-- Pi Postgres stays the store. Do not copy snapshot rows off-cluster.
 -- Public card_id = CardTrader blueprint × 2.
 
 create or replace function public.pokoin_public_card_id(
@@ -83,8 +83,16 @@ create table if not exists public.marketplace_card_weights (
   best_seller_score numeric not null default 0,
   featured_score numeric not null default 0,
   combined_weight numeric not null default 0,
+  listed_qty_now integer not null default 0,
+  popular_score numeric not null default 0,
   updated_at timestamptz not null default now()
 );
+
+alter table public.marketplace_card_weights
+  add column if not exists listed_qty_now integer not null default 0;
+
+alter table public.marketplace_card_weights
+  add column if not exists popular_score numeric not null default 0;
 
 create index if not exists marketplace_card_weights_weight_idx
   on public.marketplace_card_weights (combined_weight desc, card_id desc);
@@ -97,6 +105,9 @@ create index if not exists marketplace_card_weights_best_seller_idx
 
 create index if not exists marketplace_card_weights_featured_idx
   on public.marketplace_card_weights (featured_score desc, combined_weight desc);
+
+create index if not exists marketplace_card_weights_popular_idx
+  on public.marketplace_card_weights (popular_score desc, listed_qty_now desc);
 
 create or replace function public.marketplace_user_listings_audit()
 returns trigger
@@ -569,16 +580,19 @@ begin
   )
   with listed as (
     select
-      cache.blueprint_id,
-      coalesce(cache.eligible_listing_count, 0)::integer as listing_count,
-      coalesce(cache.eligible_quantity, 0)::integer as listed_quantity,
-      0::integer as seller_count,
+      pop.blueprint_id,
+      coalesce(pop.listing_count, 0)::integer as listing_count,
+      coalesce(pop.listed_quantity, 0)::integer as listed_quantity,
+      coalesce(pop.seller_count, 0)::integer as seller_count,
       cache.cheapest_price_pkn as min_price_pkn,
       cache.cheapest_price_pkn as median_price_pkn,
       cache.cheapest_price_pkn as average_price_pkn,
       cache.cheapest_price_pkn as max_price_pkn
-    from public.cardtrader_blueprint_listing_cache cache
-    where cache.blueprint_id is not null
+    from public.cardtrader_blueprint_population_daily pop
+    left join public.cardtrader_blueprint_listing_cache cache
+      on cache.blueprint_id = pop.blueprint_id
+    where pop.observed_day = (timezone('utc', now()))::date
+      and pop.blueprint_id is not null
   ),
   removed as (
     select
@@ -646,7 +660,16 @@ begin
     ),
     now()
   from combined
-  where combined.blueprint_id is not null;
+  where combined.blueprint_id is not null
+    -- Skip orphan blueprint ids (removed history / population can mention
+    -- blueprints not in cardtrader_pokemon_blueprints). One orphan used to
+    -- abort the whole daily finalize on FK
+    -- cardtrader_blueprint_daily_analytics_blueprint_id_fkey.
+    and exists (
+      select 1
+      from public.cardtrader_pokemon_blueprints blueprints
+      where blueprints.id = combined.blueprint_id
+    );
 
   get diagnostics refreshed_count = row_count;
   return coalesce(refreshed_count, 0);
@@ -670,13 +693,18 @@ as $$
 declare
   v_day date := coalesce(p_removed_day, current_date - 1);
 begin
-  perform set_config('statement_timeout', '60s', true);
+  perform set_config('statement_timeout', '180s', true);
   perform set_config('lock_timeout', '4s', true);
 
-  -- Skip full-table snapshot scans on the 1 GB micro. Per-expansion upserts
-  -- already wrote asks; sold comps live in removed_history.
+  -- Population GROUP BY of cheap-25 snapshots is Pi-safe. Hub cache is not
+  -- market size. Sold comps still come from removed_history.
   cache_refreshed_count := 0;
   price_summary_count := 0;
+
+  perform public.refresh_cardtrader_blueprint_population(
+    (timezone('utc', now()))::date,
+    true
+  );
 
   select public.refresh_cardtrader_blueprint_daily_analytics(v_day)
   into analytics_count;

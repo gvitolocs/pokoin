@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+Disallow: /marketplace/search
+Disallow: /marketplace/search?
+
+User-agent: Googlebot
+Allow: /
+Disallow: /marketplace/search
+Disallow: /marketplace/search?
+
+User-agent: Googlebot-Image
+Allow: /
+
+Sitemap: https://sitemap.pokoin.com/sitemap.xml

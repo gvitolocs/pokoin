@@ -1,44 +1,34 @@
+import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
 import { applyTilePrice, tilePricePkn } from './pkn.js';
-
-const viteEnv = (typeof import.meta !== 'undefined' && import.meta.env) || {};
-
-export const SUPABASE_URL = String(
-  viteEnv.VITE_SUPABASE_URL || 'https://ruvtchmbtxvjqmquobij.supabase.co',
-).replace(/\/$/, '');
-
-export const SUPABASE_ANON_KEY = String(viteEnv.VITE_SUPABASE_ANON_KEY || '');
+import { expandProvisionalCardIds, normalizeRecentCardIds, realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
+import { isSetDeskCard } from './search-filters.js';
+import { isOriginDownError, isOriginDownStatus, noteOriginDown } from './working-page.js';
 
 const RAIL = {
   newCards: 'new_cards',
   featured: 'featured',
   bestSellers: 'best_sellers',
   spotlight: 'spotlight',
-  topSold: 'top_sold',
   setIndex: 'set_index',
 };
+
+export const NEW_CARDS_LIMIT = 20;
+export const FEATURED_LIMIT = 30;
 
 export function setRailId(slug) {
   return `set:${String(slug || '').trim()}`;
 }
 
 export function listsConfigured() {
-  return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+  return true;
 }
 
-function isViteDev() {
-  try {
-    return Boolean(viteEnv.DEV);
-  } catch (_) {
-    return false;
-  }
-}
-
-/** Worker/Supabase rails vector. Reject Flutter hydrate and Oracle newest-only page. */
+/** Pi rails vector. Reject Flutter hydrate. */
 export function isPublicRailsVector(payload) {
   if (!payload || typeof payload !== 'object') {
     return false;
   }
-  if (payload.source === 'supabase') {
+  if (payload.source === 'pi') {
     return true;
   }
   const sections = payload.sections || {};
@@ -49,26 +39,6 @@ export function isPublicRailsVector(payload) {
   );
 }
 
-function headers() {
-  return {
-    apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-    Accept: 'application/json',
-  };
-}
-
-async function rest(path) {
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    headers: headers(),
-  });
-  if (!response.ok) {
-    const error = new Error(`Lists request failed (${response.status})`);
-    error.status = response.status;
-    throw error;
-  }
-  return response.json();
-}
-
 function asCards(value) {
   if (Array.isArray(value)) {
     return value.filter((card) => card && (card.id || card.card_id));
@@ -76,19 +46,77 @@ function asCards(value) {
   return [];
 }
 
+function asHomeCards(value) {
+  return asCards(value).filter(isSetDeskCard);
+}
+
 function cardId(card) {
-  return String(card?.id || card?.card_id || '');
+  return realPublicCardId(String(card?.id || card?.card_id || ''));
+}
+
+export function tileHasName(card) {
+  return Boolean(String(card?.name || '').trim());
+}
+
+function mergeTile(prev, next) {
+  if (!prev) {
+    return tileHasName(next) ? next : null;
+  }
+  if (tileHasName(prev) && !tileHasName(next)) {
+    const merged = { ...next, ...prev };
+    if (tilePricePkn(next) && !tilePricePkn(prev)) {
+      merged.price = next.price;
+      merged.lowest_price_pkn = next.lowest_price_pkn;
+    }
+    return applyTilePrice(merged);
+  }
+  const merged = { ...prev, ...next };
+  if (!tilePricePkn(next) && tilePricePkn(prev)) {
+    merged.price = prev.price;
+    merged.lowest_price_pkn = prev.lowest_price_pkn;
+  }
+  return applyTilePrice(merged);
+}
+
+function collapseTiles(cards) {
+  const byId = new Map();
+  for (const card of asCards(cards)) {
+    const id = cardId(card);
+    if (!id) {
+      continue;
+    }
+    const path = rewriteCanonicalCardPath(card.canonicalPath || card.canonical_path, id);
+    const next = applyTilePrice({
+      ...card,
+      id,
+      card_id: id,
+      canonicalPath: path || card.canonicalPath,
+      canonical_path: path || card.canonical_path,
+    });
+    const merged = mergeTile(byId.get(id), next);
+    if (merged) {
+      byId.set(id, merged);
+    }
+  }
+  return [...byId.values()];
 }
 
 export async function fetchRail(id) {
-  if (!listsConfigured() || !id) {
+  if (!id) {
     return null;
   }
-  const rows = await rest(
-    `marketplace_rails?id=eq.${encodeURIComponent(id)}&select=id,cards,meta,updated_at`,
-  );
-  const row = rows?.[0];
-  if (!row) {
+  const response = await fetch(publicApiUrl(`/api/marketplace-rails?id=${encodeURIComponent(id)}`), {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    if (!framedByChromeExtension() && (isOriginDownStatus(response.status) || isOriginDownError({ message: raw }, response.status, raw))) {
+      noteOriginDown();
+    }
+    return null;
+  }
+  const row = await response.json();
+  if (!row?.id) {
     return null;
   }
   return {
@@ -100,56 +128,38 @@ export async function fetchRail(id) {
 }
 
 export async function fetchCardTiles(ids) {
-  const wanted = [...new Set((ids || []).map((id) => String(id)).filter((id) => /^\d+$/.test(id)))];
+  const wanted = expandProvisionalCardIds(normalizeRecentCardIds(ids, 24), 48);
   if (!wanted.length) {
     return [];
   }
-  if (!isViteDev()) {
-    try {
-      const response = await fetch(`/api/marketplace-card-tiles?ids=${wanted.join(',')}`, {
-        headers: { Accept: 'application/json' },
-      });
-      if (response.ok) {
-        const body = await response.json();
-        const cards = Array.isArray(body?.cards) ? body.cards : [];
-        if (cards.length) {
-          return cards.filter((card) => cardId(card));
-        }
-      }
-    } catch (_) {
-      /* supabase fallback below */
+  try {
+    const response = await fetch(publicApiUrl(`/api/marketplace-card-tiles?ids=${wanted.join(',')}`), {
+      headers: { Accept: 'application/json' },
+    });
+    if (response.ok) {
+      const body = await response.json();
+      const cards = Array.isArray(body?.cards) ? body.cards : [];
+      return collapseTiles(cards);
     }
+  } catch (_) {
+    /* Pi tiles unavailable */
   }
-  if (!listsConfigured()) {
-    return [];
-  }
-  const rows = await rest(
-    `marketplace_card_tiles?card_id=in.(${wanted.join(',')})&select=card_id,payload`,
-  );
-  return (rows || []).map((row) => row.payload).filter((card) => cardId(card));
+  return [];
 }
 
 export function attachRecentsToHome(payload, recentIds = [], extraCards = []) {
-  const ids = [...new Set((recentIds || []).map(String).filter((id) => /^\d+$/.test(id)))].slice(0, 24);
+  const ids = normalizeRecentCardIds(recentIds, 24);
   const byId = new Map();
   function remember(cards) {
-    for (const card of asCards(cards)) {
+    for (const card of collapseTiles(cards)) {
       const id = cardId(card);
       if (!id) {
         continue;
       }
-      const next = applyTilePrice({ ...card, id, card_id: card.card_id || id });
-      const prev = byId.get(id);
-      if (!prev) {
-        byId.set(id, next);
-        continue;
+      const merged = mergeTile(byId.get(id), card);
+      if (merged) {
+        byId.set(id, merged);
       }
-      const merged = { ...prev, ...next };
-      if (!tilePricePkn(next) && tilePricePkn(prev)) {
-        merged.price = prev.price;
-        merged.lowest_price_pkn = prev.lowest_price_pkn;
-      }
-      byId.set(id, applyTilePrice(merged));
     }
   }
   remember(payload?.cards);
@@ -157,7 +167,7 @@ export function attachRecentsToHome(payload, recentIds = [], extraCards = []) {
   const missingRecentIds = ids.filter((id) => !byId.has(id));
   return {
     ...payload,
-    source: payload?.source || 'supabase',
+    source: payload?.source || 'pi',
     cards: [...byId.values()],
     missingRecentIds,
     sections: {
@@ -171,54 +181,38 @@ export async function fetchHomeFromLists(recentIds = []) {
   if (!listsConfigured()) {
     return null;
   }
-  const [newCards, featured, bestSellers, spotlight, topSold] = await Promise.all([
+  const [newCards, featured, bestSellers, spotlight] = await Promise.all([
     fetchRail(RAIL.newCards),
     fetchRail(RAIL.featured),
     fetchRail(RAIL.bestSellers),
     fetchRail(RAIL.spotlight),
-    fetchRail(RAIL.topSold),
   ]);
-  const rails = [newCards, featured, bestSellers, spotlight, topSold].filter(Boolean);
+  const rails = [newCards, featured, bestSellers, spotlight].filter(Boolean);
   if (!rails.length) {
-    return attachRecentsToHome({ source: 'supabase', cards: [], sections: {} }, recentIds);
+    return attachRecentsToHome({ source: 'pi', cards: [], sections: {} }, recentIds);
   }
 
   const byId = new Map();
-  function remember(cards) {
-    for (const card of asCards(cards)) {
+  for (const rail of rails) {
+    for (const card of collapseTiles(asHomeCards(rail.cards))) {
       const id = cardId(card);
-      if (!id) {
-        continue;
+      const merged = mergeTile(byId.get(id), card);
+      if (merged) {
+        byId.set(id, merged);
       }
-      const next = applyTilePrice({ ...card, id, card_id: card.card_id || id });
-      const prev = byId.get(id);
-      if (!prev) {
-        byId.set(id, next);
-        continue;
-      }
-      const merged = { ...prev, ...next };
-      if (!tilePricePkn(next) && tilePricePkn(prev)) {
-        merged.price = prev.price;
-        merged.lowest_price_pkn = prev.lowest_price_pkn;
-      }
-      byId.set(id, applyTilePrice(merged));
     }
   }
-  for (const rail of rails) {
-    remember(rail.cards);
-  }
 
-  const idsOf = (rail, n) => asCards(rail?.cards).map(cardId).filter(Boolean).slice(0, n);
+  const idsOf = (rail, n) => asHomeCards(rail?.cards).map(cardId).filter(Boolean).slice(0, n);
 
   return attachRecentsToHome({
-    source: 'supabase',
+    source: 'pi',
     cards: [...byId.values()],
     sections: {
-      newArrivalIds: idsOf(newCards, 12),
-      featuredIds: idsOf(featured, 12),
+      newArrivalIds: idsOf(newCards, NEW_CARDS_LIMIT),
+      featuredIds: idsOf(featured, FEATURED_LIMIT),
       bestSellerIds: idsOf(bestSellers, 12),
       spotlightIds: idsOf(spotlight, 16),
-      topSoldIds: idsOf(topSold, 24),
     },
   }, recentIds);
 }
@@ -232,28 +226,44 @@ export async function fetchSetIndexFromLists() {
   if (!Array.isArray(expansions) || !expansions.length) {
     return null;
   }
-  return { expansions, source: 'supabase' };
+  return { expansions, source: 'pi' };
+}
+
+export function sliceExpansionRail(cards, { limit = 48, offset = 0, cardCount = 0, hasMoreMeta = false } = {}) {
+  const start = Math.max(0, Number(offset) || 0);
+  const size = Math.max(1, Number(limit) || 48);
+  const rows = (cards || []).slice(start, start + size);
+  const total = Number(cardCount) || 0;
+  const loaded = start + rows.length;
+  const hasMore = total > 0 ? loaded < total : Boolean(hasMoreMeta) || (rows.length >= size && start + rows.length < (cards || []).length);
+  return { cards: rows, hasMore, offset: start, limit: size };
 }
 
 export async function fetchExpansionFromLists({ slug = '', limit = 48, offset = 0 } = {}) {
-  if (Number(offset) > 0) {
-    return null;
-  }
   const rail = await fetchRail(setRailId(slug));
   if (!rail?.cards?.length) {
     return null;
   }
-  const cards = (rail.cards || []).slice(0, Number(limit) || 48).map(applyTilePrice);
   const expansion = rail.meta?.expansion || { slug, name: rail.meta?.name || slug };
   const cardCount = Number(expansion.cardCount || rail.meta?.cardCount || rail.meta?.total || 0);
+  const sliced = sliceExpansionRail(rail.cards, {
+    limit,
+    offset,
+    cardCount,
+    hasMoreMeta: Boolean(rail.meta?.hasMore),
+  });
+  if (!sliced.cards.length) {
+    return null;
+  }
+  const cards = sliced.cards.map(applyTilePrice);
   return {
-    source: 'supabase',
+    source: 'pi',
     cards,
     expansion: cardCount > 0 ? { ...expansion, cardCount } : expansion,
     expansions: [],
-    hasMore: Boolean(rail.meta?.hasMore),
-    limit: Number(limit) || 48,
-    offset: 0,
+    hasMore: sliced.hasMore,
+    limit: sliced.limit,
+    offset: sliced.offset,
     ...(cardCount > 0 ? { total: cardCount } : {}),
   };
 }

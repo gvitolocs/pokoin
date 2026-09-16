@@ -4,6 +4,7 @@ import {
   fetchSwapPools,
   fetchSwapQuote,
   fetchWpknQuote,
+  formatPknNumber,
   requestWpknExchange,
   requestWpknQuote,
 } from '../api.js';
@@ -216,8 +217,8 @@ export default function Wallet() {
 
       <MetricGrid>
         <Metric value={address ? shortAddress(address) : '—'} label="Account" hint={address ? 'Connected' : 'Not connected'} />
-        <Metric value={balance ? balance.toLocaleString('en-US', { maximumFractionDigits: 4 }) : '0'} label="Chain PKN" />
-        <Metric value={availablePkn.toLocaleString()} label="Site PKN" />
+        <Metric value={balance ? formatPknNumber(balance, { maximumFractionDigits: 4 }) : '0'} label="Chain PKN" />
+        <Metric value={formatPknNumber(availablePkn)} label="Site PKN" />
         <Metric value={chainId || '—'} label={onPokoin || !chainId ? 'Chain' : 'Wrong chain'} />
       </MetricGrid>
       <Alert>{error}</Alert>
@@ -308,7 +309,7 @@ export default function Wallet() {
             </label>
             {quote ? (
               <p className="page-lede">
-                Out {Number(quote.amountOut || 0).toLocaleString()} {quote.assetOut || assetOut}
+                Out {formatPknNumber(quote.amountOut || 0)} {quote.assetOut || assetOut}
                 {quote.price ? ` · ${quote.price}` : ''}
               </p>
             ) : null}
@@ -339,7 +340,7 @@ export default function Wallet() {
             </label>
             {wpknQuote ? (
               <p className="page-lede">
-                Quote {Number(wpknQuote.amountOut || wpknQuote.out || 0).toLocaleString()}
+                Quote {formatPknNumber(wpknQuote.amountOut || wpknQuote.out || 0)}
                 {wpknQuote.quoteId ? ` · ${wpknQuote.quoteId}` : ''}
               </p>
             ) : null}

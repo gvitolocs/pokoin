@@ -1,0 +1,9 @@
+[Unit]
+Description=Seed 15T card-image replica from local leftover trees (rsyncd if Pi daemon is up)
+
+[Service]
+Type=oneshot
+ExecStart=/home/nez/Projects/pokoin-web/scripts/sync-pi-card-images-replica.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

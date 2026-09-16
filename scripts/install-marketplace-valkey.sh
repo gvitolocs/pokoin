@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Tiny Valkey on pokoin-marketplace for CT asks + non-empty home snapshots.
-# Does not go on pokoin-peer1. Does not replace Postgres or Supabase rails.
+# Tiny Valkey for CT asks + non-empty home snapshots.
+# Live instance is on the Pi with the API. Does not go on pokoin-peer1. Does not replace Postgres rails.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SSH_OPTS='-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20'

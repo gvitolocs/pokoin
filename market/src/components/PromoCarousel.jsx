@@ -1,125 +1,65 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { cardHref, fetchExpansion, imageSrc, peekExpansion } from '../api.js';
-import { printingIdentity } from '../identity.js';
+import { cardHref, fetchExpansion, fetchPromoFanPool, imageSrc, peekPromoFanPool } from '../api.js';
+import { FAN_POOL, fillFan, pickFan } from '../promo-fan.js';
 import { Action, track } from '../track.js';
 import CardArt from './CardArt.jsx';
 
-const PROMO_LIMIT = 48;
 const PROMO_INTERVAL_MS = 5500;
 
-/** Newest English sets the catalog actually carries, presented like tcg.pokemon.com. */
+/** Current expansions on the home promo carousel (five slides). */
 export const PROMO_BANNERS = [
+  {
+    slug: 'storm-emeralda',
+    series: 'Mega Evolution',
+    title: 'Storm Emeralda',
+    lede: 'Japanese M6 is on the floor. Chase Mega Rayquaza ex.',
+    cta: 'Explore cards from this expansion',
+  },
   {
     slug: 'mega-evolution',
     series: 'Mega Evolution',
     title: 'Mega Evolution',
     lede: 'The first Mega Evolution set is on the floor. Chase Mega Lucario ex.',
-    cta: 'View cards from this expansion',
+    cta: 'Explore cards from this expansion',
   },
   {
     slug: 'phantasmal-flames',
     series: 'Mega Evolution',
     title: 'Phantasmal Flames',
     lede: 'The second Mega Evolution set is on the floor. Chase Mega Charizard X ex.',
-    cta: 'View cards from this expansion',
+    cta: 'Explore cards from this expansion',
   },
   {
     slug: 'black-bolt',
     series: 'Black & White',
     title: 'Black Bolt',
     lede: 'Unova returns in black. Zekrom ex and the chase holos.',
-    cta: 'View cards from this expansion',
+    cta: 'Explore cards from this expansion',
   },
   {
     slug: 'white-flare',
     series: 'Black & White',
     title: 'White Flare',
     lede: 'Unova in white. Reshiram ex and the set’s secret rares.',
-    cta: 'View cards from this expansion',
-  },
-  {
-    slug: 'destined-rivals',
-    series: 'Scarlet & Violet',
-    title: 'Destined Rivals',
-    lede: 'Team Rocket and other legendary characters. The rivalries collectors want.',
-    cta: 'View cards from this expansion',
+    cta: 'Explore cards from this expansion',
   },
 ];
 
-function isSecretRare(card) {
-  const identity = printingIdentity(card);
-  const rarity = identity.rarity.toLowerCase();
-  if (/secret rare|gold secret|hyper rare|special illustration rare/.test(rarity)) {
-    return true;
-  }
-  const match = String(identity.number).match(/(\d+)\s*\/\s*(\d+)/);
-  return Boolean(match && Number(match[1]) > Number(match[2]));
-}
-
-function shuffle(list) {
-  const copy = [...list];
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-function pickSecretRares(cards, n = 3) {
-  const withArt = (cards || []).filter((card) => imageSrc(card, 'hero'));
-  const secrets = withArt.filter(isSecretRare);
-  const picked = [];
-  const seen = new Set();
-  function take(list) {
-    for (const card of shuffle(list)) {
-      const id = String(card.id || card.card_id || '');
-      if (!id || seen.has(id)) {
-        continue;
-      }
-      seen.add(id);
-      picked.push(card);
-      if (picked.length === n) {
-        return;
-      }
-    }
-  }
-  take(secrets);
-  if (picked.length < n) {
-    take(withArt);
-  }
-  return picked;
-}
-
-function fanSlots(cards) {
-  if (cards.length >= 3) {
-    return [cards[1], cards[0], cards[2]];
-  }
-  if (cards.length === 2) {
-    return [cards[1], cards[0], null];
-  }
-  if (cards.length === 1) {
-    return [null, cards[0], null];
-  }
-  return [null, null, null];
-}
-
-function PromoFanCard({ card, role, index, onPointerEnter }) {
+function PromoFanCard({ card, role, index, onPointerEnter, onFail }) {
   const [ready, setReady] = useState(false);
   const art = imageSrc(card, 'hero');
+  useEffect(() => {
+    if (!art) {
+      onFail?.();
+    }
+  }, [art, onFail]);
   if (!art) {
     return null;
   }
-  if (!ready) {
-    return (
-      <span className="promo-card-preload" aria-hidden="true">
-        <CardArt src={art} alt="" fallback="hide" full onLoad={() => setReady(true)} />
-      </span>
-    );
-  }
   return (
     <Link
-      className={`promo-card is-${role} is-ready`}
+      className={`promo-card is-${role}${ready ? ' is-ready' : ''}`}
       to={cardHref(card)}
       state={{ card }}
       aria-label={card.name}
@@ -132,7 +72,10 @@ function PromoFanCard({ card, role, index, onPointerEnter }) {
           alt={card.name}
           fallback="hide"
           full
-          fetchPriority={role === 'center' ? 'high' : 'low'}
+          loading="eager"
+          fetchPriority="high"
+          onLoad={() => setReady(true)}
+          onError={onFail}
         />
       </span>
     </Link>
@@ -141,7 +84,12 @@ function PromoFanCard({ card, role, index, onPointerEnter }) {
 
 function PromoFan({ cards, loading }) {
   const [midAway, setMidAway] = useState(false);
-  const visual = fanSlots(cards);
+  const [failed, setFailed] = useState(() => new Set());
+  const poolKey = (cards || []).map((card) => String(card.id || card.card_id || '')).join(',');
+  useEffect(() => {
+    setFailed(new Set());
+  }, [poolKey]);
+  const visual = fillFan(cards, failed);
   const roles = ['left', 'center', 'right'];
   const ready = cards.length > 0;
   return (
@@ -167,6 +115,20 @@ function PromoFan({ cards, loading }) {
             role={role}
             index={index}
             onPointerEnter={role === 'center' ? undefined : () => setMidAway(true)}
+            onFail={() => {
+              const id = String(card.id || card.card_id || '');
+              if (!id) {
+                return;
+              }
+              setFailed((current) => {
+                if (current.has(id)) {
+                  return current;
+                }
+                const next = new Set(current);
+                next.add(id);
+                return next;
+              });
+            }}
           />
         );
       })}
@@ -186,10 +148,24 @@ function prefetchExpansionPage(slug) {
   fetchExpansion({ slug, limit: 48 }).catch(() => {});
 }
 
+function loadFanPool(slug) {
+  return fetchPromoFanPool(slug);
+}
+
+if (typeof window !== 'undefined') {
+  loadFanPool(PROMO_BANNERS[0].slug).catch(() => {});
+}
+
 export default function PromoCarousel() {
   const [index, setIndex] = useState(0);
-  const [cardsBySlug, setCardsBySlug] = useState({});
-  const [fanCards, setFanCards] = useState([]);
+  const [cardsBySlug, setCardsBySlug] = useState(() => {
+    const first = peekPromoFanPool(PROMO_BANNERS[0].slug);
+    return first?.length ? { [PROMO_BANNERS[0].slug]: first } : {};
+  });
+  const [fanCards, setFanCards] = useState(() => {
+    const first = peekPromoFanPool(PROMO_BANNERS[0].slug);
+    return first?.length ? pickFan(first, FAN_POOL) : [];
+  });
   const [paused, setPaused] = useState(false);
   const [hidden, setHidden] = useState(() => typeof document !== 'undefined' && document.hidden);
   const [reduceMotion, setReduceMotion] = useState(() => (
@@ -210,27 +186,21 @@ export default function PromoCarousel() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
     const count = PROMO_BANNERS.length;
     neighborIndexes(index, count).forEach((slot) => {
       const slug = PROMO_BANNERS[slot].slug;
-      const peeked = peekExpansion({ slug, limit: PROMO_LIMIT });
-      if (peeked?.cards?.length) {
+      const peeked = peekPromoFanPool(slug);
+      if (peeked?.length) {
         setCardsBySlug((current) => (
-          current[slug] ? current : { ...current, [slug]: peeked.cards }
+          current[slug] ? current : { ...current, [slug]: peeked }
         ));
       }
-      fetchExpansion({ slug, limit: PROMO_LIMIT })
-        .then((data) => {
-          if (!cancelled) {
-            setCardsBySlug((current) => ({ ...current, [slug]: data.cards || [] }));
-          }
+      loadFanPool(slug)
+        .then((cards) => {
+          setCardsBySlug((current) => ({ ...current, [slug]: cards || [] }));
         })
         .catch(() => {});
     });
-    return () => {
-      cancelled = true;
-    };
   }, [index]);
 
   useEffect(() => {
@@ -251,10 +221,11 @@ export default function PromoCarousel() {
   useEffect(() => {
     if (!pool?.length) {
       setFanCards([]);
-      return;
+      return undefined;
     }
-    setFanCards(pickSecretRares(pool, 3));
-  }, [banner.slug, pool]);
+    setFanCards(pickFan(pool, FAN_POOL));
+    return undefined;
+  }, [banner.slug, pool, index]);
 
   function go(delta) {
     setIndex((current) => (current + delta + count) % count);
@@ -334,7 +305,7 @@ export default function PromoCarousel() {
             className={slot === index ? 'is-on' : undefined}
             onClick={() => setIndex(slot)}
             onPointerEnter={() => {
-              fetchExpansion({ slug: item.slug, limit: PROMO_LIMIT }).catch(() => {});
+              loadFanPool(item.slug).catch(() => {});
             }}
           />
         ))}

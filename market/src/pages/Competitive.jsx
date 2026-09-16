@@ -102,9 +102,9 @@ export default function Competitive() {
       </div>
       <DeskPanel title="Notes">
         <p className="page-lede">
-          This page is the candyext Limitless dump ({data.formatLabel}): {data.tournaments.length} events,
+          Tournament snapshot ({data.formatLabel}): {data.tournaments.length} events,
           {' '}{data.decks.length} archetypes, Worlds standings, and {Object.keys(data.lists).length} representative lists.
-          It is not a live Limitless scrape and not Oracle `/api/marketplace-competitive`.
+          Pictures load from Pokoin Oracle (`/card-images/competitive/…`). This is not a live Limitless scrape.
         </p>
       </DeskPanel>
     </div>

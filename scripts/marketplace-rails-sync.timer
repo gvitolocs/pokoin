@@ -1,0 +1,11 @@
+[Unit]
+Description=Publish Pokoin marketplace browse rails to Pi Postgres every 5 min
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

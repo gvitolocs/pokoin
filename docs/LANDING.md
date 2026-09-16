@@ -20,8 +20,8 @@ vercel.json                 GET /              = landing
                             /api/*              = api.pokoin.com
 ```
 
-Wallet, auth, cart, checkout, forum, signal, scan, inventory, and docs are
-React on this host. Android/iOS stays on `https://app.pokoin.com`. Links:
+Wallet, auth, `/extension/auth-bridge`, cart, checkout, forum, signal, scan,
+inventory, and docs are React on this host. Android/iOS stays on `https://app.pokoin.com`. Links:
 [CHROME.md](CHROME.md). App leftovers: [APP.md](APP.md). Do not deploy
 `cardvault/.../build/web` as pokoin.com.
 
@@ -78,7 +78,7 @@ Filesystem `index.html` is evaluated **before** rewrites.
 | `GET /` | `index.html` (landing) | Static HTML |
 | `GET /home/landing.css` | `home/landing.css` | Static |
 | `GET /marketplace` (and search / sets / cards, **with or without trailing `/`**) | `/market/index.html` | React SPA |
-| `GET /api/*` | Oracle proxy | `api.pokoin.com` |
+| `GET /api/*` | Pi API proxy | `api.pokoin.com` (Raspberry Pi tunnel). Tunnel 1033 → `/working.html` (“We are working on a solution.” + Pikachu GIF). |
 | `GET /wallet`, `/auth`, `/cart`, `/forum`, `/scan`, `/docs`, … | `/market/index.html` | React SPA |
 | `https://explorer.pokoin.com/` | not this project | Caddy |
 
@@ -120,10 +120,12 @@ A tiny inline script in `<head>` sets `document.documentElement.classList.add("j
 
 | Path | Role |
 | --- | --- |
-| `index.html` | Source HTML for `pokoin.com/`. Relative `home/` URLs for local preview. |
+| `index.html` | Source HTML for `pokoin.com/`. Relative `home/` URLs for local preview. Classic cookie bar (`pokoin.cookieConsent`). |
 | `home/landing.css` | Satoshi, Pokoin gold `#FFD33D`, layout, `.reveal`, marquee, CTA glow, store icons, coming-soon cards. |
-| `home/landing.js` | Nav, reveals, counters, idle RPC, SW unregister. |
-| `home/logo.png` | Nav + hero mark (7339 bytes). |
+| `home/landing.js` | Nav, reveals, counters, idle RPC, SW unregister, cookie banner Accept. |
+| `home/logo.png` | Nav + hero mark (7339 bytes). Also `/pokoin-512.png`. |
+| `home/favicon-48x48.png` / `favicon-96x96.png` | Google Search favicon (multiples of 48px). First `<link rel="icon">` on `/`. |
+| `home/working.html` + `home/working.gif` | API-down page. Copied to `/working.html`. Never show Cloudflare Tunnel 1033. No cookie banner. |
 | `home/satoshi.woff2` | Self-hosted Satoshi variable font. |
 | `scripts/build-web.sh` | Production build: landing + `market/` into `dist-web/`. |
 | `vercel.json` | Headers, www redirect, `/marketplace*` (slash and no-slash) → `/market/index.html`, card shortlinks 302 to `/marketplace/en/cards/:id` (fallback; live hop is Cloudflare Worker `pokoin-shortlink`), `/api/*` → `api.pokoin.com`. |
@@ -146,17 +148,18 @@ Visual reference only (not deployed): `/home/nez/Projects/candyext` (get.rarecan
 
 | Region | Markup | Notes |
 | --- | --- | --- |
-| Head | title, description, OG/Twitter, canonical, JSON-LD Organization | No “wrapped liquidity”. `theme-color` `#000`. |
+| Head | title, description, OG/Twitter, canonical, JSON-LD Organization, 48px Google favicon, robots.txt / sitemap | No “wrapped liquidity”. `theme-color` `#000`. GSC sitemap is `https://sitemap.pokoin.com/sitemap.xml` (grey-cloud; Bot Fight 403s Google’s fetch on orange-clouded hosts). |
 | Skip | `.skip-link` → `#main` | Yellow on focus. |
 | Header | logo `/`, marketplace, wallet, scan, `/docs`, forum | Hamburger `.nav-toggle` on ≤991px. |
 | Hero | H1 white “The market belongs to the collectors.” + yellow “Buy. Sell. Settle in PKN.” | Lede: global P2P marketplace built for everyone. CTAs: Explore cards `/marketplace`, Start selling `/inventory`. |
+| Protection | `#protection` | CardTrader-shaped three tiles. Escrow line, 7-day no-ship PKN refund, dispute 48h / 5 business days. Details `/protection`. |
 | Features | three `<a class="feature">` | `/marketplace`, `/wallet`, `/scan`. |
 | Live | marquee + four `.stat` | Height/peers/health live-updated. Chain ID `26062026` static. |
 | Security | two `.card` | May 2026 PDF. Reserve proof (renounced, JSON, BscScan, Pancake). |
 | Peers | `[data-peer-list]` | Snapshot then idle refresh. |
 | Coming next | three `.soon-card` | iOS/Android: not in stores (web is live). More peers: permissioned, no open intake. |
 | CTA | yellow `.cta-box` | Live: marketplace, signal, forum, cardscan. Placeholders: App Store / Play (`aria-disabled`). |
-| Footer | four columns | Marketplace, account, network, legal. |
+| Footer | four columns | Marketplace, account, network, legal. `/about` is the SPA story page (locked hero copy, no internals). |
 | Script | `home/landing.js` `defer` | Last. |
 
 Hero copy (locked):
@@ -188,7 +191,7 @@ Crawlers get this HTML at `GET /`. `/marketplace` is the React market.
 
 ### `home/landing.js` — functions
 
-Nav toggle + scroll tint; SW unregister; reveal observer (150ms sibling stagger, `data-delay`); `animateCounter` / `fill` (live height cancels the rAF count); `peerRow` (safe DOM, geo only); idle `/health` + `peer-status.json`.
+Nav toggle + scroll tint; SW unregister; reveal observer (150ms sibling stagger, `data-delay`); `animateCounter` / `fill` (live height cancels the rAF count); `peerRow` (safe DOM, geo only); idle `/health` + `peer-status.json`; idle prefetch of the market SPA and `/api/marketplace-home?v=rising-month` (Worker strips `?v=`).
 
 ---
 
@@ -212,8 +215,22 @@ Android/iOS CardVault, leftover Flutter-web `web/home.html` / `app.html` /
 | `forum.pokoin.com` | Legacy alias. Use `https://pokoin.com/forum`. |
 | `explorer.pokoin.com` | **Caddy**, not Vercel. Do not `vercel alias` this name. |
 | `rpc.pokoin.com` | PokoinPoS RPC (health, bootstrap peers, `eth_chainId`) |
-| `api.pokoin.com` | Oracle marketplace API (`?game=one_piece` / `riftbound` for satellite catalogs) |
-| `news.pokoin.com` | Hypemeter on `pokoin-a1` via Cloudflare Tunnel. [NEWS.md](NEWS.md). |
+| `api.pokoin.com` | Raspberry Pi marketplace API (`?game=one_piece` / `riftbound` for satellite catalogs) |
+| `api2.pokoin.com` | Same Pi origin as `api.pokoin.com`. Oracle api2 CDN is removed. |
+| `news.pokoin.com` | Hypemeter **target** is `pokoin-a1` via Cloudflare Tunnel; **today** DNS is still Vercel Hobby. [NEWS.md](NEWS.md). |
+| `test.pokoin.com` | Same `web` project. `/` 307 → `/sanitize`. `/espurr` is the frozen Espurr board. `/ocr` is one leftover per expansion; Qwen3-VL calls Japanese vs Chinese vs English against DB `nationality`. |
+
+`test.pokoin.com` is a **manual alias**, not a project domain, so it does not
+follow production deploys by itself. Finish every deploy with:
+
+```
+env -u VERCEL_TOKEN vercel alias set <new-deployment-url> test.pokoin.com
+```
+
+Otherwise review boards keep serving the deployment the alias was last pinned
+to (this bit the artwork hover board on 16 Sep 2026). Do not use
+`vercel project add test.pokoin.com` — that creates an empty project named
+after the domain instead of attaching it to `web`.
 
 Vercel project name: `web`. Inspect example: `https://vercel.com/giuseppevitolo17s-projects/web`.
 

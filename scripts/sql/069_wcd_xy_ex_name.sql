@@ -1,0 +1,11 @@
+-- WCD 2012–2016 / 30th JP XY EX leftovers CardTrader named "ex".
+-- CLIP name_key keeps EX ≠ ex, so Plasma Blast Genesect EX never saw
+-- WCD 2014 640472. Applied on nezopt 15T 13 Sep 2026.
+-- Pins: pokemon-card-extension STAMP_EX_PINS.
+-- Do not rename 30th SV-era Pikachu / Greninja / Fuecoco ex.
+--
+-- 640472,824990 → v249482 Genesect EX
+-- 651362 → v250176 Latias EX
+-- 824988 → v229200 Rayquaza EX
+-- 824970 → v278364 Scizor EX
+-- plus 35 other WCD 2012–2016 stamps (Darkrai, Deoxys, Keldeo, Shaymin, …).

@@ -1,0 +1,12 @@
+[Unit]
+Description=Mail Giuseppe when Pokoin /healthz is down
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=POKOIN_UPTIME_MAIL_TO=vitologiuseppe17@gmail.com
+EnvironmentFile=-/etc/pokoin/uptime-mail.env
+ExecStart=/usr/local/sbin/pokoin-uptime-mail.sh
+Nice=5
+TimeoutStartSec=60

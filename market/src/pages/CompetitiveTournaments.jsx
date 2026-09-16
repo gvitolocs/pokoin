@@ -174,8 +174,8 @@ function TournamentList() {
             <p className="muted">
               Showing {rows.length} completed events
               {types.size < ALL_TYPES.length || formats.size < ALL_FORMATS.length || regions.size < ALL_REGIONS.length
-                ? ' (filtered from candyext dump)'
-                : ' from candyext dump'}
+                ? ' (filtered from snapshot)'
+                : ' from snapshot'}
               .
             </p>
           )}
@@ -283,7 +283,7 @@ function TournamentDetail() {
             </table>
           </div>
         ) : (
-          <p className="muted">No full lists for this event in the candyext dump. Worlds 2026 has the representative Standard lists.</p>
+          <p className="muted">No full lists for this event in the snapshot. Worlds 2026 has the representative Standard lists.</p>
         )
       ) : null}
       {view === 'meta' ? (

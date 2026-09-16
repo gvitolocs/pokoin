@@ -51,10 +51,11 @@ UNIT
   sudo chown -R caddy:caddy /var/lib/caddy
 fi
 
-# Meilisearch 1.10.3 aarch64
-if [[ ! -x /usr/local/bin/meilisearch ]]; then
+# Meilisearch 1.53.1 aarch64 (same pin as Pi Docker pokoin-meili)
+MEILI_VERSION="${MEILI_VERSION:-v1.53.1}"
+if ! command -v meilisearch >/dev/null 2>&1 || ! meilisearch --version 2>/dev/null | grep -q "${MEILI_VERSION#v}"; then
   curl -fsSL -o /tmp/meilisearch \
-    "https://github.com/meilisearch/meilisearch/releases/download/v1.10.3/meilisearch-linux-aarch64"
+    "https://github.com/meilisearch/meilisearch/releases/download/${MEILI_VERSION}/meilisearch-linux-aarch64"
   sudo install -m 0755 /tmp/meilisearch /usr/local/bin/meilisearch
   rm -f /tmp/meilisearch
 fi

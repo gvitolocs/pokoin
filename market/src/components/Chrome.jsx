@@ -1,27 +1,65 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useWindowScrollRestore } from '../scroll-restore.js';
 import {
   cardFromAutocomplete,
   cardHref,
+  fetchArtist,
+  fetchExpansion,
+  fetchSearch,
+  fetchSellerByUsername,
   fetchSuggest,
+  formatPknNumber,
   imageSrc,
-  versionsHref,
 } from '../api.js';
-import { game } from '../game.js';
-import { printingIdentity, setAbbrev, suggestKind } from '../identity.js';
+import { resolveArtLayout } from '../art-cut.js';
+import { pickSuggestHoverSrc, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
+import { fetchSuggestRanked, rankConcurrency, rankNames, resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
+import { rankChunkOnWorker, warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
+import { useSuggestFlip } from '../suggest-flip.js';
+import {
+  cachedPrintings,
+  isLiveStub,
+  liveSuggestGroups,
+  rememberPrintings,
+  rememberSuggestGroups,
+  suggestLiveReady,
+} from '../suggest-live.js';
+import { catalogCacheKey, catalogIntent, expansionNationality, groupsFromCards } from '../suggest-catalog.js';
+import {
+  SUGGEST_THUMB_EAGER,
+  SUGGEST_THUMB_HIGH,
+  collectPrintingThumbUrls,
+  preloadSuggestThumbs,
+} from '../suggest-images.js';
+import { prefetchSearchPage } from '../search-hot.js';
+import { game, isPokemonGame } from '../game.js';
+import { printingIdentity, clipSuggestCollector, suggestCardName, suggestTranslatedLine } from '../identity.js';
+import { normalizeSearchTab, searchHref, uniqueSellers } from '../search-kind.js';
+import { sellerHref } from '../listing-meta.js';
+import CatalogMenu from './CatalogHubs.jsx';
+import ExpansionMark from './ExpansionMark.jsx';
+import SearchTabs from './SearchTabs.jsx';
 import { Action, track } from '../track.js';
 import { useAuth } from '../auth.jsx';
+import { framedByChromeExtension } from '../extension-auth-bridge.js';
 import { APP, authFrom } from '../punchouts.js';
 import { useCart } from '../cart.jsx';
 import { useWallet } from '../wallet.jsx';
 import CardArt from './CardArt.jsx';
 import {
+  PRINT_LANGS,
   SEARCH_LANGS,
   flagSrc,
   langMeta,
+  printFlagFromNationality,
+  printLangMeta,
   rewriteCatalogLang,
   searchLangFromPath,
+  setPrintLang,
   setSearchLang,
+  usePrintLang,
   useSearchLang,
 } from '../locale.js';
 
@@ -123,16 +161,16 @@ function LangToggle() {
     <div className="lang-toggle" ref={box}>
       <button
         type="button"
-        aria-label={`Search language, ${current.label}`}
+        aria-label={`Card title language, ${current.label}`}
         aria-haspopup="listbox"
         aria-expanded={open}
         title={current.label}
         onClick={() => setOpen((value) => !value)}
       >
-        <img src={flagSrc(current.code)} alt="" width="28" height="28" />
+        <img src={flagSrc(current.code)} alt="" width="40" height="40" />
       </button>
       {open ? (
-        <ul className="lang-menu" role="listbox" aria-label="Search language">
+        <ul className="lang-menu" role="listbox" aria-label="Card title language">
           {SEARCH_LANGS.map((item) => (
             <li key={item.code} role="option" aria-selected={item.code === lang}>
               <button type="button" className={item.code === lang ? 'is-active' : ''} onClick={() => pick(item.code)}>
@@ -146,6 +184,79 @@ function LangToggle() {
       ) : null}
     </div>
   );
+}
+
+function PrintLangToggle() {
+  const lang = usePrintLang();
+  const current = printLangMeta(lang);
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+
+  useEffect(() => {
+    function onDoc(event) {
+      if (box.current && !box.current.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+    function onKey(event) {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, []);
+
+  return (
+    <div className="print-lang-toggle" ref={box}>
+      <button
+        type="button"
+        aria-label={`Card print language, ${current.label}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title={current.label}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <svg className="search-go-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+        </svg>
+        <svg className="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true">
+          <path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" />
+        </svg>
+      </button>
+      {open ? (
+        <ul className="lang-menu" role="listbox" aria-label="Card print language">
+          {PRINT_LANGS.map((item) => (
+            <li key={item.code} role="option" aria-selected={item.code === lang}>
+              <button type="button" className={item.code === lang ? 'is-active' : ''} onClick={() => { setPrintLang(item.code); setOpen(false); }}>
+                {item.flag ? (
+                  <img src={flagSrc(item.flag)} alt="" width="22" height="22" />
+                ) : (
+                  <svg className="print-lang-all" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                    <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
+                  </svg>
+                )}
+                <span>{item.label}</span>
+                <em>{item.tag || (item.flag ? item.flag.toUpperCase() : 'ALL')}</em>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function suggestThumbSrc(printing) {
+  const card = cardFromAutocomplete(printing);
+  if (isLiveStub(card) || isLiveStub(printing)) {
+    return '';
+  }
+  return imageSrc(card, 'suggest');
 }
 
 function flattenPrintings(groups) {
@@ -170,56 +281,291 @@ export default function Chrome({ children }) {
   const { signedIn, admin } = useAuth();
   const { count } = useCart();
   const { balance } = useWallet();
+  const extensionDesk = framedByChromeExtension();
   const lang = useSearchLang();
+  const printLang = usePrintLang();
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [groups, setGroups] = useState([]);
+  const [liveTick, setLiveTick] = useState(0);
   const [hitCount, setHitCount] = useState(0);
   const [pending, setPending] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const box = useRef(null);
   const inputRef = useRef(null);
-  const flat = flattenPrintings(groups);
+  const suggestRef = useRef(null);
+  const listRef = useRef(null);
+  const queryRef = useRef('');
+  const pokemonScheduled = useRef(new Set());
+  const meiliControllers = useRef([]);
+  const [pointerHoverId, setPointerHoverId] = useState(null);
+  const [hoverBox, setHoverBox] = useState(null);
+  const [searchTab, setSearchTab] = useState('singles');
+  const [sellerHits, setSellerHits] = useState([]);
+  useWindowScrollRestore();
+  const searchTabRef = useRef(searchTab);
+  searchTabRef.current = searchTab;
+  const catalogTab = searchTab === 'users' ? 'singles' : searchTab;
+  const visibleGroups = useMemo(() => {
+    if (!isPokemonGame()) {
+      return groups;
+    }
+    if (!suggestLiveReady(query) || searchTab === 'users') {
+      return [];
+    }
+    return liveSuggestGroups(query, { printLang, kind: catalogTab }).groups;
+  }, [groups, liveTick, printLang, query, searchTab, catalogTab]);
+  const flat = flattenPrintings(visibleGroups);
   const activeOption = activeIndex >= 0 ? flat[activeIndex] : null;
+  const previewOptionId = pointerHoverId || activeOption?.optionId || '';
+  const hoverRow = previewOptionId
+    ? flat.find((row) => row.optionId === previewOptionId)
+    : null;
+  const hoverCard = hoverRow && !isLiveStub(hoverRow.card)
+    ? cardFromAutocomplete(hoverRow.card)
+    : null;
+  const hoverHero = hoverCard ? imageSrc(hoverCard, 'hero') : '';
+  const hoverSrc = pickSuggestHoverSrc(hoverHero, hoverCard ? imageSrc(hoverCard, 'suggest') : '');
+  const suggestIds = open
+    ? flat.map((row) => String(row.card?.id || '')).join('|')
+    : '';
+  const suggestVisible = open && suggestLiveReady(query) && (
+    isPokemonGame()
+    || visibleGroups.length > 0
+    || pending
+  );
+  useSuggestFlip(listRef, suggestVisible ? suggestIds : '');
 
   useEffect(() => {
-    const q = new URLSearchParams(location.search).get('q');
+    if (!visibleGroups.length) {
+      return;
+    }
+    preloadSuggestThumbs(collectPrintingThumbUrls(visibleGroups, suggestThumbSrc), { first: true });
+  }, [visibleGroups]);
+
+  useEffect(() => {
+    warmupSuggestRankWorkers();
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const q = params.get('q');
     if (location.pathname === '/marketplace/search' && q) {
       setQuery(q);
     }
+    if (location.pathname === '/marketplace/search') {
+      setSearchTab(normalizeSearchTab(params.get('tab')));
+    }
   }, [location.pathname, location.search]);
 
-  useLayoutEffect(() => {
-    window.history.scrollRestoration = 'manual';
-  }, []);
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [searchTab, query]);
 
-  useLayoutEffect(() => {
-    if (location.hash) {
+  useEffect(() => {
+    if (!open || searchTab !== 'users' || !suggestLiveReady(query)) {
+      setSellerHits([]);
       return;
     }
-    window.scrollTo(0, 0);
-  }, [location.key]);
+    const handle = query.trim();
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetchSellerByUsername(handle, { limit: 20 })
+        .then((data) => {
+          if (!cancelled) {
+            setSellerHits(Array.isArray(data?.listings) ? data.listings : []);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSellerHits([]);
+          }
+        });
+    }, 160);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [open, query, searchTab]);
 
   useEffect(() => {
     const term = query.trim();
-    if (term.length < 2) {
+    queryRef.current = term;
+    if (!term) {
+      pokemonScheduled.current.clear();
+      for (const running of meiliControllers.current) {
+        running.abort();
+      }
+      meiliControllers.current = [];
       setPending(false);
-      if (!term) {
+      setGroups([]);
+      setHitCount(0);
+      setActiveIndex(-1);
+      return undefined;
+    }
+
+    const ready = suggestLiveReady(term);
+
+    function rememberAndPaint(data) {
+      const remembered = data?.hydrated || data?.groups;
+      rememberSuggestGroups(remembered);
+      preloadSuggestThumbs(collectPrintingThumbUrls(remembered, suggestThumbSrc));
+      const current = String(queryRef.current || '').trim();
+      if (!isPokemonGame() || !suggestLiveReady(current)) {
+        return;
+      }
+      setLiveTick((tick) => tick + 1);
+      if (current !== term) {
+        return;
+      }
+      const count = Number(data?.count) || 0;
+      setHitCount(count);
+      prefetchSearchPage(data?.resolvedQuery || term, lang, {
+        fetchSearchPage: fetchSearch,
+        count,
+        tab: searchTabRef.current,
+      });
+    }
+
+    function hydrateCatalog(nextTerm) {
+      const intent = catalogIntent(nextTerm);
+      const key = catalogCacheKey(intent);
+      if (!key || cachedPrintings(key).length) {
+        return;
+      }
+      if (intent.kind === 'artist' && intent.slug) {
+        fetchArtist(intent.slug, { limit: 80 })
+          .then((data) => {
+            rememberPrintings(catalogCacheKey(intent), data.cards);
+            rememberSuggestGroups(groupsFromCards(data.cards));
+            preloadSuggestThumbs(collectPrintingThumbUrls(
+              groupsFromCards(data.cards),
+              suggestThumbSrc,
+            ));
+            const current = String(queryRef.current || '').trim();
+            if (suggestLiveReady(current)) {
+              setLiveTick((tick) => tick + 1);
+            }
+          })
+          .catch(() => {});
+        return;
+      }
+      if (intent.kind === 'set' && intent.slug) {
+        fetchExpansion({ slug: intent.slug, limit: 48 })
+          .then((data) => {
+            const cards = data?.cards || [];
+            rememberPrintings(catalogCacheKey(intent), cards);
+            rememberSuggestGroups(groupsFromCards(cards));
+            preloadSuggestThumbs(collectPrintingThumbUrls(
+              groupsFromCards(cards),
+              suggestThumbSrc,
+            ));
+            const current = String(queryRef.current || '').trim();
+            if (suggestLiveReady(current)) {
+              setLiveTick((tick) => tick + 1);
+            }
+          })
+          .catch(() => {});
+      }
+    }
+
+    if (isPokemonGame()) {
+      if (ready) {
+        setActiveIndex(-1);
+        hydrateCatalog(term);
+      } else {
         setGroups([]);
+        setPending(false);
         setHitCount(0);
         setActiveIndex(-1);
       }
+      const kickKey = `${term}\0${lang}`;
+      if (pokemonScheduled.current.has(kickKey)) {
+        return undefined;
+      }
+      const start = () => {
+        if (pokemonScheduled.current.has(kickKey)) {
+          return;
+        }
+        pokemonScheduled.current.add(kickKey);
+        const controller = new AbortController();
+        meiliControllers.current.push(controller);
+        if (queryRef.current === term) {
+          setPending(true);
+        }
+        fetchSuggestRanked(term, {
+          fetchSuggest,
+          fetchSearch,
+          limit: 20,
+          signal: controller.signal,
+          lang,
+          printLang: 'all',
+          concurrency: rankConcurrency(),
+          mapChunk: rankChunkOnWorker,
+          kind: searchTabRef.current,
+        }).catch((error) => {
+          if (error?.name === 'AbortError') {
+            throw error;
+          }
+          return fetchSuggest(term, { limit: 20, signal: controller.signal, lang, printLang: 'all' })
+            .then((data) => ({
+              groups: Array.isArray(data.groups) ? data.groups : [],
+              hydrated: data.groups,
+              count: Number(data.count) || 0,
+              resolvedQuery: term,
+            }));
+        }).then((data) => {
+          rememberAndPaint(data);
+        }).catch((error) => {
+          if (error.name !== 'AbortError') {
+            setActiveIndex(-1);
+          }
+        }).finally(() => {
+          meiliControllers.current = meiliControllers.current.filter((row) => row !== controller);
+          if (queryRef.current === term) {
+            setPending(false);
+          }
+        });
+      };
+      if (pokemonScheduled.current.size === 0) {
+        start();
+        return undefined;
+      }
+      const timer = setTimeout(start, 40);
+      return () => clearTimeout(timer);
+    }
+
+    if (!ready) {
+      setPending(false);
+      setGroups([]);
+      setHitCount(0);
+      setActiveIndex(-1);
       return undefined;
     }
+
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setPending(true);
-      fetchSuggest(term, { limit: 12, signal: controller.signal, lang })
+      fetchSuggest(term, { limit: 20, signal: controller.signal, lang, printLang })
+        .then((data) => ({
+          groups: Array.isArray(data.groups) ? data.groups : [],
+          count: Number(data.count) || 0,
+          resolvedQuery: term,
+        }))
         .then((data) => {
-          setGroups(Array.isArray(data.groups) ? data.groups : []);
-          setHitCount(Number(data.count) || 0);
+          if (controller.signal.aborted) {
+            return;
+          }
+          setGroups(data.groups);
+          setHitCount(data.count);
           setActiveIndex(-1);
+          prefetchSearchPage(data.resolvedQuery, lang, {
+            fetchSearchPage: fetchSearch,
+            signal: controller.signal,
+            count: data.count,
+            tab: searchTabRef.current,
+          });
         })
         .catch((error) => {
           if (error.name !== 'AbortError') {
@@ -236,17 +582,65 @@ export default function Chrome({ children }) {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [query, lang]);
+  }, [query, lang, printLang]);
 
   useEffect(() => {
     function onDoc(event) {
-      if (box.current && !box.current.contains(event.target)) {
-        setOpen(false);
+      const target = event.target;
+      if (box.current && box.current.contains(target)) {
+        return;
       }
+      if (typeof target?.closest === 'function' && target.closest('.lang-toggle')) {
+        return;
+      }
+      setOpen(false);
     }
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setPointerHoverId(null);
+    }
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !previewOptionId || !hoverSrc) {
+      setHoverBox(null);
+      return undefined;
+    }
+    function place() {
+      if (!suggestHoverAllowed(window.innerWidth, window.matchMedia('(hover: hover)').matches)) {
+        setHoverBox(null);
+        return;
+      }
+      const panel = suggestRef.current;
+      const row = document.getElementById(previewOptionId);
+      if (!panel || !row) {
+        setHoverBox(null);
+        return;
+      }
+      const panelRect = panel.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      setHoverBox(suggestHoverBox({
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        panelLeft: panelRect.left,
+        panelRight: panelRect.right,
+        rowTop: rowRect.top,
+        rowHeight: rowRect.height,
+      }));
+    }
+    place();
+    const list = suggestRef.current?.querySelector('.suggest-list');
+    window.addEventListener('resize', place);
+    list?.addEventListener('scroll', place, { passive: true });
+    return () => {
+      window.removeEventListener('resize', place);
+      list?.removeEventListener('scroll', place);
+    };
+  }, [open, previewOptionId, hoverSrc, visibleGroups]);
 
   useEffect(() => {
     setMenu(false);
@@ -273,17 +667,34 @@ export default function Chrome({ children }) {
   function goSearch(event) {
     event?.preventDefault?.();
     const next = query.trim();
+    const resolved = isPokemonGame()
+      ? resolveSearchQuery(next, rankNames(next))
+      : next;
+    const prefetchQuery = isPokemonGame() ? typedMeiliQuery(next) : resolved;
     setOpen(false);
     setMenu(false);
-    navigate(next ? `/marketplace/search?q=${encodeURIComponent(next)}` : '/marketplace/search');
+    if (prefetchQuery) {
+      prefetchSearchPage(prefetchQuery, lang, {
+        fetchSearchPage: fetchSearch,
+        count: hitCount,
+        tab: searchTab,
+      });
+    }
+    navigate(searchHref(resolved, searchTab));
   }
 
   function pick(card, rank) {
+    if (isLiveStub(card)) {
+      return;
+    }
     const mapped = cardFromAutocomplete(card);
+    if (isLiveStub(mapped)) {
+      return;
+    }
     setOpen(false);
     setQuery(mapped.name || '');
     track(Action.clickSuggest, mapped, { query, resultRank: rank });
-    navigate(cardHref(mapped));
+    navigate(cardHref(mapped), { state: { card: mapped } });
   }
 
   function onSearchKeyDown(event) {
@@ -308,6 +719,10 @@ export default function Chrome({ children }) {
     }
     if (event.key === 'Enter' && activeOption) {
       event.preventDefault();
+      if (isLiveStub(activeOption.card)) {
+        goSearch(event);
+        return;
+      }
       pick(activeOption.card, activeIndex);
     }
   }
@@ -320,7 +735,7 @@ export default function Chrome({ children }) {
     ? (new URLSearchParams(location.search).get('from') || '/marketplace')
     : `${location.pathname || '/marketplace'}${location.search || ''}`;
   const from = authFrom(returnPath);
-  const pknLabel = `${Number.isFinite(balance) ? balance.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '0'} PKN`;
+  const pknLabel = `${formatPknNumber(Number.isFinite(balance) ? balance : 0)} PKN`;
   const site = game();
   const homeHref = site.homeHref || '/';
 
@@ -357,80 +772,199 @@ export default function Chrome({ children }) {
                 }}
                 onFocus={() => setOpen(true)}
                 onKeyDown={onSearchKeyDown}
-                placeholder="Search cards, sets, products..."
+                placeholder={extensionDesk ? 'Search cards' : 'Search cards, sets, products...'}
                 autoComplete="off"
-                aria-expanded={open && (groups.length > 0 || pending)}
+                aria-expanded={suggestVisible}
                 aria-controls="market-suggest"
                 aria-activedescendant={activeOption ? activeOption.optionId : undefined}
                 aria-autocomplete="list"
-                aria-busy={pending}
+                aria-busy={suggestVisible && pending}
               />
-              <button type="submit" aria-label="Search">
-                <svg className="search-go-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-                  <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-                </svg>
-              </button>
+              {isPokemonGame() ? <PrintLangToggle /> : null}
+              <button className="sr-only" type="submit">Search</button>
             </div>
-            {open && (groups.length || pending) ? (
-              <div className="suggest" id="market-suggest">
-                {pending ? <div className="suggest-pending" aria-hidden="true" /> : null}
-                <ul role="listbox" aria-label="Card suggestions">
-                  {groups.map((group) => {
-                    const versionCount = (group.printings || []).length;
-                    return (
-                      <li key={group.name} className="suggest-group">
+            {suggestVisible ? (
+              <div
+                className="suggest"
+                id="market-suggest"
+                ref={suggestRef}
+                onMouseLeave={() => setPointerHoverId(null)}
+              >
+                {isPokemonGame() ? (
+                  <SearchTabs
+                    value={searchTab}
+                    onChange={setSearchTab}
+                    ariaLabel="Search type"
+                  />
+                ) : null}
+                {searchTab === 'users' ? (
+                  <ul className="suggest-list" role="listbox" aria-label="Seller suggestions">
+                    {sellerHits.length ? (
+                      uniqueSellers(sellerHits, query.trim()).map((seller) => (
+                        <li key={seller.id}>
+                          <button
+                            type="button"
+                            className="suggest-user"
+                            onClick={() => {
+                              setOpen(false);
+                              navigate(sellerHref({ sellerName: seller.username }));
+                            }}
+                          >
+                            <span className="suggest-user-mark" aria-hidden="true">
+                              {seller.name.slice(0, 1).toUpperCase()}
+                            </span>
+                            <span className="suggest-copy">
+                              <strong>{seller.name}</strong>
+                              {seller.count ? (
+                                <em>{seller.count} listing{seller.count === 1 ? '' : 's'}</em>
+                              ) : null}
+                            </span>
+                          </button>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="suggest-empty">
+                        No sellers match “{query.trim()}”.
+                      </li>
+                    )}
+                  </ul>
+                ) : (
+                <ul className="suggest-list" role="listbox" aria-label="Card suggestions" ref={listRef}>
+                  {visibleGroups.length ? visibleGroups.map((group) => (
+                      <li key={`${group.name}:${group.printings?.[0]?.id || ''}`} className="suggest-group">
                         <ul>
                           {(group.printings || []).map((printing) => {
                             const card = cardFromAutocomplete(printing);
                             const identity = printingIdentity(card);
+                            const englishName = suggestCardName(card, group.name);
+                            const artLayout = isPokemonGame()
+                              ? resolveArtLayout({ ...card, name: englishName })
+                              : 'window';
+                            const landscapePrint = artLayout === 'landscape';
+                            const bleedPrint = artLayout === 'bleed' || artLayout === 'item';
+                            const suggestNumber = clipSuggestCollector(identity.number);
+                            const translation = suggestTranslatedLine(card, group.name, suggestNumber);
                             const optionId = `suggest-${card.id}`;
                             const active = activeOption?.optionId === optionId;
                             const thumb = imageSrc(card, 'suggest');
-                            const mark = setAbbrev(identity.set);
-                            const kind = suggestKind(card);
+                            const printFlag = printFlagFromNationality(
+                              card.nationality || expansionNationality(identity.set || card.set),
+                            );
+                            const live = isLiveStub(card) || isLiveStub(printing);
+                            const rowIndex = flat.findIndex((row) => row.optionId === optionId);
+                            const thumbLoading = rowIndex >= SUGGEST_THUMB_EAGER ? 'lazy' : undefined;
+                            const thumbPriority = rowIndex < SUGGEST_THUMB_HIGH ? 'high' : 'low';
                             return (
-                              <li key={card.id} role="option" id={optionId} aria-selected={active}>
-                                <div className={`suggest-row${active ? ' is-active' : ''}`}>
+                              <li
+                                key={card.id}
+                                data-suggest-id={card.id}
+                                role="option"
+                                id={optionId}
+                                aria-selected={active}
+                                aria-disabled={live || undefined}
+                                onMouseEnter={() => {
+                                  if (live) {
+                                    return;
+                                  }
+                                  setPointerHoverId(optionId);
+                                  const hero = imageSrc(card, 'hero');
+                                  if (hero) {
+                                    const preload = new Image();
+                                    preload.src = hero;
+                                  }
+                                }}
+                              >
+                                  <div className={`suggest-row${active ? ' is-active' : ''}`}>
                                   <button
                                     type="button"
                                     className="suggest-main"
-                                    onClick={() => pick(card, flat.findIndex((row) => row.optionId === optionId))}
+                                    onClick={() => {
+                                      if (live) {
+                                        return;
+                                      }
+                                      pick(card, flat.findIndex((row) => row.optionId === optionId));
+                                    }}
                                   >
-                                    <span className="suggest-set" aria-hidden="true">{mark || '●'}</span>
-                                    {thumb ? <CardArt src={thumb} alt="" /> : <span className="suggest-ph" />}
+                                    <span className="suggest-set" aria-hidden="true">
+                                      <span className="set-shortcut is-on">
+                                        <ExpansionMark
+                                          setName={identity.set}
+                                          symbolUrl={card.expansionSymbolUrl}
+                                        />
+                                      </span>
+                                    </span>
+                                    {thumb ? (
+                                      <CardArt src={thumb} alt="" loading={thumbLoading} fetchPriority={thumbPriority} />
+                                    ) : <span className="suggest-ph" />}
                                     <span className="suggest-copy">
-                                      <strong>{identity.suggestTitle || card.name}</strong>
-                                      {identity.suggestExpansion ? <em>{identity.suggestExpansion}</em> : null}
+                                      <span className="suggest-number">{suggestNumber}</span>
+                                      <span className="suggest-copy-text">
+                                        <strong>
+                                          {englishName}
+                                          {suggestNumber ? (
+                                            <span className="suggest-num-phone"> - {suggestNumber}</span>
+                                          ) : null}
+                                        </strong>
+                                        {translation ? (
+                                          <span className="suggest-translated">{translation}</span>
+                                        ) : null}
+                                        {identity.suggestExpansionShort ? (
+                                          <em title={identity.suggestExpansion}>{identity.suggestExpansionShort}</em>
+                                        ) : null}
+                                      </span>
                                     </span>
                                   </button>
-                                  <div className="suggest-meta">
-                                    <span className="suggest-kind">{kind}</span>
-                                    {versionCount > 1 ? (
-                                      <Link
-                                        className="suggest-versions"
-                                        to={versionsHref(card)}
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          setOpen(false);
+                                  {isPokemonGame() && (thumb || printFlag) ? (
+                                    <div className="suggest-art-cluster">
+                                      {printFlag ? (
+                                        <span className="suggest-print-flag">
+                                          <img src={flagSrc(printFlag.code)} alt="" width="40" height="40" />
+                                          <span className="sr-only">{printFlag.label}</span>
+                                        </span>
+                                      ) : null}
+                                      {thumb ? (
+                                      <button
+                                        type="button"
+                                        className={[
+                                          'suggest-art',
+                                          landscapePrint ? 'is-landscape' : '',
+                                          bleedPrint && !landscapePrint ? 'is-bleed' : '',
+                                        ].filter(Boolean).join(' ')}
+                                        tabIndex={-1}
+                                        aria-hidden="true"
+                                        onClick={() => {
+                                          if (live) {
+                                            return;
+                                          }
+                                          pick(card, flat.findIndex((row) => row.optionId === optionId));
                                         }}
                                       >
-                                        View all {versionCount} versions
-                                      </Link>
-                                    ) : null}
-                                  </div>
+                                        <CardArt src={thumb} card={card} cut={artLayout === 'window' || artLayout === 'halfart'} loading={thumbLoading} fetchPriority={thumbPriority} />
+                                      </button>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
                                 </div>
                               </li>
                             );
                           })}
                         </ul>
                       </li>
-                    );
-                  })}
+                  )) : (
+                    <li className="suggest-empty">
+                      {pending
+                        ? 'Searching…'
+                        : searchTab === 'product'
+                          ? `No products match “${query.trim()}”.`
+                          : `No singles match “${query.trim()}”.`}
+                    </li>
+                  )}
                 </ul>
-                {query.trim().length >= 2 ? (
+                )}
+                {query.trim().length >= 2 && searchTab !== 'users' ? (
                   <button className="suggest-all" type="submit">
                     {hitCount > 0
-                      ? `View all ${hitCount} results`
+                      ? `View all ${hitCount.toLocaleString('en-US')} results`
                       : `View all results for “${query.trim()}”`}
                   </button>
                 ) : null}
@@ -483,6 +1017,9 @@ export default function Chrome({ children }) {
         <MobileTile to="/marketplace/explore" label="Explore" icon="explore" onClick={closeMenu} />
         <MobileTile to="/marketplace/portfolio" label="Portfolio" icon="portfolio" onClick={closeMenu} />
         <MobileTile to="/marketplace/sets" label="Sets" icon="sets" onClick={closeMenu} />
+        <MobileTile to={`/marketplace/${lang}/pokemon`} label="Pokémon" icon="sets" onClick={closeMenu} />
+        <MobileTile to={`/marketplace/${lang}/artists`} label="Artists" icon="sets" onClick={closeMenu} />
+        {isPokemonGame() ? <CatalogMenu lang={lang} variant="mobile" onNavigate={closeMenu} /> : null}
         <MobileTile to="/marketplace/watchlist" label="Watchlist" icon="watch" onClick={closeMenu} />
         <MobileTile to={APP.wallet} label="Wallet" icon="wallet" onClick={closeMenu} />
         <MobileTile to={APP.buy} label="Buy PKN" icon="buy" onClick={closeMenu} />
@@ -499,7 +1036,7 @@ export default function Chrome({ children }) {
         <div className="foot-grid">
           <div>
             <strong>Pokoin</strong>
-            <p>Buy. Sell. Settle in PKN. Catalog identity is the public card id — never divide it.</p>
+            <p>Buy. Sell. Settle in PKN.</p>
           </div>
           <div>
             <h3>Shop</h3>
@@ -509,6 +1046,9 @@ export default function Chrome({ children }) {
             <Link to="/marketplace/explore">Explore</Link>
             <Link to="/marketplace/portfolio">Portfolio</Link>
             <Link to="/marketplace/sets">Sets</Link>
+            <Link to={`/marketplace/${lang}/pokemon`}>Pokémon</Link>
+            <Link to={`/marketplace/${lang}/artists`}>Artists</Link>
+            {isPokemonGame() ? <CatalogMenu lang={lang} /> : null}
             <Link to="/marketplace/watchlist">Watchlist</Link>
           </div>
           <div>
@@ -529,10 +1069,30 @@ export default function Chrome({ children }) {
             <Link to={APP.forum}>Forum</Link>
             <Link to={APP.signal}>Signal</Link>
             <Link to={APP.docs}>Docs</Link>
+            <Link to={APP.about}>About</Link>
+            <Link to={APP.privacy}>Privacy</Link>
+            <Link to={APP.protection}>Buyer protection</Link>
             <Link to={APP.scan}>Scan</Link>
           </div>
         </div>
       </footer>
+      {open && hoverSrc && hoverBox
+        ? createPortal(
+          <div
+            className="suggest-hover"
+            style={{
+              left: `${hoverBox.left}px`,
+              top: `${hoverBox.top}px`,
+              width: `${hoverBox.width}px`,
+              height: `${hoverBox.height}px`,
+            }}
+            aria-hidden="true"
+          >
+            <CardArt src={hoverSrc} full={Boolean(hoverHero)} alt="" />
+          </div>,
+          document.body,
+        )
+        : null}
     </div>
   );
 }

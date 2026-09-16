@@ -1,0 +1,17 @@
+[Unit]
+Description=Publish Pokoin marketplace browse rails to primary Postgres
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/srv/pokoin/api/.env
+Environment=API_ORIGIN=https://api.pokoin.com
+Environment=POKOIN_MARKETPLACE_POSTGRES=pokoin-marketplace-postgres-15t
+WorkingDirectory=/srv/pokoin/scripts
+ExecStart=/usr/bin/python3 /srv/pokoin/scripts/sync-marketplace-rails.py
+TimeoutStartSec=600
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

@@ -9,6 +9,8 @@ const homeDir = path.resolve(rootDir, '../home');
 const rootIcons = {
   '/favicon.ico': 'favicon.ico',
   '/favicon-32x32.png': 'favicon-32x32.png',
+  '/favicon-48x48.png': 'favicon-48x48.png',
+  '/favicon-96x96.png': 'favicon-96x96.png',
   '/apple-touch-icon.png': 'apple-touch-icon.png',
   '/pokoin-192.png': 'pokoin-192.png',
   '/pokoin-512.png': 'logo.png',
@@ -40,6 +42,9 @@ function serveLandingHome() {
         const ext = path.extname(file);
         const types = {
           '.png': 'image/png',
+          '.webp': 'image/webp',
+          '.gif': 'image/gif',
+          '.svg': 'image/svg+xml',
           '.ico': 'image/x-icon',
           '.woff2': 'font/woff2',
           '.css': 'text/css',
@@ -69,6 +74,8 @@ function rewriteMarketplace(server) {
     }
         if (
       url === '/sanitize' || url.startsWith('/sanitize/')
+      || url === '/espurr' || url.startsWith('/espurr/')
+      || url === '/ocr' || url.startsWith('/ocr/')
       || url === '/marketplace' || url.startsWith('/marketplace/')
       || url === '/favorites' || url.startsWith('/favorites/')
       || url === '/product' || url.startsWith('/product/')
@@ -76,6 +83,7 @@ function rewriteMarketplace(server) {
       || url === '/wallet' || url.startsWith('/wallet/')
       || url === '/cart' || url.startsWith('/cart/')
       || url === '/auth' || url.startsWith('/auth/')
+      || url === '/extension/auth-bridge' || url.startsWith('/extension/auth-bridge/')
       || url === '/profile' || url.startsWith('/profile/')
       || url === '/scan' || url.startsWith('/scan/')
       || url === '/cardscan' || (url.startsWith('/cardscan/') && url !== '/cardscan/identify')
@@ -85,6 +93,7 @@ function rewriteMarketplace(server) {
       || url === '/about' || url.startsWith('/about/')
       || url === '/contact' || url.startsWith('/contact/')
       || url === '/privacy' || url.startsWith('/privacy/')
+      || url === '/protection' || url.startsWith('/protection/')
       || url === '/buy' || url.startsWith('/buy/')
       || url === '/admin' || url.startsWith('/admin/')
       || url === '/earn' || url.startsWith('/earn/')

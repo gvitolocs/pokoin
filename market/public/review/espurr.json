@@ -1,0 +1,835 @@
+{
+  "revision": "2026-09-06-espurr-artbox",
+  "generatedAt": "2026-09-06T07:45:16.463992+00:00",
+  "host": "test.pokoin.com",
+  "path": "/espurr",
+  "url": "https://test.pokoin.com/espurr",
+  "model": "leftover catalog CLIP \u22650.83 plus art-box ViT-B-32 laion2b_s34b_b79k \u22650.8 for catalog holes",
+  "rule": "Same card = same illustration, any language. JP/EN/CN, deck reprints, and stamp reverses of that art stay in one group. Each public_id keeps its own page.",
+  "counts": {
+    "printings": 35,
+    "western": 12,
+    "japanese": 16,
+    "chinese": 7,
+    "artworks": 12,
+    "paired": 12,
+    "unpaired": 0,
+    "catalog_ms": 205.3,
+    "encode_ms": 3201.3,
+    "total_ms": 4518.4,
+    "catalog_min": 0.83,
+    "artbox_hole_min": 0.8,
+    "catalog_hits": 33
+  },
+  "groups": [
+    {
+      "title": "JP MEGA Start Deck 100 Battle Collection 331/742 / Super Electric Breaker 053/106 \u00b7 EN Surging Sparks 084/191 \u00b7 CN CSV9: Master Ball Reverse CSV9C | Master Ball Reverse | 088/208 / CSV9: Pok\u00e9 Ball Reverse CSV9C | Pok\u00e9 Ball Reverse | 088/208 / CSV9: Stellar Crystal CSV9C | 088/208",
+      "paired": true,
+      "note": "Same artwork box \u00b7 6 printings \u00b7 CLIP 0.677\u20130.995",
+      "score": 0.6768,
+      "artbox": "/review/espurr-art/780868.jpg",
+      "printings": [
+        {
+          "id": 780868,
+          "ct_id": 390434,
+          "lang": "chinese",
+          "set": "CSV9: Stellar Crystal",
+          "num": "CSV9C | 088/208",
+          "code": "csv9",
+          "image": "https://cdn.pokoin.com/390434_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/780868",
+          "artbox": "/review/espurr-art/780868.jpg"
+        },
+        {
+          "id": 781464,
+          "ct_id": 390732,
+          "lang": "chinese",
+          "set": "CSV9: Pok\u00e9 Ball Reverse",
+          "num": "CSV9C | Pok\u00e9 Ball Reverse | 088/208",
+          "code": "csv9-p",
+          "image": "https://cardtrader.com/uploads/blueprints/image/390732/preview_390732-espurr-csv9c-poke-ball-reverse-088-208-csv9-poke-ball-reverse.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/781464",
+          "artbox": "/review/espurr-art/781464.jpg"
+        },
+        {
+          "id": 781818,
+          "ct_id": 390909,
+          "lang": "chinese",
+          "set": "CSV9: Master Ball Reverse",
+          "num": "CSV9C | Master Ball Reverse | 088/208",
+          "code": "csv9-m",
+          "image": "https://cardtrader.com/uploads/blueprints/image/390909/preview_390909-espurr-csv9c-master-ball-reverse-088-208-csv9-master-ball-reverse.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/781818",
+          "artbox": "/review/espurr-art/781818.jpg"
+        },
+        {
+          "id": 609298,
+          "ct_id": 304649,
+          "lang": "japanese",
+          "set": "Super Electric Breaker",
+          "num": "053/106",
+          "code": "sv8",
+          "image": "https://cdn.pokoin.com/304649_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/609298",
+          "artbox": "/review/espurr-art/609298.jpg"
+        },
+        {
+          "id": 727994,
+          "ct_id": 363997,
+          "lang": "japanese",
+          "set": "MEGA Start Deck 100 Battle Collection",
+          "num": "331/742",
+          "code": "mc",
+          "image": "https://cdn.pokoin.com/363997_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/727994",
+          "artbox": "/review/espurr-art/727994.jpg"
+        },
+        {
+          "id": 612306,
+          "ct_id": 306153,
+          "lang": "western",
+          "set": "Surging Sparks",
+          "num": "084/191",
+          "code": "ssp",
+          "image": "https://cdn.pokoin.com/306153_espurr-084-191-surging-sparks.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/612306",
+          "artbox": "/review/espurr-art/612306.jpg"
+        }
+      ],
+      "jp": {
+        "id": 609298,
+        "ct_id": 304649,
+        "lang": "japanese",
+        "set": "Super Electric Breaker",
+        "num": "053/106",
+        "code": "sv8",
+        "image": "https://cdn.pokoin.com/304649_espurr.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/609298",
+        "artbox": "/review/espurr-art/609298.jpg"
+      },
+      "en": {
+        "id": 612306,
+        "ct_id": 306153,
+        "lang": "western",
+        "set": "Surging Sparks",
+        "num": "084/191",
+        "code": "ssp",
+        "image": "https://cdn.pokoin.com/306153_espurr-084-191-surging-sparks.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/612306",
+        "artbox": "/review/espurr-art/612306.jpg"
+      },
+      "cn": {
+        "id": 780868,
+        "ct_id": 390434,
+        "lang": "chinese",
+        "set": "CSV9: Stellar Crystal",
+        "num": "CSV9C | 088/208",
+        "code": "csv9",
+        "image": "https://cdn.pokoin.com/390434_espurr.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/780868",
+        "artbox": "/review/espurr-art/780868.jpg"
+      }
+    },
+    {
+      "title": "JP Double Blaze 040/095 / Tag Team GX: Tag All Stars 059/173 \u00b7 EN Unbroken Bonds 079/214 \u00b7 CN CSM2b: Shining Synergy - Supreme CSM2b | 071/150",
+      "paired": true,
+      "note": "Same artwork box \u00b7 4 printings \u00b7 CLIP 0.744\u20130.992",
+      "score": 0.7444,
+      "artbox": "/review/espurr-art/705770.jpg",
+      "printings": [
+        {
+          "id": 705770,
+          "ct_id": 352885,
+          "lang": "chinese",
+          "set": "CSM2b: Shining Synergy - Supreme",
+          "num": "CSM2b | 071/150",
+          "code": "csm2b",
+          "image": "https://cdn.pokoin.com/352885_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/705770",
+          "artbox": "/review/espurr-art/705770.jpg"
+        },
+        {
+          "id": 274702,
+          "ct_id": 137351,
+          "lang": "japanese",
+          "set": "Double Blaze",
+          "num": "040/095",
+          "code": "sm10",
+          "image": "https://cdn.pokoin.com/137351_espurr-40-095-jp-double-blaze.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/274702",
+          "artbox": "/review/espurr-art/274702.jpg"
+        },
+        {
+          "id": 516050,
+          "ct_id": 258025,
+          "lang": "japanese",
+          "set": "Tag Team GX: Tag All Stars",
+          "num": "059/173",
+          "code": "sm12a",
+          "image": "https://cdn.pokoin.com/258025_espurr-059-173-tag-team-gx-tag-all-stars.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/516050",
+          "artbox": "/review/espurr-art/516050.jpg"
+        },
+        {
+          "id": 261128,
+          "ct_id": 130564,
+          "lang": "western",
+          "set": "Unbroken Bonds",
+          "num": "079/214",
+          "code": "unb",
+          "image": "https://cdn.pokoin.com/65282_espurr-79-214-unbroken-bonds.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/261128",
+          "artbox": "/review/espurr-art/261128.jpg"
+        }
+      ],
+      "jp": {
+        "id": 274702,
+        "ct_id": 137351,
+        "lang": "japanese",
+        "set": "Double Blaze",
+        "num": "040/095",
+        "code": "sm10",
+        "image": "https://cdn.pokoin.com/137351_espurr-40-095-jp-double-blaze.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/274702",
+        "artbox": "/review/espurr-art/274702.jpg"
+      },
+      "en": {
+        "id": 261128,
+        "ct_id": 130564,
+        "lang": "western",
+        "set": "Unbroken Bonds",
+        "num": "079/214",
+        "code": "unb",
+        "image": "https://cdn.pokoin.com/65282_espurr-79-214-unbroken-bonds.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/261128",
+        "artbox": "/review/espurr-art/261128.jpg"
+      },
+      "cn": {
+        "id": 705770,
+        "ct_id": 352885,
+        "lang": "chinese",
+        "set": "CSM2b: Shining Synergy - Supreme",
+        "num": "CSM2b | 071/150",
+        "code": "csm2b",
+        "image": "https://cdn.pokoin.com/352885_espurr.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/705770",
+        "artbox": "/review/espurr-art/705770.jpg"
+      }
+    },
+    {
+      "title": "JP Single Strike Master 025/070 / Start Deck 100 189/414 \u00b7 EN Battle Styles 060/163 \u00b7 CN CS3a: Primordial Martial Arts - Overgrowth CS3aC | 048/125",
+      "paired": true,
+      "note": "Same artwork box \u00b7 4 printings \u00b7 CLIP 0.767\u20130.879",
+      "score": 0.7673,
+      "artbox": "/review/espurr-art/699094.jpg",
+      "printings": [
+        {
+          "id": 699094,
+          "ct_id": 349547,
+          "lang": "chinese",
+          "set": "CS3a: Primordial Martial Arts - Overgrowth",
+          "num": "CS3aC | 048/125",
+          "code": "cs3a",
+          "image": "https://cdn.pokoin.com/349547_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/699094",
+          "artbox": "/review/espurr-art/699094.jpg"
+        },
+        {
+          "id": 471028,
+          "ct_id": 235514,
+          "lang": "japanese",
+          "set": "Start Deck 100",
+          "num": "189/414",
+          "code": "sl",
+          "image": "https://cdn.pokoin.com/235514_espurr-189-414-start-deck-100.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/471028",
+          "artbox": "/review/espurr-art/471028.jpg"
+        },
+        {
+          "id": 480314,
+          "ct_id": 240157,
+          "lang": "japanese",
+          "set": "Single Strike Master",
+          "num": "025/070",
+          "code": "s5l",
+          "image": "https://cdn.pokoin.com/240157_espurr-025-070-single-strike-master.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/480314",
+          "artbox": "/review/espurr-art/480314.jpg"
+        },
+        {
+          "id": 307864,
+          "ct_id": 153932,
+          "lang": "western",
+          "set": "Battle Styles",
+          "num": "060/163",
+          "code": "bst",
+          "image": "https://cdn.pokoin.com/76966_espurr-60-163-battle-styles.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/307864",
+          "artbox": "/review/espurr-art/307864.jpg"
+        }
+      ],
+      "jp": {
+        "id": 471028,
+        "ct_id": 235514,
+        "lang": "japanese",
+        "set": "Start Deck 100",
+        "num": "189/414",
+        "code": "sl",
+        "image": "https://cdn.pokoin.com/235514_espurr-189-414-start-deck-100.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/471028",
+        "artbox": "/review/espurr-art/471028.jpg"
+      },
+      "en": {
+        "id": 307864,
+        "ct_id": 153932,
+        "lang": "western",
+        "set": "Battle Styles",
+        "num": "060/163",
+        "code": "bst",
+        "image": "https://cdn.pokoin.com/76966_espurr-60-163-battle-styles.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/307864",
+        "artbox": "/review/espurr-art/307864.jpg"
+      },
+      "cn": {
+        "id": 699094,
+        "ct_id": 349547,
+        "lang": "chinese",
+        "set": "CS3a: Primordial Martial Arts - Overgrowth",
+        "num": "CS3aC | 048/125",
+        "code": "cs3a",
+        "image": "https://cdn.pokoin.com/349547_espurr.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/699094",
+        "artbox": "/review/espurr-art/699094.jpg"
+      }
+    },
+    {
+      "title": "JP Incandescent Arcana 041/068 \u00b7 EN Silver Tempest 081/195 \u00b7 CN CS6.5: Victory Star Guide CS6.5C | 034/072 / CSVE1: Battle Party Dream Together CSVE1 | 060/177",
+      "paired": true,
+      "note": "Same artwork box \u00b7 4 printings \u00b7 CLIP 0.724\u20130.915",
+      "score": 0.7243,
+      "artbox": "/review/espurr-art/677394.jpg",
+      "printings": [
+        {
+          "id": 677394,
+          "ct_id": 338697,
+          "lang": "chinese",
+          "set": "CS6.5: Victory Star Guide",
+          "num": "CS6.5C | 034/072",
+          "code": "cs65",
+          "image": "https://cdn.pokoin.com/338697_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/677394",
+          "artbox": "/review/espurr-art/677394.jpg"
+        },
+        {
+          "id": 759992,
+          "ct_id": 379996,
+          "lang": "chinese",
+          "set": "CSVE1: Battle Party Dream Together",
+          "num": "CSVE1 | 060/177",
+          "code": "csve1",
+          "image": "https://cdn.pokoin.com/379996_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/759992",
+          "artbox": "/review/espurr-art/759992.jpg"
+        },
+        {
+          "id": 466038,
+          "ct_id": 233019,
+          "lang": "japanese",
+          "set": "Incandescent Arcana",
+          "num": "041/068",
+          "code": "s11a",
+          "image": "https://cdn.pokoin.com/233019_espurr-041-068-incandescent-arcana.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/466038",
+          "artbox": "/review/espurr-art/466038.jpg"
+        },
+        {
+          "id": 455496,
+          "ct_id": 227748,
+          "lang": "western",
+          "set": "Silver Tempest",
+          "num": "081/195",
+          "code": "sit",
+          "image": "https://cdn.pokoin.com/227748_espurr-081-195-silver-tempest.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/455496",
+          "artbox": "/review/espurr-art/455496.jpg"
+        }
+      ],
+      "jp": {
+        "id": 466038,
+        "ct_id": 233019,
+        "lang": "japanese",
+        "set": "Incandescent Arcana",
+        "num": "041/068",
+        "code": "s11a",
+        "image": "https://cdn.pokoin.com/233019_espurr-041-068-incandescent-arcana.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/466038",
+        "artbox": "/review/espurr-art/466038.jpg"
+      },
+      "en": {
+        "id": 455496,
+        "ct_id": 227748,
+        "lang": "western",
+        "set": "Silver Tempest",
+        "num": "081/195",
+        "code": "sit",
+        "image": "https://cdn.pokoin.com/227748_espurr-081-195-silver-tempest.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/455496",
+        "artbox": "/review/espurr-art/455496.jpg"
+      },
+      "cn": {
+        "id": 677394,
+        "ct_id": 338697,
+        "lang": "chinese",
+        "set": "CS6.5: Victory Star Guide",
+        "num": "CS6.5C | 034/072",
+        "code": "cs65",
+        "image": "https://cdn.pokoin.com/338697_espurr.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/677394",
+        "artbox": "/review/espurr-art/677394.jpg"
+      }
+    },
+    {
+      "title": "JP Forbidden Light JP 030/094 / GX Starter Decks 048/131 \u00b7 EN Forbidden Light 44/131",
+      "paired": true,
+      "note": "Same artwork box \u00b7 3 printings \u00b7 CLIP 0.800\u20130.866",
+      "score": 0.7996,
+      "artbox": "/review/espurr-art/276820.jpg",
+      "printings": [
+        {
+          "id": 276820,
+          "ct_id": 138410,
+          "lang": "japanese",
+          "set": "Forbidden Light JP",
+          "num": "030/094",
+          "code": "sm6",
+          "image": "https://cdn.pokoin.com/138410_espurr-30-094-jp-forbidden-light.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/276820",
+          "artbox": "/review/espurr-art/276820.jpg"
+        },
+        {
+          "id": 568704,
+          "ct_id": 284352,
+          "lang": "japanese",
+          "set": "GX Starter Decks",
+          "num": "048/131",
+          "code": "sd",
+          "image": "https://cdn.pokoin.com/284352_espurr-048-131-gx-starter-decks.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/568704",
+          "artbox": "/review/espurr-art/568704.jpg"
+        },
+        {
+          "id": 238828,
+          "ct_id": 119414,
+          "lang": "western",
+          "set": "Forbidden Light",
+          "num": "44/131",
+          "code": "fli",
+          "image": "https://cdn.pokoin.com/119414_espurr-full-v4.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/238828",
+          "artbox": "/review/espurr-art/238828.jpg"
+        }
+      ],
+      "jp": {
+        "id": 276820,
+        "ct_id": 138410,
+        "lang": "japanese",
+        "set": "Forbidden Light JP",
+        "num": "030/094",
+        "code": "sm6",
+        "image": "https://cdn.pokoin.com/138410_espurr-30-094-jp-forbidden-light.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/276820",
+        "artbox": "/review/espurr-art/276820.jpg"
+      },
+      "en": {
+        "id": 238828,
+        "ct_id": 119414,
+        "lang": "western",
+        "set": "Forbidden Light",
+        "num": "44/131",
+        "code": "fli",
+        "image": "https://cdn.pokoin.com/119414_espurr-full-v4.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/238828",
+        "artbox": "/review/espurr-art/238828.jpg"
+      },
+      "cn": null
+    },
+    {
+      "title": "JP Emboar EX vs Togekiss EX Deck Kit 007/022 \u00b7 EN BREAKpoint 58/122",
+      "paired": true,
+      "note": "Same artwork box \u00b7 2 printings \u00b7 CLIP 0.804\u20130.804",
+      "score": 0.8039,
+      "artbox": "/review/espurr-art/642870.jpg",
+      "printings": [
+        {
+          "id": 642870,
+          "ct_id": 321435,
+          "lang": "japanese",
+          "set": "Emboar EX vs Togekiss EX Deck Kit",
+          "num": "007/022",
+          "code": "xye",
+          "image": "https://cardtrader.com/uploads/blueprints/image/321435/preview_espurr-007-022-emboar-ex-vs-togekiss-ex-deck-kit.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/642870",
+          "artbox": "/review/espurr-art/642870.jpg"
+        },
+        {
+          "id": 220962,
+          "ct_id": 110481,
+          "lang": "western",
+          "set": "BREAKpoint",
+          "num": "58/122",
+          "code": "bkp",
+          "image": "https://cdn.pokoin.com/110481_espurr-58-122-breakpoint.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/220962",
+          "artbox": "/review/espurr-art/220962.jpg"
+        }
+      ],
+      "jp": {
+        "id": 642870,
+        "ct_id": 321435,
+        "lang": "japanese",
+        "set": "Emboar EX vs Togekiss EX Deck Kit",
+        "num": "007/022",
+        "code": "xye",
+        "image": "https://cardtrader.com/uploads/blueprints/image/321435/preview_espurr-007-022-emboar-ex-vs-togekiss-ex-deck-kit.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/642870",
+        "artbox": "/review/espurr-art/642870.jpg"
+      },
+      "en": {
+        "id": 220962,
+        "ct_id": 110481,
+        "lang": "western",
+        "set": "BREAKpoint",
+        "num": "58/122",
+        "code": "bkp",
+        "image": "https://cdn.pokoin.com/110481_espurr-58-122-breakpoint.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/220962",
+        "artbox": "/review/espurr-art/220962.jpg"
+      },
+      "cn": null
+    },
+    {
+      "title": "JP Darkness that Consumes Light 024/051 \u00b7 EN Burning Shadows 59/147",
+      "paired": true,
+      "note": "Same artwork box \u00b7 2 printings \u00b7 CLIP 0.827\u20130.827",
+      "score": 0.8273,
+      "artbox": "/review/espurr-art/274176.jpg",
+      "printings": [
+        {
+          "id": 274176,
+          "ct_id": 137088,
+          "lang": "japanese",
+          "set": "Darkness that Consumes Light",
+          "num": "024/051",
+          "code": "sm3n",
+          "image": "https://cdn.pokoin.com/137088_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/274176",
+          "artbox": "/review/espurr-art/274176.jpg"
+        },
+        {
+          "id": 224182,
+          "ct_id": 112091,
+          "lang": "western",
+          "set": "Burning Shadows",
+          "num": "59/147",
+          "code": "bus",
+          "image": "https://cdn.pokoin.com/112091_espurr-59-147-burning-shadows.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/224182",
+          "artbox": "/review/espurr-art/224182.jpg"
+        }
+      ],
+      "jp": {
+        "id": 274176,
+        "ct_id": 137088,
+        "lang": "japanese",
+        "set": "Darkness that Consumes Light",
+        "num": "024/051",
+        "code": "sm3n",
+        "image": "https://cdn.pokoin.com/137088_espurr.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/274176",
+        "artbox": "/review/espurr-art/274176.jpg"
+      },
+      "en": {
+        "id": 224182,
+        "ct_id": 112091,
+        "lang": "western",
+        "set": "Burning Shadows",
+        "num": "59/147",
+        "code": "bus",
+        "image": "https://cdn.pokoin.com/112091_espurr-59-147-burning-shadows.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/224182",
+        "artbox": "/review/espurr-art/224182.jpg"
+      },
+      "cn": null
+    },
+    {
+      "title": "JP Wild Blaze 037/080 \u00b7 EN Flashfire 42/106",
+      "paired": true,
+      "note": "Same artwork box \u00b7 2 printings \u00b7 CLIP 0.833\u20130.833",
+      "score": 0.8331,
+      "artbox": "/review/espurr-art/288536.jpg",
+      "printings": [
+        {
+          "id": 288536,
+          "ct_id": 144268,
+          "lang": "japanese",
+          "set": "Wild Blaze",
+          "num": "037/080",
+          "code": "xy2",
+          "image": "https://cdn.pokoin.com/144268_espurr-37-080-jp-wild-blaze.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/288536",
+          "artbox": "/review/espurr-art/288536.jpg"
+        },
+        {
+          "id": 238380,
+          "ct_id": 119190,
+          "lang": "western",
+          "set": "Flashfire",
+          "num": "42/106",
+          "code": "flf",
+          "image": "https://cdn.pokoin.com/119190_espurr-42-106-flashfire.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/238380",
+          "artbox": "/review/espurr-art/238380.jpg"
+        }
+      ],
+      "jp": {
+        "id": 288536,
+        "ct_id": 144268,
+        "lang": "japanese",
+        "set": "Wild Blaze",
+        "num": "037/080",
+        "code": "xy2",
+        "image": "https://cdn.pokoin.com/144268_espurr-37-080-jp-wild-blaze.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/288536",
+        "artbox": "/review/espurr-art/288536.jpg"
+      },
+      "en": {
+        "id": 238380,
+        "ct_id": 119190,
+        "lang": "western",
+        "set": "Flashfire",
+        "num": "42/106",
+        "code": "flf",
+        "image": "https://cdn.pokoin.com/119190_espurr-42-106-flashfire.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/238380",
+        "artbox": "/review/espurr-art/238380.jpg"
+      },
+      "cn": null
+    },
+    {
+      "title": "JP Pok\u00e9Kyun Collection 016/032 \u00b7 EN Radiant Collection Generation RC14/RC32",
+      "paired": true,
+      "note": "Same artwork box \u00b7 2 printings \u00b7 CLIP 0.837\u20130.837",
+      "score": 0.8375,
+      "artbox": "/review/espurr-art/542180.jpg",
+      "printings": [
+        {
+          "id": 542180,
+          "ct_id": 271090,
+          "lang": "japanese",
+          "set": "Pok\u00e9Kyun Collection",
+          "num": "016/032",
+          "code": "cp3",
+          "image": "https://cdn.pokoin.com/271090_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/542180",
+          "artbox": "/review/espurr-art/542180.jpg"
+        },
+        {
+          "id": 252496,
+          "ct_id": 126248,
+          "lang": "western",
+          "set": "Radiant Collection Generation",
+          "num": "RC14/RC32",
+          "code": "rc",
+          "image": "https://cdn.pokoin.com/126248_espurr-rc14-rc32-radiant-collection-generation.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/252496",
+          "artbox": "/review/espurr-art/252496.jpg"
+        }
+      ],
+      "jp": {
+        "id": 542180,
+        "ct_id": 271090,
+        "lang": "japanese",
+        "set": "Pok\u00e9Kyun Collection",
+        "num": "016/032",
+        "code": "cp3",
+        "image": "https://cdn.pokoin.com/271090_espurr.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/542180",
+        "artbox": "/review/espurr-art/542180.jpg"
+      },
+      "en": {
+        "id": 252496,
+        "ct_id": 126248,
+        "lang": "western",
+        "set": "Radiant Collection Generation",
+        "num": "RC14/RC32",
+        "code": "rc",
+        "image": "https://cdn.pokoin.com/126248_espurr-rc14-rc32-radiant-collection-generation.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/252496",
+        "artbox": "/review/espurr-art/252496.jpg"
+      },
+      "cn": null
+    },
+    {
+      "title": "JP Nihil Zero 032/080 \u00b7 EN Perfect Order 033/088",
+      "paired": true,
+      "note": "Same artwork box \u00b7 2 printings \u00b7 CLIP 0.794\u20130.794",
+      "score": 0.7943,
+      "artbox": "/review/espurr-art/734318.jpg",
+      "printings": [
+        {
+          "id": 734318,
+          "ct_id": 367159,
+          "lang": "japanese",
+          "set": "Nihil Zero",
+          "num": "032/080",
+          "code": "m3",
+          "image": "https://cdn.pokoin.com/367159_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/734318",
+          "artbox": "/review/espurr-art/734318.jpg"
+        },
+        {
+          "id": 757756,
+          "ct_id": 378878,
+          "lang": "western",
+          "set": "Perfect Order",
+          "num": "033/088",
+          "code": "por",
+          "image": "https://cardtrader.com/uploads/blueprints/image/378878/preview_espurr-033-088-perfect-order(2).jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/757756",
+          "artbox": "/review/espurr-art/757756.jpg"
+        }
+      ],
+      "jp": {
+        "id": 734318,
+        "ct_id": 367159,
+        "lang": "japanese",
+        "set": "Nihil Zero",
+        "num": "032/080",
+        "code": "m3",
+        "image": "https://cdn.pokoin.com/367159_espurr.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/734318",
+        "artbox": "/review/espurr-art/734318.jpg"
+      },
+      "en": {
+        "id": 757756,
+        "ct_id": 378878,
+        "lang": "western",
+        "set": "Perfect Order",
+        "num": "033/088",
+        "code": "por",
+        "image": "https://cardtrader.com/uploads/blueprints/image/378878/preview_espurr-033-088-perfect-order(2).jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/757756",
+        "artbox": "/review/espurr-art/757756.jpg"
+      },
+      "cn": null
+    },
+    {
+      "title": "JP Nihil Zero Illustration Rare | 087/080 \u00b7 EN Perfect Order Illustration Rare | 095/088",
+      "paired": true,
+      "note": "Same artwork box \u00b7 2 printings \u00b7 CLIP 0.856\u20130.856",
+      "score": 0.856,
+      "artbox": "/review/espurr-art/736062.jpg",
+      "printings": [
+        {
+          "id": 736062,
+          "ct_id": 368031,
+          "lang": "japanese",
+          "set": "Nihil Zero",
+          "num": "Illustration Rare | 087/080",
+          "code": "m3",
+          "image": "https://cdn.pokoin.com/368031_espurr.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/736062",
+          "artbox": "/review/espurr-art/736062.jpg"
+        },
+        {
+          "id": 757880,
+          "ct_id": 378940,
+          "lang": "western",
+          "set": "Perfect Order",
+          "num": "Illustration Rare | 095/088",
+          "code": "por",
+          "image": "https://cardtrader.com/uploads/blueprints/image/378940/preview_espurr-illustration-rare-095-088-perfect-order.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/757880",
+          "artbox": "/review/espurr-art/757880.jpg"
+        }
+      ],
+      "jp": {
+        "id": 736062,
+        "ct_id": 368031,
+        "lang": "japanese",
+        "set": "Nihil Zero",
+        "num": "Illustration Rare | 087/080",
+        "code": "m3",
+        "image": "https://cdn.pokoin.com/368031_espurr.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/736062",
+        "artbox": "/review/espurr-art/736062.jpg"
+      },
+      "en": {
+        "id": 757880,
+        "ct_id": 378940,
+        "lang": "western",
+        "set": "Perfect Order",
+        "num": "Illustration Rare | 095/088",
+        "code": "por",
+        "image": "https://cardtrader.com/uploads/blueprints/image/378940/preview_espurr-illustration-rare-095-088-perfect-order.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/757880",
+        "artbox": "/review/espurr-art/757880.jpg"
+      },
+      "cn": null
+    },
+    {
+      "title": "JP Ninja Spinner 036/083 \u00b7 EN Chaos Rising 036/086",
+      "paired": true,
+      "note": "Same artwork box \u00b7 2 printings \u00b7 CLIP 0.807\u20130.807",
+      "score": 0.8066,
+      "artbox": "/review/espurr-art/756020.jpg",
+      "printings": [
+        {
+          "id": 756020,
+          "ct_id": 378010,
+          "lang": "japanese",
+          "set": "Ninja Spinner",
+          "num": "036/083",
+          "code": "m4",
+          "image": "https://cardtrader.com/uploads/blueprints/image/378010/preview_espurr-036-083-ninja-spinner.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/756020",
+          "artbox": "/review/espurr-art/756020.jpg"
+        },
+        {
+          "id": 779954,
+          "ct_id": 389977,
+          "lang": "western",
+          "set": "Chaos Rising",
+          "num": "036/086",
+          "code": "cri",
+          "image": "https://cardtrader.com/uploads/blueprints/image/389977/preview_389977-espurr-036-086-chaos-rising.jpg",
+          "desk": "https://pokoin.com/marketplace/en/cards/779954",
+          "artbox": "/review/espurr-art/779954.jpg"
+        }
+      ],
+      "jp": {
+        "id": 756020,
+        "ct_id": 378010,
+        "lang": "japanese",
+        "set": "Ninja Spinner",
+        "num": "036/083",
+        "code": "m4",
+        "image": "https://cardtrader.com/uploads/blueprints/image/378010/preview_espurr-036-083-ninja-spinner.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/756020",
+        "artbox": "/review/espurr-art/756020.jpg"
+      },
+      "en": {
+        "id": 779954,
+        "ct_id": 389977,
+        "lang": "western",
+        "set": "Chaos Rising",
+        "num": "036/086",
+        "code": "cri",
+        "image": "https://cardtrader.com/uploads/blueprints/image/389977/preview_389977-espurr-036-086-chaos-rising.jpg",
+        "desk": "https://pokoin.com/marketplace/en/cards/779954",
+        "artbox": "/review/espurr-art/779954.jpg"
+      },
+      "cn": null
+    }
+  ]
+}

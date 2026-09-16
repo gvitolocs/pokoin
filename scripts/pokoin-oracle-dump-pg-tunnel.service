@@ -1,0 +1,19 @@
+[Unit]
+Description=Reverse tunnel: Oracle CardTrader dump persist → nezopt NVMe Postgres
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -N \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o BatchMode=yes \
+  -R 127.0.0.1:15543:127.0.0.1:25432 \
+  pokoin-marketplace
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
