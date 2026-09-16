@@ -116,6 +116,32 @@ Cinderace VMAX `Secret Rare | 194/192` is full-bleed on the leftover and stays
 `no_chrome`. The Secret Rare token did not decide either card. VMAX names
 are catalog bleed (`scripts/sql/079_vmax_album_bleed.sql`).
 
+## Incident — Walking Wake 063/167 + the Pikachu V cream-rules cohort
+
+Giuseppe 2026-09-16, same `geometry:*` false-positive family as the Squirtle
+above:
+
+- **Walking Wake `Rare | 063/167` Twilight Masquerade** (`287725`, CLIP
+  `v562238`) — pastel watercolor wash defeated the art-box detector
+  (`geometry:no_art_box+ocr_chrome`) and stored bleed, so the album painted
+  the whole card. It is a framed Ancient illustration; stamped **halfart**
+  manually. The other three `v562238` members stay window.
+- **Pikachu V / Pikachu ex Ultra Rares** (`200579`, `283421`, `206484`,
+  `225715`, `225750`, `236599`, `406714`, `412397` — Fusion Strike 086/264,
+  Brilliant Stars 157/172, SWSH145/198 + jumbo, 30th Celebration 053/128 and
+  the JP prints) — attack text sits **on the painting** for full-art V/ex,
+  and the cream detector read that text sheet as a rules panel
+  (`agree:cream_rules+ocr_chrome`), storing window. Stamped **bleed**
+  manually; `pokoin_version_sets` rows for their groups follow.
+
+Manual stamps use `source = 'manual:giuseppe-2026-09-16'`. `apply_rows` in
+`scripts/artwork-layout.py` now skips `manual:%` rows on later passes, so a
+re-classify never reverts them. What is still open: **geometry-only bleed
+stamps inside window-majority CLIP groups** (WCD decks every year, JP deck
+kits, promos — ~920 rows). Dusknoir `v223574` WCD 2013/2014 are the visible
+cases; a group-majority override for geometry-sourced stamps is the planned
+fix.
+
 ## Incident — Quagsire SVP 156 / Chikorita MEP 046
 
 Saboteri album showed Cosmos Holo SVP 156 as a two-row leftover (Rollout,

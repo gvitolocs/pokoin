@@ -795,6 +795,7 @@ update public.pokoin_version_sets s
        updated_at = now()
   from art_layout_versions v
  where s.version = v.version
+   and coalesce(s.art_layout_source, '') not like 'manual:%'
    and v.layout in ('window','bleed','landscape','halfart');
 insert into public.marketplace_leftover_art_layouts (ct_id, layout, source, version, sampled_at)
 select ct_id, layout, source, version, now()
@@ -804,7 +805,8 @@ on conflict (ct_id) do update
   set layout = excluded.layout,
       source = excluded.source,
       version = excluded.version,
-      sampled_at = now();
+      sampled_at = now()
+ where public.marketplace_leftover_art_layouts.source not like 'manual:%';
 update public.marketplace_search_candidates c
    set art_layout = coalesce(
      (select nullif(l.layout, '') from public.marketplace_leftover_art_layouts l where l.ct_id = c.ct_id),
