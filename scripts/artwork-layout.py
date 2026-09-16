@@ -798,13 +798,13 @@ update public.pokoin_version_sets s
    and coalesce(s.art_layout_source, '') not like 'manual:%'
    and v.layout in ('window','bleed','landscape','halfart');
 insert into public.marketplace_leftover_art_layouts (ct_id, layout, source, version, sampled_at)
-select ct_id, layout, source, version, now()
+select ct_id, layout, source, coalesce(version, ''), now()
   from art_layout_leftovers
  where layout in ('window','bleed','landscape','halfart')
 on conflict (ct_id) do update
   set layout = excluded.layout,
       source = excluded.source,
-      version = excluded.version,
+      version = coalesce(nullif(excluded.version, ''), public.marketplace_leftover_art_layouts.version),
       sampled_at = now()
  where public.marketplace_leftover_art_layouts.source not like 'manual:%';
 update public.marketplace_search_candidates c
@@ -1313,6 +1313,21 @@ def main() -> int:
         f"versions {len(version_rows)} leftover_layouts {len(leftover_rows)}",
         flush=True,
     )
+    if not args.apply:
+        # Dry-run: dump the proposed verdicts so the flips can be reviewed
+        # against the database before --apply.
+        import csv as _csv
+
+        dump = Path("scripts/out/artwork-repair-proposals.csv")
+        dump.parent.mkdir(parents=True, exist_ok=True)
+        with dump.open("w", newline="", encoding="utf-8") as fh:
+            writer = _csv.writer(fh)
+            writer.writerow(["kind", "key", "layout", "source"])
+            for version, layout, source in version_rows:
+                writer.writerow(["version", version, layout, source])
+            for ct_id, layout, source, _version in leftover_rows:
+                writer.writerow(["leftover", ct_id, layout, source])
+        print(f"proposals {dump} (dry run; rerun with --apply to write)", flush=True)
     if args.apply:
         apply_rows(version_rows, leftover_rows)
         print("applied", flush=True)

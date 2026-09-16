@@ -142,6 +142,33 @@ kits, promos — ~920 rows). Dusknoir `v223574` WCD 2013/2014 are the visible
 cases; a group-majority override for geometry-sourced stamps is the planned
 fix.
 
+**16 Sep 2026 repair pass.** `--repair-no-chrome --gpu` re-classified the
+35,267 no-chrome/leftover overrides and proposed 125 flips
+(`scripts/out/artwork-repair-proposals.csv`, dumped on every dry run). Every
+doubtful flip was decided by reading the scan: 95 applied, 30 vetoed. Vetoes
+keep evidence in git history of this doc:
+
+- window → bleed **applied** for full-art families (ex URs n>m via
+  `catalog_bleed`, the Shiny V cohort SV105/108/115/118/120, Sigilyph
+  057/051, Charizard 077/070, Cinderace V stamped).
+- window → bleed **vetoed** for framed shiny rares (Shiny Star V 214–218,
+  276–281 — the D00005H class: white sparkle backgrounds defeat `no_chrome`),
+  Shining Mew / Shining Ho-Oh, plain JP holos (Kommo-o, Flareon, Sandslash,
+  Sableye, Landorus, Larvesta) and Charizard ☆ Gold Star.
+- bleed → window **applied** for framed cards (Iron Boulder 046/131 and
+  071/142, CoroCoro glossies, SM Alternate Art Promos, Radiants, Holon
+  energies, white/dark/gold rules JP holos).
+- bleed → window **vetoed** for edge-to-edge paintings the text detector
+  misread: Zekrom ex 172/086 Black Bolt secret, Archeops 075/069, Celebi &
+  Venusaur GX 350/342, Walking Wake ex 074/204, Giacomo 138/131, Tool
+  Scrapper 208/192, Ancient Mew, and the LV.X trio.
+- Amazing Rare Yveltal 046/072 → halfart per D000058.
+
+`apply_rows` is also NULL-safe for the leftover `version` column now. Junk
+scans found while vetting: SVP 199 / 200 / 218 (Zarude, Eevee, Team Rocket's
+Persian ex) share one identical placeholder scan (pixel sprite on a
+starfield) — they need the D00004H placeholder re-import, not a layout stamp.
+
 ## Incident — Quagsire SVP 156 / Chikorita MEP 046
 
 Saboteri album showed Cosmos Holo SVP 156 as a two-row leftover (Rollout,
