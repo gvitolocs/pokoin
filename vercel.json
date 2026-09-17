@@ -76,6 +76,19 @@
       ]
     },
     {
+      "source": "/bimi.svg",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400, must-revalidate"
+        },
+        {
+          "key": "Content-Type",
+          "value": "image/svg+xml"
+        }
+      ]
+    },
+    {
       "source": "/favicon.ico",
       "headers": [
         {
