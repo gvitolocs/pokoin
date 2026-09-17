@@ -119,6 +119,25 @@
 .scan-qr svg { width: 9.5rem; height: 9.5rem; border-radius: 8px; display: block; }
 .scan-qr figcaption { color: var(--muted); font-size: 0.78rem; margin-top: 0.35rem; }
 
+.scan-connect.is-loading { border-color: var(--g5); opacity: 0.85; }
+.scan-pin-skeleton span {
+  background: var(--g3);
+  border-color: var(--g4);
+  color: transparent;
+  animation: scan-pulse 1.1s ease-in-out infinite;
+}
+.scan-qr-skeleton {
+  width: 9.5rem;
+  height: 9.5rem;
+  border-radius: 8px;
+  background: var(--g3);
+  animation: scan-pulse 1.1s ease-in-out infinite;
+}
+@keyframes scan-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
 /* Batch defaults */
 
 .scan-defaults {

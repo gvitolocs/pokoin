@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { fetchLastMedianPknMap, fetchVersionSet, formatPkn, imageSrc } from '../api.js';
 import { useAuth } from '../auth.jsx';
@@ -149,18 +150,43 @@ export default function ScanDesk() {
 
   const startSession = useCallback(async (batchId) => {
     setError('');
+    const perf = perfSink();
+    const t0 = performance.now();
     try {
       const t = await token();
+      const tokenMs = Math.round(performance.now() - t0);
+      const t1 = performance.now();
       const data = await scanApi.start(t, batchId);
-      setSession(data.session);
-      setBatch(data.batch);
-      setPairing(data.pairing);
-      setServerOffset(Number(data.serverTime) - Date.now());
+      const startMs = Math.round(performance.now() - t1);
+      // Force the PIN/QR tile to paint before the items snapshot fetch.
+      // React 18 batches setState across awaits in one async function, so
+      // without flushSync the connect tile waited on scan-batch too.
+      flushSync(() => {
+        setSession(data.session);
+        setBatch(data.batch);
+        setPairing(data.pairing);
+        setServerOffset(Number(data.serverTime) - Date.now());
+      });
       rememberActiveSession(data.session?.id || '');
+      perf.push({
+        kind: 'desk-start',
+        tokenMs,
+        startMs,
+        pairing: Boolean(data.pairing),
+        at: Date.now(),
+      });
+      const t2 = performance.now();
       const snapshot = await scanApi.batch(t, data.batch.id);
       dispatch({ type: 'reset', items: snapshot.items });
+      perf.push({
+        kind: 'desk-batch',
+        batchMs: Math.round(performance.now() - t2),
+        items: (snapshot.items || []).length,
+        at: Date.now(),
+      });
     } catch (err) {
       setError(err.message || 'Scan could not start.');
+      perf.push({ kind: 'desk-start-error', message: err.message || '', at: Date.now() });
     }
   }, [token]);
 
@@ -868,6 +894,17 @@ export default function ScanDesk() {
             </p>
           </div>
           <QrBlock secret={pairing.qrSecret} pin={pairing.pin} />
+        </section>
+      ) : !closed && !session ? (
+        <section className="scan-connect is-loading" aria-label="Connect your phone" aria-busy="true">
+          <div className="scan-connect-main">
+            <h2>Connect your phone</h2>
+            <p className="scan-connect-step">Preparing pairing code…</p>
+            <p className="scan-pin scan-pin-skeleton" aria-hidden="true">
+              <span /><span /><span /><span />
+            </p>
+          </div>
+          <div className="scan-qr scan-qr-skeleton" aria-hidden="true" />
         </section>
       ) : null}
 
@@ -1638,8 +1675,17 @@ function PerfPanel({ now }) {
     const values = pick(key);
     return [key, values.length, median(values), p95(values)];
   });
+  const start = [...samples].reverse().find((s) => s.kind === 'desk-start');
+  const batch = [...samples].reverse().find((s) => s.kind === 'desk-batch');
   return (
     <aside className="scan-perf" data-now={now}>
+      {start ? (
+        <span>
+          desk-start: token={start.tokenMs ?? '—'}ms session={start.startMs ?? '—'}ms
+          {start.pairing ? ' pairing=yes' : ' pairing=no'}
+        </span>
+      ) : null}
+      {batch ? <span>desk-batch: {batch.batchMs ?? '—'}ms items={batch.items ?? 0}</span> : null}
       {rowsOut.map(([key, n, med, p]) => (
         <span key={key}>{key}: n={n} p50={med ?? '—'} p95={p ?? '—'}</span>
       ))}
