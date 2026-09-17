@@ -87,6 +87,11 @@ test('artworkVersionLabel matches set · number with print badge', () => {
   assert.equal(artworkVersionLabel(EN), 'EN · Pitch Black · 030/084');
 });
 
+test('artworkVersionShortLabel drops the print badge', () => {
+  assert.equal(artworkVersionShortLabel(JP), 'Abyss Eye · 029/081');
+  assert.equal(artworkVersionShortLabel(EN), 'Pitch Black · 030/084');
+});
+
 test('listingLanguageForPrint blocks EN on JP and JP on western', () => {
   assert.equal(listingLanguageForPrint('japanese', 'EN'), 'JP');
   assert.equal(listingLanguageForPrint('japanese', 'IT'), 'JP');

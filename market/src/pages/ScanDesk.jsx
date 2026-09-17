@@ -13,6 +13,7 @@ import {
 } from '../scan-api.js';
 import {
   artworkVersionLabel,
+  artworkVersionShortLabel,
   languagesForPrint,
   listingLanguageForPrint,
   preferArtworkPrinting,
@@ -1006,6 +1007,7 @@ export default function ScanDesk() {
             image={images[row.id]}
             closed={closed}
             replacing={replaceFor === row.id}
+            preferredLanguage={defaults.language}
             onFocus={(event) => {
               if (event.shiftKey && focusId) {
                 const a = list.findIndex((r) => r.id === focusId);
@@ -1169,15 +1171,15 @@ function thumbFor(cardId, name, imageUrl) {
   }
 }
 
-function ArtworkVersionSelect({ row, closed, onPick, onLanguage }) {
+function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick, onLanguage }) {
   const [printings, setPrintings] = useState(null);
   const remapTried = useRef(new Set());
   const onPickRef = useRef(onPick);
   const onLanguageRef = useRef(onLanguage);
   onPickRef.current = onPick;
   onLanguageRef.current = onLanguage;
-  // Prefer the row language as the region intent (EN on a JP hit → western sibling).
-  const listingLanguage = row.language || 'EN';
+  // Batch defaults language is the region intent (EN → western sibling).
+  const listingLanguage = preferredLanguage || row.language || 'EN';
 
   useEffect(() => {
     let cancelled = false;
@@ -1206,10 +1208,10 @@ function ArtworkVersionSelect({ row, closed, onPick, onLanguage }) {
       const nationality = String(current?.nationality || row.nationality || '').toLowerCase();
       if (!nationality) return;
       const nextLang = listingLanguageForPrint(nationality, listingLanguage);
-      if (nextLang !== listingLanguage) onLanguageRef.current?.(nextLang);
+      if (nextLang !== row.language) onLanguageRef.current?.(nextLang);
     });
     return () => { cancelled = true; };
-  }, [row.cardId, row.id, row.nationality, closed, listingLanguage]);
+  }, [row.cardId, row.id, row.nationality, row.language, closed, listingLanguage]);
 
   const fallback = [row.setName, row.collectorNumber].filter(Boolean).join(' · ');
   if (closed || !row.cardId) {
@@ -1226,31 +1228,94 @@ function ArtworkVersionSelect({ row, closed, onPick, onLanguage }) {
     ? String(row.cardId)
     : String(printings[0].id);
   return (
-    <select
-      className="c-version"
-      value={value}
-      aria-label="Artwork version"
-      tabIndex={-1}
-      title="Same artwork — pick the printing to list"
-      onChange={(e) => onPick(e.target.value)}
-    >
-      {printings.map((printing) => (
-        <option key={printing.id} value={String(printing.id)}>
-          {artworkVersionLabel(printing)}
-        </option>
-      ))}
-    </select>
+    <label className="c-version-wrap">
+      <span className="c-version-tag">Version</span>
+      <select
+        className="c-version"
+        value={value}
+        aria-label="Artwork version"
+        tabIndex={-1}
+        title="Same artwork — pick which printing to list"
+        onChange={(e) => onPick(e.target.value)}
+      >
+        {printings.map((printing) => (
+          <option key={printing.id} value={String(printing.id)}>
+            {artworkVersionShortLabel(printing)}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
-function QueueRow({ row, index, focused, selected, problem, image, closed, replacing, onFocus, onPatch, onPick, onRemove, onReplaceDone }) {
+function CandidateAlts({ row, preferredLanguage, onPick }) {
+  const raw = candidateList(row);
+  const [mapped, setMapped] = useState(raw);
+  const lang = preferredLanguage || row.language || 'EN';
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = raw.map((c) => c.cardId).join(',');
+    if (!ids) {
+      setMapped([]);
+      return undefined;
+    }
+    Promise.all(raw.map(async (cand) => {
+      const data = await loadVersionSet(cand.cardId);
+      const rows = sortArtworkVersions(data?.printings || [], lang);
+      if (!rows.length) return cand;
+      const preferred = preferArtworkPrinting(rows, cand.cardId, lang);
+      if (!preferred) return cand;
+      return {
+        ...cand,
+        cardId: String(preferred.id || preferred.card_id || cand.cardId),
+        name: preferred.name || cand.name,
+        setName: preferred.set_name || preferred.setName || preferred.set || cand.setName,
+        number: preferred.card_number || preferred.collector_number || preferred.number || cand.number,
+      };
+    })).then((next) => {
+      if (cancelled) return;
+      const seen = new Set();
+      setMapped(next.filter((c) => {
+        const id = String(c.cardId || '');
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      }));
+    });
+    return () => { cancelled = true; };
+  }, [row.id, lang, raw.map((c) => c.cardId).join(',')]);
+
+  if (!mapped.length) return null;
+  return (
+    <span className="c-cands">
+      {mapped.slice(0, 4).map((cand, i) => (
+        <button
+          key={cand.cardId}
+          type="button"
+          className={cand.cardId === row.cardId ? 'on' : ''}
+          onClick={() => onPick(cand.cardId)}
+          title={`Alt+${i + 1}`}
+        >
+          <b>{i + 1}</b> {cand.setName || cand.name} {cand.number}
+          {cand.score != null ? <i>{Math.round(cand.score * 100)}%</i> : null}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function QueueRow({
+  row, index, focused, selected, problem, image, closed, replacing,
+  preferredLanguage,
+  onFocus, onPatch, onPick, onRemove, onReplaceDone,
+}) {
   const stateLabel = row.status === 'submitted'
     ? 'Listed'
     : problem
       ? PROBLEM_LABEL[problem]
       : row.recognitionState === 'manual' ? 'Manual' : row.reviewed && row.recognitionState !== 'matched' ? 'Checked' : 'Matched';
   const tone = row.status === 'submitted' ? 'ok' : problem === 'no_printing' ? 'bad' : problem ? 'warn' : 'ok';
-  const candidates = candidateList(row);
   const showCandidates = !closed && (row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed;
   const allowedLangs = languagesForPrint(row.nationality, LANGUAGES);
   const langValue = allowedLangs.includes(row.language)
@@ -1258,6 +1323,7 @@ function QueueRow({ row, index, focused, selected, problem, image, closed, repla
     : listingLanguageForPrint(row.nationality, row.language);
   const langWarn = row.nationality && row.language !== langValue;
   const thumb = thumbFor(row.cardId, row.cardName, row.imageUrl);
+  const remapLang = preferredLanguage || row.language || 'EN';
   return (
     <div
       className={`scan-row${focused ? ' focused' : ''}${selected ? ' selected' : ''}${row.status === 'submitted' ? ' done' : ''}`}
@@ -1279,24 +1345,12 @@ function QueueRow({ row, index, focused, selected, problem, image, closed, repla
         <ArtworkVersionSelect
           row={row}
           closed={closed}
+          preferredLanguage={remapLang}
           onPick={onPick}
           onLanguage={(language) => onPatch({ language })}
         />
-        {showCandidates && candidates.length ? (
-          <span className="c-cands">
-            {candidates.slice(0, 4).map((cand, i) => (
-              <button
-                key={cand.cardId}
-                type="button"
-                className={cand.cardId === row.cardId ? 'on' : ''}
-                onClick={() => onPick(cand.cardId)}
-                title={`Alt+${i + 1}`}
-              >
-                <b>{i + 1}</b> {cand.setName || cand.name} {cand.number}
-                {cand.score != null ? <i>{Math.round(cand.score * 100)}%</i> : null}
-              </button>
-            ))}
-          </span>
+        {showCandidates ? (
+          <CandidateAlts row={row} preferredLanguage={remapLang} onPick={onPick} />
         ) : null}
         {replacing ? <ReplacePrinting onPick={(id) => { onPick(id); onReplaceDone(); }} onClose={onReplaceDone} seed={row.cardName} /> : null}
       </span>

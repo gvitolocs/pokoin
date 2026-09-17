@@ -126,7 +126,7 @@ export function shouldRemapToWestern(printings, currentId) {
   return shouldRemapArtwork(printings, currentId, 'EN');
 }
 
-/** Dropdown label where the set · collector line used to be. */
+/** Dropdown option / full label with print badge. */
 export function artworkVersionLabel(row) {
   if (!row) return '';
   const set = row.set_name || row.setName || row.set || '';
@@ -135,6 +135,14 @@ export function artworkVersionLabel(row) {
   const badge = printLangBadge(row);
   if (badge && base) return `${badge} · ${base}`;
   return base || badge || String(row.name || printingId(row) || '');
+}
+
+/** Compact closed label for the version <select> (LANG column already has EN/JP). */
+export function artworkVersionShortLabel(row) {
+  if (!row) return '';
+  const set = row.set_name || row.setName || row.set || '';
+  const number = row.card_number || row.collector_number || row.collectorNumber || row.number || '';
+  return [set, number].filter(Boolean).join(' · ') || String(row.name || printingId(row) || '');
 }
 
 export { printingId };
