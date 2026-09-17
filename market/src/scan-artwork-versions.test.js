@@ -3,9 +3,11 @@ import test from 'node:test';
 import {
   artworkVersionLabel,
   artworkVersionShortLabel,
+  draftArtworkBucket,
   languagesForPrint,
   listingLanguageForPrint,
   preferArtworkPrinting,
+  preferDraftArtwork,
   preferredPrintBucket,
   shouldRemapArtwork,
   sortArtworkVersions,
@@ -111,4 +113,25 @@ test('languagesForPrint: western has no asian; JP has only JP', () => {
   assert.deepEqual(languagesForPrint('japanese', all), ['JP']);
   assert.deepEqual(languagesForPrint('korean', all), ['KO']);
   assert.deepEqual(languagesForPrint('chinese', all), ['ZH', 'ZHT']);
+});
+
+test('draftArtworkBucket: asian non-chinese remaps; ZH does not', () => {
+  assert.equal(draftArtworkBucket('JP'), 'jpko');
+  assert.equal(draftArtworkBucket('KO'), 'jpko');
+  assert.equal(draftArtworkBucket('ID'), 'jpko');
+  assert.equal(draftArtworkBucket('TH'), 'jpko');
+  assert.equal(draftArtworkBucket('EN'), 'western');
+  assert.equal(draftArtworkBucket('ZH'), null);
+  assert.equal(draftArtworkBucket('ZHT'), null);
+});
+
+test('preferDraftArtwork switches western → JP sibling; ZH leaves null', () => {
+  assert.equal(preferDraftArtwork([JP, EN, CN], '2', 'JP').id, '1');
+  assert.equal(preferDraftArtwork([JP, EN, CN], '2', 'KO').id, '1');
+  assert.equal(preferDraftArtwork([JP, EN, CN], '2', 'ID').id, '1');
+  assert.equal(preferDraftArtwork([JP, EN, CN], '1', 'EN').id, '2');
+  assert.equal(preferDraftArtwork([JP, EN, CN], '2', 'ZH'), null);
+  assert.equal(preferDraftArtwork([JP, EN, CN], '2', 'ZHT'), null);
+  assert.equal(preferDraftArtwork([JP, EN], '2', 'JP').id, '1');
+  assert.equal(preferDraftArtwork([JP, EN], '1', 'JP'), null);
 });

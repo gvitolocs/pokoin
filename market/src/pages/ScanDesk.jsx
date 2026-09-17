@@ -14,9 +14,11 @@ import {
 import {
   artworkVersionLabel,
   artworkVersionShortLabel,
+  draftArtworkBucket,
   languagesForPrint,
   listingLanguageForPrint,
   preferArtworkPrinting,
+  preferDraftArtwork,
   shouldRemapArtwork,
   sortArtworkVersions,
 } from '../scan-artwork-versions.js';
@@ -465,13 +467,14 @@ export default function ScanDesk() {
   /** PowerTools single-card: pick a printing → draft with Batch Defaults; Qty autofocus. */
   function startDraft(card) {
     if (!card?.id || closed) return;
+    const language = defaults.language;
     setDraft({
       cardId: card.id,
       name: card.name || '',
       set: card.set || '',
       number: card.number || '',
       image: card.image || '',
-      language: defaults.language,
+      language,
       condition: defaults.condition,
       foilState: defaults.foilState,
       firstEdition: defaults.firstEdition,
@@ -479,6 +482,30 @@ export default function ScanDesk() {
       altered: defaults.altered,
       location: defaults.location,
       quantity: defaults.quantity,
+    });
+    void remapDraftArtwork(card.id, language);
+  }
+
+  /** JP/KO/ID/TH/VI → matching asian expansion; western → western; ZH/ZHT leave the printing. */
+  async function remapDraftArtwork(fromCardId, language) {
+    if (!draftArtworkBucket(language)) return;
+    const data = await loadVersionSet(fromCardId);
+    const preferred = preferDraftArtwork(data?.printings || [], fromCardId, language);
+    if (!preferred) return;
+    const nextId = String(preferred.id || preferred.card_id || '');
+    if (!nextId || nextId === String(fromCardId)) return;
+    setDraft((current) => {
+      if (!current) return null;
+      if (String(current.language || '').toUpperCase() !== String(language || '').toUpperCase()) return current;
+      if (String(current.cardId) !== String(fromCardId) && String(current.cardId) !== nextId) return current;
+      return {
+        ...current,
+        cardId: nextId,
+        name: preferred.name || current.name,
+        set: preferred.set_name || preferred.setName || preferred.set || current.set,
+        number: preferred.card_number || preferred.collector_number || preferred.number || current.number,
+        image: imageSrc({ ...preferred, id: nextId }, 'grid') || current.image,
+      };
     });
   }
 
@@ -546,6 +573,9 @@ export default function ScanDesk() {
       if (!draft) return null;
       if (cmd.command === 'set') {
         setDraft((current) => (current ? { ...current, [cmd.field]: cmd.value } : null));
+        if (cmd.field === 'language' && draft.cardId) {
+          void remapDraftArtwork(draft.cardId, cmd.value);
+        }
         return null;
       }
       if (cmd.command === 'toggle') {

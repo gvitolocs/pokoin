@@ -96,6 +96,18 @@ export function sortArtworkVersions(printings = [], listingLanguage = '') {
 }
 
 /**
+ * Manual-add language → artwork remap bucket.
+ * JP/KO/ID/TH/VI → japanese|korean sibling. Western → western.
+ * ZH/ZHT → null (do not auto-change the expansion).
+ */
+export function draftArtworkBucket(listingLanguage = '') {
+  const lang = String(listingLanguage || '').trim().toUpperCase();
+  if (lang === 'ZH' || lang === 'ZHT') return null;
+  if (lang === 'JP' || lang === 'KO' || lang === 'ID' || lang === 'TH' || lang === 'VI') return 'jpko';
+  return 'western';
+}
+
+/**
  * Pick the CLIP sibling that matches the row's listing language region.
  * No sibling in that region → keep the identify/current printing.
  */
@@ -108,6 +120,19 @@ export function preferArtworkPrinting(printings = [], currentId = '', listingLan
   const match = rows.find((row) => matchesPrintBucket(row, bucket)) || null;
   if (match && (!current || !matchesPrintBucket(current, bucket))) return match;
   return current || rows[0];
+}
+
+/** Pick a CLIP sibling for the draft language, or null if none / Chinese. */
+export function preferDraftArtwork(printings = [], currentId = '', listingLanguage = '') {
+  const bucket = draftArtworkBucket(listingLanguage);
+  if (!bucket) return null;
+  const rows = Array.isArray(printings) ? printings : [];
+  if (!rows.length) return null;
+  const id = String(currentId || '').trim();
+  const current = rows.find((row) => printingId(row) === id) || null;
+  const match = rows.find((row) => matchesPrintBucket(row, bucket)) || null;
+  if (match && (!current || !matchesPrintBucket(current, bucket))) return match;
+  return null;
 }
 
 export function shouldRemapArtwork(printings = [], currentId = '', listingLanguage = '') {
