@@ -115,14 +115,17 @@ must survive) and stays a QA `holes` fail on purpose.
   `https://cdn.pokoin.com/figure-masks-clean/{version}.webp`. Production
   `figure-masks/` is untouched.
 
-### Flipping production (pending approval)
+### Production flip (applied 2026-09-17)
 
-Once approved: re-point `artworkFigureMaskSrc` in
-`market/src/art-figure-mask.js` at `figure-masks-clean/` (or copy the clean
-set over `figure-masks/`) and bump `FIGURE_MASK_REV` to `clean-1` so
-browsers drop the cached artifacts. The remaining ~12k versions still
-grounding through the Qwen job will pick up `clean_mask` automatically when
-`build-artwork-figure-masks.py` re-runs.
+`market/src/art-figure-mask.js` points at `figure-masks-clean/` with
+`FIGURE_MASK_REV = 'clean-1'` — fresh URLs, so the one-year immutable CDN
+caches never serve the old dirty bytes. The CDN path holds only the QA pass
+list (fails are pruned; QA-failing versions simply have no hover layer, same
+as before). Production deploys build from GitHub pushes; the flip shipped in
+`c84385c`. The remaining versions still grounding through the Qwen job get
+clean masks automatically: `scripts/ship-figure-masks-after-qwen.sh` waits
+for the job, runs the builder (cleanup baked in) into `figure-masks-clean/`,
+re-QAs, and rsyncs the new pass list.
 
 ## Same problem, discussed online
 
