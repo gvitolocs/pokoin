@@ -1,4 +1,9 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "main": false
+    }
+  },
   "installCommand": "true",
   "buildCommand": "bash scripts/build-web.sh",
   "outputDirectory": "dist-web",

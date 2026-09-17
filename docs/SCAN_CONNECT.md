@@ -33,7 +33,7 @@ Schema: CardVault `oracle-postgres/schema/082_scan_connect.sql`.
 | Surface | Route | Why here |
 | --- | --- | --- |
 | Desktop | `dashboard.pokoin.com/scan` and `pokoin.com/inventory/scan` (SPA, `market/src/pages/ScanDesk.jsx`) | Same Vercel SPA. On the `dashboard.` host `/scan` renders the desk (`isDashboardHost`, `market/src/App.jsx`) and `/` redirects to `/scan` (`vercel.json`). On `pokoin.com`, `/scan` stays the public photo identify page. |
-| Phone | `scan.pokoin.com/connect` (BattleScan FastAPI serves the same `web/index.html`; `web/static/scan-connect.js` switches to connect mode) | Reuses the tuned camera loop, detection and orientation fixes. `scan.pokoin.com/` keeps redirecting accepted scans to the card page. |
+| Phone | `scan.pokoin.com/connect` — Oracle peer1 Caddy `file_server` over `/opt/pokoin-cardscan/web` with `rewrite /connect /index.html`; `web/static/scan-connect.js` switches that page to connect mode | Reuses the tuned camera loop, detection and orientation fixes. `scan.pokoin.com/` keeps redirecting accepted scans to the card page. Recognition paths (`/identify`, `/catalogs`, `/health`) proxy to `127.0.0.1:8100` → nezopt worker. The FastAPI `/connect` route in BattleScan `server/app.py` only matters when the app serves `web/` itself (local). |
 | QR | `https://scan.pokoin.com/connect#c=<4 digits>&k=<secret>` | [QR link](#qr-link). Fragment is never sent to a server log. |
 
 ## API (CardVault, registered in `server/api-route-manifest.js`, family `scan`)
@@ -118,6 +118,7 @@ pre-filled…".
 | Threat | Protection |
 | --- | --- |
 | PIN is a secret | It is not: it only selects a pairing for 120 s. The credential is the 256-bit `phoneToken`. |
+| Flooding a batch with a leaked phone token | 1200 scans / session / 10 min (`scan:<session>` bucket, counted even when rejected), 10,000 rows per batch (`batch_full`). Retries of an already stored `scanEventId` are not counted. |
 | Guessing a PIN | Postgres-backed fixed windows (`scan_rate_limits`, fails **closed**): 8 failed claims / IP / 10 min, 30 claims / IP / 10 min, 300 failed claims **globally** / 10 min (then 429 for everyone for the rest of the window). With *k* live pairings a guess hits with probability *k*/10,000: one IP (8 guesses) against 20 live codes ≈ 1.6 % per 10 min. Distributed attacks are bounded by the global cap (arithmetic below). |
 | What a lucky guess gets | The ability to add scan rows to one staged batch until the seller notices. The desktop shows the device label and a **Disconnect** button; the real phone's claim fails ("code not valid") which prompts **Regenerate**. No listing is created without the desktop submitting. No read access. |
 | Account enumeration | Pair response never includes seller name/uid; identical error for wrong / expired / used. |
@@ -212,19 +213,75 @@ Mechanics:
   `scanEventId`. Losing the network never blocks the camera.
 - `phoneToken` is kept in `localStorage` so a reload rejoins the session.
 
-## Going live on dashboard.pokoin.com
+## Production topology (verified 2026-09-17 15:00 UTC)
 
-Code is ready; these are account steps, not repo changes:
+| Piece | Where | Evidence |
+| --- | --- | --- |
+| Desk SPA | Vercel project `web`; aliases `pokoin.com`, `dashboard.pokoin.com` (+ `onepiece.`, `riftbound.`, …) | `vercel inspect pokoin.com` |
+| `dashboard.pokoin.com` DNS | Cloudflare DNS-only CNAME → `00dae56389d2f4d1.vercel-dns-017.com`; Firebase Auth authorized domain | Cloudflare API; identitytoolkit config |
+| Oracle API | Pi `pi-home`, Docker `pokoin-oracle-api` (`node server/oracle-api-server.js`, net host, port 18080), bind mount `/srv/pokoin/api/current` → `releases/…`; public via `pokoin-api-edge.service` :18079 and the Cloudflare tunnel | `docker inspect`, `ss -ltnp` |
+| API reads | `MARKETPLACE_DATABASE_URL` = `127.0.0.1:5432/pokoin_marketplace` — Pi Docker `pokoin-marketplace-postgres-replica`, **hot standby** (`pg_is_in_recovery() = t`) | container env (names/hosts only), psql |
+| API writes (all scan tables) | `MARKETPLACE_WRITER_DATABASE_URL` = `192.168.178.55:25432/pokoin_marketplace` — nezopt Docker `pokoin-marketplace-postgres-15t`, **primary** (`pg_is_in_recovery() = f`) | same |
+| Replication | nezopt → Pi, streaming async, slot `pokoin_pi_replica` | `pg_stat_replication`, `pg_stat_wal_receiver` |
+| DB role | API connects as `pokoin_marketplace` (owner) for both | env |
+| Phone page | Oracle peer1 (`scan.pokoin.com` A 92.5.153.117), Caddy | `/etc/caddy/Caddyfile` |
+| Recognition | nezopt `battlescan-fast` 127.0.0.1:8099, reached from peer1 via 127.0.0.1:8100 | `cardscan.pokoin.com/health` → worker `nezopt` |
 
-1. Cloudflare DNS `dashboard` CNAME → Vercel, and add the domain to the
-   pokoin-web Vercel project.
-2. Firebase Auth → Authorized domains: add `dashboard.pokoin.com` (Google
-   sign-in popup fails otherwise).
-3. Sellers sign in once on that host (auth storage is per origin).
-4. Apply CardVault `oracle-postgres/schema/082_scan_connect.sql` on the
-   writer **before** deploying CardVault (`createListing` now writes
-   `location`, `altered`).
-5. Deploy BattleScan `web/` and `server/app.py` (`/connect`) to peer1.
+Scan state is read and written on the **writer** (`_scan_store.js` uses the
+writer pool for every query): a stream reading the replica would miss the row
+it was just told about. The 6 Sep 2026 note that the Pi became primary is
+superseded by this table.
+
+## Production deployment
+
+All from nezopt, in order; each step verifies itself.
+
+```bash
+scripts/deploy-scan-connect.sh migrate   # 082 + grants on the primary, waits for the Pi replica
+scripts/deploy-scan-connect.sh api       # Pi release = live release + scan files, restart, health, auto-rollback
+scripts/deploy-scan-connect.sh scanner   # peer1 backup, files, Caddy /connect rewrite, public check
+scripts/deploy-web.sh                    # pokoin-web from origin/main (docs/DEPLOY.md)
+```
+
+| Step | What it touches | Rollback |
+| --- | --- | --- |
+| migrate | `scan_batches`, `scan_sessions`, `scan_pairings`, `scan_rate_limits`, `scan_items`; `marketplace_user_listings.location`, `.altered`, unique index `marketplace_user_listings_scan_row_uidx`. Idempotent (`if not exists`). | Additive; leave in place. |
+| api | 13 files: `api/_scan_*.js`, `api/scan-*.js`, `api/marketplace-listings.js`, `server/api-route-manifest.js`, the 082 SQL; `server/api-route-families.js` keeps the live file plus the scan rule only | `scripts/deploy-scan-connect.sh rollback-api` (symlink back to `.scan-connect-previous`) |
+| scanner | peer1 `web/index.html`, `web/static/scan-connect.js`, `server/app.py`; Caddy rewrite in the `scan.` and `cardscan.` blocks | `rollback-scanner` (backup in `/opt/pokoin-cardscan/.backups/<stamp>-scan-connect`); Caddy backup `/etc/caddy/Caddyfile.bak-scan-connect-*` |
+| web | Vercel production | [DEPLOY.md](DEPLOY.md#commands) |
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| `dashboard.pokoin.com/scan` shows the public photo scan page | Deployed bundle predates `isDashboardHost` — see DEPLOY.md; `vercel api /v4/aliases/dashboard.pokoin.com` |
+| Google sign-in popup fails on `dashboard.` | Firebase Auth authorized domains must list `dashboard.pokoin.com` |
+| Phone: "Code not valid or expired" instantly | Code older than 120 s, already used, or QR from another tab after **New code**. Server: `select pin, expires_at from scan_pairings` on the writer |
+| Phone: "Too many tries" | `select * from scan_rate_limits where bucket like 'pair%' order by window_start desc` |
+| Desk stuck on "Connection lost" | Phone heartbeat not arriving: phone offline or token revoked (`scan_sessions.status`) |
+| Rows never appear on the desk | `GET https://api.pokoin.com/api/scan-stream?batchId=…&after=0` with the bearer; `scan_items.seq` vs stream cursor |
+| `scan.pokoin.com/connect` 404 | Caddy rewrite missing — `grep "rewrite /connect" /etc/caddy/Caddyfile` on peer1 |
+| API 500 on scan routes | `docker logs pokoin-oracle-api` on the Pi; writer reachable from the Pi (`192.168.178.55:25432`) |
+
+## Local development
+
+```bash
+# nezopt: throwaway Postgres
+docker run -d --name pokoin-scan-test-pg --rm -e POSTGRES_PASSWORD=scantest -e POSTGRES_DB=scantest \
+  -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql/data postgres:17-alpine -c fsync=off
+export SCAN_TEST_DATABASE_URL=postgres://postgres:scantest@127.0.0.1:55432/scantest
+# CardVault
+node --test api/_scan_connect.test.js
+node --test --test-concurrency=1 api/scan-connect.integration.test.js
+SCAN_DEV_FAKE_AUTH=1 PORT=18990 node scripts/scan-connect-dev-server.js --reset   # scan API + read-only proxy to api.pokoin.com
+# pokoin-web (desk + phone page + fake identify, Playwright)
+node scripts/scan-connect-e2e.mjs
+# BattleScan
+node --test scripts/scan-connect.test.cjs && node scripts/scanner-ui.test.cjs web/index.html
+```
+
+The dev server's fake auth (`Bearer seller:<uid>`) only exists with
+`SCAN_DEV_FAKE_AUTH=1` and refuses `NODE_ENV=production`.
 
 ## Files
 
@@ -239,3 +296,7 @@ Code is ready; these are account steps, not repo changes:
 | CardVault `api/_scan_connect.test.js`, `api/scan-connect.integration.test.js` | Tests |
 | `market/src/pages/ScanDesk.jsx`, `market/src/scan-*.js`, `market/src/scan-desk.css` | Desktop |
 | BattleScan `web/static/scan-connect.js`, `web/index.html`, `server/app.py` (`/connect`) | Phone |
+| CardVault `oracle-postgres/schema/082_scan_connect.grants.sql` | Grants for the API writer role |
+| CardVault `scripts/scan-connect-dev-server.js` | Local scan API for E2E |
+| `scripts/deploy-scan-connect.sh`, `scripts/deploy-web.sh` | Production rollout |
+| `scripts/scan-connect-e2e.mjs` | Desk + phone E2E (Playwright, scripted identify) |
