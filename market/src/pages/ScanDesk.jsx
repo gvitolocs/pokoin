@@ -241,6 +241,18 @@ export default function ScanDesk() {
               });
             }
             const item = data.items.find((row) => row.id === (event.id || event.mergedId));
+            if (event.type === 'added' && item) {
+              console.info('[scan-desk] dashboard-row', {
+                itemId: item.id,
+                recognitionState: item.recognitionState,
+                cardId: item.cardId || null,
+                name: item.cardName || item.name || null,
+                set: item.setName || null,
+                number: item.collectorNumber || null,
+                score: item.recognition?.topScore ?? null,
+                seq: item.seq,
+              });
+            }
             if (item?.receivedAt && item?.capturedAt) {
               // All in server-clock ms: capturedAt is the phone capture mapped to server time.
               const arrivedServer = arrivedAt + serverOffsetRef.current;
