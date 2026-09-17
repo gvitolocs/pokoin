@@ -752,6 +752,7 @@ export default function ScanDesk() {
           <span role="columnheader">Qty</span>
           <span role="columnheader">Price</span>
           <span role="columnheader">State</span>
+          <span role="columnheader" className="c-remove" aria-label="Remove" />
         </div>
         {list.length === 0 ? (
           <p className="scan-empty">
@@ -782,6 +783,7 @@ export default function ScanDesk() {
             }}
             onPatch={(changes) => patchRows([row.id], changes)}
             onPick={(cardId) => patchRows([row.id], { cardId }, { label: 'Printing' })}
+            onRemove={() => removeRows([row.id])}
             onReplaceDone={() => {
               setReplaceFor('');
               queueRef.current?.focus();
@@ -931,7 +933,7 @@ function thumbFor(cardId, name, imageUrl) {
   }
 }
 
-function QueueRow({ row, index, focused, selected, problem, image, closed, replacing, onFocus, onPatch, onPick, onReplaceDone }) {
+function QueueRow({ row, index, focused, selected, problem, image, closed, replacing, onFocus, onPatch, onPick, onRemove, onReplaceDone }) {
   const stateLabel = row.status === 'submitted'
     ? 'Listed'
     : problem
@@ -1058,6 +1060,23 @@ function QueueRow({ row, index, focused, selected, problem, image, closed, repla
         )}
       </span>
       <span className={`c-state tone-${tone}`}>{stateLabel}</span>
+      <span className="c-remove">
+        {closed ? null : (
+          <button
+            type="button"
+            className="scan-remove"
+            tabIndex={-1}
+            title="Remove (Backspace)"
+            aria-label={`Remove ${row.cardName || 'card'}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove?.();
+            }}
+          >
+            ×
+          </button>
+        )}
+      </span>
     </div>
   );
 }

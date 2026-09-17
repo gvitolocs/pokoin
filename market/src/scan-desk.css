@@ -241,7 +241,7 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 
 .scan-row {
   display: grid;
-  grid-template-columns: 2.4rem 4.8rem minmax(12rem, 1fr) 4.4rem 4.6rem 6.4rem 5.6rem 7rem 2.6rem 5.4rem 7rem;
+  grid-template-columns: 2.4rem 4.8rem minmax(12rem, 1fr) 4.4rem 4.6rem 6.4rem 5.6rem 7rem 2.6rem 5.4rem 7rem 2.2rem;
   align-items: center;
   gap: 0.45rem;
   min-height: var(--scan-row-h);
@@ -465,15 +465,50 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
   border-radius: 8px;
 }
 
+
+.c-remove {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.scan-remove {
+  width: 1.7rem;
+  height: 1.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #f07178;
+  font: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.scan-remove:hover,
+.scan-remove:focus-visible {
+  border-color: rgb(240 113 120 / 0.45);
+  background: rgb(240 113 120 / 0.12);
+  color: #ff8b90;
+  outline: none;
+}
+
+.scan-row-head .c-remove { min-height: 1rem; }
+
 /* The desk is a desktop tool; phones get the connect flow on scan.pokoin.com. */
 @media (max-width: 1100px) {
-  .scan-row { grid-template-columns: 2rem 4.6rem minmax(9rem, 1fr) 4rem 4.2rem 5.6rem 5rem 5.6rem 2.2rem 4.6rem 5rem; font-size: 0.82rem; }
+  .scan-row { grid-template-columns: 2rem 4.6rem minmax(9rem, 1fr) 4rem 4.2rem 5.6rem 5rem 5.6rem 2.2rem 4.6rem 5rem 2rem; font-size: 0.82rem; }
 }
 
 @media (max-width: 720px) {
   .scan-connect { flex-direction: column; align-items: flex-start; }
   .scan-queue { max-height: none; }
-  .scan-row { grid-template-columns: 4.6rem minmax(0, 1fr) 3.6rem 3.4rem; }
+  .scan-row { grid-template-columns: 4.6rem minmax(0, 1fr) 3.6rem 3.4rem 2rem; }
   .scan-row > .c-num,
   .scan-row > .c-finish,
   .scan-row > .c-flags,
