@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { filterExpansionCards, filterSearchCards, uniqueSearchOptions, searchPrintLang, searchRarity, searchSet } from './search-filters.js';
+import { filterExpansionCards, filterSearchCards, uniqueSearchOptions, searchPrintLang, searchRarity, searchSet, isLegendCard, legendVersionPairKey, legendHalfOrder } from './search-filters.js';
 
 const mimikyu = {
   name: 'Mimikyu',
@@ -198,5 +198,173 @@ test('set number sort keeps AR/SH letter codes after n/m, not mixed into 1–9',
       { name: 'Charizard', number: 'Holo Rare | 001/099', rarity: 'Card', productType: 'card' },
     ], searchRarity),
     ['Holo Rare'],
+  );
+});
+
+
+test('LEGEND version pair key collapses consecutive half public ids', () => {
+  assert.equal(legendVersionPairKey({ version: 'v263304' }), 'v263304');
+  assert.equal(legendVersionPairKey({ version: 'v263306' }), 'v263304');
+  assert.equal(legendVersionPairKey({ version: 'v263312' }), 'v263312');
+  assert.equal(legendVersionPairKey({ version: 'v263314' }), 'v263312');
+  assert.equal(isLegendCard({ name: 'Entei & Raikou Legend' }), true);
+  assert.equal(isLegendCard({ name: 'Call of Legends Booster' }), false);
+  assert.equal(legendHalfOrder({ name: 'Entei & Raikou Legend', rarity: 'Top', number: '90/95' }), 0);
+  assert.equal(legendHalfOrder({ name: 'Entei & Raikou Legend', rarity: 'Bottom', number: '91/95' }), 1);
+  assert.equal(legendHalfOrder({ name: 'Suicune & Entei LEGEND', rarity: 'WCD 2011', version: 'v263312' }), 0);
+  assert.equal(legendHalfOrder({ name: 'Suicune & Entei LEGEND', rarity: 'WCD 2011', version: 'v263314' }), 1);
+});
+
+test('Pokédex sort keeps LEGEND Top immediately before matching Bottom', () => {
+  const top = {
+    id: '263312',
+    name: 'Suicune & Entei Legend',
+    set: 'Unleashed',
+    number: 'Top | 94/95',
+    rarity: 'Top',
+    version: 'v263312',
+    pokedexSort: 245080001,
+    expansionSort: 80001,
+    collectorSort: 94,
+    nationality: 'western',
+    productType: 'card',
+  };
+  const bottom = {
+    id: '263314',
+    name: 'Suicune & Entei Legend',
+    set: 'Unleashed',
+    number: 'Bottom | 95/95',
+    rarity: 'Bottom',
+    version: 'v263314',
+    pokedexSort: 245080001,
+    expansionSort: 80001,
+    collectorSort: 95,
+    nationality: 'western',
+    productType: 'card',
+  };
+  const wcdTop = {
+    id: '650874',
+    name: 'Suicune & Entei LEGEND',
+    set: 'World Championships 2011',
+    number: 'WCD 2011',
+    rarity: 'WCD 2011',
+    version: 'v263312',
+    pokedexSort: 245080001,
+    expansionSort: 105000,
+    collectorSort: 152011,
+    nationality: 'western',
+    productType: 'card',
+  };
+  const wcdBottom = {
+    id: '650876',
+    name: 'Suicune & Entei LEGEND',
+    set: 'World Championships 2011',
+    number: 'WCD 2011',
+    rarity: 'WCD 2011',
+    version: 'v263314',
+    pokedexSort: 245080001,
+    expansionSort: 105000,
+    collectorSort: 152011,
+    nationality: 'western',
+    productType: 'card',
+  };
+  const enteiTop = {
+    id: '263304',
+    name: 'Entei & Raikou Legend',
+    set: 'Unleashed',
+    number: 'Top | 90/95',
+    rarity: 'Top',
+    version: 'v263304',
+    pokedexSort: 244080001,
+    expansionSort: 80001,
+    collectorSort: 90,
+    nationality: 'western',
+    productType: 'card',
+  };
+  const enteiBottom = {
+    id: '263306',
+    name: 'Entei & Raikou Legend',
+    set: 'Unleashed',
+    number: 'Bottom | 91/95',
+    rarity: 'Bottom',
+    version: 'v263306',
+    pokedexSort: 244080001,
+    expansionSort: 80001,
+    collectorSort: 91,
+    nationality: 'western',
+    productType: 'card',
+  };
+  // Shuffle so version-key order would previously insert WCD between halves.
+  const shown = filterSearchCards(
+    [wcdBottom, bottom, wcdTop, enteiBottom, top, enteiTop],
+    { sort: 'pokedex', expandPokedexPairs: true },
+  );
+  assert.deepEqual(
+    shown.map((row) => `${row.id}:${row.rarity}`),
+    [
+      '263304:Top',
+      '263306:Bottom',
+      '263312:Top',
+      '263314:Bottom',
+      '650874:WCD 2011',
+      '650876:WCD 2011',
+    ],
+  );
+});
+
+test('Pokédex LEGEND pairing leaves Tag Team expand and non-LEGEND order intact', () => {
+  const charizard = {
+    id: 'ch',
+    name: 'Charizard',
+    set: 'Base Set',
+    number: '4/102',
+    pokedexSort: 6_000_000 + 10_000,
+    productType: 'card',
+  };
+  const team = {
+    id: 'cb',
+    name: 'Charizard & Braixen GX',
+    set: 'Cosmic Eclipse',
+    number: 'Full-Art | 22/236',
+    pokedexSort: 6_000_000 + 140_000,
+    productType: 'card',
+  };
+  const legendTop = {
+    id: 'pd-top',
+    name: 'Palkia & Dialga Legend',
+    set: 'Triumphant',
+    number: 'Top | 101/102',
+    rarity: 'Top',
+    version: 'v260112',
+    pokedexSort: 484_000_000 + 80_000,
+    expansionSort: 80003,
+    collectorSort: 101,
+    productType: 'card',
+  };
+  const legendBottom = {
+    id: 'pd-bot',
+    name: 'Palkia & Dialga Legend',
+    set: 'Triumphant',
+    number: 'Bottom | 102/102',
+    rarity: 'Bottom',
+    version: 'v260114',
+    pokedexSort: 484_000_000 + 80_000,
+    expansionSort: 80003,
+    collectorSort: 102,
+    productType: 'card',
+  };
+  const shown = filterSearchCards(
+    [legendBottom, team, legendTop, charizard],
+    { sort: 'pokedex', expandPokedexPairs: true },
+  );
+  assert.deepEqual(
+    shown.map((row) => `${row.id}@${row.pokedexSlot || ''}:${row.rarity || ''}`),
+    [
+      'ch@:',
+      'cb@6:',
+      'pd-top@:Top',
+      'pd-bot@:Bottom',
+      'cb@654:',
+    ],
   );
 });

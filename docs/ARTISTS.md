@@ -95,6 +95,9 @@ CLIP same-artwork reprints sit together after species at the oldest expansion.
 Hand-listed SM **Tag Team GX** leftovers clone once per partner Dex
 (`tag-team-partners.js`): triples appear three times. LEGEND pairs, Tate & Liza,
 and sealed tins/decks are not cloned. Do not clone every name that contains `&`.
+HGSS **LEGEND** Top/Bottom halves (and WCD/JP printings that share related
+CLIP version keys) stay adjacent in Pokédex order so the album grid forms the
+full landscape art — Top immediately before its matching Bottom.
 
 ## What did not change
 
