@@ -209,7 +209,7 @@
         },
         {
           "key": "Content-Disposition",
-          "value": "attachment; filename=\"pokemon-card-extension-12.0.21.zip\""
+          "value": "attachment; filename=\"pokemon-card-extension-12.0.34.zip\""
         },
         {
           "key": "Cache-Control",
@@ -217,7 +217,7 @@
         },
         {
           "key": "X-Pokoin-Extension-Version",
-          "value": "12.0.21"
+          "value": "12.0.34"
         }
       ]
     },
@@ -230,7 +230,7 @@
         },
         {
           "key": "Content-Disposition",
-          "value": "attachment; filename=\"pokemon-card-extension-12.0.21.zip\""
+          "value": "attachment; filename=\"pokemon-card-extension-12.0.34.zip\""
         },
         {
           "key": "Cache-Control",
@@ -238,7 +238,7 @@
         },
         {
           "key": "X-Pokoin-Extension-Version",
-          "value": "12.0.21"
+          "value": "12.0.34"
         }
       ]
     }
