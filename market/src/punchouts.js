@@ -11,6 +11,10 @@ export function authFrom(path) {
   return route(`/auth?from=${encodeURIComponent(path || '/marketplace')}`);
 }
 
+/** Seller desk on the dashboard host (Scan Connect). */
+export const DASHBOARD_ORIGIN = 'https://dashboard.pokoin.com';
+export const DASHBOARD_SCAN = `${DASHBOARD_ORIGIN}/scan`;
+
 export const APP = {
   home: route('/'),
   forum: route('/forum'),

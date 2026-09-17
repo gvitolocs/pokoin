@@ -1,12 +1,14 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, onIdTokenChanged } from 'firebase/auth';
 import { doc, getFirestore, onSnapshot } from 'firebase/firestore';
 import {
   clearAuthSession,
   profileFromSession,
   readAuthSession,
+  readAuthToken,
   writeAuthSession,
+  writeAuthToken,
 } from './auth-session.js';
 import {
   EXTENSION_DESK_SESSION_REQUEST,
@@ -127,7 +129,13 @@ const AuthContext = createContext({
 });
 
 export function AuthProvider({ children }) {
-  const hint = useMemo(() => readAuthSession(), []);
+  const hint = useMemo(() => {
+    const cached = readAuthToken();
+    if (cached) {
+      applyInjectedDeskSession(cached);
+    }
+    return readAuthSession();
+  }, []);
   const [user, setUser] = useState(() => firebaseAuth.currentUser);
   const [ready, setReady] = useState(false);
   const [extensionUid, setExtensionUid] = useState(() => injectedDeskSession.uid || '');
@@ -140,6 +148,9 @@ export function AuthProvider({ children }) {
     silverUntil: hint?.silverUntil || null,
     availablePkn: hint?.availablePkn || 0,
   });
+  // Distinguishes cold-start on dashboard (adopt .pokoin.com cookie) from an
+  // explicit Firebase sign-out on this origin (wipe the shared cookie).
+  const hadFirebaseUserRef = useRef(Boolean(firebaseAuth.currentUser));
 
   function persistSession(partial) {
     persistRef.current = { ...persistRef.current, ...partial };
@@ -223,6 +234,33 @@ export function AuthProvider({ children }) {
   useEffect(() => onAuthStateChanged(firebaseAuth, (next) => {
     setUser(next);
     if (!next) {
+      if (hadFirebaseUserRef.current) {
+        hadFirebaseUserRef.current = false;
+        injectedDeskSession = { token: '', uid: '', expiresAt: 0 };
+        persistRef.current = {
+          uid: '',
+          admin: false,
+          silver: false,
+          silverUntil: null,
+          availablePkn: 0,
+        };
+        setExtensionUid('');
+        setProfile(null);
+        setAvailablePkn(0);
+        clearAuthSession();
+        setReady(true);
+        return;
+      }
+      // Cold start with no Firebase user on this origin (typical for
+      // dashboard.pokoin.com): adopt the sibling-host token cookie.
+      const shared = readAuthToken();
+      if (shared && applyInjectedDeskSession(shared)) {
+        setExtensionUid(shared.uid);
+        persistSession({ uid: shared.uid });
+        setReady(true);
+        void hydrateInjectedDeskProfile();
+        return;
+      }
       if (injectedDeskSession.token && injectedDeskSession.uid) {
         setExtensionUid(injectedDeskSession.uid);
         persistSession({ uid: injectedDeskSession.uid });
@@ -247,6 +285,7 @@ export function AuthProvider({ children }) {
       setReady(true);
       return;
     }
+    hadFirebaseUserRef.current = true;
     persistRef.current = {
       ...persistRef.current,
       uid: next.uid,
@@ -254,6 +293,22 @@ export function AuthProvider({ children }) {
     setProfile((current) => (current?.uid && current.uid !== next.uid ? null : current));
     persistSession({ uid: next.uid });
     setReady(true);
+  }), []);
+
+  // Keep a Domain=.pokoin.com ID-token cookie fresh so dashboard.pokoin.com
+  // can call getBearer without a second Google sign-in.
+  useEffect(() => onIdTokenChanged(firebaseAuth, async (next) => {
+    if (!next) {
+      return;
+    }
+    try {
+      const result = await next.getIdTokenResult();
+      const expiresAt = Date.parse(result.expirationTime) || (Date.now() + 55 * 60 * 1000);
+      writeAuthToken({ token: result.token, uid: next.uid, expiresAt });
+      injectedDeskSession = { token: result.token, uid: next.uid, expiresAt };
+    } catch (_) {
+      /* ignore transient token errors */
+    }
   }), []);
 
   useEffect(() => {

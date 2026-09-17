@@ -45,7 +45,7 @@ import SearchTabs from './SearchTabs.jsx';
 import { Action, track } from '../track.js';
 import { useAuth } from '../auth.jsx';
 import { framedByChromeExtension } from '../extension-auth-bridge.js';
-import { APP, authFrom } from '../punchouts.js';
+import { APP, DASHBOARD_SCAN, authFrom } from '../punchouts.js';
 import { useCart } from '../cart.jsx';
 import { useWallet } from '../wallet.jsx';
 import CardArt from './CardArt.jsx';
@@ -78,6 +78,7 @@ const ICO = {
   home: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z',
   forum: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z',
   signal: 'M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z',
+  dashboard: 'M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z',
   trophy: 'M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94A5.01 5.01 0 0 0 11 17.9V19H7v2h10v-2h-4v-1.1a5.01 5.01 0 0 0 3.61-4.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z',
   explore: 'M12 10.9c-.61 0-1.1.49-1.1 1.1s.49 1.1 1.1 1.1 1.1-.49 1.1-1.1-.49-1.1-1.1-1.1zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm2.19 12.19L6 18l3.81-8.19L18 6l-3.81 8.19z',
   portfolio: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z',
@@ -1008,9 +1009,9 @@ export default function Chrome({ children }) {
             <NavLink to="/forum" title="Forum" aria-label="Forum">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" /></svg>
             </NavLink>
-            <NavLink to="/marketplace/signal" title="Signal" aria-label="Signal">
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z" /></svg>
-            </NavLink>
+            <a href={DASHBOARD_SCAN} title="Dashboard" aria-label="Dashboard">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z" /></svg>
+            </a>
             {site.features.competitive ? (
               <NavLink className="trophy" to="/marketplace/competitive" title="Competitive" aria-label="Competitive">
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94A5.01 5.01 0 0 0 11 17.9V19H7v2h10v-2h-4v-1.1a5.01 5.01 0 0 0 3.61-4.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z" /></svg>
@@ -1039,7 +1040,7 @@ export default function Chrome({ children }) {
         <MobileTile to="/marketplace/search" label="Search" icon="search" onClick={closeMenu} />
         <MobileTile href={homeHref} label="Home" icon="home" onClick={closeMenu} />
         <MobileTile to={APP.forum} label="Forum" icon="forum" onClick={closeMenu} />
-        <MobileTile to={APP.signal} label="Signal" icon="signal" onClick={closeMenu} />
+        <MobileTile href={DASHBOARD_SCAN} label="Dashboard" icon="dashboard" onClick={closeMenu} />
         {site.features.competitive ? (
           <MobileTile to="/marketplace/competitive" label="Competitive" icon="trophy" onClick={closeMenu} />
         ) : null}
@@ -1096,7 +1097,7 @@ export default function Chrome({ children }) {
             <h3>More</h3>
             <a href="/">Home</a>
             <Link to={APP.forum}>Forum</Link>
-            <Link to={APP.signal}>Signal</Link>
+            <a href={DASHBOARD_SCAN}>Dashboard</a>
             <Link to={APP.docs}>Docs</Link>
             <Link to={APP.about}>About</Link>
             <Link to={APP.privacy}>Privacy</Link>

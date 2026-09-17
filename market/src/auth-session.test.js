@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   AUTH_SESSION_KEY,
+  AUTH_TOKEN_COOKIE,
   accountHeading,
   accountLede,
+  authCookieDomain,
   clearAuthSession,
+  clearAuthToken,
   profileFromSession,
   readAuthSession,
+  readAuthToken,
   writeAuthSession,
+  writeAuthToken,
 } from './auth-session.js';
 
 function memoryStore(initial = {}) {
@@ -79,4 +84,84 @@ test('account heading survives a side-panel session with no Firebase user', () =
   assert.equal(accountHeading({ displayName: 'Giuseppe', email: 'a@b.c' }, null), 'Giuseppe');
   assert.equal(accountLede(null), 'Signed in');
   assert.equal(accountLede({ email: 'a@b.c' }), 'a@b.c');
+});
+
+
+test('auth cookie domain is shared across pokoin.com hosts', () => {
+  assert.equal(authCookieDomain('pokoin.com'), '.pokoin.com');
+  assert.equal(authCookieDomain('dashboard.pokoin.com'), '.pokoin.com');
+  assert.equal(authCookieDomain('www.pokoin.com'), '.pokoin.com');
+  assert.equal(authCookieDomain('localhost'), '');
+  assert.equal(authCookieDomain('evilpokoin.com'), '');
+});
+
+function cookieDoc(initial = '') {
+  let cookie = initial;
+  return {
+    get cookie() {
+      return cookie;
+    },
+    set cookie(value) {
+      const [pair] = String(value).split(';');
+      const at = pair.indexOf('=');
+      const name = pair.slice(0, at).trim();
+      const raw = pair.slice(at + 1);
+      const parts = cookie ? cookie.split('; ') : [];
+      const next = parts.filter((row) => !row.startsWith(`${name}=`));
+      if (!String(value).includes('Max-Age=0')) {
+        next.push(`${name}=${raw}`);
+      }
+      cookie = next.join('; ');
+    },
+  };
+}
+
+test('ID token cookie round-trips for sibling-host handoff', () => {
+  const jar = cookieDoc();
+  writeAuthToken({
+    token: 'x'.repeat(40),
+    uid: 'user-9',
+    expiresAt: Date.now() + 60 * 60 * 1000,
+  }, jar);
+  const cached = readAuthToken(jar);
+  assert.equal(cached.uid, 'user-9');
+  assert.equal(cached.token.length, 40);
+  assert.equal(jar.cookie.includes(AUTH_TOKEN_COOKIE), true);
+  clearAuthToken(jar);
+  assert.equal(readAuthToken(jar), null);
+});
+
+test('expired ID token cookie is ignored', () => {
+  const jar = cookieDoc();
+  writeAuthToken({
+    token: 'y'.repeat(40),
+    uid: 'user-9',
+    expiresAt: Date.now() - 1000,
+  }, jar);
+  // Max-Age becomes 60s minimum in writeAuthToken when expiresAt is in the past
+  // — force an expired payload directly.
+  jar.cookie = `${AUTH_TOKEN_COOKIE}=${encodeURIComponent(JSON.stringify({
+    token: 'y'.repeat(40),
+    uid: 'user-9',
+    expiresAt: Date.now() - 1000,
+  }))}`;
+  assert.equal(readAuthToken(jar), null);
+});
+
+test('writeAuthSession also mirrors into the shared cookie jar', () => {
+  const store = memoryStore();
+  const jar = cookieDoc();
+  // Combine: storage for localStorage API, cookie via jar — pass jar with getItem?
+  // writeAuthSession uses store(override) for localStorage and cookieJar(override)
+  // which only uses override when it has a `cookie` property. Use jar alone and
+  // skip localStorage by making jar also look like storage? Simpler: dual object.
+  const dual = {
+    ...jar,
+    getItem: store.getItem.bind(store),
+    setItem: store.setItem.bind(store),
+    removeItem: store.removeItem.bind(store),
+  };
+  writeAuthSession({ uid: 'user-2', silver: true, availablePkn: 5 }, dual);
+  assert.equal(readAuthSession(dual).uid, 'user-2');
+  assert.equal(dual.cookie.includes('user-2'), true);
 });

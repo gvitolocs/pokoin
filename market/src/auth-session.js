@@ -1,8 +1,15 @@
 /** Last-known marketplace session. Same idea as Flutter SharedPreferences
  * `pokoin_user_profile` / `pokoin_account_balance`: paint Silver tools from
- * this browser's previous snapshot instead of waiting on Firebase. */
+ * this browser's previous snapshot instead of waiting on Firebase.
+ *
+ * Firebase Auth persistence is origin-scoped, so pokoin.com and
+ * dashboard.pokoin.com do not share IndexedDB. Mirror the paint hint and the
+ * live ID token into a Domain=.pokoin.com cookie so the seller desk stays
+ * signed in when hopping between hosts. */
 
 export const AUTH_SESSION_KEY = 'pokoin.auth.session';
+export const AUTH_TOKEN_COOKIE = 'pokoin.auth.token';
+export const AUTH_SESSION_COOKIE = 'pokoin.auth.session.cookie';
 
 function store(override) {
   if (override) {
@@ -26,13 +33,85 @@ function readDate(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+/** Cookie Domain for shared Pokoin hosts. Empty = host-only (localhost). */
+export function authCookieDomain(hostname = '') {
+  const host = String(hostname || '').toLowerCase();
+  if (host === 'pokoin.com' || host.endsWith('.pokoin.com')) {
+    return '.pokoin.com';
+  }
+  return '';
+}
+
+function cookieJar(override) {
+  if (override && typeof override === 'object' && 'cookie' in override) {
+    return override;
+  }
+  try {
+    return globalThis.document || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function readCookie(name, jar) {
+  const raw = String(jar?.cookie || '');
+  if (!raw) return null;
+  const parts = raw.split(';');
+  for (const part of parts) {
+    const at = part.indexOf('=');
+    if (at < 0) continue;
+    const key = part.slice(0, at).trim();
+    if (key !== name) continue;
+    try {
+      return decodeURIComponent(part.slice(at + 1).trim());
+    } catch (_) {
+      return part.slice(at + 1).trim();
+    }
+  }
+  return null;
+}
+
+function writeCookie(name, value, { maxAgeSec = 60 * 60, jar, hostname } = {}) {
+  const doc = cookieJar(jar);
+  if (!doc || typeof doc !== 'object') return;
+  const domain = authCookieDomain(hostname || (typeof location !== 'undefined' ? location.hostname : ''));
+  const encoded = encodeURIComponent(String(value || ''));
+  let cookie = `${name}=${encoded}; Path=/; Max-Age=${Math.max(0, Number(maxAgeSec) || 0)}; SameSite=Lax`;
+  if (typeof location !== 'undefined' && location.protocol === 'https:') {
+    cookie += '; Secure';
+  }
+  if (domain) {
+    cookie += `; Domain=${domain}`;
+  }
+  try {
+    doc.cookie = cookie;
+  } catch (_) {
+    /* private mode */
+  }
+}
+
+function clearCookie(name, { jar, hostname } = {}) {
+  writeCookie(name, '', { maxAgeSec: 0, jar, hostname });
+}
+
 export function readAuthSession(overrideStore) {
   const storage = store(overrideStore);
-  if (!storage?.getItem) {
+  let raw = null;
+  if (storage?.getItem) {
+    try {
+      raw = storage.getItem(AUTH_SESSION_KEY);
+    } catch (_) {
+      raw = null;
+    }
+  }
+  if (!raw) {
+    raw = readCookie(AUTH_SESSION_COOKIE, cookieJar(overrideStore));
+  }
+  if (!raw) {
     return null;
   }
   try {
-    const parsed = JSON.parse(storage.getItem(AUTH_SESSION_KEY) || 'null');
+    const parsed = JSON.parse(raw);
     const uid = String(parsed?.uid || '').trim();
     if (!parsed || parsed.signedIn !== true || !uid) {
       return null;
@@ -57,22 +136,29 @@ export function readAuthSession(overrideStore) {
 export function writeAuthSession(session, overrideStore) {
   const storage = store(overrideStore);
   const uid = String(session?.uid || '').trim();
-  if (!storage?.setItem || !uid) {
+  if (!uid) {
     return;
   }
   const silverUntil = readDate(session.silverUntil);
-  try {
-    storage.setItem(AUTH_SESSION_KEY, JSON.stringify({
-      uid,
-      signedIn: true,
-      admin: session.admin === true,
-      silver: session.silver === true,
-      silverUntil: silverUntil ? silverUntil.toISOString() : null,
-      availablePkn: Number(session.availablePkn) || 0,
-    }));
-  } catch (_) {
-    /* quota / private mode */
+  const payload = JSON.stringify({
+    uid,
+    signedIn: true,
+    admin: session.admin === true,
+    silver: session.silver === true,
+    silverUntil: silverUntil ? silverUntil.toISOString() : null,
+    availablePkn: Number(session.availablePkn) || 0,
+  });
+  if (storage?.setItem) {
+    try {
+      storage.setItem(AUTH_SESSION_KEY, payload);
+    } catch (_) {
+      /* quota / private mode */
+    }
   }
+  writeCookie(AUTH_SESSION_COOKIE, payload, {
+    maxAgeSec: 60 * 60 * 24 * 30,
+    jar: cookieJar(overrideStore),
+  });
 }
 
 export function clearAuthSession(overrideStore) {
@@ -82,6 +168,43 @@ export function clearAuthSession(overrideStore) {
   } catch (_) {
     /* private mode */
   }
+  clearCookie(AUTH_SESSION_COOKIE, { jar: cookieJar(overrideStore) });
+  clearAuthToken(overrideStore);
+}
+
+/** Live Firebase ID token mirrored for sibling Pokoin hosts. */
+export function readAuthToken(overrideStore) {
+  const raw = readCookie(AUTH_TOKEN_COOKIE, cookieJar(overrideStore));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const token = String(parsed?.token || '').trim();
+    const uid = String(parsed?.uid || '').trim();
+    const expiresAt = Number(parsed?.expiresAt) || 0;
+    if (token.length <= 20 || !uid) return null;
+    if (expiresAt && expiresAt <= Date.now() + 30 * 1000) return null;
+    return { token, uid, expiresAt };
+  } catch (_) {
+    return null;
+  }
+}
+
+export function writeAuthToken(session, overrideStore) {
+  const token = String(session?.token || '').trim();
+  const uid = String(session?.uid || '').trim();
+  const expiresAt = Number(session?.expiresAt) || 0;
+  if (token.length <= 20 || !uid) return;
+  const maxAgeSec = expiresAt > Date.now()
+    ? Math.max(60, Math.floor((expiresAt - Date.now()) / 1000))
+    : 55 * 60;
+  writeCookie(AUTH_TOKEN_COOKIE, JSON.stringify({ token, uid, expiresAt }), {
+    maxAgeSec,
+    jar: cookieJar(overrideStore),
+  });
+}
+
+export function clearAuthToken(overrideStore) {
+  clearCookie(AUTH_TOKEN_COOKIE, { jar: cookieJar(overrideStore) });
 }
 
 export function profileFromSession(session) {
