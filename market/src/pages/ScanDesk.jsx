@@ -898,10 +898,7 @@ export default function ScanDesk() {
           <span className="dot" aria-hidden="true" />
           <span>{session?.paused ? 'Paused' : phaseInfo.text}</span>
           {streamStatus === 'reconnecting' ? <span className="scan-sub">· dashboard reconnecting</span> : null}
-          {phase !== 'waiting' && session?.phoneScans
-            ? <span className="scan-sub">· {session.phoneScans} scans</span>
-            : null}
-          {phase === 'waiting' && counts.cards
+          {counts.cards
             ? <span className="scan-sub">· {counts.cards} in queue</span>
             : null}
         </div>
