@@ -31,6 +31,7 @@ export const APP = {
   about: route('/about'),
   contact: route('/contact'),
   privacy: route('/privacy'),
+  emailPreferences: route('/email-preferences'),
   protection: route('/protection'),
   whitepaper: route('/whitepaper'),
   nft: route('/nft'),

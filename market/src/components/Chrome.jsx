@@ -1100,6 +1100,7 @@ export default function Chrome({ children }) {
             <Link to={APP.docs}>Docs</Link>
             <Link to={APP.about}>About</Link>
             <Link to={APP.privacy}>Privacy</Link>
+            <Link to={APP.emailPreferences}>Email preferences</Link>
             <Link to={APP.protection}>Buyer protection</Link>
             <Link to={APP.scan}>Scan</Link>
           </div>

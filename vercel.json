@@ -694,6 +694,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/email-preferences/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/email-preferences",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/protection/",
       "destination": "/market/index.html"
     },

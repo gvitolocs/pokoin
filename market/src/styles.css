@@ -6037,3 +6037,46 @@ html.is-extension-desk select.collector-badge.version-badge {
 .guide-body a {
   color: inherit;
 }
+
+/* Email preferences */
+.email-pref-list {
+  display: grid;
+  gap: 0.85rem;
+}
+.email-pref-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border, #5c5c5c);
+  border-radius: 12px;
+  background: var(--surface-2, #24212b);
+  cursor: pointer;
+}
+.email-pref-row input {
+  margin-top: 0.2rem;
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--yellow, #ffd33d);
+  flex: 0 0 auto;
+}
+.email-pref-row input:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.email-pref-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+.email-pref-copy strong {
+  color: var(--text, #fff);
+}
+.email-pref-copy span {
+  color: var(--muted, #dee6e8);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+.email-pref-status {
+  margin-top: 0.85rem;
+}
