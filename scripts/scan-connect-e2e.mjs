@@ -170,6 +170,8 @@ async function focusRow(page, index) {
   await page.locator('.scan-queue .scan-row:not(.scan-row-head) .c-num').nth(index).click();
 }
 
+let qrPhoneRef = null;
+let qrLinkRef = '';
 const results = [];
 const debugPages = [];
 async function step(name, fn) {
@@ -390,6 +392,64 @@ async function main() {
     await phone.waitForSelector('#scanConnectPanel:not([hidden])', { timeout: 10_000 });
     await shot(phone, '08-phone-ended');
   });
+
+  await step('dashboard QR link opens the phone pre-filled with the code and connects without typing', async () => {
+    await desktop.click('text=Scan another batch');
+    await desktop.waitForSelector('.scan-qr[data-connect-url]', { timeout: 15_000 });
+    const pinNow = await desktop.$$eval('.scan-pin span', (els) => els.map((e) => e.textContent).join(''));
+    const link = await desktop.getAttribute('.scan-qr', 'data-connect-url');
+    assert.match(link, /^https:\/\/scan\.pokoin\.com\/connect#c=[0-9]{4}&k=[A-Za-z0-9_-]{32}$/);
+    assert.equal(new URLSearchParams(link.split('#')[1]).get('c'), pinNow);
+    const qrPhone = await (await browser.newContext({ ...devices['iPhone 13'], permissions: ['camera'] })).newPage();
+    // Same fragment, served from the local phone host.
+    await qrPhone.goto(`http://127.0.0.1:${PHONE_PORT}/connect#${link.split('#')[1]}`);
+    await qrPhone.waitForFunction((pin) => [...document.querySelectorAll('.sc-slot')].map((e) => e.textContent).join('') === pin, pinNow, { timeout: 5000 });
+    await shot(qrPhone, '09-phone-qr-prefilled');
+    await qrPhone.waitForSelector('.sc-bar:not([hidden])', { timeout: 10_000 });
+    assert.equal(new URL(qrPhone.url()).hash, '', 'secret removed from the address bar');
+    await desktop.waitForFunction(() => /iPhone connected|Scanning/.test(document.querySelector('.scan-status')?.textContent || ''), null, { timeout: 10_000 });
+    await shot(desktop, '10-desktop-connected-by-qr');
+    qrPhoneRef = qrPhone;
+    qrLinkRef = link;
+  });
+
+  await step('phone keeps scanning while the API is unreachable and delivers once it recovers', async () => {
+    const before = (await rows(desktop)).length;
+    await qrPhoneRef.route('**/api/scan-phone?action=scan', (route) => route.abort('internetdisconnected'));
+    await showCard([['233090', 0.95]]);
+    await desktop.waitForTimeout(1500);
+    assert.equal((await rows(desktop)).length, before, 'nothing delivered while offline');
+    await qrPhoneRef.unroute('**/api/scan-phone?action=scan');
+    const list = await waitRows(desktop, before + 1, 15_000);
+    assert.equal(list.at(-1).card, 'Pikachu δ');
+  });
+
+  await step('reused, tampered and expired QR links are refused and fall back to the keypad', async () => {
+    const hash = qrLinkRef.split('#')[1];
+    const openLink = async (fragment) => {
+      const page = await (await browser.newContext({ ...devices['iPhone 13'], permissions: ['camera'] })).newPage();
+      await page.goto(`http://127.0.0.1:${PHONE_PORT}/connect#${fragment}`);
+      await page.waitForFunction(() => /expired|not valid/i.test(document.querySelector('.sc-status')?.textContent || ''), null, { timeout: 8000 });
+      assert.equal(await page.isVisible('.sc-keys'), true, 'keypad offered');
+      assert.equal(await page.isHidden('.sc-bar'), true, 'not connected');
+      return page;
+    };
+    await openLink(hash); // reused: already claimed above
+    // Fresh pairing for tamper + expiry.
+    await desktop.click('text=Disconnect');
+    await desktop.waitForSelector('.scan-qr[data-connect-url]', { timeout: 10_000 });
+    const fresh = (await desktop.getAttribute('.scan-qr', 'data-connect-url')).split('#')[1];
+    const params = new URLSearchParams(fresh);
+    const wrongPin = String((Number(params.get('c')) + 1) % 10000).padStart(4, '0');
+    await openLink(`c=${wrongPin}&k=${params.get('k')}`);
+    await openLink(`c=${params.get('c')}&k=${'A'.repeat(32)}`);
+    const pool = new Pool({ connectionString: DB_URL });
+    await pool.query("update public.scan_pairings set expires_at = now() - interval '1 second' where pin = $1", [params.get('c')]);
+    await pool.end();
+    await openLink(fresh);
+    await shot(desktop, '11-desktop-after-rejections');
+  });
+
 
   const perf = await desktop.evaluate(() => window.__pokoinScanPerf || []);
   fs.writeFileSync(path.join(process.env.E2E_OUT || '/tmp', 'scan-connect-e2e-perf.json'), JSON.stringify(perf, null, 1));

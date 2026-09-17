@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { isDashboardHost, phoneConnectUrl } from './scan-api.js';
 import {
   applyItems,
   batchCounts,
@@ -129,4 +130,13 @@ test('defaults label, finish cycle, candidates, quantity typing', () => {
   assert.deepEqual(typeQuantity('4', '2'), { buffer: '42', quantity: 42 });
   assert.deepEqual(typeQuantity('42', '7'), { buffer: '27', quantity: 27 });
   assert.deepEqual(typeQuantity('', '0'), { buffer: '', quantity: null });
+});
+
+test('QR link carries code and secret in the fragment; dashboard host detection', () => {
+  assert.equal(phoneConnectUrl('AbCdEfGhIjKlMnOpQrStUvWxYz012345', '0427'), 'https://scan.pokoin.com/connect#c=0427&k=AbCdEfGhIjKlMnOpQrStUvWxYz012345');
+  assert.equal(phoneConnectUrl('AbCdEfGhIjKlMnOpQrStUvWxYz012345'), 'https://scan.pokoin.com/connect#k=AbCdEfGhIjKlMnOpQrStUvWxYz012345');
+  assert.equal(phoneConnectUrl('x', '12a4'), 'https://scan.pokoin.com/connect#k=x');
+  assert.equal(isDashboardHost('dashboard.pokoin.com'), true);
+  assert.equal(isDashboardHost('pokoin.com'), false);
+  assert.equal(isDashboardHost('dashboard.pokoin.com.evil.example'), false);
 });

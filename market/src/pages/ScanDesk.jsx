@@ -686,7 +686,7 @@ export default function ScanDesk() {
               <button type="button" className="linkish" onClick={regenerate}>New code</button>
             </p>
           </div>
-          <QrBlock secret={pairing.qrSecret} />
+          <QrBlock secret={pairing.qrSecret} pin={pairing.pin} />
         </section>
       ) : null}
 
@@ -825,24 +825,25 @@ export default function ScanDesk() {
   );
 }
 
-function QrBlock({ secret }) {
+function QrBlock({ secret, pin }) {
+  const url = secret ? phoneConnectUrl(secret, pin) : '';
   const path = useMemo(() => {
-    if (!secret) return null;
+    if (!url) return null;
     try {
-      const qr = encodeQr(phoneConnectUrl(secret));
+      const qr = encodeQr(url);
       return { d: qrPath(qr), size: qr.size + 8 };
     } catch (_) {
       return null;
     }
-  }, [secret]);
+  }, [url]);
   if (!path) return null;
   return (
-    <figure className="scan-qr">
+    <figure className="scan-qr" data-connect-url={url}>
       <svg viewBox={`0 0 ${path.size} ${path.size}`} role="img" aria-label="QR code to connect your phone" shapeRendering="crispEdges">
         <rect width={path.size} height={path.size} fill="#fff" />
         <path d={path.d} fill="#000" />
       </svg>
-      <figcaption>or scan with the camera</figcaption>
+      <figcaption>Scan with the phone camera — connects by itself</figcaption>
     </figure>
   );
 }

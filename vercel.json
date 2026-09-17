@@ -228,6 +228,12 @@
   "redirects": [
     {
       "source": "/",
+      "has": [{ "type": "host", "value": "dashboard.pokoin.com" }],
+      "destination": "/scan",
+      "permanent": false
+    },
+    {
+      "source": "/",
       "has": [{ "type": "host", "value": "www.pokoin.com" }],
       "destination": "https://pokoin.com/",
       "permanent": true

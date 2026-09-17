@@ -54,6 +54,7 @@ import About from './pages/About.jsx';
 import WorkingOnIt from './components/WorkingOnIt.jsx';
 import CookieBanner from './components/CookieBanner.jsx';
 import { framedByChromeExtension } from './extension-auth-bridge.js';
+import { isDashboardHost } from './scan-api.js';
 import { subscribeOriginDown } from './working-page.js';
 
 function both(path, element) {
@@ -89,6 +90,8 @@ function AppShell() {
   const stripped = pathname.replace(/\/$/, '');
   const board = stripped === '/sanitize' || stripped === '/espurr' || stripped === '/ocr' || stripped === '/ocr/artists' || stripped === '/artwork' || stripped === '/extension/auth-bridge';
   const framed = framedByChromeExtension();
+  // dashboard.pokoin.com/scan is the Scan Connect desk; pokoin.com/scan stays photo identify.
+  const dashboard = isDashboardHost();
   if (originDown && !board && !framed) {
     return <WorkingOnIt />;
   }
@@ -153,7 +156,7 @@ function AppShell() {
       {both('/forum', <Forum />)}
       {both('/forum/category/:categoryId', <Forum />)}
       {both('/forum/topic/:topicId', <Forum />)}
-      {both('/scan', <Scan />)}
+      {both('/scan', dashboard ? <ScanDesk /> : <Scan />)}
       {both('/cardscan', <Scan />)}
       {both('/scancard', <Scan />)}
       {both('/inventory', <Inventory />)}
@@ -168,7 +171,7 @@ function AppShell() {
       {both('/earn', <Site />)}
       {both('/whitepaper', <Site />)}
       {both('/health', <Site />)}
-      <Route path="*" element={<Navigate to="/marketplace" replace />} />
+      <Route path="*" element={<Navigate to={dashboard ? '/scan' : '/marketplace'} replace />} />
     </Routes>
   );
   if (board) {

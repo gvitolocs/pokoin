@@ -16,8 +16,22 @@ export function streamUrl(batchId, cursor, origin = scanApiOrigin()) {
   return `${origin}/api/scan-stream?${params}`;
 }
 
-export function phoneConnectUrl(qrSecret) {
-  return `https://scan.pokoin.com/connect#k=${encodeURIComponent(qrSecret)}`;
+/**
+ * QR / link that opens the phone scanner already paired: `c` is the 4-digit
+ * code (shown pre-filled on the phone), `k` the pairing secret. The server
+ * only accepts the pair when both match the same live pairing. Fragment, so
+ * neither reaches a server log. docs/SCAN_CONNECT.md#qr-link
+ */
+export function phoneConnectUrl(qrSecret, pin = '') {
+  const params = new URLSearchParams();
+  if (/^[0-9]{4}$/.test(String(pin))) params.set('c', String(pin));
+  params.set('k', String(qrSecret || ''));
+  return `https://scan.pokoin.com/connect#${params}`;
+}
+
+/** dashboard.pokoin.com serves the seller desk; `/scan` there is Scan Connect. */
+export function isDashboardHost(hostname = typeof window !== 'undefined' ? window.location.hostname : '') {
+  return String(hostname).toLowerCase() === 'dashboard.pokoin.com';
 }
 
 async function request(path, { method = 'GET', body, token }) {

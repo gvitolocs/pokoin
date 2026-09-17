@@ -1,7 +1,8 @@
 # Scan Connect (desktop ↔ phone pairing and realtime)
 
-A seller opens **Scan** on `pokoin.com/inventory/scan`, types a 4-digit code
-on the phone at `scan.pokoin.com/connect`, and every card the phone
+A seller opens **Scan** on `dashboard.pokoin.com/scan` (same desk as
+`pokoin.com/inventory/scan`), scans the QR with the phone camera — or types
+the 4-digit code at `scan.pokoin.com/connect` — and every card the phone
 recognises lands in the desktop queue within a second. The desktop owns
 metadata; the phone is a camera. Listing semantics:
 [SCAN_LISTING_WORKFLOW.md](SCAN_LISTING_WORKFLOW.md). Audit:
@@ -31,9 +32,9 @@ Schema: CardVault `oracle-postgres/schema/082_scan_connect.sql`.
 
 | Surface | Route | Why here |
 | --- | --- | --- |
-| Desktop | `pokoin.com/inventory/scan` (SPA, `market/src/pages/ScanDesk.jsx`) | Seller tools already live under `/inventory`; `/scan` stays the public photo identify page. |
+| Desktop | `dashboard.pokoin.com/scan` and `pokoin.com/inventory/scan` (SPA, `market/src/pages/ScanDesk.jsx`) | Same Vercel SPA. On the `dashboard.` host `/scan` renders the desk (`isDashboardHost`, `market/src/App.jsx`) and `/` redirects to `/scan` (`vercel.json`). On `pokoin.com`, `/scan` stays the public photo identify page. |
 | Phone | `scan.pokoin.com/connect` (BattleScan FastAPI serves the same `web/index.html`; `web/static/scan-connect.js` switches to connect mode) | Reuses the tuned camera loop, detection and orientation fixes. `scan.pokoin.com/` keeps redirecting accepted scans to the card page. |
-| QR | `https://scan.pokoin.com/connect#k=<secret>` | Fragment is never sent to a server log. |
+| QR | `https://scan.pokoin.com/connect#c=<4 digits>&k=<secret>` | [QR link](#qr-link). Fragment is never sent to a server log. |
 
 ## API (CardVault, registered in `server/api-route-manifest.js`, family `scan`)
 
@@ -45,7 +46,7 @@ Schema: CardVault `oracle-postgres/schema/082_scan_connect.sql`.
 | `POST /api/scan-session?action=pause` `{sessionId, paused}` | desktop | Phone scans are rejected with `paused` (phone shows it). |
 | `POST /api/scan-session?action=end` `{sessionId, reason}` | desktop | `completed` or `logout`. Batch untouched. |
 | `GET /api/scan-session?sessionId=` | desktop | Session state. |
-| `POST /api/scan-pair` `{pin}` or `{qr}` + `{device}` | phone, **public** | Claim a pairing. Returns `{phoneToken, sessionId, serverTime, label:'Pokoin Dashboard'}`. Same `400 {"error":"Code not valid or expired."}` for wrong, expired and used codes. |
+| `POST /api/scan-pair` `{pin}` (keypad), `{pin, qr}` (QR link), or `{qr}` (legacy link) + `{device}` | phone, **public** | Claim a pairing. Returns `{phoneToken, sessionId, serverTime, label:'Pokoin Dashboard'}`. Same `400 {"error":"Code not valid or expired."}` for wrong, expired and used codes. |
 | `POST /api/scan-phone?action=heartbeat` | phone, `Authorization: Scan <phoneToken>` | Presence + `{status, paused, serverTime, defaultsLabel, received}`. |
 | `POST /api/scan-phone?action=scan` | phone | One scan event (below). Idempotent on `scanEventId`. |
 | `POST /api/scan-phone?action=leave` | phone | Phone disconnects itself. |
@@ -76,8 +77,9 @@ immutable identity. The server stores `received_at` itself.
    `insert … on conflict (pin) do nothing` after deleting that PIN only if it
    is **expired**; conflict → draw again (≤ 20 tries, then 503). The PK makes
    the PIN unique among live pairings even across concurrent creates.
-2. Pairing also gets `qrSecret` (24 random bytes, base64url); only its
-   SHA-256 is stored.
+2. Pairing also gets `qrSecret` (24 random bytes, base64url), stored in
+   plain text beside the PIN: it lives ≤ 120 s, is deleted on claim, and
+   every open dashboard tab must be able to draw the same QR.
 3. Phone posts the PIN. In one transaction: rate-limit check →
    `delete from scan_pairings where pin = $1 and expires_at > now() returning session_id`
    (the delete **is** the single-use claim; two phones racing on one PIN →
@@ -86,6 +88,30 @@ immutable identity. The server stores `received_at` itself.
 4. `phoneToken` = 32 random bytes (base64url). It is the only phone
    credential. It is scoped to that session: post scans, heartbeat, leave.
    It cannot read batch contents, listings, account data, or other sessions.
+
+### QR link
+
+The desk QR encodes `https://scan.pokoin.com/connect#c=4827&k=<qrSecret>`
+(`phoneConnectUrl` in `market/src/scan-api.js`, ~73 bytes → QR version 5-M,
+encoded locally by `market/src/qr.js`). Scanning it with the phone camera:
+
+1. opens the scanner in connect mode;
+2. `pairingFromHash` (BattleScan `web/static/scan-connect.js`) reads `c` and
+   `k`, shows the 4 digits already in the slots, removes the fragment from
+   the address bar;
+3. posts `{pin, qr}` immediately — no typing;
+4. the server claims the pairing only if **both** name the same live row
+   (`pin = $1 and qr_secret = $2`, one `delete … returning`), so a stale or
+   tampered link fails like a wrong code, counts toward the IP failure limit,
+   and leaves the real pairing usable;
+5. on success the phone shows **Connected to Pokoin Dashboard** and starts
+   the camera; the desk flips to *iPhone connected*.
+
+An expired QR shows "This QR code has expired. Type the new code from the
+dashboard." with the keypad ready. The desk's **New code** regenerates PIN and
+QR together. Tests: integration "dashboard QR link: PIN + secret…", phone
+unit "dashboard QR link carries…", E2E step "dashboard QR link opens the phone
+pre-filled…".
 
 ### Security protections
 
@@ -100,7 +126,7 @@ immutable identity. The server stores `received_at` itself.
 | Stolen phone token | Dies with disconnect, Done, logout, 30 min inactivity. Stored hashed. |
 | Seller signs out | SPA calls `end` with `logout` before `signOut`. |
 | Another account in the tab | Every desktop call checks `seller_uid = token uid` → 404; the SPA drops scan state when the uid changes. |
-| Cross-site calls | CORS allowlist per handler: `https://pokoin.com`, `https://scan.pokoin.com`, `https://cardscan.pokoin.com`, plus `http://localhost:*` / `127.0.0.1:*` outside production. Phone uses `Authorization: Scan …`, never cookies. |
+| Cross-site calls | CORS allowlist per handler: `https://pokoin.com`, `https://dashboard.pokoin.com`, `https://scan.pokoin.com`, `https://cardscan.pokoin.com`, plus `http://localhost:*` / `127.0.0.1:*` outside production. Phone uses `Authorization: Scan …`, never cookies. |
 | Oversized uploads | image ≤ 45 KB decoded, ≤ 10 hits, strings clipped. |
 
 Brute-force arithmetic, stated plainly: an attacker needs the right PIN
@@ -185,6 +211,20 @@ Mechanics:
 - Events go to an in-memory + `localStorage` outbox; retries reuse the same
   `scanEventId`. Losing the network never blocks the camera.
 - `phoneToken` is kept in `localStorage` so a reload rejoins the session.
+
+## Going live on dashboard.pokoin.com
+
+Code is ready; these are account steps, not repo changes:
+
+1. Cloudflare DNS `dashboard` CNAME → Vercel, and add the domain to the
+   pokoin-web Vercel project.
+2. Firebase Auth → Authorized domains: add `dashboard.pokoin.com` (Google
+   sign-in popup fails otherwise).
+3. Sellers sign in once on that host (auth storage is per origin).
+4. Apply CardVault `oracle-postgres/schema/082_scan_connect.sql` on the
+   writer **before** deploying CardVault (`createListing` now writes
+   `location`, `altered`).
+5. Deploy BattleScan `web/` and `server/app.py` (`/connect`) to peer1.
 
 ## Files
 
