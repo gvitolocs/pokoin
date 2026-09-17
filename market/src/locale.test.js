@@ -120,11 +120,12 @@ test('print-language buckets match Occidental / Japanese / Korean / Chinese chip
   assert.equal(printBucket('chinese'), 'chinese');
   assert.equal(printBucket('western'), 'western');
   assert.equal(printBucket('korean'), 'korean');
-  assert.equal(printBucket(''), 'western');
+  assert.equal(printBucket(''), 'unknown');
   assert.equal(artistPrintRegion('korean'), 'japanese');
   assert.equal(artistPrintRegion('japanese'), 'japanese');
   assert.equal(artistPrintRegion('chinese'), 'chinese');
   assert.equal(artistPrintRegion('western'), 'western');
+  assert.equal(artistPrintRegion(''), 'unknown');
   assert.deepEqual(ARTIST_PRINT_FLAGS.map((row) => row.flag), ['euus', 'jpko', 'zh', 'id']);
 });
 
@@ -162,7 +163,7 @@ test('artist desk print chips are western, Japanese+Korean, Chinese, and Indones
   assert.equal(artistPrintRegion('chinese'), 'chinese');
   assert.equal(artistPrintRegion('indonesian'), 'indonesian');
   assert.equal(artistPrintRegion('idth'), 'indonesian');
-  assert.equal(artistPrintRegion(''), 'western');
+  assert.equal(artistPrintRegion(''), 'unknown');
 });
 
 test('print-language filter keeps live name stubs', () => {

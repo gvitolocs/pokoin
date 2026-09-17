@@ -112,22 +112,23 @@ cmd_rollback_api() {
 }
 
 cmd_scanner() {
-  (cd "$BATTLESCAN" && node --test scripts/scan-connect.test.cjs >/dev/null && node scripts/scanner-ui.test.cjs web/index.html >/dev/null) \
+  (cd "$BATTLESCAN" && node --test scripts/scan-connect.test.cjs >/dev/null \
+    && node scripts/scan-connect-phone-layout.cjs >/dev/null \
+    && node scripts/scanner-ui.test.cjs web/index.html >/dev/null) \
     || die "BattleScan tests failed"
   say "backup peer1 files to .backups/$STAMP-scan-connect"
   ssh oracle-peer1 "set -e; cd /opt/pokoin-cardscan; b=.backups/$STAMP-scan-connect; mkdir -p \$b/static; cp -a web/index.html server/app.py \$b/; [ -f web/static/scan-connect.js ] && cp -a web/static/scan-connect.js \$b/static/ || true; echo $STAMP-scan-connect > .backups/scan-connect-latest"
   scp -q "$BATTLESCAN/web/index.html" oracle-peer1:/tmp/sc-index.html
   scp -q "$BATTLESCAN/web/static/scan-connect.js" oracle-peer1:/tmp/sc-scan-connect.js
   scp -q "$BATTLESCAN/server/app.py" oracle-peer1:/tmp/sc-app.py
+  # Static UI is Caddy file_server under /opt/pokoin-cardscan/web. Recognition is
+  # the SSH tunnel 8100→nezopt; peer1 uvicorn is optional and may be down.
   ssh oracle-peer1 "set -e; cd /opt/pokoin-cardscan
     install -m 644 /tmp/sc-scan-connect.js web/static/scan-connect.js.new && mv -f web/static/scan-connect.js.new web/static/scan-connect.js
     install -m 644 /tmp/sc-index.html web/index.html.new && mv -f web/index.html.new web/index.html
     install -m 644 /tmp/sc-app.py server/app.py.new && mv -f server/app.py.new server/app.py
-    sudo -n systemctl restart pokoin-cardscan
-    for i in \$(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:8099/connect && break; sleep 2; done
-    curl -fsS http://127.0.0.1:8099/connect | grep -q scan-connect.js
-    curl -fsS http://127.0.0.1:8099/static/scan-connect.js | grep -q pairingFromHash
-    curl -fsS http://127.0.0.1:8099/ | grep -q scan-connect.js"
+    grep -q chromeUrlFor web/static/scan-connect.js
+    grep -q 'padding-bottom: calc(88px' web/index.html"
   # Public scan.pokoin.com is Caddy file_server over /opt/pokoin-cardscan/web (recognition paths
   # proxy to 127.0.0.1:8100 → nezopt). /connect must be rewritten there; app.py is not in that path.
   ssh oracle-peer1 bash -s <<'REMOTE'
@@ -150,9 +151,14 @@ PY
 fi
 REMOTE
   for u in https://scan.pokoin.com/connect https://cardscan.pokoin.com/connect; do
-    curl -fsS "$u" | grep -q scan-connect.js || die "$u does not serve the connect page"
+    # Avoid curl exit 23 (SIGPIPE) when grep -q closes the pipe early.
+    curl -fsS "$u" -o /tmp/sc-connect-check.html
+    grep -q scan-connect.js /tmp/sc-connect-check.html || die "$u does not serve the connect page"
   done
-  curl -fsS https://scan.pokoin.com/static/scan-connect.js | grep -q pairingFromHash || die "public scan-connect.js is stale"
+  curl -fsS https://scan.pokoin.com/static/scan-connect.js -o /tmp/sc-js-check.js
+  grep -q chromeUrlFor /tmp/sc-js-check.js || die "public scan-connect.js is stale"
+  curl -fsS https://scan.pokoin.com/ -o /tmp/sc-index-check.html
+  grep -q 'padding-bottom: calc(88px' /tmp/sc-index-check.html || die "public index.html missing phone dock pad"
   say "scanner live on peer1 (public /connect verified)"
 }
 

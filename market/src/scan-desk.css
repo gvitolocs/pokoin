@@ -194,6 +194,241 @@
 
 .sd-check { display: inline-flex; gap: 0.35rem; align-items: center; font-size: 0.82rem; color: #ddd; }
 
+/* Manual add (PowerTools single-card Name field) */
+
+.scan-manual-add {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0 0 0.55rem;
+  padding: 0.45rem 0.7rem;
+  background: rgba(14, 12, 16, 0.92);
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+}
+
+.scan-manual-add-label {
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.scan-manual-add-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.scan-manual-add-field > input {
+  width: 100%;
+  background: #000;
+  color: #fff;
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.scan-manual-add-field > input:focus {
+  outline: none;
+  border-color: var(--yellow);
+}
+
+.scan-manual-add-field .scan-replace-list {
+  position: absolute;
+  z-index: 9;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  max-height: 18rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.35rem;
+  background: #111;
+  border: 1px solid var(--yellow);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+.scan-manual-add.is-draft {
+  flex-wrap: wrap;
+  border-color: var(--yellow);
+  gap: 0.55rem 0.75rem;
+}
+
+.scan-draft-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.scan-draft-card img {
+  width: 2.4rem;
+  border-radius: 4px;
+  flex: none;
+}
+
+.scan-draft-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.scan-draft-copy strong {
+  color: #fff;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scan-draft-copy em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.scan-draft-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.scan-draft-qty input {
+  width: 3rem;
+  text-align: center;
+  background: #000;
+  color: #fff;
+  border: 2px solid var(--yellow);
+  border-radius: 8px;
+  padding: 0.4rem 0.35rem;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.scan-draft-attrs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.scan-draft-attrs span {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--g5);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #ddd;
+}
+
+.scan-draft-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.scan-draft-actions {
+  display: inline-flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.scan-hotkey-legend {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--g5);
+}
+
+.scan-hotkey-legend-title {
+  margin: 0 0 0.15rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.scan-hotkey-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.scan-hotkey-row-label {
+  flex: none;
+  width: 4.6rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.scan-hotkey-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+}
+
+.scan-hotkey-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.18rem 0.4rem 0.18rem 0.28rem;
+  background: #0a0a0c;
+  color: #ddd;
+  border: 1px solid var(--g5);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.scan-hotkey-chip kbd {
+  display: inline-flex;
+  min-width: 1.15rem;
+  justify-content: center;
+  padding: 0.05rem 0.28rem;
+  background: #1a1814;
+  border: 1px solid var(--g5);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--yellow);
+}
+
+.scan-hotkey-chip.on {
+  border-color: var(--yellow);
+  background: #2a2410;
+  color: #fff;
+}
+
+.scan-hotkey-chip.on kbd {
+  background: var(--yellow);
+  color: #111;
+  border-color: var(--yellow);
+}
+
+.scan-hotkey-chip:hover {
+  border-color: #888;
+}
+
 /* Toolbar */
 
 .scan-toolbar {
@@ -277,6 +512,31 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 .c-card { position: relative; min-width: 0; display: flex; flex-direction: column; }
 .c-card strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .c-card em { font-style: normal; color: var(--muted); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Same gold chevron language as LANG / COND / FINISH selects. */
+.c-card select.c-version {
+  width: 100%;
+  max-width: 100%;
+  margin: 0.1rem 0 0;
+  padding: 0.1rem 1.35rem 0.1rem 0.15rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23f5c542' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E") right 0.2rem center no-repeat;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-style: normal;
+  line-height: 1.35;
+  appearance: none;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.c-card select.c-version:hover,
+.c-card select.c-version:focus {
+  color: var(--text, #eee);
+  background-color: rgba(245, 197, 66, 0.08);
+  outline: none;
+}
 
 .c-cands { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.2rem; }
 .c-cands button {

@@ -1,4 +1,9 @@
 import { useSyncExternalStore } from 'react';
+import {
+  effectivePrintBucket,
+  printBucket as canonicalPrintBucket,
+} from './print-bucket.js';
+import { filterSuggestByPrintLang, rowPrintBucket } from './print-filter.js';
 
 const KEY = 'pokoin.searchLanguage';
 const PRINT_KEY = 'pokoin.printLanguage';
@@ -283,18 +288,14 @@ export function printLangMeta(code) {
   return PRINT_LANGS.find((row) => row.code === code) || PRINT_LANGS[0];
 }
 
-/** Occidental / Japanese / Korean / Chinese buckets. Empty / product → western.
- * Indonesian / Thai leftovers stay out of Occidental. */
+/** Occidental / Japanese / Korean / Chinese buckets.
+ * Empty / product / unrecognized → `unknown` (never silently western).
+ * Canonical implementation: `print-bucket.js`. */
 export function printBucket(nationality) {
-  const value = String(nationality || '').trim().toLowerCase();
-  if (value === 'japanese' || value === 'chinese' || value === 'korean') {
-    return value;
-  }
-  if (value === 'indonesian' || value === 'thai' || value === 'idth') {
-    return value;
-  }
-  return 'western';
+  return canonicalPrintBucket(nationality);
 }
+
+export { effectivePrintBucket, filterSuggestByPrintLang, rowPrintBucket };
 
 /** Artist desk: EU+US / JP+KO / CN / ID. Korean print sits on jpko. */
 export const ARTIST_PRINT_FLAGS = [
@@ -309,21 +310,6 @@ export function artistPrintRegion(nationality) {
   if (bucket === 'japanese' || bucket === 'korean') return 'japanese';
   if (bucket === 'chinese') return 'chinese';
   if (bucket === 'indonesian' || bucket === 'idth') return 'indonesian';
+  if (bucket === 'unknown') return 'unknown';
   return 'western';
-}
-
-export function filterSuggestByPrintLang(groups, printLang) {
-  if (!printLang || printLang === 'all') {
-    return groups;
-  }
-  return (groups || [])
-    .map((group) => ({
-      ...group,
-      printings: (group.printings || []).filter((row) => (
-        row?.live === true
-        || String(row?.id || row?.card_id || '').startsWith('live:')
-        || printBucket(row.nationality) === printLang
-      )),
-    }))
-    .filter((group) => group.printings.length);
 }

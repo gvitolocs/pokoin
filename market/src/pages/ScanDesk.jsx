@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { cardFromAutocomplete, fetchLastMedianPknMap, fetchSuggest, formatPkn, imageSrc } from '../api.js';
+import { fetchLastMedianPknMap, fetchVersionSet, formatPkn, imageSrc } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { languagesForNationality } from '../locale.js';
 import { encodeQr, qrPath } from '../qr.js';
 import {
   fetchScanImage,
@@ -11,6 +10,14 @@ import {
   scanApi,
   streamUrl,
 } from '../scan-api.js';
+import {
+  artworkVersionLabel,
+  languagesForPrint,
+  listingLanguageForPrint,
+  preferArtworkPrinting,
+  shouldRemapArtwork,
+  sortArtworkVersions,
+} from '../scan-artwork-versions.js';
 import {
   applyItems,
   batchCounts,
@@ -32,10 +39,37 @@ import {
   submitLabel,
   typeQuantity,
 } from '../scan-model.js';
-import { HELP_SECTIONS, shortcutFor } from '../scan-shortcuts.js';
+import { HELP_SECTIONS, shortcutFor, DRAFT_HOTKEY_LEGEND, draftLegendActive, dispatchDraftHotkey } from '../scan-shortcuts.js';
 import { connectScanStream } from '../scan-stream.js';
+import { useLiveSuggest } from '../use-live-suggest.js';
 import { SessionWait } from '../components/Desk.jsx';
 import '../scan-desk.css';
+
+/** CLIP version-set cache keyed by any member card id. */
+const versionSetCache = new Map();
+
+function loadVersionSet(cardId) {
+  const id = String(cardId || '').trim();
+  if (!id) return Promise.resolve(null);
+  if (versionSetCache.has(id)) return Promise.resolve(versionSetCache.get(id));
+  const pending = fetchVersionSet(id)
+    .then((data) => {
+      const printings = sortArtworkVersions(data?.printings || []);
+      const payload = { printings, version: data?.version || '' };
+      versionSetCache.set(id, payload);
+      for (const row of printings) {
+        const memberId = String(row.id || row.card_id || '');
+        if (memberId) versionSetCache.set(memberId, payload);
+      }
+      return payload;
+    })
+    .catch(() => {
+      versionSetCache.delete(id);
+      return null;
+    });
+  versionSetCache.set(id, pending);
+  return pending;
+}
 
 const FIELD_LABEL = { reverse: 'Reverse', firstEdition: '1st Ed.', signed: 'Signed', altered: 'Altered' };
 
@@ -91,6 +125,8 @@ export default function ScanDesk() {
   const [problems, setProblems] = useState({});
   const [now, setNow] = useState(() => Date.now());
   const [images, setImages] = useState({});
+  /** PowerTools single-card draft: printing picked, Qty focused, hotkeys edit, Enter creates. */
+  const [draft, setDraft] = useState(null);
   const qtyBuffer = useRef({ id: '', buffer: '', at: 0 });
   const undoStack = useRef([]);
   const redoStack = useRef([]);
@@ -99,6 +135,8 @@ export default function ScanDesk() {
   const queueRef = useRef(null);
   const locationInput = useRef(null);
   const quantityInput = useRef(null);
+  const draftQtyRef = useRef(null);
+  const addSearchRef = useRef(null);
   const submitKey = useRef(newSubmitKey());
   const followTail = useRef(true);
   rowsRef.current = rows;
@@ -269,13 +307,36 @@ export default function ScanDesk() {
     delete optimistic.confirm;
     if (changes.confirm) optimistic.reviewed = true;
     if (changes.cardId) {
-      const cand = candidateList(targets[0]).find((c) => c.cardId === changes.cardId);
+      const nextId = String(changes.cardId);
+      const cand = candidateList(targets[0]).find((c) => c.cardId === nextId);
+      const cached = versionSetCache.get(nextId);
+      const fromVersions = Array.isArray(cached?.printings)
+        ? cached.printings.find((p) => String(p.id || p.card_id) === nextId)
+        : null;
+      const nationality = String(
+        fromVersions?.nationality || cand?.nationality || targets[0].nationality || '',
+      ).toLowerCase();
+      const preferredLang = changes.language || targets[0].language || 'EN';
       Object.assign(optimistic, {
-        cardName: cand?.name || '',
-        setName: cand?.setName || '',
-        collectorNumber: cand?.number || '',
+        cardName: cand?.name || fromVersions?.name || targets[0].cardName || '',
+        setName: cand?.setName || fromVersions?.set_name || fromVersions?.setName || fromVersions?.set || '',
+        collectorNumber: cand?.number
+          || fromVersions?.card_number
+          || fromVersions?.collector_number
+          || fromVersions?.collectorNumber
+          || fromVersions?.number
+          || '',
+        nationality,
+        imageUrl: fromVersions?.image_url || fromVersions?.imageUrl || targets[0].imageUrl || '',
+        language: listingLanguageForPrint(nationality, preferredLang),
         reviewed: true,
       });
+      if (!Object.prototype.hasOwnProperty.call(changes, 'language')) {
+        changes.language = optimistic.language;
+      }
+    } else if (changes.language && targets[0]?.nationality) {
+      optimistic.language = listingLanguageForPrint(targets[0].nationality, changes.language);
+      changes.language = optimistic.language;
     }
     setPending((current) => {
       const next = { ...current };
@@ -374,6 +435,76 @@ export default function ScanDesk() {
     }
   }
 
+  /** PowerTools single-card: pick a printing → draft with Batch Defaults; Qty autofocus. */
+  function startDraft(card) {
+    if (!card?.id || closed) return;
+    setDraft({
+      cardId: card.id,
+      name: card.name || '',
+      set: card.set || '',
+      number: card.number || '',
+      image: card.image || '',
+      language: defaults.language,
+      condition: defaults.condition,
+      foilState: defaults.foilState,
+      firstEdition: defaults.firstEdition,
+      signed: defaults.signed,
+      altered: defaults.altered,
+      location: defaults.location,
+      quantity: defaults.quantity,
+    });
+  }
+
+  useEffect(() => {
+    if (!draft) return;
+    const id = requestAnimationFrame(() => {
+      draftQtyRef.current?.focus();
+      draftQtyRef.current?.select();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [draft?.cardId]);
+
+  async function commitDraft({ keep = false } = {}) {
+    if (!draft || !batch?.id || closed) return;
+    const qty = Math.max(1, Math.min(99, Number(draft.quantity) || 1));
+    try {
+      const data = await runApi((t) => scanApi.add(t, batch.id, {
+        cardId: draft.cardId,
+        language: draft.language,
+        condition: draft.condition,
+        foilState: draft.foilState,
+        firstEdition: draft.firstEdition,
+        signed: draft.signed,
+        altered: draft.altered,
+        location: draft.location,
+        quantity: qty,
+      }));
+      const item = data?.items?.[0];
+      if (item) {
+        followTail.current = true;
+        setFocusId(item.id);
+        undoStack.current.push({
+          label: 'Add',
+          undo: () => runApi((t) => scanApi.remove(t, item.id)),
+        });
+        redoStack.current = [];
+      }
+      if (keep) {
+        // Create & copy (PT `c`): stay on the same printing for another identity.
+        setDraft((current) => (current ? { ...current, quantity: defaults.quantity } : null));
+        requestAnimationFrame(() => {
+          draftQtyRef.current?.focus();
+          draftQtyRef.current?.select();
+        });
+      } else {
+        setDraft(null);
+        requestAnimationFrame(() => addSearchRef.current?.focus());
+      }
+    } catch (err) {
+      setError(err.message || 'Could not add card.');
+    }
+  }
+
   function applyAttribute(cmd) {
     if (cmd.target === 'defaults') {
       if (cmd.command === 'set') return setDefaults({ [cmd.field]: cmd.value });
@@ -382,6 +513,29 @@ export default function ScanDesk() {
         return setDefaults({ [cmd.field]: !defaults[cmd.field] });
       }
       if (cmd.command === 'cycleFinish') return setDefaults({ foilState: cycleFinish(defaults.foilState) });
+      return null;
+    }
+    if (cmd.target === 'draft') {
+      if (!draft) return null;
+      if (cmd.command === 'set') {
+        setDraft((current) => (current ? { ...current, [cmd.field]: cmd.value } : null));
+        return null;
+      }
+      if (cmd.command === 'toggle') {
+        if (cmd.field === 'reverse') {
+          setDraft((current) => (current ? {
+            ...current,
+            foilState: current.foilState === 'reverse' ? 'standard' : 'reverse',
+          } : null));
+          return null;
+        }
+        setDraft((current) => (current ? { ...current, [cmd.field]: !current[cmd.field] } : null));
+        return null;
+      }
+      if (cmd.command === 'cycleFinish') {
+        setDraft((current) => (current ? { ...current, foilState: cycleFinish(current.foilState) } : null));
+        return null;
+      }
       return null;
     }
     const ids = targetIds();
@@ -426,7 +580,10 @@ export default function ScanDesk() {
         if (confirmOpen) setConfirmOpen(false);
         else if (replaceFor) setReplaceFor('');
         else if (helpOpen) setHelpOpen(false);
-        else {
+        else if (draft) {
+          setDraft(null);
+          requestAnimationFrame(() => addSearchRef.current?.focus());
+        } else {
           setSelection(new Set());
           qtyBuffer.current = { id: '', buffer: '', at: 0 };
           if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur?.();
@@ -437,6 +594,7 @@ export default function ScanDesk() {
         setHelpOpen((open) => !open);
         return;
       case 'move':
+        if (draft) return;
         move(cmd.delta);
         return;
       case 'nextAttention': {
@@ -450,36 +608,50 @@ export default function ScanDesk() {
         if (!closed) applyAttribute(cmd);
         return;
       case 'confirm':
+        if (draft) {
+          commitDraft({ keep: false });
+          return;
+        }
         if (!closed) confirmFocused();
         return;
       case 'duplicate':
+        if (draft) {
+          commitDraft({ keep: true });
+          return;
+        }
         if (!closed && focused) duplicate(focused);
         return;
       case 'remove':
         if (!closed && targetIds().length) removeRows(targetIds());
         return;
       case 'candidate': {
-        if (closed || !focused) return;
+        if (closed || !focused || draft) return;
         const next = stepCandidate(focused, cmd.delta);
         if (next) patchRows([focused.id], { cardId: next }, { label: 'Printing' });
         return;
       }
       case 'pickCandidate': {
-        if (closed || !focused) return;
+        if (closed || !focused || draft) return;
         const cand = candidateList(focused)[cmd.index];
         if (cand) patchRows([focused.id], { cardId: cand.cardId }, { label: 'Printing' });
         return;
       }
       case 'qtyDigit':
-        if (!closed) quantityDigit(cmd.digit);
+        if (!closed && !draft) quantityDigit(cmd.digit);
         return;
       case 'qtyStep':
+        if (draft) {
+          const q = Math.max(1, Math.min(99, Number(draft.quantity || 1) + cmd.delta));
+          setDraft((current) => (current ? { ...current, quantity: q } : null));
+          return;
+        }
         if (!closed && focused) {
           const q = Math.max(1, Math.min(99, Number(focused.quantity) + cmd.delta));
           patchRows(targetIds(), { quantity: q }, { label: `Qty ${q}` });
         }
         return;
       case 'qtyBackspace': {
+        if (draft) return;
         const buf = qtyBuffer.current;
         if (focused && buf.id === focused.id && buf.buffer.length > 1) {
           const next = buf.buffer.slice(0, -1);
@@ -489,7 +661,7 @@ export default function ScanDesk() {
         return;
       }
       case 'replace':
-        if (!closed && focused) setReplaceFor(focused.id);
+        if (!closed && focused && !draft) setReplaceFor(focused.id);
         return;
       case 'focusDefault':
         (cmd.field === 'location' ? locationInput : quantityInput).current?.focus();
@@ -509,12 +681,16 @@ export default function ScanDesk() {
       default:
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, focusIndex, focused, closed, confirmOpen, replaceFor, helpOpen, counts.ready, selection, defaults]);
+  }, [list, focusIndex, focused, closed, confirmOpen, replaceFor, helpOpen, counts.ready, selection, defaults, draft]);
 
   useEffect(() => {
     function onKey(event) {
       // The confirm dialog's button has focus, so Enter there is a native click.
-      const cmd = shortcutFor(event, { helpOpen, modalOpen: confirmOpen || Boolean(replaceFor) });
+      const cmd = shortcutFor(event, {
+        helpOpen,
+        modalOpen: confirmOpen || Boolean(replaceFor),
+        draftActive: Boolean(draft),
+      });
       if (!cmd) return;
       event.preventDefault();
       handleCommand(cmd);
@@ -522,7 +698,7 @@ export default function ScanDesk() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleCommand, helpOpen, confirmOpen, replaceFor]);
+  }, [handleCommand, helpOpen, confirmOpen, replaceFor, draft]);
 
   // ---------------------------------------------------------------- prices + images
 
@@ -653,7 +829,12 @@ export default function ScanDesk() {
           <span className="dot" aria-hidden="true" />
           <span>{session?.paused ? 'Paused' : phaseInfo.text}</span>
           {streamStatus === 'reconnecting' ? <span className="scan-sub">· dashboard reconnecting</span> : null}
-          {session?.phoneScans ? <span className="scan-sub">· {session.phoneScans} scans</span> : null}
+          {phase !== 'waiting' && session?.phoneScans
+            ? <span className="scan-sub">· {session.phoneScans} scans</span>
+            : null}
+          {phase === 'waiting' && counts.cards
+            ? <span className="scan-sub">· {counts.cards} in queue</span>
+            : null}
         </div>
         <div className="scan-head-actions">
           {session?.status === 'connected' ? (
@@ -676,7 +857,7 @@ export default function ScanDesk() {
         <section className="scan-connect" aria-label="Connect your phone">
           <div className="scan-connect-main">
             <h2>Connect your phone</h2>
-            <p className="scan-connect-step">Type the code on <strong>scan.pokoin.com/connect</strong> (Safari or Chrome — not the Camera mini browser), or scan the QR</p>
+            <p className="scan-connect-step">Type the code on <strong>scan.pokoin.com/connect</strong>, or scan the QR code</p>
             <p className="scan-pin" aria-label={`Pairing code ${pairing.pin.split('').join(' ')}`}>
               {pairing.pin.split('').map((d, i) => <span key={i}>{d}</span>)}
             </p>
@@ -707,6 +888,22 @@ export default function ScanDesk() {
           quantityRef={quantityInput}
         />
       )}
+
+      {!closed ? (
+        <ManualAddBar
+          draft={draft}
+          draftQtyRef={draftQtyRef}
+          searchRef={addSearchRef}
+          onPickCard={startDraft}
+          onDraftChange={setDraft}
+          onCreate={() => commitDraft({ keep: false })}
+          onCreateCopy={() => commitDraft({ keep: true })}
+          onCancelDraft={() => {
+            setDraft(null);
+            requestAnimationFrame(() => addSearchRef.current?.focus());
+          }}
+        />
+      ) : null}
 
       <div className="scan-toolbar">
         <span className="scan-counts">
@@ -756,7 +953,9 @@ export default function ScanDesk() {
         </div>
         {list.length === 0 ? (
           <p className="scan-empty">
-            {session?.status === 'connected' ? 'Scan a card with your phone. It appears here instantly.' : 'Scanned cards appear here.'}
+            {session?.status === 'connected'
+              ? 'Scan a card with your phone, or search above to add one.'
+              : 'Search above to add a card, or connect your phone to scan.'}
           </p>
         ) : null}
         {list.map((row, index) => (
@@ -845,7 +1044,7 @@ function QrBlock({ secret, pin }) {
         <rect width={path.size} height={path.size} fill="#fff" />
         <path d={path.d} fill="#000" />
       </svg>
-      <figcaption>Scan with the phone camera. If iOS opens a mini browser, tap <strong>Open in Safari / browser</strong> on that page.</figcaption>
+      <figcaption>Scan with the phone camera.</figcaption>
     </figure>
   );
 }
@@ -933,6 +1132,80 @@ function thumbFor(cardId, name, imageUrl) {
   }
 }
 
+function ArtworkVersionSelect({ row, closed, onPick, onLanguage }) {
+  const [printings, setPrintings] = useState(null);
+  const remapTried = useRef(new Set());
+  const onPickRef = useRef(onPick);
+  const onLanguageRef = useRef(onLanguage);
+  onPickRef.current = onPick;
+  onLanguageRef.current = onLanguage;
+  // Prefer the row language as the region intent (EN on a JP hit → western sibling).
+  const listingLanguage = row.language || 'EN';
+
+  useEffect(() => {
+    let cancelled = false;
+    const cardId = String(row.cardId || '').trim();
+    if (!cardId) {
+      setPrintings(null);
+      return undefined;
+    }
+    loadVersionSet(cardId).then((data) => {
+      if (cancelled) return;
+      const rows = sortArtworkVersions(data?.printings || [], listingLanguage);
+      setPrintings(rows);
+      if (closed) return;
+      const tryKey = `${row.id}\0${listingLanguage}\0${cardId}`;
+      if (remapTried.current.has(tryKey)) return;
+      remapTried.current.add(tryKey);
+      if (shouldRemapArtwork(rows, cardId, listingLanguage)) {
+        const preferred = preferArtworkPrinting(rows, cardId, listingLanguage);
+        const nextId = String(preferred?.id || preferred?.card_id || '');
+        if (nextId && nextId !== cardId) {
+          onPickRef.current(nextId);
+          return;
+        }
+      }
+      const current = rows.find((p) => String(p.id || p.card_id) === cardId);
+      const nationality = String(current?.nationality || row.nationality || '').toLowerCase();
+      if (!nationality) return;
+      const nextLang = listingLanguageForPrint(nationality, listingLanguage);
+      if (nextLang !== listingLanguage) onLanguageRef.current?.(nextLang);
+    });
+    return () => { cancelled = true; };
+  }, [row.cardId, row.id, row.nationality, closed, listingLanguage]);
+
+  const fallback = [row.setName, row.collectorNumber].filter(Boolean).join(' · ');
+  if (closed || !row.cardId) {
+    return <em>{fallback}</em>;
+  }
+  if (!printings) {
+    return <em>{fallback || '…'}</em>;
+  }
+  if (printings.length <= 1) {
+    const only = printings[0];
+    return <em>{only ? artworkVersionLabel(only) : fallback}</em>;
+  }
+  const value = printings.some((p) => String(p.id) === String(row.cardId))
+    ? String(row.cardId)
+    : String(printings[0].id);
+  return (
+    <select
+      className="c-version"
+      value={value}
+      aria-label="Artwork version"
+      tabIndex={-1}
+      title="Same artwork — pick the printing to list"
+      onChange={(e) => onPick(e.target.value)}
+    >
+      {printings.map((printing) => (
+        <option key={printing.id} value={String(printing.id)}>
+          {artworkVersionLabel(printing)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function QueueRow({ row, index, focused, selected, problem, image, closed, replacing, onFocus, onPatch, onPick, onRemove, onReplaceDone }) {
   const stateLabel = row.status === 'submitted'
     ? 'Listed'
@@ -942,8 +1215,11 @@ function QueueRow({ row, index, focused, selected, problem, image, closed, repla
   const tone = row.status === 'submitted' ? 'ok' : problem === 'no_printing' ? 'bad' : problem ? 'warn' : 'ok';
   const candidates = candidateList(row);
   const showCandidates = !closed && (row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed;
-  const allowedLangs = row.nationality ? languagesForNationality(row.nationality, LANGUAGES) : LANGUAGES;
-  const langWarn = row.nationality && allowedLangs.length && !allowedLangs.includes(row.language);
+  const allowedLangs = languagesForPrint(row.nationality, LANGUAGES);
+  const langValue = allowedLangs.includes(row.language)
+    ? row.language
+    : listingLanguageForPrint(row.nationality, row.language);
+  const langWarn = row.nationality && row.language !== langValue;
   const thumb = thumbFor(row.cardId, row.cardName, row.imageUrl);
   return (
     <div
@@ -963,7 +1239,12 @@ function QueueRow({ row, index, focused, selected, problem, image, closed, repla
       </span>
       <span className="c-card">
         <strong>{row.cardName || (row.cardId ? `#${row.cardId}` : 'Not identified')}</strong>
-        <em>{[row.setName, row.collectorNumber].filter(Boolean).join(' · ')}</em>
+        <ArtworkVersionSelect
+          row={row}
+          closed={closed}
+          onPick={onPick}
+          onLanguage={(language) => onPatch({ language })}
+        />
         {showCandidates && candidates.length ? (
           <span className="c-cands">
             {candidates.slice(0, 4).map((cand, i) => (
@@ -982,10 +1263,16 @@ function QueueRow({ row, index, focused, selected, problem, image, closed, repla
         ) : null}
         {replacing ? <ReplacePrinting onPick={(id) => { onPick(id); onReplaceDone(); }} onClose={onReplaceDone} seed={row.cardName} /> : null}
       </span>
-      <span className={`c-lang${langWarn ? ' warn' : ''}`} title={langWarn ? `Not a ${row.nationality} print language` : ''}>
-        {closed ? row.language : (
-          <select value={row.language} onChange={(e) => onPatch({ language: e.target.value })} tabIndex={-1}>
-            {LANGUAGES.map((code) => <option key={code} value={code}>{code}</option>)}
+      <span className={`c-lang${langWarn ? ' warn' : ''}`} title={langWarn ? `Not a ${row.nationality || 'this'} print language` : ''}>
+        {closed ? langValue : (
+          <select
+            value={langValue}
+            onChange={(e) => onPatch({ language: e.target.value })}
+            tabIndex={-1}
+          >
+            {(allowedLangs.length ? allowedLangs : [langValue]).map((code) => (
+              <option key={code} value={code}>{code}</option>
+            ))}
           </select>
         )}
       </span>
@@ -1081,78 +1368,234 @@ function QueueRow({ row, index, focused, selected, problem, image, closed, repla
   );
 }
 
+function PrintingSuggestList({ results, active, onPick }) {
+  if (!results.length) return null;
+  return (
+    <span className="scan-replace-list" role="listbox">
+      {results.map((card, i) => (
+        <button
+          key={card.id}
+          type="button"
+          role="option"
+          aria-selected={i === active}
+          className={i === active ? 'on' : ''}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onPick(card.id);
+          }}
+        >
+          {card.image ? <img src={card.image} alt="" /> : null}
+          <span>{card.name}</span>
+          <em>{[card.set, card.number].filter(Boolean).join(' ')}</em>
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function suggestKeyDown(e, { results, active, setActive, onPick, onEscape }) {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    setActive((i) => Math.min(results.length - 1, i + 1));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    setActive((i) => Math.max(0, i - 1));
+  } else if (e.key === 'Enter' && results[active]) {
+    e.preventDefault();
+    onPick(results[active].id);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    onEscape?.();
+  }
+}
+
+/** Header typeahead engine (liveSuggestGroups + fetchSuggestRanked). */
+function useScanPrintingSuggest(query) {
+  const { results } = useLiveSuggest(query, { kind: 'singles', limit: 20 });
+  const [active, setActive] = useState(0);
+  useEffect(() => {
+    setActive(0);
+  }, [query]);
+  useEffect(() => {
+    setActive((i) => (results.length ? Math.min(i, results.length - 1) : 0));
+  }, [results]);
+  return { results, active, setActive };
+}
+
+function DraftHotkeyLegend({ draft, qtyRef }) {
+  const fire = (entry) => {
+    dispatchDraftHotkey(qtyRef?.current, entry);
+  };
+  const groups = [
+    ['Condition', DRAFT_HOTKEY_LEGEND.condition],
+    ['Language', DRAFT_HOTKEY_LEGEND.language],
+    ['Flags', DRAFT_HOTKEY_LEGEND.toggles],
+    ['Actions', DRAFT_HOTKEY_LEGEND.actions],
+  ];
+  return (
+    <div className="scan-hotkey-legend" data-testid="hotkey-legend">
+      <p className="scan-hotkey-legend-title">
+        Use your keyboard or click a key to edit this card
+      </p>
+      {groups.map(([title, entries]) => (
+        <div key={title} className="scan-hotkey-row" role="group" aria-label={title}>
+          <span className="scan-hotkey-row-label">{title}</span>
+          <span className="scan-hotkey-chips">
+            {entries.map((entry) => {
+              const active = draftLegendActive(entry, draft);
+              return (
+                <button
+                  key={`${entry.key}:${entry.label}`}
+                  type="button"
+                  className={`scan-hotkey-chip${active ? ' on' : ''}`}
+                  aria-pressed={active}
+                  title={`${entry.key} → ${entry.label}`}
+                  onMouseDown={(event) => {
+                    // Keep Qty focused (PT legend does the same).
+                    event.preventDefault();
+                    fire(entry);
+                  }}
+                >
+                  <kbd>{entry.key}</kbd>
+                  <span>{entry.label}</span>
+                </button>
+              );
+            })}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ManualAddBar({
+  draft,
+  draftQtyRef,
+  searchRef,
+  onPickCard,
+  onDraftChange,
+  onCreate,
+  onCreateCopy,
+  onCancelDraft,
+}) {
+  const [query, setQuery] = useState('');
+  const { results, active, setActive } = useScanPrintingSuggest(draft ? '' : query);
+  const pick = (cardId) => {
+    const card = results.find((row) => row.id === cardId) || { id: cardId };
+    onPickCard(card);
+    setQuery('');
+    setActive(0);
+  };
+
+  if (draft) {
+    const finishLabel = FINISHES.find((f) => f.value === draft.foilState)?.label || draft.foilState;
+    const flags = [
+      draft.firstEdition ? '1st' : null,
+      draft.signed ? 'Signed' : null,
+      draft.altered ? 'Altered' : null,
+    ].filter(Boolean).join(' · ');
+    return (
+      <section className="scan-manual-add is-draft" aria-label="Article being added" data-testid="article-being-added">
+        <span className="scan-manual-add-label">Adding</span>
+        <div className="scan-draft-card">
+          {draft.image ? <img src={draft.image} alt="" /> : <span className="art-empty" />}
+          <div className="scan-draft-copy">
+            <strong>{draft.name || `#${draft.cardId}`}</strong>
+            <em>{[draft.set, draft.number].filter(Boolean).join(' · ')}</em>
+          </div>
+        </div>
+        <label className="scan-draft-qty">
+          <span>Qty</span>
+          <input
+            ref={draftQtyRef}
+            data-pokoin-hotkeys="qty"
+            data-testid="quanty-input-add-new-article"
+            inputMode="numeric"
+            autoComplete="off"
+            value={draft.quantity === '' || draft.quantity == null ? '' : String(draft.quantity)}
+            onChange={(e) => {
+              const raw = e.target.value.replace(/\D/g, '').slice(0, 2);
+              onDraftChange({
+                ...draft,
+                quantity: raw === '' ? '' : Number(raw),
+              });
+            }}
+            onFocus={(e) => e.target.select()}
+          />
+        </label>
+        <div className="scan-draft-attrs" aria-live="polite">
+          <span>{draft.condition}</span>
+          <span>{draft.language}</span>
+          <span>{finishLabel}</span>
+          {flags ? <span>{flags}</span> : null}
+          {draft.location ? <span>{draft.location}</span> : null}
+        </div>
+        <div className="scan-draft-actions">
+          <button type="button" className="btn ghost" onClick={onCancelDraft}>Cancel</button>
+          <button type="button" className="btn ghost" onClick={onCreateCopy} title="c">Create &amp; copy</button>
+          <button type="button" className="btn" onClick={onCreate} title="Enter">Create</button>
+        </div>
+        <DraftHotkeyLegend draft={draft} qtyRef={draftQtyRef} />
+      </section>
+    );
+  }
+
+  return (
+    <section className="scan-manual-add" aria-label="Add card by name">
+      <span className="scan-manual-add-label">Add card</span>
+      <div className="scan-manual-add-field">
+        <input
+          ref={searchRef}
+          value={query}
+          placeholder="Same as header search — name, set, number…"
+          aria-label="Search to add a card"
+          autoComplete="off"
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => suggestKeyDown(e, {
+            results,
+            active,
+            setActive,
+            onPick: pick,
+            onEscape: () => {
+              if (query) {
+                e.stopPropagation();
+                setQuery('');
+              } else {
+                e.currentTarget.blur();
+              }
+            },
+          })}
+        />
+        <PrintingSuggestList results={results} active={active} onPick={pick} />
+      </div>
+    </section>
+  );
+}
+
 function ReplacePrinting({ onPick, onClose, seed }) {
   const [query, setQuery] = useState(seed || '');
-  const [results, setResults] = useState([]);
-  const [active, setActive] = useState(0);
   const input = useRef(null);
+  const { results, active, setActive } = useScanPrintingSuggest(query);
   useEffect(() => {
     input.current?.focus();
     input.current?.select();
   }, []);
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) {
-      setResults([]);
-      return undefined;
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      fetchSuggest(q, { limit: 12, signal: controller.signal })
-        .then((data) => {
-          const cards = (data?.groups || []).flatMap((g) => (g.printings || []).map(cardFromAutocomplete)).filter((c) => /^\d+$/.test(c.id));
-          setResults(cards.slice(0, 12));
-          setActive(0);
-        })
-        .catch(() => {});
-    }, 120);
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [query]);
   return (
     <span className="scan-replace" role="dialog" aria-label="Replace printing">
       <input
         ref={input}
         value={query}
-        placeholder="Name, set code or number"
+        placeholder="Same as header search — name, set, number…"
         onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            setActive((i) => Math.min(results.length - 1, i + 1));
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            setActive((i) => Math.max(0, i - 1));
-          } else if (e.key === 'Enter' && results[active]) {
-            e.preventDefault();
-            onPick(results[active].id);
-          } else if (e.key === 'Escape') {
-            e.preventDefault();
-            onClose();
-          }
-        }}
+        onKeyDown={(e) => suggestKeyDown(e, {
+          results,
+          active,
+          setActive,
+          onPick,
+          onEscape: onClose,
+        })}
       />
-      <span className="scan-replace-list" role="listbox">
-        {results.map((card, i) => (
-          <button
-            key={card.id}
-            type="button"
-            role="option"
-            aria-selected={i === active}
-            className={i === active ? 'on' : ''}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onPick(card.id);
-            }}
-          >
-            {card.image ? <img src={card.image} alt="" /> : null}
-            <span>{card.name}</span>
-            <em>{card.set} {card.number}</em>
-          </button>
-        ))}
-      </span>
+      <PrintingSuggestList results={results} active={active} onPick={onPick} />
     </span>
   );
 }
@@ -1162,7 +1605,11 @@ function HelpOverlay({ onClose }) {
     <div className="scan-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onMouseDown={onClose}>
       <div className="scan-modal-box scan-help" onMouseDown={(e) => e.stopPropagation()}>
         <h2>Keyboard shortcuts</h2>
-        <p className="scan-help-note">Keys act on the focused row when no text field is focused. PowerTools keys work the same way.</p>
+        <p className="scan-help-note">
+          PowerTools single-card: after you pick a printing, Qty is focused and the on-screen
+          key legend lights up — click a key or type it. Digits type quantity; Enter creates;
+          C creates &amp; copies. Queue keys work when no text field is focused.
+        </p>
         <div className="scan-help-grid">
           {HELP_SECTIONS.map((section) => (
             <section key={section.title}>

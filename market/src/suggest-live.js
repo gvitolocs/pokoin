@@ -25,6 +25,7 @@ import {
   isRarityAwareQuery,
   isSetAwareQuery,
   isSetOnlyQuery,
+  isModifierWord,
   hasRivalMechanic,
   typedModifiers,
   mergeSuggestGroups,
@@ -40,6 +41,8 @@ import {
 import { catalogCacheKey, catalogIntent, groupsFromCards } from './suggest-catalog.js';
 import { resolverOwns, resolveSuggestQuery } from './suggest-resolve.js';
 import { filterSuggestByPrintLang } from './locale.js';
+import { mergePrintingFields } from './print-bucket.js';
+import { rankFreeText, scoreGroups } from './search-score.js';
 
 export const SUGGEST_LIVE_MIN_CHARS = 3;
 const TTL_MS = 30 * 60 * 1000;
@@ -81,16 +84,20 @@ function pruneLiveCache(now = Date.now()) {
   }
 }
 
-export function rememberSuggestGroups(groups) {
+export function rememberSuggestGroups(groups, { searchLang = '' } = {}) {
   const at = Date.now();
+  const stampLang = String(searchLang || '').toLowerCase();
   for (const group of groups || []) {
     const key = compactQuery(group?.name);
     if (!key) {
       continue;
     }
-    const incoming = (group.printings || []).filter((row) => (
-      !isLiveStub(row) && String(row?.id || row?.card_id || '')
-    ));
+    const incoming = (group.printings || [])
+      .filter((row) => (!isLiveStub(row) && String(row?.id || row?.card_id || '')))
+      // Stamp the fetch language so the unified scorer only trusts localized_*
+      // fields under the language they were actually fetched for (language is
+      // part of cache identity; a stale cross-language response is ignored).
+      .map((row) => (stampLang ? { ...row, search_lang: stampLang } : row));
     if (!incoming.length) {
       continue;
     }
@@ -98,7 +105,10 @@ export function rememberSuggestGroups(groups) {
       (byCompact.get(key)?.printings || []).map((row) => [String(row.id || row.card_id), row]),
     );
     for (const row of incoming) {
-      byId.set(String(row.id || row.card_id), row);
+      const id = String(row.id || row.card_id);
+      const prev = byId.get(id);
+      // Empty hydration must not erase a known nationality / identity fields.
+      byId.set(id, prev ? mergePrintingFields(prev, row) : row);
     }
     byCompact.set(key, { printings: [...byId.values()], at });
   }
@@ -115,6 +125,25 @@ export function cachedPrintings(name) {
     return [];
   }
   return row.printings;
+}
+
+/**
+ * Every live-cached group (real printings only), for the unified scorer to
+ * surface localized / hydrated matches the English name ranker cannot see
+ * (`Glurak` → Charizard while German is selected). Bounded by the cache cap.
+ */
+function allCachedGroups(now = Date.now()) {
+  const groups = [];
+  for (const [key, row] of byCompact) {
+    if (now - row.at > TTL_MS) {
+      continue;
+    }
+    const printings = (row.printings || []).filter((printing) => !isLiveStub(printing));
+    if (printings.length) {
+      groups.push({ name: printings[0].name || key, printings });
+    }
+  }
+  return groups;
 }
 
 function cachedNumberPrintings(parsed) {
@@ -317,13 +346,10 @@ function resolverLiveGroups(resolved, { limit }) {
   return { groups: groupsFromCards(rows), ranked, each: limit };
 }
 
-/** The print flag shapes the popup, it must never blind it: when the filter
- * would empty every group, paint the unfiltered rows instead — the user
- * still gets the closest matches (imageless prints included) over an empty
- * "No singles match" board. */
+/** Print language is a hard universe constraint. Zero matches stays empty —
+ * never silently broaden to All / other print regions. */
 function popupGroups(groups, printLang) {
-  const filtered = filterSuggestByPrintLang(groups, printLang);
-  return filtered.length ? filtered : (groups || []);
+  return filterSuggestByPrintLang(groups, printLang);
 }
 
 export function liveSuggestGroups(query, {
@@ -332,6 +358,7 @@ export function liveSuggestGroups(query, {
   limit = SUGGEST_RESULT_FLOOR,
   preferPerGroup = 4,
   printLang = 'all',
+  searchLang = 'en',
   kind = '',
 } = {}) {
   if (!suggestLiveReady(query)) {
@@ -341,7 +368,9 @@ export function liveSuggestGroups(query, {
   const nameQuery = isBareCollectorQuery(parsed) ? query : (parsed.nameQuery || query);
   const intent = isBareCollectorQuery(parsed) ? { kind: 'name' } : catalogIntent(query);
   const resolved = isBareCollectorQuery(parsed) ? null : resolveSuggestQuery(query);
-  if (resolved && resolverOwns(resolved)) {
+  // Artist bindings keep their hydrate branch; the resolver no longer OWNS a
+  // free-text card query (`palkia legend`) — that goes through the one scorer.
+  if (resolved && resolved.hasArtist && resolverOwns(resolved)) {
     const branch = resolverLiveGroups(resolved, { limit, preferPerGroup });
     if (branch) {
       return {
@@ -358,6 +387,54 @@ export function liveSuggestGroups(query, {
         intent,
       };
     }
+  }
+  // ---------------------------------------------------------------------------
+  // ORDINARY FREE-TEXT SINGLES: one scorer owns it (search-score.js). No engine
+  // fork, no destructive set-peel, no resolver pipeline swap. Set/mechanic
+  // recognition is EVIDENCE only. Genuinely structured/browse queries keep
+  // their own paths below: bare collector numbers, set-only browse
+  // (`expedition`), art/rarity/number peels, the `energy` set browse, and
+  // resolver artist bindings — each a hard universe constraint the coverage
+  // scorer cannot express, not free-text card search.
+  // A CONFIDENT set token is a real set alias/title the user browses by
+  // (`sl` → Call of Legends, `platinum`, `call of legends`) — an opaque alias
+  // the coverage scorer cannot reconstruct from set-name tokens, so it keeps
+  // the set-aware browse path. A PREFIX peel (`pika` → Pikachu World
+  // Collection) or a MODIFIER homonym (`legend`) is a false positive: those go
+  // through the one scorer as evidence. This is the Section-7 boundary — only
+  // fuzzy/prefix set recognition is demoted, never explicit set intent.
+  const confidentSet = (parsed.setTokens || []).some((token) => (
+    !token.prefix && !isModifierWord(token.token || token.compact)
+  ));
+  const isFreeText = !isBareCollectorQuery(parsed)
+    && !isSetOnlyQuery(parsed)
+    && !isNumberAwareQuery(parsed)
+    && !isArtAwareQuery(parsed)
+    && !isRarityAwareQuery(parsed)
+    && !confidentSet
+    && !(resolved && resolved.hasArtist);
+  if (isFreeText) {
+    const lang = String(searchLang || 'en').toLowerCase();
+    // Name-pool order (English local vocab) for the returned `ranked` and FLIP.
+    const ranked = pool
+      ? rank(nameQuery, pool)
+      : rankFreeText(query, { lang, limit: SUGGEST_RESULT_FLOOR * 2 });
+    // The displayed rows are the live cache scored by the ONE model, filtered
+    // to tokens actually covered and ordered by coverage→quality. Scoring the
+    // whole cache (not just rankFreeText's top-N) keeps a low-quality-but-valid
+    // reading (base `Pikachu` under `pikahc gx`) and surfaces server-hydrated
+    // localized rows through the same code path — deterministic, order-free.
+    const scored = scoreGroups(query, popupGroups(allCachedGroups(), printLang), { lang });
+    // Free text is never a hard set filter: drop any peeled set token so fill /
+    // order treat recognition as evidence. Mechanic words still ride the raw
+    // query for fill's rival-mechanic consistency (`pika gx` hides ex prints).
+    const freeParsed = { ...parsed, setTokens: [], eras: [], nameQuery: query };
+    const each = typedModifiers(query).mods.length ? limit : preferPerGroup;
+    return {
+      groups: fillSuggestGroups(scored.groups, limit, each, freeParsed, kind),
+      ranked,
+      parsed: freeParsed,
+    };
   }
   // Token-peeled queries rank the local name pool. The parse already split the
   // tokens off, and catalogIntent's fuzzy catalog rank misranks mid-typing

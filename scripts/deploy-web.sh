@@ -25,6 +25,9 @@ CANONICAL="${POKOIN_WEB_CANONICAL:-/home/nez/Projects/pokoin-web}"
 # Gitignored files scripts/build-web.sh needs. Nothing else from any working tree is used.
 UNTRACKED_INPUTS=(download/extension.zip)
 
+command -v vercel >/dev/null \
+  || die "vercel CLI not on PATH. Non-interactive shells miss ~/.local/bin: run this through a login shell (bash -lc)."
+
 exec 9>/tmp/pokoin-web-deploy.lock
 flock -n 9 || die "another pokoin-web production deploy is running"
 
@@ -36,7 +39,10 @@ git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
 # `vercel inspect --format=json` omits meta; the REST API has it.
 prod_state() {
   local id
-  id="$(V api /v4/aliases/pokoin.com 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["deploymentId"])')"
+  # A silent failure here used to read as "production has no commit", which the
+  # check below reports as a branch deploy. Fail on the API call instead.
+  id="$(V api /v4/aliases/pokoin.com 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["deploymentId"])')" \
+    || die "cannot read the pokoin.com alias from Vercel (logged in? \`vercel whoami\`)"
   V api "/v13/deployments/$id" 2>/dev/null | python3 -c '
 import json, sys
 d = json.load(sys.stdin)

@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CONDITION_KEYS, HELP_SECTIONS, LANGUAGE_KEYS, isEditableTarget, shortcutFor } from './scan-shortcuts.js';
+import {
+  CONDITION_KEYS,
+  DRAFT_HOTKEY_LEGEND,
+  HELP_SECTIONS,
+  LANGUAGE_KEYS,
+  draftLegendActive,
+  isEditableTarget,
+  shortcutFor,
+} from './scan-shortcuts.js';
 
 const div = { tagName: 'DIV' };
 function key(k, extra = {}) {
@@ -71,7 +79,7 @@ test('Pokoin gap keys', () => {
   assert.deepEqual(shortcutFor(key('Enter', { metaKey: true })), { command: 'submit' });
 });
 
-test('never steals keys from text fields', () => {
+test('never steals keys from ordinary text fields', () => {
   const input = { tagName: 'INPUT', type: 'text' };
   const number = { tagName: 'INPUT', type: 'number' };
   const textarea = { tagName: 'TEXTAREA' };
@@ -90,6 +98,50 @@ test('never steals keys from text fields', () => {
   assert.equal(isEditableTarget({ tagName: 'BUTTON' }), false);
 });
 
+test('PowerTools Quantity field: letters are hotkeys, digits stay in the input', () => {
+  const qty = {
+    tagName: 'INPUT',
+    type: 'text',
+    dataset: { pokoinHotkeys: 'qty' },
+    getAttribute: (name) => (name === 'data-pokoin-hotkeys' ? 'qty' : null),
+  };
+  const ctx = { draftActive: true };
+  assert.deepEqual(shortcutFor(key('g', { target: qty }), ctx), { command: 'set', field: 'language', value: 'IT', target: 'draft' });
+  assert.deepEqual(shortcutFor(key('w', { target: qty }), ctx), { command: 'set', field: 'condition', value: 'NM', target: 'draft' });
+  assert.deepEqual(shortcutFor(key('i', { target: qty }), ctx), { command: 'toggle', field: 'reverse', target: 'draft' });
+  assert.equal(shortcutFor(key('4', { target: qty }), ctx), null, 'digits type into Qty');
+  assert.equal(shortcutFor(key('Backspace', { target: qty }), ctx), null);
+  assert.deepEqual(shortcutFor(key('Enter', { target: qty }), ctx), { command: 'confirm' });
+  assert.deepEqual(shortcutFor(key(' ', { target: qty, code: 'Space' }), ctx), { command: 'confirm' });
+  assert.deepEqual(shortcutFor(key('c', { target: qty }), ctx), { command: 'duplicate' });
+  assert.deepEqual(shortcutFor(key('Escape', { target: qty }), ctx), { command: 'cancel' });
+  assert.deepEqual(shortcutFor(key('Delete', { target: qty }), ctx), { command: 'cancel' }, 'PT Delete discards draft');
+  assert.deepEqual(
+    shortcutFor(key('G', { target: qty, shiftKey: true, code: 'KeyG' }), ctx),
+    { command: 'set', field: 'language', value: 'IT', target: 'defaults' },
+  );
+});
+
+test('draft hotkey legend chips mirror the PowerTools map and highlight active attrs', () => {
+  assert.equal(DRAFT_HOTKEY_LEGEND.condition.length, 7);
+  assert.equal(DRAFT_HOTKEY_LEGEND.language.length, 15);
+  assert.ok(DRAFT_HOTKEY_LEGEND.actions.some((row) => row.command === 'confirm'));
+  assert.ok(DRAFT_HOTKEY_LEGEND.actions.some((row) => row.command === 'duplicate'));
+  const draft = {
+    condition: 'SP',
+    language: 'IT',
+    foilState: 'reverse',
+    firstEdition: true,
+    signed: false,
+  };
+  assert.equal(draftLegendActive(DRAFT_HOTKEY_LEGEND.condition.find((r) => r.key === 'e'), draft), true);
+  assert.equal(draftLegendActive(DRAFT_HOTKEY_LEGEND.condition.find((r) => r.key === 'w'), draft), false);
+  assert.equal(draftLegendActive(DRAFT_HOTKEY_LEGEND.language.find((r) => r.key === 'g'), draft), true);
+  assert.equal(draftLegendActive(DRAFT_HOTKEY_LEGEND.toggles.find((r) => r.field === 'reverse'), draft), true);
+  assert.equal(draftLegendActive(DRAFT_HOTKEY_LEGEND.toggles.find((r) => r.field === 'firstEdition'), draft), true);
+  assert.equal(draftLegendActive(DRAFT_HOTKEY_LEGEND.toggles.find((r) => r.field === 'signed'), draft), false);
+});
+
 test('browser shortcuts, IME composition, auto-repeat toggles and open dialogs are left alone', () => {
   assert.equal(shortcutFor(key('c', { metaKey: true })), null, 'copy');
   assert.equal(shortcutFor(key('r', { ctrlKey: true })), null, 'reload');
@@ -106,7 +158,7 @@ test('browser shortcuts, IME composition, auto-repeat toggles and open dialogs a
 
 test('help overlay lists every PowerTools key the map binds', () => {
   const text = JSON.stringify(HELP_SECTIONS);
-  for (const k of [...Object.keys(CONDITION_KEYS), ...Object.keys(LANGUAGE_KEYS), 'i', 'o', '[', 'c', 'Delete', 'v / b', '?']) {
+  for (const k of [...Object.keys(CONDITION_KEYS), ...Object.keys(LANGUAGE_KEYS), 'i / o / [', 'c', 'Delete', 'v / b · ↑ / ↓', '?']) {
     assert.ok(text.includes(k), k);
   }
 });

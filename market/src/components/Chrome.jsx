@@ -26,7 +26,7 @@ import {
   rememberSuggestGroups,
   suggestLiveReady,
 } from '../suggest-live.js';
-import { catalogCacheKey, catalogIntent, expansionNationality, groupsFromCards } from '../suggest-catalog.js';
+import { catalogCacheKey, catalogIntent, groupsFromCards } from '../suggest-catalog.js';
 import { resolveSuggestQuery, serializeResolution } from '../suggest-resolve.js';
 import {
   SUGGEST_THUMB_EAGER,
@@ -58,6 +58,7 @@ import {
   printFlagFromNationality,
   printLangMeta,
   rewriteCatalogLang,
+  rowPrintBucket,
   searchLangFromPath,
   setPrintLang,
   setSearchLang,
@@ -328,6 +329,9 @@ export default function Chrome({ children }) {
   useWindowScrollRestore();
   const searchTabRef = useRef(searchTab);
   searchTabRef.current = searchTab;
+  const printLangRef = useRef(printLang);
+  printLangRef.current = printLang;
+  const suggestRequestId = useRef(0);
   const catalogTab = searchTab === 'users' ? 'singles' : searchTab;
   const visibleGroups = useMemo(() => {
     if (!isPokemonGame()) {
@@ -336,8 +340,8 @@ export default function Chrome({ children }) {
     if (!suggestLiveReady(query) || searchTab === 'users') {
       return [];
     }
-    return liveSuggestGroups(query, { printLang, kind: catalogTab }).groups;
-  }, [groups, liveTick, printLang, query, searchTab, catalogTab]);
+    return liveSuggestGroups(query, { printLang, searchLang: lang, kind: catalogTab }).groups;
+  }, [groups, liveTick, printLang, lang, query, searchTab, catalogTab]);
   const flat = flattenPrintings(visibleGroups);
   const activeOption = activeIndex >= 0 ? flat[activeIndex] : null;
   const previewOptionId = pointerHoverId || activeOption?.optionId || '';
@@ -414,12 +418,14 @@ export default function Chrome({ children }) {
   useEffect(() => {
     const term = query.trim();
     queryRef.current = term;
+    // Print / query identity changed — drop in-flight work so stale All
+    // responses cannot race past a newer Western paint.
+    for (const running of meiliControllers.current) {
+      running.abort();
+    }
+    meiliControllers.current = [];
+    pokemonScheduled.current.clear();
     if (!term) {
-      pokemonScheduled.current.clear();
-      for (const running of meiliControllers.current) {
-        running.abort();
-      }
-      meiliControllers.current = [];
       setPending(false);
       setGroups([]);
       setHitCount(0);
@@ -429,7 +435,16 @@ export default function Chrome({ children }) {
 
     const ready = suggestLiveReady(term);
 
-    function rememberAndPaint(data) {
+    function rememberAndPaint(data, requestMeta = {}) {
+      const requestPrint = requestMeta.printLang || 'all';
+      const requestSeq = Number(requestMeta.seq) || 0;
+      // Stale All responses must not overwrite a newer Western (etc.) paint.
+      if (requestSeq && requestSeq !== suggestRequestId.current) {
+        return;
+      }
+      if (requestPrint !== printLangRef.current) {
+        return;
+      }
       const remembered = data?.hydrated || data?.groups;
       rememberSuggestGroups(remembered);
       preloadSuggestThumbs(collectPrintingThumbUrls(remembered, suggestThumbSrc));
@@ -447,6 +462,7 @@ export default function Chrome({ children }) {
         fetchSearchPage: fetchSearch,
         count,
         tab: searchTabRef.current,
+        printLang: requestPrint,
       });
     }
 
@@ -527,7 +543,7 @@ export default function Chrome({ children }) {
         setHitCount(0);
         setActiveIndex(-1);
       }
-      const kickKey = `${term}\0${lang}`;
+      const kickKey = `${term}\0${lang}\0${printLang}\0${catalogTab}`;
       if (pokemonScheduled.current.has(kickKey)) {
         return undefined;
       }
@@ -538,6 +554,8 @@ export default function Chrome({ children }) {
         pokemonScheduled.current.add(kickKey);
         const controller = new AbortController();
         meiliControllers.current.push(controller);
+        const seq = (suggestRequestId.current += 1);
+        const requestPrint = printLang;
         if (queryRef.current === term) {
           setPending(true);
         }
@@ -547,7 +565,7 @@ export default function Chrome({ children }) {
           limit: 20,
           signal: controller.signal,
           lang,
-          printLang: 'all',
+          printLang: requestPrint,
           concurrency: rankConcurrency(),
           mapChunk: rankChunkOnWorker,
           kind: searchTabRef.current,
@@ -556,7 +574,12 @@ export default function Chrome({ children }) {
           if (error?.name === 'AbortError') {
             throw error;
           }
-          return fetchSuggest(term, { limit: 20, signal: controller.signal, lang, printLang: 'all' })
+          return fetchSuggest(term, {
+            limit: 20,
+            signal: controller.signal,
+            lang,
+            printLang: requestPrint,
+          })
             .then((data) => ({
               groups: Array.isArray(data.groups) ? data.groups : [],
               hydrated: data.groups,
@@ -564,14 +587,14 @@ export default function Chrome({ children }) {
               resolvedQuery: term,
             }));
         }).then((data) => {
-          rememberAndPaint(data);
+          rememberAndPaint(data, { printLang: requestPrint, seq });
         }).catch((error) => {
           if (error.name !== 'AbortError') {
             setActiveIndex(-1);
           }
         }).finally(() => {
           meiliControllers.current = meiliControllers.current.filter((row) => row !== controller);
-          if (queryRef.current === term) {
+          if (queryRef.current === term && printLangRef.current === requestPrint) {
             setPending(false);
           }
         });
@@ -898,9 +921,10 @@ export default function Chrome({ children }) {
                             const optionId = `suggest-${card.id}`;
                             const active = activeOption?.optionId === optionId;
                             const thumb = imageSrc(card, 'suggest');
-                            const printFlag = printFlagFromNationality(
-                              card.nationality || expansionNationality(identity.set || card.set),
-                            );
+                              const bucket = rowPrintBucket(card);
+                              const printFlag = printFlagFromNationality(
+                                bucket === 'unknown' ? '' : bucket,
+                              );
                             const live = isLiveStub(card) || isLiveStub(printing);
                             const rowIndex = flat.findIndex((row) => row.optionId === optionId);
                             const thumbLoading = rowIndex >= SUGGEST_THUMB_EAGER ? 'lazy' : undefined;

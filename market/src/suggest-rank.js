@@ -63,7 +63,7 @@
 import RAW_NAMES from './data/suggest-names.js';
 import RAW_SETS from './data/suggest-sets.js';
 import { suggestKind } from './identity.js';
-import { printBucket } from './locale.js';
+import { effectivePrintBucket } from './print-bucket.js';
 import { TCG_ERA_CATALOG, matchTcgEra } from './tcg-eras.js';
 
 export const KEYBOARD_COST = 0.5;
@@ -133,12 +133,22 @@ const KEY_NEIGHBORS = {
 };
 
 export function compactQuery(value) {
-  return String(value || '')
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[δΔ]/g, '')
+  // Unicode-safe compaction shared across search / suggest / cache keys.
+  // Order matters: NFKC folds full-width/compatibility and composes; strip
+  // Greek delta (delta-species shorthand); NFD exposes Latin diacritics as
+  // trailing combining marks; strip ONLY U+0300-U+036F so `é`->`e` while
+  // Japanese dakuten/handakuten (U+3099/U+309A, outside that range) survive;
+  // NFC recomposes voiced kana; then casefold and drop non-letter/number.
+  // Invariant: NFC and NFD forms of the same string collapse to one compact,
+  // but distinct kana stay distinct (compactQuery("ピ") !== compactQuery("ヒ")).
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[δΔ]/g, "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .normalize("NFC")
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '');
+    .replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 export function nameRow(display, prior = 1) {
@@ -1617,6 +1627,7 @@ function printingArtRank(printing, parsed) {
 export async function fetchSetAwareCards(parsed, {
   fetchSearch,
   lang,
+  printLang = 'all',
   signal,
   limit = 48,
   strict,
@@ -1632,6 +1643,7 @@ export async function fetchSetAwareCards(parsed, {
     query,
     limit,
     lang,
+    printLang,
     signal,
   }).catch((error) => {
     if (error?.name === 'AbortError') {
@@ -1646,6 +1658,9 @@ export async function fetchSetAwareCards(parsed, {
     for (const card of page?.cards || []) {
       const printing = printingFromSearchCard(card);
       if (!printing.id || seen.has(printing.id)) {
+        continue;
+      }
+      if (printLang && printLang !== 'all' && effectivePrintBucket(printing) !== printLang) {
         continue;
       }
       if (suggestKind(printing) !== 'Singles') {
@@ -1766,7 +1781,7 @@ export function printingPrintRank(printing, printLang) {
   if (!printLang || printLang === 'all') {
     return 1;
   }
-  return printBucket(printing?.nationality) === printLang ? 0 : 2;
+  return effectivePrintBucket(printing) === printLang ? 0 : 2;
 }
 
 export function typedMeiliQuery(typed) {
@@ -2145,6 +2160,7 @@ export async function fetchSuggestRanked(term, {
     const cards = await fetchSetAwareCards(parsed, {
       fetchSearch,
       lang,
+      printLang,
       signal,
       limit: Math.max(48, limit),
       strict: true,
@@ -2176,6 +2192,7 @@ export async function fetchSuggestRanked(term, {
     const cards = await fetchSetAwareCards(resolvedParsed, {
       fetchSearch,
       lang,
+      printLang,
       signal,
       strict: true,
     });

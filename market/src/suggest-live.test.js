@@ -716,7 +716,7 @@ test('set-token live path keeps the name pool instead of a stub intent group', (
   assert.equal(filled, 6, 'cached printings fill the list instead of a stub group');
 });
 
-test('a print filter that would empty the popup paints unfiltered rows', () => {
+test('a print filter with no matching rows returns an empty popup', () => {
   resetSuggestLive();
   const latiosPool = [nameRow('Latios ex', 90)];
   rememberSuggestGroups([
@@ -741,8 +741,5 @@ test('a print filter that would empty the popup paints unfiltered rows', () => {
     kind: 'singles',
   });
   const rows = out.groups.flatMap((group) => group.printings);
-  assert.ok(
-    rows.some((row) => row.id === 'half'),
-    'the Japanese half-deck print survives a western filter that empties the popup',
-  );
+  assert.equal(rows.length, 0, 'western hard filter does not broaden to Japanese');
 });

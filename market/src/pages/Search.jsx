@@ -12,7 +12,8 @@ import {
   printingMatchesNumberFilter,
   typedMeiliQuery,
 } from '../suggest-rank.js';
-import { useSearchLang } from '../locale.js';
+import { useSearchLang, usePrintLang } from '../locale.js';
+import { rowPrintBucket } from '../print-filter.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
@@ -53,11 +54,10 @@ export default function Search() {
       ? typedMeiliQuery(typedQuery)
       : typedQuery);
   const lang = useSearchLang();
-  // Resolver parity: the popup may hand over its winning hypothesis
-  // (`resolved=artist:yuka-morii~name:Pikachu`). Re-resolving the same raw
-  // query locally gives the artist display names so the rows — which carry
-  // `artist` from marketplace_search_candidates — can be filtered client-side,
-  // and the fetch runs on the corrected name text instead of the raw typo.
+  const printLang = usePrintLang();
+  // Print filter applies to Singles and Product (expansion nationality).
+  // Users are people — print language does not apply.
+  const activePrintLang = tab === 'users' ? 'all' : printLang;
   const resolvedParamRaw = (params.get('resolved') || '').trim();
   const localResolved = useMemo(
     () => (isPokemonGame() && typedQuery && resolvedParamRaw ? resolveSuggestQuery(typedQuery) : null),
@@ -134,13 +134,21 @@ export default function Search() {
       setSort('match');
     }
     setSellers([]);
-    const fetchOpts = searchFetchOptions(tab);
-    const hot = setAware || tab === 'users' ? null : takeHotSearchPage(fetchQuery, lang, tab);
+    const fetchOpts = {
+      ...searchFetchOptions(tab),
+      ...(tab === 'users' ? {} : { printLang: activePrintLang }),
+    };
+    const hot = setAware || tab === 'users'
+      ? null
+      : takeHotSearchPage(fetchQuery, lang, tab, activePrintLang);
     function apply(data, totalHits) {
       if (cancelled) {
         return;
       }
-      const next = data?.cards || [];
+      let next = data?.cards || [];
+      if (activePrintLang && activePrintLang !== 'all') {
+        next = next.filter((card) => rowPrintBucket(card) === activePrintLang);
+      }
       setCards(next);
       setHasMore(setAware || tab === 'users' ? false : Boolean(data?.hasMore));
       setError('');
@@ -218,7 +226,7 @@ export default function Search() {
         });
     }
     if (!setAware && tab === 'singles' && fetchQuery.length >= 2 && !(hot?.count > 0)) {
-      fetchSuggest(fetchQuery, { limit: 1, lang })
+      fetchSuggest(fetchQuery, { limit: 1, lang, printLang: activePrintLang })
         .then((suggest) => {
           if (!cancelled) {
             setTotal(Number(suggest?.count) || 0);
@@ -229,7 +237,7 @@ export default function Search() {
     return () => {
       cancelled = true;
     };
-  }, [query, fetchQuery, lang, tab, typedQuery]);
+  }, [query, fetchQuery, lang, activePrintLang, tab, typedQuery]);
 
   useEffect(() => {
     rememberPageView(location.key, { rarity, setName, sort });
@@ -276,9 +284,13 @@ export default function Search() {
       offset: cards.length,
       limit: 48,
       lang,
+      printLang: activePrintLang,
       ...searchFetchOptions(tab),
     });
-    const extra = data.cards || [];
+    let extra = data.cards || [];
+    if (activePrintLang && activePrintLang !== 'all') {
+      extra = extra.filter((card) => rowPrintBucket(card) === activePrintLang);
+    }
     setCards((current) => [...current, ...extra]);
     setHasMore(Boolean(data.hasMore));
     if (extra[0]) {

@@ -92,6 +92,26 @@ Finish is **never** inferred from the photo (the embedding cannot see holo
 foil). It comes from the snapshot and is corrected with `i` (reverse) or `.`
 (cycle).
 
+## Manual add (PowerTools single-card)
+
+Bar between Batch Defaults and the queue. Uses the **same header typeahead
+engine** (`liveSuggestGroups` + `fetchSuggestRanked`, docs/TYPEAHEAD.md) via
+`market/src/use-live-suggest.js`.
+
+Flow (candyext KB "How to add one or more unsorted cards: SINGLE CARD"):
+
+1. Type a name in **Add card** (also `SET 069`, typos, set peels, …).
+2. Enter / click a printing → **article being added** strip; **Qty** autofocuses.
+3. PowerTools hotkeys edit the draft while Qty is focused (digits type qty).
+   An on-screen **hotkey legend** (`data-testid="hotkey-legend"`) shows every
+   key; clicking a chip dispatches the same keydown onto Qty (candyext PT
+   behaviour). Active attributes get a gold border.
+4. Enter / Space **Create** → `POST /api/scan-batch?action=add` with draft attrs.
+5. `c` **Create & copy** → same POST, keep the printing for another identity.
+6. Esc / Delete cancel the draft (never deletes queue rows).
+
+Row **Replace printing** (`/`) uses the same suggest hook.
+
 ## Queue
 
 Dense table, newest at the bottom, auto-scroll while the last row is in view.

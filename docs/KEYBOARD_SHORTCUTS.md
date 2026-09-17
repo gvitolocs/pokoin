@@ -25,9 +25,11 @@ article". **Tab** cycles Quantity ↔ Comment inside `#article-edit-container`.
 The on-screen legend buttons dispatch the same `keydown` to the focused
 element, so mouse and keyboard run one code path.
 
-Pokoin keeps the idea: shortcuts fire only when focus is on the **scan
-queue grid** (or nothing editable is focused on the scan page). Inputs,
-selects, textareas and `contenteditable` never receive a shortcut.
+Pokoin replicates that on **Add card**: after a printing is picked, Qty is
+focused (`data-pokoin-hotkeys="qty"`). Letter keys edit the draft
+(`target: 'draft'`), digits type into Qty, Enter/Space create, `c` creates &
+copies, Esc/Delete cancel. Queue row keys still fire when no text field is
+focused. Ordinary inputs never receive a shortcut.
 
 ## PowerTools Pokémon keys → Pokoin
 

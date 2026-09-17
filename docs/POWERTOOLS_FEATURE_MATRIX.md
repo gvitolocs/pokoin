@@ -55,7 +55,7 @@ Columns: **PT behaviour** is what the bundle/KB does. **Status**: ✅ exists,
 
 | PowerTools feature | PT behaviour | Pokoin equivalent | Status | Scan | Implementation location | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Single card mode | Type a name (also `SET 069`, `069 name`, set + name), arrows + Enter pick, hotkeys set attributes, digits = quantity, Enter/Space create | Card desk **List your card**, one card per page | 🟡 | Yes | `market/src/pages/Card.jsx` `ListingForm` → scan queue manual add | Scan queue row "Replace printing" search reuses `/api/marketplace-suggest` |
+| Single card mode | Type a name (also `SET 069`, `069 name`, set + name), arrows + Enter pick, hotkeys set attributes, digits = quantity, Enter/Space create | **Add card** search on `/inventory/scan` between Batch Defaults and the queue; attributes from Batch Defaults / row hotkeys | ✅ | **Yes** | `use-live-suggest.js` (same as header Chrome typeahead) → `ScanDesk` `ManualAddBar` → `scanApi.add` | candyext KB single-card + search articles |
 | By expansion | Walk a sorted expansion; Enter creates and advances, **B** skips, **V** goes back, jump-to by number | none | ❌ | Partly | follow-up | Scan Connect replaces this for piles; the ‹ › set walk on the desk is browse only |
 | Bulk (whole expansion × quantity per rarity) | One click adds every card of a set using the template | none | ❌ | No | follow-up | |
 | Import a file | CSV/XLS/XLSX/ODS; required Quantity + an id or name/number/expansion; missing language/condition default EN/NM; failed rows downloadable | none | ❌ | No | follow-up | |
@@ -122,7 +122,8 @@ Template → Batch Defaults · listing tabs → Scan Batch · Save/Publish →
 idempotent submit · create & copy → duplicate row · hotkeys (condition,
 language, reverse, first edition, signed, confirm, delete, prev/next) ·
 location per article · signed and altered in the listing form path ·
-undo in the queue · camera identification (Pokoin-only).
+undo in the queue · camera identification (Pokoin-only) · **single-card
+Name search** (`ManualAddBar`).
 
 ## Follow-up tasks
 

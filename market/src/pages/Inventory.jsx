@@ -3,6 +3,11 @@ import { Link, Navigate, useLocation } from 'react-router-dom';
 import { fetchSellerListings, formatPkn } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
+import {
+  inventoryListingHref,
+  inventoryListingMeta,
+  liveInventoryListings,
+} from '../inventory-listings.js';
 
 export default function Inventory() {
   const location = useLocation();
@@ -18,7 +23,7 @@ export default function Inventory() {
     getBearer()
       .then((token) => fetchSellerListings(uid, token))
       .then((data) => {
-        if (!cancelled) setRows(data.listings || data.items || []);
+        if (!cancelled) setRows(liveInventoryListings(data.listings || data.items || []));
       })
       .catch((err) => {
         if (!cancelled) setError(err.message || 'Listings failed.');
@@ -38,7 +43,7 @@ export default function Inventory() {
       <PageHead
         kicker="Seller"
         title="My listings"
-        lede="Live native listings for this Firebase uid. Empty is honest until you list from a card desk."
+        lede="Live asks on card desks for this account. Cancelled rows stay off this list."
       >
         <Link className="btn" to="/inventory/scan">Scan cards</Link>
         <Link className="btn ghost" to="/marketplace">List a card</Link>
@@ -59,9 +64,9 @@ export default function Inventory() {
             {rows.map((row) => (
               <Thread
                 key={row.id || `${row.cardId}-${row.pricePkn}`}
-                to={row.cardId ? `/marketplace/en/cards/${row.cardId}` : '/marketplace'}
+                to={inventoryListingHref(row)}
                 title={row.cardName || row.name || 'Listing'}
-                meta={`${formatPkn(row.pricePkn)} · ${row.condition || 'NM'} · qty ${row.quantityAvailable || 1}`}
+                meta={inventoryListingMeta(row, formatPkn)}
               />
             ))}
           </div>

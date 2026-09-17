@@ -197,6 +197,7 @@ export function fetchSearch({
   productType = '',
   productSearchOnly = false,
   lang,
+  printLang,
   signal,
 } = {}) {
   const params = new URLSearchParams({
@@ -212,6 +213,9 @@ export function fetchSearch({
   }
   if (productSearchOnly) {
     params.set('productSearchOnly', '1');
+  }
+  if (printLang && printLang !== 'all') {
+    params.set('print_language', printLang);
   }
   return getJson(`/api/marketplace-search-page?${params}`, { signal });
 }
