@@ -21,6 +21,12 @@ cp "$ROOT/sitemap-hubs.xml" "$OUT/sitemap-hubs.xml"
 cp "$ROOT/sitemap-pokemon.xml" "$OUT/sitemap-pokemon.xml"
 cp "$ROOT/sitemap-sets.xml" "$OUT/sitemap-sets.xml"
 cp "$ROOT/site.webmanifest" "$OUT/site.webmanifest"
+# BIMI logo for inbox brand avatars (DNS: default._bimi.pokoin.com)
+if [[ -f "$ROOT/bimi.svg" ]]; then
+  cp "$ROOT/bimi.svg" "$OUT/bimi.svg"
+elif [[ -f "$ROOT/home/bimi.svg" ]]; then
+  cp "$ROOT/home/bimi.svg" "$OUT/bimi.svg"
+fi
 cp "$ROOT/home/working.html" "$OUT/working.html"
 # Chrome extension zip from Mac Desktop (highest FULL build). Served at
 # /download/extension.zip and the /download/extention.zip alias.
