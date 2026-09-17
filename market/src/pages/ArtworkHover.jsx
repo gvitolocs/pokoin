@@ -6,6 +6,20 @@ const REVISION = '2026-09-17';
 
 const BEFORE_MASK_REV = 'sam21-1';
 const AFTER_MASK_REV = 'clean-1';
+const WHOLE_MASK_REV = 'whole-1';
+
+// Whole-silhouette rework: fill every interior hole + keep small details so the
+// cut-out reads as one solid shape. Served from figure-masks-whole/ (test only;
+// production still resolves figure-masks-clean/).
+const WHOLE_CASES = [
+  {
+    version: 'v232338',
+    name: 'Venusaur ex',
+    image: '/card-images/116169_venusaur-ex-full-v4.jpg',
+    status: 'Review',
+    note: 'EX FireRed & LeafGreen 112/112 · Ryo Ueda. Left is production (clean-1); right fills the flower gap and keeps the leaf tips so the silhouette lifts whole.',
+  },
+];
 
 const SAMPLES = [
   {
@@ -149,6 +163,39 @@ function CaseTile({ item, mask, label }) {
   );
 }
 
+function WholeCase({ item }) {
+  const before = maskUrl(item.version, AFTER_MASK_REV, 'figure-masks-clean');
+  const after = maskUrl(item.version, WHOLE_MASK_REV, 'figure-masks-whole');
+  return (
+    <article className="artwork-test-case artwork-mask-case">
+      <div className="artwork-case-pair">
+        <CaseTile item={item} mask={before} label="Production" />
+        <CaseTile item={item} mask={after} label="Whole" />
+      </div>
+      <div className="artwork-test-copy">
+        <div className="artwork-test-heading">
+          <h2>{item.name}</h2>
+          <span className={`artwork-status ${item.status === 'Pass' ? 'is-pass' : 'is-review'}`}>
+            {item.status}
+          </span>
+        </div>
+        <p>{item.note}</p>
+        <p className="artwork-test-id">{item.version}</p>
+        <div className="artwork-mask-pair">
+          <figure>
+            <img src={before} alt={`${item.name} production mask`} loading="lazy" />
+            <figcaption>Production (clean-1)</figcaption>
+          </figure>
+          <figure>
+            <img src={after} alt={`${item.name} whole silhouette mask`} loading="lazy" />
+            <figcaption>Whole ({WHOLE_MASK_REV})</figcaption>
+          </figure>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function MaskCase({ item }) {
   const before = maskUrl(item.version, BEFORE_MASK_REV);
   const after = maskUrl(item.version, AFTER_MASK_REV, 'figure-masks-clean');
@@ -209,6 +256,20 @@ export default function ArtworkHover() {
           silhouette is clean; Review marks a useful edge case retained for inspection.
         </p>
 
+        <h2 className="artwork-section-title">Whole silhouette — production / rework</h2>
+        <p className="sanitize-note">
+          The cleanup used to punch a hole where a translucent part (the flower) let the
+          background through, and dropped small detached details, so silhouettes felt
+          glitchy. The rework fills every interior hole and keeps the details, so the whole
+          Pokémon lifts as one shape. Left tile wears the production mask
+          (<code>figure-masks-clean/</code>), right wears the rework
+          (<code>figure-masks-whole/</code>).
+        </p>
+        <section className="artwork-review-grid" aria-label="Whole silhouette rework">
+          {WHOLE_CASES.map((item) => <WholeCase key={item.version} item={item} />)}
+        </section>
+
+        <h2 className="artwork-section-title">Sample paintings</h2>
         <section className="artwork-review-grid" aria-label="Artwork hover samples">
           {SAMPLES.map((sample) => <HoverSample key={sample.version} sample={sample} />)}
         </section>
