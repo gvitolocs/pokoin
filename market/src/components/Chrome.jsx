@@ -45,7 +45,8 @@ import SearchTabs from './SearchTabs.jsx';
 import { Action, track } from '../track.js';
 import { useAuth } from '../auth.jsx';
 import { framedByChromeExtension } from '../extension-auth-bridge.js';
-import { APP, DASHBOARD_SCAN, authFrom } from '../punchouts.js';
+import { APP, DASHBOARD_SCAN, authFrom, marketUrl } from '../punchouts.js';
+import { isDashboardHost } from '../scan-api.js';
 import { useCart } from '../cart.jsx';
 import { useWallet } from '../wallet.jsx';
 import CardArt from './CardArt.jsx';
@@ -102,8 +103,10 @@ function MobileTile({ to, href, label, icon, onClick }) {
       <span>{label}</span>
     </>
   );
-  if (href) {
-    return <a className="mobile-tile" href={href} onClick={onClick}>{body}</a>;
+  const external = href || (to ? marketUrl(to) : '');
+  // On dashboard.pokoin.com, marketUrl returns https://pokoin.com/… so leave the host.
+  if (href || (to && String(external).startsWith('http'))) {
+    return <a className="mobile-tile" href={external} onClick={onClick}>{body}</a>;
   }
   return (
     <NavLink
@@ -112,6 +115,23 @@ function MobileTile({ to, href, label, icon, onClick }) {
       onClick={onClick}
     >
       {body}
+    </NavLink>
+  );
+}
+
+/** Same-origin NavLink, or absolute pokoin.com <a> when the SPA is on dashboard. */
+function AppLink({ to, className, title, 'aria-label': ariaLabel, children }) {
+  const href = marketUrl(to);
+  if (String(href).startsWith('http')) {
+    return (
+      <a className={typeof className === 'function' ? className({ isActive: false }) : className} href={href} title={title} aria-label={ariaLabel}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <NavLink className={className} to={to} title={title} aria-label={ariaLabel}>
+      {children}
     </NavLink>
   );
 }
@@ -767,7 +787,8 @@ export default function Chrome({ children }) {
   const from = authFrom(returnPath);
   const pknLabel = `${formatPknNumber(Number.isFinite(balance) ? balance : 0)} PKN`;
   const site = game();
-  const homeHref = site.homeHref || '/';
+  const homeHref = marketUrl(site.homeHref || '/');
+  const onDashboard = isDashboardHost();
 
   return (
     <div className="shell">
@@ -783,10 +804,10 @@ export default function Chrome({ children }) {
           >
             <span /><span /><span />
           </button>
-          <Link className="brand" to="/marketplace" aria-label={site.title}>
+          <AppLink className="brand" to="/marketplace" aria-label={site.title}>
             <img src="/home/logo.png" alt="" width="40" height="40" />
             <span>{site.brand}</span>
-          </Link>
+          </AppLink>
           <form className="search" onSubmit={goSearch} role="search" ref={box}>
             <label className="sr-only" htmlFor="market-search">Search cards</label>
             <div className="search-pill">
@@ -1006,25 +1027,25 @@ export default function Chrome({ children }) {
             <a href={homeHref} title="Home" aria-label="Home">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" /></svg>
             </a>
-            <NavLink to="/forum" title="Forum" aria-label="Forum">
+            <AppLink to="/forum" title="Forum" aria-label="Forum">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" /></svg>
-            </NavLink>
-            <a href={DASHBOARD_SCAN} title="Dashboard" aria-label="Dashboard">
+            </AppLink>
+            <a href={onDashboard ? '/scan' : DASHBOARD_SCAN} title="Dashboard" aria-label="Dashboard">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z" /></svg>
             </a>
             {site.features.competitive ? (
-              <NavLink className="trophy" to="/marketplace/competitive" title="Competitive" aria-label="Competitive">
+              <AppLink className="trophy" to="/marketplace/competitive" title="Competitive" aria-label="Competitive">
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94A5.01 5.01 0 0 0 11 17.9V19H7v2h10v-2h-4v-1.1a5.01 5.01 0 0 0 3.61-4.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z" /></svg>
-              </NavLink>
+              </AppLink>
             ) : null}
-            <NavLink className="pkn-chip" to="/wallet" title="Wallet">{pknLabel}</NavLink>
-            <NavLink to={signedIn ? '/profile' : from} title={signedIn ? 'Profile' : 'Sign in'} aria-label={signedIn ? 'Profile' : 'Sign in'}>
+            <AppLink className="pkn-chip" to="/wallet" title="Wallet">{pknLabel}</AppLink>
+            <AppLink to={signedIn ? '/profile' : from} title={signedIn ? 'Profile' : 'Sign in'} aria-label={signedIn ? 'Profile' : 'Sign in'}>
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" /></svg>
-            </NavLink>
-            <NavLink className="cart-chip" to="/cart" title="Cart" aria-label={`Cart, ${count} items`}>
+            </AppLink>
+            <AppLink className="cart-chip" to="/cart" title="Cart" aria-label={`Cart, ${count} items`}>
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0 0 20 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z" /></svg>
               <em>{count}</em>
-            </NavLink>
+            </AppLink>
           </nav>
         </div>
       </header>
@@ -1040,7 +1061,7 @@ export default function Chrome({ children }) {
         <MobileTile to="/marketplace/search" label="Search" icon="search" onClick={closeMenu} />
         <MobileTile href={homeHref} label="Home" icon="home" onClick={closeMenu} />
         <MobileTile to={APP.forum} label="Forum" icon="forum" onClick={closeMenu} />
-        <MobileTile href={DASHBOARD_SCAN} label="Dashboard" icon="dashboard" onClick={closeMenu} />
+        <MobileTile href={onDashboard ? '/scan' : DASHBOARD_SCAN} label="Dashboard" icon="dashboard" onClick={closeMenu} />
         {site.features.competitive ? (
           <MobileTile to="/marketplace/competitive" label="Competitive" icon="trophy" onClick={closeMenu} />
         ) : null}
@@ -1070,40 +1091,40 @@ export default function Chrome({ children }) {
           </div>
           <div>
             <h3>Shop</h3>
-            <Link to="/marketplace">Marketplace</Link>
-            <Link to="/marketplace/search">Search</Link>
-            <Link to="/marketplace/competitive">Competitive</Link>
-            <Link to="/marketplace/explore">Explore</Link>
-            <Link to="/marketplace/portfolio">Portfolio</Link>
-            <Link to="/marketplace/sets">Sets</Link>
-            <Link to={`/marketplace/${lang}/pokemon`}>Pokémon</Link>
-            <Link to={`/marketplace/${lang}/artists`}>Artists</Link>
+            <AppLink to="/marketplace">Marketplace</AppLink>
+            <AppLink to="/marketplace/search">Search</AppLink>
+            <AppLink to="/marketplace/competitive">Competitive</AppLink>
+            <AppLink to="/marketplace/explore">Explore</AppLink>
+            <AppLink to="/marketplace/portfolio">Portfolio</AppLink>
+            <AppLink to="/marketplace/sets">Sets</AppLink>
+            <AppLink to={`/marketplace/${lang}/pokemon`}>Pokémon</AppLink>
+            <AppLink to={`/marketplace/${lang}/artists`}>Artists</AppLink>
             {isPokemonGame() ? <CatalogMenu lang={lang} /> : null}
-            <Link to="/marketplace/watchlist">Watchlist</Link>
+            <AppLink to="/marketplace/watchlist">Watchlist</AppLink>
           </div>
           <div>
             <h3>Account</h3>
-            <Link to={APP.wallet}>Wallet</Link>
-            <Link to={APP.buy}>Buy PKN</Link>
-            <Link to={APP.cart}>Cart</Link>
-            <Link to="/checkout">Checkout</Link>
-            <Link to="/orders">Orders</Link>
-            <Link to="/nft">NFT</Link>
-            <Link to={APP.profile}>Profile</Link>
-            {admin ? <Link to={APP.admin}>Admin</Link> : null}
-            {signedIn ? null : <Link to={from}>Sign in</Link>}
+            <AppLink to={APP.wallet}>Wallet</AppLink>
+            <AppLink to={APP.buy}>Buy PKN</AppLink>
+            <AppLink to={APP.cart}>Cart</AppLink>
+            <AppLink to="/checkout">Checkout</AppLink>
+            <AppLink to="/orders">Orders</AppLink>
+            <AppLink to="/nft">NFT</AppLink>
+            <AppLink to={APP.profile}>Profile</AppLink>
+            {admin ? <AppLink to={APP.admin}>Admin</AppLink> : null}
+            {signedIn ? null : <AppLink to={from}>Sign in</AppLink>}
           </div>
           <div>
             <h3>More</h3>
-            <a href="/">Home</a>
-            <Link to={APP.forum}>Forum</Link>
-            <a href={DASHBOARD_SCAN}>Dashboard</a>
-            <Link to={APP.docs}>Docs</Link>
-            <Link to={APP.about}>About</Link>
-            <Link to={APP.privacy}>Privacy</Link>
-            <Link to={APP.emailPreferences}>Email preferences</Link>
-            <Link to={APP.protection}>Buyer protection</Link>
-            <Link to={APP.scan}>Scan</Link>
+            <a href={marketUrl('/')}>Home</a>
+            <AppLink to={APP.forum}>Forum</AppLink>
+            <a href={onDashboard ? '/scan' : DASHBOARD_SCAN}>Dashboard</a>
+            <AppLink to={APP.docs}>Docs</AppLink>
+            <AppLink to={APP.about}>About</AppLink>
+            <AppLink to={APP.privacy}>Privacy</AppLink>
+            <AppLink to={APP.emailPreferences}>Email preferences</AppLink>
+            <AppLink to={APP.protection}>Buyer protection</AppLink>
+            <AppLink to={APP.scan}>Scan</AppLink>
           </div>
         </div>
       </footer>

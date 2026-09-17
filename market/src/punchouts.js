@@ -15,6 +15,36 @@ export function authFrom(path) {
 export const DASHBOARD_ORIGIN = 'https://dashboard.pokoin.com';
 export const DASHBOARD_SCAN = `${DASHBOARD_ORIGIN}/scan`;
 
+/** Public marketplace apex. Dashboard links that leave the seller desk go here. */
+export const MARKET_ORIGIN = 'https://pokoin.com';
+
+function onDashboardHost(hostname) {
+  const host = String(
+    hostname
+    || (typeof window !== 'undefined' ? window.location.hostname : ''),
+  ).toLowerCase();
+  return host === 'dashboard.pokoin.com';
+}
+
+/**
+ * Path for in-app links. On dashboard.pokoin.com returns an absolute
+ * https://pokoin.com/… URL so the browser leaves the seller desk.
+ */
+export function marketUrl(path = '/marketplace', hostname) {
+  const raw = String(path || '/marketplace');
+  const normalized = raw.startsWith('/') ? raw : `/${raw}`;
+  if (onDashboardHost(hostname)) {
+    return `${MARKET_ORIGIN}${normalized}`;
+  }
+  return normalized;
+}
+
+/** Paths that stay on the dashboard host (Scan Connect desk). */
+export function isDashboardDeskPath(pathname = '') {
+  const path = String(pathname || '').replace(/\/$/, '') || '/';
+  return path === '/scan' || path === '/inventory/scan';
+}
+
 export const APP = {
   home: route('/'),
   forum: route('/forum'),

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { APP, DASHBOARD_ORIGIN, DASHBOARD_SCAN, authFrom } from './punchouts.js';
+import { APP, DASHBOARD_ORIGIN, DASHBOARD_SCAN, MARKET_ORIGIN, authFrom, isDashboardDeskPath, marketUrl } from './punchouts.js';
 
 test('every APP route stays on this host', () => {
   for (const [name, path] of Object.entries(APP)) {
@@ -22,4 +22,25 @@ test('dashboard desk is the Scan Connect host, not app.pokoin.com', () => {
   assert.equal(DASHBOARD_ORIGIN, 'https://dashboard.pokoin.com');
   assert.equal(DASHBOARD_SCAN, 'https://dashboard.pokoin.com/scan');
   assert.equal(DASHBOARD_SCAN.includes('app.pokoin.com'), false);
+});
+
+
+test('marketUrl keeps relative paths on pokoin.com and abs on dashboard', () => {
+  assert.equal(marketUrl('/marketplace', 'pokoin.com'), '/marketplace');
+  assert.equal(marketUrl('/marketplace/search', 'www.pokoin.com'), '/marketplace/search');
+  assert.equal(
+    marketUrl('/marketplace', 'dashboard.pokoin.com'),
+    `${MARKET_ORIGIN}/marketplace`,
+  );
+  assert.equal(
+    marketUrl('/wallet', 'dashboard.pokoin.com'),
+    `${MARKET_ORIGIN}/wallet`,
+  );
+});
+
+test('dashboard desk paths are only Scan Connect', () => {
+  assert.equal(isDashboardDeskPath('/scan'), true);
+  assert.equal(isDashboardDeskPath('/inventory/scan'), true);
+  assert.equal(isDashboardDeskPath('/marketplace'), false);
+  assert.equal(isDashboardDeskPath('/inventory'), false);
 });

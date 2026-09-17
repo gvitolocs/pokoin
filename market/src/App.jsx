@@ -56,6 +56,7 @@ import WorkingOnIt from './components/WorkingOnIt.jsx';
 import CookieBanner from './components/CookieBanner.jsx';
 import { framedByChromeExtension } from './extension-auth-bridge.js';
 import { isDashboardHost } from './scan-api.js';
+import { MARKET_ORIGIN, isDashboardDeskPath } from './punchouts.js';
 import { subscribeOriginDown } from './working-page.js';
 
 function both(path, element) {
@@ -78,7 +79,7 @@ export default function App() {
 }
 
 function AppShell() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const [originDown, setOriginDown] = useState(() => (
     typeof window !== 'undefined' && Boolean(window.__pokoinOriginDown)
   ));
@@ -93,6 +94,15 @@ function AppShell() {
   const framed = framedByChromeExtension();
   // dashboard.pokoin.com/scan is the Scan Connect desk; pokoin.com/scan stays photo identify.
   const dashboard = isDashboardHost();
+  // Marketplace chrome on the dashboard host must not keep /marketplace etc. here —
+  // send those paths to the apex so the URL matches the product surface.
+  useEffect(() => {
+    if (!dashboard || framed || board) return undefined;
+    if (isDashboardDeskPath(pathname)) return undefined;
+    const target = `${MARKET_ORIGIN}${pathname}${search || ''}`;
+    window.location.replace(target);
+    return undefined;
+  }, [dashboard, framed, board, pathname, search]);
   if (originDown && !board && !framed) {
     return <WorkingOnIt />;
   }

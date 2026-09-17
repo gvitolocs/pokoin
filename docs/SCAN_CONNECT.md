@@ -255,6 +255,7 @@ scripts/deploy-web.sh                    # pokoin-web from origin/main (docs/DEP
 | Symptom | Check |
 | --- | --- |
 | `dashboard.pokoin.com/scan` shows the public photo scan page | Deployed bundle predates `isDashboardHost` — see DEPLOY.md; `vercel api /v4/aliases/dashboard.pokoin.com` |
+| Marketplace links stay on `dashboard.pokoin.com/marketplace` | Chrome must use `marketUrl()`; non-desk paths hard-redirect to `pokoin.com` (`App.jsx`) |
 | Google sign-in popup fails on `dashboard.` | Firebase Auth authorized domains must list `dashboard.pokoin.com` |
 | Phone: "Code not valid or expired" instantly | Code older than 120 s, already used, or QR from another tab after **New code**. Server: `select pin, expires_at from scan_pairings` on the writer |
 | Phone: "Too many tries" | `select * from scan_rate_limits where bucket like 'pair%' order by window_start desc` |
