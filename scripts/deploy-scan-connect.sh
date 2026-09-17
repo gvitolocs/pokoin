@@ -1,80 +1,104 @@
 #!/usr/bin/env bash
-# Scan Connect production rollout (docs/SCAN_CONNECT.md#going-live-on-dashboardpokoincom).
-# Run from the Mac (SSH aliases nezopt, pi-home, oracle-peer1; Vercel CLI logged in).
-# Order matters: migrate → api → scanner → web. Each step verifies itself and stops on failure.
+# Scan Connect production rollout. Run ON NEZOPT (SSH aliases pi-home, oracle-peer1).
+# docs/SCAN_CONNECT.md#production-deployment · web deploys go through scripts/deploy-web.sh.
 #
-#   scripts/deploy-scan-connect.sh migrate     # 082 on the writer (nezopt :25432), grants to the API writer role
-#   scripts/deploy-scan-connect.sh api         # new Pi release = current + scan files, restart pokoin-oracle-api
-#   scripts/deploy-scan-connect.sh scanner     # peer1 /opt/pokoin-cardscan web + /connect route, with backup
-#   scripts/deploy-scan-connect.sh web         # Vercel prebuilt prod deploy (pokoin.com + dashboard.pokoin.com)
+#   scripts/deploy-scan-connect.sh migrate    # 082 on the primary (nezopt pokoin-marketplace-postgres-15t), grants, replica check
+#   scripts/deploy-scan-connect.sh api        # new Pi release = live release + scan files, restart pokoin-oracle-api, auto-rollback
+#   scripts/deploy-scan-connect.sh scanner    # peer1 /opt/pokoin-cardscan: backup, web + /connect route, verify
+#   scripts/deploy-scan-connect.sh web        # scripts/deploy-web.sh (guarded, from a commit)
 #   scripts/deploy-scan-connect.sh rollback-api | rollback-scanner
 set -euo pipefail
 
-PROJECTS="${PROJECTS:-/Users/giuseppe/mnt/nezopt/Projects}"
+PROJECTS="${PROJECTS:-/home/nez/Projects}"
 CARDVAULT="$PROJECTS/cardvault/pokemon_card_vault"
 BATTLESCAN="$PROJECTS/BattleScan"
-WEB="$PROJECTS/pokoin-web"
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
 STAMP="$(date -u +%Y%m%d%H%M%S)"
 PG_CONTAINER="${PG_CONTAINER:-pokoin-marketplace-postgres-15t}"
+REPLICA_CONTAINER="${REPLICA_CONTAINER:-pokoin-marketplace-postgres-replica}"
 API_CONTAINER="${API_CONTAINER:-pokoin-oracle-api}"
+DB_USER="${DB_USER:-pokoin_marketplace}"
+DB_NAME="${DB_NAME:-pokoin_marketplace}"
 
-# CardVault files this release touches (new + modified). Nothing else is copied,
-# so unrelated uncommitted work in the nezopt tree never ships with it.
+# CardVault files shipped whole. Everything else in the Pi release stays as deployed,
+# so unrelated uncommitted work in the nezopt CardVault tree never ships.
 API_FILES=(
   api/_scan_connect.js api/_scan_store.js api/_scan_bus.js api/_scan_http.js
   api/scan-session.js api/scan-pair.js api/scan-phone.js api/scan-batch.js api/scan-stream.js
   api/marketplace-listings.js
-  server/api-route-manifest.js server/api-route-families.js
-  oracle-postgres/schema/082_scan_connect.sql
+  server/api-route-manifest.js
+  oracle-postgres/schema/082_scan_connect.sql oracle-postgres/schema/082_scan_connect.grants.sql
 )
 
-die() { echo "error: $*" >&2; exit 1; }
+die() { echo "deploy-scan-connect: $*" >&2; exit 1; }
 say() { echo "== $*"; }
+primary_psql() { docker exec -i "$PG_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@"; }
+replica_psql() { ssh pi-home "docker exec -i $REPLICA_CONTAINER psql -U $DB_USER -d $DB_NAME -At -c \"$1\""; }
 
-writer_role() {
-  # Username of MARKETPLACE_WRITER_DATABASE_URL inside the running API (never prints the password).
-  ssh pi-home "pid=\$(docker inspect -f '{{.State.Pid}}' $API_CONTAINER); sudo -n cat /proc/\$pid/environ 2>/dev/null || docker exec $API_CONTAINER cat /proc/1/environ" \
-    | tr '\0' '\n' | sed -nE 's#^MARKETPLACE_WRITER_DATABASE_URL=[a-z]+://([^:@/]+).*#\1#p' | head -1
+writer_url_parts() {
+  # user host db of the running API's writer URL — never the password.
+  ssh pi-home "tr '\0' '\n' < /proc/\$(docker inspect -f '{{.State.Pid}}' $API_CONTAINER)/environ" \
+    | sed -nE 's#^MARKETPLACE_WRITER_DATABASE_URL=[a-z]+://([^:@/]+)[^@]*@([^/?]+)/([^?]*).*#\1 \2 \3#p' | head -1
 }
 
+SCHEMA_CHECK="select (select count(*) from pg_tables where schemaname='public' and tablename in ('scan_batches','scan_sessions','scan_pairings','scan_rate_limits','scan_items')) || ',' || (select count(*) from information_schema.columns where table_name='marketplace_user_listings' and column_name in ('location','altered')) || ',' || (select count(*) from pg_indexes where indexname='marketplace_user_listings_scan_row_uidx')"
+
 cmd_migrate() {
-  local role
-  role="$(writer_role)"
-  [[ -n "$role" ]] || die "could not read the API writer role"
-  say "writer role: $role"
-  ssh nezopt "docker exec -i $PG_CONTAINER psql -U postgres -d pokoin_marketplace -v ON_ERROR_STOP=1 -Atc 'select pg_is_in_recovery()'" | grep -qx f \
-    || die "writer is in recovery (not the primary)"
-  say "apply 082_scan_connect.sql (idempotent: create if not exists / add column if not exists)"
-  ssh nezopt "docker exec -i $PG_CONTAINER psql -U postgres -d pokoin_marketplace -v ON_ERROR_STOP=1" < "$CARDVAULT/oracle-postgres/schema/082_scan_connect.sql"
+  read -r role host db <<<"$(writer_url_parts)"
+  [[ -n "${role:-}" ]] || die "could not read the API writer URL"
+  say "API writes as $role@$host/$db"
+  [[ "$host" == "192.168.178.55:25432" && "$db" == "$DB_NAME" ]] \
+    || die "API writer is $host/$db, not $PG_CONTAINER — topology changed; re-verify before migrating"
+  [[ "$(primary_psql -Atc 'select pg_is_in_recovery()')" == "f" ]] || die "$PG_CONTAINER is in recovery (read-only)"
+  say "apply 082_scan_connect.sql (idempotent)"
+  primary_psql -q < "$CARDVAULT/oracle-postgres/schema/082_scan_connect.sql"
   say "grants for $role"
-  ssh nezopt "docker exec -i $PG_CONTAINER psql -U postgres -d pokoin_marketplace -v ON_ERROR_STOP=1 -v api_role=$role" \
-    < "$CARDVAULT/oracle-postgres/schema/082_scan_connect.grants.sql"
-  say "verify"
-  ssh nezopt "docker exec -i $PG_CONTAINER psql -U postgres -d pokoin_marketplace -Atc \"
-    select string_agg(tablename, ',' order by tablename) from pg_tables where tablename like 'scan_%';
-    select count(*) from information_schema.columns where table_name = 'marketplace_user_listings' and column_name in ('location','altered');\""
+  primary_psql -q -v api_role="$role" < "$CARDVAULT/oracle-postgres/schema/082_scan_connect.grants.sql"
+  [[ "$(primary_psql -Atc "$SCHEMA_CHECK")" == "5,2,1" ]] || die "primary schema incomplete"
+  say "primary: 5 tables, 2 columns, 1 index"
+  for i in $(seq 1 30); do
+    [[ "$(replica_psql "$SCHEMA_CHECK")" == "5,2,1" ]] && { say "replica (Pi) has the schema"; return 0; }
+    sleep 2
+  done
+  die "replica did not receive the schema within 60 s — check pg_stat_replication"
 }
 
 cmd_api() {
   for f in "${API_FILES[@]}"; do [[ -f "$CARDVAULT/$f" ]] || die "missing $f"; done
-  say "unit tests"
-  (cd "$CARDVAULT" && node --test api/_scan_connect.test.js api/marketplace-listings.test.js server/api-route-families.test.js >/dev/null) \
-    || die "CardVault tests failed"
-  ssh pi-home "psql_ok=\$(docker exec $API_CONTAINER node -e \"require('/app/api/_marketplace_db').marketplaceWriteQuery('select to_regclass(\\\$\\\$public.scan_items\\\$\\\$) as t').then(r=>{console.log(r.rows[0].t||'');process.exit(0)}).catch(()=>process.exit(1))\"); [ \"\$psql_ok\" = scan_items ]" \
-    || die "writer has no scan_items: run migrate first"
+  say "CardVault unit tests"
+  (cd "$CARDVAULT" && node --test api/_scan_connect.test.js api/marketplace-listings.test.js server/api-route-families.test.js >/tmp/sc-api-tests.log 2>&1) \
+    || { tail -20 /tmp/sc-api-tests.log; die "CardVault tests failed"; }
+  [[ "$(replica_psql "$SCHEMA_CHECK")" == "5,2,1" ]] || die "scan schema missing on the Pi replica: run migrate first"
   local release="releases/scan-connect-$STAMP"
-  say "new Pi release $release (copy of current)"
+  say "Pi release $release = live release + ${#API_FILES[@]} files"
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .scan-connect-previous; cp -a \$prev $release"
-  say "copy ${#API_FILES[@]} files"
   tar -C "$CARDVAULT" -cf - "${API_FILES[@]}" | ssh pi-home "tar -C /srv/pokoin/api/$release -xf -"
+  # Families: keep the live file, add only the scan rule.
+  ssh pi-home "cd /srv/pokoin/api/$release && python3 - server/api-route-families.js" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+if "id: 'scan'" not in s:
+    a = "  { id: 'commerce', title: 'Listings / cart / orders' },"
+    b = "  if (/cardtrader/"
+    assert s.count(a) == 1 and s.count(b) == 1, "families layout changed"
+    s = s.replace(a, a + "\n  { id: 'scan', title: 'Scan Connect' },")
+    s = s.replace(b, "  if (/\\/api\\/scan-(session|pair|phone|batch|stream)(?:\\.js)?$/.test(p)) {\n    return 'scan';\n  }\n" + b, 1)
+    open(p, "w").write(s)
+PY
   ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn $release current.new && mv -Tf current.new current; docker restart $API_CONTAINER >/dev/null"
   say "health"
-  for i in $(seq 1 30); do
+  for i in $(seq 1 45); do
     if ssh pi-home "curl -fsS 'http://127.0.0.1:18080/api/__routes?family=scan'" 2>/dev/null | grep -q scan-pair; then
-      ssh pi-home "curl -s -o /dev/null -w 'scan-pair unauth POST -> %{http_code}\n' -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:18080/api/scan-pair"
-      ssh pi-home "curl -s -o /dev/null -w 'marketplace-listings GET -> %{http_code}\n' 'http://127.0.0.1:18080/api/marketplace-listings?cardId=220962&nativeOnly=1&limit=1'"
-      say "api live"
-      return 0
+      local pair listings
+      pair="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{\"pin\":\"0000\"}' http://127.0.0.1:18080/api/scan-pair")"
+      listings="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-listings?cardId=220962&nativeOnly=1&limit=1'")"
+      say "scan-pair wrong code → $pair (expect 400), marketplace-listings → $listings (expect 200)"
+      if [[ "$pair" == "400" && "$listings" == "200" ]]; then
+        say "api live: $(ssh pi-home 'readlink /srv/pokoin/api/current')"
+        return 0
+      fi
+      break
     fi
     sleep 2
   done
@@ -90,8 +114,8 @@ cmd_rollback_api() {
 cmd_scanner() {
   (cd "$BATTLESCAN" && node --test scripts/scan-connect.test.cjs >/dev/null && node scripts/scanner-ui.test.cjs web/index.html >/dev/null) \
     || die "BattleScan tests failed"
-  say "backup peer1 web + app.py to .backups/$STAMP-scan-connect"
-  ssh oracle-peer1 "set -e; cd /opt/pokoin-cardscan; mkdir -p .backups/$STAMP-scan-connect; cp -a web/index.html server/app.py .backups/$STAMP-scan-connect/; echo $STAMP-scan-connect > .backups/scan-connect-latest"
+  say "backup peer1 files to .backups/$STAMP-scan-connect"
+  ssh oracle-peer1 "set -e; cd /opt/pokoin-cardscan; b=.backups/$STAMP-scan-connect; mkdir -p \$b/static; cp -a web/index.html server/app.py \$b/; [ -f web/static/scan-connect.js ] && cp -a web/static/scan-connect.js \$b/static/ || true; echo $STAMP-scan-connect > .backups/scan-connect-latest"
   scp -q "$BATTLESCAN/web/index.html" oracle-peer1:/tmp/sc-index.html
   scp -q "$BATTLESCAN/web/static/scan-connect.js" oracle-peer1:/tmp/sc-scan-connect.js
   scp -q "$BATTLESCAN/server/app.py" oracle-peer1:/tmp/sc-app.py
@@ -100,40 +124,49 @@ cmd_scanner() {
     install -m 644 /tmp/sc-index.html web/index.html.new && mv -f web/index.html.new web/index.html
     install -m 644 /tmp/sc-app.py server/app.py.new && mv -f server/app.py.new server/app.py
     sudo -n systemctl restart pokoin-cardscan
-    for i in \$(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:8099/connect && break; sleep 2; done
+    for i in \$(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:8099/connect && break; sleep 2; done
     curl -fsS http://127.0.0.1:8099/connect | grep -q scan-connect.js
-    curl -fsS -o /dev/null http://127.0.0.1:8099/static/scan-connect.js
-    curl -fsS http://127.0.0.1:8099/health | head -c 120; echo"
-  say "scanner live"
+    curl -fsS http://127.0.0.1:8099/static/scan-connect.js | grep -q pairingFromHash
+    curl -fsS http://127.0.0.1:8099/ | grep -q scan-connect.js"
+  # Public scan.pokoin.com is Caddy file_server over /opt/pokoin-cardscan/web (recognition paths
+  # proxy to 127.0.0.1:8100 → nezopt). /connect must be rewritten there; app.py is not in that path.
+  ssh oracle-peer1 bash -s <<'REMOTE'
+set -euo pipefail
+if ! sudo -n grep -q "rewrite /connect /index.html" /etc/caddy/Caddyfile; then
+  stamp=$(date -u +%Y%m%d%H%M%S)
+  sudo -n cp -a /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-scan-connect-$stamp
+  tmp=$(mktemp); sudo -n cat /etc/caddy/Caddyfile > "$tmp"
+  python3 - "$tmp" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = "    handle {\n        root * /opt/pokoin-cardscan/web\n        file_server\n    }"
+new = "    handle {\n        root * /opt/pokoin-cardscan/web\n        # Scan Connect (pokoin-web docs/SCAN_CONNECT.md): /connect is the same page in pairing mode.\n        rewrite /connect /index.html\n        rewrite /connect/ /index.html\n        file_server\n    }"
+assert s.count(old) == 2, "scanner Caddy blocks changed"
+open(p, "w").write(s.replace(old, new))
+PY
+  sudo -n caddy validate --config "$tmp" --adapter caddyfile >/dev/null
+  sudo -n install -m 644 "$tmp" /etc/caddy/Caddyfile
+  sudo -n systemctl reload caddy
+fi
+REMOTE
+  for u in https://scan.pokoin.com/connect https://cardscan.pokoin.com/connect; do
+    curl -fsS "$u" | grep -q scan-connect.js || die "$u does not serve the connect page"
+  done
+  curl -fsS https://scan.pokoin.com/static/scan-connect.js | grep -q pairingFromHash || die "public scan-connect.js is stale"
+  say "scanner live on peer1 (public /connect verified)"
 }
 
 cmd_rollback_scanner() {
-  ssh oracle-peer1 "set -e; cd /opt/pokoin-cardscan; b=.backups/\$(cat .backups/scan-connect-latest); cp -a \$b/index.html web/index.html; cp -a \$b/app.py server/app.py; sudo -n systemctl restart pokoin-cardscan; echo restored \$b"
-}
-
-cmd_web() {
-  say "SPA unit tests"
-  (cd "$WEB" && node --test market/src/scan-model.test.js market/src/scan-shortcuts.test.js market/src/scan-stream.test.js market/src/qr.test.js >/dev/null) \
-    || die "pokoin-web tests failed"
-  local stage="/tmp/pokoin-web-scan-connect-$STAMP"
-  say "stage $stage (Codex recipe: no .git/node_modules/.vercel/output/dist-web)"
-  rsync -a --exclude .git --exclude node_modules --exclude .vercel/output --exclude dist-web "$WEB/" "$stage/"
-  mkdir -p "$stage/.vercel" && cp "$WEB/.vercel/project.json" "$stage/.vercel/project.json"
-  (cd "$stage" && env -u VERCEL_TOKEN vercel build --prod --yes && env -u VERCEL_TOKEN vercel deploy --prebuilt --prod --yes --archive=tgz) | tee "$stage/deploy.log"
-  local url
-  url="$(grep -Eo 'https://[a-z0-9-]+\.vercel\.app' "$stage/deploy.log" | tail -1)"
-  say "verify $url"
-  (cd "$stage" && env -u VERCEL_TOKEN vercel curl /inventory/scan --deployment "$url" | grep -q '<div id="root"') || die "SPA shell missing"
-  say "web deployed; aliases pokoin.com + dashboard.pokoin.com follow the production deployment"
+  # The Caddy /connect rewrite is left in place: without scan-connect.js it serves the normal scanner.
+  ssh oracle-peer1 "set -e; cd /opt/pokoin-cardscan; b=.backups/\$(cat .backups/scan-connect-latest); cp -a \$b/index.html web/index.html; cp -a \$b/app.py server/app.py; rm -f web/static/scan-connect.js; [ -f \$b/static/scan-connect.js ] && cp -a \$b/static/scan-connect.js web/static/ || true; sudo -n systemctl restart pokoin-cardscan; echo restored \$b"
 }
 
 case "${1:-}" in
   migrate) cmd_migrate ;;
   api) cmd_api ;;
   scanner) cmd_scanner ;;
-  web) cmd_web ;;
+  web) "$HERE/scripts/deploy-web.sh" "${2:-HEAD}" ;;
   rollback-api) cmd_rollback_api ;;
   rollback-scanner) cmd_rollback_scanner ;;
-  all) cmd_migrate; cmd_api; cmd_scanner; cmd_web ;;
-  *) sed -n 2,12p "$0"; exit 2 ;;
+  *) sed -n 2,10p "$0"; exit 2 ;;
 esac
