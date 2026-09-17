@@ -676,7 +676,7 @@ export default function ScanDesk() {
         <section className="scan-connect" aria-label="Connect your phone">
           <div className="scan-connect-main">
             <h2>Connect your phone</h2>
-            <p className="scan-connect-step">On your phone open <strong>scan.pokoin.com/connect</strong> and type</p>
+            <p className="scan-connect-step">Type the code on <strong>scan.pokoin.com/connect</strong> (Safari or Chrome — not the Camera mini browser), or scan the QR</p>
             <p className="scan-pin" aria-label={`Pairing code ${pairing.pin.split('').join(' ')}`}>
               {pairing.pin.split('').map((d, i) => <span key={i}>{d}</span>)}
             </p>
@@ -845,7 +845,7 @@ function QrBlock({ secret, pin }) {
         <rect width={path.size} height={path.size} fill="#fff" />
         <path d={path.d} fill="#000" />
       </svg>
-      <figcaption>Scan with the phone camera — connects by itself</figcaption>
+      <figcaption>Scan with the phone camera. If iOS opens a mini browser, tap <strong>Open in Safari / browser</strong> on that page.</figcaption>
     </figure>
   );
 }
