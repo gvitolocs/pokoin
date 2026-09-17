@@ -40,15 +40,17 @@ export default function Inventory() {
         title="My listings"
         lede="Live native listings for this Firebase uid. Empty is honest until you list from a card desk."
       >
-        <Link className="btn" to="/marketplace">List a card</Link>
+        <Link className="btn" to="/inventory/scan">Scan cards</Link>
+        <Link className="btn ghost" to="/marketplace">List a card</Link>
       </PageHead>
       <Alert>{error}</Alert>
       {rows == null && !error ? (
         <DeskPanel title="Inventory"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       ) : null}
       {rows && !rows.length ? (
-        <EmptyDesk title="No live listings" lede="Open a card and use List your card. GET marketplace-listings for this uid stays empty until then.">
-          <Link className="btn" to="/marketplace">Find a card</Link>
+        <EmptyDesk title="No live listings" lede="Scan a pile with your phone, or open a card and use List your card.">
+          <Link className="btn" to="/inventory/scan">Scan cards</Link>
+          <Link className="btn ghost" to="/marketplace">Find a card</Link>
         </EmptyDesk>
       ) : null}
       {rows?.length ? (

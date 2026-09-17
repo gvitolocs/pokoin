@@ -1039,7 +1039,7 @@ function packedFromRankedSet(ranked) {
 /** Token longer than 3 letters that is an unfinished expansion title (`plasma`). */
 const MIN_EXPANSION_PREFIX = 4;
 /** Bare set browse (`expedition`). Shorter tokens stay names (`dark`, `plasma`). */
-const MIN_BARE_SET_PREFIX = 8;
+export const MIN_BARE_SET_PREFIX = 8;
 let expansionPrefixRowsCache = null;
 
 function expansionPrefixRows() {
@@ -2121,6 +2121,9 @@ export async function fetchSuggestRanked(term, {
       signal,
       lang,
       printLang,
+      // Corrected primary lookups run strict server-side (match=all) so a
+      // resolver anchor cannot silently vanish; challengers stay relaxed.
+      match: corrected && compactQuery(lookup) === compactQuery(corrected) ? 'all' : undefined,
     }).catch((error) => {
       if (error?.name === 'AbortError') {
         throw error;
@@ -2237,8 +2240,33 @@ export async function fetchSuggestRanked(term, {
     immediatePayloadsPromise,
     Promise.all(extraLookups.map(suggestLookup)),
   ]);
-  const payloads = [...immediatePayloads, ...extraPayloads];
-  const suggestLookups = [...immediateLookups, ...extraLookups];
+  // Anchor fallback: strict primary came back empty and the corrected text
+  // carried unresolved free text — relax ONLY the free text, keeping the
+  // required name anchors mandatory (never the raw challenger's relaxation).
+  let payloads = [...immediatePayloads, ...extraPayloads];
+  let suggestLookups = [...immediateLookups, ...extraLookups];
+  const anchorQuery = corrected && resolved?.best?.entities.name?.length
+    ? resolved.best.entities.name.map((row) => row.display).join(' ').trim()
+    : '';
+  if (
+    corrected
+    && anchorQuery
+    && compactQuery(anchorQuery) !== compactQuery(corrected)
+    && !(payloads[0]?.groups || []).length
+    && !suggestLookups.some((lookup) => compactQuery(lookup) === compactQuery(anchorQuery))
+  ) {
+    const anchorPayload = await suggestFn(anchorQuery, {
+      limit,
+      signal,
+      lang,
+      printLang,
+      match: 'all',
+    }).catch(() => null);
+    if (anchorPayload) {
+      payloads = [anchorPayload, ...payloads];
+      suggestLookups = [anchorQuery, ...suggestLookups];
+    }
+  }
 
   let merged = mergeSuggestGroups([
     groupsFromSearchCards(setCards),

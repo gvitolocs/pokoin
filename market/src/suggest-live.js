@@ -38,7 +38,7 @@ import {
   SUGGEST_RESULT_FLOOR,
 } from './suggest-rank.js';
 import { catalogCacheKey, catalogIntent, groupsFromCards } from './suggest-catalog.js';
-import { resolveSuggestQuery } from './suggest-resolve.js';
+import { resolverOwns, resolveSuggestQuery } from './suggest-resolve.js';
 import { filterSuggestByPrintLang } from './locale.js';
 
 export const SUGGEST_LIVE_MIN_CHARS = 3;
@@ -203,13 +203,118 @@ function intersectPools(pools) {
 }
 
 /**
- * The resolver takes over only for artist bindings — the class the legacy
- * whole-compact parse misroutes (`kawayod`, `pika yuka`). Pure name + typo
- * and modifier queries stay on the legacy ranked pool: its mechanic bonus
- * and rival filtering are locked fixture behavior.
+ * The gate lives in the resolver (resolverOwns): artist bindings plus the
+ * narrow semantic-competition case (legacy peeled a set, but the winner is a
+ * single compound-name literal projection — `palkia legend` → Palkia &
+ * Dialga LEGEND). Everything else stays legacy.
  */
-function resolverApplies(resolved) {
-  return Boolean(resolved?.best?.entities.artist.length);
+
+function toSetToken(entity) {
+  return {
+    token: entity.display,
+    compact: entity.compact,
+    eraId: entity.eraId || '',
+    setNames: entity.setNames || [entity.display],
+    needles: entity.needles || [entity.compact],
+    slug: entity.slug || '',
+    prefix: entity.exactness === 'prefix',
+  };
+}
+
+function tierRows(tier, resolved, used) {
+  const nameRows = [];
+  for (const entity of tier.entities.name) {
+    nameRows.push(cachedPrintings(entity.display));
+  }
+  const artistRows = [];
+  let artistPending = null;
+  for (const entity of dedupeBySlug(tier.entities.artist)) {
+    const rows = cachedPrintings(`artist:${entity.slug}`);
+    if (rows.length) {
+      artistRows.push(rows);
+    } else if (!artistPending) {
+      artistPending = entity;
+    }
+  }
+  const setRows = [];
+  for (const entity of dedupeBySlug(tier.entities.set)) {
+    if (entity.slug) {
+      setRows.push(cachedPrintings(`set:${entity.slug}`));
+    }
+  }
+  const pools = [...nameRows, ...artistRows, ...setRows].filter((poolRows) => poolRows.length);
+  if (!pools.length) {
+    if (artistPending) {
+      return [{ name: artistPending.display, printings: [stubPrinting(artistPending.display)] }];
+    }
+    return [];
+  }
+  let rows = intersectPools(pools);
+  if (!rows.length) {
+    rows = pools.reduce((best, poolRows) => (poolRows.length < best.length ? poolRows : best), pools[0]);
+  }
+  // Tier-own set constraint: strict only when another pool contributed rows,
+  // so the set tier narrows the name reading instead of replacing it.
+  const setTokens = tier.entities.set.map(toSetToken);
+  if (setTokens.length && (nameRows.length || artistRows.length)) {
+    const filtered = rows.filter((row) => printingMatchesSetFilter(row, {
+      setTokens,
+      eras: resolved.parsed.eras || [],
+    }));
+    if (filtered.length) {
+      rows = filtered;
+    }
+  }
+  return rows;
+}
+
+/**
+ * Sectioned paint: each tier appends its rows (winning interpretation first,
+ * then alternate readings, then the strongest single entity), then the ranked
+ * name pool fills whatever is left. Tiers whose lexical cost runs away from
+ * the winner stop the walk — junk readings never paint.
+ */
+function resolverLiveGroups(resolved, { limit }) {
+  const ranked = rankNames(resolved.correctedQuery || resolved.query);
+  const used = new Set();
+  const rows = [];
+  const costCap = resolved.best.cost + 1.5;
+  for (const tier of resolved.tiers) {
+    if (rows.length >= limit) {
+      break;
+    }
+    if (tier !== resolved.best && tier.cost > costCap) {
+      break;
+    }
+    for (const row of tierRows(tier, resolved, used)) {
+      const id = String(row.id || row.card_id || '');
+      if (id && !used.has(id)) {
+        used.add(id);
+        rows.push(row);
+      }
+    }
+  }
+  // Name-pool fill: after entity sections, the ranked pool rounds the popup
+  // up to 20 so a sparse intersection never empties the board.
+  if (rows.length && rows.length < limit) {
+    for (const rankedRow of ranked) {
+      if (rows.length >= limit) {
+        break;
+      }
+      for (const printing of cachedPrintings(rankedRow.display)) {
+        const id = String(printing.id || printing.card_id || '');
+        if (id && !used.has(id)) {
+          used.add(id);
+          rows.push(printing);
+          break;
+        }
+      }
+    }
+  }
+  if (!rows.length) {
+    return null;
+  }
+  return { groups: groupsFromCards(rows), ranked, each: limit };
 }
 
 /** The print flag shapes the popup, it must never blind it: when the filter
@@ -219,72 +324,6 @@ function resolverApplies(resolved) {
 function popupGroups(groups, printLang) {
   const filtered = filterSuggestByPrintLang(groups, printLang);
   return filtered.length ? filtered : (groups || []);
-}
-
-/**
- * Intersection-first paint from the hypothesis entities against the suggest
- * cache: all resolved constraints when the cache can satisfy them, then the
- * relaxation tiers (drop weakest constraint → strongest entity). Entities
- * not yet hydrated paint as a stub row until their hydration lands.
- */
-function resolverLiveGroups(resolved, { limit, preferPerGroup }) {
-  const ranked = rankNames(resolved.correctedQuery);
-  for (const tier of resolved.tiers) {
-    const nameRows = [];
-    for (const entity of tier.entities.name) {
-      nameRows.push(cachedPrintings(entity.display));
-    }
-    const artistRows = [];
-    let artistPending = null;
-    for (const entity of dedupeBySlug(tier.entities.artist)) {
-      const rows = cachedPrintings(`artist:${entity.slug}`);
-      if (rows.length) {
-        artistRows.push(rows);
-      } else if (!artistPending) {
-        artistPending = entity;
-      }
-    }
-    const setRows = [];
-    for (const entity of dedupeBySlug(tier.entities.set)) {
-      if (entity.slug) {
-        setRows.push(cachedPrintings(`set:${entity.slug}`));
-      }
-    }
-    const pools = [...nameRows, ...artistRows, ...setRows].filter((pool) => pool.length);
-    if (!pools.length) {
-      if (artistPending || tier.entities.set.some((entity) => entity.slug)) {
-        const pending = artistPending
-          ? [{ name: artistPending.display, printings: [stubPrinting(artistPending.display)] }]
-          : [];
-        return {
-          groups: pending,
-          ranked,
-          each: limit,
-        };
-      }
-      continue;
-    }
-    let rows = intersectPools(pools);
-    if (!rows.length) {
-      rows = pools.reduce((best, pool) => (pool.length < best.length ? pool : best), pools[0]);
-    }
-    const setTokens = resolved.parsed.setTokens || [];
-    if (setTokens.length) {
-      const filtered = rows.filter((row) => printingMatchesSetFilter(row, {
-        setTokens,
-        eras: resolved.parsed.eras || [],
-      }));
-      if (filtered.length) {
-        rows = filtered;
-      }
-    }
-    return {
-      groups: groupsFromCards(rows),
-      ranked,
-      each: setTokens.length || tier.entities.artist.length ? limit : preferPerGroup,
-    };
-  }
-  return null;
 }
 
 export function liveSuggestGroups(query, {
@@ -302,7 +341,7 @@ export function liveSuggestGroups(query, {
   const nameQuery = isBareCollectorQuery(parsed) ? query : (parsed.nameQuery || query);
   const intent = isBareCollectorQuery(parsed) ? { kind: 'name' } : catalogIntent(query);
   const resolved = isBareCollectorQuery(parsed) ? null : resolveSuggestQuery(query);
-  if (resolved && resolverApplies(resolved)) {
+  if (resolved && resolverOwns(resolved)) {
     const branch = resolverLiveGroups(resolved, { limit, preferPerGroup });
     if (branch) {
       return {

@@ -63,6 +63,20 @@ export default function Search() {
     () => (isPokemonGame() && typedQuery && resolvedParamRaw ? resolveSuggestQuery(typedQuery) : null),
     [typedQuery, resolvedParamRaw],
   );
+  // Set chips serialize display names (resolver-owned sets have no slug);
+  // they prefill the existing set-name filter.
+  const resolvedSetName = useMemo(() => {
+    if (!resolvedParamRaw) {
+      return '';
+    }
+    const want = new Set(parseResolutionParam(resolvedParamRaw).sets);
+    if (!want.size) {
+      return '';
+    }
+    const sets = localResolved?.best?.entities.set.map((entity) => entity.display) || [];
+    const owned = sets.find((display) => want.has(display));
+    return owned || [...want][0] || '';
+  }, [resolvedParamRaw, localResolved]);
   const artistEntities = useMemo(() => {
     if (!resolvedParamRaw || !localResolved?.best) {
       return [];
@@ -87,9 +101,9 @@ export default function Search() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [rarity, setRarity] = useState(() => String(restored?.rarity || ''));
-  const [setName, setSetName] = useState(() => String(restored?.setName || ''));
+  const [setName, setSetName] = useState(() => String(restored?.setName || resolvedSetName || ''));
   const [sort, setSort] = useState(() => restored?.sort || 'match');
-  const skipFilterReset = useRef(Boolean(restored));
+  const skipFilterReset = useRef(Boolean(restored || resolvedSetName));
 
   function setTab(next) {
     const kind = normalizeSearchTab(next);

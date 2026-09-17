@@ -1,0 +1,217 @@
+// Scan desk row model: pure functions over server rows so the reducer can be
+// tested without React. Spec: docs/SCAN_LISTING_WORKFLOW.md.
+
+export const CONDITIONS = ['NM', 'SP', 'MP', 'PL', 'Poor'];
+export const LANGUAGES = ['EN', 'IT', 'FR', 'DE', 'ES', 'JP', 'PT', 'NL', 'PL', 'RU', 'KO', 'ZH', 'ZHT', 'ID', 'TH', 'VI'];
+export const FINISHES = [
+  { value: 'standard', label: 'Standard' },
+  { value: 'holo', label: 'Holo' },
+  { value: 'reverse', label: 'Reverse' },
+  { value: 'stamped', label: 'Stamped' },
+  { value: 'promo', label: 'Promo' },
+  { value: 'other', label: 'Other' },
+];
+
+export const DEFAULTS = Object.freeze({
+  language: 'EN',
+  condition: 'NM',
+  foilState: 'standard',
+  firstEdition: false,
+  signed: false,
+  altered: false,
+  location: '',
+  quantity: 1,
+  mergeRepeats: true,
+});
+
+const PHONE_LOST_MS = 12_000;
+const SCANNING_MS = 20_000;
+
+/** Upsert rows by id; a row only replaces one with a lower `seq`. */
+export function applyItems(rows, items) {
+  let next = rows;
+  for (const item of items || []) {
+    if (!item || !item.id) continue;
+    const current = next[item.id];
+    if (current && Number(current.seq) >= Number(item.seq)) continue;
+    if (next === rows) next = { ...rows };
+    next[item.id] = item;
+  }
+  return next;
+}
+
+/** Queue order: physical scan order (fractional positions for copies). */
+export function orderedRows(rows) {
+  return Object.values(rows || {}).sort((a, b) => Number(a.position) - Number(b.position));
+}
+
+/** Rows the seller works with: merged repeats live inside their head's qty. */
+export function queueRows(rows) {
+  return orderedRows(rows).filter((row) => row.status === 'active' || row.status === 'submitted');
+}
+
+export function stackKey(row = {}) {
+  return [
+    String(row.cardId ?? row.card_id ?? ''),
+    row.condition || '',
+    row.language || '',
+    row.foilState ?? row.foil_state ?? '',
+    (row.firstEdition ?? row.first_edition) ? '1' : '0',
+    row.signed ? '1' : '0',
+    row.altered ? '1' : '0',
+    row.graded ? '1' : '0',
+    row.gradingCompany ?? row.grading_company ?? '',
+    row.grade ?? '',
+    String(row.location ?? '').trim().toLowerCase(),
+  ].join('|');
+}
+
+/** Same reasons as CardVault `_scan_connect.submitProblem`. */
+export function rowProblem(row) {
+  if (!row || row.status !== 'active') return '';
+  if (!/^\d+$/.test(String(row.cardId || ''))) return 'no_printing';
+  if ((row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed) {
+    return 'needs_review';
+  }
+  if (row.graded && (!row.gradingCompany || !row.grade)) return 'grading_incomplete';
+  const price = Number(row.pricePkn);
+  if (row.pricePkn == null || !Number.isFinite(price) || price <= 0) return 'no_price';
+  return '';
+}
+
+export const PROBLEM_LABEL = {
+  no_printing: 'Pick a printing',
+  needs_review: 'Check match',
+  grading_incomplete: 'Grading details',
+  no_price: 'Needs a price',
+};
+
+export function batchCounts(rows) {
+  const counts = { rows: 0, cards: 0, needsReview: 0, noPrinting: 0, noPrice: 0, blocked: 0, merged: 0 };
+  for (const row of Object.values(rows || {})) {
+    if (row.status === 'merged') counts.merged += 1;
+    if (row.status !== 'active') continue;
+    counts.rows += 1;
+    counts.cards += Number(row.quantity) || 0;
+    const problem = rowProblem(row);
+    if (problem) counts.blocked += 1;
+    if (problem === 'needs_review') counts.needsReview += 1;
+    if (problem === 'no_printing') counts.noPrinting += 1;
+    if (problem === 'no_price') counts.noPrice += 1;
+  }
+  counts.ready = counts.rows > 0 && counts.blocked === 0;
+  return counts;
+}
+
+export function submitLabel(counts) {
+  const n = counts.cards;
+  return `Add ${n} card${n === 1 ? '' : 's'} to Inventory`;
+}
+
+/** Index of the next row after `from` that blocks submit, wrapping once. */
+export function nextAttentionIndex(list, from = -1) {
+  const n = list.length;
+  for (let step = 1; step <= n; step += 1) {
+    const i = (from + step + n) % n;
+    if (rowProblem(list[i])) return i;
+  }
+  return -1;
+}
+
+/**
+ * What changed for the seller when a stream frame lands: new rows (scroll),
+ * merges (the "Qty 1 → 2 · Undo" toast).
+ */
+export function frameEvents(before, items) {
+  const events = [];
+  for (const item of items || []) {
+    const previous = before[item.id];
+    if (!previous && item.status === 'merged' && item.mergedInto) {
+      const head = items.find((row) => row.id === item.mergedInto) || before[item.mergedInto];
+      const to = Number(head?.quantity) || 0;
+      events.push({ type: 'merged', mergedId: item.id, headId: item.mergedInto, from: to - Number(item.quantity || 1), to });
+    } else if (!previous && item.status === 'active') {
+      events.push({ type: 'added', id: item.id, recognitionState: item.recognitionState });
+    }
+  }
+  return events;
+}
+
+/** Session phase recomputed locally so "Connection lost" appears without a frame. */
+export function sessionPhase(session, nowMs, serverOffsetMs = 0) {
+  if (!session) return 'none';
+  if (session.status === 'ended') return session.endReason === 'expired' ? 'expired' : 'completed';
+  if (session.status === 'waiting') return 'waiting';
+  const serverNow = nowMs + serverOffsetMs;
+  const seen = session.phoneLastSeenAt ? Date.parse(session.phoneLastSeenAt) : 0;
+  if (!seen || serverNow - seen >= PHONE_LOST_MS) return 'lost';
+  if (session.phase === 'scanning' && serverNow - seen < SCANNING_MS) return 'scanning';
+  return 'connected';
+}
+
+export function phaseText(phase, session) {
+  switch (phase) {
+    case 'waiting':
+      return { tone: 'wait', text: 'Waiting for phone…' };
+    case 'connected':
+      return { tone: 'ok', text: `${session?.phoneLabel || 'Phone'} connected` };
+    case 'scanning':
+      return { tone: 'ok', text: 'Scanning' };
+    case 'lost':
+      return { tone: 'warn', text: 'Connection lost — reconnecting' };
+    case 'expired':
+      return { tone: 'off', text: 'Session expired' };
+    case 'completed':
+      return { tone: 'off', text: 'Session completed' };
+    default:
+      return { tone: 'off', text: 'No session' };
+  }
+}
+
+export function defaultsLabel(d = DEFAULTS) {
+  const finish = FINISHES.find((f) => f.value === d.foilState);
+  return [
+    d.language,
+    d.condition,
+    finish && d.foilState !== 'standard' ? finish.label : '',
+    d.firstEdition ? '1st Ed.' : '',
+    d.signed ? 'Signed' : '',
+    d.altered ? 'Altered' : '',
+    d.location,
+    `Qty ${d.quantity}`,
+  ].filter(Boolean).join(' · ');
+}
+
+export function cycleFinish(value, dir = 1) {
+  const i = FINISHES.findIndex((f) => f.value === value);
+  const n = FINISHES.length;
+  return FINISHES[((i < 0 ? 0 : i) + dir + n) % n].value;
+}
+
+/** Candidate printings for a row: scanner hits first, then the chosen card. */
+export function candidateList(row) {
+  const list = (row?.recognition?.candidates || []).map((c) => ({ ...c }));
+  if (row?.cardId && !list.some((c) => c.cardId === row.cardId)) {
+    list.unshift({ cardId: row.cardId, name: row.cardName, setName: row.setName, number: row.collectorNumber, score: null });
+  }
+  return list;
+}
+
+export function stepCandidate(row, dir) {
+  const list = candidateList(row);
+  if (list.length < 2) return '';
+  const i = Math.max(0, list.findIndex((c) => c.cardId === row.cardId));
+  return list[(i + dir + list.length) % list.length].cardId;
+}
+
+/** Digit typing into a quantity buffer: "1" then "2" → 12, capped at 99. */
+export function typeQuantity(buffer, digit) {
+  const next = `${buffer || ''}${digit}`.replace(/^0+/, '').slice(-2);
+  const n = Number(next);
+  return { buffer: next, quantity: n >= 1 && n <= 99 ? n : null };
+}
+
+export function newSubmitKey() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}

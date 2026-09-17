@@ -119,7 +119,8 @@ export default defineConfig(({ command }) => ({
     port: 5174,
     proxy: {
       '/api': {
-        target: 'https://api.pokoin.com',
+        // POKOIN_API_PROXY points dev at a local Oracle API (Scan Connect E2E).
+        target: process.env.POKOIN_API_PROXY || 'https://api.pokoin.com',
         changeOrigin: true,
       },
       '/chain': {

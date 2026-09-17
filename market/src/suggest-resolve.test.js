@@ -83,11 +83,18 @@ test('short set codes still bind as sets next to the name', () => {
   assert.ok(resolved.best.entities.set.some((entity) => entity.display === 'Call of Legends'));
 });
 
-test('relaxation tiers drop constraints before dropping the entity', () => {
+test('paint tiers walk literal → alternate reading → single entity', () => {
   const resolved = entitiesOf('pika yuka');
   assert.ok(resolved.tiers.length >= 2);
-  const relaxed = resolved.tiers[1];
-  assert.equal(relaxed.entities.artist.length + relaxed.entities.name.length, 1);
+  // T1 is a different SHAPE of reading (same-kind different-artist readings
+  // are popularity rivals inside one tier, never alternate tiers).
+  const signature = (tier) => tier.spans.map((span) => span.candidate.kind).join(',') + '|' + tier.free.length;
+  const seen = new Set(resolved.tiers.map(signature));
+  assert.equal(seen.size, resolved.tiers.length);
+  // The final tier relaxes down to a single bound entity.
+  const last = resolved.tiers[resolved.tiers.length - 1];
+  const entityCount = last.entities.name.length + last.entities.artist.length + last.entities.set.length;
+  assert.equal(entityCount, 1);
 });
 
 test('serialization round-trips through the URL param', () => {

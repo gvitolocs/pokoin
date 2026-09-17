@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { firebaseAuth, useAuth } from '../auth.jsx';
+import { firebaseAuth, getBearer, useAuth } from '../auth.jsx';
+import { endActiveScanSessionForSignOut } from '../scan-api.js';
 import { accountHeading, accountLede } from '../auth-session.js';
 import { useWallet, shortAddress } from '../wallet.jsx';
 import { useCart } from '../cart.jsx';
@@ -34,7 +35,16 @@ export default function Profile() {
         title={accountHeading(user, profile)}
         lede={accountLede(user)}
       >
-        <button className="btn ghost" type="button" onClick={() => signOut(firebaseAuth)}>Sign out</button>
+        <button
+          className="btn ghost"
+          type="button"
+          onClick={async () => {
+            await endActiveScanSessionForSignOut(getBearer);
+            await signOut(firebaseAuth);
+          }}
+        >
+          Sign out
+        </button>
       </PageHead>
       <MetricGrid>
         <Metric value={count} label="Cart items" />

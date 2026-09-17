@@ -68,7 +68,11 @@ Search Engine Crawler document fetch skipping via `fd1dc4d1…` (edge 200,
 the robots.txt fetch (05:55:27Z, 66.249.66.74) and 54 subresource skips via
 `897717b3…`; zero `8fb4273…` blocks in the window. Spoofed Googlebot UAs
 from ordinary clients still 403 — the exception keys on Cloudflare's bot
-verification, not the UA string.
+verification, not the UA string. 6 h post-fix, organic Googlebot re-crawled
+`/`, set/era desks, `/privacy`, robots, sitemap and SPA assets: 39 skips via
+`fd1dc4d1…`, zero genuine-Googlebot blocks; the only 403s were spoofed UAs
+(our probe box, one AWS client BFM-challenged via `bot_fight_mode` — Bot
+Fight Mode itself stays enabled and only touches unverified clients).
 
 Human UI stays a desk. Googlebot already gets worker HTML, so the SPA
 must not paint a catalog-hub strip, an “X belongs to Set” lede, or text

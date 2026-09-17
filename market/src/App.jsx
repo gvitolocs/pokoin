@@ -41,6 +41,7 @@ import Forum from './pages/Forum.jsx';
 import Signal from './pages/Signal.jsx';
 import Scan from './pages/Scan.jsx';
 import Inventory from './pages/Inventory.jsx';
+import ScanDesk from './pages/ScanDesk.jsx';
 import Buy from './pages/Buy.jsx';
 import Admin from './pages/Admin.jsx';
 import Checkout from './pages/Checkout.jsx';
@@ -155,6 +156,7 @@ function AppShell() {
       {both('/cardscan', <Scan />)}
       {both('/scancard', <Scan />)}
       {both('/inventory', <Inventory />)}
+      {both('/inventory/scan', <ScanDesk />)}
       {both('/docs', <Site />)}
       {both('/about', <About />)}
       {both('/contact', <Site />)}

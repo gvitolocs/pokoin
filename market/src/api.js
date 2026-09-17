@@ -256,13 +256,18 @@ export async function fetchExactNameCards(name, {
   return collected;
 }
 
-export function fetchSuggest(query, { limit = 20, signal, lang, printLang } = {}) {
+export function fetchSuggest(query, { limit = 20, signal, lang, printLang, match } = {}) {
   const params = new URLSearchParams({
     q: query || '',
     limit: String(limit),
     search_language: lang || getSearchLang(),
     print_language: printLang || 'all',
   });
+  // Corrected semantic lookups require every token to hit server-side so a
+  // resolver anchor cannot silently vanish (default Meili "last" relaxes).
+  if (match === 'all') {
+    params.set('match', 'all');
+  }
   return getJson(`/api/marketplace-suggest?${params}`, { signal });
 }
 

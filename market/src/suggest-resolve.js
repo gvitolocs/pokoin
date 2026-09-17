@@ -27,6 +27,7 @@ import {
 } from './suggest-catalog.js';
 import {
   NAME_POOL,
+  MIN_BARE_SET_PREFIX,
   compactQuery,
   exactSetAlias,
   expansionPrefixSet,
@@ -39,6 +40,12 @@ import {
   rankNames,
   rankedSetAlias,
 } from './suggest-rank.js';
+import { suggestKind } from './identity.js';
+
+/** Sealed-product titles prefix-reading as a rewrite (`mewtwo` → the deck kit). */
+function productTitleRewrite(display) {
+  return suggestKind({ name: display }, display) === 'Product' ? 1 : 0;
+}
 
 const MAX_BEAM = 8;
 /** Alternatives kept per span before hypothesis assembly. */
@@ -59,13 +66,27 @@ function splitWords(display) {
     .filter(Boolean);
 }
 
+/** Merge possessive fragments: "N's Zoroark" → [ns, zoroark], not [n, s, …]. */
+function possessiveWords(display) {
+  const words = splitWords(display);
+  const merged = [];
+  for (const word of words) {
+    if (word === 's' && merged.length) {
+      merged[merged.length - 1] += 's';
+      continue;
+    }
+    merged.push(word);
+  }
+  return merged;
+}
+
 /** Unified entity vocabulary: names + artists (+ their last-name rows) + set titles. */
 const VOCAB = [
   ...NAME_POOL.map((row) => ({
     kind: 'name',
     display: row.display,
     compact: row.compact,
-    words: splitWords(row.display),
+    words: possessiveWords(row.display),
     prior: row.prior,
     slug: '',
   })),
@@ -73,7 +94,7 @@ const VOCAB = [
     kind: 'artist',
     display: row.display,
     compact: row.compact,
-    words: splitWords(row.display),
+    words: possessiveWords(row.display),
     prior: row.prior,
     slug: row.slug || '',
   })),
@@ -81,7 +102,7 @@ const VOCAB = [
     kind: 'set',
     display: row.display,
     compact: row.compact,
-    words: splitWords(row.display),
+    words: possessiveWords(row.display),
     prior: row.prior,
     slug: row.slug || '',
   })),
@@ -97,6 +118,126 @@ for (const entry of VOCAB) {
   }
 }
 const MAX_SPAN_WORDS = Math.min(6, VOCAB.reduce((n, row) => Math.max(n, row.words.length), 1));
+
+/**
+ * Word index over multi-word entities: gapped literal projections
+ * (`palkia legend` → Palkia & Dialga LEGEND) need entities containing the
+ * span words in order, not just as a contiguous prefix.
+ */
+const WORD_INDEX = new Map();
+for (const entry of VOCAB) {
+  if (entry.words.length < 2) {
+    continue;
+  }
+  for (const word of new Set(entry.words)) {
+    let list = WORD_INDEX.get(word);
+    if (!list) {
+      list = [];
+      WORD_INDEX.set(word, list);
+    }
+    list.push(entry);
+  }
+}
+
+function wordMatches(typed, entityWord) {
+  // Possessive tolerance: `n` matches the `n's` title word, `imakuni` the
+  // `imakuni?'s` word — the apostrophe-s never survives compaction.
+  return typed === entityWord || (typed.length >= 1 && entityWord === typed + 's');
+}
+
+function isSubsequence(spanWords, entityWords) {
+  let at = 0;
+  let exactWords = 0;
+  for (const word of entityWords) {
+    if (at < spanWords.length && wordMatches(spanWords[at], word)) {
+      // A possessive title word (`imakuni?` + `'s` → `imakunis`) typed as its
+      // base form is still exact evidence of that title word.
+      if (word === spanWords[at] || spanWords[at] + 's' === word) {
+        exactWords += 1;
+      }
+      at += 1;
+      if (at === spanWords.length) {
+        break;
+      }
+    }
+  }
+  if (at !== spanWords.length) {
+    return null;
+  }
+  // Every typed word literally present in the title (possessive-s aside) is
+  // exact evidence; one prefix word makes the whole projection a prefix.
+  return { exact: exactWords === spanWords.length };
+}
+
+/** Order-insensitive fallback: every typed word appears (once) in the title. */
+function isMultisetContained(spanWords, entityWords) {
+  const pool = [...entityWords];
+  let exactWords = 0;
+  for (const typed of spanWords) {
+    const exactAt = pool.indexOf(typed);
+    if (exactAt >= 0) {
+      pool.splice(exactAt, 1);
+      exactWords += 1;
+      continue;
+    }
+    const possessiveAt = pool.indexOf(typed + 's');
+    if (possessiveAt >= 0) {
+      pool.splice(possessiveAt, 1);
+      exactWords += 1;
+      continue;
+    }
+    return null;
+  }
+  return { exact: exactWords === spanWords.length };
+}
+
+function subsequenceCandidates(comps, start, end) {
+  const spanWords = comps.slice(start, end + 1);
+  if (spanWords.length < 2) {
+    return [];
+  }
+  // Constituent order is not semantic: `mew mewtwo` titles the same card as
+  // `mewtwo mew`, so probe the reversed span too.
+  const probes = [spanWords, [...spanWords].reverse()];
+  const out = [];
+  const seenEntries = new Set();
+  for (const probe of probes) {
+    // Possessive tolerance at index time too: `n` must probe `n's`-keyed titles.
+    const head = WORD_INDEX.get(probe[0]) || [];
+    const possessive = probe[0].length >= 1 ? WORD_INDEX.get(probe[0] + 's') || [] : [];
+    let entries = [...head, ...possessive.filter((entry) => !head.includes(entry))];
+    if (entries.length < 4) {
+      const second = WORD_INDEX.get(probe[1]);
+      if (second?.length) {
+        entries = [...entries, ...second.filter((entry) => !entries.includes(entry))];
+      }
+    }
+    for (const entry of entries) {
+      if (out.length >= 6) {
+        break;
+      }
+      if (seenEntries.has(entry.compact)) {
+        continue;
+      }
+      const match = isSubsequence(probe, entry.words) || isMultisetContained(probe, entry.words);
+      if (!match) {
+        continue;
+      }
+      seenEntries.add(entry.compact);
+      out.push({
+        ...entry,
+        // Each untyped middle word is a literal gap in the projection.
+        distance: entry.words.length - spanWords.length,
+        exactness: match.exact ? 'exact' : 'prefix',
+        // Evidence-complete literal projection: every typed word appears
+        // verbatim in one title, so it prices like an exact span and can beat
+        // splitting the same tokens across two unrelated cards.
+        costOverride: match.exact ? 0 : 0.25,
+      });
+    }
+  }
+  return out;
+}
 
 /** Word trie: walk token comps, multi-word entities sit on terminals. */
 const TRIE = { kids: new Map(), entries: [] };
@@ -178,6 +319,9 @@ function setAliasEntry(packed, distance, exactness) {
     needles: packed.needles,
     distance,
     exactness,
+    // Short codes, expansion-prefix and homonym readings are semantic
+    // rewrites of what the user typed — literal readings outrank them.
+    rewrites: 1,
   };
 }
 
@@ -224,14 +368,21 @@ function labelExactness(candidate, spanCompactText) {
 }
 
 export function candidateCost(candidate) {
+  if (candidate.costOverride != null) {
+    return candidate.costOverride;
+  }
+  // The semantic-rewrite price rides INSIDE cost: an exact homonym alias
+  // (legend → Call of Legends, +0.5) loses to an exact literal reading but
+  // beats a bare prefix guess (0.25) — so bare `legend` still browses CoL.
+  const rewritePrice = (candidate.rewrites || 0) * 0.5;
   if (candidate.exactness === 'exact') {
-    return 0;
+    return candidate.distance + rewritePrice;
   }
   if (candidate.exactness === 'prefix') {
-    return 0.25 + candidate.distance;
+    return 0.25 + candidate.distance + rewritePrice;
   }
   // A capped fuzzy hit must still beat leaving the token unresolved.
-  return 0.75 + candidate.distance * 0.1;
+  return 0.75 + candidate.distance * 0.1 + rewritePrice;
 }
 
 function dedupeCandidates(list) {
@@ -257,10 +408,27 @@ function spanCandidates(comps, start, end, total) {
   const out = [];
   for (const entry of trieCandidates(comps, start, end)) {
     const distance = prefixEditDistance(spanCompactText, entry.compact);
+    const exactness = labelExactness({ distance, compact: entry.compact }, spanCompactText);
     out.push({
       ...entry,
       distance,
-      exactness: labelExactness({ distance, compact: entry.compact }, spanCompactText),
+      // A prefix reading is the expansion-prefix rewrite when the entity is a
+      // set or a sealed-product title (`mewtwo` → the deck kit, `pika` →
+      // Pikachu World Collection); a species prefix (`pika` → Pikachu) is
+      // literal evidence.
+      rewrites: exactness !== 'exact' && (entry.kind === 'set' || productTitleRewrite(entry.display)) ? 1 : 0,
+      exactness,
+    });
+  }
+  // Gapped literal projections (`palkia legend` → Palkia & Dialga LEGEND):
+  // every typed word appears in the title, in order. Flat cheap cost so one
+  // compound-title reading beats two independent prefix guesses, capped at
+  // two skipped words before the gap starts costing.
+  for (const entry of subsequenceCandidates(comps, start, end)) {
+    out.push({
+      ...entry,
+      rewrites: entry.kind === 'set' && entry.exactness !== 'exact' ? 1 : 0,
+      costOverride: 0.25 + Math.max(0, entry.distance - 2) * 0.5,
     });
   }
   for (const row of setAliasCandidates(spanRaw, spanCompactText, end - start + 1, end === total - 1)) {
@@ -275,17 +443,19 @@ function spanCandidates(comps, start, end, total) {
         kind: VOCAB_BY_COMPACT.get(row.compact)?.kind || 'name',
         display: row.display,
         compact: row.compact,
-        words: splitWords(row.display),
+        words: possessiveWords(row.display),
         prior: row.prior,
         slug: VOCAB_BY_COMPACT.get(row.compact)?.slug || '',
         distance: row.distance,
+        rewrites: 0,
         exactness: labelExactness(row, spanCompactText),
       });
     }
   }
   const ranked = dedupeCandidates(out)
     .sort((left, right) => (
-      candidateCost(left) - candidateCost(right)
+      (left.rewrites - right.rewrites)
+      || (candidateCost(left) - candidateCost(right))
       || right.prior - left.prior
     ))
     .slice(0, SPAN_ALTERNATIVES);
@@ -426,6 +596,7 @@ function buildResolution(raw, compact) {
       spans: [{ start: 0, end: Math.max(0, comps.length - 1), candidate: { ...locked, distance: 0, exactness: 'exact' } }],
       free: [],
       cost: 0,
+      rewrites: 0,
       exactnessRank: 0,
       popularity: locked.prior,
     }], true);
@@ -440,6 +611,7 @@ function buildResolution(raw, compact) {
     spans: [],
     free: [],
     cost: 0,
+    rewrites: 0,
     exactnessRank: 3,
     popularity: 0,
   }];
@@ -462,6 +634,7 @@ function buildResolution(raw, compact) {
               spans: [...state.spans, { start: pos, end, candidate }],
               free: state.free,
               cost: state.cost + candidateCost(candidate),
+              rewrites: state.rewrites + (candidate.rewrites || 0),
               exactnessRank: Math.min(
                 state.exactnessRank,
                 candidate.exactness === 'exact' ? 0 : candidate.exactness === 'prefix' ? 1 : 2,
@@ -475,6 +648,7 @@ function buildResolution(raw, compact) {
         spans: state.spans,
         free: [...state.free, { comp: freeComps[pos] }],
         cost: state.cost + FREE_TOKEN_COST,
+        rewrites: state.rewrites,
         exactnessRank: state.exactnessRank,
         popularity: state.popularity,
       });
@@ -500,6 +674,10 @@ function finalize(raw, words, comps, guard, states, locked) {
     }));
     const entities = entityMap(spans);
     const compat = compatPenalty(entities);
+    const rewrites = state.rewrites || 0;
+    const literalTokens = spans
+      .filter((span) => !(span.candidate.rewrites || 0))
+      .reduce((n, span) => n + (span.end - span.start + 1), 0);
     const coverage = locked ? 1 : Math.min(1,
       (coveredTokens(state) + state.free.length + protectedCount) / Math.max(1, comps.length));
     return {
@@ -509,10 +687,10 @@ function finalize(raw, words, comps, guard, states, locked) {
         raw: words.find((word) => compactQuery(word) === row.comp) || row.comp,
       })),
       entities,
-      // Compatibility folds into cost so a junk multi-entity parse cannot win
-      // on raw span economics alone.
       cost: state.cost + compat,
       coverage,
+      rewrites,
+      literalCoverage: locked ? 1 : Math.min(1, (literalTokens + protectedCount) / Math.max(1, comps.length)),
       exactnessRank: state.exactnessRank,
       kindRank: locked ? 0 : kindRankOf(spans),
       popularity: state.popularity,
@@ -529,8 +707,9 @@ function finalize(raw, words, comps, guard, states, locked) {
   const parsed = {
     ...guard.parsed,
     // The resolver owns set decisions now: rebuild setTokens from the winning
-    // spans so downstream set filters (printingMatchesSetFilter) keep working,
-    // and drop any legacy peel that the hypothesis step did not confirm.
+    // spans so downstream set filters (printingMatchesSetFilter) keep working.
+    // The legacy peel is preserved for the semantic-competition gate.
+    legacySetTokens: guard.parsed.setTokens || [],
     setTokens: best
       ? best.entities.set.map((row) => ({
         token: row.display,
@@ -549,8 +728,10 @@ function finalize(raw, words, comps, guard, states, locked) {
     compact,
     hypotheses,
     best,
-    // Relaxation tiers: full constraints → drop the weakest → strongest entity.
-    tiers: best ? buildTiers(best) : [],
+    // Paint tiers: winning interpretation first, then distinct alternate
+    // readings in comparator order (literal → alias → reduced), then the
+    // strongest single entity. Legacy stays the terminal fallback.
+    tiers: best ? buildTiers(hypotheses) : [],
     correctedQuery: nameQuery,
     freeText: best ? best.free.map((row) => row.raw) : words,
     parsed,
@@ -560,49 +741,72 @@ function finalize(raw, words, comps, guard, states, locked) {
 }
 
 function compareHypotheses(left, right) {
+  // Cost already carries the semantic-rewrite price; rewrites remain a
+  // tiebreak. When two readings tie all the way down, the one that binds the
+  // same typed tokens onto FEWER entities wins — one card literally titled
+  // with your words beats two cards each covering half of them.
   return right.coverage - left.coverage
     || left.cost - right.cost
+    || left.rewrites - right.rewrites
     || left.compat - right.compat
+    || entityCountOf(left) - entityCountOf(right)
     || left.exactnessRank - right.exactnessRank
     || left.kindRank - right.kindRank
     || right.popularity - left.popularity;
 }
 
-function buildTiers(best) {
-  const tiers = [best];
-  const entityCount = best.entities.name.length + best.entities.artist.length + best.entities.set.length;
-  if (entityCount > 1) {
-    let weakest = 0;
-    let weakestScore = -1;
-    for (let i = 0; i < best.spans.length; i += 1) {
-      const candidate = best.spans[i].candidate;
-      const score = candidateCost(candidate) + (candidate.exactness === 'exact' ? 0 : 0.5);
-      if (score > weakestScore) {
-        weakestScore = score;
-        weakest = i;
-      }
+function entityCountOf(hypothesis) {
+  // Free tokens count as unresolved "entities" — an all-free reading must
+  // never outrank an entity span on this tiebreak.
+  return hypothesis.entities.name.length
+    + hypothesis.entities.artist.length
+    + hypothesis.entities.set.length
+    + hypothesis.free.length;
+}
+
+function signatureOf(hypothesis) {
+  // Shape signature: same-kind readings with different entities (Yuka Morii
+  // vs Yuka Tanaka) are popularity rivals inside one tier, not alternate
+  // readings. A tier is a different SHAPE of interpretation.
+  return hypothesis.spans.map((span) => span.candidate.kind).join(',') + '|' + hypothesis.free.length;
+}
+
+/**
+ * Paint tiers: the winning hypothesis, then each further hypothesis whose
+ * interpretation shape differs (literal → alias → reduced), capped so the
+ * popup degrades through at most three readings before the legacy fallback.
+ */
+function buildTiers(hypotheses) {
+  const tiers = [];
+  const seen = new Set();
+  for (const hypothesis of hypotheses) {
+    const signature = signatureOf(hypothesis);
+    if (seen.has(signature)) {
+      continue;
     }
-    const relaxedSpans = best.spans.filter((_, index) => index !== weakest);
-    tiers.push({
-      ...best,
-      spans: relaxedSpans,
-      entities: entityMap(relaxedSpans),
-      free: [...best.free, { comp: best.spans[weakest].candidate.compact, raw: best.spans[weakest].raw }],
-      cost: best.cost + FREE_TOKEN_COST,
-    });
+    seen.add(signature);
+    tiers.push(hypothesis);
+    if (tiers.length >= 3) {
+      break;
+    }
   }
-  if (best.spans.length > 1) {
+  const best = tiers[0];
+  if (best && best.spans.length > 1) {
+    // Strongest single entity as the final relaxation for name+artist pairs.
     const single = [...best.spans].sort((left, right) => (
       candidateCost(left.candidate) - candidateCost(right.candidate)
       || right.candidate.prior - left.candidate.prior
     ))[0];
-    tiers.push({
-      ...best,
-      spans: [single],
-      entities: entityMap([single]),
-      free: best.free,
-      cost: best.cost,
-    });
+    const singleEntities = entityMap([single]);
+    const singleSignature = single.candidate.kind + '|0';
+    if (!seen.has(singleSignature)) {
+      seen.add(singleSignature);
+      tiers.push({
+        ...best,
+        spans: [single],
+        entities: singleEntities,
+      });
+    }
   }
   return tiers;
 }
@@ -613,9 +817,50 @@ export function resetResolveMemo() {
 }
 
 /**
- * Serialize the winning hypothesis for the results page, so pressing Enter or
- * "View all" lands on the same meaning the popup painted. Format:
- * `name:Pikachu~artist:yuka-morii~set:call-of-legends`.
+ * Semantic competition, narrowly: legacy peeled a set, but the winning
+ * reading is a single compound-name literal projection covering every token
+ * (`palkia legend` → Palkia & Dialga LEGEND). Two-entity glue (`hgss
+ * energy`), single-token queries, alias winners (`palkia sl`) and fuzzy
+ * readings stay legacy.
+ */
+export function resolverOwns(resolved) {
+  const best = resolved?.best;
+  if (!best) {
+    return false;
+  }
+  if (best.entities.artist.length) {
+    return true;
+  }
+  // D00004M: a bare long expansion-title token is a set browse — the literal
+  // projection (Expedition Uniform) must not steal the explicit set intent.
+  if (!best.locked
+    && best.entities.set.length === 0
+    && resolved.query
+    && compactQuery(resolved.query).length >= MIN_BARE_SET_PREFIX
+    && !namePoolHasCompact(compactQuery(resolved.query))
+    && exactSetAlias(resolved.query)) {
+    return false;
+  }
+  if (best.locked || best.rewrites > 0 || best.free.length || best.coverage < 1) {
+    return false;
+  }
+  if (best.entities.set.length || best.entities.artist.length || best.entities.name.length !== 1) {
+    return false;
+  }
+  const [nameEntity] = best.entities.name;
+  if (!nameEntity || nameEntity.words.length < 2) {
+    return false;
+  }
+  const legacyPeels = (resolved.parsed.legacySetTokens || []).length > 0;
+  const alternate = resolved.hypotheses[1];
+  return Boolean(legacyPeels && alternate);
+}
+
+/**
+ * Serialize the hypothesis for the results page. When the resolver owns the
+ * query the winning entities are serialized (Enter on `palkia legend` must
+ * NOT set a Call of Legends filter). When legacy owns it, only its confirmed
+ * set peel rides along (`palkia sl` → set:Call of Legends).
  */
 export function serializeResolution(resolved) {
   const best = resolved?.best;
@@ -623,22 +868,34 @@ export function serializeResolution(resolved) {
     return '';
   }
   const parts = [];
-  for (const entity of best.entities.name) {
-    if (entity.display) {
-      parts.push(`name:${entity.display}`);
+  const owned = resolverOwns(resolved);
+  if (owned || best.locked) {
+    for (const entity of best.entities.name) {
+      if (entity.display) {
+        parts.push(`name:${entity.display}`);
+      }
+    }
+    for (const entity of dedupeBySlugExport(best.entities.artist)) {
+      if (entity.slug) {
+        parts.push(`artist:${entity.slug}`);
+      }
     }
   }
-  for (const entity of dedupeBySlugExport(best.entities.artist)) {
-    if (entity.slug) {
-      parts.push(`artist:${entity.slug}`);
-    }
-  }
+  // Winning set bindings always ride (the page's set filter understands
+  // display names); a legacy peel rides only when the resolver did not win —
+  // Enter on `palkia legend` must NOT set a Call of Legends filter.
   for (const entity of dedupeBySlugExport(best.entities.set)) {
-    if (entity.slug) {
-      parts.push(`set:${entity.slug}`);
+    parts.push(`set:${entity.display}`);
+  }
+  if (!best.entities.set.length && !owned) {
+    for (const token of resolved.parsed?.legacySetTokens || []) {
+      const display = token.setNames?.[0] || token.token;
+      if (display) {
+        parts.push(`set:${display}`);
+      }
     }
   }
-  if (!parts.length && best.free.length) {
+  if (!parts.length && owned && best.free.length) {
     parts.push(`free:${best.free.map((row) => row.raw).join(' ')}`);
   }
   return parts.join('~');

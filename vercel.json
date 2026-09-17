@@ -646,6 +646,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/inventory/scan/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/inventory/scan",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/inventory/",
       "destination": "/market/index.html"
     },
