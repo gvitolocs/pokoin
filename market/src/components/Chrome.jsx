@@ -27,6 +27,7 @@ import {
   suggestLiveReady,
 } from '../suggest-live.js';
 import { catalogCacheKey, catalogIntent, expansionNationality, groupsFromCards } from '../suggest-catalog.js';
+import { resolveSuggestQuery, serializeResolution } from '../suggest-resolve.js';
 import {
   SUGGEST_THUMB_EAGER,
   SUGGEST_THUMB_HIGH,
@@ -429,44 +430,69 @@ export default function Chrome({ children }) {
     }
 
     function hydrateCatalog(nextTerm) {
+      const targets = [];
+      const resolved = resolveSuggestQuery(nextTerm);
+      if (resolved?.best) {
+        for (const entity of resolved.best.entities.artist) {
+          if (entity.slug) {
+            targets.push({ key: `artist:${entity.slug}`, kind: 'artist', slug: entity.slug });
+          }
+        }
+        for (const entity of resolved.best.entities.set) {
+          if (entity.slug) {
+            targets.push({ key: `set:${entity.slug}`, kind: 'set', slug: entity.slug });
+          }
+        }
+      }
       const intent = catalogIntent(nextTerm);
-      const key = catalogCacheKey(intent);
-      if (!key || cachedPrintings(key).length) {
-        return;
+      const legacyKey = catalogCacheKey(intent);
+      if (legacyKey && intent.slug) {
+        targets.push({ key: legacyKey, kind: intent.kind, slug: intent.slug });
       }
-      if (intent.kind === 'artist' && intent.slug) {
-        fetchArtist(intent.slug, { limit: 80 })
-          .then((data) => {
-            rememberPrintings(catalogCacheKey(intent), data.cards);
-            rememberSuggestGroups(groupsFromCards(data.cards));
-            preloadSuggestThumbs(collectPrintingThumbUrls(
-              groupsFromCards(data.cards),
-              suggestThumbSrc,
-            ));
-            const current = String(queryRef.current || '').trim();
-            if (suggestLiveReady(current)) {
-              setLiveTick((tick) => tick + 1);
-            }
-          })
-          .catch(() => {});
-        return;
-      }
-      if (intent.kind === 'set' && intent.slug) {
-        fetchExpansion({ slug: intent.slug, limit: 48 })
-          .then((data) => {
-            const cards = data?.cards || [];
-            rememberPrintings(catalogCacheKey(intent), cards);
-            rememberSuggestGroups(groupsFromCards(cards));
-            preloadSuggestThumbs(collectPrintingThumbUrls(
-              groupsFromCards(cards),
-              suggestThumbSrc,
-            ));
-            const current = String(queryRef.current || '').trim();
-            if (suggestLiveReady(current)) {
-              setLiveTick((tick) => tick + 1);
-            }
-          })
-          .catch(() => {});
+      const seen = new Set();
+      for (const target of targets) {
+        if (seen.has(target.key) || cachedPrintings(target.key).length) {
+          continue;
+        }
+        seen.add(target.key);
+        const needsHydration = () => {
+          if (cachedPrintings(target.key).length) {
+            return;
+          }
+          if (target.kind === 'artist') {
+            fetchArtist(target.slug, { limit: 80 })
+              .then((data) => {
+                rememberPrintings(target.key, data.cards);
+                rememberSuggestGroups(groupsFromCards(data.cards));
+                preloadSuggestThumbs(collectPrintingThumbUrls(
+                  groupsFromCards(data.cards),
+                  suggestThumbSrc,
+                ));
+                const current = String(queryRef.current || '').trim();
+                if (suggestLiveReady(current)) {
+                  setLiveTick((tick) => tick + 1);
+                }
+              })
+              .catch(() => {});
+            return;
+          }
+          fetchExpansion({ slug: target.slug, limit: 48 })
+            .then((data) => {
+              const cards = data?.cards || [];
+              rememberPrintings(target.key, cards);
+              rememberSuggestGroups(groupsFromCards(cards));
+              preloadSuggestThumbs(collectPrintingThumbUrls(
+                groupsFromCards(cards),
+                suggestThumbSrc,
+              ));
+              const current = String(queryRef.current || '').trim();
+              if (suggestLiveReady(current)) {
+                setLiveTick((tick) => tick + 1);
+              }
+            })
+            .catch(() => {});
+        };
+        needsHydration();
       }
     }
 
@@ -504,6 +530,7 @@ export default function Chrome({ children }) {
           concurrency: rankConcurrency(),
           mapChunk: rankChunkOnWorker,
           kind: searchTabRef.current,
+          resolved: resolveSuggestQuery(term),
         }).catch((error) => {
           if (error?.name === 'AbortError') {
             throw error;
@@ -667,7 +694,9 @@ export default function Chrome({ children }) {
   function goSearch(event) {
     event?.preventDefault?.();
     const next = query.trim();
-    const resolved = isPokemonGame()
+    const resolved = isPokemonGame() ? resolveSuggestQuery(next) : null;
+    const resolvedParam = resolved ? serializeResolution(resolved) : '';
+    const resolvedQuery = isPokemonGame()
       ? resolveSearchQuery(next, rankNames(next))
       : next;
     const prefetchQuery = isPokemonGame() ? typedMeiliQuery(next) : resolved;
@@ -675,12 +704,12 @@ export default function Chrome({ children }) {
     setMenu(false);
     if (prefetchQuery) {
       prefetchSearchPage(prefetchQuery, lang, {
-        fetchSearchPage: fetchSearch,
+        fetchSearch,
         count: hitCount,
         tab: searchTab,
       });
     }
-    navigate(searchHref(resolved, searchTab));
+    navigate(searchHref(resolvedQuery, searchTab, resolvedParam));
   }
 
   function pick(card, rank) {

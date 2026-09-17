@@ -18,3 +18,9 @@ test('artwork board uses real figure masks and album hover structure', () => {
   assert.match(page, /tile tile-cut tile-album artwork-test-card/);
   assert.match(page, /Hover or focus/);
 });
+
+test('artifact cleanup board compares raw vs cleaned masks', () => {
+  assert.match(page, /figure-masks-clean/);
+  assert.match(page, /label="Before"/);
+  assert.match(page, /label="After"/);
+});

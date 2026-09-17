@@ -54,6 +54,36 @@ class ArtworkFigureMasksTest(unittest.TestCase):
                 alpha = np.asarray(image.getchannel("A"))
             self.assertEqual(int((alpha > 0).sum()), 2)
 
+    def test_clean_fills_small_interior_holes(self):
+        mask = np.zeros((30, 30), dtype=bool)
+        mask[5:25, 5:25] = True
+        mask[12:16, 12:16] = False
+        cleaned = MOD.clean_mask(mask)
+        self.assertTrue(cleaned[13, 13])
+        self.assertEqual(int(cleaned.sum()), 400)
+
+    def test_clean_keeps_large_open_gaps(self):
+        mask = np.zeros((40, 40), dtype=bool)
+        mask[:5, :] = True
+        mask[-5:, :] = True
+        mask[:, :2] = True
+        mask[:, -2:] = True
+        cleaned = MOD.clean_mask(mask)
+        self.assertFalse(cleaned[20, 20])
+        self.assertGreaterEqual(int(cleaned.sum()), int(mask.sum()))
+
+    def test_clean_drops_speck_islands_keeps_second_figure(self):
+        mask = np.zeros((200, 200), dtype=bool)
+        mask[10:60, 10:60] = True
+        mask[100:130, 100:130] = True
+        mask[190, 190] = True
+        mask[5, 180] = True
+        cleaned = MOD.clean_mask(mask)
+        self.assertTrue(cleaned[110, 110])
+        self.assertFalse(cleaned[190, 190])
+        self.assertFalse(cleaned[5, 180])
+        self.assertEqual(int(cleaned.sum()), 3400)
+
 
 if __name__ == "__main__":
     unittest.main()

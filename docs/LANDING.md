@@ -218,7 +218,7 @@ Android/iOS CardVault, leftover Flutter-web `web/home.html` / `app.html` /
 | `api.pokoin.com` | Raspberry Pi marketplace API (`?game=one_piece` / `riftbound` for satellite catalogs) |
 | `api2.pokoin.com` | Same Pi origin as `api.pokoin.com`. Oracle api2 CDN is removed. |
 | `news.pokoin.com` | Hypemeter **target** is `pokoin-a1` via Cloudflare Tunnel; **today** DNS is still Vercel Hobby. [NEWS.md](NEWS.md). |
-| `test.pokoin.com` | Same `web` project. `/` 307 → `/sanitize`. `/espurr` is the frozen Espurr board. `/ocr` is one leftover per expansion; Qwen3-VL calls Japanese vs Chinese vs English against DB `nationality`. |
+| `test.pokoin.com` | Same `web` project. `/` 307 → `/sanitize`. `/espurr` is the frozen Espurr board. `/ocr` is one leftover per expansion; Qwen3-VL calls Japanese vs Chinese vs English against DB `nationality`. `/artwork` is the SAM figure-mask review board ([FIGURE_MASKS.md](FIGURE_MASKS.md)). |
 
 `test.pokoin.com` is a **manual alias**, not a project domain, so it does not
 follow production deploys by itself. Finish every deploy with:

@@ -27,8 +27,14 @@ import {
   uniqueSearchOptions,
 } from '../search-filters.js';
 import { normalizeSearchTab, searchFetchOptions, searchHref, uniqueSellers } from '../search-kind.js';
+import { parseResolutionParam, resolveSuggestQuery } from '../suggest-resolve.js';
 import { sellerHref } from '../listing-meta.js';
 import { rememberPageView, restoredPageView } from '../scroll-restore.js';
+
+/** Artist rows carry display names; the resolved param carries slugs. */
+function normalizeArtistName(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
 
 export default function Search() {
   const location = useLocation();
@@ -47,6 +53,33 @@ export default function Search() {
       ? typedMeiliQuery(typedQuery)
       : typedQuery);
   const lang = useSearchLang();
+  // Resolver parity: the popup may hand over its winning hypothesis
+  // (`resolved=artist:yuka-morii~name:Pikachu`). Re-resolving the same raw
+  // query locally gives the artist display names so the rows — which carry
+  // `artist` from marketplace_search_candidates — can be filtered client-side,
+  // and the fetch runs on the corrected name text instead of the raw typo.
+  const resolvedParamRaw = (params.get('resolved') || '').trim();
+  const localResolved = useMemo(
+    () => (isPokemonGame() && typedQuery && resolvedParamRaw ? resolveSuggestQuery(typedQuery) : null),
+    [typedQuery, resolvedParamRaw],
+  );
+  const artistEntities = useMemo(() => {
+    if (!resolvedParamRaw || !localResolved?.best) {
+      return [];
+    }
+    const want = new Set(parseResolutionParam(resolvedParamRaw).artists);
+    if (!want.size) {
+      return [];
+    }
+    return localResolved.best.entities.artist.filter((entity) => entity.slug && want.has(entity.slug));
+  }, [resolvedParamRaw, localResolved]);
+  const artistNames = useMemo(
+    () => new Set(artistEntities.map((entity) => normalizeArtistName(entity.display))),
+    [artistEntities],
+  );
+  const fetchQuery = artistEntities.length && localResolved?.correctedQuery
+    ? localResolved.correctedQuery
+    : query;
   const [cards, setCards] = useState([]);
   const [sellers, setSellers] = useState([]);
   const [hasMore, setHasMore] = useState(false);
@@ -88,7 +121,7 @@ export default function Search() {
     }
     setSellers([]);
     const fetchOpts = searchFetchOptions(tab);
-    const hot = setAware || tab === 'users' ? null : takeHotSearchPage(query, lang, tab);
+    const hot = setAware || tab === 'users' ? null : takeHotSearchPage(fetchQuery, lang, tab);
     function apply(data, totalHits) {
       if (cancelled) {
         return;
@@ -126,7 +159,13 @@ export default function Search() {
         .catch((err) => {
           if (!cancelled) {
             setSellers([]);
-            setError(err?.status === 404 || /not found/i.test(err?.message || '') ? '' : (err.message || 'Search failed.'));
+            // The API validates usernames with a 400 "Seller username is
+            // invalid." — a term that cannot be a username is the same
+            // no-match outcome as 404, not a failure worth a red banner.
+            const noSeller = err?.status === 404
+              || (err?.status === 400 && /invalid/i.test(err?.message || ''))
+              || /not found/i.test(err?.message || '');
+            setError(noSeller ? '' : (err.message || 'Search failed.'));
             setLoading(false);
           }
         });
@@ -145,7 +184,7 @@ export default function Search() {
           cards: rows,
           hasMore: false,
         }))
-        : (hot?.promise || fetchSearch({ query, offset: 0, limit: 48, lang, ...fetchOpts }));
+        : (hot?.promise || fetchSearch({ query: fetchQuery, offset: 0, limit: 48, lang, ...fetchOpts }));
       pending
         .then((data) => {
           if (data) {
@@ -155,7 +194,7 @@ export default function Search() {
           if (cancelled) {
             return;
           }
-          return fetchSearch({ query, offset: 0, limit: 48, lang, ...fetchOpts }).then((fresh) => apply(fresh, hot?.count));
+          return fetchSearch({ query: fetchQuery, offset: 0, limit: 48, lang, ...fetchOpts }).then((fresh) => apply(fresh, hot?.count));
         })
         .catch((err) => {
           if (!cancelled) {
@@ -164,8 +203,8 @@ export default function Search() {
           }
         });
     }
-    if (!setAware && tab === 'singles' && query.length >= 2 && !(hot?.count > 0)) {
-      fetchSuggest(query, { limit: 1, lang })
+    if (!setAware && tab === 'singles' && fetchQuery.length >= 2 && !(hot?.count > 0)) {
+      fetchSuggest(fetchQuery, { limit: 1, lang })
         .then((suggest) => {
           if (!cancelled) {
             setTotal(Number(suggest?.count) || 0);
@@ -176,7 +215,7 @@ export default function Search() {
     return () => {
       cancelled = true;
     };
-  }, [query, lang, tab, typedQuery]);
+  }, [query, fetchQuery, lang, tab, typedQuery]);
 
   useEffect(() => {
     rememberPageView(location.key, { rarity, setName, sort });
@@ -188,12 +227,15 @@ export default function Search() {
     if (tab === 'users') {
       return [];
     }
-    const rows = filterSearchCards(cards, {
+    let rows = filterSearchCards(cards, {
       type: tab === 'product' ? 'sealed' : 'singles',
       rarity,
       set: setName,
       sort,
     });
+    if (artistNames.size) {
+      rows = rows.filter((card) => artistNames.has(normalizeArtistName(card.artist)));
+    }
     if (sort !== 'match' || !isNumberAwareQuery(parsed)) {
       return rows;
     }
@@ -202,8 +244,14 @@ export default function Search() {
       const rightHit = printingMatchesNumberFilter(right, parsed) ? 0 : 1;
       return leftHit - rightHit;
     });
-  }, [cards, tab, rarity, setName, sort, typedQuery]);
-  const filtersOn = rarity || setName || sort !== 'match';
+  }, [cards, tab, rarity, setName, sort, typedQuery, artistNames]);
+  const filtersOn = rarity || setName || artistEntities.length > 0 || sort !== 'match';
+
+  function clearResolved() {
+    const nextParams = new URLSearchParams(params);
+    nextParams.delete('resolved');
+    setParams(nextParams, { replace: true });
+  }
 
   async function loadMore() {
     if (setAware || tab === 'users') {
@@ -263,6 +311,21 @@ export default function Search() {
                     ? <><strong>{(total || cards.length).toLocaleString('en-US')}</strong> results</>
                     : 'Searching…'))))}
         </p>
+        {tab !== 'users' && artistEntities.length ? (
+          <div className="search-resolved">
+            {artistEntities.map((entity) => (
+              <button
+                key={entity.slug}
+                type="button"
+                className="search-chip"
+                onClick={clearResolved}
+                title="Remove artist filter"
+              >
+                By {entity.display} ✕
+              </button>
+            ))}
+          </div>
+        ) : null}
         {tab !== 'users' ? (
           <SearchToolbar
             sort={sort}

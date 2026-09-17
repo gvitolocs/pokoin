@@ -24,6 +24,9 @@ export const SMALL_SCAN_CACHE = 'ctf1';
 export const ODD_SCAN_CACHE = 'sv312';
 /** Team Up Charizard 014/181 (CT 397269) swapped off the pokemontcg.io digital onto CT's scan. */
 export const TEAM_UP_CHARIZARD_CACHE = 'ct397';
+/** Leftovers whose missing-card coin was replaced by a real scan; keyed by leftover ct_id. */
+const RESCAN_IDS = new Set([286866, 122705, 126934, 331755, 331756]);
+export const RESCAN_CACHE = 'rscan1';
 const SMALL_SCAN_ID_SET = new Set(SMALL_SCAN_IDS.map(Number));
 const POKOIN_PLACEHOLDER_ID_SET = new Set(POKOIN_PLACEHOLDER_IDS.map(Number));
 /** 312×437 catalog thumbs replaced with CardTrader full (SV Magnemite cohort). */
@@ -34,6 +37,9 @@ function catalogCacheToken(id) {
   const value = Number(id);
   if (value === 397269) {
     return TEAM_UP_CHARIZARD_CACHE;
+  }
+  if (RESCAN_IDS.has(value)) {
+    return RESCAN_CACHE;
   }
   if (POKOIN_PLACEHOLDER_ID_SET.has(value)) {
     return POKOIN_PLACEHOLDER_CACHE;

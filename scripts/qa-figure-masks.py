@@ -11,7 +11,11 @@ relative to the Qwen prompt boxes:
 - bleed: at most `--max-bleed` of the alpha may fall outside the Qwen
   union box (SAM wandered off the creature),
 - fill: at least `--min-fill` of the union box area must be alpha (SAM
-  actually found the creature).
+  actually found the creature),
+- holes: at most `--max-hole-ratio` of the silhouette may be interior
+  background lakes (SAM followed the paint through translucent bodies),
+- specks: at most `--max-specks` detached islands smaller than 50 px
+  (holofoil texture fragments the silhouette).
 
 The gate never edits masks; it only classifies them and writes a JSONL
 report plus a file list of passes for `rsync --files-from`.
@@ -25,6 +29,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage
 
 BUILDER = Path(__file__).with_name("build-artwork-figure-masks.py")
 
@@ -74,6 +79,15 @@ def mask_metrics(alpha: np.ndarray, row: dict, builder) -> tuple[dict, list[str]
     bleed = float(on.sum() - inside.sum()) / max(float(on.sum()), 1.0)
     metrics["fill"] = round(fill, 4)
     metrics["bleed"] = round(bleed, 4)
+
+    on_area = max(float(on.sum()), 1.0)
+    filled = ndimage.binary_fill_holes(on)
+    metrics["holes"] = round(float((filled & ~on).sum()) / on_area, 4)
+    structure = np.ones((3, 3), dtype=int)
+    labels, count = ndimage.label(on, structure=structure)
+    if count:
+        sizes = np.bincount(labels.ravel())[1:]
+        metrics["specks"] = int((sizes < 50).sum())
     return metrics, reasons
 
 
@@ -87,6 +101,8 @@ def main() -> int:
     parser.add_argument("--max-coverage", type=float, default=0.55)
     parser.add_argument("--max-bleed", type=float, default=0.35)
     parser.add_argument("--min-fill", type=float, default=0.08)
+    parser.add_argument("--max-hole-ratio", type=float, default=0.02)
+    parser.add_argument("--max-specks", type=int, default=0)
     args = parser.parse_args()
 
     builder = load_builder()
@@ -116,6 +132,10 @@ def main() -> int:
                             reasons.append("bleed")
                         if metrics.get("fill", 0.0) < args.min_fill:
                             reasons.append("fill")
+                        if metrics.get("holes", 0.0) > args.max_hole_ratio:
+                            reasons.append("holes")
+                        if metrics.get("specks", 0) > args.max_specks:
+                            reasons.append("specks")
                     verdict.update(metrics)
                     verdict["reasons"] = reasons
                 except Exception as exc:  # noqa: BLE001 - any decode failure fails the mask

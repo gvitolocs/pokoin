@@ -159,6 +159,32 @@ const MODIFIER_COMPACT = [
 const MODIFIER_WORD = new Set(MODIFIER_COMPACT);
 const PAIR_JOIN_RE = /^(?:&|and)$/i;
 
+/** Mechanic words (`gx` / `vmax` / `mega`) for the protected-syntax pass. */
+export function isModifierWord(word) {
+  return MODIFIER_WORD.has(compactQuery(word));
+}
+
+/** Exact blueprint-name check (`eevee` beats an `Eevee`-titled expansion alias). */
+export function namePoolHasCompact(compact) {
+  const key = String(compact || '');
+  return Boolean(key) && NAME_POOL.some((row) => row.compact === key);
+}
+
+/** Exact expansion alias (`hgss`, `sl`), or null. Read-only view for the resolver. */
+export function exactSetAlias(word) {
+  return expansionAliasIndex().get(compactQuery(word)) || null;
+}
+
+/** Expansion-title prefix candidate (`pika` → Pikachu World Collection), or null. */
+export function expansionPrefixSet(word) {
+  return packedFromExpansionPrefix(compactQuery(word));
+}
+
+/** Best fuzzy set-alias hit for a token (`call of legendsd` family), or null. */
+export function rankedSetAlias(word) {
+  return rankNames(word, setAliasPool())[0] || null;
+}
+
 function popularityPoints(prior) {
   const count = Math.max(1, Number(prior) || 1);
   const scaled = POPULARITY_POINTS
@@ -1071,11 +1097,6 @@ function isPairJoin(word) {
   return PAIR_JOIN_RE.test(String(word || '').trim());
 }
 
-function namePoolHasCompact(compact) {
-  const key = String(compact || '');
-  return Boolean(key) && NAME_POOL.some((row) => row.compact === key);
-}
-
 /**
  * Card suffixes that collide with set aliases: HGSS LEGEND vs Call of Legends,
  * Tag Team GX vs SM tag-team extras, `Palkia &` vs Paldea.
@@ -1879,7 +1900,7 @@ export function fillSuggestGroups(groups, limit = SUGGEST_RESULT_FLOOR, preferPe
   const tab = String(kind || parsed?.searchKind || '').trim().toLowerCase();
   const mods = typedModifiers(parsed?.raw || parsed?.nameQuery || '').mods;
 
-  function addPrinting(group, printing) {
+  function addPrinting(group, printing, relaxed = false) {
     if (n >= cap) {
       return false;
     }
@@ -1915,6 +1936,7 @@ export function fillSuggestGroups(groups, limit = SUGGEST_RESULT_FLOOR, preferPe
       parsed
       && isNumberAwareQuery(parsed)
       && !isBareCollectorQuery(parsed)
+      && !relaxed
       && !printingMatchesNumberFilter(printing, parsed)
     ) {
       return false;
@@ -1978,12 +2000,17 @@ export function fillSuggestGroups(groups, limit = SUGGEST_RESULT_FLOOR, preferPe
     }
   }
   if (n < cap) {
+    // Relaxed top-up: the strict number pass above may have filled nothing
+    // (the only matching printing sits outside the cached rows, or the print
+    // filter hid it). The popup must still show the ranked name's cards —
+    // matched rows are already in, closest misses follow — never "No singles
+    // match" while the group has printings.
     for (const group of list) {
       for (const printing of group.printings || []) {
         if (n >= cap) {
           break;
         }
-        addPrinting(group, printing);
+        addPrinting(group, printing, true);
       }
     }
   }
@@ -2062,6 +2089,7 @@ export async function fetchSuggestRanked(term, {
   concurrency,
   mapChunk,
   kind = '',
+  resolved = null,
 } = {}) {
   const query = String(term || '').trim();
   const parsed = parseTypedQuery(query);
@@ -2069,6 +2097,15 @@ export async function fetchSuggestRanked(term, {
   const setOnly = isSetOnlyQuery(parsed);
   const nameQuery = bareNumber || setOnly ? '' : (parsed.nameQuery || query);
   const rankQuery = bareNumber || setOnly ? query : nameQuery;
+  // Resolver parity: when the hypothesis step corrected the query (artist /
+  // set binding or typo tokens), the corrected text is the PRIMARY lookup and
+  // the raw typed query stays as the challenger. The popup count comes from
+  // the corrected lookup — never max-over-junk-lookups.
+  const corrected = resolved?.correctedQuery
+  && (resolved.hasArtist || resolved.hasSet || (resolved.best?.free?.length || 0) > 0)
+    ? String(resolved.correctedQuery).trim()
+    : '';
+  const primaryName = corrected || nameQuery;
   const peeled = isSetAwareQuery(parsed)
     || setOnly
     || isArtAwareQuery(parsed)
@@ -2163,12 +2200,12 @@ export async function fetchSuggestRanked(term, {
       ...parsed.numberTokens.map((token) => token.token),
     ]
     : [
-      nameQuery,
+      primaryName,
       peeled ? '' : query,
     ]);
   const immediatePayloadsPromise = Promise.all(immediateLookups.map(suggestLookup));
   const ranked = await rankedPromise;
-  const resolvedName = bareNumber ? query : resolvedNameQuery(nameQuery, ranked);
+  const resolvedName = bareNumber ? query : (corrected || resolvedNameQuery(nameQuery, ranked));
   const resolvedParsed = { ...parsed, nameQuery: resolvedName };
   const firstWord = String(query).trim().split(/\s+/)[0] || '';
   const seedLookups = !bareNumber

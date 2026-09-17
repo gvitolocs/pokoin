@@ -38,6 +38,7 @@ import {
   SUGGEST_RESULT_FLOOR,
 } from './suggest-rank.js';
 import { catalogCacheKey, catalogIntent, groupsFromCards } from './suggest-catalog.js';
+import { resolveSuggestQuery } from './suggest-resolve.js';
 import { filterSuggestByPrintLang } from './locale.js';
 
 export const SUGGEST_LIVE_MIN_CHARS = 3;
@@ -164,6 +165,128 @@ function cachedSetPrintings(parsed, nameTest) {
   return out;
 }
 
+function dedupeBySlug(entities) {
+  const bySlug = new Map();
+  for (const entity of entities) {
+    const key = entity.slug || entity.compact;
+    if (!bySlug.has(key)) {
+      bySlug.set(key, entity);
+    }
+  }
+  return [...bySlug.values()];
+}
+
+function intersectPools(pools) {
+  if (!pools.length) {
+    return [];
+  }
+  const [first, ...rest] = pools;
+  const ids = new Set();
+  for (const row of first) {
+    const id = String(row.id || row.card_id || '');
+    if (id && rest.every((pool) => pool.some((other) => String(other.id || other.card_id || '') === id))) {
+      ids.add(id);
+    }
+  }
+  const out = [];
+  const seen = new Set();
+  for (const pool of pools) {
+    for (const row of pool) {
+      const id = String(row.id || row.card_id || '');
+      if (ids.has(id) && !seen.has(id)) {
+        seen.add(id);
+        out.push(row);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The resolver takes over only for artist bindings — the class the legacy
+ * whole-compact parse misroutes (`kawayod`, `pika yuka`). Pure name + typo
+ * and modifier queries stay on the legacy ranked pool: its mechanic bonus
+ * and rival filtering are locked fixture behavior.
+ */
+function resolverApplies(resolved) {
+  return Boolean(resolved?.best?.entities.artist.length);
+}
+
+/** The print flag shapes the popup, it must never blind it: when the filter
+ * would empty every group, paint the unfiltered rows instead — the user
+ * still gets the closest matches (imageless prints included) over an empty
+ * "No singles match" board. */
+function popupGroups(groups, printLang) {
+  const filtered = filterSuggestByPrintLang(groups, printLang);
+  return filtered.length ? filtered : (groups || []);
+}
+
+/**
+ * Intersection-first paint from the hypothesis entities against the suggest
+ * cache: all resolved constraints when the cache can satisfy them, then the
+ * relaxation tiers (drop weakest constraint → strongest entity). Entities
+ * not yet hydrated paint as a stub row until their hydration lands.
+ */
+function resolverLiveGroups(resolved, { limit, preferPerGroup }) {
+  const ranked = rankNames(resolved.correctedQuery);
+  for (const tier of resolved.tiers) {
+    const nameRows = [];
+    for (const entity of tier.entities.name) {
+      nameRows.push(cachedPrintings(entity.display));
+    }
+    const artistRows = [];
+    let artistPending = null;
+    for (const entity of dedupeBySlug(tier.entities.artist)) {
+      const rows = cachedPrintings(`artist:${entity.slug}`);
+      if (rows.length) {
+        artistRows.push(rows);
+      } else if (!artistPending) {
+        artistPending = entity;
+      }
+    }
+    const setRows = [];
+    for (const entity of dedupeBySlug(tier.entities.set)) {
+      if (entity.slug) {
+        setRows.push(cachedPrintings(`set:${entity.slug}`));
+      }
+    }
+    const pools = [...nameRows, ...artistRows, ...setRows].filter((pool) => pool.length);
+    if (!pools.length) {
+      if (artistPending || tier.entities.set.some((entity) => entity.slug)) {
+        const pending = artistPending
+          ? [{ name: artistPending.display, printings: [stubPrinting(artistPending.display)] }]
+          : [];
+        return {
+          groups: pending,
+          ranked,
+          each: limit,
+        };
+      }
+      continue;
+    }
+    let rows = intersectPools(pools);
+    if (!rows.length) {
+      rows = pools.reduce((best, pool) => (pool.length < best.length ? pool : best), pools[0]);
+    }
+    const setTokens = resolved.parsed.setTokens || [];
+    if (setTokens.length) {
+      const filtered = rows.filter((row) => printingMatchesSetFilter(row, {
+        setTokens,
+        eras: resolved.parsed.eras || [],
+      }));
+      if (filtered.length) {
+        rows = filtered;
+      }
+    }
+    return {
+      groups: groupsFromCards(rows),
+      ranked,
+      each: setTokens.length || tier.entities.artist.length ? limit : preferPerGroup,
+    };
+  }
+  return null;
+}
+
 export function liveSuggestGroups(query, {
   rank = rankNames,
   pool,
@@ -178,6 +301,25 @@ export function liveSuggestGroups(query, {
   const parsed = parseTypedQuery(query);
   const nameQuery = isBareCollectorQuery(parsed) ? query : (parsed.nameQuery || query);
   const intent = isBareCollectorQuery(parsed) ? { kind: 'name' } : catalogIntent(query);
+  const resolved = isBareCollectorQuery(parsed) ? null : resolveSuggestQuery(query);
+  if (resolved && resolverApplies(resolved)) {
+    const branch = resolverLiveGroups(resolved, { limit, preferPerGroup });
+    if (branch) {
+      return {
+        groups: fillSuggestGroups(
+          popupGroups(branch.groups, printLang),
+          limit,
+          branch.each,
+          resolved.parsed,
+          kind,
+        ),
+        ranked: branch.ranked,
+        parsed: resolved.parsed,
+        resolved,
+        intent,
+      };
+    }
+  }
   // Token-peeled queries rank the local name pool. The parse already split the
   // tokens off, and catalogIntent's fuzzy catalog rank misranks mid-typing
   // (`eevee illu` ≈ Eeveelutions products — plain Eevee drops out and the
@@ -197,7 +339,7 @@ export function liveSuggestGroups(query, {
     const each = intent.kind === 'set' || isSetOnlyQuery(parsed) ? limit : preferPerGroup;
     return {
       groups: fillSuggestGroups(
-        filterSuggestByPrintLang(groups, printLang),
+        popupGroups(groups, printLang),
         limit,
         each,
         parsed,
@@ -232,7 +374,7 @@ export function liveSuggestGroups(query, {
     : [];
   const merged = mergeSuggestGroups([collectorGroups, energySetGroups, nameGroups]);
   let ordered = orderSuggestGroups(
-    filterSuggestByPrintLang(merged, printLang),
+    popupGroups(merged, printLang),
     ranked,
     parsed,
   );

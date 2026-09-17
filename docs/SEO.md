@@ -33,6 +33,43 @@ datacenter IPs get Cloudflare **403** on every orange-clouded name
 Vercel build, keep the last `sitemap-sets.xml` instead of collapsing to
 `/marketplace/sets`.
 
+## Cloudflare crawler-policy 403 (2026-09-16/17)
+
+GSC "Blocked due to access forbidden (403)" was Cloudflare edge, not origin.
+Managed rule `8fb4273cf339402ebc4a777810d32c18` (managed ruleset
+`3e677e63d4e9479382576f3fa66279e7`, source `firewallManaged`, the
+`content_bots_protection: block` crawler-policy rule — exact internal identity
+unreadable via API, attribution STRONG) 403'd every non-exempt automated
+request on pokoin.com/www page paths with `Your request was blocked.` before
+the Workers ran. Genuine Googlebot was hit: 24 events/23h from
+`66.249.66.72–76` (rDNS `crawl-66-249-66-*.googlebot.com`, Googlebot +
+Googlebot Smartphone UAs) across set desks, era hubs, guides, `/`, `/privacy`.
+Bot Fight Mode was exonerated (separate pipeline, challenges, unskippable);
+`34.156.63.59` was a GCE "CMS-Checker" scanner, not Google. Origin (Vercel)
+served 200 to Googlebot UA when bypassed via `--resolve`.
+
+Fix: custom rule **`fd1dc4d1dfe44ba6a06206a9fb786f8d`** (first position,
+"Pokoin custom firewall rules" v35): `(http.host in {"pokoin.com"
+"www.pokoin.com"} and http.request.method in {"GET" "HEAD"} and
+cf.verified_bot_category eq "Search Engine Crawler")` → **skip phase
+`http_request_sbfm` ONLY**. Verified-bot category, not UA (spoofable), not
+ASN/IP lists, not `cf.client.bot` (would also admit verified AI crawlers).
+Free-plan cap is 5 custom rules, so the two identical TrainingAI skips
+(`f4e639d2…` + `619563bc…`, same action_parameters) were merged into
+`55161883ff23…` (union expression, behavior-neutral) to free the slot.
+Rollback: `/tmp/pokoin-custom-ruleset-ROLLBACK-v33.json`, or delete the new
+rule id. robots.txt is exempt from the crawler rule by Cloudflare itself;
+`/api/*`, `/card-images/*`, downloads, embed bots keep the `897717b3…` skip.
+**CONFIRMED fixed 2026-09-17**: GSC Live Test on
+`/marketplace/sets/team-up` (≈05:55 UTC) reported "Google har adgang til
+webadressen / Siden kan indekseres". Security Events show the verified
+Search Engine Crawler document fetch skipping via `fd1dc4d1…` (edge 200,
+66.249.66.72, Googlebot Smartphone, ray `a3c5df690bfdb227`, 05:57:18Z) plus
+the robots.txt fetch (05:55:27Z, 66.249.66.74) and 54 subresource skips via
+`897717b3…`; zero `8fb4273…` blocks in the window. Spoofed Googlebot UAs
+from ordinary clients still 403 — the exception keys on Cloudflare's bot
+verification, not the UA string.
+
 Human UI stays a desk. Googlebot already gets worker HTML, so the SPA
 must not paint a catalog-hub strip, an “X belongs to Set” lede, or text
 prev/next under the header. Related **tiles** (at most **12**) and one

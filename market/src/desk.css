@@ -510,6 +510,32 @@
   white-space: nowrap;
 }
 
+.search-resolved {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: none;
+}
+
+.search-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: transparent;
+  color: #e7c96b;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.search-chip:hover {
+  background: rgba(231, 201, 107, 0.12);
+}
+
 .search-toolbar .toolbar-right {
   flex: 1;
   min-width: 0;

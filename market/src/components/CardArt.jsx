@@ -15,6 +15,7 @@ export default function CardArt({
   cut = false,
   cutSurface,
   card,
+  figureMask: figureMaskOverride,
   onClick,
   onLoad,
   onError,
@@ -37,7 +38,8 @@ export default function CardArt({
   }, [src]);
 
   const current = urls[index] || '';
-  const figureMask = cut && cutSurface === 'album' ? artworkFigureMaskSrc(card) : '';
+  const figureMask = figureMaskOverride
+    ?? (cut && cutSurface === 'album' ? artworkFigureMaskSrc(card) : '');
 
   function failCurrent() {
     const next = indexRef.current + 1;

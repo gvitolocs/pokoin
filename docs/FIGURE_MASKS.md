@@ -13,6 +13,7 @@ a rectangle; Qwen boxes are only SAM prompts and never reach the UI.
 | Ground visible figures once per CLIP artwork | `scripts/qwen-artwork-figures.py` (Qwen3-VL via Ollama `:11434` on nezopt) | `scripts/out/qwen-artwork-figures.jsonl` (resumable; rows keyed by `version`) |
 | Boxes → alpha masks | `scripts/build-artwork-figure-masks.py` (transformers `Sam2Model`, `facebook/sam2.1-hiera-small`, ROCm CUDA) | `/home/nez/data/pokoin-leftovers/figure-masks/{version}.webp` |
 | Quality gate | `scripts/qa-figure-masks.py` | `scripts/out/figure-masks-qa.jsonl` + `figure-masks-pass.txt` |
+| Retro-clean pre-cleanup masks | `scripts/clean-figure-masks.py` | `/home/nez/data/pokoin-leftovers/figure-masks-clean/` |
 | Upload loop | `scripts/upload-figure-masks-loop.sh` (rsync pass-list while the builder runs) | `pi-home:/srv/pokoin/card-images/objects/figure-masks/` |
 
 The SPA resolves the URL in `market/src/art-figure-mask.js`
@@ -71,22 +72,57 @@ failure mode on transparent and mirror surfaces (see references below):
 background visible through the body breaks SAM's grouping, and specular foil
 texture spawns false-positive fragments.
 
-## Planned cleanup (not yet applied)
+## Cleanup (applied 2026-09-16, on test only)
 
-1. Post-process in `build-artwork-figure-masks.py` before `write_mask`:
-   `scipy.ndimage.binary_fill_holes` (with a small hole-area cap so
-   genuinely open silhouettes keep their gaps), drop connected components
-   under an area floor relative to the largest component, optional
-   binary-closing to calm jaggies.
-2. Extend `qa-figure-masks.py` with the same two checks so the gate fails
-   holey / speckled masks instead of shipping them: `hole_ratio` max and a
-   speck-component count max.
-3. Rebuild (`--out` is resumable; delete touched masks or rebuild all), then
-   bump `FIGURE_MASK_REV` in `market/src/art-figure-mask.js` (e.g.
-   `sam21-2-clean`) so browsers drop the cached artifacts.
-4. Delete the shipped-but-failing masks from the CDN pass-list flow — the
-   upload loop only ever rsyncs the QA pass-list, so a stricter gate plus a
-   rebuilt pass list self-corrects on the next loop tick.
+`build-artwork-figure-masks.py` now runs `clean_mask` on every union before
+`write_mask` (opt out with `--no-clean`):
+
+- one 3×3 binary closing to settle jaggies (padded first — scipy erodes with
+  `border_value=0`, which would eat silhouettes touching the image edge),
+- drop connected components under `max(32 px, 0.2% of the largest component)`
+  so specks die and real second figures / cameos survive,
+- fill interior background components up to 5% of the mask area, so Lampent
+  glass lakes close while genuinely open silhouettes keep their gaps.
+
+`scripts/qa-figure-masks.py` grew the matching gate checks: `holes`
+(`--max-hole-ratio`, default 0.02) and `specks` (`--max-specks`, default 0).
+
+`scripts/clean-figure-masks.py` retro-cleaned the already-built 10,276 masks
+into `figure-masks-clean/` without re-running SAM (about 45 s, 8 workers).
+Gate results over the same rows:
+
+| Check | Before (raw SAM) | After (cleaned) |
+| --- | --- | --- |
+| fail specks | 6597 | 94 |
+| fail holes | 1948 | 415 |
+| fail coverage / fill (real SAM misses, untouched) | 1335 / 1103 | 1351 / 1102 |
+
+Showcase versions after cleaning: Lampent `v249112` holes 3.1% → 0,
+Chandelure `v249116` specks 50 → 0, Noivern GX `v224472` specks 579 → 0.
+Gyarados GX `v226758` keeps one large open gap (over the 5% cap — art gaps
+must survive) and stays a QA `holes` fail on purpose.
+
+### Where to see before / after
+
+- **Test board**: `/artwork` on the market dev server (`npm run dev` in
+  `market/`, vite on `127.0.0.1:4179`) — "Hole and speck cleanup" section
+  renders each card twice, wearing the raw production mask vs the cleaned
+  one, with alpha previews under each pair. `CardArt` takes a `figureMask`
+  override prop for this; production cards still resolve
+  `artworkFigureMaskSrc` unchanged.
+- **CDN**: the cleaned set is rsynced to
+  `pi-home:/srv/pokoin/card-images/objects/figure-masks-clean/`, i.e.
+  `https://cdn.pokoin.com/figure-masks-clean/{version}.webp`. Production
+  `figure-masks/` is untouched.
+
+### Flipping production (pending approval)
+
+Once approved: re-point `artworkFigureMaskSrc` in
+`market/src/art-figure-mask.js` at `figure-masks-clean/` (or copy the clean
+set over `figure-masks/`) and bump `FIGURE_MASK_REV` to `clean-1` so
+browsers drop the cached artifacts. The remaining ~12k versions still
+grounding through the Qwen job will pick up `clean_mask` automatically when
+`build-artwork-figure-masks.py` re-runs.
 
 ## Same problem, discussed online
 

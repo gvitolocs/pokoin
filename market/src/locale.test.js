@@ -173,17 +173,21 @@ test('print-language filter keeps live name stubs', () => {
   assert.equal(filterSuggestByPrintLang(groups, 'japanese')[0].printings[0].id, 'live:cynthia');
 });
 
-test('Korean HGSS prints bucket as korean so the print filter keeps them', async () => {
+test('HeartGold Collection buckets japanese so the print filter keeps its energies', async () => {
   const { expansionNationality } = await import('./suggest-catalog.js');
-  assert.equal(expansionNationality('HeartGold Collection'), 'korean');
+  // The catalog set is the Japanese ハートゴールドコレクション (L1): the
+  // leftover scans (Flaaffy 032/070, the basic energies) carry Japanese name
+  // bars and ©2009 JP layout, and the DB expansion nationality is japanese.
+  // It is not the Korean HGSS release.
+  assert.equal(expansionNationality('HeartGold Collection'), 'japanese');
   const groups = [{
     name: 'Darkness Energy',
     printings: [
       { id: 'hgss-121', name: 'Darkness Energy', set: 'HeartGold & SoulSilver', nationality: 'western' },
-      { id: 'ko-070', name: 'Darkness Energy', set: 'HeartGold Collection', nationality: 'korean' },
+      { id: 'l1-070', name: 'Darkness Energy', set: 'HeartGold Collection', nationality: 'japanese' },
     ],
   }];
-  assert.deepEqual(filterSuggestByPrintLang(groups, 'korean')[0].printings.map((row) => row.id), ['ko-070']);
+  assert.deepEqual(filterSuggestByPrintLang(groups, 'japanese')[0].printings.map((row) => row.id), ['l1-070']);
   assert.equal(filterSuggestByPrintLang(groups, 'western')[0].printings.length, 1);
   assert.equal(filterSuggestByPrintLang(groups, 'all')[0].printings.length, 2);
 });

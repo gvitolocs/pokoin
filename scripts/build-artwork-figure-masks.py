@@ -4,7 +4,8 @@
 The output is one lossless WebP per CLIP artwork version.  It is transparent
 outside the Pokemon silhouettes, so the SPA can scale a masked duplicate of
 the card art while leaving the original painting still.  Qwen boxes are only
-prompts and never appear in the UI.
+prompts and never appear in the UI.  ``clean_mask`` fills the interior holes
+and drops the speck islands SAM leaves in translucent or holofoil art.
 """
 from __future__ import annotations
 
@@ -91,6 +92,56 @@ def load_rows(path: Path) -> list[dict]:
     return list(rows.values())
 
 
+def clean_mask(
+    mask: np.ndarray,
+    max_hole_frac: float = 0.05,
+    min_island_px: int = 32,
+    min_island_frac: float = 0.002,
+) -> np.ndarray:
+    """Fill interior lakes and drop speck islands from a SAM silhouette.
+
+    SAM follows the painted background through translucent bodies (Lampent
+    glass) and holofoil texture, so the union comes back with interior holes
+    and hundreds of detached islands that the album hover renders as empty
+    spots and granular glitch specks.  Fill background components that do not
+    touch the border when they are small next to the silhouette, keep islands
+    that could be a real second figure, and settle the edge with one binary
+    closing.  Legitimately open silhouettes keep gaps larger than
+    ``max_hole_frac`` of the mask area.
+    """
+    from scipy import ndimage
+
+    on = mask.astype(bool)
+    if not on.any():
+        return on
+
+    structure = np.ones((3, 3), dtype=int)
+    # Pad before closing: scipy erodes with border_value=0, which would eat
+    # silhouettes that touch the image edge.  Closing must only ever add.
+    padded = np.pad(on, 2)
+    on = ndimage.binary_closing(padded, structure=structure)[2:-2, 2:-2]
+
+    labels, count = ndimage.label(on, structure=structure)
+    if count > 1:
+        sizes = np.bincount(labels.ravel())
+        largest = int(sizes[1:].max())
+        keep = sizes >= max(min_island_px, min_island_frac * largest)
+        keep[0] = False
+        on = keep[labels]
+
+    on_area = int(on.sum())
+    if on_area:
+        filled = ndimage.binary_fill_holes(on)
+        holes = filled & ~on
+        hole_labels, hole_count = ndimage.label(holes, structure=structure)
+        if hole_count:
+            hole_sizes = np.bincount(hole_labels.ravel())
+            drop = hole_sizes > max_hole_frac * on_area
+            drop[0] = True
+            on = on | (holes & ~drop[hole_labels])
+    return on
+
+
 def union_best_masks(masks: torch.Tensor, scores: torch.Tensor) -> np.ndarray:
     """Pick SAM's best candidate for each Qwen box and union the silhouettes."""
     masks = masks.detach().cpu()
@@ -125,6 +176,11 @@ def main() -> int:
     parser.add_argument("--objects", type=Path, default=OBJECTS)
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument(
+        "--no-clean",
+        action="store_true",
+        help="write the raw SAM union without hole/island cleanup",
+    )
     args = parser.parse_args()
 
     rows = load_rows(args.jsonl)
@@ -155,7 +211,8 @@ def main() -> int:
             masks = processor.post_process_masks(
                 outputs.pred_masks.cpu(), inputs["original_sizes"].cpu()
             )[0]
-            write_mask(union_best_masks(masks, outputs.iou_scores), dest)
+            union = union_best_masks(masks, outputs.iou_scores)
+            write_mask(union if args.no_clean else clean_mask(union), dest)
             print(f"{index}/{len(rows)} {version} figures={len(boxes)}", flush=True)
     return 0
 

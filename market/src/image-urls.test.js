@@ -91,6 +91,21 @@ test('CardTrader 186×260 leftover backs bust cache after Pokoin missing-card st
   );
 });
 
+test('rescanned Latios desk rewrites its public id and busts the placeholder cache', () => {
+  const card = {
+    id: '573732',
+    name: 'Latios ex',
+    canonicalPath: '/marketplace/en/cards/573732/card-latios-ex-holo-rare-011-018-latios-ex-half-deck',
+  };
+  assert.equal(
+    ownCatalogImage(
+      card,
+      '/card-images/573732_latios-ex-holo-rare-011-018-latios-ex-half-deck.jpg',
+    ),
+    '/card-images/286866_latios-ex-holo-rare-011-018-latios-ex-half-deck.jpg?v=rscan1',
+  );
+});
+
 test('CSM2d Shining Synergy leftovers bust cache after placeholder ingest', () => {
   assert.equal(
     preferFullImage('https://cdn.pokoin.com/373219_latios-csm2d-120-342-csm2d-shining-synergy-gx-starter-deck.jpg'),

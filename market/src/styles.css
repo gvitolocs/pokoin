@@ -5387,6 +5387,53 @@ dialog.zoom:not([open]) {
   object-fit: contain;
 }
 
+.artwork-section-title {
+  margin: 2.5rem 0 0;
+}
+
+.artwork-case-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.artwork-mask-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  padding: 0.4rem;
+  border-radius: 10px;
+  background-color: #333740;
+  background-image:
+    linear-gradient(45deg, #464b56 25%, transparent 25%),
+    linear-gradient(-45deg, #464b56 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #464b56 75%),
+    linear-gradient(-45deg, transparent 75%, #464b56 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
+
+.artwork-mask-pair figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.artwork-mask-pair img {
+  display: block;
+  width: 100%;
+  height: 7rem;
+  object-fit: contain;
+}
+
+.artwork-mask-pair figcaption {
+  margin-top: 0.25rem;
+  color: #fff;
+  font-size: 0.72rem;
+  text-align: center;
+  text-shadow: 0 1px 3px #000;
+}
+
 .artwork-mask-preview span {
   color: #fff;
   font-size: 0.78rem;

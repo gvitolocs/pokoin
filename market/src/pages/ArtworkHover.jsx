@@ -2,7 +2,10 @@ import { useEffect } from 'react';
 import CardArt from '../components/CardArt.jsx';
 import TestDock from '../components/TestDock.jsx';
 
-const REVISION = '2026-09-16';
+const REVISION = '2026-09-17';
+
+const BEFORE_MASK_REV = 'sam21-1';
+const AFTER_MASK_REV = 'clean-1';
 
 const SAMPLES = [
   {
@@ -36,6 +39,41 @@ const SAMPLES = [
     note: 'Checks whether SAM includes loose ground and particle details.',
   },
 ];
+
+const ARTIFACT_CASES = [
+  {
+    version: 'v249112',
+    name: 'Lampent',
+    image: '/card-images/124556_lampent-42-119-phantom-forces.jpg',
+    status: 'Pass',
+    note: 'Translucent glass body: SAM carved 3.1% of the silhouette into interior lakes. Now filled.',
+  },
+  {
+    version: 'v249116',
+    name: 'Chandelure',
+    image: '/card-images/124558_chandelure-rare-holo-43-119-phantom-forces.jpg',
+    status: 'Pass',
+    note: 'Holofoil granular specks: 56 disconnected islands, 50 under 50 px, plus 4.3% holes. Now solid.',
+  },
+  {
+    version: 'v224472',
+    name: 'Noivern GX',
+    image: '/card-images/112236_noivern-gx-full-v4.jpg',
+    status: 'Pass',
+    note: 'Worst speck case: 579 detached islands along the foil edges. Cleanup keeps the two figures.',
+  },
+  {
+    version: 'v239120',
+    name: 'Xerneas GX',
+    image: '/card-images/119560_xerneas-gx-full-v4.jpg',
+    status: 'Pass',
+    note: '497 foil specks and 7.2% interior holes before. Cleanup clears both — QA passes, so this mask ships on production.',
+  },
+];
+
+function maskUrl(version, rev, dir = 'figure-masks') {
+  return `/card-images/${dir}/${version}.webp?v=${rev}`;
+}
 
 function HoverSample({ sample }) {
   const card = {
@@ -86,6 +124,63 @@ function HoverSample({ sample }) {
   );
 }
 
+function CaseTile({ item, mask, label }) {
+  const card = { id: item.version.slice(1), version: item.version, name: item.name };
+  return (
+    <div
+      className="tile tile-cut tile-album artwork-test-card"
+      tabIndex="0"
+      aria-label={`${item.name} ${label.toLowerCase()} silhouette hover test`}
+    >
+      <span className="tile-art">
+        <CardArt
+          src={item.image}
+          alt={`${item.name} ${label.toLowerCase()} cleanup comparison`}
+          cut
+          cutSurface="album"
+          full
+          card={card}
+          figureMask={mask}
+          loading="lazy"
+        />
+      </span>
+      <span className="artwork-hover-hint">{label} — hover</span>
+    </div>
+  );
+}
+
+function MaskCase({ item }) {
+  const before = maskUrl(item.version, BEFORE_MASK_REV);
+  const after = maskUrl(item.version, AFTER_MASK_REV, 'figure-masks-clean');
+  return (
+    <article className="artwork-test-case artwork-mask-case">
+      <div className="artwork-case-pair">
+        <CaseTile item={item} mask={before} label="Before" />
+        <CaseTile item={item} mask={after} label="After" />
+      </div>
+      <div className="artwork-test-copy">
+        <div className="artwork-test-heading">
+          <h2>{item.name}</h2>
+          <span className={`artwork-status ${item.status === 'Pass' ? 'is-pass' : 'is-review'}`}>
+            {item.status}
+          </span>
+        </div>
+        <p>{item.note}</p>
+        <div className="artwork-mask-pair">
+          <figure>
+            <img src={before} alt={`${item.name} mask before cleanup`} loading="lazy" />
+            <figcaption>Before</figcaption>
+          </figure>
+          <figure>
+            <img src={after} alt={`${item.name} mask after cleanup`} loading="lazy" />
+            <figcaption>After</figcaption>
+          </figure>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export default function ArtworkHover() {
   useEffect(() => {
     document.title = 'Artwork hover masks · test.pokoin.com';
@@ -116,6 +211,17 @@ export default function ArtworkHover() {
 
         <section className="artwork-review-grid" aria-label="Artwork hover samples">
           {SAMPLES.map((sample) => <HoverSample key={sample.version} sample={sample} />)}
+        </section>
+
+        <h2 className="artwork-section-title">Hole and speck cleanup — before / after</h2>
+        <p className="sanitize-note">
+          The same card twice: the left tile wears the raw SAM 2.1 mask uploaded to
+          production, the right tile wears the cleaned silhouette
+          (<code>fill_holes</code> + island removal + edge closing, uploaded to
+          <code>/card-images/figure-masks-clean/</code>). Alpha previews sit under each pair.
+        </p>
+        <section className="artwork-review-grid" aria-label="Mask cleanup before and after">
+          {ARTIFACT_CASES.map((item) => <MaskCase key={item.version} item={item} />)}
         </section>
       </main>
 

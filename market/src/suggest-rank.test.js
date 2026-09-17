@@ -1457,3 +1457,35 @@ test('version-rarity slang tokens score through the rarity system: eevee ur, sr,
 });
 
 
+
+test('latios ex 011 fills closest printings when no cached row carries 011', () => {
+  const parsed = parseTypedQuery('latios ex 011');
+  const groups = fillSuggestGroups([
+    {
+      name: 'Latios EX',
+      printings: [
+        { id: 'rs', name: 'Latios EX', set: 'Roaring Skies', number: '58/108' },
+        { id: 'pf', name: 'Latios EX', set: 'Plasma Freeze', number: '86/116' },
+      ],
+    },
+  ], 20, 4, parsed, 'singles');
+  const ids = groups.flatMap((group) => group.printings.map((row) => row.id));
+  assert.ok(ids.includes('rs'), 'closest misses fill the popup instead of no-match');
+  assert.ok(ids.includes('pf'));
+});
+
+test('latios ex 011 keeps the 011 printing ahead of number misses', () => {
+  const parsed = parseTypedQuery('latios ex 011');
+  const groups = fillSuggestGroups([
+    {
+      name: 'Latios ex',
+      printings: [
+        { id: 'exd', name: 'Latios ex', set: 'EX Dragon', number: '94/97' },
+        { id: 'half', name: 'Latios ex', set: 'Latios ex Half Deck', number: '011/018' },
+      ],
+    },
+  ], 20, 4, parsed, 'singles');
+  const ids = groups.flatMap((group) => group.printings.map((row) => row.id));
+  assert.equal(ids[0], 'half', 'the typed collector number leads');
+  assert.ok(ids.includes('exd'), 'number misses still fill behind the match');
+});

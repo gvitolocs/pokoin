@@ -6,7 +6,7 @@ import { artworkFigureMaskSrc } from './art-figure-mask.js';
 test('figure mask is keyed by same-painting CLIP version', () => {
   assert.equal(
     artworkFigureMaskSrc({ version: 'v219698' }),
-    '/card-images/figure-masks/v219698.webp?v=sam21-1',
+    '/card-images/figure-masks-clean/v219698.webp?v=clean-1',
   );
 });
 

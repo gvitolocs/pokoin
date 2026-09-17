@@ -349,7 +349,7 @@ export default [
 {"display":"Black Bolt - Pok\u00e9 Ball Reverse Holo","slug":"black-bolt-poke-ball-reverse-holo","prior":80,"nationality":"western"},
 {"display":"Black Bolt | sv11B - Pok\u00e9 Ball Reverse Holo","slug":"black-bolt-sv11b-poke-ball-reverse-holo","prior":80,"nationality":"japanese"},
 {"display":"Gaia Volcano","slug":"gaia-volcano","prior":80,"nationality":"japanese"},
-{"display":"HeartGold Collection","slug":"heartgold-collection","prior":80,"nationality":"korean"},
+{"display":"HeartGold Collection","slug":"heartgold-collection","prior":80,"nationality":"japanese"},
 {"display":"Magma VS Aqua: Two Ambitions","slug":"magma-vs-aqua-two-ambitions","prior":80,"nationality":"japanese"},
 {"display":"Remix Bout","slug":"remix-bout","prior":80,"nationality":"japanese"},
 {"display":"Tidal Storm","slug":"tidal-storm","prior":80,"nationality":"japanese"},

@@ -715,3 +715,34 @@ test('set-token live path keeps the name pool instead of a stub intent group', (
   assert.equal(live.parsed.setTokens.length, 1, 'Call of Legends still peels as the set');
   assert.equal(filled, 6, 'cached printings fill the list instead of a stub group');
 });
+
+test('a print filter that would empty the popup paints unfiltered rows', () => {
+  resetSuggestLive();
+  const latiosPool = [nameRow('Latios ex', 90)];
+  rememberSuggestGroups([
+    {
+      name: 'Latios ex',
+      printings: [
+        {
+          id: 'half',
+          name: 'Latios ex',
+          set: 'Latios ex Half Deck',
+          number: '011/018',
+          nationality: 'japanese',
+          itemKind: 'single',
+          productType: 'card',
+        },
+      ],
+    },
+  ]);
+  const out = liveSuggestGroups('latios ex 011', {
+    pool: latiosPool,
+    printLang: 'western',
+    kind: 'singles',
+  });
+  const rows = out.groups.flatMap((group) => group.printings);
+  assert.ok(
+    rows.some((row) => row.id === 'half'),
+    'the Japanese half-deck print survives a western filter that empties the popup',
+  );
+});

@@ -11,7 +11,7 @@ export function normalizeSearchTab(value) {
   return SEARCH_TABS.some((tab) => tab.id === id) ? id : 'singles';
 }
 
-export function searchHref(query, tab = 'singles') {
+export function searchHref(query, tab = 'singles', resolved = '') {
   const params = new URLSearchParams();
   const q = String(query || '').trim();
   if (q) {
@@ -20,6 +20,10 @@ export function searchHref(query, tab = 'singles') {
   const kind = normalizeSearchTab(tab);
   if (kind !== 'singles') {
     params.set('tab', kind);
+  }
+  const meaning = String(resolved || '').trim();
+  if (meaning) {
+    params.set('resolved', meaning);
   }
   const search = params.toString();
   return search ? `/marketplace/search?${search}` : '/marketplace/search';
