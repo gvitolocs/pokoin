@@ -89,5 +89,9 @@ for i in $(seq 1 30); do
   sleep 2
 done
 [[ "$live" == "$COMMIT" ]] || die "pokoin.com runs $live, not $COMMIT — another deploy raced this one"
-say "pokoin.com (and every alias on it) runs $COMMIT"
+# test.pokoin.com is a separate Vercel alias and can lag behind pokoin.com.
+host="${url#https://}"
+say "point test.pokoin.com at $host"
+V alias set "$host" test.pokoin.com >/dev/null
+say "pokoin.com + test.pokoin.com run $COMMIT"
 echo "$url"

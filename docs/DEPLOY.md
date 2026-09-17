@@ -21,8 +21,9 @@ rollout: [SCAN_CONNECT.md](SCAN_CONNECT.md#production-deployment).
 meta `gitCommitSha`, or `githubCommitSha` for older git builds). It builds a
 `git archive` of the commit plus an allowlist of gitignored inputs
 (`download/extension.zip`), runs `node --test market/src/*.test.js`, deploys
-with `--meta gitCommitSha=…`, holds `/tmp/pokoin-web-deploy.lock`, and checks
-that `pokoin.com` points at the new commit afterwards. A production deployment
+with `--meta gitCommitSha=…`, holds `/tmp/pokoin-web-deploy.lock`, checks that
+`pokoin.com` points at the new commit, and re-points `test.pokoin.com` at the
+same deployment (that alias can otherwise lag and serve an old review board). A production deployment
 without a SHA must be compared by hand and accepted with
 `ALLOW_UNTRACKED_PRODUCTION=<deployment id>`.
 
