@@ -6080,3 +6080,65 @@ html.is-extension-desk select.collector-badge.version-badge {
 .email-pref-status {
   margin-top: 0.85rem;
 }
+
+/* Test boards dashboard (/tests) */
+.tests-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin-top: 1.75rem;
+}
+.tests-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 1.1rem 0.9rem;
+  border: 1px solid rgb(255 211 61 / 0.18);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.02);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+.tests-card:hover,
+.tests-card:focus-visible {
+  border-color: var(--yellow);
+  background: rgb(255 211 61 / 0.06);
+  transform: translateY(-2px);
+  outline: none;
+}
+.tests-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.tests-card-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #f4f4f7;
+}
+.tests-card-head time {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tests-card-note {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.86rem;
+  color: var(--yellow);
+}
+.tests-card-about {
+  margin: 0;
+  flex: 1;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.tests-card-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  opacity: 0.8;

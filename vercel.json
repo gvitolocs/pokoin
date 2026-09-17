@@ -271,7 +271,7 @@
     {
       "source": "/",
       "has": [{ "type": "host", "value": "test.pokoin.com" }],
-      "destination": "/sanitize",
+      "destination": "/tests",
       "permanent": false
     },
     {
