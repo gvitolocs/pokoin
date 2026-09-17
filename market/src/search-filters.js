@@ -96,6 +96,40 @@ export function artworkVersionKey(card) {
   return `id:${card?.id || card?.card_id || ''}`;
 }
 
+/** HGSS LEGEND name (not Call of Legends / Shining Legends set titles). */
+export function isLegendCard(card) {
+  const name = String(card?.name || '').replace(/\s+/g, ' ').trim();
+  return /\blegend$/i.test(name);
+}
+
+/**
+ * Matching LEGEND halves share related CLIP version keys (public card_ids of
+ * consecutive leftovers, e.g. v263304 Top + v263306 Bottom). Collapse the pair
+ * so WCD / JP reprints that reuse a half's key cannot sort between them.
+ */
+export function legendVersionPairKey(card) {
+  const key = artworkVersionKey(card);
+  const match = /^v(\d+)$/i.exec(key);
+  if (!match) return key;
+  const n = Number(match[1]);
+  return `v${4 * Math.floor(n / 4)}`;
+}
+
+/** Top half before Bottom. WCD / Ultra Rare without Top|Bottom follow version parity. */
+export function legendHalfOrder(card) {
+  const identity = printingIdentity(card);
+  const blob = `${identity.rarity || ''} ${identity.number || ''} ${card?.number || ''}`.toLowerCase();
+  if (/\btop\b/.test(blob)) return 0;
+  if (/\bbottom\b/.test(blob)) return 1;
+  const key = artworkVersionKey(card);
+  const match = /^v(\d+)$/i.exec(key);
+  if (match) {
+    const n = Number(match[1]);
+    return n === 4 * Math.floor(n / 4) ? 0 : 1;
+  }
+  return 2;
+}
+
 export function albumSortParts(card) {
   return {
     pokedexNum: pokedexSortValue(card),
@@ -124,6 +158,21 @@ export function compareStoredPokedexSort(a, b) {
     || String(a.id || a.card_id || '').localeCompare(String(b.id || b.card_id || ''));
 }
 
+function compareLegendPairTiebreak(a, b) {
+  // Pair key, then expansion (Unleashed before WCD), then Top before Bottom
+  // within that printing — so a WCD half that reuses the Top version key
+  // cannot sort between the set's Top and Bottom.
+  return legendVersionPairKey(a).localeCompare(legendVersionPairKey(b))
+    || (Number(a.expansionSort) || 0) - (Number(b.expansionSort) || 0)
+    || expansionSortValue(a) - expansionSortValue(b)
+    || legendHalfOrder(a) - legendHalfOrder(b)
+    || (Number(a.collectorSort) || 0) - (Number(b.collectorSort) || 0)
+    || collectorSortValue(a) - collectorSortValue(b)
+    || String(a.number || '').localeCompare(String(b.number || ''))
+    || String(a.name || '').localeCompare(String(b.name || ''))
+    || String(a.id || a.card_id || '').localeCompare(String(b.id || b.card_id || ''));
+}
+
 function comparePokedexAlbumSort(a, b) {
   const aDex = pokedexSortValue(a);
   const bDex = pokedexSortValue(b);
@@ -131,18 +180,28 @@ function comparePokedexAlbumSort(a, b) {
   // pokedex_sort can still pack first-name Dex; CLIP cluster-oldest stays
   // the packed remainder. Items already rank TRAINER_DEX live.
   if (aDex !== bDex) return aDex - bDex;
+  const aLegend = isLegendCard(a);
+  const bLegend = isLegendCard(b);
   const aStored = Number(a?.pokedexSort || 0);
   const bStored = Number(b?.pokedexSort || 0);
   if (aStored > 0 && bStored > 0) {
     const aCluster = aStored % 1_000_000;
     const bCluster = bStored % 1_000_000;
-    return aCluster - bCluster
-      || artworkVersionKey(a).localeCompare(artworkVersionKey(b))
+    if (aCluster !== bCluster) return aCluster - bCluster;
+    // LEGEND Top/Bottom (and WCD/JP halves that share related version keys)
+    // stay adjacent so the album grid forms the full landscape art.
+    if (aLegend && bLegend) {
+      return compareLegendPairTiebreak(a, b);
+    }
+    return artworkVersionKey(a).localeCompare(artworkVersionKey(b))
       || (Number(a.expansionSort) || 0) - (Number(b.expansionSort) || 0)
       || (Number(a.collectorSort) || 0) - (Number(b.collectorSort) || 0)
       || String(a.number || '').localeCompare(String(b.number || ''))
       || String(a.name || '').localeCompare(String(b.name || ''))
       || String(a.id || a.card_id || '').localeCompare(String(b.id || b.card_id || ''));
+  }
+  if (aLegend && bLegend) {
+    return compareLegendPairTiebreak(a, b);
   }
   return expansionSortValue(a) - expansionSortValue(b)
     || collectorSortValue(a) - collectorSortValue(b)
