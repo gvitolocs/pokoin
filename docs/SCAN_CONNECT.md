@@ -161,6 +161,16 @@ request. A scan whose `captured_at` is before `ended_at` is still accepted
 for 120 s after an **expiry** (upload in flight), never after Disconnect,
 Done or logout.
 
+The phone never frees the session on `pagehide` / `beforeunload` /
+`visibilitychange`: those fire on a reload and when the Camera mini browser
+hands off to Safari, so a keepalive `action=leave` there drops a desk the
+seller is still using (regression fixed 2026-09-17; guarded by
+`BattleScan/scripts/scan-connect.test.cjs` and the E2E step "phone reload
+keeps the pairing"). An abandoned phone is covered by the 12 s **Connection
+lost** indication and the 30-minute inactivity expiry; **Disconnect** on the
+desk (or `action=leave` from the phone Disconnect button) is the deliberate
+way to free a session.
+
 ## Realtime transport
 
 **Decision:** Postgres writer is the only store; `GET /api/scan-stream`
