@@ -470,6 +470,14 @@
       "destination": "https://rpc.pokoin.com/chain/:path*"
     },
     {
+      "source": "/tests/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/tests",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/sanitize/",
       "destination": "/market/index.html"
     },
