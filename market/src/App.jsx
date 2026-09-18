@@ -11,6 +11,7 @@ import Ocr from './pages/Ocr.jsx';
 import OcrArtists from './pages/OcrArtists.jsx';
 import ArtworkHover from './pages/ArtworkHover.jsx';
 import TestsDashboard from './pages/TestsDashboard.jsx';
+import JumbosBoard from './pages/JumbosBoard.jsx';
 import Search from './pages/Search.jsx';
 import Card from './pages/Card.jsx';
 import Expansion from './pages/Expansion.jsx';
@@ -104,7 +105,7 @@ function AppShell() {
     return () => document.documentElement.classList.remove('is-extension-desk');
   }, []);
   const stripped = pathname.replace(/\/$/, '');
-  const board = stripped === '/tests' || stripped === '/sanitize' || stripped === '/espurr' || stripped === '/ocr' || stripped === '/ocr/artists' || stripped === '/artwork' || stripped === '/extension/auth-bridge';
+  const board = stripped === '/tests' || stripped === '/sanitize' || stripped === '/espurr' || stripped === '/ocr' || stripped === '/ocr/artists' || stripped === '/artwork' || stripped === '/jumbos' || stripped === '/extension/auth-bridge';
   const framed = framedByChromeExtension();
   // dashboard.pokoin.com/scan is the Scan Connect desk; pokoin.com/scan stays photo identify.
   const dashboard = isDashboardHost();
@@ -123,6 +124,7 @@ function AppShell() {
       {both('/ocr', <Ocr />)}
       {both('/ocr/artists', <OcrArtists />)}
       {both('/artwork', <ArtworkHover />)}
+      {both('/jumbos', <JumbosBoard />)}
       {both('/marketplace', <Home />)}
       {both('/marketplace/search', <Search />)}
       {both('/marketplace/explore', <Explore />)}

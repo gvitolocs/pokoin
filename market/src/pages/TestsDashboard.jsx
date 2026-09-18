@@ -11,6 +11,7 @@ const ABOUT = {
   '/ocr': 'Read expansion and print language straight off the card with Qwen3-VL on the leftover print.',
   '/ocr/artists': 'Match the OCR-read illustrator credit to the pokemontcg.io artist table.',
   '/artwork': 'Pokémon-only album hover masks: Qwen3-VL boxes → SAM 2.1 silhouettes, with the whole-silhouette before / after.',
+  '/jumbos': 'Every Jumbo Oversized leftover in one grid — homepage tiles with full-resolution links, so wrong pixels under a right name get caught.',
 };
 
 export default function TestsDashboard() {
