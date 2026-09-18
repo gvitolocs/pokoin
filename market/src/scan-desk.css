@@ -577,6 +577,8 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 /* Photo the phone took, beside the catalog art of the current candidate. */
 .c-art .scan-shot { object-fit: contain; background: #000; outline: 1px solid var(--scan-warn); }
 .art-empty { width: 2.2rem; aspect-ratio: 63 / 88; border-radius: 3px; background: var(--g3); display: block; }
+/* Hover zoom host wraps the catalog thumb; the floating full-res card is a body portal. */
+.thumb-zoom-host { display: inline-flex; }
 
 .c-card { position: relative; min-width: 0; display: flex; flex-direction: column; }
 .c-card strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

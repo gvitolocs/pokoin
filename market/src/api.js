@@ -1808,6 +1808,18 @@ export function fetchOwnedCollection(token) {
   });
 }
 
+/** Red-cross remove: drops one copy of a physical holding; doc deleted at zero. */
+export function removeCollectionItem({ itemId, quantity = 1 } = {}, token) {
+  return getJson('/api/marketplace-collection?action=remove', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ itemId, quantity }),
+  });
+}
+
 export function fetchPortfolio({ id = '', limit } = {}) {
   const cap = Number.isFinite(Number(limit))
     ? Number(limit)

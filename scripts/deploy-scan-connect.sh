@@ -28,6 +28,7 @@ API_FILES=(
   api/_user_card_collection.js
   api/marketplace-listings.js api/marketplace-orders.js
   api/marketplace-collection-summary.js api/marketplace-collection.js
+  api/marketplace-home.js
   server/api-route-manifest.js
   oracle-postgres/schema/082_scan_connect.sql oracle-postgres/schema/082_scan_connect.grants.sql
 )
@@ -73,6 +74,7 @@ cmd_api() {
       api/_scan_submit_intent.test.js \
       api/_scan_store_submit_intent.test.js \
       api/_user_card_collection.test.js \
+      api/marketplace-home.test.js \
       api/marketplace-listings.test.js \
       server/api-route-families.test.js \
       >/tmp/sc-api-tests.log 2>&1) \

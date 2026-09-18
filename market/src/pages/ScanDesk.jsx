@@ -25,6 +25,7 @@ import {
 import {
   applyItems,
   batchCounts,
+  boxSlots,
   candidateList,
   CONDITIONS,
   createPatchChain,
@@ -34,12 +35,14 @@ import {
   frameEvents,
   LANGUAGES,
   nextAttentionIndex,
+  nextBoxPositions,
   newSubmitKey,
   PROBLEM_LABEL,
   phaseText,
   queueRows,
   rowProblem,
   sessionPhase,
+  slotText,
   stepCandidate,
   submitLabel,
   typeQuantity,
@@ -49,6 +52,7 @@ import { facetSignature, scanFacets, suggestPriceFromSlices } from '../scan-pric
 import { connectScanStream } from '../scan-stream.js';
 import { useLiveSuggest } from '../use-live-suggest.js';
 import { SessionWait } from '../components/Desk.jsx';
+import ThumbZoom from '../components/ThumbZoom.jsx';
 import { marketUrl } from '../punchouts.js';
 import '../scan-desk.css';
 
@@ -1357,11 +1361,16 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef }) {
 }
 
 function thumbFor(cardId, name, imageUrl) {
-  if (!cardId) return '';
+  if (!cardId) return { thumb: '', hero: '' };
+  const card = { id: cardId, card_id: cardId, name, imageUrl };
   try {
-    return imageSrc({ id: cardId, card_id: cardId, name, imageUrl }, 'suggest');
+    return {
+      thumb: imageSrc(card, 'suggest'),
+      // Full-resolution leftover JPEG for the hover zoom (falls back to thumb).
+      hero: imageSrc(card, 'hero'),
+    };
   } catch (_) {
-    return '';
+    return { thumb: '', hero: '' };
   }
 }
 
@@ -1516,7 +1525,9 @@ function QueueRow({
     ? row.language
     : listingLanguageForPrint(row.nationality, row.language);
   const langWarn = row.nationality && row.language !== langValue;
-  const thumb = thumbFor(row.cardId, row.cardName, row.imageUrl);
+  const thumbArt = thumbFor(row.cardId, row.cardName, row.imageUrl);
+  const thumb = thumbArt.thumb;
+  const zoomSrc = thumbArt.hero || thumbArt.thumb;
   const remapLang = preferredLanguage || row.language || 'EN';
   return (
     <div
@@ -1532,7 +1543,11 @@ function QueueRow({
       <span className="c-num">{index + 1}</span>
       <span className="c-art">
         {showCandidates && image && image !== 'none' ? <img className="scan-shot" src={image} alt="Scanned card" /> : null}
-        {thumb ? <img src={thumb} alt="" loading="lazy" /> : <span className="art-empty" />}
+        {thumb ? (
+          <ThumbZoom src={zoomSrc} full={Boolean(thumbArt.hero)} alt={row.cardName || ''}>
+            <img src={thumb} alt="" loading="lazy" />
+          </ThumbZoom>
+        ) : <span className="art-empty" />}
       </span>
       <span className="c-card">
         <strong>{row.cardName || (row.cardId ? `#${row.cardId}` : 'Not identified')}</strong>

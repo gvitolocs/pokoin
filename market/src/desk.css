@@ -298,6 +298,44 @@
 }
 .thread-chevron { flex-shrink: 0; color: var(--muted); }
 
+.thread-remove {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: #f87171;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.thread-remove:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.thread-remove:not(:disabled):hover {
+  opacity: 1;
+  background: rgb(239 68 68 / 0.12);
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
+.thread-remove svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
 .bag-list { display: flex; flex-direction: column; }
 .bag-row {
   display: grid;

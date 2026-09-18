@@ -111,7 +111,11 @@ test('Dashboard history panel keeps chart frame; never draws a real fake series'
   assert.match(cssSrc, /\.seller-history-ghost-line/);
   assert.match(cssSrc, /\.seller-history-frame/);
   assert.match(cssSrc, /min-height:\s*12\.5rem/);
+  // Trending reads the fast best_sellers rail; the marketplace hydrate
+  // (fetchHome) is seconds cold on api.pokoin.com and was discarded anyway.
+  assert.match(homeSrc, /RAIL\.bestSellers/);
   assert.match(homeSrc, /bestSellerIds/);
+  assert.doesNotMatch(homeSrc, /fetchHome\(/);
   assert.doesNotMatch(homeSrc, /\+\d+%/);
   assert.doesNotMatch(viewSrc, /series\(total/);
 });

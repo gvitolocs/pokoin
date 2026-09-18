@@ -3,9 +3,9 @@ import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   cardFromCatalogRow,
   fetchCollectionSummary,
-  fetchHome,
   fetchSellerListings,
 } from '../api.js';
+import { fetchRail, RAIL } from '../lists.js';
 import { useAuth } from '../auth.jsx';
 import { SellerDashboardView } from '../components/SellerDashboardView.jsx';
 import { SessionWait } from '../components/Desk.jsx';
@@ -79,20 +79,8 @@ const PREVIEW_FIXTURE = {
   ].map(cardFromCatalogRow),
 };
 
-function cardsForIds(cards, ids) {
-  const byId = new Map((cards || []).map((card) => [String(card.id), card]));
-  return (ids || []).map((id) => byId.get(String(id))).filter(Boolean);
-}
-
-function moversFromHome(payload) {
-  if (!payload) return [];
-  const cards = (payload.cards || []).map(cardFromCatalogRow).filter((c) => c.id);
-  const sections = payload.sections || {};
-  // Best sellers is a ranked marketplace rail — no % change in the payload.
-  const ranked = cardsForIds(cards, sections.bestSellerIds);
-  if (ranked.length) return ranked.slice(0, MOVER_LIMIT);
-  const featured = cardsForIds(cards, sections.featuredIds);
-  if (featured.length) return featured.slice(0, MOVER_LIMIT);
+function moversFromRail(rail) {
+  const cards = ((rail && rail.cards) || []).map(cardFromCatalogRow).filter((c) => c.id);
   return cards.slice(0, MOVER_LIMIT);
 }
 
@@ -184,13 +172,22 @@ export default function SellerHome() {
   useEffect(() => {
     if (preview) return undefined;
     let cancelled = false;
-    fetchHome([])
-      .then((payload) => {
-        if (!cancelled) setMovers(moversFromHome(payload));
-      })
-      .catch(() => {
-        if (!cancelled) setMovers([]);
-      });
+    // Trending reads the table-backed best_sellers rail (~90 ms). The shared
+    // home hydrate in api.js is seconds cold on api.pokoin.com, and the
+    // dashboard host is not on the origin-worker cached route. Its hydrate
+    // payload carries bestSellerIds but no newArrivalIds, so
+    // isPublicRailsVector rejected it — seconds of wait, then discarded.
+    async function loadMovers() {
+      const bestSellers = await fetchRail(RAIL.bestSellers).catch(() => null);
+      if (cancelled) return;
+      if (bestSellers?.cards?.length) {
+        setMovers(moversFromRail(bestSellers));
+        return;
+      }
+      const featured = await fetchRail(RAIL.featured).catch(() => null);
+      if (!cancelled) setMovers(moversFromRail(featured));
+    }
+    loadMovers();
     return () => {
       cancelled = true;
     };

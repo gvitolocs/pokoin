@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { fetchOwnedCollection, requestNftShipping } from '../api.js';
+import { fetchOwnedCollection, removeCollectionItem, requestNftShipping } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { isNftHolding, partitionHoldings } from '../collection-holdings.js';
 import { authFrom } from '../punchouts.js';
@@ -11,7 +11,7 @@ function canShip(row) {
   return isNftHolding(row) && (!status || status === 'not_requested');
 }
 
-function HoldingRow({ row }) {
+function HoldingRow({ row, onRemove, removing }) {
   const nft = isNftHolding(row);
   const meta = [
     row.setName,
@@ -30,6 +30,21 @@ function HoldingRow({ row }) {
           {meta.length ? ` · ${meta.join(' · ')}` : ''}
         </span>
       </span>
+      {onRemove ? (
+        <button
+          type="button"
+          className="thread-remove"
+          data-testid="collection-remove"
+          aria-label={`Remove ${row.cardName || row.name || row.cardId} from collection`}
+          title="Remove from collection"
+          disabled={removing}
+          onClick={() => onRemove(row)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      ) : null}
     </article>
   );
 }
@@ -46,6 +61,7 @@ export default function Collection() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [form, setForm] = useState({ name: '', line1: '', city: '', postalCode: '', country: '' });
+  const [removingId, setRemovingId] = useState(null);
 
   const loadCollection = useCallback(async () => {
     setRows(null);
@@ -96,6 +112,28 @@ export default function Collection() {
   if (!ready) return <SessionWait />;
   if (!signedIn) {
     return <Navigate to={authFrom(location.pathname || '/collection')} replace />;
+  }
+
+  async function removeItem(row) {
+    if (removingId) return;
+    setRemovingId(row.id);
+    setError('');
+    setMessage('');
+    try {
+      const token = await getBearer();
+      const result = await removeCollectionItem({ itemId: row.id }, token);
+      setRows((current) => (current || [])
+        .map((r) => (r.id === row.id ? { ...r, quantity: result.after } : r))
+        .filter((r) => !(r.id === row.id && result.deleted)));
+      if (result.deleted) {
+        setMessage(`Removed ${row.cardName || row.name || row.cardId} from your collection.`);
+      }
+    } catch (err) {
+      console.error('collection remove failed', err);
+      setError("Couldn't remove the card. Try again.");
+    } finally {
+      setRemovingId(null);
+    }
   }
 
   async function requestAll(event) {
@@ -160,7 +198,14 @@ export default function Collection() {
             {physical.length ? (
               <div className="thread-list" data-testid="collection-physical">
                 <p className="page-lede">Physical · {physical.length} stack{physical.length === 1 ? '' : 's'}</p>
-                {physical.map((row) => <HoldingRow key={row.id} row={row} />)}
+                {physical.map((row) => (
+                  <HoldingRow
+                    key={row.id}
+                    row={row}
+                    onRemove={removeItem}
+                    removing={removingId === row.id}
+                  />
+                ))}
               </div>
             ) : null}
             {nft.length ? (

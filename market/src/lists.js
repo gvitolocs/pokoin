@@ -4,7 +4,7 @@ import { expandProvisionalCardIds, normalizeRecentCardIds, realPublicCardId, rew
 import { isSetDeskCard } from './search-filters.js';
 import { isOriginDownError, isOriginDownStatus, noteOriginDown } from './working-page.js';
 
-const RAIL = {
+export const RAIL = {
   newCards: 'new_cards',
   featured: 'featured',
   bestSellers: 'best_sellers',
