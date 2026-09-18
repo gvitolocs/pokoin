@@ -97,6 +97,16 @@ export function effectivePrintBucket(row = {}, expansionNationalityLookup) {
   return 'unknown';
 }
 
+/** Search menu buckets fold korean into japanese (jpko flag, one option). */
+export function printLangMatchesBucket(want, bucket) {
+  const have = String(bucket || '').trim().toLowerCase();
+  const selected = String(want || '').trim().toLowerCase();
+  if (selected === 'japanese') {
+    return have === 'japanese' || have === 'korean';
+  }
+  return have === selected;
+}
+
 export function printingMatchesPrintLang(row, printLang, expansionNationalityLookup) {
   const want = String(printLang || 'all').trim().toLowerCase();
   if (!want || want === 'all') {
@@ -105,7 +115,7 @@ export function printingMatchesPrintLang(row, printLang, expansionNationalityLoo
   if (row?.live === true || String(row?.id || row?.card_id || '').startsWith('live:')) {
     return true;
   }
-  return effectivePrintBucket(row, expansionNationalityLookup) === want;
+  return printLangMatchesBucket(want, effectivePrintBucket(row, expansionNationalityLookup));
 }
 
 /**
@@ -158,13 +168,17 @@ export function cleanPrintLanguage(value) {
   if (raw === 'jp' || raw === 'ja') {
     return 'japanese';
   }
-  if (raw === 'ko') {
-    return 'korean';
+  // Korean rides the merged japanese (jpko) menu option.
+  if (raw === 'ko' || raw === 'korean') {
+    return 'japanese';
   }
   if (raw === 'zh' || raw === 'cn' || raw === 'zht') {
     return 'chinese';
   }
   const bucket = printBucket(raw);
+  if (bucket === 'korean') {
+    return 'japanese';
+  }
   if (SEARCH_PRINT_BUCKETS.includes(bucket)) {
     return bucket;
   }

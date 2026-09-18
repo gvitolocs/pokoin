@@ -211,8 +211,14 @@ test('hot search cache keys distinguish print language', async () => {
 test('printingMatchesPrintLang and cleanPrintLanguage aliases', () => {
   assert.equal(cleanPrintLanguage('EU'), 'western');
   assert.equal(cleanPrintLanguage('jp'), 'japanese');
+  // Korean print rides the merged japanese (jpko) menu option.
+  assert.equal(cleanPrintLanguage('ko'), 'japanese');
+  assert.equal(cleanPrintLanguage('korean'), 'japanese');
   assert.equal(printingMatchesPrintLang({ nationality: 'western' }, 'western'), true);
   assert.equal(printingMatchesPrintLang({ nationality: 'japanese' }, 'western'), false);
+  assert.equal(printingMatchesPrintLang({ nationality: 'korean' }, 'japanese'), true);
+  assert.equal(printingMatchesPrintLang({ nationality: 'japanese' }, 'japanese'), true);
+  assert.equal(printingMatchesPrintLang({ nationality: 'korean' }, 'western'), false);
   assert.equal(printingMatchesPrintLang({ live: true }, 'western'), true);
 });
 

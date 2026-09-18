@@ -227,12 +227,12 @@ export function langMeta(code) {
   return SEARCH_LANGS.find((row) => row.code === code) || SEARCH_LANGS[0];
 }
 
-/** Card print-region filter in the search pill. Not title language. */
+/** Card print-region filter in the search pill. Not title language.
+ * Korean print sits on japanese (jpko) — artistPrintRegion parity. */
 export const PRINT_LANGS = [
   { code: 'all', label: 'All prints' },
   { code: 'western', label: 'Western print', flag: 'euus', tag: 'EN' },
   { code: 'japanese', label: 'Japanese print', flag: 'jpko', tag: 'JP' },
-  { code: 'korean', label: 'Korean print', flag: 'ko', tag: 'KO' },
   { code: 'chinese', label: 'Chinese print', flag: 'zh' },
 ];
 
@@ -243,6 +243,10 @@ let currentPrint = readStoredPrint();
 function readStoredPrint() {
   try {
     const stored = localStorage.getItem(PRINT_KEY);
+    // Pre-merge stored 'korean' rides the merged japanese (jpko) filter.
+    if (stored === 'korean') {
+      return 'japanese';
+    }
     if (PRINT_CODES.has(stored)) {
       return stored;
     }

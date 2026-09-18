@@ -63,7 +63,7 @@
 import RAW_NAMES from './data/suggest-names.js';
 import RAW_SETS from './data/suggest-sets.js';
 import { suggestKind } from './identity.js';
-import { effectivePrintBucket } from './print-bucket.js';
+import { effectivePrintBucket, printLangMatchesBucket } from './print-bucket.js';
 import { TCG_ERA_CATALOG, matchTcgEra } from './tcg-eras.js';
 
 export const KEYBOARD_COST = 0.5;
@@ -1660,7 +1660,7 @@ export async function fetchSetAwareCards(parsed, {
       if (!printing.id || seen.has(printing.id)) {
         continue;
       }
-      if (printLang && printLang !== 'all' && effectivePrintBucket(printing) !== printLang) {
+      if (printLang && printLang !== 'all' && !printLangMatchesBucket(printLang, effectivePrintBucket(printing))) {
         continue;
       }
       if (suggestKind(printing) !== 'Singles') {
@@ -1781,7 +1781,7 @@ export function printingPrintRank(printing, printLang) {
   if (!printLang || printLang === 'all') {
     return 1;
   }
-  return effectivePrintBucket(printing) === printLang ? 0 : 2;
+  return printLangMatchesBucket(printLang, effectivePrintBucket(printing)) ? 0 : 2;
 }
 
 export function typedMeiliQuery(typed) {

@@ -142,9 +142,10 @@ test('suggest print-language filter keeps matching nationalities', () => {
     },
   ];
   assert.equal(filterSuggestByPrintLang(groups, 'all')[0].printings.length, 4);
-  assert.deepEqual(filterSuggestByPrintLang(groups, 'japanese')[0].printings.map((row) => row.id), ['1']);
+  // Korean print rides the merged japanese (jpko) option.
+  assert.deepEqual(filterSuggestByPrintLang(groups, 'japanese')[0].printings.map((row) => row.id), ['1', '4']);
   assert.deepEqual(filterSuggestByPrintLang(groups, 'western')[0].printings.map((row) => row.id), ['2']);
-  assert.deepEqual(filterSuggestByPrintLang(groups, 'korean')[0].printings.map((row) => row.id), ['4']);
+  assert.deepEqual(filterSuggestByPrintLang(groups, 'chinese')[0].printings.map((row) => row.id), ['3']);
 });
 
 test('artist desk print chips are western, Japanese+Korean, Chinese, and Indonesian', () => {
