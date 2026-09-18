@@ -193,6 +193,7 @@
 }
 
 .sd-field.grow input { width: 9rem; }
+.sd-field.pos input { width: 3.1rem; text-align: center; }
 .sd-field.qty input { width: 2.6rem; text-align: center; }
 
 .sd-seg {
@@ -540,12 +541,12 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 }
 
 .scan-queue.intent-collection .scan-row {
-  grid-template-columns: 2.4rem 4.8rem minmax(12rem, 1fr) 4.4rem 4.6rem 6.4rem 5.6rem 7rem 2.6rem 7rem 2.2rem;
+  grid-template-columns: 2.4rem 4.8rem minmax(12rem, 1fr) 4.4rem 4.6rem 6.4rem 5.6rem 8.2rem 2.6rem 7rem 2.2rem;
 }
 
 .scan-row {
   display: grid;
-  grid-template-columns: 2.4rem 4.8rem minmax(12rem, 1fr) 4.4rem 4.6rem 6.4rem 5.6rem 7rem 2.6rem 5.4rem 7rem 2.2rem;
+  grid-template-columns: 2.4rem 4.8rem minmax(12rem, 1fr) 4.4rem 4.6rem 6.4rem 5.6rem 8.2rem 2.6rem 5.4rem 7rem 2.2rem;
   align-items: center;
   gap: 0.45rem;
   min-height: var(--scan-row-h);
@@ -678,6 +679,18 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 .c-flags button.on { background: var(--yellow); color: #111; border-color: var(--yellow); }
 
 .c-qty { font-weight: 800; font-variant-numeric: tabular-nums; text-align: center; }
+/* Location cell: box name input + the position inside the box (box1·47). */
+.c-loc { min-width: 0; display: flex; align-items: center; gap: 0.15rem; }
+.c-loc input { min-width: 0; flex: 1; }
+.c-loc .loc-slot {
+  flex: none;
+  padding-right: 0.2rem;
+  color: var(--yellow);
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .c-price input { text-align: right; font-variant-numeric: tabular-nums; }
 .c-price.suggested input { color: var(--muted); font-style: italic; }
 
@@ -704,6 +717,31 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 }
 
 .scan-replace input { background: #000 !important; border-color: var(--g5) !important; }
+/* Unidentified rows keep an always-open printing search inside the card cell;
+   only the candidate list floats, like the `/` replace popup. */
+.scan-replace.inline {
+  position: static;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.scan-replace.inline .scan-replace-list {
+  position: absolute;
+  z-index: 8;
+  top: 100%;
+  left: 0;
+  width: min(28rem, 70vw);
+  max-height: 18rem;
+  overflow: auto;
+  margin-top: 0.3rem;
+  padding: 0.4rem;
+  background: #111;
+  border: 1px solid var(--yellow);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
 .scan-replace-list { display: flex; flex-direction: column; max-height: 18rem; overflow: auto; margin-top: 0.3rem; }
 .scan-replace-list button {
   display: grid;

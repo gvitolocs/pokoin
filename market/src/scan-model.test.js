@@ -4,17 +4,20 @@ import { isDashboardHost, phoneConnectUrl } from './scan-api.js';
 import {
   applyItems,
   batchCounts,
+  boxSlots,
   candidateList,
   cycleFinish,
   defaultsLabel,
   DEFAULTS,
   frameEvents,
   nextAttentionIndex,
+  nextBoxPositions,
   orderedRows,
   phaseText,
   queueRows,
   rowProblem,
   sessionPhase,
+  slotText,
   stackKey,
   stepCandidate,
   submitLabel,
@@ -125,7 +128,9 @@ test('session phase is recomputed locally with the server clock offset', () => {
 });
 
 test('defaults label, finish cycle, candidates, quantity typing', () => {
-  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'Box A12' }), 'IT · NM · Box A12 · Qty 1');
+  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'Box A12' }), 'IT · NM · Box A12·1 · Qty 1');
+  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'box1', startPosition: 47 }), 'IT · NM · box1·47 · Qty 1');
+  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: '' }), 'IT · NM · Qty 1');
   assert.equal(cycleFinish('standard'), 'holo');
   assert.equal(cycleFinish('other'), 'standard');
   assert.equal(cycleFinish('standard', -1), 'other');
@@ -169,4 +174,51 @@ test('createPatchChain serializes runs per key and survives failures', async () 
   await pOther;
   assert.equal(started, true);
   await slowA;
+});
+
+test('box slots: capture-time anchor, stacks take ranges, a later anchor re-starts', () => {
+  const list = [
+    row('a', { position: 1, location: 'box1', quantity: 1, defaultsSnapshot: { startPosition: 47 } }),
+    row('b', { position: 2, location: 'box1', quantity: 3, defaultsSnapshot: { startPosition: 47 } }),
+    row('c', { position: 3, location: 'box1', quantity: 2, defaultsSnapshot: { startPosition: 100 } }),
+    row('d', { position: 4, location: 'box2', quantity: 1, defaultsSnapshot: { startPosition: 12 } }),
+    row('e', { position: 5, location: '', quantity: 2 }),
+  ];
+  const slots = boxSlots(list);
+  assert.deepEqual(slots.get('a'), { start: 47, end: 47 });
+  assert.deepEqual(slots.get('b'), { start: 48, end: 50 });
+  assert.deepEqual(slots.get('c'), { start: 100, end: 101 });
+  assert.deepEqual(slots.get('d'), { start: 12, end: 12 });
+  assert.equal(slots.get('e'), undefined);
+  assert.equal(slotText(slots.get('a')), '·47');
+  assert.equal(slotText(slots.get('b')), '·48-50');
+  assert.equal(slotText(undefined), '');
+});
+
+test('rows without a captured start anchor at 1; next box positions remember the stop', () => {
+  const list = [
+    row('a', { position: 1, location: 'box1', quantity: 2 }),
+    row('b', { position: 2, location: 'box1', quantity: 1 }),
+    row('c', { position: 3, location: 'box2', quantity: 3 }),
+    row('d', { position: 4, location: '', quantity: 5 }),
+  ];
+  const slots = boxSlots(list);
+  assert.deepEqual(slots.get('a'), { start: 1, end: 2 });
+  assert.deepEqual(slots.get('b'), { start: 3, end: 3 });
+  assert.deepEqual(slots.get('c'), { start: 1, end: 3 });
+  assert.deepEqual(
+    Object.fromEntries(nextBoxPositions(list)),
+    { box1: 4, box2: 4 },
+  );
+});
+
+test('merged quantity growth shifts the following slots; submitted rows still count', () => {
+  const list = [
+    row('a', { position: 1, location: 'box1', quantity: 4, status: 'submitted' }),
+    row('b', { position: 2, location: 'box1', quantity: 1 }),
+  ];
+  const slots = boxSlots(list);
+  assert.deepEqual(slots.get('a'), { start: 1, end: 4 });
+  assert.deepEqual(slots.get('b'), { start: 5, end: 5 });
+  assert.deepEqual(Object.fromEntries(nextBoxPositions(list)), { box1: 6 });
 });

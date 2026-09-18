@@ -59,6 +59,25 @@ import '../scan-desk.css';
 /** CLIP version-set cache keyed by any member card id. */
 const versionSetCache = new Map();
 
+const BOX_POSITIONS_KEY = 'scan:box-positions';
+
+/** Where the seller stopped in each box, so the next session's Start
+ * position defaults there. localStorage: the scan desk is one browser. */
+function loadStoppedPositions() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(BOX_POSITIONS_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function rememberStoppedPositions(next) {
+  try {
+    localStorage.setItem(BOX_POSITIONS_KEY, JSON.stringify(next));
+  } catch (_) { /* private mode etc. — the suggestion is best effort */ }
+}
+
 function loadVersionSet(cardId) {
   const id = String(cardId || '').trim();
   if (!id) return Promise.resolve(null);
@@ -333,6 +352,7 @@ export default function ScanDesk() {
   }, [rows, pending]);
 
   const list = useMemo(() => queueRows(displayRows), [displayRows]);
+  const slots = useMemo(() => boxSlots(list), [list]);
   const counts = useMemo(
     () => batchCounts(displayRows, { intent: submitIntent }),
     [displayRows, submitIntent],
@@ -353,6 +373,42 @@ export default function ScanDesk() {
     const el = queueRef.current.querySelector(`[data-row="${focusId}"]`);
     el?.scrollIntoView?.({ block: 'nearest' });
   }, [focusId]);
+
+  // Keep "where I stopped" per box so the next session's Start position
+  // suggests it (PowerTools template behaviour).
+  useEffect(() => {
+    if (!list.length) return;
+    const next = nextBoxPositions(list);
+    const store = loadStoppedPositions();
+    let dirty = false;
+    for (const [loc, pos] of next) {
+      if (store[loc] !== pos) {
+        store[loc] = pos;
+        dirty = true;
+      }
+    }
+    if (dirty) rememberStoppedPositions(store);
+  }, [list]);
+
+  // The Start position suggests where the seller stopped in that box: on the
+  // first run for a batch and whenever the location switches. A start the
+  // seller typed for the current location is never overwritten.
+  const prevLocationRef = useRef(undefined);
+  useEffect(() => {
+    const loc = String(defaults.location || '').trim();
+    if (closed || !batch?.id) {
+      prevLocationRef.current = loc;
+      return;
+    }
+    const locationChanged = prevLocationRef.current !== loc;
+    prevLocationRef.current = loc;
+    if (!loc) return;
+    const stored = Math.trunc(Number(loadStoppedPositions()[loc])) || 0;
+    const current = Number(defaults.startPosition) || 1;
+    if (stored > 1 && stored !== current && (locationChanged || current === 1)) {
+      setDefaults({ startPosition: Math.min(9999, stored) });
+    }
+  }, [batch?.id, defaults.location, defaults.startPosition, closed]);
 
   // ---------------------------------------------------------------- toasts / undo
 
@@ -1189,6 +1245,7 @@ export default function ScanDesk() {
             image={images[row.id]}
             closed={closed}
             hidePrice={submitIntent === 'collection'}
+            slot={slots.get(row.id)}
             replacing={replaceFor === row.id}
             preferredLanguage={defaults.language}
             onPriceFocus={(rowId) => priceTouched.current.add(rowId)}
@@ -1288,11 +1345,18 @@ function QrBlock({ secret, pin }) {
 
 function DefaultsBar({ defaults, onChange, locationRef, quantityRef }) {
   const [locationDraft, setLocationDraft] = useState(defaults.location);
+  const [posDraft, setPosDraft] = useState(String(defaults.startPosition ?? 1));
   const [qtyDraft, setQtyDraft] = useState(String(defaults.quantity));
   useEffect(() => setLocationDraft(defaults.location), [defaults.location]);
+  useEffect(() => setPosDraft(String(defaults.startPosition ?? 1)), [defaults.startPosition, defaults.location]);
   useEffect(() => setQtyDraft(String(defaults.quantity)), [defaults.quantity]);
   const commitLocation = () => {
     if (locationDraft !== defaults.location) onChange({ location: locationDraft });
+  };
+  const commitPos = () => {
+    const n = Number.parseInt(posDraft, 10);
+    if (n >= 1 && n <= 9999 && n !== (defaults.startPosition ?? 1)) onChange({ startPosition: n });
+    else setPosDraft(String(defaults.startPosition ?? 1));
   };
   const commitQty = () => {
     const n = Number.parseInt(qtyDraft, 10);
@@ -1338,6 +1402,16 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef }) {
           placeholder="Box A12"
           onChange={(e) => setLocationDraft(e.target.value)}
           onBlur={commitLocation}
+          onKeyDown={blurOnEnter}
+        />
+      </label>
+      <label className="sd-field pos" title="Position inside the box the next card goes to">
+        <span>Start</span>
+        <input
+          inputMode="numeric"
+          value={posDraft}
+          onChange={(e) => setPosDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
+          onBlur={commitPos}
           onKeyDown={blurOnEnter}
         />
       </label>
@@ -1509,7 +1583,7 @@ function CandidateAlts({ row, preferredLanguage, onPick }) {
 }
 
 function QueueRow({
-  row, index, focused, selected, problem, image, closed, replacing,
+  row, index, focused, selected, problem, image, closed, slot, replacing,
   preferredLanguage, hidePrice = false,
   onFocus, onPatch, onPriceFocus, onPick, onRemove, onReplaceDone,
 }) {
@@ -1520,6 +1594,7 @@ function QueueRow({
       : row.recognitionState === 'manual' ? 'Manual' : row.reviewed && row.recognitionState !== 'matched' ? 'Checked' : 'Matched';
   const tone = row.status === 'submitted' ? 'ok' : problem === 'no_printing' ? 'bad' : problem ? 'warn' : 'ok';
   const showCandidates = !closed && (row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed;
+  const unidentified = !closed && !row.cardId;
   const allowedLangs = languagesForPrint(row.nationality, LANGUAGES);
   const langValue = allowedLangs.includes(row.language)
     ? row.language
@@ -1550,7 +1625,16 @@ function QueueRow({
         ) : <span className="art-empty" />}
       </span>
       <span className="c-card">
-        <strong>{row.cardName || (row.cardId ? `#${row.cardId}` : 'Not identified')}</strong>
+        {unidentified ? (
+          <ReplacePrinting
+            inline
+            onPick={(id) => { onPick(id); onReplaceDone(); }}
+            onClose={onReplaceDone}
+            seed=""
+          />
+        ) : (
+          <strong>{row.cardName || (row.cardId ? `#${row.cardId}` : 'Not identified')}</strong>
+        )}
         <ArtworkVersionSelect
           row={row}
           closed={closed}
@@ -1561,7 +1645,7 @@ function QueueRow({
         {showCandidates ? (
           <CandidateAlts row={row} preferredLanguage={remapLang} onPick={onPick} />
         ) : null}
-        {replacing ? <ReplacePrinting onPick={(id) => { onPick(id); onReplaceDone(); }} onClose={onReplaceDone} seed={row.cardName} /> : null}
+        {replacing && !unidentified ? <ReplacePrinting onPick={(id) => { onPick(id); onReplaceDone(); }} onClose={onReplaceDone} seed={row.cardName} /> : null}
       </span>
       <span className={`c-lang${langWarn ? ' warn' : ''}`} title={langWarn ? `Not a ${row.nationality || 'this'} print language` : ''}>
         {closed ? langValue : (
@@ -1605,20 +1689,28 @@ function QueueRow({
           </button>
         ))}
       </span>
-      <span className="c-loc">
-        {closed ? row.location : (
-          <input
-            defaultValue={row.location}
-            key={`${row.id}:${row.location}`}
-            tabIndex={-1}
-            maxLength={64}
-            onBlur={(e) => {
-              if (e.target.value !== row.location) onPatch({ location: e.target.value });
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') e.currentTarget.blur();
-            }}
-          />
+      <span className="c-loc" title={slot ? `Position ${slot.start}${slot.end > slot.start ? `–${slot.end}` : ''} inside the box` : undefined}>
+        {closed ? (
+          <>
+            {row.location}
+            <b className="loc-slot">{slotText(slot)}</b>
+          </>
+        ) : (
+          <>
+            <input
+              defaultValue={row.location}
+              key={`${row.id}:${row.location}`}
+              tabIndex={-1}
+              maxLength={64}
+              onBlur={(e) => {
+                if (e.target.value !== row.location) onPatch({ location: e.target.value });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur();
+              }}
+            />
+            {row.location ? <b className="loc-slot">{slotText(slot)}</b> : null}
+          </>
         )}
       </span>
       <span className="c-qty">{row.quantity}</span>
@@ -1882,7 +1974,7 @@ function ManualAddBar({
   );
 }
 
-function ReplacePrinting({ onPick, onClose, seed }) {
+function ReplacePrinting({ onPick, onClose, seed, inline = false }) {
   const [query, setQuery] = useState(seed || '');
   const input = useRef(null);
   const { results, active, setActive } = useScanPrintingSuggest(query);
@@ -1891,7 +1983,7 @@ function ReplacePrinting({ onPick, onClose, seed }) {
     input.current?.select();
   }, []);
   return (
-    <span className="scan-replace" role="dialog" aria-label="Replace printing">
+    <span className={inline ? 'scan-replace inline' : 'scan-replace'} role="dialog" aria-label="Replace printing">
       <input
         ref={input}
         value={query}

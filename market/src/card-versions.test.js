@@ -185,19 +185,21 @@ test('desk shortcuts follow this illustration, not every rarity of the name', ()
     { id: '245368', name: 'Blacephalon GX', set: 'Lost Thunder', number: 'Rainbow Secret Rare | 219/214' },
     fa,
   ];
+  // Default order is the era catalog, newest block first — not "current set
+  // first" — so a circle keeps its position when the seller clicks another.
   assert.deepEqual(
     deskSetShortcuts(ur, urArt).map((row) => row.set),
     [
-      'CSM1.5: Battle Elite',
-      'Super-Burst Impact',
-      'Tag Team GX: Tag All Stars',
-      'Lost Thunder',
       'World Championship Decks 2019',
+      'Tag Team GX: Tag All Stars',
+      'Super-Burst Impact',
+      'Lost Thunder',
+      'CSM1.5: Battle Elite',
     ],
   );
   assert.deepEqual(
     deskSetShortcuts(fa, faArt).map((row) => row.set),
-    ['CSM1.5: Battle Elite', 'Super-Burst Impact', 'Lost Thunder'],
+    ['Super-Burst Impact', 'Lost Thunder', 'CSM1.5: Battle Elite'],
   );
 });
 
@@ -216,7 +218,7 @@ test('CLIP Dialga reprints become four desk shortcuts, not the Dialga name dump'
   ];
   assert.deepEqual(
     deskSetShortcuts(csdc, deskClipCandidates([], clip)).map((row) => row.id),
-    ['770422', '342770', '403516', '756240'],
+    ['756240', '770422', '342770', '403516'],
   );
   const nameDump = Array.from({ length: 20 }, (_, i) => ({
     id: String(800000 + i),
@@ -237,7 +239,7 @@ test('few expansion reprints become desk set shortcuts; many do not', () => {
   const spark = { id: '586974', name: 'Ditto ◇ Prism Star', set: 'Thunderclap Spark', number: '043/060' };
   assert.deepEqual(
     deskSetShortcuts(lost, [stars, spark]).map((row) => row.set),
-    ['Lost Thunder', 'Tag Team GX: Tag All Stars', 'Thunderclap Spark'],
+    ['Tag Team GX: Tag All Stars', 'Thunderclap Spark', 'Lost Thunder'],
   );
   assert.deepEqual(deskSetShortcuts(lost, []).map((row) => row.id), ['245170']);
   const four = Array.from({ length: 4 }, (_, i) => ({
@@ -290,7 +292,7 @@ test('same-set rarities collapse to one shortcut, not two Mega Evolution circles
   const jp = { id: '689172', name: 'Mega Gardevoir ex', set: 'Mega Symphonia', number: 'Ultra Rare | 049/063' };
   assert.deepEqual(
     deskSetShortcuts(ur, [fa, jp]).map((row) => row.id),
-    ['703000', '689172'],
+    ['689172', '703000'],
   );
 });
 

@@ -34,7 +34,7 @@ Pokémon). Code: CardVault `api/_scan_connect.js` `stackKey`, SPA
 
 Bar pinned above the queue:
 
-`Language IT · Condition NM · Finish Standard · 1st Ed. · Signed · Location Box A12 · Qty 1 · Merge repeats ✓`
+`Language IT · Condition NM · Finish Standard · 1st Ed. · Signed · Location box1 · Start 47 · Qty 1 · Merge repeats ✓`
 
 | Default | Values | Snapshotted |
 | --- | --- | --- |
@@ -43,6 +43,7 @@ Bar pinned above the queue:
 | Finish | `standard holo reverse stamped promo other` | yes |
 | First edition, Signed, Altered | on / off | yes |
 | Location | free text ≤ 64 chars (`Box A12`, `Binder 3`) | yes |
+| Start position | 1–9999: the position inside the box the next card goes to. Suggests the position the seller stopped at last time (localStorage per box, seeded when the location changes or the batch starts). | yes |
 | Quantity per scan | 1–99 | yes |
 | Merge repeats | on / off | yes (the rule in force when the scan happened) |
 
@@ -125,7 +126,7 @@ Dense table, newest at the bottom, auto-scroll while the last row is in view.
 | Cond | NM… | `q w e r t y u` |
 | Finish | Standard / Reverse … | `i`, `.` |
 | Flags | 1st · Signed · Altered · Graded | `o`, `[` |
-| Loc | location | inline text |
+| Loc | box name + position inside the box (`box1 · 47`, `box1 · 48-50`) | box name inline text |
 | Qty | 1–99 | digits, `+` `-` |
 | Price | PKN; greyed "suggested" when prefilled | inline |
 | State | matched / check / unmatched / merged ×n | `Enter` confirm |
@@ -216,6 +217,24 @@ PowerTools' `locations[]` per-stack breakdown is deferred to the picking
 work (matrix follow-up #5). `location` is **private**: returned only when a
 seller reads their own listings (`?sellerUid=` with bearer), never on public
 card or seller pages.
+
+### Position inside the box
+
+PowerTools keeps box and slot in one location string (`AA03`, `Box 2`); the
+template carries whatever the seller typed last. Pokoin splits the pair:
+
+- **Batch Defaults** shows a **Start** input beside Location. It suggests the
+  position the seller stopped at last time (`localStorage` per box) and is
+  snapshotted like the other defaults, so a scan keeps the position in force
+  when it was captured.
+- Each stack claims `quantity` slots in its box from that anchor, in queue
+  order; a stack re-anchored by a later Start change starts at the new
+  position. The queue Loc cell shows `box1 · 47` (ranges for qty > 1) beside
+  the editable box name — `scan-model.js` `boxSlots` mirrors the server walk.
+- At submit the listing's `location` becomes the composed string
+  `box1·47` / `box1·48-50` (CardVault `_scan_store.js` `listingLocationOf`),
+  so inventory reads like a PowerTools location. The row's editable location
+  stays the bare box name, so the stack key and merging are unchanged.
 
 ## Autosave and recovery
 

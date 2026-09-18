@@ -63,6 +63,7 @@ import {
   SOLD_GRAPH_PAD,
 } from '../sold-graph.js';
 import { soldGraphView, soldTraitsForGraphDay } from '../sold-sales.js';
+import { albumShade, cardShadeStyle } from '../art-shade.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '../sold-sales-cache.js';
 import { authFrom } from '../punchouts.js';
 import { useAuth } from '../auth.jsx';
@@ -1485,6 +1486,8 @@ export default function Card() {
   const identity = printingIdentity(card);
   const fromPath = card.canonicalPath || window.location.pathname;
   const art = imageSrc(card, 'hero');
+  // The header tile takes the printing's leftover illustration shade.
+  const heroShade = albumShade(card);
   const setName = identity.set || '';
   const setHref = setName ? `/marketplace/sets/${setSlug(setName)}` : '';
   const artist = identity.artist || payload?.artist?.name || payload?.artist?.illustrator || '';
@@ -1623,7 +1626,10 @@ export default function Card() {
           }))),
         ]}
       />
-      <header className="asset-header">
+      <header
+        className={heroShade ? 'asset-header shaded' : 'asset-header'}
+        style={cardShadeStyle(card)}
+      >
         <div className="asset-title-row">
           <h1>{displayName(card)}{identityEmoji ? <span className="asset-emoji"> {identityEmoji}</span> : null}</h1>
           <div className="asset-title-tools">

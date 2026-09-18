@@ -2,6 +2,7 @@ import { namesEqual } from './exact-name.js';
 import { printingIdentity } from './identity.js';
 import { tilePricePkn } from './pkn.js';
 import { TCG_ERA_ORDER, tcgEra, tcgEraId } from './set-logos.js';
+import { expansionSortValue } from './tcg-eras.js';
 
 const LANG = { japanese: 'JP', western: 'EN', chinese: 'CN', korean: 'KO' };
 
@@ -97,9 +98,10 @@ export function deskClipCandidates(fetched = [], payloadVersions = []) {
 /**
  * One printing per expansion for the desk shortcut row. Pass the CLIP
  * same-illustration group (`marketplace-version-set` printings), not every
- * rarity of the English name. Current set first. A singleton still paints
- * one circle. Empty when there are more than DESK_SET_SHORTCUT_MAX sets
- * (then the desk keeps only “More versions...”).
+ * rarity of the English name. Default order is the set date, newest block
+ * first, so a circle keeps its position when the seller clicks another one.
+ * A singleton still paints one circle. Empty when there are more than
+ * DESK_SET_SHORTCUT_MAX sets (then the desk keeps only “More versions...”).
  */
 export function deskSetShortcuts(current, candidates = [], { max = DESK_SET_SHORTCUT_MAX } = {}) {
   if (!current?.id && !current?.card_id) {
@@ -124,7 +126,9 @@ export function deskSetShortcuts(current, candidates = [], { max = DESK_SET_SHOR
   if (!rows.length || rows.length > max) {
     return [];
   }
-  return rows;
+  return rows.sort((left, right) =>
+    expansionSortValue(right) - expansionSortValue(left)
+    || setKey(left).localeCompare(setKey(right)));
 }
 
 /** Rarity lineup + other artwork live on `/versions`. Keep that link next to set circles. */

@@ -2195,6 +2195,17 @@ h1, h2 { margin: 0 0 0.85rem; }
   margin-bottom: 1rem;
 }
 
+/* When the printing has a saved leftover shade, the header tile takes that
+   color over the navy default (same swatch the artist album tints with). */
+.asset-header.shaded {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--card-shade) 46%, #10131c),
+    color-mix(in srgb, var(--card-shade) 26%, #0d1016)
+  );
+  border-color: color-mix(in srgb, var(--card-shade) 34%, var(--g5));
+}
+
 .asset-title-row,
 .asset-sub-row {
   display: flex;

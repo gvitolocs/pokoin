@@ -11,3 +11,9 @@ export function albumShadeStyle(card) {
   const shade = albumShade(card);
   return shade ? { '--album-shade': shade } : undefined;
 }
+
+/** The desk header tile tints with the same leftover shade (`--card-shade`). */
+export function cardShadeStyle(card) {
+  const shade = albumShade(card);
+  return shade ? { '--card-shade': shade } : undefined;
+}

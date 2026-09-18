@@ -20,6 +20,7 @@ export const DEFAULTS = Object.freeze({
   signed: false,
   altered: false,
   location: '',
+  startPosition: 1,
   quantity: 1,
   mergeRepeats: true,
 });
@@ -43,6 +44,48 @@ export function applyItems(rows, items) {
 /** Queue order: physical scan order (fractional positions for copies). */
 export function orderedRows(rows) {
   return Object.values(rows || {}).sort((a, b) => Number(a.position) - Number(b.position));
+}
+
+/**
+ * Position inside the box per queue row, like PowerTools' location strings
+ * (`AA03`). Walking queue order, a stack claims `quantity` slots in its
+ * location starting from the start position in force when it was captured
+ * (`defaultsSnapshot.startPosition`); a later capture-time anchor re-starts
+ * the counter when the seller moved to a new spot. Rows without a location
+ * consume nothing. Mirrors `listingLocationOf` in CardVault `_scan_store.js`.
+ */
+export function boxSlots(list) {
+  const counters = new Map();
+  const slots = new Map();
+  for (const row of list || []) {
+    const loc = String(row.location ?? '').trim();
+    if (!loc) continue;
+    const anchor = Math.max(1, Math.trunc(Number(row.defaultsSnapshot?.startPosition)) || 1);
+    const start = Math.max((counters.get(loc) || 0) + 1, anchor);
+    const end = start + (Number(row.quantity) || 1) - 1;
+    slots.set(row.id, { start, end });
+    counters.set(loc, end);
+  }
+  return slots;
+}
+
+/** Next free slot per location — the position the seller stopped at. */
+export function nextBoxPositions(list) {
+  const next = new Map();
+  for (const row of list || []) {
+    const loc = String(row.location ?? '').trim();
+    if (!loc) continue;
+    const anchor = Math.max(1, Math.trunc(Number(row.defaultsSnapshot?.startPosition)) || 1);
+    const end = Math.max(next.get(loc) || 1, anchor) + (Number(row.quantity) || 1) - 1;
+    next.set(loc, end + 1);
+  }
+  return next;
+}
+
+/** `·47` / `·47-49` suffix shown beside the box name. */
+export function slotText(slot) {
+  if (!slot) return '';
+  return `·${slot.start}${slot.end > slot.start ? `-${slot.end}` : ''}`;
 }
 
 /** Rows the seller works with: merged repeats live inside their head's qty. */
@@ -185,7 +228,7 @@ export function defaultsLabel(d = DEFAULTS) {
     d.firstEdition ? '1st Ed.' : '',
     d.signed ? 'Signed' : '',
     d.altered ? 'Altered' : '',
-    d.location,
+    d.location ? `${d.location}·${d.startPosition ?? 1}` : '',
     `Qty ${d.quantity}`,
   ].filter(Boolean).join(' · ');
 }
