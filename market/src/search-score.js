@@ -64,6 +64,12 @@ export const Q_ARTIST_PREFIX = 0.28;
 export const Q_NUMBER = 0.4;
 export const Q_RARITY = 0.35;
 
+// Tight-match preference: when two candidates cover the same tokens equally,
+// the one whose name has FEWER leftover (unmatched) tokens is the better match
+// (`Pikachu GX` over `Pikachu & Zekrom GX` for `pikachu gx`). A small per-extra
+// penalty on quality, so it only breaks quality ties — never overturns coverage.
+export const EXTRA_TOKEN_PENALTY = 0.05;
+
 // Selected-language bias: a match in the selected (non-English) language is
 // slightly better evidence than the same tier in English. Kept tiny so it only
 // breaks otherwise-equal ties — never lifts a weaker reading over a stronger
@@ -349,6 +355,17 @@ export function scoreEntry(tokens, doc, langs = ['en']) {
       perToken.push({ token: token.raw, quality: 0, distance: Infinity, via: 'none', lang: '' });
     }
   }
+  // Tight-match preference: penalize leftover name tokens (per the tightest
+  // active-language name), so a full-name match beats a longer partial one.
+  let minNameLen = Infinity;
+  for (const lang of langs) {
+    const names = doc.langText?.[lang]?.name;
+    if (names && names.length) {
+      minNameLen = Math.min(minNameLen, names.length);
+    }
+  }
+  const extraTokens = Number.isFinite(minNameLen) ? Math.max(0, minNameLen - coverage) : 0;
+  quality -= EXTRA_TOKEN_PENALTY * extraTokens;
   const score = coverage * COVERAGE_UNIT + quality * QUALITY_UNIT + priorBonus(doc.prior);
   return { score, coverage, quality, distance, perToken };
 }
