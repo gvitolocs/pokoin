@@ -169,7 +169,6 @@ export default function Collection() {
       <PageHead
         kicker="Holdings"
         title="Collection"
-        lede="Your collection — physical cards you own and NFT holdings. Set binders with owned/missing slots come next."
       >
         <Link className="btn ghost" to="/product/nft">NFT catalog</Link>
         <Link className="btn ghost" to="/scan">Scan cards</Link>
