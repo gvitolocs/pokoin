@@ -2127,6 +2127,22 @@ export async function fetchSuggestRanked(term, {
     || isNumberAwareQuery(parsed)
     || isRarityAwareQuery(parsed);
   const setAware = (isSetAwareQuery(parsed) || setOnly) && typeof fetchSearch === 'function';
+  // Ordinary multi-token free text uses the HIGH-RECALL full-text SEARCH
+  // endpoint for candidate generation — the same endpoint set-aware queries
+  // already use — so the retrieval engine no longer depends on whether the
+  // legacy parser recognized a set. This is what lets `Pikachu & Zekrom GX`
+  // reach the candidate union for `pikachu gx`, exactly as `Palkia & Dialga
+  // LEGEND` already did for `palkia legend`. Structured paths (bare collector,
+  // set-only, art/rarity/number peels, set-aware) keep their own retrieval.
+  // Scorer-owned free text (matches liveSuggestGroups' isFreeText): everything
+  // except a bare collector number, a set-only browse, or the `energy` browse.
+  // Set/rarity/art/mechanic recognition is EVIDENCE, not a retrieval switch —
+  // so `palkia legend`, `charizard sr`, `arceus platinum` all use generic
+  // high-recall search too, not the legacy set-filtered rescue.
+  const isEnergyQuery = isSetAwareQuery(parsed) && compactQuery(nameQuery) === 'energy';
+  const queryWordCount = String(query).trim().split(/\s+/).filter(Boolean).length;
+  const freeTextSearch = !bareNumber && !setOnly && !isEnergyQuery
+    && queryWordCount >= 2 && typeof fetchSearch === 'function';
   const suggestFn = typeof fetchSuggest === 'function'
     ? fetchSuggest
     : async () => ({ groups: [], count: 0 });
@@ -2228,8 +2244,12 @@ export async function fetchSuggestRanked(term, {
   const resolvedName = bareNumber ? query : (corrected || resolvedNameQuery(nameQuery, ranked));
   const resolvedParsed = { ...parsed, nameQuery: resolvedName };
   const firstWord = String(query).trim().split(/\s+/)[0] || '';
+  // Free text draws its candidates from the SEARCH endpoint, not from a
+  // first-word rankNames fan-out — that seed ranked `pikachu` variants and
+  // buried the `Pikachu & Zekrom GX` Tag Team. Only non-free-text keeps it.
   const seedLookups = !bareNumber
     && !peeled
+    && !freeTextSearch
     && compactQuery(firstWord).length >= 3
     && compactQuery(firstWord) !== compactQuery(nameQuery)
     ? extraSuggestQueries(query, rankNames(firstWord, pool), extraLimit, kind)
@@ -2246,14 +2266,17 @@ export async function fetchSuggestRanked(term, {
       !immediateLookups.some((row) => compactQuery(row) === compactQuery(lookup))
     ));
   const [setCards, immediatePayloads, extraPayloads] = await Promise.all([
-    setAware
-      ? fetchSetAwareCards(resolvedParsed, {
-        fetchSearch,
-        lang,
-        signal,
-        strict: false,
-      })
-      : Promise.resolve([]),
+    freeTextSearch
+      // High-recall full-text search for the raw query — the candidate source
+      // that actually contains the compound cards (Tag Teams, LEGEND pairs).
+      // Takes precedence over the set-filtered path so recognition of a set
+      // token no longer decides the retrieval engine.
+      ? fetchSearch({ query, offset: 0, limit: Math.max(48, limit), lang, printLang, signal })
+        .then((data) => data?.cards || [])
+        .catch((error) => { if (error?.name === 'AbortError') { throw error; } return []; })
+      : (setAware
+        ? fetchSetAwareCards(resolvedParsed, { fetchSearch, lang, signal, strict: false })
+        : Promise.resolve([])),
     immediatePayloadsPromise,
     Promise.all(extraLookups.map(suggestLookup)),
   ]);
@@ -2290,6 +2313,11 @@ export async function fetchSuggestRanked(term, {
     ...payloads.map((payload) => payload?.groups || []),
   ]);
   if (!bareNumber && compactQuery(resolvedName).length >= 3) {
+    // Name-lock keeps set/number-aware queries focused on the typed name. It is
+    // safe with high-recall search: a compound like `Palkia & Dialga LEGEND`
+    // contains the name (`palkia`) so it survives, while unrelated set-mates
+    // (Flareon in the same Plasma set) are dropped. `pikachu gx` is not
+    // set/number-aware, so it is never locked and the Tag Team stays.
     const nameLock = isNumberAwareQuery(parsed)
       || (isSetAwareQuery(parsed) && compactQuery(nameQuery) !== 'energy');
     if (nameLock) {
