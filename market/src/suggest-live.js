@@ -25,7 +25,6 @@ import {
   isRarityAwareQuery,
   isSetAwareQuery,
   isSetOnlyQuery,
-  isModifierWord,
   hasRivalMechanic,
   typedModifiers,
   mergeSuggestGroups,
@@ -368,9 +367,12 @@ export function liveSuggestGroups(query, {
   const nameQuery = isBareCollectorQuery(parsed) ? query : (parsed.nameQuery || query);
   const intent = isBareCollectorQuery(parsed) ? { kind: 'name' } : catalogIntent(query);
   const resolved = isBareCollectorQuery(parsed) ? null : resolveSuggestQuery(query);
-  // Artist bindings keep their hydrate branch; the resolver no longer OWNS a
-  // free-text card query (`palkia legend`) — that goes through the one scorer.
-  if (resolved && resolved.hasArtist && resolverOwns(resolved)) {
+  // LEGACY (kept for parity comparison per §15, superseded by the scorer's
+  // typed artist evidence): the resolver-artist paint branch. Artist queries
+  // now flow through the ONE scorer below, which credits `artist` evidence on
+  // hydrated rows. Flip LEGACY_ARTIST_PAINT to true only to A/B the old paint.
+  const LEGACY_ARTIST_PAINT = false;
+  if (LEGACY_ARTIST_PAINT && resolved && resolved.hasArtist && resolverOwns(resolved)) {
     const branch = resolverLiveGroups(resolved, { limit, preferPerGroup });
     if (branch) {
       return {
@@ -396,23 +398,17 @@ export function liveSuggestGroups(query, {
   // (`expedition`), art/rarity/number peels, the `energy` set browse, and
   // resolver artist bindings — each a hard universe constraint the coverage
   // scorer cannot express, not free-text card search.
-  // A CONFIDENT set token is a real set alias/title the user browses by
-  // (`sl` → Call of Legends, `platinum`, `call of legends`) — an opaque alias
-  // the coverage scorer cannot reconstruct from set-name tokens, so it keeps
-  // the set-aware browse path. A PREFIX peel (`pika` → Pikachu World
-  // Collection) or a MODIFIER homonym (`legend`) is a false positive: those go
-  // through the one scorer as evidence. This is the Section-7 boundary — only
-  // fuzzy/prefix set recognition is demoted, never explicit set intent.
-  const confidentSet = (parsed.setTokens || []).some((token) => (
-    !token.prefix && !isModifierWord(token.token || token.compact)
-  ));
-  const isFreeText = !isBareCollectorQuery(parsed)
-    && !isSetOnlyQuery(parsed)
-    && !isNumberAwareQuery(parsed)
-    && !isArtAwareQuery(parsed)
-    && !isRarityAwareQuery(parsed)
-    && !confidentSet
-    && !(resolved && resolved.hasArtist);
+  // Knowledge-rich, branch-poor: every curated vocabulary (artist, set/era
+  // alias, rarity/art alias, collector number) now enters the ONE scorer as
+  // TYPED EVIDENCE (search-score.js), so recognition never routes a different
+  // pipeline. Only genuinely structured/browse queries keep an optimized path:
+  //   - a bare collector number  (`025`, `SH1`)      → number-filtered browse
+  //   - a bare set-title browse   (`expedition`)      → that set's printings
+  //   - the `energy` set browse   (`hgss energy`)     → elemental energies
+  // A mixed query (`charizard 025/198`, `palkia sl`, `charizard sr`,
+  // `sugimori pikachu`) is free text and flows through the scorer.
+  const isEnergySet = isSetAwareQuery(parsed) && compactQuery(nameQuery) === 'energy';
+  const isFreeText = !isBareCollectorQuery(parsed) && !isSetOnlyQuery(parsed) && !isEnergySet;
   if (isFreeText) {
     const lang = String(searchLang || 'en').toLowerCase();
     // Name-pool order (English local vocab) for the returned `ranked` and FLIP.
@@ -422,18 +418,28 @@ export function liveSuggestGroups(query, {
     // The displayed rows are the live cache scored by the ONE model, filtered
     // to tokens actually covered and ordered by coverage→quality. Scoring the
     // whole cache (not just rankFreeText's top-N) keeps a low-quality-but-valid
-    // reading (base `Pikachu` under `pikahc gx`) and surfaces server-hydrated
+    // reading (base `Pikachu` under `pikahc gx`), lets typed evidence surface
+    // artist/set/rarity/collector matches, and picks up server-hydrated
     // localized rows through the same code path — deterministic, order-free.
     const scored = scoreGroups(query, popupGroups(allCachedGroups(), printLang), { lang });
-    // Free text is never a hard set filter: drop any peeled set token so fill /
-    // order treat recognition as evidence. Mechanic words still ride the raw
-    // query for fill's rival-mechanic consistency (`pika gx` hides ex prints).
-    const freeParsed = { ...parsed, setTokens: [], eras: [], nameQuery: query };
-    const each = typedModifiers(query).mods.length ? limit : preferPerGroup;
+    // Recognition is EVIDENCE, never a hard facet here: strip every peeled
+    // structured token so fill/order impose no set/art/rarity/number filter —
+    // the scorer already weighed them. Mechanic words still ride the raw query
+    // for fill's rival-mechanic consistency (`pika gx` hides ex prints).
+    const freeParsed = {
+      ...parsed, setTokens: [], artTokens: [], rarityTokens: [], numberTokens: [], eras: [], nameQuery: query,
+    };
+    // Show more printings per card when the query carries structure (a specific
+    // rarity/art/set/number/mechanic), one per card for a plain name browse.
+    const structured = typedModifiers(query).mods.length
+      || isArtAwareQuery(parsed) || isRarityAwareQuery(parsed)
+      || isNumberAwareQuery(parsed) || (parsed.setTokens || []).length
+      || Boolean(resolved && resolved.hasArtist);
     return {
-      groups: fillSuggestGroups(scored.groups, limit, each, freeParsed, kind),
+      groups: fillSuggestGroups(scored.groups, limit, structured ? limit : preferPerGroup, freeParsed, kind),
       ranked,
       parsed: freeParsed,
+      intent,
     };
   }
   // Token-peeled queries rank the local name pool. The parse already split the

@@ -68,6 +68,18 @@ function both(path, element) {
   ];
 }
 
+/** Leave dashboard.pokoin.com for the apex — do not paint marketplace routes here. */
+function DashboardMarketHandoff({ target }) {
+  useEffect(() => {
+    window.location.replace(target);
+  }, [target]);
+  return (
+    <div className="page desk" style={{ padding: '2.5rem 1.25rem', color: 'var(--muted)' }} role="status">
+      Opening marketplace…
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -96,15 +108,10 @@ function AppShell() {
   const framed = framedByChromeExtension();
   // dashboard.pokoin.com/scan is the Scan Connect desk; pokoin.com/scan stays photo identify.
   const dashboard = isDashboardHost();
-  // Marketplace chrome on the dashboard host must not keep /marketplace etc. here —
-  // send those paths to the apex so the URL matches the product surface.
-  useEffect(() => {
-    if (!dashboard || framed || board) return undefined;
-    if (isDashboardDeskPath(pathname)) return undefined;
-    const target = `${MARKET_ORIGIN}${pathname}${search || ''}`;
-    window.location.replace(target);
-    return undefined;
-  }, [dashboard, framed, board, pathname, search]);
+  // Never mount marketplace pages on the dashboard host — they paint black until refresh.
+  if (dashboard && !framed && !board && !isDashboardDeskPath(pathname)) {
+    return <DashboardMarketHandoff target={`${MARKET_ORIGIN}${pathname}${search || ''}`} />;
+  }
   if (originDown && !board && !framed) {
     return <WorkingOnIt />;
   }
@@ -186,6 +193,7 @@ function AppShell() {
       {both('/whitepaper', <Site />)}
       {both('/health', <Site />)}
       {both('/', dashboard ? <SellerHome /> : <Navigate to="/marketplace" replace />)}
+      {import.meta.env.DEV ? both('/dash-preview', <SellerHome />) : null}
       <Route path="*" element={<Navigate to={dashboard ? '/' : '/marketplace'} replace />} />
     </Routes>
   );

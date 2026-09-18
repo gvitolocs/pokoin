@@ -66,6 +66,46 @@ function applyInjectedDeskSession(data = {}) {
   return true;
 }
 
+function isPrivateDevHost(hostname = '') {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'localhost'
+    || host === '127.0.0.1'
+    || host === 'nezopt'
+    || /^100\.\d+\.\d+\.\d+$/.test(host);
+}
+
+/** Vite `/__dev/bearer` — Tailscale/local only. Never hits production. */
+async function bootstrapPrivateDevBearer() {
+  if (!import.meta.env.DEV || typeof window === 'undefined') {
+    return false;
+  }
+  if (!isPrivateDevHost(window.location.hostname)) {
+    return false;
+  }
+  if (injectedDeskSession.token && injectedDeskSession.uid) {
+    return true;
+  }
+  try {
+    const res = await fetch('/__dev/bearer', { cache: 'no-store' });
+    if (!res.ok) {
+      return false;
+    }
+    const data = await res.json();
+    if (!applyInjectedDeskSession(data)) {
+      return false;
+    }
+    writeAuthToken({
+      token: data.token,
+      uid: data.uid,
+      expiresAt: Number(data.expiresAt) || 0,
+    });
+    writeAuthSession({ uid: data.uid, signedIn: true });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 export function sellerNameOf(user) {
   if (!user) {
     return 'Pokoin seller';
@@ -229,6 +269,22 @@ export function AuthProvider({ children }) {
     window.addEventListener('message', onMessage);
     requestDeskSession();
     return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const ok = await bootstrapPrivateDevBearer();
+      if (cancelled || !ok) return;
+      const uid = injectedDeskSession.uid;
+      if (!uid) return;
+      setExtensionUid(uid);
+      persistSession({ uid });
+      void hydrateInjectedDeskProfile();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => onAuthStateChanged(firebaseAuth, (next) => {

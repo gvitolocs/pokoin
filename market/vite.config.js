@@ -26,6 +26,32 @@ function serveLandingHome() {
           return;
         }
         const pathname = decodeURIComponent(req.url.split('?')[0]);
+        if (pathname === '/__dev/bearer') {
+          const file = path.join(process.env.HOME || '', '.config/pokoin/dev-bearer.json');
+          if (!fs.existsSync(file)) {
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'no_dev_bearer' }));
+            return;
+          }
+          try {
+            const raw = fs.readFileSync(file, 'utf8');
+            const data = JSON.parse(raw);
+            if (!data?.token || !data?.uid) {
+              res.statusCode = 404;
+              res.end(JSON.stringify({ error: 'invalid_dev_bearer' }));
+              return;
+            }
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Cache-Control', 'no-store');
+            res.end(JSON.stringify(data));
+          } catch (err) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: String(err?.message || err) }));
+          }
+          return;
+        }
         const iconName = rootIcons[pathname];
         const relative = pathname.startsWith('/home/')
           ? pathname.slice('/home/'.length)
@@ -104,6 +130,7 @@ function rewriteMarketplace(server) {
       || url === '/checkout' || url.startsWith('/checkout/')
       || url === '/orders' || url.startsWith('/orders/')
       || url === '/collection' || url.startsWith('/collection/')
+      || url === '/dash-preview'
     ) {
       req.url = '/index.html';
     }

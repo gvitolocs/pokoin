@@ -109,7 +109,10 @@ test('session phase is recomputed locally with the server clock offset', () => {
   const now = Date.parse('2026-09-17T12:00:00Z');
   const connected = { status: 'connected', phase: 'connected', phoneLabel: 'iPhone', phoneLastSeenAt: '2026-09-17T11:59:58Z' };
   assert.equal(sessionPhase(connected, now), 'connected');
-  assert.deepEqual(phaseText('connected', connected), { tone: 'ok', text: 'iPhone connected' });
+  assert.deepEqual(phaseText('connected', connected), {
+    tone: 'ok',
+    text: 'iPhone connected · disconnects after 10 min idle',
+  });
   assert.equal(sessionPhase({ ...connected, phase: 'scanning' }, now), 'scanning');
   assert.equal(sessionPhase(connected, now + 15_000), 'lost');
   assert.equal(sessionPhase(connected, now + 15_000, -10_000), 'connected', 'desktop clock 10 s fast');

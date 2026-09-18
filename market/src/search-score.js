@@ -29,11 +29,20 @@
  */
 
 import {
+  ART_ALIAS_COMPACT,
   NAME_POOL,
+  RARITY_ALIAS_COMPACT,
+  RARITY_PHRASE_COMPACT,
   compactQuery,
   emissionMultiplier,
+  exactSetAlias,
   maxDistance,
+  parseCollectorWord,
   prefixEditDistance,
+  printingMatchesArtFilter,
+  printingMatchesNumberFilter,
+  printingMatchesRarityFilter,
+  printingMatchesSetFilter,
 } from './suggest-rank.js';
 import { ARTIST_POOL, SET_POOL, expansionNationality } from './suggest-catalog.js';
 import { printBucket } from './print-bucket.js';
@@ -51,18 +60,26 @@ import { printBucket } from './print-bucket.js';
 export const COVERAGE_UNIT = 1000;
 export const QUALITY_UNIT = 10;
 
-// Per-token evidence quality, 0..1. Name evidence always beats metadata
-// evidence, so `legend` as an exact NAME token outscores `legend` as a set.
+// Per-token evidence quality, 0..1. Field-quality model (small + explainable):
+//   name        strongest (a card literally titled with your word)
+//   collector   extremely specific — an exact printed number is very
+//               discriminative, so it sits just under an exact name
+//   artist/set  strong contextual evidence
+//   rarity/art  supporting evidence
+// Name evidence still always beats metadata, so `legend` as a NAME token
+// outscores `legend` as a set. Coverage (tokens matched) dominates all of it.
 export const Q_NAME_EXACT = 1.0;
 export const Q_NAME_PREFIX = 0.7; // query token is a prefix of a name token (pika → Pikachu)
 export const Q_NAME_TYPO = 0.5; // scaled by emissionMultiplier(distance)
-export const Q_SET_EXACT = 0.4;
-export const Q_SET_PREFIX = 0.28;
+export const Q_COLLECTOR = 0.9; // exact printed collector number (n, n/m, SH1, 74a)
+export const Q_ARTIST_EXACT = 0.6;
+export const Q_ARTIST_PREFIX = 0.42;
+export const Q_SET_EXACT = 0.5; // literal set-name word, or a set/era alias (hgss, sl)
+export const Q_SET_PREFIX = 0.32;
 export const Q_SET_TYPO = 0.18;
-export const Q_ARTIST_EXACT = 0.4;
-export const Q_ARTIST_PREFIX = 0.28;
-export const Q_NUMBER = 0.4;
-export const Q_RARITY = 0.35;
+export const Q_NUMBER = 0.4; // lexical number-field match (weaker than a parsed collector)
+export const Q_RARITY = 0.35; // rarity word or alias (sr → secret)
+export const Q_ART = 0.35; // illustration / art alias (ir, sir, fa, illustrazione)
 
 // Tight-match preference: when two candidates cover the same tokens equally,
 // the one whose name has FEWER leftover (unmatched) tokens is the better match
@@ -122,14 +139,83 @@ export function nameTokens(display) {
   return merged;
 }
 
-/** Non-destructive tokenization: keep every token's raw + normalized form. */
+// --- Typed vocabulary recognition (additive; never consumes a token) ---------
+// Every curated vocabulary the old resolver/parseTypedQuery owned becomes a
+// TYPED interpretation of a query token, carried alongside its always-present
+// name reading. Recognition only ADDS evidence — an ambiguous term (`legend`,
+// `sl`) keeps every plausible reading and coverage/quality resolves it (§12),
+// so we never re-commit early the way the old branch router did.
+
+// Canonical rarity keys the rarity filter understands (secret, ultra, holo, …).
+const RARITY_CANON = new Set([...RARITY_ALIAS_COMPACT.values(), ...RARITY_PHRASE_COMPACT.values()]);
+// Artist recognition: an exact illustrator name or last-name row → identity.
+const ARTIST_BY_COMPACT = new Map();
+for (const row of ARTIST_POOL) {
+  if (row.compact && !ARTIST_BY_COMPACT.has(row.compact)) {
+    ARTIST_BY_COMPACT.set(row.compact, { display: row.display, slug: row.slug || '' });
+  }
+}
+
+/** Typed interpretations for one token, beyond its always-present name reading. */
+function tokenInterps(raw, compact) {
+  const interps = [];
+  const rarityAlias = RARITY_ALIAS_COMPACT.get(compact);
+  if (rarityAlias) {
+    interps.push({ field: 'rarity', kind: 'alias', canonical: rarityAlias });
+  } else if (RARITY_CANON.has(compact)) {
+    interps.push({ field: 'rarity', kind: 'word', canonical: compact });
+  }
+  const art = ART_ALIAS_COMPACT.get(compact);
+  if (art) {
+    interps.push({ field: 'art', kind: 'alias', canonical: art });
+  }
+  const setAlias = compact.length >= 2 ? exactSetAlias(raw) : null;
+  if (setAlias?.setNames?.length) {
+    interps.push({
+      field: 'set',
+      kind: 'alias',
+      canonical: setAlias.setNames[0],
+      setToken: {
+        token: raw,
+        compact,
+        eraId: setAlias.eraId || '',
+        setNames: setAlias.setNames,
+        needles: setAlias.needles || [compact],
+        prefix: false,
+        slug: setAlias.slug || '',
+      },
+    });
+  }
+  const number = parseCollectorWord(raw);
+  if (number) {
+    interps.push({ field: 'number', kind: 'collector', canonical: number.token, numberToken: number });
+  }
+  const artist = ARTIST_BY_COMPACT.get(compact);
+  if (artist) {
+    interps.push({ field: 'artist', kind: 'exact', canonical: artist.display, slug: artist.slug });
+  }
+  return interps;
+}
+
+/** Non-destructive tokenization: keep every token's raw + normalized form plus
+ * its typed interpretations (name is implicit; extras come from vocabulary). */
 export function tokenizeQuery(raw) {
   const text = String(raw || '').trim();
   const tokens = [];
   for (const word of text.split(/\s+/).filter(Boolean)) {
     const compact = compactQuery(word);
     if (compact) {
-      tokens.push({ raw: word, compact });
+      tokens.push({ raw: word, compact, interps: tokenInterps(word, compact) });
+    }
+  }
+  // Multi-word rarity/art phrases (`secret rare`, `full art`) add a shared
+  // interpretation to the spanned tokens without consuming them (§5).
+  for (let i = 0; i + 1 < tokens.length; i += 1) {
+    const canon = RARITY_PHRASE_COMPACT.get(compactQuery(`${tokens[i].raw} ${tokens[i + 1].raw}`));
+    if (canon) {
+      const field = canon === 'illustration' ? 'art' : 'rarity';
+      tokens[i].interps.push({ field, kind: 'phrase', canonical: canon });
+      tokens[i + 1].interps.push({ field, kind: 'phrase', canonical: canon });
     }
   }
   return { raw: text, tokens };
@@ -307,7 +393,13 @@ export function tokenEvidence(token, doc, langs = ['en']) {
     }
     const boosted = lang !== 'en' ? evidence.quality * (1 + SELECTED_LANG_BONUS) : evidence.quality;
     if (!best || boosted > best.quality || (boosted === best.quality && evidence.distance < best.distance)) {
-      best = { quality: boosted, distance: evidence.distance, via: evidence.via, lang };
+      best = {
+        quality: boosted,
+        distance: evidence.distance,
+        via: evidence.via,
+        canonical: evidence.canonical || '',
+        lang,
+      };
     }
   };
   for (const lang of langs) {
@@ -330,6 +422,34 @@ export function tokenEvidence(token, doc, langs = ['en']) {
     const rarity = text.rarity;
     if (rarity && (!best || best.quality < Q_RARITY) && rarity === compact) {
       consider({ quality: Q_RARITY, distance: 0, via: 'rarity' }, lang);
+    }
+  }
+  // Typed vocabulary evidence: rarity/art/set/collector aliases matched against
+  // the hydrated printing through the SAME authoritative filters the legacy
+  // path used, so semantics are identical. Each interpretation is considered
+  // independently (never one erasing another — §12); applies only to hydrated
+  // rows (doc.raw), since local name/artist docs have no such fields.
+  if (doc.raw && token.interps?.length) {
+    for (const interp of token.interps) {
+      if (interp.field === 'rarity' && (!best || best.quality < Q_RARITY)
+        && printingMatchesRarityFilter(doc.raw, { rarityTokens: [{ rarity: interp.canonical }] })) {
+        consider({ quality: Q_RARITY, distance: 0, via: `rarity-${interp.kind}`, canonical: interp.canonical }, 'en');
+      }
+      if (interp.field === 'art' && (!best || best.quality < Q_ART)
+        && printingMatchesArtFilter(doc.raw, { artTokens: [{ art: interp.canonical }] })) {
+        consider({ quality: Q_ART, distance: 0, via: `art-${interp.kind}`, canonical: interp.canonical }, 'en');
+      }
+      if (interp.field === 'set' && (!best || best.quality < Q_SET_EXACT)
+        && printingMatchesSetFilter(doc.raw, {
+          setTokens: [interp.setToken],
+          eras: interp.setToken.eraId ? [interp.setToken.eraId] : [],
+        })) {
+        consider({ quality: Q_SET_EXACT, distance: 0, via: 'set-alias', canonical: interp.canonical }, 'en');
+      }
+      if (interp.field === 'number' && (!best || best.quality < Q_COLLECTOR)
+        && printingMatchesNumberFilter(doc.raw, { numberTokens: [interp.numberToken] })) {
+        consider({ quality: Q_COLLECTOR, distance: 0, via: 'number-collector', canonical: interp.canonical }, 'en');
+      }
     }
   }
   return best;
@@ -488,6 +608,9 @@ export function docFromPrinting(printing = {}, { lang = 'en' } = {}) {
     id: String(printing.id || printing.card_id || ''),
     bucket: printBucket(printing.nationality) || (set ? printBucket(expansionNationality(set)) : 'unknown'),
     langText,
+    // Raw row for the authoritative rarity/art/set/collector filters (typed
+    // evidence reuses the legacy matchers rather than re-implementing them).
+    raw: printing,
   };
 }
 
@@ -503,13 +626,16 @@ export function scoreGroups(query, groups, { lang = 'en', minCoverage = 1 } = {}
   const scoreByName = new Map();
   const scored = [];
   for (const group of groups || []) {
-    let best = null;
-    for (const printing of group.printings || []) {
-      const result = scoreEntry(tokens, docFromPrinting(printing, { lang }), langs);
-      if (!best || result.score > best.score) {
-        best = result;
-      }
-    }
+    // Score every printing, then reorder the group's printings by their own
+    // evidence so the strongest reading leads (`eevee i` → the Illustration
+    // Rare first; `charizard sr` → the Secret Rare). One scorer owns both the
+    // group order and the within-group order — no separate art/number sort.
+    const rows = (group.printings || []).map((printing) => ({
+      printing,
+      result: scoreEntry(tokens, docFromPrinting(printing, { lang }), langs),
+    }));
+    rows.sort((a, b) => b.result.score - a.result.score);
+    let best = rows[0]?.result || null;
     if (!best) {
       // No printings yet (stub / cold cache): fall back to the group name as an
       // English doc so instant paint still orders by coverage.
@@ -518,8 +644,9 @@ export function scoreGroups(query, groups, { lang = 'en', minCoverage = 1 } = {}
     if (best.coverage < minCoverage) {
       continue;
     }
+    const ordered = rows.length ? { ...group, printings: rows.map((row) => row.printing) } : group;
     scoreByName.set(compactQuery(group.name), best.score);
-    scored.push({ group, score: best.score, coverage: best.coverage });
+    scored.push({ group: ordered, score: best.score, coverage: best.coverage });
   }
   scored.sort((a, b) => (
     b.score - a.score
@@ -541,8 +668,9 @@ export function explainQuery(query, target, { lang = 'en' } = {}) {
   const scored = scoreEntry(tokens, doc, langs);
   const lines = [typeof target === 'string' ? target : (target.name || ''), `  langs = [${langs.join(', ')}]`, ''];
   for (const row of scored.perToken) {
-    lines.push(`  ${row.token}: via=${row.via}${row.lang ? ` lang=${row.lang}` : ''} `
-      + `quality=${row.quality.toFixed(3)}${Number.isFinite(row.distance) ? ` distance=${row.distance}` : ''}`);
+    lines.push(`  ${row.token}: via=${row.via}${row.canonical ? ` canonical="${row.canonical}"` : ''}`
+      + `${row.lang ? ` lang=${row.lang}` : ''} quality=${row.quality.toFixed(3)}`
+      + `${Number.isFinite(row.distance) ? ` distance=${row.distance}` : ''}`);
   }
   lines.push('');
   lines.push(`  coverage = ${scored.coverage}/${tokens.length}`);

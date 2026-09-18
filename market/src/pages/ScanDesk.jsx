@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { fetchLastMedianPknMap, fetchVersionSet, formatPkn, imageSrc } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { encodeQr, qrPath } from '../qr.js';
+import { encodeQr, qrPath, qrLogoLayout } from '../qr.js';
 import {
   fetchScanImage,
   phoneConnectUrl,
@@ -115,6 +115,7 @@ export default function ScanDesk() {
   const [session, setSession] = useState(null);
   const [batch, setBatch] = useState(null);
   const [pairing, setPairing] = useState(null);
+  const [idleDisconnectNote, setIdleDisconnectNote] = useState(false);
   const [serverOffset, setServerOffset] = useState(0);
   const [rows, dispatch] = useReducer(rowsReducer, {});
   const [pending, setPending] = useState({});
@@ -146,6 +147,8 @@ export default function ScanDesk() {
   const addSearchRef = useRef(null);
   const submitKey = useRef(newSubmitKey());
   const followTail = useRef(true);
+  const intentionalDisconnect = useRef(false);
+  const wasPhoneConnected = useRef(false);
   rowsRef.current = rows;
   const serverOffsetRef = useRef(serverOffset);
   serverOffsetRef.current = serverOffset;
@@ -282,10 +285,22 @@ export default function ScanDesk() {
             }
           }
         } else if (name === 'session') {
-          setSession(data.session);
+          const next = data.session;
+          if (wasPhoneConnected.current && next?.status === 'waiting' && !intentionalDisconnect.current) {
+            setIdleDisconnectNote(true);
+          }
+          if (next?.status === 'connected') {
+            setIdleDisconnectNote(false);
+            intentionalDisconnect.current = false;
+          }
+          wasPhoneConnected.current = next?.status === 'connected';
+          setSession(next);
           if (data.serverTime) setServerOffset(Number(data.serverTime) - Date.now());
-          if (data.session?.status === 'waiting') {
-            token().then((t) => scanApi.session(t, data.session.id)).then((res) => setPairing(res.pairing)).catch(() => {});
+          if (next?.status === 'waiting') {
+            token().then((t) => scanApi.session(t, next.id)).then((res) => {
+              setPairing(res.pairing);
+              if (res.justIdleDisconnected) setIdleDisconnectNote(true);
+            }).catch(() => {});
           }
         } else if (name === 'batch') {
           setBatch((current) => ({ ...current, ...data.batch }));
@@ -834,6 +849,7 @@ export default function ScanDesk() {
 
   async function sessionAction(action, extra) {
     try {
+      if (action === 'disconnect') intentionalDisconnect.current = true;
       const t = await token();
       const data = action === 'disconnect'
         ? await scanApi.disconnect(t, session.id)
@@ -842,6 +858,10 @@ export default function ScanDesk() {
           : await scanApi.end(t, session.id, extra);
       setSession(data.session);
       setPairing(data.pairing || null);
+      if (action === 'disconnect') {
+        setIdleDisconnectNote(false);
+        wasPhoneConnected.current = false;
+      }
       if (action === 'end') rememberActiveSession('');
     } catch (err) {
       setError(err.message);
@@ -932,8 +952,12 @@ export default function ScanDesk() {
       {waiting && !closed ? (
         <section className="scan-connect" aria-label="Connect your phone">
           <div className="scan-connect-main">
-            <h2>Connect your phone</h2>
-            <p className="scan-connect-step">Type the code on <strong>scan.pokoin.com/connect</strong>, or scan the QR code</p>
+            <h2>{idleDisconnectNote ? 'Reconnect phone' : 'Connect your phone'}</h2>
+            {idleDisconnectNote ? (
+              <p className="scan-connect-step">Phone disconnected after 10 minutes without a scan. Pair again to continue this batch.</p>
+            ) : (
+              <p className="scan-connect-step">Type the code on <strong>scan.pokoin.com/connect</strong>, or scan the QR code</p>
+            )}
             <p className="scan-pin" aria-label={`Pairing code ${pairing.pin.split('').join(' ')}`}>
               {pairing.pin.split('').map((d, i) => <span key={i}>{d}</span>)}
             </p>
@@ -1158,18 +1182,32 @@ function QrBlock({ secret, pin }) {
   const path = useMemo(() => {
     if (!url) return null;
     try {
-      const qr = encodeQr(url);
-      return { d: qrPath(qr), size: qr.size + 8 };
+      // ECC H (~30% recovery) so a small centered Pokoin logo stays scannable.
+      const qr = encodeQr(url, { ecc: 'H' });
+      const logo = qrLogoLayout(qr);
+      return { d: qrPath(qr), ...logo };
     } catch (_) {
       return null;
     }
   }, [url]);
   if (!path) return null;
+  const logoX = path.cx - path.logo / 2;
+  const logoY = path.cy - path.logo / 2;
   return (
     <figure className="scan-qr" data-connect-url={url}>
-      <svg viewBox={`0 0 ${path.size} ${path.size}`} role="img" aria-label="QR code to connect your phone" shapeRendering="crispEdges">
-        <rect width={path.size} height={path.size} fill="#fff" />
+      <svg viewBox={`0 0 ${path.view} ${path.view}`} role="img" aria-label="QR code to connect your phone" shapeRendering="crispEdges">
+        <rect width={path.view} height={path.view} fill="#fff" />
         <path d={path.d} fill="#000" />
+        {/* White pad + Pokoin mark: ~20% logo / ~28% pad of the module field. */}
+        <circle cx={path.cx} cy={path.cy} r={path.pad / 2} fill="#fff" />
+        <image
+          href="/home/logo.png"
+          x={logoX}
+          y={logoY}
+          width={path.logo}
+          height={path.logo}
+          preserveAspectRatio="xMidYMid meet"
+        />
       </svg>
       <figcaption>Scan with the phone camera.</figcaption>
     </figure>

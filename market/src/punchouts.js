@@ -40,6 +40,20 @@ export function marketUrl(path = '/marketplace', hostname) {
   return normalized;
 }
 
+/**
+ * Hard-navigate to a marketplace URL. Use on the dashboard host so React
+ * Router never paints /marketplace/* inside the seller desk (black flash).
+ */
+export function goMarket(pathOrUrl, hostname) {
+  const href = String(pathOrUrl || '').startsWith('http')
+    ? String(pathOrUrl)
+    : marketUrl(pathOrUrl, hostname);
+  if (typeof window !== 'undefined') {
+    window.location.assign(href);
+  }
+  return href;
+}
+
 /** Paths that stay on the dashboard host (seller home + Scan Connect desk). */
 export function isDashboardDeskPath(pathname = '') {
   const path = String(pathname || '').replace(/\/$/, '') || '/';

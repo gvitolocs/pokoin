@@ -8,10 +8,14 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const appSrc = fs.readFileSync(path.join(root, 'App.jsx'), 'utf8');
 const chromeSrc = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
 const homeSrc = fs.readFileSync(path.join(root, 'pages/SellerHome.jsx'), 'utf8');
+const viewSrc = fs.readFileSync(path.join(root, 'components/SellerDashboardView.jsx'), 'utf8');
+const cssSrc = fs.readFileSync(path.join(root, 'seller-home.css'), 'utf8');
 const collectionSrc = fs.readFileSync(path.join(root, 'pages/Collection.jsx'), 'utf8');
 const nftSrc = fs.readFileSync(path.join(root, 'pages/Nft.jsx'), 'utf8');
 const deskSrc = fs.readFileSync(path.join(root, 'pages/ScanDesk.jsx'), 'utf8');
 const vercel = fs.readFileSync(path.join(root, '../../vercel.json'), 'utf8');
+
+const CARD_ICON = 'M6 3h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 0h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM6 14h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zm8 0h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z';
 
 test('dashboard host / renders SellerHome; /scan stays ScanDesk', () => {
   assert.match(appSrc, /import SellerHome from '\.\/pages\/SellerHome\.jsx'/);
@@ -48,28 +52,68 @@ test('Chrome Dashboard nav resolves to / on dashboard host; Collection replaces 
   assert.match(chromeSrc, />Collection</);
 });
 
+test('Dashboard nav icon is four portrait card rectangles, not equal squares', () => {
+  assert.match(chromeSrc, /DASHBOARD_CARDS_ICON/);
+  assert.match(chromeSrc, new RegExp(`dashboard:\\s*DASHBOARD_CARDS_ICON`));
+  assert.match(chromeSrc, new RegExp(CARD_ICON.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  // Topbar reuses ICO.dashboard — no second hardcoded fat-square path.
+  assert.match(chromeSrc, /d=\{ICO\.dashboard\}/);
+  assert.doesNotMatch(chromeSrc, /dashboard: 'M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z'/);
+  assert.equal(
+    (chromeSrc.match(/M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z/g) || []).length,
+    0,
+  );
+  assert.doesNotMatch(chromeSrc, /M3\.5 2h6\.5c\.8 0 1\.5\.7/);
+});
+
 test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(homeSrc, /fetchCollectionSummary/);
-  assert.match(homeSrc, /marketplace-collection-summary|fetchCollectionSummary/);
   assert.doesNotMatch(homeSrc, /onSnapshot/);
   assert.doesNotMatch(homeSrc, /user_card_collections/);
   assert.doesNotMatch(homeSrc, /Missing or insufficient permissions/);
   assert.match(homeSrc, /Couldn't load your collection/);
   assert.match(homeSrc, /marketUrl\(APP\.collection\)/);
-  assert.match(homeSrc, /Cards owned|Card owned/);
-  assert.match(homeSrc, /Listed for sale/);
-  assert.match(homeSrc, /Sum of quantity on live asks/);
-  assert.match(homeSrc, /listed\?\.cards/);
-  assert.match(homeSrc, /View collection/);
-  assert.match(homeSrc, /to="\/scan"/);
-  assert.match(homeSrc, /Add Cards/);
-  assert.match(homeSrc, /Scan cards to add them to your collection or list them for sale/);
-  assert.doesNotMatch(homeSrc, /kicker="Seller"/);
-  assert.doesNotMatch(homeSrc, /List Cards/);
-  assert.doesNotMatch(homeSrc, /Total listed/);
-  assert.doesNotMatch(homeSrc, /Your live listings/);
+  assert.match(viewSrc, /Cards owned|Card owned/);
+  assert.match(viewSrc, /Listed for sale/);
+  assert.match(viewSrc, /Physical/);
+  assert.match(viewSrc, /Digital \/ NFT/);
+  assert.match(viewSrc, /Total asking value/);
+  assert.doesNotMatch(viewSrc, /Portfolio value/);
+  assert.match(viewSrc, /View collection/);
+  assert.match(viewSrc, /to="\/scan"/);
+  assert.match(viewSrc, /Add Cards/);
+  assert.match(viewSrc, /Scan cards to add them to your collection or list them for sale/);
+  assert.match(viewSrc, /Collection value history/);
+  assert.match(viewSrc, /Collection history will appear here/);
+  assert.match(viewSrc, /Scan cards to start building your portfolio/);
+  assert.match(viewSrc, /data-history=\{hasSeries \? 'series' : 'empty'\}/);
+  assert.match(viewSrc, /seller-history-ghost-line/);
+  assert.doesNotMatch(viewSrc, /fake.?line/i);
+  // Empty collection still keeps the chart hero — not a collapsed EmptyDesk.
+  assert.match(viewSrc, /portfolio-empty-scan/);
+  assert.match(viewSrc, /CollectionHistoryPanel/);
+  assert.doesNotMatch(viewSrc, /No cards in your collection yet/);
+  assert.match(viewSrc, /Trending on Pokoin/);
+  assert.match(viewSrc, /marketUrl\(cardHref\(card\)\)/);
+  assert.match(viewSrc, /Your listings/);
+  assert.match(viewSrc, /Collection insights/);
+  assert.doesNotMatch(viewSrc, /kicker="Seller"/);
+  assert.doesNotMatch(viewSrc, /List Cards/);
   assert.doesNotMatch(homeSrc, /marketplace\/portfolio/);
   assert.doesNotMatch(homeSrc, /fetchPortfolio/);
+});
+
+test('Dashboard history panel keeps chart frame; never draws a real fake series', () => {
+  // Real polyline only when a `series` prop is supplied.
+  assert.match(viewSrc, /hasSeries \? \([\s\S]*<polyline/);
+  assert.match(viewSrc, /data-history=\{hasSeries \? 'series' : 'empty'\}/);
+  assert.match(viewSrc, /seller-history-ghost-line/);
+  assert.match(cssSrc, /\.seller-history-ghost-line/);
+  assert.match(cssSrc, /\.seller-history-frame/);
+  assert.match(cssSrc, /min-height:\s*12\.5rem/);
+  assert.match(homeSrc, /bestSellerIds/);
+  assert.doesNotMatch(homeSrc, /\+\d+%/);
+  assert.doesNotMatch(viewSrc, /series\(total/);
 });
 
 test('/collection is holdings; /nft redirects to /collection', () => {
@@ -99,4 +143,11 @@ test('ScanDesk has list|collection intent without resetting batch', () => {
 test('SellerHome gates unsigned users like other seller desks', () => {
   assert.match(homeSrc, /Navigate to=\{`\/auth\?from=/);
   assert.match(homeSrc, /SessionWait/);
+});
+
+test('dashPreview layout fixtures stay off production hostnames', () => {
+  assert.match(homeSrc, /dashPreview/);
+  assert.match(homeSrc, /import\.meta\.env\.DEV/);
+  assert.match(viewSrc, /Layout preview/);
+  assert.match(homeSrc, /localhost/);
 });

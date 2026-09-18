@@ -91,9 +91,11 @@ test('stubs are tagged live:', () => {
 
 test('artist intent paints cached printings instead of a name stub', () => {
   resetSuggestLive();
-  rememberPrintings('artist:tomokazu-komiya', [
-    { id: '1', name: 'Cynthia', set: 'Ultra Prism' },
-    { id: '2', name: 'Garchomp', set: 'Ultra Prism' },
+  // Real hydrated artist cards carry the illustrator (cardFromCatalogRow.artist);
+  // the one scorer surfaces them via artist EVIDENCE — no separate artist branch.
+  rememberSuggestGroups([
+    { name: 'Cynthia', printings: [{ id: '1', name: 'Cynthia', set: 'Ultra Prism', artist: 'Tomokazu Komiya', nationality: 'western' }] },
+    { name: 'Garchomp', printings: [{ id: '2', name: 'Garchomp', set: 'Ultra Prism', artist: 'Tomokazu Komiya', nationality: 'western' }] },
   ]);
   const live = liveSuggestGroups('komiya', { preferPerGroup: 4 });
   assert.equal(live.intent.kind, 'artist');
@@ -199,7 +201,8 @@ test('palkai call of live ranks Palkia from Call of Legends, not LV.X', () => {
     },
   ]);
   const live = liveSuggestGroups('palkai call of', { preferPerGroup: 4 });
-  assert.equal(compactQuery(live.parsed.nameQuery), 'palkai');
+  // `call of` set words add set evidence to the Call of Legends printing; the
+  // Palkia name reading still leads (one scorer, not a set-branch takeover).
   assert.equal(live.groups[0].name, 'Palkia');
   assert.equal(live.groups[0].printings[0].id, 'col');
   assert.ok(live.groups.findIndex((group) => group.name === 'Palkia')
@@ -222,7 +225,7 @@ test('flareon call of legendsd live ranks Flareon, not sealed products', () => {
     },
   ]);
   const live = liveSuggestGroups('flareon call of legendsd', { preferPerGroup: 4 });
-  assert.equal(compactQuery(live.parsed.nameQuery), 'flareon');
+  // Flareon name reading leads; the set phrase is evidence, never a takeover.
   assert.equal(live.groups[0].name, 'Flareon');
   assert.equal(live.groups[0].printings[0].id, 'col');
   assert.ok(!live.groups.some((group) => /Booster|Theme Deck/i.test(group.name)));
@@ -313,8 +316,8 @@ test('palkai sl live ranks Call of Legends Palkia, not LV.X or jumbos', () => {
     },
   ]);
   const live = liveSuggestGroups('palkai sl', { preferPerGroup: 4, kind: 'singles' });
-  assert.equal(compactQuery(live.parsed.nameQuery), 'palkai');
-  assert.ok(live.parsed.eras.includes('Call of Legends'));
+  // `sl` is now set-alias EVIDENCE (not a hard peel): Call of Legends Palkia
+  // leads on coverage, other Palkia readings stay eligible (one scorer, §4).
   const ids = live.groups.flatMap((group) => group.printings.map((row) => row.id));
   assert.equal(ids[0], 'col');
   assert.ok(ids.includes('ge'));
@@ -385,7 +388,6 @@ test('palkia legen live fills 20 Palkia singles, not Paldea tins or jumbos', () 
     },
   ]);
   const live = liveSuggestGroups('palkia legen', { preferPerGroup: 4, kind: 'singles' });
-  assert.equal(compactQuery(live.parsed.nameQuery), 'palkia');
   const ids = live.groups.flatMap((group) => group.printings.map((row) => row.id));
   assert.equal(ids[0], 'col');
   assert.equal(ids.length, 20);
@@ -447,8 +449,8 @@ test('arceus platinum singles drop theme decks, chests, and binders', () => {
     },
   ]);
   const singles = liveSuggestGroups('arceus platinum', { preferPerGroup: 4, kind: 'singles' });
-  assert.equal(compactQuery(singles.parsed.nameQuery), 'arceus');
-  assert.ok(singles.parsed.eras.includes('Platinum'));
+  // `platinum` is set-alias evidence: Platinum Arceus singles rank up, all
+  // Arceus singles stay eligible, products are dropped by scope (not by peel).
   const ids = singles.groups.flatMap((group) => group.printings.map((row) => row.id));
   assert.ok(ids.includes('prism'));
   assert.ok(ids.includes('ar1'));
@@ -623,8 +625,9 @@ test('eevee i peels illustration shorthand and keeps the cached Eevee pool, neve
   // No pool argument — the exact Chrome.jsx call, so ranked comes from
   // catalogIntent and the query must not peel `eevee` as the Eevee Heroes set.
   const live = liveSuggestGroups('eevee i', { printLang: 'all', kind: 'singles' });
+  // `i` is illustration/art EVIDENCE now (no set peel, no art hard-facet): the
+  // Eevee pool stays and its Illustration-Rare printing leads within the group.
   assert.equal(live.parsed.setTokens.length, 0);
-  assert.equal(live.parsed.artTokens[0]?.art, 'illustration');
   assert.equal(live.groups[0]?.name, 'Eevee');
   const filled = live.groups.reduce((n, group) => n + group.printings.length, 0);
   assert.equal(filled, 7);
@@ -712,7 +715,8 @@ test('set-token live path keeps the name pool instead of a stub intent group', (
   ]);
   const live = liveSuggestGroups('palkia legen', { printLang: 'all', kind: 'singles' });
   const filled = live.groups.reduce((n, group) => n + group.printings.length, 0);
-  assert.equal(live.parsed.setTokens.length, 1, 'Call of Legends still peels as the set');
+  // `legen` is Call of Legends set-alias EVIDENCE; the cached Palkia pool fills
+  // the list through the one scorer (no stub intent group, no hard set filter).
   assert.equal(filled, 6, 'cached printings fill the list instead of a stub group');
 });
 

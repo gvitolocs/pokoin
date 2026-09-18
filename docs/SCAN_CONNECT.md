@@ -98,8 +98,9 @@ immutable identity. The server stores `received_at` itself.
 ### QR link
 
 The desk QR encodes `https://scan.pokoin.com/connect#c=4827&k=<qrSecret>`
-(`phoneConnectUrl` in `market/src/scan-api.js`, ~73 bytes → QR version 5-M,
-encoded locally by `market/src/qr.js`). Scanning it with the phone camera:
+(`phoneConnectUrl` in `market/src/scan-api.js`, ~73 bytes → QR version ~8-H,
+encoded locally by `market/src/qr.js`, with a small centered Pokoin logo on a
+white pad — ECC H keeps it scannable). Scanning it with the phone camera:
 
 1. opens the scanner in connect mode;
 2. `pairingFromHash` (BattleScan `web/static/scan-connect.js`) reads `c` and

@@ -159,7 +159,10 @@ export function phaseText(phase, session) {
     case 'waiting':
       return { tone: 'wait', text: 'Waiting for phone…' };
     case 'connected':
-      return { tone: 'ok', text: `${session?.phoneLabel || 'Phone'} connected` };
+      return {
+        tone: 'ok',
+        text: `${session?.phoneLabel || 'Phone'} connected · disconnects after 10 min idle`,
+      };
     case 'scanning':
       return { tone: 'ok', text: 'Scanning' };
     case 'lost':

@@ -1,10 +1,24 @@
-// Minimal QR Code encoder (ISO/IEC 18004): byte mode, error correction M,
+// Minimal QR Code encoder (ISO/IEC 18004): byte mode, ECC M or H,
 // versions 1–10, automatic mask. Enough for the Scan Connect pairing URL
 // (~70 bytes). Local on purpose: the URL carries a pairing secret and must
 // not be sent to a third-party QR image service.
+//
+ // ECC H (~30% recovery) is used when the Scan desk overlays the Pokoin logo.
 
-const EC_PER_BLOCK_M = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26];
-const BLOCKS_M = [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
+const ECC = {
+  // format-info level bits (ISO/IEC 18004 Table 12) << 3 | mask
+  M: {
+    format: 0b00,
+    // ECC codewords per block, versions 1–10 (Nayuki / ISO Annex)
+    ecPerBlock: [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26],
+    blocks: [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5],
+  },
+  H: {
+    format: 0b10,
+    ecPerBlock: [0, 17, 28, 22, 16, 22, 28, 26, 26, 24, 28],
+    blocks: [0, 1, 1, 2, 4, 4, 4, 5, 6, 8, 8],
+  },
+};
 
 function gfMul(x, y) {
   let z = 0;
@@ -51,8 +65,9 @@ function rawDataModules(ver) {
   return result;
 }
 
-function dataCodewords(ver) {
-  return Math.floor(rawDataModules(ver) / 8) - EC_PER_BLOCK_M[ver] * BLOCKS_M[ver];
+function dataCodewords(ver, level) {
+  const cfg = ECC[level];
+  return Math.floor(rawDataModules(ver) / 8) - cfg.ecPerBlock[ver] * cfg.blocks[ver];
 }
 
 function alignmentPositions(ver, size) {
@@ -68,16 +83,22 @@ function utf8Bytes(text) {
   return Array.from(new TextEncoder().encode(String(text)));
 }
 
-export function encodeQr(text) {
+/**
+ * @param {string} text
+ * @param {{ ecc?: 'M' | 'H' }} [opts]
+ */
+export function encodeQr(text, opts = {}) {
+  const level = opts.ecc === 'M' ? 'M' : 'H';
+  const cfg = ECC[level];
   const bytes = utf8Bytes(text);
   let ver = 1;
   for (; ver <= 10; ver += 1) {
     const countBits = ver <= 9 ? 8 : 16;
-    if (4 + countBits + bytes.length * 8 <= dataCodewords(ver) * 8) break;
+    if (4 + countBits + bytes.length * 8 <= dataCodewords(ver, level) * 8) break;
   }
   if (ver > 10) throw new Error('QR payload too long');
   const size = ver * 4 + 17;
-  const capacityBits = dataCodewords(ver) * 8;
+  const capacityBits = dataCodewords(ver, level) * 8;
 
   const bits = [];
   const push = (value, len) => {
@@ -96,9 +117,8 @@ export function encodeQr(text) {
     data.push(byte);
   }
 
-  // Blocks + interleave.
-  const numBlocks = BLOCKS_M[ver];
-  const eccLen = EC_PER_BLOCK_M[ver];
+  const numBlocks = cfg.blocks[ver];
+  const eccLen = cfg.ecPerBlock[ver];
   const rawCodewords = Math.floor(rawDataModules(ver) / 8);
   const numShort = numBlocks - (rawCodewords % numBlocks);
   const shortLen = Math.floor(rawCodewords / numBlocks);
@@ -109,7 +129,7 @@ export function encodeQr(text) {
     const dat = data.slice(k, k + datLen);
     k += datLen;
     const ecc = rsRemainder(dat, divisor);
-    if (i < numShort) dat.push(0); // equal lengths; the pad is skipped below
+    if (i < numShort) dat.push(0);
     blocks.push(dat.concat(ecc));
   }
   const codewords = [];
@@ -156,7 +176,7 @@ export function encodeQr(text) {
   });
 
   const drawFormat = (mask) => {
-    const formatData = (0 << 3) | mask; // ECC M = 00
+    const formatData = (cfg.format << 3) | mask;
     let rem = formatData;
     for (let i = 0; i < 10; i += 1) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
     const fbits = ((formatData << 10) | rem) ^ 0x5412;
@@ -228,11 +248,11 @@ export function encodeQr(text) {
       best = mask;
       bestScore = score;
     }
-    applyMask(mask); // XOR back
+    applyMask(mask);
   }
   applyMask(best);
   drawFormat(best);
-  return { version: ver, size, mask: best, modules };
+  return { version: ver, size, mask: best, ecc: level, modules };
 }
 
 function penalty(m, size) {
@@ -283,4 +303,26 @@ export function qrPath(qr) {
     }
   }
   return parts.join('');
+}
+
+/** Center logo geometry in the quiet-zone SVG viewBox (modules + 8). */
+export function qrLogoLayout(qr, {
+  logoRatio = 0.20,
+  padRatio = 0.28,
+} = {}) {
+  const view = qr.size + 8;
+  const modules = qr.size;
+  const cx = view / 2;
+  const cy = view / 2;
+  const logo = modules * logoRatio;
+  const pad = modules * padRatio;
+  return {
+    view,
+    cx,
+    cy,
+    logo,
+    pad,
+    // Fraction of module area covered by the white pad (≈ π(r/s)²).
+    coverFraction: Math.PI * ((pad / 2) / modules) ** 2,
+  };
 }

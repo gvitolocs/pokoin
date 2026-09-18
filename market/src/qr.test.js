@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
-import { encodeQr, qrPath } from './qr.js';
+import { encodeQr, qrPath, qrLogoLayout } from './qr.js';
 
 // Golden matrix decoded back to the same text with jsQR 1.4.0 on 2026-09-17
 // (scratch check, not a dependency). Any change to the encoder must still
@@ -14,15 +14,27 @@ function matrixHash(qr) {
   return crypto.createHash('sha256').update(bits).digest('hex');
 }
 
-test('pairing URL encodes to the verified golden matrix', () => {
-  const qr = encodeQr(GOLDEN_TEXT);
+test('pairing URL encodes to the verified golden matrix (ECC M)', () => {
+  const qr = encodeQr(GOLDEN_TEXT, { ecc: 'M' });
   assert.equal(qr.version, 5);
   assert.equal(qr.size, 37);
+  assert.equal(qr.ecc, 'M');
   assert.equal(matrixHash(qr), GOLDEN_SHA);
 });
 
+test('Scan Connect default ECC H fits a ~70-byte pairing URL', () => {
+  const url = 'https://scan.pokoin.com/connect#c=0427&k=AbCdEfGhIjKlMnOpQrStUvWxYz012345';
+  const qr = encodeQr(url); // default H
+  assert.equal(qr.ecc, 'H');
+  assert.ok(qr.version >= 7 && qr.version <= 10, `version ${qr.version}`);
+  const layout = qrLogoLayout(qr);
+  assert.equal(layout.view, qr.size + 8);
+  assert.ok(layout.coverFraction < 0.12, `pad covers ${layout.coverFraction}`);
+  assert.ok(layout.logo < layout.pad);
+});
+
 test('finder patterns, timing and dark module are in place', () => {
-  const qr = encodeQr('https://scan.pokoin.com/connect#k=abc');
+  const qr = encodeQr('https://scan.pokoin.com/connect#k=abc', { ecc: 'M' });
   const m = qr.modules;
   const n = qr.size;
   for (const [ox, oy] of [[0, 0], [n - 7, 0], [0, n - 7]]) {
@@ -41,8 +53,8 @@ test('finder patterns, timing and dark module are in place', () => {
 });
 
 test('version grows with payload and rejects what does not fit version 10', () => {
-  assert.equal(encodeQr('x'.repeat(10)).version, 1);
-  assert.ok(encodeQr('x'.repeat(100)).version >= 5);
-  assert.throws(() => encodeQr('x'.repeat(400)), /too long/);
-  assert.match(qrPath(encodeQr('a')), /^M4 4h1v1h-1z/);
+  assert.equal(encodeQr('x'.repeat(10), { ecc: 'M' }).version, 1);
+  assert.ok(encodeQr('x'.repeat(100), { ecc: 'M' }).version >= 5);
+  assert.throws(() => encodeQr('x'.repeat(400), { ecc: 'H' }), /too long/);
+  assert.match(qrPath(encodeQr('a', { ecc: 'M' })), /^M4 4h1v1h-1z/);
 });

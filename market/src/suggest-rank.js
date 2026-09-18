@@ -373,7 +373,7 @@ export function parseCollectorWord(word) {
   };
 }
 
-const RARITY_PHRASE_COMPACT = new Map([
+export const RARITY_PHRASE_COMPACT = new Map([
   ['secretrare', 'secret'],
   ['ultrarare', 'ultra'],
   ['holorare', 'holo'],

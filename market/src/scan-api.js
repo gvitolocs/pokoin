@@ -31,7 +31,17 @@ export function phoneConnectUrl(qrSecret, pin = '') {
 
 /** dashboard.pokoin.com serves the seller desk; `/scan` there is Scan Connect. */
 export function isDashboardHost(hostname = typeof window !== 'undefined' ? window.location.hostname : '') {
-  return String(hostname).toLowerCase() === 'dashboard.pokoin.com';
+  const host = String(hostname).toLowerCase();
+  if (host === 'dashboard.pokoin.com') {
+    return true;
+  }
+  // Local / Tailscale review of the seller desk (Vite only).
+  if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
+    if (host === 'nezopt' || /^100\.\d+\.\d+\.\d+$/.test(host)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function request(path, { method = 'GET', body, token }) {
