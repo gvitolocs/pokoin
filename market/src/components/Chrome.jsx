@@ -315,7 +315,7 @@ function flattenPrintings(groups) {
 export default function Chrome({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { signedIn, admin } = useAuth();
+  const { signedIn, admin, availablePkn } = useAuth();
   const { count } = useCart();
   const { balance } = useWallet();
   const extensionDesk = framedByChromeExtension();
@@ -822,7 +822,12 @@ export default function Chrome({ children }) {
     ? (new URLSearchParams(location.search).get('from') || '/marketplace')
     : `${location.pathname || '/marketplace'}${location.search || ''}`;
   const from = authFrom(returnPath);
-  const pknLabel = `${formatPknNumber(Number.isFinite(balance) ? balance : 0)} PKN`;
+  // The chip is the signed-in member's spendable Site PKN; anonymous visitors
+  // with a connected wallet still see their on-chain balance.
+  const pknAmount = signedIn && Number.isFinite(availablePkn)
+    ? availablePkn
+    : (Number.isFinite(balance) ? balance : 0);
+  const pknLabel = `${formatPknNumber(pknAmount)} PKN`;
   const site = game();
   const homeHref = marketUrl(site.homeHref || '/');
   const onDashboard = isDashboardHost();
