@@ -26,7 +26,8 @@ API_FILES=(
   api/_scan_connect.js api/_scan_store.js api/_scan_bus.js api/_scan_http.js
   api/scan-session.js api/scan-pair.js api/scan-phone.js api/scan-batch.js api/scan-stream.js
   api/_user_card_collection.js
-  api/marketplace-listings.js api/marketplace-orders.js api/marketplace-collection-summary.js
+  api/marketplace-listings.js api/marketplace-orders.js
+  api/marketplace-collection-summary.js api/marketplace-collection.js
   server/api-route-manifest.js
   oracle-postgres/schema/082_scan_connect.sql oracle-postgres/schema/082_scan_connect.grants.sql
 )

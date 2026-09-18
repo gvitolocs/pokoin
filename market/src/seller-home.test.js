@@ -79,6 +79,13 @@ test('/collection is holdings; /nft redirects to /collection', () => {
   assert.match(collectionSrc, /partitionHoldings|isNftHolding/);
   assert.match(collectionSrc, /data-testid="collection-physical"|Physical/);
   assert.match(collectionSrc, /Request physical shipping \(NFT\)|canShip/);
+  assert.match(collectionSrc, /fetchOwnedCollection/);
+  assert.match(collectionSrc, /Couldn't load your collection/);
+  assert.match(collectionSrc, /collection-retry/);
+  assert.doesNotMatch(collectionSrc, /onSnapshot/);
+  assert.doesNotMatch(collectionSrc, /user_card_collections/);
+  assert.doesNotMatch(collectionSrc, /from 'firebase\/firestore'/);
+  assert.doesNotMatch(collectionSrc, /Missing or insufficient permissions/);
 });
 
 test('ScanDesk has list|collection intent without resetting batch', () => {

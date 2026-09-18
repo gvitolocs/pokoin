@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { requestNftShipping } from '../api.js';
-import { firestore, useAuth } from '../auth.jsx';
+import { fetchOwnedCollection, requestNftShipping } from '../api.js';
+import { useAuth } from '../auth.jsx';
 import { isNftHolding, partitionHoldings } from '../collection-holdings.js';
 import { authFrom } from '../punchouts.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
@@ -37,29 +36,56 @@ function HoldingRow({ row }) {
 
 /**
  * Canonical holdings desk for /collection (physical + NFT).
- * Architecture leaves room for later /collection/:expansionSlug binder overlays.
+ * Loads via authenticated BFF — never client Firestore (no rules match).
  */
 export default function Collection() {
   const location = useLocation();
-  const { ready, signedIn, user, getBearer } = useAuth();
+  const { ready, signedIn, user, profile, getBearer } = useAuth();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [form, setForm] = useState({ name: '', line1: '', city: '', postalCode: '', country: '' });
 
+  const loadCollection = useCallback(async () => {
+    setRows(null);
+    setError('');
+    try {
+      const token = await getBearer();
+      const data = await fetchOwnedCollection(token);
+      setRows(Array.isArray(data.items) ? data.items : []);
+    } catch (err) {
+      console.error('collection load failed', err);
+      setError("Couldn't load your collection");
+      setRows([]);
+    }
+  }, [getBearer]);
+
   useEffect(() => {
     document.title = 'Collection · Pokoin';
-    if (!user?.uid) {
+    if (!signedIn) {
       setRows(null);
       return undefined;
     }
-    const q = query(collection(firestore, 'user_card_collections'), where('uid', '==', user.uid));
-    return onSnapshot(q, (snap) => {
-      setRows(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-      setError('');
-    }, (err) => setError(err.message || 'Collection failed to load.'));
-  }, [user?.uid]);
+    let cancelled = false;
+    setRows(null);
+    setError('');
+    getBearer()
+      .then((token) => fetchOwnedCollection(token))
+      .then((data) => {
+        if (cancelled) return;
+        setRows(Array.isArray(data.items) ? data.items : []);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('collection load failed', err);
+        setError("Couldn't load your collection");
+        setRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, user?.uid, profile?.uid, getBearer]);
 
   const { physical, nft, ownedCards } = useMemo(
     () => partitionHoldings(rows || []),
@@ -88,14 +114,17 @@ export default function Collection() {
         shippingAddress: form,
       }, token);
       setMessage(data.message || `Requested ${data.requests?.length || shippable.length} shipment${shippable.length === 1 ? '' : 's'}.`);
+      await loadCollection();
     } catch (err) {
-      setError(err.message || 'Shipping request failed.');
+      console.error('NFT shipping request failed', err);
+      setError("Couldn't request shipping. Try again.");
     } finally {
       setBusy(false);
     }
   }
 
-  const empty = rows && physical.length === 0 && nft.length === 0;
+  const empty = rows && physical.length === 0 && nft.length === 0 && !error;
+  const loading = rows == null && !error;
 
   return (
     <div className="page desk" data-testid="collection-desk">
@@ -107,9 +136,16 @@ export default function Collection() {
         <Link className="btn ghost" to="/product/nft">NFT catalog</Link>
         <Link className="btn ghost" to="/scan">Scan cards</Link>
       </PageHead>
-      <Alert>{error}</Alert>
+      {error ? (
+        <div className="desk-panel" data-testid="collection-error">
+          <Alert>{error}</Alert>
+          <button type="button" className="btn ghost" onClick={() => { void loadCollection(); }} data-testid="collection-retry">
+            Retry
+          </button>
+        </div>
+      ) : null}
       {message ? <p className="desk-ok">{message}</p> : null}
-      {rows == null && !error ? (
+      {loading ? (
         <DeskPanel title="Your collection"><div className="skeleton-line" /></DeskPanel>
       ) : null}
       {empty ? (
@@ -118,7 +154,7 @@ export default function Collection() {
           <Link className="btn ghost" to="/product/nft">Search NFT catalog</Link>
         </EmptyDesk>
       ) : null}
-      {rows && !empty ? (
+      {rows && !empty && !error ? (
         <div className="wallet-desk">
           <DeskPanel flush title={`${ownedCards} card${ownedCards === 1 ? '' : 's'} owned`}>
             {physical.length ? (

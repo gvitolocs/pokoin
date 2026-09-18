@@ -1766,6 +1766,13 @@ export function fetchCollectionSummary(token) {
   });
 }
 
+/** Full owned holdings for /collection. Uid comes from the bearer only. */
+export function fetchOwnedCollection(token) {
+  return getJson('/api/marketplace-collection', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
 export function fetchPortfolio({ id = '', limit } = {}) {
   const cap = Number.isFinite(Number(limit))
     ? Number(limit)
