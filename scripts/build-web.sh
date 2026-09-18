@@ -5,7 +5,7 @@ OUT="$ROOT/dist-web"
 cd "$ROOT"
 rm -rf "$OUT"
 mkdir -p "$OUT"
-cp "$ROOT/index.html" "$OUT/index.html"
+cp "$ROOT/index.html" "$OUT/landing.html"
 cp -a "$ROOT/home" "$OUT/home"
 cp "$ROOT/home/favicon.ico" "$OUT/favicon.ico"
 cp "$ROOT/home/favicon-32x32.png" "$OUT/favicon-32x32.png"
@@ -40,7 +40,7 @@ else
 fi
 python3 - <<PY
 from pathlib import Path
-p = Path("$OUT/index.html")
+p = Path("$OUT/landing.html")
 t = p.read_text()
 t = t.replace('href="home/', 'href="/home/').replace('src="home/', 'src="/home/')
 p.write_text(t)

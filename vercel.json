@@ -18,6 +18,15 @@
       ]
     },
     {
+      "source": "/landing.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
       "source": "/index.html",
       "headers": [
         {
@@ -455,6 +464,10 @@
       "source": "/",
       "has": [{ "type": "host", "value": "dashboard.pokoin.com" }],
       "destination": "/market/index.html"
+    },
+    {
+      "source": "/",
+      "destination": "/landing.html"
     },
     {
       "source": "/working",

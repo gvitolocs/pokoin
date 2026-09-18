@@ -20,7 +20,7 @@ test('dashboard host / renders SellerHome; /scan stays ScanDesk', () => {
   assert.match(appSrc, /Navigate to=\{dashboard \? '\/' : '\/marketplace'\}/);
 });
 
-test('vercel serves SellerHome SPA at dashboard.pokoin.com / (no /scan redirect)', () => {
+test('vercel serves SellerHome SPA at dashboard.pokoin.com / (landing is landing.html)', () => {
   const config = JSON.parse(vercel);
   const dashRootRedirect = (config.redirects || []).find(
     (r) => r.source === '/' && (r.has || []).some((h) => h.value === 'dashboard.pokoin.com'),
@@ -32,6 +32,13 @@ test('vercel serves SellerHome SPA at dashboard.pokoin.com / (no /scan redirect)
       && (r.has || []).some((h) => h.value === 'dashboard.pokoin.com'),
   );
   assert.ok(dashRootRewrite, 'dashboard / must rewrite to market SPA');
+  const apexRootRewrite = (config.rewrites || []).find(
+    (r) => r.source === '/' && r.destination === '/landing.html' && !r.has,
+  );
+  assert.ok(apexRootRewrite, 'apex / must rewrite to landing.html (not filesystem index.html)');
+  const build = fs.readFileSync(path.join(root, '../../scripts/build-web.sh'), 'utf8');
+  assert.match(build, /landing\.html/);
+  assert.doesNotMatch(build, /cp "\$ROOT\/index\.html" "\$OUT\/index\.html"/);
 });
 
 test('Chrome Dashboard nav resolves to / on dashboard host; Collection replaces NFT label', () => {
