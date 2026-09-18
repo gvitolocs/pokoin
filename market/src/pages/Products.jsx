@@ -26,6 +26,13 @@ const PRODUCTS = {
     unit: 'cards',
     lede: 'PSA, BGS, CGC, and other slabbed listings from sellers on Pokoin.',
   },
+  jumbo: {
+    title: 'Jumbo cards',
+    query: 'jumbo oversized',
+    productType: 'jumbo',
+    unit: 'cards',
+    lede: 'Oversized jumbo printings — their own product type, across every era.',
+  },
   nft: {
     title: 'NFT',
     query: 'nft',
