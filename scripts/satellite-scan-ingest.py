@@ -206,7 +206,9 @@ def local_fetch(jobs: dict[str, list[str]]) -> dict[str, bytes]:
 def oracle_fetch(jobs: dict[str, list[str]]) -> dict[str, bytes]:
     if not jobs:
         return {}
-    if not CT_FETCH_HOST:
+    # Read per call: run_game rotates POKOIN_CT_FETCH_HOST when rotating hosts.
+    host = os.environ.get("POKOIN_CT_FETCH_HOST", CT_FETCH_HOST)
+    if not host:
         return local_fetch(jobs)
     jobs_path = Path(f"/tmp/pokoin-scan-jobs{TAG}.json")
     jobs_path.write_text(json.dumps(jobs))
@@ -214,15 +216,15 @@ def oracle_fetch(jobs: dict[str, list[str]]) -> dict[str, bytes]:
     helper_path = Path(_helper_path())
     remote_script = "/tmp/satellite-scan-ingest.py"
     remote_out = f"/tmp/pokoin-scan-out{TAG}"
-    subprocess.run(["scp", *SSH_OPTS, str(script), f"{CT_FETCH_HOST}:{remote_script}"], check=True)
+    subprocess.run(["scp", *SSH_OPTS, str(script), f"{host}:{remote_script}"], check=True)
     subprocess.run(
-        ["scp", *SSH_OPTS, str(helper_path), f"{CT_FETCH_HOST}:/tmp/ingest-missing-product-images.py"],
+        ["scp", *SSH_OPTS, str(helper_path), f"{host}:/tmp/ingest-missing-product-images.py"],
         check=True,
     )
-    subprocess.run(["scp", *SSH_OPTS, str(jobs_path), f"{CT_FETCH_HOST}:{jobs_path}"], check=True)
+    subprocess.run(["scp", *SSH_OPTS, str(jobs_path), f"{host}:{jobs_path}"], check=True)
     env = f"POKOIN_SCAN_WORKERS={WORKERS} POKOIN_SCAN_JOBS={jobs_path} POKOIN_SCAN_OUT={remote_out}"
     subprocess.run(
-        ["ssh", *SSH_OPTS, CT_FETCH_HOST,
+        ["ssh", *SSH_OPTS, host,
          f"rm -rf {remote_out} && {env} python3 {remote_script} --oracle-fetch"],
         check=True,
     )
@@ -361,6 +363,13 @@ def run_game(slug: str) -> None:
             continue
         log(f"{slug}: chunk rows={len(rows)} jobs={len(jobs)}")
         bodies = oracle_fetch(jobs)
+        if not bodies and os.environ.get("POKOIN_SCAN_ROTATE"):
+            # Zero bodies usually means the current host got challenged.
+            log(f"{slug}: empty chunk — cooling down and switching host")
+            time.sleep(240)
+            cur = os.environ.get("POKOIN_CT_FETCH_HOST", CT_FETCH_HOST)
+            os.environ["POKOIN_CT_FETCH_HOST"] = "" if cur else "pokoin-marketplace"
+            continue
         ok, failed = encode(bodies)
         stamped = stamp_cdn(db, schema, prefix, ok)
         if failed and failed < 0.4 * max(1, len(bodies)):
@@ -380,6 +389,11 @@ def run_game(slug: str) -> None:
         log(f"{slug}: encoded_ok={len(ok)} enc_fail={failed} stamped={stamped} total_ok={game_state['ok']}")
         if not ok:
             break
+        if os.environ.get("POKOIN_SCAN_ROTATE"):
+            # Alternate egress per chunk so neither IP accumulates a block.
+            cur = os.environ.get("POKOIN_CT_FETCH_HOST", CT_FETCH_HOST)
+            os.environ["POKOIN_CT_FETCH_HOST"] = "" if cur else "pokoin-marketplace"
+            time.sleep(60)
 
 
 def oracle_fetch_worker() -> int:
