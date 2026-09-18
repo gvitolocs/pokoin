@@ -48,9 +48,13 @@ test('Chrome Dashboard nav resolves to / on dashboard host; Collection replaces 
   assert.match(chromeSrc, />Collection</);
 });
 
-test('SellerHome Portfolio uses Firestore collection and View collection CTA', () => {
-  assert.match(homeSrc, /user_card_collections/);
-  assert.match(homeSrc, /sumOwnedQuantity/);
+test('SellerHome Portfolio uses authenticated collection summary API', () => {
+  assert.match(homeSrc, /fetchCollectionSummary/);
+  assert.match(homeSrc, /marketplace-collection-summary|fetchCollectionSummary/);
+  assert.doesNotMatch(homeSrc, /onSnapshot/);
+  assert.doesNotMatch(homeSrc, /user_card_collections/);
+  assert.doesNotMatch(homeSrc, /Missing or insufficient permissions/);
+  assert.match(homeSrc, /Couldn't load your collection/);
   assert.match(homeSrc, /marketUrl\(APP\.collection\)/);
   assert.match(homeSrc, /Cards owned|Card owned/);
   assert.match(homeSrc, /Listed for sale/);
@@ -58,7 +62,10 @@ test('SellerHome Portfolio uses Firestore collection and View collection CTA', (
   assert.match(homeSrc, /listed\?\.cards/);
   assert.match(homeSrc, /View collection/);
   assert.match(homeSrc, /to="\/scan"/);
-  assert.match(homeSrc, /add them to your collection or list them for sale/);
+  assert.match(homeSrc, /Add Cards/);
+  assert.match(homeSrc, /Scan cards to add them to your collection or list them for sale/);
+  assert.doesNotMatch(homeSrc, /kicker="Seller"/);
+  assert.doesNotMatch(homeSrc, /List Cards/);
   assert.doesNotMatch(homeSrc, /Total listed/);
   assert.doesNotMatch(homeSrc, /Your live listings/);
   assert.doesNotMatch(homeSrc, /marketplace\/portfolio/);

@@ -1759,6 +1759,13 @@ export function fetchSellerListings(sellerUid, token, { limit = 40 } = {}) {
   });
 }
 
+/** Owned-card totals for the signed-in user. Uid comes from the bearer only. */
+export function fetchCollectionSummary(token) {
+  return getJson('/api/marketplace-collection-summary', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
 export function fetchPortfolio({ id = '', limit } = {}) {
   const cap = Number.isFinite(Number(limit))
     ? Number(limit)

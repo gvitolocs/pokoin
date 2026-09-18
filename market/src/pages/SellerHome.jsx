@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { fetchSellerListings } from '../api.js';
-import { firestore, useAuth } from '../auth.jsx';
-import { sumOwnedQuantity } from '../collection-holdings.js';
+import { fetchCollectionSummary, fetchSellerListings } from '../api.js';
+import { useAuth } from '../auth.jsx';
 import { Alert, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 import { liveInventoryListings, summarizeLiveInventory } from '../inventory-listings.js';
 import { APP, marketUrl } from '../punchouts.js';
@@ -25,22 +23,22 @@ export default function SellerHome() {
     let cancelled = false;
     setOwnedCards(null);
     setError('');
-    const q = query(collection(firestore, 'user_card_collections'), where('uid', '==', uid));
-    const unsub = onSnapshot(q, (snap) => {
-      if (cancelled) return;
-      const rows = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      setOwnedCards(sumOwnedQuantity(rows));
-    }, (err) => {
-      if (!cancelled) {
-        setError(err.message || 'Could not load collection.');
+    getBearer()
+      .then((token) => fetchCollectionSummary(token))
+      .then((data) => {
+        if (cancelled) return;
+        setOwnedCards(Math.max(0, Number(data.cardsOwned) || 0));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('dashboard collection summary failed', err);
+        setError("Couldn't load your collection");
         setOwnedCards(0);
-      }
-    });
+      });
     return () => {
       cancelled = true;
-      unsub();
     };
-  }, [signedIn, user?.uid, profile?.uid]);
+  }, [signedIn, user?.uid, profile?.uid, getBearer]);
 
   useEffect(() => {
     const uid = user?.uid || profile?.uid;
@@ -68,13 +66,25 @@ export default function SellerHome() {
   }
 
   const loading = ownedCards == null;
-  const empty = ownedCards === 0 && !(listed?.cards > 0);
+  const empty = ownedCards === 0 && !(listed?.cards > 0) && !error;
   const collectionHref = marketUrl(APP.collection);
+
+  function retryCollection() {
+    setOwnedCards(null);
+    setError('');
+    getBearer()
+      .then((token) => fetchCollectionSummary(token))
+      .then((data) => setOwnedCards(Math.max(0, Number(data.cardsOwned) || 0)))
+      .catch((err) => {
+        console.error('dashboard collection summary failed', err);
+        setError("Couldn't load your collection");
+        setOwnedCards(0);
+      });
+  }
 
   return (
     <div className="page desk seller-home" data-testid="seller-home">
       <PageHead
-        kicker="Seller"
         title="Dashboard"
         lede="Your collection overview and the quickest way to add more cards."
       />
@@ -93,9 +103,14 @@ export default function SellerHome() {
           {error ? (
             <div className="seller-tile-body">
               <Alert>{error}</Alert>
-              <a className="btn ghost" href={collectionHref} data-testid="portfolio-view-collection">
-                View collection
-              </a>
+              <div className="seller-tile-actions">
+                <button type="button" className="btn ghost" onClick={retryCollection} data-testid="portfolio-retry">
+                  Retry
+                </button>
+                <a className="btn ghost" href={collectionHref} data-testid="portfolio-view-collection">
+                  View collection
+                </a>
+              </div>
             </div>
           ) : null}
           {!loading && !error && empty ? (
@@ -137,8 +152,8 @@ export default function SellerHome() {
 
         <section className="seller-tile seller-tile-list" aria-labelledby="seller-list-title">
           <header className="seller-tile-head">
-            <h2 id="seller-list-title">List Cards</h2>
-            <p className="seller-tile-sub">Scan your cards and add them to your collection or list them for sale.</p>
+            <h2 id="seller-list-title">Add Cards</h2>
+            <p className="seller-tile-sub">Scan cards to add them to your collection or list them for sale.</p>
           </header>
           <div className="seller-tile-body seller-tile-cta">
             <Link className="btn" to="/scan" data-testid="list-cards-scan">
