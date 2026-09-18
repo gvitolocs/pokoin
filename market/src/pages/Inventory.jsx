@@ -43,7 +43,6 @@ export default function Inventory() {
       <PageHead
         kicker="Seller"
         title="My listings"
-        lede="Live asks on card desks for this account. Cancelled rows stay off this list."
       >
         <Link className="btn" to="/inventory/scan">Scan cards</Link>
         <Link className="btn ghost" to="/marketplace">List a card</Link>
