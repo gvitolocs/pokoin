@@ -29,6 +29,7 @@ API_FILES=(
   api/marketplace-listings.js api/marketplace-orders.js
   api/marketplace-collection-summary.js api/marketplace-collection.js
   api/marketplace-home.js
+  api/marketplace-card-page.js api/_marketplace_react_sql.js api/_marketplace_react_card.js
   server/api-route-manifest.js
   oracle-postgres/schema/082_scan_connect.sql oracle-postgres/schema/082_scan_connect.grants.sql
 )
