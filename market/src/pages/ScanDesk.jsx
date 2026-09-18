@@ -146,6 +146,7 @@ export default function ScanDesk() {
   const priceTouched = useRef(new Set());
   const suggestedFor = useRef(new Map());
   const patchChain = useRef(createPatchChain());
+  const remapTried = useRef(new Set());
   const queueRef = useRef(null);
   const locationInput = useRef(null);
   const quantityInput = useRef(null);
@@ -365,6 +366,14 @@ export default function ScanDesk() {
     const data = await fn(t);
     if (data?.items) dispatch({ type: 'items', items: data.items });
     return data;
+  }
+
+  // An explicit version pick is authoritative: pre-mark the artwork-remap
+  // guard so the region-remap effect doesn't bounce the row back to the
+  // batch-language sibling on the first click.
+  function markPick(row, nextId) {
+    const lang = defaults.language || row.language || 'EN';
+    remapTried.current.add(`${row.id}\0${lang}\0${String(nextId)}`);
   }
 
   async function patchRows(ids, changes, { record = true, label = '' } = {}) {
@@ -733,13 +742,13 @@ export default function ScanDesk() {
       case 'candidate': {
         if (closed || !focused || draft) return;
         const next = stepCandidate(focused, cmd.delta);
-        if (next) patchRows([focused.id], { cardId: next }, { label: 'Printing' });
+        if (next) { markPick(focused, next); patchRows([focused.id], { cardId: next }, { label: 'Printing' }); }
         return;
       }
       case 'pickCandidate': {
         if (closed || !focused || draft) return;
         const cand = candidateList(focused)[cmd.index];
-        if (cand) patchRows([focused.id], { cardId: cand.cardId }, { label: 'Printing' });
+        if (cand) { markPick(focused, cand.cardId); patchRows([focused.id], { cardId: cand.cardId }, { label: 'Printing' }); }
         return;
       }
       case 'qtyDigit':
@@ -1191,7 +1200,7 @@ export default function ScanDesk() {
               followTail.current = index === list.length - 1;
             }}
             onPatch={(changes) => patchRows([row.id], changes)}
-            onPick={(cardId) => patchRows([row.id], { cardId }, { label: 'Printing' })}
+            onPick={(cardId) => { markPick(row, cardId); patchRows([row.id], { cardId }, { label: 'Printing' }); }}
             onRemove={() => removeRows([row.id])}
             onReplaceDone={() => {
               setReplaceFor('');
