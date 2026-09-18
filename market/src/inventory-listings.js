@@ -15,6 +15,24 @@ export function liveInventoryListings(rows) {
   return (Array.isArray(rows) ? rows : []).filter(isLiveInventoryListing);
 }
 
+/** Card count and summed asking PKN for live inventory rows only. */
+export function summarizeLiveInventory(rows) {
+  const live = liveInventoryListings(rows);
+  let cards = 0;
+  let listedPkn = 0;
+  for (const row of live) {
+    const qty = Math.max(0, Number(row.quantityAvailable ?? row.quantity_available ?? 0) || 0);
+    const price = Math.max(0, Number(row.pricePkn ?? row.price_pkn ?? 0) || 0);
+    cards += qty;
+    listedPkn += price * qty;
+  }
+  return {
+    listings: live.length,
+    cards,
+    listedPkn,
+  };
+}
+
 export function inventoryListingHref(row) {
   const path = String(row?.canonicalPath || row?.canonical_path || '').trim();
   if (path.startsWith('/marketplace/')) return path;

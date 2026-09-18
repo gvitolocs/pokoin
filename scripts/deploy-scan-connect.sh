@@ -25,7 +25,8 @@ DB_NAME="${DB_NAME:-pokoin_marketplace}"
 API_FILES=(
   api/_scan_connect.js api/_scan_store.js api/_scan_bus.js api/_scan_http.js
   api/scan-session.js api/scan-pair.js api/scan-phone.js api/scan-batch.js api/scan-stream.js
-  api/marketplace-listings.js
+  api/_user_card_collection.js
+  api/marketplace-listings.js api/marketplace-orders.js
   server/api-route-manifest.js
   oracle-postgres/schema/082_scan_connect.sql oracle-postgres/schema/082_scan_connect.grants.sql
 )
@@ -66,7 +67,14 @@ cmd_migrate() {
 cmd_api() {
   for f in "${API_FILES[@]}"; do [[ -f "$CARDVAULT/$f" ]] || die "missing $f"; done
   say "CardVault unit tests"
-  (cd "$CARDVAULT" && node --test api/_scan_connect.test.js api/marketplace-listings.test.js server/api-route-families.test.js >/tmp/sc-api-tests.log 2>&1) \
+  (cd "$CARDVAULT" && node --test \
+      api/_scan_connect.test.js \
+      api/_scan_submit_intent.test.js \
+      api/_scan_store_submit_intent.test.js \
+      api/_user_card_collection.test.js \
+      api/marketplace-listings.test.js \
+      server/api-route-families.test.js \
+      >/tmp/sc-api-tests.log 2>&1) \
     || { tail -20 /tmp/sc-api-tests.log; die "CardVault tests failed"; }
   [[ "$(replica_psql "$SCHEMA_CHECK")" == "5,2,1" ]] || die "scan schema missing on the Pi replica: run migrate first"
   local release="releases/scan-connect-$STAMP"

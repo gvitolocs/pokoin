@@ -266,6 +266,17 @@
   color: var(--muted);
   font-size: 0.8rem;
 }
+.thread-badge {
+  display: inline-block;
+  margin-right: 0.25rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid var(--g5);
+  color: var(--yellow);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .thread-chevron { flex-shrink: 0; color: var(--muted); }
 
 .bag-list { display: flex; flex-direction: column; }

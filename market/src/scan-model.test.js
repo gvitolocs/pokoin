@@ -63,6 +63,7 @@ test('queue hides merged repeats and removed rows; counts use quantities', () =>
   assert.deepEqual(counts, { rows: 4, cards: 7, needsReview: 1, noPrinting: 1, noPrice: 1, blocked: 3, merged: 1, ready: false });
   assert.equal(submitLabel({ cards: 187 }), 'Add 187 cards to Inventory');
   assert.equal(submitLabel({ cards: 1 }), 'Add 1 card to Inventory');
+  assert.equal(submitLabel({ cards: 2 }, { intent: 'collection' }), 'Add 2 cards to collection');
 });
 
 test('row problems mirror the server submit rules', () => {
@@ -71,8 +72,12 @@ test('row problems mirror the server submit rules', () => {
   assert.equal(rowProblem(row('a', { recognitionState: 'ambiguous', reviewed: true })), '');
   assert.equal(rowProblem(row('a', { cardId: '' })), 'no_printing');
   assert.equal(rowProblem(row('a', { pricePkn: null })), 'no_price');
+  assert.equal(rowProblem(row('a', { pricePkn: null }), { intent: 'collection' }), '');
+  assert.equal(rowProblem(row('a', { recognitionState: 'ambiguous', pricePkn: null }), { intent: 'collection' }), 'needs_review');
   assert.equal(rowProblem(row('a', { graded: true, gradingCompany: 'PSA' })), 'grading_incomplete');
   assert.equal(rowProblem(row('a', { status: 'removed', cardId: '' })), '');
+  assert.equal(batchCounts({ a: row('a', { pricePkn: null }) }, { intent: 'collection' }).ready, true);
+  assert.equal(batchCounts({ a: row('a', { pricePkn: null }) }, { intent: 'list' }).ready, false);
 });
 
 test('stack key matches the CardVault vectors', () => {

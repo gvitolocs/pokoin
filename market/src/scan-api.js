@@ -75,7 +75,11 @@ export const scanApi = {
   restore: (token, itemId) => post('/api/scan-batch?action=restore', { itemId }, token),
   duplicate: (token, itemId) => post('/api/scan-batch?action=duplicate', { itemId }, token),
   unmerge: (token, itemId) => post('/api/scan-batch?action=unmerge', { itemId }, token),
-  submit: (token, batchId, submitKey) => post('/api/scan-batch?action=submit', { batchId, submitKey }, token),
+  submit: (token, batchId, submitKey, intent = 'list') => post('/api/scan-batch?action=submit', {
+    batchId,
+    submitKey,
+    intent: intent === 'collection' ? 'collection' : 'list',
+  }, token),
   discard: (token, batchId) => post('/api/scan-batch?action=discard', { batchId }, token),
 };
 

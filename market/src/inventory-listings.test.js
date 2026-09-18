@@ -5,6 +5,7 @@ import {
   inventoryListingMeta,
   isLiveInventoryListing,
   liveInventoryListings,
+  summarizeLiveInventory,
 } from './inventory-listings.js';
 
 test('inventory hides cancelled and sold-out rows', () => {
@@ -37,4 +38,22 @@ test('inventory meta marks paused and non-EN language', () => {
     (n) => `${n} PKN`,
   );
   assert.equal(meta, '324 PKN · NM · qty 1 · paused · JP');
+});
+
+test('summarizeLiveInventory counts qty and asking value for live rows only', () => {
+  const summary = summarizeLiveInventory([
+    { status: 'active', quantityAvailable: 2, pricePkn: 100 },
+    { status: 'paused', quantityAvailable: 1, pricePkn: 50 },
+    { status: 'inactive', quantityAvailable: 9, pricePkn: 999 },
+    { status: 'sold_out', quantityAvailable: 0, pricePkn: 40 },
+    { status: 'active', quantityAvailable: 0, pricePkn: 10 },
+  ]);
+  assert.equal(summary.listings, 2);
+  assert.equal(summary.cards, 3);
+  assert.equal(summary.listedPkn, 250);
+});
+
+test('summarizeLiveInventory empty input is zeroes', () => {
+  assert.deepEqual(summarizeLiveInventory([]), { listings: 0, cards: 0, listedPkn: 0 });
+  assert.deepEqual(summarizeLiveInventory(null), { listings: 0, cards: 0, listedPkn: 0 });
 });

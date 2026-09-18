@@ -45,7 +45,7 @@ import SearchTabs from './SearchTabs.jsx';
 import { Action, track } from '../track.js';
 import { useAuth } from '../auth.jsx';
 import { framedByChromeExtension } from '../extension-auth-bridge.js';
-import { APP, DASHBOARD_SCAN, authFrom, marketUrl } from '../punchouts.js';
+import { APP, DASHBOARD_HOME, authFrom, marketUrl } from '../punchouts.js';
 import { isDashboardHost } from '../scan-api.js';
 import { useCart } from '../cart.jsx';
 import { useWallet } from '../wallet.jsx';
@@ -1054,7 +1054,7 @@ export default function Chrome({ children }) {
             <AppLink to="/forum" title="Forum" aria-label="Forum">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" /></svg>
             </AppLink>
-            <a href={onDashboard ? '/scan' : DASHBOARD_SCAN} title="Dashboard" aria-label="Dashboard">
+            <a href={onDashboard ? '/' : DASHBOARD_HOME} title="Dashboard" aria-label="Dashboard">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z" /></svg>
             </a>
             {site.features.competitive ? (
@@ -1085,7 +1085,7 @@ export default function Chrome({ children }) {
         <MobileTile to="/marketplace/search" label="Search" icon="search" onClick={closeMenu} />
         <MobileTile href={homeHref} label="Home" icon="home" onClick={closeMenu} />
         <MobileTile to={APP.forum} label="Forum" icon="forum" onClick={closeMenu} />
-        <MobileTile href={onDashboard ? '/scan' : DASHBOARD_SCAN} label="Dashboard" icon="dashboard" onClick={closeMenu} />
+        <MobileTile href={onDashboard ? '/' : DASHBOARD_HOME} label="Dashboard" icon="dashboard" onClick={closeMenu} />
         {site.features.competitive ? (
           <MobileTile to="/marketplace/competitive" label="Competitive" icon="trophy" onClick={closeMenu} />
         ) : null}
@@ -1101,7 +1101,7 @@ export default function Chrome({ children }) {
         <MobileTile to={APP.cart} label="Cart" icon="cart" onClick={closeMenu} />
         <MobileTile to="/checkout" label="Checkout" icon="checkout" onClick={closeMenu} />
         <MobileTile to="/orders" label="Orders" icon="orders" onClick={closeMenu} />
-        <MobileTile to="/nft" label="NFT" icon="nft" onClick={closeMenu} />
+        <MobileTile to="/collection" label="Collection" icon="nft" onClick={closeMenu} />
         <MobileTile to={APP.profile} label="Profile" icon="profile" onClick={closeMenu} />
         {admin ? <MobileTile to={APP.admin} label="Admin" icon="admin" onClick={closeMenu} /> : null}
         {signedIn ? null : <MobileTile to={from} label="Sign in" icon="signin" onClick={closeMenu} />}
@@ -1133,7 +1133,7 @@ export default function Chrome({ children }) {
             <AppLink to={APP.cart}>Cart</AppLink>
             <AppLink to="/checkout">Checkout</AppLink>
             <AppLink to="/orders">Orders</AppLink>
-            <AppLink to="/nft">NFT</AppLink>
+            <AppLink to="/collection">Collection</AppLink>
             <AppLink to={APP.profile}>Profile</AppLink>
             {admin ? <AppLink to={APP.admin}>Admin</AppLink> : null}
             {signedIn ? null : <AppLink to={from}>Sign in</AppLink>}
@@ -1142,7 +1142,7 @@ export default function Chrome({ children }) {
             <h3>More</h3>
             <a href={marketUrl('/')}>Home</a>
             <AppLink to={APP.forum}>Forum</AppLink>
-            <a href={onDashboard ? '/scan' : DASHBOARD_SCAN}>Dashboard</a>
+            <a href={onDashboard ? '/' : DASHBOARD_HOME}>Dashboard</a>
             <AppLink to={APP.docs}>Docs</AppLink>
             <AppLink to={APP.about}>About</AppLink>
             <AppLink to={APP.privacy}>Privacy</AppLink>

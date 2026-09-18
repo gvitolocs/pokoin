@@ -60,7 +60,7 @@ export default function Products() {
         kicker="Products"
         title={spec.title}
         lede={kind === 'nft'
-          ? 'Live NFT catalog search. Owned holdings and shipping requests live on /nft after nft_only checkout.'
+          ? 'Live NFT catalog search. Owned holdings and shipping requests live on /collection after nft_only checkout.'
           : `Marketplace search for ${spec.query}. Empty query + booster_box is not used here.`}
       />
       <nav className="comp-tabs" aria-label="Product types">

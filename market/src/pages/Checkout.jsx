@@ -113,7 +113,7 @@ export default function Checkout() {
         <p className="desk-ok">
           Paid order {orderId}.{' '}
           <Link to="/orders">View orders</Link>
-          {nft ? <> · <Link to="/nft">NFT holdings</Link></> : null}
+          {nft ? <> · <Link to="/collection">Collection</Link></> : null}
         </p>
       ) : null}
       {!items.length && !orderId ? (

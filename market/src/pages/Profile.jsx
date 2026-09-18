@@ -63,7 +63,7 @@ export default function Profile() {
             <Thread to="/orders" title="Orders" meta="Paid checkouts" />
             <Thread to="/wallet" title="Wallet" meta="Send, swap, WPKN" />
             <Thread to="/buy" title="Buy PKN" meta="Stripe site balance" />
-            <Thread to="/nft" title="NFT holdings" meta="nft_only checkouts" />
+            <Thread to="/collection" title="Your collection" meta="Physical + NFT holdings" />
             <Thread to="/forum" title="Forum" meta="Community" />
             {admin ? <Thread to="/admin" title="Admin" meta="Expansion logos" /> : null}
           </div>

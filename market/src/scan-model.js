@@ -67,15 +67,17 @@ export function stackKey(row = {}) {
 }
 
 /** Same reasons as CardVault `_scan_connect.submitProblem`. */
-export function rowProblem(row) {
+export function rowProblem(row, { intent = 'list' } = {}) {
   if (!row || row.status !== 'active') return '';
   if (!/^\d+$/.test(String(row.cardId || ''))) return 'no_printing';
   if ((row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed) {
     return 'needs_review';
   }
   if (row.graded && (!row.gradingCompany || !row.grade)) return 'grading_incomplete';
-  const price = Number(row.pricePkn);
-  if (row.pricePkn == null || !Number.isFinite(price) || price <= 0) return 'no_price';
+  if (intent !== 'collection') {
+    const price = Number(row.pricePkn);
+    if (row.pricePkn == null || !Number.isFinite(price) || price <= 0) return 'no_price';
+  }
   return '';
 }
 
@@ -86,14 +88,14 @@ export const PROBLEM_LABEL = {
   no_price: 'Needs a price',
 };
 
-export function batchCounts(rows) {
+export function batchCounts(rows, { intent = 'list' } = {}) {
   const counts = { rows: 0, cards: 0, needsReview: 0, noPrinting: 0, noPrice: 0, blocked: 0, merged: 0 };
   for (const row of Object.values(rows || {})) {
     if (row.status === 'merged') counts.merged += 1;
     if (row.status !== 'active') continue;
     counts.rows += 1;
     counts.cards += Number(row.quantity) || 0;
-    const problem = rowProblem(row);
+    const problem = rowProblem(row, { intent });
     if (problem) counts.blocked += 1;
     if (problem === 'needs_review') counts.needsReview += 1;
     if (problem === 'no_printing') counts.noPrinting += 1;
@@ -103,17 +105,20 @@ export function batchCounts(rows) {
   return counts;
 }
 
-export function submitLabel(counts) {
+export function submitLabel(counts, { intent = 'list' } = {}) {
   const n = counts.cards;
+  if (intent === 'collection') {
+    return `Add ${n} card${n === 1 ? '' : 's'} to collection`;
+  }
   return `Add ${n} card${n === 1 ? '' : 's'} to Inventory`;
 }
 
 /** Index of the next row after `from` that blocks submit, wrapping once. */
-export function nextAttentionIndex(list, from = -1) {
+export function nextAttentionIndex(list, from = -1, { intent = 'list' } = {}) {
   const n = list.length;
   for (let step = 1; step <= n; step += 1) {
     const i = (from + step + n) % n;
-    if (rowProblem(list[i])) return i;
+    if (rowProblem(list[i], { intent })) return i;
   }
   return -1;
 }

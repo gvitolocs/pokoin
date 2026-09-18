@@ -493,6 +493,50 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 
 .scan-queue:focus-visible { box-shadow: 0 0 0 2px var(--yellow); }
 
+.scan-intent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin: 0 0 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--scan-line);
+  border-radius: 10px;
+  background: #121018;
+}
+
+.scan-intent-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.scan-intent-seg {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.scan-intent-seg button {
+  appearance: none;
+  border: 1px solid var(--scan-line);
+  background: #0b0a0e;
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 0.45rem 0.85rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.scan-intent-seg button.on {
+  border-color: var(--yellow);
+  color: var(--yellow);
+  background: #1d1a10;
+}
+
+.scan-queue.intent-collection .scan-row {
+  grid-template-columns: 2.4rem 4.8rem minmax(12rem, 1fr) 4.4rem 4.6rem 6.4rem 5.6rem 7rem 2.6rem 7rem 2.2rem;
+}
+
 .scan-row {
   display: grid;
   grid-template-columns: 2.4rem 4.8rem minmax(12rem, 1fr) 4.4rem 4.6rem 6.4rem 5.6rem 7rem 2.6rem 5.4rem 7rem 2.2rem;

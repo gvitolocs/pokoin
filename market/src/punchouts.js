@@ -14,6 +14,7 @@ export function authFrom(path) {
 /** Seller desk on the dashboard host (Scan Connect). */
 export const DASHBOARD_ORIGIN = 'https://dashboard.pokoin.com';
 export const DASHBOARD_SCAN = `${DASHBOARD_ORIGIN}/scan`;
+export const DASHBOARD_HOME = `${DASHBOARD_ORIGIN}/`;
 
 /** Public marketplace apex. Dashboard links that leave the seller desk go here. */
 export const MARKET_ORIGIN = 'https://pokoin.com';
@@ -39,10 +40,10 @@ export function marketUrl(path = '/marketplace', hostname) {
   return normalized;
 }
 
-/** Paths that stay on the dashboard host (Scan Connect desk). */
+/** Paths that stay on the dashboard host (seller home + Scan Connect desk). */
 export function isDashboardDeskPath(pathname = '') {
   const path = String(pathname || '').replace(/\/$/, '') || '/';
-  return path === '/scan' || path === '/inventory/scan';
+  return path === '/' || path === '/scan' || path === '/inventory/scan';
 }
 
 export const APP = {
@@ -69,6 +70,7 @@ export const APP = {
   protection: route('/protection'),
   whitepaper: route('/whitepaper'),
   nft: route('/nft'),
+  collection: route('/collection'),
   checkout: route('/checkout'),
   orders: route('/orders'),
 };

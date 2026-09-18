@@ -43,11 +43,13 @@ import Signal from './pages/Signal.jsx';
 import Scan from './pages/Scan.jsx';
 import Inventory from './pages/Inventory.jsx';
 import ScanDesk from './pages/ScanDesk.jsx';
+import SellerHome from './pages/SellerHome.jsx';
 import Buy from './pages/Buy.jsx';
 import Admin from './pages/Admin.jsx';
 import Checkout from './pages/Checkout.jsx';
 import Orders from './pages/Orders.jsx';
-import Nft from './pages/Nft.jsx';
+import Collection from './pages/Collection.jsx';
+import NftRedirect from './pages/Nft.jsx';
 import Protection from './pages/Protection.jsx';
 import EmailPreferences from './pages/EmailPreferences.jsx';
 import Site from './pages/Site.jsx';
@@ -121,7 +123,7 @@ function AppShell() {
       {both('/marketplace/portfolio/:listingId', <Portfolio />)}
       {both('/marketplace/watchlist', <Watchlist />)}
       {both('/favorites', <Watchlist />)}
-      {both('/nft', <Nft />)}
+      {both('/nft', <NftRedirect />)}
       {both('/product', <Navigate to="/product/box" replace />)}
       {both('/product/:kind', <Products />)}
       {both('/marketplace/signal', <Signal />)}
@@ -164,7 +166,7 @@ function AppShell() {
       {both('/swap', <Navigate to="/wallet" replace />)}
       {both('/checkout', <Checkout />)}
       {both('/orders', <Orders />)}
-      {both('/collection', <Navigate to="/nft" replace />)}
+      {both('/collection', <Collection />)}
       {both('/forum', <Forum />)}
       {both('/forum/category/:categoryId', <Forum />)}
       {both('/forum/topic/:topicId', <Forum />)}
@@ -183,7 +185,8 @@ function AppShell() {
       {both('/earn', <Site />)}
       {both('/whitepaper', <Site />)}
       {both('/health', <Site />)}
-      <Route path="*" element={<Navigate to={dashboard ? '/scan' : '/marketplace'} replace />} />
+      {both('/', dashboard ? <SellerHome /> : <Navigate to="/marketplace" replace />)}
+      <Route path="*" element={<Navigate to={dashboard ? '/' : '/marketplace'} replace />} />
     </Routes>
   );
   if (board) {

@@ -1,11 +1,16 @@
 # Scan Connect (desktop ↔ phone pairing and realtime)
 
-A seller opens **Scan** on `dashboard.pokoin.com/scan` (same desk as
-`pokoin.com/inventory/scan`), scans the QR with the phone camera — or types
-the 4-digit code at `scan.pokoin.com/connect` — and every card the phone
-recognises lands in the desktop queue within a second. The desktop owns
-metadata; the phone is a camera. Listing semantics:
-[SCAN_LISTING_WORKFLOW.md](SCAN_LISTING_WORKFLOW.md). Audit:
+A seller opens **Dashboard** on `dashboard.pokoin.com/` (Portfolio overview of
+the Firestore collection + List Cards), then **Scan** on
+`dashboard.pokoin.com/scan` (same desk as `pokoin.com/inventory/scan`). The desk
+has one scanner with submit **intent** `list` | `collection`: list creates
+`marketplace_user_listings` **and** physical `user_card_collections` ownership;
+collection writes ownership only (no asking price). Pairing is unchanged —
+scans the QR with the phone camera — or types the 4-digit code at
+`scan.pokoin.com/connect` — and every card the phone recognises lands in the
+desktop queue within a second. The desktop owns metadata; the phone is a
+camera. Listing semantics: [SCAN_LISTING_WORKFLOW.md](SCAN_LISTING_WORKFLOW.md).
+Audit:
 [SCAN_SYSTEM_AUDIT.md](SCAN_SYSTEM_AUDIT.md). Timings:
 [SCAN_PERFORMANCE.md](SCAN_PERFORMANCE.md).
 
@@ -18,7 +23,8 @@ metadata; the phone is a camera. Listing semantics:
 | **Scan Batch** | until submitted or discarded (days) | `scan_batches` | The seller's persistent work and the Batch Defaults history. A new session resumes it. |
 | **Scan Event** | immutable | columns on `scan_items` (`scan_event_id` unique, `captured_at`, `recognition`, `defaults_snapshot`, `image`) | Idempotency key and audit of what the phone saw. |
 | **Catalog match** | immutable per event | `scan_items.recognition` (`state`, candidates by public `card_id`) | Uses the existing public id; no new printing table. |
-| **Inventory article** | live | `marketplace_user_listings` | Existing listing table; written only on submit. |
+| **Inventory article** | live after finalize | `marketplace_user_listings` | Inserted as `status=inactive` on list submit, activated to `active` in the same Postgres transaction that marks the batch submitted. Purchase requires `active`. |
+| **Collection ownership** | live | Firestore `user_card_collections` doc `scan:{itemId}` | Written on every successful submit (`list` and `collection`). Retries do not rewrite quantity. |
 
 Four tables, not six: an event and its staged article are one row
 (immutable event columns + mutable article columns) because every event
@@ -32,7 +38,7 @@ Schema: CardVault `oracle-postgres/schema/082_scan_connect.sql`.
 
 | Surface | Route | Why here |
 | --- | --- | --- |
-| Desktop | `dashboard.pokoin.com/scan` and `pokoin.com/inventory/scan` (SPA, `market/src/pages/ScanDesk.jsx`) | Same Vercel SPA. On the `dashboard.` host `/scan` renders the desk (`isDashboardHost`, `market/src/App.jsx`) and `/` redirects to `/scan` (`vercel.json`). On `pokoin.com`, `/scan` stays the public photo identify page. |
+| Desktop | `dashboard.pokoin.com/` seller home (`SellerHome.jsx`); Scan Connect desk at `dashboard.pokoin.com/scan` and `pokoin.com/inventory/scan` (`ScanDesk.jsx`) | Same Vercel SPA. On the `dashboard.` host `/` is the seller home and `/scan` is the desk (`isDashboardHost`, `market/src/App.jsx`). On `pokoin.com`, `/scan` stays the public photo identify page. |
 | Phone | `scan.pokoin.com/connect` — Oracle peer1 Caddy `file_server` over `/opt/pokoin-cardscan/web` with `rewrite /connect /index.html`; `web/static/scan-connect.js` switches that page to connect mode | Reuses the tuned camera loop, detection and orientation fixes. `scan.pokoin.com/` keeps redirecting accepted scans to the card page. Recognition paths (`/identify`, `/catalogs`, `/health`) proxy to `127.0.0.1:8100` → nezopt worker. The FastAPI `/connect` route in BattleScan `server/app.py` only matters when the app serves `web/` itself (local). |
 | QR | `https://scan.pokoin.com/connect#c=<4 digits>&k=<secret>` | [QR link](#qr-link). Fragment is never sent to a server log. |
 

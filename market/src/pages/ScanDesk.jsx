@@ -47,6 +47,7 @@ import { HELP_SECTIONS, shortcutFor, DRAFT_HOTKEY_LEGEND, draftLegendActive, dis
 import { connectScanStream } from '../scan-stream.js';
 import { useLiveSuggest } from '../use-live-suggest.js';
 import { SessionWait } from '../components/Desk.jsx';
+import { marketUrl } from '../punchouts.js';
 import '../scan-desk.css';
 
 /** CLIP version-set cache keyed by any member card id. */
@@ -127,6 +128,8 @@ export default function ScanDesk() {
   const [replaceFor, setReplaceFor] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [problems, setProblems] = useState({});
+  /** Finalize intent: list → listings+ownership; collection → ownership only. */
+  const [submitIntent, setSubmitIntent] = useState('list');
   const [now, setNow] = useState(() => Date.now());
   const [images, setImages] = useState({});
   /** PowerTools single-card draft: printing picked, Qty focused, hotkeys edit, Enter creates. */
@@ -304,7 +307,10 @@ export default function ScanDesk() {
   }, [rows, pending]);
 
   const list = useMemo(() => queueRows(displayRows), [displayRows]);
-  const counts = useMemo(() => batchCounts(displayRows), [displayRows]);
+  const counts = useMemo(
+    () => batchCounts(displayRows, { intent: submitIntent }),
+    [displayRows, submitIntent],
+  );
   const phase = sessionPhase(session, now, serverOffset);
   const phaseInfo = phaseText(phase, session);
   const defaults = batch?.defaults || DEFAULTS;
@@ -622,14 +628,18 @@ export default function ScanDesk() {
 
   function confirmFocused() {
     if (!focused) return;
-    const problem = rowProblem(focused);
+    const problem = rowProblem(focused, { intent: submitIntent });
     if ((focused.recognitionState === 'ambiguous' || focused.recognitionState === 'unmatched') && !focused.reviewed && focused.cardId) {
       patchRows([focused.id], { confirm: true }, { label: 'Confirm' });
     } else if (problem === 'no_printing') {
       setReplaceFor(focused.id);
       return;
     }
-    const nextIndex = nextAttentionIndex(list.map((row) => (row.id === focused.id ? { ...row, reviewed: true } : row)), focusIndex);
+    const nextIndex = nextAttentionIndex(
+      list.map((row) => (row.id === focused.id ? { ...row, reviewed: true } : row)),
+      focusIndex,
+      { intent: submitIntent },
+    );
     if (nextIndex >= 0 && nextIndex !== focusIndex) setFocusId(list[nextIndex].id);
     else move(1);
   }
@@ -667,7 +677,7 @@ export default function ScanDesk() {
         move(cmd.delta);
         return;
       case 'nextAttention': {
-        const i = nextAttentionIndex(list, focusIndex);
+        const i = nextAttentionIndex(list, focusIndex, { intent: submitIntent });
         if (i >= 0) setFocusId(list[i].id);
         return;
       }
@@ -750,7 +760,7 @@ export default function ScanDesk() {
       default:
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, focusIndex, focused, closed, confirmOpen, replaceFor, helpOpen, counts.ready, selection, defaults, draft]);
+  }, [list, focusIndex, focused, closed, confirmOpen, replaceFor, helpOpen, counts.ready, selection, defaults, draft, submitIntent]);
 
   useEffect(() => {
     function onKey(event) {
@@ -772,7 +782,7 @@ export default function ScanDesk() {
   // ---------------------------------------------------------------- prices + images
 
   useEffect(() => {
-    if (closed) return;
+    if (closed || submitIntent === 'collection') return;
     const missing = list
       .filter((row) => row.cardId && row.pricePkn == null && !pricesAsked.current.has(`${row.id}:${row.cardId}`))
       .slice(0, 12);
@@ -787,7 +797,7 @@ export default function ScanDesk() {
       }
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, closed]);
+  }, [list, closed, submitIntent]);
 
   useEffect(() => {
     const wanted = list.filter((row) => row.hasImage && (row.recognitionState !== 'matched' || !row.cardId) && !images[row.id]);
@@ -848,7 +858,7 @@ export default function ScanDesk() {
     setError('');
     try {
       const t = await token();
-      const data = await scanApi.submit(t, batch.id, submitKey.current);
+      const data = await scanApi.submit(t, batch.id, submitKey.current, submitIntent);
       setBatch((current) => ({ ...current, ...data.batch }));
       setConfirmOpen(false);
       setProblems({});
@@ -863,7 +873,7 @@ export default function ScanDesk() {
         const first = list.findIndex((row) => err.problems.some((p) => p.itemId === row.id));
         if (first >= 0) setFocusId(list[first].id);
       }
-      setError(err.message || 'Could not add to inventory.');
+      setError(err.message || (submitIntent === 'collection' ? 'Could not add to collection.' : 'Could not add to inventory.'));
     } finally {
       setSubmitting(false);
     }
@@ -892,7 +902,7 @@ export default function ScanDesk() {
       <header className="scan-head">
         <div className="scan-head-title">
           <p className="page-kicker">Seller · Scan</p>
-          <h1 className="page-title">Scan to inventory</h1>
+          <h1 className="page-title">Scan cards</h1>
         </div>
         <div className={`scan-status tone-${phaseInfo.tone}`} role="status" aria-live="polite">
           <span className="dot" aria-hidden="true" />
@@ -950,20 +960,58 @@ export default function ScanDesk() {
 
       {closed ? (
         <section className="scan-done">
-          <h2>{batch.status === 'submitted' ? `Added ${batch.submitResult?.cards ?? counts.cards} cards to Inventory` : 'Batch discarded'}</h2>
-          <p>{batch.submitResult?.listings ?? 0} listings are live.</p>
+          <h2>
+            {batch.status === 'submitted'
+              ? (batch.submitResult?.intent === 'collection'
+                ? `Added ${batch.submitResult?.cards ?? counts.cards} cards to your collection`
+                : `Added ${batch.submitResult?.cards ?? counts.cards} cards to Inventory`)
+              : 'Batch discarded'}
+          </h2>
+          <p>
+            {batch.submitResult?.intent === 'collection'
+              ? `${batch.submitResult?.ownership ?? 0} collection records saved. None listed for sale.`
+              : `${batch.submitResult?.listings ?? 0} listings are live (also added to your collection).`}
+          </p>
           <div className="scan-done-actions">
-            <Link className="btn ghost" to="/inventory">Open inventory</Link>
+            <a className="btn ghost" href={marketUrl('/collection')}>View collection</a>
+            {batch.submitResult?.intent !== 'collection' ? (
+              <Link className="btn ghost" to="/inventory">Open inventory</Link>
+            ) : null}
             <button type="button" className="btn" onClick={newBatch}>Scan another batch</button>
           </div>
         </section>
       ) : (
-        <DefaultsBar
-          defaults={defaults}
-          onChange={setDefaults}
-          locationRef={locationInput}
-          quantityRef={quantityInput}
-        />
+        <>
+          <section className="scan-intent" aria-label="What do you want to do?">
+            <p className="scan-intent-label">What do you want to do?</p>
+            <div className="scan-intent-seg" role="group">
+              <button
+                type="button"
+                className={submitIntent === 'list' ? 'on' : ''}
+                aria-pressed={submitIntent === 'list'}
+                data-testid="scan-intent-list"
+                onClick={() => setSubmitIntent('list')}
+              >
+                List for sale
+              </button>
+              <button
+                type="button"
+                className={submitIntent === 'collection' ? 'on' : ''}
+                aria-pressed={submitIntent === 'collection'}
+                data-testid="scan-intent-collection"
+                onClick={() => setSubmitIntent('collection')}
+              >
+                Add to collection
+              </button>
+            </div>
+          </section>
+          <DefaultsBar
+            defaults={defaults}
+            onChange={setDefaults}
+            locationRef={locationInput}
+            quantityRef={quantityInput}
+          />
+        </>
       )}
 
       {!closed ? (
@@ -988,7 +1036,7 @@ export default function ScanDesk() {
           {counts.merged ? ` · ${counts.merged} repeat${counts.merged === 1 ? '' : 's'} merged` : ''}
           {counts.needsReview ? <button type="button" className="chip warn" onClick={() => handleCommand({ command: 'nextAttention' })}>{counts.needsReview} to check</button> : null}
           {counts.noPrinting ? <span className="chip bad">{counts.noPrinting} unidentified</span> : null}
-          {counts.noPrice ? <span className="chip warn">{counts.noPrice} need a price</span> : null}
+          {counts.noPrice && submitIntent === 'list' ? <span className="chip warn">{counts.noPrice} need a price</span> : null}
         </span>
         {!closed ? (
           <button
@@ -998,13 +1046,13 @@ export default function ScanDesk() {
             onClick={() => setConfirmOpen(true)}
             title="⌘Enter"
           >
-            {submitting ? 'Adding…' : submitLabel(counts)}
+            {submitting ? 'Adding…' : submitLabel(counts, { intent: submitIntent })}
           </button>
         ) : null}
       </div>
 
       <div
-        className="scan-queue"
+        className={`scan-queue${submitIntent === 'collection' ? ' intent-collection' : ''}`}
         role="grid"
         aria-label="Scan queue"
         tabIndex={0}
@@ -1024,7 +1072,7 @@ export default function ScanDesk() {
           <span role="columnheader">Flags</span>
           <span role="columnheader">Location</span>
           <span role="columnheader">Qty</span>
-          <span role="columnheader">Price</span>
+          {submitIntent === 'list' ? <span role="columnheader">Price</span> : null}
           <span role="columnheader">State</span>
           <span role="columnheader" className="c-remove" aria-label="Remove" />
         </div>
@@ -1042,9 +1090,10 @@ export default function ScanDesk() {
             index={index}
             focused={row.id === focusId}
             selected={selection.has(row.id)}
-            problem={problems[row.id] || rowProblem(row)}
+            problem={problems[row.id] || rowProblem(row, { intent: submitIntent })}
             image={images[row.id]}
             closed={closed}
+            hidePrice={submitIntent === 'collection'}
             replacing={replaceFor === row.id}
             preferredLanguage={defaults.language}
             onFocus={(event) => {
@@ -1085,7 +1134,7 @@ export default function ScanDesk() {
       {confirmOpen ? (
         <div className="scan-modal" role="dialog" aria-modal="true" aria-label="Add to inventory">
           <div className="scan-modal-box">
-            <h2>{submitLabel(counts)}?</h2>
+            <h2>{submitLabel(counts, { intent: submitIntent })}?</h2>
             <p>{counts.rows} listings go live on Pokoin now.</p>
             <div className="scan-modal-actions">
               <button type="button" className="btn ghost" onClick={() => setConfirmOpen(false)}>Cancel (Esc)</button>
@@ -1346,11 +1395,11 @@ function CandidateAlts({ row, preferredLanguage, onPick }) {
 
 function QueueRow({
   row, index, focused, selected, problem, image, closed, replacing,
-  preferredLanguage,
+  preferredLanguage, hidePrice = false,
   onFocus, onPatch, onPick, onRemove, onReplaceDone,
 }) {
   const stateLabel = row.status === 'submitted'
-    ? 'Listed'
+    ? (hidePrice ? 'Collected' : 'Listed')
     : problem
       ? PROBLEM_LABEL[problem]
       : row.recognitionState === 'manual' ? 'Manual' : row.reviewed && row.recognitionState !== 'matched' ? 'Checked' : 'Matched';
@@ -1452,6 +1501,7 @@ function QueueRow({
         )}
       </span>
       <span className="c-qty">{row.quantity}</span>
+      {hidePrice ? null : (
       <span className={`c-price${row.priceSuggested ? ' suggested' : ''}`}>
         {closed ? formatPkn(row.pricePkn) : (
           <input
@@ -1476,6 +1526,7 @@ function QueueRow({
           />
         )}
       </span>
+      )}
       <span className={`c-state tone-${tone}`}>{stateLabel}</span>
       <span className="c-remove">
         {closed ? null : (
