@@ -14,6 +14,7 @@ import {
 } from '../suggest-rank.js';
 import { useSearchLang, usePrintLang } from '../locale.js';
 import { rowPrintBucket } from '../print-filter.js';
+import { printLangMatchesBucket } from '../print-bucket.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
@@ -147,7 +148,7 @@ export default function Search() {
       }
       let next = data?.cards || [];
       if (activePrintLang && activePrintLang !== 'all') {
-        next = next.filter((card) => rowPrintBucket(card) === activePrintLang);
+        next = next.filter((card) => printLangMatchesBucket(activePrintLang, rowPrintBucket(card)));
       }
       setCards(next);
       setHasMore(setAware || tab === 'users' ? false : Boolean(data?.hasMore));
@@ -289,7 +290,7 @@ export default function Search() {
     });
     let extra = data.cards || [];
     if (activePrintLang && activePrintLang !== 'all') {
-      extra = extra.filter((card) => rowPrintBucket(card) === activePrintLang);
+      extra = extra.filter((card) => printLangMatchesBucket(activePrintLang, rowPrintBucket(card)));
     }
     setCards((current) => [...current, ...extra]);
     setHasMore(Boolean(data.hasMore));
@@ -306,7 +307,7 @@ export default function Search() {
 
   const emptyTitle = tab === 'users'
     ? 'No sellers match'
-    : (tab === 'product' ? 'No products match' : 'No matches');
+    : (tab === 'jumbo' ? 'No jumbo cards match' : tab === 'product' ? 'No products match' : 'No matches');
   const emptyLede = tab === 'users'
     ? 'Try an exact seller username.'
     : 'Try a collector number, a set name, or a shorter card name.';
@@ -330,7 +331,7 @@ export default function Search() {
                 ? <><strong>{sellers.length.toLocaleString('en-US')}</strong> sellers</>
                 : 'No sellers match that search.')
               : (!cards.length
-                ? (tab === 'product' ? 'No products match that search.' : 'No cards match that search.')
+                ? (tab === 'jumbo' ? 'No jumbo cards match that search.' : tab === 'product' ? 'No products match that search.' : 'No cards match that search.')
                 : (filtersOn
                   ? <><strong>{shown.length.toLocaleString('en-US')}</strong> matching</>
                   : (total || !hasMore

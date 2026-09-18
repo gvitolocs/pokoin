@@ -12,19 +12,19 @@ test('suggest kind treats pin collections as products even without itemKind', ()
   assert.equal(suggestKind({
     name: 'Palkia & Dialga LEGEND',
     number: 'Jumbo Oversized',
-  }), 'Product');
-  assert.equal(suggestKind({ name: 'Jumbo Oversized Pikachu' }), 'Product');
+  }), 'Jumbo');
+  assert.equal(suggestKind({ name: 'Jumbo Oversized Pikachu' }), 'Jumbo');
   assert.equal(suggestKind({
     name: 'Charizard',
     number: '017',
     rarity: 'Jumbo Oversized',
     set: 'XY Black Star Promos',
-  }), 'Product');
+  }), 'Jumbo');
   assert.equal(suggestKind({
     name: 'Venusaur',
     number: 'Jumbo Oversized | 017',
     set: 'XY Black Star Promos',
-  }), 'Product');
+  }), 'Jumbo');
   assert.equal(suggestKind({ name: 'Arceus: Flamemaster Theme Deck' }), 'Product');
   assert.equal(suggestKind({ name: 'Arceus: Stormshaper Theme Deck' }), 'Product');
   assert.equal(suggestKind({ name: 'Arceus Spring 2022 Collector\'s Chest' }), 'Product');
@@ -319,4 +319,11 @@ test('Japanese Tag Team GX titles match western GX names', () => {
     sanitizeCardName('Sky Legend: Moltres & Zapdos & Articuno Tag Team GX Sleeves'),
     'Sky Legend: Moltres & Zapdos & Articuno Tag Team GX Sleeves',
   );
+});
+
+test('suggestKind classifies jumbo product type rows and name fallback', () => {
+  assert.equal(suggestKind({ itemKind: 'single', productType: 'jumbo', name: 'Charizard GX' }), 'Jumbo');
+  // Name/number fallback still catches rows predating the 083 stamp.
+  assert.equal(suggestKind({ name: 'Charizard GX', number: 'Jumbo Oversized | 211' }), 'Jumbo');
+  assert.equal(suggestKind({ name: 'Mimikyu', number: '042/094' }), 'Singles');
 });

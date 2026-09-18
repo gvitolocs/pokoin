@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  SEARCH_TABS,
   isSearchSingle,
   normalizeSearchTab,
   printingMatchesSearchTab,
@@ -38,6 +39,14 @@ test('singles vs product follows catalog kind', () => {
     number: 'Jumbo Oversized',
   }, 'singles'), false);
   assert.equal(printingMatchesSearchTab({
+    name: 'Palkia & Dialga LEGEND',
+    number: 'Jumbo Oversized',
+  }, 'jumbo'), true);
+  assert.equal(printingMatchesSearchTab({
+    name: 'Palkia & Dialga LEGEND',
+    number: 'Jumbo Oversized',
+  }, 'product'), false);
+  assert.equal(printingMatchesSearchTab({
     name: 'Charizard',
     number: '017',
     rarity: 'Jumbo Oversized',
@@ -46,7 +55,12 @@ test('singles vs product follows catalog kind', () => {
     name: 'Charizard',
     number: '017',
     rarity: 'Jumbo Oversized',
-  }, 'product'), true);
+  }, 'jumbo'), true);
+  assert.equal(printingMatchesSearchTab({
+    name: 'Charizard',
+    number: '017',
+    rarity: 'Jumbo Oversized',
+  }, 'product'), false);
   assert.equal(printingMatchesSearchTab({
     name: 'Arceus: Flamemaster Theme Deck',
     set: 'HeartGold & SoulSilver Platinum',
@@ -78,4 +92,19 @@ test('unique sellers collapse listings by seller uid', () => {
   assert.equal(sellers.length, 2);
   assert.equal(sellers[0].count, 2);
   assert.equal(sellers[0].name, 'Mimi');
+});
+
+test('search popup has a Jumbo tab; singles and product exclude jumbos', () => {
+  assert.equal(SEARCH_TABS.map((t) => t.id).join(','), 'singles,jumbo,product,users');
+  assert.equal(normalizeSearchTab('jumbo'), 'jumbo');
+  assert.deepEqual(searchFetchOptions('jumbo'), { productType: 'jumbo' });
+  assert.deepEqual(searchFetchOptions('singles'), { productType: 'card' });
+  const jumboRow = { itemKind: 'single', productType: 'jumbo', name: 'Charizard GX', number: 'Jumbo Oversized | 211' };
+  assert.equal(printingMatchesSearchTab(jumboRow, 'jumbo'), true);
+  assert.equal(printingMatchesSearchTab(jumboRow, 'singles'), false);
+  assert.equal(printingMatchesSearchTab(jumboRow, 'product'), false);
+  const normalRow = { itemKind: 'single', productType: 'card', name: 'Dratini', number: '131/197' };
+  assert.equal(printingMatchesSearchTab(normalRow, 'singles'), true);
+  assert.equal(printingMatchesSearchTab(normalRow, 'jumbo'), false);
+  assert.equal(searchHref('charizard gx jumbo', 'jumbo'), '/marketplace/search?q=charizard+gx+jumbo&tab=jumbo');
 });

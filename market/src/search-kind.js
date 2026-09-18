@@ -2,6 +2,7 @@ import { suggestKind } from './identity.js';
 
 export const SEARCH_TABS = [
   { id: 'singles', label: 'Singles' },
+  { id: 'jumbo', label: 'Jumbo' },
   { id: 'product', label: 'Product' },
   { id: 'users', label: 'Users' },
 ];
@@ -38,14 +39,21 @@ export function printingMatchesSearchTab(card, tab) {
   if (kind === 'users') {
     return false;
   }
+  const jumbo = suggestKind(card) === 'Jumbo';
+  if (kind === 'jumbo') {
+    return jumbo;
+  }
   const single = isSearchSingle(card);
-  return kind === 'singles' ? single : !single;
+  return kind === 'singles' ? single && !jumbo : !single && !jumbo;
 }
 
 export function searchFetchOptions(tab) {
   const kind = normalizeSearchTab(tab);
   if (kind === 'product') {
     return { productSearchOnly: true };
+  }
+  if (kind === 'jumbo') {
+    return { productType: 'jumbo' };
   }
   if (kind === 'singles') {
     return { productType: 'card' };

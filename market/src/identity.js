@@ -240,6 +240,10 @@ export function suggestKind(card = {}, groupName = '') {
   if (/product/.test(blob) && !/card|single/.test(blob)) {
     return 'Product';
   }
+  if (/\bjumbo\b/.test(blob)) {
+    // product_type 'jumbo' (083): its own Pokémon product type, not a single.
+    return 'Jumbo';
+  }
   if (/single/.test(blob)) {
     return 'Singles';
   }
@@ -268,8 +272,13 @@ export function suggestKind(card = {}, groupName = '') {
   ) {
     return 'Singles';
   }
-  if (SEALED_SKU.test(nameHay) || JUMBO_PRODUCT.test(nameHay)) {
+  if (SEALED_SKU.test(nameHay)) {
     return 'Product';
+  }
+  if (JUMBO_PRODUCT.test(nameHay)) {
+    // "Jumbo Oversized | 211" and friends: the jumbo product type, detected by
+    // name/number when a row predates the 083 product_type stamp.
+    return 'Jumbo';
   }
   if (PRODUCT_NAME.test(nameHay) && !PRINTED_FRACTION.test(identity.number)) {
     return 'Product';
