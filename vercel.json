@@ -452,6 +452,11 @@
   ],
   "rewrites": [
     {
+      "source": "/",
+      "has": [{ "type": "host", "value": "dashboard.pokoin.com" }],
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/working",
       "destination": "/working.html"
     },
