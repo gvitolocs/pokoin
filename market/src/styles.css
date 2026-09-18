@@ -801,7 +801,8 @@ button, input, select { font: inherit; color: inherit; }
   font-size: 0.8125rem;
   font-weight: 800;
   letter-spacing: 0.02em;
-  color: #fff;
+  color: var(--yellow);
+  background: rgb(255 211 61 / 0.14);
 }
 
 .icon-nav .cart-chip {
