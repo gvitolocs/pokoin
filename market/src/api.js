@@ -472,6 +472,28 @@ export async function fetchLastMedianPknMap(cardIds) {
   return byId;
 }
 
+/** Batch cheapest listed PKN per card id (marketplace-card-cheapest-price). */
+export async function fetchCheapestPricePknMap(cardIds) {
+  const ids = [...new Set((cardIds || []).map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id)))].slice(0, 50);
+  if (!ids.length) {
+    return {};
+  }
+  try {
+    const data = await getJson(`/api/marketplace-card-cheapest-price?cardIds=${ids.join(',')}`);
+    const byId = {};
+    for (const row of data?.prices || []) {
+      const id = String(row?.cardId || row?.card_id || '').trim();
+      const pkn = Number(row?.pricePkn ?? row?.price);
+      if (/^\d+$/.test(id) && Number.isFinite(pkn) && pkn > 0) {
+        byId[id] = pkn;
+      }
+    }
+    return byId;
+  } catch (_) {
+    return {};
+  }
+}
+
 export async function fillMissingLastMedianPrices(cards) {
   const ids = idsMissingTilePrice(cards);
   if (!ids.length) {

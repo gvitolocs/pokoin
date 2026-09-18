@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { fetchLastMedianPknMap, fetchVersionSet, formatPkn, imageSrc } from '../api.js';
+import { fetchCardSales, fetchCheapestPricePknMap, fetchVersionSet, formatPkn, imageSrc } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { encodeQr, qrPath, qrLogoLayout } from '../qr.js';
 import {
@@ -44,6 +44,7 @@ import {
   typeQuantity,
 } from '../scan-model.js';
 import { HELP_SECTIONS, shortcutFor, DRAFT_HOTKEY_LEGEND, draftLegendActive, dispatchDraftHotkey } from '../scan-shortcuts.js';
+import { facetSignature, scanFacets, suggestPriceFromSlices } from '../scan-pricing.js';
 import { connectScanStream } from '../scan-stream.js';
 import { useLiveSuggest } from '../use-live-suggest.js';
 import { SessionWait } from '../components/Desk.jsx';
@@ -140,6 +141,9 @@ export default function ScanDesk() {
   const redoStack = useRef([]);
   const rowsRef = useRef(rows);
   const pricesAsked = useRef(new Set());
+  const slicesCache = useRef(new Map());
+  const priceTouched = useRef(new Set());
+  const suggestedFor = useRef(new Map());
   const queueRef = useRef(null);
   const locationInput = useRef(null);
   const quantityInput = useRef(null);
@@ -798,19 +802,63 @@ export default function ScanDesk() {
 
   useEffect(() => {
     if (closed || submitIntent === 'collection') return;
-    const missing = list
-      .filter((row) => row.cardId && row.pricePkn == null && !pricesAsked.current.has(`${row.id}:${row.cardId}`))
+    const want = list
+      .filter((row) => {
+        if (!row.cardId || priceTouched.current.has(row.id)) return false;
+        const signature = facetSignature(row);
+        if (row.pricePkn == null) return !pricesAsked.current.has(`${row.id}:${signature}`);
+        return row.priceSuggested === true && suggestedFor.current.get(row.id) !== signature;
+      })
       .slice(0, 12);
-    if (!missing.length) return;
-    for (const row of missing) pricesAsked.current.add(`${row.id}:${row.cardId}`);
-    fetchLastMedianPknMap(missing.map((row) => row.cardId)).then((byId) => {
-      for (const row of missing) {
-        const pkn = byId[row.cardId];
+    if (!want.length) return;
+    for (const row of want) {
+      const signature = facetSignature(row);
+      pricesAsked.current.add(`${row.id}:${signature}`);
+      suggestedFor.current.set(row.id, signature);
+    }
+    let cancelled = false;
+    (async () => {
+      // Sold-comps slices once per printing (4 in flight, docs "once per printing").
+      const queue = [...new Set(want.map((row) => String(row.cardId)))]
+        .filter((id) => !slicesCache.current.has(id))
+        .map((id) => () => {
+          const pending = fetchCardSales(id, { slices: true })
+            .then((data) => (Array.isArray(data?.slices) ? data.slices : []))
+            .catch(() => []);
+          slicesCache.current.set(id, pending);
+          return pending;
+        });
+      while (queue.length) {
+        await Promise.all(queue.splice(0, 4).map((run) => run()));
+      }
+      const cheapestIds = new Set();
+      for (const row of want) {
+        if (cancelled) return;
+        const slices = await slicesCache.current.get(String(row.cardId));
+        const pkn = suggestPriceFromSlices(slices, scanFacets(row));
         if (pkn > 0) {
-          patchRows([row.id], { pricePkn: Math.round(pkn), priceSuggested: true, onlyIfEmptyPrice: true }, { record: false });
+          const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
+          // Fresh rows race only with an empty price; stale suggested rows overwrite.
+          if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
+          patchRows([row.id], patch, { record: false });
+        } else {
+          cheapestIds.add(String(row.cardId));
         }
       }
-    }).catch(() => {});
+      // No sold comps at all → the cheapest listed price is the floor.
+      if (!cheapestIds.size) return;
+      const byId = await fetchCheapestPricePknMap([...cheapestIds]);
+      for (const row of want) {
+        if (cancelled) return;
+        const pkn = byId[String(row.cardId)];
+        if (pkn > 0) {
+          const patch = { pricePkn: Math.round(pkn), priceSuggested: true };
+          if (row.pricePkn == null) patch.onlyIfEmptyPrice = true;
+          patchRows([row.id], patch, { record: false });
+        }
+      }
+    })().catch(() => {});
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list, closed, submitIntent]);
 
@@ -902,6 +950,8 @@ export default function ScanDesk() {
   async function newBatch() {
     submitKey.current = newSubmitKey();
     pricesAsked.current = new Set();
+    priceTouched.current = new Set();
+    suggestedFor.current = new Map();
     dispatch({ type: 'reset', items: [] });
     setBatch(null);
     await startSession();
@@ -1120,6 +1170,7 @@ export default function ScanDesk() {
             hidePrice={submitIntent === 'collection'}
             replacing={replaceFor === row.id}
             preferredLanguage={defaults.language}
+            onPriceFocus={(rowId) => priceTouched.current.add(rowId)}
             onFocus={(event) => {
               if (event.shiftKey && focusId) {
                 const a = list.findIndex((r) => r.id === focusId);
@@ -1434,7 +1485,7 @@ function CandidateAlts({ row, preferredLanguage, onPick }) {
 function QueueRow({
   row, index, focused, selected, problem, image, closed, replacing,
   preferredLanguage, hidePrice = false,
-  onFocus, onPatch, onPick, onRemove, onReplaceDone,
+  onFocus, onPatch, onPriceFocus, onPick, onRemove, onReplaceDone,
 }) {
   const stateLabel = row.status === 'submitted'
     ? (hidePrice ? 'Collected' : 'Listed')
@@ -1548,6 +1599,12 @@ function QueueRow({
             key={`${row.id}:${row.pricePkn}`}
             defaultValue={row.pricePkn ?? ''}
             placeholder="PKN"
+            onFocus={(e) => {
+              // Clicking in is the only thing that empties a suggested price;
+              // switching versions re-suggests instead.
+              onPriceFocus?.(row.id);
+              if (row.priceSuggested) e.target.value = '';
+            }}
             onBlur={(e) => {
               const value = e.target.value.trim();
               const n = Number(value);
@@ -1556,7 +1613,9 @@ function QueueRow({
                 e.target.value = row.pricePkn ?? '';
                 return;
               }
-              if (n !== Number(row.pricePkn) || row.priceSuggested) onPatch({ pricePkn: value === '' ? null : n });
+              if (n !== Number(row.pricePkn) || row.priceSuggested) {
+                onPatch({ pricePkn: value === '' ? null : n, ...(row.priceSuggested ? { priceSuggested: false } : {}) });
+              }
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') e.currentTarget.blur();

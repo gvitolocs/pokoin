@@ -127,12 +127,21 @@ Dense table, newest at the bottom, auto-scroll while the last row is in view.
 | Flags | 1st · Signed · Altered · Graded | `o`, `[` |
 | Loc | location | inline text |
 | Qty | 1–99 | digits, `+` `-` |
-| Price | PKN; greyed "suggested" when prefilled from last-day median | inline |
+| Price | PKN; greyed "suggested" when prefilled | inline |
 | State | matched / check / unmatched / merged ×n | `Enter` confirm |
 
-Prices prefill from `GET /api/marketplace-card-sales?cardId=` →
-`series.lastMedianPkn` (existing desk series) once per printing, 4 at a
-time. A prefilled price is marked suggested until edited or confirmed.
+Prices prefill once per row+facet signature, 4 printings at a time. The
+suggestion follows the row's facets from
+`GET /api/marketplace-card-sales?cardId=&slices=1` (per-day
+condition × language × reverse × 1st-edition medians): exact facets first,
+then relaxing the finish/1st flag, then the nearest condition in the same
+language, then the same condition in any language (English preferred), then
+anything. When the printing has no sold comps at all, the cheapest listed PKN
+(`GET /api/marketplace-card-cheapest-price?cardIds=`) is the floor. Switching
+the version (or language/condition/finish/1st facets) re-suggests for the new
+shape and clears the server-side price; a suggestion stays greyed
+`suggested` until edited or confirmed, and only clicking into the price field
+empties it for a manual price.
 
 Status line: `187 cards · 12 need review · 3 need a price · Add 187 cards to Inventory`.
 
