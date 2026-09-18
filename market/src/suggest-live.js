@@ -39,6 +39,7 @@ import {
 } from './suggest-rank.js';
 import { catalogCacheKey, catalogIntent, groupsFromCards } from './suggest-catalog.js';
 import { resolverOwns, resolveSuggestQuery } from './suggest-resolve.js';
+import { suggestKind } from './identity.js';
 import { filterSuggestByPrintLang } from './locale.js';
 import { mergePrintingFields } from './print-bucket.js';
 import { rankFreeText, scoreGroups } from './search-score.js';
@@ -347,6 +348,29 @@ function resolverLiveGroups(resolved, { limit }) {
 
 /** Print language is a hard universe constraint. Zero matches stays empty —
  * never silently broaden to All / other print regions. */
+/**
+ * Default-popup free text: when at least one card (Singles) group matched,
+ * sealed-SKU groups drop out entirely — a set phrase in the query is evidence
+ * for the card reading, never a ride-along for Booster/Theme Deck products.
+ * A query with no card reading at all (a sealed browse) keeps its products.
+ */
+function withoutSealedWhenCardsLead(groups) {
+  const groupIsSingle = (group) => (group.printings || [])
+    .some((printing) => suggestKind(printing, group.name) === 'Singles');
+  if (!groups.some(groupIsSingle)) {
+    return groups;
+  }
+  return groups.flatMap((group) => {
+    if (!(group.printings || []).length || groupIsSingle(group)) {
+      return [group];
+    }
+    const rows = group.printings.filter(
+      (printing) => suggestKind(printing, group.name) === 'Singles',
+    );
+    return rows.length ? [{ ...group, printings: rows }] : [];
+  });
+}
+
 function popupGroups(groups, printLang) {
   return filterSuggestByPrintLang(groups, printLang);
 }
@@ -435,8 +459,15 @@ export function liveSuggestGroups(query, {
       || isArtAwareQuery(parsed) || isRarityAwareQuery(parsed)
       || isNumberAwareQuery(parsed) || (parsed.setTokens || []).length
       || Boolean(resolved && resolved.hasArtist);
+    // Default popup (no tab): when a real card reading matches, sealed SKUs
+    // never ride the set phrase into the results — they live on the Product
+    // tab. A query with no card reading at all keeps its product groups.
+    const tabbed = String(kind || '').trim().length > 0;
+    const groups = tabbed
+      ? scored.groups
+      : withoutSealedWhenCardsLead(scored.groups);
     return {
-      groups: fillSuggestGroups(scored.groups, limit, structured ? limit : preferPerGroup, freeParsed, kind),
+      groups: fillSuggestGroups(groups, limit, structured ? limit : preferPerGroup, freeParsed, kind),
       ranked,
       parsed: freeParsed,
       intent,
