@@ -223,3 +223,21 @@ export function newSubmitKey() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
+
+/** Per-key network serialization for scan-item patches: run N+1 starts only
+ * after run N's response landed, so the server sees intent order even when a
+ * handler is slow (patchItem awaits a card lookup before mutating). Without
+ * this, "switch version" and the follow-up price suggestion can commit in the
+ * wrong order and the card-change price clear wipes the fresh suggestion. */
+export function createPatchChain() {
+  const tails = new Map();
+  return (key, run) => {
+    const prev = tails.get(key) || Promise.resolve();
+    const next = prev.catch(() => {}).then(run);
+    tails.set(key, next);
+    Promise.resolve(next).catch(() => {}).then(() => {
+      if (tails.get(key) === next) tails.delete(key);
+    });
+    return next;
+  };
+}

@@ -148,3 +148,25 @@ test('QR link carries code and secret in the fragment; dashboard host detection'
   assert.equal(isDashboardHost('pokoin.com'), false);
   assert.equal(isDashboardHost('dashboard.pokoin.com.evil.example'), false);
 });
+
+test('createPatchChain serializes runs per key and survives failures', async () => {
+  const { createPatchChain } = await import('./scan-model.js');
+  const chain = createPatchChain();
+  const order = [];
+  const slow = () => new Promise((resolve) => setTimeout(() => { order.push('a'); resolve('a'); }, 20));
+  const boom = () => Promise.reject(new Error('nope'));
+  const quick = () => { order.push('c'); return 'c'; };
+  const p1 = chain('row1', slow);
+  const p2 = chain('row1', () => { order.push('b'); return 'b'; });
+  const pf = chain('row1', boom).catch((err) => err.message);
+  const p4 = chain('row1', quick);
+  assert.deepEqual(await Promise.all([p1, p2, pf, p4]), ['a', 'b', 'nope', 'c']);
+  assert.deepEqual(order, ['a', 'b', 'c']);
+  // independent keys do not wait on each other
+  let started = false;
+  const slowA = chain('row1', () => new Promise((resolve) => setTimeout(resolve, 30)));
+  const pOther = chain('row2', () => { started = true; return 'other'; });
+  await pOther;
+  assert.equal(started, true);
+  await slowA;
+});

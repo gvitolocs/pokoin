@@ -27,6 +27,7 @@ import {
   batchCounts,
   candidateList,
   CONDITIONS,
+  createPatchChain,
   cycleFinish,
   DEFAULTS,
   FINISHES,
@@ -144,6 +145,7 @@ export default function ScanDesk() {
   const slicesCache = useRef(new Map());
   const priceTouched = useRef(new Set());
   const suggestedFor = useRef(new Map());
+  const patchChain = useRef(createPatchChain());
   const queueRef = useRef(null);
   const locationInput = useRef(null);
   const quantityInput = useRef(null);
@@ -419,7 +421,13 @@ export default function ScanDesk() {
       redoStack.current = [];
     }
     try {
-      await Promise.all(targets.map((row) => runApi((t) => scanApi.patch(t, row.id, changes))));
+      // Serialize per row: the version-switch patch (which clears the stale
+      // price) must land before the follow-up price suggestion is sent, or the
+      // server applies them out of order and wipes the fresh suggestion.
+      await Promise.all(targets.map((row) => patchChain(
+        row.id,
+        () => runApi((t) => scanApi.patch(t, row.id, changes)),
+      )));
     } catch (err) {
       setError(err.message || 'Change not saved.');
     } finally {
