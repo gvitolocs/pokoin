@@ -220,6 +220,19 @@ export function fetchSearch({
   return getJson(`/api/marketplace-search-page?${params}`, { signal });
 }
 
+/** Live graded native listings only — not a Meili text search for "graded". */
+export async function fetchGradedCards({ limit = 48, signal } = {}) {
+  const params = new URLSearchParams({
+    productCategory: 'graded',
+    limit: String(Math.min(240, Math.max(1, Number(limit) || 48))),
+  });
+  const rows = await getJson(`/api/marketplace-card-versions?${params}`, { signal });
+  const cards = (Array.isArray(rows) ? rows : [])
+    .map(cardFromCatalogRow)
+    .filter((card) => card.id);
+  return { cards, hasMore: false, count: cards.length };
+}
+
 export async function fetchExactNameCards(name, {
   excludeId,
   signal,

@@ -1,16 +1,51 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { fetchSearch } from '../api.js';
+import { fetchGradedCards, fetchSearch } from '../api.js';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
 const PRODUCTS = {
-  box: { title: 'Booster boxes', query: 'booster box', productType: 'booster_box' },
-  pack: { title: 'Booster packs', query: 'booster', productType: 'booster_pack' },
-  graded: { title: 'Graded cards', query: 'graded', productType: '' },
-  nft: { title: 'NFT', query: 'nft', productType: '' },
+  box: {
+    title: 'Booster boxes',
+    query: 'booster box',
+    productType: 'booster_box',
+    unit: 'products',
+    lede: 'Marketplace search for booster boxes.',
+  },
+  pack: {
+    title: 'Booster packs',
+    query: 'booster',
+    productType: 'booster_pack',
+    unit: 'products',
+    lede: 'Marketplace search for booster packs.',
+  },
+  graded: {
+    title: 'Graded cards',
+    mode: 'graded',
+    unit: 'cards',
+    lede: 'PSA, BGS, CGC, and other slabbed listings from sellers on Pokoin.',
+  },
+  nft: {
+    title: 'NFT',
+    query: 'nft',
+    productType: '',
+    unit: 'products',
+    lede: 'Live NFT catalog search. Owned holdings and shipping requests live on /collection after nft_only checkout.',
+  },
 };
+
+function loadAisle(spec, { offset = 0, limit = 48 } = {}) {
+  if (spec.mode === 'graded') {
+    return fetchGradedCards({ limit });
+  }
+  return fetchSearch({
+    query: spec.query,
+    productType: spec.productType,
+    offset,
+    limit,
+  });
+}
 
 export default function Products() {
   const { kind = 'box' } = useParams();
@@ -24,7 +59,7 @@ export default function Products() {
     document.title = `${spec.title} · Pokoin`;
     let cancelled = false;
     setLoading(true);
-    fetchSearch({ query: spec.query, productType: spec.productType, limit: 48 })
+    loadAisle(spec, { limit: 48 })
       .then((data) => {
         if (cancelled) return;
         setCards(data.cards || []);
@@ -40,12 +75,11 @@ export default function Products() {
     return () => {
       cancelled = true;
     };
-  }, [kind, spec.query, spec.productType, spec.title]);
+  }, [kind, spec]);
 
   async function loadMore() {
-    const data = await fetchSearch({
-      query: spec.query,
-      productType: spec.productType,
+    if (spec.mode === 'graded') return;
+    const data = await loadAisle(spec, {
       offset: cards.length,
       limit: 48,
     });
@@ -54,14 +88,16 @@ export default function Products() {
     setHasMore(Boolean(data.hasMore));
   }
 
+  const emptyLede = kind === 'graded'
+    ? 'No active PSA / BGS / CGC listings yet. List a graded card from inventory or Scan Connect.'
+    : 'Try another product type or search from the bar.';
+
   return (
     <div className="page desk">
       <PageHead
         kicker="Products"
         title={spec.title}
-        lede={kind === 'nft'
-          ? 'Live NFT catalog search. Owned holdings and shipping requests live on /collection after nft_only checkout.'
-          : `Marketplace search for ${spec.query}. Empty query + booster_box is not used here.`}
+        lede={spec.lede}
       />
       <nav className="comp-tabs" aria-label="Product types">
         {Object.entries(PRODUCTS).map(([id, row]) => (
@@ -75,13 +111,13 @@ export default function Products() {
           {loading
             ? 'Loading…'
             : (cards.length
-              ? <><strong>{cards.length.toLocaleString('en-US')}{hasMore ? '+' : ''}</strong> products</>
-              : 'No products in that search.')}
+              ? <><strong>{cards.length.toLocaleString('en-US')}{hasMore ? '+' : ''}</strong> {spec.unit}</>
+              : (kind === 'graded' ? 'No graded cards listed.' : 'No products in that search.'))}
         </p>
       </div>
       <Alert>{error}</Alert>
       {!loading && !cards.length && !error ? (
-        <EmptyDesk title="Nothing in this aisle" lede="Try another product type or search from the bar.">
+        <EmptyDesk title="Nothing in this aisle" lede={emptyLede}>
           <Link className="btn" to="/marketplace">Shop</Link>
         </EmptyDesk>
       ) : (
