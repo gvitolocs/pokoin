@@ -237,7 +237,7 @@ def oracle_fetch(jobs: dict[str, list[str]]) -> dict[str, bytes]:
     shutil.rmtree(RAW_OUT, ignore_errors=True)
     RAW_OUT.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        ["rsync", "-a", "--info=stats1", f"{CT_FETCH_HOST}:{remote_out}/", f"{RAW_OUT}/"],
+        ["rsync", "-a", "--info=stats1", f"{host}:{remote_out}/", f"{RAW_OUT}/"],
         check=True,
     )
     # Only this chunk's keys — the raw dir may hold older chunks' files.
