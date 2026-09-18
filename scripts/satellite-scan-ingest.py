@@ -223,11 +223,17 @@ def oracle_fetch(jobs: dict[str, list[str]]) -> dict[str, bytes]:
     )
     subprocess.run(["scp", *SSH_OPTS, str(jobs_path), f"{host}:{jobs_path}"], check=True)
     env = f"POKOIN_SCAN_WORKERS={WORKERS} POKOIN_SCAN_JOBS={jobs_path} POKOIN_SCAN_OUT={remote_out}"
-    subprocess.run(
-        ["ssh", *SSH_OPTS, host,
-         f"rm -rf {remote_out} && {env} python3 {remote_script} --oracle-fetch"],
-        check=True,
-    )
+    try:
+        subprocess.run(
+            ["ssh", *SSH_OPTS, host,
+             f"rm -rf {remote_out} && {env} python3 {remote_script} --oracle-fetch"],
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        # Remote fetch died (challenge, ssh hiccup) — treat as empty chunk so
+        # run_game cools down and flips host instead of crashing.
+        log(f"remote fetch on {host} failed rc={exc.returncode}")
+        return {}
     shutil.rmtree(RAW_OUT, ignore_errors=True)
     RAW_OUT.mkdir(parents=True, exist_ok=True)
     subprocess.run(
@@ -348,6 +354,7 @@ def run_game(slug: str) -> None:
     state = load_state()
     game_state = state.setdefault(slug, {"ok": 0, "fail": 0, "chunks": 0})
     log(f"== {slug} {db} prefix={prefix}")
+    empty_streak = 0
     for _ in range(200):  # hard chunk cap per game
         rows = dump_chunk(schema, CHUNK)
         if not rows:
@@ -363,13 +370,21 @@ def run_game(slug: str) -> None:
             continue
         log(f"{slug}: chunk rows={len(rows)} jobs={len(jobs)}")
         bodies = oracle_fetch(jobs)
-        if not bodies and os.environ.get("POKOIN_SCAN_ROTATE"):
+        if not bodies:
             # Zero bodies usually means the current host got challenged.
-            log(f"{slug}: empty chunk — cooling down and switching host")
-            time.sleep(240)
-            cur = os.environ.get("POKOIN_CT_FETCH_HOST", CT_FETCH_HOST)
-            os.environ["POKOIN_CT_FETCH_HOST"] = "" if cur else "pokoin-marketplace"
+            empty_streak += 1
+            if empty_streak >= 12:
+                log(f"{slug}: 12 consecutive empty chunks — giving up for now (resume later)")
+                break
+            if os.environ.get("POKOIN_SCAN_ROTATE"):
+                log(f"{slug}: empty chunk {empty_streak} — cooling down and switching host")
+                time.sleep(240)
+                cur = os.environ.get("POKOIN_CT_FETCH_HOST", CT_FETCH_HOST)
+                os.environ["POKOIN_CT_FETCH_HOST"] = "" if cur else "pokoin-marketplace"
+            else:
+                time.sleep(240)
             continue
+        empty_streak = 0
         ok, failed = encode(bodies)
         stamped = stamp_cdn(db, schema, prefix, ok)
         if failed and failed < 0.4 * max(1, len(bodies)):
