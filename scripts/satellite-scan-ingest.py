@@ -167,6 +167,17 @@ def jobs_for(rows: list[dict], prefix: str) -> tuple[dict[str, list[str]], list[
     return jobs, planned
 
 
+def fetch_with_retry(mod, urls: list[str], attempts: int = 3) -> bytes | None:
+    """CT challenges flap minute-to-minute once an IP is flagged; bridge them."""
+    for attempt in range(attempts):
+        data = mod.fetch_first(urls)
+        if data:
+            return data
+        if attempt < attempts - 1:
+            time.sleep(2 * (attempt + 1))
+    return None
+
+
 def local_fetch(jobs: dict[str, list[str]]) -> dict[str, bytes]:
     """Fetch from this host (nezopt home IP) — used when Oracle is blocked."""
     mod = helper()
@@ -175,7 +186,7 @@ def local_fetch(jobs: dict[str, list[str]]) -> dict[str, bytes]:
     saved = failed = 0
 
     def one(key: str) -> tuple[str, bool]:
-        data = mod.fetch_first(jobs.get(key) or [])
+        data = fetch_with_retry(mod, jobs.get(key) or [])
         if not data:
             return key, False
         dest = RAW_OUT / key
@@ -373,16 +384,16 @@ def run_game(slug: str) -> None:
         if not bodies:
             # Zero bodies usually means the current host got challenged.
             empty_streak += 1
-            if empty_streak >= 12:
-                log(f"{slug}: 12 consecutive empty chunks — giving up for now (resume later)")
+            if empty_streak >= 30:
+                log(f"{slug}: 30 consecutive empty chunks — giving up for now (resume later)")
                 break
             if os.environ.get("POKOIN_SCAN_ROTATE"):
                 log(f"{slug}: empty chunk {empty_streak} — cooling down and switching host")
-                time.sleep(240)
+                time.sleep(420)
                 cur = os.environ.get("POKOIN_CT_FETCH_HOST", CT_FETCH_HOST)
                 os.environ["POKOIN_CT_FETCH_HOST"] = "" if cur else "pokoin-marketplace"
             else:
-                time.sleep(240)
+                time.sleep(420)
             continue
         empty_streak = 0
         ok, failed = encode(bodies)
@@ -421,7 +432,7 @@ def oracle_fetch_worker() -> int:
     saved = failed = 0
 
     def one(key: str) -> tuple[str, bool]:
-        data = mod.fetch_first(jobs.get(key) or [])
+        data = fetch_with_retry(mod, jobs.get(key) or [])
         if not data:
             return key, False
         dest = out / key
