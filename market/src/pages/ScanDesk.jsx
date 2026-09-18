@@ -424,7 +424,7 @@ export default function ScanDesk() {
       // Serialize per row: the version-switch patch (which clears the stale
       // price) must land before the follow-up price suggestion is sent, or the
       // server applies them out of order and wipes the fresh suggestion.
-      await Promise.all(targets.map((row) => patchChain(
+      await Promise.all(targets.map((row) => patchChain.current(
         row.id,
         () => runApi((t) => scanApi.patch(t, row.id, changes)),
       )));
