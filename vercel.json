@@ -530,6 +530,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/jumbos/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/jumbos",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/admin/",
       "destination": "/market/index.html"
     },
