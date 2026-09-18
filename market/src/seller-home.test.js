@@ -20,8 +20,18 @@ test('dashboard host / renders SellerHome; /scan stays ScanDesk', () => {
   assert.match(appSrc, /Navigate to=\{dashboard \? '\/' : '\/marketplace'\}/);
 });
 
-test('vercel no longer redirects dashboard.pokoin.com / to /scan', () => {
-  assert.equal(vercel.includes('"value": "dashboard.pokoin.com"') && vercel.includes('"destination": "/scan"'), false);
+test('vercel serves SellerHome SPA at dashboard.pokoin.com / (no /scan redirect)', () => {
+  const config = JSON.parse(vercel);
+  const dashRootRedirect = (config.redirects || []).find(
+    (r) => r.source === '/' && (r.has || []).some((h) => h.value === 'dashboard.pokoin.com'),
+  );
+  assert.equal(dashRootRedirect, undefined);
+  const dashRootRewrite = (config.rewrites || []).find(
+    (r) => r.source === '/'
+      && r.destination === '/market/index.html'
+      && (r.has || []).some((h) => h.value === 'dashboard.pokoin.com'),
+  );
+  assert.ok(dashRootRewrite, 'dashboard / must rewrite to market SPA');
 });
 
 test('Chrome Dashboard nav resolves to / on dashboard host; Collection replaces NFT label', () => {
