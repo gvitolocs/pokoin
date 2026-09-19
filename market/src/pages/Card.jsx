@@ -905,7 +905,10 @@ function ListingForm({
           >
             {saving ? 'Saving…' : 'Save changes'}
           </button>
-        ) : (
+        ) : null}
+      </div>
+      {!isEditing ? (
+        <div className="sell-targets-row">
           <InventoryTargets
             mode="list"
             counts={{ cards: Number.parseInt(qty, 10) || 1 }}
@@ -922,8 +925,8 @@ function ListingForm({
               submit(targets);
             }}
           />
-        )}
-      </div>
+        </div>
+      ) : null}
       {currency !== 'PKN' && listedPkn ? (
         <p className="sell-pkn-eq">Lists at {formatPkn(listedPkn)}</p>
       ) : null}

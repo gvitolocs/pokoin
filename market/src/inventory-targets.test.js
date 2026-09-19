@@ -16,11 +16,15 @@ test('inventoryTargetsLabel covers dual and single destinations', () => {
     'Add 2 cards to Pokoin + CardTrader',
   );
   assert.equal(
-    inventoryTargetsLabel({ cards: 1 }, { verb: 'List', targets: { pokoin: true, cardtrader: false } }),
+    inventoryTargetsLabel({ cards: 1 }, { intent: 'list', verb: 'List', targets: { pokoin: true, cardtrader: false } }),
     'List card on Pokoin',
   );
   assert.equal(
-    inventoryTargetsLabel({ cards: 3 }, { verb: 'List', targets: { pokoin: false, cardtrader: true } }),
-    'List 3 cards to CardTrader',
+    inventoryTargetsLabel({ cards: 1 }, { intent: 'list', verb: 'List', targets: { pokoin: true, cardtrader: true } }),
+    'List card on Pokoin + CardTrader',
+  );
+  assert.equal(
+    inventoryTargetsLabel({ cards: 3 }, { intent: 'list', verb: 'List', targets: { pokoin: false, cardtrader: true } }),
+    'List 3 cards on CardTrader',
   );
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getBearer } from '../auth.jsx';
 import { fetchCardTraderStatus } from '../api.js';
@@ -24,6 +24,7 @@ export default function InventoryTargets({
   const [connected, setConnected] = useState(false);
   const [statusReady, setStatusReady] = useState(false);
   const [targets, setTargets] = useState(() => defaultInventoryTargets(false));
+  const touchedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +34,9 @@ export default function InventoryTargets({
         if (!bearer) {
           if (!cancelled) {
             setConnected(false);
-            setTargets(defaultInventoryTargets(false));
+            if (!touchedRef.current) {
+              setTargets(defaultInventoryTargets(false));
+            }
             setStatusReady(true);
           }
           return;
@@ -42,13 +45,22 @@ export default function InventoryTargets({
         const on = data?.status?.connected === true;
         if (!cancelled) {
           setConnected(on);
-          setTargets(defaultInventoryTargets(on));
+          // Only seed defaults once — never overwrite a seller's chip toggles.
+          if (!touchedRef.current) {
+            setTargets(defaultInventoryTargets(on));
+          } else if (!on) {
+            setTargets((current) => (
+              current.cardtrader ? { ...current, cardtrader: false } : current
+            ));
+          }
           setStatusReady(true);
         }
       } catch (_) {
         if (!cancelled) {
           setConnected(false);
-          setTargets(defaultInventoryTargets(false));
+          if (!touchedRef.current) {
+            setTargets(defaultInventoryTargets(false));
+          }
           setStatusReady(true);
         }
       }
@@ -58,13 +70,14 @@ export default function InventoryTargets({
 
   function toggle(key) {
     setTargets((current) => {
+      if (key === 'cardtrader' && !connected) {
+        return current;
+      }
       const next = { ...current, [key]: !current[key] };
       if (!next.pokoin && !next.cardtrader) {
         return current;
       }
-      if (key === 'cardtrader' && !connected) {
-        return current;
-      }
+      touchedRef.current = true;
       return next;
     });
   }

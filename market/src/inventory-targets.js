@@ -13,13 +13,18 @@ export function inventoryTargetsLabel(counts, { intent = 'list', targets, verb =
   }
   const pokoin = targets?.pokoin !== false;
   const cardtrader = targets?.cardtrader === true;
+  const listOn = intent === 'list' && verb === 'List';
   if (pokoin && cardtrader) {
-    return `${verb} ${n} ${noun} to Pokoin + CardTrader`;
+    return listOn
+      ? `List ${n === 1 ? 'card' : `${n} cards`} on Pokoin + CardTrader`
+      : `${verb} ${n} ${noun} to Pokoin + CardTrader`;
   }
   if (cardtrader && !pokoin) {
-    return `${verb} ${n} ${noun} to CardTrader`;
+    return listOn
+      ? `List ${n === 1 ? 'card' : `${n} cards`} on CardTrader`
+      : `${verb} ${n} ${noun} to CardTrader`;
   }
-  if (intent === 'list' && verb === 'List') {
+  if (listOn) {
     return `List ${n === 1 ? 'card' : `${n} cards`} on Pokoin`;
   }
   return `${verb} ${n} ${noun} to Pokoin`;
