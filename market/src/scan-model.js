@@ -82,6 +82,23 @@ export function nextBoxPositions(list) {
   return next;
 }
 
+/**
+ * Suggested Start when the seller switches box (or opens a batch).
+ * localStorage is only a hint for a *new* location — never lock Start=1
+ * out, and never overwrite a Start the seller already typed for this box.
+ */
+export function suggestedStartPosition({
+  stored,
+  current = 1,
+  locationChanged = false,
+} = {}) {
+  if (!locationChanged) return null;
+  const hint = Math.trunc(Number(stored)) || 0;
+  const now = Math.max(1, Math.trunc(Number(current)) || 1);
+  if (hint < 1 || hint === now) return null;
+  return Math.min(9999, hint);
+}
+
 /** `·47` / `·47-49` suffix shown beside the box name. */
 export function slotText(slot) {
   if (!slot) return '';

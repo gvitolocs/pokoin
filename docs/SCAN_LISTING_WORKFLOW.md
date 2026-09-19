@@ -224,9 +224,11 @@ PowerTools keeps box and slot in one location string (`AA03`, `Box 2`); the
 template carries whatever the seller typed last. Pokoin splits the pair:
 
 - **Batch Defaults** shows a **Start** input beside Location. It suggests the
-  position the seller stopped at last time (`localStorage` per box) and is
-  snapshotted like the other defaults, so a scan keeps the position in force
-  when it was captured.
+  position the seller stopped at last time (`localStorage` per box) when the
+  location or batch changes. The seller can always type any Start including
+  **1** — a prior stop hint must not lock slot 1 out. Start is snapshotted like
+  the other defaults, so a scan keeps the position in force when it was
+  captured.
 - Each stack claims `quantity` slots in its box from that anchor, in queue
   order; a stack re-anchored by a later Start change starts at the new
   position. The queue Loc cell shows `box1 · 47` (ranges for qty > 1) beside

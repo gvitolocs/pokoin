@@ -45,6 +45,7 @@ import {
   slotText,
   stepCandidate,
   submitLabel,
+  suggestedStartPosition,
   typeQuantity,
 } from '../scan-model.js';
 import { HELP_SECTIONS, shortcutFor, DRAFT_HOTKEY_LEGEND, draftLegendActive, dispatchDraftHotkey } from '../scan-shortcuts.js';
@@ -375,40 +376,59 @@ export default function ScanDesk() {
   }, [focusId]);
 
   // Keep "where I stopped" per box so the next session's Start position
-  // suggests it (PowerTools template behaviour).
+  // suggests it (PowerTools template behaviour). An empty queue pins the
+  // hint to the live Start — otherwise a cleared box keeps a stale
+  // high-water mark and Start=1 cannot stick across a refresh.
   useEffect(() => {
-    if (!list.length) return;
+    const loc = String(defaults.location || '').trim();
+    if (!list.length) {
+      if (!loc) return;
+      const pos = Math.max(1, Math.min(9999, Math.trunc(Number(defaults.startPosition)) || 1));
+      const store = loadStoppedPositions();
+      if (store[loc] !== pos) {
+        store[loc] = pos;
+        rememberStoppedPositions(store);
+      }
+      return;
+    }
     const next = nextBoxPositions(list);
     const store = loadStoppedPositions();
     let dirty = false;
-    for (const [loc, pos] of next) {
-      if (store[loc] !== pos) {
-        store[loc] = pos;
+    for (const [box, pos] of next) {
+      if (store[box] !== pos) {
+        store[box] = pos;
         dirty = true;
       }
     }
     if (dirty) rememberStoppedPositions(store);
-  }, [list]);
+  }, [list, defaults.location, defaults.startPosition]);
 
-  // The Start position suggests where the seller stopped in that box: on the
-  // first run for a batch and whenever the location switches. A start the
-  // seller typed for the current location is never overwritten.
+  // The Start position suggests where the seller stopped in that box when the
+  // location (or batch) changes. A Start the seller typed — including 1 — is
+  // never overwritten; treating 1 as "unset" locked sellers out of slot 1.
   const prevLocationRef = useRef(undefined);
+  const prevBatchRef = useRef(undefined);
   useEffect(() => {
     const loc = String(defaults.location || '').trim();
     if (closed || !batch?.id) {
       prevLocationRef.current = loc;
+      prevBatchRef.current = batch?.id;
       return;
     }
     const locationChanged = prevLocationRef.current !== loc;
+    const batchChanged = prevBatchRef.current !== batch.id;
     prevLocationRef.current = loc;
-    if (!loc) return;
-    const stored = Math.trunc(Number(loadStoppedPositions()[loc])) || 0;
-    const current = Number(defaults.startPosition) || 1;
-    if (stored > 1 && stored !== current && (locationChanged || current === 1)) {
-      setDefaults({ startPosition: Math.min(9999, stored) });
+    prevBatchRef.current = batch.id;
+    if (!loc || (!locationChanged && !batchChanged)) return;
+    const suggested = suggestedStartPosition({
+      stored: loadStoppedPositions()[loc],
+      current: defaults.startPosition,
+      locationChanged: true,
+    });
+    if (suggested != null) {
+      setDefaults({ startPosition: suggested });
     }
-  }, [batch?.id, defaults.location, defaults.startPosition, closed]);
+  }, [batch?.id, defaults.location, closed]);
 
   // ---------------------------------------------------------------- toasts / undo
 
@@ -513,6 +533,16 @@ export default function ScanDesk() {
 
   async function setDefaults(patch) {
     if (!batch?.id) return;
+    const merged = { ...(batch.defaults || {}), ...patch };
+    const loc = String(merged.location || '').trim();
+    if (loc && patch.startPosition != null) {
+      // Seller's typed Start is the new floor for this box. Without this,
+      // nextBoxPositions from an older queue would keep shoving Start past 1.
+      const pos = Math.max(1, Math.min(9999, Math.trunc(Number(patch.startPosition)) || 1));
+      const store = loadStoppedPositions();
+      store[loc] = pos;
+      rememberStoppedPositions(store);
+    }
     setBatch((current) => ({ ...current, defaults: { ...current.defaults, ...patch } }));
     try {
       const t = await token();

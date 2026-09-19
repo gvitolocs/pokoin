@@ -21,6 +21,7 @@ import {
   stackKey,
   stepCandidate,
   submitLabel,
+  suggestedStartPosition,
   typeQuantity,
 } from './scan-model.js';
 
@@ -210,6 +211,14 @@ test('rows without a captured start anchor at 1; next box positions remember the
     Object.fromEntries(nextBoxPositions(list)),
     { box1: 4, box2: 4 },
   );
+});
+
+test('Start suggestion only fires on location change — Start=1 is a real choice', () => {
+  assert.equal(suggestedStartPosition({ stored: 4, current: 1, locationChanged: false }), null);
+  assert.equal(suggestedStartPosition({ stored: 4, current: 1, locationChanged: true }), 4);
+  assert.equal(suggestedStartPosition({ stored: 4, current: 4, locationChanged: true }), null);
+  assert.equal(suggestedStartPosition({ stored: 1, current: 4, locationChanged: true }), 1);
+  assert.equal(suggestedStartPosition({ stored: 0, current: 1, locationChanged: true }), null);
 });
 
 test('merged quantity growth shifts the following slots; submitted rows still count', () => {
