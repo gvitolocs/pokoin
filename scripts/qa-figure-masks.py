@@ -103,7 +103,24 @@ def main() -> int:
     parser.add_argument("--min-fill", type=float, default=0.08)
     parser.add_argument("--max-hole-ratio", type=float, default=0.02)
     parser.add_argument("--max-specks", type=int, default=0)
+    parser.add_argument(
+        "--placeholders",
+        type=Path,
+        default=Path(__file__).with_name("out") / "placeholder-artwork-versions.txt",
+        help="versions whose leftover scan is a CardTrader placeholder, never a painting",
+    )
     args = parser.parse_args()
+
+    # CardTrader ships one generic placeholder image for cards it has no scan of.
+    # SAM happily segments its logo, so those masks must never reach the CDN.
+    placeholders = set()
+    if args.placeholders and args.placeholders.is_file():
+        placeholders = {
+            line.strip()
+            for line in args.placeholders.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+        print(f"placeholder artworks excluded: {len(placeholders)}", flush=True)
 
     builder = load_builder()
     rows = builder.load_rows(args.jsonl)
@@ -117,6 +134,12 @@ def main() -> int:
             version = builder.safe_version(row["version"])
             path = args.masks / f"{version}.webp"
             verdict = {"version": version, "pass": False}
+            if version in placeholders:
+                verdict["reasons"] = ["placeholder-scan"]
+                verdict["pass"] = False
+                fails["placeholder-scan"] = fails.get("placeholder-scan", 0) + 1
+                report.write(json.dumps(verdict) + "\n")
+                continue
             if not path.is_file() or not path.stat().st_size:
                 verdict["reasons"] = ["missing"]
             else:
