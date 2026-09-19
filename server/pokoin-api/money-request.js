@@ -178,7 +178,8 @@ module.exports = async function handler(req, res) {
 
     throw httpError(400, 'Unknown action.');
   } catch (error) {
-    console.error('money-request failed', error);
-    return res.status(error.statusCode || 500).json({ error: error.message || 'Money request failed.' });
+    const statusCode = error.statusCode || 500;
+    if (statusCode >= 500) console.error('money-request failed', error);
+    return res.status(statusCode).json({ error: error.message || 'Money request failed.' });
   }
 };
