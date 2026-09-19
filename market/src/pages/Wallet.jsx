@@ -29,6 +29,10 @@ import {
   writeActivityCache,
 } from '../wallet-activity-cache.js';
 import { buildReceiveQr, parseScannedQr, parseWalletSendLink } from '../wallet-qr.js';
+import {
+  counterpartiesFromActivity,
+  mergeUsernameSuggestions,
+} from '../recipient-suggest.js';
 import { sendPkn, switchToPokoin, useWallet } from '../wallet.jsx';
 import {
   createMoneyRequest,
@@ -492,6 +496,7 @@ export default function Wallet() {
           address={address}
           balance={balance}
           getBearer={getBearer}
+          recentActivity={activity}
           initialRecipient={sendPrefill.recipient}
           initialAmount={sendPrefill.amount}
           fromQr={sendPrefill.fromQr}
@@ -565,6 +570,7 @@ function SendSheet({
   onClose, busy, signedIn, profile, address, balance, getBearer,
   onConnect, onRequireSignIn, onTransfer, onChainSend,
   initialRecipient = '', initialAmount = '', fromQr = false,
+  recentActivity = [],
 }) {
   const [recipient, setRecipient] = useState(initialRecipient);
   const [amount, setAmount] = useState(initialAmount);
@@ -576,6 +582,20 @@ function SendSheet({
   const toChain = IS_ADDRESS.test(recipient.trim());
   const query = recipient.trim().toLowerCase();
   const searchable = query.length >= 2 && !query.includes('@') && !IS_ADDRESS.test(query);
+  const localNames = useMemo(
+    () => counterpartiesFromActivity(recentActivity),
+    [recentActivity],
+  );
+  const suggestions = useMemo(
+    () => mergeUsernameSuggestions({
+      query,
+      local: localNames,
+      remote: search.rows,
+      selfUsername: profile?.username,
+      limit: 6,
+    }),
+    [query, localNames, search.rows, profile?.username],
+  );
 
   // Camera + decode loop while the scanner is open. A decoded code only
   // PREFILLS the form — the transfer itself always waits for Send.
@@ -660,7 +680,7 @@ function SendSheet({
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      setSearch({ status: 'searching', rows: [] });
+      setSearch((prev) => ({ status: 'searching', rows: prev.rows }));
       getBearer()
         .then((token) => {
           if (cancelled) {
@@ -674,14 +694,14 @@ function SendSheet({
             if (cancelled) {
               return;
             }
-            const rows = (data.usernames || []).slice(0, 6);
+            const rows = (data.usernames || []).slice(0, 8);
             setSearch({ status: rows.length ? 'results' : 'none', rows });
           });
         })
         .catch(() => {
           if (!cancelled) setSearch({ status: 'error', rows: [] });
         });
-    }, 250);
+    }, 180);
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -767,17 +787,27 @@ function SendSheet({
             : `Sending to ${scanned} — enter an amount, then Send.`}
         </p>
       ) : null}
-      {search.status === 'results' ? (
-        <div className="wallet-suggestions">
-          {search.rows.map((name) => (
-            <button key={name} type="button" onClick={() => setRecipient(name)}>{name}</button>
+      {suggestions.length ? (
+        <div className="wallet-suggestions" role="listbox" aria-label="Matching usernames">
+          {suggestions.map((name) => (
+            <button
+              key={name}
+              type="button"
+              role="option"
+              onClick={() => {
+                setRecipient(name);
+                setSearch({ status: 'idle', rows: [] });
+              }}
+            >
+              @{name}
+            </button>
           ))}
         </div>
-      ) : search.status === 'searching' ? (
+      ) : searchable && search.status === 'searching' && !localNames.some((name) => name.startsWith(query)) ? (
         <p className="wallet-suggestions-note">Searching usernames…</p>
-      ) : search.status === 'none' ? (
-        <p className="wallet-suggestions-note">No matching usernames.</p>
-      ) : search.status === 'signedout' || search.status === 'error' ? (
+      ) : searchable && search.status === 'none' ? (
+        <p className="wallet-suggestions-note">No matching usernames — you can still send if you know the exact handle.</p>
+      ) : searchable && (search.status === 'signedout' || search.status === 'error') ? (
         <p className="wallet-suggestions-note">Sign in to search recipients.</p>
       ) : null}
       <label className="sell-field">
