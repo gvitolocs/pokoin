@@ -26,7 +26,23 @@ const SKIP_INDEX_PREFIXES = [
   'one-piece/',
   'riftbound/',
   'artcut/',
+  // Multi-game re-import prefixes (docs/MULTIGAME_REIMPORT.md): never index or
+  // halve ids under a game prefix — ids collide across games.
+  'magic/',
+  'yugioh/',
+  'lorcana/',
+  'flesh-and-blood/',
+  'digimon/',
+  'dragon-ball-super/',
+  'vanguard/',
+  'star-wars/',
+  'union-arena/',
+  'gundam/',
+  'sorcery/',
 ];
+
+const GAME_PREFIX_RE =
+  /^(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery)\//i;
 
 function leftoverCdnObjectKey(requestedKey) {
   const key = String(requestedKey || '').replace(/^\/+/, '');
@@ -178,7 +194,7 @@ function candidateKeys(requestedKey) {
   add(leftoverCdnObjectKey(key));
   add(leftoverCdnObjectKey(catalog));
   if (jpeg) add(leftoverCdnObjectKey(jpeg));
-  if (/^(one-piece|riftbound)\//i.test(key)) {
+  if (GAME_PREFIX_RE.test(key)) {
     const stem = key
       .replace(/_homepage\.(jpe?g|png|webp)$/i, '')
       .replace(/\.(jpe?g|png|webp)$/i, '');

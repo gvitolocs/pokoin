@@ -38,22 +38,22 @@ not on the Pi replica of the writer.
 
 ## CardTrader games (from `cardvault/.../data/cardtrader/games.json`)
 
-| CT id | Game | Slug / DB | CDN prefix | Status 2026-09-14 |
+| CT id | Game | Slug / DB | CDN prefix | Status 2026-09-18 |
 | ---: | --- | --- | --- | --- |
 | 5 | Pokémon | `pokoin_marketplace` | *(none)* | Live. NVMe writer + Pi replica. Images on Pi origin, rsynced from the NVMe tree. |
-| 15 | One Piece | `pokoin_one_piece` | `one-piece/` | ~8.5k blueprints on **Oracle**. ~2.1 GB objects already on Pi **and** NVMe. |
-| 22 | Riftbound | `pokoin_riftbound` | `riftbound/` | ~1.8k on **Oracle**. ~455 MB objects. |
-| 1 | Magic: the Gathering | `pokoin_magic` | `magic/` | Config only. Largest dump — do this after the prefix syncs through to the Pi origin. |
-| 4 | Yu-Gi-Oh! | `pokoin_yugioh` | `yugioh/` | Config only. |
-| 18 | Disney Lorcana | `pokoin_lorcana` | `lorcana/` | Config only. |
-| 6 | Flesh and Blood | `pokoin_flesh_and_blood` | `flesh-and-blood/` | Config only. |
-| 8 | Digimon | `pokoin_digimon` | `digimon/` | Config only. |
-| 9 | Dragon Ball Super | `pokoin_dragon_ball_super` | `dragon-ball-super/` | Config only. |
-| 10 | Cardfight!! Vanguard | `pokoin_vanguard` | `vanguard/` | Config only. |
-| 20 | Star Wars Unlimited | `pokoin_star_wars` | `star-wars/` | Config only. |
-| 21 | Union Arena | `pokoin_union_arena` | `union-arena/` | Config only. |
-| 23 | Gundam | `pokoin_gundam` | `gundam/` | Config only. |
-| 24 | Sorcery: Contested Realm | `pokoin_sorcery` | `sorcery/` | Config only. |
+| 15 | One Piece | `pokoin_one_piece` | `one-piece/` | **Live on writer + Pi replica (2026-09-18).** 8,543 blueprints dumped Oracle → restored NVMe writer; extensions pg_trgm/unaccent; projections refreshed. 4.1 GB objects on both disks. |
+| 22 | Riftbound | `pokoin_riftbound` | `riftbound/` | **Live on writer + Pi replica (2026-09-18).** 1,800 blueprints; 455 MB objects. Smoke: `GET /api/marketplace-card-page?game=riftbound&cardId=723286` → Spiritforged Ahri (public id is **723286** = 361643×2; the older 722286 here was a digit-swap typo). |
+| 1 | Magic: the Gathering | `pokoin_magic` | `magic/` | Ingest API live (`POST /api/ingest/magic` on Oracle :18082); discover-only done: **790 expansions** / 27 categories. Catalog import next (bound one expansion before `--stream-all`). |
+| 4 | Yu-Gi-Oh! | `pokoin_yugioh` | `yugioh/` | Ingest API live; discover-only done: **683 expansions** / 18 categories. |
+| 18 | Disney Lorcana | `pokoin_lorcana` | `lorcana/` | Ingest API live; discover-only: 29 expansions. |
+| 6 | Flesh and Blood | `pokoin_flesh_and_blood` | `flesh-and-blood/` | Ingest API live; discover-only: 131 expansions. |
+| 8 | Digimon | `pokoin_digimon` | `digimon/` | Ingest API live; discover-only: 122 expansions. |
+| 9 | Dragon Ball Super | `pokoin_dragon_ball_super` | `dragon-ball-super/` | Ingest API live; discover-only: 171 expansions. |
+| 10 | Cardfight!! Vanguard | `pokoin_vanguard` | `vanguard/` | Ingest API live; discover-only: 279 expansions. |
+| 20 | Star Wars Unlimited | `pokoin_star_wars` | `star-wars/` | Ingest API live; discover-only: 31 expansions. |
+| 21 | Union Arena | `pokoin_union_arena` | `union-arena/` | Ingest API live; discover-only: 92 expansions. |
+| 23 | Gundam | `pokoin_gundam` | `gundam/` | Ingest API live; discover-only: 37 expansions. |
+| 24 | Sorcery: Contested Realm | `pokoin_sorcery` | `sorcery/` | Ingest API live; discover-only: 9 expansions. |
 
 SPA hosts today: `pokoin.com`, `onepiece.pokoin.com`, `riftbound.pokoin.com`.
 Magic / Yu-Gi-Oh hosts come **after** a catalog exists (`game.js` +
@@ -131,6 +131,10 @@ scripts/install-cardtrader-game-ingest-api.sh
 ssh pokoin-marketplace 'curl -sS http://127.0.0.1:18082/api/ingest'
 ssh pokoin-marketplace 'curl -sS http://127.0.0.1:18082/api/ingest/magic'
 # POST needs CARDTRADER_INGEST_SECRET (or CARDTRADER_DAILY_LISTINGS_SECRET)
+# 2026-09-18: CARDTRADER_INGEST_SECRET now lives in Oracle .env.ingest (chmod 600).
+# Header: x-cardtrader-ingest-secret (or Authorization: Bearer). NOTE: docker
+# restart does NOT re-read --env-file — recreate the container with
+# run-cardtrader-game-ingest-api-docker.sh after editing .env.ingest.
 # discover-only:
 curl -sS -X POST -H "Authorization: Bearer $SECRET" \
   -H 'content-type: application/json' \
@@ -179,41 +183,100 @@ Catalogs already exist on Oracle. Images already sit under `one-piece/` and
 5. Pi API env: `ONE_PIECE_MARKETPLACE_DATABASE_URL` /
    `RIFTBOUND_MARKETPLACE_DATABASE_URL` → `127.0.0.1:5432` replica DBs.
    Drop Oracle as the satellite first hop.
-6. Smoke: `GET /api/marketplace-card-page?game=riftbound&cardId=` for
-   Spiritforged Ahri (`361643` → public `722286`). Extension “Card market
-   not found” should go away.
+6. Smoke: `GET /api/marketplace-card-page?game=riftbound&cardId=723286` for
+   Spiritforged Ahri (`361643` → public `723286`). Extension “Card market
+   not found” should go away. **Verified 2026-09-18** — the Pi API reads the
+   replica satellite DBs (no explicit `ONE_PIECE_MARKETPLACE_DATABASE_URL` /
+   `RIFTBOUND_…` env is needed: `databaseUrlForGame` derives
+   `127.0.0.1:5432/pokoin_<db>` from `MARKETPLACE_DATABASE_URL`).
 
 ### Wave 2 — Magic, then Yu-Gi-Oh
 
-Largest. Image plumbing (Wave 0) **must** already sync the prefix through
-to the Pi origin.
+**DONE 2026-09-18 — full blueprint import of every satellite game ran the same
+day (see Wave 3 status).** Two importer bugs were found and fixed first:
 
-```bash
-node cardvault/pokemon_card_vault/scripts/cardtrader-multigame-import.js \
-  --game=magic --cardtrader-game-id=1 --discover-only
+1. `cardtrader-multigame-import.js` `createTargetPool` always passed an `ssl`
+   object to `pg.Pool` — even `{rejectUnauthorized:false}` **forces** SSL, and
+   the `:15543` tunnel to the writer is non-SSL ("The server does not support
+   SSL connections"). Fixed: `ssl:false` when `MARKETPLACE_DATABASE_SSL=0`,
+   `sslmode=disable` in the URL, or `<ENV>_SSL=0`.
+2. The ingest API body needs **`"limit":"all"`** — without it the default cap
+   is **500 blueprint rows** per request (11 games × 500 rows silently).
+3. `.env.ingest` on Oracle now uses `sslmode=disable` everywhere (the install
+   script derives per-game URLs from the base `?sslmode=require` URL).
 
-node …/cardtrader-multigame-import.js \
-  --game=magic --cardtrader-game-id=1 \
-  --database-url-env=MAGIC_MARKETPLACE_DATABASE_URL \
-  --schema=marketplace_magic --table=cardtrader_blueprints \
-  --stream-all --ensure-schema \
-  --batch-size=1000 --concurrency=8
+Results (rows in `marketplace_<game>.cardtrader_blueprints` on the writer,
+streamed to the Pi replica automatically):
+
+| Game | CT id | Rows | CT expansions |
+| --- | ---: | ---: | ---: |
+| Magic | 1 | 122,740 | 790 |
+| Yu-Gi-Oh! | 4 | 48,453 | 683 |
+| Vanguard | 10 | 26,619 | 279 |
+| Dragon Ball Super | 9 | 14,742 | 171 |
+| Flesh and Blood | 6 | 13,756 | 131 |
+| Digimon | 8 | 9,783 | 100 selected |
+| Star Wars Unlimited | 20 | 8,302 | 31 |
+| Union Arena | 21 | 7,200 | 92 (9 empty/not-ready on CT) |
+| Lorcana | 18 | 3,879 | 29 |
+| Gundam | 23 | 2,168 | 37 |
+| Sorcery | 24 | 1,844 | 9 |
+
+**Raw archive:** `/home/nez/mnt/mybook/pokoin-ct-blueprints/` — `pg_dump -Fc`
+of each game's `cardtrader_blueprints` (the `blueprint` jsonb column holds
+CT's original blueprint JSON) + `manifest.txt`. Giuseppe 2026-09-18: keep the
+raw copies on the 15T mybook for now.
+
+## Scan ingest (2026-09-18, satellite games)
+
+`scripts/satellite-scan-ingest.py` (pokoin-web) downloads CardTrader blueprint
+scans for every satellite game and lands them exactly like Pokemon leftovers:
+
+```
+per game, 5000-row chunks (resumable; rows with cdn_image_url IS NULL)
+  nezopt: dump rows (ct_id, name, preview/full urls) from writer
+          build jobs {prefix}{ct_id}_{slug}.jpg → candidate urls
+  Oracle: scp jobs, fetch at POKOIN_SCAN_WORKERS (ThreadPool) → /tmp/pokoin-scan-out{tag}
+  rsync bytes back → Pillow ProcessPool encodes onto NVMe tree
+          objects/sorcery/385717_alpha-booster-box.jpg + _homepage.webp
+  stamp cdn_image_url / cdn_object_key / homepage_* on the writer (ct_id join)
+Pi: per-prefix rsync over ssh to /srv/pokoin/card-images/objects/ (ingest push
+    path, same as Pokemon push(); the "hourly pi replica timer" in GAMES.md is
+    NOT installed — push manually per prefix, or install the rsyncd first)
 ```
 
-Run that importer on **Oracle** so CardTrader GET and writer persist stay
-one hop (`MARKETPLACE_DATABASE_URL` already tunnels). Same for
-`--game=yugioh --cardtrader-game-id=4`. Create DBs first. Then leftover
-ingest with `POKOIN_CT_FETCH_HOST=pokoin-marketplace` and
-`POKOIN_REPLICA_OBJECTS` as the write root; **do not** `rsync` to
-`pi-home:/srv/pokoin/card-images`. Projection SQL is the multigame helper
-with that game’s `category_id`s (discover-only prints them). Bound one
-expansion before `--stream-all`.
+Run with the ai-toolkit venv python (Pillow). Env: `POKOIN_SCAN_WORKERS`
+(Oracle fetch concurrency), `POKOIN_SCAN_CHUNK`, `POKOIN_SCAN_GAMES`,
+`POKOIN_SCAN_TAG` (separates concurrent runners: jobs/out dirs on Oracle +
+state/raw dirs locally), `POKOIN_SCAN_STATE` / `POKOIN_SCAN_FAILS` (7-day
+failure memo so empty/unscannable blueprints are not refetched every run;
+memoization is skipped for a chunk whose fail rate is ≥40% — that pattern is
+rate limiting, not missing scans).
+
+**Cloudflare incident 2026-09-18:** two runners × 24 workers (48 concurrent
+CT image GETs) tripped the bot challenge — cardtrader.com AND
+api.cardtrader.com returned 403 "Just a moment…" for the Oracle IP. The
+blueprint import at concurrency 4 never triggered it. Escalation learned the
+hard way: an IP that once got challenged gets re-challenged after only ~7 min
+of fetching, and the home IP eventually too. **Working configuration:
+`POKOIN_SCAN_ROTATE=1`** — the runner flips egress per chunk (Oracle ↔ nezopt
+home IP), sleeps 240s + flips on an empty chunk, and gives a game up after 12
+consecutive empty chunks (resume later; everything is resumable). Keep
+workers ≤8 per runner. The `blueprint->'image'->>'url'` full URL is the first
+candidate, so most rows cost exactly one GET. `pkill -f satellite-scan…`
+self-matches the launching shell's command line — kill by PID or use a `[y]`
+bracket pattern. The script is committed to the repo: the Mac repo sync
+(19:33) deleted the untracked copy mid-run once already.
 
 ### Wave 3 — the rest
 
-Lorcana, Flesh and Blood, Digimon, Dragon Ball Super, Vanguard, Star Wars
-Unlimited, Union Arena, Gundam, Sorcery. Same importer, one isolated DB +
-prefix each. Order by CardTrader expansion count after `--discover-only`.
+**DONE 2026-09-18** (same run as Wave 2): Lorcana, Flesh and Blood, Digimon,
+Dragon Ball Super, Vanguard, Star Wars Unlimited, Union Arena, Gundam,
+Sorcery all imported — counts in the Wave 2 table. Runner:
+`/home/ubuntu/cardtrader-game-ingest-runner.sh` on Oracle, logs +
+per-game response JSON in `/home/ubuntu/cardtrader-game-ingest-logs/`.
+CardTrader-side gaps: a few Union Arena expansions return `[]` or 404
+"Data is not ready for blueprints" — nothing to import yet.
 
 ### Wave 4 — SPA hosts (after catalogs)
 
