@@ -233,6 +233,7 @@ function SoldGraphToggle({ label, pressed, onToggle }) {
 function SoldGraphFilters({
   conditions,
   languages,
+  chips,
   condition,
   language,
   reverse,
@@ -245,7 +246,9 @@ function SoldGraphFilters({
   onFirstEdition,
   onGraded,
 }) {
-  if (!conditions.length && !languages.length && !reverse && !firstEdition && !graded) {
+  // A foil chip plots nothing when the printing never sold that variant, so it
+  // only renders when the flagged variant exists in the sold slices.
+  if (!conditions.length && !languages.length && !chips.reverse && !chips.firstEdition && !chips.graded) {
     return null;
   }
   return (
@@ -255,21 +258,27 @@ function SoldGraphFilters({
       onPointerMove={stopSoldPointer}
       onPointerUp={stopSoldPointer}
     >
-      <SoldGraphToggle
-        label="Reverse"
-        pressed={reverse}
-        onToggle={onReverse}
-      />
-      <SoldGraphToggle
-        label="1st Ed."
-        pressed={firstEdition}
-        onToggle={onFirstEdition}
-      />
-      <SoldGraphToggle
-        label="Graded"
-        pressed={graded}
-        onToggle={onGraded}
-      />
+      {chips.reverse ? (
+        <SoldGraphToggle
+          label="Reverse"
+          pressed={reverse}
+          onToggle={onReverse}
+        />
+      ) : null}
+      {chips.firstEdition ? (
+        <SoldGraphToggle
+          label="1st Ed."
+          pressed={firstEdition}
+          onToggle={onFirstEdition}
+        />
+      ) : null}
+      {chips.graded ? (
+        <SoldGraphToggle
+          label="Graded"
+          pressed={graded}
+          onToggle={onGraded}
+        />
+      ) : null}
       <SoldGraphFilter
         label="Sold language"
         allLabel="All languages"
@@ -294,6 +303,7 @@ function SoldGraphFilters({
 function SoldPriceGraph({
   series,
   filters,
+  chips,
   condition,
   language,
   reverse,
@@ -320,12 +330,14 @@ function SoldPriceGraph({
   const unitsLabel = unitCount > 0 ? formatSoldSampleCount(unitCount) : '';
   const conditions = Array.isArray(filters?.conditions) ? filters.conditions : [];
   const languages = Array.isArray(filters?.languages) ? filters.languages : [];
+  const chipFlags = chips || {};
   const tone = soldGraphTone(soldFilterValue(conditions, condition));
   const graphClass = `panel sold-graph is-${tone}`;
   const filterBar = (
     <SoldGraphFilters
       conditions={conditions}
       languages={languages}
+      chips={chipFlags}
       condition={condition}
       language={language}
       reverse={reverse}
@@ -1302,6 +1314,24 @@ export default function Card() {
   const salesFilters = salesView.filters;
   const graphLangs = languagesForNationality(salesNationality, salesFilters.languages);
 
+  // Keep the chip pressed-state on the effective flags: a printing that never
+  // sold the standard variant snaps Reverse/1st Ed./Graded back on.
+  useEffect(() => {
+    const flags = salesView.flags;
+    if (!flags) {
+      return;
+    }
+    if (flags.reverse !== salesReverse) {
+      setSalesReverse(flags.reverse);
+    }
+    if (flags.firstEdition !== salesFirstEdition) {
+      setSalesFirstEdition(flags.firstEdition);
+    }
+    if (flags.graded !== salesGraded) {
+      setSalesGraded(flags.graded);
+    }
+  }, [salesView, salesReverse, salesFirstEdition, salesGraded]);
+
   useEffect(() => {
     const cached = peekCardSales(cardId);
     if (cached) {
@@ -1803,6 +1833,7 @@ export default function Card() {
           <SoldPriceGraph
             series={salesSeries}
             filters={{ ...salesFilters, languages: graphLangs }}
+            chips={salesView.chips}
             condition={salesCondition}
             language={salesLanguage}
             reverse={salesReverse}

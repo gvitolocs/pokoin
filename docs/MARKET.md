@@ -115,17 +115,27 @@ then Best Deal.
    conditions**; one-language reverse shows **English**, not **All languages**.
    Language and condition do **not** shrink each other, so clicking a Poor
    Italian day still leaves **All languages** when the printing also sold in
-   other languages. An empty toggle (Reverse on, no reverse comps) keeps the
-   printing menus. A dropdown with only one key in that slice shows that key
+   other languages. A flag state with no matching comps keeps the printing
+   menus (`sold-sales.js` fallback); the UI avoids reaching it via chip
+   hiding and the standard-variant snap. A dropdown with only one key in that
+   slice shows that key
    (no **All**). Japanese and Korean expansions
    (`pokoin_pokemon_expansions.nationality`) only offer Asian TCG langs
    (JP, KO, ZH, ZHT, ID, TH, VI) on the graph, Best Deal, list form, and shop
    — not EN/IT/FR/…. Card payloads often omit `nationality`; the desk reads
    it from `GET /api/marketplace-expansion-page?slug=`. A JP-only printing
    uses JP from the cached slices, not mixed All.
-   **Reverse**, **1st Ed.** and **Graded** are off by
-   default (all foil); press to gold for reverse-only / 1st / graded.
-   Both on may be empty. The Pi stores those daily slices in
+   **Reverse**, **1st Ed.** and **Graded** are strict two-state switches, off
+   by default: off plots the **standard copies only** (flag `false` — reverse
+   holos never bleed into the default median), gold plots that variant only.
+   The three flags combine orthogonally (they mirror the
+   `cardtrader_sold_daily` slice key), so Reverse+1st Ed. is the reverse
+   1st-edition slice. A chip only renders when the printing actually sold
+   that variant (visibility is printing-wide, not scoped to the current
+   combo). A printing that never sold the standard variant — 1.7k mostly
+   reverse-holo promo/blister printings — **snaps the chip back on** on load
+   (`soldGraphView.flags`), so the stricter default never blanks a graph;
+   both-on combos may still be empty. The Pi stores those daily slices in
    `cardtrader_sold_daily`. The tile is a **fixed 12rem** `.sold-graph`
    while sales load, when empty, and when plotted — no “Loading sold-card
    analytics…” label. Hover shows that day’s PKN and a locale

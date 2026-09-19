@@ -68,28 +68,31 @@ const DESK = [
   sale({ day: '2026-09-08', condition: 'NM', language: 'IT', reverse: true, firstEdition: true, medianPkn: 90 }),
 ];
 
-test('Reverse on keeps reverse holos only', () => {
+test('Reverse off plots standard copies only, Reverse on keeps reverse holos only', () => {
   const slices = [
     sale({ day: '2026-09-02', condition: 'NM', language: 'EN', medianPkn: 8, sampleCount: 4, soldQty: 4 }),
     sale({ day: '2026-09-02', condition: 'NM', language: 'EN', reverse: true, medianPkn: 12, sampleCount: 2, soldQty: 2 }),
   ];
   const off = soldGraphView(slices, { reverse: false });
-  assert.equal(off.series.sampleCount, 6);
+  assert.equal(off.series.sampleCount, 4);
+  assert.equal(off.series.lastMedianPkn, 8);
+  assert.equal(off.flags.reverse, false);
   const on = soldGraphView(slices, { reverse: true });
   assert.equal(on.series.sampleCount, 2);
   assert.equal(on.series.lastMedianPkn, 12);
+  assert.equal(on.flags.reverse, true);
   assert.deepEqual(on.filters.languages, ['EN']);
   assert.deepEqual(on.filters.conditions, ['NM']);
 });
 
 test('one reverse Near Mint unit shows Near Mint, not All conditions', () => {
   const view = soldGraphView(DESK, { reverse: true });
-  assert.equal(view.series.soldQty, 2);
+  assert.equal(view.series.soldQty, 1);
   assert.deepEqual(view.filters.conditions, ['NM']);
   assert.equal(soldFilterShowsAll(view.filters.conditions), false);
   assert.equal(soldFilterValue(view.filters.conditions, ''), 'NM');
-  assert.deepEqual(view.filters.languages, ['EN', 'IT']);
-  assert.equal(soldFilterShowsAll(view.filters.languages), true);
+  assert.deepEqual(view.filters.languages, ['EN']);
+  assert.equal(soldFilterShowsAll(view.filters.languages), false);
 });
 
 test('Reverse with two conditions keeps All conditions for those keys only', () => {
@@ -108,9 +111,9 @@ test('Reverse with two conditions keeps All conditions for those keys only', () 
 
 test('1st Ed. lists only 1st-edition languages and conditions', () => {
   const view = soldGraphView(DESK, { firstEdition: true });
-  assert.deepEqual(view.filters.languages, ['EN', 'IT']);
-  assert.deepEqual(view.filters.conditions, ['NM', 'SP']);
-  assert.equal(view.series.soldQty, 2);
+  assert.deepEqual(view.filters.languages, ['EN']);
+  assert.deepEqual(view.filters.conditions, ['SP']);
+  assert.equal(view.series.soldQty, 1);
 });
 
 test('Graded with one Italian MP sale shows Italiano and Moderately Played', () => {
@@ -137,20 +140,40 @@ test('Reverse plus Graded with no overlap keeps printing menus and an empty seri
   assert.deepEqual(view.filters.conditions, ['NM', 'SP', 'MP', 'Poor']);
 });
 
-test('Poor selected without Reverse still offers every language on the printing', () => {
+test('Poor on the standard slice keeps the printing languages', () => {
   const view = soldGraphView(DESK, { condition: 'Poor' });
   assert.deepEqual(view.filters.languages, ['EN', 'IT']);
-  assert.deepEqual(view.filters.conditions, ['NM', 'SP', 'MP', 'Poor']);
+  assert.deepEqual(view.filters.conditions, ['NM', 'Poor']);
   assert.equal(view.series.soldQty, 1);
 });
 
-test('turning Reverse off restores All conditions on the printing', () => {
+test('turning Reverse off plots the standard slices with their menus', () => {
   const on = soldGraphView(DESK, { reverse: true });
   const off = soldGraphView(DESK, { reverse: false });
   assert.equal(soldFilterValue(on.filters.conditions, ''), 'NM');
-  assert.deepEqual(off.filters.conditions, ['NM', 'SP', 'MP', 'Poor']);
-  assert.equal(soldFilterShowsAll(off.filters.conditions), true);
-  assert.equal(soldFilterValue(off.filters.conditions, ''), '');
+  assert.equal(on.series.soldQty, 1);
+  assert.deepEqual(off.filters.conditions, ['NM', 'Poor']);
+  assert.deepEqual(off.filters.languages, ['EN', 'IT']);
+  assert.equal(off.series.soldQty, 5);
+  assert.equal(off.flags.reverse, false);
+});
+
+test('a reverse-only printing snaps Reverse on so the graph never blanks', () => {
+  const slices = [
+    sale({ day: '2026-09-02', condition: 'NM', language: 'EN', reverse: true, medianPkn: 12, sampleCount: 2, soldQty: 2 }),
+  ];
+  const view = soldGraphView(slices, { reverse: false });
+  assert.equal(view.flags.reverse, true);
+  assert.equal(view.series.sampleCount, 2);
+  assert.equal(view.series.lastMedianPkn, 12);
+});
+
+test('Reverse requested on a printing without reverse comps snaps back to standard', () => {
+  const view = soldGraphView(LEDIAN, { reverse: true });
+  assert.equal(view.flags.reverse, false);
+  assert.equal(view.series.sampleCount, 10);
+  assert.deepEqual(view.filters.languages, ['EN', 'IT']);
+  assert.deepEqual(view.filters.conditions, ['NM', 'Poor']);
 });
 
 test('one 1st Ed. Slightly Played sale shows that condition, not All', () => {
@@ -167,7 +190,7 @@ test('one 1st Ed. Slightly Played sale shows that condition, not All', () => {
 test('Reverse on ignores a leftover Poor selection when reverse is only Near Mint', () => {
   const view = soldGraphView(DESK, { reverse: true, condition: 'Poor' });
   assert.deepEqual(view.filters.conditions, ['NM']);
-  assert.equal(view.series.soldQty, 2);
+  assert.equal(view.series.soldQty, 1);
 });
 
 test('all three foil toggles with no overlap keep printing menus', () => {
@@ -194,13 +217,6 @@ test('clicking one reverse Near Mint unit keeps that reverse condition menu', ()
   assert.deepEqual(view.filters.conditions, ['NM']);
   assert.deepEqual(view.filters.languages, ['EN']);
   assert.equal(soldFilterShowsAll(view.filters.conditions), false);
-});
-
-test('Reverse with no reverse comps keeps the language and condition menus', () => {
-  const view = soldGraphView(LEDIAN, { reverse: true });
-  assert.equal(view.series.sampleCount, 0);
-  assert.deepEqual(view.filters.languages, ['EN', 'IT']);
-  assert.deepEqual(view.filters.conditions, ['NM', 'Poor']);
 });
 
 test('Japanese printings drop western languages from cached slices', () => {
@@ -341,7 +357,7 @@ test('graph click uses the currently visible slice, not hidden languages', () =>
   });
 });
 
-test('mixed reverse stays All foil', () => {
+test('a mixed reverse day keeps the standard default', () => {
   assert.deepEqual(sharedSoldTraits([
     { condition: 'NM', language: 'EN', reverse: true, firstEdition: false, graded: false },
     { condition: 'NM', language: 'EN', reverse: false, firstEdition: false, graded: false },

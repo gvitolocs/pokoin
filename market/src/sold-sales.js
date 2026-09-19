@@ -97,13 +97,28 @@ function medianOf(values) {
   return (list[mid] + list[mid + 1]) / 2;
 }
 
+function strictFlagValue(value) {
+  if (value === true || value === '1' || value === 'true') {
+    return true;
+  }
+  if (value === false || value === '0' || value === 'false') {
+    return false;
+  }
+  return null;
+}
+
+function rowFlag(row, key) {
+  const value = key === 'firstEdition' ? (row.firstEdition ?? row.first_edition) : row[key];
+  return strictFlagValue(value) === true;
+}
+
 export function soldSlicePayload(slice = {}) {
   return {
     condition: String(slice.condition || '').trim(),
     language: String(slice.language || '').trim().toUpperCase(),
-    reverse: slice.reverse === true ? true : null,
-    firstEdition: slice.firstEdition === true ? true : null,
-    graded: slice.graded === true ? true : null,
+    reverse: strictFlagValue(slice.reverse),
+    firstEdition: strictFlagValue(slice.firstEdition),
+    graded: strictFlagValue(slice.graded),
   };
 }
 
@@ -115,17 +130,17 @@ export function rowMatchesSoldSlice(row, slice = {}, omit = '') {
   if (omit !== 'language' && flags.language && String(row.language || '').toUpperCase() !== flags.language) {
     return false;
   }
-  if (omit !== 'reverse' && flags.reverse !== null && Boolean(row.reverse) !== flags.reverse) {
+  if (omit !== 'reverse' && flags.reverse !== null && rowFlag(row, 'reverse') !== flags.reverse) {
     return false;
   }
   if (
     omit !== 'firstEdition'
     && flags.firstEdition !== null
-    && Boolean(row.firstEdition ?? row.first_edition) !== flags.firstEdition
+    && rowFlag(row, 'firstEdition') !== flags.firstEdition
   ) {
     return false;
   }
-  if (omit !== 'graded' && flags.graded !== null && Boolean(row.graded) !== flags.graded) {
+  if (omit !== 'graded' && flags.graded !== null && rowFlag(row, 'graded') !== flags.graded) {
     return false;
   }
   return true;
@@ -248,6 +263,34 @@ export function nationalitySoldSlices(slices, nationality) {
   return list.filter((row) => ASIAN_CARD_LANGS.includes(String(row.language || '').toUpperCase()));
 }
 
+/**
+ * Strict foil flags for the desk graph: an unselected chip plots standard
+ * copies only (reverse / 1st Ed. / Graded excluded), a pressed chip plots that
+ * variant only. A printing that never sold the standard variant snaps the chip
+ * back on so its graph is not blanked by the stricter default.
+ */
+function strictFlagState(rows, wanted) {
+  const effective = {};
+  for (const key of ['reverse', 'firstEdition', 'graded']) {
+    const on = rows.some((row) => rowFlag(row, key));
+    const off = rows.some((row) => !rowFlag(row, key));
+    if (wanted[key] === true) {
+      effective[key] = on;
+    } else {
+      effective[key] = !off && on;
+    }
+  }
+  return effective;
+}
+
+function flagVariants(rows, key) {
+  const seen = new Set();
+  for (const row of rows) {
+    seen.add(rowFlag(row, key));
+  }
+  return [false, true].filter((value) => seen.has(value));
+}
+
 function soldGraphSliceState(slices, {
   nationality,
   language = '',
@@ -257,19 +300,24 @@ function soldGraphSliceState(slices, {
   graded = false,
 } = {}) {
   const scoped = nationalitySoldSlices(slices, nationality);
-  const flagSlice = { reverse, firstEdition, graded };
-  const flagged = scoped.filter((row) => rowMatchesSoldSlice(row, flagSlice));
+  const flags = strictFlagState(scoped, { reverse, firstEdition, graded });
+  const flagged = scoped.filter((row) => rowMatchesSoldSlice(row, flags));
   const filters = buildSalesFilters(flagged.length ? flagged : scoped);
   const next = {
     language: cardLanguageQuery(nationality, filters.languages, language),
     condition: soldFilterValue(filters.conditions, condition),
-    reverse: reverse === true,
-    firstEdition: firstEdition === true,
-    graded: graded === true,
+    ...flags,
   };
   return {
     filters,
     filtered: scoped.filter((row) => rowMatchesSoldSlice(row, next)),
+    flags,
+    // Chip visibility is printing-wide, not scoped to the current foil combo.
+    chips: {
+      reverse: flagVariants(scoped, 'reverse').includes(true),
+      firstEdition: flagVariants(scoped, 'firstEdition').includes(true),
+      graded: flagVariants(scoped, 'graded').includes(true),
+    },
   };
 }
 
@@ -285,9 +333,11 @@ export function soldTraitsForGraphDay(slices, slice = {}, day) {
 
 /** Series + faceted menus from the cached card slices. */
 export function soldGraphView(slices, slice = {}) {
-  const { filters, filtered } = soldGraphSliceState(slices, slice);
+  const { filters, filtered, flags, chips } = soldGraphSliceState(slices, slice);
   return {
     series: buildSalesSeries(mergeSoldDailyRows(filtered)),
     filters,
+    flags,
+    chips,
   };
 }
