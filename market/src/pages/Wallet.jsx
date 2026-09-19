@@ -2,13 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   fetchChainAddressActivity,
-  fetchSwapPools,
-  fetchSwapQuote,
-  fetchWpknQuote,
   formatPknNumber,
   requestPknWithdraw,
-  requestWpknExchange,
-  requestWpknQuote,
   searchRecipientUsernames,
   topUpAccountBalance,
   transferAccountBalance,
@@ -24,14 +19,7 @@ import {
   mergeActivity,
   shortChainAddress,
 } from '../wallet-activity.js';
-import {
-  POKOIN_RPC,
-  poolIdFor,
-  sendPkn,
-  sendSwapTransaction,
-  switchToPokoin,
-  useWallet,
-} from '../wallet.jsx';
+import { sendPkn, switchToPokoin, useWallet } from '../wallet.jsx';
 
 /** Bank wallet that funds account top-ups (same treasury as cardvault). */
 const TREASURY_ADDRESS = '0xb4029F68E360280aa4Ad21D8aE5AD8896b8768B2';
@@ -165,25 +153,6 @@ function PercentRow({ onPick }) {
   );
 }
 
-function poolsOf(data) {
-  const rows = Array.isArray(data) ? data : (data?.pools || data?.items || []);
-  const mapped = rows.map((row) => {
-    const id = String(row.id || row.poolId || row.pool_id || '');
-    let asset = String(row.otherAsset || row.asset || row.quote || row.assetB || '').toUpperCase();
-    if (!asset && id) {
-      asset = id.replace(/^PKN-/, '').replace(/-PKN$/, '').toUpperCase();
-    }
-    if (asset === 'PKN') {
-      asset = '';
-    }
-    return { id: id || poolIdFor(asset), asset: asset || '' };
-  }).filter((row) => row.asset);
-  if (!mapped.some((row) => row.asset === 'WPKN')) {
-    mapped.push({ id: poolIdFor('WPKN'), asset: 'WPKN' });
-  }
-  return mapped;
-}
-
 const HERO_MODES = ['accounts', 'site', 'chain'];
 
 export default function Wallet() {
@@ -201,18 +170,6 @@ export default function Wallet() {
   const [showAllActivity, setShowAllActivity] = useState(false);
 
   const [busy, setBusy] = useState(false);
-
-  // WPKN exchange (site PKN ↔ wrapped PKN).
-  const [wpknDirection, setWpknDirection] = useState('pkn_to_wpkn');
-  const [wpknAmount, setWpknAmount] = useState('100');
-  const [wpknQuote, setWpknQuote] = useState(null);
-
-  // AMM swap against live pools.
-  const [pools, setPools] = useState([]);
-  const [asset, setAsset] = useState('WPKN');
-  const [fromPkn, setFromPkn] = useState(true);
-  const [amountIn, setAmountIn] = useState('100');
-  const [ammQuote, setAmmQuote] = useState(null);
 
   const refreshActivity = useCallback(async () => {
     setActivityLoading(true);
@@ -242,21 +199,6 @@ export default function Wallet() {
 
   useEffect(() => {
     document.title = 'Wallet · Pokoin';
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchSwapPools()
-      .then((data) => {
-        if (cancelled) return;
-        const next = poolsOf(data);
-        setPools(next);
-        if (next[0]?.asset) setAsset(next[0].asset);
-      })
-      .catch(() => setPools(poolsOf({})));
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   useEffect(() => {
@@ -333,12 +275,11 @@ export default function Wallet() {
   }
 
   const actions = [
-    { key: 'add', icon: 'plus', label: 'Add money', to: '/buy' },
-    { key: 'topup', icon: 'topup', label: 'Top up', sheet: 'topup' },
-    { key: 'withdraw', icon: 'withdraw', label: 'Withdraw', sheet: 'withdraw' },
     { key: 'send', icon: 'send', label: 'Send', sheet: 'send' },
     { key: 'receive', icon: 'receive', label: 'Receive', sheet: 'receive' },
-    { key: 'swap', icon: 'swap', label: 'Swap', sheet: 'swap' },
+    { key: 'withdraw', icon: 'withdraw', label: 'Withdraw', sheet: 'withdraw' },
+    { key: 'topup', icon: 'topup', label: 'Top up', sheet: 'topup' },
+    { key: 'swap', icon: 'swap', label: 'Swap', to: '/exchange' },
     { key: 'more', icon: 'more', label: 'More', sheet: 'more' },
   ];
 
@@ -428,7 +369,7 @@ export default function Wallet() {
         ) : (
           <p className="wallet-empty">
             {signedIn
-              ? 'No activity yet. Add money, send PKN, or swap to see it here.'
+              ? 'No activity yet. Send PKN or top up to see it here.'
               : 'Sign in to see your account activity.'}
           </p>
         )}
@@ -457,164 +398,6 @@ export default function Wallet() {
           </button>
         </div>
       </section>
-
-      <div className="wallet-tools">
-        <section className="wallet-card">
-          <div className="wallet-card-head">
-            <h2>WPKN exchange</h2>
-            <span className="wallet-card-tag">site PKN ↔ WPKN</span>
-          </div>
-          <p className="wallet-card-lede">Needs a signed-in session and a receiving address.</p>
-          <label className="sell-field">
-            Direction
-            <select value={wpknDirection} onChange={(event) => setWpknDirection(event.target.value)}>
-              <option value="pkn_to_wpkn">Site PKN → WPKN</option>
-              <option value="wpkn_to_pkn">WPKN → site PKN</option>
-            </select>
-          </label>
-          <label className="sell-field">
-            Amount
-            <input inputMode="numeric" value={wpknAmount} onChange={(event) => setWpknAmount(event.target.value)} />
-          </label>
-          <div className="wallet-tool-actions">
-            <button
-              className="btn ghost"
-              type="button"
-              onClick={() => run(async () => {
-                const data = await fetchWpknQuote({
-                  direction: wpknDirection,
-                  amountIn: Math.round(Number(wpknAmount) || 0),
-                });
-                setWpknQuote(data);
-              })}
-            >
-              Quote
-            </button>
-            <button
-              className="btn"
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                if (!signedIn) {
-                  requireSignIn();
-                  return;
-                }
-                if (!address) {
-                  run(connect);
-                  return;
-                }
-                run(async () => {
-                  const token = await getBearer();
-                  const quoted = await requestWpknQuote({
-                    direction: wpknDirection,
-                    amountIn: Math.round(Number(wpknAmount) || 0),
-                  }, token);
-                  const quoteId = quoted.quoteId || quoted.id || wpknQuote?.quoteId;
-                  if (!quoteId) {
-                    throw new Error('WPKN quote did not return an id.');
-                  }
-                  const result = await requestWpknExchange({ quoteId, direction: wpknDirection, toAddress: address }, token);
-                  setFlash(result.status || result.message || 'Exchange requested.');
-                });
-              }}
-            >
-              {signedIn ? 'Request exchange' : 'Sign in to exchange'}
-            </button>
-          </div>
-          {wpknQuote ? (
-            <p className="wallet-quote">
-              Quote {formatPknNumber(wpknQuote.amountOut || wpknQuote.out || 0)}
-              {wpknQuote.quoteId ? ` · ${wpknQuote.quoteId}` : ''}
-            </p>
-          ) : null}
-        </section>
-
-        <section className="wallet-card">
-          <div className="wallet-card-head">
-            <h2>PokoinSwap</h2>
-            <span className="wallet-card-tag">AMM · 0.5% min-out</span>
-          </div>
-          <p className="wallet-card-lede">{POKOIN_RPC.replace('https://', '')} · integer amounts against live pools.</p>
-          <label className="sell-field">
-            Pair
-            <select value={asset} onChange={(event) => { setAsset(event.target.value); setAmmQuote(null); }}>
-              {pools.map((row) => (
-                <option key={row.id || row.asset} value={row.asset}>{row.asset} / PKN</option>
-              ))}
-            </select>
-          </label>
-          <label className="sell-field">
-            Direction
-            <select
-              value={fromPkn ? 'pkn' : 'out'}
-              onChange={(event) => { setFromPkn(event.target.value === 'pkn'); setAmmQuote(null); }}
-            >
-              <option value="pkn">PKN → {asset}</option>
-              <option value="out">{asset} → PKN</option>
-            </select>
-          </label>
-          <label className="sell-field">
-            Amount in
-            <input inputMode="numeric" value={amountIn} onChange={(event) => { setAmountIn(event.target.value); setAmmQuote(null); }} />
-          </label>
-          <div className="wallet-tool-actions">
-            <button
-              className="btn ghost"
-              type="button"
-              onClick={() => run(async () => {
-                const poolId = pools.find((row) => row.asset === asset)?.id || poolIdFor(asset);
-                const data = await fetchSwapQuote({
-                  pool: poolId,
-                  assetIn: fromPkn ? 'PKN' : asset,
-                  amountIn: Math.round(Number(amountIn) || 0),
-                });
-                setAmmQuote(data);
-              })}
-            >
-              Quote
-            </button>
-            <button
-              className="btn"
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                if (!address) {
-                  run(connect);
-                  return;
-                }
-                run(async () => {
-                  const poolId = pools.find((row) => row.asset === asset)?.id || poolIdFor(asset);
-                  const assetIn = fromPkn ? 'PKN' : asset;
-                  const assetOut = fromPkn ? asset : 'PKN';
-                  const latest = ammQuote || await fetchSwapQuote({
-                    pool: poolId,
-                    assetIn,
-                    amountIn: Math.round(Number(amountIn) || 0),
-                  });
-                  setAmmQuote(latest);
-                  const hash = await sendSwapTransaction({
-                    from: address,
-                    quote: latest,
-                    poolId,
-                    assetIn,
-                    assetOut,
-                    amountIn: Math.round(Number(amountIn) || 0),
-                  });
-                  setFlash(`Swap sent · ${shortChainAddress(hash)}`);
-                });
-              }}
-            >
-              {address ? 'Swap' : 'Connect and swap'}
-            </button>
-          </div>
-          {ammQuote ? (
-            <p className="wallet-quote">
-              Out {formatPknNumber(ammQuote.amountOut || 0)} {ammQuote.assetOut || (fromPkn ? asset : 'PKN')}
-              {ammQuote.price ? ` · ${ammQuote.price}` : ''}
-            </p>
-          ) : null}
-        </section>
-      </div>
 
       {sheet === 'send' ? (
         <SendSheet
@@ -687,22 +470,6 @@ export default function Wallet() {
             await topUpAccountBalance({ amountPkn: Math.round(Number(amount)), fundingTxHash: hash }, token);
           }, { okMessage: 'Account balance topped up.' })}
         />
-      ) : null}
-
-      {sheet === 'swap' ? (
-        <Sheet title="Swap" onClose={closeSheet}>
-          <p className="wallet-sheet-lede">Exchange tools live below your activity feed.</p>
-          <button
-            className="wallet-sheet-cta"
-            type="button"
-            onClick={() => {
-              closeSheet();
-              document.querySelector('.wallet-tools')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }}
-          >
-            Open swap tools
-          </button>
-        </Sheet>
       ) : null}
 
       {sheet === 'more' ? (

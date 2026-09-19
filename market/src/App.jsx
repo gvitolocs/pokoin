@@ -39,6 +39,7 @@ import Profile from './pages/Profile.jsx';
 import Seller from './pages/Seller.jsx';
 import Cart from './pages/Cart.jsx';
 import Wallet from './pages/Wallet.jsx';
+import Exchange from './pages/Exchange.jsx';
 import Forum from './pages/Forum.jsx';
 import Signal from './pages/Signal.jsx';
 import Scan from './pages/Scan.jsx';
@@ -172,7 +173,8 @@ function AppShell() {
       {both('/profile', <Profile />)}
       {both('/cart', <Cart />)}
       {both('/wallet', <Wallet />)}
-      {both('/swap', <Navigate to="/wallet" replace />)}
+      {both('/exchange', <Exchange />)}
+      {both('/swap', <Navigate to="/exchange" replace />)}
       {both('/checkout', <Checkout />)}
       {both('/orders', <Orders />)}
       {both('/collection', <Collection />)}
