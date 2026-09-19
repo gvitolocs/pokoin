@@ -1,4 +1,4 @@
-const FIGURE_MASK_REV = 'clean-1';
+const FIGURE_MASK_REV = 'clean-2';
 
 /** Transparent SAM silhouette for the CLIP painting, never a rectangular crop.
  * Served from the cleaned set: fill-holes + island removal + edge closing. */
