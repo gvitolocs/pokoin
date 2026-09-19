@@ -95,3 +95,38 @@ test('owned collection queries bail out without a uid or real token', async () =
   assert.deepEqual(await fetchOwnedCollectionDocuments('ledger_entries', '', 'z'.repeat(24)), []);
   assert.deepEqual(await fetchOwnedCollectionDocuments('ledger_entries', 'desk-user', 'short'), []);
 });
+
+test('owned collection queries add newest-first limit and fall back without the index', async () => {
+  const calls = [];
+  const fetchImpl = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    calls.push(body.structuredQuery);
+    if (body.structuredQuery.orderBy) {
+      return { ok: false, status: 400, json: async () => ({}) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => [
+        {
+          document: {
+            name: 'projects/pokoin/databases/(default)/documents/ledger_entries/row2',
+            fields: { uid: { stringValue: 'desk-user' }, amountPkn: { integerValue: '1' } },
+          },
+        },
+      ],
+    };
+  };
+  const rows = await fetchOwnedCollectionDocuments('ledger_entries', 'desk-user', 'z'.repeat(24), {
+    fetchImpl,
+    limit: 60,
+    sinceMs: Date.parse('2026-05-20T00:00:00Z'),
+  });
+  assert.equal(rows[0].id, 'row2');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].limit, 60);
+  assert.equal(calls[0].orderBy[0].direction, 'DESCENDING');
+  assert.equal(calls[0].where.compositeFilter.op, 'AND');
+  assert.equal(calls[1].orderBy, undefined);
+  assert.equal(calls[1].where.fieldFilter.field.fieldPath, 'uid');
+});

@@ -75,45 +75,96 @@ export async function fetchDeskUserDocuments(uid, token, fetchImpl = fetch) {
 
 /** List the caller's docs in a collection (wallet ledger feeds). REST runQuery
  * instead of the SDK so the credentialless extension iframe — no
- * firebaseAuth.currentUser — still reads with the injected bearer. */
-export async function fetchOwnedCollectionDocuments(collection, uid, token, { fetchImpl = fetch } = {}) {
+ * firebaseAuth.currentUser — still reads with the injected bearer.
+ *
+ * Prefer newest-first + limit when the composite index exists; fall back to
+ * the plain uid filter so a missing index never blanks the feed. */
+export async function fetchOwnedCollectionDocuments(
+  collection,
+  uid,
+  token,
+  { fetchImpl = fetch, limit = 0, sinceMs = 0 } = {},
+) {
   const col = String(collection || '').trim();
   const id = String(uid || '').trim();
   const bearer = String(token || '').trim();
   if (!col || !id || bearer.length <= 20) {
     return [];
   }
-  const response = await fetchImpl(
-    `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents:runQuery`,
+  const filters = [
     {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${bearer}`,
-        'Content-Type': 'application/json',
+      fieldFilter: {
+        field: { fieldPath: 'uid' },
+        op: 'EQUAL',
+        value: { stringValue: id },
       },
-      body: JSON.stringify({
-        structuredQuery: {
-          from: [{ collectionId: col }],
-          where: {
-            fieldFilter: {
-              field: { fieldPath: 'uid' },
-              op: 'EQUAL',
-              value: { stringValue: id },
-            },
+    },
+  ];
+  if (sinceMs > 0) {
+    filters.push({
+      fieldFilter: {
+        field: { fieldPath: 'createdAt' },
+        op: 'GREATER_THAN',
+        value: {
+          timestampValue: new Date(sinceMs).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        },
+      },
+    });
+  }
+  const structuredQuery = {
+    from: [{ collectionId: col }],
+    where: filters.length === 1
+      ? filters[0]
+      : { compositeFilter: { op: 'AND', filters } },
+  };
+  if (limit > 0) {
+    structuredQuery.orderBy = [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }];
+    structuredQuery.limit = Math.min(Math.floor(limit), 200);
+  }
+
+  async function run(query) {
+    const response = await fetchImpl(
+      `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents:runQuery`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${bearer}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ structuredQuery: query }),
+      },
+    );
+    if (!response.ok) {
+      const err = new Error(`firestore query ${col} ${response.status}`);
+      err.status = response.status;
+      throw err;
+    }
+    const rows = await response.json();
+    return (Array.isArray(rows) ? rows : [])
+      .map((row) => row?.document)
+      .filter(Boolean)
+      .map((doc) => ({
+        id: String(doc.name || '').split('/').pop() || '',
+        ...firestoreDocumentData(doc),
+      }));
+  }
+
+  try {
+    return await run(structuredQuery);
+  } catch (err) {
+    // Missing composite index (uid + createdAt) — retry the plain uid scan.
+    if (limit > 0 || sinceMs > 0) {
+      return run({
+        from: [{ collectionId: col }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'uid' },
+            op: 'EQUAL',
+            value: { stringValue: id },
           },
         },
-      }),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(`firestore query ${col} ${response.status}`);
+      });
+    }
+    throw err;
   }
-  const rows = await response.json();
-  return (Array.isArray(rows) ? rows : [])
-    .map((row) => row?.document)
-    .filter(Boolean)
-    .map((doc) => ({
-      id: String(doc.name || '').split('/').pop() || '',
-      ...firestoreDocumentData(doc),
-    }));
 }

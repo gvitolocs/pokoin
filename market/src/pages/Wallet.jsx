@@ -21,6 +21,13 @@ import {
   mergeActivity,
   shortChainAddress,
 } from '../wallet-activity.js';
+import {
+  activityCacheIsFresh,
+  activityFingerprint,
+  activityNewestMs,
+  readActivityCache,
+  writeActivityCache,
+} from '../wallet-activity-cache.js';
 import { buildReceiveQr, parseScannedQr, parseWalletSendLink } from '../wallet-qr.js';
 import { sendPkn, switchToPokoin, useWallet } from '../wallet.jsx';
 import {
@@ -191,30 +198,77 @@ export default function Wallet() {
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const refreshActivity = useCallback(async () => {
-    setActivityLoading(true);
-    const groups = await Promise.allSettled([
-      (async () => {
-        const token = await getBearer();
-        const rows = await fetchOwnedCollectionDocuments('ledger_entries', uid, token);
-        return rows.map(activityFromLedgerRow);
-      })(),
-      (async () => {
-        const token = await getBearer();
-        const rows = await fetchOwnedCollectionDocuments('wallet_activity', uid, token);
-        return rows.map(activityFromWalletRow);
-      })(),
-      (async () => {
-        if (!address) return [];
-        const txs = await fetchChainAddressActivity(address, { limit: ACTIVITY_QUERY_LIMIT });
-        return txs.map((tx) => activityFromChainTx(tx, address));
-      })(),
-    ]);
-    setActivity(mergeActivity(
-      groups.map((row) => (row.status === 'fulfilled' ? row.value : [])),
-      { limit: ACTIVITY_QUERY_LIMIT },
-    ));
-    setActivityLoading(false);
+  // Instant paint from the last successful feed for this uid (+ chain address).
+  useEffect(() => {
+    if (!uid) {
+      setActivity([]);
+      return;
+    }
+    const cached = readActivityCache(uid, address);
+    if (cached?.rows?.length) {
+      setActivity(cached.rows);
+    }
+  }, [uid, address]);
+
+  const refreshActivity = useCallback(async ({ force = false } = {}) => {
+    if (!uid) {
+      setActivity([]);
+      setActivityLoading(false);
+      return;
+    }
+    const cached = readActivityCache(uid, address);
+    if (!force && activityCacheIsFresh(cached)) {
+      setActivity(cached.rows);
+      setActivityLoading(false);
+      return;
+    }
+    const showSpinner = !(cached?.rows?.length || false);
+    if (showSpinner) setActivityLoading(true);
+    // Overlap one minute so clock skew / same-second writes are not missed.
+    const sinceMs = !force && cached?.rows?.length
+      ? Math.max(0, activityNewestMs(cached.rows) - 60_000)
+      : 0;
+    try {
+      const groups = await Promise.allSettled([
+        (async () => {
+          const token = await getBearer();
+          const rows = await fetchOwnedCollectionDocuments('ledger_entries', uid, token, {
+            limit: ACTIVITY_QUERY_LIMIT,
+            sinceMs,
+          });
+          return rows.map(activityFromLedgerRow);
+        })(),
+        (async () => {
+          const token = await getBearer();
+          const rows = await fetchOwnedCollectionDocuments('wallet_activity', uid, token, {
+            limit: ACTIVITY_QUERY_LIMIT,
+            sinceMs,
+          });
+          return rows.map(activityFromWalletRow);
+        })(),
+        (async () => {
+          if (!address) return [];
+          const txs = await fetchChainAddressActivity(address, { limit: ACTIVITY_QUERY_LIMIT });
+          return txs.map((tx) => activityFromChainTx(tx, address));
+        })(),
+      ]);
+      const fetched = groups.map((row) => (row.status === 'fulfilled' ? row.value : []));
+      // Delta fetch: fold new rows onto the cached feed. Full fetch: replace.
+      const next = mergeActivity(
+        sinceMs > 0 && cached?.rows?.length ? [cached.rows, ...fetched] : fetched,
+        { limit: ACTIVITY_QUERY_LIMIT },
+      );
+      const prevFp = cached?.fingerprint || activityFingerprint(cached?.rows || []);
+      const nextFp = activityFingerprint(next);
+      writeActivityCache(uid, address, next);
+      if (nextFp !== prevFp) {
+        setActivity(next);
+      } else if (!cached?.rows?.length && next.length) {
+        setActivity(next);
+      }
+    } finally {
+      setActivityLoading(false);
+    }
   }, [address, getBearer, uid]);
 
   useEffect(() => {
@@ -280,7 +334,7 @@ export default function Wallet() {
     try {
       await task();
       if (okMessage) setFlash(okMessage);
-      refreshActivity();
+      refreshActivity({ force: true });
       return true;
     } catch (err) {
       setError(err.message || 'Something went wrong.');
