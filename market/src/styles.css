@@ -6204,6 +6204,11 @@ html.is-extension-desk select.collector-badge.version-badge {
 
 /* ---- Wallet desk — Revolut-style hero, quick actions, activity, sheets ---- */
 
+main:has(.wallet-page),
+html.is-extension-desk main:has(.wallet-page) {
+  padding: 0;
+}
+
 .wallet-page {
   width: 100%;
   padding: 0 0 4rem;
@@ -6220,7 +6225,8 @@ html.is-extension-desk select.collector-badge.version-badge {
   text-align: center;
   color: #fff;
   background:
-    radial-gradient(120% 150% at 50% -30%, #8b5cf6 0%, #6d28d9 34%, #4c1d95 58%, rgba(18, 10, 38, 0.92) 82%, #0b0716 100%);
+    linear-gradient(180deg, rgba(11, 9, 4, 0) 58%, #0b0904 97%),
+    radial-gradient(130% 150% at 50% -38%, #ffd33d 0%, #e5b21e 22%, #8f7013 42%, rgba(28, 22, 7, 0.96) 64%, #0b0904 100%);
 }
 
 .wallet-hero.slim {
@@ -6240,7 +6246,7 @@ html.is-extension-desk select.collector-badge.version-badge {
   font-weight: 800;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(25, 18, 4, 0.62);
 }
 
 .wallet-hero-label {
@@ -6383,7 +6389,7 @@ html.is-extension-desk select.collector-badge.version-badge {
 .wallet-action:hover .wallet-action-label { color: var(--text); }
 
 .wallet-card {
-  background: color-mix(in srgb, var(--g2) 72%, transparent);
+  background: transparent;
   border: 0;
   border-radius: 0;
   padding: 1rem 1.15rem 1.1rem;
@@ -6480,7 +6486,7 @@ html.is-extension-desk select.collector-badge.version-badge {
   height: 2.35rem;
   border-radius: 50%;
   background: var(--g3);
-  color: #c9b8ff;
+  color: #ffd33d;
 }
 
 .wallet-account-icon.chain { color: #8ab4ff; }
@@ -6560,7 +6566,7 @@ html.is-extension-desk select.collector-badge.version-badge {
   margin: 0.6rem 0 0;
   font-size: 0.85rem;
   font-weight: 700;
-  color: #c9b8ff;
+  color: #ffdf7e;
 }
 
 /* Sheets — bottom card on phones, centered dialog on desktop. */
@@ -6654,8 +6660,8 @@ html.is-extension-desk select.collector-badge.version-badge {
   padding: 0.85rem 1rem;
   border: 0;
   border-radius: 999px;
-  background: #7c3aed;
-  color: #fff;
+  background: #ffd33d;
+  color: #191204;
   font: inherit;
   font-size: 0.95rem;
   font-weight: 800;
@@ -6663,7 +6669,7 @@ html.is-extension-desk select.collector-badge.version-badge {
   transition: background 0.15s ease;
 }
 
-.wallet-sheet-cta:hover { background: #8b5cf6; }
+.wallet-sheet-cta:hover { background: #ffdd66; }
 
 .wallet-sheet-cta:disabled { opacity: 0.55; cursor: default; }
 
@@ -6747,16 +6753,16 @@ html.is-extension-desk select.collector-badge.version-badge {
 .wallet-suggestions button {
   padding: 0.38rem 0.8rem;
   border-radius: 999px;
-  border: 1px solid rgba(124, 58, 237, 0.55);
-  background: rgba(124, 58, 237, 0.16);
-  color: #d6c6ff;
+  border: 1px solid rgba(255, 211, 61, 0.5);
+  background: rgba(255, 211, 61, 0.12);
+  color: #ffe28a;
   font: inherit;
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
 }
 
-.wallet-suggestions button:hover { background: rgba(124, 58, 237, 0.3); }
+.wallet-suggestions button:hover { background: rgba(255, 211, 61, 0.24); }
 
 .wallet-more {
   display: flex;
@@ -6781,7 +6787,7 @@ html.is-extension-desk select.collector-badge.version-badge {
 }
 
 .wallet-more a:hover,
-.wallet-more button:hover { color: #c9b8ff; }
+.wallet-more button:hover { color: #ffd33d; }
 
 .wallet-more .danger { color: #ff5f7a; }
 
