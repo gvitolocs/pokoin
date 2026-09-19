@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  compactRecipientQuery,
   counterpartiesFromActivity,
   mergeUsernameSuggestions,
 } from './recipient-suggest.js';
@@ -13,20 +14,45 @@ test('counterpartiesFromActivity reads to/from handles', () => {
       { title: 'account_top_up 10 PKN' },
       { title: 'Sent 5 PKN to nesaggezza' },
     ]),
-    ['nesaggezza', 'ash'],
+    [
+      { username: 'nesaggezza', displayName: '' },
+      { username: 'ash', displayName: '' },
+    ],
   );
 });
 
-test('mergeUsernameSuggestions prefixes, dedupes, drops self', () => {
+test('compactRecipientQuery strips spaces for display-name typing', () => {
+  assert.equal(compactRecipientQuery('Raffaella Sabatino'), 'raffaellasabatino');
+  assert.equal(compactRecipientQuery('raf'), 'raf');
+});
+
+test('mergeUsernameSuggestions matches display names and drops self', () => {
   assert.deepEqual(
     mergeUsernameSuggestions({
-      query: 'ra',
-      local: ['raffa', 'nesaggezza'],
-      remote: ['raff', 'Raffa', 'random'],
-      selfUsername: 'raff',
+      query: 'raf',
+      local: [],
+      remote: [
+        { username: 'raffaellasabatino', displayName: 'Raffaella Sabatino' },
+        { username: 'redshakkio', displayName: 'Simone Di Blasi' },
+      ],
+      selfUsername: 'pknreserve',
       limit: 6,
     }),
-    ['raffa', 'random'],
+    [{ username: 'raffaellasabatino', displayName: 'Raffaella Sabatino' }],
   );
-  assert.deepEqual(mergeUsernameSuggestions({ query: 'x', local: ['ash'], remote: [] }), []);
+  assert.deepEqual(
+    mergeUsernameSuggestions({
+      query: 'raffaella sab',
+      local: [],
+      remote: [{ username: 'raffaellasabatino', displayName: 'Raffaella Sabatino' }],
+    }),
+    [{ username: 'raffaellasabatino', displayName: 'Raffaella Sabatino' }],
+  );
+  assert.deepEqual(
+    mergeUsernameSuggestions({
+      query: 'sim',
+      remote: [{ username: 'redshakkio', displayName: 'Simone Di Blasi' }],
+    }),
+    [{ username: 'redshakkio', displayName: 'Simone Di Blasi' }],
+  );
 });

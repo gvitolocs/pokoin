@@ -30,6 +30,7 @@ import {
 } from '../wallet-activity-cache.js';
 import { buildReceiveQr, parseScannedQr, parseWalletSendLink } from '../wallet-qr.js';
 import {
+  compactRecipientQuery,
   counterpartiesFromActivity,
   mergeUsernameSuggestions,
 } from '../recipient-suggest.js';
@@ -580,8 +581,9 @@ function SendSheet({
   const [scanned, setScanned] = useState(fromQr && initialRecipient ? initialRecipient : '');
   const videoRef = useRef(null);
   const toChain = IS_ADDRESS.test(recipient.trim());
-  const query = recipient.trim().toLowerCase();
-  const searchable = query.length >= 2 && !query.includes('@') && !IS_ADDRESS.test(query);
+  const query = recipient.trim();
+  const compactQuery = compactRecipientQuery(query);
+  const searchable = compactQuery.length >= 2 && !query.includes('@') && !IS_ADDRESS.test(query);
   const localNames = useMemo(
     () => counterpartiesFromActivity(recentActivity),
     [recentActivity],
@@ -690,11 +692,14 @@ function SendSheet({
             setSearch({ status: 'signedout', rows: [] });
             return undefined;
           }
-          return searchRecipientUsernames(query, token).then((data) => {
+          return searchRecipientUsernames(compactQuery || query, token).then((data) => {
             if (cancelled) {
               return;
             }
-            const rows = (data.usernames || []).slice(0, 8);
+            const fromResults = Array.isArray(data.results) ? data.results : [];
+            const rows = fromResults.length
+              ? fromResults.slice(0, 8)
+              : (data.usernames || []).slice(0, 8).map((username) => ({ username, displayName: '' }));
             setSearch({ status: rows.length ? 'results' : 'none', rows });
           });
         })
@@ -706,7 +711,7 @@ function SendSheet({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [searchable, query, getBearer]);
+  }, [searchable, compactQuery, query, getBearer]);
 
   function submit() {
     const to = recipient.trim();
@@ -789,21 +794,28 @@ function SendSheet({
       ) : null}
       {suggestions.length ? (
         <div className="wallet-suggestions" role="listbox" aria-label="Matching usernames">
-          {suggestions.map((name) => (
+          {suggestions.map((row) => (
             <button
-              key={name}
+              key={row.username}
               type="button"
               role="option"
               onClick={() => {
-                setRecipient(name);
+                setRecipient(row.username);
                 setSearch({ status: 'idle', rows: [] });
               }}
             >
-              @{name}
+              {row.displayName ? (
+                <>
+                  <span className="wallet-suggest-name">{row.displayName}</span>
+                  <span className="wallet-suggest-handle">@{row.username}</span>
+                </>
+              ) : (
+                <>@{row.username}</>
+              )}
             </button>
           ))}
         </div>
-      ) : searchable && search.status === 'searching' && !localNames.some((name) => name.startsWith(query)) ? (
+      ) : searchable && search.status === 'searching' && !suggestions.length ? (
         <p className="wallet-suggestions-note">Searching usernames…</p>
       ) : searchable && search.status === 'none' ? (
         <p className="wallet-suggestions-note">No matching usernames — you can still send if you know the exact handle.</p>
