@@ -2476,6 +2476,44 @@ select.collector-badge.version-badge option {
   border-color: #ef4444;
 }
 
+.shop-edit {
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  color: #facc15;
+}
+
+.shop-edit:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.shop-edit:not(:disabled):hover,
+.shop-edit.on {
+  color: #fde68a;
+  border-color: #facc15;
+}
+
+.shop-owner-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  justify-self: end;
+}
+
+.shop-row.is-editing {
+  background: rgb(250 204 21 / 0.05);
+}
+
+.sell-form.is-editing {
+  outline: 1px solid rgb(250 204 21 / 0.35);
+}
+
+.sell-cancel-edit {
+  font-size: 0.72rem;
+}
+
 .linkish {
   background: none;
   border: 0;
@@ -3248,6 +3286,9 @@ a.era-link:focus-visible {
 }
 
 .seller-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 700;
@@ -3415,6 +3456,7 @@ a.era-link:focus-visible {
 .shop-row.is-buy:hover { background: rgb(255 211 61 / 0.04); }
 .shop-row.mine { cursor: default; }
 .shop-row.mine:hover { background: transparent; }
+.shop-row .shop-owner-actions,
 .shop-row .shop-trash { justify-self: end; }
 
 .shop-seller {

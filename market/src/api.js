@@ -663,6 +663,19 @@ export function cancelListing(listingId, token, sellerUid) {
   });
 }
 
+export function updateListing(listingId, body, token) {
+  const id = String(listingId || '');
+  const params = new URLSearchParams({ id });
+  return getJson(`/api/marketplace-listings?${params}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body || {}),
+  });
+}
+
 export function postWatchlist(cardId, action) {
   const id = Number(cardId);
   if (!Number.isSafeInteger(id) || id <= 0) {

@@ -7,6 +7,7 @@ import {
   cardtraderPublicUrl,
   cancelListing,
   createListing,
+  updateListing,
   dropListing,
   cardFromCatalogRow,
   fetchCard,
@@ -82,6 +83,7 @@ import SeoHead from '../components/SeoHead.jsx';
 import { tcgEra, eraHref } from '../set-logos.js';
 import { speciesFromCard, pokemonHref } from '../pokemon-hubs.js';
 import ShopListingRow from '../components/ShopListing.jsx';
+import { conditionShort } from '../listing-meta.js';
 import {
   breadcrumbJsonLd,
   cardImageAlt,
@@ -594,6 +596,75 @@ function defaultFoil(card) {
   return 'standard';
 }
 
+function foilFromOffer(offer, card) {
+  const state = String(offer?.foilState || '').toLowerCase();
+  if (FOILS.some((row) => row.value === state)) {
+    return state;
+  }
+  if (offer?.reverse) {
+    return 'reverse';
+  }
+  return defaultFoil(card);
+}
+
+function moodCondition(offer) {
+  const short = conditionShort(offer?.condition) || 'NM';
+  return MOOD_CONDS.some((row) => row.value === short) ? short : 'NM';
+}
+
+function offerLanguage(offer, card) {
+  const raw = String(offer?.language || '').trim().toUpperCase();
+  if (!raw) {
+    return defaultCardLanguage(card?.nationality);
+  }
+  if (raw === 'JA' || raw === 'JPN') return 'JP';
+  if (raw === 'CN' || raw === 'ZHS') return 'ZH';
+  if (raw === 'TW') return 'ZHT';
+  return raw;
+}
+
+function blankListingForm(card) {
+  return {
+    price: '',
+    currency: 'PKN',
+    qty: '1',
+    condition: 'NM',
+    language: defaultCardLanguage(card?.nationality),
+    foil: defaultFoil(card),
+    chips: {
+      firstEd: false,
+      sealed: false,
+      graded: false,
+      shipping: true,
+    },
+    comment: '',
+    company: 'PSA',
+    grade: '',
+    cert: '',
+  };
+}
+
+function listingFormFromOffer(offer, card) {
+  return {
+    price: offer?.pricePkn != null && offer?.pricePkn !== '' ? String(offer.pricePkn) : '',
+    currency: 'PKN',
+    qty: String(Math.max(1, Number(offer?.quantityAvailable) || 1)),
+    condition: moodCondition(offer),
+    language: offerLanguage(offer, card),
+    foil: foilFromOffer(offer, card),
+    chips: {
+      firstEd: Boolean(offer?.firstEdition),
+      sealed: Boolean(offer?.sealed),
+      graded: Boolean(offer?.graded),
+      shipping: offer?.shippingAvailable !== false,
+    },
+    comment: String(offer?.sellerComment || ''),
+    company: String(offer?.gradingCompany || 'PSA'),
+    grade: String(offer?.grade || ''),
+    cert: String(offer?.certificationId || ''),
+  };
+}
+
 function ListingForm({
   card,
   identity,
@@ -602,53 +673,61 @@ function ListingForm({
   onListed,
   preferredLanguage,
   preferredCondition,
+  editing = null,
+  onCancelEdit,
 }) {
   const navigate = useNavigate();
-  const { signedIn, ready, sellerName, getBearer } = useAuth();
-  const [price, setPrice] = useState('');
-  const [currency, setCurrency] = useState('PKN');
-  const [qty, setQty] = useState('1');
-  const [condition, setCondition] = useState('NM');
-  const [language, setLanguage] = useState(() => defaultCardLanguage(card?.nationality));
-  const [foil, setFoil] = useState(defaultFoil(card));
-  const [chips, setChips] = useState({
-    firstEd: false,
-    sealed: false,
-    graded: false,
-    shipping: true,
-  });
-  const [comment, setComment] = useState('');
-  const [company, setCompany] = useState('PSA');
-  const [grade, setGrade] = useState('');
-  const [cert, setCert] = useState('');
+  const { signedIn, ready, sellerName, user, getBearer } = useAuth();
+  const formRef = useRef(null);
+  const blank = blankListingForm(card);
+  const [price, setPrice] = useState(blank.price);
+  const [currency, setCurrency] = useState(blank.currency);
+  const [qty, setQty] = useState(blank.qty);
+  const [condition, setCondition] = useState(blank.condition);
+  const [language, setLanguage] = useState(blank.language);
+  const [foil, setFoil] = useState(blank.foil);
+  const [chips, setChips] = useState(blank.chips);
+  const [comment, setComment] = useState(blank.comment);
+  const [company, setCompany] = useState(blank.company);
+  const [grade, setGrade] = useState(blank.grade);
+  const [cert, setCert] = useState(blank.cert);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
   const sellLangs = languagesForNationality(card.nationality, LIST_LANGS);
   const listLangs = sellLangs.length ? sellLangs : LIST_LANGS;
+  const editingId = editing?.id || '';
+  const isEditing = Boolean(editingId);
 
-  useEffect(() => {
-    setPrice('');
-    setCurrency('PKN');
-    setQty('1');
-    setCondition('NM');
-    setLanguage(defaultCardLanguage(card.nationality));
-    setFoil(defaultFoil(card));
-    setChips({
-      firstEd: false,
-      sealed: false,
-      graded: false,
-      shipping: true,
-    });
-    setComment('');
-    setCompany('PSA');
-    setGrade('');
-    setCert('');
+  function applyFields(next) {
+    setPrice(next.price);
+    setCurrency(next.currency);
+    setQty(next.qty);
+    setCondition(next.condition);
+    setLanguage(next.language);
+    setFoil(next.foil);
+    setChips(next.chips);
+    setComment(next.comment);
+    setCompany(next.company);
+    setGrade(next.grade);
+    setCert(next.cert);
     setError('');
     setDone('');
-  }, [card.id]);
+  }
 
   useEffect(() => {
+    if (editingId) {
+      applyFields(listingFormFromOffer(editing, card));
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+    applyFields(blankListingForm(card));
+  }, [card.id, editingId]);
+
+  useEffect(() => {
+    if (editingId) {
+      return;
+    }
     const langs = languagesForNationality(card.nationality, LIST_LANGS);
     const allowed = langs.length ? langs : LIST_LANGS;
     if (preferredLanguage && allowed.includes(preferredLanguage)) {
@@ -658,13 +737,14 @@ function ListingForm({
     setLanguage((current) => (
       allowed.includes(current) ? current : defaultCardLanguage(card.nationality)
     ));
-  }, [preferredLanguage, card.nationality]);
+  }, [preferredLanguage, card.nationality, editingId]);
 
   useEffect(() => {
-    if (preferredCondition) {
-      setCondition(preferredCondition);
+    if (editingId || !preferredCondition) {
+      return;
     }
-  }, [preferredCondition]);
+    setCondition(preferredCondition);
+  }, [preferredCondition, editingId]);
 
   const hint = !price && suggestedPrice ? listPriceHint(suggestedPrice, currency) : '';
   const listedPkn = price
@@ -701,11 +781,7 @@ function ListingForm({
         navigate(authFrom(fromPath));
         return;
       }
-      const created = await createListing({
-        cardId: publicCardId(card),
-        sellerName,
-        sellerCountry: 'EU',
-        sellerReputationLabel: 'New',
+      const fields = {
         condition,
         language,
         pricePkn: amount,
@@ -728,28 +804,50 @@ function ListingForm({
         cardImageUrl: card.heroImageUrl || card.imageUrl || '',
         setName: identity.set,
         collectorNumber: identity.number,
-      }, token);
+      };
+      const saved = isEditing
+        ? await updateListing(editingId, {
+          ...fields,
+          sellerUid: user?.uid || editing.sellerUid,
+          status: 'active',
+        }, token)
+        : await createListing({
+          cardId: publicCardId(card),
+          sellerName,
+          sellerCountry: 'EU',
+          sellerReputationLabel: 'New',
+          ...fields,
+        }, token);
       track(Action.sell, card);
-      setDone('Listing created.');
-      setQty('1');
-      onListed?.(created);
+      setDone(isEditing ? 'Listing updated.' : 'Listing created.');
+      if (!isEditing) {
+        setQty('1');
+      }
+      onListed?.(saved);
     } catch (err) {
       if (err.status === 401) {
         navigate(authFrom(fromPath));
         return;
       }
-      setError(err.message || 'Listing failed.');
+      setError(err.message || (isEditing ? 'Update failed.' : 'Listing failed.'));
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <section className="panel sell-form">
+    <section className={`panel sell-form${isEditing ? ' is-editing' : ''}`} ref={formRef}>
       <div className="add-head">
-        <h2>List your card</h2>
+        <h2>{isEditing ? 'Edit listing' : 'List your card'}</h2>
         {signedIn ? (
-          <span className="seller-chip">{sellerName}</span>
+          <span className="seller-chip">
+            {sellerName}
+            {isEditing ? (
+              <button type="button" className="linkish sell-cancel-edit" onClick={() => onCancelEdit?.()}>
+                Cancel edit
+              </button>
+            ) : null}
+          </span>
         ) : (
           <Link className="signin-link" to={authFrom(fromPath)} onClick={() => track(Action.sell, card)}>
             Sign in
@@ -786,10 +884,10 @@ function ListingForm({
           type="button"
           className="btn list-btn"
           disabled={!ready || saving || (!signedIn && ready)}
-          title={signedIn ? 'List card' : 'Sign in to list'}
+          title={signedIn ? (isEditing ? 'Save listing changes' : 'List card') : 'Sign in to list'}
           onClick={submit}
         >
-          {saving ? 'Listing…' : 'List card'}
+          {saving ? (isEditing ? 'Saving…' : 'Listing…') : (isEditing ? 'Save changes' : 'List card')}
         </button>
       </div>
       {currency !== 'PKN' && listedPkn ? (
@@ -1071,6 +1169,7 @@ export default function Card() {
   const [offersReady, setOffersReady] = useState(false);
   const [listingBusy, setListingBusy] = useState(false);
   const [shopError, setShopError] = useState('');
+  const [editingOffer, setEditingOffer] = useState(null);
   const [namePrintings, setNamePrintings] = useState([]);
   const [artPrintings, setArtPrintings] = useState([]);
   const [salesSlices, setSalesSlices] = useState(() => peekCardSales(cardId)?.slices ?? null);
@@ -1127,6 +1226,7 @@ export default function Card() {
     setDealCond('');
     setListingBusy(false);
     setShopError('');
+    setEditingOffer(null);
     const cached = peekCard(cardId, { lang });
     const listed = peekListings(cardId);
     setArtPrintings(
@@ -1464,6 +1564,9 @@ export default function Card() {
       await Promise.all(listingIds.map((id) => cancelListing(id, token, user.uid)));
       listingIds.forEach((id) => dropListing(cardId, id));
       setPayload((current) => omitListings(current, listingIds));
+      setEditingOffer((current) => (
+        current && listingIds.includes(current.id) ? null : current
+      ));
     } catch (err) {
       if (err.status === 401) {
         navigate(authFrom(location.pathname || '/marketplace'));
@@ -1870,6 +1973,8 @@ export default function Card() {
             fromPath={fromPath}
             preferredLanguage={dealLang}
             preferredCondition={dealCond}
+            editing={editingOffer}
+            onCancelEdit={() => setEditingOffer(null)}
             onListed={(created) => {
               listingsSeq.current += 1;
               const seq = listingsSeq.current;
@@ -1877,6 +1982,7 @@ export default function Card() {
               rememberCreatedListing(card.id, created);
               setPayload((current) => mergeCreatedListing(current, created));
               setOffersReady(true);
+              setEditingOffer(null);
               fetchListings(card.id, { fresh: true }).then((list) => {
                 if (seq !== listingsSeq.current) {
                   return;
@@ -2009,11 +2115,15 @@ export default function Card() {
                     offer={offer}
                     mine={mine}
                     listingBusy={listingBusy}
+                    editing={editingOffer?.id === offer.id}
                     onBuy={() => {
                       track(Action.clickListing, card, { resultRank: index });
                       addItem(cartItemFromOffer(card, offer));
                       navigate('/cart');
                     }}
+                    onEdit={() => setEditingOffer(
+                      editingOffer?.id === offer.id ? null : offer,
+                    )}
                     onCancel={() => cancelMine([offer.id])}
                   />
                 );
