@@ -408,15 +408,16 @@ def run_game(slug: str) -> None:
         empty_streak = 0
         ok, failed = encode(bodies)
         stamped = stamp_cdn(db, schema, prefix, ok)
-        if failed and failed < 0.4 * max(1, len(bodies)):
-            # Memoize only when the chunk looks healthy: a high fail rate means
-            # CardTrader rate limiting / outage — do not poison the memo.
-            ok_set = set(ok)
+        # Encode rejects are deterministic (too small / preview-only scan):
+        # memoize them always. Only never-fetched keys are flap suspects, and
+        # those stay guarded by the 40% rule so a challenge never poisons.
+        ok_set = set(ok)
+        rejects = [key for key in bodies if key not in ok_set]
+        if rejects:
             fails = load_fails()
             now = time.time()
-            for key in bodies:
-                if key not in ok_set:
-                    fails[key] = now
+            for key in rejects:
+                fails[key] = now
             save_fails(fails)
         game_state["ok"] += len(ok)
         game_state["fail"] += failed
