@@ -792,8 +792,11 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
   ### Sold comps (stack identity — not CardTrader product id)
 
   Pokoin never sees CardTrader receipts. Sold graphs are **snapshot diffs**
-  of the public listing book. Persist lives in
-  `scripts/sql/cardtrader-listing-qty-diff.sql`.
+  of the public listing book. Persist lives in the **cardvault** repo,
+  `pokemon_card_vault/oracle-postgres/schema/086_disappearance_inferred_sales.sql`
+  (continuity reconciliation in `088_seller_stack_continuity.sql`). The copy at
+  `scripts/sql/cardtrader-listing-qty-diff.sql` in this repo is a superseded
+  snapshot and must never be applied.
 
   **Stack key (the listing identity for “sold?”):**
 
@@ -843,11 +846,23 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
   stay `inferred_sale`.
 
   Live persist decides with `cardtrader_same_seller_listing_stack`
-  (`scripts/sql/cardtrader-listing-qty-diff.sql`, schema `070_…`). Product id
-  is only the snapshot row key. If the id vanished but the seller still lists
+  (cardvault `oracle-postgres/schema/086_disappearance_inferred_sales.sql`).
+  Product id is only the snapshot row key. If the id vanished but the seller still lists
   that stack — including **sibling product ids already in the book** and
   **different quantities** — → `listing_id_rotated`. Do not require the
   successor id to be new, and do not require live qty = vanished qty.
+
+  **Quantity-aware continuity.** A disappearance is reconciled against the
+  successor stack by quantity, not by mere existence
+  (cardvault `088_seller_stack_continuity.sql`). For predecessor `P` and
+  available successor units `S`: `continuity = least(P, S)` and
+  `residual = P - continuity`. `S >= P` retracts the episode outright
+  (`listing_id_rotated`); `0 < S < P` keeps the residual as a **provisional**
+  disappearance that still has to clear the normal confirmation rules, so a
+  genuine partial sale is never erased; `S = 0` leaves the episode alone.
+  Successor units are allocated once per stack (largest predecessor first), and
+  credited continuity permanently consumes that capacity, which makes repeated
+  reconciliation a no-op. `quantity_decreased` episodes are never touched.
   If the seller no longer lists that stack at all → `inferred_sale` (full
   remaining qty) **unless** that seller is on vacation or their whole shop
   vanished the same day (`seller_on_vacation`, schema `075_…`). Dump miss
