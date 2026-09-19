@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import jsQR from 'jsqr';
 import {
   fetchChainAddressActivity,
@@ -21,7 +21,7 @@ import {
   mergeActivity,
   shortChainAddress,
 } from '../wallet-activity.js';
-import { buildReceiveQr, parseScannedQr } from '../wallet-qr.js';
+import { buildReceiveQr, parseScannedQr, parseWalletSendLink } from '../wallet-qr.js';
 import { sendPkn, switchToPokoin, useWallet } from '../wallet.jsx';
 import {
   createMoneyRequest,
@@ -176,11 +176,13 @@ const HERO_MODES = ['accounts', 'site', 'chain'];
 
 export default function Wallet() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { address, balance, chainId, connect, disconnect } = useWallet();
   const { signedIn, user, profile, availablePkn, getBearer } = useAuth();
   const uid = profile?.uid || user?.uid || '';
 
   const [sheet, setSheet] = useState('');
+  const [sendPrefill, setSendPrefill] = useState({ recipient: '', amount: '', fromQr: false });
   const [flash, setFlash] = useState('');
   const [error, setError] = useState('');
   const [linkedAddress, setLinkedAddress] = useState('');
@@ -218,6 +220,21 @@ export default function Wallet() {
   useEffect(() => {
     document.title = 'Wallet · Pokoin';
   }, []);
+
+  // Deep link from a receive QR / shared payment URL: open Send with the
+  // recipient (and optional amount) already filled. Strip the query so a
+  // refresh does not re-open the sheet.
+  useEffect(() => {
+    const parsed = parseWalletSendLink(`${location.pathname}${location.search}`);
+    if (!parsed) return;
+    setSendPrefill({
+      recipient: parsed.recipient,
+      amount: parsed.amountPkn || '',
+      fromQr: true,
+    });
+    setSheet('send');
+    navigate('/wallet', { replace: true });
+  }, [location.pathname, location.search, navigate]);
 
   useEffect(() => {
     if (!uid) {
@@ -275,6 +292,7 @@ export default function Wallet() {
 
   function closeSheet() {
     setSheet('');
+    setSendPrefill({ recipient: '', amount: '', fromQr: false });
   }
 
   const actions = [
@@ -420,9 +438,11 @@ export default function Wallet() {
           address={address}
           balance={balance}
           getBearer={getBearer}
+          initialRecipient={sendPrefill.recipient}
+          initialAmount={sendPrefill.amount}
+          fromQr={sendPrefill.fromQr}
           onConnect={() => run(connect)}
           onRequireSignIn={requireSignIn}
-          onOpenConversation={(username) => navigate(`/messages/${encodeURIComponent(username)}`)}
           onTransfer={(recipient, amount) => run(async () => {
             const token = await getBearer();
             await transferAccountBalance({ recipientUsername: recipient, amountPkn: Math.round(Number(amount)) }, token);
@@ -444,6 +464,7 @@ export default function Wallet() {
           getBearer={getBearer}
           onConnect={() => run(connect)}
           onRequireSignIn={requireSignIn}
+          onOpenConversation={(username) => navigate(`/messages/${encodeURIComponent(username)}`)}
         />
       ) : null}
 
@@ -489,13 +510,14 @@ export default function Wallet() {
 function SendSheet({
   onClose, busy, signedIn, profile, address, balance, getBearer,
   onConnect, onRequireSignIn, onTransfer, onChainSend,
+  initialRecipient = '', initialAmount = '', fromQr = false,
 }) {
-  const [recipient, setRecipient] = useState('');
-  const [amount, setAmount] = useState('');
+  const [recipient, setRecipient] = useState(initialRecipient);
+  const [amount, setAmount] = useState(initialAmount);
   const [search, setSearch] = useState({ status: 'idle', rows: [] });
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState('');
-  const [scanned, setScanned] = useState('');
+  const [scanned, setScanned] = useState(fromQr && initialRecipient ? initialRecipient : '');
   const videoRef = useRef(null);
   const toChain = IS_ADDRESS.test(recipient.trim());
   const query = recipient.trim().toLowerCase();
@@ -562,10 +584,9 @@ function SendSheet({
           }
           setScanning(false);
           setRecipient(parsed.recipient);
-          if (parsed.amountPkn) {
-            setAmount(parsed.amountPkn);
-          }
-          setScanned(`@${parsed.recipient}`);
+          setAmount(parsed.amountPkn || '');
+          setScanned(parsed.recipient);
+          setScanMsg('');
         } catch (_) {
           // frame skipped — keep scanning
         }
@@ -687,7 +708,9 @@ function SendSheet({
       </label>
       {scanned ? (
         <p className="wallet-scan-ok">
-          QR loaded — nothing is sent until you press Send.
+          {amount
+            ? `Sending to ${scanned} · ${amount} PKN loaded — confirm before Send.`
+            : `Sending to ${scanned} — enter an amount, then Send.`}
         </p>
       ) : null}
       {search.status === 'results' ? (
@@ -880,7 +903,9 @@ function ReceiveSheet({
         </div>
       ) : null}
       <p className="wallet-sheet-note">
-        The code updates live — senders scan it and confirm the details themselves.
+        The code opens Send to your username
+        {cleanAmount ? ` with ${cleanAmount} PKN filled in` : ''}
+        {' '}— senders confirm before anything moves.
       </p>
     </Sheet>
   );
