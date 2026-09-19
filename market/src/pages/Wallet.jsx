@@ -137,9 +137,10 @@ function CopyRow({ label, value, mono = true }) {
   );
 }
 
-function Presets({ balance, onPick }) {
+function Presets({ balance, amounts, onPick }) {
   const max = Math.floor(Number(balance) || 0);
-  const presets = [1, 5, 10, max].filter((amount, index, all) => amount > 0 && all.indexOf(amount) === index);
+  const presets = (amounts || [1, 5, 10, max])
+    .filter((amount, index, all) => amount > 0 && all.indexOf(amount) === index);
   if (!presets.length) {
     return null;
   }
@@ -147,7 +148,7 @@ function Presets({ balance, onPick }) {
     <div className="wallet-presets">
       {presets.map((amount) => (
         <button key={amount} type="button" onClick={() => onPick(String(amount))}>
-          {amount === max ? 'Max' : `${amount} PKN`}
+          {!amounts && amount === max ? 'Max' : `${amount} PKN`}
         </button>
       ))}
     </div>
@@ -730,37 +731,45 @@ function SendSheet({
 }) {
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
-  const [searching, setSearching] = useState(false);
+  const [search, setSearch] = useState({ status: 'idle', rows: [] });
   const toChain = IS_ADDRESS.test(recipient.trim());
+  const query = recipient.trim().toLowerCase();
+  const searchable = query.length >= 2 && !query.includes('@') && !IS_ADDRESS.test(query);
 
   useEffect(() => {
-    const query = recipient.trim().toLowerCase();
-    if (query.length < 2 || query.includes('@') || IS_ADDRESS.test(query)) {
-      setSuggestions([]);
-      setSearching(false);
+    if (!searchable) {
+      setSearch({ status: 'idle', rows: [] });
       return () => {};
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      setSearching(true);
+      setSearch({ status: 'searching', rows: [] });
       getBearer()
-        .then((token) => searchRecipientUsernames(query, token))
-        .then((data) => {
-          if (!cancelled) setSuggestions((data.usernames || []).slice(0, 6));
+        .then((token) => {
+          if (cancelled) {
+            return undefined;
+          }
+          if (!token) {
+            setSearch({ status: 'signedout', rows: [] });
+            return undefined;
+          }
+          return searchRecipientUsernames(query, token).then((data) => {
+            if (cancelled) {
+              return;
+            }
+            const rows = (data.usernames || []).slice(0, 6);
+            setSearch({ status: rows.length ? 'results' : 'none', rows });
+          });
         })
         .catch(() => {
-          if (!cancelled) setSuggestions([]);
-        })
-        .finally(() => {
-          if (!cancelled) setSearching(false);
+          if (!cancelled) setSearch({ status: 'error', rows: [] });
         });
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [recipient, getBearer]);
+  }, [searchable, query, getBearer]);
 
   function submit() {
     const to = recipient.trim();
@@ -802,15 +811,21 @@ function SendSheet({
           placeholder={profile?.username ? `e.g. ${profile.username}` : 'username or 0x…'}
         />
       </label>
-      {searching || suggestions.length ? (
+      {search.status === 'results' ? (
         <div className="wallet-suggestions">
-          {suggestions.map((name) => (
+          {search.rows.map((name) => (
             <button key={name} type="button" onClick={() => setRecipient(name)}>{name}</button>
           ))}
         </div>
+      ) : search.status === 'searching' ? (
+        <p className="wallet-suggestions-note">Searching usernames…</p>
+      ) : search.status === 'none' ? (
+        <p className="wallet-suggestions-note">No matching usernames.</p>
+      ) : search.status === 'signedout' || search.status === 'error' ? (
+        <p className="wallet-suggestions-note">Sign in to search recipients.</p>
       ) : null}
       <label className="sell-field">
-        Amount{toChain ? '' : ' (whole PKN)'}
+        Amount
         <input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" />
       </label>
       {toChain ? (
@@ -820,7 +835,7 @@ function SendSheet({
           )}
         />
       ) : (
-        <Presets onPick={setAmount} />
+        <Presets amounts={[2000, 5000, 10000]} onPick={setAmount} />
       )}
       <button className="wallet-sheet-cta" type="button" disabled={busy} onClick={submit}>
         {toChain && !address ? 'Connect to send' : 'Send'}

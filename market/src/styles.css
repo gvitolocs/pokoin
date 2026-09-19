@@ -6787,3 +6787,9 @@ html.is-extension-desk select.collector-badge.version-badge {
   }
   .wallet-sheet-grab { display: none; }
 }
+
+.wallet-suggestions-note {
+  margin: 0.15rem 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
