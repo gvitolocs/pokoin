@@ -43,7 +43,7 @@ test('quota on recents drops desk caches and still saves ids and compact tiles',
   const local = memoryStorage({
     [RECENT_TILES_KEY]: '{"504094":{"id":"504094","name":"Victini","gridImageUrl":"x"}}',
     'pokoin.cardPage.v1.en:1': '{"card":{"id":"1"}}',
-    'pokoin.cardSales.v11.1': '{"series":[]}',
+    'pokoin.cardSales.v12.1': '{"series":[]}',
   }, { failWrites: 1 });
   globalThis.localStorage = local;
   globalThis.sessionStorage = memoryStorage();

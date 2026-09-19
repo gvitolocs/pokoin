@@ -33,9 +33,9 @@ test('card sales cache keeps slices for 15 days', () => {
 
 test('expired card sales cache is ignored until a stale read', () => {
   saveCardSales('598006', [{ day: '2026-09-01' }]);
-  const raw = JSON.parse(store.get('pokoin.cardSales.v11.598006'));
+  const raw = JSON.parse(store.get('pokoin.cardSales.v12.598006'));
   raw.savedAt = Date.now() - CARD_SALES_TTL_MS - 1;
-  store.set('pokoin.cardSales.v11.598006', JSON.stringify(raw));
+  store.set('pokoin.cardSales.v12.598006', JSON.stringify(raw));
   resetCardSalesCacheForTests();
   assert.equal(peekCardSales('598006'), null);
   assert.equal(rememberStaleCardSales('598006').slices[0].day, '2026-09-01');
