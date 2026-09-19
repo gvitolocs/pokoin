@@ -53,6 +53,7 @@ import { facetSignature, scanFacets, suggestPriceFromSlices } from '../scan-pric
 import { connectScanStream } from '../scan-stream.js';
 import { useLiveSuggest } from '../use-live-suggest.js';
 import { SessionWait } from '../components/Desk.jsx';
+import InventoryTargets from '../components/InventoryTargets.jsx';
 import ThumbZoom from '../components/ThumbZoom.jsx';
 import { marketUrl } from '../punchouts.js';
 import '../scan-desk.css';
@@ -177,6 +178,7 @@ export default function ScanDesk() {
   const draftQtyRef = useRef(null);
   const addSearchRef = useRef(null);
   const submitKey = useRef(newSubmitKey());
+  const pendingTargets = useRef({ pokoin: true, cardtrader: false });
   const followTail = useRef(true);
   const intentionalDisconnect = useRef(false);
   const wasPhoneConnected = useRef(false);
@@ -1027,16 +1029,26 @@ export default function ScanDesk() {
     if (session && session.status === 'connected') sessionAction('pause', !session.paused);
   }
 
-  async function submit() {
+  async function submit(targets = pendingTargets.current) {
     if (submitting || !batch?.id) return;
+    const nextTargets = submitIntent === 'collection'
+      ? { pokoin: true, cardtrader: false }
+      : {
+        pokoin: targets?.pokoin !== false,
+        cardtrader: targets?.cardtrader === true,
+      };
+    pendingTargets.current = nextTargets;
     setSubmitting(true);
     setError('');
     try {
       const t = await token();
-      const data = await scanApi.submit(t, batch.id, submitKey.current, submitIntent);
+      const data = await scanApi.submit(t, batch.id, submitKey.current, submitIntent, nextTargets);
       setBatch((current) => ({ ...current, ...data.batch }));
       setConfirmOpen(false);
       setProblems({});
+      if (data.cardtrader && data.cardtrader.ok === false) {
+        setError(data.cardtrader.error || 'Listed on Pokoin; CardTrader push had errors.');
+      }
       rememberActiveSession('');
       const snapshot = await scanApi.batch(t, batch.id);
       dispatch({ type: 'items', items: snapshot.items });
@@ -1220,15 +1232,30 @@ export default function ScanDesk() {
           {counts.noPrice && submitIntent === 'list' ? <span className="chip warn">{counts.noPrice} need a price</span> : null}
         </span>
         {!closed ? (
-          <button
-            type="button"
-            className="btn scan-submit"
-            disabled={!counts.ready || submitting}
-            onClick={() => setConfirmOpen(true)}
-            title="⌘Enter"
-          >
-            {submitting ? 'Adding…' : submitLabel(counts, { intent: submitIntent })}
-          </button>
+          submitIntent === 'list' ? (
+            <InventoryTargets
+              mode="add"
+              counts={counts}
+              intent={submitIntent}
+              disabled={!counts.ready}
+              busy={submitting}
+              busyLabel="Adding…"
+              onSubmit={(targets) => {
+                pendingTargets.current = targets;
+                setConfirmOpen(true);
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              className="btn scan-submit"
+              disabled={!counts.ready || submitting}
+              onClick={() => setConfirmOpen(true)}
+              title="⌘Enter"
+            >
+              {submitting ? 'Adding…' : submitLabel(counts, { intent: submitIntent })}
+            </button>
+          )
         ) : null}
       </div>
 
@@ -1317,11 +1344,19 @@ export default function ScanDesk() {
       {confirmOpen ? (
         <div className="scan-modal" role="dialog" aria-modal="true" aria-label="Add to inventory">
           <div className="scan-modal-box">
-            <h2>{submitLabel(counts, { intent: submitIntent })}?</h2>
-            <p>{counts.rows} listings go live on Pokoin now.</p>
+            <h2>{submitLabel(counts, { intent: submitIntent, targets: pendingTargets.current })}?</h2>
+            <p>
+              {submitIntent === 'collection'
+                ? `${counts.rows} cards go into your collection.`
+                : pendingTargets.current.cardtrader && pendingTargets.current.pokoin
+                  ? `${counts.rows} listings go live on Pokoin and CardTrader now.`
+                  : pendingTargets.current.cardtrader
+                    ? `${counts.rows} products go to CardTrader now.`
+                    : `${counts.rows} listings go live on Pokoin now.`}
+            </p>
             <div className="scan-modal-actions">
               <button type="button" className="btn ghost" onClick={() => setConfirmOpen(false)}>Cancel (Esc)</button>
-              <button type="button" className="btn" onClick={submit} disabled={submitting} autoFocus>
+              <button type="button" className="btn" onClick={() => submit(pendingTargets.current)} disabled={submitting} autoFocus>
                 {submitting ? 'Adding…' : 'Add (Enter)'}
               </button>
             </div>

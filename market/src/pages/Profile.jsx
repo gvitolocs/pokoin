@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Link, Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { firebaseAuth, getBearer, useAuth } from '../auth.jsx';
 import { endActiveScanSessionForSignOut } from '../scan-api.js';
@@ -7,6 +7,7 @@ import { accountHeading, accountLede } from '../auth-session.js';
 import { useWallet, shortAddress } from '../wallet.jsx';
 import { useCart } from '../cart.jsx';
 import { DeskPanel, Metric, MetricGrid, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
+import CardTraderConnectPanel from '../components/CardTraderConnectPanel.jsx';
 import { formatPknNumber } from '../pkn.js';
 
 export default function Profile() {
@@ -55,6 +56,9 @@ export default function Profile() {
       <div className="profile-grid">
         <DeskPanel title="Status">
           <p className="page-lede">{silverLine}{admin ? ' · Admin' : ''}</p>
+        </DeskPanel>
+        <DeskPanel title="CardTrader">
+          <CardTraderConnectPanel />
         </DeskPanel>
         <DeskPanel flush title="Go to">
           <div className="thread-list">

@@ -413,6 +413,114 @@
   align-items: start;
 }
 
+.profile-grid > :nth-child(3) {
+  grid-column: 1 / -1;
+}
+
+.ct-connect-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.ct-token-field input {
+  width: 100%;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: var(--g2);
+  color: var(--text);
+  padding: 0.65rem 0.8rem;
+  font: inherit;
+}
+
+.ct-connect-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.ct-connect-ok { color: #7dcea0; margin: 0.55rem 0 0; font-size: 0.9rem; }
+.ct-connect-err { color: #f07178; margin: 0.55rem 0 0; font-size: 0.9rem; }
+
+.inventory-targets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.55rem;
+  margin-left: auto;
+}
+
+.inventory-targets.is-simple {
+  margin-left: 0;
+}
+
+.inventory-targets-tile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: var(--g2);
+}
+
+.inventory-targets-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inventory-targets-chips {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.inventory-targets-chips button {
+  border: 1px solid var(--g5);
+  background: #0b0a0e;
+  border-radius: 999px;
+  padding: 0.28rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.inventory-targets-chips button.on {
+  background: var(--yellow);
+  color: #111;
+  border-color: var(--yellow);
+}
+
+.inventory-targets-chips button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.inventory-targets-hint {
+  font-size: 0.72rem;
+  color: var(--yellow);
+  text-decoration: none;
+}
+
+.inventory-targets-eur {
+  font-size: 0.72rem;
+  color: var(--muted);
+  width: 100%;
+}
+
+.sell-row .inventory-targets {
+  flex: 1 1 14rem;
+  justify-content: flex-end;
+}
+
+.sell-row .inventory-targets .list-btn {
+  min-height: 2.6rem;
+}
+
 .forum-desk { grid-template-columns: 1.15fr 0.85fr; }
 
 .auth-shell {

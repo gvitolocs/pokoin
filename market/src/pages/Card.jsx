@@ -78,6 +78,7 @@ import { LIST_CURRENCIES, listPriceHint, listingPriceToPkn } from '../pkn.js';
 import { cardStubFromRoute, mergeDeskCard, realPublicCardId } from '../card-stub.js';
 import CardArt from '../components/CardArt.jsx';
 import RelatedCards from '../components/RelatedCards.jsx';
+import InventoryTargets from '../components/InventoryTargets.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import { tcgEra, eraHref } from '../set-logos.js';
@@ -755,7 +756,7 @@ function ListingForm({
     setChips((current) => ({ ...current, [key]: !current[key] }));
   }
 
-  async function submit() {
+  async function submit(targets = { pokoin: true, cardtrader: false }) {
     if (!signedIn) {
       navigate(authFrom(fromPath));
       return;
@@ -816,14 +817,28 @@ function ListingForm({
           sellerName,
           sellerCountry: 'EU',
           sellerReputationLabel: 'New',
+          targets: {
+            pokoin: targets?.pokoin !== false,
+            cardtrader: targets?.cardtrader === true,
+          },
           ...fields,
         }, token);
       track(Action.sell, card);
-      setDone(isEditing ? 'Listing updated.' : 'Listing created.');
+      if (saved?.cardtrader && saved.cardtrader.ok === false) {
+        setDone(isEditing ? 'Listing updated.' : 'Listed on Pokoin.');
+        setError(saved.cardtrader.error || 'CardTrader push failed.');
+      } else if (saved?.listing === null && saved?.cardtrader?.ok) {
+        setDone('Listed on CardTrader.');
+      } else {
+        setDone(isEditing ? 'Listing updated.' : 'Listing created.');
+      }
       if (!isEditing) {
         setQty('1');
       }
-      onListed?.(saved);
+      const listingRow = saved?.id ? saved : saved?.listing;
+      if (listingRow?.id) {
+        onListed?.(listingRow);
+      }
     } catch (err) {
       if (err.status === 401) {
         navigate(authFrom(fromPath));
@@ -880,15 +895,34 @@ function ListingForm({
             onChange={(event) => setQty(event.target.value)}
           />
         </label>
-        <button
-          type="button"
-          className="btn list-btn"
-          disabled={!ready || saving || (!signedIn && ready)}
-          title={signedIn ? (isEditing ? 'Save listing changes' : 'List card') : 'Sign in to list'}
-          onClick={submit}
-        >
-          {saving ? (isEditing ? 'Saving…' : 'Listing…') : (isEditing ? 'Save changes' : 'List card')}
-        </button>
+        {isEditing ? (
+          <button
+            type="button"
+            className="btn list-btn"
+            disabled={!ready || saving || (!signedIn && ready)}
+            title={signedIn ? 'Save listing changes' : 'Sign in to list'}
+            onClick={() => submit()}
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        ) : (
+          <InventoryTargets
+            mode="list"
+            counts={{ cards: Number.parseInt(qty, 10) || 1 }}
+            intent="list"
+            disabled={!ready || (!signedIn && ready)}
+            busy={saving}
+            busyLabel="Listing…"
+            pricePkn={listedPkn}
+            onSubmit={(targets) => {
+              if (!signedIn) {
+                navigate(authFrom(fromPath));
+                return;
+              }
+              submit(targets);
+            }}
+          />
+        )}
       </div>
       {currency !== 'PKN' && listedPkn ? (
         <p className="sell-pkn-eq">Lists at {formatPkn(listedPkn)}</p>

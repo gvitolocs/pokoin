@@ -165,10 +165,18 @@ export function batchCounts(rows, { intent = 'list' } = {}) {
   return counts;
 }
 
-export function submitLabel(counts, { intent = 'list' } = {}) {
+export function submitLabel(counts, { intent = 'list', targets } = {}) {
   const n = counts.cards;
   if (intent === 'collection') {
     return `Add ${n} card${n === 1 ? '' : 's'} to collection`;
+  }
+  const pokoin = !targets || targets.pokoin !== false;
+  const cardtrader = targets?.cardtrader === true;
+  if (pokoin && cardtrader) {
+    return `Add ${n} card${n === 1 ? '' : 's'} to Pokoin + CardTrader`;
+  }
+  if (cardtrader && !pokoin) {
+    return `Add ${n} card${n === 1 ? '' : 's'} to CardTrader`;
   }
   return `Add ${n} card${n === 1 ? '' : 's'} to Inventory`;
 }

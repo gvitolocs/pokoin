@@ -68,6 +68,14 @@ test('queue hides merged repeats and removed rows; counts use quantities', () =>
   assert.equal(submitLabel({ cards: 187 }), 'Add 187 cards to Inventory');
   assert.equal(submitLabel({ cards: 1 }), 'Add 1 card to Inventory');
   assert.equal(submitLabel({ cards: 2 }, { intent: 'collection' }), 'Add 2 cards to collection');
+  assert.equal(
+    submitLabel({ cards: 2 }, { intent: 'list', targets: { pokoin: true, cardtrader: true } }),
+    'Add 2 cards to Pokoin + CardTrader',
+  );
+  assert.equal(
+    submitLabel({ cards: 1 }, { intent: 'list', targets: { pokoin: false, cardtrader: true } }),
+    'Add 1 card to CardTrader',
+  );
 });
 
 test('row problems mirror the server submit rules', () => {

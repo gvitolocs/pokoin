@@ -647,6 +647,37 @@ export function createListing(body, token) {
   });
 }
 
+export function fetchCardTraderStatus(token) {
+  return getJson('/api/cardtrader-status', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+export function connectCardTrader(token, cardTraderToken) {
+  return getJson('/api/cardtrader-connect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ token: String(cardTraderToken || '').trim() }),
+  });
+}
+
+export function disconnectCardTrader(token) {
+  return getJson('/api/cardtrader-disconnect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: '{}',
+  });
+}
+
 export function cancelListing(listingId, token, sellerUid) {
   const id = String(listingId || '');
   const params = new URLSearchParams({ id });
