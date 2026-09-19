@@ -140,7 +140,7 @@ test('ScanDesk has list|collection intent without resetting batch', () => {
   assert.match(deskSrc, /submitIntent/);
   assert.match(deskSrc, /scan-intent-list/);
   assert.match(deskSrc, /scan-intent-collection/);
-  assert.match(deskSrc, /scanApi\.submit\(t, batch\.id, submitKey\.current, submitIntent\)/);
+  assert.match(deskSrc, /scanApi\.submit\(t, batch\.id, submitKey\.current, submitIntent,/);
   assert.match(deskSrc, /What do you want to do\?/);
 });
 
