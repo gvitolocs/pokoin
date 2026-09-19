@@ -65,7 +65,10 @@ env -u VERCEL_TOKEN vercel deploy --prebuilt --prod --yes --archive=tgz
 | `vercel.json` `buildCommand` | `scripts/build-web.sh` writes `dist-web/` (landing with `/home/` paths + Vite `market/`). |
 | `outputDirectory` | `dist-web`. Never upload the GitHub source tree as static — that ships Vite `src/main.jsx` and 404s `/marketplace`. |
 
-`vercel deploy --prod` aliases `pokoin.com`. **Do not** alias `explorer.pokoin.com` to this project — that host is Caddy.
+`vercel deploy --prod` aliases `pokoin.com`. `explorer.pokoin.com` is served
+by this same project through host-based rewrites to `/explorer/*` (vendored
+PokoinPoS explorer UI — `explorer/README.md`). Never point that hostname at a
+node or Caddy origin.
 
 `scripts/sync-landing.sh` / `scripts/sync-market.sh` copy into CardVault. They are leftover and not the production path.
 
@@ -80,7 +83,7 @@ Filesystem `index.html` is evaluated **before** rewrites.
 | `GET /marketplace` (and search / sets / cards, **with or without trailing `/`**) | `/market/index.html` | React SPA |
 | `GET /api/*` | Pi API proxy | `api.pokoin.com` (Raspberry Pi tunnel). Tunnel 1033 → `/working.html` (“We are working on a solution.” + Pikachu GIF). |
 | `GET /wallet`, `/auth`, `/cart`, `/forum`, `/scan`, `/docs`, … | `/market/index.html` | React SPA |
-| `https://explorer.pokoin.com/` | not this project | Caddy |
+| `https://explorer.pokoin.com/*` | `/explorer/*` (host rewrite) | PokoinPoS explorer UI (static, vendored from pokoinpos) |
 
 `www.pokoin.com/` 301s to `https://pokoin.com/`.
 
@@ -213,7 +216,7 @@ Android/iOS CardVault, leftover Flutter-web `web/home.html` / `app.html` /
 | `riftbound.pokoin.com` | 307 → `/marketplace` (shared React market SPA, Riftbound catalog) |
 | `app.pokoin.com` | Flutter CardVault (Android/iOS). Public chrome is `pokoin.com`. [APP.md](APP.md). |
 | `forum.pokoin.com` | Legacy alias. Use `https://pokoin.com/forum`. |
-| `explorer.pokoin.com` | **Caddy**, not Vercel. Do not `vercel alias` this name. |
+| `explorer.pokoin.com` | **Vercel `web`** via host rewrite → `/explorer/*`. DNS must be a CNAME to `cname.vercel-dns.com` — never a node/home IP. |
 | `rpc.pokoin.com` | PokoinPoS RPC (health, bootstrap peers, `eth_chainId`) |
 | `api.pokoin.com` | Raspberry Pi marketplace API (`?game=one_piece` / `riftbound` for satellite catalogs) |
 | `api2.pokoin.com` | Same Pi origin as `api.pokoin.com`. Oracle api2 CDN is removed. |

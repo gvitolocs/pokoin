@@ -11,7 +11,9 @@ Public chrome is this SPA. Android/iOS CardVault is a separate app on
 | `https://riftbound.pokoin.com` | same `web` | Same SPA; hostname → Riftbound (`?game=riftbound`) |
 | `https://app.pokoin.com` | `pokoin-flutter` (`prj_nrmYJjDGMPh4fZVO7dexZ77BTPls`) | Flutter CardVault |
 
-Never alias `explorer.pokoin.com` to either Vercel project.
+`explorer.pokoin.com` is served by the same `web` project via host-based
+rewrites to `/explorer/*` (PokoinPoS explorer UI, `explorer/README.md`) —
+never aliased to `pokoin-flutter`.
 
 The **title-language** picker is the **32px circular flag in the top bar**,
 right of the search pill (`LangToggle`). The Pokoin mark on the left is

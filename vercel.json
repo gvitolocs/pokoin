@@ -250,36 +250,99 @@
           "value": "12.0.34"
         }
       ]
+    },
+    {
+      "source": "/wpkn-reserve.json",
+      "has": [
+        {
+          "type": "host",
+          "value": "explorer.pokoin.com"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Content-Type",
+          "value": "application/json; charset=utf-8"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300"
+        }
+      ]
+    },
+    {
+      "source": "/wpkn/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "explorer.pokoin.com"
+        }
+      ],
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        }
+      ]
     }
   ],
   "redirects": [
     {
       "source": "/",
-      "has": [{ "type": "host", "value": "www.pokoin.com" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "www.pokoin.com"
+        }
+      ],
       "destination": "https://pokoin.com/",
       "permanent": true
     },
     {
       "source": "/",
-      "has": [{ "type": "host", "value": "onepiece.pokoin.com" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "onepiece.pokoin.com"
+        }
+      ],
       "destination": "/marketplace",
       "permanent": false
     },
     {
       "source": "/",
-      "has": [{ "type": "host", "value": "riftbound.pokoin.com" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "riftbound.pokoin.com"
+        }
+      ],
       "destination": "/marketplace",
       "permanent": false
     },
     {
       "source": "/",
-      "has": [{ "type": "host", "value": "test.pokoin.com" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "test.pokoin.com"
+        }
+      ],
       "destination": "/tests",
       "permanent": false
     },
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "www.pokoin.com" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "www.pokoin.com"
+        }
+      ],
       "destination": "https://pokoin.com/:path*",
       "permanent": true
     },
@@ -462,8 +525,33 @@
   "rewrites": [
     {
       "source": "/",
-      "has": [{ "type": "host", "value": "dashboard.pokoin.com" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
       "destination": "/market/index.html"
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "explorer.pokoin.com"
+        }
+      ],
+      "destination": "/explorer/index.html"
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "explorer.pokoin.com"
+        }
+      ],
+      "destination": "/explorer/:path*"
     },
     {
       "source": "/",

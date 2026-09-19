@@ -28,6 +28,13 @@ elif [[ -f "$ROOT/home/bimi.svg" ]]; then
   cp "$ROOT/home/bimi.svg" "$OUT/bimi.svg"
 fi
 cp "$ROOT/home/working.html" "$OUT/working.html"
+# PokoinPoS explorer UI served on explorer.pokoin.com (host-based rewrites in
+# vercel.json). Vendored from pokoinpos/explorer — see explorer/README.md.
+if [[ -d "$ROOT/explorer" ]]; then
+  cp -a "$ROOT/explorer" "$OUT/explorer"
+else
+  echo "warning: missing $ROOT/explorer (explorer.pokoin.com will 404)" >&2
+fi
 # Jumbo Oversized visual-review gallery (noindex, unlinked): /jumbos.html
 cp "$ROOT/jumbos.html" "$OUT/jumbos.html"
 # Chrome extension zip from Mac Desktop (highest FULL build). Served at

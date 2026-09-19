@@ -1,0 +1,278 @@
+@font-face {
+  font-family: Satoshi;
+  src: url("./satoshi.woff2") format("woff2");
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+  --bg: #000;
+  --surface: #16141a;
+  --surface-2: #24212b;
+  --line: #33313b;
+  --text: #fff;
+  --muted: #9d9aa4;
+  --gold: #ffd33d;
+  --blue: #4452d8;
+  --focus: #4d65ff;
+  --font: Satoshi, Arial, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 8% -10%, rgb(68 82 216 / 0.32), transparent 44%),
+    radial-gradient(circle at 100% 115%, rgb(68 82 216 / 0.16), transparent 42%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 1rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--gold);
+  color: #16141a;
+}
+
+:focus-visible {
+  outline: 0.125rem solid var(--focus);
+  outline-offset: 0.125rem;
+}
+
+.shell {
+  width: min(1180px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 48px 0 64px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1fr minmax(280px, 440px);
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 32px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.brand img {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: block;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(36px, 5vw, 60px);
+  letter-spacing: -0.03em;
+  margin: 10px 0 12px;
+}
+
+h2 {
+  font-size: 18px;
+}
+
+.hero .muted {
+  max-width: 56ch;
+}
+
+.search {
+  display: flex;
+  gap: 10px;
+}
+
+input,
+button {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--text);
+  background: rgb(22 20 26 / 0.9);
+  font: inherit;
+}
+
+input {
+  width: 100%;
+}
+
+input::placeholder {
+  color: rgb(157 154 164 / 0.7);
+}
+
+button {
+  cursor: pointer;
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #111;
+  font-weight: 800;
+  transition: filter 0.15s;
+}
+
+button:hover {
+  filter: brightness(1.08);
+}
+
+.cards,
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.cards {
+  grid-template-columns: repeat(4, 1fr);
+  margin-bottom: 16px;
+}
+
+.cards article,
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.45);
+}
+
+.cards article {
+  padding: 18px;
+}
+
+.cards article span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.cards strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 30px;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.grid {
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.8fr);
+}
+
+.panel {
+  padding: 20px;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.panel-title button {
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 90px 1fr 100px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-variant-numeric: tabular-nums;
+}
+
+code,
+.hash {
+  overflow-wrap: anywhere;
+  color: var(--gold);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 12px;
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.hidden {
+  display: none;
+}
+
+#result {
+  margin-bottom: 16px;
+  border-color: rgb(255 211 61 / 0.4);
+}
+
+#result h2 {
+  margin-bottom: 10px;
+}
+
+@media (max-width: 1100px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .hero .search {
+    max-width: 560px;
+  }
+}
+
+@media (max-width: 800px) {
+  .grid,
+  .cards {
+    grid-template-columns: 1fr;
+  }
+
+  .row {
+    grid-template-columns: 1fr;
+  }
+}

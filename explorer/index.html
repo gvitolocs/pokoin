@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <title>PokoinPoS Explorer</title>
+    <link rel="icon" type="image/png" href="./pokoin-logo.png?v=2" />
+    <link rel="stylesheet" href="./styles.css?v=2" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <div class="brand">
+            <img src="./pokoin-logo.png?v=2" alt="" width="44" height="44" />
+            <p class="eyebrow">PokoinPoS Explorer</p>
+          </div>
+          <h1>PKN public chain explorer</h1>
+          <p class="muted">Blocks, transactions, addresses, and public network metadata for PokoinPoS.</p>
+        </div>
+        <form id="search-form" class="search">
+          <input id="search-input" placeholder="Search block, tx hash, or address" />
+          <button type="submit">Search</button>
+        </form>
+      </header>
+
+      <section class="cards">
+        <article>
+          <span>Height</span>
+          <strong id="height">-</strong>
+        </article>
+        <article>
+          <span>Committed</span>
+          <strong id="committed">-</strong>
+        </article>
+        <article>
+          <span>Transactions</span>
+          <strong id="tx-count">-</strong>
+        </article>
+        <article>
+          <span>Mempool</span>
+          <strong id="mempool">-</strong>
+        </article>
+      </section>
+
+      <section id="result" class="panel hidden"></section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-title">
+            <h2>Latest Blocks</h2>
+            <button id="refresh">Refresh</button>
+          </div>
+          <div id="blocks" class="list"></div>
+        </article>
+        <article class="panel">
+          <h2>Network</h2>
+          <dl class="facts">
+            <dt>Name</dt><dd>PokoinPoS</dd>
+            <dt>RPC</dt><dd><code>https://rpc.pokoin.com/rpc</code></dd>
+            <dt>Chain ID</dt><dd><code>26062026</code></dd>
+            <dt>Symbol</dt><dd><code>PKN</code></dd>
+            <dt>Explorer API</dt><dd><code>/explorer/*</code></dd>
+          </dl>
+        </article>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>
