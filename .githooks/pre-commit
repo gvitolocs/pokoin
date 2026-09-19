@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# pokoin-web: refuse commits from the canonical (main) worktree.
+#
+# /home/nez/Projects/pokoin-web is the integration/deployment checkout, not a
+# development workspace (see AGENTS.md and docs/paseo-development.md). Other
+# agents may hold uncommitted work in that tree; committing there risks
+# mixing it into history. Code changes belong in a Paseo/git worktree.
+#
+# - Linked worktrees are NEVER blocked: the guard only fires when the commit
+#   would be created in the repository's main working tree (detected via git
+#   metadata, not hardcoded paths).
+# - Intentional integration/maintenance commits in the canonical checkout
+#   bypass it explicitly:
+#       POKOIN_ALLOW_CANONICAL_COMMIT=1 git commit ...
+#
+# Activate for this clone/worktree:  scripts/setup-git-hooks.sh
+
+set -euo pipefail
+
+if [[ "${POKOIN_ALLOW_CANONICAL_COMMIT:-}" == "1" ]]; then
+  exit 0
+fi
+
+git_dir="$(git rev-parse --absolute-git-dir)"
+common_dir="$(git rev-parse --git-common-dir)"
+common_dir="$(cd "$common_dir" && pwd -P)"
+
+if [[ "$git_dir" != "$common_dir" ]]; then
+  # Linked worktree: normal development flow.
+  exit 0
+fi
+
+branch="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD)"
+cat >&2 <<EOF
+================================================================================
+pokoin-web: commit rejected in the CANONICAL checkout (branch: $branch)
+
+  $(pwd -P)
+
+This is the integration/deployment working tree, not a development workspace.
+Uncommitted work from other agents may live here; committing here risks mixing
+it into history.
+
+Develop and commit inside your own Paseo/git worktree instead:
+
+    scripts/paseo-workspace.sh <slug>
+
+If this is an intentional integration/maintenance commit in the canonical
+checkout, re-run it with:
+
+    POKOIN_ALLOW_CANONICAL_COMMIT=1 git commit ...
+================================================================================
+EOF
+exit 1

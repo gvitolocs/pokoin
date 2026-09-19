@@ -63,6 +63,25 @@ else
   say "production $prod_id untracked — accepted explicitly"
 fi
 
+# Canonical-checkout preflight (2026-09-19, Paseo isolation):
+# /home/nez/Projects/pokoin-web is the integration/deployment tree, not a dev
+# workspace. Staging below is `git archive` of $COMMIT plus the explicit
+# UNTRACKED_INPUTS allowlist, so a dirty tree can never change deployed
+# source — but dirt here means un-integrated agent work exists and the
+# UNTRACKED_INPUTS artifacts are read from this tree. Never let that pass
+# silently.
+canonical_dirty="$(git -C "$REPO" status --porcelain=v1 2>/dev/null || true)"
+if [[ -n "$canonical_dirty" ]]; then
+  say "WARNING ┌ canonical checkout is DIRTY — un-integrated work exists and is NOT part of this deploy:"
+  printf '%s\n' "$canonical_dirty" | head -15 | sed 's/^/          │ /'
+  dirty_count=$(printf '%s\n' "$canonical_dirty" | wc -l)
+  if (( dirty_count > 15 )); then
+    say "          │ … and $((dirty_count - 15)) more"
+  fi
+  say "WARNING └ deployed contents come ONLY from git archive of $COMMIT (+ UNTRACKED_INPUTS: ${UNTRACKED_INPUTS[*]} read from this tree)."
+  say "          Verify the deploy commit is what you intend: git log -1 $COMMIT"
+fi
+
 stage="$(mktemp -d /tmp/pokoin-web-deploy-XXXXXX)"
 say "stage $stage (git archive)"
 git -C "$REPO" archive "$COMMIT" | tar -x -C "$stage"

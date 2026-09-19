@@ -1,0 +1,23 @@
+{
+  "$schema": "https://paseo.sh/schemas/paseo.project.v1.json",
+  "name": "pokoin-web",
+  "description": "Pokoin marketplace SPA (market/), landing, workers. Dev preview = vite in market/.",
+  "worktree": {
+    "setup": "cd market && npm ci"
+  },
+  "scripts": {
+    "test": {
+      "description": "Run market SPA node tests (docs/DEPLOY.md)",
+      "command": "node --test market/src/*.test.js"
+    },
+    "build": {
+      "description": "Full web build (scripts/build-web.sh, same as Vercel)",
+      "command": "bash scripts/build-web.sh"
+    },
+    "web": {
+      "type": "service",
+      "description": "Vite dev server on the Paseo-assigned port, reverse-proxied at web--<branch>--<project>.localhost:<daemon-port>",
+      "command": "cd market && npm run dev -- --port $PASEO_PORT --host $HOST --strictPort"
+    }
+  }
+}
