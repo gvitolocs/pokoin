@@ -722,6 +722,30 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/messages/:path*/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/messages/:path*",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/messages/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/messages",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/exchange/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/exchange",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/swap/",
       "destination": "/market/index.html"
     },
