@@ -384,6 +384,16 @@ def run_game(slug: str) -> None:
         if not bodies:
             # Zero bodies usually means the current host got challenged.
             empty_streak += 1
+            if empty_streak >= 3 and len(jobs) < 200:
+                # Small tail chunk failing repeatedly = dead rows (no real CT
+                # scan), not a block — memoize so the game can move on.
+                # Big chunks are treated as rate limiting and never memoized.
+                fails = load_fails()
+                now = time.time()
+                for key in jobs:
+                    fails[key] = now
+                save_fails(fails)
+                log(f"{slug}: memoized {len(jobs)} dead-tail keys after {empty_streak} empty chunks")
             if empty_streak >= 30:
                 log(f"{slug}: 30 consecutive empty chunks — giving up for now (resume later)")
                 break
