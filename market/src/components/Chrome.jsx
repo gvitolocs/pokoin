@@ -12,6 +12,7 @@ import {
   fetchSuggest,
   formatPknNumber,
   imageSrc,
+  warmupCard,
 } from '../api.js';
 import { resolveArtLayout } from '../art-cut.js';
 import { pickSuggestHoverSrc, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
@@ -781,6 +782,9 @@ export default function Chrome({ children }) {
     setOpen(false);
     setQuery(mapped.name || '');
     track(Action.clickSuggest, mapped, { query, resultRank: rank });
+    // Existing prefetch: warm the card-page payload (visualTheme included)
+    // so the desk paints themed on arrival instead of recoloring later.
+    warmupCard(mapped, { lang });
     navigate(cardHref(mapped), { state: { card: mapped } });
   }
 
