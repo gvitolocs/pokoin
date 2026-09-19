@@ -6922,3 +6922,200 @@ html:has(.wallet-page) .brand span {
   .wallet-card { margin: 0.9rem auto 0; max-width: 51rem; }
   .exchange-grid { padding: 0.95rem 2rem 0; }
 }
+
+/* ---- Wallet QR: receive codes + camera scan ---- */
+
+.wallet-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.wallet-cam {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.05);
+  color: #eceaf2;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.wallet-cam:hover {
+  color: #ffd33d;
+  border-color: rgba(255, 211, 61, 0.45);
+}
+
+.wallet-cam:active { transform: scale(0.94); }
+
+.wallet-scan-ok {
+  margin: 0.15rem 0 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #ffd33d;
+}
+
+.wallet-scanner-frame {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wallet-scanner-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.wallet-scanner-corner {
+  position: absolute;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 2.5px solid #ffd33d;
+}
+
+.wallet-scanner-corner.tl { top: 0.7rem; left: 0.7rem; border-right: 0; border-bottom: 0; border-radius: 0.5rem 0 0 0; }
+.wallet-scanner-corner.tr { top: 0.7rem; right: 0.7rem; border-left: 0; border-bottom: 0; border-radius: 0 0.5rem 0 0; }
+.wallet-scanner-corner.bl { bottom: 0.7rem; left: 0.7rem; border-right: 0; border-top: 0; border-radius: 0 0 0 0.5rem; }
+.wallet-scanner-corner.br { bottom: 0.7rem; right: 0.7rem; border-left: 0; border-top: 0; border-radius: 0 0 0.5rem 0; }
+
+.wallet-scanner-msg {
+  margin: 0.65rem 0 0;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.wallet-scanner-msg.err { color: #ffb4be; }
+
+/* Receive QR card — white for scannability, gold chip for the ask. */
+.wallet-qr-card {
+  position: relative;
+  background: #fff;
+  border-radius: 18px;
+  padding: 1rem 1rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  margin: 0 0 0.7rem;
+  min-height: 15rem;
+}
+
+.wallet-qr-svg {
+  width: min(14.5rem, 100%);
+  height: auto;
+  display: block;
+  border-radius: 6px;
+}
+
+.wallet-qr-requested {
+  background: #191204;
+  color: #ffd33d;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0.32rem 0.85rem;
+  border-radius: 999px;
+}
+
+.wallet-qr-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 1.5rem 0.8rem;
+  text-align: center;
+}
+
+.wallet-qr-empty-icon { color: #6b6875; }
+
+.wallet-qr-empty-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #3f3c47;
+  max-width: 13rem;
+  line-height: 1.4;
+}
+
+.wallet-segments {
+  display: flex;
+  gap: 0.3rem;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+  padding: 0.22rem;
+  margin: 0 0 0.7rem;
+}
+
+.wallet-segments button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.48rem 0.5rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.wallet-segments button.on {
+  background: rgba(255, 211, 61, 0.13);
+  color: #ffd33d;
+}
+
+.wallet-segments button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.wallet-amount-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.wallet-amount-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--g2);
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.wallet-amount-toggle {
+  width: 100%;
+  text-align: center;
+  padding: 0.62rem;
+  border-radius: 999px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.wallet-amount-toggle:hover {
+  color: #ffd33d;
+  border-color: rgba(255, 211, 61, 0.4);
+}

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import jsQR from 'jsqr';
 import {
   fetchChainAddressActivity,
   formatPknNumber,
@@ -11,6 +12,7 @@ import {
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { fetchFirestoreDocument, fetchOwnedCollectionDocuments } from '../firestore-rest.js';
+import { encodeQr, qrPath } from '../qr.js';
 import {
   activityFromChainTx,
   activityFromLedgerRow,
@@ -19,6 +21,7 @@ import {
   mergeActivity,
   shortChainAddress,
 } from '../wallet-activity.js';
+import { buildReceiveQr, parseScannedQr } from '../wallet-qr.js';
 import { sendPkn, switchToPokoin, useWallet } from '../wallet.jsx';
 
 /** Bank wallet that funds account top-ups (same treasury as cardvault). */
@@ -39,6 +42,18 @@ function Icon({ name, size = 22 }) {
     link: <path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7L12.5 19" />,
     wallet: <path d="M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm13 4h4v4h-4a2 2 0 0 1 0-4Z" />,
     activity: <path d="M3 12h4l2.5-7 5 14 2.5-7H21" />,
+    qr: (
+      <>
+        <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" />
+        <path d="M9 9h2v2H9V9Zm4 0h2v2h-2V9Zm-4 4h2v2H9v-2Zm4 0h2v2h-2v-2Z" />
+      </>
+    ),
+    camera: (
+      <>
+        <path d="M3 8.5A1.5 1.5 0 0 1 4.5 7H7l1.6-2.2h6.8L17 7h2.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-9Z" />
+        <circle cx="12" cy="12.6" r="3.4" />
+      </>
+    ),
   };
   return (
     <svg
@@ -415,18 +430,15 @@ export default function Wallet() {
       ) : null}
 
       {sheet === 'receive' ? (
-        <Sheet title="Receive PKN" onClose={closeSheet}>
-          <p className="wallet-sheet-lede">
-            Share your Pokoin username for site balance transfers
-            {address ? ', or your 0x address for on-chain PKN.' : '.'}
-          </p>
-          {signedIn && profile?.username ? (
-            <CopyRow label="Pokoin username" value={profile.username} mono={false} />
-          ) : (
-            <p className="wallet-sheet-note">Sign in to receive by username.</p>
-          )}
-          {address ? <CopyRow label="PokoinPoS address" value={address} /> : null}
-        </Sheet>
+        <ReceiveSheet
+          onClose={closeSheet}
+          signedIn={signedIn}
+          profile={profile}
+          address={address}
+          chainId={chainId}
+          onConnect={() => run(connect)}
+          onRequireSignIn={requireSignIn}
+        />
       ) : null}
 
       {sheet === 'withdraw' ? (
@@ -475,9 +487,90 @@ function SendSheet({
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [search, setSearch] = useState({ status: 'idle', rows: [] });
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState('');
+  const [scanned, setScanned] = useState('');
+  const videoRef = useRef(null);
   const toChain = IS_ADDRESS.test(recipient.trim());
   const query = recipient.trim().toLowerCase();
   const searchable = query.length >= 2 && !query.includes('@') && !IS_ADDRESS.test(query);
+
+  // Camera + decode loop while the scanner is open. A decoded code only
+  // PREFILLS the form — the transfer itself always waits for Send.
+  useEffect(() => {
+    if (!scanning) {
+      return () => {};
+    }
+    let cancelled = false;
+    let timer = 0;
+    let stream = null;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    let detector = null;
+    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+      try {
+        detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      } catch (_) {
+        detector = null;
+      }
+    }
+    setScanMsg('');
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+        });
+      } catch (_) {
+        if (!cancelled) setScanMsg('Camera unavailable — allow camera access and try again.');
+        return;
+      }
+      if (cancelled) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        video.play().catch(() => {});
+      }
+      timer = setInterval(async () => {
+        const el = videoRef.current;
+        if (!el || el.readyState < 2) return;
+        try {
+          let text = '';
+          if (detector) {
+            const codes = await detector.detect(el);
+            text = codes?.[0]?.rawValue || '';
+          } else if (el.videoWidth && el.videoHeight) {
+            canvas.width = el.videoWidth;
+            canvas.height = el.videoHeight;
+            ctx.drawImage(el, 0, 0);
+            const code = jsQR(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
+            text = code?.data || '';
+          }
+          if (!text) return;
+          const parsed = parseScannedQr(text);
+          if (!parsed) {
+            setScanMsg('Not a Pokoin payment code — keep the code inside the frame.');
+            return;
+          }
+          setScanning(false);
+          setRecipient(parsed.recipient);
+          if (parsed.amountPkn) {
+            setAmount(parsed.amountPkn);
+          }
+          setScanned(`@${parsed.recipient}`);
+        } catch (_) {
+          // frame skipped — keep scanning
+        }
+      }, 180);
+    })();
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [scanning]);
 
   useEffect(() => {
     if (!searchable) {
@@ -539,6 +632,28 @@ function SendSheet({
     onTransfer(to, value);
   }
 
+  if (scanning) {
+    return (
+      <Sheet title="Scan payment QR" onClose={() => { setScanning(false); onClose(); }}>
+        <div className="wallet-scanner">
+          <div className="wallet-scanner-frame">
+            <video ref={videoRef} className="wallet-scanner-video" muted playsInline />
+            <span className="wallet-scanner-corner tl" aria-hidden="true" />
+            <span className="wallet-scanner-corner tr" aria-hidden="true" />
+            <span className="wallet-scanner-corner bl" aria-hidden="true" />
+            <span className="wallet-scanner-corner br" aria-hidden="true" />
+          </div>
+          <p className={scanMsg ? 'wallet-scanner-msg err' : 'wallet-scanner-msg'}>
+            {scanMsg || 'Point the camera at a Pokoin payment code'}
+          </p>
+        </div>
+        <button className="wallet-sheet-cta" type="button" onClick={() => setScanning(false)}>
+          Cancel
+        </button>
+      </Sheet>
+    );
+  }
+
   return (
     <Sheet title="Send PKN" onClose={onClose}>
       <p className="wallet-sheet-lede">
@@ -546,7 +661,21 @@ function SendSheet({
         {address ? '; a 0x address sends from your connected wallet.' : '.'}
       </p>
       <label className="sell-field">
-        Recipient username or 0x address
+        <span className="wallet-field-head">
+          Recipient username or 0x address
+          <button
+            className="wallet-cam"
+            type="button"
+            aria-label="Scan a payment QR code"
+            onClick={(event) => {
+              event.preventDefault();
+              setScanned('');
+              setScanning(true);
+            }}
+          >
+            <Icon name="camera" size={18} />
+          </button>
+        </span>
         <input
           value={recipient}
           autoFocus
@@ -554,6 +683,11 @@ function SendSheet({
           placeholder={profile?.username ? `e.g. ${profile.username}` : 'username or 0x…'}
         />
       </label>
+      {scanned ? (
+        <p className="wallet-scan-ok">
+          QR loaded — nothing is sent until you press Send.
+        </p>
+      ) : null}
       {search.status === 'results' ? (
         <div className="wallet-suggestions">
           {search.rows.map((name) => (
@@ -583,6 +717,111 @@ function SendSheet({
       <button className="wallet-sheet-cta" type="button" disabled={busy} onClick={submit}>
         {toChain && !address ? 'Connect to send' : 'Send'}
       </button>
+    </Sheet>
+  );
+}
+
+function ReceiveSheet({ onClose, signedIn, profile, address, chainId, onConnect, onRequireSignIn }) {
+  const onPokoin = chainId === 26062026;
+  const hasSite = Boolean(signedIn && profile?.username);
+  const [kind, setKind] = useState(hasSite || !address ? 'site' : 'chain');
+  const [amountOpen, setAmountOpen] = useState(false);
+  const [amount, setAmount] = useState('');
+  const cleanAmount = /^\d{1,9}$/.test(String(amount).trim()) ? String(Number(amount.trim())) : '';
+  const effectiveKind = kind === 'chain' && address ? 'chain' : 'site';
+  // Fall back to the plain code while the typed amount is incomplete.
+  const payload = buildReceiveQr({
+    kind: effectiveKind,
+    username: profile?.username,
+    address,
+    amount: cleanAmount,
+  }) || buildReceiveQr({ kind: effectiveKind, username: profile?.username, address });
+  const qr = payload ? encodeQr(payload, { ecc: 'M' }) : null;
+  const handle = effectiveKind === 'chain' ? address : (profile?.username || '');
+
+  return (
+    <Sheet title="Receive PKN" onClose={onClose}>
+      <div className="wallet-qr-card">
+        {qr ? (
+          <>
+            <svg
+              viewBox={`0 0 ${qr.size + 8} ${qr.size + 8}`}
+              className="wallet-qr-svg"
+              role="img"
+              aria-label="Payment QR code"
+              shapeRendering="crispEdges"
+            >
+              <rect width={qr.size + 8} height={qr.size + 8} fill="#ffffff" />
+              <path d={qrPath(qr)} fill="#171310" />
+            </svg>
+            {cleanAmount ? <span className="wallet-qr-requested">Requested · {cleanAmount} PKN</span> : null}
+          </>
+        ) : (
+          <div className="wallet-qr-empty">
+            <span className="wallet-qr-empty-icon"><Icon name="qr" size={26} /></span>
+            <p className="wallet-qr-empty-title">
+              {effectiveKind === 'chain' ? 'Connect a wallet for an on-chain code' : 'Sign in to get your receive code'}
+            </p>
+            {effectiveKind === 'chain' ? (
+              <button className="wallet-source-cta" type="button" onClick={onConnect}>Connect wallet</button>
+            ) : (
+              <button className="wallet-source-cta" type="button" onClick={onRequireSignIn}>Sign in</button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {qr && handle ? (
+        <CopyRow
+          label={effectiveKind === 'chain' ? 'PokoinPoS address' : 'Pokoin username'}
+          value={handle}
+          mono={effectiveKind === 'chain'}
+        />
+      ) : null}
+
+      <div className="wallet-segments">
+        <button className={effectiveKind === 'site' ? 'on' : ''} type="button" disabled={!hasSite} onClick={() => setKind('site')}>
+          Pokoin balance
+        </button>
+        <button
+          className={effectiveKind === 'chain' ? 'on' : ''}
+          type="button"
+          disabled={!address}
+          title={address ? '' : 'Connect a wallet first'}
+          onClick={() => setKind('chain')}
+        >
+          PokoinPoS
+        </button>
+      </div>
+      {!hasSite && !address ? (
+        <p className="wallet-sheet-note">
+          Sign in for a site-balance code, or connect a wallet for on-chain PKN.
+        </p>
+      ) : null}
+
+      {amountOpen || cleanAmount ? (
+        <div className="wallet-amount-row">
+          <input
+            inputMode="numeric"
+            value={amount}
+            autoFocus={amountOpen && !cleanAmount}
+            onChange={(event) => setAmount(event.target.value)}
+            placeholder="Requested amount (whole PKN)"
+          />
+          {cleanAmount ? (
+            <button className="wallet-source-link" type="button" onClick={() => { setAmount(''); setAmountOpen(false); }}>
+              Clear
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <button className="wallet-amount-toggle" type="button" onClick={() => setAmountOpen(true)}>
+          Request a specific amount
+        </button>
+      )}
+      <p className="wallet-sheet-note">
+        The code updates live — senders scan it and confirm the details themselves.
+      </p>
     </Sheet>
   );
 }
