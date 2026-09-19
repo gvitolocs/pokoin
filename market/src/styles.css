@@ -6543,6 +6543,160 @@ html:has(.wallet-page) .brand span {
   font-weight: 800;
 }
 
+/* Requests — incoming asks to pay, outgoing asks awaiting an answer. */
+.wallet-requests {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wallet-requests-note {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #ffdf7e;
+}
+
+.wallet-request-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.wallet-request-row:last-child { border-bottom: 0; }
+
+.wallet-request-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.wallet-request-title {
+  font-size: 0.86rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wallet-request-note {
+  font-size: 0.74rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wallet-request-end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+}
+
+.wallet-request-amount {
+  font-weight: 800;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.wallet-request-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.wallet-request-pay {
+  border: 1px solid rgba(255, 211, 61, 0.5);
+  background: rgba(255, 211, 61, 0.1);
+  color: #ffd33d;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.28rem 0.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.wallet-request-pay:hover { background: rgba(255, 211, 61, 0.2); }
+
+.wallet-request-status {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.wallet-confirm {
+  margin-top: 0.65rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 211, 61, 0.28);
+  background: rgba(255, 211, 61, 0.06);
+}
+
+.wallet-confirm p {
+  margin: 0 0 0.6rem;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.wallet-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.wallet-confirm-actions .btn { margin: 0; }
+
+.wallet-confirm-pay {
+  border: 0;
+  border-radius: 999px;
+  background: #ffd33d;
+  color: #191204;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.wallet-confirm-pay:hover { background: #ffdd66; }
+.wallet-confirm-pay:disabled { opacity: 0.55; cursor: default; }
+
+/* Receive request-box */
+.wallet-request-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 211, 61, 0.22);
+  background: rgba(255, 211, 61, 0.05);
+  margin-bottom: 0.7rem;
+}
+
+.wallet-request-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.wallet-request-fields input {
+  background: var(--g2);
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.55rem 0.7rem;
+}
+
 /* Your wallets — connection / source rows, product semantics not bank branches. */
 .wallet-sources {
   display: flex;
@@ -6925,32 +7079,42 @@ html:has(.wallet-page) .brand span {
 
 /* ---- Wallet QR: receive codes + camera scan ---- */
 
-.wallet-field-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
+.wallet-input-row {
+  position: relative;
+  display: block;
+}
+
+.wallet-input-row input {
+  padding-right: 3.1rem;
 }
 
 .wallet-cam {
+  position: absolute;
+  right: 0.4rem;
+  top: 0;
+  bottom: 0;
+  margin: auto;
   display: grid;
   place-items: center;
   width: 2rem;
   height: 2rem;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(255, 255, 255, 0.05);
-  color: #eceaf2;
+  border: 0;
+  background: none;
+  color: var(--muted);
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition: color 0.15s ease;
+}
+
+.wallet-field-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
 }
 
 .wallet-cam:hover {
   color: #ffd33d;
-  border-color: rgba(255, 211, 61, 0.45);
 }
-
-.wallet-cam:active { transform: scale(0.94); }
 
 .wallet-scan-ok {
   margin: 0.15rem 0 0.5rem;

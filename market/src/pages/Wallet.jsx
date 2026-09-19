@@ -23,6 +23,19 @@ import {
 } from '../wallet-activity.js';
 import { buildReceiveQr, parseScannedQr } from '../wallet-qr.js';
 import { sendPkn, switchToPokoin, useWallet } from '../wallet.jsx';
+import {
+  canPayRequest,
+  createMoneyRequest,
+  fetchNotifications,
+  listMoneyRequests,
+  markNotificationsRead,
+  newClientToken,
+  notificationLine,
+  payMoneyRequest,
+  requestStatusLabel,
+  respondMoneyRequest,
+  unreadNotificationCount,
+} from '../money-requests.js';
 
 /** Bank wallet that funds account top-ups (same treasury as cardvault). */
 const TREASURY_ADDRESS = '0xb4029F68E360280aa4Ad21D8aE5AD8896b8768B2';
@@ -182,6 +195,9 @@ export default function Wallet() {
   const [activity, setActivity] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [showAllActivity, setShowAllActivity] = useState(false);
+  const [requests, setRequests] = useState(null);
+  const [notifications, setNotifications] = useState([]);
+  const [confirming, setConfirming] = useState(null);
 
   const [busy, setBusy] = useState(false);
 
@@ -240,6 +256,69 @@ export default function Wallet() {
   useEffect(() => {
     refreshActivity();
   }, [refreshActivity]);
+
+  const refreshRequests = useCallback(async () => {
+    if (!signedIn) {
+      setRequests(null);
+      setNotifications([]);
+      return;
+    }
+    try {
+      const token = await getBearer();
+      if (!token) {
+        setRequests(null);
+        setNotifications([]);
+        return;
+      }
+      const [data, notes] = await Promise.all([
+        listMoneyRequests(token),
+        fetchNotifications(token),
+      ]);
+      setRequests({ incoming: data.incoming || [], outgoing: data.outgoing || [] });
+      setNotifications(notes.notifications || []);
+    } catch (_) {
+      // The endpoint only exists once the API is deployed — stay quiet.
+    }
+  }, [signedIn, getBearer]);
+
+  useEffect(() => {
+    refreshRequests();
+    const timer = setInterval(refreshRequests, 45000);
+    return () => clearInterval(timer);
+  }, [refreshRequests]);
+
+  const unreadRequests = unreadNotificationCount(notifications);
+
+  // Viewing the wallet is seeing the notification — mark read shortly after.
+  useEffect(() => {
+    if (!unreadRequests) {
+      return () => {};
+    }
+    const timer = setTimeout(() => {
+      getBearer()
+        .then((token) => markNotificationsRead(token))
+        .then(() => setNotifications((rows) => rows.map((row) => ({ ...row, read: true }))))
+        .catch(() => {});
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [unreadRequests, getBearer]);
+
+  async function payRequest(request) {
+    await run(async () => {
+      const token = await getBearer();
+      await payMoneyRequest(request.requestId, token);
+      setConfirming(null);
+      refreshRequests();
+    }, { okMessage: `Paid ${formatPknNumber(request.amountPkn)} PKN to @${request.fromUsername}.` });
+  }
+
+  async function respondRequest(request, action) {
+    await run(async () => {
+      const token = await getBearer();
+      await respondMoneyRequest(request.requestId, action, token);
+      refreshRequests();
+    }, { okMessage: action === 'decline' ? 'Request declined.' : 'Request cancelled.' });
+  }
 
   const onPokoin = chainId === 26062026;
   const chainAccount = address ? {
@@ -359,6 +438,71 @@ export default function Wallet() {
         )}
       </section>
 
+      {signedIn && requests && (requests.incoming.length || requests.outgoing.length) ? (
+        <section className="wallet-card">
+          <div className="wallet-card-head">
+            <h2>Requests</h2>
+            {unreadRequests ? <span className="wallet-card-tag gold">{unreadRequests} new</span> : null}
+          </div>
+          {(() => {
+            const rows = [
+              ...(requests.incoming || []).map((row) => ({ ...row, direction: 'incoming' })),
+              ...(requests.outgoing || []).map((row) => ({ ...row, direction: 'outgoing' })),
+            ].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+            const latestUnread = notifications.find((row) => !row.read);
+            return (
+              <>
+                {latestUnread ? (
+                  <p className="wallet-requests-note">{notificationLine(latestUnread)}</p>
+                ) : null}
+                <ul className="wallet-requests">
+                  {rows.map((row) => (
+                    <li key={row.requestId} className="wallet-request-row">
+                      <span className="wallet-request-main">
+                        <span className="wallet-request-title">
+                          {row.direction === 'incoming'
+                            ? `@${row.fromUsername} requested`
+                            : `Requested from @${row.toUsername}`}
+                        </span>
+                        {row.note ? <span className="wallet-request-note">{row.note}</span> : null}
+                      </span>
+                      <span className="wallet-request-end">
+                        <span className="wallet-request-amount">{formatPknNumber(row.amountPkn)} PKN</span>
+                        {requestIsPending(row) ? (
+                          <span className="wallet-request-actions">
+                            {row.direction === 'incoming' ? (
+                              <>
+                                <button className="wallet-request-pay" type="button" onClick={() => setConfirming(row)}>Pay</button>
+                                <button className="wallet-source-link" type="button" onClick={() => respondRequest(row, 'decline')}>Decline</button>
+                              </>
+                            ) : (
+                              <button className="wallet-source-link" type="button" onClick={() => respondRequest(row, 'cancel')}>Cancel</button>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="wallet-request-status">{requestStatusLabel(row.status)}</span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {confirming ? (
+                  <div className="wallet-confirm">
+                    <p>Pay {formatPknNumber(confirming.amountPkn)} PKN to @{confirming.fromUsername}?</p>
+                    <div className="wallet-confirm-actions">
+                      <button className="btn ghost" type="button" onClick={() => setConfirming(null)}>Cancel</button>
+                      <button className="wallet-confirm-pay" type="button" disabled={busy} onClick={() => payRequest(confirming)}>
+                        Confirm payment
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            );
+          })()}
+        </section>
+      ) : null}
+
       <section className="wallet-card">
         <div className="wallet-card-head"><h2>Your wallets</h2></div>
         <div className="wallet-sources">
@@ -436,6 +580,7 @@ export default function Wallet() {
           profile={profile}
           address={address}
           chainId={chainId}
+          getBearer={getBearer}
           onConnect={() => run(connect)}
           onRequireSignIn={requireSignIn}
         />
@@ -656,13 +801,15 @@ function SendSheet({
 
   return (
     <Sheet title="Send PKN" onClose={onClose}>
-      <p className="wallet-sheet-lede">
-        Pokoin username sends from your site balance
-        {address ? '; a 0x address sends from your connected wallet.' : '.'}
-      </p>
       <label className="sell-field">
-        <span className="wallet-field-head">
-          Recipient username or 0x address
+        Recipient username or 0x address
+        <span className="wallet-input-row">
+          <input
+            value={recipient}
+            autoFocus
+            onChange={(event) => setRecipient(event.target.value)}
+            placeholder={profile?.username ? `e.g. ${profile.username}` : 'username or 0x…'}
+          />
           <button
             className="wallet-cam"
             type="button"
@@ -676,12 +823,6 @@ function SendSheet({
             <Icon name="camera" size={18} />
           </button>
         </span>
-        <input
-          value={recipient}
-          autoFocus
-          onChange={(event) => setRecipient(event.target.value)}
-          placeholder={profile?.username ? `e.g. ${profile.username}` : 'username or 0x…'}
-        />
       </label>
       {scanned ? (
         <p className="wallet-scan-ok">
@@ -721,12 +862,15 @@ function SendSheet({
   );
 }
 
-function ReceiveSheet({ onClose, signedIn, profile, address, chainId, onConnect, onRequireSignIn }) {
+function ReceiveSheet({ onClose, signedIn, profile, address, chainId, getBearer, onConnect, onRequireSignIn }) {
   const onPokoin = chainId === 26062026;
   const hasSite = Boolean(signedIn && profile?.username);
   const [kind, setKind] = useState(hasSite || !address ? 'site' : 'chain');
   const [amountOpen, setAmountOpen] = useState(false);
   const [amount, setAmount] = useState('');
+  const [reqUser, setReqUser] = useState('');
+  const [reqNote, setReqNote] = useState('');
+  const [reqState, setReqState] = useState({ status: 'idle', message: '' });
   const cleanAmount = /^\d{1,9}$/.test(String(amount).trim()) ? String(Number(amount.trim())) : '';
   const effectiveKind = kind === 'chain' && address ? 'chain' : 'site';
   // Fall back to the plain code while the typed amount is incomplete.
@@ -819,6 +963,54 @@ function ReceiveSheet({ onClose, signedIn, profile, address, chainId, onConnect,
           Request a specific amount
         </button>
       )}
+
+      {effectiveKind === 'site' && hasSite && cleanAmount ? (
+        <div className="wallet-request-box">
+          <span className="wallet-field-label">Send this request straight to a user</span>
+          <div className="wallet-request-fields">
+            <input
+              value={reqUser}
+              onChange={(event) => setReqUser(event.target.value)}
+              placeholder="Username"
+              spellCheck={false}
+            />
+            <input
+              value={reqNote}
+              onChange={(event) => setReqNote(event.target.value)}
+              placeholder="Note (optional)"
+              maxLength={140}
+            />
+          </div>
+          <button
+            className="wallet-sheet-cta"
+            type="button"
+            disabled={reqState.status === 'busy' || !reqUser.trim()}
+            onClick={async () => {
+              setReqState({ status: 'busy', message: '' });
+              try {
+                const token = await getBearer();
+                await createMoneyRequest({
+                  recipientUsername: reqUser.trim(),
+                  amountPkn: Number(cleanAmount),
+                  note: reqNote,
+                  clientToken: newClientToken(),
+                }, token);
+                setReqState({ status: 'done', message: reqUser.trim().toLowerCase() });
+                setReqUser('');
+                setReqNote('');
+              } catch (err) {
+                setReqState({ status: 'error', message: err.message || 'Request failed.' });
+              }
+            }}
+          >
+            {reqState.status === 'busy' ? 'Sending…' : `Request ${cleanAmount} PKN`}
+          </button>
+          {reqState.status === 'done' ? (
+            <p className="wallet-scan-ok">Request sent to @{reqState.message} — they can pay it from their wallet.</p>
+          ) : null}
+          {reqState.status === 'error' ? <p className="wallet-scanner-msg err">{reqState.message}</p> : null}
+        </div>
+      ) : null}
       <p className="wallet-sheet-note">
         The code updates live — senders scan it and confirm the details themselves.
       </p>
