@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import jsQR from 'jsqr';
 import {
   fetchChainAddressActivity,
@@ -21,7 +21,14 @@ import {
   mergeActivity,
   shortChainAddress,
 } from '../wallet-activity.js';
-import { buildReceiveQr, parseScannedQr } from '../wallet-qr.js';
+import {
+  activityCacheIsFresh,
+  activityFingerprint,
+  activityNewestMs,
+  readActivityCache,
+  writeActivityCache,
+} from '../wallet-activity-cache.js';
+import { buildReceiveQr, parseScannedQr, parseWalletSendLink } from '../wallet-qr.js';
 import { sendPkn, switchToPokoin, useWallet } from '../wallet.jsx';
 import {
   createMoneyRequest,
@@ -176,11 +183,13 @@ const HERO_MODES = ['accounts', 'site', 'chain'];
 
 export default function Wallet() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { address, balance, chainId, connect, disconnect } = useWallet();
   const { signedIn, user, profile, availablePkn, getBearer } = useAuth();
   const uid = profile?.uid || user?.uid || '';
 
   const [sheet, setSheet] = useState('');
+  const [sendPrefill, setSendPrefill] = useState({ recipient: '', amount: '', fromQr: false });
   const [flash, setFlash] = useState('');
   const [error, setError] = useState('');
   const [linkedAddress, setLinkedAddress] = useState('');
@@ -189,35 +198,97 @@ export default function Wallet() {
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const refreshActivity = useCallback(async () => {
-    setActivityLoading(true);
-    const groups = await Promise.allSettled([
-      (async () => {
-        const token = await getBearer();
-        const rows = await fetchOwnedCollectionDocuments('ledger_entries', uid, token);
-        return rows.map(activityFromLedgerRow);
-      })(),
-      (async () => {
-        const token = await getBearer();
-        const rows = await fetchOwnedCollectionDocuments('wallet_activity', uid, token);
-        return rows.map(activityFromWalletRow);
-      })(),
-      (async () => {
-        if (!address) return [];
-        const txs = await fetchChainAddressActivity(address, { limit: ACTIVITY_QUERY_LIMIT });
-        return txs.map((tx) => activityFromChainTx(tx, address));
-      })(),
-    ]);
-    setActivity(mergeActivity(
-      groups.map((row) => (row.status === 'fulfilled' ? row.value : [])),
-      { limit: ACTIVITY_QUERY_LIMIT },
-    ));
-    setActivityLoading(false);
+  // Instant paint from the last successful feed for this uid (+ chain address).
+  useEffect(() => {
+    if (!uid) {
+      setActivity([]);
+      return;
+    }
+    const cached = readActivityCache(uid, address);
+    if (cached?.rows?.length) {
+      setActivity(cached.rows);
+    }
+  }, [uid, address]);
+
+  const refreshActivity = useCallback(async ({ force = false } = {}) => {
+    if (!uid) {
+      setActivity([]);
+      setActivityLoading(false);
+      return;
+    }
+    const cached = readActivityCache(uid, address);
+    if (!force && activityCacheIsFresh(cached)) {
+      setActivity(cached.rows);
+      setActivityLoading(false);
+      return;
+    }
+    const showSpinner = !(cached?.rows?.length || false);
+    if (showSpinner) setActivityLoading(true);
+    // Overlap one minute so clock skew / same-second writes are not missed.
+    const sinceMs = !force && cached?.rows?.length
+      ? Math.max(0, activityNewestMs(cached.rows) - 60_000)
+      : 0;
+    try {
+      const groups = await Promise.allSettled([
+        (async () => {
+          const token = await getBearer();
+          const rows = await fetchOwnedCollectionDocuments('ledger_entries', uid, token, {
+            limit: ACTIVITY_QUERY_LIMIT,
+            sinceMs,
+          });
+          return rows.map(activityFromLedgerRow);
+        })(),
+        (async () => {
+          const token = await getBearer();
+          const rows = await fetchOwnedCollectionDocuments('wallet_activity', uid, token, {
+            limit: ACTIVITY_QUERY_LIMIT,
+            sinceMs,
+          });
+          return rows.map(activityFromWalletRow);
+        })(),
+        (async () => {
+          if (!address) return [];
+          const txs = await fetchChainAddressActivity(address, { limit: ACTIVITY_QUERY_LIMIT });
+          return txs.map((tx) => activityFromChainTx(tx, address));
+        })(),
+      ]);
+      const fetched = groups.map((row) => (row.status === 'fulfilled' ? row.value : []));
+      // Delta fetch: fold new rows onto the cached feed. Full fetch: replace.
+      const next = mergeActivity(
+        sinceMs > 0 && cached?.rows?.length ? [cached.rows, ...fetched] : fetched,
+        { limit: ACTIVITY_QUERY_LIMIT },
+      );
+      const prevFp = cached?.fingerprint || activityFingerprint(cached?.rows || []);
+      const nextFp = activityFingerprint(next);
+      writeActivityCache(uid, address, next);
+      if (nextFp !== prevFp) {
+        setActivity(next);
+      } else if (!cached?.rows?.length && next.length) {
+        setActivity(next);
+      }
+    } finally {
+      setActivityLoading(false);
+    }
   }, [address, getBearer, uid]);
 
   useEffect(() => {
     document.title = 'Wallet · Pokoin';
   }, []);
+
+  // Deep link from a receive QR / shared payment URL: open Send with the
+  // recipient (and optional amount) already filled. Strip the query so a
+  // refresh does not re-open the sheet.
+  useEffect(() => {
+    const parsed = parseWalletSendLink(`${location.pathname}${location.search}`);
+    if (!parsed) return;
+    setSendPrefill({
+      recipient: parsed.recipient,
+      amount: parsed.amountPkn || '',
+      fromQr: true,
+    });
+    setSheet('send');
+    navigate('/wallet', { replace: true });
+  }, [location.pathname, location.search, navigate]);
 
   useEffect(() => {
     if (!uid) {
@@ -263,7 +334,7 @@ export default function Wallet() {
     try {
       await task();
       if (okMessage) setFlash(okMessage);
-      refreshActivity();
+      refreshActivity({ force: true });
       return true;
     } catch (err) {
       setError(err.message || 'Something went wrong.');
@@ -275,6 +346,7 @@ export default function Wallet() {
 
   function closeSheet() {
     setSheet('');
+    setSendPrefill({ recipient: '', amount: '', fromQr: false });
   }
 
   const actions = [
@@ -420,9 +492,11 @@ export default function Wallet() {
           address={address}
           balance={balance}
           getBearer={getBearer}
+          initialRecipient={sendPrefill.recipient}
+          initialAmount={sendPrefill.amount}
+          fromQr={sendPrefill.fromQr}
           onConnect={() => run(connect)}
           onRequireSignIn={requireSignIn}
-          onOpenConversation={(username) => navigate(`/messages/${encodeURIComponent(username)}`)}
           onTransfer={(recipient, amount) => run(async () => {
             const token = await getBearer();
             await transferAccountBalance({ recipientUsername: recipient, amountPkn: Math.round(Number(amount)) }, token);
@@ -444,6 +518,7 @@ export default function Wallet() {
           getBearer={getBearer}
           onConnect={() => run(connect)}
           onRequireSignIn={requireSignIn}
+          onOpenConversation={(username) => navigate(`/messages/${encodeURIComponent(username)}`)}
         />
       ) : null}
 
@@ -489,13 +564,14 @@ export default function Wallet() {
 function SendSheet({
   onClose, busy, signedIn, profile, address, balance, getBearer,
   onConnect, onRequireSignIn, onTransfer, onChainSend,
+  initialRecipient = '', initialAmount = '', fromQr = false,
 }) {
-  const [recipient, setRecipient] = useState('');
-  const [amount, setAmount] = useState('');
+  const [recipient, setRecipient] = useState(initialRecipient);
+  const [amount, setAmount] = useState(initialAmount);
   const [search, setSearch] = useState({ status: 'idle', rows: [] });
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState('');
-  const [scanned, setScanned] = useState('');
+  const [scanned, setScanned] = useState(fromQr && initialRecipient ? initialRecipient : '');
   const videoRef = useRef(null);
   const toChain = IS_ADDRESS.test(recipient.trim());
   const query = recipient.trim().toLowerCase();
@@ -562,10 +638,9 @@ function SendSheet({
           }
           setScanning(false);
           setRecipient(parsed.recipient);
-          if (parsed.amountPkn) {
-            setAmount(parsed.amountPkn);
-          }
-          setScanned(`@${parsed.recipient}`);
+          setAmount(parsed.amountPkn || '');
+          setScanned(parsed.recipient);
+          setScanMsg('');
         } catch (_) {
           // frame skipped — keep scanning
         }
@@ -687,7 +762,9 @@ function SendSheet({
       </label>
       {scanned ? (
         <p className="wallet-scan-ok">
-          QR loaded — nothing is sent until you press Send.
+          {amount
+            ? `Sending to ${scanned} · ${amount} PKN loaded — confirm before Send.`
+            : `Sending to ${scanned} — enter an amount, then Send.`}
         </p>
       ) : null}
       {search.status === 'results' ? (
@@ -880,7 +957,9 @@ function ReceiveSheet({
         </div>
       ) : null}
       <p className="wallet-sheet-note">
-        The code updates live — senders scan it and confirm the details themselves.
+        The code opens Send to your username
+        {cleanAmount ? ` with ${cleanAmount} PKN filled in` : ''}
+        {' '}— senders confirm before anything moves.
       </p>
     </Sheet>
   );
