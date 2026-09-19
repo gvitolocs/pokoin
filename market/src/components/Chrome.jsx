@@ -430,6 +430,50 @@ export default function Chrome({ children }) {
     };
   }, [open, query, searchTab]);
 
+  // "View all N" count: the search-page payload total for this exact query +
+  // tab — the same request the footer's submit destination renders, so
+  // popupCount(Q) === totalCount(search(Q)) whenever the payload carries a
+  // total (Product/SQL universe). Where it does not yet (singles rides the
+  // Meili candidates window), the suggest payload's relaxed estimate stays
+  // as the baseline instead of zeroing the footer.
+  useEffect(() => {
+    if (!open || !isPokemonGame() || searchTab === 'users' || !suggestLiveReady(query)) {
+      return undefined;
+    }
+    const text = typedMeiliQuery(query).trim();
+    if (text.length < 2) {
+      return undefined;
+    }
+    const tabUsed = searchTab;
+    const printUsed = printLang;
+    let cancelled = false;
+    prefetchSearchPage(text, lang, {
+      fetchSearch,
+      tab: tabUsed,
+      printLang: printUsed,
+    })
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+        if (
+          queryRef.current !== query.trim()
+          || searchTabRef.current !== tabUsed
+          || printLangRef.current !== printUsed
+        ) {
+          return;
+        }
+        const total = Number(payload?.total);
+        if (Number.isFinite(total) && total > 0) {
+          setHitCount(total);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open, query, searchTab, lang, printLang]);
+
   useEffect(() => {
     const term = query.trim();
     queryRef.current = term;
@@ -471,11 +515,13 @@ export default function Chrome({ children }) {
       if (current !== term) {
         return;
       }
-      const count = Number(data?.count) || 0;
-      setHitCount(count);
+      // Suggest's relaxed estimate is the footer baseline; the search-page
+      // prefetch effect below overrides it whenever the payload carries an
+      // exact total.
+      setHitCount(Number(data?.count) || 0);
+      // Warm the "View all" destination so Enter is hot.
       prefetchSearchPage(data?.resolvedQuery || term, lang, {
-        fetchSearchPage: fetchSearch,
-        count,
+        fetchSearch: fetchSearch,
         tab: searchTabRef.current,
         printLang: requestPrint,
       });
@@ -649,7 +695,6 @@ export default function Chrome({ children }) {
           prefetchSearchPage(data.resolvedQuery, lang, {
             fetchSearchPage: fetchSearch,
             signal: controller.signal,
-            count: data.count,
             tab: searchTabRef.current,
           });
         })
@@ -764,7 +809,6 @@ export default function Chrome({ children }) {
     if (prefetchQuery) {
       prefetchSearchPage(prefetchQuery, lang, {
         fetchSearch,
-        count: hitCount,
         tab: searchTab,
       });
     }

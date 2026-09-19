@@ -37,7 +37,6 @@ export function takeHotSearchPage(query, lang, tab = 'singles', printLang = 'all
 export function prefetchSearchPage(query, lang, {
   fetchSearchPage,
   signal,
-  count,
   tab = 'singles',
   printLang = 'all',
 } = {}) {
@@ -50,9 +49,6 @@ export function prefetchSearchPage(query, lang, {
   const key = cacheKey(q, lang, kind, print);
   const existing = cache.get(key);
   if (existing && Date.now() - existing.at < TTL_MS && existing.promise) {
-    if (count != null) {
-      existing.count = Number(count) || existing.count || 0;
-    }
     return existing.promise;
   }
   const promise = fetchSearchPage({
@@ -67,6 +63,9 @@ export function prefetchSearchPage(query, lang, {
     const row = cache.get(key);
     if (row && row.promise === promise) {
       row.data = data;
+      // The cached count is the payload's OWN total — the same predicate that
+      // produced its rows. Never a suggest-side estimate.
+      row.count = Number(data?.total) || 0;
       row.at = Date.now();
     }
     return data;
@@ -84,7 +83,7 @@ export function prefetchSearchPage(query, lang, {
     at: Date.now(),
     data: null,
     promise,
-    count: Number(count) || 0,
+    count: 0,
   });
   return promise;
 }

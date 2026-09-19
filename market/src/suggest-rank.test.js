@@ -283,6 +283,55 @@ test('Chrome ranks from one character and opens the popup at three', () => {
   assert.equal(chrome.includes('term.length < 2'), false);
 });
 
+test('fetchSuggestRanked counts the search total, never suggest estimates', async () => {
+  const result = await fetchSuggestRanked('pikachu gx 30th', {
+    pool: FIXTURE,
+    fetchSuggest: async () => ({
+      // Relaxed Meili "last"-strategy estimate: the token-dropping count of
+      // the reduced "pikachu" universe that made the footer say 1,211.
+      count: 1211,
+      groups: [{ name: 'Pikachu', printings: [{ id: 'pika', name: 'Pikachu', number: '025/102' }] }],
+    }),
+    fetchSearch: async ({ query }) => {
+      assert.equal(query, 'pikachu gx 30th');
+      return {
+        cards: [{ id: 'a', name: 'Pikachu GX', number: '145/181' }],
+        count: 1,
+        total: 40,
+        hasMore: false,
+      };
+    },
+  });
+  // Count answers the same predicate as the "View all" destination.
+  assert.equal(result.count, 40);
+});
+
+test('fetchSuggestRanked falls back to lookup counts without a search total', async () => {
+  const result = await fetchSuggestRanked('oi', {
+    pool: FIXTURE,
+    extraLimit: 1,
+    fetchSuggest: async (query) => {
+      if (query === 'oi') {
+        return { count: 3, groups: [{ name: 'Oinkologne', printings: [{ id: 'oink' }] }] };
+      }
+      return { count: 49, groups: [{ name: 'Pikachu', printings: [{ id: 'pika' }] }] };
+    },
+  });
+  assert.ok(Number.isFinite(result.count) && result.count >= 0);
+  assert.notEqual(result.count, 49, 'the extra-name estimate must not become the count');
+});
+
+test('Chrome View-all count prefers the payload total, keeps the suggest baseline', () => {
+  const chrome = readFileSync(new URL('./components/Chrome.jsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(chrome, /setHitCount\(count\)/);
+  assert.doesNotMatch(chrome, /count:\s*hitCount/);
+  // Exact totals override; the suggest estimate survives where the payload
+  // has none (singles rides the Meili candidates window today).
+  assert.match(chrome, /const total = Number\(payload\?\.total\);/);
+  assert.match(chrome, /Number\.isFinite\(total\) && total > 0/);
+  assert.match(chrome, /setHitCount\(Number\(data\?\.count\) \|\| 0\)/);
+});
+
 test('hgss energy peels the set code and keeps the name', () => {
   for (const query of ['hgss energy', 'energy hgss', 'HGSS Energy']) {
     const parsed = parseTypedQuery(query);

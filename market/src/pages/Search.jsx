@@ -38,6 +38,16 @@ function normalizeArtistName(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+/** The route's exact same-predicate total, or null when the payload has
+ * none (singles rides the Meili candidates window today). */
+function payloadTotal(payload) {
+  if (payload?.total == null) {
+    return null;
+  }
+  const total = Number(payload.total);
+  return Number.isFinite(total) ? total : null;
+}
+
 export default function Search() {
   const location = useLocation();
   const navType = useNavigationType();
@@ -153,10 +163,15 @@ export default function Search() {
       setCards(next);
       setHasMore(setAware || tab === 'users' ? false : Boolean(data?.hasMore));
       setError('');
+      // The total travels with the results: totalHits is either the hot
+      // payload's total or this response's own total — the same predicate
+      // that produced the rows. Never a suggest-side estimate.
       if (totalHits != null) {
         setTotal(Number(totalHits) || 0);
       } else if (setAware) {
         setTotal(next.length);
+      } else if (Number.isFinite(Number(data?.total))) {
+        setTotal(Number(data.total) || 0);
       }
       if (next[0]) {
         track(Action.searchSubmit, next[0], { query, resultCount: next.length });
@@ -211,13 +226,13 @@ export default function Search() {
       pending
         .then((data) => {
           if (data) {
-            apply(data, setAware ? data.cards?.length : hot?.count);
+            apply(data, setAware ? data.cards?.length : (payloadTotal(data) ?? hot?.count));
             return;
           }
           if (cancelled) {
             return;
           }
-          return fetchSearch({ query: fetchQuery, offset: 0, limit: 48, lang, ...fetchOpts }).then((fresh) => apply(fresh, hot?.count));
+          return fetchSearch({ query: fetchQuery, offset: 0, limit: 48, lang, ...fetchOpts }).then((fresh) => apply(fresh, payloadTotal(fresh) ?? hot?.count));
         })
         .catch((err) => {
           if (!cancelled) {
@@ -227,6 +242,9 @@ export default function Search() {
         });
     }
     if (!setAware && tab === 'singles' && fetchQuery.length >= 2 && !(hot?.count > 0)) {
+      // No search-page total for this universe yet (singles rides the Meili
+      // candidates window) and no cached count: keep the suggest estimate so
+      // the results page still shows a query-scoped number.
       fetchSuggest(fetchQuery, { limit: 1, lang, printLang: activePrintLang })
         .then((suggest) => {
           if (!cancelled) {

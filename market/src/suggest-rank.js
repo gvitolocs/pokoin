@@ -2265,6 +2265,7 @@ export async function fetchSuggestRanked(term, {
     ]).filter((lookup) => (
       !immediateLookups.some((row) => compactQuery(row) === compactQuery(lookup))
     ));
+  let searchPagePayload = null;
   const [setCards, immediatePayloads, extraPayloads] = await Promise.all([
     freeTextSearch
       // High-recall full-text search for the raw query — the candidate source
@@ -2272,7 +2273,10 @@ export async function fetchSuggestRanked(term, {
       // Takes precedence over the set-filtered path so recognition of a set
       // token no longer decides the retrieval engine.
       ? fetchSearch({ query, offset: 0, limit: Math.max(48, limit), lang, printLang, signal })
-        .then((data) => data?.cards || [])
+        .then((data) => {
+          searchPagePayload = data;
+          return data?.cards || [];
+        })
         .catch((error) => { if (error?.name === 'AbortError') { throw error; } return []; })
       : (setAware
         ? fetchSetAwareCards(resolvedParsed, { fetchSearch, lang, signal, strict: false })
@@ -2364,15 +2368,24 @@ export async function fetchSuggestRanked(term, {
     Number(payloads[index]?.count) || 0,
   ]));
   const filled = groups.reduce((n, group) => n + (group.printings || []).length, 0);
+  // Count ownership: the free-text count is the SEARCH endpoint's total for
+  // the raw query — the same predicate as the "View all" destination. The
+  // suggest lookups' estimatedTotalHits are relaxed, token-dropping Meili
+  // estimates (default "last" strategy) and must never inflate the number:
+  // "pikachu gx 30th" is not "pikachu" (≈ the whole Pikachu pool).
+  const searchTotal = Number(searchPagePayload?.total);
+  const lookupMax = Math.max(
+    setCards.length,
+    countByLookup.get(compactQuery(resolvedName)) || 0,
+    countByLookup.get(compactQuery(resolvedQuery)) || 0,
+    Number(payloads[0]?.count) || 0,
+    filled,
+  );
   const count = bareNumber
     ? Math.max(countByLookup.get(compactQuery(query)) || 0, filled)
-    : Math.max(
-      setCards.length,
-      countByLookup.get(compactQuery(resolvedName)) || 0,
-      countByLookup.get(compactQuery(resolvedQuery)) || 0,
-      Number(payloads[0]?.count) || 0,
-      filled,
-    );
+    : Number.isFinite(searchTotal)
+      ? Math.max(searchTotal, filled)
+      : lookupMax;
   return {
     groups,
     count,
