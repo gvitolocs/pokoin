@@ -66,6 +66,7 @@ export const APP = {
   signal: route('/marketplace/signal'),
   competitive: route('/marketplace/competitive'),
   wallet: route('/wallet'),
+  messages: route('/messages'),
   cart: route('/cart'),
   profile: route('/profile'),
   inventory: route('/inventory'),

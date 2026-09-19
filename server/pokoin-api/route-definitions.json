@@ -1,0 +1,32 @@
+[
+  {
+    "path": "/api/chat",
+    "file": "chat.js",
+    "methods": ["GET", "POST"],
+    "purpose": "List and append typed events in a canonical private conversation, including atomic direct PKN payments.",
+    "auth": "Required Firebase bearer token; conversation membership is enforced server-side.",
+    "params": {
+      "query": "action=list|get and peer for one conversation.",
+      "body": "peer plus text, or a positive whole amountPkn and clientToken for payment."
+    },
+    "dependencies": {
+      "env": ["FIREBASE_*"],
+      "services": ["Firebase Admin"]
+    }
+  },
+  {
+    "path": "/api/money-request",
+    "file": "money-request.js",
+    "methods": ["GET", "POST"],
+    "purpose": "Create, pay, decline, or cancel PKN requests represented as typed conversation events.",
+    "auth": "Required Firebase bearer token; request parties and transitions are enforced server-side.",
+    "params": {
+      "query": "action=list|create|pay|decline|cancel.",
+      "body": "recipientUsername, amountPkn, note, and clientToken for create; requestId for transitions."
+    },
+    "dependencies": {
+      "env": ["FIREBASE_*"],
+      "services": ["Firebase Admin"]
+    }
+  }
+]

@@ -1121,6 +1121,9 @@ export default function Chrome({ children }) {
             <AppLink to="/forum" title="Forum" aria-label="Forum">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" /></svg>
             </AppLink>
+            <AppLink to={APP.messages} title="Messages" aria-label="Messages">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-5 4V6a2 2 0 0 1 2-2Zm2 5v2h12V9H6Zm0 4v2h8v-2H6Z" /></svg>
+            </AppLink>
             <a href={onDashboard ? '/' : DASHBOARD_HOME} title="Dashboard" aria-label="Dashboard">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={ICO.dashboard} /></svg>
             </a>
@@ -1152,6 +1155,7 @@ export default function Chrome({ children }) {
         <MobileTile to="/marketplace/search" label="Search" icon="search" onClick={closeMenu} />
         <MobileTile href={homeHref} label="Home" icon="home" onClick={closeMenu} />
         <MobileTile to={APP.forum} label="Forum" icon="forum" onClick={closeMenu} />
+        <MobileTile to={APP.messages} label="Messages" icon="forum" onClick={closeMenu} />
         <MobileTile href={onDashboard ? '/' : DASHBOARD_HOME} label="Dashboard" icon="dashboard" onClick={closeMenu} />
         {site.features.competitive ? (
           <MobileTile to="/marketplace/competitive" label="Competitive" icon="trophy" onClick={closeMenu} />
@@ -1195,6 +1199,7 @@ export default function Chrome({ children }) {
           </div>
           <div>
             <h3>Account</h3>
+            <AppLink to={APP.messages}>Messages</AppLink>
             <AppLink to={APP.wallet}>Wallet</AppLink>
             <AppLink to={APP.buy}>Buy PKN</AppLink>
             <AppLink to={APP.cart}>Cart</AppLink>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import jsQR from 'jsqr';
 import {
   fetchChainAddressActivity,
@@ -24,17 +24,8 @@ import {
 import { buildReceiveQr, parseScannedQr } from '../wallet-qr.js';
 import { sendPkn, switchToPokoin, useWallet } from '../wallet.jsx';
 import {
-  canPayRequest,
   createMoneyRequest,
-  fetchNotifications,
-  listMoneyRequests,
-  markNotificationsRead,
   newClientToken,
-  notificationLine,
-  payMoneyRequest,
-  requestStatusLabel,
-  respondMoneyRequest,
-  unreadNotificationCount,
 } from '../money-requests.js';
 
 /** Bank wallet that funds account top-ups (same treasury as cardvault). */
@@ -184,6 +175,7 @@ function PercentRow({ onPick }) {
 const HERO_MODES = ['accounts', 'site', 'chain'];
 
 export default function Wallet() {
+  const navigate = useNavigate();
   const { address, balance, chainId, connect, disconnect } = useWallet();
   const { signedIn, user, profile, availablePkn, getBearer } = useAuth();
   const uid = profile?.uid || user?.uid || '';
@@ -195,10 +187,6 @@ export default function Wallet() {
   const [activity, setActivity] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [showAllActivity, setShowAllActivity] = useState(false);
-  const [requests, setRequests] = useState(null);
-  const [notifications, setNotifications] = useState([]);
-  const [confirming, setConfirming] = useState(null);
-
   const [busy, setBusy] = useState(false);
 
   const refreshActivity = useCallback(async () => {
@@ -256,69 +244,6 @@ export default function Wallet() {
   useEffect(() => {
     refreshActivity();
   }, [refreshActivity]);
-
-  const refreshRequests = useCallback(async () => {
-    if (!signedIn) {
-      setRequests(null);
-      setNotifications([]);
-      return;
-    }
-    try {
-      const token = await getBearer();
-      if (!token) {
-        setRequests(null);
-        setNotifications([]);
-        return;
-      }
-      const [data, notes] = await Promise.all([
-        listMoneyRequests(token),
-        fetchNotifications(token),
-      ]);
-      setRequests({ incoming: data.incoming || [], outgoing: data.outgoing || [] });
-      setNotifications(notes.notifications || []);
-    } catch (_) {
-      // The endpoint only exists once the API is deployed — stay quiet.
-    }
-  }, [signedIn, getBearer]);
-
-  useEffect(() => {
-    refreshRequests();
-    const timer = setInterval(refreshRequests, 45000);
-    return () => clearInterval(timer);
-  }, [refreshRequests]);
-
-  const unreadRequests = unreadNotificationCount(notifications);
-
-  // Viewing the wallet is seeing the notification — mark read shortly after.
-  useEffect(() => {
-    if (!unreadRequests) {
-      return () => {};
-    }
-    const timer = setTimeout(() => {
-      getBearer()
-        .then((token) => markNotificationsRead(token))
-        .then(() => setNotifications((rows) => rows.map((row) => ({ ...row, read: true }))))
-        .catch(() => {});
-    }, 2500);
-    return () => clearTimeout(timer);
-  }, [unreadRequests, getBearer]);
-
-  async function payRequest(request) {
-    await run(async () => {
-      const token = await getBearer();
-      await payMoneyRequest(request.requestId, token);
-      setConfirming(null);
-      refreshRequests();
-    }, { okMessage: `Paid ${formatPknNumber(request.amountPkn)} PKN to @${request.fromUsername}.` });
-  }
-
-  async function respondRequest(request, action) {
-    await run(async () => {
-      const token = await getBearer();
-      await respondMoneyRequest(request.requestId, action, token);
-      refreshRequests();
-    }, { okMessage: action === 'decline' ? 'Request declined.' : 'Request cancelled.' });
-  }
 
   const onPokoin = chainId === 26062026;
   const chainAccount = address ? {
@@ -438,71 +363,6 @@ export default function Wallet() {
         )}
       </section>
 
-      {signedIn && requests && (requests.incoming.length || requests.outgoing.length) ? (
-        <section className="wallet-card">
-          <div className="wallet-card-head">
-            <h2>Requests</h2>
-            {unreadRequests ? <span className="wallet-card-tag gold">{unreadRequests} new</span> : null}
-          </div>
-          {(() => {
-            const rows = [
-              ...(requests.incoming || []).map((row) => ({ ...row, direction: 'incoming' })),
-              ...(requests.outgoing || []).map((row) => ({ ...row, direction: 'outgoing' })),
-            ].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-            const latestUnread = notifications.find((row) => !row.read);
-            return (
-              <>
-                {latestUnread ? (
-                  <p className="wallet-requests-note">{notificationLine(latestUnread)}</p>
-                ) : null}
-                <ul className="wallet-requests">
-                  {rows.map((row) => (
-                    <li key={row.requestId} className="wallet-request-row">
-                      <span className="wallet-request-main">
-                        <span className="wallet-request-title">
-                          {row.direction === 'incoming'
-                            ? `@${row.fromUsername} requested`
-                            : `Requested from @${row.toUsername}`}
-                        </span>
-                        {row.note ? <span className="wallet-request-note">{row.note}</span> : null}
-                      </span>
-                      <span className="wallet-request-end">
-                        <span className="wallet-request-amount">{formatPknNumber(row.amountPkn)} PKN</span>
-                        {requestIsPending(row) ? (
-                          <span className="wallet-request-actions">
-                            {row.direction === 'incoming' ? (
-                              <>
-                                <button className="wallet-request-pay" type="button" onClick={() => setConfirming(row)}>Pay</button>
-                                <button className="wallet-source-link" type="button" onClick={() => respondRequest(row, 'decline')}>Decline</button>
-                              </>
-                            ) : (
-                              <button className="wallet-source-link" type="button" onClick={() => respondRequest(row, 'cancel')}>Cancel</button>
-                            )}
-                          </span>
-                        ) : (
-                          <span className="wallet-request-status">{requestStatusLabel(row.status)}</span>
-                        )}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                {confirming ? (
-                  <div className="wallet-confirm">
-                    <p>Pay {formatPknNumber(confirming.amountPkn)} PKN to @{confirming.fromUsername}?</p>
-                    <div className="wallet-confirm-actions">
-                      <button className="btn ghost" type="button" onClick={() => setConfirming(null)}>Cancel</button>
-                      <button className="wallet-confirm-pay" type="button" disabled={busy} onClick={() => payRequest(confirming)}>
-                        Confirm payment
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            );
-          })()}
-        </section>
-      ) : null}
-
       <section className="wallet-card">
         <div className="wallet-card-head"><h2>Your wallets</h2></div>
         <div className="wallet-sources">
@@ -562,6 +422,7 @@ export default function Wallet() {
           getBearer={getBearer}
           onConnect={() => run(connect)}
           onRequireSignIn={requireSignIn}
+          onOpenConversation={(username) => navigate(`/messages/${encodeURIComponent(username)}`)}
           onTransfer={(recipient, amount) => run(async () => {
             const token = await getBearer();
             await transferAccountBalance({ recipientUsername: recipient, amountPkn: Math.round(Number(amount)) }, token);
@@ -862,7 +723,9 @@ function SendSheet({
   );
 }
 
-function ReceiveSheet({ onClose, signedIn, profile, address, chainId, getBearer, onConnect, onRequireSignIn }) {
+function ReceiveSheet({
+  onClose, signedIn, profile, address, chainId, getBearer, onConnect, onRequireSignIn, onOpenConversation,
+}) {
   const onPokoin = chainId === 26062026;
   const hasSite = Boolean(signedIn && profile?.username);
   const [kind, setKind] = useState(hasSite || !address ? 'site' : 'chain');
@@ -1006,7 +869,12 @@ function ReceiveSheet({ onClose, signedIn, profile, address, chainId, getBearer,
             {reqState.status === 'busy' ? 'Sending…' : `Request ${cleanAmount} PKN`}
           </button>
           {reqState.status === 'done' ? (
-            <p className="wallet-scan-ok">Request sent to @{reqState.message} — they can pay it from their wallet.</p>
+            <div className="wallet-request-sent">
+              <p className="wallet-scan-ok">Request sent to @{reqState.message} in your conversation.</p>
+              <button className="wallet-source-link" type="button" onClick={() => { onClose(); onOpenConversation(reqState.message); }}>
+                View conversation
+              </button>
+            </div>
           ) : null}
           {reqState.status === 'error' ? <p className="wallet-scanner-msg err">{reqState.message}</p> : null}
         </div>
