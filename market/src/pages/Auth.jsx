@@ -53,7 +53,6 @@ export default function Auth() {
   const [busy, setBusy] = useState(false);
   // PENDING_EMAIL_VERIFICATION screen state.
   const [pendingEmail, setPendingEmail] = useState('');
-  const [pendingSendOk, setPendingSendOk] = useState(true);
   const [resendReadyAt, setResendReadyAt] = useState(0);
   const [now, setNow] = useState(Date.now());
   const verifyStartedRef = useRef('');
@@ -115,9 +114,8 @@ export default function Auth() {
     return () => clearInterval(timer);
   }, [mode]);
 
-  async function enterPendingState(result, verifiedEmail) {
+  async function enterPendingState(verifiedEmail) {
     setPendingEmail(verifiedEmail);
-    setPendingSendOk(result?.verificationEmail?.ok !== false);
     setResendReadyAt(Date.now());
     setError('');
     setNotice('');
@@ -163,13 +161,13 @@ export default function Auth() {
       if (mode === 'signup') {
         // The Pokoin account stays pending until the emailed link is opened;
         // no Firebase identity exists until the backend verifies the token.
-        const result = await requestVerificationEmail({
+        await requestVerificationEmail({
           email: email.trim(),
           password,
           username: username.trim(),
           redirectPath: safeFrom,
         });
-        await enterPendingState(result, email.trim());
+        await enterPendingState(email.trim());
         return;
       }
       try {
@@ -188,7 +186,7 @@ export default function Auth() {
           }
           // A 429 still proves a pending verification exists for this email.
           if (probed || probeError?.status === 429) {
-            await enterPendingState(probed, email.trim());
+            await enterPendingState(email.trim());
             if (!probed) {
               setResendReadyAt(Date.now() - RESEND_COOLDOWN_MS + (probeError.body?.retryAfterSec || 60) * 1000);
               setNotice(probeError.message);
@@ -210,8 +208,7 @@ export default function Auth() {
     setBusy(true);
     setError('');
     try {
-      const result = await requestVerificationEmail({ resend: true, email: pendingEmail });
-      setPendingSendOk(result?.verificationEmail?.ok !== false);
+      await requestVerificationEmail({ resend: true, email: pendingEmail });
       setResendReadyAt(Date.now());
     } catch (err) {
       if (err?.status === 429) {
@@ -273,9 +270,6 @@ export default function Auth() {
                 Verification link sent to <strong>{pendingEmail || 'your email'}</strong>.
                 {' '}The link is valid for one hour and only works on a Pokoin domain.
               </p>
-              {pendingSendOk === false ? (
-                <p className="page-lede">The email could not be delivered just now — use the resend button below.</p>
-              ) : null}
               <Alert>{error}</Alert>
               <button className="btn" type="button" disabled={busy || blockedMs > 0} onClick={onResend}>
                 {blockedMs > 0
