@@ -72,3 +72,48 @@ export async function fetchDeskUserDocuments(uid, token, fetchImpl = fetch) {
   ]);
   return { user, balance };
 }
+
+/** List the caller's docs in a collection (wallet ledger feeds). REST runQuery
+ * instead of the SDK so the credentialless extension iframe — no
+ * firebaseAuth.currentUser — still reads with the injected bearer. */
+export async function fetchOwnedCollectionDocuments(collection, uid, token, { fetchImpl = fetch } = {}) {
+  const col = String(collection || '').trim();
+  const id = String(uid || '').trim();
+  const bearer = String(token || '').trim();
+  if (!col || !id || bearer.length <= 20) {
+    return [];
+  }
+  const response = await fetchImpl(
+    `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents:runQuery`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: col }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'uid' },
+              op: 'EQUAL',
+              value: { stringValue: id },
+            },
+          },
+        },
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`firestore query ${col} ${response.status}`);
+  }
+  const rows = await response.json();
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => row?.document)
+    .filter(Boolean)
+    .map((doc) => ({
+      id: String(doc.name || '').split('/').pop() || '',
+      ...firestoreDocumentData(doc),
+    }));
+}

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   fetchDeskUserDocuments,
+  fetchOwnedCollectionDocuments,
   firestoreDocumentData,
   firestoreDocumentUrl,
   firestoreFieldValue,
@@ -52,4 +53,45 @@ test('desk user documents load users and balances with the ID token', async () =
   assert.equal(docs.balance.availablePkn, 20);
   assert.equal(calls.length, 2);
   assert.equal(calls[0].auth, `Bearer ${'z'.repeat(24)}`);
+});
+
+test('owned collection queries run uid filters over REST runQuery', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => [
+        {
+          document: {
+            name: 'projects/pokoin/databases/(default)/documents/ledger_entries/row1',
+            fields: {
+              uid: { stringValue: 'desk-user' },
+              type: { stringValue: 'pkn_purchase_credit' },
+              amountPkn: { integerValue: '500' },
+            },
+          },
+        },
+        { readTime: '2026-09-19T00:00:00Z' },
+      ],
+    };
+  };
+  const rows = await fetchOwnedCollectionDocuments('ledger_entries', 'desk-user', 'z'.repeat(24), { fetchImpl });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 'row1');
+  assert.equal(rows[0].amountPkn, 500);
+  const body = JSON.parse(calls[0].options.body);
+  assert.equal(calls[0].url.includes('documents:runQuery'), true);
+  assert.deepEqual(body.structuredQuery.from, [{ collectionId: 'ledger_entries' }]);
+  assert.deepEqual(
+    body.structuredQuery.where.fieldFilter.value,
+    { stringValue: 'desk-user' },
+  );
+  assert.equal(calls[0].options.headers.Authorization, `Bearer ${'z'.repeat(24)}`);
+});
+
+test('owned collection queries bail out without a uid or real token', async () => {
+  assert.deepEqual(await fetchOwnedCollectionDocuments('ledger_entries', '', 'z'.repeat(24)), []);
+  assert.deepEqual(await fetchOwnedCollectionDocuments('ledger_entries', 'desk-user', 'short'), []);
 });

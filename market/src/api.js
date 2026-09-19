@@ -1547,6 +1547,74 @@ export function requestWpknExchange({ quoteId, direction, toAddress }, token) {
   });
 }
 
+/** Whole-PKN site balance transfer to another Pokoin username. */
+export function transferAccountBalance({ recipientUsername, amountPkn }, token) {
+  return getJson('/api/transfer-account-balance', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      recipientUsername: String(recipientUsername || '').trim().toLowerCase(),
+      amountPkn: Math.round(Number(amountPkn) || 0),
+    }),
+  });
+}
+
+/** Site PKN payout to a 0x address from the bank wallet. */
+export function requestPknWithdraw({ toAddress, amountPkn }, token) {
+  return getJson('/api/request-pkn-withdraw', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      toAddress: String(toAddress || '').trim(),
+      amountPkn: Math.round(Number(amountPkn) || 0),
+    }),
+  });
+}
+
+/** Credit site PKN after the caller funded the treasury on-chain. */
+export function topUpAccountBalance({ amountPkn, fundingTxHash = '' }, token) {
+  return getJson('/api/top-up-account-balance', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      amountPkn: Math.round(Number(amountPkn) || 0),
+      fundingTxHash: String(fundingTxHash || '').trim(),
+    }),
+  });
+}
+
+export function searchRecipientUsernames(query, token) {
+  const params = new URLSearchParams({ q: String(query || '').trim().toLowerCase() });
+  return getJson(`/api/search-recipient-emails?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+/** PokoinPoS explorer feed for a 0x address. Explorer failures are tolerated
+ * by the caller — the ledger feeds still render without it. */
+export async function fetchChainAddressActivity(address, { limit = 12 } = {}) {
+  const normalized = String(address || '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(normalized)) {
+    return [];
+  }
+  const response = await fetch(`https://rpc.pokoin.com/explorer/address/${normalized}`);
+  if (!response.ok) {
+    throw new Error(`explorer ${response.status}`);
+  }
+  const payload = await response.json();
+  return (Array.isArray(payload?.transactions) ? payload.transactions : [])
+    .slice(0, limit);
+}
+
 export function fetchExpansionSymbols(token, { query = '', missingOnly = false } = {}) {
   const params = new URLSearchParams({ limit: '200' });
   if (query) params.set('query', query);
