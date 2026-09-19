@@ -41,19 +41,21 @@ ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn $release current.new && mv -Tf 
 say "health"
 health_ok=0
 for i in $(seq 1 45); do
-  if search_json="$(ssh pi-home "curl -fsS 'http://127.0.0.1:18080/api/marketplace-search-page?query=blastoise&productSearchOnly=1&limit=6&offset=0&includeFacets=0&lang=en'" 2>/dev/null)"; then
-    if echo "$search_json" | python3 -c '
+  if universe_json="$(ssh pi-home "curl -fsS 'http://127.0.0.1:18080/api/marketplace-search-page?query=blastoise&productSearchOnly=1&limit=6&offset=0&includeFacets=0&lang=en'" 2>/dev/null)" \
+    && aisle_json="$(ssh pi-home "curl -fsS 'http://127.0.0.1:18080/api/marketplace-search-page?query=blastoise&productType=jumbo&limit=3&offset=0&includeFacets=0&lang=en'" 2>/dev/null)"; then
+    if printf '%s\n%s\n' "$universe_json" "$aisle_json" | python3 -c '
 import json, sys
-d = json.load(sys.stdin)
-rows = d.get("cards") or []
-jumbo = any("Jumbo Oversized" in str(c.get("number") or "") for c in rows)
-total = d.get("total")
-assert total is not None and total > 0, f"total missing: {total!r}"
-assert jumbo, "no jumbo rows in the Product (productSearchOnly) universe"
+universe, aisle = [json.loads(line) for line in sys.stdin if line.strip()]
+total = universe.get("total")
+assert total is not None and total > 0, f"product universe total missing: {total!r}"
+assert universe.get("cards"), "product universe returned no rows"
+jumbo = (aisle.get("cards") or [])
+assert jumbo, "productType=jumbo probe returned no rows"
+assert all("Jumbo Oversized" in str(c.get("number") or "") for c in jumbo), "narrow jumbo filter leaked non-jumbo rows"
 ' ; then
       listings="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-listings?cardId=220962&nativeOnly=1&limit=1'")"
       pair="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{\"pin\":\"0000\"}' http://127.0.0.1:18080/api/scan-pair")"
-      say "search-page total+jumbo OK · listings → $listings (expect 200) · scan-pair wrong code → $pair (expect 400)"
+      say "search-page universe total OK · jumbo narrow filter OK · listings → $listings (expect 200) · scan-pair wrong code → $pair (expect 400)"
       if [[ "$listings" == "200" && "$pair" == "400" ]]; then
         health_ok=1
         break
