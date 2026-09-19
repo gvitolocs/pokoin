@@ -475,10 +475,13 @@
 
 .inventory-targets-chips {
   display: flex;
+  flex-wrap: nowrap;
   gap: 0.35rem;
+  min-width: 0;
 }
 
 .inventory-targets-chips button {
+  flex: 0 0 auto;
   border: 1px solid var(--g5);
   background: #0b0a0e;
   border-radius: 999px;
@@ -487,6 +490,7 @@
   font-weight: 800;
   color: var(--muted);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .inventory-targets-chips button.on {
@@ -512,13 +516,24 @@
   width: 100%;
 }
 
-.sell-row .inventory-targets {
-  flex: 1 1 14rem;
-  justify-content: flex-end;
+/* Desk list form: targets sit on their own row so chips never crush. */
+.sell-targets-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.55rem;
+  margin: 0 0 0.65rem;
 }
 
-.sell-row .inventory-targets .list-btn {
+.sell-targets-row .inventory-targets {
+  flex: 1 1 100%;
+  margin-left: 0;
+  justify-content: flex-start;
+}
+
+.sell-targets-row .inventory-targets .list-btn {
   min-height: 2.6rem;
+  margin-left: auto;
 }
 
 .forum-desk { grid-template-columns: 1.15fr 0.85fr; }
