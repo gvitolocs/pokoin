@@ -448,7 +448,7 @@ export default function Chrome({ children }) {
     const printUsed = printLang;
     let cancelled = false;
     prefetchSearchPage(text, lang, {
-      fetchSearch,
+      fetchSearchPage: fetchSearch,
       tab: tabUsed,
       printLang: printUsed,
     })
@@ -521,7 +521,7 @@ export default function Chrome({ children }) {
       setHitCount(Number(data?.count) || 0);
       // Warm the "View all" destination so Enter is hot.
       prefetchSearchPage(data?.resolvedQuery || term, lang, {
-        fetchSearch: fetchSearch,
+        fetchSearchPage: fetchSearch,
         tab: searchTabRef.current,
         printLang: requestPrint,
       });
@@ -808,7 +808,7 @@ export default function Chrome({ children }) {
     setMenu(false);
     if (prefetchQuery) {
       prefetchSearchPage(prefetchQuery, lang, {
-        fetchSearch,
+        fetchSearchPage: fetchSearch,
         tab: searchTab,
       });
     }

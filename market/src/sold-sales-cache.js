@@ -1,4 +1,4 @@
-const PREFIX = 'pokoin.cardSales.v11.';
+const PREFIX = 'pokoin.cardSales.v12.';
 export const CARD_SALES_TTL_MS = 15 * 24 * 60 * 60 * 1000;
 const MEMORY_CAP = 32;
 const memory = new Map();

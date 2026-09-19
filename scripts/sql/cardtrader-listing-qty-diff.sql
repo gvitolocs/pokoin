@@ -1,3 +1,36 @@
+-- =====================================================================
+-- SUPERSEDED / NOT AUTHORITATIVE -- DO NOT APPLY TO ANY DATABASE.
+--
+-- The listing + sold pipeline functions defined below are owned by the
+-- cardvault repo:
+--
+--   pokemon_card_vault/oracle-postgres/schema/086_disappearance_inferred_sales.sql
+--   pokemon_card_vault/oracle-postgres/schema/088_seller_stack_continuity.sql
+--
+-- and are applied from there against the marketplace write primary
+-- ("nezopt 15T", container pokoin-marketplace-postgres-15t). The Pi
+-- (pokoin-marketplace-postgres-replica) is a streaming READ replica -- never
+-- migrate it.
+--
+-- This file is an OLD snapshot kept only for historical reference. Applying it
+-- would CREATE OR REPLACE the live refresh_cardtrader_market_listing_snapshots
+-- with a definition that predates:
+--   * quantity-aware attribution (stack_delta / stack_qty_before / suspicious)
+--   * the provisional / pending / retracted episode lifecycle
+--   * seller-stack continuity reconciliation
+-- i.e. it would reintroduce fabricated inferred sales such as the 2026-09-17
+-- Beedrill 340 PKN / 935 unit regression.
+--
+-- The guard below makes that mistake loud instead of silent.
+-- =====================================================================
+
+do $superseded$
+begin
+  raise exception
+    'cardtrader-listing-qty-diff.sql is superseded and must not be applied; the authoritative source is cardvault pokemon_card_vault/oracle-postgres/schema/ (086, 088)';
+end
+$superseded$;
+
 -- Per-listing CardTrader qty diffs for every facet combo
 -- (language × condition × reverse × 1st edition × graded).
 -- Daily job fetches the full listing book (cheap-25 trim is gone).

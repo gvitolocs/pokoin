@@ -20,6 +20,13 @@ test('prefetchSearchPage stores the first search page for Enter', async () => {
   assert.equal(takeHotSearchPage('oshawt', 'en'), null);
 });
 
+test('prefetchSearchPage without a fetcher resolves null instead of throwing', async () => {
+  resetHotSearchPage();
+  const result = await prefetchSearchPage('mimikyu', 'en', { tab: 'product' });
+  assert.equal(result, null);
+  assert.equal(takeHotSearchPage('mimikyu', 'en', 'product'), null);
+});
+
 test('hot search page is keyed by singles vs product', async () => {
   resetHotSearchPage();
   const singles = { cards: [{ id: 'card' }], hasMore: false, total: 9 };

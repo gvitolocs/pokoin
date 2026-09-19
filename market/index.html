@@ -24,7 +24,7 @@
       }
       (function () {
         var path = location.pathname.replace(/\/$/, "");
-        var match = path.match(/^\/marketplace\/([a-z]{2}(?:-[a-z]{2})?)\/cards\/(\d+)$/i);
+        var match = path.match(/^\/marketplace\/([a-z]{2}(?:-[a-z]{2})?)\/cards\/(\d+)(?:\/[^/?#]+)?$/i);
         if (!match) {
           return;
         }
