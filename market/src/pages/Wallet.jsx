@@ -340,11 +340,6 @@ export default function Wallet() {
           <div className="wallet-empty">
             <span className="wallet-empty-icon"><Icon name="activity" size={22} /></span>
             <p className="wallet-empty-title">No activity yet</p>
-            <p className="wallet-empty-sub">
-              {signedIn
-                ? 'Your sends, receives, and top-ups will land here.'
-                : 'Sign in, then your wallet moves will land here.'}
-            </p>
           </div>
         )}
       </section>
@@ -390,7 +385,7 @@ export default function Wallet() {
                   )}
                 </>
               ) : (
-                <button className="wallet-source-cta" type="button" onClick={() => run(connect)}>Connect MetaMask</button>
+                <button className="wallet-source-cta" type="button" onClick={() => run(connect)}>Connect wallet</button>
               )}
             </span>
           </div>
@@ -548,7 +543,7 @@ function SendSheet({
     <Sheet title="Send PKN" onClose={onClose}>
       <p className="wallet-sheet-lede">
         Pokoin username sends from your site balance
-        {address ? '; a 0x address sends from your connected MetaMask wallet.' : '.'}
+        {address ? '; a 0x address sends from your connected wallet.' : '.'}
       </p>
       <label className="sell-field">
         Recipient username or 0x address
@@ -641,15 +636,15 @@ function TopUpSheet({
   return (
     <Sheet title="Top up account balance" onClose={onClose}>
       <p className="wallet-sheet-lede">
-        Move whole PKN from your connected MetaMask wallet into your site account balance.
+        Move whole PKN from your connected wallet into your site account balance.
       </p>
       {!address ? (
-        <button className="wallet-sheet-cta" type="button" onClick={() => { onClose(); onConnect(); }}>Connect MetaMask</button>
+        <button className="wallet-sheet-cta" type="button" onClick={() => { onClose(); onConnect(); }}>Connect wallet</button>
       ) : !signedIn ? (
         <button className="wallet-sheet-cta" type="button" onClick={onRequireSignIn}>Sign in to top up</button>
       ) : mismatch ? (
         <p className="wallet-sheet-note">
-          Switch MetaMask to your linked wallet ({shortChainAddress(linkedAddress)}) before topping up.
+          Switch your wallet to the linked address ({shortChainAddress(linkedAddress)}) before topping up.
         </p>
       ) : (
         <>

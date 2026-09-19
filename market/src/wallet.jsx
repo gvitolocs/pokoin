@@ -85,7 +85,7 @@ export function WalletProvider({ children }) {
     async connect() {
       const ethereum = window.ethereum;
       if (!ethereum?.request) {
-        throw new Error('Install MetaMask or another injected wallet.');
+        throw new Error('No wallet found. Connect an EVM wallet — browser wallet, Ledger, or similar.');
       }
       const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
       const next = String(accounts?.[0] || '').toLowerCase();
@@ -126,7 +126,7 @@ export function utf8Hex(text) {
 export async function switchToPokoin() {
   const ethereum = window.ethereum;
   if (!ethereum?.request) {
-    throw new Error('Install MetaMask.');
+    throw new Error('Connect an EVM wallet — browser wallet, Ledger, or similar.');
   }
   try {
     await ethereum.request({
@@ -169,7 +169,7 @@ export function toWeiHex(amount) {
 export async function sendPkn({ from, to, amount }) {
   const ethereum = window.ethereum;
   if (!ethereum?.request) {
-    throw new Error('Install MetaMask.');
+    throw new Error('Connect an EVM wallet — browser wallet, Ledger, or similar.');
   }
   const dest = String(to || '').trim();
   if (!/^0x[0-9a-fA-F]{40}$/.test(dest)) {
@@ -189,7 +189,7 @@ export async function sendPkn({ from, to, amount }) {
 export async function sendSwapTransaction({ from, quote, poolId, assetIn, assetOut, amountIn }) {
   const ethereum = window.ethereum;
   if (!ethereum?.request) {
-    throw new Error('Install MetaMask.');
+    throw new Error('Connect an EVM wallet — browser wallet, Ledger, or similar.');
   }
   await switchToPokoin();
   const amountOut = Number(quote?.amountOut || 0);

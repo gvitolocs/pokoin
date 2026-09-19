@@ -6543,14 +6543,6 @@ html:has(.wallet-page) .brand span {
   font-weight: 800;
 }
 
-.wallet-empty-sub {
-  margin: 0;
-  font-size: 0.78rem;
-  color: var(--muted);
-  max-width: 17rem;
-  line-height: 1.45;
-}
-
 /* Your wallets — connection / source rows, product semantics not bank branches. */
 .wallet-sources {
   display: flex;
