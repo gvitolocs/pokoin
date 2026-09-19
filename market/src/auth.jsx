@@ -121,7 +121,10 @@ export async function getBearer(forceRefresh = false) {
   }
   const user = firebaseAuth.currentUser;
   if (!user) {
-    return injected;
+    // The injected desk token is expired and there is no Firebase session to
+    // mint a fresh one — return nothing so callers get a clean 401 / sign-in
+    // state instead of a guaranteed token-expired rejection.
+    return '';
   }
   return user.getIdToken(forceRefresh);
 }

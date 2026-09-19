@@ -29,16 +29,16 @@ const IS_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 function Icon({ name, size = 22 }) {
   const paths = {
-    plus: <path d="M12 5v14M5 12h14" />,
     topup: <path d="M12 21V9m0 0-4 4m4-4 4 4M4 3h16" />,
     withdraw: <path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" />,
     send: <path d="M4 12 20 4l-4 16-4-6-8-2Z" />,
     receive: <path d="M20 12 4 20l4-16 4 6 8 2Z" />,
     swap: <path d="M4 8h13m0 0-3.5-3.5M17 8l-3.5 3.5M20 16H7m0 0 3.5 3.5M7 16l3.5-3.5" />,
-    more: <path d="M6 12h.01M12 12h.01M18 12h.01" />,
     copy: <path d="M9 9h10v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V9Zm-2 6H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" />,
     check: <path d="m4 12 5 5L20 6" />,
     link: <path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7L12.5 19" />,
+    wallet: <path d="M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm13 4h4v4h-4a2 2 0 0 1 0-4Z" />,
+    activity: <path d="M3 12h4l2.5-7 5 14 2.5-7H21" />,
   };
   return (
     <svg
@@ -160,7 +160,6 @@ export default function Wallet() {
   const { signedIn, user, profile, availablePkn, getBearer } = useAuth();
   const uid = profile?.uid || user?.uid || '';
 
-  const [mode, setMode] = useState('accounts');
   const [sheet, setSheet] = useState('');
   const [flash, setFlash] = useState('');
   const [error, setError] = useState('');
@@ -234,21 +233,6 @@ export default function Wallet() {
   } : null;
   const total = availablePkn + (chainAccount ? balance : 0);
 
-  const hero = useMemo(() => {
-    if (mode === 'site') {
-      return { label: 'Pokoin balance', value: availablePkn };
-    }
-    if (mode === 'chain') {
-      return { label: 'PokoinPoS', value: balance };
-    }
-    return { label: 'Total balance', value: total };
-  }, [mode, availablePkn, balance, total]);
-
-  function cycleMode() {
-    const next = HERO_MODES[(HERO_MODES.indexOf(mode) + 1) % HERO_MODES.length];
-    setMode(next === 'chain' && !address ? 'accounts' : next);
-  }
-
   function requireSignIn() {
     window.location.href = authFrom('/wallet');
   }
@@ -279,8 +263,7 @@ export default function Wallet() {
     { key: 'receive', icon: 'receive', label: 'Receive', sheet: 'receive' },
     { key: 'withdraw', icon: 'withdraw', label: 'Withdraw', sheet: 'withdraw' },
     { key: 'topup', icon: 'topup', label: 'Top up', sheet: 'topup' },
-    { key: 'swap', icon: 'swap', label: 'Swap', to: '/exchange' },
-    { key: 'more', icon: 'more', label: 'More', sheet: 'more' },
+    { key: 'swap', icon: 'swap', label: 'Exchange', to: '/exchange' },
   ];
 
   const visibleActivity = showAllActivity ? activity : activity.slice(0, ACTIVITY_ROW_COUNT);
@@ -288,28 +271,12 @@ export default function Wallet() {
   return (
     <div className="page wallet-page">
       <section className="wallet-hero">
-        <div className="wallet-hero-kicker">Wallet</div>
-        <div className="wallet-hero-label">{hero.label}</div>
-        <BalanceText value={hero.value} />
-        <button className="wallet-accounts-pill" type="button" onClick={cycleMode}>
-          Accounts
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-        </button>
-        {mode === 'accounts' && total > 0 ? (
-          <p className="wallet-hero-sub">
-            {formatPknNumber(availablePkn)} site{chainAccount ? ` · ${formatPknNumber(balance, { maximumFractionDigits: 4 })} chain` : ''}
+        <h1 className="wallet-title">Wallet</h1>
+        <BalanceText value={total} />
+        {chainAccount ? (
+          <p className="wallet-hero-sources">
+            Pokoin {formatPknNumber(availablePkn)} · PokoinPoS {formatPknNumber(balance, { maximumFractionDigits: 2 })}
           </p>
-        ) : null}
-        {mode === 'chain' ? (
-          address ? (
-            <p className="wallet-hero-sub mono">
-              {onPokoin ? shortChainAddress(address) : 'Switch MetaMask to PokoinPoS'}
-            </p>
-          ) : (
-            <button className="wallet-hero-connect" type="button" onClick={() => run(connect)}>Connect MetaMask</button>
-          )
         ) : null}
         {flash ? <p className="wallet-flash">{flash}</p> : null}
         {error ? <p className="wallet-error">{error}</p> : null}
@@ -343,7 +310,10 @@ export default function Wallet() {
           ) : null}
         </div>
         {activityLoading && !activity.length ? (
-          <p className="wallet-empty">Loading activity…</p>
+          <div className="wallet-empty">
+            <span className="wallet-empty-icon loading"><Icon name="activity" size={22} /></span>
+            <p className="wallet-empty-title">Loading activity…</p>
+          </div>
         ) : visibleActivity.length ? (
           <ul className="wallet-activity">
             {visibleActivity.map((item) => (
@@ -367,35 +337,63 @@ export default function Wallet() {
             ))}
           </ul>
         ) : (
-          <p className="wallet-empty">
-            {signedIn
-              ? 'No activity yet. Send PKN or top up to see it here.'
-              : 'Sign in to see your account activity.'}
-          </p>
+          <div className="wallet-empty">
+            <span className="wallet-empty-icon"><Icon name="activity" size={22} /></span>
+            <p className="wallet-empty-title">No activity yet</p>
+            <p className="wallet-empty-sub">
+              {signedIn
+                ? 'Your sends, receives, and top-ups will land here.'
+                : 'Sign in, then your wallet moves will land here.'}
+            </p>
+          </div>
         )}
       </section>
 
       <section className="wallet-card">
-        <div className="wallet-card-head"><h2>Accounts</h2></div>
-        <div className="wallet-accounts">
-          <button className="wallet-account-row" type="button" onClick={() => setMode('site')}>
-            <span className="wallet-account-icon pk"><Icon name="topup" size={18} /></span>
-            <span className="wallet-activity-text">
-              <span className="wallet-activity-title">Pokoin balance</span>
-              <span className="wallet-activity-time">{profile?.username || (signedIn ? 'Site account' : 'Sign in to activate')}</span>
+        <div className="wallet-card-head"><h2>Your wallets</h2></div>
+        <div className="wallet-sources">
+          <div className="wallet-source">
+            <span className="wallet-source-icon gold"><Icon name="wallet" size={18} /></span>
+            <span className="wallet-source-text">
+              <span className="wallet-source-name">Pokoin balance</span>
+              <span className="wallet-source-status">
+                <span className={signedIn ? 'wallet-dot on' : 'wallet-dot'} />
+                {signedIn ? (profile?.username || 'Signed in') : 'Not signed in'}
+              </span>
             </span>
-            <span className="wallet-account-amount">{formatPknNumber(availablePkn)} PKN</span>
-          </button>
-          <button className="wallet-account-row" type="button" onClick={() => setMode('chain')}>
-            <span className="wallet-account-icon chain"><Icon name="link" size={18} /></span>
-            <span className="wallet-activity-text">
-              <span className="wallet-activity-title">PokoinPoS</span>
-              <span className="wallet-activity-time">{chainAccount ? chainAccount.detail : 'Connect MetaMask'}</span>
+            <span className="wallet-source-end">
+              <span className="wallet-source-amount">{formatPknNumber(availablePkn)} PKN</span>
+              {!signedIn ? (
+                <button className="wallet-source-link" type="button" onClick={requireSignIn}>Sign in</button>
+              ) : null}
             </span>
-            <span className="wallet-account-amount">
-              {chainAccount ? `${formatPknNumber(balance, { maximumFractionDigits: 4 })} PKN` : '—'}
+          </div>
+          <div className="wallet-source">
+            <span className="wallet-source-icon chain"><Icon name="link" size={18} /></span>
+            <span className="wallet-source-text">
+              <span className="wallet-source-name">PokoinPoS</span>
+              <span className="wallet-source-status">
+                <span className={!address ? 'wallet-dot' : onPokoin ? 'wallet-dot on' : 'wallet-dot warn'} />
+                {!address
+                  ? 'Not connected'
+                  : onPokoin ? shortChainAddress(address) : 'Wrong network'}
+              </span>
             </span>
-          </button>
+            <span className="wallet-source-end">
+              {address ? (
+                <>
+                  <span className="wallet-source-amount">{formatPknNumber(balance, { maximumFractionDigits: 4 })} PKN</span>
+                  {!onPokoin ? (
+                    <button className="wallet-source-link" type="button" onClick={() => run(switchToPokoin)}>Switch network</button>
+                  ) : (
+                    <button className="wallet-source-link" type="button" onClick={() => run(disconnect)}>Disconnect</button>
+                  )}
+                </>
+              ) : (
+                <button className="wallet-source-cta" type="button" onClick={() => run(connect)}>Connect MetaMask</button>
+              )}
+            </span>
+          </div>
         </div>
       </section>
 
@@ -470,23 +468,6 @@ export default function Wallet() {
             await topUpAccountBalance({ amountPkn: Math.round(Number(amount)), fundingTxHash: hash }, token);
           }, { okMessage: 'Account balance topped up.' })}
         />
-      ) : null}
-
-      {sheet === 'more' ? (
-        <Sheet title="More" onClose={closeSheet}>
-          <div className="wallet-more">
-            <a href="https://explorer.pokoin.com" target="_blank" rel="noreferrer">Block explorer</a>
-            <Link to="/buy" onClick={closeSheet}>Buy PKN</Link>
-            <Link to="/nft" onClick={closeSheet}>NFT</Link>
-            <Link to="/profile" onClick={closeSheet}>Profile</Link>
-            <button type="button" onClick={() => run(switchToPokoin)}>Add Pokoin network</button>
-            {address ? (
-              <button type="button" className="danger" onClick={() => { disconnect(); closeSheet(); }}>Disconnect MetaMask</button>
-            ) : (
-              <button type="button" onClick={() => { run(connect); closeSheet(); }}>Connect MetaMask</button>
-            )}
-          </div>
-        </Sheet>
       ) : null}
     </div>
   );

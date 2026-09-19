@@ -92,12 +92,12 @@ export default function Exchange() {
 
   return (
     <div className="page wallet-page">
-      <section className="wallet-hero slim">
-        <div className="wallet-hero-kicker">Exchange</div>
-        <div className="wallet-hero-label">Swap site PKN, WPKN, and PokoinPoS assets</div>
+      <section className="wallet-hero">
+        <h1 className="wallet-title">Exchange</h1>
+        <p className="wallet-hero-sources">Swap site PKN, WPKN, and PokoinPoS assets</p>
         {flash ? <p className="wallet-flash">{flash}</p> : null}
         {error ? <p className="wallet-error">{error}</p> : null}
-        <Link className="wallet-hero-connect" to="/wallet">Back to wallet</Link>
+        <Link className="wallet-back" to="/wallet">Back to wallet</Link>
       </section>
 
       <div className="exchange-grid">
