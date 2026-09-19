@@ -35,8 +35,6 @@ if [[ -d "$ROOT/explorer" ]]; then
 else
   echo "warning: missing $ROOT/explorer (explorer.pokoin.com will 404)" >&2
 fi
-# Jumbo Oversized visual-review gallery (noindex, unlinked): /jumbos.html
-cp "$ROOT/jumbos.html" "$OUT/jumbos.html"
 # Chrome extension zip from Mac Desktop (highest FULL build). Served at
 # /download/extension.zip and the /download/extention.zip alias.
 if [[ -f "$ROOT/download/extension.zip" ]]; then

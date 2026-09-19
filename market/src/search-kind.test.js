@@ -10,10 +10,11 @@ import {
   uniqueSellers,
 } from './search-kind.js';
 
-test('search tabs default to singles', () => {
+test('search tabs default to singles; legacy jumbo normalizes to product', () => {
   assert.equal(normalizeSearchTab(''), 'singles');
   assert.equal(normalizeSearchTab('product'), 'product');
   assert.equal(normalizeSearchTab('users'), 'users');
+  assert.equal(normalizeSearchTab('jumbo'), 'product');
   assert.equal(normalizeSearchTab('sealed'), 'singles');
 });
 
@@ -34,6 +35,7 @@ test('singles vs product follows catalog kind', () => {
   assert.equal(printingMatchesSearchTab(card, 'product'), false);
   assert.equal(printingMatchesSearchTab({ name: 'Mimikyu Pin Collection' }, 'singles'), false);
   assert.equal(printingMatchesSearchTab({ name: 'Mimikyu Pin Collection' }, 'product'), true);
+  // Jumbo rows are Product results — no separate jumbo universe.
   assert.equal(printingMatchesSearchTab({
     name: 'Palkia & Dialga LEGEND',
     number: 'Jumbo Oversized',
@@ -45,7 +47,7 @@ test('singles vs product follows catalog kind', () => {
   assert.equal(printingMatchesSearchTab({
     name: 'Palkia & Dialga LEGEND',
     number: 'Jumbo Oversized',
-  }, 'product'), false);
+  }, 'product'), true);
   assert.equal(printingMatchesSearchTab({
     name: 'Charizard',
     number: '017',
@@ -60,7 +62,7 @@ test('singles vs product follows catalog kind', () => {
     name: 'Charizard',
     number: '017',
     rarity: 'Jumbo Oversized',
-  }, 'product'), false);
+  }, 'product'), true);
   assert.equal(printingMatchesSearchTab({
     name: 'Arceus: Flamemaster Theme Deck',
     set: 'HeartGold & SoulSilver Platinum',
@@ -94,17 +96,30 @@ test('unique sellers collapse listings by seller uid', () => {
   assert.equal(sellers[0].name, 'Mimi');
 });
 
-test('search popup has a Jumbo tab; singles and product exclude jumbos', () => {
-  assert.equal(SEARCH_TABS.map((t) => t.id).join(','), 'singles,jumbo,product,users');
-  assert.equal(normalizeSearchTab('jumbo'), 'jumbo');
-  assert.deepEqual(searchFetchOptions('jumbo'), { productType: 'jumbo' });
-  assert.deepEqual(searchFetchOptions('singles'), { productType: 'card' });
-  const jumboRow = { itemKind: 'single', productType: 'jumbo', name: 'Charizard GX', number: 'Jumbo Oversized | 211' };
+test('jumbo is a Product subtype, never a fourth top-level search entity', () => {
+  // Top-level search entities are exactly Singles | Product | Users.
+  assert.equal(SEARCH_TABS.map((tab) => tab.id).join(','), 'singles,product,users');
+  assert.equal(SEARCH_TABS.map((tab) => tab.label).join('|'), 'Singles|Product|Users');
+  // Legacy tab=jumbo state normalizes into Product everywhere.
+  assert.equal(normalizeSearchTab('jumbo'), 'product');
+  assert.deepEqual(searchFetchOptions('jumbo'), searchFetchOptions('product'));
+  assert.equal(searchHref('mimikyu', 'jumbo'), '/marketplace/search?q=mimikyu&tab=product');
+  // A jumbo row (product_type 'jumbo', item_kind 'single' per 083) rides Product.
+  const jumboRow = {
+    itemKind: 'single',
+    productType: 'jumbo',
+    name: 'Mimikyu',
+    number: 'Jumbo Oversized | SVP 004',
+  };
   assert.equal(printingMatchesSearchTab(jumboRow, 'jumbo'), true);
+  assert.equal(printingMatchesSearchTab(jumboRow, 'product'), true);
   assert.equal(printingMatchesSearchTab(jumboRow, 'singles'), false);
-  assert.equal(printingMatchesSearchTab(jumboRow, 'product'), false);
+  // Name-stamped legacy jumbos (pre-083 rows) classify the same way.
+  const legacyJumbo = { name: 'Charizard GX', number: 'Jumbo Oversized | 211' };
+  assert.equal(printingMatchesSearchTab(legacyJumbo, 'product'), true);
+  assert.equal(printingMatchesSearchTab(legacyJumbo, 'singles'), false);
   const normalRow = { itemKind: 'single', productType: 'card', name: 'Dratini', number: '131/197' };
   assert.equal(printingMatchesSearchTab(normalRow, 'singles'), true);
   assert.equal(printingMatchesSearchTab(normalRow, 'jumbo'), false);
-  assert.equal(searchHref('charizard gx jumbo', 'jumbo'), '/marketplace/search?q=charizard+gx+jumbo&tab=jumbo');
+  assert.equal(printingMatchesSearchTab(normalRow, 'product'), false);
 });

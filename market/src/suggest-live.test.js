@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compactQuery, nameRow } from './suggest-rank.js';
+import { SEARCH_TABS } from './search-kind.js';
 import {
   cachedPrintings,
   isLiveStub,
@@ -396,6 +397,48 @@ test('palkia legen live fills 20 Palkia singles, not Paldea tins or jumbos', () 
   assert.ok(!ids.includes('jumbo'));
   const product = liveSuggestGroups('palkia legen', { preferPerGroup: 4, kind: 'product' });
   assert.ok(product.groups.some((group) => group.printings.some((row) => row.id === 'jumbo')));
+});
+
+test('mimikyu popup: a jumbo matching the query is a Product result, tabs stay three', () => {
+  resetSuggestLive();
+  rememberSuggestGroups([
+    {
+      name: 'Mimikyu',
+      printings: [
+        {
+          id: 'pfl',
+          name: 'Mimikyu',
+          set: 'Phantasmal Flames',
+          number: '042/094',
+          productType: 'card',
+          itemKind: 'single',
+          nationality: 'western',
+        },
+        {
+          id: 'jumbo-svp',
+          name: 'Mimikyu',
+          set: 'SV Black Star Promos',
+          number: 'Jumbo Oversized | SVP 004',
+          productType: 'jumbo',
+          itemKind: 'single',
+          nationality: 'western',
+        },
+      ],
+    },
+  ]);
+  // The popup exposes exactly Singles | Product | Users — no Jumbo entity.
+  assert.equal(SEARCH_TABS.map((tab) => tab.id).join(','), 'singles,product,users');
+  const singles = liveSuggestGroups('mimikyu', { preferPerGroup: 4, kind: 'singles' });
+  const singlesIds = singles.groups.flatMap((group) => group.printings.map((row) => row.id));
+  assert.ok(singlesIds.includes('pfl'));
+  assert.ok(!singlesIds.includes('jumbo-svp'));
+  const product = liveSuggestGroups('mimikyu', { preferPerGroup: 4, kind: 'product' });
+  const productIds = product.groups.flatMap((group) => group.printings.map((row) => row.id));
+  assert.ok(
+    productIds.includes('jumbo-svp'),
+    'jumbo Mimikyu must ride the Product tab, never its own category',
+  );
+  assert.ok(!productIds.includes('pfl'));
 });
 
 test('arceus platinum singles drop theme decks, chests, and binders', () => {

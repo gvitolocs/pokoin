@@ -1048,11 +1048,9 @@ export default function Chrome({ children }) {
                     <li className="suggest-empty">
                       {pending
                         ? 'Searching…'
-                        : searchTab === 'jumbo'
-                          ? `No jumbo cards match “${query.trim()}”.`
-                          : searchTab === 'product'
-                            ? `No products match “${query.trim()}”.`
-                            : `No singles match “${query.trim()}”.`}
+                        : searchTab === 'product'
+                          ? `No products match “${query.trim()}”.`
+                          : `No singles match “${query.trim()}”.`}
                     </li>
                   )}
                 </ul>

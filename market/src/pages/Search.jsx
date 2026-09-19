@@ -307,7 +307,7 @@ export default function Search() {
 
   const emptyTitle = tab === 'users'
     ? 'No sellers match'
-    : (tab === 'jumbo' ? 'No jumbo cards match' : tab === 'product' ? 'No products match' : 'No matches');
+    : (tab === 'product' ? 'No products match' : 'No matches');
   const emptyLede = tab === 'users'
     ? 'Try an exact seller username.'
     : 'Try a collector number, a set name, or a shorter card name.';
@@ -331,7 +331,7 @@ export default function Search() {
                 ? <><strong>{sellers.length.toLocaleString('en-US')}</strong> sellers</>
                 : 'No sellers match that search.')
               : (!cards.length
-                ? (tab === 'jumbo' ? 'No jumbo cards match that search.' : tab === 'product' ? 'No products match that search.' : 'No cards match that search.')
+                ? (tab === 'product' ? 'No products match that search.' : 'No cards match that search.')
                 : (filtersOn
                   ? <><strong>{shown.length.toLocaleString('en-US')}</strong> matching</>
                   : (total || !hasMore

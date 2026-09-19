@@ -1,14 +1,19 @@
 import { suggestKind } from './identity.js';
 
+// Top-level search entities: Singles | Product | Users. Jumbo is not a
+// category — product_type 'jumbo' (083) rides inside Product.
 export const SEARCH_TABS = [
   { id: 'singles', label: 'Singles' },
-  { id: 'jumbo', label: 'Jumbo' },
   { id: 'product', label: 'Product' },
   { id: 'users', label: 'Users' },
 ];
 
 export function normalizeSearchTab(value) {
   const id = String(value || '').trim().toLowerCase();
+  // Legacy tab=jumbo links normalize into Product; jumbo is a subtype there.
+  if (id === 'jumbo') {
+    return 'product';
+  }
   return SEARCH_TABS.some((tab) => tab.id === id) ? id : 'singles';
 }
 
@@ -39,21 +44,18 @@ export function printingMatchesSearchTab(card, tab) {
   if (kind === 'users') {
     return false;
   }
-  const jumbo = suggestKind(card) === 'Jumbo';
-  if (kind === 'jumbo') {
-    return jumbo;
-  }
+  // Jumbo rows classify as Product (suggestKind 'Jumbo' is a subtype label,
+  // never a third result universe next to Singles/Product).
   const single = isSearchSingle(card);
-  return kind === 'singles' ? single && !jumbo : !single && !jumbo;
+  return kind === 'singles' ? single : !single;
 }
 
 export function searchFetchOptions(tab) {
   const kind = normalizeSearchTab(tab);
   if (kind === 'product') {
+    // Product search universe: sealed products plus the jumbo subtype.
+    // The backend clause matches item_kind 'product' OR product_type 'jumbo'.
     return { productSearchOnly: true };
-  }
-  if (kind === 'jumbo') {
-    return { productType: 'jumbo' };
   }
   if (kind === 'singles') {
     return { productType: 'card' };
