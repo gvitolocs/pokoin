@@ -13,9 +13,8 @@ is a public frontend/static metadata hostname hosted on the Vercel project
 `https://rpc.pokoin.com` client-side. Required public URLs:
 
 - `https://explorer.pokoin.com/` (this UI)
-- `https://explorer.pokoin.com/wpkn/logo.png` (pending: asset lives in
-  pokoinpos `metadata/token-assets/wpkn/` per `docs/wpkn-token-listing.md`,
-  not yet produced)
+- `https://explorer.pokoin.com/wpkn/logo.png` (256×256 downscale of the
+  marketplace mark `home/logo.png`, per `docs/wpkn-token-listing.md`)
 - `https://explorer.pokoin.com/wpkn-reserve.json` (pending: reserve manifest
   data must be supplied by the operator)
 

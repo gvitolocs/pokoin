@@ -48,3 +48,13 @@ test('build-web.sh copies the vendored explorer UI into dist-web', () => {
   assert.ok(fs.existsSync(`${repoRoot}explorer/styles.css`));
   assert.ok(fs.existsSync(`${repoRoot}explorer/pokoin-logo.png`));
 });
+
+test('wpkn token-listing logo ships at the documented path and size', () => {
+  const logo = fs.readFileSync(`${repoRoot}explorer/wpkn/logo.png`);
+  // PNG magic + IHDR width/height at bytes 16..24.
+  assert.deepEqual([...logo.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  assert.equal(logo.readUInt32BE(16), 256);
+  assert.equal(logo.readUInt32BE(20), 256);
+  // Same mark as the marketplace logo (both are 512x512 sources downscaled).
+  assert.ok(logo.length > 4000, 'logo should not be a blank placeholder');
+});
