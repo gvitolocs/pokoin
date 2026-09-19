@@ -1650,7 +1650,7 @@ export default function Card() {
         imageAlt={cardImageAlt(card)}
         jsonLd={[
           productJsonLd(card, { url: `https://pokoin.com${cardPath}`, offers: nativeLive }),
-          breadcrumbJsonLd(seoCrumbs.map((crumb) => ({
+          breadcrumbJsonLd(seoCrumbs.filter(Boolean).map((crumb) => ({
             name: crumb.name,
             href: crumb.href,
           }))),
