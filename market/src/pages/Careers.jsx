@@ -1,7 +1,5 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { EmptyDesk } from '../components/Desk.jsx';
-import { APP } from '../punchouts.js';
 import {
   CAREERS_CONTACT,
   OPEN_ROLES,
@@ -10,67 +8,143 @@ import {
   roleMeta,
 } from '../careers-jobs.js';
 
+/** Inline brand mark — Phantom puts a lottie/mascot inside display titles. */
+function TitleMark({ className = '' }) {
+  return (
+    <img
+      className={`careers-title-mark ${className}`.trim()}
+      src="/home/logo.png"
+      width="72"
+      height="72"
+      alt=""
+      draggable={false}
+    />
+  );
+}
+
 const PRINCIPLES = [
   {
     title: 'Collectors first',
-    body: 'Every desk, search hit, and listing flow should help a collector buy or sell — not pad a house account.',
+    highlight: 'Collectors',
+    rest: ' first',
+    tone: 'a',
+    body: 'Every desk and listing flow should help a collector trade — not pad a house account.',
   },
   {
     title: 'Stay honest',
-    body: 'No invented prices, fake comps, or silent fallbacks. If the book is empty, the page says so.',
+    highlight: 'honest',
+    prefix: 'Stay ',
+    rest: '',
+    tone: 'b',
+    body: 'No invented prices or silent fallbacks. Empty books stay empty on the page.',
   },
   {
     title: 'Ship and iterate',
-    body: 'Ship the smallest correct surface, then tighten. Catalog depth and chain settlement both move in public.',
+    highlight: 'Ship',
+    rest: ' and iterate',
+    tone: 'c',
+    body: 'Ship the smallest correct surface, then tighten it in public.',
   },
   {
     title: 'Own the stack',
-    body: 'Marketplace, wallet, and scan stay one product. Prefer fixing the real path over bolting on a parallel one.',
+    highlight: 'Own',
+    rest: ' the stack',
+    tone: 'd',
+    body: 'Marketplace, wallet, and scan stay one product — fix the real path.',
   },
 ];
 
+/** Semantic stand-in for Phantom perk cards — product reasons, not invented HR benefits. */
 const REASONS = [
-  {
-    title: 'One product surface',
-    body: 'Card Reserve, PKN wallet, and Scan share the same host and identity — not three disconnected apps.',
-  },
-  {
-    title: 'Real catalog work',
-    body: 'Printings, artists, eras, and leftovers are treated as product data, not marketing filler.',
-  },
-  {
-    title: 'Native PKN settlement',
-    body: 'Listings and checkout settle in PKN on PokoinPoS. Chain tooling stays public when it can.',
-  },
-  {
-    title: 'Peer to peer',
-    body: 'Collectors trade with collectors. Offers sit on the desk instead of a middleman inventory.',
-  },
-  {
-    title: 'Public docs & explorer',
-    body: 'Host-a-node notes, health, RPC, and the explorer stay reachable from the site.',
-  },
-  {
-    title: 'Direct contact',
-    body: 'Questions go to contact@pokoin.com. There is no opaque careers portal yet.',
-  },
+  { title: 'One product surface', tone: 'a' },
+  { title: 'Real catalog depth', tone: 'b' },
+  { title: 'Native PKN settlement', tone: 'c' },
+  { title: 'Peer-to-peer trading', tone: 'd' },
+  { title: 'Public docs & explorer', tone: 'e' },
+  { title: 'Direct email contact', tone: 'f' },
 ];
 
-function IconChevron({ open }) {
+const LIFE_STRIP = [
+  { label: 'Card desk', tone: 'a' },
+  { label: 'Scan', tone: 'b' },
+  { label: 'Wallet', tone: 'c' },
+  { label: 'Sets', tone: 'd' },
+  { label: 'Artists', tone: 'e' },
+  { label: 'Signal', tone: 'f' },
+];
+
+function PrincipleCard({ item }) {
+  const prefix = item.prefix || '';
+  const rest = item.rest || '';
   return (
-    <svg
-      className={`careers-chevron${open ? ' is-open' : ''}`}
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M6 9l6 6 6-6" />
-    </svg>
+    <li className={`careers-principle-card tone-${item.tone}`}>
+      <p className="careers-principle-title">
+        {prefix}
+        <span className="careers-principle-hl">{item.highlight}</span>
+        {rest}
+      </p>
+      <p className="careers-principle-body">{item.body}</p>
+      <div className="careers-principle-art" aria-hidden="true" />
+    </li>
+  );
+}
+
+function PrinciplesSlider() {
+  const scrollerRef = useRef(null);
+  const [atStart, setAtStart] = useState(true);
+  const [atEnd, setAtEnd] = useState(false);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return undefined;
+    const sync = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      setAtStart(el.scrollLeft <= 4);
+      setAtEnd(max <= 4 || el.scrollLeft >= max - 4);
+    };
+    sync();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(sync) : null;
+    ro?.observe(el);
+    el.addEventListener('scroll', sync, { passive: true });
+    window.addEventListener('resize', sync);
+    requestAnimationFrame(sync);
+    return () => {
+      ro?.disconnect();
+      el.removeEventListener('scroll', sync);
+      window.removeEventListener('resize', sync);
+    };
+  }, []);
+
+  const scrollBy = (dir) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const card = el.querySelector('.careers-principle-card');
+    const step = card ? card.getBoundingClientRect().width + 16 : 320;
+    el.scrollBy({ left: dir * step, behavior: 'smooth' });
+  };
+
+  return (
+    <div className="careers-slider">
+      <div className="careers-slider-chrome">
+        <p className="careers-chip">
+          <span className="careers-chip-star" aria-hidden="true">★</span>
+          How we work
+        </p>
+        <div className="careers-slider-arrows">
+          <button type="button" className="careers-arrow" aria-label="Previous slide" disabled={atStart} onClick={() => scrollBy(-1)}>
+            ‹
+          </button>
+          <button type="button" className="careers-arrow" aria-label="Next slide" disabled={atEnd} onClick={() => scrollBy(1)}>
+            ›
+          </button>
+        </div>
+      </div>
+      <ul className="careers-principle-track" ref={scrollerRef}>
+        {PRINCIPLES.map((item) => (
+          <PrincipleCard key={item.title} item={item} />
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -89,18 +163,10 @@ function DepartmentAccordion({ department, roles, defaultOpen }) {
         onClick={() => setOpen((v) => !v)}
       >
         <span className="careers-dept-name">{department}</span>
-        <span className="careers-dept-count" aria-label={`${count} open ${count === 1 ? 'role' : 'roles'}`}>
-          {count}
-        </span>
-        <IconChevron open={open} />
+        <span className="careers-dept-count">{count}</span>
+        <span className={`careers-dept-chevron${open ? ' is-open' : ''}`} aria-hidden="true">›</span>
       </button>
-      <div
-        id={panelId}
-        className="careers-dept-panel"
-        hidden={!open}
-        role="region"
-        aria-label={`${department} openings`}
-      >
+      <div id={panelId} className="careers-dept-panel" hidden={!open} role="region" aria-label={`${department} openings`}>
         <ul className="careers-role-list">
           {roles.map((role) => {
             const href = roleHref(role);
@@ -114,8 +180,7 @@ function DepartmentAccordion({ department, roles, defaultOpen }) {
                   {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                 >
                   <span className="careers-role-title">{role.title}</span>
-                  {meta ? <span className="careers-role-meta">{meta}</span> : null}
-                  <span className="careers-role-cta" aria-hidden="true">View</span>
+                  <span className="careers-role-meta">{meta || 'Open'}</span>
                 </a>
               </li>
             );
@@ -128,36 +193,30 @@ function DepartmentAccordion({ department, roles, defaultOpen }) {
 
 function OpenPositions({ roles }) {
   const groups = groupRolesByDepartment(roles);
-  const total = roles.length;
-
-  if (!total) {
+  if (!roles.length) {
     return (
-      <EmptyDesk
-        nested
-        title="No open roles right now"
-        lede="When a posting is ready it will land here. Until then, write if you want to talk about working on Pokoin."
-      >
-        <a className="btn" href={CAREERS_CONTACT}>Email contact@pokoin.com</a>
-        <Link className="btn ghost" to={APP.about}>About Pokoin</Link>
-      </EmptyDesk>
+      <div className="careers-jobs-empty" role="status">
+        <p className="careers-jobs-empty-title">No open roles right now</p>
+        <p className="careers-jobs-empty-lede">
+          When a posting is ready it will appear in this list, grouped by team — the same layout as a live board.
+          Until then, write to{' '}
+          <a href={CAREERS_CONTACT}>contact@pokoin.com</a>.
+        </p>
+        <a className="careers-soft-btn" href={CAREERS_CONTACT}>Email contact@pokoin.com</a>
+      </div>
     );
   }
 
   return (
     <div className="careers-jobs">
-      <p className="careers-jobs-count">
-        {total} open {total === 1 ? 'role' : 'roles'}
-      </p>
-      <div className="careers-dept-list">
-        {groups.map((group, index) => (
-          <DepartmentAccordion
-            key={group.department}
-            department={group.department}
-            roles={group.roles}
-            defaultOpen={index === 0}
-          />
-        ))}
-      </div>
+      {groups.map((group, index) => (
+        <DepartmentAccordion
+          key={group.department}
+          department={group.department}
+          roles={group.roles}
+          defaultOpen={index === 0}
+        />
+      ))}
     </div>
   );
 }
@@ -173,118 +232,134 @@ export default function Careers() {
   useEffect(() => {
     const hash = String(location.hash || '').replace(/^#/, '');
     if (hash !== 'open-positions') return;
-    const node = document.getElementById('open-positions');
-    if (!node) return;
-    node.scrollIntoView({ block: 'start' });
+    document.getElementById('open-positions')?.scrollIntoView({ block: 'start' });
   }, [location.hash, roles.length]);
 
   return (
     <div className="page careers-page">
-      <header className="careers-hero">
-        <div>
-          <p className="page-kicker">Careers</p>
-          <h1 className="careers-title">
-            <span>Careers at Pokoin</span>
-            <span className="careers-gold">Build the collector market.</span>
-          </h1>
-          <p className="careers-lede">
-            Designers, engineers, and collectors shaping a peer-to-peer Pokémon marketplace that settles in PKN.
-          </p>
-          <div className="careers-actions">
-            <a className="btn" href="#open-positions">Browse open roles</a>
-            <Link className="btn ghost" to={APP.about}>About Pokoin</Link>
-          </div>
-        </div>
-        <img className="careers-mark" src="/home/logo.png" width="168" height="168" alt="" />
+      {/* 0 · pageIntro */}
+      <header className="careers-intro">
+        <h1 className="careers-display">
+          Careers at <TitleMark /> Pokoin
+        </h1>
+        <p className="careers-intro-lede">
+          We’re a small team building a peer-to-peer Pokémon marketplace that settles in PKN —
+          Card Reserve, wallet, and Scan as one product.
+        </p>
+        <a className="careers-soft-btn careers-intro-cta" href="#open-positions">
+          Browse open roles
+          <span aria-hidden="true">↓</span>
+        </a>
       </header>
 
-      <section className="careers-section careers-story" aria-labelledby="careers-mission-heading">
-        <div>
-          <h2 id="careers-mission-heading">Help us keep the market with the collectors</h2>
+      {/* 1 · moduleBlockContentBasic: media + prose */}
+      <section className="careers-module careers-life" aria-label="Life at Pokoin">
+        <div className="careers-media-bleed">
+          <div className="careers-media-badge">
+            <TitleMark className="is-sm" />
+            <span>Life at Pokoin</span>
+          </div>
+          <div className="careers-media-stage" aria-hidden="true">
+            <div className="careers-media-orb" />
+            <p className="careers-media-caption">Buy. Sell. Settle in PKN.</p>
+          </div>
+        </div>
+
+        <div className="careers-prose">
+          <h2 id="help-us-keep-the-market-with-collectors">Help us keep the market with the collectors</h2>
           <p>
             Pokoin is peer-to-peer. You list a card. Another collector buys it.
             Settlement is native PKN on PokoinPoS — chain ID 26062026.
           </p>
           <p>
-            We are building Card Reserve, the wallet, and Scan as one product:
-            live seller offers on the desk, catalog depth that respects printings,
-            and tooling that stays honest when data is missing.
+            We started Pokoin to build the collector market we wanted: fast desks,
+            honest sold books, and catalog depth that respects printings — not a listing farm.
+          </p>
+
+          <h2 id="built-as-one-product">Built as one product, used worldwide</h2>
+          <p>
+            Card Reserve, the PKN wallet, and Scan share one host and identity.
+            Great ideas can come from anywhere; the tools should work the same way.
+          </p>
+          <p>
+            Roles list a location when they open. Until then, contact stays open by email —
+            no invented headcount, offices, or funding claims on this page.
           </p>
         </div>
-        <ul className="careers-facts">
-          <li>
-            <strong>Mission</strong>
-            <span>A collector market that feels fast, clear, and fair — not a listing farm.</span>
-          </li>
-          <li>
-            <strong>How we work</strong>
-            <span>Ship small, keep surfaces shared, and prefer public docs over private lore.</span>
-          </li>
-          <li>
-            <strong>Where</strong>
-            <span>Roles list a location when they open. Until then, contact stays global by email.</span>
-          </li>
-        </ul>
       </section>
 
-      <section className="careers-section" aria-labelledby="careers-principles-heading">
-        <p className="careers-chip">
-          <span className="careers-chip-mark" aria-hidden="true">★</span>
-          How we work
-        </p>
-        <h2 id="careers-principles-heading">Principles that guide the product</h2>
-        <p className="careers-section-lede">
-          These are product habits, not slogans. They show up in search ranking, sold graphs, and desk empty states.
-        </p>
-        <ul className="careers-principles">
-          {PRINCIPLES.map((item) => (
-            <li key={item.title} className="careers-principle">
-              <h3>{item.title}</h3>
-              <p>{item.body}</p>
-            </li>
-          ))}
-        </ul>
+      {/* 2 · moduleCardsSliderWithIntro */}
+      <section className="careers-module careers-principles-mod" aria-labelledby="careers-principles-heading">
+        <h2 id="careers-principles-heading" className="careers-display">
+          Principles guide
+          <br />
+          our <TitleMark /> people
+        </h2>
+        <PrinciplesSlider />
       </section>
 
-      <section className="careers-section" aria-labelledby="careers-reasons-heading">
-        <h2 id="careers-reasons-heading">Why join</h2>
-        <p className="careers-section-lede">
-          Concrete reasons to work on Pokoin. Benefits and compensation land with each real posting —
-          this page does not invent them.
-        </p>
-        <ul className="careers-reasons">
+      {/* 3 · moduleBlockContentWithIntro */}
+      <section className="careers-module careers-perks-intro" aria-labelledby="careers-perks-heading">
+        <h2 id="careers-perks-heading" className="careers-display">
+          Powered by the
+          <br />
+          best <TitleMark /> reasons
+        </h2>
+      </section>
+
+      {/* 4 · moduleCardsBasic */}
+      <section className="careers-module careers-benefits" aria-labelledby="careers-benefits-heading">
+        <div className="careers-prose">
+          <h2 id="careers-benefits-heading">Why join</h2>
+          <p>
+            These are concrete reasons to work on Pokoin — product facts, not invented meal stipends
+            or unlimited-PTO claims. Compensation and benefits land with each real posting.
+          </p>
+          <p>
+            Speculative interest is welcome at{' '}
+            <a href={CAREERS_CONTACT}>contact@pokoin.com</a>
+            {' '}with what you build and why Pokoin.
+          </p>
+        </div>
+        <ul className="careers-perk-grid">
           {REASONS.map((item) => (
-            <li key={item.title} className="careers-reason">
-              <h3>{item.title}</h3>
-              <p>{item.body}</p>
+            <li key={item.title} className={`careers-perk-card tone-${item.tone}`}>
+              <span className="careers-perk-title">{item.title}</span>
+              <span className="careers-perk-art" aria-hidden="true" />
             </li>
           ))}
         </ul>
       </section>
 
+      {/* 5 · moduleJobsWithIntro */}
       <section
-        className="careers-section careers-open"
+        className="careers-module careers-open"
         id="open-positions"
         aria-labelledby="careers-open-heading"
       >
-        <h2 id="careers-open-heading">Open positions</h2>
-        <p className="careers-section-lede">
-          Full-time and contract roles will group by team here when they exist.
-        </p>
-        <OpenPositions roles={roles} />
+        <h2 id="careers-open-heading" className="careers-display">
+          Open <TitleMark /> Positions
+        </h2>
+        <div className="careers-jobs-wrap">
+          <OpenPositions roles={roles} />
+        </div>
       </section>
 
-      <section className="careers-cta" aria-labelledby="careers-next-heading">
-        <h2 id="careers-next-heading">Want to talk before a posting lands?</h2>
-        <p>
-          Send a short note to{' '}
-          <a href={CAREERS_CONTACT}>contact@pokoin.com</a>
-          {' '}with what you build and why Pokoin.
+      {/* 6 · mediaCarousel — product surfaces, not staff photos */}
+      <section className="careers-module careers-strip-mod" aria-label="Pokoin surfaces">
+        <ul className="careers-life-strip">
+          {LIFE_STRIP.map((item) => (
+            <li key={item.label} className={`careers-life-tile tone-${item.tone}`}>
+              <span>{item.label}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="careers-strip-note">
+          Prefer exploring the live product?{' '}
+          <Link to="/marketplace">Open the marketplace</Link>
+          {' · '}
+          <Link to="/about">About Pokoin</Link>
         </p>
-        <div className="careers-actions">
-          <a className="btn" href={CAREERS_CONTACT}>Email us</a>
-          <Link className="btn ghost" to="/marketplace">Explore the market</Link>
-        </div>
       </section>
     </div>
   );
