@@ -2,6 +2,11 @@
 # Controlled CardTrader inventory sync E2E against a connected seller.
 # Creates one disposable CT product, reconciles, updates qty, destroys, reconciles.
 #
+# Not part of the Pi API runtime overlay. deploy-cardtrader-sync-api.sh archives
+# only server/pokoin-api/; commits that change only this script (e.g. ff20279)
+# must not force a production redeploy — runtime SHA may stay on the last
+# overlay that changed CT handlers.
+#
 #   scripts/e2e-cardtrader-inventory-sync.sh [seller_uid]
 set -euo pipefail
 

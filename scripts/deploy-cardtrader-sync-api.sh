@@ -4,6 +4,10 @@
 # atomic overlay release that replaces legacy CardVault CT handlers with the
 # Pokoin copies and adds /api/cardtrader-sync.
 #
+# Runtime artifact = server/pokoin-api/ only. Repo scripts such as
+# scripts/e2e-cardtrader-inventory-sync.sh are never staged into the release;
+# a main tip that differs only in e2e/tooling does not require this deploy.
+#
 #   scripts/deploy-cardtrader-sync-api.sh [commit]
 set -euo pipefail
 

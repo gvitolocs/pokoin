@@ -34,6 +34,12 @@ Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings a
 never modified by reconcile. Incomplete/failed CT exports never trigger
 destructive “missing product” removal (CT has no product-delete webhook).
 
+Deploy note: `scripts/deploy-cardtrader-sync-api.sh` overlays only
+`server/pokoin-api/`. The live E2E harness
+(`scripts/e2e-cardtrader-inventory-sync.sh`) is repo tooling and is **not** part
+of the Pi runtime artifact — a main tip that changes only that script does not
+require an API redeploy.
+
 
 **Navigate live**
 
