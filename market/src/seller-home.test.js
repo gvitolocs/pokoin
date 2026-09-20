@@ -93,12 +93,16 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(viewSrc, /Collection value history/);
   assert.match(viewSrc, /Collection history will appear here/);
   assert.match(viewSrc, /Scan cards to start building your portfolio/);
-  assert.match(viewSrc, /data-history=\{hasSeries \? \(balanceOnly \? 'balance' : 'series'\) : 'empty'\}/);
-  assert.match(viewSrc, /seller-history-ghost-line/);
+  assert.match(viewSrc, /data-history=\{hasLine \? 'series' : \(hasPoint \? 'point' : 'empty'\)\}/);
+  assert.doesNotMatch(viewSrc, /seller-history-ghost-line/);
+  assert.doesNotMatch(viewSrc, /currency-availability-graph/);
+  assert.doesNotMatch(viewSrc, /Site balance available to spend/);
   assert.doesNotMatch(viewSrc, /fake.?line/i);
   // Empty collection still keeps the chart hero — not a collapsed EmptyDesk.
   assert.match(viewSrc, /portfolio-empty-scan/);
   assert.match(viewSrc, /CollectionHistoryPanel/);
+  assert.match(viewSrc, /todayHistoryDay/);
+  assert.match(viewSrc, /collection-history-tip/);
   assert.doesNotMatch(viewSrc, /No cards in your collection yet/);
   assert.match(viewSrc, /Trending on Pokoin/);
   assert.match(viewSrc, /marketUrl\(cardHref\(card\)\)/);
@@ -111,15 +115,18 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
 });
 
 test('Dashboard history panel keeps chart frame; never draws a real fake series', () => {
-  // Real polyline only when a `series` prop is supplied — or a flat line from site PKN.
-  assert.match(viewSrc, /hasSeries \? \([\s\S]*<polyline/);
-  assert.match(viewSrc, /data-history=\{hasSeries \? \(balanceOnly \? 'balance' : 'series'\) : 'empty'\}/);
-  assert.match(viewSrc, /currencyPkn=\{balance\}/);
-  assert.match(viewSrc, /currency-availability-graph/);
-  assert.match(viewSrc, /seller-history-ghost-line/);
-  assert.match(cssSrc, /\.seller-history-ghost-line/);
+  // Multi-day polyline only; a single live day is a point — no flat underline.
+  assert.match(viewSrc, /hasLine \? \([\s\S]*<polyline/);
+  assert.match(viewSrc, /seller-history-point/);
+  assert.match(viewSrc, /seller-history-y/);
+  assert.match(viewSrc, /seller-history-x/);
+  assert.match(viewSrc, /collection-history-tip/);
+  assert.match(cssSrc, /\.seller-history-y/);
+  assert.match(cssSrc, /\.seller-history-tip/);
   assert.match(cssSrc, /\.seller-history-frame/);
-  assert.match(cssSrc, /min-height:\s*12\.5rem/);
+  assert.match(cssSrc, /min-height:\s*11rem/);
+  assert.doesNotMatch(viewSrc, /seller-history-ghost-line/);
+  assert.doesNotMatch(cssSrc, /seller-history-ghost-line/);
   // Trending reads the fast best_sellers rail; the marketplace hydrate
   // (fetchHome) is seconds cold on api.pokoin.com and was discarded anyway.
   assert.match(homeSrc, /RAIL\.bestSellers/);

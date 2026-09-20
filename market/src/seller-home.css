@@ -126,7 +126,7 @@
   font-weight: 800;
 }
 
-/* Chart frame always present — real series or decorative empty graph */
+/* Chart frame — axis labels on the borders, plot area stays clean */
 .seller-history {
   flex: 1;
   display: flex;
@@ -144,16 +144,44 @@
   color: var(--muted);
 }
 
+.seller-history-chart {
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr);
+  gap: 6px 8px;
+  flex: 1;
+  min-height: 12.5rem;
+}
+
+.seller-history-y {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 4px 0 1.4rem;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.seller-history-plot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
 .seller-history-frame {
   position: relative;
   flex: 1;
-  min-height: 12.5rem;
+  min-height: 11rem;
   border-radius: 12px;
   border: 1px solid var(--g5);
   background:
     radial-gradient(120% 80% at 50% 100%, rgb(255 211 61 / 0.07), transparent 55%),
     linear-gradient(180deg, #14121c, #0c0b10);
   overflow: hidden;
+  cursor: crosshair;
 }
 
 .seller-history-grid {
@@ -161,11 +189,6 @@
   inset: 0;
   width: 100%;
   height: 100%;
-}
-
-.seller-history-grid line {
-  stroke: rgb(255 255 255 / 0.07);
-  stroke-width: 1;
 }
 
 .seller-history-grid .seller-history-fill {
@@ -179,17 +202,26 @@
   stroke-linecap: round;
 }
 
-/* Illustrative silhouette — not a metric */
-.seller-history-grid.is-empty .seller-history-ghost-fill {
-  fill: rgb(255 211 61 / 0.05);
+.seller-history-grid .seller-history-point {
+  fill: var(--yellow);
+  stroke: #0c0b10;
+  stroke-width: 2;
 }
 
-.seller-history-grid.is-empty .seller-history-ghost-line {
-  stroke: rgb(255 211 61 / 0.22);
-  stroke-width: 1.75;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-  stroke-dasharray: 6 7;
+.seller-history-grid .seller-history-crosshair {
+  stroke: rgb(255 255 255 / 0.28);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.seller-history-x {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 1rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  line-height: 1;
 }
 
 .seller-history-empty {
@@ -220,6 +252,58 @@
   color: var(--muted);
   font-size: 0.9rem;
   line-height: 1.4;
+}
+
+.seller-history-tip {
+  position: absolute;
+  top: 10px;
+  z-index: 2;
+  min-width: 11rem;
+  max-width: 16rem;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--g5);
+  background: rgb(12 11 16 / 0.94);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.45);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.seller-history-tip-day {
+  margin: 0 0 2px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.seller-history-tip-total {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.seller-history-tip ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.seller-history-tip li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.seller-history-tip li strong {
+  color: var(--text);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 
 .seller-history-skel {

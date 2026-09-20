@@ -1,102 +1,174 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc } from '../api.js';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import { printingIdentity } from '../identity.js';
 import { formatPknNumber, tilePricePkn } from '../pkn.js';
+import {
+  formatDayLabel,
+  formatHistoryTip,
+  historySeriesMax,
+  nearestHistoryDay,
+  niceScaleMax,
+  normalizeHistoryDay,
+  todayHistoryDay,
+  yTickValues,
+} from '../portfolio-history.js';
 import { marketUrl, goMarket } from '../punchouts.js';
 
+const CHART_W = 640;
+const CHART_H = 200;
+
 /**
- * Collection value chart. Real `series` when available; otherwise a flat line
- * at the current site PKN balance (currency availability).
+ * Collection value chart. Draws a real multi-day series when available.
+ * Axis labels live on the borders; hover shows that day's balance + composition.
+ * Never paints a fake flat "all assets combined" underline from a single balance.
  */
-export function CollectionHistoryPanel({ series = null, currencyPkn = null }) {
-  const balance = Math.max(0, Number(currencyPkn) || 0);
-  const fromSeries = Array.isArray(series)
-    ? series.map(Number).filter((n) => Number.isFinite(n))
-    : [];
-  const points = fromSeries.length >= 2
-    ? fromSeries
-    : (balance > 0 ? [balance, balance] : []);
-  const hasSeries = points.length >= 2;
-  const balanceOnly = hasSeries && fromSeries.length < 2;
+export function CollectionHistoryPanel({ series = null, today = null }) {
+  const [hover, setHover] = useState(null);
+  const days = (Array.isArray(series) ? series : [])
+    .map((row) => normalizeHistoryDay(row))
+    .filter(Boolean);
+  const live = today ? normalizeHistoryDay(today) : null;
+  const points = days.length ? days : (live ? [live] : []);
+  const hasLine = days.length >= 2;
+  const hasPoint = points.length === 1;
+  const hasData = points.length > 0;
+  const yMax = niceScaleMax(historySeriesMax(points));
+  const yTicks = yTickValues(yMax, 4);
+  const xLabels = points.length >= 2
+    ? [points[0], points[Math.floor(points.length / 2)], points[points.length - 1]]
+        .filter((day, i, arr) => arr.findIndex((row) => row.date === day.date) === i)
+    : points;
+
   let polyline = '';
   let area = '';
-  if (hasSeries) {
-    const w = 640;
-    const h = 200;
-    const min = Math.min(...points);
-    const max = Math.max(...points);
-    const flat = max === min;
-    const span = max - min || 1;
-    const coords = points.map((v, i) => {
-      const x = (i / (points.length - 1)) * w;
-      // Flat balance line sits mid-frame; real series scale to the data.
-      const y = flat ? h * 0.45 : h - ((v - min) / span) * (h - 24) - 12;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
+  let marker = null;
+  if (hasLine) {
+    const coords = points.map((day, i) => {
+      const x = (i / (points.length - 1)) * CHART_W;
+      const y = CHART_H - (day.totalPkn / yMax) * (CHART_H - 24) - 12;
+      return { x, y, day };
     });
-    polyline = coords.join(' ');
-    area = `0,${h} ${polyline} ${w},${h}`;
+    polyline = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+    area = `0,${CHART_H} ${polyline} ${CHART_W},${CHART_H}`;
+  } else if (hasPoint) {
+    const day = points[0];
+    marker = {
+      x: CHART_W * 0.85,
+      y: CHART_H - (day.totalPkn / yMax) * (CHART_H - 24) - 12,
+      day,
+    };
   }
+
+  const tipDay = hover?.day || null;
+  const tip = formatHistoryTip(tipDay);
+
+  function onMove(event) {
+    if (!hasData) {
+      setHover(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+    const day = nearestHistoryDay(points, ratio);
+    const xPct = Math.min(96, Math.max(4, ratio * 100));
+    setHover({ day, xPct });
+  }
+
   return (
     <div
       className="seller-history"
       data-testid="collection-history"
-      data-history={hasSeries ? (balanceOnly ? 'balance' : 'series') : 'empty'}
+      data-history={hasLine ? 'series' : (hasPoint ? 'point' : 'empty')}
     >
       <div className="seller-history-head">
-        <h3>{balanceOnly ? 'Currency availability' : 'Collection value history'}</h3>
+        <h3>Collection value history</h3>
       </div>
-      <div className="seller-history-frame">
-        <svg
-          className={`seller-history-grid${hasSeries ? '' : ' is-empty'}`}
-          viewBox="0 0 640 200"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          {[0.25, 0.5, 0.75].map((y) => (
-            <line key={y} x1="0" x2="640" y1={200 * y} y2={200 * y} />
+      <div className="seller-history-chart">
+        <div className="seller-history-y" aria-hidden="true">
+          {[...yTicks].reverse().map((tick) => (
+            <span key={tick}>{formatPknNumber(tick)}</span>
           ))}
-          {[0.2, 0.4, 0.6, 0.8].map((x) => (
-            <line key={x} y1="0" y2="200" x1={640 * x} x2={640 * x} />
-          ))}
-          {hasSeries ? (
-            <>
-              <polygon className="seller-history-fill" points={area} />
-              <polyline className="seller-history-line" points={polyline} fill="none" />
-            </>
-          ) : (
-            <>
-              {/* Decorative silhouette only — not real metrics. */}
-              <path
-                className="seller-history-ghost-fill"
-                d="M0 168 C72 152, 110 124, 168 118 C230 112, 268 148, 328 132 C392 114, 430 78, 488 88 C548 98, 590 126, 640 108 L640 200 L0 200 Z"
-              />
-              <path
-                className="seller-history-ghost-line"
-                d="M0 168 C72 152, 110 124, 168 118 C230 112, 268 148, 328 132 C392 114, 430 78, 488 88 C548 98, 590 126, 640 108"
-                fill="none"
-              />
-            </>
-          )}
-        </svg>
-        {balanceOnly ? (
-          <div className="seller-history-empty" data-testid="currency-availability-graph">
-            <p className="seller-history-title">{formatPknNumber(balance)} PKN</p>
-            <p className="seller-history-lede">Site balance available to spend</p>
+        </div>
+        <div className="seller-history-plot">
+          <div
+            className="seller-history-frame"
+            onMouseMove={onMove}
+            onMouseLeave={() => setHover(null)}
+            role="img"
+            aria-label="Collection value history chart"
+          >
+            <svg
+              className={`seller-history-grid${hasLine || hasPoint ? '' : ' is-empty'}`}
+              viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              {hasLine ? (
+                <>
+                  <polygon className="seller-history-fill" points={area} />
+                  <polyline className="seller-history-line" points={polyline} fill="none" />
+                </>
+              ) : null}
+              {marker ? (
+                <circle
+                  className="seller-history-point"
+                  cx={marker.x}
+                  cy={marker.y}
+                  r="5"
+                />
+              ) : null}
+              {hover && hasLine ? (
+                <line
+                  className="seller-history-crosshair"
+                  x1={(hover.xPct / 100) * CHART_W}
+                  x2={(hover.xPct / 100) * CHART_W}
+                  y1="0"
+                  y2={CHART_H}
+                />
+              ) : null}
+            </svg>
+            {!hasData ? (
+              <div className="seller-history-empty">
+                <p className="seller-history-title">Collection history will appear here</p>
+                <p className="seller-history-lede">
+                  Scan cards to start building your portfolio.
+                </p>
+              </div>
+            ) : null}
+            {tip ? (
+              <div
+                className="seller-history-tip"
+                data-testid="collection-history-tip"
+                style={{ left: `${hover?.xPct ?? 50}%` }}
+              >
+                <p className="seller-history-tip-day">{tip.dateLabel}</p>
+                <p className="seller-history-tip-total">{tip.totalLabel}</p>
+                <ul>
+                  {tip.rows.map((row) => (
+                    <li key={row.label}>
+                      <span>{row.label}</span>
+                      <strong>{row.value}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-        {!hasSeries ? (
-          <div className="seller-history-empty">
-            <p className="seller-history-title">Collection history will appear here</p>
-            <p className="seller-history-lede">
-              Scan cards to start building your portfolio.
-            </p>
+          <div className="seller-history-x" aria-hidden="true">
+            {xLabels.map((day) => (
+              <span key={day.date}>{formatDayLabel(day.date)}</span>
+            ))}
+            {!xLabels.length ? <span> </span> : null}
           </div>
-        ) : null}
+        </div>
       </div>
     </div>
   );
 }
+
+export { todayHistoryDay };
 
 function AddCardsArt() {
   return (
@@ -394,7 +466,14 @@ export function SellerDashboardView({
                 </p>
               ) : null}
 
-              <CollectionHistoryPanel currencyPkn={balance} />
+              <CollectionHistoryPanel
+                today={todayHistoryDay({
+                  currencyPkn: balance,
+                  listedPkn: listed && !listed.failed ? listed.listedPkn : 0,
+                  cardsOwned: owned,
+                  nftOwned: nftQty,
+                })}
+              />
 
               <div className="seller-tile-actions">
                 {empty ? (
