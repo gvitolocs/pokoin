@@ -9,6 +9,7 @@ export const SESSION_TILES_KEY = 'pokoin.recentCardTiles.session';
 export const RECENT_MAX = 24;
 
 const memoryTiles = {};
+let legacyCleared = false;
 
 function asId(value) {
   return realPublicCardId(String(value || '').trim());
@@ -103,6 +104,54 @@ export function writeLocalIds(ids, gameId) {
   writeJson(store, recentIdsKey(resolved), JSON.stringify((ids || []).slice(0, RECENT_MAX)));
 }
 
+/** Drop ambiguous pre-game-scope keys so they cannot reseed any history. */
+export function clearLegacyUnscopedRecents() {
+  if (legacyCleared) {
+    return;
+  }
+  legacyCleared = true;
+  const store = localStore();
+  if (!store?.removeItem) {
+    return;
+  }
+  try {
+    store.removeItem(RECENT_KEY);
+    store.removeItem(RECENT_TILES_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    sessionStore()?.removeItem(SESSION_TILES_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function forgetLocalCardId(cardId, gameId) {
+  const resolved = resolveGameId(gameId);
+  const id = asId(cardId);
+  if (!/^\d+$/.test(id)) {
+    return readRecentCardIds(resolved);
+  }
+  const next = readRecentCardIds(resolved).filter((row) => row !== id);
+  writeLocalIds(next, resolved);
+  const map = readStoredTileMap(resolved);
+  delete map[id];
+  if (memoryTiles[resolved]) {
+    delete memoryTiles[resolved][id];
+  }
+  writeTileMap(map, next, resolved);
+  return next;
+}
+
+export function replaceLocalRecentIds(ids, gameId) {
+  const resolved = resolveGameId(gameId);
+  const next = normalizeRecentCardIds(ids || [], RECENT_MAX);
+  writeLocalIds(next, resolved);
+  writeTileMap(readStoredTileMap(resolved), next, resolved);
+  return next;
+}
+
 function legacyTileIds(store, gameId) {
   // Only the game-scoped tile map. Unscoped pokoin.recentCardTiles may mix TCGs.
   try {
@@ -139,6 +188,7 @@ function parseTileMap(raw) {
 }
 
 export function readRecentCardIds(gameId) {
+  clearLegacyUnscopedRecents();
   const resolved = resolveGameId(gameId);
   const store = localStore();
   try {

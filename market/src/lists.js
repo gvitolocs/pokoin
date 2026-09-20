@@ -1,4 +1,5 @@
 import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
+import { withGameQuery, gameRequestHeaders } from './game.js';
 import { applyTilePrice, tilePricePkn } from './pkn.js';
 import { expandProvisionalCardIds, normalizeRecentCardIds, realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
 import { isSetDeskCard } from './search-filters.js';
@@ -133,8 +134,11 @@ export async function fetchCardTiles(ids) {
     return [];
   }
   try {
-    const response = await fetch(publicApiUrl(`/api/marketplace-card-tiles?ids=${wanted.join(',')}`), {
-      headers: { Accept: 'application/json' },
+    const response = await fetch(publicApiUrl(withGameQuery(`/api/marketplace-card-tiles?ids=${wanted.join(',')}`)), {
+      headers: {
+        Accept: 'application/json',
+        ...gameRequestHeaders(),
+      },
     });
     if (response.ok) {
       const body = await response.json();

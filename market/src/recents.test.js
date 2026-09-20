@@ -4,14 +4,16 @@ import {
   RECENT_KEY,
   RECENT_MAX,
   RECENT_TILES_KEY,
-  SESSION_TILES_KEY,
+  clearLegacyUnscopedRecents,
   clearRecentTileMemory,
+  forgetLocalCardId,
   peekRecentTile,
   readRecentCardIds,
   readRecentTiles,
   recentIdsKey,
   recentTilesKey,
   rememberLocalCardId,
+  replaceLocalRecentIds,
   writeLocalIds,
 } from './recents-storage.js';
 
@@ -134,7 +136,7 @@ test('history stays capped at RECENT_MAX per game', () => {
   assert.ok(!next.includes('1023'));
 });
 
-test('riftbound and pokemon ignore unscoped legacy keys', () => {
+test('unscoped legacy keys are cleared and never seed game history', () => {
   clearRecentTileMemory();
   globalThis.localStorage = memoryStorage({
     [RECENT_KEY]: JSON.stringify(['504094', '790994']),
@@ -147,4 +149,16 @@ test('riftbound and pokemon ignore unscoped legacy keys', () => {
   assert.deepEqual(readRecentTiles('riftbound'), []);
   assert.deepEqual(readRecentCardIds('pokemon'), []);
   assert.deepEqual(readRecentTiles('pokemon'), []);
+});
+
+test('forgetLocalCardId removes a wrong-game id from scoped history', () => {
+  clearRecentTileMemory();
+  clearLegacyUnscopedRecents();
+  globalThis.localStorage = memoryStorage();
+  globalThis.sessionStorage = memoryStorage();
+  rememberLocalCardId({ id: '816620', name: 'Charlotte Smoothie', set: 'OP-17', gridImageUrl: 'x' }, 'riftbound');
+  rememberLocalCardId({ id: '723286', name: 'Ahri', gridImageUrl: 'y' }, 'riftbound');
+  forgetLocalCardId('816620', 'riftbound');
+  assert.deepEqual(readRecentCardIds('riftbound'), ['723286']);
+  assert.equal(peekRecentTile('816620', 'riftbound'), null);
 });

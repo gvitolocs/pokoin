@@ -3,27 +3,42 @@ import { publicApiUrl } from './extension-auth-bridge.js';
 import { game as currentGame, gameRequestHeaders, withGameQuery } from './game.js';
 import {
   RECENT_MAX,
+  clearLegacyUnscopedRecents,
+  forgetLocalCardId,
   mergeRecentIds,
   readRecentCardIds,
   rememberLocalCardId,
+  replaceLocalRecentIds,
   writeLocalIds,
 } from './recents-storage.js';
 
 export {
   RECENT_MAX,
+  clearLegacyUnscopedRecents,
   compactRecentTile,
+  forgetLocalCardId,
   peekRecentTile,
   readRecentCardIds,
   readRecentTiles,
   rememberRecentTiles,
   recentIdsKey,
   recentTilesKey,
+  replaceLocalRecentIds,
 } from './recents-storage.js';
 
 let remoteWriteTimer = 0;
+let legacyCleared = false;
 
 function resolveGameId(gameId) {
   return String(gameId || currentGame().id || 'pokemon').trim() || 'pokemon';
+}
+
+function ensureLegacyCleared() {
+  if (legacyCleared) {
+    return;
+  }
+  legacyCleared = true;
+  clearLegacyUnscopedRecents();
 }
 
 function recentsUrl(gameId, path = '/api/marketplace-recents') {
@@ -45,7 +60,7 @@ async function fetchRemoteRecentIds(token, gameId) {
     },
   });
   if (!res.ok) {
-    return [];
+    return null;
   }
   const body = await res.json().catch(() => ({}));
   return mergeRecentIds(body.cardIds || body.card_ids || []);
@@ -53,7 +68,7 @@ async function fetchRemoteRecentIds(token, gameId) {
 
 async function putRemoteRecentIds(token, ids, gameId) {
   const resolved = resolveGameId(gameId);
-  await fetch(recentsUrl(resolved), {
+  const res = await fetch(recentsUrl(resolved), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -66,11 +81,12 @@ async function putRemoteRecentIds(token, ids, gameId) {
     }),
     keepalive: true,
   });
+  return res;
 }
 
 async function postRemoteRecentCard(token, cardId, gameId) {
   const resolved = resolveGameId(gameId);
-  await fetch(recentsUrl(resolved), {
+  return fetch(recentsUrl(resolved), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -104,7 +120,19 @@ function scheduleRemoteCard(cardId, gameId) {
   globalThis.clearTimeout(remoteWriteTimer);
   remoteWriteTimer = globalThis.setTimeout(() => {
     void getBearer()
-      .then((token) => (token ? postRemoteRecentCard(token, id, resolved) : null))
+      .then(async (token) => {
+        if (!token) {
+          return;
+        }
+        const res = await postRemoteRecentCard(token, id, resolved);
+        if (!res || res.ok) {
+          return;
+        }
+        // Wrong-game or unknown card: do not keep it in this storefront's history.
+        if (res.status === 400) {
+          forgetLocalCardId(id, resolved);
+        }
+      })
       .catch(() => {});
   }, 250);
 }
@@ -115,6 +143,7 @@ export async function loadRecentCardIds(gameId) {
 
 /** Account recents after auth. Do not call on the home LCP path. */
 export async function syncRemoteRecentCardIds(gameId) {
+  ensureLegacyCleared();
   const resolved = resolveGameId(gameId);
   const local = readRecentCardIds(resolved);
   try {
@@ -122,20 +151,36 @@ export async function syncRemoteRecentCardIds(gameId) {
     if (!token) {
       return local;
     }
-    // Never merge unscoped Firestore/local legacy — it mixed TCGs.
     const remote = await fetchRemoteRecentIds(token, resolved);
-    const merged = mergeRecentIds(local, remote);
-    writeLocalIds(merged, resolved);
-    if (merged.join(',') !== remote.join(',')) {
-      await putRemoteRecentIds(token, merged, resolved).catch(() => {});
+    if (!remote) {
+      return local;
     }
-    return merged;
+    // Server game row is authoritative. Do not re-upload polluted local cross-game ids.
+    replaceLocalRecentIds(remote, resolved);
+    return remote;
   } catch {
     return local;
   }
 }
 
+/**
+ * Drop recent ids that did not resolve in this game's catalog/tiles.
+ * Keeps disposable local history honest after a failed hydrate.
+ */
+export function pruneUnresolvedRecents(resolvedIds, gameId) {
+  ensureLegacyCleared();
+  const resolved = resolveGameId(gameId);
+  const keep = new Set((resolvedIds || []).map((id) => String(id)));
+  const current = readRecentCardIds(resolved);
+  const next = current.filter((id) => keep.has(String(id)));
+  if (next.join(',') !== current.join(',')) {
+    replaceLocalRecentIds(next, resolved);
+  }
+  return next;
+}
+
 export function rememberCardId(cardOrId, gameId) {
+  ensureLegacyCleared();
   const resolved = resolveGameId(gameId);
   const card = cardOrId && typeof cardOrId === 'object' ? cardOrId : null;
   const id = String(card?.id || card?.card_id || card?.cardId || cardOrId || '').trim();
@@ -143,7 +188,6 @@ export function rememberCardId(cardOrId, gameId) {
   if (!next.length) {
     return;
   }
-  // Prefer a single-card POST so other games' histories are never rewritten.
   if (/^\d+$/.test(id)) {
     scheduleRemoteCard(id, resolved);
     return;

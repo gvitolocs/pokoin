@@ -1287,11 +1287,8 @@ export default function Card() {
           .catch(() => {});
       }
     }
-    if (cached?.card) {
-      rememberCardId(cached.card);
-    } else if (stubCard?.id && stubCard.name) {
-      rememberCardId(stubCard);
-    }
+    // Only record a successful desk hydrate for this host's game.
+    // Do not remember URL stubs or cross-game card-page cache hits.
     if (cached) {
       setPayload({
         ...cached,

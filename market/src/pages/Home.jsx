@@ -13,7 +13,7 @@ import {
 } from '../home-browse.js';
 import { readHomeVectorCache, writeHomeVectorCache } from '../home-cache.js';
 import { tilePricePkn } from '../pkn.js';
-import { readRecentCardIds, readRecentTiles, rememberRecentTiles, syncRemoteRecentCardIds } from '../recents.js';
+import { readRecentCardIds, readRecentTiles, rememberRecentTiles, pruneUnresolvedRecents, syncRemoteRecentCardIds } from '../recents.js';
 import { Action, track } from '../track.js';
 import { isOriginDownError, noteOriginDown, publicErrorMessage } from '../working-page.js';
 import { framedByChromeExtension } from '../extension-auth-bridge.js';
@@ -84,7 +84,17 @@ async function fillMissingRecents(payload, ids, already = []) {
   );
   const hydrated = extras.filter(Boolean);
   rememberRecentTiles(hydrated);
-  return paintHome(payload, ids, localExtras([...already, ...tiles, ...hydrated]));
+  const next = paintHome(payload, ids, localExtras([...already, ...tiles, ...hydrated]));
+  // Ids that still have no name are not in this game — drop them from local history.
+  const resolved = (next.sections?.recentlySeenIds || []).filter((id) => {
+    const card = (next.cards || []).find((row) => String(row.id) === String(id));
+    return tileHasName(card);
+  });
+  if (resolved.length !== ids.length) {
+    pruneUnresolvedRecents(resolved);
+    return paintHome(payload, resolved, localExtras([...already, ...tiles, ...hydrated]));
+  }
+  return next;
 }
 
 export default function Home() {
@@ -176,7 +186,7 @@ export default function Home() {
     let cancelled = false;
     syncRemoteRecentCardIds()
       .then(async (ids) => {
-        if (cancelled || !ids.length) {
+        if (cancelled) {
           return;
         }
         const current = payloadRef.current;
@@ -185,6 +195,10 @@ export default function Home() {
         }
         const next = paintHome(current, ids, localExtras());
         commit(next);
+        if (!ids.length) {
+          setRecentPending(false);
+          return;
+        }
         if (!recentsNeedingTiles(next, ids).length) {
           setRecentPending(false);
           return;
