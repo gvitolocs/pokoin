@@ -14,6 +14,12 @@ import {
   liveInventoryListings,
   summarizeLiveInventory,
 } from '../inventory-listings.js';
+import {
+  portfolioTilesFingerprint,
+  portfolioTilesFromSummary,
+  readPortfolioTilesCache,
+  writePortfolioTilesCache,
+} from '../portfolio-tiles-cache.js';
 import { APP, marketUrl } from '../punchouts.js';
 import '../seller-home.css';
 
@@ -120,21 +126,39 @@ export default function SellerHome() {
     const uid = user?.uid || profile?.uid;
     if (!signedIn || !uid) return undefined;
     let cancelled = false;
-    setOwnedCards(null);
-    setError('');
+    // Instant paint from the last successful tile metrics for this uid.
+    const cached = readPortfolioTilesCache(uid);
+    if (cached) {
+      setOwnedCards(cached.ownedCards);
+      setPhysicalOwned(cached.physicalOwned);
+      setNftOwned(cached.nftOwned);
+      setUniqueItems(cached.uniqueItems);
+      if (cached.listed) setListed(cached.listed);
+      setError('');
+    } else {
+      setOwnedCards(null);
+      setError('');
+    }
     getBearer()
       .then((token) => fetchCollectionSummary(token))
       .then((data) => {
         if (cancelled) return;
-        setOwnedCards(Math.max(0, Number(data.cardsOwned) || 0));
-        // Prefer qty sums; fall back to unique-item counts on older API responses.
-        setPhysicalOwned(Math.max(0, Number(data.physicalOwned ?? data.physicalItems) || 0));
-        setNftOwned(Math.max(0, Number(data.nftOwned ?? data.nftItems) || 0));
-        setUniqueItems(Math.max(0, Number(data.items) || 0));
+        const next = portfolioTilesFromSummary(data);
+        const entry = writePortfolioTilesCache(uid, next) || { ...next, fingerprint: portfolioTilesFingerprint(next) };
+        const prevFp = cached?.fingerprint || '';
+        if (entry.fingerprint !== prevFp || cached == null) {
+          setOwnedCards(entry.ownedCards);
+          setPhysicalOwned(entry.physicalOwned);
+          setNftOwned(entry.nftOwned);
+          setUniqueItems(entry.uniqueItems);
+        }
+        setError('');
       })
       .catch((err) => {
         if (cancelled) return;
         console.error('dashboard collection summary failed', err);
+        // Keep cached tiles on screen when the refresh fails.
+        if (cached) return;
         setError("Couldn't load your collection");
         setOwnedCards(0);
       });
@@ -148,21 +172,32 @@ export default function SellerHome() {
     const uid = user?.uid || profile?.uid;
     if (!signedIn || !uid) return undefined;
     let cancelled = false;
-    setListed(null);
-    setListingRows([]);
+    const cached = readPortfolioTilesCache(uid);
+    // Do not blank listed tiles when we already painted from cache.
+    if (!cached?.listed) {
+      setListed(null);
+      setListingRows([]);
+    }
     getBearer()
       .then((token) => fetchSellerListings(uid, token, { limit: LISTINGS_LIMIT }))
       .then((data) => {
         if (cancelled) return;
         const live = liveInventoryListings(data.listings || data.items || []);
-        setListed(summarizeLiveInventory(live));
+        const summary = summarizeLiveInventory(live);
+        writePortfolioTilesCache(uid, { listed: summary });
+        setListed(summary);
         setListingRows(live.slice(0, LISTING_PREVIEW));
       })
       .catch(() => {
-        if (!cancelled) {
-          setListed({ listings: 0, cards: 0, listedPkn: 0, failed: true });
-          setListingRows([]);
+        if (cancelled) return;
+        if (cached?.listed && !cached.listed.failed) {
+          // Keep the cached listed tile; only fail when we had nothing to show.
+          return;
         }
+        const failed = { listings: 0, cards: 0, listedPkn: 0, failed: true };
+        writePortfolioTilesCache(uid, { listed: failed });
+        setListed(failed);
+        setListingRows([]);
       });
     return () => {
       cancelled = true;
@@ -194,18 +229,26 @@ export default function SellerHome() {
   }, [preview]);
 
   function retryCollection() {
-    setOwnedCards(null);
+    const uid = user?.uid || profile?.uid;
+    const cached = uid ? readPortfolioTilesCache(uid) : null;
+    // Retry keeps cached numbers visible — no skeleton flash.
+    if (!cached) setOwnedCards(null);
     setError('');
     getBearer()
       .then((token) => fetchCollectionSummary(token))
       .then((data) => {
-        setOwnedCards(Math.max(0, Number(data.cardsOwned) || 0));
-        setPhysicalOwned(Math.max(0, Number(data.physicalOwned ?? data.physicalItems) || 0));
-        setNftOwned(Math.max(0, Number(data.nftOwned ?? data.nftItems) || 0));
-        setUniqueItems(Math.max(0, Number(data.items) || 0));
+        if (!uid) return;
+        const next = portfolioTilesFromSummary(data);
+        const entry = writePortfolioTilesCache(uid, next) || next;
+        setOwnedCards(entry.ownedCards);
+        setPhysicalOwned(entry.physicalOwned);
+        setNftOwned(entry.nftOwned);
+        setUniqueItems(entry.uniqueItems);
+        setError('');
       })
       .catch((err) => {
         console.error('dashboard collection summary failed', err);
+        if (cached) return;
         setError("Couldn't load your collection");
         setOwnedCards(0);
       });

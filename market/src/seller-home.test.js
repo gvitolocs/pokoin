@@ -68,6 +68,9 @@ test('Dashboard nav icon is four portrait card rectangles, not equal squares', (
 
 test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(homeSrc, /fetchCollectionSummary/);
+  assert.match(homeSrc, /readPortfolioTilesCache/);
+  assert.match(homeSrc, /writePortfolioTilesCache/);
+  assert.match(homeSrc, /portfolioTilesFromSummary/);
   assert.doesNotMatch(homeSrc, /onSnapshot/);
   assert.doesNotMatch(homeSrc, /user_card_collections/);
   assert.doesNotMatch(homeSrc, /Missing or insufficient permissions/);

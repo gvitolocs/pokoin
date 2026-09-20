@@ -311,10 +311,7 @@ export function SellerDashboardView({
           Layout preview — fixture data, not your live collection.
         </p>
       ) : null}
-      <PageHead
-        title="Dashboard"
-        lede="Your collection overview and the quickest way to add more cards."
-      />
+      <PageHead title="Dashboard" />
 
       <div className="seller-home-grid">
         <section className="seller-tile seller-tile-portfolio" aria-labelledby="seller-portfolio-title">
