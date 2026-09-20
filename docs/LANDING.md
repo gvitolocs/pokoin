@@ -162,7 +162,7 @@ Visual reference only (not deployed): `/home/nez/Projects/candyext` (get.rarecan
 | Peers | `[data-peer-list]` | Snapshot then idle refresh. |
 | Coming next | three `.soon-card` | iOS/Android: not in stores (web is live). More peers: permissioned, no open intake. |
 | CTA | yellow `.cta-box` | Live: marketplace, signal, forum, cardscan. Placeholders: App Store / Play (`aria-disabled`). |
-| Footer | four columns | Marketplace, account, network, legal. `/about` is the SPA story page (locked hero copy, no internals). |
+| Footer | four columns | Marketplace, account, network, legal. `/about` is the SPA story page (locked hero copy, no internals). `/careers` is the SPA hiring page. |
 | Script | `home/landing.js` `defer` | Last. |
 
 Hero copy (locked):

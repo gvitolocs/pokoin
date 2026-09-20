@@ -277,6 +277,7 @@ Do not send `listingId` in `marketplace-event`.
 | `/admin` | Firestore admin only. Expansion symbol editor at `/marketplace/admin/edit`. |
 | `/docs` `/contact` `/privacy` `/earn` `/whitepaper` `/health` | Static desk + RPC probe on health |
 | `/about` | Public story page (hero, how it works, surfaces). Not internals. |
+| `/careers` | Public careers page (mission, principles, why join, open roles). Empty when no postings. |
 
 Checkout pays site PKN through `/api/marketplace-orders`. Failed API calls stay
 honest (no invented 24h or CT prices).

@@ -842,6 +842,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/careers/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/careers",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/contact/",
       "destination": "/market/index.html"
     },
