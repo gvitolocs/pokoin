@@ -648,12 +648,17 @@ export function createListing(body, token) {
 }
 
 export function fetchCardTraderStatus(token) {
-  return getJson('/api/cardtrader-status', {
+  return getJson('/api/cardtrader-sync', {
     headers: {
       Authorization: `Bearer ${token}`,
     },
     cache: 'no-store',
-  });
+  }).catch(() => getJson('/api/cardtrader-status', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  }));
 }
 
 export function connectCardTrader(token, cardTraderToken) {
@@ -675,6 +680,26 @@ export function disconnectCardTrader(token) {
       Authorization: `Bearer ${token}`,
     },
     body: '{}',
+  });
+}
+
+export function syncCardTraderInventory(token) {
+  return getJson('/api/cardtrader-sync', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: '{}',
+  });
+}
+
+export function fetchCardTraderSyncStatus(token) {
+  return getJson('/api/cardtrader-sync', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
   });
 }
 

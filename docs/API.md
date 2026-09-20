@@ -1,12 +1,39 @@
 # Pokoin API map (web)
 
-Handlers live in CardVault, not this repo. Do not add Vercel serverless
-functions here. `pokoin.com/api/*` rewrites to `https://api.pokoin.com/api/*`
-on **pi-home**. Oracle `pokoin-marketplace` is the CardTrader dump / Postgres
-**writer**, not the public first hop. Topology: [GAMES.md](GAMES.md).
-Non-Pokemon **ingest** APIs are Oracle `127.0.0.1:18082` `/api/ingest/{game}`
-writing isolated 15T databases. Pokemon stays on this Pi map. Plan:
-[MULTIGAME_REIMPORT.md](MULTIGAME_REIMPORT.md).
+Public marketplace API runtime is **Pi** Docker `pokoin-oracle-api`
+(`/srv/pokoin/api/current` → release overlay). `pokoin.com/api/*` rewrites to
+`https://api.pokoin.com/api/*` — **not** Vercel serverless. Do not add
+`api/*.js` serverless functions in this repo.
+
+## Who owns what (strangler / overlay)
+
+| Layer | Repository | Notes |
+| --- | --- | --- |
+| Runtime host | Pi `pokoin-oracle-api` | Atomic release dirs under `/srv/pokoin/api/releases/` |
+| Legacy / base handlers | `gvitolocs/cardvault` (`pokemon_card_vault/api`) | Historical Flutter-era API still present on the Pi image |
+| **New Pokoin domain APIs** | **this repo** `server/pokoin-api/` (+ some `server/api/`) | Messages, CardTrader seller sync, etc. Deployed as overlays from `origin/main` |
+| CardTrader market dump | Oracle `cardtrader-oracle-api` | Global marketplace snapshots — not seller inventory |
+
+**CardVault is not the intended home for new Pokoin API functionality.** Inspect it as legacy/reference; migrate seller-domain logic into `server/pokoin-api/` and ship with overlay scripts such as `scripts/deploy-messages-api.sh` and `scripts/deploy-cardtrader-sync-api.sh`.
+
+Oracle `pokoin-marketplace` is the CardTrader dump / Postgres **writer**, not the
+public first hop. Topology: [GAMES.md](GAMES.md). Non-Pokemon **ingest** APIs
+are Oracle `127.0.0.1:18082` `/api/ingest/{game}` writing isolated 15T
+databases. Pokemon stays on this Pi map. Plan: [MULTIGAME_REIMPORT.md](MULTIGAME_REIMPORT.md).
+
+### CardTrader seller inventory (Pokoin-owned)
+
+| Route | Role |
+| --- | --- |
+| `POST /api/cardtrader-connect` | Validate token, encrypt, register order webhook, run initial inventory reconcile |
+| `GET /api/cardtrader-status` / `GET /api/cardtrader-sync` | Connection + last sync summary |
+| `POST /api/cardtrader-sync` | Full inventory reconcile (`GET /products/export`) |
+| `POST /api/cardtrader-webhook/:uid` | Order sale stock gate → linked Pokoin qty (idempotent) |
+
+Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings are
+never modified by reconcile. Incomplete/failed CT exports never trigger
+destructive “missing product” removal (CT has no product-delete webhook).
+
 
 **Navigate live**
 

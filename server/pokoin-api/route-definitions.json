@@ -28,5 +28,20 @@
       "env": ["FIREBASE_*"],
       "services": ["Firebase Admin"]
     }
+  },
+  {
+    "path": "/api/cardtrader-sync",
+    "file": "cardtrader-sync.js",
+    "methods": ["GET", "POST"],
+    "purpose": "Reconcile the seller's complete CardTrader inventory into Pokoin (import/link/update/remove linked stock only).",
+    "auth": "Required Firebase bearer token; seller must have CardTrader connected.",
+    "params": {
+      "query": "GET returns last sync status; POST runs reconcile.",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": ["FIREBASE_*", "CARDTRADER_TOKEN_ENCRYPTION_KEY", "MARKETPLACE_WRITER_DATABASE_URL"],
+      "services": ["Firebase Admin", "CardTrader API", "Postgres writer"]
+    }
   }
 ]
