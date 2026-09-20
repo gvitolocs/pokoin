@@ -4495,21 +4495,58 @@ dialog.zoom:not([open]) {
   animation: careers-glow-drift-c 9.5s ease-in-out infinite;
 }
 
-.careers-media-art {
-  position: relative;
+.careers-media-bubbles {
+  position: absolute;
+  inset: 0;
   z-index: 1;
-  width: min(48%, 18.5rem);
+  pointer-events: none;
+}
+
+.careers-media-art {
+  position: absolute;
+  z-index: 1;
   aspect-ratio: 1;
   border-radius: 50%;
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 0.16);
   background: rgb(20 18 24 / 0.4);
   box-shadow:
-    0 0 0 10px rgb(255 255 255 / 0.03),
-    0 0 60px rgb(255 186 92 / 0.35),
-    0 0 120px rgb(91 160 200 / 0.2),
-    0 32px 64px rgb(0 0 0 / 0.5);
+    0 0 0 8px rgb(255 255 255 / 0.03),
+    0 0 48px rgb(255 186 92 / 0.32),
+    0 0 96px rgb(91 160 200 / 0.18),
+    0 24px 48px rgb(0 0 0 / 0.45);
   animation: careers-cozy-float 6.8s ease-in-out infinite;
+}
+
+.careers-media-art.slot-a {
+  width: min(42%, 17rem);
+  top: 14%;
+  right: 10%;
+  animation-delay: 0s;
+}
+
+.careers-media-art.slot-b {
+  width: min(28%, 11.5rem);
+  top: 18%;
+  left: 8%;
+  animation-delay: -2.1s;
+  animation-duration: 7.6s;
+}
+
+.careers-media-art.slot-c {
+  width: min(24%, 9.5rem);
+  bottom: 18%;
+  left: 22%;
+  animation-delay: -3.8s;
+  animation-duration: 8.2s;
+}
+
+.careers-media-art.slot-d {
+  width: min(22%, 8.75rem);
+  top: 42%;
+  left: 42%;
+  animation-delay: -1.4s;
+  animation-duration: 7.1s;
 }
 
 .careers-media-art::after {
@@ -4529,13 +4566,34 @@ dialog.zoom:not([open]) {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* Tight face crop — closed eyes / smile / sleep bubble */
-  object-position: 58% 8%;
-  transform: scale(2.65);
-  transform-origin: 58% 14%;
+  object-position: var(--bubble-face, 50% 20%);
+  --bubble-scale: 2.35;
+  transform: scale(var(--bubble-scale));
+  transform-origin: var(--bubble-face, 50% 20%);
   user-select: none;
   -webkit-user-drag: none;
   animation: careers-cozy-breathe 7s ease-in-out infinite;
+}
+
+.careers-media-art.slot-a .careers-media-shot {
+  --bubble-scale: 2.55;
+  animation-duration: 7.2s;
+}
+
+.careers-media-art.slot-b .careers-media-shot {
+  --bubble-scale: 2.2;
+  animation-delay: -1.5s;
+}
+
+.careers-media-art.slot-c .careers-media-shot {
+  /* Komala is a bordered card — keep more of the illustration window */
+  --bubble-scale: 1.85;
+  animation-delay: -2.6s;
+}
+
+.careers-media-art.slot-d .careers-media-shot {
+  --bubble-scale: 2.1;
+  animation-delay: -0.7s;
 }
 
 .careers-media-caption {
@@ -4581,10 +4639,10 @@ dialog.zoom:not([open]) {
 @keyframes careers-cozy-breathe {
   0%,
   100% {
-    transform: scale(2.65);
+    transform: scale(var(--bubble-scale, 2.35));
   }
   50% {
-    transform: scale(2.78);
+    transform: scale(calc(var(--bubble-scale, 2.35) * 1.05));
   }
 }
 
@@ -4835,13 +4893,13 @@ dialog.zoom:not([open]) {
 }
 
 .careers-principle-art.is-full-art.pose-bleed-low {
-  height: 44%;
-  bottom: -4%;
+  height: 56%;
+  bottom: 0;
 }
 
 .careers-principle-art.is-full-art.pose-bleed-low .careers-card-shot {
-  object-position: center 42%;
-  transform: scale(1.18);
+  object-position: center 28%;
+  transform: scale(1.2);
 }
 
 /* B · Physical-card: ~50–70% of the full leftover, frame intact, hangs off */
@@ -5167,41 +5225,90 @@ dialog.zoom:not([open]) {
   font-weight: 700;
 }
 
-/* 6 · product strip (staff carousel geometry) */
+/* 6 · product strip — Phantom carousel silhouette, editorial pastel cards */
 .careers-strip-mod {
-  padding-top: 2rem;
-  padding-bottom: 2rem;
+  width: min(100%, 77.5rem); /* 1240 */
+  margin: 0 auto;
+  padding: 6.5rem 2rem 6rem;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  outline: none;
+}
+
+.careers-surfaces {
+  padding: 0;
+}
+
+.careers-surfaces-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 1.25rem;
+  padding: 0 0.15rem;
 }
 
 .careers-life-strip {
   list-style: none;
   margin: 0;
-  padding: 0 var(--careers-inset);
+  padding: 0 0.15rem 0.5rem;
   display: flex;
-  gap: 0.85rem;
+  gap: 1.35rem; /* ~22px */
   overflow-x: auto;
+  overflow-y: hidden;
   scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.careers-life-strip::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .careers-life-tile {
   position: relative;
-  flex: 0 0 min(18rem, 72vw);
-  aspect-ratio: 3 / 2;
-  display: grid;
-  place-items: end start;
-  padding: 1.1rem;
-  border-radius: 1.5rem;
+  flex: 0 0 auto;
+  width: min(23.75rem, 88vw); /* ~380 */
+  height: 29.5rem; /* ~472 */
+  display: flex;
+  flex-direction: column;
+  padding: 1.9rem 1.9rem 0;
+  border-radius: 1.9rem;
   scroll-snap-align: start;
   overflow: hidden;
-  font-weight: 750;
-  font-size: 1.15rem;
   color: #111;
+  isolation: isolate;
 }
 
-.careers-life-label {
+.careers-life-copy {
   position: relative;
-  z-index: 1;
-  text-shadow: 0 1px 0 rgb(255 255 255 / 0.35);
+  z-index: 2;
+  flex: 0 0 auto;
+  max-width: 92%;
+  min-height: 8.5rem;
+  padding-bottom: 1.35rem;
+}
+
+.careers-life-title {
+  margin: 0;
+  font-size: clamp(1.65rem, 2.2vw, 1.95rem);
+  font-weight: 750;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+}
+
+.careers-life-body {
+  margin: 0.7rem 0 0;
+  max-width: 85%;
+  color: rgb(17 17 17 / 0.72);
+  font-size: 1.05rem;
+  line-height: 1.4;
+  font-weight: 500;
 }
 
 .careers-life-tile.tone-a { background: #ffe28a; }
@@ -5213,68 +5320,101 @@ dialog.zoom:not([open]) {
 
 .careers-life-art {
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 58%;
   pointer-events: none;
   z-index: 0;
 }
 
+/* A · Full-art: editorial illustration in the lower panel only */
 .careers-life-art.is-full-art {
-  mask-image: linear-gradient(to top, #000 35%, transparent 88%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 18%, #000 100%);
 }
 
 .careers-life-art.is-full-art .careers-card-shot {
-  object-fit: cover;
-  object-position: center 22%;
   width: 100%;
   height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
 }
 
 .careers-life-art.is-full-art.pose-bleed-corner .careers-card-shot {
   object-position: 62% 18%;
-  transform: scale(1.08);
+  transform: scale(1.28);
+  transform-origin: 65% 22%;
 }
 
 .careers-life-art.is-full-art.pose-bleed-wide .careers-card-shot {
-  object-position: 48% 16%;
-  transform: scale(1.1);
+  object-position: 45% 18%;
+  transform: scale(1.16);
+  transform-origin: center 25%;
 }
 
 .careers-life-art.is-full-art.pose-bleed-low .careers-card-shot {
-  object-position: center 32%;
+  object-position: center 28%;
+  transform: scale(1.1);
+  transform-origin: center 30%;
 }
 
+/* B · Physical trading card: real aspect, clipped by pastel bottom */
 .careers-life-art.is-physical-card {
-  right: -12%;
-  left: auto;
-  top: -8%;
+  left: 50%;
+  right: auto;
   bottom: -28%;
-  width: 62%;
-  inset: unset;
+  width: 74%;
+  height: auto;
   display: flex;
-  align-items: flex-start;
   justify-content: center;
+  transform: translateX(-50%);
+  mask-image: none;
 }
 
 .careers-life-art.is-physical-card .careers-card-shot {
   width: 100%;
   height: auto;
+  aspect-ratio: 63 / 88;
   object-fit: contain;
-  border-radius: 0.45rem;
-  box-shadow: 0 14px 28px rgb(17 17 17 / 0.28);
-  transform: rotate(7deg);
+  object-position: top center;
+  border-radius: 0.55rem;
+  box-shadow:
+    0 22px 48px rgb(17 17 17 / 0.3),
+    0 1px 0 rgb(255 255 255 / 0.35) inset;
+  transform: rotate(-2deg);
   transform-origin: center top;
 }
 
+.careers-life-art.is-physical-card.pose-rise-center {
+  bottom: -26%;
+  width: 72%;
+}
+
+.careers-life-art.is-physical-card.pose-rise-center .careers-card-shot {
+  transform: rotate(1.5deg);
+}
+
+.careers-life-art.is-physical-card.pose-tilt-right {
+  left: auto;
+  right: -6%;
+  transform: none;
+  width: 76%;
+  bottom: -32%;
+}
+
 .careers-life-art.is-physical-card.pose-tilt-right .careers-card-shot {
-  transform: rotate(9deg) translateX(4%);
+  transform: rotate(4deg);
 }
 
 .careers-strip-note {
-  margin: 1.25rem auto 0;
-  padding: 0 var(--careers-inset);
-  max-width: var(--careers-prose);
+  display: block;
+  margin: 3.5rem auto 0;
+  padding: 0 1rem;
+  max-width: 42rem;
   color: var(--muted);
   text-align: center;
+  font-size: 0.98rem;
+  line-height: 1.45;
 }
 
 .careers-strip-note a {
@@ -5283,8 +5423,46 @@ dialog.zoom:not([open]) {
 }
 
 @media (max-width: 900px) {
+  .careers-strip-mod {
+    padding: 5rem 1.5rem 5rem;
+  }
+
+  .careers-life-tile {
+    width: min(22rem, 78vw);
+    height: 26.5rem;
+    padding: 1.5rem 1.5rem 0;
+  }
+
   .careers-perk-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .careers-strip-mod {
+    padding: 4rem 1rem 4.5rem;
+  }
+
+  .careers-life-strip {
+    gap: 1rem;
+  }
+
+  .careers-life-tile {
+    width: 88vw;
+    height: 26rem;
+    padding: 1.4rem 1.4rem 0;
+  }
+
+  .careers-life-title {
+    font-size: 1.55rem;
+  }
+
+  .careers-life-body {
+    font-size: 0.98rem;
+  }
+
+  .careers-strip-note {
+    margin-top: 2.75rem;
   }
 }
 
@@ -5312,6 +5490,30 @@ dialog.zoom:not([open]) {
     margin: 0 1rem;
     border-radius: 1.25rem;
     aspect-ratio: 4 / 3;
+  }
+
+  .careers-media-art.slot-a {
+    width: min(48%, 12rem);
+    top: 10%;
+    right: 6%;
+  }
+
+  .careers-media-art.slot-b {
+    width: min(32%, 8rem);
+    top: 14%;
+    left: 4%;
+  }
+
+  .careers-media-art.slot-c {
+    width: min(28%, 7rem);
+    bottom: 14%;
+    left: 16%;
+  }
+
+  .careers-media-art.slot-d {
+    width: min(26%, 6.5rem);
+    top: 44%;
+    left: 40%;
   }
 
   .careers-principle-card {

@@ -15,12 +15,33 @@
  * @property {string} [pose] CSS modifier for composition variety
  */
 
-/** Life-at-Pokoin media bleed — sleeping Dragonite V IR (Atsushi Furusawa). */
-export const LIFE_MEDIA = {
-  src: '/card-images/322202_dragonite-v-jp-rare-secret-074-s7r-blue-sky-stream.jpg',
-  card: 'Dragonite V Illustration Rare · Blue Sky Stream 074/067',
-  reason: 'Sleeping mid-air Dragonite — cozy Life-at-Pokoin hero, not an abstract orb.',
-};
+/** Life-at-Pokoin media bleed — floating sleep bubbles (same circle treatment). */
+export const LIFE_BUBBLES = [
+  {
+    src: '/card-images/322202_dragonite-v-jp-rare-secret-074-s7r-blue-sky-stream.jpg',
+    card: 'Dragonite V Illustration Rare · Blue Sky Stream 074/067',
+    face: '58% 12%',
+    slot: 'a',
+  },
+  {
+    src: '/card-images/502874_snorlax-181-165-pokemon-card-151.jpg',
+    card: 'Snorlax Illustration Rare · Pokémon Card 151 181/165',
+    face: '48% 22%',
+    slot: 'b',
+  },
+  {
+    src: '/card-images/241014_komala-114-145-guardians-rising.jpg',
+    card: 'Komala · Guardians Rising 114/145',
+    face: '50% 28%',
+    slot: 'c',
+  },
+  {
+    src: '/card-images/484062_slowpoke-204-198-scarlet-violet.jpg',
+    card: 'Slowpoke Illustration Rare · Scarlet & Violet 204/198',
+    face: '28% 32%',
+    slot: 'd',
+  },
+];
 
 /** @type {Array<{title: string, highlight: string, prefix?: string, rest?: string, tone: string, body: string, art: CareersArt}>} */
 export const PRINCIPLES = [
@@ -154,71 +175,77 @@ export const REASONS = [
 ];
 
 /** Bottom product strip — one leftover per Pokoin surface. */
-/** @type {Array<{label: string, tone: string, art: CareersArt}>} */
+/** @type {Array<{label: string, tone: string, body: string, art: CareersArt}>} */
 export const LIFE_STRIP = [
   {
     label: 'Card desk',
     tone: 'a',
+    body: 'Open any printing and see the live book — asks, sold comps, and neighbors.',
     art: {
-      mode: 'full-art',
+      mode: 'physical-card',
       src: '/card-images/397269_charizard.jpg?v=ct397',
       card: 'Charizard · Team Up 014/181',
-      reason: 'Desk hero printing — the card you open a desk for.',
-      pose: 'bleed-low',
+      reason: 'Bordered desk hero — keep the physical card emerging, never stretch-cover.',
+      pose: 'rise-center',
     },
   },
   {
     label: 'Scan',
     tone: 'b',
+    body: 'Point the phone, lock the printing, list or collect without retyping the set.',
     art: {
       mode: 'full-art',
       src: '/card-images/401454_elesa-s-sparkle-233-264-fusion-strike.jpg',
       card: "Elesa's Sparkle · Fusion Strike 233/264",
-      reason: 'Sparkle of capture — Scan picks the printing out of the world.',
+      reason: 'Full-art sparkle — illustration fills the lower panel as an editorial crop.',
       pose: 'bleed-corner',
     },
   },
   {
     label: 'Wallet',
     tone: 'c',
+    body: 'Hold PKN, send, and settle peer trades without leaving the product.',
     art: {
       mode: 'full-art',
       src: '/card-images/612658_pikachu-ex-full-art-219-191-surging-sparks.jpg',
       card: 'Pikachu ex Full-Art · Surging Sparks 219/191',
-      reason: 'Electric value — wallet energy as a full-art bleed.',
+      reason: 'Full-art electricity for native settlement energy.',
       pose: 'bleed-wide',
     },
   },
   {
     label: 'Sets',
     tone: 'd',
+    body: 'Browse expansions with print flags, symbols, and checklists that respect languages.',
     art: {
       mode: 'physical-card',
       src: '/card-images/55576_clefairy-rare-holo-5-102-base-set.jpg?v=bsu2',
       card: 'Clefairy · Base Set 5/102',
-      reason: 'Classic bordered set icon — expansions stay visibly cards.',
+      reason: 'Classic bordered set piece — physical card clipped by the pastel bottom.',
       pose: 'tilt-right',
     },
   },
   {
     label: 'Artists',
     tone: 'e',
+    body: 'Album tiles for illustrators — same artwork groups, Pokédex order, real credits.',
     art: {
       mode: 'full-art',
       src: '/card-images/332900_sylveon-vmax-secret-rare-212-203-evolving-skies.jpg',
       card: 'Sylveon VMAX SIR · Evolving Skies 212/203',
-      reason: 'Illustration-first SIR — artists album energy.',
+      reason: 'SIR painting as album-scale editorial art.',
       pose: 'bleed-low',
     },
   },
   {
     label: 'Signal',
     tone: 'f',
+    body: 'Follow the market pulse — sold books and activity without invented volume.',
     art: {
       mode: 'full-art',
       src: '/card-images/470296_mewtwo-vstar-ultra-rare-gg44-gg70-crown-zenith.jpg',
       card: 'Mewtwo VSTAR SIR · Crown Zenith GG44/GG70',
-      reason: 'Psychic signal across the book — full-art pulse for the feed.',
+      reason: 'Illustration-heavy signal — bleed into the lower pastel, text stays clear above.',
       pose: 'bleed-corner',
     },
   },
