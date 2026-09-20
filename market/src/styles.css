@@ -4576,7 +4576,7 @@ dialog.zoom:not([open]) {
 }
 
 .careers-media-art.slot-a .careers-media-shot {
-  --bubble-scale: 2.55;
+  --bubble-scale: 2.7;
   animation-duration: 7.2s;
 }
 
@@ -4586,13 +4586,14 @@ dialog.zoom:not([open]) {
 }
 
 .careers-media-art.slot-c .careers-media-shot {
-  /* Komala is a bordered card — keep more of the illustration window */
-  --bubble-scale: 1.85;
+  /* Physical card — zoom past chrome into the face */
+  --bubble-scale: 3.2;
   animation-delay: -2.6s;
 }
 
 .careers-media-art.slot-d .careers-media-shot {
-  --bubble-scale: 2.1;
+  /* Fill the circle with Slowpoke, not the alley */
+  --bubble-scale: 3.7;
   animation-delay: -0.7s;
 }
 
