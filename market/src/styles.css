@@ -4587,6 +4587,8 @@ dialog.zoom:not([open]) {
 .careers-principle-card.tone-d { background: #ffd0e0; }
 
 .careers-principle-title {
+  position: relative;
+  z-index: 1;
   margin: 0;
   font-size: clamp(1.55rem, 2.2vw, 2rem);
   font-weight: 750;
@@ -4603,23 +4605,85 @@ dialog.zoom:not([open]) {
 }
 
 .careers-principle-body {
+  position: relative;
+  z-index: 1;
   margin: 0.85rem 0 0;
   color: rgb(17 17 17 / 0.72);
   font-size: 0.98rem;
   line-height: 1.45;
 }
 
-.careers-principle-art {
+.careers-principle-art,
+.careers-perk-art {
   position: absolute;
-  left: 10%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.careers-card-shot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* A · Full-art: illustration as editorial bleed in the lower panel */
+.careers-principle-art.is-full-art {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 52%;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 28%, #000 100%);
+}
+
+.careers-principle-art.is-full-art .careers-card-shot {
+  object-position: center 28%;
+  transform: scale(1.14);
+  transform-origin: center 30%;
+}
+
+.careers-principle-art.is-full-art.pose-bleed-wide .careers-card-shot {
+  object-position: 58% 34%;
+  transform: scale(1.22);
+}
+
+.careers-principle-art.is-full-art.pose-bleed-low .careers-card-shot {
+  object-position: center 38%;
+  transform: scale(1.18);
+}
+
+/* B · Physical-card: ~50–70% of the full leftover, frame intact, hangs off */
+.careers-principle-art.is-physical-card {
+  left: 14%;
   right: 10%;
-  bottom: 8%;
-  height: 38%;
-  border-radius: 50% 50% 40% 40%;
-  background:
-    radial-gradient(circle at 50% 40%, rgb(17 17 17 / 0.12), transparent 62%),
-    radial-gradient(circle at 30% 70%, rgb(255 255 255 / 0.55), transparent 50%);
-  opacity: 0.9;
+  bottom: -42%;
+  height: 82%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.careers-principle-art.is-physical-card .careers-card-shot {
+  width: auto;
+  height: 100%;
+  max-width: none;
+  object-fit: contain;
+  object-position: top center;
+  border-radius: 0.55rem;
+  box-shadow:
+    0 18px 40px rgb(17 17 17 / 0.28),
+    0 2px 0 rgb(255 255 255 / 0.35) inset;
+  transform-origin: center top;
+}
+
+.careers-principle-art.is-physical-card.pose-tilt-left .careers-card-shot {
+  transform: rotate(-7deg) translateX(-4%);
+}
+
+.careers-principle-art.is-physical-card.pose-rise-center .careers-card-shot {
+  transform: rotate(3deg);
 }
 
 /* 3 · perks display title */
@@ -4674,16 +4738,78 @@ dialog.zoom:not([open]) {
   line-height: 1.15;
 }
 
-.careers-perk-art {
-  position: absolute;
+.careers-perk-art.is-full-art {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 62%;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
+}
+
+.careers-perk-art.is-full-art .careers-card-shot {
+  object-position: center 30%;
+  transform: scale(1.16);
+  transform-origin: center 28%;
+}
+
+.careers-perk-art.is-full-art.pose-bleed-corner .careers-card-shot {
+  object-position: 62% 28%;
+  transform: scale(1.24);
+}
+
+.careers-perk-art.is-full-art.pose-bleed-low .careers-card-shot {
+  object-position: center 40%;
+  transform: scale(1.2);
+}
+
+.careers-perk-art.is-physical-card {
   right: -8%;
-  bottom: -12%;
-  width: 70%;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 40% 35%, rgb(255 255 255 / 0.75), transparent 55%),
-    radial-gradient(circle at 60% 70%, rgb(17 17 17 / 0.12), transparent 60%);
+  bottom: -36%;
+  width: min(78%, 16.5rem);
+  height: 92%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.careers-perk-art.is-physical-card .careers-card-shot {
+  width: 100%;
+  height: auto;
+  max-height: none;
+  object-fit: contain;
+  object-position: top center;
+  border-radius: 0.5rem;
+  box-shadow:
+    0 16px 36px rgb(17 17 17 / 0.26),
+    0 1px 0 rgb(255 255 255 / 0.3) inset;
+  transform-origin: center top;
+}
+
+.careers-perk-art.is-physical-card.pose-tilt-right .careers-card-shot {
+  transform: rotate(8deg) translateX(4%);
+}
+
+.careers-perk-art.is-physical-card.pose-tilt-left .careers-card-shot {
+  transform: rotate(-6deg) translateX(-2%);
+}
+
+.careers-perk-art.is-physical-card.pose-rise-right {
+  right: -10%;
+  left: auto;
+}
+
+.careers-perk-art.is-physical-card.pose-rise-right .careers-card-shot {
+  transform: rotate(5deg);
+}
+
+.careers-perk-art.is-physical-card.pose-rise-left {
+  left: -4%;
+  right: auto;
+  width: min(68%, 14rem);
+}
+
+.careers-perk-art.is-physical-card.pose-rise-left .careers-card-shot {
+  transform: rotate(-4deg);
 }
 
 /* 5 · open positions */

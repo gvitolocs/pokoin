@@ -81,6 +81,28 @@ test('Careers CSS encodes Phantom geometry tokens', () => {
   assert.doesNotMatch(cssSrc, /\.careers-facts\s*\{/);
 });
 
+test('Careers principle and benefit art is art-dependent with deliberate leftovers', () => {
+  const artSrc = fs.readFileSync(path.join(root, 'careers-art.js'), 'utf8');
+  assert.match(artSrc, /mode:\s*'full-art'/);
+  assert.match(artSrc, /mode:\s*'physical-card'/);
+  assert.match(artSrc, /332906_umbreon/);
+  assert.match(artSrc, /222470_professor-oak/);
+  assert.match(artSrc, /55591_magikarp/);
+  assert.match(artSrc, /332912_rayquaza/);
+  assert.match(artSrc, /470360_giratina/);
+  assert.match(artSrc, /55609_computer-search/);
+  assert.match(artSrc, /111151_charizard/);
+  assert.match(artSrc, /455774_serena/);
+  assert.match(artSrc, /502844_bulbasaur/);
+  assert.match(artSrc, /55619_bill/);
+  assert.match(careersSrc, /from '\.\.\/careers-art\.js'/);
+  assert.match(careersSrc, /CareersCardArt|is-full-art|is-physical-card/);
+  assert.match(cssSrc, /\.careers-principle-art\.is-full-art/);
+  assert.match(cssSrc, /\.careers-principle-art\.is-physical-card/);
+  assert.match(cssSrc, /\.careers-perk-art\.is-full-art/);
+  assert.match(cssSrc, /\.careers-perk-art\.is-physical-card/);
+});
+
 test('Chrome footer and landing link to /careers', () => {
   assert.match(chromeSrc, /to=\{APP\.careers\}/);
   assert.match(landing, /href="\/careers"/);

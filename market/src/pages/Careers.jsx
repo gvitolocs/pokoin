@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { PRINCIPLES, REASONS } from '../careers-art.js';
 import {
   CAREERS_CONTACT,
   OPEN_ROLES,
@@ -22,48 +23,6 @@ function TitleMark({ className = '' }) {
   );
 }
 
-const PRINCIPLES = [
-  {
-    title: 'Collectors first',
-    highlight: 'Collectors',
-    rest: ' first',
-    tone: 'a',
-    body: 'Every desk and listing flow should help a collector trade — not pad a house account.',
-  },
-  {
-    title: 'Stay honest',
-    highlight: 'honest',
-    prefix: 'Stay ',
-    rest: '',
-    tone: 'b',
-    body: 'No invented prices or silent fallbacks. Empty books stay empty on the page.',
-  },
-  {
-    title: 'Ship and iterate',
-    highlight: 'Ship',
-    rest: ' and iterate',
-    tone: 'c',
-    body: 'Ship the smallest correct surface, then tighten it in public.',
-  },
-  {
-    title: 'Own the stack',
-    highlight: 'Own',
-    rest: ' the stack',
-    tone: 'd',
-    body: 'Marketplace, wallet, and scan stay one product — fix the real path.',
-  },
-];
-
-/** Semantic stand-in for Phantom perk cards — product reasons, not invented HR benefits. */
-const REASONS = [
-  { title: 'One product surface', tone: 'a' },
-  { title: 'Real catalog depth', tone: 'b' },
-  { title: 'Native PKN settlement', tone: 'c' },
-  { title: 'Peer-to-peer trading', tone: 'd' },
-  { title: 'Public docs & explorer', tone: 'e' },
-  { title: 'Direct email contact', tone: 'f' },
-];
-
 const LIFE_STRIP = [
   { label: 'Card desk', tone: 'a' },
   { label: 'Scan', tone: 'b' },
@@ -72,6 +31,29 @@ const LIFE_STRIP = [
   { label: 'Artists', tone: 'e' },
   { label: 'Signal', tone: 'f' },
 ];
+
+/** Art-dependent shot: full-art bleed vs ~50–70% physical card. */
+function CareersCardArt({ art, className }) {
+  if (!art?.src) return null;
+  const mode = art.mode === 'physical-card' ? 'physical-card' : 'full-art';
+  const pose = art.pose ? ` pose-${art.pose}` : '';
+  return (
+    <div
+      className={`${className} is-${mode}${pose}`.trim()}
+      aria-hidden="true"
+      title={art.card || undefined}
+    >
+      <img
+        className="careers-card-shot"
+        src={art.src}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        draggable={false}
+      />
+    </div>
+  );
+}
 
 function PrincipleCard({ item }) {
   const prefix = item.prefix || '';
@@ -84,7 +66,7 @@ function PrincipleCard({ item }) {
         {rest}
       </p>
       <p className="careers-principle-body">{item.body}</p>
-      <div className="careers-principle-art" aria-hidden="true" />
+      <CareersCardArt art={item.art} className="careers-principle-art" />
     </li>
   );
 }
@@ -325,7 +307,7 @@ export default function Careers() {
           {REASONS.map((item) => (
             <li key={item.title} className={`careers-perk-card tone-${item.tone}`}>
               <span className="careers-perk-title">{item.title}</span>
-              <span className="careers-perk-art" aria-hidden="true" />
+              <CareersCardArt art={item.art} className="careers-perk-art" />
             </li>
           ))}
         </ul>
