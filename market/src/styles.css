@@ -4834,8 +4834,13 @@ dialog.zoom:not([open]) {
   transform: scale(1.22);
 }
 
+.careers-principle-art.is-full-art.pose-bleed-low {
+  height: 44%;
+  bottom: -4%;
+}
+
 .careers-principle-art.is-full-art.pose-bleed-low .careers-card-shot {
-  object-position: center 38%;
+  object-position: center 42%;
   transform: scale(1.18);
 }
 
@@ -5179,6 +5184,7 @@ dialog.zoom:not([open]) {
 }
 
 .careers-life-tile {
+  position: relative;
   flex: 0 0 min(18rem, 72vw);
   aspect-ratio: 3 / 2;
   display: grid;
@@ -5186,9 +5192,16 @@ dialog.zoom:not([open]) {
   padding: 1.1rem;
   border-radius: 1.5rem;
   scroll-snap-align: start;
+  overflow: hidden;
   font-weight: 750;
   font-size: 1.15rem;
   color: #111;
+}
+
+.careers-life-label {
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 1px 0 rgb(255 255 255 / 0.35);
 }
 
 .careers-life-tile.tone-a { background: #ffe28a; }
@@ -5197,6 +5210,64 @@ dialog.zoom:not([open]) {
 .careers-life-tile.tone-d { background: #ffc2d4; }
 .careers-life-tile.tone-e { background: #c9b8ff; }
 .careers-life-tile.tone-f { background: #d7d0ff; }
+
+.careers-life-art {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.careers-life-art.is-full-art {
+  mask-image: linear-gradient(to top, #000 35%, transparent 88%);
+}
+
+.careers-life-art.is-full-art .careers-card-shot {
+  object-fit: cover;
+  object-position: center 22%;
+  width: 100%;
+  height: 100%;
+}
+
+.careers-life-art.is-full-art.pose-bleed-corner .careers-card-shot {
+  object-position: 62% 18%;
+  transform: scale(1.08);
+}
+
+.careers-life-art.is-full-art.pose-bleed-wide .careers-card-shot {
+  object-position: 48% 16%;
+  transform: scale(1.1);
+}
+
+.careers-life-art.is-full-art.pose-bleed-low .careers-card-shot {
+  object-position: center 32%;
+}
+
+.careers-life-art.is-physical-card {
+  right: -12%;
+  left: auto;
+  top: -8%;
+  bottom: -28%;
+  width: 62%;
+  inset: unset;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.careers-life-art.is-physical-card .careers-card-shot {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  border-radius: 0.45rem;
+  box-shadow: 0 14px 28px rgb(17 17 17 / 0.28);
+  transform: rotate(7deg);
+  transform-origin: center top;
+}
+
+.careers-life-art.is-physical-card.pose-tilt-right .careers-card-shot {
+  transform: rotate(9deg) translateX(4%);
+}
 
 .careers-strip-note {
   margin: 1.25rem auto 0;

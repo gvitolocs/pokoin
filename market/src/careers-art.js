@@ -152,3 +152,74 @@ export const REASONS = [
     },
   },
 ];
+
+/** Bottom product strip — one leftover per Pokoin surface. */
+/** @type {Array<{label: string, tone: string, art: CareersArt}>} */
+export const LIFE_STRIP = [
+  {
+    label: 'Card desk',
+    tone: 'a',
+    art: {
+      mode: 'full-art',
+      src: '/card-images/397269_charizard.jpg?v=ct397',
+      card: 'Charizard · Team Up 014/181',
+      reason: 'Desk hero printing — the card you open a desk for.',
+      pose: 'bleed-low',
+    },
+  },
+  {
+    label: 'Scan',
+    tone: 'b',
+    art: {
+      mode: 'full-art',
+      src: '/card-images/401454_elesa-s-sparkle-233-264-fusion-strike.jpg',
+      card: "Elesa's Sparkle · Fusion Strike 233/264",
+      reason: 'Sparkle of capture — Scan picks the printing out of the world.',
+      pose: 'bleed-corner',
+    },
+  },
+  {
+    label: 'Wallet',
+    tone: 'c',
+    art: {
+      mode: 'full-art',
+      src: '/card-images/612658_pikachu-ex-full-art-219-191-surging-sparks.jpg',
+      card: 'Pikachu ex Full-Art · Surging Sparks 219/191',
+      reason: 'Electric value — wallet energy as a full-art bleed.',
+      pose: 'bleed-wide',
+    },
+  },
+  {
+    label: 'Sets',
+    tone: 'd',
+    art: {
+      mode: 'physical-card',
+      src: '/card-images/55576_clefairy-rare-holo-5-102-base-set.jpg?v=bsu2',
+      card: 'Clefairy · Base Set 5/102',
+      reason: 'Classic bordered set icon — expansions stay visibly cards.',
+      pose: 'tilt-right',
+    },
+  },
+  {
+    label: 'Artists',
+    tone: 'e',
+    art: {
+      mode: 'full-art',
+      src: '/card-images/332900_sylveon-vmax-secret-rare-212-203-evolving-skies.jpg',
+      card: 'Sylveon VMAX SIR · Evolving Skies 212/203',
+      reason: 'Illustration-first SIR — artists album energy.',
+      pose: 'bleed-low',
+    },
+  },
+  {
+    label: 'Signal',
+    tone: 'f',
+    art: {
+      mode: 'full-art',
+      src: '/card-images/470296_mewtwo-vstar-ultra-rare-gg44-gg70-crown-zenith.jpg',
+      card: 'Mewtwo VSTAR SIR · Crown Zenith GG44/GG70',
+      reason: 'Psychic signal across the book — full-art pulse for the feed.',
+      pose: 'bleed-corner',
+    },
+  },
+];

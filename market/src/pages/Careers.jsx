@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LIFE_MEDIA, PRINCIPLES, REASONS } from '../careers-art.js';
+import { LIFE_MEDIA, LIFE_STRIP, PRINCIPLES, REASONS } from '../careers-art.js';
 import {
   CAREERS_CONTACT,
   OPEN_ROLES,
@@ -22,15 +22,6 @@ function TitleMark({ className = '' }) {
     />
   );
 }
-
-const LIFE_STRIP = [
-  { label: 'Card desk', tone: 'a' },
-  { label: 'Scan', tone: 'b' },
-  { label: 'Wallet', tone: 'c' },
-  { label: 'Sets', tone: 'd' },
-  { label: 'Artists', tone: 'e' },
-  { label: 'Signal', tone: 'f' },
-];
 
 /** Art-dependent shot: full-art bleed vs ~50–70% physical card. */
 function CareersCardArt({ art, className }) {
@@ -263,7 +254,6 @@ export default function Careers() {
           <h2 id="help-us-keep-the-market-with-collectors">Help us keep the market with the collectors</h2>
           <p>
             Pokoin is peer-to-peer. You list a card. Another collector buys it.
-            Settlement is native PKN on PokoinPoS — chain ID 26062026.
           </p>
           <p>
             We started Pokoin to build the collector market we wanted: fast desks,
@@ -274,10 +264,6 @@ export default function Careers() {
           <p>
             Card Reserve, the PKN wallet, and Scan share one host and identity.
             Great ideas can come from anywhere; the tools should work the same way.
-          </p>
-          <p>
-            Roles list a location when they open. Until then, contact stays open by email —
-            no invented headcount, offices, or funding claims on this page.
           </p>
         </div>
       </section>
@@ -344,7 +330,8 @@ export default function Careers() {
         <ul className="careers-life-strip">
           {LIFE_STRIP.map((item) => (
             <li key={item.label} className={`careers-life-tile tone-${item.tone}`}>
-              <span>{item.label}</span>
+              <span className="careers-life-label">{item.label}</span>
+              <CareersCardArt art={item.art} className="careers-life-art" />
             </li>
           ))}
         </ul>

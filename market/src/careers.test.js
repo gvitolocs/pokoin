@@ -96,9 +96,18 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(artSrc, /455774_serena/);
   assert.match(artSrc, /502844_bulbasaur/);
   assert.match(artSrc, /55619_bill/);
+  assert.match(artSrc, /LIFE_STRIP/);
+  assert.match(artSrc, /397269_charizard/);
+  assert.match(artSrc, /401454_elesa/);
+  assert.match(artSrc, /612658_pikachu/);
+  assert.match(artSrc, /55576_clefairy/);
+  assert.match(artSrc, /332900_sylveon/);
+  assert.match(artSrc, /470296_mewtwo/);
   assert.match(careersSrc, /from '\.\.\/careers-art\.js'/);
   assert.match(careersSrc, /LIFE_MEDIA/);
+  assert.match(careersSrc, /LIFE_STRIP/);
   assert.match(careersSrc, /CareersCardArt|is-full-art|is-physical-card/);
+  assert.match(cssSrc, /\.careers-life-art/);
   assert.match(cssSrc, /\.careers-principle-art\.is-full-art/);
   assert.match(cssSrc, /\.careers-principle-art\.is-physical-card/);
   assert.match(cssSrc, /\.careers-perk-art\.is-full-art/);
