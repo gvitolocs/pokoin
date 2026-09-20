@@ -1,5 +1,13 @@
 ## Worktree isolation (Paseo) — required, not optional
 
+### Ownership (do not confuse)
+
+| Piece | Where | Notes |
+| --- | --- | --- |
+| Website / React SPA | **this repo** (`market/`, `home/`) | Deploy: `scripts/deploy-web.sh` |
+| CardVault app | `gvitolocs/cardvault` | Flutter Android/iOS — **not** the shared API |
+| Shared Pokoin API | Pi `api.pokoin.com`; **new work** in `server/pokoin-api/` / `server/api/` | Both Web and CardVault call it. Deploy: `scripts/deploy-*-api.sh`. Legacy handlers may still exist under CardVault’s `pokemon_card_vault/api` on the Pi image — transitional only. |
+
 `/home/nez/Projects/pokoin-web` is the canonical integration/deployment
 checkout. It is **not** a development workspace:
 

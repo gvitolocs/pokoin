@@ -612,14 +612,16 @@ return visit paints rails before the network.
 
 Recently seen is **not** in that cache. Recents are 24 public ids **per
 game**: guest `localStorage pokoin.recentCardIds.{game}` for the list,
-signed-in `GET/PUT/POST /api/marketplace-recents?game=` on nezopt
-(`marketplace_user_recents` PK `(user_uid, game)`). A Riftbound GET never
-loads Pokémon rows. The home rail first-paints up to 20 **compact** tiles
-from `localStorage pokoin.recentCardTiles.{game}` (name, PKN, grid URL).
-That is not the desk dump that blew quota. `GET /api/marketplace-card-tiles`
-fills ids that are not already cached, after New cards already painted.
-Firestore `user_card_recent_views` is merged once on login for **pokemon
-only**, then the Postgres row wins. Nameless stubs are treated as missing:
+signed-in `GET/PUT/POST /api/marketplace-recents?game=` on the shared Pi
+API (`marketplace_user_recents` PK `(user_uid, game)` on the **nezopt
+writer**). Handler source: `server/pokoin-api/marketplace-recents.js`
+(deploy `scripts/deploy-recents-api.sh`). A Riftbound GET never loads
+Pokémon rows. Unscoped legacy localStorage / Firestore lists are **not**
+reseeding. Migration `090` deletes ambiguous unscoped SQL rows (does not
+label them pokemon). Compact tiles:
+`localStorage pokoin.recentCardTiles.{game}`.
+`GET /api/marketplace-card-tiles` fills ids that are not already cached,
+after New cards already painted. Nameless stubs are treated as missing:
 do not paint the coin placeholder, and `fetchCard` after tiles miss.
 
 Tiles show `formatPkn` (2642 PKN, no thousands comma) plus `printingIdentity().tileLine`. Grid art is the

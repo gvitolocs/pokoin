@@ -1,20 +1,50 @@
-# Pokoin API map (web)
+# Pokoin API map
 
 Public marketplace API runtime is **Pi** Docker `pokoin-oracle-api`
 (`/srv/pokoin/api/current` → release overlay). `pokoin.com/api/*` rewrites to
 `https://api.pokoin.com/api/*` — **not** Vercel serverless. Do not add
 `api/*.js` serverless functions in this repo.
 
+## Clients vs shared backend
+
+```text
+Pokoin Web (this repo, market/) ──┐
+                                  ├──> Shared Pokoin API on Raspberry Pi
+CardVault app (Flutter) ──────────┘     api.pokoin.com
+```
+
+| Client | Repo | Role |
+| --- | --- | --- |
+| **Pokoin Web** | `gvitolocs/pokoin` (this repo) | Website / React SPA |
+| **CardVault** | `gvitolocs/cardvault` | Android/iOS app client |
+| **Pokoin API** | **Shared backend** on Pi | Auth, marketplace BFFs, listings, recents, … |
+
+The backend is **not** “the CardVault backend” and **not** website-only.
+Both clients use the same Firebase-bearer contracts on `api.pokoin.com`.
+Deploying the shared API is **not** deploying the CardVault app (and not
+`scripts/deploy-web.sh`).
+
+Pi hosts the API **runtime**. Writers, dump ingest, and leftover pipelines
+follow [GAMES.md](GAMES.md) (nezopt writer, Oracle GET hop, etc.) — the Pi
+runtime does not imply every database lives on the Pi.
+
 ## Who owns what (strangler / overlay)
 
-| Layer | Repository | Notes |
+| Layer | Location | Notes |
 | --- | --- | --- |
 | Runtime host | Pi `pokoin-oracle-api` | Atomic release dirs under `/srv/pokoin/api/releases/` |
-| Legacy / base handlers | `gvitolocs/cardvault` (`pokemon_card_vault/api`) | Historical Flutter-era API still present on the Pi image |
-| **New Pokoin domain APIs** | **this repo** `server/pokoin-api/` (+ some `server/api/`) | Messages, CardTrader seller sync, etc. Deployed as overlays from `origin/main` |
+| Legacy base handlers | Historically shipped from `cardvault/pokemon_card_vault/api` onto the Pi image | **Legacy / transitional.** Inspect as reference; do not add new Pokoin domain features there. |
+| **Shared Pokoin domain APIs (canonical for new work)** | **this repo** `server/pokoin-api/` (+ some `server/api/`) | Overlays onto the live Pi release from `origin/main` |
 | CardTrader market dump | Oracle `cardtrader-oracle-api` | Global marketplace snapshots — not seller inventory |
 
-**CardVault is not the intended home for new Pokoin API functionality.** Inspect it as legacy/reference; migrate seller-domain logic into `server/pokoin-api/` and ship with overlay scripts such as `scripts/deploy-messages-api.sh` and `scripts/deploy-cardtrader-sync-api.sh`.
+**New shared API functionality belongs in this repo’s `server/pokoin-api/` (or
+`server/api/` for search-style overlays), deployed with the matching
+`scripts/deploy-*-api.sh`.** Do not implement or deploy shared backend
+features from the CardVault app project.
+
+Overlay examples: `scripts/deploy-messages-api.sh`,
+`scripts/deploy-cardtrader-sync-api.sh`, `scripts/deploy-search-api.sh`,
+`scripts/deploy-recents-api.sh`.
 
 Oracle `pokoin-marketplace` is the CardTrader dump / Postgres **writer**, not the
 public first hop. Topology: [GAMES.md](GAMES.md). Non-Pokemon **ingest** APIs
@@ -54,14 +84,30 @@ require an API redeploy.
 Do not move CardVault `api/*.js` into subfolders. The Pi API maps
 `/api/foo` → `api/foo.js`. Families are `server/api-route-families.js`.
 
-**Human docs (CardVault `pokemon_card_vault/docs/`)**
+**Human docs (contracts; some still live under the legacy CardVault tree)**
 
-- `react-api-architecture.md` — contract
-- `react-page-apis.md` — home / search / card / set BFFs
-- `oracle-api-migration.md` — generated from `server/api-route-manifest.js`
-- `api-route-catalog.json` — machine catalog (now includes `family`)
-- `pokoin-api.md` — auth examples
+- CardVault `pokemon_card_vault/docs/react-api-architecture.md` — contract (legacy location)
+- CardVault `pokemon_card_vault/docs/react-page-apis.md` — home / search / card / set BFFs
+- CardVault `pokemon_card_vault/docs/oracle-api-migration.md` — generated from `server/api-route-manifest.js`
+- CardVault `pokemon_card_vault/docs/api-route-catalog.json` — machine catalog (now includes `family`)
+- CardVault `pokemon_card_vault/docs/pokoin-api.md` — auth examples
+- This repo [GAMES.md](GAMES.md) / [DEPLOY.md](DEPLOY.md) — topology and how to ship overlays
 - pokoin-web `docs/ARTISTS.md` — leftover artists PK vs public `card_id` display cache
+
+**Recently Seen (shared)**
+
+| | |
+| --- | --- |
+| Contract | `GET/PUT/POST /api/marketplace-recents` with **explicit** `game` (`pokemon` \| `one_piece` \| `riftbound`) |
+| Source | `server/pokoin-api/marketplace-recents.js` |
+| Deploy | `scripts/deploy-recents-api.sh` (Pi overlay) |
+| Schema | `scripts/sql/090_marketplace_user_recents_game.sql` on **nezopt writer** only |
+| Auth | Firebase bearer → server uid; never client uid |
+| Isolation | SQL `WHERE user_uid AND game`; cards validated in that game’s catalog |
+
+Bare calls without `game` / satellite Host / `x-pokoin-game` return **400** (no
+silent Pokemon default). Older app builds that only used Firestore
+`user_card_recent_views` are unaffected until they adopt this API.
 
 **React page BFFs (pokoin-web)**
 
@@ -110,4 +156,5 @@ the walk completes. [MARKET.md](MARKET.md#set-desk-first-paint). Schema:
 
 - `market/src/api.js` — SPA client
 - `vercel.json` — SPA routes + `/api/*` rewrite
-- `scripts/sql/` — marketplace SQL applied on the Oracle dump **primary**. The Pi API reads a streaming replica (`127.0.0.1:5432`). Never migrate or dump-write on the replica.
+- `server/pokoin-api/` — shared Pokoin API overlays (messages, CardTrader seller sync, recents, …)
+- `scripts/sql/` — marketplace SQL applied on the **nezopt writer** primary (`pokoin-marketplace-postgres-15t`). The Pi API reads a streaming replica (`127.0.0.1:5432`). Never migrate or dump-write on the replica.

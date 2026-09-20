@@ -58,21 +58,20 @@ test('quota on recents drops desk caches and still saves ids and compact tiles',
   assert.equal(local.getItem('pokoin.cardPage.v1.en:1'), null);
 });
 
-test('legacy tile dump becomes ids and keeps compact tiles for pokemon', () => {
+test('legacy unscoped tile dump does not seed any game history', () => {
   clearRecentTileMemory();
   const local = memoryStorage({
     [RECENT_TILES_KEY]: JSON.stringify({
       504094: { id: '504094', name: 'Victini', gridImageUrl: 'x' },
       790994: { id: '790994', name: 'Charizard', gridImageUrl: 'y' },
     }),
+    [RECENT_KEY]: JSON.stringify(['504094', '790994']),
   });
-  const session = memoryStorage();
   globalThis.localStorage = local;
-  globalThis.sessionStorage = session;
-  assert.deepEqual(readRecentCardIds('pokemon'), ['504094', '790994']);
-  assert.deepEqual(JSON.parse(local.getItem(recentIdsKey('pokemon')) || '[]'), ['504094', '790994']);
-  assert.equal(JSON.parse(local.getItem(recentTilesKey('pokemon')) || local.getItem(RECENT_TILES_KEY) || '{}')['504094'].name, 'Victini');
-  assert.equal(readRecentTiles('pokemon')[0].name, 'Victini');
+  globalThis.sessionStorage = memoryStorage();
+  assert.deepEqual(readRecentCardIds('pokemon'), []);
+  assert.deepEqual(readRecentCardIds('riftbound'), []);
+  assert.deepEqual(readRecentTiles('pokemon'), []);
 });
 
 test('compact tiles persist in localStorage for the next visit', () => {
@@ -135,7 +134,7 @@ test('history stays capped at RECENT_MAX per game', () => {
   assert.ok(!next.includes('1023'));
 });
 
-test('riftbound does not seed from unscoped legacy pokemon keys', () => {
+test('riftbound and pokemon ignore unscoped legacy keys', () => {
   clearRecentTileMemory();
   globalThis.localStorage = memoryStorage({
     [RECENT_KEY]: JSON.stringify(['504094', '790994']),
@@ -146,5 +145,6 @@ test('riftbound does not seed from unscoped legacy pokemon keys', () => {
   globalThis.sessionStorage = memoryStorage();
   assert.deepEqual(readRecentCardIds('riftbound'), []);
   assert.deepEqual(readRecentTiles('riftbound'), []);
-  assert.deepEqual(readRecentCardIds('pokemon'), ['504094', '790994']);
+  assert.deepEqual(readRecentCardIds('pokemon'), []);
+  assert.deepEqual(readRecentTiles('pokemon'), []);
 });

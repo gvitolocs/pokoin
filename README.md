@@ -33,8 +33,9 @@ public `card_id` display cache): [docs/ARTISTS.md](docs/ARTISTS.md).
 
 | Module | Repository | Verified status |
 | --- | --- | --- |
-| Pokoin | [`gvitolocs/pokoin`](https://github.com/gvitolocs/pokoin) | Public web: landing (`index.html`, `home/`) and React market (`market/`) on `https://pokoin.com`. |
-| CardVault | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) | Flutter Android/iOS on `https://app.pokoin.com`. Not the pokoin.com web host. [docs/APP.md](docs/APP.md). |
+| Pokoin Web | [`gvitolocs/pokoin`](https://github.com/gvitolocs/pokoin) | Public website: landing (`index.html`, `home/`) and React market (`market/`) on `https://pokoin.com`. |
+| CardVault | [`gvitolocs/cardvault`](https://github.com/gvitolocs/cardvault) | Flutter Android/iOS app on `https://app.pokoin.com`. **App client only** — not the shared API runtime. [docs/APP.md](docs/APP.md). |
+| Shared Pokoin API | Pi `api.pokoin.com` (`pokoin-oracle-api`); new overlays in this repo `server/pokoin-api/` | Consumed by **both** Web and CardVault. See [docs/API.md](docs/API.md). Deploying the API ≠ deploying CardVault. |
 | Wallet | This repo (`/wallet`) and [`gvitolocs/pokoinpos`](https://github.com/gvitolocs/pokoinpos) | MetaMask + PokoinPoS on the React SPA. The `pokoinwallet` repository is an older Flutter/Firebase Functions prototype. |
 | Hypemeter | [`gvitolocs/hypemeter`](https://github.com/gvitolocs/hypemeter) | Next.js Pokoin News at `https://news.pokoin.com`, hosted on Always Free Ampere A1 behind a Cloudflare named tunnel. Pipeline: [docs/NEWS.md](docs/NEWS.md). |
 | Card Extension | [`gvitolocs/pokemon-card-extension`](https://github.com/gvitolocs/pokemon-card-extension) | Chrome Manifest V3 extension that adds Pokoin card links to supported Pokemon marketplace listings. |

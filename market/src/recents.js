@@ -1,6 +1,5 @@
-import { doc, getDoc } from 'firebase/firestore';
-import { firebaseAuth, firestore, getBearer } from './auth.jsx';
-import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
+import { getBearer } from './auth.jsx';
+import { publicApiUrl } from './extension-auth-bridge.js';
 import { game as currentGame, gameRequestHeaders, withGameQuery } from './game.js';
 import {
   RECENT_MAX,
@@ -35,25 +34,6 @@ function recentsUrl(gameId, path = '/api/marketplace-recents') {
   }
   const join = withGame.includes('?') ? '&' : '?';
   return publicApiUrl(`${withGame}${join}game=${encodeURIComponent(resolved)}`);
-}
-
-async function readFirestoreRecentIds(gameId) {
-  // Legacy Firestore list was never game-scoped. Only seed pokemon.
-  if (resolveGameId(gameId) !== 'pokemon') {
-    return [];
-  }
-  if (framedByChromeExtension()) {
-    return [];
-  }
-  const uid = firebaseAuth.currentUser?.uid;
-  if (!uid) {
-    return [];
-  }
-  const snap = await getDoc(doc(firestore, 'user_card_recent_views', uid));
-  const data = snap.data() || {};
-  return (Array.isArray(data.cardIds) ? data.cardIds : [])
-    .map((id) => String(id || '').trim())
-    .filter((id) => /^\d+$/.test(id));
 }
 
 async function fetchRemoteRecentIds(token, gameId) {
@@ -142,11 +122,9 @@ export async function syncRemoteRecentCardIds(gameId) {
     if (!token) {
       return local;
     }
-    const [remote, legacy] = await Promise.all([
-      fetchRemoteRecentIds(token, resolved),
-      readFirestoreRecentIds(resolved).catch(() => []),
-    ]);
-    const merged = mergeRecentIds(local, remote, legacy);
+    // Never merge unscoped Firestore/local legacy — it mixed TCGs.
+    const remote = await fetchRemoteRecentIds(token, resolved);
+    const merged = mergeRecentIds(local, remote);
     writeLocalIds(merged, resolved);
     if (merged.join(',') !== remote.join(',')) {
       await putRemoteRecentIds(token, merged, resolved).catch(() => {});

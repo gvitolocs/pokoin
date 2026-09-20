@@ -66,6 +66,21 @@ dashboard/CLI, then fix `main` before the next deploy.
 
 | Surface | Host | How |
 | --- | --- | --- |
-| Oracle API (`api.pokoin.com`) | Pi, Docker `pokoin-oracle-api`, `/srv/pokoin/api/current` → release dir | new release dir + symlink + `docker restart` (see `scripts/deploy-scan-connect.sh api`) |
-| Marketplace Postgres writer | nezopt Docker `pokoin-marketplace-postgres-15t` (`192.168.178.55:25432`) | migrations here only; the Pi replica follows |
+| Shared Pokoin API (`api.pokoin.com`) | Pi, Docker `pokoin-oracle-api`, `/srv/pokoin/api/current` → release dir | Overlay scripts from **this repo** (`scripts/deploy-*-api.sh`) or a full release copy; restart container; auto-rollback on health failure. **Not** a CardVault app deploy. |
+| Marketplace Postgres **writer** | nezopt Docker `pokoin-marketplace-postgres-15t` (`192.168.178.55:25432`) | Schema migrations **here only**; Pi replica follows. Never migrate on the replica. |
 | Phone scanner (`scan.pokoin.com`) | Oracle peer1 Caddy `file_server` over `/opt/pokoin-cardscan/web` | back up, replace files; Caddy `/etc/caddy/Caddyfile` |
+
+### Recently Seen API (example shared overlay)
+
+```bash
+# 1) Writer migration (nezopt primary — verify writer host first)
+docker exec -i pokoin-marketplace-postgres-15t \
+  psql -U pokoin_marketplace -d pokoin_marketplace -v ON_ERROR_STOP=1 \
+  < scripts/sql/090_marketplace_user_recents_game.sql
+
+# 2) Pi API overlay from origin/main
+scripts/deploy-recents-api.sh
+
+# 3) Web SPA (separate)
+scripts/deploy-web.sh
+```

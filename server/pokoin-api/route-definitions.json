@@ -43,5 +43,20 @@
       "env": ["FIREBASE_*", "CARDTRADER_TOKEN_ENCRYPTION_KEY", "MARKETPLACE_WRITER_DATABASE_URL"],
       "services": ["Firebase Admin", "CardTrader API", "Postgres writer"]
     }
+  },
+  {
+    "path": "/api/marketplace-recents",
+    "file": "marketplace-recents.js",
+    "methods": ["GET", "PUT", "POST"],
+    "purpose": "Signed-in recently seen public card ids, scoped by game at storage/query. Writer is the nezopt marketplace primary. Tile JSON is not stored.",
+    "auth": "Required Firebase bearer token; uid from verified token only.",
+    "params": {
+      "query": "game required (pokemon|one_piece|riftbound) unless satellite Host / x-pokoin-game supplies it.",
+      "body": "POST { game, cardId } records one view; PUT { game, cardIds } replaces that game list. Cards must exist in the game catalog."
+    },
+    "dependencies": {
+      "env": ["FIREBASE_*", "MARKETPLACE_WRITER_DATABASE_URL", "MARKETPLACE_DATABASE_URL", "ONE_PIECE_MARKETPLACE_DATABASE_URL", "RIFTBOUND_MARKETPLACE_DATABASE_URL"],
+      "services": ["Firebase Admin", "Postgres writer + per-game catalog DBs"]
+    }
   }
 ]

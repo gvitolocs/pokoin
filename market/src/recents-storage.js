@@ -104,23 +104,9 @@ export function writeLocalIds(ids, gameId) {
 }
 
 function legacyTileIds(store, gameId) {
+  // Only the game-scoped tile map. Unscoped pokoin.recentCardTiles may mix TCGs.
   try {
     const parsed = JSON.parse(store?.getItem(recentTilesKey(gameId)) || 'null');
-    if (Array.isArray(parsed)) {
-      return parsed.map((item) => item?.id || item?.card_id || item);
-    }
-    if (parsed && typeof parsed === 'object') {
-      return Object.keys(parsed);
-    }
-  } catch {
-    /* ignore */
-  }
-  // Pokemon-only one-time read of the unscoped legacy key.
-  if (resolveGameId(gameId) !== 'pokemon') {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(store?.getItem(RECENT_TILES_KEY) || 'null');
     if (Array.isArray(parsed)) {
       return parsed.map((item) => item?.id || item?.card_id || item);
     }
@@ -156,11 +142,8 @@ export function readRecentCardIds(gameId) {
   const resolved = resolveGameId(gameId);
   const store = localStore();
   try {
-    let raw = store?.getItem(recentIdsKey(resolved));
-    // Disposable legacy: unscoped key only seeds pokemon history once.
-    if (!raw && resolved === 'pokemon') {
-      raw = store?.getItem(RECENT_KEY);
-    }
+    // Game-scoped key only. Unscoped pokoin.recentCardIds is ambiguous mixed history.
+    const raw = store?.getItem(recentIdsKey(resolved));
     const parsed = JSON.parse(raw || '[]');
     const listed = Array.isArray(parsed) ? parsed : [];
     const ids = normalizeRecentCardIds(
@@ -227,13 +210,6 @@ function readStoredTileMap(gameId) {
     ...parseTileMap(localStore()?.getItem(recentTilesKey(resolved))),
     ...parseTileMap(sessionStore()?.getItem(sessionTilesKey(resolved))),
   };
-  if (resolved === 'pokemon' && !Object.keys(scoped).length) {
-    Object.assign(
-      scoped,
-      parseTileMap(localStore()?.getItem(RECENT_TILES_KEY)),
-      parseTileMap(sessionStore()?.getItem(SESSION_TILES_KEY)),
-    );
-  }
   const gameMemory = memoryTiles[resolved] || {};
   return { ...scoped, ...gameMemory };
 }
