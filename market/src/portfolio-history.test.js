@@ -6,6 +6,7 @@ import {
   historySeriesMax,
   nearestHistoryDay,
   niceScaleMax,
+  normalizeHistoryDay,
   todayHistoryDay,
   yTickValues,
 } from './portfolio-history.js';
@@ -44,5 +45,20 @@ test('nearest day and tip composition', () => {
   const tip = formatHistoryTip(days[1]);
   assert.equal(tip.totalLabel, '15 PKN');
   assert.equal(formatDayLabel('2026-09-20'), 'Sep 20');
+  assert.ok(tip.rows.some((row) => row.label === 'Currency' && row.value === '15 PKN'));
+});
+
+test('normalizeHistoryDay is idempotent — desk may re-normalize today()', () => {
+  const once = todayHistoryDay({
+    currencyPkn: 15,
+    listedPkn: 0,
+    cardsOwned: 0,
+    nftOwned: 0,
+    date: '2026-09-20T12:00:00.000Z',
+  });
+  const twice = normalizeHistoryDay(once);
+  assert.equal(twice.totalPkn, 15);
+  assert.equal(twice.assets.currencyPkn, 15);
+  const tip = formatHistoryTip(twice);
   assert.ok(tip.rows.some((row) => row.label === 'Currency' && row.value === '15 PKN'));
 });

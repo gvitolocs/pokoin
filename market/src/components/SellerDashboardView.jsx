@@ -36,10 +36,10 @@ export function CollectionHistoryPanel({ series = null, today = null }) {
   const hasData = points.length > 0;
   const yMax = niceScaleMax(historySeriesMax(points));
   const yTicks = yTickValues(yMax, 4);
-  const xLabels = points.length >= 2
-    ? [points[0], points[Math.floor(points.length / 2)], points[points.length - 1]]
-        .filter((day, i, arr) => arr.findIndex((row) => row.date === day.date) === i)
-    : points;
+  // Match card-desk sold graph: first + last date on the x borders (same day twice when lone).
+  const xLabels = points.length
+    ? [points[0], points[points.length - 1]]
+    : [];
 
   let polyline = '';
   let area = '';
@@ -54,8 +54,9 @@ export function CollectionHistoryPanel({ series = null, today = null }) {
     area = `0,${CHART_H} ${polyline} ${CHART_W},${CHART_H}`;
   } else if (hasPoint) {
     const day = points[0];
+    // Card sold graph centers a single day (plotW / 2), not flush right.
     marker = {
-      x: CHART_W * 0.85,
+      x: CHART_W / 2,
       y: CHART_H - (day.totalPkn / yMax) * (CHART_H - 24) - 12,
       day,
     };
@@ -63,6 +64,8 @@ export function CollectionHistoryPanel({ series = null, today = null }) {
 
   const tipDay = hover?.day || null;
   const tip = formatHistoryTip(tipDay);
+  const tipLeftPct = hover?.xPct
+    ?? (marker ? (marker.x / CHART_W) * 100 : 50);
 
   function onMove(event) {
     if (!hasData) {
@@ -72,7 +75,10 @@ export function CollectionHistoryPanel({ series = null, today = null }) {
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
     const day = nearestHistoryDay(points, ratio);
-    const xPct = Math.min(96, Math.max(4, ratio * 100));
+    // Snap tip/crosshair to the lone marker; multi-day follows the pointer.
+    const xPct = hasPoint && marker
+      ? (marker.x / CHART_W) * 100
+      : Math.min(96, Math.max(4, ratio * 100));
     setHover({ day, xPct });
   }
 
@@ -119,7 +125,7 @@ export function CollectionHistoryPanel({ series = null, today = null }) {
                   r="5"
                 />
               ) : null}
-              {hover && hasLine ? (
+              {hover && (hasLine || hasPoint) ? (
                 <line
                   className="seller-history-crosshair"
                   x1={(hover.xPct / 100) * CHART_W}
@@ -141,7 +147,7 @@ export function CollectionHistoryPanel({ series = null, today = null }) {
               <div
                 className="seller-history-tip"
                 data-testid="collection-history-tip"
-                style={{ left: `${hover?.xPct ?? 50}%` }}
+                style={{ left: `${tipLeftPct}%` }}
               >
                 <p className="seller-history-tip-day">{tip.dateLabel}</p>
                 <p className="seller-history-tip-total">{tip.totalLabel}</p>

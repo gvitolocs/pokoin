@@ -39,12 +39,20 @@ export function formatDayLabel(dayKey) {
 /**
  * One day of portfolio value + composition.
  * totalPkn is currency + listed only — we do not invent card valuations.
+ * Idempotent: already-normalized rows keep assets.* (desk may re-normalize).
  */
 export function normalizeHistoryDay(row = {}) {
-  const currencyPkn = asNonNeg(row.currencyPkn ?? row.currency);
-  const listedPkn = asNonNeg(row.listedPkn ?? row.listed);
-  const cardsOwned = asNonNeg(row.cardsOwned ?? row.ownedCards);
-  const nftOwned = asNonNeg(row.nftOwned);
+  const prior = row && typeof row.assets === 'object' && row.assets ? row.assets : null;
+  const currencyPkn = asNonNeg(
+    row.currencyPkn ?? row.currency ?? prior?.currencyPkn,
+  );
+  const listedPkn = asNonNeg(
+    row.listedPkn ?? row.listed ?? prior?.listedPkn,
+  );
+  const cardsOwned = asNonNeg(
+    row.cardsOwned ?? row.ownedCards ?? prior?.cardsOwned,
+  );
+  const nftOwned = asNonNeg(row.nftOwned ?? prior?.nftOwned);
   const totalPkn = asNonNeg(
     row.totalPkn != null ? row.totalPkn : currencyPkn + listedPkn,
   );

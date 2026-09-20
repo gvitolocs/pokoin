@@ -118,6 +118,8 @@ test('Dashboard history panel keeps chart frame; never draws a real fake series'
   // Multi-day polyline only; a single live day is a point — no flat underline.
   assert.match(viewSrc, /hasLine \? \([\s\S]*<polyline/);
   assert.match(viewSrc, /seller-history-point/);
+  assert.match(viewSrc, /CHART_W \/ 2/);
+  assert.doesNotMatch(viewSrc, /CHART_W \* 0\.85/);
   assert.match(viewSrc, /seller-history-y/);
   assert.match(viewSrc, /seller-history-x/);
   assert.match(viewSrc, /collection-history-tip/);
