@@ -1,6 +1,8 @@
 import { mergeDeskCard, normalizeRecentCardIds, realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
+import { game as currentGame } from './game.js';
 import { tilePricePkn } from './pkn.js';
 
+/** Unscoped legacy keys — ignored once game-scoped keys are in use. */
 export const RECENT_KEY = 'pokoin.recentCardIds';
 export const RECENT_TILES_KEY = 'pokoin.recentCardTiles';
 export const SESSION_TILES_KEY = 'pokoin.recentCardTiles.session';
@@ -10,6 +12,23 @@ const memoryTiles = {};
 
 function asId(value) {
   return realPublicCardId(String(value || '').trim());
+}
+
+function resolveGameId(gameId) {
+  const id = String(gameId || currentGame().id || 'pokemon').trim() || 'pokemon';
+  return id;
+}
+
+export function recentIdsKey(gameId) {
+  return `${RECENT_KEY}.${resolveGameId(gameId)}`;
+}
+
+export function recentTilesKey(gameId) {
+  return `${RECENT_TILES_KEY}.${resolveGameId(gameId)}`;
+}
+
+export function sessionTilesKey(gameId) {
+  return `${SESSION_TILES_KEY}.${resolveGameId(gameId)}`;
 }
 
 function localStore() {
@@ -78,12 +97,28 @@ function writeJson(store, key, payload) {
   }
 }
 
-export function writeLocalIds(ids) {
+export function writeLocalIds(ids, gameId) {
   const store = localStore();
-  writeJson(store, RECENT_KEY, JSON.stringify((ids || []).slice(0, RECENT_MAX)));
+  const resolved = resolveGameId(gameId);
+  writeJson(store, recentIdsKey(resolved), JSON.stringify((ids || []).slice(0, RECENT_MAX)));
 }
 
-function legacyTileIds(store) {
+function legacyTileIds(store, gameId) {
+  try {
+    const parsed = JSON.parse(store?.getItem(recentTilesKey(gameId)) || 'null');
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => item?.id || item?.card_id || item);
+    }
+    if (parsed && typeof parsed === 'object') {
+      return Object.keys(parsed);
+    }
+  } catch {
+    /* ignore */
+  }
+  // Pokemon-only one-time read of the unscoped legacy key.
+  if (resolveGameId(gameId) !== 'pokemon') {
+    return [];
+  }
   try {
     const parsed = JSON.parse(store?.getItem(RECENT_TILES_KEY) || 'null');
     if (Array.isArray(parsed)) {
@@ -117,17 +152,23 @@ function parseTileMap(raw) {
   return out;
 }
 
-export function readRecentCardIds() {
+export function readRecentCardIds(gameId) {
+  const resolved = resolveGameId(gameId);
   const store = localStore();
   try {
-    const parsed = JSON.parse(store?.getItem(RECENT_KEY) || '[]');
+    let raw = store?.getItem(recentIdsKey(resolved));
+    // Disposable legacy: unscoped key only seeds pokemon history once.
+    if (!raw && resolved === 'pokemon') {
+      raw = store?.getItem(RECENT_KEY);
+    }
+    const parsed = JSON.parse(raw || '[]');
     const listed = Array.isArray(parsed) ? parsed : [];
     const ids = normalizeRecentCardIds(
-      listed.length ? listed : legacyTileIds(store),
+      listed.length ? listed : legacyTileIds(store, resolved),
       RECENT_MAX,
     );
     if (ids.join(',') !== listed.map((id) => String(id || '')).join(',')) {
-      writeLocalIds(ids);
+      writeLocalIds(ids, resolved);
     }
     return ids;
   } catch {
@@ -176,42 +217,62 @@ export function compactRecentTile(card, id = '') {
     illustrator: String(card?.illustrator || card?.artist || ''),
     isMarketAvailable: Boolean(card?.isMarketAvailable || card?.inStock),
     inStock: Boolean(card?.inStock || card?.isMarketAvailable),
+    vt: String(card?.vt || ''),
   };
 }
 
-function readStoredTileMap() {
-  const out = {
-    ...parseTileMap(localStore()?.getItem(RECENT_TILES_KEY)),
-    ...parseTileMap(sessionStore()?.getItem(SESSION_TILES_KEY)),
-    ...memoryTiles,
+function readStoredTileMap(gameId) {
+  const resolved = resolveGameId(gameId);
+  const scoped = {
+    ...parseTileMap(localStore()?.getItem(recentTilesKey(resolved))),
+    ...parseTileMap(sessionStore()?.getItem(sessionTilesKey(resolved))),
   };
-  return out;
+  if (resolved === 'pokemon' && !Object.keys(scoped).length) {
+    Object.assign(
+      scoped,
+      parseTileMap(localStore()?.getItem(RECENT_TILES_KEY)),
+      parseTileMap(sessionStore()?.getItem(SESSION_TILES_KEY)),
+    );
+  }
+  const gameMemory = memoryTiles[resolved] || {};
+  return { ...scoped, ...gameMemory };
 }
 
-export function writeTileMap(map, ids = readRecentCardIds()) {
+export function writeTileMap(map, ids = null, gameId) {
+  const resolved = resolveGameId(gameId);
+  const keepIds = (ids || readRecentCardIds(resolved)).slice(0, RECENT_MAX);
+  if (!memoryTiles[resolved]) {
+    memoryTiles[resolved] = {};
+  }
   const keep = {};
-  for (const id of ids.slice(0, RECENT_MAX)) {
+  for (const id of keepIds) {
     if (map[id]) {
       keep[id] = map[id];
-      memoryTiles[id] = map[id];
+      memoryTiles[resolved][id] = map[id];
     }
   }
   const payload = JSON.stringify(keep);
-  writeJson(sessionStore(), SESSION_TILES_KEY, payload);
-  writeJson(localStore(), RECENT_TILES_KEY, payload);
+  writeJson(sessionStore(), sessionTilesKey(resolved), payload);
+  writeJson(localStore(), recentTilesKey(resolved), payload);
 }
 
-export function clearRecentTileMemory() {
-  for (const id of Object.keys(memoryTiles)) {
-    delete memoryTiles[id];
+export function clearRecentTileMemory(gameId) {
+  const resolved = gameId == null ? null : resolveGameId(gameId);
+  if (resolved) {
+    delete memoryTiles[resolved];
+    return;
+  }
+  for (const key of Object.keys(memoryTiles)) {
+    delete memoryTiles[key];
   }
 }
 
-export function rememberTiles(cards) {
+export function rememberTiles(cards, gameId) {
   if (!cards?.length) {
     return;
   }
-  const map = readStoredTileMap();
+  const resolved = resolveGameId(gameId);
+  const map = readStoredTileMap(resolved);
   for (const card of cards) {
     const tile = compactRecentTile(card);
     if (!tile) {
@@ -231,37 +292,39 @@ export function rememberTiles(cards) {
       map[tile.id] = prev ? mergeDeskCard(prev, tile) : tile;
     }
   }
-  writeTileMap(map);
+  writeTileMap(map, readRecentCardIds(resolved), resolved);
 }
 
-export function peekRecentTile(cardId) {
+export function peekRecentTile(cardId, gameId) {
   const id = asId(cardId);
   if (!/^\d+$/.test(id)) {
     return null;
   }
-  return readStoredTileMap()[id] || null;
+  return readStoredTileMap(gameId)[id] || null;
 }
 
-export function readRecentTiles() {
-  const map = readStoredTileMap();
-  return readRecentCardIds().map((id) => map[id]).filter((card) => card && String(card.name || '').trim());
+export function readRecentTiles(gameId) {
+  const resolved = resolveGameId(gameId);
+  const map = readStoredTileMap(resolved);
+  return readRecentCardIds(resolved).map((id) => map[id]).filter((card) => card && String(card.name || '').trim());
 }
 
-export function rememberRecentTiles(cards) {
-  rememberTiles(cards);
+export function rememberRecentTiles(cards, gameId) {
+  rememberTiles(cards, gameId);
 }
 
-export function rememberLocalCardId(cardOrId) {
+export function rememberLocalCardId(cardOrId, gameId) {
+  const resolved = resolveGameId(gameId);
   const card = cardOrId && typeof cardOrId === 'object' ? cardOrId : null;
   const id = asId(card?.id || card?.card_id || card?.cardId || cardOrId);
   if (!/^\d+$/.test(id)) {
     return [];
   }
-  const next = mergeRecentIds([id], readRecentCardIds());
-  writeLocalIds(next);
+  const next = mergeRecentIds([id], readRecentCardIds(resolved));
+  writeLocalIds(next, resolved);
   if (card) {
-    rememberTiles([card]);
-    writeTileMap(readStoredTileMap(), next);
+    rememberTiles([card], resolved);
+    writeTileMap(readStoredTileMap(resolved), next, resolved);
   }
   return next;
 }

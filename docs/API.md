@@ -67,7 +67,7 @@ Do not move CardVault `api/*.js` into subfolders. The Pi API maps
 
 | Page | API |
 | --- | --- |
-| Home | Rails vector: Worker `GET /api/marketplace-home` on pokoin.com (origin `api.pokoin.com`), else Pi `GET /api/marketplace-rails`, else Pi `GET /api/marketplace-home-page`. Recents: 24 ids locally, signed-in `GET/PUT /api/marketplace-recents` (15T). Do not use Flutter `api.pokoin.com/api/marketplace-home` (~170 KB). **No Supabase.** First paint: [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md). |
+| Home | Rails vector: Worker `GET /api/marketplace-home` on pokoin.com (origin `api.pokoin.com`), else Pi `GET /api/marketplace-rails`, else Pi `GET /api/marketplace-home-page`. Recents: 24 ids per game locally (`pokoin.recentCardIds.{game}`), signed-in `GET/PUT/POST /api/marketplace-recents?game=` (`marketplace_user_recents` PK `(user_uid, game)`). Do not use Flutter `api.pokoin.com/api/marketplace-home` (~170 KB). **No Supabase.** First paint: [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md). |
 | Search | `GET /api/marketplace-search-page` + `GET /api/marketplace-suggest` (print_language; western tie-break on equal Meili score; suggest ids can stay hot for search-page) |
 | Scan | `POST /cardscan/identify?catalog=pokemon_generic` — leftover-JPEG singles like old Milo; live default is TCGPlayer. Desk uses `public_id`. Leftover `ct_id` × 2 if `public_id` is missing. [SCAN.md](SCAN.md), [MARKET.md](MARKET.md) |
 | Extension auth | `/extension/auth-bridge` — Firebase ID token `postMessage` (`pokoin-auth-token` / `accessToken`) for the Chrome extension. Not an API. Skip marketplace chrome. |

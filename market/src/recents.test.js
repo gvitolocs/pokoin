@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   RECENT_KEY,
+  RECENT_MAX,
   RECENT_TILES_KEY,
   SESSION_TILES_KEY,
   clearRecentTileMemory,
   peekRecentTile,
   readRecentCardIds,
   readRecentTiles,
+  recentIdsKey,
+  recentTilesKey,
   rememberLocalCardId,
+  writeLocalIds,
 } from './recents-storage.js';
 
 function memoryStorage(start = {}, { failWrites } = {}) {
@@ -40,20 +44,22 @@ function memoryStorage(start = {}, { failWrites } = {}) {
 }
 
 test('quota on recents drops desk caches and still saves ids and compact tiles', () => {
+  clearRecentTileMemory();
   const local = memoryStorage({
-    [RECENT_TILES_KEY]: '{"504094":{"id":"504094","name":"Victini","gridImageUrl":"x"}}',
+    [recentTilesKey('pokemon')]: '{"504094":{"id":"504094","name":"Victini","gridImageUrl":"x"}}',
     'pokoin.cardPage.v1.en:1': '{"card":{"id":"1"}}',
     'pokoin.cardSales.v12.1': '{"series":[]}',
   }, { failWrites: 1 });
   globalThis.localStorage = local;
   globalThis.sessionStorage = memoryStorage();
-  rememberLocalCardId('504094');
-  assert.deepEqual(readRecentCardIds(), ['504094']);
-  assert.equal(JSON.parse(local.getItem(RECENT_TILES_KEY) || '{}')['504094'].name, 'Victini');
+  rememberLocalCardId('504094', 'pokemon');
+  assert.deepEqual(readRecentCardIds('pokemon'), ['504094']);
+  assert.equal(JSON.parse(local.getItem(recentTilesKey('pokemon')) || '{}')['504094'].name, 'Victini');
   assert.equal(local.getItem('pokoin.cardPage.v1.en:1'), null);
 });
 
-test('legacy tile dump becomes ids and keeps compact tiles', () => {
+test('legacy tile dump becomes ids and keeps compact tiles for pokemon', () => {
+  clearRecentTileMemory();
   const local = memoryStorage({
     [RECENT_TILES_KEY]: JSON.stringify({
       504094: { id: '504094', name: 'Victini', gridImageUrl: 'x' },
@@ -63,13 +69,14 @@ test('legacy tile dump becomes ids and keeps compact tiles', () => {
   const session = memoryStorage();
   globalThis.localStorage = local;
   globalThis.sessionStorage = session;
-  assert.deepEqual(readRecentCardIds(), ['504094', '790994']);
-  assert.deepEqual(JSON.parse(local.getItem(RECENT_KEY) || '[]'), ['504094', '790994']);
-  assert.equal(JSON.parse(local.getItem(RECENT_TILES_KEY) || '{}')['504094'].name, 'Victini');
-  assert.equal(readRecentTiles()[0].name, 'Victini');
+  assert.deepEqual(readRecentCardIds('pokemon'), ['504094', '790994']);
+  assert.deepEqual(JSON.parse(local.getItem(recentIdsKey('pokemon')) || '[]'), ['504094', '790994']);
+  assert.equal(JSON.parse(local.getItem(recentTilesKey('pokemon')) || local.getItem(RECENT_TILES_KEY) || '{}')['504094'].name, 'Victini');
+  assert.equal(readRecentTiles('pokemon')[0].name, 'Victini');
 });
 
 test('compact tiles persist in localStorage for the next visit', () => {
+  clearRecentTileMemory();
   const local = memoryStorage();
   const session = memoryStorage();
   globalThis.localStorage = local;
@@ -80,12 +87,64 @@ test('compact tiles persist in localStorage for the next visit', () => {
     set: 'BW Promos',
     number: 'BW-P 234',
     gridImageUrl: '/card-images/504094_victini.jpg',
-  });
-  assert.deepEqual(JSON.parse(local.getItem(RECENT_KEY) || '[]'), ['504094']);
-  assert.equal(JSON.parse(local.getItem(RECENT_TILES_KEY) || '{}')['504094'].name, 'Victini');
-  assert.equal(JSON.parse(session.getItem(SESSION_TILES_KEY) || '{}')['504094'].name, 'Victini');
-  clearRecentTileMemory();
+  }, 'pokemon');
+  assert.deepEqual(JSON.parse(local.getItem(recentIdsKey('pokemon')) || '[]'), ['504094']);
+  assert.equal(JSON.parse(local.getItem(recentTilesKey('pokemon')) || '{}')['504094'].name, 'Victini');
+  assert.equal(JSON.parse(session.getItem(`pokoin.recentCardTiles.session.pokemon`) || '{}')['504094'].name, 'Victini');
+  clearRecentTileMemory('pokemon');
   globalThis.sessionStorage = memoryStorage();
-  assert.equal(readRecentTiles()[0].name, 'Victini');
-  assert.equal(peekRecentTile('504094').name, 'Victini');
+  assert.equal(readRecentTiles('pokemon')[0].name, 'Victini');
+  assert.equal(peekRecentTile('504094', 'pokemon').name, 'Victini');
+});
+
+test('pokemon and riftbound local histories stay isolated', () => {
+  clearRecentTileMemory();
+  globalThis.localStorage = memoryStorage();
+  globalThis.sessionStorage = memoryStorage();
+  rememberLocalCardId({ id: '504094', name: 'Victini', gridImageUrl: 'x' }, 'pokemon');
+  rememberLocalCardId({ id: '723286', name: 'Ahri', gridImageUrl: 'y' }, 'riftbound');
+  rememberLocalCardId({ id: '111', name: 'Luffy', gridImageUrl: 'z' }, 'one_piece');
+
+  assert.deepEqual(readRecentCardIds('pokemon'), ['504094']);
+  assert.deepEqual(readRecentCardIds('riftbound'), ['723286']);
+  assert.deepEqual(readRecentCardIds('one_piece'), ['111']);
+  assert.equal(readRecentTiles('riftbound')[0].name, 'Ahri');
+  assert.equal(peekRecentTile('504094', 'riftbound'), null);
+  assert.equal(peekRecentTile('723286', 'pokemon'), null);
+});
+
+test('re-viewing a card moves it to the front without duplicates', () => {
+  clearRecentTileMemory();
+  globalThis.localStorage = memoryStorage();
+  globalThis.sessionStorage = memoryStorage();
+  writeLocalIds(['111', '222', '333'], 'riftbound');
+  rememberLocalCardId('222', 'riftbound');
+  assert.deepEqual(readRecentCardIds('riftbound'), ['222', '111', '333']);
+});
+
+test('history stays capped at RECENT_MAX per game', () => {
+  clearRecentTileMemory();
+  globalThis.localStorage = memoryStorage();
+  globalThis.sessionStorage = memoryStorage();
+  const ids = Array.from({ length: RECENT_MAX }, (_, i) => String(1000 + i));
+  writeLocalIds(ids, 'one_piece');
+  rememberLocalCardId('999999', 'one_piece');
+  const next = readRecentCardIds('one_piece');
+  assert.equal(next.length, RECENT_MAX);
+  assert.equal(next[0], '999999');
+  assert.ok(!next.includes('1023'));
+});
+
+test('riftbound does not seed from unscoped legacy pokemon keys', () => {
+  clearRecentTileMemory();
+  globalThis.localStorage = memoryStorage({
+    [RECENT_KEY]: JSON.stringify(['504094', '790994']),
+    [RECENT_TILES_KEY]: JSON.stringify({
+      504094: { id: '504094', name: 'Victini', gridImageUrl: 'x' },
+    }),
+  });
+  globalThis.sessionStorage = memoryStorage();
+  assert.deepEqual(readRecentCardIds('riftbound'), []);
+  assert.deepEqual(readRecentTiles('riftbound'), []);
+  assert.deepEqual(readRecentCardIds('pokemon'), ['504094', '790994']);
 });

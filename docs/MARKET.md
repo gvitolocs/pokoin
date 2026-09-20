@@ -610,16 +610,17 @@ Browsers may keep the JSON 120s fresh and a day stale. The SPA also keeps the
 last public vector in `sessionStorage pokoin.homeVector.{game}.rising` (10 min) so a
 return visit paints rails before the network.
 
-Recently seen is **not** in that cache. Recents are 24 public ids: guest
-`localStorage pokoin.recentCardIds` for the list, signed-in
-`GET/PUT /api/marketplace-recents` on nezopt 15T (`marketplace_user_recents`).
-The home rail first-paints up to 20 **compact** tiles from
-`localStorage pokoin.recentCardTiles` (name, PKN, grid URL). That is not the
-desk dump that blew quota. `GET /api/marketplace-card-tiles` fills ids that
-are not already cached, after New cards already painted. Firestore
-`user_card_recent_views` is merged once on login, then the Postgres row
-wins. Nameless stubs are treated as missing: do not paint
-the coin placeholder, and `fetchCard` after tiles miss.
+Recently seen is **not** in that cache. Recents are 24 public ids **per
+game**: guest `localStorage pokoin.recentCardIds.{game}` for the list,
+signed-in `GET/PUT/POST /api/marketplace-recents?game=` on nezopt
+(`marketplace_user_recents` PK `(user_uid, game)`). A Riftbound GET never
+loads Pokémon rows. The home rail first-paints up to 20 **compact** tiles
+from `localStorage pokoin.recentCardTiles.{game}` (name, PKN, grid URL).
+That is not the desk dump that blew quota. `GET /api/marketplace-card-tiles`
+fills ids that are not already cached, after New cards already painted.
+Firestore `user_card_recent_views` is merged once on login for **pokemon
+only**, then the Postgres row wins. Nameless stubs are treated as missing:
+do not paint the coin placeholder, and `fetchCard` after tiles miss.
 
 Tiles show `formatPkn` (2642 PKN, no thousands comma) plus `printingIdentity().tileLine`. Grid art is the
 240px `_homepage.webp` sibling (catalog JPEG stays on the card desk and the
@@ -656,7 +657,7 @@ treat Flutter `api.pokoin.com/api/marketplace-home` as the SPA vector.
 | Rail | What it is | Rank | Price on the tile |
 | --- | --- | --- | --- |
 | Promo | Five current sets (Storm Emeralda first) | local `PromoCarousel` | set page, not this row |
-| Recently seen | Last 24 card ids | `marketplace_user_recents` when signed in; guest ids in localStorage | not in the 1-day vector |
+| Recently seen | Last 24 card ids **per game** | `marketplace_user_recents` `(user_uid, game)` when signed in; guest ids in `pokoin.recentCardIds.{game}` | not in the 1-day vector |
 | New cards | **Curated Storm Emeralda** chase printings (Japanese M6 / English Delta Reign source). Matched by set + collector number + name; same Pokémon names stay separate variants. Not `imported_at`, not unique-name shop mix. Missing specs are logged, never filled with another printing. | publisher `NEW_CARDS_CURATED` array order | waterfall above; last-day sold fills hub misses |
 | Best sellers | Cheap movers that still have copies: `best_seller_score`, `sold_qty_7d ≥ 3`, `listed_qty_now > 0`, median sold **≤ €15**, skip Energy. 12 tiles. UI title **Best sellers** (`bestSellerIds`). `psql_price_gainers()` (30d % up) exists in the publisher and is **not called**. | `best_seller_score DESC` | hub cache or median PKN |
 | Featured | **30 random 30th Anniversary singles** (EN `30th Celebration`, JP `30th Celebration JP`, First Partner Illustration Collection, CN when present). Daily UTC shuffle. Skip Energy, boxes, frames, markers. Same Pokémon names stay separate printings. Empty pool falls back to sell-through. 30 tiles. UI title **Spotlight** (`featuredIds`). | publisher `pick_featured_cards` daily seed | same |
