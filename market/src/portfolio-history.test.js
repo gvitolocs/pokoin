@@ -46,6 +46,10 @@ test('nearest day and tip composition', () => {
   assert.equal(tip.totalLabel, '15 PKN');
   assert.equal(formatDayLabel('2026-09-20'), 'Sep 20');
   assert.ok(tip.rows.some((row) => row.label === 'Currency' && row.value === '15 PKN'));
+  assert.equal(tip.rows.length, 4);
+  assert.ok(tip.rows.every((row) => String(row.value).endsWith('PKN')));
+  assert.ok(tip.rows.some((row) => row.label === 'Cards owned' && row.value === '0 PKN'));
+  assert.ok(tip.rows.some((row) => row.label === 'Digital / NFT' && row.value === '0 PKN'));
 });
 
 test('normalizeHistoryDay is idempotent — desk may re-normalize today()', () => {

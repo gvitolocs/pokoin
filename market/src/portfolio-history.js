@@ -107,14 +107,16 @@ export function nearestHistoryDay(days, ratio) {
 export function formatHistoryTip(day) {
   if (!day) return null;
   const assets = day.assets || {};
+  // Card/NFT PKN is not invented — value stays 0 until mark-to-market exists.
+  // Counts stay on the Portfolio metric tiles above the chart.
   return {
     dateLabel: formatDayLabel(day.date),
     totalLabel: `${formatPknNumber(day.totalPkn)} PKN`,
     rows: [
       { label: 'Currency', value: `${formatPknNumber(assets.currencyPkn)} PKN` },
       { label: 'Listed', value: `${formatPknNumber(assets.listedPkn)} PKN` },
-      { label: 'Cards owned', value: String(asNonNeg(assets.cardsOwned)) },
-      { label: 'Digital / NFT', value: String(asNonNeg(assets.nftOwned)) },
+      { label: 'Cards owned', value: `${formatPknNumber(assets.cardsValuePkn ?? 0)} PKN` },
+      { label: 'Digital / NFT', value: `${formatPknNumber(assets.nftValuePkn ?? 0)} PKN` },
     ],
   };
 }

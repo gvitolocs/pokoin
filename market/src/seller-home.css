@@ -202,10 +202,17 @@
   stroke-linecap: round;
 }
 
-.seller-history-grid .seller-history-point {
-  fill: var(--yellow);
-  stroke: #0c0b10;
-  stroke-width: 2;
+.seller-history-point {
+  position: absolute;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--yellow);
+  border: 2px solid #0c0b10;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
 .seller-history-grid .seller-history-crosshair {

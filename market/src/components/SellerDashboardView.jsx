@@ -117,14 +117,6 @@ export function CollectionHistoryPanel({ series = null, today = null }) {
                   <polyline className="seller-history-line" points={polyline} fill="none" />
                 </>
               ) : null}
-              {marker ? (
-                <circle
-                  className="seller-history-point"
-                  cx={marker.x}
-                  cy={marker.y}
-                  r="5"
-                />
-              ) : null}
               {hover && (hasLine || hasPoint) ? (
                 <line
                   className="seller-history-crosshair"
@@ -135,6 +127,17 @@ export function CollectionHistoryPanel({ series = null, today = null }) {
                 />
               ) : null}
             </svg>
+            {/* CSS circle — SVG circle stretches under preserveAspectRatio=none. */}
+            {marker ? (
+              <span
+                className="seller-history-point"
+                data-testid="collection-history-point"
+                style={{
+                  left: `${(marker.x / CHART_W) * 100}%`,
+                  top: `${(marker.y / CHART_H) * 100}%`,
+                }}
+              />
+            ) : null}
             {!hasData ? (
               <div className="seller-history-empty">
                 <p className="seller-history-title">Collection history will appear here</p>
