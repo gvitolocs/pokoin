@@ -79,6 +79,7 @@ export const APP = {
   admin: route('/admin'),
   earn: route('/earn'),
   about: route('/about'),
+  careers: route('/careers'),
   contact: route('/contact'),
   privacy: route('/privacy'),
   emailPreferences: route('/email-preferences'),

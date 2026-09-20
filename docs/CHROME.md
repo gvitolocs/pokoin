@@ -100,7 +100,7 @@ Every control is a **same-origin** path on `pokoin.com`. Never
 | Print flag | **Inside the search pill**, gold magnifying glass. Opens the card **print** language filter (`pokoin.printLanguage`). Search submit is Enter. |
 
 Footer and burger also include Explore, Portfolio, **Sets** (era catalog,
-`set-logos.js`, not the 80-row dump), Watchlist, Docs, About, Privacy, Scan.
+`set-logos.js`, not the 80-row dump), Watchlist, Docs, About, Careers, Privacy, Scan.
 Gold era names on Sets and Versions open `/marketplace/eras/:id`.
 
 On viewports `≤720px` the icon row is a **left side drawer** (~86vw) that
