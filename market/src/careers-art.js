@@ -20,25 +20,25 @@ export const LIFE_BUBBLES = [
   {
     src: '/card-images/322202_dragonite-v-jp-rare-secret-074-s7r-blue-sky-stream.jpg',
     card: 'Dragonite V Illustration Rare · Blue Sky Stream 074/067',
-    face: '58% 12%',
+    face: '64% 24%',
     slot: 'a',
   },
   {
     src: '/card-images/502874_snorlax-181-165-pokemon-card-151.jpg',
     card: 'Snorlax Illustration Rare · Pokémon Card 151 181/165',
-    face: '48% 22%',
+    face: '82% 27%',
     slot: 'b',
   },
   {
     src: '/card-images/241014_komala-114-145-guardians-rising.jpg',
     card: 'Komala · Guardians Rising 114/145',
-    face: '50% 28%',
+    face: '52% 24%',
     slot: 'c',
   },
   {
     src: '/card-images/484062_slowpoke-204-198-scarlet-violet.jpg',
     card: 'Slowpoke Illustration Rare · Scarlet & Violet 204/198',
-    face: '28% 32%',
+    face: '38% 40%',
     slot: 'd',
   },
 ];
