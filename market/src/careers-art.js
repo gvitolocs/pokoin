@@ -15,6 +15,13 @@
  * @property {string} [pose] CSS modifier for composition variety
  */
 
+/** Life-at-Pokoin media bleed — sleeping Dragonite V IR (Atsushi Furusawa). */
+export const LIFE_MEDIA = {
+  src: '/card-images/322202_dragonite-v-jp-rare-secret-074-s7r-blue-sky-stream.jpg',
+  card: 'Dragonite V Illustration Rare · Blue Sky Stream 074/067',
+  reason: 'Sleeping mid-air Dragonite — cozy Life-at-Pokoin hero, not an abstract orb.',
+};
+
 /** @type {Array<{title: string, highlight: string, prefix?: string, rest?: string, tone: string, body: string, art: CareersArt}>} */
 export const PRINCIPLES = [
   {

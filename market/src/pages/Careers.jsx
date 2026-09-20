@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { PRINCIPLES, REASONS } from '../careers-art.js';
+import { LIFE_MEDIA, PRINCIPLES, REASONS } from '../careers-art.js';
 import {
   CAREERS_CONTACT,
   OPEN_ROLES,
@@ -242,7 +242,16 @@ export default function Careers() {
             <span>Life at Pokoin</span>
           </div>
           <div className="careers-media-stage" aria-hidden="true">
-            <div className="careers-media-orb" />
+            <div className="careers-media-art" title={LIFE_MEDIA.card}>
+              <img
+                className="careers-media-shot"
+                src={LIFE_MEDIA.src}
+                alt=""
+                loading="eager"
+                decoding="async"
+                draggable={false}
+              />
+            </div>
             <p className="careers-media-caption">Buy. Sell. Settle in PKN.</p>
           </div>
         </div>

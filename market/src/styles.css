@@ -4328,11 +4328,19 @@ dialog.zoom:not([open]) {
 
 .careers-title-mark {
   display: inline-block;
-  width: 0.72em;
-  height: 0.72em;
-  margin: 0 0.12em;
-  vertical-align: -0.08em;
+  width: 1.15em;
+  height: 1.15em;
+  margin: 0 0.08em;
+  vertical-align: -0.22em;
   border-radius: 50%;
+  object-fit: cover;
+  animation: careers-mark-breathe 4.8s ease-in-out infinite;
+}
+
+.careers-intro .careers-title-mark {
+  width: 1.22em;
+  height: 1.22em;
+  vertical-align: -0.24em;
 }
 
 .careers-title-mark.is-sm {
@@ -4340,6 +4348,7 @@ dialog.zoom:not([open]) {
   height: 1.35rem;
   margin: 0;
   vertical-align: middle;
+  animation: none;
 }
 
 /* 0 · pageIntro — centered hero, large whitespace */
@@ -4351,6 +4360,7 @@ dialog.zoom:not([open]) {
   min-height: min(72vh, 42rem);
   padding: 6rem var(--careers-inset) 3rem;
   text-align: center;
+  animation: careers-rise-in 1.05s cubic-bezier(0.165, 0.84, 0.44, 1) both;
 }
 
 .careers-intro .careers-display {
@@ -4439,14 +4449,42 @@ dialog.zoom:not([open]) {
   place-items: center;
 }
 
-.careers-media-orb {
-  width: min(42%, 16rem);
+.careers-media-art {
+  position: relative;
+  width: min(58%, 22rem);
   aspect-ratio: 1;
   border-radius: 50%;
-  background:
-    radial-gradient(circle at 35% 30%, rgb(255 211 61 / 0.95), rgb(255 211 61 / 0.15) 55%, transparent 70%),
-    radial-gradient(circle at 70% 70%, rgb(91 186 213 / 0.35), transparent 60%);
-  filter: blur(0.5px);
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    0 0 48px rgb(255 186 92 / 0.22),
+    0 0 96px rgb(91 186 213 / 0.14),
+    0 28px 64px rgb(0 0 0 / 0.45);
+  animation: careers-cozy-float 7.5s ease-in-out infinite;
+}
+
+.careers-media-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 48px rgb(8 10 16 / 0.35);
+  pointer-events: none;
+  animation: careers-aura-pulse 8s ease-in-out infinite;
+}
+
+.careers-media-shot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Sleeping Dragonite sits in the upper half — crop past attack text */
+  object-position: 52% 12%;
+  transform: scale(1.55);
+  transform-origin: 50% 18%;
+  user-select: none;
+  -webkit-user-drag: none;
+  animation: careers-cozy-breathe 6.2s ease-in-out infinite;
 }
 
 .careers-media-caption {
@@ -4457,6 +4495,70 @@ dialog.zoom:not([open]) {
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: 0.02em;
+  animation: careers-caption-soft 5.4s ease-in-out infinite;
+}
+
+@keyframes careers-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(1.35rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes careers-cozy-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.7rem);
+  }
+}
+
+@keyframes careers-cozy-breathe {
+  0%,
+  100% {
+    transform: scale(1.55);
+  }
+  50% {
+    transform: scale(1.62);
+  }
+}
+
+@keyframes careers-aura-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes careers-mark-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+@keyframes careers-caption-soft {
+  0%,
+  100% {
+    opacity: 0.62;
+  }
+  50% {
+    opacity: 0.9;
+  }
 }
 
 .careers-prose {
@@ -4663,6 +4765,7 @@ dialog.zoom:not([open]) {
   display: flex;
   align-items: flex-start;
   justify-content: center;
+  animation: careers-cozy-float 8.5s ease-in-out infinite;
 }
 
 .careers-principle-art.is-physical-card .careers-card-shot {
@@ -4680,6 +4783,10 @@ dialog.zoom:not([open]) {
 
 .careers-principle-art.is-physical-card.pose-tilt-left .careers-card-shot {
   transform: rotate(-7deg) translateX(-4%);
+}
+
+.careers-principle-art.is-physical-card.pose-rise-center {
+  animation-delay: -2.4s;
 }
 
 .careers-principle-art.is-physical-card.pose-rise-center .careers-card-shot {
@@ -4770,6 +4877,7 @@ dialog.zoom:not([open]) {
   display: flex;
   align-items: flex-start;
   justify-content: center;
+  animation: careers-cozy-float 9s ease-in-out infinite;
 }
 
 .careers-perk-art.is-physical-card .careers-card-shot {
@@ -4785,8 +4893,16 @@ dialog.zoom:not([open]) {
   transform-origin: center top;
 }
 
+.careers-perk-art.is-physical-card.pose-tilt-right {
+  animation-delay: -1.2s;
+}
+
 .careers-perk-art.is-physical-card.pose-tilt-right .careers-card-shot {
   transform: rotate(8deg) translateX(4%);
+}
+
+.careers-perk-art.is-physical-card.pose-tilt-left {
+  animation-delay: -3.1s;
 }
 
 .careers-perk-art.is-physical-card.pose-tilt-left .careers-card-shot {
@@ -4796,6 +4912,7 @@ dialog.zoom:not([open]) {
 .careers-perk-art.is-physical-card.pose-rise-right {
   right: -10%;
   left: auto;
+  animation-delay: -0.8s;
 }
 
 .careers-perk-art.is-physical-card.pose-rise-right .careers-card-shot {
@@ -4806,6 +4923,7 @@ dialog.zoom:not([open]) {
   left: -4%;
   right: auto;
   width: min(68%, 14rem);
+  animation-delay: -4.2s;
 }
 
 .careers-perk-art.is-physical-card.pose-rise-left .careers-card-shot {
@@ -5070,6 +5188,18 @@ dialog.zoom:not([open]) {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .careers-intro,
+  .careers-title-mark,
+  .careers-media-art,
+  .careers-media-shot,
+  .careers-media-caption,
+  .careers-principle-art.is-physical-card,
+  .careers-perk-art.is-physical-card {
+    animation: none !important;
   }
 }
 

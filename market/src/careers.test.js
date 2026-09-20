@@ -85,6 +85,7 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   const artSrc = fs.readFileSync(path.join(root, 'careers-art.js'), 'utf8');
   assert.match(artSrc, /mode:\s*'full-art'/);
   assert.match(artSrc, /mode:\s*'physical-card'/);
+  assert.match(artSrc, /322202_dragonite/);
   assert.match(artSrc, /332906_umbreon/);
   assert.match(artSrc, /222470_professor-oak/);
   assert.match(artSrc, /55591_magikarp/);
@@ -96,11 +97,15 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(artSrc, /502844_bulbasaur/);
   assert.match(artSrc, /55619_bill/);
   assert.match(careersSrc, /from '\.\.\/careers-art\.js'/);
+  assert.match(careersSrc, /LIFE_MEDIA/);
   assert.match(careersSrc, /CareersCardArt|is-full-art|is-physical-card/);
   assert.match(cssSrc, /\.careers-principle-art\.is-full-art/);
   assert.match(cssSrc, /\.careers-principle-art\.is-physical-card/);
   assert.match(cssSrc, /\.careers-perk-art\.is-full-art/);
   assert.match(cssSrc, /\.careers-perk-art\.is-physical-card/);
+  assert.match(cssSrc, /\.careers-media-art/);
+  assert.match(cssSrc, /careers-cozy-float/);
+  assert.match(cssSrc, /\.careers-title-mark\s*\{[\s\S]*width:\s*1\.15em/);
 });
 
 test('Chrome footer and landing link to /careers', () => {
