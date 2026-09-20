@@ -121,6 +121,71 @@ function PrinciplesSlider() {
   );
 }
 
+function SurfacesSlider() {
+  const scrollerRef = useRef(null);
+  const [atStart, setAtStart] = useState(true);
+  const [atEnd, setAtEnd] = useState(false);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return undefined;
+    const sync = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      setAtStart(el.scrollLeft <= 4);
+      setAtEnd(max <= 4 || el.scrollLeft >= max - 4);
+    };
+    sync();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(sync) : null;
+    ro?.observe(el);
+    el.addEventListener('scroll', sync, { passive: true });
+    window.addEventListener('resize', sync);
+    requestAnimationFrame(sync);
+    return () => {
+      ro?.disconnect();
+      el.removeEventListener('scroll', sync);
+      window.removeEventListener('resize', sync);
+    };
+  }, []);
+
+  const scrollBy = (dir) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const card = el.querySelector('.careers-life-tile');
+    const step = card ? card.getBoundingClientRect().width + 22 : 380;
+    el.scrollBy({ left: dir * step, behavior: 'smooth' });
+  };
+
+  return (
+    <div className="careers-surfaces">
+      <div className="careers-surfaces-chrome">
+        <p className="careers-chip">
+          <span className="careers-chip-star" aria-hidden="true">★</span>
+          Live product
+        </p>
+        <div className="careers-slider-arrows">
+          <button type="button" className="careers-arrow" aria-label="Previous surface" disabled={atStart} onClick={() => scrollBy(-1)}>
+            ‹
+          </button>
+          <button type="button" className="careers-arrow" aria-label="Next surface" disabled={atEnd} onClick={() => scrollBy(1)}>
+            ›
+          </button>
+        </div>
+      </div>
+      <ul className="careers-life-strip" ref={scrollerRef}>
+        {LIFE_STRIP.map((item) => (
+          <li key={item.label} className={`careers-life-tile tone-${item.tone}`}>
+            <div className="careers-life-copy">
+              <h3 className="careers-life-title">{item.label}</h3>
+              <p className="careers-life-body">{item.body}</p>
+            </div>
+            <CareersCardArt art={item.art} className="careers-life-art" />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function DepartmentAccordion({ department, roles, defaultOpen }) {
   const panelId = useId();
   const [open, setOpen] = useState(Boolean(defaultOpen));
@@ -327,14 +392,7 @@ export default function Careers() {
 
       {/* 6 · mediaCarousel — product surfaces, not staff photos */}
       <section className="careers-module careers-strip-mod" aria-label="Pokoin surfaces">
-        <ul className="careers-life-strip">
-          {LIFE_STRIP.map((item) => (
-            <li key={item.label} className={`careers-life-tile tone-${item.tone}`}>
-              <span className="careers-life-label">{item.label}</span>
-              <CareersCardArt art={item.art} className="careers-life-art" />
-            </li>
-          ))}
-        </ul>
+        <SurfacesSlider />
         <p className="careers-strip-note">
           Prefer exploring the live product?{' '}
           <Link to="/marketplace">Open the marketplace</Link>

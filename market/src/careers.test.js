@@ -98,6 +98,7 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(artSrc, /55619_bill/);
   assert.match(artSrc, /LIFE_STRIP/);
   assert.match(artSrc, /397269_charizard/);
+  assert.match(artSrc, /mode:\s*'physical-card'/);
   assert.match(artSrc, /401454_elesa/);
   assert.match(artSrc, /612658_pikachu/);
   assert.match(artSrc, /55576_clefairy/);
@@ -106,8 +107,15 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(careersSrc, /from '\.\.\/careers-art\.js'/);
   assert.match(careersSrc, /LIFE_MEDIA/);
   assert.match(careersSrc, /LIFE_STRIP/);
+  assert.match(careersSrc, /SurfacesSlider/);
+  assert.match(careersSrc, /careers-life-title|careers-life-body/);
   assert.match(careersSrc, /CareersCardArt|is-full-art|is-physical-card/);
-  assert.match(cssSrc, /\.careers-life-art/);
+  assert.match(cssSrc, /\.careers-life-art\.is-physical-card/);
+  assert.match(cssSrc, /\.careers-life-tile[\s\S]*width:\s*min\(23\.75rem/);
+  assert.match(cssSrc, /\.careers-life-tile[\s\S]*height:\s*29\.5rem/);
+  assert.match(cssSrc, /\.careers-life-strip::-webkit-scrollbar/);
+  assert.match(cssSrc, /scrollbar-width:\s*none/);
+  assert.match(cssSrc, /\.careers-strip-note[\s\S]*margin:\s*3\.5rem/);
   assert.match(cssSrc, /\.careers-principle-art\.is-full-art/);
   assert.match(cssSrc, /\.careers-principle-art\.is-physical-card/);
   assert.match(cssSrc, /\.careers-perk-art\.is-full-art/);
