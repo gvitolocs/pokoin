@@ -15,12 +15,33 @@
  * @property {string} [pose] CSS modifier for composition variety
  */
 
-/** Life-at-Pokoin media bleed — sleeping Dragonite V IR (Atsushi Furusawa). */
-export const LIFE_MEDIA = {
-  src: '/card-images/322202_dragonite-v-jp-rare-secret-074-s7r-blue-sky-stream.jpg',
-  card: 'Dragonite V Illustration Rare · Blue Sky Stream 074/067',
-  reason: 'Sleeping mid-air Dragonite — cozy Life-at-Pokoin hero, not an abstract orb.',
-};
+/** Life-at-Pokoin media bleed — floating sleep bubbles (same circle treatment). */
+export const LIFE_BUBBLES = [
+  {
+    src: '/card-images/322202_dragonite-v-jp-rare-secret-074-s7r-blue-sky-stream.jpg',
+    card: 'Dragonite V Illustration Rare · Blue Sky Stream 074/067',
+    face: '58% 12%',
+    slot: 'a',
+  },
+  {
+    src: '/card-images/502874_snorlax-181-165-pokemon-card-151.jpg',
+    card: 'Snorlax Illustration Rare · Pokémon Card 151 181/165',
+    face: '48% 22%',
+    slot: 'b',
+  },
+  {
+    src: '/card-images/241014_komala-114-145-guardians-rising.jpg',
+    card: 'Komala · Guardians Rising 114/145',
+    face: '50% 28%',
+    slot: 'c',
+  },
+  {
+    src: '/card-images/484062_slowpoke-204-198-scarlet-violet.jpg',
+    card: 'Slowpoke Illustration Rare · Scarlet & Violet 204/198',
+    face: '28% 32%',
+    slot: 'd',
+  },
+];
 
 /** @type {Array<{title: string, highlight: string, prefix?: string, rest?: string, tone: string, body: string, art: CareersArt}>} */
 export const PRINCIPLES = [

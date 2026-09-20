@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LIFE_MEDIA, LIFE_STRIP, PRINCIPLES, REASONS } from '../careers-art.js';
+import { LIFE_BUBBLES, LIFE_STRIP, PRINCIPLES, REASONS } from '../careers-art.js';
 import {
   CAREERS_CONTACT,
   OPEN_ROLES,
@@ -301,15 +301,24 @@ export default function Careers() {
             <span className="careers-media-glow careers-media-glow-a" />
             <span className="careers-media-glow careers-media-glow-b" />
             <span className="careers-media-glow careers-media-glow-c" />
-            <div className="careers-media-art" title={LIFE_MEDIA.card}>
-              <img
-                className="careers-media-shot"
-                src={LIFE_MEDIA.src}
-                alt=""
-                loading="eager"
-                decoding="async"
-                draggable={false}
-              />
+            <div className="careers-media-bubbles">
+              {LIFE_BUBBLES.map((bubble) => (
+                <div
+                  key={bubble.slot}
+                  className={`careers-media-art slot-${bubble.slot}`}
+                  title={bubble.card}
+                  style={{ '--bubble-face': bubble.face }}
+                >
+                  <img
+                    className="careers-media-shot"
+                    src={bubble.src}
+                    alt=""
+                    loading={bubble.slot === 'a' ? 'eager' : 'lazy'}
+                    decoding="async"
+                    draggable={false}
+                  />
+                </div>
+              ))}
             </div>
             <p className="careers-media-caption">Buy. Sell. Settle in PKN.</p>
           </div>

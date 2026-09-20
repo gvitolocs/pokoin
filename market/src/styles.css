@@ -4495,21 +4495,58 @@ dialog.zoom:not([open]) {
   animation: careers-glow-drift-c 9.5s ease-in-out infinite;
 }
 
-.careers-media-art {
-  position: relative;
+.careers-media-bubbles {
+  position: absolute;
+  inset: 0;
   z-index: 1;
-  width: min(48%, 18.5rem);
+  pointer-events: none;
+}
+
+.careers-media-art {
+  position: absolute;
+  z-index: 1;
   aspect-ratio: 1;
   border-radius: 50%;
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 0.16);
   background: rgb(20 18 24 / 0.4);
   box-shadow:
-    0 0 0 10px rgb(255 255 255 / 0.03),
-    0 0 60px rgb(255 186 92 / 0.35),
-    0 0 120px rgb(91 160 200 / 0.2),
-    0 32px 64px rgb(0 0 0 / 0.5);
+    0 0 0 8px rgb(255 255 255 / 0.03),
+    0 0 48px rgb(255 186 92 / 0.32),
+    0 0 96px rgb(91 160 200 / 0.18),
+    0 24px 48px rgb(0 0 0 / 0.45);
   animation: careers-cozy-float 6.8s ease-in-out infinite;
+}
+
+.careers-media-art.slot-a {
+  width: min(42%, 17rem);
+  top: 14%;
+  right: 10%;
+  animation-delay: 0s;
+}
+
+.careers-media-art.slot-b {
+  width: min(28%, 11.5rem);
+  top: 18%;
+  left: 8%;
+  animation-delay: -2.1s;
+  animation-duration: 7.6s;
+}
+
+.careers-media-art.slot-c {
+  width: min(24%, 9.5rem);
+  bottom: 18%;
+  left: 22%;
+  animation-delay: -3.8s;
+  animation-duration: 8.2s;
+}
+
+.careers-media-art.slot-d {
+  width: min(22%, 8.75rem);
+  top: 42%;
+  left: 42%;
+  animation-delay: -1.4s;
+  animation-duration: 7.1s;
 }
 
 .careers-media-art::after {
@@ -4529,13 +4566,34 @@ dialog.zoom:not([open]) {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* Tight face crop — closed eyes / smile / sleep bubble */
-  object-position: 58% 8%;
-  transform: scale(2.65);
-  transform-origin: 58% 14%;
+  object-position: var(--bubble-face, 50% 20%);
+  --bubble-scale: 2.35;
+  transform: scale(var(--bubble-scale));
+  transform-origin: var(--bubble-face, 50% 20%);
   user-select: none;
   -webkit-user-drag: none;
   animation: careers-cozy-breathe 7s ease-in-out infinite;
+}
+
+.careers-media-art.slot-a .careers-media-shot {
+  --bubble-scale: 2.55;
+  animation-duration: 7.2s;
+}
+
+.careers-media-art.slot-b .careers-media-shot {
+  --bubble-scale: 2.2;
+  animation-delay: -1.5s;
+}
+
+.careers-media-art.slot-c .careers-media-shot {
+  /* Komala is a bordered card — keep more of the illustration window */
+  --bubble-scale: 1.85;
+  animation-delay: -2.6s;
+}
+
+.careers-media-art.slot-d .careers-media-shot {
+  --bubble-scale: 2.1;
+  animation-delay: -0.7s;
 }
 
 .careers-media-caption {
@@ -4581,10 +4639,10 @@ dialog.zoom:not([open]) {
 @keyframes careers-cozy-breathe {
   0%,
   100% {
-    transform: scale(2.65);
+    transform: scale(var(--bubble-scale, 2.35));
   }
   50% {
-    transform: scale(2.78);
+    transform: scale(calc(var(--bubble-scale, 2.35) * 1.05));
   }
 }
 
@@ -4835,13 +4893,13 @@ dialog.zoom:not([open]) {
 }
 
 .careers-principle-art.is-full-art.pose-bleed-low {
-  height: 44%;
-  bottom: -4%;
+  height: 56%;
+  bottom: 0;
 }
 
 .careers-principle-art.is-full-art.pose-bleed-low .careers-card-shot {
-  object-position: center 42%;
-  transform: scale(1.18);
+  object-position: center 28%;
+  transform: scale(1.2);
 }
 
 /* B · Physical-card: ~50–70% of the full leftover, frame intact, hangs off */
@@ -5283,9 +5341,9 @@ dialog.zoom:not([open]) {
 }
 
 .careers-life-art.is-full-art.pose-bleed-corner .careers-card-shot {
-  object-position: 62% 28%;
+  object-position: 62% 18%;
   transform: scale(1.28);
-  transform-origin: 65% 35%;
+  transform-origin: 65% 22%;
 }
 
 .careers-life-art.is-full-art.pose-bleed-wide .careers-card-shot {
@@ -5432,6 +5490,30 @@ dialog.zoom:not([open]) {
     margin: 0 1rem;
     border-radius: 1.25rem;
     aspect-ratio: 4 / 3;
+  }
+
+  .careers-media-art.slot-a {
+    width: min(48%, 12rem);
+    top: 10%;
+    right: 6%;
+  }
+
+  .careers-media-art.slot-b {
+    width: min(32%, 8rem);
+    top: 14%;
+    left: 4%;
+  }
+
+  .careers-media-art.slot-c {
+    width: min(28%, 7rem);
+    bottom: 14%;
+    left: 16%;
+  }
+
+  .careers-media-art.slot-d {
+    width: min(26%, 6.5rem);
+    top: 44%;
+    left: 40%;
   }
 
   .careers-principle-card {

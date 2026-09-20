@@ -98,16 +98,20 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(artSrc, /55619_bill/);
   assert.match(artSrc, /LIFE_STRIP/);
   assert.match(artSrc, /397269_charizard/);
-  assert.match(artSrc, /mode:\s*'physical-card'/);
   assert.match(artSrc, /401454_elesa/);
   assert.match(artSrc, /612658_pikachu/);
   assert.match(artSrc, /55576_clefairy/);
   assert.match(artSrc, /332900_sylveon/);
   assert.match(artSrc, /470296_mewtwo/);
+  assert.match(artSrc, /LIFE_BUBBLES/);
+  assert.match(artSrc, /502874_snorlax/);
+  assert.match(artSrc, /241014_komala/);
+  assert.match(artSrc, /484062_slowpoke/);
   assert.match(careersSrc, /from '\.\.\/careers-art\.js'/);
-  assert.match(careersSrc, /LIFE_MEDIA/);
+  assert.match(careersSrc, /LIFE_BUBBLES/);
   assert.match(careersSrc, /LIFE_STRIP/);
   assert.match(careersSrc, /SurfacesSlider/);
+  assert.match(careersSrc, /careers-media-bubbles/);
   assert.match(careersSrc, /careers-life-title|careers-life-body/);
   assert.match(careersSrc, /CareersCardArt|is-full-art|is-physical-card/);
   assert.match(cssSrc, /\.careers-life-art\.is-physical-card/);
@@ -121,9 +125,13 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(cssSrc, /\.careers-perk-art\.is-full-art/);
   assert.match(cssSrc, /\.careers-perk-art\.is-physical-card/);
   assert.match(cssSrc, /\.careers-media-art/);
+  assert.match(cssSrc, /\.careers-media-art\.slot-b/);
+  assert.match(cssSrc, /\.careers-media-art\.slot-c/);
+  assert.match(cssSrc, /\.careers-media-art\.slot-d/);
   assert.match(cssSrc, /careers-cozy-float/);
   assert.match(cssSrc, /careers-media-glow/);
-  assert.match(cssSrc, /object-position:\s*58%\s*8%/);
+  assert.match(cssSrc, /object-position:\s*62%\s*18%/);
+  assert.match(cssSrc, /\.careers-principle-art\.is-full-art\.pose-bleed-low[\s\S]*height:\s*56%/);
   assert.match(cssSrc, /\.careers-title-mark\s*\{[\s\S]*width:\s*1\.15em/);
 });
 
