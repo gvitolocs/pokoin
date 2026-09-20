@@ -225,8 +225,8 @@ export default function Careers() {
           Careers at <TitleMark /> Pokoin
         </h1>
         <p className="careers-intro-lede">
-          We’re a small team building a peer-to-peer Pokémon marketplace that settles in PKN —
-          Card Reserve, wallet, and Scan as one product.
+          We’re building the peer-to-peer Pokémon marketplace designed for collectors —
+          buy, sell, and settle in PKN.
         </p>
         <a className="careers-soft-btn careers-intro-cta" href="#open-positions">
           Browse open roles
@@ -242,6 +242,9 @@ export default function Careers() {
             <span>Life at Pokoin</span>
           </div>
           <div className="careers-media-stage" aria-hidden="true">
+            <span className="careers-media-glow careers-media-glow-a" />
+            <span className="careers-media-glow careers-media-glow-b" />
+            <span className="careers-media-glow careers-media-glow-c" />
             <div className="careers-media-art" title={LIFE_MEDIA.card}>
               <img
                 className="careers-media-shot"

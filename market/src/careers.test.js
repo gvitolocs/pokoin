@@ -105,6 +105,8 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(cssSrc, /\.careers-perk-art\.is-physical-card/);
   assert.match(cssSrc, /\.careers-media-art/);
   assert.match(cssSrc, /careers-cozy-float/);
+  assert.match(cssSrc, /careers-media-glow/);
+  assert.match(cssSrc, /object-position:\s*58%\s*8%/);
   assert.match(cssSrc, /\.careers-title-mark\s*\{[\s\S]*width:\s*1\.15em/);
 });
 

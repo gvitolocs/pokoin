@@ -4420,26 +4420,35 @@ dialog.zoom:not([open]) {
   margin: 0 var(--careers-inset);
   border-radius: 2rem;
   overflow: hidden;
-  background: linear-gradient(145deg, #1a1620 0%, #2a2418 45%, #141018 100%);
-  border: 1px solid var(--g5);
+  /* Phantom-like soft mesh — warm Pokoin gold instead of purple */
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 42%, rgb(255 196 110 / 0.14), transparent 62%),
+    radial-gradient(ellipse 45% 40% at 18% 78%, rgb(91 160 200 / 0.12), transparent 55%),
+    radial-gradient(ellipse 40% 35% at 88% 18%, rgb(255 211 61 / 0.1), transparent 50%),
+    linear-gradient(160deg, #16131c 0%, #1c1822 42%, #121018 100%);
+  border: 1px solid rgb(255 255 255 / 0.06);
   aspect-ratio: 16 / 9;
+  isolation: isolate;
 }
 
 .careers-media-badge {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
   top: 1.1rem;
   left: 1.1rem;
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.45rem 0.8rem 0.45rem 0.45rem;
+  padding: 0.45rem 0.85rem 0.45rem 0.45rem;
   border-radius: 999px;
-  background: rgb(0 0 0 / 0.55);
-  border: 1px solid rgb(255 211 61 / 0.35);
+  background: rgb(12 10 16 / 0.45);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
   color: var(--text);
   font-size: 0.88rem;
   font-weight: 700;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
 }
 
 .careers-media-stage {
@@ -4447,20 +4456,60 @@ dialog.zoom:not([open]) {
   inset: 0;
   display: grid;
   place-items: center;
+  padding-bottom: 1.75rem;
+}
+
+.careers-media-glow {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(42px);
+  opacity: 0.85;
+  will-change: transform, opacity;
+}
+
+.careers-media-glow-a {
+  width: min(52%, 20rem);
+  aspect-ratio: 1;
+  background: rgb(255 186 92 / 0.38);
+  top: 18%;
+  left: 28%;
+  animation: careers-glow-drift-a 11s ease-in-out infinite;
+}
+
+.careers-media-glow-b {
+  width: min(40%, 15rem);
+  aspect-ratio: 1;
+  background: rgb(120 180 220 / 0.28);
+  bottom: 12%;
+  right: 18%;
+  animation: careers-glow-drift-b 13s ease-in-out infinite;
+}
+
+.careers-media-glow-c {
+  width: min(28%, 10rem);
+  aspect-ratio: 1;
+  background: rgb(255 211 61 / 0.22);
+  top: 22%;
+  right: 26%;
+  animation: careers-glow-drift-c 9.5s ease-in-out infinite;
 }
 
 .careers-media-art {
   position: relative;
-  width: min(58%, 22rem);
+  z-index: 1;
+  width: min(48%, 18.5rem);
   aspect-ratio: 1;
   border-radius: 50%;
   overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  background: rgb(20 18 24 / 0.4);
   box-shadow:
-    0 0 0 1px rgb(255 255 255 / 0.08),
-    0 0 48px rgb(255 186 92 / 0.22),
-    0 0 96px rgb(91 186 213 / 0.14),
-    0 28px 64px rgb(0 0 0 / 0.45);
-  animation: careers-cozy-float 7.5s ease-in-out infinite;
+    0 0 0 10px rgb(255 255 255 / 0.03),
+    0 0 60px rgb(255 186 92 / 0.35),
+    0 0 120px rgb(91 160 200 / 0.2),
+    0 32px 64px rgb(0 0 0 / 0.5);
+  animation: careers-cozy-float 6.8s ease-in-out infinite;
 }
 
 .careers-media-art::after {
@@ -4468,9 +4517,11 @@ dialog.zoom:not([open]) {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: inset 0 0 48px rgb(8 10 16 / 0.35);
+  background:
+    radial-gradient(circle at 35% 28%, rgb(255 255 255 / 0.14), transparent 42%),
+    linear-gradient(180deg, transparent 55%, rgb(8 10 16 / 0.28) 100%);
+  box-shadow: inset 0 0 36px rgb(8 10 16 / 0.28);
   pointer-events: none;
-  animation: careers-aura-pulse 8s ease-in-out infinite;
 }
 
 .careers-media-shot {
@@ -4478,23 +4529,31 @@ dialog.zoom:not([open]) {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* Sleeping Dragonite sits in the upper half — crop past attack text */
-  object-position: 52% 12%;
-  transform: scale(1.55);
-  transform-origin: 50% 18%;
+  /* Tight face crop — closed eyes / smile / sleep bubble */
+  object-position: 58% 8%;
+  transform: scale(2.65);
+  transform-origin: 58% 14%;
   user-select: none;
   -webkit-user-drag: none;
-  animation: careers-cozy-breathe 6.2s ease-in-out infinite;
+  animation: careers-cozy-breathe 7s ease-in-out infinite;
 }
 
 .careers-media-caption {
   position: absolute;
-  bottom: 1.4rem;
+  z-index: 2;
+  bottom: 1.25rem;
   margin: 0;
-  color: rgb(255 255 255 / 0.72);
-  font-size: 1rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 999px;
+  background: rgb(12 10 16 / 0.42);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  backdrop-filter: blur(12px) saturate(1.15);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+  color: rgb(255 255 255 / 0.88);
+  font-size: 0.95rem;
   font-weight: 600;
   letter-spacing: 0.02em;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.28);
   animation: careers-caption-soft 5.4s ease-in-out infinite;
 }
 
@@ -4515,29 +4574,53 @@ dialog.zoom:not([open]) {
     transform: translateY(0);
   }
   50% {
-    transform: translateY(-0.7rem);
+    transform: translateY(-0.85rem);
   }
 }
 
 @keyframes careers-cozy-breathe {
   0%,
   100% {
-    transform: scale(1.55);
+    transform: scale(2.65);
   }
   50% {
-    transform: scale(1.62);
+    transform: scale(2.78);
   }
 }
 
-@keyframes careers-aura-pulse {
+@keyframes careers-glow-drift-a {
   0%,
   100% {
-    opacity: 0.7;
-    transform: scale(1);
+    transform: translate(0, 0) scale(1);
+    opacity: 0.75;
   }
   50% {
+    transform: translate(6%, -8%) scale(1.12);
     opacity: 1;
-    transform: scale(1.08);
+  }
+}
+
+@keyframes careers-glow-drift-b {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.65;
+  }
+  50% {
+    transform: translate(-10%, 6%) scale(1.18);
+    opacity: 0.95;
+  }
+}
+
+@keyframes careers-glow-drift-c {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translate(-4%, 10%) scale(1.2);
+    opacity: 0.85;
   }
 }
 
@@ -5197,6 +5280,7 @@ dialog.zoom:not([open]) {
   .careers-media-art,
   .careers-media-shot,
   .careers-media-caption,
+  .careers-media-glow,
   .careers-principle-art.is-physical-card,
   .careers-perk-art.is-physical-card {
     animation: none !important;
