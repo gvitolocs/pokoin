@@ -99,7 +99,8 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.doesNotMatch(viewSrc, /Site balance available to spend/);
   assert.doesNotMatch(viewSrc, /fake.?line/i);
   // Empty collection still keeps the chart hero — not a collapsed EmptyDesk.
-  assert.match(viewSrc, /portfolio-empty-scan/);
+  assert.doesNotMatch(viewSrc, /portfolio-empty-scan/);
+  assert.match(viewSrc, /portfolio-view-collection/);
   assert.match(viewSrc, /CollectionHistoryPanel/);
   assert.match(viewSrc, /todayHistoryDay/);
   assert.match(viewSrc, /collection-history-tip/);

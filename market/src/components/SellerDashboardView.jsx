@@ -485,11 +485,6 @@ export function SellerDashboardView({
               />
 
               <div className="seller-tile-actions">
-                {empty ? (
-                  <Link className="btn" to="/scan" data-testid="portfolio-empty-scan">
-                    Scan cards
-                  </Link>
-                ) : null}
                 <a className="btn ghost" href={collectionHref} data-testid="portfolio-view-collection">
                   View collection
                 </a>
