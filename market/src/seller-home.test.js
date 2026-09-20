@@ -78,8 +78,12 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(homeSrc, /marketUrl\(APP\.collection\)/);
   assert.match(viewSrc, /Cards owned|Card owned/);
   assert.match(viewSrc, /Listed for sale/);
-  assert.match(viewSrc, /Physical/);
+  assert.match(viewSrc, /Currency availability/);
+  assert.match(viewSrc, /formatPknNumber\(balance\)/);
   assert.match(viewSrc, /Digital \/ NFT/);
+  assert.doesNotMatch(viewSrc, /<span>Physical<\/span>/);
+  assert.match(homeSrc, /availablePkn \} = useAuth\(\)/);
+  assert.match(homeSrc, /pknBalance=\{availablePkn\}/);
   assert.match(viewSrc, /Total asking value/);
   assert.doesNotMatch(viewSrc, /Portfolio value/);
   assert.match(viewSrc, /View collection/);
@@ -89,7 +93,7 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(viewSrc, /Collection value history/);
   assert.match(viewSrc, /Collection history will appear here/);
   assert.match(viewSrc, /Scan cards to start building your portfolio/);
-  assert.match(viewSrc, /data-history=\{hasSeries \? 'series' : 'empty'\}/);
+  assert.match(viewSrc, /data-history=\{hasSeries \? \(balanceOnly \? 'balance' : 'series'\) : 'empty'\}/);
   assert.match(viewSrc, /seller-history-ghost-line/);
   assert.doesNotMatch(viewSrc, /fake.?line/i);
   // Empty collection still keeps the chart hero — not a collapsed EmptyDesk.
@@ -107,9 +111,11 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
 });
 
 test('Dashboard history panel keeps chart frame; never draws a real fake series', () => {
-  // Real polyline only when a `series` prop is supplied.
+  // Real polyline only when a `series` prop is supplied — or a flat line from site PKN.
   assert.match(viewSrc, /hasSeries \? \([\s\S]*<polyline/);
-  assert.match(viewSrc, /data-history=\{hasSeries \? 'series' : 'empty'\}/);
+  assert.match(viewSrc, /data-history=\{hasSeries \? \(balanceOnly \? 'balance' : 'series'\) : 'empty'\}/);
+  assert.match(viewSrc, /currencyPkn=\{balance\}/);
+  assert.match(viewSrc, /currency-availability-graph/);
   assert.match(viewSrc, /seller-history-ghost-line/);
   assert.match(cssSrc, /\.seller-history-ghost-line/);
   assert.match(cssSrc, /\.seller-history-frame/);

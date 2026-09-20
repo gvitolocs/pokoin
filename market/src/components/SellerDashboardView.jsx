@@ -2,15 +2,23 @@ import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc } from '../api.js';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import { printingIdentity } from '../identity.js';
-import { tilePricePkn } from '../pkn.js';
+import { formatPknNumber, tilePricePkn } from '../pkn.js';
 import { marketUrl, goMarket } from '../punchouts.js';
 
-/** Shared chart frame — real `series` when available; otherwise an illustrative empty graph. */
-export function CollectionHistoryPanel({ series = null }) {
-  const points = Array.isArray(series)
+/**
+ * Collection value chart. Real `series` when available; otherwise a flat line
+ * at the current site PKN balance (currency availability).
+ */
+export function CollectionHistoryPanel({ series = null, currencyPkn = null }) {
+  const balance = Math.max(0, Number(currencyPkn) || 0);
+  const fromSeries = Array.isArray(series)
     ? series.map(Number).filter((n) => Number.isFinite(n))
     : [];
+  const points = fromSeries.length >= 2
+    ? fromSeries
+    : (balance > 0 ? [balance, balance] : []);
   const hasSeries = points.length >= 2;
+  const balanceOnly = hasSeries && fromSeries.length < 2;
   let polyline = '';
   let area = '';
   if (hasSeries) {
@@ -18,10 +26,12 @@ export function CollectionHistoryPanel({ series = null }) {
     const h = 200;
     const min = Math.min(...points);
     const max = Math.max(...points);
+    const flat = max === min;
     const span = max - min || 1;
     const coords = points.map((v, i) => {
       const x = (i / (points.length - 1)) * w;
-      const y = h - ((v - min) / span) * (h - 24) - 12;
+      // Flat balance line sits mid-frame; real series scale to the data.
+      const y = flat ? h * 0.45 : h - ((v - min) / span) * (h - 24) - 12;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     });
     polyline = coords.join(' ');
@@ -31,10 +41,10 @@ export function CollectionHistoryPanel({ series = null }) {
     <div
       className="seller-history"
       data-testid="collection-history"
-      data-history={hasSeries ? 'series' : 'empty'}
+      data-history={hasSeries ? (balanceOnly ? 'balance' : 'series') : 'empty'}
     >
       <div className="seller-history-head">
-        <h3>Collection value history</h3>
+        <h3>{balanceOnly ? 'Currency availability' : 'Collection value history'}</h3>
       </div>
       <div className="seller-history-frame">
         <svg
@@ -69,14 +79,20 @@ export function CollectionHistoryPanel({ series = null }) {
             </>
           )}
         </svg>
-        {hasSeries ? null : (
+        {balanceOnly ? (
+          <div className="seller-history-empty" data-testid="currency-availability-graph">
+            <p className="seller-history-title">{formatPknNumber(balance)} PKN</p>
+            <p className="seller-history-lede">Site balance available to spend</p>
+          </div>
+        ) : null}
+        {!hasSeries ? (
           <div className="seller-history-empty">
             <p className="seller-history-title">Collection history will appear here</p>
             <p className="seller-history-lede">
               Scan cards to start building your portfolio.
             </p>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -278,6 +294,7 @@ export function SellerDashboardView({
   physicalOwned,
   nftOwned,
   uniqueItems,
+  pknBalance = 0,
   listed,
   listingRows = [],
   movers = [],
@@ -297,6 +314,7 @@ export function SellerDashboardView({
   const physicalQty = Math.max(0, Number(physicalOwned) || 0);
   const nftQty = Math.max(0, Number(nftOwned) || 0);
   const owned = Math.max(0, Number(ownedCards) || 0);
+  const balance = Math.max(0, Number(pknBalance) || 0);
   const listedCards = Math.max(0, Number(listed?.cards) || 0);
   const mixBase = physicalQty + nftQty;
   const physicalPct = mixBase > 0 ? (physicalQty / mixBase) * 100 : 0;
@@ -359,9 +377,9 @@ export function SellerDashboardView({
                   <strong>{listed?.failed ? '—' : listedCards.toLocaleString('en-US')}</strong>
                   <span>Listed for sale</span>
                 </div>
-                <div className="seller-metric">
-                  <strong>{physicalQty.toLocaleString('en-US')}</strong>
-                  <span>Physical</span>
+                <div className="seller-metric" data-testid="currency-availability">
+                  <strong>{formatPknNumber(balance)} PKN</strong>
+                  <span>Currency availability</span>
                 </div>
                 <div className="seller-metric">
                   <strong>{nftQty.toLocaleString('en-US')}</strong>
@@ -376,7 +394,7 @@ export function SellerDashboardView({
                 </p>
               ) : null}
 
-              <CollectionHistoryPanel />
+              <CollectionHistoryPanel currencyPkn={balance} />
 
               <div className="seller-tile-actions">
                 {empty ? (

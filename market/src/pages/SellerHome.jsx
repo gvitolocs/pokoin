@@ -33,6 +33,7 @@ const PREVIEW_FIXTURE = {
   physicalOwned: 290,
   nftOwned: 37,
   uniqueItems: 241,
+  pknBalance: 15,
   listed: { listings: 18, cards: 24, listedPkn: 12400 },
   listingRows: [
     {
@@ -103,7 +104,7 @@ export default function SellerHome() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const preview = allowLayoutPreview(searchParams, location.pathname);
-  const { user, ready, signedIn, profile, getBearer } = useAuth();
+  const { user, ready, signedIn, profile, getBearer, availablePkn } = useAuth();
   const [ownedCards, setOwnedCards] = useState(null);
   const [physicalOwned, setPhysicalOwned] = useState(0);
   const [nftOwned, setNftOwned] = useState(0);
@@ -263,6 +264,7 @@ export default function SellerHome() {
         physicalOwned={PREVIEW_FIXTURE.physicalOwned}
         nftOwned={PREVIEW_FIXTURE.nftOwned}
         uniqueItems={PREVIEW_FIXTURE.uniqueItems}
+        pknBalance={PREVIEW_FIXTURE.pknBalance}
         listed={PREVIEW_FIXTURE.listed}
         listingRows={PREVIEW_FIXTURE.listingRows}
         movers={PREVIEW_FIXTURE.movers}
@@ -294,6 +296,7 @@ export default function SellerHome() {
       physicalOwned={physicalOwned}
       nftOwned={nftOwned}
       uniqueItems={uniqueItems}
+      pknBalance={availablePkn}
       listed={listed}
       listingRows={listingRows}
       movers={movers}
