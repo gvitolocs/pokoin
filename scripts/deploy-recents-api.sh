@@ -44,8 +44,8 @@ healthy=0
 for _ in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
   noauth="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-recents?game=pokemon'" || true)"
-  nogame="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer invalid' 'http://127.0.0.1:18080/api/marketplace-recents'" || true)"
-  # noauth should be 401; nogame with bad token may be 401 before game check — accept 400 or 401
+  # No Authorization header → auth fails before game check (401). Explicit invalid game with no auth also 401.
+  nogame="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-recents'" || true)"
   if [[ "$health" == "200" && "$noauth" =~ ^(401|403)$ && "$nogame" =~ ^(400|401|403)$ ]]; then
     healthy=1
     break

@@ -333,7 +333,12 @@ module.exports = async function handler(req, res) {
     if (error.statusCode === 400) {
       return res.status(400).json({ error: error.message, code: error.code || 'BAD_REQUEST' });
     }
-    if (error.statusCode === 401 || error.code === 'auth/id-token-expired') {
+    if (
+      error.statusCode === 401
+      || error.statusCode === 403
+      || String(error.code || '').startsWith('auth/')
+      || /bearer|id token|authentication/i.test(String(error.message || ''))
+    ) {
       const auth = authErrorResponse(error);
       return res.status(auth.statusCode).json(auth.body);
     }

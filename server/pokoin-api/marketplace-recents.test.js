@@ -349,11 +349,11 @@ test('pre-migration unscoped schema returns empty — does not leak mixed ids', 
   assert.deepEqual(res.body.cardIds, []);
 });
 
-test('missing bearer is 401', async () => {
+test('malformed bearer is 401 not 500', async () => {
   const handler = loadHandler({
     verifyBearerToken: async () => {
-      const error = new Error('Missing Pokoin bearer token.');
-      error.statusCode = 401;
+      const error = new Error('Decoding Firebase ID token failed.');
+      error.code = 'auth/argument-error';
       throw error;
     },
     marketplaceQuery: async () => ({ rows: [] }),
@@ -361,8 +361,8 @@ test('missing bearer is 401', async () => {
   const res = mockRes();
   await handler({
     method: 'GET',
-    url: '/api/marketplace-recents?game=pokemon',
-    headers: { host: 'pokoin.com' },
+    url: '/api/marketplace-recents',
+    headers: { authorization: 'Bearer invalid', host: 'pokoin.com' },
   }, res);
   assert.equal(res.statusCode, 401);
 });
