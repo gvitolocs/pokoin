@@ -21,6 +21,13 @@ cp "$ROOT/sitemap-hubs.xml" "$OUT/sitemap-hubs.xml"
 cp "$ROOT/sitemap-pokemon.xml" "$OUT/sitemap-pokemon.xml"
 cp "$ROOT/sitemap-sets.xml" "$OUT/sitemap-sets.xml"
 cp "$ROOT/site.webmanifest" "$OUT/site.webmanifest"
+# The landing and marketplace both link to the official PokoinPOS audit. Keep
+# it in the deployment artifact so the published URL cannot regress to 404.
+if [[ -d "$ROOT/audit" ]]; then
+  cp -a "$ROOT/audit" "$OUT/audit"
+else
+  echo "warning: missing $ROOT/audit (security audit URL will 404)" >&2
+fi
 # BIMI logo for inbox brand avatars (DNS: default._bimi.pokoin.com)
 if [[ -f "$ROOT/bimi.svg" ]]; then
   cp "$ROOT/bimi.svg" "$OUT/bimi.svg"
