@@ -4,6 +4,7 @@ const GAMES = {
   pokemon: {
     id: 'pokemon',
     apiGame: 'pokemon',
+    name: 'Pokémon',
     brand: 'Pokoin',
     title: 'Pokoin marketplace',
     homeHref: '/',
@@ -13,6 +14,7 @@ const GAMES = {
   one_piece: {
     id: 'one_piece',
     apiGame: 'one_piece',
+    name: 'One Piece',
     brand: 'Pokoin One Piece',
     title: 'One Piece marketplace',
     homeHref: '/marketplace',
@@ -22,6 +24,7 @@ const GAMES = {
   riftbound: {
     id: 'riftbound',
     apiGame: 'riftbound',
+    name: 'Riftbound',
     brand: 'Pokoin Riftbound',
     title: 'Riftbound marketplace',
     homeHref: '/marketplace',

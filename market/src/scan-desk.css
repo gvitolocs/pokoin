@@ -151,9 +151,8 @@
   top: calc(var(--topbar-h) + 0.25rem);
   z-index: 5;
   display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.45rem;
   padding: 0.55rem 0.7rem;
   margin-bottom: 0.6rem;
   background: rgba(22, 20, 26, 0.96);
@@ -163,13 +162,36 @@
   border-radius: 12px;
 }
 
+/* Tile title above one row of controls. */
 .scan-defaults-label {
+  margin: 0;
   font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--yellow);
-  margin-right: 0.2rem;
+}
+
+/* One line whenever it fits; a narrow desk wraps instead of clipping. */
+.scan-defaults-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.scan-defaults-row > * { flex: 0 0 auto; }
+
+.sd-game b {
+  background: #000;
+  color: #fff;
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .sd-field {
@@ -192,7 +214,9 @@
   font-weight: 700;
 }
 
-.sd-field.grow input { width: 9rem; }
+/* Location takes the slack so the row stays on one line. */
+.scan-defaults-row > .sd-field.grow { flex: 1 1 7rem; min-width: 6rem; }
+.sd-field.grow input { width: 100%; min-width: 0; }
 .sd-field.pos input { width: 3.1rem; text-align: center; }
 .sd-field.qty input { width: 2.6rem; text-align: center; }
 
@@ -208,7 +232,7 @@
   color: #ddd;
   border: 0;
   border-right: 1px solid var(--g5);
-  padding: 0.35rem 0.55rem;
+  padding: 0.35rem 0.45rem;
   font: inherit;
   font-size: 0.85rem;
   font-weight: 700;
@@ -218,7 +242,7 @@
 .sd-seg button:last-child { border-right: 0; }
 .sd-seg button.on { background: var(--yellow); color: #111; }
 
-.sd-check { display: inline-flex; gap: 0.35rem; align-items: center; font-size: 0.82rem; color: #ddd; }
+.sd-check { display: inline-flex; gap: 0.35rem; align-items: center; font-size: 0.82rem; color: #ddd; white-space: nowrap; }
 
 /* Manual add (PowerTools single-card Name field) */
 

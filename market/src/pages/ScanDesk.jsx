@@ -60,6 +60,7 @@ import { useLiveSuggest } from '../use-live-suggest.js';
 import { SessionWait } from '../components/Desk.jsx';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import ThumbZoom from '../components/ThumbZoom.jsx';
+import { game } from '../game.js';
 import { marketUrl } from '../punchouts.js';
 import '../scan-desk.css';
 
@@ -1466,8 +1467,14 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef }) {
     if (event.key === 'Enter') event.currentTarget.blur();
   };
   return (
-    <section className="scan-defaults" aria-label="Batch defaults">
-      <span className="scan-defaults-label" title="New scans take these values. Shift + a row key changes them.">Batch defaults</span>
+    <section className="scan-defaults" aria-labelledby="scan-defaults-title">
+      <h2 id="scan-defaults-title" className="scan-defaults-label" title="New scans take these values. Shift + a row key changes them.">Batch defaults</h2>
+      <div className="scan-defaults-row">
+      {/* The TCG comes from the host (pokoin.com, onepiece., riftbound.). */}
+      <span className="sd-field sd-game">
+        <span>Game</span>
+        <b>{game().name}</b>
+      </span>
       <label className="sd-field">
         <span>Language</span>
         <select value={defaults.language} onChange={(e) => onChange({ language: e.target.value })}>
@@ -1529,6 +1536,7 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef }) {
         <input type="checkbox" checked={defaults.mergeRepeats} onChange={(e) => onChange({ mergeRepeats: e.target.checked })} />
         <span>Merge repeats</span>
       </label>
+      </div>
     </section>
   );
 }
