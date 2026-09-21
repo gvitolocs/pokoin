@@ -29,6 +29,7 @@ CT_FILES=(
   _cardtrader_seller_listings.js
   _cardtrader_inventory_sync_core.js
   _cardtrader_inventory_sync.js
+  _cardtrader_inventory_async.js
   cardtrader-connect.js
   cardtrader-disconnect.js
   cardtrader-status.js
@@ -74,6 +75,7 @@ tar -C "$SRC" -cf - \
   _cardtrader_seller_listings.js \
   _cardtrader_inventory_sync_core.js \
   _cardtrader_inventory_sync.js \
+  _cardtrader_inventory_async.js \
   cardtrader-connect.js \
   cardtrader-disconnect.js \
   cardtrader-status.js \

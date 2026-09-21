@@ -13,7 +13,7 @@ const {
   safeStatusFromDoc,
   storeConnectedIntegration,
 } = require('./_cardtrader_integration');
-const { reconcileCardTraderInventory } = require('./_cardtrader_inventory_sync');
+const { enqueueCardTraderInventorySync } = require('./_cardtrader_inventory_async');
 
 function setNoStore(res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -56,22 +56,32 @@ async function connect(req, decoded, admin, firestore) {
     });
   }
 
-  // Auth succeeded → keep integration even if initial inventory sync fails.
+  // Auth succeeded → keep connection; inventory import runs in the background
+  // so Cloudflare (~100s) never kills a big first sync.
   let inventorySync = null;
   try {
     const sellerName = info?.user?.username
       || info?.seller?.name
       || decoded.email
       || 'Pokoin seller';
-    inventorySync = await reconcileCardTraderInventory({
+    const job = enqueueCardTraderInventorySync({
       firestore,
       uid: decoded.uid,
       sellerName: String(sellerName),
       token,
       oneDayReady: info.oneDayReady === true,
     });
+    inventorySync = {
+      ok: true,
+      started: job.started,
+      alreadyRunning: job.alreadyRunning,
+      running: true,
+      connected: true,
+      async: true,
+      summary: { running: true, phase: 'starting', processed: 0, total: 0 },
+    };
   } catch (error) {
-    console.error('cardtrader initial inventory sync failed', {
+    console.error('cardtrader initial inventory sync enqueue failed', {
       uid: decoded.uid,
       message: error.message,
     });
@@ -80,7 +90,7 @@ async function connect(req, decoded, admin, firestore) {
       incomplete: true,
       connected: true,
       destructiveSkipped: true,
-      error: error.message || 'Initial CardTrader inventory sync failed.',
+      error: error.message || 'Initial CardTrader inventory sync failed to start.',
       summary: null,
     };
   }

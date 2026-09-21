@@ -3,10 +3,11 @@
 const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
 const { parseEncryptionKey } = require('./_cardtrader_crypto');
 const { readIntegrationDoc, safeStatusFromDoc } = require('./_cardtrader_integration');
+const { readSellerSync } = require('./_cardtrader_inventory_sync');
 const {
-  readSellerSync,
-  reconcileCardTraderInventory,
-} = require('./_cardtrader_inventory_sync');
+  enqueueCardTraderInventorySync,
+  readInventorySyncProgress,
+} = require('./_cardtrader_inventory_async');
 
 function setNoStore(res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -28,10 +29,15 @@ module.exports = async function handler(req, res) {
     if (req.method === 'GET') {
       const doc = await readIntegrationDoc(firestore, decoded.uid);
       const status = safeStatusFromDoc(doc);
-      const sync = await readSellerSync(decoded.uid);
+      const progress = await readInventorySyncProgress(decoded.uid);
+      const sync = progress.row;
       return res.status(200).json({
         ok: true,
         status,
+        running: progress.running,
+        phase: progress.phase || null,
+        processed: progress.processed,
+        total: progress.total,
         sync: sync
           ? {
             lastSyncAt: sync.last_sync_at,
@@ -41,8 +47,18 @@ module.exports = async function handler(req, res) {
             lastCompleteExportAt: sync.last_complete_export_at,
             lastExportProductCount: sync.last_export_product_count,
             summary: sync.last_sync_summary || {},
+            running: progress.running,
+            phase: progress.phase || null,
+            processed: progress.processed,
+            total: progress.total,
           }
-          : null,
+          : {
+            running: progress.running,
+            phase: progress.phase || null,
+            processed: progress.processed,
+            total: progress.total,
+            summary: progress.summary || {},
+          },
       });
     }
 
@@ -58,19 +74,23 @@ module.exports = async function handler(req, res) {
       || decoded.email
       || 'Pokoin seller';
 
-    const result = await reconcileCardTraderInventory({
+    const job = enqueueCardTraderInventorySync({
       firestore,
       uid: decoded.uid,
       sellerName: String(sellerName),
     });
 
     return res.status(200).json({
-      ok: result.ok !== false,
+      ok: true,
       connected: true,
-      incomplete: Boolean(result.incomplete),
-      destructiveSkipped: Boolean(result.destructiveSkipped),
-      error: result.error || null,
-      summary: result.summary,
+      async: true,
+      started: job.started,
+      alreadyRunning: job.alreadyRunning,
+      running: true,
+      incomplete: true,
+      destructiveSkipped: false,
+      error: null,
+      summary: { running: true, phase: 'starting', processed: 0, total: 0 },
       status,
     });
   } catch (error) {

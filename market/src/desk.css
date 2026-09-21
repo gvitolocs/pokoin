@@ -459,6 +459,32 @@
   margin-top: 0.75rem;
 }
 
+
+.ct-sync-progress {
+  margin: 0.75rem 0 0.25rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.ct-sync-progress-label {
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.ct-sync-progress-track {
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--g3);
+  overflow: hidden;
+}
+
+.ct-sync-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #5dade2, #7dcea0);
+  transition: width 0.35s ease;
+}
+
 .ct-connect-ok { color: #7dcea0; margin: 0.55rem 0 0; font-size: 0.9rem; }
 .ct-connect-err { color: #f07178; margin: 0.55rem 0 0; font-size: 0.9rem; }
 
