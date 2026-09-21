@@ -26,6 +26,8 @@ import {
   applyItems,
   batchCounts,
   boxSlots,
+  stackPosToIndex,
+  indexToStackPos,
   candidateList,
   CONDITIONS,
   createPatchChain,
@@ -46,7 +48,11 @@ import {
   stepCandidate,
   submitLabel,
   suggestedStartPosition,
+  suggestedStackCursor,
+  STACK_SIZES,
+  slotFilledStack,
   typeQuantity,
+  locationDefaultsText,
 } from '../scan-model.js';
 import { HELP_SECTIONS, shortcutFor, DRAFT_HOTKEY_LEGEND, draftLegendActive, dispatchDraftHotkey } from '../scan-shortcuts.js';
 import {
@@ -60,7 +66,7 @@ import { useLiveSuggest } from '../use-live-suggest.js';
 import { SessionWait } from '../components/Desk.jsx';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import ThumbZoom from '../components/ThumbZoom.jsx';
-import { game } from '../game.js';
+import { game, GAMES, setScanGameOverride, gameIdFromHost } from '../game.js';
 import { marketUrl } from '../punchouts.js';
 import '../scan-desk.css';
 
@@ -157,6 +163,8 @@ export default function ScanDesk() {
   const [focusId, setFocusId] = useState('');
   const [selection, setSelection] = useState(() => new Set());
   const [toasts, setToasts] = useState([]);
+  const [stackFull, setStackFull] = useState(false);
+  const stackFullTimer = useRef(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [replaceFor, setReplaceFor] = useState('');
@@ -374,6 +382,16 @@ export default function ScanDesk() {
   const phase = sessionPhase(session, now, serverOffset);
   const phaseInfo = phaseText(phase, session);
   const defaults = batch?.defaults || DEFAULTS;
+
+  // Push Game picker (dashboard localStorage override) into batch defaults once a batch exists.
+  useEffect(() => {
+    if (!batch?.id || closed) return;
+    const id = gameIdFromHost();
+    if ((defaults.game || 'pokemon') === id) return;
+    setDefaults({ game: id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batch?.id, closed]);
+
   const closed = batch && batch.status !== 'open';
   const focusIndex = list.findIndex((row) => row.id === focusId);
   const focused = focusIndex >= 0 ? list[focusIndex] : null;
@@ -388,18 +406,22 @@ export default function ScanDesk() {
     el?.scrollIntoView?.({ block: 'nearest' });
   }, [focusId]);
 
-  // Keep "where I stopped" per box so the next session's Start position
-  // suggests it (PowerTools template behaviour). An empty queue pins the
-  // hint to the live Start — otherwise a cleared box keeps a stale
-  // high-water mark and Start=1 cannot stick across a refresh.
+  // Keep where the seller stopped per box (stack + position) so the next
+  // session can resume at the same divider.
   useEffect(() => {
     const loc = String(defaults.location || '').trim();
+    const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
     if (!list.length) {
       if (!loc) return;
-      const pos = Math.max(1, Math.min(9999, Math.trunc(Number(defaults.startPosition)) || 1));
+      const cursor = {
+        stack: Math.max(1, Math.trunc(Number(defaults.stack)) || 1),
+        startPosition: size === 1 ? 1 : Math.max(1, Math.trunc(Number(defaults.startPosition)) || 1),
+        stackSize: size,
+      };
       const store = loadStoppedPositions();
-      if (store[loc] !== pos) {
-        store[loc] = pos;
+      const prev = store[loc];
+      if (!prev || prev.stack !== cursor.stack || prev.startPosition !== cursor.startPosition) {
+        store[loc] = cursor;
         rememberStoppedPositions(store);
       }
       return;
@@ -407,18 +429,50 @@ export default function ScanDesk() {
     const next = nextBoxPositions(list);
     const store = loadStoppedPositions();
     let dirty = false;
-    for (const [box, pos] of next) {
-      if (store[box] !== pos) {
-        store[box] = pos;
+    for (const [box, cursor] of next) {
+      const prev = store[box];
+      if (!prev || prev.stack !== cursor.stack || prev.startPosition !== cursor.startPosition) {
+        store[box] = {
+          stack: cursor.stack,
+          startPosition: cursor.startPosition,
+          stackSize: cursor.stackSize || size,
+        };
         dirty = true;
       }
     }
     if (dirty) rememberStoppedPositions(store);
-  }, [list, defaults.location, defaults.startPosition]);
+  }, [list, defaults.location, defaults.startPosition, defaults.stack, defaults.stackSize]);
 
-  // The Start position suggests where the seller stopped in that box when the
-  // location (or batch) changes. A Start the seller typed — including 1 — is
-  // never overwritten; treating 1 as "unset" locked sellers out of slot 1.
+  // Advance Stack / Position as cards land, and flash when a divider fills.
+  const prevListLenRef = useRef(0);
+  useEffect(() => {
+    const loc = String(defaults.location || '').trim();
+    const len = list.length;
+    const grew = len > prevListLenRef.current;
+    prevListLenRef.current = len;
+    if (!loc || !grew || !len) return;
+    const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
+    const slots = boxSlots(list);
+    const last = list[list.length - 1];
+    const slot = last && slots.get(last.id);
+    // Size 1 = one card per divider: nothing "fills", so never flash/toast.
+    if (size > 1 && slot && slotFilledStack(slot)) {
+      setStackFull(true);
+      if (stackFullTimer.current) clearTimeout(stackFullTimer.current);
+      stackFullTimer.current = setTimeout(() => setStackFull(false), 2800);
+      pushToast({ text: `Stack ${slot.stack} full — next divider`, ms: 3200 });
+    } else if (size === 1 && stackFull) {
+      setStackFull(false);
+    }
+    const next = nextBoxPositions(list).get(loc);
+    if (!next) return;
+    const patch = {};
+    if (next.stack !== (defaults.stack ?? 1)) patch.stack = next.stack;
+    if (next.startPosition !== (defaults.startPosition ?? 1)) patch.startPosition = next.startPosition;
+    if (Object.keys(patch).length) setDefaults(patch);
+  }, [list]);
+
+  // Resume stack/position when the seller switches box (or opens a batch).
   const prevLocationRef = useRef(undefined);
   const prevBatchRef = useRef(undefined);
   useEffect(() => {
@@ -433,14 +487,14 @@ export default function ScanDesk() {
     prevLocationRef.current = loc;
     prevBatchRef.current = batch.id;
     if (!loc || (!locationChanged && !batchChanged)) return;
-    const suggested = suggestedStartPosition({
+    const suggested = suggestedStackCursor({
       stored: loadStoppedPositions()[loc],
-      current: defaults.startPosition,
+      currentStack: defaults.stack ?? 1,
+      currentPosition: defaults.startPosition ?? 1,
+      stackSize: defaults.stackSize ?? 1,
       locationChanged: true,
     });
-    if (suggested != null) {
-      setDefaults({ startPosition: suggested });
-    }
+    if (suggested) setDefaults(suggested);
   }, [batch?.id, defaults.location, closed]);
 
   // ---------------------------------------------------------------- toasts / undo
@@ -568,12 +622,14 @@ export default function ScanDesk() {
     if (!batch?.id) return;
     const merged = { ...(batch.defaults || {}), ...patch };
     const loc = String(merged.location || '').trim();
-    if (loc && patch.startPosition != null) {
-      // Seller's typed Start is the new floor for this box. Without this,
-      // nextBoxPositions from an older queue would keep shoving Start past 1.
-      const pos = Math.max(1, Math.min(9999, Math.trunc(Number(patch.startPosition)) || 1));
+    if (loc && (patch.startPosition != null || patch.stack != null || patch.stackSize != null)) {
+      const size = Math.max(1, Math.trunc(Number(patch.stackSize ?? defaults.stackSize)) || 1);
       const store = loadStoppedPositions();
-      store[loc] = pos;
+      store[loc] = {
+        stack: Math.max(1, Math.trunc(Number(patch.stack ?? defaults.stack)) || 1),
+        startPosition: size === 1 ? 1 : Math.max(1, Math.trunc(Number(patch.startPosition ?? defaults.startPosition)) || 1),
+        stackSize: size,
+      };
       rememberStoppedPositions(store);
     }
     setBatch((current) => ({ ...current, defaults: { ...current.defaults, ...patch } }));
@@ -1234,6 +1290,7 @@ export default function ScanDesk() {
           </section>
           <DefaultsBar
             defaults={defaults}
+            stackFull={stackFull}
             onChange={setDefaults}
             locationRef={locationInput}
             quantityRef={quantityInput}
@@ -1443,19 +1500,38 @@ function QrBlock({ secret, pin }) {
   );
 }
 
-function DefaultsBar({ defaults, onChange, locationRef, quantityRef }) {
+function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull = false }) {
   const [locationDraft, setLocationDraft] = useState(defaults.location);
+  const [stackDraft, setStackDraft] = useState(String(defaults.stack ?? 1));
   const [posDraft, setPosDraft] = useState(String(defaults.startPosition ?? 1));
   const [qtyDraft, setQtyDraft] = useState(String(defaults.quantity));
+  const [sizeOpen, setSizeOpen] = useState(false);
+  const sizeMenuRef = useRef(null);
+  const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
+  useEffect(() => {
+    if (!sizeOpen) return undefined;
+    const onDoc = (event) => {
+      if (sizeMenuRef.current && !sizeMenuRef.current.contains(event.target)) setSizeOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [sizeOpen]);
   useEffect(() => setLocationDraft(defaults.location), [defaults.location]);
-  useEffect(() => setPosDraft(String(defaults.startPosition ?? 1)), [defaults.startPosition, defaults.location]);
+  useEffect(() => setStackDraft(String(defaults.stack ?? 1)), [defaults.stack, defaults.location]);
+  useEffect(() => setPosDraft(String(defaults.startPosition ?? 1)), [defaults.startPosition, defaults.location, defaults.stack]);
   useEffect(() => setQtyDraft(String(defaults.quantity)), [defaults.quantity]);
   const commitLocation = () => {
     if (locationDraft !== defaults.location) onChange({ location: locationDraft });
   };
+  const commitStack = () => {
+    const n = Number.parseInt(stackDraft, 10);
+    if (n >= 1 && n <= 9999 && n !== (defaults.stack ?? 1)) {
+      onChange({ stack: n, ...(size === 1 ? { startPosition: 1 } : {}) });
+    } else setStackDraft(String(defaults.stack ?? 1));
+  };
   const commitPos = () => {
     const n = Number.parseInt(posDraft, 10);
-    if (n >= 1 && n <= 9999 && n !== (defaults.startPosition ?? 1)) onChange({ startPosition: n });
+    if (n >= 1 && n <= size && n !== (defaults.startPosition ?? 1)) onChange({ startPosition: n });
     else setPosDraft(String(defaults.startPosition ?? 1));
   };
   const commitQty = () => {
@@ -1466,15 +1542,39 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef }) {
   const blurOnEnter = (event) => {
     if (event.key === 'Enter') event.currentTarget.blur();
   };
+  const pickSize = (nextSize) => {
+    setSizeOpen(false);
+    if (nextSize === size) return;
+    const abs = stackPosToIndex(defaults.stack ?? 1, defaults.startPosition ?? 1, size);
+    const mapped = indexToStackPos(abs, nextSize);
+    onChange({
+      stackSize: nextSize,
+      stack: mapped.stack,
+      startPosition: nextSize === 1 ? 1 : mapped.position,
+    });
+  };
   return (
-    <section className="scan-defaults" aria-labelledby="scan-defaults-title">
+    <section className={`scan-defaults${stackFull ? ' is-stack-full' : ''}`} aria-labelledby="scan-defaults-title">
       <h2 id="scan-defaults-title" className="scan-defaults-label" title="New scans take these values. Shift + a row key changes them.">Batch defaults</h2>
       <div className="scan-defaults-row">
       {/* The TCG comes from the host (pokoin.com, onepiece., riftbound.). */}
-      <span className="sd-field sd-game">
+      <label className="sd-field sd-game" title="Switch TCG — phone catalog follows this">
         <span>Game</span>
-        <b>{game().name}</b>
-      </span>
+        <select
+          value={gameIdFromHost()}
+          onChange={(e) => {
+            const next = e.target.value;
+            if (next === gameIdFromHost()) return;
+            setScanGameOverride(next);
+            // Reload so catalog, pricing, and a fresh pair use the new game.
+            window.location.reload();
+          }}
+        >
+          {Object.values(GAMES).map((g) => (
+            <option key={g.id} value={g.id}>{g.name}</option>
+          ))}
+        </select>
+      </label>
       <label className="sd-field">
         <span>Language</span>
         <select value={defaults.language} onChange={(e) => onChange({ language: e.target.value })}>
@@ -1511,16 +1611,55 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef }) {
           onKeyDown={blurOnEnter}
         />
       </label>
-      <label className="sd-field pos" title="Position inside the box the next card goes to">
-        <span>Start</span>
+      <div ref={sizeMenuRef} className={`sd-field pos sd-stack${stackFull ? ' is-full' : ''}`}>
+        <button
+          type="button"
+          className="sd-stack-label"
+          title="Stack size — how many cards fit between box dividers"
+          aria-haspopup="listbox"
+          aria-expanded={sizeOpen}
+          onClick={() => setSizeOpen((open) => !open)}
+        >
+          Stack{size > 1 ? ` ·${size}` : ''}
+        </button>
         <input
           inputMode="numeric"
-          value={posDraft}
-          onChange={(e) => setPosDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
-          onBlur={commitPos}
+          value={stackDraft}
+          aria-label="Stack number"
+          title="Divider stack inside the box"
+          onChange={(e) => setStackDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
+          onBlur={commitStack}
           onKeyDown={blurOnEnter}
         />
-      </label>
+        {sizeOpen ? (
+          <div className="sd-stack-menu" role="listbox" aria-label="Stack size">
+            {STACK_SIZES.map((n) => (
+              <button
+                key={n}
+                type="button"
+                role="option"
+                aria-selected={n === size}
+                className={n === size ? 'on' : ''}
+                onClick={() => pickSize(n)}
+              >
+                {n === 1 ? '1 — one card per stack' : `${n} cards`}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      {size > 1 ? (
+        <label className="sd-field pos" title="Position inside the current stack">
+          <span>Position</span>
+          <input
+            inputMode="numeric"
+            value={posDraft}
+            onChange={(e) => setPosDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            onBlur={commitPos}
+            onKeyDown={blurOnEnter}
+          />
+        </label>
+      ) : null}
       <label className="sd-field qty">
         <span>Qty</span>
         <input
@@ -1537,6 +1676,9 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef }) {
         <span>Merge repeats</span>
       </label>
       </div>
+      {stackFull ? (
+        <p className="sd-stack-full-msg" role="status">Stack full — next card starts a new divider.</p>
+      ) : null}
     </section>
   );
 }

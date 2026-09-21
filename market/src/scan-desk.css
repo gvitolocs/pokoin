@@ -220,6 +220,79 @@
 .sd-field.pos input { width: 3.1rem; text-align: center; }
 .sd-field.qty input { width: 2.6rem; text-align: center; }
 
+.sd-stack {
+  position: relative;
+}
+.sd-stack-label {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--muted, #8a8f98);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.15em;
+}
+.sd-stack-label:hover,
+.sd-stack-label[aria-expanded="true"] {
+  color: var(--fg, #e8eaed);
+}
+.sd-stack-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  min-width: 11rem;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 0.25rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--fg, #fff) 14%, transparent);
+  background: var(--panel, #1a1d24);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.sd-stack-menu button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+.sd-stack-menu button:hover,
+.sd-stack-menu button.on {
+  background: color-mix(in srgb, var(--accent, #6c8cff) 22%, transparent);
+}
+.scan-defaults.is-stack-full,
+.sd-stack.is-full input {
+  animation: sd-stack-pulse 1.1s ease-in-out 2;
+}
+.sd-stack.is-full .sd-stack-label {
+  color: var(--warn, #f0b429);
+}
+.sd-stack-full-msg {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--warn, #f0b429);
+}
+@keyframes sd-stack-pulse {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn, #f0b429) 55%, transparent); }
+}
+
+
 .sd-seg {
   display: inline-flex;
   border: 1px solid var(--g5);

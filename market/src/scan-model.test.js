@@ -22,6 +22,11 @@ import {
   stepCandidate,
   submitLabel,
   suggestedStartPosition,
+  suggestedStackCursor,
+  locationDefaultsText,
+  slotFilledStack,
+  indexToStackPos,
+  stackPosToIndex,
   typeQuantity,
 } from './scan-model.js';
 
@@ -138,7 +143,10 @@ test('session phase is recomputed locally with the server clock offset', () => {
 
 test('defaults label, finish cycle, candidates, quantity typing', () => {
   assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'Box A12' }), 'IT · NM · Box A12·1 · Qty 1');
-  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'box1', startPosition: 47 }), 'IT · NM · box1·47 · Qty 1');
+  // stackSize 1: startPosition is the stack index (legacy flat counter).
+  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'box1', stack: 47, startPosition: 1 }), 'IT · NM · box1·47 · Qty 1');
+  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'box1', stackSize: 40, stack: 2, startPosition: 5 }), 'IT · NM · box1·2·5 · Qty 1');
+  assert.equal(locationDefaultsText({ ...DEFAULTS, location: 'box1', stackSize: 1, stack: 3 }), 'box1·3');
   assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: '' }), 'IT · NM · Qty 1');
   assert.equal(cycleFinish('standard'), 'holo');
   assert.equal(cycleFinish('other'), 'standard');
@@ -186,6 +194,7 @@ test('createPatchChain serializes runs per key and survives failures', async () 
 });
 
 test('box slots: capture-time anchor, stacks take ranges, a later anchor re-starts', () => {
+  // Legacy snapshots: startPosition was the flat counter (stackSize defaults to 1).
   const list = [
     row('a', { position: 1, location: 'box1', quantity: 1, defaultsSnapshot: { startPosition: 47 } }),
     row('b', { position: 2, location: 'box1', quantity: 3, defaultsSnapshot: { startPosition: 47 } }),
@@ -194,10 +203,12 @@ test('box slots: capture-time anchor, stacks take ranges, a later anchor re-star
     row('e', { position: 5, location: '', quantity: 2 }),
   ];
   const slots = boxSlots(list);
-  assert.deepEqual(slots.get('a'), { start: 47, end: 47 });
-  assert.deepEqual(slots.get('b'), { start: 48, end: 50 });
-  assert.deepEqual(slots.get('c'), { start: 100, end: 101 });
-  assert.deepEqual(slots.get('d'), { start: 12, end: 12 });
+  assert.equal(slots.get('a').stack, 47);
+  assert.equal(slots.get('a').start, 1);
+  assert.equal(slots.get('b').stack, 48);
+  assert.equal(slots.get('b').endStack, 50);
+  assert.equal(slots.get('c').stack, 100);
+  assert.equal(slots.get('d').stack, 12);
   assert.equal(slots.get('e'), undefined);
   assert.equal(slotText(slots.get('a')), '·47');
   assert.equal(slotText(slots.get('b')), '·48-50');
@@ -212,13 +223,43 @@ test('rows without a captured start anchor at 1; next box positions remember the
     row('d', { position: 4, location: '', quantity: 5 }),
   ];
   const slots = boxSlots(list);
-  assert.deepEqual(slots.get('a'), { start: 1, end: 2 });
-  assert.deepEqual(slots.get('b'), { start: 3, end: 3 });
-  assert.deepEqual(slots.get('c'), { start: 1, end: 3 });
-  assert.deepEqual(
-    Object.fromEntries(nextBoxPositions(list)),
-    { box1: 4, box2: 4 },
-  );
+  // stackSize 1: quantity 2 → stacks 1-2, then stack 3
+  assert.equal(slots.get('a').stack, 1);
+  assert.equal(slots.get('a').endStack, 2);
+  assert.equal(slots.get('b').stack, 3);
+  assert.equal(slots.get('c').stack, 1);
+  assert.equal(slots.get('c').endStack, 3);
+  const next = Object.fromEntries(nextBoxPositions(list));
+  assert.equal(next.box1.stack, 4);
+  assert.equal(next.box1.startPosition, 1);
+  assert.equal(next.box2.stack, 4);
+});
+
+test('stackSize > 1 fills positions then spills to the next divider', () => {
+  const snap = { stack: 1, stackSize: 3, startPosition: 1 };
+  const list = [
+    row('a', { position: 1, location: 'box1', quantity: 2, defaultsSnapshot: snap }),
+    row('b', { position: 2, location: 'box1', quantity: 2, defaultsSnapshot: snap }),
+  ];
+  const slots = boxSlots(list);
+  assert.equal(slots.get('a').stack, 1);
+  assert.equal(slots.get('a').start, 1);
+  assert.equal(slots.get('a').end, 2);
+  assert.equal(slots.get('a').filledStack, false);
+  assert.equal(slots.get('b').stack, 1);
+  assert.equal(slots.get('b').start, 3);
+  assert.equal(slots.get('b').endStack, 2);
+  assert.equal(slots.get('b').end, 1);
+  assert.equal(slotFilledStack(slots.get('b')), true); // closed stack 1, spilled to stack 2
+  assert.equal(slotText(slots.get('a')), '·1·1-2');
+  // Card that closes a stack
+  const full = boxSlots([
+    row('x', { position: 1, location: 'box1', quantity: 3, defaultsSnapshot: { stack: 1, stackSize: 3, startPosition: 1 } }),
+  ]);
+  assert.equal(full.get('x').filledStack, true);
+  assert.equal(slotText(full.get('x')), '·1·1-3');
+  assert.deepEqual(indexToStackPos(4, 3), { stack: 2, position: 1 });
+  assert.equal(stackPosToIndex(2, 1, 3), 4);
 });
 
 test('Start suggestion only fires on location change — Start=1 is a real choice', () => {
@@ -235,7 +276,11 @@ test('merged quantity growth shifts the following slots; submitted rows still co
     row('b', { position: 2, location: 'box1', quantity: 1 }),
   ];
   const slots = boxSlots(list);
-  assert.deepEqual(slots.get('a'), { start: 1, end: 4 });
-  assert.deepEqual(slots.get('b'), { start: 5, end: 5 });
-  assert.deepEqual(Object.fromEntries(nextBoxPositions(list)), { box1: 6 });
+  // stackSize 1 → stacks 1-4 then stack 5
+  assert.equal(slots.get('a').stack, 1);
+  assert.equal(slots.get('a').endStack, 4);
+  assert.equal(slots.get('b').stack, 5);
+  const next = Object.fromEntries(nextBoxPositions(list));
+  assert.equal(next.box1.stack, 6);
+  assert.equal(next.box1.startPosition, 1);
 });

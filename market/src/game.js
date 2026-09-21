@@ -40,6 +40,30 @@ function hostName() {
   return String(window.location.hostname || '').toLowerCase();
 }
 
+const SCAN_GAME_KEY = 'pokoin.scanGame';
+
+/** Optional desk override (dashboard host has no game subdomain). */
+export function readScanGameOverride() {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return '';
+    const id = String(window.localStorage.getItem(SCAN_GAME_KEY) || '').trim();
+    return GAMES[id] ? id : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+export function setScanGameOverride(gameId) {
+  const id = String(gameId || '').trim();
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (!id || id === 'pokemon') window.localStorage.removeItem(SCAN_GAME_KEY);
+    else if (GAMES[id]) window.localStorage.setItem(SCAN_GAME_KEY, id);
+  } catch (_) {
+    // private mode
+  }
+}
+
 export function gameIdFromHost(hostname = hostName()) {
   const host = String(hostname || '').toLowerCase();
   if (host === 'onepiece.pokoin.com' || host.startsWith('onepiece.')) {
@@ -48,11 +72,24 @@ export function gameIdFromHost(hostname = hostName()) {
   if (host === 'riftbound.pokoin.com' || host.startsWith('riftbound.')) {
     return 'riftbound';
   }
+  // dashboard.pokoin.com (and localhost) honor the scan-desk Game picker.
+  if (host === 'dashboard.pokoin.com' || host === 'localhost' || host.endsWith('.localhost')) {
+    const override = readScanGameOverride();
+    if (override) return override;
+  }
   return 'pokemon';
 }
 
 export function game(hostname = hostName()) {
   return GAMES[gameIdFromHost(hostname)] || GAMES.pokemon;
+}
+
+/** Phone BattleScan selectCatalog args for the active game. */
+export function scanPhoneCatalog(hostname = hostName()) {
+  const id = gameIdFromHost(hostname);
+  if (id === 'one_piece') return { family: 'one_piece', variant: 'singles' };
+  if (id === 'riftbound') return { family: 'riftbound', variant: 'western' };
+  return { family: 'pokemon', variant: 'generic' };
 }
 
 export function isPokemonGame(hostname = hostName()) {
