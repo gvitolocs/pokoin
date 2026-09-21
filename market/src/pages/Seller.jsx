@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useLocation, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { fetchSellerByUsername } from '../api.js';
 import ShopListingRow from '../components/ShopListing.jsx';
-import { Alert, EmptyDesk, Metric, MetricGrid } from '../components/Desk.jsx';
-import { peekHasListingRows, peekSellerListings } from '../listings-cache.js';
-import {
 
 const PAGE_SIZE = 100;
 const FETCH_LIMIT = 1000;
