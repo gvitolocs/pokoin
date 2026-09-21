@@ -441,14 +441,18 @@ export default function ScanDesk() {
     const grew = len > prevListLenRef.current;
     prevListLenRef.current = len;
     if (!loc || !grew || !len) return;
+    const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
     const slots = boxSlots(list);
     const last = list[list.length - 1];
     const slot = last && slots.get(last.id);
-    if (slot && slotFilledStack(slot)) {
+    // Size 1 = one card per divider: nothing "fills", so never flash/toast.
+    if (size > 1 && slot && slotFilledStack(slot)) {
       setStackFull(true);
       if (stackFullTimer.current) clearTimeout(stackFullTimer.current);
       stackFullTimer.current = setTimeout(() => setStackFull(false), 2800);
       pushToast({ text: `Stack ${slot.stack} full — next divider`, ms: 3200 });
+    } else if (size === 1 && stackFull) {
+      setStackFull(false);
     }
     const next = nextBoxPositions(list).get(loc);
     if (!next) return;
