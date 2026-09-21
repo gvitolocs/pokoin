@@ -1,3 +1,7 @@
+
+function sellerShopCacheKey(username, limit = 1000) {
+  return `${String(username || "").trim().toLowerCase()}::${Number(limit) || 0}`;
+}
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 import { attachRecentsToHome, fetchCardTiles, fetchExpansionFromLists, fetchHomeFromLists, fetchSetIndexFromLists, isPublicRailsVector } from './lists.js';
 import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsMissingTilePrice, lastMedianFromSales, tilePricePkn } from './pkn.js';
@@ -273,7 +277,7 @@ export async function fetchExactNameCards(name, {
   return collected;
 }
 
-export function fetchSuggest(query, { limit = 20, signal, lang, printLang, match } = {}) {
+export function fetchSuggest(query, { limit = 1000, signal, lang, printLang, match } = {}) {
   const params = new URLSearchParams({
     q: query || '',
     limit: String(limit),
@@ -599,7 +603,7 @@ export {
   rememberCreatedListing,
 };
 
-export function fetchListings(cardId, { limit = 40, fresh = false } = {}) {
+export function fetchListings(cardId, { limit = 1000, fresh = false } = {}) {
   const id = String(cardId || '');
   if (!fresh) {
     const cached = peekListings(id);
@@ -1900,7 +1904,7 @@ export async function catalogFromScanHit(hit) {
 
 const sellerInflight = new Map();
 
-export function fetchSellerByUsername(username, { limit = 20, signal } = {}) {
+export function fetchSellerByUsername(username, { limit = 1000, signal } = {}) {
   const handle = String(username || '').trim();
   if (!handle) {
     return Promise.resolve({ listings: [] });
@@ -1910,7 +1914,7 @@ export function fetchSellerByUsername(username, { limit = 20, signal } = {}) {
     return Promise.resolve(cached);
   }
   const key = handle.toLowerCase();
-  const pending = sellerInflight.get(key);
+  const pending = sellerInflight.get(sellerShopCacheKey(key, limit));
   if (pending) {
     return pending;
   }
@@ -1930,7 +1934,7 @@ export function fetchSellerByUsername(username, { limit = 20, signal } = {}) {
   return request;
 }
 
-export function fetchSellerListings(sellerUid, token, { limit = 40 } = {}) {
+export function fetchSellerListings(sellerUid, token, { limit = 1000 } = {}) {
   const params = new URLSearchParams({
     sellerUid: String(sellerUid || ''),
     nativeOnly: '1',

@@ -45,7 +45,7 @@ export default function Inventory() {
     const uid = user?.uid || profile?.uid;
     if (!signedIn || !uid) return;
     const token = await getBearer();
-    const data = await fetchSellerListings(uid, token, { limit: 500 });
+    const data = await fetchSellerListings(uid, token, { limit: 1000 });
     setRows(liveInventoryListings(data.listings || data.items || []));
   }
 
@@ -55,7 +55,7 @@ export default function Inventory() {
     if (!signedIn || !uid) return undefined;
     let cancelled = false;
     getBearer()
-      .then((token) => fetchSellerListings(uid, token, { limit: 500 }))
+      .then((token) => fetchSellerListings(uid, token, { limit: 1000 }))
       .then((data) => {
         if (!cancelled) setRows(liveInventoryListings(data.listings || data.items || []));
       })
