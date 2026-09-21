@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getBearer } from '../auth.jsx';
 import {
@@ -7,6 +7,33 @@ import {
   fetchCardTraderStatus,
   syncCardTraderInventory,
 } from '../api.js';
+import {
+  MIN_CARDTRADER_TOKEN_LENGTH,
+  describeCardTraderToken,
+} from '../cardtrader-token.js';
+
+/** One line under the token field: which CardTrader app it belongs to, or what is wrong. */
+function tokenHint(pasted) {
+  if (!pasted.token) return null;
+  if (pasted.problem === 'not_token') {
+    return {
+      tone: 'warn',
+      text: 'This does not look like a CardTrader API token. Clear the field and paste only the token from your CardTrader settings.',
+    };
+  }
+  if (pasted.problem === 'incomplete') {
+    return {
+      tone: 'warn',
+      text: 'This token looks cut off or has extra characters. Clear the field and paste it again with CardTrader’s Copy button.',
+    };
+  }
+  const parts = [pasted.appName ? `CardTrader token for “${pasted.appName}”` : 'CardTrader token'];
+  if (pasted.issuedAt) {
+    parts.push(`issued ${pasted.issuedAt.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`);
+  }
+  if (pasted.cleaned) parts.push('extra spaces or text removed');
+  return { tone: 'ok', text: parts.join(' · ') };
+}
 
 function formatSyncSummary(summary) {
   if (!summary || typeof summary !== 'object') return '';
@@ -25,11 +52,14 @@ function formatSyncSummary(summary) {
 export default function CardTraderConnectPanel() {
   const [status, setStatus] = useState(null);
   const [token, setToken] = useState('');
+  const [tokenVisible, setTokenVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [syncSummary, setSyncSummary] = useState(null);
+  const pasted = useMemo(() => describeCardTraderToken(token), [token]);
+  const hint = tokenHint(pasted);
 
   async function refresh() {
     setLoading(true);
@@ -59,9 +89,10 @@ export default function CardTraderConnectPanel() {
     setMessage('');
     try {
       const bearer = await getBearer();
-      const data = await connectCardTrader(bearer, token);
+      const data = await connectCardTrader(bearer, pasted.token);
       setStatus(data?.status || { connected: true });
       setToken('');
+      setTokenVisible(false);
       const sync = data?.inventorySync;
       if (sync?.summary) {
         setSyncSummary(sync.summary);
@@ -156,18 +187,52 @@ export default function CardTraderConnectPanel() {
             and to import your existing CardTrader inventory into Pokoin.
             The token is stored encrypted and never shown again.
           </p>
-          <label className="ct-token-field">
-            <span className="sr-only">CardTrader API token</span>
-            <input
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="CardTrader API token"
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-            />
-          </label>
-          <button type="submit" className="btn" disabled={busy || token.trim().length < 16}>
+          <div className="ct-token-row">
+            <label className="ct-token-field">
+              <span className="sr-only">CardTrader API token</span>
+              {/* Not type="password": browsers and password managers fill saved
+                  site passwords into password fields and the paste lands next
+                  to them. The text is masked with CSS instead. */}
+              <input
+                type="text"
+                name="cardtrader-api-token"
+                className={tokenVisible ? '' : 'is-masked'}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-1p-ignore=""
+                data-lpignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                placeholder="CardTrader API token"
+                value={token}
+                aria-describedby={hint ? 'ct-token-hint' : undefined}
+                onChange={(event) => {
+                  setToken(event.target.value);
+                  // A rejection belongs to the previous paste.
+                  setError('');
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn ghost ct-token-toggle"
+              aria-pressed={tokenVisible}
+              disabled={!token}
+              onClick={() => setTokenVisible((visible) => !visible)}
+            >
+              {tokenVisible ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          {hint ? (
+            <p id="ct-token-hint" className={`ct-token-hint is-${hint.tone}`}>{hint.text}</p>
+          ) : null}
+          <button
+            type="submit"
+            className="btn"
+            disabled={busy || pasted.token.length < MIN_CARDTRADER_TOKEN_LENGTH}
+          >
             {busy ? 'Connecting…' : 'Connect CardTrader'}
           </button>
         </form>

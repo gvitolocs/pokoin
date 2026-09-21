@@ -2,6 +2,7 @@ const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
 const { parseEncryptionKey } = require('./_cardtrader_crypto');
 const {
   cardTraderWebhookUrlForUid,
+  cleanToken,
   updateAppWebhookUrl,
   validateCardTraderToken,
 } = require('./_cardtrader_client');
@@ -34,7 +35,8 @@ async function clearSellerWebhook(token) {
 }
 
 async function connect(req, decoded, admin, firestore) {
-  const token = String(req.body?.token || '').trim();
+  // Store and use the same normalized token CardTrader validated.
+  const token = cleanToken(req.body?.token);
   parseEncryptionKey();
   const info = await validateCardTraderToken(token);
   await storeConnectedIntegration({

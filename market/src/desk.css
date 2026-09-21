@@ -422,6 +422,17 @@
   gap: 0.75rem;
 }
 
+.ct-token-row {
+  display: flex;
+  gap: 0.55rem;
+  align-items: stretch;
+}
+
+.ct-token-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .ct-token-field input {
   width: 100%;
   border: 1px solid var(--g5);
@@ -431,6 +442,15 @@
   padding: 0.65rem 0.8rem;
   font: inherit;
 }
+
+/* Masks the token without type="password" (which invites password autofill). */
+.ct-token-field input.is-masked { -webkit-text-security: disc; }
+
+.ct-token-toggle { flex: 0 0 auto; }
+
+.ct-token-hint { margin: 0; font-size: 0.85rem; overflow-wrap: anywhere; }
+.ct-token-hint.is-ok { color: var(--muted); }
+.ct-token-hint.is-warn { color: #f0b86e; }
 
 .ct-connect-actions {
   display: flex;

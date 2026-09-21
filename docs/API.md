@@ -64,6 +64,19 @@ Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings a
 never modified by reconcile. Incomplete/failed CT exports never trigger
 destructive “missing product” removal (CT has no product-delete webhook).
 
+Tokens: CardTrader app tokens are RS256 JWTs. `cleanToken` (server) and
+`market/src/cardtrader-token.js` (Profile panel) drop whitespace, a `Bearer `
+prefix, quotes, and text a password manager filled in before the paste; the
+panel is a masked `type="text"` field (not `type="password"`) and names the
+pasted token's app + issue time before Connect. CardTrader answers 401
+`error_code: unauthorized` for any bad token → **400**
+`code: cardtrader_token_rejected`; a 403 without that JSON body is an edge
+block → **502** `code: cardtrader_blocked`. Each rejection logs
+`cardtrader token rejected` with CT `requestId` and a non-secret fingerprint
+(length, sha256 prefix, `sub`, app `name`, `iat`, signature bytes,
+`complete`) — never the token. `complete: false` means a cut-off or extended
+paste; `complete: true` means a revoked or regenerated token.
+
 Deploy note: `scripts/deploy-cardtrader-sync-api.sh` overlays only
 `server/pokoin-api/`. The live E2E harness
 (`scripts/e2e-cardtrader-inventory-sync.sh`) is repo tooling and is **not** part
