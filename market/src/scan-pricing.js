@@ -83,3 +83,20 @@ export function suggestPriceFromSlices(slices, facets = {}) {
   }
   return null;
 }
+
+/**
+ * What leaving the desk price field does with its text. An emptied field
+ * never saves "no price": it goes back to the suggested default.
+ *   default → restore the suggested price
+ *   restore → invalid text; show the saved price again
+ *   keep    → same manual price, nothing to save
+ *   set     → save pricePkn as a manual price
+ */
+export function priceFieldCommit(row = {}, raw = '') {
+  const value = String(raw ?? '').trim();
+  if (value === '') return { action: 'default' };
+  const pricePkn = Number(value);
+  if (!Number.isFinite(pricePkn) || pricePkn <= 0) return { action: 'restore' };
+  if (pricePkn === Number(row.pricePkn) && !row.priceSuggested) return { action: 'keep' };
+  return { action: 'set', pricePkn };
+}

@@ -142,7 +142,10 @@ anything. When the printing has no sold comps at all, the cheapest listed PKN
 the version (or language/condition/finish/1st facets) re-suggests for the new
 shape and clears the server-side price; a suggestion stays greyed
 `suggested` until edited or confirmed, and only clicking into the price field
-empties it for a manual price.
+empties it for a manual price (the suggestion stays as the placeholder).
+Leaving the field empty restores the default suggestion — also after a manual
+price — so an emptied field never becomes "Needs a price" while a default
+exists; `priceFieldCommit` in `market/src/scan-pricing.js`.
 
 Status line: `187 cards · 12 need review · 3 need a price · Add 187 cards to Inventory`.
 

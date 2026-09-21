@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { facetSignature, scanFacets, suggestPriceFromSlices } from './scan-pricing.js';
+import {
+  facetSignature,
+  priceFieldCommit,
+  scanFacets,
+  suggestPriceFromSlices,
+} from './scan-pricing.js';
 
 const slice = (over = {}) => ({
   day: '2026-09-10',
@@ -101,4 +106,20 @@ test('facetSignature changes with version and every priced facet', () => {
   assert.notEqual(facetSignature({ ...base, language: 'JP' }), sig);
   assert.notEqual(facetSignature({ ...base, foilState: 'reverse' }), sig);
   assert.notEqual(facetSignature({ ...base, firstEdition: true }), sig);
+});
+
+test('priceFieldCommit: an emptied field goes back to the default price', () => {
+  assert.deepEqual(priceFieldCommit({ pricePkn: 40, priceSuggested: true }, ''), { action: 'default' });
+  assert.deepEqual(priceFieldCommit({ pricePkn: 55, priceSuggested: false }, '   '), { action: 'default' });
+  assert.deepEqual(priceFieldCommit({ pricePkn: null }, ''), { action: 'default' });
+});
+
+test('priceFieldCommit: typed prices save as manual, invalid text restores', () => {
+  assert.deepEqual(priceFieldCommit({ pricePkn: 40, priceSuggested: true }, '60'), { action: 'set', pricePkn: 60 });
+  // Accepting the suggested value by typing it makes it a manual price.
+  assert.deepEqual(priceFieldCommit({ pricePkn: 40, priceSuggested: true }, '40'), { action: 'set', pricePkn: 40 });
+  assert.deepEqual(priceFieldCommit({ pricePkn: 40, priceSuggested: false }, ' 40 '), { action: 'keep' });
+  assert.deepEqual(priceFieldCommit({ pricePkn: 40 }, 'abc'), { action: 'restore' });
+  assert.deepEqual(priceFieldCommit({ pricePkn: 40 }, '0'), { action: 'restore' });
+  assert.deepEqual(priceFieldCommit({ pricePkn: 40 }, '-5'), { action: 'restore' });
 });
