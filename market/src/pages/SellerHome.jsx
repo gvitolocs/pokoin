@@ -26,7 +26,8 @@ import '../seller-home.css';
 
 const LISTINGS_LIMIT = 200;
 const MOVER_LIMIT = 10;
-const LISTING_PREVIEW = 6;
+// The dashboard's visual inventory is a 12-by-6 sheet of card miniatures.
+const LISTING_PREVIEW = 72;
 
 /** Dev/local layout fixtures — never presented as live production data. */
 const PREVIEW_FIXTURE = {

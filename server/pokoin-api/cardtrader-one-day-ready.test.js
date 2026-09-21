@@ -99,8 +99,16 @@ test('a 1-Day Ready sync stores assets and hides imported listings — it never 
   assert.deepEqual(firestore.writes[0].payload, { metadata: { oneDayReady: true } });
   const texts = dbCalls.map((c) => c.text);
   assert.equal(texts.filter((x) => x.startsWith('insert into public.marketplace_user_listings')).length, 0);
+  // Card metadata reads the real candidate columns (name / card_number), so
+  // synced cards get their image, set and number.
+  const meta = dbCalls.find((c) => c.text.includes('from public.marketplace_search_candidates'));
+  assert.match(meta.text, /nullif\(name, ''\)/);
+  assert.match(meta.text, /nullif\(card_number, ''\)/);
+  assert.doesNotMatch(meta.text, /nullif\(card_name|nullif\(collector_number/);
   const upserts = dbCalls.filter((c) => c.text.startsWith('insert into public.marketplace_cardtrader_1dr_assets'));
   assert.equal(upserts.length, 1);
+  assert.equal(upserts[0].params[5], 'Evolutions');
+  assert.equal(upserts[0].params[7], 'https://cdn/doduo.jpg');
   assert.equal(upserts[0].params[1], '111');
   assert.equal(upserts[0].params[3], '244');
   assert.equal(upserts[0].params[15], 2);

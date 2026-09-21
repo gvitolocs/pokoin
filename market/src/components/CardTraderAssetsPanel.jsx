@@ -1,53 +1,32 @@
 import { useState } from 'react';
 import { formatPkn } from '../api.js';
-import { goMarket, marketUrl } from '../punchouts.js';
+import { marketUrl } from '../punchouts.js';
+import MiniCardTile from './MiniCardTile.jsx';
 
-const PREVIEW_COUNT = 48;
+// Same 12-by-6 miniature sheet as Your listings.
+const PREVIEW_COUNT = 72;
 
-function assetMeta(item) {
+function assetTitle(item) {
   const flags = [
     item.reverse ? 'Reverse' : '',
     item.firstEdition ? '1st Ed.' : '',
     item.graded ? 'Graded' : '',
   ].filter(Boolean);
-  return [item.setName, item.condition, item.language, ...flags].filter(Boolean).join(' · ');
-}
-
-function AssetTile({ item }) {
-  const name = item.cardName || 'Card';
-  const href = item.cardId ? marketUrl(`/marketplace/en/cards/${item.cardId}`) : '';
-  const body = (
-    <>
-      <span className="ct1dr-art">
-        {item.imageUrl ? <img src={item.imageUrl} alt="" loading="lazy" /> : <span className="tile-ph" aria-hidden="true" />}
-        {item.quantity > 1 ? <span className="ct1dr-qty">×{item.quantity}</span> : null}
-      </span>
-      <span className="ct1dr-name">{name}</span>
-      <span className="ct1dr-meta">{assetMeta(item)}</span>
-      <span className="ct1dr-price">{item.pricePkn > 0 ? formatPkn(item.pricePkn) : '—'}</span>
-    </>
-  );
-  if (!href) return <div className="ct1dr-tile">{body}</div>;
-  return (
-    <a
-      className="ct1dr-tile"
-      href={href}
-      title={name}
-      onClick={(event) => {
-        if (!href.startsWith('http')) return;
-        event.preventDefault();
-        goMarket(href);
-      }}
-    >
-      {body}
-    </a>
-  );
+  const details = [
+    item.cardName || 'Card',
+    item.setName,
+    item.condition,
+    item.language,
+    ...flags,
+    item.pricePkn > 0 ? formatPkn(item.pricePkn) : '',
+  ].filter(Boolean).join(' · ');
+  return item.quantity > 1 ? `${details} · Qty ${item.quantity}` : details;
 }
 
 /**
- * CardTrader 1-Day Ready inventory on the dashboard. That stock sits in
- * CardTrader's warehouse and CardTrader sells it, so it is shown as assets,
- * never as Pokoin listings. Renders nothing for other sellers.
+ * CardTrader 1-Day Ready inventory on the dashboard, beside Your listings.
+ * That stock sits in CardTrader's warehouse and CardTrader sells it, so it is
+ * shown as assets, never as Pokoin listings. Renders nothing for other sellers.
  */
 export default function CardTraderAssetsPanel({ assets }) {
   const [showAll, setShowAll] = useState(false);
@@ -60,25 +39,30 @@ export default function CardTraderAssetsPanel({ assets }) {
       <header className="seller-panel-head">
         <h2 id="ct1dr-title">CardTrader 1-DR</h2>
         {items.length ? (
-          <p className="ct1dr-totals">
-            <strong>{Number(totals.cards || 0).toLocaleString('en-US')}</strong> cards
-            {' · '}
-            <strong>{formatPkn(totals.valuePkn || 0)}</strong>
-          </p>
+          <span className="ct1dr-totals" title="Stocked and sold by CardTrader 1-Day Ready — not listed on Pokoin">
+            {Number(totals.cards || 0).toLocaleString('en-US')} cards · {formatPkn(totals.valuePkn || 0)}
+          </span>
         ) : null}
       </header>
-      <p className="ct1dr-lede">
-        Stocked and sold by CardTrader 1-Day Ready, so these cards are assets here — not Pokoin listings.
-      </p>
       {items.length ? (
-        <div className="ct1dr-grid">
-          {shown.map((item) => <AssetTile key={item.ctProductId} item={item} />)}
+        <div className="seller-listing-list" data-testid="cardtrader-1dr-grid">
+          {shown.map((item) => (
+            <MiniCardTile
+              key={item.ctProductId}
+              imageUrl={item.imageUrl}
+              name={item.cardName || 'Card'}
+              title={assetTitle(item)}
+              href={item.cardId ? marketUrl(`/marketplace/en/cards/${item.cardId}`) : ''}
+              badge={item.quantity > 1 ? `×${item.quantity}` : ''}
+            />
+          ))}
         </div>
       ) : (
         <p className="seller-panel-empty">No 1-Day Ready cards yet. Run Sync CardTrader in Profile.</p>
       )}
+      <p className="ct1dr-lede">Stocked and sold by CardTrader 1-Day Ready — not listed on Pokoin.</p>
       {items.length > PREVIEW_COUNT ? (
-        <button type="button" className="btn ghost ct1dr-more" onClick={() => setShowAll((all) => !all)}>
+        <button type="button" className="seller-panel-link ct1dr-more" onClick={() => setShowAll((all) => !all)}>
           {showAll ? 'Show fewer' : `Show all ${items.length}`}
         </button>
       ) : null}

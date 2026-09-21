@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc } from '../api.js';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import CardTraderAssetsPanel from './CardTraderAssetsPanel.jsx';
+import MiniCardTile from './MiniCardTile.jsx';
 import { printingIdentity } from '../identity.js';
 import { formatPknNumber, tilePricePkn } from '../pkn.js';
 import {
@@ -321,49 +322,19 @@ function MoverCard({ card }) {
   );
 }
 
-function ListingPreviewRow({ row, formatPrice, href }) {
-  const art = row.cardImageUrl || row.card_image_url || '';
+function ListingPreviewTile({ row, href }) {
   const name = row.cardName || row.card_name || 'Card';
-  const setName = row.setName || row.set_name || '';
-  const condition = row.condition || 'NM';
-  const qty = row.quantityAvailable ?? row.quantity_available ?? 1;
-  const price = formatPrice(row.pricePkn ?? row.price_pkn);
-  const meta = [setName, condition].filter(Boolean).join(' · ');
-  const link = href || '#';
-  if (link.startsWith('http')) {
-    return (
-      <a
-        className="seller-listing-row"
-        href={link}
-        onClick={(event) => {
-          event.preventDefault();
-          goMarket(link);
-        }}
-      >
-        <span className="seller-listing-art">
-          {art ? <img src={art} alt="" loading="lazy" /> : <span className="tile-ph" />}
-        </span>
-        <span className="seller-listing-copy">
-          <strong>{name}</strong>
-          <em>{meta || 'Listing'}</em>
-          <span className="seller-listing-qty">Qty {qty}</span>
-        </span>
-        <span className="seller-listing-price">{price || '—'}</span>
-      </a>
-    );
-  }
+  const qty = Number(row.quantityAvailable ?? row.quantity_available ?? 1) || 1;
+  const price = formatPkn(row.pricePkn ?? row.price_pkn);
+  const details = [name, row.setName || row.set_name, row.condition, price].filter(Boolean).join(' · ');
   return (
-    <Link className="seller-listing-row" to={link}>
-      <span className="seller-listing-art">
-        {art ? <img src={art} alt="" loading="lazy" /> : <span className="tile-ph" />}
-      </span>
-      <span className="seller-listing-copy">
-        <strong>{name}</strong>
-        <em>{meta || 'Listing'}</em>
-        <span className="seller-listing-qty">Qty {qty}</span>
-      </span>
-      <span className="seller-listing-price">{price || '—'}</span>
-    </Link>
+    <MiniCardTile
+      imageUrl={row.cardImageUrl || row.card_image_url || ''}
+      name={name}
+      title={qty > 1 ? `${details} · Qty ${qty}` : details}
+      href={href || ''}
+      badge={qty > 1 ? `×${qty}` : ''}
+    />
   );
 }
 
@@ -542,9 +513,8 @@ export function SellerDashboardView({
         )}
       </section>
 
-      <CardTraderAssetsPanel assets={cardTraderAssets} />
-
-      <div className="seller-secondary-grid">
+      {/* CardTrader 1-DR sits next to Your listings as the same miniature sheet. */}
+      <div className={`seller-secondary-grid${oneDayReadyCards > 0 ? ' has-1dr' : ''}`}>
         <section className="seller-panel" aria-labelledby="seller-listings-title">
           <header className="seller-panel-head">
             <h2 id="seller-listings-title">Your listings</h2>
@@ -556,10 +526,9 @@ export function SellerDashboardView({
           {!listed?.failed && listingRows.length ? (
             <div className="seller-listing-list" data-testid="your-listings">
               {listingRows.map((row) => (
-                <ListingPreviewRow
+                <ListingPreviewTile
                   key={row.id || `${row.cardId}-${row.pricePkn}`}
                   row={row}
-                  formatPrice={formatPkn}
                   href={listingHrefFor?.(row) || inventoryHref}
                 />
               ))}
@@ -572,7 +541,9 @@ export function SellerDashboardView({
           ) : null}
         </section>
 
-        <section className="seller-panel" aria-labelledby="seller-insights-title">
+        <CardTraderAssetsPanel assets={cardTraderAssets} />
+
+        <section className="seller-panel seller-insights-panel" aria-labelledby="seller-insights-title">
           <header className="seller-panel-head">
             <h2 id="seller-insights-title">Collection insights</h2>
           </header>

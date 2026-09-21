@@ -108,6 +108,14 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(viewSrc, /Trending on Pokoin/);
   assert.match(viewSrc, /marketUrl\(cardHref\(card\)\)/);
   assert.match(viewSrc, /Your listings/);
+  assert.match(viewSrc, /ListingPreviewTile/);
+  assert.doesNotMatch(viewSrc, /ListingPreviewRow/);
+  assert.doesNotMatch(viewSrc, /seller-listing-copy/);
+  assert.doesNotMatch(viewSrc, /seller-listing-price/);
+  assert.match(cssSrc, /grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
+  assert.match(cssSrc, /\.seller-listing-tile \{/);
+  assert.doesNotMatch(cssSrc, /\.seller-listing-row \{/);
+  assert.match(homeSrc, /const LISTING_PREVIEW = 72/);
   assert.match(viewSrc, /Collection insights/);
   assert.doesNotMatch(viewSrc, /kicker="Seller"/);
   assert.doesNotMatch(viewSrc, /List Cards/);
@@ -185,7 +193,12 @@ test('CardTrader 1-Day Ready stock shows as dashboard assets, never as listings'
   assert.match(viewSrc, /<CardTraderAssetsPanel assets=\{cardTraderAssets\} \/>/);
   assert.match(viewSrc, /CardTrader 1-DR assets/);
   assert.match(panelSrc, /if \(!assets\?\.oneDayReady\) return null;/);
-  assert.match(panelSrc, /not Pokoin listings/);
+  assert.match(panelSrc, /not listed on Pokoin/);
+  // Same miniature sheet as Your listings, beside it in the secondary grid.
+  assert.match(panelSrc, /className="seller-listing-list"/);
+  assert.match(panelSrc, /<MiniCardTile/);
+  assert.match(viewSrc, /seller-secondary-grid\$\{oneDayReadyCards > 0 \? ' has-1dr' : ''\}/);
+  assert.match(cssSrc, /\.seller-secondary-grid\.has-1dr > \.seller-insights-panel \{\s*grid-column: 1 \/ -1;/);
   // The desk never offers CardTrader as a target for a 1-Day Ready account.
   assert.match(targetsSrc, /const on = data\?\.status\?\.connected === true && !ready1d;/);
 });

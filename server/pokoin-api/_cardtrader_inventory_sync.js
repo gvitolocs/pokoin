@@ -181,13 +181,16 @@ async function readSellerSync(sellerUid) {
 
 async function cardMetadata(cardId) {
   try {
+    // marketplace_search_candidates names these name / card_number (not
+    // card_name / collector_number); a wrong column made every lookup fail and
+    // synced cards had no image, set or number.
     const result = await marketplaceQuery(
       `
         select
-          coalesce(nullif(card_name, ''), '') as card_name,
-          coalesce(nullif(set_name, ''), 'Pokemon') as set_name,
-          coalesce(nullif(collector_number, ''), '') as collector_number,
-          coalesce(nullif(image_url, ''), '') as card_image_url
+          coalesce(nullif(name, ''), '') as card_name,
+          coalesce(nullif(set_name, ''), nullif(expansion_name, ''), 'Pokemon') as set_name,
+          coalesce(nullif(card_number, ''), '') as collector_number,
+          coalesce(nullif(image_url, ''), nullif(cdn_image_url, ''), '') as card_image_url
         from public.marketplace_search_candidates
         where card_id = $1
         limit 1
@@ -195,7 +198,8 @@ async function cardMetadata(cardId) {
       [cardId],
     );
     return result.rows[0] || {};
-  } catch (_) {
+  } catch (error) {
+    console.warn('cardtrader card metadata lookup failed', { cardId, message: error.message });
     return {};
   }
 }
