@@ -1,11 +1,13 @@
 import { Link } from 'react-router-dom';
 import { homepageDerivativeUrl } from '../image-urls.js';
 import { goMarket } from '../punchouts.js';
+import ThumbZoom from './ThumbZoom.jsx';
 
 /**
  * One card in a dashboard miniature sheet (Your listings, CardTrader 1-DR):
  * the 240px `_homepage.webp` thumbnail, falling back to the full art when a
- * card has no thumbnail. `badge` marks quantity; the title carries details.
+ * card has no thumbnail. Hovering floats the full card beside the cursor, as
+ * on the scan desk. `badge` marks quantity; the title carries details.
  */
 export default function MiniCardTile({ imageUrl = '', name = 'Card', title = '', href = '', badge = '' }) {
   const full = String(imageUrl || '').trim();
@@ -13,18 +15,20 @@ export default function MiniCardTile({ imageUrl = '', name = 'Card', title = '',
   const art = (
     <span className="seller-listing-art">
       {thumb ? (
-        <img
-          src={thumb}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          onError={(event) => {
-            const img = event.currentTarget;
-            if (img.dataset.fallback) return;
-            img.dataset.fallback = '1';
-            img.src = full;
-          }}
-        />
+        <ThumbZoom src={full} full alt={name}>
+          <img
+            src={thumb}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            onError={(event) => {
+              const img = event.currentTarget;
+              if (img.dataset.fallback) return;
+              img.dataset.fallback = '1';
+              img.src = full;
+            }}
+          />
+        </ThumbZoom>
       ) : <span className="tile-ph" aria-hidden="true" />}
       {badge ? <span className="seller-listing-badge">{badge}</span> : null}
     </span>

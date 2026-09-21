@@ -197,6 +197,10 @@ test('CardTrader 1-Day Ready stock shows as dashboard assets, never as listings'
   // Same miniature sheet as Your listings, beside it in the secondary grid.
   assert.match(panelSrc, /className="seller-listing-list"/);
   assert.match(panelSrc, /<MiniCardTile/);
+  // Both sheets zoom the full card on hover, like the scan desk.
+  const tileSrc = fs.readFileSync(path.join(root, 'components/MiniCardTile.jsx'), 'utf8');
+  assert.match(tileSrc, /<ThumbZoom src=\{full\} full alt=\{name\}>/);
+  assert.match(cssSrc, /\.seller-listing-art > \.thumb-zoom-host \{/);
   assert.match(viewSrc, /seller-secondary-grid\$\{oneDayReadyCards > 0 \? ' has-1dr' : ''\}/);
   assert.match(cssSrc, /\.seller-secondary-grid\.has-1dr > \.seller-insights-panel \{\s*grid-column: 1 \/ -1;/);
   // The desk never offers CardTrader as a target for a 1-Day Ready account.
