@@ -635,6 +635,22 @@ button, input, select { font: inherit; color: inherit; }
   align-self: center;
 }
 
+.messages-link {
+  position: relative;
+}
+
+.messages-unread-dot {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid #0c0b12;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 1px rgb(239 68 68 / 0.2);
+}
+
 .lang-toggle {
   position: relative;
   flex: none;

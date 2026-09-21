@@ -50,6 +50,8 @@ import { APP, DASHBOARD_HOME, authFrom, goMarket, marketUrl } from '../punchouts
 import { isDashboardHost } from '../scan-api.js';
 import { useCart } from '../cart.jsx';
 import { useWallet } from '../wallet.jsx';
+import { listConversations } from '../chat-client.js';
+import { MESSAGES_UNREAD_EVENT, MESSAGES_UNREAD_REFRESH_MS, unreadMessagesCount } from '../messages-unread.js';
 import CardArt from './CardArt.jsx';
 import {
   PRINT_LANGS,
@@ -316,7 +318,7 @@ function flattenPrintings(groups) {
 export default function Chrome({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { signedIn, admin, availablePkn } = useAuth();
+  const { signedIn, admin, availablePkn, getBearer } = useAuth();
   const { count } = useCart();
   const { balance } = useWallet();
   const extensionDesk = framedByChromeExtension();
@@ -341,6 +343,8 @@ export default function Chrome({ children }) {
   const [hoverBox, setHoverBox] = useState(null);
   const [searchTab, setSearchTab] = useState('singles');
   const [sellerHits, setSellerHits] = useState([]);
+  const [messagesUnread, setMessagesUnread] = useState(0);
+  const messagesAriaLabel = messagesUnread > 0 ? 'Messages, unread messages' : 'Messages';
   useWindowScrollRestore();
   const searchTabRef = useRef(searchTab);
   searchTabRef.current = searchTab;
@@ -778,6 +782,35 @@ export default function Chrome({ children }) {
   }, [location.pathname]);
 
   useEffect(() => {
+    if (!signedIn) {
+      setMessagesUnread(0);
+      return undefined;
+    }
+    let active = true;
+    const refresh = async () => {
+      try {
+        const token = await getBearer();
+        if (!token) return;
+        const result = await listConversations(token);
+        if (active) setMessagesUnread(unreadMessagesCount(result?.conversations || []));
+      } catch {
+        /* unread dot is best-effort; never break the nav */
+      }
+    };
+    refresh();
+    const timer = setInterval(refresh, MESSAGES_UNREAD_REFRESH_MS);
+    const onUnread = (event) => {
+      if (typeof event?.detail?.count === 'number') setMessagesUnread(event.detail.count);
+    };
+    window.addEventListener(MESSAGES_UNREAD_EVENT, onUnread);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener(MESSAGES_UNREAD_EVENT, onUnread);
+    };
+  }, [signedIn, getBearer]);
+
+  useEffect(() => {
     if (!menu) {
       return undefined;
     }
@@ -1118,11 +1151,9 @@ export default function Chrome({ children }) {
             <AppLink to="/marketplace" title="Marketplace" aria-label="Marketplace">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={ICO.storefront} /></svg>
             </AppLink>
-            <AppLink to="/forum" title="Forum" aria-label="Forum">
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" /></svg>
-            </AppLink>
-            <AppLink to={APP.messages} title="Messages" aria-label="Messages">
+            <AppLink className="messages-link" to={APP.messages} title="Messages" aria-label={messagesAriaLabel}>
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-5 4V6a2 2 0 0 1 2-2Zm2 5v2h12V9H6Zm0 4v2h8v-2H6Z" /></svg>
+              {messagesUnread > 0 ? <span className="messages-unread-dot" aria-hidden="true" /> : null}
             </AppLink>
             <a href={onDashboard ? '/' : DASHBOARD_HOME} title="Dashboard" aria-label="Dashboard">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={ICO.dashboard} /></svg>
@@ -1154,7 +1185,6 @@ export default function Chrome({ children }) {
         <MobileTile to="/marketplace" label="Marketplace" icon="market" onClick={closeMenu} />
         <MobileTile to="/marketplace/search" label="Search" icon="search" onClick={closeMenu} />
         <MobileTile href={homeHref} label="Home" icon="home" onClick={closeMenu} />
-        <MobileTile to={APP.forum} label="Forum" icon="forum" onClick={closeMenu} />
         <MobileTile to={APP.messages} label="Messages" icon="forum" onClick={closeMenu} />
         <MobileTile href={onDashboard ? '/' : DASHBOARD_HOME} label="Dashboard" icon="dashboard" onClick={closeMenu} />
         {site.features.competitive ? (
