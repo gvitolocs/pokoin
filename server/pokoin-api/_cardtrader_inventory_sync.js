@@ -204,6 +204,53 @@ async function cardMetadata(cardId) {
   }
 }
 
+
+async function cardMetadataMany(cardIds) {
+  const ids = [...new Set((cardIds || []).map((id) => cleanText(id, 80)).filter(Boolean))];
+  const out = new Map();
+  if (!ids.length) return out;
+  try {
+    const result = await marketplaceQuery(
+      `
+        select
+          card_id::text as card_id,
+          coalesce(nullif(name, ''), '') as card_name,
+          coalesce(nullif(set_name, ''), nullif(expansion_name, ''), 'Pokemon') as set_name,
+          coalesce(nullif(card_number, ''), '') as collector_number,
+          coalesce(nullif(image_url, ''), nullif(cdn_image_url, ''), '') as card_image_url
+        from public.marketplace_search_candidates
+        where card_id::text = any($1::text[])
+      `,
+      [ids],
+    );
+    for (const row of result.rows || []) {
+      out.set(String(row.card_id), row);
+    }
+  } catch (error) {
+    console.warn('cardtrader batch metadata lookup failed', { message: error.message, count: ids.length });
+  }
+  return out;
+}
+
+/** Run async work over items with a fixed concurrency (I/O parallel, not OS threads). */
+async function mapPool(items, concurrency, worker) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return [];
+  const limit = Math.max(1, Math.min(32, Math.trunc(Number(concurrency) || 8)));
+  const results = new Array(list.length);
+  let next = 0;
+  async function run() {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= list.length) return;
+      results[index] = await worker(list[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, list.length) }, () => run()));
+  return results;
+}
+
 async function applyCtQuantity(listingId, quantity) {
   const qty = Math.max(0, Math.min(999999, Math.trunc(Number(quantity) || 0)));
   const result = await marketplaceWriteQuery(
@@ -252,8 +299,8 @@ async function linkExistingListing(listingId, product) {
   return result.rows[0] || null;
 }
 
-async function createImportedListing({ sellerUid, sellerName, product, cardId, reactivateHidden = false }) {
-  const meta = await cardMetadata(cardId);
+async function createImportedListing({ sellerUid, sellerName, product, cardId, reactivateHidden = false, meta: metaIn = null }) {
+  const meta = metaIn && typeof metaIn === 'object' ? metaIn : await cardMetadata(cardId);
   const qty = Math.max(0, Math.min(999999, product.quantity));
   const pricePkn = product.pricePkn;
   if (!(pricePkn > 0)) {
@@ -428,7 +475,14 @@ async function hideImportedCardTraderListings(sellerUid) {
   return rows.length;
 }
 
-async function reconcileOneDayReadyAssets({ sellerUid, products, gate, summary }) {
+async function reconcileOneDayReadyAssets({
+  sellerUid,
+  products,
+  gate,
+  summary,
+  onProgress = null,
+  writeConcurrency = 8,
+} = {}) {
   Object.assign(summary, {
     mode: 'one_day_ready',
     assets: 0,
@@ -436,16 +490,39 @@ async function reconcileOneDayReadyAssets({ sellerUid, products, gate, summary }
     assetValuePkn: 0,
     hiddenListings: 0,
   });
-  const rows = [];
+  const emitProgress = async (partial) => {
+    if (typeof onProgress !== 'function') return;
+    try { await onProgress(partial); } catch (_) {}
+  };
+
+  const pokemonProducts = [];
   for (const product of products) {
     if (!isPokemonProduct(product)) {
       summary.skippedNonPokemon += 1;
       continue;
     }
     summary.pokemonInventory += 1;
+    pokemonProducts.push(product);
+  }
+
+  await emitProgress({
+    phase: 'import',
+    processed: 0,
+    total: pokemonProducts.length,
+    inventory: summary.inventory,
+    pokemonInventory: summary.pokemonInventory,
+  });
+
+  const metaByCard = await cardMetadataMany(
+    pokemonProducts.map((product) => publicCardIdFromBlueprint(product.blueprintId) || ''),
+  );
+
+  const rows = [];
+  let processed = 0;
+  await mapPool(pokemonProducts, writeConcurrency, async (product) => {
     const cardId = publicCardIdFromBlueprint(product.blueprintId) || '';
     try {
-      const meta = cardId ? await cardMetadata(cardId) : {};
+      const meta = metaByCard.get(String(cardId || '')) || {};
       const row = oneDayReadyAssetRow(product, { cardId, meta });
       await upsertOneDayReadyAsset(sellerUid, row);
       rows.push(row);
@@ -453,7 +530,17 @@ async function reconcileOneDayReadyAssets({ sellerUid, products, gate, summary }
       summary.errors += 1;
       summary.errorItems.push({ ctProductId: product.id, reason: error.code || error.message || 'asset_error' });
     }
-  }
+    processed += 1;
+    if (processed === pokemonProducts.length || processed % 25 === 0) {
+      await emitProgress({
+        phase: 'import',
+        processed,
+        total: pokemonProducts.length,
+        inventory: summary.inventory,
+        pokemonInventory: summary.pokemonInventory,
+      });
+    }
+  });
   // Only a complete, error-free pass may delete assets CardTrader no longer has.
   if (gate.allowDestructive && summary.errors === 0) {
     summary.removed = await removeMissingOneDayReadyAssets(sellerUid, rows.map((row) => row.ctProductId));
@@ -466,6 +553,8 @@ async function reconcileOneDayReadyAssets({ sellerUid, products, gate, summary }
 
   const persisted = {
     ...summary,
+    running: false,
+    phase: 'done',
     unresolvedItems: summary.unresolvedItems.slice(0, 25),
     errorItems: summary.errorItems.slice(0, 25),
   };
@@ -510,7 +599,17 @@ async function reconcileCardTraderInventory({
   sellerName = '',
   token: providedToken = null,
   oneDayReady: providedOneDayReady,
+  onProgress = null,
+  writeConcurrency = 8,
 } = {}) {
+  const emitProgress = async (partial) => {
+    if (typeof onProgress !== 'function') return;
+    try {
+      await onProgress(partial);
+    } catch (_) {
+      // Progress is best-effort; never fail the sync on a progress write.
+    }
+  };
   const summary = emptySummary();
   const sellerUid = cleanText(uid, 160);
   if (!sellerUid) {
@@ -566,6 +665,8 @@ async function reconcileCardTraderInventory({
     }
   }
 
+  await emitProgress({ phase: 'export', processed: 0, total: 0 });
+
   let exportResult;
   try {
     exportResult = await fetchCompleteSellerInventory(token);
@@ -594,7 +695,14 @@ async function reconcileCardTraderInventory({
   summary.inventory = products.length;
 
   if (oneDayReady) {
-    return reconcileOneDayReadyAssets({ sellerUid, products, gate, summary });
+    return reconcileOneDayReadyAssets({
+      sellerUid,
+      products,
+      gate,
+      summary,
+      onProgress,
+      writeConcurrency,
+    });
   }
 
   const listings = await loadSellerListings(sellerUid);
@@ -619,6 +727,10 @@ async function reconcileCardTraderInventory({
   const linkByProduct = new Map(links.map((l) => [cleanText(l.ct_product_id, 80), l]));
   const seenProductIds = new Set();
 
+  // Decide sequentially (facet matching mutates shared maps), apply with
+  // concurrent Postgres writes. First import of ~10k cards was ~2 min because
+  // each product awaited metadata+insert+link one-by-one.
+  const planned = [];
   for (const product of products) {
     if (!isPokemonProduct(product)) {
       summary.skippedNonPokemon += 1;
@@ -627,7 +739,6 @@ async function reconcileCardTraderInventory({
     summary.pokemonInventory += 1;
     seenProductIds.add(product.id);
 
-    // Prefer link table → source id for already-linked via push that may not be in bySourceId maps yet
     if (!bySourceId.has(ctSourceListingId(product.id))) {
       const link = linkByProduct.get(product.id);
       if (link?.listing_id && byListingId.has(String(link.listing_id))) {
@@ -644,7 +755,60 @@ async function reconcileCardTraderInventory({
       byListingId,
       unlinkedByFacet,
     });
+    planned.push({ product, decision });
 
+    // Keep decision-time map updates for facet matching of later products.
+    if (decision.action === 'link_existing' && decision.facetKey) {
+      unlinkedByFacet.set(decision.facetKey, []);
+      bySourceId.set(decision.sourceId, decision.listing);
+    }
+    if (decision.action === 'already_linked' && decision.listing) {
+      bySourceId.set(ctSourceListingId(product.id), decision.listing);
+    }
+    if (decision.action === 'import') {
+      bySourceId.set(decision.sourceId, { id: `pending:${product.id}`, source_listing_id: decision.sourceId });
+    }
+  }
+
+  await emitProgress({
+    phase: 'export_done',
+    processed: 0,
+    total: planned.length,
+    inventory: summary.inventory,
+    pokemonInventory: summary.pokemonInventory,
+  });
+
+  const importJobs = planned.filter((row) => row.decision.action === 'import');
+  const metaByCard = await cardMetadataMany(
+    importJobs.map((row) => row.decision.cardId || publicCardIdFromBlueprint(row.product.blueprintId)),
+  );
+
+  await emitProgress({
+    phase: 'import',
+    processed: 0,
+    total: planned.length,
+    inventory: summary.inventory,
+    pokemonInventory: summary.pokemonInventory,
+  });
+
+  let processed = 0;
+  const bump = async () => {
+    processed += 1;
+    if (processed === planned.length || processed % 25 === 0) {
+      await emitProgress({
+        phase: 'import',
+        processed,
+        total: planned.length,
+        inventory: summary.inventory,
+        pokemonInventory: summary.pokemonInventory,
+        imported: summary.imported,
+        updated: summary.updated,
+        matchedExisting: summary.matchedExisting,
+      });
+    }
+  };
+
+  await mapPool(planned, writeConcurrency, async ({ product, decision }) => {
     try {
       if (decision.action === 'unresolved') {
         summary.unresolved += 1;
@@ -655,7 +819,8 @@ async function reconcileCardTraderInventory({
           name: decision.name || product.name,
           candidates: decision.candidates,
         });
-        continue;
+        await bump();
+        return;
       }
 
       if (decision.action === 'already_linked') {
@@ -676,16 +841,17 @@ async function reconcileCardTraderInventory({
           origin: linkByProduct.get(product.id)?.origin || 'push',
           missingFromCt: false,
         });
-        continue;
+        await bump();
+        return;
       }
 
       if (decision.action === 'link_existing') {
-        if (decision.facetKey) unlinkedByFacet.set(decision.facetKey, []);
         const updated = await linkExistingListing(decision.listing.id, product);
         if (!updated) {
           summary.errors += 1;
           summary.errorItems.push({ ctProductId: product.id, reason: 'link_failed' });
-          continue;
+          await bump();
+          return;
         }
         summary.matchedExisting += 1;
         bySourceId.set(decision.sourceId, { ...decision.listing, ...updated });
@@ -698,21 +864,25 @@ async function reconcileCardTraderInventory({
           origin: decision.origin || 'match',
           missingFromCt: false,
         });
-        continue;
+        await bump();
+        return;
       }
 
       if (decision.action === 'import') {
+        const cardId = decision.cardId || publicCardIdFromBlueprint(product.blueprintId);
         const created = await createImportedListing({
           sellerUid,
           sellerName,
           product,
-          cardId: decision.cardId || publicCardIdFromBlueprint(product.blueprintId),
+          cardId,
           reactivateHidden: !linkByProduct.has(product.id),
+          meta: metaByCard.get(String(cardId || '')) || {},
         });
         if (!created) {
           summary.errors += 1;
           summary.errorItems.push({ ctProductId: product.id, reason: 'import_failed' });
-          continue;
+          await bump();
+          return;
         }
         summary.imported += 1;
         bySourceId.set(decision.sourceId, created);
@@ -734,7 +904,8 @@ async function reconcileCardTraderInventory({
         reason: error.code || error.message || 'sync_error',
       });
     }
-  }
+    await bump();
+  });
 
   if (gate.allowDestructive) {
     for (const [sourceId, listing] of bySourceId.entries()) {
@@ -767,8 +938,23 @@ async function reconcileCardTraderInventory({
     }
   }
 
+  await emitProgress({
+    phase: 'finishing',
+    processed: planned.length,
+    total: planned.length,
+    inventory: summary.inventory,
+    pokemonInventory: summary.pokemonInventory,
+    imported: summary.imported,
+    updated: summary.updated,
+    matchedExisting: summary.matchedExisting,
+  });
+
   const persisted = {
     ...summary,
+    running: false,
+    phase: 'done',
+    processed: planned.length,
+    total: planned.length,
     unresolvedItems: summary.unresolvedItems.slice(0, 25),
     errorItems: summary.errorItems.slice(0, 25),
   };
