@@ -285,10 +285,6 @@ export default function CardTraderConnectPanel() {
           <p className="page-lede">
             Connected{username ? ` as ${username}` : ''}
             {appName ? ` · ${appName}` : ''}.
-            {' '}
-            {oneDayReady
-              ? 'This is a CardTrader 1-Day Ready account: CardTrader stocks and sells these cards, so they show on your Dashboard as CardTrader 1-DR assets, not as Pokoin listings.'
-              : 'CardTrader inventory is a synchronized subset of Pokoin; Pokoin-only listings stay independent.'}
           </p>
           {syncSummary && !syncing ? (
             <p className="page-lede muted">{formatSyncSummary(syncSummary)}</p>
