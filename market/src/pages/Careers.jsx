@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { LIFE_BUBBLES, LIFE_STRIP, PRINCIPLES, REASONS } from '../careers-art.js';
+import { startBubbleDrift } from '../careers-bubbles.js';
 import {
   CAREERS_CONTACT,
   OPEN_ROLES,
@@ -262,9 +263,16 @@ function OpenPositions({ roles }) {
 export default function Careers() {
   const location = useLocation();
   const roles = OPEN_ROLES;
+  const bubblesRef = useRef(null);
 
   useEffect(() => {
     document.title = 'Careers · Pokoin';
+  }, []);
+
+  // Life at Pokoin: bubbles drift slowly and can be dragged around.
+  useEffect(() => {
+    const reducedMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+    return startBubbleDrift(bubblesRef.current, { reducedMotion });
   }, []);
 
   useEffect(() => {
@@ -301,24 +309,30 @@ export default function Careers() {
             <span className="careers-media-glow careers-media-glow-a" />
             <span className="careers-media-glow careers-media-glow-b" />
             <span className="careers-media-glow careers-media-glow-c" />
-            <div className="careers-media-bubbles">
-              {LIFE_BUBBLES.map((bubble) => (
-                <div
-                  key={bubble.slot}
-                  className={`careers-media-art slot-${bubble.slot}`}
-                  title={bubble.card}
-                  style={{ '--bubble-face': bubble.face }}
-                >
-                  <img
-                    className="careers-media-shot"
-                    src={bubble.src}
-                    alt=""
-                    loading={bubble.slot === 'a' ? 'eager' : 'lazy'}
-                    decoding="async"
-                    draggable={false}
-                  />
-                </div>
-              ))}
+            <div className="careers-media-bubbles" ref={bubblesRef}>
+              {LIFE_BUBBLES.map((bubble) => {
+                const [bfx, bfy] = bubble.face.split(/\s+/);
+                return (
+                  <div
+                    key={bubble.slot}
+                    className={`careers-media-art slot-${bubble.slot}`}
+                    title={bubble.card}
+                    style={{
+                      '--bfx-n': Number.parseFloat(bfx),
+                      '--bfy-n': Number.parseFloat(bfy),
+                    }}
+                  >
+                    <img
+                      className="careers-media-shot"
+                      src={bubble.src}
+                      alt=""
+                      loading={bubble.slot === 'a' ? 'eager' : 'lazy'}
+                      decoding="async"
+                      draggable={false}
+                    />
+                  </div>
+                );
+              })}
             </div>
             <p className="careers-media-caption">Buy. Sell. Settle in PKN.</p>
           </div>

@@ -38,8 +38,36 @@ export const LIFE_BUBBLES = [
   {
     src: '/card-images/484062_slowpoke-204-198-scarlet-violet.jpg',
     card: 'Slowpoke Illustration Rare · Scarlet & Violet 204/198',
-    face: '38% 40%',
+    // Doorway face sits ~mid-left of the leftover; absolute anchor centers it.
+    face: '34% 40%',
     slot: 'd',
+  },
+  {
+    src: '/card-images/483642_greavard-214-198-scarlet-violet.jpg',
+    card: 'Greavard Illustration Rare · Scarlet & Violet 214/198',
+    face: '50% 38%',
+    slot: 'e',
+  },
+  {
+    src: '/card-images/612618_spheal-illustration-rare-199-191-surging-sparks.jpg',
+    card: 'Spheal Illustration Rare · Surging Sparks 199/191',
+    // Sleeping Spheal on the ice floe (upper cluster).
+    face: '42% 18%',
+    slot: 'f',
+  },
+  {
+    src: '/card-images/550636_snom-illustration-rare-073-071-wild-force.jpg',
+    card: 'Snom Illustration Rare · Wild Force 073/071',
+    // Snom's head hangs from the branch (upper centre).
+    face: '48% 24%',
+    slot: 'g',
+  },
+  {
+    src: '/card-images/502862_psyduck-175-165-pokemon-card-151.jpg',
+    card: 'Psyduck Illustration Rare · Pokémon Card 151 175/165',
+    // Small Psyduck on the forest steps; zoomed in by its --bubble-scale.
+    face: '66% 38%',
+    slot: 'h',
   },
 ];
 

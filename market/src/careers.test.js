@@ -107,6 +107,10 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(artSrc, /502874_snorlax/);
   assert.match(artSrc, /241014_komala/);
   assert.match(artSrc, /484062_slowpoke/);
+  assert.match(artSrc, /483642_greavard/);
+  assert.match(artSrc, /612618_spheal/);
+  assert.match(artSrc, /550636_snom/);
+  assert.match(artSrc, /502862_psyduck/);
   assert.match(careersSrc, /from '\.\.\/careers-art\.js'/);
   assert.match(careersSrc, /LIFE_BUBBLES/);
   assert.match(careersSrc, /LIFE_STRIP/);
@@ -128,6 +132,8 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(cssSrc, /\.careers-media-art\.slot-b/);
   assert.match(cssSrc, /\.careers-media-art\.slot-c/);
   assert.match(cssSrc, /\.careers-media-art\.slot-d/);
+  assert.match(cssSrc, /\.careers-media-art\.slot-e/);
+  assert.match(cssSrc, /\.careers-media-art\.slot-h/);
   assert.match(cssSrc, /careers-cozy-float/);
   assert.match(cssSrc, /careers-media-glow/);
   assert.match(cssSrc, /object-position:\s*62%\s*18%/);
