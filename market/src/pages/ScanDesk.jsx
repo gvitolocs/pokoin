@@ -66,7 +66,7 @@ import { useLiveSuggest } from '../use-live-suggest.js';
 import { SessionWait } from '../components/Desk.jsx';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import ThumbZoom from '../components/ThumbZoom.jsx';
-import { game } from '../game.js';
+import { game, GAMES, setScanGameOverride, gameIdFromHost } from '../game.js';
 import { marketUrl } from '../punchouts.js';
 import '../scan-desk.css';
 
@@ -382,6 +382,16 @@ export default function ScanDesk() {
   const phase = sessionPhase(session, now, serverOffset);
   const phaseInfo = phaseText(phase, session);
   const defaults = batch?.defaults || DEFAULTS;
+
+  // Push Game picker (dashboard localStorage override) into batch defaults once a batch exists.
+  useEffect(() => {
+    if (!batch?.id || closed) return;
+    const id = gameIdFromHost();
+    if ((defaults.game || 'pokemon') === id) return;
+    setDefaults({ game: id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batch?.id, closed]);
+
   const closed = batch && batch.status !== 'open';
   const focusIndex = list.findIndex((row) => row.id === focusId);
   const focused = focusIndex >= 0 ? list[focusIndex] : null;
@@ -1548,10 +1558,23 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull =
       <h2 id="scan-defaults-title" className="scan-defaults-label" title="New scans take these values. Shift + a row key changes them.">Batch defaults</h2>
       <div className="scan-defaults-row">
       {/* The TCG comes from the host (pokoin.com, onepiece., riftbound.). */}
-      <span className="sd-field sd-game">
+      <label className="sd-field sd-game" title="Switch TCG — phone catalog follows this">
         <span>Game</span>
-        <b>{game().name}</b>
-      </span>
+        <select
+          value={gameIdFromHost()}
+          onChange={(e) => {
+            const next = e.target.value;
+            if (next === gameIdFromHost()) return;
+            setScanGameOverride(next);
+            // Reload so catalog, pricing, and a fresh pair use the new game.
+            window.location.reload();
+          }}
+        >
+          {Object.values(GAMES).map((g) => (
+            <option key={g.id} value={g.id}>{g.name}</option>
+          ))}
+        </select>
+      </label>
       <label className="sd-field">
         <span>Language</span>
         <select value={defaults.language} onChange={(e) => onChange({ language: e.target.value })}>

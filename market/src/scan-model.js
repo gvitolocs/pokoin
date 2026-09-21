@@ -16,6 +16,7 @@ export const FINISHES = [
 export const STACK_SIZES = Object.freeze([1, 5, 10, 20, 25, 40, 50, 60, 80, 100]);
 
 export const DEFAULTS = Object.freeze({
+  game: 'pokemon',
   language: 'EN',
   condition: 'NM',
   foilState: 'standard',
