@@ -68,6 +68,7 @@ async function connect(req, decoded, admin, firestore) {
       uid: decoded.uid,
       sellerName: String(sellerName),
       token,
+      oneDayReady: info.oneDayReady === true,
     });
   } catch (error) {
     console.error('cardtrader initial inventory sync failed', {

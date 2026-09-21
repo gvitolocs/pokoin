@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc } from '../api.js';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
+import CardTraderAssetsPanel from './CardTraderAssetsPanel.jsx';
 import { printingIdentity } from '../identity.js';
 import { formatPknNumber, tilePricePkn } from '../pkn.js';
 import {
@@ -376,6 +377,7 @@ export function SellerDashboardView({
   nftOwned,
   uniqueItems,
   pknBalance = 0,
+  cardTraderAssets = null,
   listed,
   listingRows = [],
   movers = [],
@@ -388,9 +390,13 @@ export function SellerDashboardView({
   listingHrefFor,
   previewBanner = false,
 }) {
+  const oneDayReadyCards = cardTraderAssets?.oneDayReady
+    ? Math.max(0, Number(cardTraderAssets.totals?.cards) || 0)
+    : 0;
   const empty = !loading && !error
     && ownedCards === 0
-    && !(listed?.cards > 0);
+    && !(listed?.cards > 0)
+    && oneDayReadyCards === 0;
 
   const physicalQty = Math.max(0, Number(physicalOwned) || 0);
   const nftQty = Math.max(0, Number(nftOwned) || 0);
@@ -475,6 +481,13 @@ export function SellerDashboardView({
                 </p>
               ) : null}
 
+              {oneDayReadyCards > 0 ? (
+                <p className="seller-asking" data-testid="cardtrader-1dr-value">
+                  <span>CardTrader 1-DR assets · {oneDayReadyCards.toLocaleString('en-US')} cards</span>
+                  <strong>{formatPkn(cardTraderAssets.totals?.valuePkn || 0)}</strong>
+                </p>
+              ) : null}
+
               <CollectionHistoryPanel
                 today={todayHistoryDay({
                   currencyPkn: balance,
@@ -528,6 +541,8 @@ export function SellerDashboardView({
           </p>
         )}
       </section>
+
+      <CardTraderAssetsPanel assets={cardTraderAssets} />
 
       <div className="seller-secondary-grid">
         <section className="seller-panel" aria-labelledby="seller-listings-title">

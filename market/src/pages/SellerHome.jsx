@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   cardFromCatalogRow,
+  fetchCardTraderAssets,
   fetchCollectionSummary,
   fetchSellerListings,
 } from '../api.js';
@@ -34,6 +35,15 @@ const PREVIEW_FIXTURE = {
   nftOwned: 37,
   uniqueItems: 241,
   pknBalance: 15,
+  cardTraderAssets: {
+    oneDayReady: true,
+    totals: { products: 3, cards: 5, valuePkn: 1840 },
+    items: [
+      { ctProductId: 'p1', cardId: '968186', cardName: 'Snorlax', setName: 'Pokémon Card 151', condition: 'NM', language: 'EN', quantity: 2, pricePkn: 620, imageUrl: '/card-images/502874_snorlax-181-165-pokemon-card-151.jpg' },
+      { ctProductId: 'p2', cardId: '968172', cardName: 'Psyduck', setName: 'Pokémon Card 151', condition: 'NM', language: 'IT', reverse: true, quantity: 1, pricePkn: 260, imageUrl: '/card-images/502862_psyduck-175-165-pokemon-card-151.jpg' },
+      { ctProductId: 'p3', cardId: '968124', cardName: 'Slowpoke', setName: 'Scarlet & Violet', condition: 'SP', language: 'EN', quantity: 2, pricePkn: 170, imageUrl: '/card-images/484062_slowpoke-204-198-scarlet-violet.jpg' },
+    ],
+  },
   listed: { listings: 18, cards: 24, listedPkn: 12400 },
   listingRows: [
     {
@@ -112,6 +122,7 @@ export default function SellerHome() {
   const [listed, setListed] = useState(null);
   const [listingRows, setListingRows] = useState([]);
   const [movers, setMovers] = useState([]);
+  const [cardTraderAssets, setCardTraderAssets] = useState(null);
   const [error, setError] = useState('');
 
   const collectionHref = marketUrl(APP.collection);
@@ -205,6 +216,25 @@ export default function SellerHome() {
     };
   }, [preview, signedIn, user?.uid, profile?.uid, getBearer]);
 
+  // CardTrader 1-Day Ready stock: dashboard assets, never Pokoin listings.
+  useEffect(() => {
+    if (preview) return undefined;
+    const uid = user?.uid || profile?.uid;
+    if (!signedIn || !uid) return undefined;
+    let cancelled = false;
+    getBearer()
+      .then((token) => fetchCardTraderAssets(token))
+      .then((data) => {
+        if (!cancelled) setCardTraderAssets(data?.oneDayReady ? data : null);
+      })
+      .catch(() => {
+        if (!cancelled) setCardTraderAssets(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [preview, signedIn, user?.uid, profile?.uid, getBearer]);
+
   useEffect(() => {
     if (preview) return undefined;
     let cancelled = false;
@@ -265,6 +295,7 @@ export default function SellerHome() {
         nftOwned={PREVIEW_FIXTURE.nftOwned}
         uniqueItems={PREVIEW_FIXTURE.uniqueItems}
         pknBalance={PREVIEW_FIXTURE.pknBalance}
+        cardTraderAssets={PREVIEW_FIXTURE.cardTraderAssets}
         listed={PREVIEW_FIXTURE.listed}
         listingRows={PREVIEW_FIXTURE.listingRows}
         movers={PREVIEW_FIXTURE.movers}
@@ -297,6 +328,7 @@ export default function SellerHome() {
       nftOwned={nftOwned}
       uniqueItems={uniqueItems}
       pknBalance={availablePkn}
+      cardTraderAssets={cardTraderAssets}
       listed={listed}
       listingRows={listingRows}
       movers={movers}

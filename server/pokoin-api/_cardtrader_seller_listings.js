@@ -6,6 +6,7 @@ const {
 } = require('./_cardtrader_client');
 const {
   decryptIntegrationToken,
+  isOneDayReadyIntegration,
   readIntegrationDoc,
 } = require('./_cardtrader_integration');
 
@@ -154,6 +155,13 @@ function productIdFromCreateResponse(payload) {
 }
 
 async function pushListingToCardTrader({ firestore, uid, listing }) {
+  if (isOneDayReadyIntegration(await readIntegrationDoc(firestore, uid))) {
+    // CardTrader stocks and ships 1-Day Ready inventory; a Pokoin card cannot join it.
+    const error = new Error('CardTrader 1-Day Ready accounts are stocked by CardTrader. List this card on Pokoin only.');
+    error.statusCode = 409;
+    error.code = 'cardtrader_one_day_ready';
+    throw error;
+  }
   const token = await decryptIntegrationToken(firestore, uid);
   const body = buildProductBody(listing);
   const payload = await createProduct(token, body);

@@ -10,9 +10,17 @@ const TOKEN_NOISE_RE = /[\s\u00AD\u200B-\u200D\u2060\uFEFF]/g;
 const JWT_RE = /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 const RSA_ALG_RE = /^(RS|PS)\d+$/;
 const RSA_SIGNATURE_BYTES = new Set([256, 384, 512]);
+// CardTrader names a 1-Day Ready account's app "<user> 1-Day Ready App <stamp>".
+// That stock lives in CardTrader's warehouse and CardTrader sells and ships it.
+const ONE_DAY_READY_RE = /\b(?:1|one)[\s-]*day[\s-]*ready\b/i;
 
 function cleanText(value, maxLength = 240) {
   return String(value || '').trim().slice(0, maxLength);
+}
+
+/** True for a CardTrader 1-Day Ready app/account name. */
+function isOneDayReadyName(name) {
+  return ONE_DAY_READY_RE.test(String(name || ''));
 }
 
 function cleanToken(value) {
@@ -231,11 +239,13 @@ function normalizeInfo(info = {}) {
   const user = info.user && typeof info.user === 'object' ? info.user : {};
   const app = info.app && typeof info.app === 'object' ? info.app : {};
   // GET /info answers flat for app tokens: { id, name, user_id, shared_secret }.
+  const appName = cleanText(app.name ?? info.app_name ?? info.name, 160);
   return {
     app: {
       id: cleanText(app.id ?? info.app_id ?? info.id, 80),
-      name: cleanText(app.name ?? info.app_name ?? info.name, 160),
+      name: appName,
     },
+    oneDayReady: isOneDayReadyName(appName),
     user: {
       id: cleanText(user.id ?? info.user_id, 80),
       email: cleanText(user.email ?? info.email, 320).toLowerCase(),
@@ -258,6 +268,7 @@ function safeInfoMetadata(info = {}) {
     user: info.user || {},
     scopes: Array.isArray(info.scopes) ? info.scopes : [],
     seller: info.seller || {},
+    oneDayReady: info.oneDayReady === true,
   };
 }
 
@@ -291,6 +302,7 @@ module.exports = {
   fetchMarketplaceProducts,
   fetchProductsExport,
   importDryRunSummary,
+  isOneDayReadyName,
   normalizeInfo,
   purchaseCart,
   safeInfoMetadata,

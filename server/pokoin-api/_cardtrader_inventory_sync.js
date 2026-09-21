@@ -7,8 +7,8 @@
 
 'use strict';
 
-const { fetchProductsExport } = require('./_cardtrader_client');
-const { decryptIntegrationToken } = require('./_cardtrader_integration');
+const { fetchProductsExport, validateCardTraderToken } = require('./_cardtrader_client');
+const { decryptIntegrationToken, markOneDayReady } = require('./_cardtrader_integration');
 const { marketplaceWriteQuery, marketplaceQuery } = require('../server/_marketplace_db');
 const {
   CT_PREFIX,
@@ -21,6 +21,8 @@ const {
   isCtLinkedSource,
   isPokemonProduct,
   normalizeProduct,
+  oneDayReadyAssetRow,
+  oneDayReadyTotals,
   parseCtProductId,
   publicCardIdFromBlueprint,
   resolveProductAttachment,
@@ -246,7 +248,7 @@ async function linkExistingListing(listingId, product) {
   return result.rows[0] || null;
 }
 
-async function createImportedListing({ sellerUid, sellerName, product, cardId }) {
+async function createImportedListing({ sellerUid, sellerName, product, cardId, reactivateHidden = false }) {
   const meta = await cardMetadata(cardId);
   const qty = Math.max(0, Math.min(999999, product.quantity));
   const pricePkn = product.pricePkn;
@@ -271,7 +273,22 @@ async function createImportedListing({ sellerUid, sellerName, product, cardId })
     `,
     [sellerUid, sourceListingId],
   );
-  if (existing.rows[0]) return existing.rows[0];
+  const found = existing.rows[0];
+  if (found && found.status === 'inactive' && reactivateHidden) {
+    // Hidden by a 1-Day Ready sync (no product link left): the account is a
+    // listing account again, so the import is public again.
+    const reactivated = await marketplaceWriteQuery(
+      `
+        update public.marketplace_user_listings
+        set status = 'active', quantity_available = $2, price_pkn = $3, updated_at = now()
+        where id = $1
+        returning id, source_listing_id, quantity_available, status, card_id
+      `,
+      [found.id, qty, pricePkn],
+    );
+    return reactivated.rows[0] || found;
+  }
+  if (found) return found;
 
   const result = await marketplaceWriteQuery(
     `
@@ -319,11 +336,176 @@ async function createImportedListing({ sellerUid, sellerName, product, cardId })
   return result.rows[0] || null;
 }
 
+// ---------------------------------------------------------------- 1-Day Ready
+
+async function upsertOneDayReadyAsset(sellerUid, row) {
+  await marketplaceWriteQuery(
+    `
+      insert into public.marketplace_cardtrader_1dr_assets (
+        seller_uid, ct_product_id, blueprint_id, card_id, card_name, set_name,
+        collector_number, card_image_url, condition, language, reverse,
+        first_edition, signed, altered, graded, quantity, price_pkn,
+        last_seen_at, updated_at
+      )
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now(), now())
+      on conflict (seller_uid, ct_product_id) do update set
+        blueprint_id = excluded.blueprint_id,
+        card_id = excluded.card_id,
+        card_name = excluded.card_name,
+        set_name = excluded.set_name,
+        collector_number = excluded.collector_number,
+        card_image_url = excluded.card_image_url,
+        condition = excluded.condition,
+        language = excluded.language,
+        reverse = excluded.reverse,
+        first_edition = excluded.first_edition,
+        signed = excluded.signed,
+        altered = excluded.altered,
+        graded = excluded.graded,
+        quantity = excluded.quantity,
+        price_pkn = excluded.price_pkn,
+        last_seen_at = now(),
+        updated_at = now()
+    `,
+    [
+      sellerUid, row.ctProductId, row.blueprintId, row.cardId, row.cardName, row.setName,
+      row.collectorNumber, row.cardImageUrl, row.condition, row.language, row.reverse,
+      row.firstEdition, row.signed, row.altered, row.graded, row.quantity, row.pricePkn,
+    ],
+  );
+}
+
+async function removeMissingOneDayReadyAssets(sellerUid, keepProductIds) {
+  const result = await marketplaceWriteQuery(
+    `
+      delete from public.marketplace_cardtrader_1dr_assets
+      where seller_uid = $1
+        and not (ct_product_id = any($2::text[]))
+    `,
+    [sellerUid, keepProductIds],
+  );
+  return result.rowCount || 0;
+}
+
+/**
+ * 1-Day Ready stock is never a Pokoin listing: hide the public copies an
+ * earlier listing-mode sync imported, and drop their product links so order
+ * webhooks leave them alone. Pokoin-only and pushed listings are untouched.
+ */
+async function hideImportedCardTraderListings(sellerUid) {
+  const hidden = await marketplaceWriteQuery(
+    `
+      update public.marketplace_user_listings
+      set status = 'inactive', updated_at = now()
+      where seller_uid = $1
+        and source = $2
+        and source_listing_id like 'ct:%'
+        and status <> 'inactive'
+      returning id, card_id
+    `,
+    [sellerUid, SOURCE_IMPORT],
+  );
+  const rows = hidden.rows || [];
+  await marketplaceWriteQuery(
+    `
+      delete from public.marketplace_cardtrader_product_links
+      where seller_uid = $1 and origin = 'import'
+    `,
+    [sellerUid],
+  );
+  // Card pages' "from N PKN" summaries must stop counting the hidden rows.
+  for (const cardId of new Set(rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean))) {
+    try {
+      await marketplaceWriteQuery('select public.refresh_marketplace_blueprint_price_summary($1)', [cardId]);
+    } catch (error) {
+      console.error('cardtrader 1dr price summary refresh failed', { cardId, message: error.message });
+    }
+  }
+  return rows.length;
+}
+
+async function reconcileOneDayReadyAssets({ sellerUid, products, gate, summary }) {
+  Object.assign(summary, {
+    mode: 'one_day_ready',
+    assets: 0,
+    assetCards: 0,
+    assetValuePkn: 0,
+    hiddenListings: 0,
+  });
+  const rows = [];
+  for (const product of products) {
+    if (!isPokemonProduct(product)) {
+      summary.skippedNonPokemon += 1;
+      continue;
+    }
+    summary.pokemonInventory += 1;
+    const cardId = publicCardIdFromBlueprint(product.blueprintId) || '';
+    try {
+      const meta = cardId ? await cardMetadata(cardId) : {};
+      const row = oneDayReadyAssetRow(product, { cardId, meta });
+      await upsertOneDayReadyAsset(sellerUid, row);
+      rows.push(row);
+    } catch (error) {
+      summary.errors += 1;
+      summary.errorItems.push({ ctProductId: product.id, reason: error.code || error.message || 'asset_error' });
+    }
+  }
+  // Only a complete, error-free pass may delete assets CardTrader no longer has.
+  if (gate.allowDestructive && summary.errors === 0) {
+    summary.removed = await removeMissingOneDayReadyAssets(sellerUid, rows.map((row) => row.ctProductId));
+  }
+  summary.hiddenListings = await hideImportedCardTraderListings(sellerUid);
+  const totals = oneDayReadyTotals(rows);
+  summary.assets = totals.products;
+  summary.assetCards = totals.cards;
+  summary.assetValuePkn = totals.valuePkn;
+
+  const persisted = {
+    ...summary,
+    unresolvedItems: summary.unresolvedItems.slice(0, 25),
+    errorItems: summary.errorItems.slice(0, 25),
+  };
+  await recordSellerSync(sellerUid, {
+    ok: summary.errors === 0,
+    incomplete: !gate.allowDestructive,
+    error: gate.allowDestructive ? '' : gate.reason,
+    summary: persisted,
+    exportCount: summary.inventory,
+    complete: gate.allowDestructive,
+  });
+  return {
+    ok: true,
+    oneDayReady: true,
+    incomplete: !gate.allowDestructive,
+    connected: true,
+    complete: gate.allowDestructive,
+    destructiveSkipped: !gate.allowDestructive,
+    summary: persisted,
+  };
+}
+
+async function readOneDayReadyAssets(sellerUid, { limit = 500 } = {}) {
+  const result = await marketplaceQuery(
+    `
+      select ct_product_id, blueprint_id, card_id, card_name, set_name,
+             collector_number, card_image_url, condition, language, reverse,
+             first_edition, signed, altered, graded, quantity, price_pkn, updated_at
+      from public.marketplace_cardtrader_1dr_assets
+      where seller_uid = $1 and quantity > 0
+      order by price_pkn * quantity desc, card_name asc
+      limit $2
+    `,
+    [sellerUid, Math.max(1, Math.min(2000, Math.trunc(Number(limit) || 500)))],
+  );
+  return result.rows || [];
+}
+
 async function reconcileCardTraderInventory({
   firestore,
   uid,
   sellerName = '',
   token: providedToken = null,
+  oneDayReady: providedOneDayReady,
 } = {}) {
   const summary = emptySummary();
   const sellerUid = cleanText(uid, 160);
@@ -354,6 +536,32 @@ async function reconcileCardTraderInventory({
     };
   }
 
+  // Account type decides where the stock goes: 1-Day Ready → dashboard assets.
+  let oneDayReady = typeof providedOneDayReady === 'boolean' ? providedOneDayReady : null;
+  if (oneDayReady === null) {
+    try {
+      oneDayReady = (await validateCardTraderToken(token)).oneDayReady === true;
+      await markOneDayReady(firestore, sellerUid, oneDayReady);
+    } catch (error) {
+      // Unknown account type: never publish stock that may be CardTrader's own.
+      await recordSellerSync(sellerUid, {
+        ok: false,
+        incomplete: true,
+        error: error.message || 'CardTrader account check failed.',
+        summary,
+        complete: false,
+      });
+      return {
+        ok: false,
+        incomplete: true,
+        connected: true,
+        destructiveSkipped: true,
+        error: error.message || 'CardTrader account check failed.',
+        summary,
+      };
+    }
+  }
+
   let exportResult;
   try {
     exportResult = await fetchCompleteSellerInventory(token);
@@ -380,6 +588,10 @@ async function reconcileCardTraderInventory({
   const gate = destructiveReconcileGate(exportResult);
   const products = (exportResult.products || []).map(normalizeProduct).filter((p) => p.id);
   summary.inventory = products.length;
+
+  if (oneDayReady) {
+    return reconcileOneDayReadyAssets({ sellerUid, products, gate, summary });
+  }
 
   const listings = await loadSellerListings(sellerUid);
   const links = await loadProductLinks(sellerUid);
@@ -491,6 +703,7 @@ async function reconcileCardTraderInventory({
           sellerName,
           product,
           cardId: decision.cardId || publicCardIdFromBlueprint(product.blueprintId),
+          reactivateHidden: !linkByProduct.has(product.id),
         });
         if (!created) {
           summary.errors += 1;
@@ -578,6 +791,7 @@ async function reconcileCardTraderInventory({
 module.exports = {
   applyCtQuantity,
   fetchCompleteSellerInventory,
+  readOneDayReadyAssets,
   readSellerSync,
   reconcileCardTraderInventory,
   recordSellerSync,

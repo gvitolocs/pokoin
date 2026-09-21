@@ -61,6 +61,21 @@ async function storeConnectedIntegration({ admin, firestore, uid, email, token, 
   return payload;
 }
 
+/** Records the CardTrader account type a sync detected (1-Day Ready or not). */
+async function markOneDayReady(firestore, uid, oneDayReady) {
+  if (!firestore || !uid) return;
+  await firestore.collection(COLLECTION).doc(integrationDocId(uid)).set(
+    { metadata: { oneDayReady: oneDayReady === true } },
+    { merge: true },
+  );
+}
+
+/** A connected CardTrader 1-Day Ready account: its stock is CardTrader's, never pushed or listed. */
+function isOneDayReadyIntegration(doc) {
+  const data = doc?.exists ? doc.data() || {} : {};
+  return data.enabled === true && data.metadata?.oneDayReady === true;
+}
+
 async function disconnectIntegration({ admin, firestore, uid }) {
   const now = admin.firestore.FieldValue.serverTimestamp();
   await firestore.collection(COLLECTION).doc(integrationDocId(uid)).set(
@@ -102,6 +117,8 @@ module.exports = {
   decryptIntegrationToken,
   disconnectIntegration,
   integrationDocId,
+  isOneDayReadyIntegration,
+  markOneDayReady,
   readIntegrationDoc,
   safeStatusFromDoc,
   storeConnectedIntegration,

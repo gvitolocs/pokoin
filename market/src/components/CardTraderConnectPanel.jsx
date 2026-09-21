@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getBearer } from '../auth.jsx';
+import { DASHBOARD_HOME } from '../punchouts.js';
 import {
   connectCardTrader,
   disconnectCardTrader,
@@ -37,6 +38,14 @@ function tokenHint(pasted) {
 
 function formatSyncSummary(summary) {
   if (!summary || typeof summary !== 'object') return '';
+  if (summary.mode === 'one_day_ready') {
+    const hidden = Number(summary.hiddenListings || 0);
+    return [
+      `${Number(summary.assetCards || 0)} cards on your Dashboard as CardTrader 1-DR`,
+      `${Number(summary.assets || 0)} products`,
+      hidden ? `${hidden} Pokoin listings hidden` : '',
+    ].filter(Boolean).join(' · ');
+  }
   const parts = [
     `${Number(summary.pokemonInventory || summary.inventory || 0)} products checked`,
     `${Number(summary.imported || 0)} imported`,
@@ -153,6 +162,11 @@ export default function CardTraderConnectPanel() {
   }
 
   const connected = status?.connected === true;
+  // 1-Day Ready: CardTrader stocks and sells the cards, so they are dashboard
+  // assets, never Pokoin listings.
+  const oneDayReady = connected && (
+    status?.metadata?.oneDayReady === true || syncSummary?.mode === 'one_day_ready'
+  );
   const username = status?.metadata?.user?.username || status?.metadata?.seller?.name || '';
   const appName = status?.metadata?.app?.name || '';
 
@@ -164,7 +178,10 @@ export default function CardTraderConnectPanel() {
           <p className="page-lede">
             Connected{username ? ` as ${username}` : ''}
             {appName ? ` · ${appName}` : ''}.
-            CardTrader inventory is a synchronized subset of Pokoin; Pokoin-only listings stay independent.
+            {' '}
+            {oneDayReady
+              ? 'This is a CardTrader 1-Day Ready account: CardTrader stocks and sells these cards, so they show on your Dashboard as CardTrader 1-DR assets, not as Pokoin listings.'
+              : 'CardTrader inventory is a synchronized subset of Pokoin; Pokoin-only listings stay independent.'}
           </p>
           {syncSummary ? (
             <p className="page-lede muted">{formatSyncSummary(syncSummary)}</p>
@@ -173,7 +190,9 @@ export default function CardTraderConnectPanel() {
             <button type="button" className="btn" disabled={busy} onClick={onSync}>
               {busy ? 'Working…' : 'Sync CardTrader'}
             </button>
-            <Link className="btn ghost" to="/inventory">Open inventory</Link>
+            {oneDayReady
+              ? <a className="btn ghost" href={DASHBOARD_HOME}>Open dashboard</a>
+              : <Link className="btn ghost" to="/inventory">Open inventory</Link>}
             <button type="button" className="btn ghost" disabled={busy} onClick={onDisconnect}>
               {busy ? 'Working…' : 'Disconnect'}
             </button>

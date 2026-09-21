@@ -663,3 +663,99 @@
     grid-auto-columns: minmax(8.2rem, 9.5rem);
   }
 }
+
+/* CardTrader 1-Day Ready assets: CardTrader's stock, shown as holdings. */
+.ct1dr-panel .seller-panel-head {
+  align-items: baseline;
+}
+
+.ct1dr-totals {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.ct1dr-totals strong {
+  color: var(--text, #fff);
+}
+
+.ct1dr-lede {
+  margin: 0 0 0.9rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.ct1dr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.25rem, 1fr));
+  gap: 0.8rem;
+}
+
+.ct1dr-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ct1dr-tile:hover {
+  text-decoration: none;
+}
+
+.ct1dr-art {
+  position: relative;
+  display: block;
+  aspect-ratio: 63 / 88;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--g2);
+  border: 1px solid var(--g5);
+}
+
+.ct1dr-art img,
+.ct1dr-art .tile-ph {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ct1dr-qty {
+  position: absolute;
+  right: 0.3rem;
+  bottom: 0.3rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.78);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.ct1dr-name {
+  overflow: hidden;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ct1dr-meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ct1dr-price {
+  color: var(--yellow);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.ct1dr-more {
+  margin-top: 0.9rem;
+}

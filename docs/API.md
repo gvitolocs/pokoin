@@ -59,6 +59,7 @@ databases. Pokemon stays on this Pi map. Plan: [MULTIGAME_REIMPORT.md](MULTIGAME
 | `GET /api/cardtrader-status` / `GET /api/cardtrader-sync` | Connection + last sync summary |
 | `POST /api/cardtrader-sync` | Full inventory reconcile (`GET /products/export`) |
 | `POST /api/cardtrader-webhook/:uid` | Order sale stock gate → linked Pokoin qty (idempotent) |
+| `GET /api/cardtrader-assets` | Signed-in seller's CardTrader 1-Day Ready inventory as dashboard assets |
 
 Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings are
 never modified by reconcile. Incomplete/failed CT exports never trigger
@@ -76,6 +77,19 @@ block → **502** `code: cardtrader_blocked`. Each rejection logs
 (length, sha256 prefix, `sub`, app `name`, `iat`, signature bytes,
 `complete`) — never the token. `complete: false` means a cut-off or extended
 paste; `complete: true` means a revoked or regenerated token.
+
+1-Day Ready accounts: CardTrader names their app `<user> 1-Day Ready App
+<stamp>` (`GET /info` `name`). That stock sits in CardTrader's warehouse and
+CardTrader lists and ships it, so it is **never** a Pokoin listing. Connect and
+every sync detect the account type (`metadata.oneDayReady`; an unknown type
+publishes nothing) and mirror the export into
+`marketplace_cardtrader_1dr_assets` (scripts/sql/091) instead of
+`marketplace_user_listings`; earlier imported copies are set `inactive`, their
+`import` product links dropped, and card price summaries refreshed. The
+dashboard shows them as **CardTrader 1-DR** (Portfolio line + panel via
+`GET /api/cardtrader-assets`), and Pokoin never pushes a listing into such an
+account (`409 cardtrader_one_day_ready`; the desk disables the CardTrader
+target). Switching back to a normal token re-activates hidden imports.
 
 Deploy note: `scripts/deploy-cardtrader-sync-api.sh` overlays only
 `server/pokoin-api/`. The live E2E harness

@@ -176,3 +176,16 @@ test('dashPreview layout fixtures stay off production hostnames', () => {
   assert.match(viewSrc, /Layout preview/);
   assert.match(homeSrc, /localhost/);
 });
+
+test('CardTrader 1-Day Ready stock shows as dashboard assets, never as listings', () => {
+  const panelSrc = fs.readFileSync(path.join(root, 'components/CardTraderAssetsPanel.jsx'), 'utf8');
+  const targetsSrc = fs.readFileSync(path.join(root, 'components/InventoryTargets.jsx'), 'utf8');
+  assert.match(homeSrc, /fetchCardTraderAssets\(token\)/);
+  assert.match(homeSrc, /cardTraderAssets=\{cardTraderAssets\}/);
+  assert.match(viewSrc, /<CardTraderAssetsPanel assets=\{cardTraderAssets\} \/>/);
+  assert.match(viewSrc, /CardTrader 1-DR assets/);
+  assert.match(panelSrc, /if \(!assets\?\.oneDayReady\) return null;/);
+  assert.match(panelSrc, /not Pokoin listings/);
+  // The desk never offers CardTrader as a target for a 1-Day Ready account.
+  assert.match(targetsSrc, /const on = data\?\.status\?\.connected === true && !ready1d;/);
+});

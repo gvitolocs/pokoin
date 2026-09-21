@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   claimSaleEventOnce,
+  oneDayReadyAssetRow,
+  oneDayReadyTotals,
   ctSourceListingId,
   destructiveReconcileGate,
   emptySummary,
@@ -355,4 +357,53 @@ test('qty change on linked CT product updates; sale claim is idempotent', () => 
   const second = claimSaleEventOnce(seen, { uid: 'seller', orderId: 'o1', orderItemId: 'i1' });
   assert.equal(first.claimed, true);
   assert.equal(second.claimed, false);
+});
+
+test('1-Day Ready product becomes a dashboard asset row, not a listing', () => {
+  const row = oneDayReadyAssetRow(
+    {
+      id: '298292043',
+      blueprintId: '122728',
+      name: 'Lost Blender',
+      condition: 'NM',
+      language: 'IT',
+      reverse: true,
+      firstEdition: false,
+      quantity: 3,
+      pricePkn: 168,
+    },
+    { cardId: '245456', meta: { set_name: 'Lost Origin', collector_number: '181/196', card_image_url: 'https://cdn.pokoin.com/x.jpg' } },
+  );
+  assert.deepEqual(row, {
+    ctProductId: '298292043',
+    blueprintId: '122728',
+    cardId: '245456',
+    cardName: 'Lost Blender',
+    setName: 'Lost Origin',
+    collectorNumber: '181/196',
+    cardImageUrl: 'https://cdn.pokoin.com/x.jpg',
+    condition: 'NM',
+    language: 'IT',
+    reverse: true,
+    firstEdition: false,
+    signed: false,
+    altered: false,
+    graded: false,
+    quantity: 3,
+    pricePkn: 168,
+  });
+  // A product without a usable price is still an asset, valued at 0.
+  assert.equal(oneDayReadyAssetRow({ id: '1', quantity: 1, pricePkn: null }).pricePkn, 0);
+});
+
+test('1-Day Ready totals weight value by quantity and skip empty stacks', () => {
+  assert.deepEqual(
+    oneDayReadyTotals([
+      { quantity: 2, pricePkn: 100 },
+      { quantity: 1, price_pkn: '50.5' },
+      { quantity: 0, pricePkn: 999 },
+    ]),
+    { products: 2, cards: 3, valuePkn: 250.5 },
+  );
+  assert.deepEqual(oneDayReadyTotals([]), { products: 0, cards: 0, valuePkn: 0 });
 });

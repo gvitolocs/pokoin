@@ -22,6 +22,9 @@ export default function InventoryTargets({
   onSubmit,
 }) {
   const [connected, setConnected] = useState(false);
+  // A CardTrader 1-Day Ready account: CardTrader lists its own warehouse stock,
+  // so Pokoin cards are never pushed there.
+  const [oneDayReady, setOneDayReady] = useState(false);
   const [statusReady, setStatusReady] = useState(false);
   const [targets, setTargets] = useState(() => defaultInventoryTargets(false));
   const touchedRef = useRef(false);
@@ -42,9 +45,11 @@ export default function InventoryTargets({
           return;
         }
         const data = await fetchCardTraderStatus(bearer);
-        const on = data?.status?.connected === true;
+        const ready1d = data?.status?.connected === true && data?.status?.metadata?.oneDayReady === true;
+        const on = data?.status?.connected === true && !ready1d;
         if (!cancelled) {
           setConnected(on);
+          setOneDayReady(ready1d);
           // Only seed defaults once — never overwrite a seller's chip toggles.
           if (!touchedRef.current) {
             setTargets(defaultInventoryTargets(on));
@@ -112,13 +117,20 @@ export default function InventoryTargets({
               className={targets.cardtrader ? 'on' : ''}
               aria-pressed={targets.cardtrader}
               disabled={disabled || busy || !connected}
-              title={connected ? 'List on CardTrader' : 'Connect CardTrader in Profile'}
+              title={connected
+                ? 'List on CardTrader'
+                : oneDayReady
+                  ? 'CardTrader lists 1-Day Ready stock itself'
+                  : 'Connect CardTrader in Profile'}
               onClick={() => toggle('cardtrader')}
             >
               CardTrader
             </button>
           </div>
-          {!connected && statusReady ? (
+          {!connected && statusReady && oneDayReady ? (
+            <span className="inventory-targets-hint">1-Day Ready: Pokoin only</span>
+          ) : null}
+          {!connected && statusReady && !oneDayReady ? (
             <Link className="inventory-targets-hint" to="/profile">Connect in Profile</Link>
           ) : null}
           {eur != null ? (

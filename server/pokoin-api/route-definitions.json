@@ -45,6 +45,21 @@
     }
   },
   {
+    "path": "/api/cardtrader-assets",
+    "file": "cardtrader-assets.js",
+    "methods": ["GET"],
+    "purpose": "Signed-in seller's CardTrader 1-Day Ready inventory as dashboard assets (never Pokoin listings).",
+    "auth": "Required Firebase bearer token; uid from verified token only.",
+    "params": {
+      "query": "none",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": ["FIREBASE_*", "MARKETPLACE_DATABASE_URL"],
+      "services": ["Firebase Admin", "Postgres"]
+    }
+  },
+  {
     "path": "/api/marketplace-recents",
     "file": "marketplace-recents.js",
     "methods": ["GET", "PUT", "POST"],

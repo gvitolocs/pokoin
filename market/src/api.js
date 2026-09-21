@@ -647,6 +647,16 @@ export function createListing(body, token) {
   });
 }
 
+/** CardTrader 1-Day Ready inventory for the dashboard (assets, never listings). */
+export function fetchCardTraderAssets(token) {
+  return getJson('/api/cardtrader-assets', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
 export function fetchCardTraderStatus(token) {
   return getJson('/api/cardtrader-sync', {
     headers: {

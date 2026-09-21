@@ -36,6 +36,7 @@ CT_FILES=(
   cardtrader-import-dry-run.js
   cardtrader-clean-listings.js
   cardtrader-sync.js
+  cardtrader-assets.js
   route-definitions.json
   patch-route-manifest.js
 )
@@ -80,6 +81,7 @@ tar -C "$SRC" -cf - \
   cardtrader-import-dry-run.js \
   cardtrader-clean-listings.js \
   cardtrader-sync.js \
+  cardtrader-assets.js \
   route-definitions.json \
   patch-route-manifest.js \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
@@ -95,14 +97,15 @@ ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf 
 
 say "verify health + CardTrader routes"
 healthy=0
-health=""; status=""; sync=""; webhook=""
+health=""; status=""; sync=""; assets=""; webhook=""
 for _ in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
   status="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/cardtrader-status" || true)"
   sync="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/cardtrader-sync" || true)"
+  assets="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/cardtrader-assets" || true)"
   webhook="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18080/api/cardtrader-webhook/test-uid" || true)"
-  # status/sync require auth → 401/403; webhook missing secret → 401/404/400; health 200
-  if [[ "$health" == "200" && "$status" =~ ^(401|403)$ && "$sync" =~ ^(401|403)$ && "$webhook" =~ ^(400|401|404)$ ]]; then
+  # status/sync/assets require auth → 401/403; webhook missing secret → 401/404/400; health 200
+  if [[ "$health" == "200" && "$status" =~ ^(401|403)$ && "$sync" =~ ^(401|403)$ && "$assets" =~ ^(401|403)$ && "$webhook" =~ ^(400|401|404)$ ]]; then
     healthy=1
     break
   fi
@@ -110,10 +113,10 @@ for _ in $(seq 1 45); do
 done
 
 if [[ "$healthy" != "1" ]]; then
-  echo "health failed (health=$health status=$status sync=$sync webhook=$webhook) — rolling back" >&2
+  echo "health failed (health=$health status=$status sync=$sync assets=$assets webhook=$webhook) — rolling back" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .cardtrader-sync-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "Pi API verification failed; previous release restored"
 fi
 
 say "API live: $(ssh pi-home 'readlink /srv/pokoin/api/current')"
-say "commit=$COMMIT health=$health cardtrader-status=$status cardtrader-sync=$sync webhook=$webhook"
+say "commit=$COMMIT health=$health cardtrader-status=$status cardtrader-sync=$sync cardtrader-assets=$assets webhook=$webhook"

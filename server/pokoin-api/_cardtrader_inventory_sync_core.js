@@ -412,6 +412,47 @@ function claimSaleEventOnce(seen, { uid, orderId, orderItemId }) {
   return { claimed: true, key };
 }
 
+/**
+ * A CardTrader 1-Day Ready product as a seller dashboard asset. That stock is
+ * in CardTrader's warehouse and CardTrader sells it, so it never becomes a
+ * Pokoin listing (docs/API.md, 091_cardtrader_one_day_ready_assets.sql).
+ */
+function oneDayReadyAssetRow(product = {}, { cardId = '', meta = {} } = {}) {
+  return {
+    ctProductId: cleanText(product.id, 80),
+    blueprintId: cleanText(product.blueprintId, 80),
+    cardId: cleanText(cardId, 80),
+    cardName: cleanText(product.name || meta.card_name, 240),
+    setName: cleanText(meta.set_name, 240),
+    collectorNumber: cleanText(meta.collector_number, 80),
+    cardImageUrl: cleanText(meta.card_image_url, 800),
+    condition: cleanText(product.condition, 20),
+    language: cleanText(product.language, 10),
+    reverse: product.reverse === true,
+    firstEdition: product.firstEdition === true,
+    signed: product.signed === true,
+    altered: product.altered === true,
+    graded: product.graded === true,
+    quantity: Math.max(0, Math.min(999999, Math.trunc(Number(product.quantity) || 0))),
+    pricePkn: Number(product.pricePkn) > 0 ? Number(product.pricePkn) : 0,
+  };
+}
+
+/** Quantity-weighted totals of 1-Day Ready assets; empty stacks do not count. */
+function oneDayReadyTotals(rows = []) {
+  let products = 0;
+  let cards = 0;
+  let valuePkn = 0;
+  for (const row of rows) {
+    const qty = Math.max(0, Math.trunc(Number(row.quantity) || 0));
+    if (!qty) continue;
+    products += 1;
+    cards += qty;
+    valuePkn += qty * Math.max(0, Number(row.pricePkn ?? row.price_pkn) || 0);
+  }
+  return { products, cards, valuePkn: Math.round(valuePkn * 100) / 100 };
+}
+
 module.exports = {
   CT_PREFIX,
   POKEMON_GAME_ID,
@@ -429,6 +470,8 @@ module.exports = {
   isCtLinkedSource,
   isPokemonProduct,
   normalizeProduct,
+  oneDayReadyAssetRow,
+  oneDayReadyTotals,
   parseCtProductId,
   parsePokoinListingId,
   planInventoryReconcile,
