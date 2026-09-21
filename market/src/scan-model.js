@@ -12,6 +12,9 @@ export const FINISHES = [
   { value: 'other', label: 'Other' },
 ];
 
+/** Common divider capacities for a box stack (BCW-style separators). */
+export const STACK_SIZES = Object.freeze([1, 5, 10, 20, 25, 40, 50, 60, 80, 100]);
+
 export const DEFAULTS = Object.freeze({
   language: 'EN',
   condition: 'NM',
@@ -20,6 +23,11 @@ export const DEFAULTS = Object.freeze({
   signed: false,
   altered: false,
   location: '',
+  /** Stack index inside the box (divider section). */
+  stack: 1,
+  /** Cards per stack. Size 1 = one card per divider; Position is hidden. */
+  stackSize: 1,
+  /** Position inside the current stack (1..stackSize). */
   startPosition: 1,
   quantity: 1,
   mergeRepeats: true,
@@ -46,46 +54,108 @@ export function orderedRows(rows) {
   return Object.values(rows || {}).sort((a, b) => Number(a.position) - Number(b.position));
 }
 
+function snapStackSize(snap = {}) {
+  return Math.max(1, Math.min(9999, Math.trunc(Number(snap.stackSize)) || 1));
+}
+
+function snapStack(snap = {}) {
+  return Math.max(1, Math.min(9999, Math.trunc(Number(snap.stack)) || 1));
+}
+
+function snapPos(snap = {}) {
+  return Math.max(1, Math.min(9999, Math.trunc(Number(snap.startPosition)) || 1));
+}
+
+/** Absolute card index → { stack, position } for a fixed stack size. */
+export function indexToStackPos(index, stackSize) {
+  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  const i = Math.max(1, Math.trunc(Number(index)) || 1);
+  if (size === 1) return { stack: i, position: 1 };
+  const stack = Math.floor((i - 1) / size) + 1;
+  const position = ((i - 1) % size) + 1;
+  return { stack, position };
+}
+
+/** { stack, position } → absolute index for a fixed stack size. */
+export function stackPosToIndex(stack, position, stackSize) {
+  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  const s = Math.max(1, Math.trunc(Number(stack)) || 1);
+  const p = Math.max(1, Math.trunc(Number(position)) || 1);
+  // Size 1: stack is the divider index. Legacy flat counters lived in
+  // startPosition only (stack defaulted to 1) — take the larger.
+  if (size === 1) return Math.max(s, Math.min(9999, p));
+  return (s - 1) * size + Math.min(size, p);
+}
+
 /**
- * Position inside the box per queue row, like PowerTools' location strings
- * (`AA03`). Walking queue order, a stack claims `quantity` slots in its
- * location starting from the start position in force when it was captured
- * (`defaultsSnapshot.startPosition`); a later capture-time anchor re-starts
- * the counter when the seller moved to a new spot. Rows without a location
- * consume nothing. Mirrors `listingLocationOf` in CardVault `_scan_store.js`.
+ * Slots inside a box: Location → Stack (divider) → Position.
+ * Each row's capture-time snapshot supplies stack, stackSize, and startPosition.
+ * Quantity claims consecutive positions; overflowing a stack spills into the next.
+ * Mirrors CardVault `_scan_store.js` listing locations.
  */
 export function boxSlots(list) {
-  const counters = new Map();
+  const counters = new Map(); // loc -> last absolute index used
+  const sizes = new Map(); // loc -> stackSize in force (last seen)
   const slots = new Map();
   for (const row of list || []) {
     const loc = String(row.location ?? '').trim();
     if (!loc) continue;
-    const anchor = Math.max(1, Math.trunc(Number(row.defaultsSnapshot?.startPosition)) || 1);
-    const start = Math.max((counters.get(loc) || 0) + 1, anchor);
-    const end = start + (Number(row.quantity) || 1) - 1;
-    slots.set(row.id, { start, end });
-    counters.set(loc, end);
+    const snap = row.defaultsSnapshot || {};
+    const size = snapStackSize(snap);
+    sizes.set(loc, size);
+    const anchor = stackPosToIndex(snapStack(snap), snapPos(snap), size);
+    const startAbs = Math.max((counters.get(loc) || 0) + 1, anchor);
+    const endAbs = startAbs + (Number(row.quantity) || 1) - 1;
+    const start = indexToStackPos(startAbs, size);
+    const end = indexToStackPos(endAbs, size);
+    const filledStack = size > 1 && (end.stack > start.stack || end.position === size);
+    slots.set(row.id, {
+      stack: start.stack,
+      start: start.position,
+      end: end.position,
+      endStack: end.stack,
+      stackSize: size,
+      filledStack,
+      absStart: startAbs,
+      absEnd: endAbs,
+    });
+    counters.set(loc, endAbs);
   }
   return slots;
 }
 
-/** Next free slot per location — the position the seller stopped at. */
+/**
+ * Next free cursor per location: { stack, startPosition, stackSize }.
+ * With stackSize 1, position stays 1 and stack advances each card.
+ */
 export function nextBoxPositions(list) {
   const next = new Map();
+  const slots = boxSlots(list);
+  const lastByLoc = new Map();
   for (const row of list || []) {
     const loc = String(row.location ?? '').trim();
     if (!loc) continue;
-    const anchor = Math.max(1, Math.trunc(Number(row.defaultsSnapshot?.startPosition)) || 1);
-    const end = Math.max(next.get(loc) || 1, anchor) + (Number(row.quantity) || 1) - 1;
-    next.set(loc, end + 1);
+    const slot = slots.get(row.id);
+    if (!slot) continue;
+    lastByLoc.set(loc, slot);
+  }
+  for (const [loc, slot] of lastByLoc) {
+    const size = slot.stackSize || 1;
+    const nextAbs = slot.absEnd + 1;
+    const cur = indexToStackPos(nextAbs, size);
+    next.set(loc, {
+      stack: cur.stack,
+      startPosition: cur.position,
+      stackSize: size,
+      nextAbs,
+    });
   }
   return next;
 }
 
 /**
- * Suggested Start when the seller switches box (or opens a batch).
- * localStorage is only a hint for a *new* location — never lock Start=1
- * out, and never overwrite a Start the seller already typed for this box.
+ * Suggested stack/position when the seller switches box (or opens a batch).
+ * stored may be a number (legacy absolute) or { stack, startPosition }.
  */
 export function suggestedStartPosition({
   stored,
@@ -93,16 +163,72 @@ export function suggestedStartPosition({
   locationChanged = false,
 } = {}) {
   if (!locationChanged) return null;
-  const hint = Math.trunc(Number(stored)) || 0;
+  let hint = 0;
+  if (stored && typeof stored === 'object') {
+    hint = stackPosToIndex(stored.stack || 1, stored.startPosition || 1, stored.stackSize || 1);
+  } else {
+    hint = Math.trunc(Number(stored)) || 0;
+  }
   const now = Math.max(1, Math.trunc(Number(current)) || 1);
   if (hint < 1 || hint === now) return null;
   return Math.min(9999, hint);
 }
 
-/** `·47` / `·47-49` suffix shown beside the box name. */
+/** Suggested full cursor (stack + position) when switching boxes. */
+export function suggestedStackCursor({
+  stored,
+  currentStack = 1,
+  currentPosition = 1,
+  stackSize = 1,
+  locationChanged = false,
+} = {}) {
+  if (!locationChanged) return null;
+  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  let hintStack = 0;
+  let hintPos = 0;
+  if (stored && typeof stored === 'object') {
+    hintStack = Math.trunc(Number(stored.stack)) || 0;
+    hintPos = Math.trunc(Number(stored.startPosition)) || 0;
+  } else {
+    const abs = Math.trunc(Number(stored)) || 0;
+    if (abs >= 1) {
+      const cur = indexToStackPos(abs, size);
+      hintStack = cur.stack;
+      hintPos = cur.position;
+    }
+  }
+  const nowS = Math.max(1, Math.trunc(Number(currentStack)) || 1);
+  const nowP = Math.max(1, Math.trunc(Number(currentPosition)) || 1);
+  if (hintStack < 1) return null;
+  if (hintStack === nowS && hintPos === nowP) return null;
+  return {
+    stack: Math.min(9999, hintStack),
+    startPosition: size === 1 ? 1 : Math.min(size, Math.max(1, hintPos || 1)),
+  };
+}
+
+/**
+ * Suffix beside the box name.
+ * stackSize 1 → `·2` (stack only). Larger → `·2·5` / `·2·5-7`.
+ */
 export function slotText(slot) {
   if (!slot) return '';
-  return `·${slot.start}${slot.end > slot.start ? `-${slot.end}` : ''}`;
+  const size = slot.stackSize || 1;
+  if (size === 1) {
+    const a = slot.stack || slot.start;
+    const b = slot.endStack || slot.stack || slot.end;
+    return b > a ? `·${a}-${b}` : `·${a}`;
+  }
+  const stack = slot.stack || 1;
+  if ((slot.endStack || stack) !== stack) {
+    return `·${stack}·${slot.start}–${slot.endStack}·${slot.end}`;
+  }
+  return `·${stack}·${slot.start}${slot.end > slot.start ? `-${slot.end}` : ''}`;
+}
+
+/** True when this slot closed out a divider stack (size > 1). */
+export function slotFilledStack(slot) {
+  return Boolean(slot && slot.filledStack);
 }
 
 /** Rows the seller works with: merged repeats live inside their head's qty. */
@@ -244,6 +370,18 @@ export function phaseText(phase, session) {
   }
 }
 
+
+/** Location chip for defaults: box · stack [· position when stackSize > 1]. */
+export function locationDefaultsText(d = DEFAULTS) {
+  const loc = String(d.location || '').trim();
+  if (!loc) return '';
+  const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
+  const stack = Math.max(1, Math.trunc(Number(d.stack)) || 1);
+  if (size === 1) return `${loc}·${stack}`;
+  const pos = Math.max(1, Math.trunc(Number(d.startPosition)) || 1);
+  return `${loc}·${stack}·${pos}`;
+}
+
 export function defaultsLabel(d = DEFAULTS) {
   const finish = FINISHES.find((f) => f.value === d.foilState);
   return [
@@ -253,7 +391,7 @@ export function defaultsLabel(d = DEFAULTS) {
     d.firstEdition ? '1st Ed.' : '',
     d.signed ? 'Signed' : '',
     d.altered ? 'Altered' : '',
-    d.location ? `${d.location}·${d.startPosition ?? 1}` : '',
+    d.location ? locationDefaultsText(d) : '',
     `Qty ${d.quantity}`,
   ].filter(Boolean).join(' · ');
 }
