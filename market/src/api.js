@@ -1942,6 +1942,31 @@ export function fetchSellerListings(sellerUid, token, { limit = 40 } = {}) {
 }
 
 /** Owned-card totals for the signed-in user. Uid comes from the bearer only. */
+/** Download seller stock as CSV (PowerTools / Cardmarket / CardTrader). */
+export async function exportStockCsv(format, token) {
+  const res = await fetch(`/api/marketplace-listings-csv?format=${encodeURIComponent(format || 'powertools')}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Export failed (${res.status})`);
+  }
+  return res.blob();
+}
+
+/** Import stock CSV. dryRun defaults true on the server. */
+export async function importStockCsv({ csv, format, stackSize = 1, priceMode = 'eur_to_pkn', dryRun = true, token }) {
+  return getJson('/api/marketplace-listings-csv', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ csv, format, stackSize, priceMode, dryRun }),
+  });
+}
+
+
 export function fetchCollectionSummary(token) {
   return getJson('/api/marketplace-collection-summary', {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
