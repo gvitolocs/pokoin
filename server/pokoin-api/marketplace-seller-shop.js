@@ -25,8 +25,9 @@ function cleanText(value, maxLength = 240) {
 }
 
 function cleanUsername(value) {
+  // Seller handles may be emails (e.g. redshakkio@gmail.com) when that is seller_name.
   const text = cleanText(value, 64).toLowerCase();
-  return /^[\p{L}\p{N} .'_-]{3,64}$/u.test(text) && /\p{L}/u.test(text) ? text : '';
+  return /^[\p{L}\p{N} .'_@+-]{3,64}$/u.test(text) && /\p{L}/u.test(text) ? text : '';
 }
 
 function cleanLimit(value, fallback = PAGE_DEFAULT) {
