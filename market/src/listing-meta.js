@@ -86,6 +86,22 @@ export function publicListingSellerName(offer, fallback = '') {
   return handle;
 }
 
+/** Public Shop chip label: username/handle first — never displayName or email. */
+export function publicShopSellerLabel(offer) {
+  const handle = sellerHandle(offer);
+  if (handle) {
+    return handle;
+  }
+  if (isReserveSeller(offer)) {
+    const name = listingSellerName(offer);
+    if (name && !isEmailLikeSellerLabel(name)) {
+      return name;
+    }
+    return 'Pokoin Reserve';
+  }
+  return 'Pokoin';
+}
+
 export function isReserveSeller(offer) {
   const name = listingSellerName(offer).toLowerCase();
   const label = String(offer?.sellerReputationLabel || '').toLowerCase();
