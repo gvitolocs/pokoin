@@ -44,14 +44,22 @@ function cleanOffset(value) {
 }
 
 function conditionSql(code) {
-  const c = String(code || '').toUpperCase();
+  // Listings store short codes (NM/LP/MP/HP/PO). UI filters use Pokoin chips
+  // (NM/SP/MP/PL/Poor); LP displays as SP and HP as PL.
+  const c = String(code || '').toUpperCase().replace(/\s+/g, '');
   if (!c) return null;
-  if (c === 'NM' || c.includes('NEAR')) return { op: 'ilike', value: '%near%' };
-  if (c === 'SP' || c.includes('SLIGHT')) return { op: 'ilike', value: '%slight%' };
-  if (c === 'MP' || c.includes('MODERATE')) return { op: 'ilike', value: '%moderate%' };
-  if (c === 'PL' || c === 'PLAYED') return { op: 'ilike', value: '%played%' };
-  if (c.includes('POOR')) return { op: 'ilike', value: '%poor%' };
-  return { op: 'ilike', value: `%${c}%` };
+  if (c === 'NM' || c === 'M' || c.includes('NEAR')) return { codes: ['NM', 'M'] };
+  if (c === 'SP' || c === 'LP' || c.includes('SLIGHT') || c.includes('LIGHT')) {
+    return { codes: ['SP', 'LP'] };
+  }
+  if (c === 'MP' || c.includes('MODERATE')) return { codes: ['MP'] };
+  if (c === 'PL' || c === 'HP' || c === 'PLAYED' || c.includes('HEAVY')) {
+    return { codes: ['PL', 'HP'] };
+  }
+  if (c === 'PO' || c.includes('POOR') || c === 'D' || c === 'DMG' || c.includes('DAMAGE')) {
+    return { codes: ['PO', 'POOR', 'D', 'DMG'] };
+  }
+  return { codes: [c] };
 }
 
 function sortSql(sort) {
@@ -193,9 +201,9 @@ async function readSellerShop(url) {
   }
 
   const cond = conditionSql(condition);
-  if (cond) {
-    values.push(cond.value);
-    where.push(`lower(coalesce(condition, '')) like $${values.length}`);
+  if (cond?.codes?.length) {
+    values.push(cond.codes);
+    where.push(`upper(btrim(coalesce(condition, ''))) = any($${values.length}::text[])`);
   }
 
   if (language) {
