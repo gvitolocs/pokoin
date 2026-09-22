@@ -116,6 +116,9 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(cssSrc, /\.seller-listing-tile \{/);
   assert.doesNotMatch(cssSrc, /\.seller-listing-row \{/);
   assert.match(homeSrc, /const LISTING_PREVIEW = 72/);
+  assert.match(cssSrc, /@media \(max-width: 900px\)/);
+  assert.match(cssSrc, /repeat\(8, minmax\(0, 1fr\)\)/);
+  assert.match(cssSrc, /repeat\(6, minmax\(0, 1fr\)\)/);
   // Art-only Your listings tiles: no set/condition/qty/price chrome on the preview.
   const tileFn = viewSrc.match(/function ListingPreviewTile[\s\S]*?\n\}/)?.[0] || '';
   assert.ok(tileFn.includes('name={name}') || /name=\{name\}/.test(tileFn));

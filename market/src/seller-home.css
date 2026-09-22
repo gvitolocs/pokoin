@@ -690,6 +690,13 @@
   font: inherit;
 }
 
+/* Narrower listing sheets keep tiles (never fall back to rows). */
+@media (max-width: 900px) {
+  .seller-listing-list {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 720px) {
   .seller-secondary-grid.has-1dr {
     grid-template-columns: 1fr;
