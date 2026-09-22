@@ -71,6 +71,21 @@ export function listingSellerName(offer) {
   return String(offer?.sellerName || offer?.sellerDisplayName || '').trim();
 }
 
+/** True when a stored seller label looks like an email (never show publicly). */
+export function isEmailLikeSellerLabel(value) {
+  return String(value || '').includes('@');
+}
+
+/** Public-facing seller label: never show email; fall back to handle. */
+export function publicListingSellerName(offer, fallback = '') {
+  const name = listingSellerName(offer);
+  if (name && !isEmailLikeSellerLabel(name)) {
+    return name;
+  }
+  const handle = String(fallback || '').trim() || sellerHandle(offer);
+  return handle;
+}
+
 export function isReserveSeller(offer) {
   const name = listingSellerName(offer).toLowerCase();
   const label = String(offer?.sellerReputationLabel || '').toLowerCase();
@@ -82,11 +97,16 @@ export function sellerHandle(offer) {
     return '';
   }
   const claimed = String(offer?.sellerUsername || '').trim().replace(/^@/, '');
-  if (claimed && claimed.toLowerCase() !== 'pokoin' && claimed.toLowerCase() !== 'pknreserve') {
+  if (
+    claimed
+    && claimed.toLowerCase() !== 'pokoin'
+    && claimed.toLowerCase() !== 'pknreserve'
+    && !isEmailLikeSellerLabel(claimed)
+  ) {
     return claimed;
   }
   const name = listingSellerName(offer);
-  if (!name || name.toLowerCase() === 'pokoin') {
+  if (!name || name.toLowerCase() === 'pokoin' || isEmailLikeSellerLabel(name)) {
     return '';
   }
   return name.replace(/^@/, '').trim();
