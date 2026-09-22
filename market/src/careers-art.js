@@ -259,9 +259,9 @@ export const LIFE_STRIP = [
     body: 'Album tiles for illustrators — same artwork groups, Pokédex order, real credits.',
     art: {
       mode: 'full-art',
-      src: '/card-images/332900_sylveon-vmax-secret-rare-212-203-evolving-skies.jpg',
-      card: 'Sylveon VMAX SIR · Evolving Skies 212/203',
-      reason: 'SIR painting as album-scale editorial art.',
+      src: '/card-images/110847_smeargle-123-162-breakthrough.jpg',
+      card: 'Smeargle · Breakthrough 123/162',
+      reason: 'Illustrator-forward album art — Smeargle as the artists tile (public card 221694).',
       pose: 'bleed-low',
     },
   },
