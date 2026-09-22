@@ -30,7 +30,7 @@ function CareersCardArt({ art, className }) {
   const pose = art.pose ? ` pose-${art.pose}` : '';
   if (art.mode === 'art-cut') {
     const cut = art.cut || { left: 0.086, top: 0.126, width: 0.828, height: 0.338, cardRatio: 63 / 88 };
-    const style = {
+    const cutStyle = {
       '--art-left': String(cut.left),
       '--art-top': String(cut.top),
       '--art-width': String(cut.width),
@@ -40,13 +40,12 @@ function CareersCardArt({ art, className }) {
     return (
       <div
         className={`${className} is-art-cut${pose}`.trim()}
-        style={style}
         aria-hidden="true"
         title={art.card || undefined}
       >
-        <div className="careers-art-cut art-cut">
+        <div className="careers-art-cut art-cut" style={cutStyle}>
           <img
-            className="careers-card-shot"
+            className="careers-art-cut-img"
             src={art.src}
             alt=""
             loading="lazy"
