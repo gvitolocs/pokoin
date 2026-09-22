@@ -4,7 +4,7 @@
  * Paths are Pi CDN leftover JPEGs (`/card-images/{ct_id}_…jpg`).
  */
 
-/** @typedef {'full-art' | 'physical-card'} CareersArtMode */
+/** @typedef {'full-art' | 'physical-card' | 'art-cut'} CareersArtMode */
 
 /**
  * @typedef {object} CareersArt
@@ -13,6 +13,7 @@
  * @property {string} card  Human label for mapping / a11y title
  * @property {string} reason Why this printing for this principle
  * @property {string} [pose] CSS modifier for composition variety
+ * @property {{left:number,top:number,width:number,height:number,cardRatio?:number}} [cut] Album art-cut window when mode is art-cut
  */
 
 /** Life-at-Pokoin media bleed — floating sleep bubbles (same circle treatment). */
@@ -258,11 +259,13 @@ export const LIFE_STRIP = [
     tone: 'e',
     body: 'Album tiles for illustrators — same artwork groups, Pokédex order, real credits.',
     art: {
-      mode: 'full-art',
+      mode: 'art-cut',
       src: '/card-images/110847_smeargle-123-162-breakthrough.jpg',
       card: 'Smeargle · Breakthrough 123/162',
-      reason: 'Illustrator-forward album art — Smeargle as the artists tile (public card 221694).',
-      pose: 'bleed-focus',
+      reason: 'Same modern album art-cut as the artist page (Breakthrough / XY window), sat a bit lower in the tile.',
+      pose: 'sit-low',
+      // Keep in sync with POKEMON_ART_CUT / modern in art-cut.js
+      cut: { left: 0.086, top: 0.126, width: 0.828, height: 0.338, cardRatio: 63 / 88 },
     },
   },
   {

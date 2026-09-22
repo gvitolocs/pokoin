@@ -24,11 +24,40 @@ function TitleMark({ className = '' }) {
   );
 }
 
-/** Art-dependent shot: full-art bleed vs ~50–70% physical card. */
+/** Art-dependent shot: full-art bleed, physical card, or album art-cut window. */
 function CareersCardArt({ art, className }) {
   if (!art?.src) return null;
-  const mode = art.mode === 'physical-card' ? 'physical-card' : 'full-art';
   const pose = art.pose ? ` pose-${art.pose}` : '';
+  if (art.mode === 'art-cut') {
+    const cut = art.cut || { left: 0.086, top: 0.126, width: 0.828, height: 0.338, cardRatio: 63 / 88 };
+    const style = {
+      '--art-left': String(cut.left),
+      '--art-top': String(cut.top),
+      '--art-width': String(cut.width),
+      '--art-height': String(cut.height),
+      '--card-ratio': String(cut.cardRatio ?? 63 / 88),
+    };
+    return (
+      <div
+        className={`${className} is-art-cut${pose}`.trim()}
+        style={style}
+        aria-hidden="true"
+        title={art.card || undefined}
+      >
+        <div className="careers-art-cut art-cut">
+          <img
+            className="careers-card-shot"
+            src={art.src}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+          />
+        </div>
+      </div>
+    );
+  }
+  const mode = art.mode === 'physical-card' ? 'physical-card' : 'full-art';
   return (
     <div
       className={`${className} is-${mode}${pose}`.trim()}
