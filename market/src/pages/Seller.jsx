@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useLocation, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { fetchSellerShop } from '../api.js';
 import { rewriteCanonicalCardPath } from '../card-stub.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
@@ -54,8 +54,11 @@ function isOneDayReady(offer) {
 }
 
 export default function Seller() {
-  const { username = '' } = useParams();
+  const { username = '', lang: routeLang } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
+  const { addItem } = useCart();
+  const lang = routeLang || getSearchLang();
   const handle = decodeURIComponent(String(username || '').trim());
   const seeded = seedSellerListings(handle, location.state);
 
@@ -236,7 +239,7 @@ export default function Seller() {
                 const path = rewriteCanonicalCardPath(
                   offer.canonicalPath || offer.canonical_path || '',
                   cardId,
-                  lang || getSearchLang(),
+                  lang,
                 );
                 const enriched = {
                   ...offer,
