@@ -486,7 +486,7 @@ export function SellerDashboardView({
           </header>
           <div className="seller-tile-body seller-tile-cta">
             <AddCardsArt />
-            <Link className="btn" to="/scan" data-testid="list-cards-scan">
+            <Link className="btn" to="/dashboard/scan" data-testid="list-cards-scan">
               Scan cards
             </Link>
           </div>
@@ -536,7 +536,7 @@ export function SellerDashboardView({
           ) : null}
           {!listed?.failed && !listingRows.length && !loading ? (
             <EmptyDesk nested title="No cards listed yet" lede="Scan a pile and list what you want to sell.">
-              <Link className="btn" to="/scan">Scan cards</Link>
+              <Link className="btn" to="/dashboard/scan">Scan cards</Link>
             </EmptyDesk>
           ) : null}
         </section>

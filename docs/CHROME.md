@@ -89,6 +89,7 @@ Every control is a **same-origin** path on `pokoin.com`. Never
 | Control | href on pokoin.com |
 | --- | --- |
 | Logo / Marketplace | `/marketplace` |
+| Dashboard | `/dashboard` (legacy `dashboard.pokoin.com` redirects here) |
 | Home | `/` (static landing, full page) |
 | Forum | `/forum` |
 | Signal | `/marketplace/signal` |

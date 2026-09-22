@@ -296,6 +296,94 @@
       "has": [
         {
           "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/dashboard",
+      "permanent": true
+    },
+    {
+      "source": "/scan",
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/dashboard/scan",
+      "permanent": true
+    },
+    {
+      "source": "/scan/",
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/dashboard/scan",
+      "permanent": true
+    },
+    {
+      "source": "/inventory/scan",
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/inventory/scan",
+      "permanent": true
+    },
+    {
+      "source": "/inventory/scan/",
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/inventory/scan",
+      "permanent": true
+    },
+    {
+      "source": "/dashboard",
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/dashboard",
+      "permanent": true
+    },
+    {
+      "source": "/dashboard/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/dashboard/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
           "value": "www.pokoin.com"
         }
       ],
@@ -528,16 +616,6 @@
       "has": [
         {
           "type": "host",
-          "value": "dashboard.pokoin.com"
-        }
-      ],
-      "destination": "/market/index.html"
-    },
-    {
-      "source": "/",
-      "has": [
-        {
-          "type": "host",
           "value": "explorer.pokoin.com"
         }
       ],
@@ -568,6 +646,22 @@
     {
       "source": "/chain/:path*",
       "destination": "https://rpc.pokoin.com/chain/:path*"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/dashboard/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/dashboard/scan",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/dashboard/scan/",
+      "destination": "/market/index.html"
     },
     {
       "source": "/tests/",

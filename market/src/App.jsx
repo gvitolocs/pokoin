@@ -190,6 +190,8 @@ function AppShell() {
       {both('/scancard', <Scan />)}
       {both('/inventory', <Inventory />)}
       {both('/inventory/scan', <ScanDesk />)}
+      {both('/dashboard', <SellerHome />)}
+      {both('/dashboard/scan', <ScanDesk />)}
       {both('/docs', <Site />)}
       {both('/about', <About />)}
       {both('/careers', <Careers />)}
