@@ -323,17 +323,15 @@ function MoverCard({ card }) {
 }
 
 function ListingPreviewTile({ row, href }) {
+  // Your listings sheet: art-only miniatures. Name stays on aria-label; no
+  // set / condition / qty / price chrome on the tile itself.
   const name = row.cardName || row.card_name || 'Card';
-  const qty = Number(row.quantityAvailable ?? row.quantity_available ?? 1) || 1;
-  const price = formatPkn(row.pricePkn ?? row.price_pkn);
-  const details = [name, row.setName || row.set_name, row.condition, price].filter(Boolean).join(' · ');
   return (
     <MiniCardTile
       imageUrl={row.cardImageUrl || row.card_image_url || ''}
       name={name}
-      title={qty > 1 ? `${details} · Qty ${qty}` : details}
+      title={name}
       href={href || ''}
-      badge={qty > 1 ? `×${qty}` : ''}
     />
   );
 }
