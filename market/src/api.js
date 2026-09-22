@@ -1930,6 +1930,40 @@ export function fetchSellerByUsername(username, { limit = 20, signal } = {}) {
   return request;
 }
 
+
+/** Public seller shop with server total + offset pagination (100/page UI). */
+export function fetchSellerShop(username, {
+  limit = 100,
+  offset = 0,
+  q = '',
+  condition = '',
+  language = '',
+  sort = 'price-asc',
+  signal,
+} = {}) {
+  const handle = String(username || '').trim();
+  if (!handle) {
+    return Promise.resolve({ listings: [], total: 0, unique: 0, limit, offset: 0 });
+  }
+  const opts = { limit, offset, q, condition, language, sort };
+  const cached = peekSellerListings(handle, opts);
+  if (cached) {
+    return Promise.resolve(cached);
+  }
+  const params = new URLSearchParams({
+    sellerUsername: handle,
+    limit: String(limit),
+    offset: String(offset || 0),
+  });
+  if (q) params.set('q', String(q));
+  if (condition) params.set('condition', String(condition));
+  if (language) params.set('language', String(language));
+  if (sort) params.set('sort', String(sort));
+  return getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) =>
+    rememberSellerListings(handle, data, opts),
+  );
+}
+
 export function fetchSellerListings(sellerUid, token, { limit = 40 } = {}) {
   const params = new URLSearchParams({
     sellerUid: String(sellerUid || ''),

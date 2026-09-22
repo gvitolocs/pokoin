@@ -1,5 +1,20 @@
 [
   {
+    "path": "/api/marketplace-seller-shop",
+    "file": "marketplace-seller-shop.js",
+    "methods": ["GET"],
+    "purpose": "Public seller shop with server total/unique + offset pagination and CT-like filters.",
+    "auth": "Public. sellerUsername required.",
+    "params": {
+      "query": "sellerUsername required; limit (max 100), offset, q, condition, language, sort.",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": ["FIREBASE_*", "MARKETPLACE_DATABASE_URL"],
+      "services": ["Firebase Admin", "Postgres"]
+    }
+  },
+  {
     "path": "/api/chat",
     "file": "chat.js",
     "methods": ["GET", "POST"],

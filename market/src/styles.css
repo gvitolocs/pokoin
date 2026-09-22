@@ -8863,3 +8863,48 @@ html:has(.wallet-page) .brand span {
   .chat-bubble { max-width: 84%; }
   .chat-money-card { width: min(91%, 390px); }
 }
+
+/* === CT-style seller shop (Pokoin dark + gold) — do not touch shared defaults === */
+.seller-shop-ct .seller-hero-ct{
+  display:flex;align-items:center;gap:1.15rem;margin:0 0 1.1rem;padding:1rem 1.1rem;
+  border:1px solid var(--g5);border-radius:16px;
+  background:linear-gradient(135deg,#1a181f 0%,#121018 55%,#1c1708 100%);
+}
+.seller-shop-ct .seller-avatar{
+  border:2px solid color-mix(in srgb, var(--yellow,#ffcc03) 55%, transparent);
+  color:var(--yellow,#ffcc03);
+}
+.seller-hero-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.55rem;margin-top:.35rem}
+.seller-badge{
+  display:inline-flex;align-items:center;gap:.25rem;padding:.2rem .55rem;border-radius:999px;
+  font-size:.72rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+}
+.seller-badge-ready{
+  background:color-mix(in srgb, var(--yellow,#ffcc03) 18%, transparent);
+  color:var(--yellow,#ffcc03);
+  border:1px solid color-mix(in srgb, var(--yellow,#ffcc03) 45%, transparent);
+}
+.seller-shop-tools{
+  display:flex;flex-wrap:wrap;gap:.65rem;align-items:center;
+  margin:0 0 .85rem;padding:0 0 .85rem;border-bottom:1px solid var(--g5);
+}
+.seller-shop-tools .shop-search{
+  flex:1 1 14rem;min-width:12rem;background:var(--g3);border:1px solid var(--g5);
+  border-radius:10px;padding:.55rem .75rem;color:var(--text);
+}
+.seller-shop-tools .shop-find{display:flex;flex-wrap:wrap;gap:.45rem}
+.seller-shop-tools select{
+  background:var(--g3);border:1px solid var(--g5);border-radius:8px;padding:.4rem .55rem;color:var(--text);
+}
+.seller-result-count{margin:0 0 .75rem;color:var(--muted);font-size:.88rem}
+.seller-result-count strong{color:var(--text);font-weight:750}
+.seller-shop-list .shop-row.is-profile{
+  grid-template-columns:minmax(12rem,2fr) auto auto minmax(0,1fr) auto auto;
+  padding:.48rem .1rem;
+}
+.seller-shop-list .shop-px{color:var(--yellow,#ffcc03);font-weight:800}
+.seller-pager{
+  display:flex;align-items:center;justify-content:center;gap:.75rem;
+  margin-top:1rem;padding-top:.85rem;border-top:1px solid var(--g5);
+}
+.seller-pager-status{color:var(--muted);font-size:.85rem}
