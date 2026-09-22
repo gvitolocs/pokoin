@@ -262,7 +262,7 @@ export const LIFE_STRIP = [
       src: '/card-images/110847_smeargle-123-162-breakthrough.jpg',
       card: 'Smeargle · Breakthrough 123/162',
       reason: 'Illustrator-forward album art — Smeargle as the artists tile (public card 221694).',
-      pose: 'bleed-low',
+      pose: 'bleed-focus',
     },
   },
   {

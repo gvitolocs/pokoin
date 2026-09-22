@@ -102,6 +102,7 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(artSrc, /612658_pikachu/);
   assert.match(artSrc, /55576_clefairy/);
   assert.match(artSrc, /110847_smeargle-123-162-breakthrough/);
+  assert.match(artSrc, /pose: 'bleed-focus'/);
   assert.match(artSrc, /470296_mewtwo/);
   assert.match(artSrc, /LIFE_BUBBLES/);
   assert.match(artSrc, /502874_snorlax/);

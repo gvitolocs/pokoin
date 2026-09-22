@@ -5472,6 +5472,13 @@ dialog.zoom:not([open]) {
   transform-origin: center 30%;
 }
 
+/* Artists · Smeargle: zoom the illustration box; bias right so painter + Smeargle sit mid-frame */
+.careers-life-art.is-full-art.pose-bleed-focus .careers-card-shot {
+  object-position: 54% 30%;
+  transform: scale(1.5);
+  transform-origin: 54% 32%;
+}
+
 /* B · Physical trading card: real aspect, clipped by pastel bottom */
 .careers-life-art.is-physical-card {
   left: 50%;
