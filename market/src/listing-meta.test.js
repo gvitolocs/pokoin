@@ -6,6 +6,7 @@ import {
   isReserveSeller,
   listingExtraTags,
   listingLanguageFlag,
+  publicListingSellerName,
   sellerCountryFlag,
   sellerHandle,
   sellerHref,
@@ -56,4 +57,23 @@ test('native seller profile is a users path; reserve is not', () => {
     '/marketplace/en/users/vitologiuseppe17',
   );
   assert.deepEqual(listingExtraTags({ reverse: true, language: 'EN' }), ['Reverse']);
+});
+
+test('public seller label never shows email; falls back to handle', () => {
+  assert.equal(
+    publicListingSellerName(
+      { sellerName: 'redshakkio@gmail.com', sellerUsername: 'redshakkio' },
+      'redshakkio',
+    ),
+    'redshakkio',
+  );
+  assert.equal(
+    publicListingSellerName({ sellerName: 'Simone', sellerUsername: 'redshakkio' }),
+    'Simone',
+  );
+  assert.equal(sellerHandle({ sellerName: 'redshakkio@gmail.com' }), '');
+  assert.equal(
+    sellerHandle({ sellerName: 'redshakkio@gmail.com', sellerUsername: 'redshakkio' }),
+    'redshakkio',
+  );
 });

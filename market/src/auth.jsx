@@ -9,6 +9,7 @@ import {
   readAuthToken,
   writeAuthSession,
   writeAuthToken,
+  sellerNameOf,
 } from './auth-session.js';
 import {
   EXTENSION_DESK_SESSION_REQUEST,
@@ -16,6 +17,8 @@ import {
   isExtensionDeskSession,
 } from './extension-auth-bridge.js';
 import { fetchDeskUserDocuments } from './firestore-rest.js';
+
+export { sellerNameOf };
 
 /** Same public web config as Flutter `DefaultFirebaseOptions.web`. */
 const firebaseApp = initializeApp({
@@ -104,13 +107,6 @@ async function bootstrapPrivateDevBearer() {
   } catch (_) {
     return false;
   }
-}
-
-export function sellerNameOf(user) {
-  if (!user) {
-    return 'Pokoin seller';
-  }
-  return user.displayName || user.email || 'Pokoin seller';
 }
 
 export async function getBearer(forceRefresh = false) {
@@ -421,7 +417,7 @@ export function AuthProvider({ children }) {
     user,
     ready,
     signedIn: Boolean(user) || Boolean(extensionUid) || (!ready && Boolean(hint?.signedIn)),
-    sellerName: sellerNameOf(user),
+    sellerName: sellerNameOf(user, profile),
     profile,
     availablePkn,
     admin: Boolean(profile?.admin),

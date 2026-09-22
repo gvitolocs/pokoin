@@ -8,7 +8,7 @@ import ShopListingRow from '../components/ShopListing.jsx';
 import { Alert, EmptyDesk, Metric, MetricGrid } from '../components/Desk.jsx';
 import { peekHasListingRows, peekSellerListings } from '../listings-cache.js';
 import {
-  listingSellerName,
+  publicListingSellerName,
   sellerCountryFlag,
   sellerCountryLabel,
   sellerHandle,
@@ -37,7 +37,7 @@ function seedSellerListings(handle, locationState) {
     };
   }
   const row = locationState?.listing;
-  const name = sellerHandle(row) || listingSellerName(row);
+  const name = sellerHandle(row) || publicListingSellerName(row, handle);
   if (row && name && name.toLowerCase() === handle.toLowerCase()) {
     return { listings: [row], total: 1, unique: 1 };
   }
@@ -120,7 +120,7 @@ export default function Seller() {
   }, [handle, page, query, condition, language, sort]);
 
   const sample = listings?.[0];
-  const display = listingSellerName(sample) || handle;
+  const display = publicListingSellerName(sample, handle);
   const country = sellerCountryFlag(sample?.sellerCountry);
   const countryLine = sellerCountryLabel(sample?.sellerCountry);
   const ready = useMemo(() => Boolean((listings || []).some(isOneDayReady)), [listings]);
