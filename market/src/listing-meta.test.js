@@ -7,6 +7,7 @@ import {
   listingExtraTags,
   listingLanguageFlag,
   publicListingSellerName,
+  publicShopSellerLabel,
   sellerCountryFlag,
   sellerHandle,
   sellerHref,
@@ -75,5 +76,27 @@ test('public seller label never shows email; falls back to handle', () => {
   assert.equal(
     sellerHandle({ sellerName: 'redshakkio@gmail.com', sellerUsername: 'redshakkio' }),
     'redshakkio',
+  );
+});
+
+test('shop chip prefers handle over displayName/email', () => {
+  assert.equal(
+    publicShopSellerLabel({
+      sellerName: 'Simone Di Blasi',
+      sellerDisplayName: 'Simone Di Blasi',
+      sellerUsername: 'redshakkio',
+    }),
+    'redshakkio',
+  );
+  assert.equal(
+    publicShopSellerLabel({
+      sellerName: 'redshakkio@gmail.com',
+      sellerUsername: 'redshakkio',
+    }),
+    'redshakkio',
+  );
+  assert.equal(
+    publicShopSellerLabel({ sellerReputationLabel: 'pknreserve', sellerName: 'pknreserve' }),
+    'pknreserve',
   );
 });

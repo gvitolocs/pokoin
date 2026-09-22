@@ -5,6 +5,7 @@ import {
   conditionTone,
   listingExtraTags,
   listingLanguageFlag,
+  publicShopSellerLabel,
   sellerCountryFlag,
   sellerHref,
 } from '../listing-meta.js';
@@ -33,7 +34,7 @@ export default function ShopListingRow({
   onEdit,
   onCancel,
 }) {
-  const name = String(offer?.sellerName || offer?.sellerDisplayName || 'Pokoin');
+  const name = publicShopSellerLabel(offer);
   const href = sellerHref(offer);
   const country = sellerCountryFlag(offer?.sellerCountry);
   const language = listingLanguageFlag(offer?.language);
