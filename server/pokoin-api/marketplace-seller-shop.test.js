@@ -28,8 +28,14 @@ test('cleanUsername rejects junk', () => {
 });
 
 test('conditionSql maps CT codes', () => {
-  assert.equal(conditionSql('NM').value, '%near%');
-  assert.equal(conditionSql('SP').value, '%slight%');
+  assert.deepEqual(conditionSql('NM').codes, ['NM', 'M']);
+  assert.deepEqual(conditionSql('SP').codes, ['SP', 'LP']);
+  assert.deepEqual(conditionSql('LP').codes, ['SP', 'LP']);
+  assert.deepEqual(conditionSql('MP').codes, ['MP']);
+  assert.deepEqual(conditionSql('PL').codes, ['PL', 'HP']);
+  assert.deepEqual(conditionSql('HP').codes, ['PL', 'HP']);
+  assert.deepEqual(conditionSql('Poor').codes, ['PO', 'POOR', 'D', 'DMG']);
+  assert.equal(conditionSql(''), null);
 });
 
 test('sortSql defaults to price asc', () => {
