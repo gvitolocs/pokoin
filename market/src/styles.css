@@ -1831,15 +1831,6 @@ h1, h2 { margin: 0 0 0.85rem; }
   text-shadow: 0 1px 8px rgb(0 0 0 / 0.72);
 }
 
-.tile-album .tile-dex {
-  color: var(--yellow, #ffcc03);
-  font-size: 0.62rem;
-  font-weight: 800;
-  line-height: 1.15;
-  font-style: normal;
-  text-shadow: 0 1px 8px rgb(0 0 0 / 0.72);
-}
-
 .tile-album .tile-id {
   color: rgb(255 255 255 / 0.92);
   font-size: 0.56rem;

@@ -126,9 +126,8 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   assert.match(tile, /const tall = false/);
   assert.match(tile, /cut \? \(/);
   assert.match(tile, /identity\.tileLine/);
-  assert.match(tile, /displayName\(card\)/);
-  assert.match(tile, /pokedexNumber/);
-  assert.match(tile, /albumDex/);
+  assert.doesNotMatch(tile, /albumDex/);
+  assert.doesNotMatch(tile, /tile-dex/);
   assert.match(artist, /albumShadeStyle\(row\)/);
   assert.match(artist, /<CardTile key=\{albumTileKey\(card\)\} card=\{card\} rank=\{index\} cut \/>/);
   assert.match(artist, /fetchArtist\(artistSlug, \{ limit: 5000 \}\)/);

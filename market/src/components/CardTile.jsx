@@ -3,7 +3,6 @@ import { albumShadeStyle } from '../art-shade.js';
 import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc, rememberCardId } from '../api.js';
 import { displayName, printingIdentity } from '../identity.js';
-import { pokedexNumber } from '../pokedex.js';
 import { tilePricePkn } from '../pkn.js';
 import { cardImageAlt } from '../seo.js';
 import { Action, track } from '../track.js';
@@ -22,7 +21,6 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
   const item = cut && artLayout === 'item';
   // Album grid keeps row order for Pokédex sort — no tall/dense packing.
   const tall = false;
-  const albumDex = cut ? pokedexNumber(card) : 0;
   const hero = imageSrc(card, 'hero');
   const art = cut ? hero : imageSrc(card, layout === 'list' ? 'hero' : 'grid');
   const list = layout === 'list';
@@ -70,8 +68,6 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
       </span>
       {cut ? (
         <div className="tile-meta">
-          <strong>{displayName(card)}</strong>
-          {albumDex > 0 ? <em className="tile-dex">#{String(albumDex).padStart(3, '0')}</em> : null}
           {identity.tileLine ? <em className="tile-id">{identity.tileLine}</em> : null}
         </div>
       ) : (

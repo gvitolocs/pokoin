@@ -6,6 +6,8 @@ import { filterSearchCards, packPokedexSort } from './search-filters.js';
 
 test('national dex matches print names including TCG prefixes', () => {
   assert.equal(pokedexNumber('Charizard'), 6);
+  assert.equal(pokedexNumber('Flabébé'), 669);
+  assert.equal(pokedexNumber('Flabebe'), 669);
   assert.equal(pokedexNumber('Dark Charizard'), 6);
   assert.equal(pokedexNumber('Charizard ex'), 6);
   assert.equal(pokedexNumber({ name: "Team Rocket's Mewtwo ex" }), 150);

@@ -13,7 +13,10 @@ function compactToken(part) {
 }
 
 export function pokedexTokens(name) {
+  // Strip accents before splitting so Flabébé → flabebe (not flab + b).
   return String(name || '')
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/♀/g, ' f ')
     .replace(/♂/g, ' m ')
     .split(/[^a-zA-Z0-9]+/)
