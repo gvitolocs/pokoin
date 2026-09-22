@@ -265,7 +265,7 @@ export const LIFE_STRIP = [
       reason: 'Taller careers crop of the Breakthrough illustration — more painter + Smeargle than the tight album window.',
       pose: 'sit-low',
       // Wider/taller than album POKEMON_ART_CUT so the life tile shows more picture.
-      cut: { left: 0.05, top: 0.09, width: 0.90, height: 0.52, cardRatio: 63 / 88 },
+      cut: { left: 0.05, top: 0.08, width: 0.90, height: 0.52, cardRatio: 63 / 88 },
     },
   },
   {

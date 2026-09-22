@@ -5488,7 +5488,7 @@ dialog.zoom:not([open]) {
 }
 
 .careers-life-art.is-art-cut.pose-sit-low .careers-art-cut {
-  transform: scale(1.06);
+  transform: scale(1.06) translateY(5px);
   transform-origin: center bottom;
 }
 
