@@ -5474,24 +5474,23 @@ dialog.zoom:not([open]) {
 
 /* Artists · album art-cut (same window as artist page), sat lower in the tile */
 .careers-life-art.is-art-cut {
-  height: auto;
-  bottom: 0;
-  top: auto;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 0 8% 4%;
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 18%, #000 100%);
+  left: 8%;
+  right: 8%;
+  width: auto;
+  height: 38%;
+  bottom: -4%;
+  display: block;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 100%);
 }
 
 .careers-life-art.is-art-cut .careers-art-cut.art-cut {
   width: 100%;
-  flex: 0 0 auto;
+  height: 100%;
+  aspect-ratio: auto;
   border-radius: 0.45rem;
 }
 
-/* Beat .careers-card-shot width/height/object-fit so album crop math actually runs */
-.careers-life-art.is-art-cut .art-cut img.careers-card-shot {
+.careers-life-art.is-art-cut .careers-art-cut-img {
   position: absolute;
   display: block;
   width: calc(100% / var(--art-width));
@@ -5501,13 +5500,13 @@ dialog.zoom:not([open]) {
   left: calc(-100% * var(--art-left) / var(--art-width));
   top: calc(-100% * var(--art-top) / var(--art-height));
   object-fit: fill;
-  object-position: unset;
-  transform: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .careers-life-art.is-art-cut.pose-sit-low {
   bottom: -6%;
-  padding-bottom: 0;
+  height: 40%;
 }
 
 /* B · Physical trading card: real aspect, clipped by pastel bottom */
