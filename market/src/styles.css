@@ -5474,17 +5474,22 @@ dialog.zoom:not([open]) {
 
 /* Artists · album illustration window, sat lower (crop math is inline on the node) */
 .careers-life-art.is-art-cut {
-  left: 7%;
-  right: 7%;
+  left: 4%;
+  right: 4%;
   width: auto;
   height: auto;
-  bottom: -2%;
+  bottom: 0;
   display: block;
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 10%, #000 100%);
 }
 
 .careers-life-art.is-art-cut.pose-sit-low {
-  bottom: -6%;
+  bottom: -4%;
+}
+
+.careers-life-art.is-art-cut.pose-sit-low .careers-art-cut {
+  transform: scale(1.06);
+  transform-origin: center bottom;
 }
 
 .careers-life-art.is-art-cut .careers-art-cut {

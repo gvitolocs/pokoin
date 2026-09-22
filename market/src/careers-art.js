@@ -262,10 +262,10 @@ export const LIFE_STRIP = [
       mode: 'art-cut',
       src: '/card-images/110847_smeargle-123-162-breakthrough.jpg',
       card: 'Smeargle · Breakthrough 123/162',
-      reason: 'Same modern album art-cut as the artist page (Breakthrough / XY window), sat a bit lower in the tile.',
+      reason: 'Taller careers crop of the Breakthrough illustration — more painter + Smeargle than the tight album window.',
       pose: 'sit-low',
-      // Keep in sync with POKEMON_ART_CUT / modern in art-cut.js
-      cut: { left: 0.086, top: 0.126, width: 0.828, height: 0.338, cardRatio: 63 / 88 },
+      // Wider/taller than album POKEMON_ART_CUT so the life tile shows more picture.
+      cut: { left: 0.05, top: 0.09, width: 0.90, height: 0.52, cardRatio: 63 / 88 },
     },
   },
   {
