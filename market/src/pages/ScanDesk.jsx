@@ -382,6 +382,7 @@ export default function ScanDesk() {
   const phase = sessionPhase(session, now, serverOffset);
   const phaseInfo = phaseText(phase, session);
   const defaults = batch?.defaults || DEFAULTS;
+  const closed = batch && batch.status !== 'open';
 
   // Push Game picker (dashboard localStorage override) into batch defaults once a batch exists.
   useEffect(() => {
@@ -391,8 +392,6 @@ export default function ScanDesk() {
     setDefaults({ game: id });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batch?.id, closed]);
-
-  const closed = batch && batch.status !== 'open';
   const focusIndex = list.findIndex((row) => row.id === focusId);
   const focused = focusIndex >= 0 ? list[focusIndex] : null;
 
