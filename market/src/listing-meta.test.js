@@ -18,8 +18,14 @@ test('condition tones match CardTrader grades', () => {
   assert.equal(conditionTone('Slightly Played'), 'sp');
   assert.equal(conditionTone('MP'), 'mp');
   assert.equal(conditionTone('Played'), 'pl');
+  assert.equal(conditionTone('HP'), 'pl');
+  assert.equal(conditionTone('Heavily Played'), 'pl');
+  assert.equal(conditionTone('PO'), 'poor');
   assert.equal(conditionTone('Poor'), 'poor');
   assert.equal(conditionShort('Near Mint'), 'NM');
+  assert.equal(conditionShort('HP'), 'PL');
+  assert.equal(conditionShort('PO'), 'PO');
+  assert.equal(conditionShort('Poor'), 'PO');
 });
 
 test('listing language uses circle flags, not EN text', () => {

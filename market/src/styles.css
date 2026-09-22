@@ -3517,8 +3517,8 @@ a.era-link:focus-visible {
 .shop-cond.is-sp { color: #f0c14b; }
 .shop-cond.is-mp { color: #f5a623; }
 .shop-cond.is-pl { color: #e67e22; }
-.shop-cond.is-hp { color: #e74c3c; }
-.shop-cond.is-poor { color: #c0392b; }
+.shop-cond.is-hp { color: #e67e22; } /* legacy unused; CT HP → PL */
+.shop-cond.is-poor { color: #dc143c; } /* Pokoin Poor / PO — scarlet */
 
 .shop-txt { color: var(--muted); display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .shop-px { font-weight: 700; font-size: 0.85rem; color: var(--yellow); }

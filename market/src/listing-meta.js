@@ -19,9 +19,11 @@ const CONDITION_TONE = {
   'MODERATELY PLAYED': 'mp',
   PL: 'pl',
   PLAYED: 'pl',
-  HP: 'hp',
-  HEAVILYPLAYED: 'hp',
-  'HEAVILY PLAYED': 'hp',
+  // CardTrader "HP" / Heavily Played is not a Pokoin grade — map to PL.
+  HP: 'pl',
+  HEAVILYPLAYED: 'pl',
+  'HEAVILY PLAYED': 'pl',
+  PO: 'poor',
   POOR: 'poor',
   D: 'poor',
   DMG: 'poor',
@@ -119,8 +121,7 @@ export function conditionShort(condition) {
   if (tone === 'sp') return 'SP';
   if (tone === 'mp') return 'MP';
   if (tone === 'pl') return 'PL';
-  if (tone === 'hp') return 'HP';
-  if (tone === 'poor') return 'Poor';
+    if (tone === 'poor') return 'PO';
   const text = String(condition || '').trim();
   return text || 'NM';
 }
