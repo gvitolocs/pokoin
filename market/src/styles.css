@@ -1598,7 +1598,7 @@ h1, h2 { margin: 0 0 0.85rem; }
 
 .grid.album-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-auto-flow: dense;
+  grid-auto-flow: row;
   align-items: start;
   gap: 1rem;
   min-width: 0;
@@ -1828,6 +1828,15 @@ h1, h2 { margin: 0 0 0.85rem; }
   color: rgb(255 255 255 / 0.94);
   font-size: 0.72rem;
   line-height: 1.15;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.72);
+}
+
+.tile-album .tile-dex {
+  color: var(--yellow, #ffcc03);
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1.15;
+  font-style: normal;
   text-shadow: 0 1px 8px rgb(0 0 0 / 0.72);
 }
 
@@ -6072,6 +6081,13 @@ dialog.zoom:not([open]) {
   .shop-row.is-profile .shop-card { grid-column: 1 / -1; }
   .shop-txt { display: none; }
   .shop-act { display: none; }
+  /* CT seller shop: keep qty visible on narrow profile rows */
+  .seller-shop-ct .shop-act {
+    display: inline-block;
+    min-width: 1.75rem;
+    font-weight: 700;
+    color: var(--text);
+  }
   .list-btn { width: 100%; }
   .about-hero,
   .about-story,

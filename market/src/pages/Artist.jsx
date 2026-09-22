@@ -382,7 +382,6 @@ function ArtistDesk() {
             </span>
           </label>
           <SearchToolbar
-            compact
             sort={sort}
             onSort={setSort}
             type={type}
@@ -407,8 +406,8 @@ function ArtistDesk() {
           {payload
             ? (allCards?.length
               ? (filtersOn
-                ? <><strong>{uniqueCardCount}</strong> matching</>
-                : <><strong>{uniqueCardCount}</strong> cards{total > uniqueCardCount ? ` of ${total}` : ''}</>)
+                ? <><strong>{uniqueCardCount}</strong> matching{sort === 'pokedex' ? ' · Sorted by Pokédex' : ''}</>
+                : <><strong>{uniqueCardCount}</strong> cards{total > uniqueCardCount ? ` of ${total}` : ''}{sort === 'pokedex' ? ' · Sorted by Pokédex' : ''}</>)
               : 'No cards for this artist.')
             : 'Loading…'}
         </p>
