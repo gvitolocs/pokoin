@@ -79,3 +79,14 @@ test('seller inventory cache is keyed by username', () => {
   rememberSellerListings('VitoLoGiuseppe17', payload);
   assert.equal(peekSellerListings('vitologiuseppe17').listings[0].id, '1');
 });
+
+test('seller shop cache includes limit/offset so short fetches cannot poison', () => {
+  resetListingsCacheForTests();
+  rememberSellerListings('redshakkio', { listings: [{ id: 'a' }], total: 1 }, { limit: 100, offset: 0 });
+  rememberSellerListings('redshakkio', { listings: [{ id: 'b' }], total: 9153 }, { limit: 100, offset: 100 });
+  assert.equal(peekSellerListings('redshakkio', { limit: 100, offset: 0 }).listings[0].id, 'a');
+  assert.equal(peekSellerListings('redshakkio', { limit: 100, offset: 100 }).total, 9153);
+  // Legacy username-only key stays separate
+  rememberSellerListings('redshakkio', { listings: [{ id: 'legacy' }] });
+  assert.equal(peekSellerListings('redshakkio').listings[0].id, 'legacy');
+});

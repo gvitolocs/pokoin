@@ -14,20 +14,47 @@ function rememberMap(map, key, value, max) {
   }
 }
 
-export function sellerCacheKey(username) {
-  return String(username || '').trim().toLowerCase();
+export function sellerCacheKey(username, opts = {}) {
+  const handle = String(username || '').trim().toLowerCase();
+  if (!handle) return '';
+  const limit = Number(opts.limit);
+  const offset = Number(opts.offset) || 0;
+  const q = String(opts.q || opts.query || '').trim().toLowerCase();
+  const condition = String(opts.condition || '').trim().toLowerCase();
+  const language = String(opts.language || '').trim().toLowerCase();
+  const sort = String(opts.sort || '').trim().toLowerCase();
+  // Bare username key remains valid for legacy fetchSellerByUsername callers.
+  if (
+    !Number.isFinite(limit) &&
+    !offset &&
+    !q &&
+    !condition &&
+    !language &&
+    !sort
+  ) {
+    return handle;
+  }
+  return [
+    handle,
+    Number.isFinite(limit) ? `l${limit}` : 'l',
+    `o${offset}`,
+    `q${q}`,
+    `c${condition}`,
+    `lang${language}`,
+    `s${sort}`,
+  ].join('::');
 }
 
-export function peekSellerListings(username) {
-  return sellerListingsCache.get(sellerCacheKey(username)) || null;
+export function peekSellerListings(username, opts) {
+  return sellerListingsCache.get(sellerCacheKey(username, opts)) || null;
 }
 
-export function rememberSellerListings(username, data) {
-  const key = sellerCacheKey(username);
+export function rememberSellerListings(username, data, opts) {
+  const key = sellerCacheKey(username, opts);
   if (!key) {
     return data;
   }
-  rememberMap(sellerListingsCache, key, data, 24);
+  rememberMap(sellerListingsCache, key, data, 48);
   return data;
 }
 
