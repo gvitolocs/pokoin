@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { fetchSellerShop } from '../api.js';
 import { rewriteCanonicalCardPath } from '../card-stub.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { getSearchLang } from '../locale.js';
 import ShopListingRow from '../components/ShopListing.jsx';
 import { Alert, EmptyDesk, Metric, MetricGrid } from '../components/Desk.jsx';
-import { peekHasListingRows, peekSellerListings } from '../listings-cache.js';
 import {
   publicListingSellerName,
   sellerCountryFlag,
   sellerCountryLabel,
-  sellerHandle,
 } from '../listing-meta.js';
+import { seedSellerListings } from '../seller-seed.js';
 
 const PAGE_SIZE = 100;
 
@@ -27,23 +26,6 @@ const CONDITION_FILTERS = [
 
 const LANG_FILTERS = ['', 'EN', 'IT', 'JP', 'DE', 'FR', 'ES', 'KR', 'PT', 'NL', 'PL', 'RU', 'ZH'];
 
-function seedSellerListings(handle, locationState) {
-  const cached = peekSellerListings(handle);
-  if (peekHasListingRows(cached)) {
-    return {
-      listings: cached.listings,
-      total: Number(cached.total ?? cached.listings.length) || 0,
-      unique: Number(cached.unique ?? 0) || 0,
-    };
-  }
-  const row = locationState?.listing;
-  const name = sellerHandle(row) || publicListingSellerName(row, handle);
-  if (row && name && name.toLowerCase() === handle.toLowerCase()) {
-    return { listings: [row], total: 1, unique: 1 };
-  }
-  return null;
-}
-
 function isOneDayReady(offer) {
   return Boolean(
     offer?.oneDayReady ||
@@ -55,12 +37,11 @@ function isOneDayReady(offer) {
 
 export default function Seller() {
   const { username = '', lang: routeLang } = useParams();
-  const location = useLocation();
   const navigate = useNavigate();
   const { addItem } = useCart();
   const lang = routeLang || getSearchLang();
   const handle = decodeURIComponent(String(username || '').trim());
-  const seeded = seedSellerListings(handle, location.state);
+  const seeded = seedSellerListings(handle, { pageSize: PAGE_SIZE, sort: 'price-asc' });
 
   const [listings, setListings] = useState(() => seeded?.listings ?? null);
   const [total, setTotal] = useState(() => seeded?.total ?? null);
