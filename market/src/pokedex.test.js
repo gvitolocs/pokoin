@@ -6,6 +6,8 @@ import { filterSearchCards, packPokedexSort } from './search-filters.js';
 
 test('national dex matches print names including TCG prefixes', () => {
   assert.equal(pokedexNumber('Charizard'), 6);
+  assert.equal(pokedexNumber('Flabébé'), 669);
+  assert.equal(pokedexNumber('Flabebe'), 669);
   assert.equal(pokedexNumber('Dark Charizard'), 6);
   assert.equal(pokedexNumber('Charizard ex'), 6);
   assert.equal(pokedexNumber({ name: "Team Rocket's Mewtwo ex" }), 150);
@@ -233,3 +235,16 @@ test('packPokedexSort is species millions plus CLIP cluster-oldest expansion', (
   assert.equal(packPokedexSort(235, 80002), 235080002);
   assert.equal(packPokedexSort(TRAINER_DEX, 80000), TRAINER_DEX * 1_000_000 + 80000);
 });
+
+test('every SPECIES key resolves as a single-token card name', async () => {
+  const { default: SPECIES } = await import('./data/pokedex-species.js');
+  let checked = 0;
+  for (const [key, n] of Object.entries(SPECIES)) {
+    if (key.length < 3) continue;
+    const name = key.charAt(0).toUpperCase() + key.slice(1);
+    assert.equal(pokedexNumber(name), n, name);
+    checked += 1;
+  }
+  assert.ok(checked >= 1000, `expected >=1000 species keys, got ${checked}`);
+});
+

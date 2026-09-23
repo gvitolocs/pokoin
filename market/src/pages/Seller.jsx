@@ -30,8 +30,7 @@ function isOneDayReady(offer) {
   return Boolean(
     offer?.oneDayReady ||
       offer?.one_day_ready ||
-      offer?.shippingMode === 'one_day_ready' ||
-      /1-?day/i.test(String(offer?.sellerName || offer?.sellerDisplayName || '')),
+      offer?.shippingMode === 'one_day_ready',
   );
 }
 
@@ -163,7 +162,7 @@ export default function Seller() {
             <input
               className="shop-search"
               type="search"
-              placeholder="Type an item name"
+              placeholder="Search listings…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               aria-label="Search listings"
@@ -192,8 +191,8 @@ export default function Seller() {
                 ))}
               </select>
               <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value)}>
-                <option value="price-asc">Price ↑</option>
-                <option value="price-desc">Price ↓</option>
+                <option value="price-asc">Price: low</option>
+                <option value="price-desc">Price: high</option>
                 <option value="name">Name</option>
                 <option value="qty">Quantity</option>
               </select>

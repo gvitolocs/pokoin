@@ -1,4 +1,4 @@
-import { isFeatureAlbumArt, isLandscapePrintName, resolveArtLayout } from '../art-cut.js';
+import { isLandscapePrintName, resolveArtLayout } from '../art-cut.js';
 import { albumShadeStyle } from '../art-shade.js';
 import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc, rememberCardId } from '../api.js';
@@ -19,7 +19,8 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
   const landscape = cut && isLandscapePrintName(card.name);
   const artLayout = cut ? resolveArtLayout(card) : 'window';
   const item = cut && artLayout === 'item';
-  const tall = cut && !landscape && isFeatureAlbumArt(card);
+  // Album grid keeps row order for Pokédex sort — no tall/dense packing.
+  const tall = false;
   const hero = imageSrc(card, 'hero');
   const art = cut ? hero : imageSrc(card, layout === 'list' ? 'hero' : 'grid');
   const list = layout === 'list';

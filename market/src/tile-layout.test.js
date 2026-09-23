@@ -123,9 +123,11 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   assert.match(tile, /full=\{cut\}/);
   assert.match(tile, /card=\{cut \? card : undefined\}/);
   assert.match(tile, /albumShadeStyle\(card\)/);
+  assert.match(tile, /const tall = false/);
   assert.match(tile, /cut \? \(/);
   assert.match(tile, /identity\.tileLine/);
-  assert.doesNotMatch(tile, /cut \? displayName/);
+  assert.doesNotMatch(tile, /albumDex/);
+  assert.doesNotMatch(tile, /tile-dex/);
   assert.match(artist, /albumShadeStyle\(row\)/);
   assert.match(artist, /<CardTile key=\{albumTileKey\(card\)\} card=\{card\} rank=\{index\} cut \/>/);
   assert.match(artist, /fetchArtist\(artistSlug, \{ limit: 5000 \}\)/);
@@ -140,7 +142,7 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   assert.match(artist, /cut\s*\n\s*full/);
   assert.match(carousel, /album = false/);
   assert.match(css, /\.grid\.album-grid \{[^}]*grid-template-columns:\s*repeat\(4/);
-  assert.match(css, /\.grid\.album-grid \{[^}]*grid-auto-flow:\s*dense/);
+  assert.match(css, /\.grid\.album-grid \{[^}]*grid-auto-flow:\s*row/);
   assert.doesNotMatch(css, /html, body \{\s*overflow-x:\s*clip/);
   assert.doesNotMatch(css, /\.page, \.card-page \{[^}]*overflow-x:\s*clip/);
   assert.doesNotMatch(css, /\.tile-album \{[^}]*overscroll-behavior:\s*none/);
