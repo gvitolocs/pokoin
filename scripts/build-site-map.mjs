@@ -23,6 +23,9 @@ import { artistSlug } from '../market/src/artist-name.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'market/src');
 const OUT = join(ROOT, 'market/public/data/site-map.json');
+/** Card thumbnails load on first hover, so the graph file stays small. */
+const OUT_IMAGES = join(ROOT, 'market/public/data/site-map-images.json');
+const CDN = 'https://cdn.pokoin.com/';
 const PG_CONTAINER = process.env.SITE_MAP_PG_CONTAINER || 'pokoin-marketplace-postgres-15t';
 
 const args = process.argv.slice(2);
@@ -99,12 +102,16 @@ const LABELS = {
   '/buy': 'Buy PKN',
 };
 
-const INTERNAL = new Set(['/tests', '/sanitize', '/espurr', '/ocr', '/ocr/artists', '/artwork', '/jumbos', '/admin', '/marketplace/admin', '/marketplace/admin/edit', '/extension/auth-bridge']);
+/** Review boards live on test.pokoin.com only; vercel.json redirects them off pokoin.com. */
+const TEST_BOARDS = new Set(['/tests', '/sanitize', '/espurr', '/ocr', '/ocr/artists', '/artwork', '/jumbos']);
+const TEST_HOST = 'https://test.pokoin.com';
+const INTERNAL = new Set(['/admin', '/marketplace/admin', '/marketplace/admin/edit', '/extension/auth-bridge']);
 const ACCOUNT = /^\/(auth|profile|cart|wallet|exchange|messages|checkout|orders|collection|inventory|scan|cardscan|scancard|buy|email-preferences|favorites|nft)\b|^\/marketplace\/(portfolio|watchlist)/;
 const INFO = /^\/(docs|about|careers|contact|privacy|protection|earn|whitepaper|health)$/;
 
 function routeGroup(path) {
   if (path === '/') return 'landing';
+  if (TEST_BOARDS.has(path)) return 'tests';
   if (INTERNAL.has(path)) return 'internal';
   if (/^\/marketplace\/competitive/.test(path)) return 'competitive';
   if (/^\/(forum|marketplace\/signal)/.test(path)) return 'community';
@@ -309,7 +316,7 @@ function buildPageGraph() {
   }
   edges.set('/', new Set([...(edges.get('/') || []), ...landingLinks]));
   const chromeLinks = linksOf([chromeFile]);
-  const boards = new Set(['/tests', '/sanitize', '/espurr', '/ocr', '/ocr/artists', '/artwork', '/jumbos', '/extension/auth-bridge', '/']);
+  const boards = new Set([...TEST_BOARDS, '/extension/auth-bridge', '/']);
   return { routes: patterns, edges, chromeLinks, boards };
 }
 
@@ -321,10 +328,20 @@ function loadCards() {
   if (file) {
     text = readFileSync(file, 'utf8');
   } else {
+    // Market: the listed cheapest PKN the tiles show (cheapest_homepage_cache_blueprint, all providers).
     const sql = `select u.card_id, u.name, u.card_number, u.set_name, u.product_type,
-        coalesce(c.pokedex_num, 10000), coalesce(nullif(c.artist, ''), c.illustrator, '')
+        coalesce(c.pokedex_num, 10000), coalesce(nullif(c.artist, ''), c.illustrator, ''),
+        coalesce(round(p.pkn), 0), coalesce(p.listings, 0), coalesce(c.homepage_image_url, ''),
+        coalesce(p.snapshot, '')
       from marketplace_card_urls u
       left join marketplace_search_candidates c on c.card_id = u.card_id
+      left join (
+        select pokoin_card_id, min(cheapest_price_pkn) as pkn, sum(eligible_listing_count) as listings,
+          max(coalesce(source_snapshot_at, updated_at))::text as snapshot
+        from cheapest_homepage_cache_blueprint
+        where cheapest_price_pkn > 0
+        group by pokoin_card_id
+      ) p on p.pokoin_card_id = u.card_id::text
       where u.language = 'en'`;
     const run = spawnSync('docker', ['exec', '-i', PG_CONTAINER, 'sh', '-c', 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -F "\t" -v ON_ERROR_STOP=1'], {
       input: sql,
@@ -339,10 +356,22 @@ function loadCards() {
   return text.split('\n').filter(Boolean).map((line) => {
     const f = line.split('\t');
     // --cards may be the wider export (…, rarity, product_type, item_kind, path, dex, artist, expansion).
-    if (f.length >= 10) {
-      return { id: Number(f[0]), name: f[1], number: f[2], set: f[3], type: f[5], dex: Number(f[8]), artist: f[9] };
+    if (f.length === 11 && f[7].startsWith('/marketplace/')) {
+      return { id: Number(f[0]), name: f[1], number: f[2], set: f[3], type: f[5], dex: Number(f[8]), artist: f[9], pkn: 0, listings: 0, image: '', snapshot: '' };
     }
-    return { id: Number(f[0]), name: f[1], number: f[2], set: f[3], type: f[4], dex: Number(f[5]), artist: f[6] };
+    return {
+      id: Number(f[0]),
+      name: f[1],
+      number: f[2],
+      set: f[3],
+      type: f[4],
+      dex: Number(f[5]),
+      artist: f[6],
+      pkn: Number(f[7]) || 0,
+      listings: Number(f[8]) || 0,
+      image: f[9] || '',
+      snapshot: f[10] || '',
+    };
   });
 }
 
@@ -594,6 +623,7 @@ async function main() {
       label: labelFor(path),
       group: routeGroup(path),
       template: /:\w/.test(path.replace(/:lang\b/, 'en')),
+      host: TEST_BOARDS.has(path) ? TEST_HOST : undefined,
     });
   }
   const shell = addPage({ id: 'chrome', path: '', label: 'Header & footer', group: 'shell', template: false });
@@ -643,9 +673,11 @@ async function main() {
     + setEraLinks // era → set
     + cardCount * 2 // set ↔ card
     + withSpecies * 2 + withArtist * 2 + withRarity * 2; // species / artist / rarity ↔ card
-  const pageCount = pageGraph.routes.filter((p) => !/:\w/.test(p.replace(/:lang\b/, 'en'))).length
+  // pokoin.com pages only: the review boards are counted on test.pokoin.com, not here.
+  const pageCount = pageGraph.routes.filter((p) => !/:\w/.test(p.replace(/:lang\b/, 'en')) && !TEST_BOARDS.has(p)).length
     + hubInstances.length + eras.length + sets.length + species.length + liveArtists.length + cardCount;
-  const shellLinks = pageGraph.chromeLinks.size * (pageCount - pageGraph.boards.size);
+  const chromeless = [...pageGraph.boards].filter((p) => !TEST_BOARDS.has(p)).length;
+  const shellLinks = pageGraph.chromeLinks.size * (pageCount - chromeless);
 
   const names = [];
   const nameIndex = new Map();
@@ -674,9 +706,11 @@ async function main() {
       catalogLinks,
       shellLinks,
       links: pageLinkList.length + catalogLinks + shellLinks,
+      listed: cards.filter((c) => c.pkn > 0).length,
+      marketAt: cards.reduce((m, c) => (c.snapshot > m ? c.snapshot : m), '').slice(0, 10),
     },
     radii: { core: round(ringRadius - maxEra), galaxy: round(galaxyRadius), species: round(speciesRadius), artists: round(artistRadius) },
-    pages: pages.map((p) => ({ id: p.id, path: p.path, label: p.label, group: p.group, template: p.template || undefined, x: round(p.x), y: round(p.y) })),
+    pages: pages.map((p) => ({ id: p.id, path: p.path, label: p.label, group: p.group, template: p.template || undefined, host: p.host, x: round(p.x), y: round(p.y) })),
     pageLinks: pageLinkList,
     eras: eras.map((e) => ({ id: e.id, name: e.name, x: round(e.x), y: round(e.y), r: round(e.r) })),
     sets: sets.map((s) => ({
@@ -704,9 +738,23 @@ async function main() {
       ar: ordered.map((c) => (c.ar >= 0 ? artistOut.get(artists[c.ar]) : -1)),
       ra: ordered.map((c) => c.ra),
       sealed: ordered.map((c) => (c.type && c.type !== 'card' ? 1 : 0)),
+      // Listed cheapest PKN (0 = no listing) and live listing count at build time.
+      pkn: ordered.map((c) => c.pkn),
+      lc: ordered.map((c) => c.listings),
     },
     names,
   };
+  // Same order as cards: CDN key (…_homepage.webp implied) or a full URL for odd ones.
+  const images = ordered.map((c) => {
+    const url = String(c.image || '');
+    if (url.startsWith(CDN) && url.endsWith('_homepage.webp')) return url.slice(CDN.length, -'_homepage.webp'.length);
+    return url;
+  });
+  const imagesBody = JSON.stringify({ cdn: CDN, suffix: '_homepage.webp', images });
+  if (!existsSync(OUT_IMAGES) || readFileSync(OUT_IMAGES, 'utf8') !== imagesBody) {
+    writeFileSync(OUT_IMAGES, imagesBody);
+  }
+
   // Weekly refresh commits only real changes: keep the old file (and its date) when only the date differs.
   const body = (json) => JSON.stringify({ ...json, generatedAt: '' });
   const previous = existsSync(OUT) ? JSON.parse(readFileSync(OUT, 'utf8')) : null;

@@ -102,3 +102,16 @@ else). It checks out `origin/main`, rebuilds the JSON, and only when the map
 changed commits, pushes to `main` and runs `scripts/deploy-web.sh`. The builder
 leaves the file alone when only the date would change, so quiet weeks deploy
 nothing. Log: `journalctl --user -u pokoin-site-map-refresh`.
+
+Site map v2: **Market** view colours card stars by the cheapest listed PKN
+(`cheapest_homepage_cache_blueprint`, quintile ramp, snapshot date in the
+footer); a card's panel fetches the live price from
+`/api/marketplace-card-page`. Card thumbnails live in
+`market/public/data/site-map-images.json`, loaded on the first card hover.
+**Six degrees** (`?focus=…&to=…`) is a BFS over real two-way catalog links
+(card ↔ set, card ↔ Pokémon, card ↔ artist, set ↔ era).
+
+Review boards (`/tests`, `/sanitize`, `/espurr`, `/ocr`, `/ocr/artists`,
+`/artwork`, `/jumbos`) are test.pokoin.com only: `vercel.json` 308-redirects
+them off the `pokoin.com` host, and the site map links them to
+test.pokoin.com and leaves them out of the pokoin.com page count.

@@ -186,9 +186,9 @@ export function nodeInfo(model, ref) {
   }
   return {
     label: page.label,
-    sub: page.path,
-    href: page.template ? '' : page.path,
-    kind: page.template ? 'Page template' : KIND_LABEL.page,
+    sub: page.host ? `${page.host.replace(/^https:\/\//, '')}${page.path}` : page.path,
+    href: page.template ? '' : `${page.host || ''}${page.path}`,
+    kind: page.template ? 'Page template' : page.group === 'tests' ? 'Test board' : KIND_LABEL.page,
   };
 }
 
@@ -397,4 +397,131 @@ export function createSearch(model) {
     take(cards.slice(firstCards), limit - out.length);
     return out;
   };
+}
+
+/* ------------------------------------------------------------------ market */
+
+export const PRICE_BUCKETS = 5;
+
+/** Quantile edges over listed prices, so each colour step holds about a fifth of the listed desks. */
+export function priceEdges(model) {
+  if (model.priceEdges) return model.priceEdges;
+  const listed = model.data.cards.pkn.filter((p) => p > 0).sort((a, b) => a - b);
+  const edges = [];
+  for (let b = 1; b < PRICE_BUCKETS; b += 1) {
+    edges.push(listed.length ? listed[Math.floor((listed.length * b) / PRICE_BUCKETS)] : 0);
+  }
+  model.priceEdges = { edges, min: listed[0] || 0, max: listed[listed.length - 1] || 0 };
+  return model.priceEdges;
+}
+
+/** -1 when the desk has no listing, else 0 (cheapest fifth) … 4 (priciest fifth). */
+export function priceBucket(model, i) {
+  const pkn = model.data.cards.pkn[i];
+  if (!(pkn > 0)) return -1;
+  const { edges } = priceEdges(model);
+  let b = 0;
+  while (b < edges.length && pkn >= edges[b]) b += 1;
+  return b;
+}
+
+function cardsOf(model, ref) {
+  const { data } = model;
+  if (ref.kind === 'card') return [ref.i];
+  if (ref.kind === 'set') return Array.from({ length: data.sets[ref.i].n }, (_, k) => model.setStart[ref.i] + k);
+  if (ref.kind === 'species') return model.bySpecies[ref.i];
+  if (ref.kind === 'artist') return model.byArtist[ref.i];
+  if (ref.kind === 'era') return model.setsOnEra[ref.i].flatMap((s) => cardsOf(model, { kind: 'set', i: s }));
+  if (ref.kind === 'page' && model.pageRarity.has(ref.i)) return model.byRarity[model.pageRarity.get(ref.i)];
+  return [];
+}
+
+/** Listed share and the cheapest listed desk behind a node (snapshot at build time). */
+export function marketSummary(model, ref) {
+  const { pkn, lc } = model.data.cards;
+  const ids = cardsOf(model, ref);
+  let listed = 0;
+  let listings = 0;
+  let cheapest = -1;
+  for (const i of ids) {
+    if (!(pkn[i] > 0)) continue;
+    listed += 1;
+    listings += lc[i] || 0;
+    if (cheapest < 0 || pkn[i] < pkn[cheapest]) cheapest = i;
+  }
+  return { total: ids.length, listed, listings, cheapest: cheapest >= 0 ? { kind: 'card', i: cheapest } : null };
+}
+
+/* -------------------------------------------------------------------- path */
+
+export const PATH_KINDS = new Set(['card', 'set', 'era', 'species', 'artist']);
+
+/**
+ * Fewest clicks between two catalog nodes. Every hop is a real link both ways
+ * on the site: card ↔ set, card ↔ Pokémon, card ↔ artist, set ↔ era.
+ */
+export function shortestPath(model, from, to) {
+  if (!from || !to || !PATH_KINDS.has(from.kind) || !PATH_KINDS.has(to.kind)) return null;
+  const { data } = model;
+  const N = model.count;
+  const base = {
+    card: 0,
+    set: N,
+    era: N + data.sets.length,
+    species: N + data.sets.length + data.eras.length,
+    artist: N + data.sets.length + data.eras.length + data.species.length,
+  };
+  const total = base.artist + data.artists.length;
+  const id = (ref) => base[ref.kind] + ref.i;
+  const refOf = (n) => {
+    for (const kind of ['artist', 'species', 'era', 'set', 'card']) {
+      if (n >= base[kind]) return { kind, i: n - base[kind] };
+    }
+    return null;
+  };
+  if (!model.eraSets) {
+    model.eraSets = data.eras.map((_, e) => [...new Set([
+      ...model.setsOnEra[e],
+      ...data.sets.flatMap((set, s) => (set.era === e ? [s] : [])),
+    ])]);
+  }
+  function each(n, visit) {
+    const ref = refOf(n);
+    if (ref.kind === 'card') {
+      visit(base.set + model.cardSet[ref.i]);
+      if (data.cards.sp[ref.i] >= 0) visit(base.species + data.cards.sp[ref.i]);
+      if (data.cards.ar[ref.i] >= 0) visit(base.artist + data.cards.ar[ref.i]);
+    } else if (ref.kind === 'set') {
+      const set = data.sets[ref.i];
+      for (let k = 0; k < set.n; k += 1) visit(model.setStart[ref.i] + k);
+      visit(base.era + set.era);
+      for (const e of set.on) visit(base.era + e);
+    } else if (ref.kind === 'era') {
+      for (const s of model.eraSets[ref.i]) visit(base.set + s);
+    } else {
+      const list = ref.kind === 'species' ? model.bySpecies[ref.i] : model.byArtist[ref.i];
+      for (const c of list) visit(c);
+    }
+  }
+  const start = id(from);
+  const goal = id(to);
+  const prev = new Int32Array(total).fill(-2);
+  const queue = new Int32Array(total);
+  let head = 0;
+  let tail = 0;
+  prev[start] = -1;
+  queue[tail++] = start;
+  while (head < tail && prev[goal] === -2) {
+    const n = queue[head++];
+    each(n, (m) => {
+      if (prev[m] === -2) {
+        prev[m] = n;
+        queue[tail++] = m;
+      }
+    });
+  }
+  if (prev[goal] === -2) return null;
+  const path = [];
+  for (let n = goal; n !== -1; n = prev[n]) path.push(refOf(n));
+  return path.reverse();
 }
