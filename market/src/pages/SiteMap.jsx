@@ -421,7 +421,8 @@ export default function SiteMap() {
         <p className="sm-footnote">
           {fmt(stats.pageLinks)} links between {fmt(stats.templates)} page templates, read from the app source ·{' '}
           {fmt(stats.catalogLinks)} catalog links between eras, sets, card desks, Pokémon, artists and rarity hubs ·{' '}
-          {fmt(stats.shellLinks)} header &amp; footer links. Built {new Date(data.generatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}.
+          {fmt(stats.shellLinks)} header &amp; footer links. The graph updates weekly; last updated{' '}
+          {new Date(data.generatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}.
         </p>
       ) : null}
       {model ? <HubIndex model={model} /> : null}
