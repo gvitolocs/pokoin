@@ -57,6 +57,7 @@ import Protection from './pages/Protection.jsx';
 import EmailPreferences from './pages/EmailPreferences.jsx';
 import Site from './pages/Site.jsx';
 import About from './pages/About.jsx';
+import SiteMap from './pages/SiteMap.jsx';
 import Careers from './pages/Careers.jsx';
 import WorkingOnIt from './components/WorkingOnIt.jsx';
 import CookieBanner from './components/CookieBanner.jsx';
@@ -192,6 +193,7 @@ function AppShell() {
       {both('/inventory/scan', <ScanDesk />)}
       {both('/docs', <Site />)}
       {both('/about', <About />)}
+      {both('/sitemap', <SiteMap />)}
       {both('/careers', <Careers />)}
       {both('/contact', <Site />)}
       {both('/privacy', <Site />)}

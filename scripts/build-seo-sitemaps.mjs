@@ -59,6 +59,7 @@ const hubs = [
   `${ORIGIN}/marketplace/en/rarities`,
   `${ORIGIN}/marketplace/en/languages`,
   `${ORIGIN}/marketplace/en/guides`,
+  `${ORIGIN}/sitemap`,
   ...TCG_ERA_ORDER.map((era) => `${ORIGIN}/marketplace/eras/${eraId(era)}`),
   ...RARITY_HUBS.map((row) => `${ORIGIN}/marketplace/en/rarities/${row.slug}`),
   ...LANGUAGE_HUBS.map((row) => `${ORIGIN}/marketplace/en/languages/${row.slug}`),

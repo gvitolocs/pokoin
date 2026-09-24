@@ -838,6 +838,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/sitemap/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/sitemap",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/about",
       "destination": "/market/index.html"
     },
