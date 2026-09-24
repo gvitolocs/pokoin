@@ -117,6 +117,7 @@ function rewriteMarketplace(server) {
       || url === '/inventory' || url.startsWith('/inventory/')
       || url === '/docs' || url.startsWith('/docs/')
       || url === '/about' || url.startsWith('/about/')
+      || url === '/sitemap' || url.startsWith('/sitemap/')
       || url === '/careers' || url.startsWith('/careers/')
       || url === '/contact' || url.startsWith('/contact/')
       || url === '/privacy' || url.startsWith('/privacy/')

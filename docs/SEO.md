@@ -81,3 +81,16 @@ prev/next under the header. Related **tiles** (at most **12**) and one
 the catalog** at the page end. Eras / rarities / languages / guides live
 in Chrome **Catalog**. Visible H1 is the name; commercial “Card List &
 Prices” copy stays on `<title>` / `SeoHead` only.
+
+## /sitemap (link graph)
+
+`pokoin.com/sitemap` is the human site map: a pan/zoom graph of every page
+template, catalog hub and card desk, with the same hubs as plain links
+underneath (`market/src/pages/SiteMap.jsx`). Its data is
+`market/public/data/site-map.json`, built on nezopt by
+`node scripts/build-site-map.mjs`. Page links come from the SPA source
+(routes, `to=`/`href=`, `navigate()`, `APP.*`, `*Href` helpers); catalog links
+come from a read-only SELECT against the 15T marketplace Postgres and the
+public expansion list. It is not part of the Vercel build, so rerun it and
+commit the JSON when routes or the catalog change. `?focus=set:base-set`
+(`card:`, `pokemon:`, `artist:`, `era:`, `page:`) deep-links a node.

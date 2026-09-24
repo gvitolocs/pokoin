@@ -1247,6 +1247,7 @@ export default function Chrome({ children }) {
             <a href={onDashboard ? '/' : DASHBOARD_HOME}>Dashboard</a>
             <AppLink to={APP.docs}>Docs</AppLink>
             <AppLink to={APP.about}>About</AppLink>
+            <AppLink to="/sitemap">Site map</AppLink>
             <AppLink to={APP.careers}>Careers</AppLink>
             <AppLink to={APP.privacy}>Privacy</AppLink>
             <AppLink to={APP.emailPreferences}>Email preferences</AppLink>
