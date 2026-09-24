@@ -28,13 +28,17 @@ main:has(.site-map-page) {
   padding: 0;
 }
 
+/* The map is the whole page: no footer or list underneath. */
+body:has(.site-map-page) .foot {
+  display: none;
+}
+
 .sm-stage {
   position: relative;
-  height: calc(100svh - var(--topbar-h) - 3.5rem);
+  height: calc(100svh - var(--topbar-h) - 1px);
   min-height: 420px;
   overflow: hidden;
   background: var(--sm-bg);
-  border-bottom: 1px solid var(--g5);
 }
 
 .sm-canvas {
@@ -225,17 +229,6 @@ main:has(.site-map-page) {
 .sm-stats strong { color: var(--sm-text); font-weight: 700; }
 
 .sm-search { position: relative; }
-
-.sm-jump {
-  display: inline-block;
-  margin-top: 0.6rem;
-  color: var(--sm-muted);
-  font-size: 0.82rem;
-  text-decoration: none;
-}
-.sm-jump:hover { color: var(--sm-page); }
-
-.sm-index h2 { scroll-margin-top: calc(var(--topbar-h) + 1rem); }
 
 .sm-search input {
   width: 100%;
@@ -460,70 +453,8 @@ main:has(.site-map-page) {
 }
 .sm-note { margin: 0.6rem 0 0; color: var(--sm-muted); font-size: 0.8rem; line-height: 1.45; }
 
-.sm-footnote {
-  max-width: var(--max);
-  margin: 0 auto;
-  padding: 0.9rem 1.25rem 0;
-  color: var(--sm-muted);
-  font-size: 0.8rem;
-  line-height: 1.5;
-}
-
-.sm-index {
-  max-width: var(--max);
-  margin: 0 auto;
-  padding: 1.5rem 1.25rem 2.5rem;
-}
-.sm-index h2 { margin: 0 0 0.35rem; font-size: 1.35rem; }
-.sm-lede { margin: 0 0 1.25rem; color: var(--sm-muted); }
-.sm-index a { color: var(--sm-text); text-decoration: none; }
-.sm-index a:hover { color: var(--sm-page); text-decoration: underline; }
-.sm-index ul { list-style: none; margin: 0; padding: 0; }
-.sm-index li { padding: 0.12rem 0; font-size: 0.9rem; }
-
-.sm-index-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
-  gap: 1.25rem 1.5rem;
-  margin-bottom: 1.25rem;
-}
-.sm-index-grid h3,
-.sm-era h4 {
-  margin: 0 0 0.4rem;
-  font-size: 0.78rem;
-  color: var(--sm-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.sm-era h4 a { color: var(--sm-page); }
-
-.sm-index details {
-  border-top: 1px solid var(--g4);
-  padding: 0.75rem 0;
-}
-.sm-index summary {
-  cursor: pointer;
-  font-weight: 700;
-  font-size: 1rem;
-}
-.sm-index summary span { color: var(--sm-muted); font-weight: 500; margin-left: 0.35rem; }
-
-.sm-columns {
-  columns: 16rem;
-  column-gap: 1.5rem;
-  margin-top: 0.9rem;
-}
-.sm-era { break-inside: avoid-column; margin-bottom: 1rem; }
-
-.sm-flow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.15rem 1rem;
-  margin-top: 0.9rem !important;
-}
-
 @media (max-width: 720px) {
-  .sm-stage { height: calc(100svh - var(--topbar-h) - 3rem); }
+  .sm-stage { height: calc(100svh - var(--topbar-h) - 1px); }
   .sm-head {
     width: 100%;
     padding: 0.7rem 0.8rem 0.8rem;

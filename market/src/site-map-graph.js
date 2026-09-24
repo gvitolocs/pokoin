@@ -186,9 +186,9 @@ export function nodeInfo(model, ref) {
   }
   return {
     label: page.label,
-    sub: page.host ? `${page.host.replace(/^https:\/\//, '')}${page.path}` : page.path,
-    href: page.template ? '' : `${page.host || ''}${page.path}`,
-    kind: page.template ? 'Page template' : page.group === 'tests' ? 'Test board' : KIND_LABEL.page,
+    sub: page.path,
+    href: page.template ? '' : page.path,
+    kind: page.template ? 'Page template' : KIND_LABEL.page,
   };
 }
 

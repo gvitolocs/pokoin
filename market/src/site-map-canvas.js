@@ -6,6 +6,9 @@
 import { MAX_LINES, PRICE_BUCKETS, neighbors, nodeInfo, position, priceBucket, sameRef } from './site-map-graph.js';
 
 const CELL = 6;
+/** Card stars are sub-pixel below this zoom: sets paint as discs, stars fade in up to 2×. */
+const STAR_K = 1.6;
+const cellKey = (c, r) => (c + 32768) * 65536 + (r + 32768);
 const TAU = Math.PI * 2;
 const MIN_K = 0.05;
 const MAX_K = 260;
@@ -23,7 +26,7 @@ function buildGrid(model) {
   const { data } = model;
   const cells = new Map();
   const add = (kind, i, x, y) => {
-    const key = `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`;
+    const key = cellKey(Math.floor(x / CELL), Math.floor(y / CELL));
     let list = cells.get(key);
     if (!list) cells.set(key, (list = []));
     list.push(kind, i);
@@ -43,7 +46,9 @@ function hubRadius(n) {
 export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColors }) {
   const ctx = canvas.getContext('2d');
   const { data } = model;
-  const grid = buildGrid(model);
+  // Hit-test grid over 76k nodes: built on the first hover or tap, not on page load.
+  let grid = null;
+  const getGrid = () => (grid ||= buildGrid(model));
   const cam = { x: 0, y: 0, k: 1 };
   let W = 0;
   let H = 0;
@@ -57,6 +62,7 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
   let hidden = new Set();
   let colors = readColors();
   let rgb = {};
+  let rgbRamp = [];
   let labelHits = [];
   const pointers = new Map();
   let gesture = null;
@@ -71,12 +77,31 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
     bucket[i] = priceBucket(model, i);
     bucketLists[bucket[i] + 1].push(i);
   }
+  // Far-zoom set discs: listed share and the median listed price step per set.
+  const setShare = new Float32Array(data.sets.length);
+  const setBucket = new Int8Array(data.sets.length).fill(-1);
+  data.sets.forEach((set, s) => {
+    const steps = [];
+    for (let k = 0; k < set.n; k += 1) {
+      const b = bucket[model.setStart[s] + k];
+      if (b >= 0) steps.push(b);
+    }
+    setShare[s] = set.n ? steps.length / set.n : 0;
+    if (steps.length) setBucket[s] = steps.sort((a, b) => a - b)[steps.length >> 1];
+  });
+  // Label priority never changes: sort once, not every frame.
+  const pageOrder = data.pages.map((_, i) => i).sort((a, b) => model.pageIn[b].length - model.pageIn[a].length);
+  const setOrder = data.sets.map((_, i) => i).sort((a, b) => data.sets[b].n - data.sets[a].n);
+  const liveEra = data.eras.map((_, e) => model.setsOnEra[e].length > 0 || data.sets.some((set) => set.era === e));
+  const speciesOrder = data.species.map((_, i) => i).sort((a, b) => data.species[b].n - data.species[a].n);
+  const artistOrder = data.artists.map((_, i) => i).sort((a, b) => data.artists[b].n - data.artists[a].n);
   // Screen space covered by the details panel; fly targets centre in what is left.
   let inset = { top: 0, right: 0, bottom: 0 };
 
   function refreshColors() {
     colors = readColors();
     rgb = Object.fromEntries(Object.entries(colors).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, hexToRgb(v)]));
+    rgbRamp = (colors.ramp || []).map(hexToRgb);
   }
   refreshColors();
 
@@ -172,7 +197,47 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
   }
 
   /** Structure: one starlight colour. Market: unlisted desks dim, listed desks on the price ramp. */
+  /** 0 at far zoom (discs only) → 1 once stars have room (stars only). */
+  function starMix() {
+    return clamp((cam.k - STAR_K) / STAR_K, 0, 1);
+  }
+
+  /** Far zoom: one soft disc per set instead of tens of thousands of sub-pixel stars. */
+  function drawSetFills(alpha) {
+    for (let s = 0; s < data.sets.length; s += 1) {
+      const set = data.sets[s];
+      const r = model.setR[s] * cam.k;
+      if (!inView(set.x, set.y, r)) continue;
+      if (mode === 'market') {
+        if (onlyListed && setBucket[s] < 0) continue;
+        const color = setBucket[s] >= 0 ? rgbRamp[setBucket[s]] : rgb.muted;
+        const share = setBucket[s] >= 0 ? 0.25 + setShare[s] * 0.55 : 0.12;
+        ctx.fillStyle = `rgb(${color} / ${share * alpha})`;
+      } else {
+        ctx.fillStyle = `rgb(${rgb.card} / ${0.3 * alpha})`;
+      }
+      ctx.beginPath();
+      ctx.arc(toScreenX(set.x), toScreenY(set.y), Math.max(r, 0.8), 0, TAU);
+      ctx.fill();
+    }
+  }
+
   function paintCards(list, lit = false) {
+    if (!list) {
+      // Level of detail: discs far out, stars fade in as they get room.
+      const mix = starMix();
+      if (mix < 1) drawSetFills(1 - mix);
+      if (mix <= 0) return;
+      const keep = ctx.globalAlpha;
+      ctx.globalAlpha = keep * mix;
+      paintStars(null, lit);
+      ctx.globalAlpha = keep;
+      return;
+    }
+    paintStars(list, lit);
+  }
+
+  function paintStars(list, lit) {
     if (mode !== 'market') {
       ctx.fillStyle = lit ? colors.text : `rgb(${rgb.card} / ${clamp(0.35 + cam.k * 0.5, 0.35, 0.95)})`;
       drawCards(list);
@@ -315,11 +380,12 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
   }
 
   /** Radial labels for the Pokédex / artist rings, most-linked first, never stacked. */
-  function ringLabels(kind, rows, taken, allow, inward = false) {
+  function ringLabels(kind, rows, sorted, allow, inward = false) {
     const size = 11;
     const accepted = [];
-    const order = rows.map((row, i) => i).filter((i) => !allow || allow.has(i)).sort((a, b) => rows[b].n - rows[a].n);
-    let budget = 260;
+    const order = allow ? sorted.filter((i) => allow.has(i)) : sorted;
+    // More names as you zoom in: a handful on the overview, up to 260 close up.
+    let budget = Math.round(clamp(40 * (cam.k / (fitK() || cam.k)), 40, 260));
     for (const i of order) {
       if (budget <= 0) break;
       const row = rows[i];
@@ -351,7 +417,6 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
       const ey = sy + Math.sin(along) * (gap + w);
       labelHits.push({ box: [Math.min(sx, ex) - 4, Math.min(sy, ey) - 6, Math.max(sx, ex) + 4, Math.max(sy, ey) + 6], ref: { kind, i } });
     }
-    return taken;
   }
 
   function drawLabels(highlight) {
@@ -359,7 +424,6 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
     const k = cam.k;
     // Pages first: the core is what most people come here for.
     if (!hidden.has('page')) {
-      const pageOrder = data.pages.map((_, i) => i).sort((a, b) => model.pageIn[b].length - model.pageIn[a].length);
       for (const i of pageOrder) {
         if (highlight && !highlight.page.has(i)) continue;
         const page = data.pages[i];
@@ -371,7 +435,7 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
     const eraAlpha = clamp(1.6 - (k * 180) / Math.min(W, H), 0, 1);
     if (eraAlpha > 0.05) {
       data.eras.forEach((era, e) => {
-        if (!model.setsOnEra[e].length && !data.sets.some((set) => set.era === e)) return;
+        if (!liveEra[e]) return;
         if (highlight && !highlight.era.has(e)) return;
         const size = clamp(era.r * k * 0.16, 12, 22);
         ctx.globalAlpha = eraAlpha;
@@ -380,8 +444,7 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
       });
     }
     if (!hidden.has('set')) {
-      const order = data.sets.map((_, i) => i).sort((a, b) => data.sets[b].n - data.sets[a].n);
-      for (const s of order) {
+      for (const s of setOrder) {
         if (highlight && !highlight.set.has(s)) continue;
         const set = data.sets[s];
         const r = model.setR[s] * k;
@@ -407,8 +470,8 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
         }
       }
     }
-    if (!hidden.has('species')) ringLabels('species', data.species, taken, highlight?.species, true);
-    if (!hidden.has('artist')) ringLabels('artist', data.artists, taken, highlight?.artist);
+    if (!hidden.has('species')) ringLabels('species', data.species, speciesOrder, highlight?.species, true);
+    if (!hidden.has('artist')) ringLabels('artist', data.artists, artistOrder, highlight?.artist);
   }
 
   function draw() {
@@ -541,7 +604,7 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
     let bestD = Infinity;
     for (let c = c0; c <= c1; c += 1) {
       for (let r = r0; r <= r1; r += 1) {
-        const list = grid.get(`${c},${r}`);
+        const list = getGrid().get(cellKey(c, r));
         if (!list) continue;
         for (let j = 0; j < list.length; j += 2) {
           const kind = list[j];

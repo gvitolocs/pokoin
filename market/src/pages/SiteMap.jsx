@@ -34,15 +34,6 @@ const LEGEND = [
   { kind: 'artist', label: 'Artists' },
 ];
 
-const GROUP_TITLE = {
-  landing: 'Home',
-  catalog: 'Catalog',
-  competitive: 'Competitive',
-  community: 'Community',
-  account: 'Account',
-  info: 'About Pokoin',
-};
-
 /** One-click examples for the path finder: famous pairs that cross eras. */
 const PATH_EXAMPLES = [
   ['pokemon:pikachu', 'pokemon:charizard'],
@@ -299,7 +290,7 @@ function Panel({ model, selected, target, path, marketAt, onPick, onTarget, onRe
       ) : null}
       {into.length ? <h3>Linked from</h3> : null}
       {into.map((group) => <RefList key={`in-${group.key}`} model={model} group={group} onPick={onPick} />)}
-      {selected.kind !== 'page' || !['internal', 'tests'].includes(model.data.pages[selected.i].group) ? (
+      {selected.kind !== 'page' || model.data.pages[selected.i].group !== 'internal' ? (
         <p className="sm-note">Plus the header &amp; footer, which every page carries.</p>
       ) : null}
     </aside>
@@ -307,14 +298,17 @@ function Panel({ model, selected, target, path, marketAt, onPick, onTarget, onRe
 }
 
 function SearchBox({ model, onPick, kinds = null, placeholder = 'Find a page, set, Pokémon, artist or card', label = 'Search the site map' }) {
-  const search = useMemo(() => createSearch(model), [model]);
+  // The name index is built on the first keystroke, not on page load.
+  const searchRef = useRef(null);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const listId = useMemo(() => `sm-hits-${Math.random().toString(36).slice(2, 8)}`, []);
   const results = useMemo(() => {
-    const hits = search(query, kinds ? 30 : 10);
+    if (!query.trim()) return [];
+    searchRef.current ||= createSearch(model);
+    const hits = searchRef.current(query, kinds ? 30 : 10);
     return (kinds ? hits.filter((ref) => kinds.has(ref.kind)) : hits).slice(0, 10);
-  }, [search, query, kinds]);
+  }, [model, query, kinds]);
   const pick = (ref) => {
     onPick(ref);
     setQuery('');
@@ -355,76 +349,6 @@ function SearchBox({ model, onPick, kinds = null, placeholder = 'Find a page, se
       ) : null}
       {query && !results.length ? <p className="sm-empty">Nothing on the map matches “{query}”.</p> : null}
     </div>
-  );
-}
-
-/** The same map as plain links: the text alternative to the canvas, and crawlable. */
-function HubIndex({ model }) {
-  const { data } = model;
-  const groups = useMemo(() => {
-    const out = {};
-    data.pages.forEach((page) => {
-      if (page.template || !GROUP_TITLE[page.group]) return;
-      (out[page.group] ||= []).push(page);
-    });
-    return out;
-  }, [data]);
-  return (
-    <section className="sm-index" aria-labelledby="sm-index-title">
-      <h2 id="sm-index-title">Every hub, as a list</h2>
-      <p className="sm-lede">
-        {fmt(data.stats.cards)} card desks hang off these hubs: open a set, a Pokémon or an artist to reach them.
-      </p>
-      <div className="sm-index-grid">
-        {Object.entries(GROUP_TITLE).filter(([key]) => groups[key]).map(([key, title]) => (
-          <div key={key}>
-            <h3>{title}</h3>
-            <ul>
-              {groups[key].map((page) => (
-                <li key={page.id}>
-                  {page.path === '/' ? <a href="/">{page.label}</a> : <Link to={page.path}>{page.label}</Link>}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-      <details>
-        <summary>Eras and sets <span>{fmt(data.sets.length)}</span></summary>
-        <div className="sm-columns">
-          {data.eras.map((era, e) => {
-            const sets = data.sets.filter((set) => set.era === e);
-            if (!sets.length) return null;
-            return (
-              <div key={era.id} className="sm-era">
-                <h4><Link to={`/marketplace/eras/${era.id}`}>{era.name}</Link></h4>
-                <ul>
-                  {sets.sort((a, b) => a.name.localeCompare(b.name)).map((set) => (
-                    <li key={set.slug}><Link to={`/marketplace/sets/${set.slug}`}>{set.name}</Link></li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
-      </details>
-      <details>
-        <summary>Pokémon <span>{fmt(data.species.length)}</span></summary>
-        <ul className="sm-flow">
-          {data.species.map((row) => (
-            <li key={row.slug}><Link to={`/marketplace/en/pokemon/${row.slug}`}>{row.name}</Link></li>
-          ))}
-        </ul>
-      </details>
-      <details>
-        <summary>Artists <span>{fmt(data.artists.length)}</span></summary>
-        <ul className="sm-flow">
-          {[...data.artists].sort((a, b) => a.name.localeCompare(b.name)).map((row) => (
-            <li key={row.slug}><Link to={`/marketplace/en/artists/${row.slug}`}>{row.name}</Link></li>
-          ))}
-        </ul>
-      </details>
-    </section>
   );
 }
 
@@ -590,7 +514,7 @@ export default function SiteMap() {
           className="sm-canvas"
           tabIndex={0}
           role="img"
-          aria-label="Map of every pokoin.com page and link. Drag to pan, scroll or pinch to zoom, click a node to see its links. The same hubs are listed as links below the map."
+          aria-label="Map of every pokoin.com page and link. Drag to pan, scroll or pinch to zoom, click a node to see its links. Use the search box to find any page."
         />
         <header className="sm-head">
           <p className="page-kicker">Pokoin</p>
@@ -623,7 +547,6 @@ export default function SiteMap() {
               })}
             </p>
           ) : null}
-          {model ? <a className="sm-jump" href="#sm-index-title">Browse as a list ↓</a> : null}
         </header>
         {!model && !error ? <p className="sm-status" role="status">Mapping every page…</p> : null}
         {error ? <p className="sm-status" role="alert">The map did not load ({error}).</p> : null}
@@ -686,15 +609,6 @@ export default function SiteMap() {
           />
         ) : null}
       </div>
-      {stats ? (
-        <p className="sm-footnote">
-          {fmt(stats.pageLinks)} links between {fmt(stats.templates)} page templates, read from the app source ·{' '}
-          {fmt(stats.catalogLinks)} catalog links between eras, sets, card desks, Pokémon, artists and rarity hubs ·{' '}
-          {fmt(stats.shellLinks)} header &amp; footer links. Market colours are the cheapest listing on {dateLabel(stats.marketAt)}; a card&apos;s panel shows its live price.{' '}
-          The graph updates weekly; last updated {dateLabel(data.generatedAt)}.
-        </p>
-      ) : null}
-      {model ? <HubIndex model={model} /> : null}
     </div>
   );
 }

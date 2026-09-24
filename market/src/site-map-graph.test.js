@@ -144,9 +144,9 @@ test('market summary counts listed desks and finds the cheapest', () => {
   }
 });
 
-test('review boards open on test.pokoin.com, not pokoin.com', () => {
-  const tests = refFromKey(model, 'page:/tests');
-  assert.equal(nodeInfo(model, tests).href, 'https://test.pokoin.com/tests');
-  const home = refFromKey(model, 'page:/marketplace');
-  assert.equal(nodeInfo(model, home).href, '/marketplace');
+test('review boards and plumbing routes are not on the map', () => {
+  for (const id of ['/tests', '/sanitize', '/espurr', '/ocr', '/ocr/artists', '/artwork', '/jumbos', '/extension/auth-bridge']) {
+    assert.equal(refFromKey(model, `page:${id}`), null, id);
+  }
+  assert.ok(refFromKey(model, 'page:/marketplace'));
 });

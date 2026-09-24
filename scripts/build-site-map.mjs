@@ -102,16 +102,17 @@ const LABELS = {
   '/buy': 'Buy PKN',
 };
 
-/** Review boards live on test.pokoin.com only; vercel.json redirects them off pokoin.com. */
-const TEST_BOARDS = new Set(['/tests', '/sanitize', '/espurr', '/ocr', '/ocr/artists', '/artwork', '/jumbos']);
-const TEST_HOST = 'https://test.pokoin.com';
-const INTERNAL = new Set(['/admin', '/marketplace/admin', '/marketplace/admin/edit', '/extension/auth-bridge']);
+/**
+ * Not on the map: review boards live on test.pokoin.com only (vercel.json
+ * redirects them off pokoin.com), and the extension auth bridge is plumbing.
+ */
+const OFF_MAP = new Set(['/tests', '/sanitize', '/espurr', '/ocr', '/ocr/artists', '/artwork', '/jumbos', '/extension/auth-bridge']);
+const INTERNAL = new Set(['/admin', '/marketplace/admin', '/marketplace/admin/edit']);
 const ACCOUNT = /^\/(auth|profile|cart|wallet|exchange|messages|checkout|orders|collection|inventory|scan|cardscan|scancard|buy|email-preferences|favorites|nft)\b|^\/marketplace\/(portfolio|watchlist)/;
 const INFO = /^\/(docs|about|careers|contact|privacy|protection|earn|whitepaper|health)$/;
 
 function routeGroup(path) {
   if (path === '/') return 'landing';
-  if (TEST_BOARDS.has(path)) return 'tests';
   if (INTERNAL.has(path)) return 'internal';
   if (/^\/marketplace\/competitive/.test(path)) return 'competitive';
   if (/^\/(forum|marketplace\/signal)/.test(path)) return 'community';
@@ -143,6 +144,7 @@ function parseRoutes() {
     const m = line.match(/both\('([^']+)',\s*(.+)\)\}\s*$/);
     if (!m) continue;
     const [, path, element] = m;
+    if (OFF_MAP.has(path)) continue;
     const redirect = element.match(/^<Navigate to="([^"]+)"/);
     if (redirect) {
       redirects.push([path, redirect[1]]);
@@ -316,7 +318,8 @@ function buildPageGraph() {
   }
   edges.set('/', new Set([...(edges.get('/') || []), ...landingLinks]));
   const chromeLinks = linksOf([chromeFile]);
-  const boards = new Set([...TEST_BOARDS, '/extension/auth-bridge', '/']);
+  // Pages without the header & footer.
+  const boards = new Set(['/']);
   return { routes: patterns, edges, chromeLinks, boards };
 }
 
@@ -623,7 +626,6 @@ async function main() {
       label: labelFor(path),
       group: routeGroup(path),
       template: /:\w/.test(path.replace(/:lang\b/, 'en')),
-      host: TEST_BOARDS.has(path) ? TEST_HOST : undefined,
     });
   }
   const shell = addPage({ id: 'chrome', path: '', label: 'Header & footer', group: 'shell', template: false });
@@ -673,11 +675,9 @@ async function main() {
     + setEraLinks // era → set
     + cardCount * 2 // set ↔ card
     + withSpecies * 2 + withArtist * 2 + withRarity * 2; // species / artist / rarity ↔ card
-  // pokoin.com pages only: the review boards are counted on test.pokoin.com, not here.
-  const pageCount = pageGraph.routes.filter((p) => !/:\w/.test(p.replace(/:lang\b/, 'en')) && !TEST_BOARDS.has(p)).length
+  const pageCount = pageGraph.routes.filter((p) => !/:\w/.test(p.replace(/:lang\b/, 'en'))).length
     + hubInstances.length + eras.length + sets.length + species.length + liveArtists.length + cardCount;
-  const chromeless = [...pageGraph.boards].filter((p) => !TEST_BOARDS.has(p)).length;
-  const shellLinks = pageGraph.chromeLinks.size * (pageCount - chromeless);
+  const shellLinks = pageGraph.chromeLinks.size * (pageCount - pageGraph.boards.size);
 
   const names = [];
   const nameIndex = new Map();
@@ -710,7 +710,7 @@ async function main() {
       marketAt: cards.reduce((m, c) => (c.snapshot > m ? c.snapshot : m), '').slice(0, 10),
     },
     radii: { core: round(ringRadius - maxEra), galaxy: round(galaxyRadius), species: round(speciesRadius), artists: round(artistRadius) },
-    pages: pages.map((p) => ({ id: p.id, path: p.path, label: p.label, group: p.group, template: p.template || undefined, host: p.host, x: round(p.x), y: round(p.y) })),
+    pages: pages.map((p) => ({ id: p.id, path: p.path, label: p.label, group: p.group, template: p.template || undefined, x: round(p.x), y: round(p.y) })),
     pageLinks: pageLinkList,
     eras: eras.map((e) => ({ id: e.id, name: e.name, x: round(e.x), y: round(e.y), r: round(e.r) })),
     sets: sets.map((s) => ({
