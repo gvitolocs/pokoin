@@ -292,6 +292,28 @@
   ],
   "redirects": [
     {
+      "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos)",
+      "has": [
+        {
+          "type": "host",
+          "value": "pokoin.com"
+        }
+      ],
+      "destination": "https://test.pokoin.com/:board",
+      "permanent": true
+    },
+    {
+      "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos)/:rest*",
+      "has": [
+        {
+          "type": "host",
+          "value": "pokoin.com"
+        }
+      ],
+      "destination": "https://test.pokoin.com/:board/:rest*",
+      "permanent": true
+    },
+    {
       "source": "/",
       "has": [
         {

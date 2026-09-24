@@ -233,3 +233,10 @@ test('packPokedexSort is species millions plus CLIP cluster-oldest expansion', (
   assert.equal(packPokedexSort(235, 80002), 235080002);
   assert.equal(packPokedexSort(TRAINER_DEX, 80000), TRAINER_DEX * 1_000_000 + 80000);
 });
+
+test('accented species names fold before tokenizing (Flabébé is #669)', () => {
+  assert.equal(pokedexNumber('Flabébé'), 669);
+  assert.equal(pokedexNumber('Flabébé ex'), 669);
+  assert.equal(pokedexNumber('Poké Ball'), 0);
+  assert.equal(pokedexNumber('Pokémon Center'), 0);
+});

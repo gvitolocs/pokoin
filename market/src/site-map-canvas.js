@@ -3,7 +3,7 @@
  * spatial grid for hover/click. Imperative on purpose — React only owns the
  * panel and overlays around it.
  */
-import { MAX_LINES, neighbors, position, sameRef } from './site-map-graph.js';
+import { MAX_LINES, PRICE_BUCKETS, neighbors, nodeInfo, position, priceBucket, sameRef } from './site-map-graph.js';
 
 const CELL = 6;
 const TAU = Math.PI * 2;
@@ -61,12 +61,22 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
   const pointers = new Map();
   let gesture = null;
   let pendingFly = null;
+  let mode = 'structure';
+  let onlyListed = false;
+  let path = null;
+  // Market colour step per desk (-1 = no listing), and the desks per step for full-frame draws.
+  const bucket = new Int8Array(model.count);
+  const bucketLists = Array.from({ length: PRICE_BUCKETS + 1 }, () => []);
+  for (let i = 0; i < model.count; i += 1) {
+    bucket[i] = priceBucket(model, i);
+    bucketLists[bucket[i] + 1].push(i);
+  }
   // Screen space covered by the details panel; fly targets centre in what is left.
   let inset = { top: 0, right: 0, bottom: 0 };
 
   function refreshColors() {
     colors = readColors();
-    rgb = Object.fromEntries(Object.entries(colors).map(([k, v]) => [k, hexToRgb(v)]));
+    rgb = Object.fromEntries(Object.entries(colors).filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, hexToRgb(v)]));
   }
   refreshColors();
 
@@ -159,6 +169,62 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
       else ctx.rect(toScreenX(x) - size / 2, toScreenY(y) - size / 2, size, size);
     }
     ctx.fill();
+  }
+
+  /** Structure: one starlight colour. Market: unlisted desks dim, listed desks on the price ramp. */
+  function paintCards(list, lit = false) {
+    if (mode !== 'market') {
+      ctx.fillStyle = lit ? colors.text : `rgb(${rgb.card} / ${clamp(0.35 + cam.k * 0.5, 0.35, 0.95)})`;
+      drawCards(list);
+      return;
+    }
+    let groups = bucketLists;
+    if (list) {
+      groups = Array.from({ length: PRICE_BUCKETS + 1 }, () => []);
+      for (const i of list) groups[bucket[i] + 1].push(i);
+    }
+    if (!onlyListed) {
+      ctx.fillStyle = `rgb(${rgb.muted} / ${lit ? 0.7 : 0.16})`;
+      drawCards(groups[0]);
+    }
+    for (let b = 0; b < PRICE_BUCKETS; b += 1) {
+      ctx.fillStyle = colors.ramp[b];
+      drawCards(groups[b + 1]);
+    }
+  }
+
+  function drawPath() {
+    if (!path || path.length < 2) return;
+    const pts = path.map((ref) => position(model, ref));
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = colors.yellow;
+    ctx.beginPath();
+    pts.forEach(([x, y], n) => {
+      if (n) ctx.lineTo(toScreenX(x), toScreenY(y));
+      else ctx.moveTo(toScreenX(x), toScreenY(y));
+    });
+    ctx.stroke();
+    const taken = [];
+    path.forEach((ref, n) => {
+      const sx = toScreenX(pts[n][0]);
+      const sy = toScreenY(pts[n][1]);
+      ctx.fillStyle = colors[ref.kind === 'card' ? 'text' : ref.kind === 'era' ? 'yellow' : ref.kind] || colors.text;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 7, 0, TAU);
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = colors.bg;
+      ctx.stroke();
+      ctx.font = FONT(9, 800);
+      ctx.fillStyle = colors.bg;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(n + 1), sx, sy + 0.5);
+      const info = nodeInfo(model, ref);
+      const below = n % 2 === 1;
+      placeLabel(info.label, sx, below ? sy + 11 : sy - 11, { size: 12, weight: 700, baseline: below ? 'top' : 'bottom', ref, taken });
+    });
   }
 
   function drawRings() {
@@ -351,22 +417,23 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
     ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, W, H);
     labelHits = [];
-    const dim = focus ? 0.28 : 1;
+    const dim = focus || path ? 0.28 : 1;
 
     ctx.globalAlpha = dim;
     drawRings();
     if (!hidden.has('page')) drawPageLinks();
     if (!hidden.has('set')) drawSetDiscs();
-    if (!hidden.has('card')) {
-      ctx.fillStyle = `rgb(${rgb.card} / ${clamp(0.35 + cam.k * 0.5, 0.35, 0.95)})`;
-      drawCards();
-    }
+    if (!hidden.has('card')) paintCards(null);
     if (!hidden.has('species')) drawHubs('species', data.species, colors.species);
     if (!hidden.has('artist')) drawHubs('artist', data.artists, colors.artist);
     if (!hidden.has('page')) drawHubs('page', data.pages, colors.page);
     ctx.globalAlpha = 1;
 
-    if (focus) {
+    if (path) {
+      ctx.fillStyle = `rgb(${rgb.bg} / 0.55)`;
+      ctx.fillRect(0, 0, W, H);
+      drawPath();
+    } else if (focus) {
       ctx.fillStyle = `rgb(${rgb.bg} / 0.55)`;
       ctx.fillRect(0, 0, W, H);
       const [fx, fy] = focus.origin;
@@ -404,10 +471,7 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
         ctx.stroke();
         ctx.setLineDash([]);
       }
-      if (focus.card.size) {
-        ctx.fillStyle = colors.text;
-        drawCards([...focus.card]);
-      }
+      if (focus.card.size) paintCards([...focus.card], true);
       if (focus.species.size) drawHubs('species', data.species, colors.species, [...focus.species]);
       if (focus.artist.size) drawHubs('artist', data.artists, colors.artist, [...focus.artist]);
       if (focus.page.size) drawHubs('page', data.pages, colors.page, [...focus.page]);
@@ -483,6 +547,7 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
           const kind = list[j];
           if (hidden.has(kind)) continue;
           const i = list[j + 1];
+          if (kind === 'card' && mode === 'market' && onlyListed && bucket[i] < 0) continue;
           const [x, y] = position(model, { kind, i });
           let d = Math.hypot(x - wx, y - wy) * cam.k;
           if (kind !== 'card') d -= 4; // hubs win ties with the stars under them
@@ -672,6 +737,30 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
     setSelected(ref) {
       selected = ref;
       focus = computeFocus(ref);
+      request();
+    },
+    setMarket(next) {
+      mode = next.mode === 'market' ? 'market' : 'structure';
+      onlyListed = Boolean(next.onlyListed);
+      request();
+    },
+    setPath(next) {
+      path = next && next.length > 1 ? next : null;
+      request();
+    },
+    /** Frame a set of nodes (a path) in the space the panel leaves. */
+    frame(refs, { ms = 800 } = {}) {
+      if (!refs?.length) return;
+      if (!W || !H) {
+        pendingFly = { ref: refs[0], opts: { ms } };
+        return;
+      }
+      const pts = refs.map((ref) => position(model, ref));
+      const xs = pts.map((p) => p[0]);
+      const ys = pts.map((p) => p[1]);
+      const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+      const k = clamp(Math.min((W - inset.right) / ((x1 - x0) * 1.3 + 20), (H - inset.top - inset.bottom) / ((y1 - y0) * 1.3 + 20), 8), MIN_K, MAX_K);
+      anim = { from: { ...cam }, to: { x: (x0 + x1) / 2 + inset.right / 2 / k, y: (y0 + y1) / 2 + (inset.bottom - inset.top) / 2 / k, k }, start: performance.now(), ms };
       request();
     },
     setInset(next) {

@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   buildModel,
+  marketSummary,
+  neighbors as neighborsOf,
+  priceBucket,
+  shortestPath,
   createSearch,
   neighbors,
   nodeInfo,
@@ -99,4 +103,50 @@ test('rings sit outside the galaxy', () => {
   assert.ok(radii.core < radii.galaxy && radii.galaxy < radii.species && radii.species < radii.artists);
   const [x, y] = position(model, { kind: 'species', i: 0 });
   assert.ok(Math.abs(Math.hypot(x, y) - radii.species) < 0.05);
+});
+
+test('Flabébé has its cards on the map (accent-folded Pokédex #669)', () => {
+  const flabebe = refFromKey(model, 'pokemon:flabebe');
+  assert.ok(data.species[flabebe.i].n > 0);
+});
+
+test('six degrees: every hop of a path is a real link', () => {
+  const from = refFromKey(model, 'pokemon:pikachu');
+  const to = refFromKey(model, 'pokemon:charizard');
+  const path = shortestPath(model, from, to);
+  assert.ok(path && path.length >= 3);
+  assert.deepEqual(path[0], from);
+  assert.deepEqual(path[path.length - 1], to);
+  for (let n = 1; n < path.length; n += 1) {
+    const { out, into } = neighborsOf(model, path[n - 1]);
+    const linked = [...out, ...into].flatMap((g) => g.refs).some((r) => r.kind === path[n].kind && r.i === path[n].i);
+    assert.ok(linked, `hop ${n} ${path[n - 1].kind}→${path[n].kind} is a link`);
+  }
+  assert.equal(shortestPath(model, from, from).length, 1);
+  assert.equal(shortestPath(model, from, { kind: 'page', i: 0 }), null);
+});
+
+test('market summary counts listed desks and finds the cheapest', () => {
+  const set = refFromKey(model, 'set:base-set');
+  const summary = marketSummary(model, set);
+  assert.equal(summary.total, data.sets[set.i].n);
+  assert.ok(summary.listed <= summary.total);
+  if (summary.cheapest) {
+    const cheapest = data.cards.pkn[summary.cheapest.i];
+    const start = model.setStart[set.i];
+    for (let k = 0; k < summary.total; k += 1) {
+      const pkn = data.cards.pkn[start + k];
+      if (pkn > 0) assert.ok(pkn >= cheapest);
+    }
+  }
+  for (let i = 0; i < model.count; i += 1009) {
+    assert.equal(priceBucket(model, i) >= 0, data.cards.pkn[i] > 0);
+  }
+});
+
+test('review boards open on test.pokoin.com, not pokoin.com', () => {
+  const tests = refFromKey(model, 'page:/tests');
+  assert.equal(nodeInfo(model, tests).href, 'https://test.pokoin.com/tests');
+  const home = refFromKey(model, 'page:/marketplace');
+  assert.equal(nodeInfo(model, home).href, '/marketplace');
 });
