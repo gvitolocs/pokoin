@@ -70,6 +70,8 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
   let mode = 'structure';
   let onlyListed = false;
   let path = null;
+  // Compare view: [{ cards: number[], color }] — every other node goes grey.
+  let compare = null;
   // Market colour step per desk (-1 = no listing), and the desks per step for full-frame draws.
   const bucket = new Int8Array(model.count);
   const bucketLists = Array.from({ length: PRICE_BUCKETS + 1 }, () => []);
@@ -93,6 +95,20 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
   const pageOrder = data.pages.map((_, i) => i).sort((a, b) => model.pageIn[b].length - model.pageIn[a].length);
   const setOrder = data.sets.map((_, i) => i).sort((a, b) => data.sets[b].n - data.sets[a].n);
   const liveEra = data.eras.map((_, e) => model.setsOnEra[e].length > 0 || data.sets.some((set) => set.era === e));
+  // Era label anchor: top-centre of the sets actually drawn for that era (the packing
+  // circle is lopsided, so its own centre/top floats beside the bubble).
+  const eraTop = data.eras.map((era) => ({ x: era.x, y: era.y - era.r, minX: Infinity, maxX: -Infinity }));
+  data.sets.forEach((set, s) => {
+    const top = eraTop[set.era];
+    const r = model.setR[s];
+    if (top.minX === Infinity) top.y = Infinity;
+    top.minX = Math.min(top.minX, set.x - r);
+    top.maxX = Math.max(top.maxX, set.x + r);
+    top.y = Math.min(top.y, set.y - r);
+  });
+  eraTop.forEach((top) => {
+    if (top.minX !== Infinity) top.x = (top.minX + top.maxX) / 2;
+  });
   const speciesOrder = data.species.map((_, i) => i).sort((a, b) => data.species[b].n - data.species[a].n);
   const artistOrder = data.artists.map((_, i) => i).sort((a, b) => data.artists[b].n - data.artists[a].n);
   // Screen space covered by the details panel; fly targets centre in what is left.
@@ -176,9 +192,9 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
     ctx.arc(sx, sy, r, 0, TAU);
   }
 
-  function drawCards(only) {
+  function drawCards(only, minSize = 0.9) {
     const k = cam.k;
-    const size = clamp(k * 0.62, 0.9, 12);
+    const size = clamp(k * 0.62, minSize, 12);
     const [x0, y0] = toWorld(-size, -size);
     const [x1, y1] = toWorld(W + size, H + size);
     const round = size >= 2.4;
@@ -305,7 +321,7 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
 
   function drawSetDiscs(alphaScale = 1) {
     ctx.lineWidth = 1;
-    ctx.strokeStyle = `rgb(${rgb.set} / ${0.5 * alphaScale})`;
+    ctx.strokeStyle = compare ? `rgb(${rgb.muted} / ${0.3 * alphaScale})` : `rgb(${rgb.set} / ${0.5 * alphaScale})`;
     ctx.beginPath();
     data.sets.forEach((set, s) => {
       const r = model.setR[s] * cam.k;
@@ -384,20 +400,18 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
     const size = 11;
     const accepted = [];
     const order = allow ? sorted.filter((i) => allow.has(i)) : sorted;
-    // More names as you zoom in: a handful on the overview, up to 260 close up.
-    let budget = Math.round(clamp(40 * (cam.k / (fitK() || cam.k)), 40, 260));
+    // As many names as the ring has pixels for: one label per (font + 3 px) of arc,
+    // most-linked first. Zooming in opens room for more.
     for (const i of order) {
-      if (budget <= 0) break;
       const row = rows[i];
       const radius = Math.hypot(row.x, row.y);
-      const minGap = (size + 2) / (radius * cam.k);
+      const minGap = (size + 3) / (radius * cam.k);
       const angle = Math.atan2(row.y, row.x);
       if (accepted.some((a) => Math.abs(((angle - a + Math.PI * 3) % TAU) - Math.PI) < minGap)) continue;
       const sx = toScreenX(row.x);
       const sy = toScreenY(row.y);
       if (sx < -80 || sx > W + 80 || sy < -80 || sy > H + 80) continue;
       accepted.push(angle);
-      budget -= 1;
       // Pokédex labels read inward, artist labels outward: the two rings never share a gap.
       const along = inward ? angle + Math.PI : angle;
       const upside = Math.cos(along) < 0;
@@ -422,6 +436,19 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
   function drawLabels(highlight) {
     const taken = [];
     const k = cam.k;
+    // Eras first (they win label collisions), centred on top of their bubble; they fade
+    // once a single era fills the screen.
+    const eraAlpha = clamp(1.6 - (k * 180) / Math.min(W, H), 0, 1);
+    if (eraAlpha > 0.05) {
+      data.eras.forEach((era, e) => {
+        if (!liveEra[e]) return;
+        if (highlight && !highlight.era.has(e)) return;
+        const size = clamp(era.r * k * 0.16, 12, 22);
+        ctx.globalAlpha = eraAlpha;
+        placeLabel(era.name.toUpperCase(), toScreenX(eraTop[e].x), toScreenY(eraTop[e].y) - 5, { size, weight: 700, color: colors.yellow, baseline: 'bottom', ref: { kind: 'era', i: e }, taken });
+        ctx.globalAlpha = 1;
+      });
+    }
     // Pages first: the core is what most people come here for.
     if (!hidden.has('page')) {
       for (const i of pageOrder) {
@@ -430,18 +457,6 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
         const r = Math.max(3, 1.6 * k);
         placeLabel(page.label, toScreenX(page.x), toScreenY(page.y) - r - 2, { size: 11, baseline: 'bottom', ref: { kind: 'page', i }, taken, color: colors.text });
       }
-    }
-    // Eras above their clusters; fade once a single era fills the screen.
-    const eraAlpha = clamp(1.6 - (k * 180) / Math.min(W, H), 0, 1);
-    if (eraAlpha > 0.05) {
-      data.eras.forEach((era, e) => {
-        if (!liveEra[e]) return;
-        if (highlight && !highlight.era.has(e)) return;
-        const size = clamp(era.r * k * 0.16, 12, 22);
-        ctx.globalAlpha = eraAlpha;
-        placeLabel(era.name.toUpperCase(), toScreenX(era.x), toScreenY(era.y - era.r) - 6, { size, weight: 700, color: colors.yellow, baseline: 'bottom', ref: { kind: 'era', i: e }, taken });
-        ctx.globalAlpha = 1;
-      });
     }
     if (!hidden.has('set')) {
       for (const s of setOrder) {
@@ -480,17 +495,25 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
     ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, W, H);
     labelHits = [];
-    const dim = focus || path ? 0.28 : 1;
+    const dim = focus || path ? 0.28 : compare ? 0.45 : 1;
 
     ctx.globalAlpha = dim;
     drawRings();
     if (!hidden.has('page')) drawPageLinks();
     if (!hidden.has('set')) drawSetDiscs();
     if (!hidden.has('card')) paintCards(null);
-    if (!hidden.has('species')) drawHubs('species', data.species, colors.species);
-    if (!hidden.has('artist')) drawHubs('artist', data.artists, colors.artist);
-    if (!hidden.has('page')) drawHubs('page', data.pages, colors.page);
+    // Compare keeps its colours for the keywords: hub dots go grey.
+    const hubColor = (color) => (compare ? `rgb(${rgb.muted} / 0.6)` : color);
+    if (!hidden.has('species')) drawHubs('species', data.species, hubColor(colors.species));
+    if (!hidden.has('artist')) drawHubs('artist', data.artists, hubColor(colors.artist));
+    if (!hidden.has('page')) drawHubs('page', data.pages, hubColor(colors.page));
     ctx.globalAlpha = 1;
+    if (compare && !focus && !path) {
+      for (const group of compare) {
+        ctx.fillStyle = group.color;
+        drawCards(group.cards, 2.6);
+      }
+    }
 
     if (path) {
       ctx.fillStyle = `rgb(${rgb.bg} / 0.55)`;
@@ -805,6 +828,10 @@ export function createSiteMapCanvas(canvas, model, { onHover, onSelect, readColo
     setMarket(next) {
       mode = next.mode === 'market' ? 'market' : 'structure';
       onlyListed = Boolean(next.onlyListed);
+      request();
+    },
+    setCompare(next) {
+      compare = next && next.some((group) => group.cards.length) ? next : null;
       request();
     },
     setPath(next) {

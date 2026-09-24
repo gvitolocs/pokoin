@@ -525,3 +525,157 @@ export function shortestPath(model, from, to) {
   for (let n = goal; n !== -1; n = prev[n]) path.push(refOf(n));
   return path.reverse();
 }
+
+/* ----------------------------------------------------------------- compare */
+
+export const MAX_COMPARE = 5;
+/** Era rows that are languages or leftovers, not a TCG block in print order. */
+const NON_BLOCK_ERAS = new Set(['Japanese', 'Chinese', 'Other']);
+
+function compareIndex(model) {
+  if (model.compare) return model.compare;
+  const names = model.data.names.map((name) => ` ${normalizeQuery(name)}`);
+  const cardsByName = groupBy(Array.from(model.data.cards.name), names.length);
+  // Every word-start phrase of one or two words, with the desks it would light up.
+  // Display keeps the printed casing ("Gardevoir ex") from the first name that has it.
+  const phrases = new Map();
+  const shown = new Map();
+  names.forEach((name, n) => {
+    const words = name.trim().split(' ').filter(Boolean);
+    const raw = model.data.names[n].split(/[^\p{L}\p{N}/]+/u).filter((word) => normalizeQuery(word));
+    const printed = raw.length === words.length ? raw : words;
+    const seen = new Map();
+    words.forEach((word, w) => {
+      if (word.length >= 2) seen.set(word, printed[w]);
+      // Possessives fold to "gardenia s"; that half-word is not worth suggesting.
+      if (words[w + 1] && words[w + 1] !== 's') seen.set(`${word} ${words[w + 1]}`, `${printed[w]} ${printed[w + 1]}`);
+    });
+    for (const [phrase, label] of seen) {
+      phrases.set(phrase, (phrases.get(phrase) || 0) + cardsByName[n].length);
+      if (!shown.has(phrase)) shown.set(phrase, label);
+    }
+  });
+  const species = new Map(model.data.species.map((row) => [normalizeQuery(row.name), row.name]));
+  const keywords = [...phrases]
+    .map(([text, n]) => ({ text, label: species.get(text) || shown.get(text), n, species: species.has(text) }))
+    .sort((a, b) => b.n - a.n);
+  model.compare = { names, cardsByName, keywords };
+  return model.compare;
+}
+
+/**
+ * Card desks whose name contains the keyword at a word start ("lucario" → Lucario,
+ * Mega Lucario ex, Lucario & Melmetal GX), accents folded.
+ */
+export function matchCards(model, keyword) {
+  const q = normalizeQuery(keyword);
+  if (!q) return [];
+  const { names, cardsByName } = compareIndex(model);
+  const out = [];
+  names.forEach((name, n) => {
+    if (name.includes(` ${q}`)) out.push(...cardsByName[n]);
+  });
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * Keywords worth comparing for what is typed so far: word-start phrases from card
+ * names, exact first, then Pokémon, then by how many desks they light up.
+ */
+export function suggestKeywords(model, query, limit = 6) {
+  const q = normalizeQuery(query);
+  if (!q) return [];
+  const { keywords } = compareIndex(model);
+  const hits = [];
+  for (const row of keywords) {
+    if (!row.text.startsWith(q) && !row.text.includes(` ${q}`)) continue;
+    hits.push(row);
+    if (hits.length >= 200) break;
+  }
+  const rank = (row) => (row.text === q ? 0 : row.text.startsWith(q) ? (row.species ? 1 : 2) : 3);
+  return hits.sort((a, b) => rank(a) - rank(b) || b.n - a.n).slice(0, limit);
+}
+
+/** One comparison row: reach across the catalog and the market for a set of card desks. */
+export function compareStats(model, cards) {
+  const { data } = model;
+  const sets = new Map();
+  const eras = new Set();
+  const artists = new Map();
+  const prices = [];
+  const mix = new Array(PRICE_BUCKETS).fill(0);
+  let cheapest = -1;
+  let priciest = -1;
+  let listings = 0;
+  for (const i of cards) {
+    const s = model.cardSet[i];
+    sets.set(s, (sets.get(s) || 0) + 1);
+    eras.add(data.sets[s].era);
+    const ar = data.cards.ar[i];
+    if (ar >= 0) artists.set(ar, (artists.get(ar) || 0) + 1);
+    const pkn = data.cards.pkn[i];
+    if (pkn > 0) {
+      prices.push(pkn);
+      listings += data.cards.lc[i] || 0;
+      mix[priceBucket(model, i)] += 1;
+      if (cheapest < 0 || pkn < data.cards.pkn[cheapest]) cheapest = i;
+      if (priciest < 0 || pkn > data.cards.pkn[priciest]) priciest = i;
+    }
+  }
+  prices.sort((a, b) => a - b);
+  const eraList = [...eras].sort((a, b) => a - b);
+  const blocks = eraList.filter((e) => !NON_BLOCK_ERAS.has(data.eras[e].name));
+  const top = (map) => [...map].sort((a, b) => b[1] - a[1])[0];
+  const topArtist = top(artists);
+  const topSet = top(sets);
+  return {
+    cards: cards.length,
+    sets: sets.size,
+    setCounts: sets,
+    eras: eraList,
+    debut: blocks.length ? blocks[0] : -1,
+    latest: blocks.length ? blocks[blocks.length - 1] : -1,
+    artists: artists.size,
+    artistCounts: artists,
+    listed: prices.length,
+    listings,
+    mix,
+    cheapest: cheapest >= 0 ? { kind: 'card', i: cheapest } : null,
+    priciest: priciest >= 0 ? { kind: 'card', i: priciest } : null,
+    median: prices.length ? prices[prices.length >> 1] : 0,
+    topArtist: topArtist ? { kind: 'artist', i: topArtist[0], n: topArtist[1] } : null,
+    topSet: topSet ? { kind: 'set', i: topSet[0], n: topSet[1] } : null,
+  };
+}
+
+/**
+ * What two or more keywords share: sets and artists that carry every one of them,
+ * and desks whose own name holds them all (tag teams, "Lucario & Melmetal").
+ */
+export function compareOverlap(model, rows) {
+  const live = rows.filter((row) => row.cards.length);
+  if (live.length < 2) return null;
+  const every = (maps) => {
+    const [first, ...rest] = maps;
+    const out = [];
+    for (const [key, n] of first) {
+      let total = n;
+      let ok = true;
+      for (const map of rest) {
+        if (!map.has(key)) { ok = false; break; }
+        total += map.get(key);
+      }
+      if (ok) out.push({ i: key, n: total });
+    }
+    return out.sort((a, b) => b.n - a.n);
+  };
+  const sets = every(live.map((row) => row.stats.setCounts));
+  const artists = every(live.map((row) => row.stats.artistCounts));
+  let both = new Set(live[0].cards);
+  for (const row of live.slice(1)) both = new Set(row.cards.filter((i) => both.has(i)));
+  return {
+    sets: sets.map(({ i, n }) => ({ kind: 'set', i, n })),
+    artists: artists.map(({ i, n }) => ({ kind: 'artist', i, n })),
+    cards: [...both].map((i) => ({ kind: 'card', i })),
+  };
+}

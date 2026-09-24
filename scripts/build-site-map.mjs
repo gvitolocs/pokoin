@@ -331,7 +331,8 @@ function loadCards() {
   if (file) {
     text = readFileSync(file, 'utf8');
   } else {
-    // Market: the listed cheapest PKN the tiles show (cheapest_homepage_cache_blueprint, all providers).
+    // Market: cheapest of CardTrader (cheapest_homepage_cache_blueprint) and every active Pokoin
+    // listing read live, so our own sellers count even when the nightly cache has not caught up.
     const sql = `select u.card_id, u.name, u.card_number, u.set_name, u.product_type,
         coalesce(c.pokedex_num, 10000), coalesce(nullif(c.artist, ''), c.illustrator, ''),
         coalesce(round(p.pkn), 0), coalesce(p.listings, 0), coalesce(c.homepage_image_url, ''),
@@ -339,10 +340,18 @@ function loadCards() {
       from marketplace_card_urls u
       left join marketplace_search_candidates c on c.card_id = u.card_id
       left join (
-        select pokoin_card_id, min(cheapest_price_pkn) as pkn, sum(eligible_listing_count) as listings,
-          max(coalesce(source_snapshot_at, updated_at))::text as snapshot
-        from cheapest_homepage_cache_blueprint
-        where cheapest_price_pkn > 0
+        select pokoin_card_id, min(pkn) as pkn, sum(listings) as listings, max(snapshot)::text as snapshot
+        from (
+          select pokoin_card_id, cheapest_price_pkn as pkn, eligible_listing_count as listings,
+            coalesce(source_snapshot_at, updated_at) as snapshot
+          from cheapest_homepage_cache_blueprint
+          where provider = 'cardtrader' and cheapest_price_pkn > 0
+          union all
+          select card_id, price_pkn, 1, updated_at
+          from marketplace_user_listings
+          where status = 'active' and quantity_available > 0 and price_pkn > 0
+            and coalesce(shipping_available, true)
+        ) offers
         group by pokoin_card_id
       ) p on p.pokoin_card_id = u.card_id::text
       where u.language = 'en'`;

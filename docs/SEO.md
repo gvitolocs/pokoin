@@ -117,3 +117,17 @@ them off the `pokoin.com` host, and the site map leaves them (and the
 extension auth bridge) off the graph. The map is the whole page: no footer,
 no list underneath. Far out, sets paint as discs; card stars fade in with
 zoom, and ring labels grow with it.
+
+Compare (`?view=compare&q=lucario,scizor`, up to five keywords): card desks
+whose name contains each keyword at a word start light up in that keyword's
+colour. Each field suggests word-start phrases from card names as you type,
+with the desks each would light up (Pokémon first). The panel opens with head
+to head lines (reach, cheaper median, debut era, listed share, priciest ask) and
+what the keywords share (sets, artists, desks naming all of them), then one
+card per keyword: desks, median PKN, price mix on the site-wide ramp, listings,
+sets, artists, era span, cheapest/priciest, biggest set and top artist.
+
+Phones (≤720px): the header is one compact block (title and counts on one line,
+modes full width, compare fields two per row); panels are a bottom sheet that
+peeks at 42% and expands from its grip; legend and zoom hide under the sheet. Market prices take the cheaper of the
+CardTrader cache and every active Pokoin listing, read live at build time.
