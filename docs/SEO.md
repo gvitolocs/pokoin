@@ -113,5 +113,7 @@ footer); a card's panel fetches the live price from
 
 Review boards (`/tests`, `/sanitize`, `/espurr`, `/ocr`, `/ocr/artists`,
 `/artwork`, `/jumbos`) are test.pokoin.com only: `vercel.json` 308-redirects
-them off the `pokoin.com` host, and the site map links them to
-test.pokoin.com and leaves them out of the pokoin.com page count.
+them off the `pokoin.com` host, and the site map leaves them (and the
+extension auth bridge) off the graph. The map is the whole page: no footer,
+no list underneath. Far out, sets paint as discs; card stars fade in with
+zoom, and ring labels grow with it.
