@@ -3,10 +3,14 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   buildModel,
+  compareOverlap,
+  compareStats,
   marketSummary,
+  matchCards,
   neighbors as neighborsOf,
   priceBucket,
   shortestPath,
+  suggestKeywords,
   createSearch,
   neighbors,
   nodeInfo,
@@ -149,4 +153,38 @@ test('review boards and plumbing routes are not on the map', () => {
     assert.equal(refFromKey(model, `page:${id}`), null, id);
   }
   assert.ok(refFromKey(model, 'page:/marketplace'));
+});
+
+test('compare matches a keyword at a word start and summarises it', () => {
+  const lucario = matchCards(model, 'lucario');
+  assert.ok(lucario.length > 0);
+  for (const i of lucario.slice(0, 50)) assert.match(data.names[data.cards.name[i]], /(^|[^a-z])lucario/i);
+  assert.ok(matchCards(model, 'Flabébé').length > 0);
+  assert.equal(matchCards(model, '   ').length, 0);
+  const stats = compareStats(model, lucario);
+  assert.equal(stats.cards, lucario.length);
+  assert.ok(stats.listed <= stats.cards && stats.sets > 0 && stats.eras.length > 0);
+});
+
+test('compare suggests word-start keywords with desk counts, Pokémon first', () => {
+  const hits = suggestKeywords(model, 'luca');
+  assert.ok(hits.length > 0);
+  assert.equal(hits[0].text, 'lucario');
+  assert.ok(hits[0].species);
+  assert.equal(hits[0].n, matchCards(model, 'lucario').length);
+  assert.deepEqual(suggestKeywords(model, ''), []);
+});
+
+test('compare overlap finds shared sets, artists and desks holding every keyword', () => {
+  const rows = ['lucario', 'melmetal'].map((term) => {
+    const cards = matchCards(model, term);
+    return { term, cards, stats: compareStats(model, cards) };
+  });
+  const overlap = compareOverlap(model, rows);
+  assert.ok(overlap.sets.length > 0 && overlap.artists.length > 0);
+  assert.ok(overlap.cards.some(({ i }) => /lucario & melmetal/i.test(data.names[data.cards.name[i]])));
+  assert.equal(compareOverlap(model, rows.slice(0, 1)), null);
+  const stats = rows[0].stats;
+  assert.equal(stats.mix.reduce((s, n) => s + n, 0), stats.listed);
+  assert.ok(stats.debut >= 0 && stats.debut <= stats.latest);
 });
