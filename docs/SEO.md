@@ -94,3 +94,11 @@ come from a read-only SELECT against the 15T marketplace Postgres and the
 public expansion list. It is not part of the Vercel build, so rerun it and
 commit the JSON when routes or the catalog change. `?focus=set:base-set`
 (`card:`, `pokemon:`, `artist:`, `era:`, `page:`) deep-links a node.
+
+Weekly refresh: `pokoin-site-map-refresh.timer` (systemd user unit on nezopt,
+Mondays 04:30 UTC) runs `scripts/refresh-site-map.sh` inside its own Paseo
+worktree (`~/.paseo/worktrees/2n15xc8c/site-map-refresh`, used by nothing
+else). It checks out `origin/main`, rebuilds the JSON, and only when the map
+changed commits, pushes to `main` and runs `scripts/deploy-web.sh`. The builder
+leaves the file alone when only the date would change, so quiet weeks deploy
+nothing. Log: `journalctl --user -u pokoin-site-map-refresh`.

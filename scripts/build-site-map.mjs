@@ -707,6 +707,13 @@ async function main() {
     },
     names,
   };
+  // Weekly refresh commits only real changes: keep the old file (and its date) when only the date differs.
+  const body = (json) => JSON.stringify({ ...json, generatedAt: '' });
+  const previous = existsSync(OUT) ? JSON.parse(readFileSync(OUT, 'utf8')) : null;
+  if (previous && body(previous) === body(out)) {
+    console.log(`site-map unchanged since ${previous.generatedAt}`);
+    return;
+  }
   writeFileSync(OUT, JSON.stringify(out));
   const size = statSync(OUT).size;
   console.log(`site-map ${relative(ROOT, OUT)} ${(size / 1e6).toFixed(2)} MB`, out.stats);
