@@ -1157,9 +1157,9 @@ export default function Chrome({ children }) {
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-5 4V6a2 2 0 0 1 2-2Zm2 5v2h12V9H6Zm0 4v2h8v-2H6Z" /></svg>
               {messagesUnread > 0 ? <span className="messages-unread-dot" aria-hidden="true" /> : null}
             </AppLink>
-            <a href={onDashboard ? '/' : DASHBOARD_HOME} title="Dashboard" aria-label="Dashboard">
+            <AppLink to={DASHBOARD_HOME} title="Dashboard" aria-label="Dashboard">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={ICO.dashboard} /></svg>
-            </a>
+            </AppLink>
             {site.features.competitive ? (
               <AppLink className="trophy" to="/marketplace/competitive" title="Competitive" aria-label="Competitive">
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94A5.01 5.01 0 0 0 11 17.9V19H7v2h10v-2h-4v-1.1a5.01 5.01 0 0 0 3.61-4.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z" /></svg>
@@ -1197,7 +1197,7 @@ export default function Chrome({ children }) {
         <MobileTile to="/marketplace/search" label="Search" icon="search" onClick={closeMenu} />
         <MobileTile href={homeHref} label="Home" icon="home" onClick={closeMenu} />
         <MobileTile to={APP.messages} label="Messages" icon="forum" onClick={closeMenu} />
-        <MobileTile href={onDashboard ? '/' : DASHBOARD_HOME} label="Dashboard" icon="dashboard" onClick={closeMenu} />
+        <MobileTile to={DASHBOARD_HOME} label="Dashboard" icon="dashboard" onClick={closeMenu} />
         {site.features.competitive ? (
           <MobileTile to="/marketplace/competitive" label="Competitive" icon="trophy" onClick={closeMenu} />
         ) : null}
@@ -1255,7 +1255,7 @@ export default function Chrome({ children }) {
             <h3>More</h3>
             <a href={marketUrl('/')}>Home</a>
             <AppLink to={APP.forum}>Forum</AppLink>
-            <a href={onDashboard ? '/' : DASHBOARD_HOME}>Dashboard</a>
+            <AppLink to={DASHBOARD_HOME}>Dashboard</AppLink>
             <AppLink to={APP.docs}>Docs</AppLink>
             <AppLink to={APP.about}>About</AppLink>
             <AppLink to="/sitemap">Site map</AppLink>

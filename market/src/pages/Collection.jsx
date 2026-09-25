@@ -171,7 +171,7 @@ export default function Collection() {
         title="Collection"
       >
         <Link className="btn ghost" to="/product/nft">NFT catalog</Link>
-        <Link className="btn ghost" to="/scan">Scan cards</Link>
+        <Link className="btn ghost" to="/dashboard/scan">Scan cards</Link>
       </PageHead>
       {error ? (
         <div className="desk-panel" data-testid="collection-error">
@@ -187,7 +187,7 @@ export default function Collection() {
       ) : null}
       {empty ? (
         <EmptyDesk title="No cards in your collection yet" lede="Scan cards to add them, or checkout an NFT listing.">
-          <Link className="btn" to="/scan">Scan cards</Link>
+          <Link className="btn" to="/dashboard/scan">Scan cards</Link>
           <Link className="btn ghost" to="/product/nft">Search NFT catalog</Link>
         </EmptyDesk>
       ) : null}

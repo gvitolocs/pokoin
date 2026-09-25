@@ -38,7 +38,7 @@ Schema: CardVault `oracle-postgres/schema/082_scan_connect.sql`.
 
 | Surface | Route | Why here |
 | --- | --- | --- |
-| Desktop | `dashboard.pokoin.com/` seller home (`SellerHome.jsx`); Scan Connect desk at `dashboard.pokoin.com/scan` and `pokoin.com/inventory/scan` (`ScanDesk.jsx`) | Same Vercel SPA. On the `dashboard.` host `/` is the seller home and `/scan` is the desk (`isDashboardHost`, `market/src/App.jsx`). On `pokoin.com`, `/scan` stays the public photo identify page. |
+| Desktop | Canonical seller home `pokoin.com/dashboard` (`SellerHome.jsx`); Scan Connect desk at `pokoin.com/dashboard/scan` and `pokoin.com/inventory/scan` (`ScanDesk.jsx`). Legacy `dashboard.pokoin.com/` and `/scan` **308** to those apex paths | Same Vercel SPA. On `pokoin.com`, `/scan` stays the public photo identify page. Desk Chrome links stay same-origin so marketplace ↔ dashboard is SPA navigation. |
 | Phone | `scan.pokoin.com/connect` — Oracle peer1 Caddy `file_server` over `/opt/pokoin-cardscan/web` with `rewrite /connect /index.html`; `web/static/scan-connect.js` switches that page to connect mode | Reuses the tuned camera loop, detection and orientation fixes. `scan.pokoin.com/` keeps redirecting accepted scans to the card page. Recognition paths (`/identify`, `/catalogs`, `/health`) proxy to `127.0.0.1:8100` → nezopt worker. The FastAPI `/connect` route in BattleScan `server/app.py` only matters when the app serves `web/` itself (local). |
 | QR | `https://scan.pokoin.com/connect#c=<4 digits>&k=<secret>` | [QR link](#qr-link). Fragment is never sent to a server log. |
 
@@ -271,8 +271,8 @@ scripts/deploy-web.sh                    # pokoin-web from origin/main (docs/DEP
 
 | Symptom | Check |
 | --- | --- |
-| `dashboard.pokoin.com/scan` shows the public photo scan page | Deployed bundle predates `isDashboardHost` — see DEPLOY.md; `vercel api /v4/aliases/dashboard.pokoin.com` |
-| Marketplace links stay on `dashboard.pokoin.com/marketplace` | Chrome must use `marketUrl()`; non-desk paths hard-redirect to `pokoin.com` (`App.jsx`) |
+| `dashboard.pokoin.com/scan` shows the public photo scan page | Should **308** to `pokoin.com/dashboard/scan`. If not, redirects missing from `vercel.json` / stale deploy — see DEPLOY.md |
+| Marketplace ↔ dashboard does a full reload | Prefer apex `/dashboard` so Chrome uses same-origin `AppLink`/`NavLink`. Legacy host should 308 to apex |
 | Google sign-in popup fails on `dashboard.` | Firebase Auth authorized domains must list `dashboard.pokoin.com` |
 | Phone: "Code not valid or expired" instantly | Code older than 120 s, already used, or QR from another tab after **New code**. Server: `select pin, expires_at from scan_pairings` on the writer |
 | Phone: "Too many tries" | `select * from scan_rate_limits where bucket like 'pair%' order by window_start desc` |
