@@ -1,0 +1,537 @@
+/* Profile picture: avatar disc, editor sheet, cropper. Tokens from styles.css. */
+
+.pk-avatar {
+  --avatar-size: 40px;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  overflow: hidden;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 25%, var(--g4), var(--g2) 70%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  user-select: none;
+}
+
+/* No photo: the golden mascot on the user's pastel, a soft top light for depth. */
+.pk-avatar.is-mascot {
+  background:
+    radial-gradient(circle at 32% 22%, rgba(255, 255, 255, 0.45), transparent 58%),
+    var(--avatar-ground, #b8c0ff);
+}
+
+.pk-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Width/height come from mascotRenderSize (integer device-pixel scale).
+   Crisp → nearest neighbour; tiny fallback → smooth downscale of the ×8. */
+.pk-avatar img.pk-avatar-mascot {
+  max-width: none;
+  margin-top: 6%;
+  object-fit: fill;
+  image-rendering: auto;
+}
+
+.pk-avatar img.pk-avatar-mascot.is-crisp {
+  image-rendering: pixelated;
+}
+
+/* Silver members get a brushed ring. */
+.pk-avatar.is-silver {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 calc(2px + max(1.5px, var(--avatar-size) * 0.035)) #c8cbd6;
+}
+
+/* ── Profile header ── */
+
+.page-head-identity {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  min-width: 0;
+}
+
+.profile-avatar-button {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.profile-avatar-button:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 4px;
+}
+
+.profile-avatar-button .pk-avatar {
+  transition: filter 0.15s ease;
+}
+
+.profile-avatar-button:hover .pk-avatar {
+  filter: brightness(0.82);
+}
+
+.profile-avatar-badge {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--yellow);
+  color: #111;
+  box-shadow: 0 0 0 3px var(--bg);
+}
+
+.profile-toast {
+  margin: -0.6rem 0 1.1rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid rgba(255, 211, 61, 0.35);
+  border-radius: 12px;
+  background: rgba(255, 211, 61, 0.08);
+  color: var(--yellow);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+/* ── Username (profile header, pencil to edit) ── */
+
+.page-meta {
+  margin: 0.2rem 0 0.1rem;
+}
+
+.username-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.1rem;
+}
+
+.username-inline.is-editing {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) auto auto;
+  justify-content: start;
+}
+
+.username-handle {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--yellow);
+  overflow-wrap: anywhere;
+}
+
+.username-pencil {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.username-pencil:hover:not(:disabled),
+.username-pencil:focus-visible {
+  color: var(--yellow);
+  border-color: rgba(255, 211, 61, 0.45);
+  outline: none;
+}
+
+.username-pencil.is-save {
+  background: var(--yellow);
+  color: #111;
+}
+
+.username-pencil.is-save:hover:not(:disabled),
+.username-pencil.is-save:focus-visible {
+  color: #111;
+  border-color: #fff;
+}
+
+.username-pencil:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.username-field {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--yellow);
+  border-radius: 999px;
+  background: var(--bg);
+}
+
+.username-field.is-invalid {
+  border-color: #ff8a80;
+}
+
+.username-field span {
+  color: var(--yellow);
+  font-weight: 800;
+}
+
+.username-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.username-help {
+  grid-column: 1 / -1;
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.username-help.is-error {
+  color: #ff8a80;
+}
+
+/* ── Topbar ── */
+
+.topbar-avatar {
+  display: inline-grid;
+}
+
+/* ── Editor sheet (bottom sheet on phones, dialog from 720px) ── */
+
+.avatar-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(4, 3, 8, 0.74);
+  backdrop-filter: blur(4px);
+  animation: avatar-fade 0.16s ease;
+}
+
+.avatar-sheet {
+  width: min(28rem, 100%);
+  max-height: min(48rem, 94dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #12101a;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 24px 24px 0 0;
+  padding: 0.6rem 1.25rem calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  animation: avatar-rise 0.2s ease;
+}
+
+@media (min-width: 720px) {
+  .avatar-sheet-backdrop {
+    align-items: center;
+    padding: 1.5rem;
+  }
+
+  .avatar-sheet {
+    border-radius: 24px;
+    padding-bottom: 1.35rem;
+  }
+
+  .avatar-sheet-grab {
+    display: none;
+  }
+}
+
+@keyframes avatar-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes avatar-rise {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-sheet-backdrop,
+  .avatar-sheet {
+    animation: none;
+  }
+}
+
+.avatar-sheet-grab {
+  width: 2.6rem;
+  height: 0.28rem;
+  margin: 0.3rem auto 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.avatar-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.9rem;
+}
+
+.avatar-sheet-head h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 900;
+}
+
+.avatar-sheet-close {
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.avatar-sheet-close:hover { color: var(--text); }
+
+/* Pick */
+
+.avatar-pick {
+  display: grid;
+  gap: 1rem;
+}
+
+.avatar-drop {
+  display: grid;
+  justify-items: center;
+  gap: 0.55rem;
+  padding: 1.4rem 1rem 1.2rem;
+  border: 1.5px dashed var(--g5);
+  border-radius: 18px;
+  background: var(--surface);
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.avatar-drop.is-over {
+  border-color: var(--yellow);
+  background: rgba(255, 211, 61, 0.06);
+}
+
+.avatar-drop.is-busy {
+  opacity: 0.7;
+}
+
+.avatar-drop .pk-avatar {
+  margin-bottom: 0.35rem;
+}
+
+.avatar-drop-copy {
+  margin: 0;
+  max-width: 26ch;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.avatar-drop-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.avatar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.avatar-actions .btn {
+  flex: 1 1 10rem;
+}
+
+.avatar-remove-link {
+  justify-self: center;
+  padding: 0.3rem 0.5rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.84rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.avatar-remove-link:hover { color: #ff8a80; }
+
+.avatar-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(255, 138, 128, 0.35);
+  border-radius: 14px;
+  background: rgba(255, 138, 128, 0.07);
+  font-size: 0.86rem;
+}
+
+.avatar-confirm span {
+  flex: 1 1 100%;
+}
+
+.btn.danger {
+  background: #ff6b5e;
+  color: #111;
+}
+
+/* Crop */
+
+.avatar-crop {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.avatar-crop-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #07060b;
+  touch-action: none;
+}
+
+.avatar-cropper {
+  background: #07060b;
+}
+
+/* The round guide: yellow ring, dimmed outside (react-easy-crop draws the
+   shade with a huge box-shadow). */
+.avatar-crop-area {
+  border: 2px solid var(--yellow) !important;
+  color: rgba(4, 3, 8, 0.72) !important;
+}
+
+.avatar-zoom {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.avatar-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 1px solid var(--g5);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.avatar-icon-btn:hover:not(:disabled) { border-color: var(--yellow); }
+.avatar-icon-btn:disabled { color: var(--muted); cursor: not-allowed; }
+
+.avatar-zoom input[type='range'] {
+  width: 100%;
+  height: 2.4rem;
+  margin: 0;
+  background: transparent;
+  accent-color: var(--yellow);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.avatar-zoom input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--g5);
+}
+
+.avatar-zoom input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -9px;
+  border: 3px solid #12101a;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+
+.avatar-zoom input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--g5);
+}
+
+.avatar-zoom input[type='range']::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 3px solid #12101a;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+
+.avatar-zoom input[type='range']:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+.avatar-previews {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.avatar-preview-label {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.avatar-error {
+  margin: 0.9rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(255, 107, 94, 0.1);
+  color: #ff8a80;
+  font-size: 0.86rem;
+}

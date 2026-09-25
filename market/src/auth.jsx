@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, onIdTokenChanged } from 'firebase/auth';
 import { doc, getFirestore, onSnapshot } from 'firebase/firestore';
@@ -17,6 +17,7 @@ import {
   isExtensionDeskSession,
 } from './extension-auth-bridge.js';
 import { fetchDeskUserDocuments } from './firestore-rest.js';
+import { safeAvatarUrl } from './avatar.js';
 
 export { sellerNameOf };
 
@@ -152,6 +153,7 @@ function profileFrom(data = {}, uid = '') {
     admin,
     silver,
     silverUntil,
+    photoUrl: safeAvatarUrl(data.photoUrl),
   };
 }
 
@@ -165,6 +167,8 @@ const AuthContext = createContext({
   admin: false,
   silver: false,
   getBearer,
+  setProfilePhoto: () => {},
+  setProfileUsername: () => {},
 });
 
 export function AuthProvider({ children }) {
@@ -186,6 +190,7 @@ export function AuthProvider({ children }) {
     silver: Boolean(hint?.silver),
     silverUntil: hint?.silverUntil || null,
     availablePkn: hint?.availablePkn || 0,
+    photoUrl: hint?.photoUrl || '',
   });
   // Distinguishes cold-start on dashboard (adopt .pokoin.com cookie) from an
   // explicit Firebase sign-out on this origin (wipe the shared cookie).
@@ -221,6 +226,7 @@ export function AuthProvider({ children }) {
         silver: next.silver,
         silverUntil: next.silverUntil,
         availablePkn: nextPkn,
+        photoUrl: next.photoUrl,
       });
     } catch (_) {
       if (injectedDeskSession.uid !== uid) {
@@ -388,6 +394,7 @@ export function AuthProvider({ children }) {
         admin: next.admin,
         silver: next.silver,
         silverUntil: next.silverUntil,
+        photoUrl: next.photoUrl,
       });
     }, () => {
       const next = profileFrom({}, user.uid);
@@ -397,6 +404,7 @@ export function AuthProvider({ children }) {
         admin: next.admin,
         silver: next.silver,
         silverUntil: next.silverUntil,
+        photoUrl: next.photoUrl,
       });
     });
     const unsubBal = onSnapshot(doc(firestore, 'balances', user.uid), (snap) => {
@@ -413,6 +421,20 @@ export function AuthProvider({ children }) {
     };
   }, [user?.uid, extensionUid]);
 
+  // Optimistic: the API already stored the photo; the users/{uid} snapshot
+  // confirms it a moment later (and never arrives on extension desks).
+  const setProfilePhoto = useCallback((url) => {
+    const photoUrl = safeAvatarUrl(url);
+    setProfile((current) => (current ? { ...current, photoUrl } : current));
+    persistSession({ photoUrl });
+  }, []);
+
+  const setProfileUsername = useCallback((name) => {
+    const username = String(name || '').trim().toLowerCase();
+    if (!username) return;
+    setProfile((current) => (current ? { ...current, username } : current));
+  }, []);
+
   const value = useMemo(() => ({
     user,
     ready,
@@ -423,7 +445,9 @@ export function AuthProvider({ children }) {
     admin: Boolean(profile?.admin),
     silver: Boolean(profile?.silver),
     getBearer,
-  }), [user, ready, hint, profile, availablePkn, extensionUid]);
+    setProfilePhoto,
+    setProfileUsername,
+  }), [user, ready, hint, profile, availablePkn, extensionUid, setProfilePhoto, setProfileUsername]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
