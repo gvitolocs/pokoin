@@ -106,6 +106,9 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(viewSrc, /Add Cards/);
   assert.match(viewSrc, /Scan cards to add them to your collection or list them for sale/);
   assert.match(viewSrc, /Collection value history/);
+  const historyImport = viewSrc.match(/import \{[^}]+\} from '\.\.\/portfolio-history\.js'/)?.[0] || '';
+  assert.match(historyImport, /\bformatDayLabel\b/);
+  assert.match(viewSrc, /formatDayLabel\(day\.date\)/);
   assert.match(viewSrc, /Collection history will appear here/);
   assert.match(viewSrc, /Scan cards to start building your portfolio/);
   assert.match(viewSrc, /data-history=\{hasLine \? 'series' : \(hasPoint \? 'point' : 'empty'\)\}/);

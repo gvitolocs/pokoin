@@ -8,6 +8,7 @@ import MiniCardTile from './MiniCardTile.jsx';
 import { printingIdentity } from '../identity.js';
 import { formatPknNumber, tilePricePkn } from '../pkn.js';
 import {
+  formatDayLabel,
   formatHistoryTip,
   historySeriesMax,
   nearestHistoryDay,
