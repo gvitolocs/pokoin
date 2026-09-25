@@ -3,7 +3,7 @@ import Cropper from 'react-easy-crop';
 import 'react-easy-crop/react-easy-crop.css';
 import Avatar from './Avatar.jsx';
 import { useAuth } from '../auth.jsx';
-import { removeProfilePicture, uploadProfilePicture, copyGoogleProfilePicture } from '../api.js';
+import { removeProfilePicture, uploadProfilePicture } from '../api.js';
 import { AVATAR_ACCEPT, nextRotation, prepareAvatarSource, renderAvatar } from '../avatar.js';
 
 const MIN_ZOOM = 1;
@@ -24,9 +24,18 @@ function isTouchDevice() {
   return typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
 }
 
+/** Library dumps (Sharp on the Pi, npm install hints) must not land in the sheet. */
+function shownError(error, fallback) {
+  const message = String(error?.message || '').replace(/\s+/g, ' ').trim();
+  if (!message || message.length > 160 || /sharp|pixelplumbing|npm install|linux-arm64|cannot find module/i.test(message)) {
+    return fallback;
+  }
+  return message;
+}
+
 /** Profile photo editor sheet. Pick (file, camera, drop, paste) → crop
  * (drag / pinch / wheel / keys, 90° turns) → upload. */
-export default function AvatarEditor({ open, onClose, name, seed = '', photoUrl, googlePhotoUrl = '', onSaved }) {
+export default function AvatarEditor({ open, onClose, name, seed = '', photoUrl, onSaved }) {
   const { getBearer, setProfilePhoto } = useAuth();
   const [step, setStep] = useState('pick');
   const [source, setSource] = useState(null);
@@ -102,7 +111,7 @@ export default function AvatarEditor({ open, onClose, name, seed = '', photoUrl,
       setPreview('');
       setStep('crop');
     } catch (err) {
-      setError(err.message || 'Could not open that photo.');
+      setError(shownError(err, 'Could not open that photo.'));
     } finally {
       setBusy('');
     }
@@ -164,7 +173,7 @@ export default function AvatarEditor({ open, onClose, name, seed = '', photoUrl,
       onClose?.();
     } catch (err) {
       setBusy('');
-      setError(err.message || 'Upload failed. Try again.');
+      setError(shownError(err, 'Could not save your photo. Try again.'));
     }
   }
 
@@ -182,27 +191,7 @@ export default function AvatarEditor({ open, onClose, name, seed = '', photoUrl,
       onClose?.();
     } catch (err) {
       setBusy('');
-      setError(err.message || 'Could not remove the photo.');
-    }
-  }
-
-  async function applyGooglePhoto() {
-    if (!googlePhotoUrl) return;
-    setBusy('saving');
-    setError('');
-    try {
-      const token = await getBearer();
-      if (!token) throw new Error('Sign in again to change your photo.');
-      const result = await copyGoogleProfilePicture(googlePhotoUrl, token);
-      if (!result?.photoUrl) throw new Error('Google did not return your photo.');
-      setProfilePhoto(result.photoUrl);
-      setBusy('');
-      reset();
-      onSaved?.('Google photo applied');
-      onClose?.();
-    } catch (err) {
-      setBusy('');
-      setError(err.message || 'Could not use your Google photo.');
+      setError(shownError(err, 'Could not remove the photo.'));
     }
   }
 
@@ -253,31 +242,30 @@ export default function AvatarEditor({ open, onClose, name, seed = '', photoUrl,
             >
               <Avatar src={photoUrl} seed={seed} name={name} size={112} />
               <p className="avatar-drop-copy">
-                {busy === 'loading'
-                  ? 'Opening photo…'
-                  : touch
-                    ? 'Choose a photo from your gallery or take a selfie.'
-                    : 'Drag a photo here, paste it, or choose a file.'}
+                {busy === 'loading' ? 'Opening photo…' : 'Drag a photo here or paste one.'}
               </p>
-              <p className="avatar-drop-hint">JPG, PNG, WebP or GIF · up to 25 MB · you can crop it next</p>
+              <p className="avatar-drop-hint">JPG, PNG, WebP or GIF · up to 25 MB · you crop it next</p>
             </div>
-            <div className="avatar-actions">
-              <button className="btn" type="button" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>
-                {touch ? 'Choose from gallery' : 'Choose photo'}
+            <div className="avatar-options" role="group" aria-label="Photo source">
+              <button className="avatar-option" type="button" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>
+                <span className="avatar-option-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 4h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm8 1.5V10h4.5L14 5.5ZM8 13h8v2H8v-2Zm0 4h5v2H8v-2Z" /></svg>
+                </span>
+                <span className="avatar-option-copy">
+                  <strong>{touch ? 'Choose from gallery' : 'Upload a photo'}</strong>
+                  <small>JPG, PNG, WebP or GIF</small>
+                </span>
               </button>
-              {touch ? (
-                <button className="btn ghost" type="button" onClick={() => cameraRef.current?.click()} disabled={Boolean(busy)}>
-                  Take a selfie
-                </button>
-              ) : null}
-              {googlePhotoUrl && !hasPhoto ? (
-                <button className="btn ghost" type="button" onClick={applyGooglePhoto} disabled={Boolean(busy)}>
-                  {saving ? 'Applying…' : 'Use my Google photo'}
-                </button>
-              ) : null}
-            </div>
-            {hasPhoto ? (
-              confirmRemove ? (
+              <button className="avatar-option" type="button" onClick={() => cameraRef.current?.click()} disabled={Boolean(busy)}>
+                <span className="avatar-option-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M9 3h6l1.2 2H20a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3.8L9 3Zm3 5.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Zm0 2a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z" /></svg>
+                </span>
+                <span className="avatar-option-copy">
+                  <strong>Take a photo</strong>
+                  <small>Use your camera</small>
+                </span>
+              </button>
+              {hasPhoto && confirmRemove ? (
                 <div className="avatar-confirm" role="group" aria-label="Confirm removal">
                   <span>Remove your photo? The Pokoin mascot shows instead.</span>
                   <button className="btn danger" type="button" onClick={remove} disabled={busy === 'removing'}>
@@ -287,12 +275,19 @@ export default function AvatarEditor({ open, onClose, name, seed = '', photoUrl,
                     Keep it
                   </button>
                 </div>
-              ) : (
-                <button className="avatar-remove-link" type="button" onClick={() => setConfirmRemove(true)} disabled={Boolean(busy)}>
-                  Remove current photo
+              ) : null}
+              {hasPhoto && !confirmRemove ? (
+                <button className="avatar-option is-danger" type="button" onClick={() => setConfirmRemove(true)} disabled={Boolean(busy)}>
+                  <span className="avatar-option-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h2v9H7V9Zm4 0h2v9h-2V9Zm4 0h2v9h-2V9ZM6 21a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8H6v13Z" /></svg>
+                  </span>
+                  <span className="avatar-option-copy">
+                    <strong>Remove current photo</strong>
+                    <small>The Pokoin mascot shows instead</small>
+                  </span>
                 </button>
-              )
-            ) : null}
+              ) : null}
+            </div>
           </div>
         ) : null}
 

@@ -15,11 +15,6 @@ import UsernameEditor from '../components/UsernameEditor.jsx';
 // The cropper (react-easy-crop) loads only when someone edits their photo.
 const AvatarEditor = lazy(() => import('../components/AvatarEditor.jsx'));
 
-function googlePhotoOf(user) {
-  const google = (user?.providerData || []).find((row) => row?.providerId === 'google.com');
-  return String(google?.photoURL || '').trim();
-}
-
 export default function Profile() {
   const location = useLocation();
   const { user, ready, signedIn, availablePkn, silver, admin, profile } = useAuth();
@@ -94,7 +89,6 @@ export default function Profile() {
             name={name}
             seed={uid}
             photoUrl={photoUrl}
-            googlePhotoUrl={googlePhotoOf(user)}
           />
         </Suspense>
       ) : null}
