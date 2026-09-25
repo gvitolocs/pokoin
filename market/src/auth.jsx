@@ -21,10 +21,23 @@ import { safeAvatarUrl } from './avatar.js';
 
 export { sellerNameOf };
 
-/** Same public web config as Flutter `DefaultFirebaseOptions.web`. */
+/**
+ * Hosts that proxy `/__/auth/*` to pokoin.firebaseapp.com (vercel.json), so the
+ * Google account chooser says "Continue to pokoin.com" instead of the Firebase
+ * domain. Each needs `https://<host>/__/auth/handler` on the Google OAuth client
+ * and the host in Firebase Auth authorized domains.
+ */
+const FIRST_PARTY_AUTH_HOSTS = new Set(['pokoin.com', 'dashboard.pokoin.com']);
+
+function firebaseAuthDomain() {
+  const host = typeof window === 'undefined' ? '' : String(window.location.hostname || '').toLowerCase();
+  return FIRST_PARTY_AUTH_HOSTS.has(host) ? host : 'pokoin.firebaseapp.com';
+}
+
+/** Same public web config as Flutter `DefaultFirebaseOptions.web`, except authDomain. */
 const firebaseApp = initializeApp({
   apiKey: 'AIzaSyDlbKXeR0R3aAATZtCG6dhEPUw39DhXQpU',
-  authDomain: 'pokoin.firebaseapp.com',
+  authDomain: firebaseAuthDomain(),
   projectId: 'pokoin',
   storageBucket: 'pokoin.firebasestorage.app',
   messagingSenderId: '36941064114',
