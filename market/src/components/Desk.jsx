@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { flagSrc } from '../locale.js';
 
-export function PageHead({ kicker, title, lede, printFlag, leading, children }) {
+export function PageHead({ kicker, title, lede, printFlag, leading, meta, children }) {
   const text = (
     <div>
       {kicker ? <p className="page-kicker">{kicker}</p> : null}
@@ -14,6 +14,7 @@ export function PageHead({ kicker, title, lede, printFlag, leading, children }) 
         ) : null}
         {title}
       </h1>
+      {meta ? <div className="page-meta">{meta}</div> : null}
       {lede ? <p className="page-lede">{lede}</p> : null}
     </div>
   );

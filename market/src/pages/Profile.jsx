@@ -56,6 +56,7 @@ export default function Profile() {
       <PageHead
         kicker="Account"
         title={name}
+        meta={<UsernameEditor onSaved={setToast} />}
         lede={accountLede(user)}
         leading={(
           <button
@@ -104,9 +105,6 @@ export default function Profile() {
         <Metric value={address ? shortAddress(address) : '—'} label="Wallet" />
       </MetricGrid>
       <div className="profile-grid">
-        <DeskPanel title="Pokoin username">
-          <UsernameEditor onSaved={setToast} />
-        </DeskPanel>
         <DeskPanel title="Status">
           <p className="page-lede">{silverLine}{admin ? ' · Admin' : ''}</p>
         </DeskPanel>

@@ -107,58 +107,80 @@
   font-weight: 700;
 }
 
-/* ── Username ── */
+/* ── Username (profile header, pencil to edit) ── */
 
-.username-row {
+.page-meta {
+  margin: 0.2rem 0 0.1rem;
+}
+
+.username-inline {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  gap: 0.35rem;
+  min-height: 2.1rem;
+}
+
+.username-inline.is-editing {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) auto auto;
+  justify-content: start;
 }
 
 .username-handle {
-  margin: 0;
-  font-size: 1.15rem;
+  font-size: 1rem;
   font-weight: 800;
   color: var(--yellow);
   overflow-wrap: anywhere;
 }
 
-.username-help {
-  margin: 0.25rem 0 0;
+.username-pencil {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
   color: var(--muted);
-  font-size: 0.82rem;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 
-.username-help.is-error {
-  color: #ff8a80;
+.username-pencil:hover:not(:disabled),
+.username-pencil:focus-visible {
+  color: var(--yellow);
+  border-color: rgba(255, 211, 61, 0.45);
+  outline: none;
 }
 
-.username-form {
-  display: grid;
-  gap: 0.45rem;
+.username-pencil.is-save {
+  background: var(--yellow);
+  color: #111;
 }
 
-.username-label {
-  font-size: 0.72rem;
-  font-weight: 750;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
+.username-pencil.is-save:hover:not(:disabled),
+.username-pencil.is-save:focus-visible {
+  color: #111;
+  border-color: #fff;
+}
+
+.username-pencil:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .username-field {
   display: flex;
+  min-width: 0;
   align-items: center;
-  gap: 0.2rem;
-  padding: 0 0.85rem;
-  border: 1px solid var(--g5);
-  border-radius: 12px;
+  gap: 0.15rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--yellow);
+  border-radius: 999px;
   background: var(--bg);
-}
-
-.username-field:focus-within {
-  border-color: var(--yellow);
 }
 
 .username-field.is-invalid {
@@ -171,23 +193,27 @@
 }
 
 .username-field input {
-  flex: 1;
+  width: 100%;
   min-width: 0;
-  padding: 0.7rem 0;
+  padding: 0.4rem 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 800;
 }
 
-.username-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-top: 0.35rem;
+.username-help {
+  grid-column: 1 / -1;
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.username-help.is-error {
+  color: #ff8a80;
 }
 
 /* ── Topbar ── */
