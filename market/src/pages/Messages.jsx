@@ -10,6 +10,8 @@ import {
   sendChatPayment,
 } from '../chat-client.js';
 import { chatTime, eventAriaLabel, requestActionFor } from '../chat-format.js';
+import { tagKey } from '../chat-listing.js';
+import ChatListingTag from '../components/ChatListingTag.jsx';
 import { createMoneyRequest, payMoneyRequest, requestStatusLabel, respondMoneyRequest } from '../money-requests.js';
 
 function SignInGate() {
@@ -174,7 +176,13 @@ function EventCard({ event, busy, onAction }) {
   if (event.type === 'payment') return (
     <article className={`chat-money-card payment ${event.mine ? 'mine' : ''}`} aria-label={eventAriaLabel(event)}><span className="chat-money-kind">{event.mine ? 'You sent' : 'You received'}</span><strong>{event.amountPkn} PKN</strong>{event.note && <p>{event.note}</p>}<span className="chat-status paid">Paid ✓</span><time>{chatTime(event.createdAt)}</time></article>
   );
-  return <div className={`chat-bubble ${event.mine ? 'mine' : ''}`} aria-label={eventAriaLabel(event)}><p>{event.text}</p><time>{chatTime(event.createdAt)}</time></div>;
+  return (
+    <div className={`chat-bubble ${event.mine ? ' mine' : ''}`} aria-label={eventAriaLabel(event)}>
+      {event.text ? <p>{event.text}</p> : null}
+      {(event.listings || []).map((row) => <ChatListingTag key={tagKey(row)} row={row} />)}
+      <time>{chatTime(event.createdAt)}</time>
+    </div>
+  );
 }
 
 export function Conversation() {

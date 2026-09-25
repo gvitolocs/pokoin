@@ -2147,9 +2147,11 @@ export default function Card() {
                   <ShopListingRow
                     key={offer.id || `${offer.sellerName}-${offer.pricePkn}-${index}`}
                     offer={offer}
+                    card={card}
                     mine={mine}
                     listingBusy={listingBusy}
                     editing={editingOffer?.id === offer.id}
+                    onCart={() => addItem(cartItemFromOffer(card, offer))}
                     onBuy={() => {
                       track(Action.clickListing, card, { resultRank: index });
                       addItem(cartItemFromOffer(card, offer));

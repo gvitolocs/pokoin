@@ -57,10 +57,55 @@ function unreadFor(conversation = {}, uid) {
   return Number((conversation.unread || {})[String(uid)] || 0);
 }
 
+function cleanListing(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const cardName = String(raw.cardName || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!cardName) return null;
+  const seller = String(raw.seller || '').trim().toLowerCase();
+  let imageUrl = '';
+  try {
+    const url = new URL(String(raw.imageUrl || ''));
+    if (url.protocol === 'https:') imageUrl = url.href.slice(0, 400);
+  } catch (_) {
+    imageUrl = '';
+  }
+  let path = String(raw.path || '');
+  if (!path.startsWith('/') || path.startsWith('//')) path = '';
+  const price = Number(raw.pricePkn);
+  return {
+    kind: raw.kind === 'card' ? 'card' : 'listing',
+    listingId: String(raw.listingId || '').slice(0, 80),
+    cardId: String(raw.cardId || '').slice(0, 40),
+    seller: USERNAME_RE.test(seller) ? seller : '',
+    cardName,
+    setName: String(raw.setName || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+    imageUrl,
+    path: path.slice(0, 240),
+    pricePkn: Number.isFinite(price) && price >= 0 ? Math.min(Math.round(price), 1000000000) : 0,
+  };
+}
+
+function cleanListings(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const row of value) {
+    const clean = cleanListing(row);
+    if (!clean) continue;
+    out.push(clean);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
 function previewForEvent(event = {}, viewerUid = '') {
   const amount = `${Number(event.amountPkn || 0)} PKN`;
   const mine = String(event.senderUid || '') === String(viewerUid || '');
-  if (event.type === EVENT_TYPES.TEXT) return cleanText(event.text).slice(0, 80);
+  if (event.type === EVENT_TYPES.TEXT) {
+    const text = cleanText(event.text);
+    if (text) return text.slice(0, 80);
+    const name = event.listings?.[0]?.cardName;
+    return name ? String(name).slice(0, 80) : '';
+  }
   if (event.type === EVENT_TYPES.MONEY_REQUEST) {
     if (event.status === 'paid') return `Paid ✓ ${amount}`;
     return mine ? `You requested ${amount}` : `Requested ${amount}`;
@@ -83,6 +128,7 @@ module.exports = {
   isParticipant,
   otherMember,
   cleanText,
+  cleanListings,
   cleanNote,
   validateAmountPkn,
   bumpUnread,

@@ -18,6 +18,20 @@ test('membership and unread state use the authoritative member list', () => {
   assert.deepEqual(core.bumpUnread({}, members, 'a'), { a: 0, b: 1 });
 });
 
+test('listing tags keep https images and drop everything else', () => {
+  const [row] = core.cleanListings([
+    { kind: 'listing', listingId: '1', seller: 'RedShakkio', cardName: 'Drifloon', imageUrl: 'https://cdn.pokoin.com/a.jpg', path: '/marketplace/en/cards/9', pricePkn: 76.2 },
+    { cardName: '' },
+    { cardName: 'Nope', imageUrl: 'javascript:alert(1)', path: 'https://evil.example' },
+  ]);
+  assert.equal(row.seller, 'redshakkio');
+  assert.equal(row.imageUrl, 'https://cdn.pokoin.com/a.jpg');
+  assert.equal(row.path, '/marketplace/en/cards/9');
+  assert.equal(row.pricePkn, 76);
+  assert.equal(core.cleanListings([{ cardName: 'Nope', imageUrl: 'javascript:alert(1)', path: 'https://evil.example' }])[0].imageUrl, '');
+  assert.equal(core.cleanListings([{ cardName: 'Nope', imageUrl: 'javascript:alert(1)', path: 'https://evil.example' }])[0].path, '');
+});
+
 test('event previews are human readable', () => {
   assert.equal(core.previewForEvent({ type: 'text', text: 'hello' }, 'a'), 'hello');
   assert.equal(core.previewForEvent({ type: 'money_request', amountPkn: 125, senderUid: 'b' }, 'a'), 'Requested 125 PKN');

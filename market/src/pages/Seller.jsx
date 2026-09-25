@@ -235,7 +235,12 @@ export default function Seller() {
                   <ShopListingRow
                     key={offer.id || `${cardId}-${index}`}
                     offer={enriched}
+                    card={cardStub}
                     showCard
+                    onCart={() => {
+                      if (!cardId || !offer.id) return;
+                      addItem(cartItemFromOffer(cardStub, enriched));
+                    }}
                     onBuy={() => {
                       if (!cardId || !offer.id) return;
                       addItem(cartItemFromOffer(cardStub, enriched));

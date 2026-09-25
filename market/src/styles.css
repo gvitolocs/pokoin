@@ -3450,7 +3450,7 @@ a.era-link:focus-visible {
 
 .shop-row {
   display: grid;
-  grid-template-columns: minmax(7rem, 1.4fr) auto auto minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(7rem, 1.4fr) auto auto minmax(0, 1fr) auto auto auto;
   gap: 0.45rem 0.55rem;
   align-items: center;
   padding: 0.55rem 0.15rem;
@@ -3464,7 +3464,44 @@ a.era-link:focus-visible {
 }
 
 .shop-row.is-profile {
-  grid-template-columns: minmax(11rem, 1.8fr) auto auto minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(11rem, 1.8fr) auto auto minmax(0, 1fr) auto auto auto;
+}
+
+.shop-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.shop-icon {
+  display: grid;
+  place-items: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border: 1px solid var(--g5);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.shop-icon:hover,
+.shop-icon:focus-visible {
+  border-color: var(--yellow);
+  color: var(--yellow);
+  outline: none;
+}
+
+.shop-icon.is-cart {
+  border-color: var(--yellow);
+  background: var(--yellow);
+  color: #17130a;
+}
+
+.shop-icon.is-cart.is-added {
+  border-color: #3ee0b0;
+  background: #3ee0b0;
 }
 
 .shop-row:last-of-type { border-bottom: 0; }

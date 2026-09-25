@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPkn } from '../api.js';
+import { listingReference, writeListingDrag } from '../chat-listing.js';
+import { openListingChat } from '../chat-dock-store.js';
 import {
   conditionShort,
   conditionTone,
@@ -7,6 +10,7 @@ import {
   listingLanguageFlag,
   publicShopSellerLabel,
   sellerCountryFlag,
+  sellerHandle,
   sellerHref,
 } from '../listing-meta.js';
 
@@ -30,11 +34,16 @@ export default function ShopListingRow({
   showCard = false,
   listingBusy = false,
   editing = false,
+  card = null,
   onBuy,
+  onCart,
   onEdit,
   onCancel,
 }) {
+  const [added, setAdded] = useState(false);
   const name = publicShopSellerLabel(offer);
+  const handle = sellerHandle(offer);
+  const reference = listingReference({ offer, card });
   const href = sellerHref(offer);
   const country = sellerCountryFlag(offer?.sellerCountry);
   const language = listingLanguageFlag(offer?.language);
@@ -56,6 +65,8 @@ export default function ShopListingRow({
   return (
     <div
       className={`shop-row${mine ? ' mine' : ''}${showCard ? ' is-profile' : ''}${onBuy && !mine ? ' is-buy' : ''}${editing ? ' is-editing' : ''}`}
+      draggable
+      onDragStart={(event) => writeListingDrag(event, reference)}
       onClick={buy}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -103,6 +114,41 @@ export default function ShopListingRow({
         ))}
       </span>
       <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>
+      {!mine ? (
+        <span className="shop-row-actions">
+          {handle ? (
+            <button
+              type="button"
+              className="shop-icon"
+              aria-label={`Message ${handle} about this listing`}
+              title="Message"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openListingChat(reference);
+              }}
+            >
+              <MessageIcon />
+            </button>
+          ) : null}
+          {onCart ? (
+            <button
+              type="button"
+              className={`shop-icon is-cart${added ? ' is-added' : ''}`}
+              aria-label={added ? 'Added to cart' : 'Add to cart'}
+              title={added ? 'Added to cart' : 'Add to cart'}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onCart();
+                setAdded(true);
+              }}
+            >
+              <CartIcon />
+            </button>
+          ) : null}
+        </span>
+      ) : null}
       {mine ? (
         <span className="shop-owner-actions">
           <button
@@ -139,6 +185,22 @@ export default function ShopListingRow({
         <span className="shop-act">{qty}</span>
       )}
     </div>
+  );
+}
+
+function MessageIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+    </svg>
+  );
+}
+
+function CartIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path fill="currentColor" d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM6.2 6l.8 2h12.2l-1.6 6H8.1L6.2 6ZM5.2 4H2V2h4l.4 1H22l-2.4 9H7.5L5.2 4Z" />
+    </svg>
   );
 }
 

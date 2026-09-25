@@ -18,9 +18,9 @@ export function getConversation(peer, token) {
   return getJson(`/api/chat?action=get&peer=${encodeURIComponent(peer)}`, { headers: authHeaders(token) });
 }
 
-export function sendChatMessage(peer, text, token) {
+export function sendChatMessage(peer, text, token, listings = []) {
   return getJson('/api/chat?action=message', {
-    method: 'POST', headers: jsonHeaders(token), body: JSON.stringify({ peer, text }),
+    method: 'POST', headers: jsonHeaders(token), body: JSON.stringify({ peer, text, listings }),
   });
 }
 

@@ -62,6 +62,7 @@ import Careers from './pages/Careers.jsx';
 import WorkingOnIt from './components/WorkingOnIt.jsx';
 import CookieBanner from './components/CookieBanner.jsx';
 import { framedByChromeExtension } from './extension-auth-bridge.js';
+import ChatDock from './components/ChatDock.jsx';
 import { isDashboardHost } from './scan-api.js';
 import { legacyDashboardHref } from './punchouts.js';
 import { subscribeOriginDown } from './working-page.js';
@@ -216,6 +217,7 @@ function AppShell() {
     <>
       <Chrome>{routes}</Chrome>
       <CookieBanner />
+      <ChatDock />
     </>
   );
 }

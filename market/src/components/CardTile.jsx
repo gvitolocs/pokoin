@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc, rememberCardId } from '../api.js';
 import { displayName, printingIdentity } from '../identity.js';
 import { tilePricePkn } from '../pkn.js';
+import { cardReference, writeListingDrag } from '../chat-listing.js';
 import { cardImageAlt } from '../seo.js';
 import { Action, track } from '../track.js';
 import CardArt from './CardArt.jsx';
@@ -47,6 +48,8 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
       ].filter(Boolean).join(' ')}
       to={href}
       state={{ card }}
+      draggable
+      onDragStart={(event) => writeListingDrag(event, cardReference(card))}
       onClick={onClick}
       onPointerEnter={prefetch}
       style={cut ? albumShadeStyle(card) : undefined}

@@ -244,7 +244,7 @@ export default function AvatarEditor({ open, onClose, name, seed = '', photoUrl,
               <p className="avatar-drop-copy">
                 {busy === 'loading' ? 'Opening photo…' : 'Drag a photo here or paste one.'}
               </p>
-              <p className="avatar-drop-hint">JPG, PNG, WebP or GIF · up to 25 MB · you crop it next</p>
+              <p className="avatar-drop-hint">JPG, PNG, WebP or GIF · up to 25 MB · saved as a JPEG under 0.7 MB</p>
             </div>
             <div className="avatar-options" role="group" aria-label="Photo source">
               <button className="avatar-option" type="button" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>

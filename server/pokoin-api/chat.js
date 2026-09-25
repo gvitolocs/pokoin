@@ -5,6 +5,7 @@ const {
   EVENT_TYPES,
   USERNAME_RE,
   bumpUnread,
+  cleanListings,
   cleanNote,
   cleanText,
   isParticipant,
@@ -53,6 +54,7 @@ function serializeEvent(doc, uid, requestsById) {
     senderUid: data.senderUid,
     senderUsername: data.senderUsername || '',
     text: data.text || '',
+    listings: Array.isArray(data.listings) ? data.listings : [],
     amountPkn: Number(data.amountPkn || request?.amountPkn || 0),
     note: data.note || request?.note || '',
     requestId: data.requestId || '',
@@ -125,8 +127,10 @@ module.exports = async function handler(req, res) {
     if (req.method !== 'POST') throw httpError(405, 'Unsupported action.');
 
     if (action === 'message') {
+      const listings = cleanListings(req.body?.listings);
       const text = cleanText(req.body?.text);
-      if (!text) throw httpError(400, 'Write a message first.');
+      if (!text && !listings.length) throw httpError(400, 'Write a message first.');
+      const previewText = text || listings[0].cardName;
       await firestore.runTransaction(async (transaction) => {
         const convo = await transaction.get(ref);
         const data = convo.exists ? convo.data() : {};
@@ -138,11 +142,11 @@ module.exports = async function handler(req, res) {
           members,
           memberUsernames: { ...(data.memberUsernames || {}), [me.uid]: me.username, [peer.uid]: peer.username },
           unread: bumpUnread(data.unread, members, me.uid),
-          lastEvent: { type: EVENT_TYPES.TEXT, text, senderUid: me.uid, at: stamp },
+          lastEvent: { type: EVENT_TYPES.TEXT, text: previewText, senderUid: me.uid, at: stamp },
           ...(convo.exists ? {} : { createdAt: stamp }),
         }, { merge: true });
         transaction.set(ref.collection('events').doc(), {
-          type: EVENT_TYPES.TEXT, senderUid: me.uid, senderUsername: me.username, text, createdAt: stamp,
+          type: EVENT_TYPES.TEXT, senderUid: me.uid, senderUsername: me.username, text, listings, createdAt: stamp,
         });
       });
       return res.status(200).json({ ok: true });
