@@ -17,25 +17,38 @@ const vercel = fs.readFileSync(path.join(root, '../../vercel.json'), 'utf8');
 
 const CARD_ICON = 'M6 3h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 0h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM6 14h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zm8 0h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z';
 
-test('dashboard host / renders SellerHome; /scan stays ScanDesk', () => {
+test('pokoin.com/dashboard renders SellerHome; /scan stays the public photo page', () => {
   assert.match(appSrc, /import SellerHome from '\.\/pages\/SellerHome\.jsx'/);
-  assert.match(appSrc, /both\('\/',\s*dashboard \? <SellerHome \/>/);
-  assert.match(appSrc, /both\('\/scan',\s*dashboard \? <ScanDesk \/>/);
-  assert.match(appSrc, /Navigate to=\{dashboard \? '\/' : '\/marketplace'\}/);
+  assert.match(appSrc, /both\('\/dashboard',\s*<SellerHome \/>/);
+  assert.match(appSrc, /both\('\/dashboard\/scan',\s*<ScanDesk \/>/);
+  assert.match(appSrc, /both\('\/scan',\s*<Scan \/>/);
+  assert.match(appSrc, /both\('\/',\s*<Navigate to="\/marketplace" replace \/>/);
+  assert.doesNotMatch(appSrc, /dashboard \? <SellerHome/);
+  assert.doesNotMatch(appSrc, /dashboard \? <ScanDesk/);
 });
 
-test('vercel serves SellerHome SPA at dashboard.pokoin.com / (landing is landing.html)', () => {
+test('vercel serves /dashboard on the market SPA and redirects the legacy host', () => {
   const config = JSON.parse(vercel);
   const dashRootRedirect = (config.redirects || []).find(
     (r) => r.source === '/' && (r.has || []).some((h) => h.value === 'dashboard.pokoin.com'),
   );
-  assert.equal(dashRootRedirect, undefined);
-  const dashRootRewrite = (config.rewrites || []).find(
-    (r) => r.source === '/'
-      && r.destination === '/market/index.html'
-      && (r.has || []).some((h) => h.value === 'dashboard.pokoin.com'),
+  assert.equal(dashRootRedirect?.destination, 'https://pokoin.com/dashboard');
+  const dashScanRedirect = (config.redirects || []).find(
+    (r) => r.source === '/scan' && (r.has || []).some((h) => h.value === 'dashboard.pokoin.com'),
   );
-  assert.ok(dashRootRewrite, 'dashboard / must rewrite to market SPA');
+  assert.equal(dashScanRedirect?.destination, 'https://pokoin.com/dashboard/scan');
+  const dashRewrite = (config.rewrites || []).find(
+    (r) => r.source === '/dashboard' && r.destination === '/market/index.html',
+  );
+  assert.ok(dashRewrite, '/dashboard must rewrite to the market SPA');
+  const dashScanRewrite = (config.rewrites || []).find(
+    (r) => r.source === '/dashboard/scan' && r.destination === '/market/index.html',
+  );
+  assert.ok(dashScanRewrite, '/dashboard/scan must rewrite to the market SPA');
+  const dashHostRewrite = (config.rewrites || []).find(
+    (r) => (r.has || []).some((h) => h.value === 'dashboard.pokoin.com'),
+  );
+  assert.equal(dashHostRewrite, undefined);
   const apexRootRewrite = (config.rewrites || []).find(
     (r) => r.source === '/' && r.destination === '/landing.html' && !r.has,
   );
@@ -45,9 +58,10 @@ test('vercel serves SellerHome SPA at dashboard.pokoin.com / (landing is landing
   assert.doesNotMatch(build, /cp "\$ROOT\/index\.html" "\$OUT\/index\.html"/);
 });
 
-test('Chrome Dashboard nav resolves to / on dashboard host; Collection replaces NFT label', () => {
-  assert.match(chromeSrc, /onDashboard \? '\/' : DASHBOARD_HOME/);
-  assert.doesNotMatch(chromeSrc, /onDashboard \? '\/scan'/);
+test('Chrome Dashboard nav is a same-origin /dashboard link', () => {
+  assert.match(chromeSrc, /to=\{DASHBOARD_HOME\}/);
+  assert.doesNotMatch(chromeSrc, /onDashboard \? '\/'/);
+  assert.doesNotMatch(chromeSrc, /dashboard\.pokoin\.com/);
   assert.match(chromeSrc, /to="\/collection"/);
   assert.match(chromeSrc, />Collection</);
 });
@@ -87,7 +101,8 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(viewSrc, /Total asking value/);
   assert.doesNotMatch(viewSrc, /Portfolio value/);
   assert.match(viewSrc, /View collection/);
-  assert.match(viewSrc, /to="\/scan"/);
+  assert.match(viewSrc, /to=\{DASHBOARD_SCAN\}/);
+  assert.doesNotMatch(viewSrc, /to="\/scan"/);
   assert.match(viewSrc, /Add Cards/);
   assert.match(viewSrc, /Scan cards to add them to your collection or list them for sale/);
   assert.match(viewSrc, /Collection value history/);

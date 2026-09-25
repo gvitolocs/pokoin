@@ -90,6 +90,33 @@
       ]
     },
     {
+      "source": "/dashboard",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/dashboard/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/dashboard/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
       "source": "/bimi.svg",
       "headers": [
         {
@@ -291,6 +318,39 @@
     }
   ],
   "redirects": [
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/dashboard",
+      "permanent": true
+    },
+    {
+      "source": "/scan",
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/dashboard/scan",
+      "permanent": true
+    },
+    {
+      "source": "/scan/",
+      "has": [
+        {
+          "type": "host",
+          "value": "dashboard.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/dashboard/scan",
+      "permanent": true
+    },
     {
       "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos)",
       "has": [
@@ -558,16 +618,6 @@
       "has": [
         {
           "type": "host",
-          "value": "dashboard.pokoin.com"
-        }
-      ],
-      "destination": "/market/index.html"
-    },
-    {
-      "source": "/",
-      "has": [
-        {
-          "type": "host",
           "value": "explorer.pokoin.com"
         }
       ],
@@ -813,6 +863,22 @@
     },
     {
       "source": "/profile",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/dashboard/scan/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/dashboard/scan",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/dashboard/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/dashboard",
       "destination": "/market/index.html"
     },
     {

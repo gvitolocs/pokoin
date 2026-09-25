@@ -112,6 +112,7 @@ function rewriteMarketplace(server) {
       || url === '/extension/auth-bridge' || url.startsWith('/extension/auth-bridge/')
       || url === '/profile' || url.startsWith('/profile/')
       || url === '/scan' || url.startsWith('/scan/')
+      || url === '/dashboard' || url.startsWith('/dashboard/')
       || url === '/cardscan' || (url.startsWith('/cardscan/') && url !== '/cardscan/identify')
       || url === '/scancard' || url.startsWith('/scancard/')
       || url === '/inventory' || url.startsWith('/inventory/')

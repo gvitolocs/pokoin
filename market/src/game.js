@@ -64,6 +64,17 @@ export function setScanGameOverride(gameId) {
   }
 }
 
+/** Seller desk has no game subdomain, so it can honor the scan Game picker. */
+export function sellerDeskUsesGameOverride(hostname, pathname = '') {
+  const host = String(hostname || '').toLowerCase();
+  const bare = String(pathname || '').replace(/\/$/, '') || '/';
+  const sellerDesk = bare === '/dashboard' || bare.startsWith('/dashboard/');
+  return host === 'dashboard.pokoin.com'
+    || host === 'localhost'
+    || host.endsWith('.localhost')
+    || ((host === 'pokoin.com' || host === 'www.pokoin.com') && sellerDesk);
+}
+
 export function gameIdFromHost(hostname = hostName()) {
   const host = String(hostname || '').toLowerCase();
   if (host === 'onepiece.pokoin.com' || host.startsWith('onepiece.')) {
@@ -72,8 +83,10 @@ export function gameIdFromHost(hostname = hostName()) {
   if (host === 'riftbound.pokoin.com' || host.startsWith('riftbound.')) {
     return 'riftbound';
   }
-  // dashboard.pokoin.com (and localhost) honor the scan-desk Game picker.
-  if (host === 'dashboard.pokoin.com' || host === 'localhost' || host.endsWith('.localhost')) {
+  const path = typeof window !== 'undefined' && window.location
+    ? String(window.location.pathname || '')
+    : '';
+  if (sellerDeskUsesGameOverride(host, path)) {
     const override = readScanGameOverride();
     if (override) return override;
   }

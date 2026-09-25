@@ -11,12 +11,17 @@ export function authFrom(path) {
   return route(`/auth?from=${encodeURIComponent(path || '/marketplace')}`);
 }
 
-/** Seller desk on the dashboard host (Scan Connect). */
-export const DASHBOARD_ORIGIN = 'https://dashboard.pokoin.com';
-export const DASHBOARD_SCAN = `${DASHBOARD_ORIGIN}/scan`;
-export const DASHBOARD_HOME = `${DASHBOARD_ORIGIN}/`;
+/**
+ * Seller desk on pokoin.com. Same origin as the marketplace, so Chrome can
+ * soft-navigate. dashboard.pokoin.com only redirects here.
+ */
+export const DASHBOARD_HOME = '/dashboard';
+export const DASHBOARD_SCAN = '/dashboard/scan';
 
-/** Public marketplace apex. Dashboard links that leave the seller desk go here. */
+/** Legacy host. Edge and the SPA send it to DASHBOARD_HOME. */
+export const DASHBOARD_ORIGIN = 'https://dashboard.pokoin.com';
+
+/** Public marketplace apex. Links that still load on the legacy host go here. */
 export const MARKET_ORIGIN = 'https://pokoin.com';
 
 function onDashboardHost(hostname) {
@@ -28,8 +33,8 @@ function onDashboardHost(hostname) {
 }
 
 /**
- * Path for in-app links. On dashboard.pokoin.com returns an absolute
- * https://pokoin.com/… URL so the browser leaves the seller desk.
+ * Path for in-app links. On the legacy dashboard host returns an absolute
+ * https://pokoin.com/… URL so the browser leaves that origin.
  */
 export function marketUrl(path = '/marketplace', hostname) {
   const raw = String(path || '/marketplace');
@@ -41,8 +46,8 @@ export function marketUrl(path = '/marketplace', hostname) {
 }
 
 /**
- * Hard-navigate to a marketplace URL. Use on the dashboard host so React
- * Router never paints /marketplace/* inside the seller desk (black flash).
+ * Hard-navigate off the legacy dashboard host. On pokoin.com, use a router
+ * link instead so the marketplace and /dashboard stay one SPA.
  */
 export function goMarket(pathOrUrl, hostname) {
   const href = String(pathOrUrl || '').startsWith('http')
@@ -54,10 +59,24 @@ export function goMarket(pathOrUrl, hostname) {
   return href;
 }
 
-/** Paths that stay on the dashboard host (seller home + Scan Connect desk). */
+/** Seller-desk routes inside the pokoin.com SPA. */
 export function isDashboardDeskPath(pathname = '') {
   const path = String(pathname || '').replace(/\/$/, '') || '/';
-  return path === '/' || path === '/scan' || path === '/inventory/scan';
+  return path === '/dashboard' || path === '/dashboard/scan' || path === '/inventory/scan';
+}
+
+/**
+ * Where a dashboard.pokoin.com URL belongs on pokoin.com.
+ * `/` and `/scan` were the seller home and Scan Connect.
+ */
+export function legacyDashboardHref(pathname = '/', search = '') {
+  const path = String(pathname || '/');
+  const bare = path.replace(/\/$/, '') || '/';
+  const q = search ? (String(search).startsWith('?') ? String(search) : `?${search}`) : '';
+  if (bare === '/') return `${MARKET_ORIGIN}/dashboard${q}`;
+  if (bare === '/scan') return `${MARKET_ORIGIN}/dashboard/scan${q}`;
+  const absolutePath = path.startsWith('/') ? path : `/${path}`;
+  return `${MARKET_ORIGIN}${absolutePath}${q}`;
 }
 
 export const APP = {

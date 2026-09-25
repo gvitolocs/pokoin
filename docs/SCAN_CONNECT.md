@@ -1,8 +1,8 @@
 # Scan Connect (desktop ↔ phone pairing and realtime)
 
-A seller opens **Dashboard** on `dashboard.pokoin.com/` (Portfolio overview of
+A seller opens **Dashboard** on `pokoin.com/dashboard` (Portfolio overview of
 the Firestore collection + List Cards), then **Scan** on
-`dashboard.pokoin.com/scan` (same desk as `pokoin.com/inventory/scan`). The desk
+`pokoin.com/dashboard/scan` (same desk as `pokoin.com/inventory/scan`). The desk
 has one scanner with submit **intent** `list` | `collection`: list creates
 `marketplace_user_listings` **and** physical `user_card_collections` ownership;
 collection writes ownership only (no asking price). Pairing is unchanged —
@@ -38,7 +38,7 @@ Schema: CardVault `oracle-postgres/schema/082_scan_connect.sql`.
 
 | Surface | Route | Why here |
 | --- | --- | --- |
-| Desktop | `dashboard.pokoin.com/` seller home (`SellerHome.jsx`); Scan Connect desk at `dashboard.pokoin.com/scan` and `pokoin.com/inventory/scan` (`ScanDesk.jsx`) | Same Vercel SPA. On the `dashboard.` host `/` is the seller home and `/scan` is the desk (`isDashboardHost`, `market/src/App.jsx`). On `pokoin.com`, `/scan` stays the public photo identify page. |
+| Desktop | `pokoin.com/dashboard` seller home (`SellerHome.jsx`); Scan Connect desk at `pokoin.com/dashboard/scan` and `pokoin.com/inventory/scan` (`ScanDesk.jsx`) | Same Vercel SPA, so the header Dashboard link is a router navigation. `pokoin.com/scan` stays the public photo identify page. `dashboard.pokoin.com/` and `/scan` redirect to those paths. |
 | Phone | `scan.pokoin.com/connect` — Oracle peer1 Caddy `file_server` over `/opt/pokoin-cardscan/web` with `rewrite /connect /index.html`; `web/static/scan-connect.js` switches that page to connect mode | Reuses the tuned camera loop, detection and orientation fixes. `scan.pokoin.com/` keeps redirecting accepted scans to the card page. Recognition paths (`/identify`, `/catalogs`, `/health`) proxy to `127.0.0.1:8100` → nezopt worker. The FastAPI `/connect` route in BattleScan `server/app.py` only matters when the app serves `web/` itself (local). |
 | QR | `https://scan.pokoin.com/connect#c=<4 digits>&k=<secret>` | [QR link](#qr-link). Fragment is never sent to a server log. |
 
@@ -271,8 +271,8 @@ scripts/deploy-web.sh                    # pokoin-web from origin/main (docs/DEP
 
 | Symptom | Check |
 | --- | --- |
-| `dashboard.pokoin.com/scan` shows the public photo scan page | Deployed bundle predates `isDashboardHost` — see DEPLOY.md; `vercel api /v4/aliases/dashboard.pokoin.com` |
-| Marketplace links stay on `dashboard.pokoin.com/marketplace` | Chrome must use `marketUrl()`; non-desk paths hard-redirect to `pokoin.com` (`App.jsx`) |
+| `pokoin.com/dashboard/scan` shows the public photo scan page | `/dashboard/scan` must render `ScanDesk`; `/scan` stays photo identify (`App.jsx`) |
+| Header Dashboard reloads the page | The link must be a router link to `/dashboard`, not `https://dashboard.pokoin.com` |
 | Google sign-in popup fails on `dashboard.` | Firebase Auth authorized domains must list `dashboard.pokoin.com` |
 | Phone: "Code not valid or expired" instantly | Code older than 120 s, already used, or QR from another tab after **New code**. Server: `select pin, expires_at from scan_pairings` on the writer |
 | Phone: "Too many tries" | `select * from scan_rate_limits where bucket like 'pair%' order by window_start desc` |

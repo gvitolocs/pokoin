@@ -63,7 +63,7 @@ import WorkingOnIt from './components/WorkingOnIt.jsx';
 import CookieBanner from './components/CookieBanner.jsx';
 import { framedByChromeExtension } from './extension-auth-bridge.js';
 import { isDashboardHost } from './scan-api.js';
-import { MARKET_ORIGIN, isDashboardDeskPath } from './punchouts.js';
+import { legacyDashboardHref } from './punchouts.js';
 import { subscribeOriginDown } from './working-page.js';
 
 function both(path, element) {
@@ -73,14 +73,14 @@ function both(path, element) {
   ];
 }
 
-/** Leave dashboard.pokoin.com for the apex — do not paint marketplace routes here. */
+/** Leave dashboard.pokoin.com for the same path on pokoin.com. */
 function DashboardMarketHandoff({ target }) {
   useEffect(() => {
     window.location.replace(target);
   }, [target]);
   return (
     <div className="page desk" style={{ padding: '2.5rem 1.25rem', color: 'var(--muted)' }} role="status">
-      Opening marketplace…
+      Opening Pokoin…
     </div>
   );
 }
@@ -111,11 +111,10 @@ function AppShell() {
   const stripped = pathname.replace(/\/$/, '');
   const board = stripped === '/tests' || stripped === '/sanitize' || stripped === '/espurr' || stripped === '/ocr' || stripped === '/ocr/artists' || stripped === '/artwork' || stripped === '/jumbos' || stripped === '/extension/auth-bridge';
   const framed = framedByChromeExtension();
-  // dashboard.pokoin.com/scan is the Scan Connect desk; pokoin.com/scan stays photo identify.
-  const dashboard = isDashboardHost();
-  // Never mount marketplace pages on the dashboard host — they paint black until refresh.
-  if (dashboard && !framed && !board && !isDashboardDeskPath(pathname)) {
-    return <DashboardMarketHandoff target={`${MARKET_ORIGIN}${pathname}${search || ''}`} />;
+  // pokoin.com/scan stays the public photo page. Scan Connect is /dashboard/scan.
+  // The legacy host never paints the SPA: / and /scan move under /dashboard.
+  if (isDashboardHost() && !board) {
+    return <DashboardMarketHandoff target={legacyDashboardHref(pathname, search)} />;
   }
   if (originDown && !board && !framed) {
     return <WorkingOnIt />;
@@ -186,9 +185,10 @@ function AppShell() {
       {both('/forum', <Forum />)}
       {both('/forum/category/:categoryId', <Forum />)}
       {both('/forum/topic/:topicId', <Forum />)}
-      {both('/scan', dashboard ? <ScanDesk /> : <Scan />)}
+      {both('/scan', <Scan />)}
       {both('/cardscan', <Scan />)}
       {both('/scancard', <Scan />)}
+      {both('/dashboard/scan', <ScanDesk />)}
       {both('/inventory', <Inventory />)}
       {both('/inventory/scan', <ScanDesk />)}
       {both('/docs', <Site />)}
@@ -203,9 +203,10 @@ function AppShell() {
       {both('/earn', <Site />)}
       {both('/whitepaper', <Site />)}
       {both('/health', <Site />)}
-      {both('/', dashboard ? <SellerHome /> : <Navigate to="/marketplace" replace />)}
+      {both('/dashboard', <SellerHome />)}
+      {both('/', <Navigate to="/marketplace" replace />)}
       {import.meta.env.DEV ? both('/dash-preview', <SellerHome />) : null}
-      <Route path="*" element={<Navigate to={dashboard ? '/' : '/marketplace'} replace />} />
+      <Route path="*" element={<Navigate to="/marketplace" replace />} />
     </Routes>
   );
   if (board) {

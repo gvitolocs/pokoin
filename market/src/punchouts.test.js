@@ -8,6 +8,7 @@ import {
   MARKET_ORIGIN,
   authFrom,
   isDashboardDeskPath,
+  legacyDashboardHref,
   marketUrl,
 } from './punchouts.js';
 
@@ -26,11 +27,12 @@ test('authFrom stays on /auth', () => {
   assert.equal(href.includes('app.pokoin.com'), false);
 });
 
-test('dashboard desk is the Scan Connect host, not app.pokoin.com', () => {
+test('dashboard desk is /dashboard on pokoin.com, not a second origin', () => {
+  assert.equal(DASHBOARD_HOME, '/dashboard');
+  assert.equal(DASHBOARD_SCAN, '/dashboard/scan');
   assert.equal(DASHBOARD_ORIGIN, 'https://dashboard.pokoin.com');
-  assert.equal(DASHBOARD_HOME, 'https://dashboard.pokoin.com/');
-  assert.equal(DASHBOARD_SCAN, 'https://dashboard.pokoin.com/scan');
-  assert.equal(DASHBOARD_SCAN.includes('app.pokoin.com'), false);
+  assert.equal(DASHBOARD_HOME.includes('app.pokoin.com'), false);
+  assert.equal(DASHBOARD_SCAN.includes('://'), false);
 });
 
 test('marketUrl keeps relative paths on pokoin.com and abs on dashboard', () => {
@@ -50,11 +52,27 @@ test('marketUrl keeps relative paths on pokoin.com and abs on dashboard', () => 
   );
 });
 
-test('dashboard desk paths include home and Scan Connect', () => {
-  assert.equal(isDashboardDeskPath('/'), true);
-  assert.equal(isDashboardDeskPath(''), true);
-  assert.equal(isDashboardDeskPath('/scan'), true);
+test('dashboard desk paths are seller home and Scan Connect', () => {
+  assert.equal(isDashboardDeskPath('/dashboard'), true);
+  assert.equal(isDashboardDeskPath('/dashboard/'), true);
+  assert.equal(isDashboardDeskPath('/dashboard/scan'), true);
   assert.equal(isDashboardDeskPath('/inventory/scan'), true);
+  assert.equal(isDashboardDeskPath('/'), false);
+  assert.equal(isDashboardDeskPath('/scan'), false);
   assert.equal(isDashboardDeskPath('/marketplace'), false);
   assert.equal(isDashboardDeskPath('/inventory'), false);
+});
+
+test('legacy dashboard host maps home and scan onto /dashboard', () => {
+  assert.equal(legacyDashboardHref('/'), 'https://pokoin.com/dashboard');
+  assert.equal(legacyDashboardHref('/scan'), 'https://pokoin.com/dashboard/scan');
+  assert.equal(legacyDashboardHref('/scan/'), 'https://pokoin.com/dashboard/scan');
+  assert.equal(
+    legacyDashboardHref('/marketplace', '?q=pikachu'),
+    'https://pokoin.com/marketplace?q=pikachu',
+  );
+  assert.equal(
+    legacyDashboardHref('/', '?dashPreview=1'),
+    'https://pokoin.com/dashboard?dashPreview=1',
+  );
 });

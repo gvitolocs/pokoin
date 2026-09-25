@@ -16,7 +16,7 @@ import {
   todayHistoryDay,
   yTickValues,
 } from '../portfolio-history.js';
-import { marketUrl, goMarket } from '../punchouts.js';
+import { DASHBOARD_SCAN, marketUrl, goMarket } from '../punchouts.js';
 
 const CHART_W = 640;
 const CHART_H = 200;
@@ -266,6 +266,30 @@ function AddCardsArt() {
   );
 }
 
+function DeskLink({ href, className, children, ...rest }) {
+  const target = String(href || '');
+  if (target.startsWith('http')) {
+    return (
+      <a
+        className={className}
+        href={target}
+        onClick={(event) => {
+          event.preventDefault();
+          goMarket(target);
+        }}
+        {...rest}
+      >
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link className={className} to={target || '/marketplace'} {...rest}>
+      {children}
+    </Link>
+  );
+}
+
 function MixBar({ label, pct, tone }) {
   const width = Math.max(0, Math.min(100, Number(pct) || 0));
   return (
@@ -415,9 +439,9 @@ export function SellerDashboardView({
                 <button type="button" className="btn ghost" onClick={onRetry} data-testid="portfolio-retry">
                   Retry
                 </button>
-                <a className="btn ghost" href={collectionHref} data-testid="portfolio-view-collection">
+                <DeskLink className="btn ghost" href={collectionHref} data-testid="portfolio-view-collection">
                   View collection
-                </a>
+                </DeskLink>
               </div>
             </div>
           ) : null}
@@ -467,9 +491,9 @@ export function SellerDashboardView({
               />
 
               <div className="seller-tile-actions">
-                <a className="btn ghost" href={collectionHref} data-testid="portfolio-view-collection">
+                <DeskLink className="btn ghost" href={collectionHref} data-testid="portfolio-view-collection">
                   View collection
-                </a>
+                </DeskLink>
               </div>
             </div>
           ) : null}
@@ -484,7 +508,7 @@ export function SellerDashboardView({
           </header>
           <div className="seller-tile-body seller-tile-cta">
             <AddCardsArt />
-            <Link className="btn" to="/scan" data-testid="list-cards-scan">
+            <Link className="btn" to={DASHBOARD_SCAN} data-testid="list-cards-scan">
               Scan cards
             </Link>
           </div>
@@ -494,9 +518,9 @@ export function SellerDashboardView({
       <section className="seller-panel seller-movers-panel" aria-labelledby="seller-movers-title">
         <header className="seller-panel-head">
           <h2 id="seller-movers-title">Trending on Pokoin</h2>
-          <a className="seller-panel-link" href={marketplaceHref}>
+          <DeskLink className="seller-panel-link" href={marketplaceHref}>
             Marketplace →
-          </a>
+          </DeskLink>
         </header>
         {movers.length ? (
           <div className="seller-movers-rail" data-testid="marketplace-movers">
@@ -516,7 +540,7 @@ export function SellerDashboardView({
         <section className="seller-panel" aria-labelledby="seller-listings-title">
           <header className="seller-panel-head">
             <h2 id="seller-listings-title">Your listings</h2>
-            <a className="seller-panel-link" href={inventoryHref}>View inventory →</a>
+            <DeskLink className="seller-panel-link" href={inventoryHref}>View inventory →</DeskLink>
           </header>
           {listed?.failed ? (
             <p className="seller-panel-empty">Listings unavailable.</p>
@@ -534,7 +558,7 @@ export function SellerDashboardView({
           ) : null}
           {!listed?.failed && !listingRows.length && !loading ? (
             <EmptyDesk nested title="No cards listed yet" lede="Scan a pile and list what you want to sell.">
-              <Link className="btn" to="/scan">Scan cards</Link>
+              <Link className="btn" to={DASHBOARD_SCAN}>Scan cards</Link>
             </EmptyDesk>
           ) : null}
         </section>

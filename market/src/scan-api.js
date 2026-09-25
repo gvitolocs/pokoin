@@ -29,19 +29,9 @@ export function phoneConnectUrl(qrSecret, pin = '') {
   return `https://scan.pokoin.com/connect#${params}`;
 }
 
-/** dashboard.pokoin.com serves the seller desk; `/scan` there is Scan Connect. */
+/** Legacy host. The seller desk is /dashboard on pokoin.com. */
 export function isDashboardHost(hostname = typeof window !== 'undefined' ? window.location.hostname : '') {
-  const host = String(hostname).toLowerCase();
-  if (host === 'dashboard.pokoin.com') {
-    return true;
-  }
-  // Local / Tailscale review of the seller desk (Vite only).
-  if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
-    if (host === 'nezopt' || /^100\.\d+\.\d+\.\d+$/.test(host)) {
-      return true;
-    }
-  }
-  return false;
+  return String(hostname).toLowerCase() === 'dashboard.pokoin.com';
 }
 
 async function request(path, { method = 'GET', body, token }) {
