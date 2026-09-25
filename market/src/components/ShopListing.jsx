@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPkn } from '../api.js';
+import { artCutVars } from '../art-cut.js';
 import { listingReference, writeListingDrag } from '../chat-listing.js';
+import { homepageDerivativeUrl, preferFullImage } from '../image-urls.js';
+import ThumbZoom from './ThumbZoom.jsx';
 import { openListingChat } from '../chat-dock-store.js';
 import {
   conditionShort,
@@ -13,6 +16,27 @@ import {
   sellerHref,
 } from '../listing-meta.js';
 import { listingSelectId } from '../shop-marquee.js';
+
+function ShopScan({ image, name, setName = '' }) {
+  const full = preferFullImage(image) || image;
+  const thumb = homepageDerivativeUrl(image) || image;
+  return (
+    <ThumbZoom src={full} full alt={name || ''}>
+      <span className="art-cut shop-art" style={artCutVars({ set: setName, name })}>
+        <img
+          src={thumb}
+          alt=""
+          onError={(event) => {
+            const img = event.currentTarget;
+            if (img.dataset.fallback) return;
+            img.dataset.fallback = '1';
+            img.src = full;
+          }}
+        />
+      </span>
+    </ThumbZoom>
+  );
+}
 
 function Flag({ flag, className }) {
   if (!flag) return null;
@@ -85,7 +109,7 @@ export default function ShopListingRow({
       {showCard ? (
         cardPath ? (
           <Link className="shop-card" to={cardPath} onClick={(event) => event.stopPropagation()}>
-            {image ? <img src={image} alt="" /> : <span className="shop-card-ph" />}
+            {image ? <ShopScan image={image} name={cardName} setName={setName} /> : <span className="shop-card-ph" />}
             <span>
               <strong>{cardName || 'Card'}</strong>
               {setName ? <em>{setName}</em> : null}
@@ -93,7 +117,7 @@ export default function ShopListingRow({
           </Link>
         ) : (
           <span className="shop-card">
-            {image ? <img src={image} alt="" /> : <span className="shop-card-ph" />}
+            {image ? <ShopScan image={image} name={cardName} setName={setName} /> : <span className="shop-card-ph" />}
             <span>
               <strong>{cardName || 'Card'}</strong>
               {setName ? <em>{setName}</em> : null}

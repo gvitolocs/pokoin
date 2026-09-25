@@ -180,5 +180,7 @@ test('shop rows show a message icon before the cart icon', () => {
   assert.ok(cart > message);
   assert.match(src, /sellerUid/);
   assert.match(src, /className="ct-qty"/);
+  assert.match(src, /<ThumbZoom src=\{full\} full alt=\{name \|\| ''\}>/);
+  assert.match(src, /className="art-cut shop-art"/);
   assert.match(src, /of \{stock \|\| choices\}/);
 });
