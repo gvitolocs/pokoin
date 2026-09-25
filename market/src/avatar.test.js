@@ -3,7 +3,10 @@ import test from 'node:test';
 import {
   AVATAR_FILE_MAX_BYTES,
   AVATAR_SOURCE_MAX,
-  avatarInitials,
+  AVATAR_PASTELS,
+  avatarColor,
+  MASCOT_GRID,
+  mascotRenderSize,
   clampArea,
   dataUrlBytes,
   displayableAvatarUrl,
@@ -39,13 +42,17 @@ test('editor previews may show data: and blob: images but not other data types',
   assert.equal(displayableAvatarUrl('data:image/svg+xml;base64,PHN2Zz4='), '');
 });
 
-test('initials: two words, one word, emails, wallets, emoji', () => {
-  assert.equal(avatarInitials('Giuseppe Vitolo'), 'GV');
-  assert.equal(avatarInitials('pokoin'), 'PO');
-  assert.equal(avatarInitials('mario.rossi@gmail.com'), 'MR');
-  assert.equal(avatarInitials('0xabcdef0123456789abcdef0123456789abcdef01'), '?');
-  assert.equal(avatarInitials('🔥 ash_ketchum'), 'AK');
-  assert.equal(avatarInitials(''), '?');
+test('default avatar pastel is stable per user and spread across the palette', () => {
+  assert.equal(avatarColor('jZX1dJsfRAYsV7HHEcK3NdDSqI83'), avatarColor('jZX1dJsfRAYsV7HHEcK3NdDSqI83'));
+  assert.equal(avatarColor('Pokoin'), avatarColor('pokoin'));
+  assert.ok(AVATAR_PASTELS.includes(avatarColor('')));
+  const used = new Set(Array.from({ length: 200 }, (_, i) => avatarColor(`uid-${i}`)));
+  assert.equal(used.size, AVATAR_PASTELS.length);
+  // No yellows/oranges: they swallow the golden mascot.
+  for (const hex of AVATAR_PASTELS) {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    assert.ok(!(r > 220 && g > 200 && b < 170), `${hex} is too yellow`);
+  }
 });
 
 test('file validation accepts photos and explains every rejection', () => {
@@ -103,4 +110,27 @@ test('session hint keeps the https photo for first paint and drops unsafe ones',
 
   writeAuthSession({ uid: 'u1', photoUrl: 'data:image/png;base64,AAAA' }, store);
   assert.equal(readAuthSession(store).photoUrl, '');
+});
+
+test('mascot pixels land on whole device pixels (no uneven columns)', () => {
+  for (const dpr of [1, 1.25, 1.5, 2, 3]) {
+    for (const size of [26, 40, 72, 88, 112]) {
+      const out = mascotRenderSize(size, dpr);
+      if (!out.crisp) continue;
+      const devicePerSpritePixel = (out.width * dpr) / MASCOT_GRID.width;
+      assert.equal(devicePerSpritePixel, out.scale, `size ${size} @${dpr}x`);
+      assert.ok(Number.isInteger(out.scale) && out.scale >= 1);
+      assert.ok(Math.abs((out.height * dpr) / MASCOT_GRID.height - out.scale) < 1e-9);
+      assert.ok(out.width <= size * 0.8 + 1e-9, `size ${size} @${dpr}x overflows`);
+    }
+  }
+  assert.deepEqual(mascotRenderSize(88, 2), { width: 52, height: 48, scale: 4, crisp: true });
+  assert.deepEqual(mascotRenderSize(112, 1), { width: 78, height: 72, scale: 3, crisp: true });
+});
+
+test('tiny avatars fall back to a smooth downscale instead of overflowing', () => {
+  const out = mascotRenderSize(24, 1);
+  assert.equal(out.crisp, false);
+  assert.ok(out.width < 24);
+  assert.equal(mascotRenderSize(26, 2).crisp, true);
 });

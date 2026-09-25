@@ -26,7 +26,7 @@ function isTouchDevice() {
 
 /** Profile photo editor sheet. Pick (file, camera, drop, paste) → crop
  * (drag / pinch / wheel / keys, 90° turns) → upload. */
-export default function AvatarEditor({ open, onClose, name, photoUrl, googlePhotoUrl = '', onSaved }) {
+export default function AvatarEditor({ open, onClose, name, seed = '', photoUrl, googlePhotoUrl = '', onSaved }) {
   const { getBearer, setProfilePhoto } = useAuth();
   const [step, setStep] = useState('pick');
   const [source, setSource] = useState(null);
@@ -251,7 +251,7 @@ export default function AvatarEditor({ open, onClose, name, photoUrl, googlePhot
               onDragLeave={() => setDragging(false)}
               onDrop={onDrop}
             >
-              <Avatar src={photoUrl} name={name} size={112} />
+              <Avatar src={photoUrl} seed={seed} name={name} size={112} />
               <p className="avatar-drop-copy">
                 {busy === 'loading'
                   ? 'Opening photo…'
@@ -279,7 +279,7 @@ export default function AvatarEditor({ open, onClose, name, photoUrl, googlePhot
             {hasPhoto ? (
               confirmRemove ? (
                 <div className="avatar-confirm" role="group" aria-label="Confirm removal">
-                  <span>Remove your photo? Your initials show instead.</span>
+                  <span>Remove your photo? The Pokoin mascot shows instead.</span>
                   <button className="btn danger" type="button" onClick={remove} disabled={busy === 'removing'}>
                     {busy === 'removing' ? 'Removing…' : 'Remove'}
                   </button>
@@ -351,9 +351,9 @@ export default function AvatarEditor({ open, onClose, name, photoUrl, googlePhot
 
             <div className="avatar-previews" aria-label="Preview">
               <span className="avatar-preview-label">Preview</span>
-              <Avatar src={preview || undefined} name={name} size={72} />
-              <Avatar src={preview || undefined} name={name} size={40} />
-              <Avatar src={preview || undefined} name={name} size={24} />
+              <Avatar src={preview || undefined} seed={seed} name={name} size={72} />
+              <Avatar src={preview || undefined} seed={seed} name={name} size={40} />
+              <Avatar src={preview || undefined} seed={seed} name={name} size={24} />
             </div>
 
             <div className="avatar-actions">

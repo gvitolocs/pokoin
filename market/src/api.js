@@ -1583,6 +1583,32 @@ export function unlockSilver(token) {
   });
 }
 
+/** Registered Pokoin username for the signed-in user. The server repairs a
+ * profile name missing from the `usernames` registry (or assigns one), so
+ * this is the name transfers and receive codes can actually resolve. */
+export function ensureUsername(token) {
+  return getJson('/api/search-recipient-emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: '{}',
+  });
+}
+
+/** Claim a new username (3–32 lowercase letters/digits). 409 when taken. */
+export function changeUsername(username, token) {
+  return getJson('/api/search-recipient-emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ username }),
+  });
+}
+
 /** `imageBase64` is the cropped square data URL from avatar.js. */
 export function uploadProfilePicture(imageBase64, token) {
   return getJson('/api/upload-profile-picture', {

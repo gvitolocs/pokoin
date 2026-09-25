@@ -168,6 +168,7 @@ const AuthContext = createContext({
   silver: false,
   getBearer,
   setProfilePhoto: () => {},
+  setProfileUsername: () => {},
 });
 
 export function AuthProvider({ children }) {
@@ -428,6 +429,12 @@ export function AuthProvider({ children }) {
     persistSession({ photoUrl });
   }, []);
 
+  const setProfileUsername = useCallback((name) => {
+    const username = String(name || '').trim().toLowerCase();
+    if (!username) return;
+    setProfile((current) => (current ? { ...current, username } : current));
+  }, []);
+
   const value = useMemo(() => ({
     user,
     ready,
@@ -439,7 +446,8 @@ export function AuthProvider({ children }) {
     silver: Boolean(profile?.silver),
     getBearer,
     setProfilePhoto,
-  }), [user, ready, hint, profile, availablePkn, extensionUid, setProfilePhoto]);
+    setProfileUsername,
+  }), [user, ready, hint, profile, availablePkn, extensionUid, setProfilePhoto, setProfileUsername]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import jsQR from 'jsqr';
 import {
+  ensureUsername,
   fetchChainAddressActivity,
   formatPknNumber,
   requestPknWithdraw,
@@ -518,7 +519,6 @@ export default function Wallet() {
         <ReceiveSheet
           onClose={closeSheet}
           signedIn={signedIn}
-          profile={profile}
           address={address}
           chainId={chainId}
           getBearer={getBearer}
@@ -843,11 +843,40 @@ function SendSheet({
 }
 
 function ReceiveSheet({
-  onClose, signedIn, profile, address, chainId, getBearer, onConnect, onRequireSignIn, onOpenConversation,
+  onClose, signedIn, address, chainId, getBearer, onConnect, onRequireSignIn, onOpenConversation,
 }) {
   const onPokoin = chainId === 26062026;
-  const hasSite = Boolean(signedIn && profile?.username);
-  const [kind, setKind] = useState(hasSite || !address ? 'site' : 'chain');
+  const { setProfileUsername } = useAuth();
+  // The profile field can hold a name the `usernames` registry never got
+  // (or none at all). Ask the server for the registered handle — it repairs
+  // or assigns one — so the code always resolves to this account.
+  const [siteName, setSiteName] = useState('');
+  const [siteNameState, setSiteNameState] = useState(signedIn ? 'loading' : 'idle');
+  useEffect(() => {
+    if (!signedIn) {
+      setSiteNameState('idle');
+      return undefined;
+    }
+    let live = true;
+    setSiteNameState('loading');
+    (async () => {
+      try {
+        const token = await getBearer();
+        if (!token) throw new Error('signed out');
+        const result = await ensureUsername(token);
+        if (!live) return;
+        const name = String(result?.username || '').trim().toLowerCase();
+        setSiteName(name);
+        setSiteNameState(name ? 'ready' : 'error');
+        if (name) setProfileUsername(name);
+      } catch (_) {
+        if (live) setSiteNameState('error');
+      }
+    })();
+    return () => { live = false; };
+  }, [signedIn, getBearer, setProfileUsername]);
+  const hasSite = Boolean(signedIn && siteName);
+  const [kind, setKind] = useState(signedIn || !address ? 'site' : 'chain');
   const [amountOpen, setAmountOpen] = useState(false);
   const [amount, setAmount] = useState('');
   const [reqUser, setReqUser] = useState('');
@@ -858,12 +887,12 @@ function ReceiveSheet({
   // Fall back to the plain code while the typed amount is incomplete.
   const payload = buildReceiveQr({
     kind: effectiveKind,
-    username: profile?.username,
+    username: siteName,
     address,
     amount: cleanAmount,
-  }) || buildReceiveQr({ kind: effectiveKind, username: profile?.username, address });
+  }) || buildReceiveQr({ kind: effectiveKind, username: siteName, address });
   const qr = payload ? encodeQr(payload, { ecc: 'M' }) : null;
-  const handle = effectiveKind === 'chain' ? address : (profile?.username || '');
+  const handle = effectiveKind === 'chain' ? address : siteName;
 
   return (
     <Sheet title="Receive PKN" onClose={onClose}>
@@ -886,13 +915,19 @@ function ReceiveSheet({
           <div className="wallet-qr-empty">
             <span className="wallet-qr-empty-icon"><Icon name="qr" size={26} /></span>
             <p className="wallet-qr-empty-title">
-              {effectiveKind === 'chain' ? 'Connect a wallet for an on-chain code' : 'Sign in to get your receive code'}
+              {effectiveKind === 'chain'
+                ? 'Connect a wallet for an on-chain code'
+                : siteNameState === 'loading'
+                  ? 'Preparing your receive code…'
+                  : siteNameState === 'error'
+                    ? 'Could not load your username. Try again in a moment.'
+                    : 'Sign in to get your receive code'}
             </p>
             {effectiveKind === 'chain' ? (
               <button className="wallet-source-cta" type="button" onClick={onConnect}>Connect wallet</button>
-            ) : (
+            ) : siteNameState === 'idle' ? (
               <button className="wallet-source-cta" type="button" onClick={onRequireSignIn}>Sign in</button>
-            )}
+            ) : null}
           </div>
         )}
       </div>

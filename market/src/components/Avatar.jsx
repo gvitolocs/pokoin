@@ -1,19 +1,41 @@
-import { useState } from 'react';
-import { avatarInitials, displayableAvatarUrl } from '../avatar.js';
+import { useEffect, useState } from 'react';
+import { avatarColor, displayableAvatarUrl, mascotRenderSize } from '../avatar.js';
+import mascotUrl from '../assets/pokoin-mascot@8x.png';
 import '../avatar.css';
 
-/** Round profile picture. Falls back to initials when there is no photo or
- * the photo fails to load. `label` makes it an image for screen readers;
- * without it the avatar is decorative (the surrounding link names it). */
-export default function Avatar({ src, name = '', size = 40, silver = false, label = '', className = '' }) {
+function currentDpr() {
+  return typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
+}
+
+/** Device pixel ratio that follows browser zoom and monitor moves, so the
+ * pixel-art mascot keeps whole device pixels. */
+function useDevicePixelRatio(active) {
+  const [dpr, setDpr] = useState(currentDpr);
+  useEffect(() => {
+    if (!active || typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const query = window.matchMedia(`(resolution: ${dpr}dppx)`);
+    const update = () => setDpr(currentDpr());
+    query.addEventListener?.('change', update);
+    return () => query.removeEventListener?.('change', update);
+  }, [active, dpr]);
+  return dpr;
+}
+
+/** Round profile picture. Without a photo (or when it fails to load) it
+ * shows the golden Pokoin mascot on the user's pastel. `seed` (uid) keeps
+ * the pastel stable; `label` makes it an image for screen readers, without
+ * it the avatar is decorative (the surrounding link names it). */
+export default function Avatar({ src, seed = '', name = '', size = 40, silver = false, label = '', className = '' }) {
   const url = displayableAvatarUrl(src);
   const [failedUrl, setFailedUrl] = useState('');
   const showPhoto = Boolean(url) && failedUrl !== url;
-  const classes = ['pk-avatar', silver ? 'is-silver' : '', className].filter(Boolean).join(' ');
+  const classes = ['pk-avatar', showPhoto ? '' : 'is-mascot', silver ? 'is-silver' : '', className].filter(Boolean).join(' ');
+  const dpr = useDevicePixelRatio(!showPhoto);
+  const mascot = showPhoto ? null : mascotRenderSize(size, dpr);
   return (
     <span
       className={classes}
-      style={{ '--avatar-size': `${size}px` }}
+      style={{ '--avatar-size': `${size}px`, '--avatar-ground': avatarColor(seed || name) }}
       role={label ? 'img' : undefined}
       aria-label={label || undefined}
       aria-hidden={label ? undefined : true}
@@ -30,7 +52,15 @@ export default function Avatar({ src, name = '', size = 40, silver = false, labe
           onError={() => setFailedUrl(url)}
         />
       ) : (
-        <span className="pk-avatar-initials">{avatarInitials(name)}</span>
+        <img
+          className={`pk-avatar-mascot${mascot.crisp ? ' is-crisp' : ''}`}
+          src={mascotUrl}
+          alt=""
+          width="208"
+          height="192"
+          style={{ width: `${mascot.width}px`, height: `${mascot.height}px` }}
+          draggable="false"
+        />
       )}
     </span>
   );

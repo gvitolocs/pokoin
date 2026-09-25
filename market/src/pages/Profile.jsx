@@ -10,6 +10,7 @@ import { DeskPanel, Metric, MetricGrid, PageHead, SessionWait, Thread } from '..
 import CardTraderConnectPanel from '../components/CardTraderConnectPanel.jsx';
 import { formatPknNumber } from '../pkn.js';
 import Avatar from '../components/Avatar.jsx';
+import UsernameEditor from '../components/UsernameEditor.jsx';
 
 // The cropper (react-easy-crop) loads only when someone edits their photo.
 const AvatarEditor = lazy(() => import('../components/AvatarEditor.jsx'));
@@ -48,6 +49,7 @@ export default function Profile() {
 
   const name = accountHeading(user, profile);
   const photoUrl = profile?.photoUrl || '';
+  const uid = profile?.uid || user?.uid || '';
 
   return (
     <div className="page desk">
@@ -63,7 +65,7 @@ export default function Profile() {
             aria-label={photoUrl ? 'Change profile photo' : 'Add a profile photo'}
             title={photoUrl ? 'Change profile photo' : 'Add a profile photo'}
           >
-            <Avatar src={photoUrl} name={name} size={88} silver={silver} />
+            <Avatar src={photoUrl} seed={uid} name={name} size={88} silver={silver} />
             <span className="profile-avatar-badge" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9Zm3 5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z" /></svg>
             </span>
@@ -89,6 +91,7 @@ export default function Profile() {
             onClose={() => setEditing(false)}
             onSaved={setToast}
             name={name}
+            seed={uid}
             photoUrl={photoUrl}
             googlePhotoUrl={googlePhotoOf(user)}
           />
@@ -101,6 +104,9 @@ export default function Profile() {
         <Metric value={address ? shortAddress(address) : '—'} label="Wallet" />
       </MetricGrid>
       <div className="profile-grid">
+        <DeskPanel title="Pokoin username">
+          <UsernameEditor onSaved={setToast} />
+        </DeskPanel>
         <DeskPanel title="Status">
           <p className="page-lede">{silverLine}{admin ? ' · Admin' : ''}</p>
         </DeskPanel>

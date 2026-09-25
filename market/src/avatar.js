@@ -38,19 +38,56 @@ export function displayableAvatarUrl(value) {
   return safeAvatarUrl(text);
 }
 
-/** One or two letters for the fallback disc. */
-export function avatarInitials(name) {
-  const clean = String(name || '')
-    .replace(/@.*$/, '')
-    .replace(/^0x[0-9a-f]+$/i, '')
-    .replace(/[^\p{L}\p{N}\s._-]/gu, ' ')
-    .trim();
-  if (!clean) return '?';
-  const words = clean.split(/[\s._-]+/).filter(Boolean);
-  const letters = words.length > 1
-    ? words[0][0] + words[words.length - 1][0]
-    : [...words[0]].slice(0, 2).join('');
-  return letters.toUpperCase();
+/** Default-avatar grounds: Nintendo-style pastels picked to set off the
+ * golden mascot (no yellows or oranges, which swallow it). */
+export const AVATAR_PASTELS = [
+  '#9ED8F5', // sky
+  '#B8C0FF', // periwinkle
+  '#D5B8F2', // lilac
+  '#FFC4DD', // sakura
+  '#FFB3AB', // coral
+  '#B5EAD7', // mint
+  '#A0E7E5', // aqua
+  '#C8E6A0', // leaf
+];
+
+/** The mascot sprite's native pixel grid (assets/pokoin-mascot@8x.png is a
+ * lossless nearest-neighbour ×8 of it). */
+export const MASCOT_GRID = { width: 26, height: 24 };
+
+/** Size the pixel-art mascot inside an avatar of `avatarSize` CSS px.
+ * Crisp: every sprite pixel covers exactly `scale` device pixels (integer),
+ * so `image-rendering: pixelated` has no uneven columns. Only when even 1:1
+ * would not fit (tiny avatars on 1× screens) it falls back to a smooth
+ * downscale of the ×8 source. */
+export function mascotRenderSize(avatarSize, devicePixelRatio = 1) {
+  const dpr = devicePixelRatio > 0 ? devicePixelRatio : 1;
+  const size = Math.max(1, Number(avatarSize) || 0);
+  const target = size * 0.64 * dpr;
+  const limit = size * 0.8 * dpr;
+  let scale = Math.max(1, Math.round(target / MASCOT_GRID.width));
+  while (scale > 1 && MASCOT_GRID.width * scale > limit) scale -= 1;
+  if (MASCOT_GRID.width * scale <= limit) {
+    return {
+      width: (MASCOT_GRID.width * scale) / dpr,
+      height: (MASCOT_GRID.height * scale) / dpr,
+      scale,
+      crisp: true,
+    };
+  }
+  const width = size * 0.64;
+  return { width, height: (width * MASCOT_GRID.height) / MASCOT_GRID.width, scale: 0, crisp: false };
+}
+
+/** Stable pastel for a user: same uid (or name) → same colour everywhere. */
+export function avatarColor(seed) {
+  const text = String(seed || '').trim().toLowerCase();
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return AVATAR_PASTELS[hash % AVATAR_PASTELS.length];
 }
 
 /** Returns an error message, or '' when the file can be cropped. */

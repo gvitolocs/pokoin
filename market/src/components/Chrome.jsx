@@ -320,7 +320,7 @@ export default function Chrome({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { signedIn, admin, silver, availablePkn, getBearer, profile, user } = useAuth();
-  const profilePhoto = signedIn ? profile?.photoUrl || '' : '';
+  const showAvatar = Boolean(signedIn && (profile?.uid || user?.uid));
   const { count } = useCart();
   const { balance } = useWallet();
   const extensionDesk = framedByChromeExtension();
@@ -1167,13 +1167,13 @@ export default function Chrome({ children }) {
             ) : null}
             <AppLink className="pkn-chip" to="/wallet" title="Wallet">{pknLabel}</AppLink>
             <AppLink
-              className={profilePhoto ? 'topbar-avatar' : undefined}
+              className={showAvatar ? 'topbar-avatar' : undefined}
               to={signedIn ? '/profile' : from}
               title={signedIn ? 'Profile' : 'Sign in'}
               aria-label={signedIn ? 'Profile' : 'Sign in'}
             >
-              {profilePhoto ? (
-                <Avatar src={profilePhoto} name={user?.displayName || profile?.username} size={26} silver={silver} />
+              {showAvatar ? (
+                <Avatar src={profile?.photoUrl} seed={profile?.uid || user?.uid} name={profile?.username} size={26} silver={silver} />
               ) : (
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" /></svg>
               )}
