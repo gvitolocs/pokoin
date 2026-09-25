@@ -32,6 +32,14 @@ test('a conversation keeps the latest page in this browser', () => {
   assert.equal(saved.hasMore, true);
 });
 
+test('the messages page reads the thread saved from the side panel', () => {
+  const uid = 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2';
+  writeChatHistory(historyKey({ peerUid: uid }), [event('9', 9)], false, { peerUid: uid, username: 'redshakkio' });
+  const saved = readChatHistory(historyKey({ peer: 'redshakkio' }));
+  assert.equal(saved.events[0].id, '9');
+  assert.equal(saved.hasMore, false);
+});
+
 test('newer messages join the cached thread without dropping older ones', () => {
   const merged = mergeChatEvents(
     [event('1', 1), event('2', 2)],

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { artCutVars } from '../art-cut.js';
 import { artworkFigureMaskSrc } from '../art-figure-mask.js';
+import { cardReference, writeListingDrag } from '../chat-listing.js';
 import { rasterSiblings } from '../image-urls.js';
 import { isCardTraderPlaceholderSize, MISSING_CARD_SRC } from '../missing-card.js';
 
@@ -19,6 +20,7 @@ export default function CardArt({
   onClick,
   onLoad,
   onError,
+  dragCard,
 }) {
   const urls = useMemo(() => rasterSiblings(src, { full }), [src, full]);
   const [index, setIndex] = useState(0);
@@ -98,6 +100,10 @@ export default function CardArt({
     return placeholder;
   }
 
+  const drag = dragCard ? {
+    draggable: true,
+    onDragStart: (event) => writeListingDrag(event, cardReference(dragCard)),
+  } : {};
   const image = (
     <img
       ref={imgRef}
@@ -110,6 +116,7 @@ export default function CardArt({
       onClick={onClick}
       onLoad={(event) => acceptIfScan(event.currentTarget)}
       onError={failCurrent}
+      {...drag}
     />
   );
 

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { homepageDerivativeUrl } from '../image-urls.js';
 import { goMarket } from '../punchouts.js';
 import ThumbZoom from './ThumbZoom.jsx';
@@ -9,9 +10,17 @@ import ThumbZoom from './ThumbZoom.jsx';
  * card has no thumbnail. Hovering floats the full card beside the cursor, as
  * on the scan desk. `badge` marks quantity; the title carries details.
  */
-export default function MiniCardTile({ imageUrl = '', name = 'Card', title = '', href = '', badge = '' }) {
+export default function MiniCardTile({
+  imageUrl = '', name = 'Card', title = '', href = '', badge = '', cardId = '', sellerUid = '', seller = '', pricePkn = 0, listingId = '',
+}) {
   const full = String(imageUrl || '').trim();
   const thumb = full ? homepageDerivativeUrl(full) || full : '';
+  const drag = {
+    draggable: true,
+    onDragStart: (event) => writeListingDrag(event, looseCardReference({
+      imageUrl: full, name, href, cardId, sellerUid, seller, pricePkn, listingId,
+    })),
+  };
   const art = (
     <span className="seller-listing-art">
       {thumb ? (
@@ -35,7 +44,7 @@ export default function MiniCardTile({ imageUrl = '', name = 'Card', title = '',
   );
   const label = title || name;
   if (!href) {
-    return <span className="seller-listing-tile" title={label} aria-label={name}>{art}</span>;
+    return <span className="seller-listing-tile" title={label} aria-label={name} {...drag}>{art}</span>;
   }
   if (href.startsWith('http')) {
     return (
@@ -44,6 +53,7 @@ export default function MiniCardTile({ imageUrl = '', name = 'Card', title = '',
         href={href}
         title={label}
         aria-label={name}
+        {...drag}
         onClick={(event) => {
           event.preventDefault();
           goMarket(href);
@@ -53,5 +63,5 @@ export default function MiniCardTile({ imageUrl = '', name = 'Card', title = '',
       </a>
     );
   }
-  return <Link className="seller-listing-tile" to={href} title={label} aria-label={name}>{art}</Link>;
+  return <Link className="seller-listing-tile" to={href} title={label} aria-label={name} {...drag}>{art}</Link>;
 }

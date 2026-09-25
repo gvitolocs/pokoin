@@ -4,6 +4,7 @@ import { createMarketplaceOrder, formatPkn, formatPknNumber } from '../api.js';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { useAuth } from '../auth.jsx';
 import { CHECKOUT_SHIPPING_PKN, CHECKOUT_TAX_RATE, useCart } from '../cart.jsx';
+import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
@@ -127,7 +128,15 @@ export default function Checkout() {
             <div className="bag-list">
               {items.map((row) => (
                 <article className="bag-row summary" key={row.id}>
-                  <Link to={row.href || '/marketplace'} className="bag-art">
+                  <Link
+                    to={row.href || '/marketplace'}
+                    className="bag-art"
+                    draggable
+                    onDragStart={(event) => writeListingDrag(event, looseCardReference({
+                      imageUrl: row.image, name: row.name, href: row.href, cardId: row.cardId,
+                      sellerUid: row.sellerUid, pricePkn: row.pricePkn, listingId: row.listingId,
+                    }))}
+                  >
                     {row.image ? <CardArt src={row.image} alt="" /> : <span className="suggest-ph" />}
                   </Link>
                   <div className="bag-info">

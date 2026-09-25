@@ -52,6 +52,8 @@ export default function CardTraderAssetsPanel({ assets }) {
               imageUrl={item.imageUrl}
               name={item.cardName || 'Card'}
               title={assetTitle(item)}
+              cardId={item.cardId || ''}
+              pricePkn={item.pricePkn}
               href={item.cardId ? marketUrl(`/marketplace/en/cards/${item.cardId}`) : ''}
               badge={item.quantity > 1 ? `×${item.quantity}` : ''}
             />

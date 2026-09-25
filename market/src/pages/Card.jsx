@@ -1907,7 +1907,7 @@ export default function Card() {
                 track(Action.zoomArt, card);
               }}
             >
-              {art ? <CardArt src={art} alt={cardImageAlt(card)} fetchPriority="high" full /> : <span className="tile-ph" />}
+              {art ? <CardArt src={art} alt={cardImageAlt(card)} fetchPriority="high" full dragCard={card} /> : <span className="tile-ph" />}
             </button>
             {(setShortcuts.length || showMoreVersions) ? (
               <div className="set-link tight version-links">
@@ -2212,6 +2212,7 @@ export default function Card() {
               src={art}
               alt={cardImageAlt(card)}
               full
+              dragCard={card}
               onClick={() => setZoom(false)}
             />
           ) : null}

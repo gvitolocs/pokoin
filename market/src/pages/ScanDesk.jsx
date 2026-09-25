@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { flushSync } from 'react-dom';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { fetchCardSales, fetchCheapestPricePknMap, fetchVersionSet, formatPkn, imageSrc } from '../api.js';
+import { cardReference, writeListingDrag } from '../chat-listing.js';
 import { useAuth } from '../auth.jsx';
 import { encodeQr, qrPath, qrLogoLayout } from '../qr.js';
 import {
@@ -1864,7 +1865,19 @@ function QueueRow({
       }}
     >
       <span className="c-num">{index + 1}</span>
-      <span className="c-art">
+      <span
+        className="c-art"
+        draggable={Boolean(row.cardId || row.cardName)}
+        onDragStart={(event) => {
+          if (!row.cardId && !row.cardName) return;
+          writeListingDrag(event, cardReference({
+            id: row.cardId,
+            name: row.cardName,
+            imageUrl: row.imageUrl || zoomSrc || thumb,
+            canonicalPath: row.cardId ? `/marketplace/en/cards/${row.cardId}` : '',
+          }));
+        }}
+      >
         {showCandidates && image && image !== 'none' ? <img className="scan-shot" src={image} alt="Scanned card" /> : null}
         {thumb ? (
           <ThumbZoom src={zoomSrc} full={Boolean(thumbArt.hero)} alt={row.cardName || ''}>

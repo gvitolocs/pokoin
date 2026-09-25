@@ -1,4 +1,5 @@
 import { displayName } from './identity.js';
+import { homepageDerivativeUrl, preferFullImage } from './image-urls.js';
 import { sellerHandle } from './listing-meta.js';
 import { tilePricePkn } from './pkn.js';
 
@@ -76,6 +77,52 @@ export function appendChatTag(tags, reference) {
   const key = tagKey(reference);
   if ((tags || []).some((row) => tagKey(row) === key)) return tags;
   return [...(tags || []), reference].slice(-4);
+}
+
+export function catalogPath(href, cardId) {
+  const text = String(href || '').trim();
+  if (text.startsWith('/marketplace/')) return text.split(/[?#]/)[0];
+  try {
+    const url = new URL(text, 'https://pokoin.com');
+    if (url.pathname.startsWith('/marketplace/')) return url.pathname;
+  } catch (_) {
+    /* not a URL */
+  }
+  const id = String(cardId || '').trim();
+  return id ? `/marketplace/en/cards/${id}` : '';
+}
+
+/** A dashboard miniature or any picture that is not a full catalog card. */
+export function looseCardReference({
+  imageUrl = '', name = 'Card', href = '', cardId = '', sellerUid = '', seller = '', pricePkn = 0, listingId = '',
+} = {}) {
+  return {
+    kind: sellerUserId(sellerUid) ? 'listing' : 'card',
+    listingId: String(listingId || ''),
+    cardId: String(cardId || ''),
+    sellerUid: sellerUserId(sellerUid),
+    seller: chatHandle(seller),
+    cardName: String(name || 'Card').trim() || 'Card',
+    setName: '',
+    imageUrl: String(imageUrl || '').trim(),
+    path: catalogPath(href, cardId),
+    pricePkn: Number(pricePkn) || 0,
+  };
+}
+
+/** Homepage thumb, then the full scan, then the stored URL. */
+export function chatImageSources(row) {
+  const stored = String(row?.imageUrl || '').trim();
+  const out = [];
+  const push = (url) => {
+    const value = String(url || '').trim();
+    if (value && !out.includes(value)) out.push(value);
+  };
+  if (!stored) return out;
+  push(homepageDerivativeUrl(stored));
+  push(preferFullImage(stored));
+  push(stored);
+  return out;
 }
 
 export function writeListingDrag(event, reference) {

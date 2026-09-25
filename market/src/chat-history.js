@@ -11,17 +11,31 @@ export function historyKey({ peerUid = '', peer = '' } = {}) {
   return name ? `name:${name}` : '';
 }
 
+function emptyStore() {
+  return { threads: {}, names: {} };
+}
+
 function readAll() {
   try {
     const data = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}');
-    return data && typeof data === 'object' ? data : {};
+    if (!data || typeof data !== 'object') return emptyStore();
+    if (data.threads && typeof data.threads === 'object') {
+      return { threads: data.threads, names: data.names && typeof data.names === 'object' ? data.names : {} };
+    }
+    const threads = {};
+    const names = {};
+    for (const [key, row] of Object.entries(data)) {
+      if (!row || typeof row !== 'object') continue;
+      threads[key] = row;
+      if (key.startsWith('name:')) names[key.slice(5)] = key;
+    }
+    return { threads, names };
   } catch (_) {
-    return {};
+    return emptyStore();
   }
 }
 
-export function readChatHistory(key) {
-  const row = key ? readAll()[key] : null;
+function unpack(row) {
   const events = Array.isArray(row?.events) ? row.events.filter((event) => event?.id).slice(-CHAT_PAGE) : [];
   return {
     events,
@@ -29,22 +43,46 @@ export function readChatHistory(key) {
   };
 }
 
-export function writeChatHistory(key, events, hasMore) {
+export function readChatHistory(key) {
+  if (!key) return { events: [], hasMore: true };
+  const all = readAll();
+  if (key.startsWith('name:')) {
+    const aliased = all.names[key.slice(5)];
+    if (aliased && all.threads[aliased]) return unpack(all.threads[aliased]);
+  }
+  return unpack(all.threads[key]);
+}
+
+export function writeChatHistory(key, events, hasMore, link = {}) {
   if (!key) return;
   const all = readAll();
-  all[key] = {
+  const uid = String(link.peerUid || (key.startsWith('uid:') ? key.slice(4) : '')).trim();
+  const username = String(link.username || (key.startsWith('name:') ? key.slice(5) : '')).trim().toLowerCase();
+  const threadKey = uid ? `uid:${uid}` : key;
+  all.threads[threadKey] = {
     events: (events || []).filter((event) => event?.id).slice(-CHAT_PAGE),
     hasMore: Boolean(hasMore),
     savedAt: Date.now(),
+    username,
   };
-  const kept = Object.entries(all)
+  if (username) all.names[username] = threadKey;
+  const kept = Object.entries(all.threads)
     .sort((a, b) => (b[1]?.savedAt || 0) - (a[1]?.savedAt || 0))
     .slice(0, MAX_THREADS);
+  const threads = Object.fromEntries(kept);
+  const names = {};
+  for (const [name, savedKey] of Object.entries(all.names)) {
+    if (threads[savedKey]) names[name] = savedKey;
+  }
+  const store = { threads, names };
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(Object.fromEntries(kept)));
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(store));
   } catch (_) {
     try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify({ [key]: all[key] }));
+      localStorage.setItem(HISTORY_KEY, JSON.stringify({
+        threads: { [threadKey]: all.threads[threadKey] },
+        names: username ? { [username]: threadKey } : {},
+      }));
     } catch (_) {
       /* private mode or a full disk */
     }

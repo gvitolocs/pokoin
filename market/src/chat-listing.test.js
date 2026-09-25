@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendChatTag, cardReference, isSellerCard, listingReference, tagKey } from './chat-listing.js';
+import { appendChatTag, cardReference, catalogPath, chatImageSources, isSellerCard, listingReference, looseCardReference, tagKey } from './chat-listing.js';
 import { readFileSync } from 'node:fs';
 
 test('a listing chat follows the Firebase user id, not the stored email', () => {
@@ -43,6 +43,22 @@ test('chat tags keep one copy of a listing and cap at four', () => {
     tags = appendChatTag(tags, { kind: 'listing', listingId: id, cardName: id, seller: 'red' });
   }
   assert.deepEqual(tags.map(tagKey), ['listing:b', 'listing:c', 'listing:d', 'listing:e']);
+});
+
+test('a miniature keeps a site path and tries the homepage thumb before the full scan', () => {
+  const row = looseCardReference({
+    name: 'Tympole',
+    cardId: '968186',
+    href: 'https://pokoin.com/marketplace/en/cards/968186',
+    imageUrl: '/card-images/502874_snorlax.jpg',
+  });
+  assert.equal(row.path, '/marketplace/en/cards/968186');
+  assert.equal(catalogPath('/marketplace/en/cards/9?x=1', ''), '/marketplace/en/cards/9');
+  assert.deepEqual(chatImageSources({ imageUrl: '/card-images/502874_snorlax.jpg' }), [
+    '/card-images/502874_snorlax_homepage.webp',
+    '/card-images/502874_snorlax.jpg',
+  ]);
+  assert.equal(row.kind, 'card');
 });
 
 test('a homepage card is not a seller card', () => {

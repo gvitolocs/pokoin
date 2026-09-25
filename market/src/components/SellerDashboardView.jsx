@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc } from '../api.js';
+import { cardReference, writeListingDrag } from '../chat-listing.js';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import CardTraderAssetsPanel from './CardTraderAssetsPanel.jsx';
 import MiniCardTile from './MiniCardTile.jsx';
@@ -316,6 +317,8 @@ function MoverCard({ card }) {
       <a
         className="seller-mover"
         href={href}
+        draggable
+        onDragStart={(event) => writeListingDrag(event, cardReference(card))}
         onClick={(event) => {
           event.preventDefault();
           goMarket(href);
@@ -333,7 +336,7 @@ function MoverCard({ card }) {
     );
   }
   return (
-    <Link className="seller-mover" to={href}>
+    <Link className="seller-mover" to={href} draggable onDragStart={(event) => writeListingDrag(event, cardReference(card))}>
       <span className="seller-mover-art">
         {art ? <img src={art} alt="" loading="lazy" /> : <span className="tile-ph" />}
       </span>
@@ -355,6 +358,11 @@ function ListingPreviewTile({ row, href }) {
       imageUrl={row.cardImageUrl || row.card_image_url || ''}
       name={name}
       title={name}
+      cardId={row.cardId || row.card_id || ''}
+      listingId={row.id || row.listingId || ''}
+      sellerUid={row.sellerUid || row.seller_uid || ''}
+      seller={row.sellerUsername || row.seller_name || ''}
+      pricePkn={row.pricePkn || row.price_pkn || 0}
       href={href || ''}
     />
   );

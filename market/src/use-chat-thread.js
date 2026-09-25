@@ -9,17 +9,17 @@ import {
   writeChatHistory,
 } from './chat-history.js';
 
-function remember(result, page, hasMore) {
+function remember(result, page, hasMore, fallbackPeer) {
   const uid = result?.peer?.uid || '';
-  const username = result?.peer?.username || '';
-  if (uid) writeChatHistory(historyKey({ peerUid: uid }), page, hasMore);
-  if (username) writeChatHistory(historyKey({ peer: username }), page, hasMore);
+  const username = result?.peer?.username || fallbackPeer || '';
+  const key = uid ? historyKey({ peerUid: uid }) : historyKey({ peer: username });
+  writeChatHistory(key, page, hasMore, { peerUid: uid, username });
 }
 
 export function useChatThread({ peer = '', peerUid = '', signedIn = false, getBearer, enabled = true }) {
   const key = historyKey({ peerUid, peer });
   const active = Boolean(enabled && signedIn && key);
-  const cached = active ? readChatHistory(key) : { events: [], hasMore: false };
+  const cached = key ? readChatHistory(key) : { events: [], hasMore: false };
   const [cacheKey, setCacheKey] = useState(key);
   const [events, setEvents] = useState(cached.events);
   const [hasMore, setHasMore] = useState(cached.hasMore);
@@ -53,8 +53,7 @@ export function useChatThread({ peer = '', peerUid = '', signedIn = false, getBe
         const more = pageHasMore(result);
         setHasMore(more);
         setEvents((current) => mergeChatEvents(current, page));
-        remember(result, page, more);
-        writeChatHistory(key, page, more);
+        remember(result, page, more, peer);
         setError('');
       } catch (err) {
         if (live && !eventsRef.current.length) setError(err.message || 'Could not open the chat.');

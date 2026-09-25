@@ -181,7 +181,7 @@ function EventCard({ event, busy, onAction }) {
       {event.text ? <p>{event.text}</p> : null}
       {(event.listings || []).length ? (
         <span className="chat-tags">
-          {(event.listings || []).map((row) => <ChatListingTag key={tagKey(row)} row={row} />)}
+          {(event.listings || []).map((row, index) => <ChatListingTag key={`${tagKey(row)}:${index}`} row={row} />)}
         </span>
       ) : null}
       <time>{chatTime(event.createdAt)}</time>
@@ -224,8 +224,8 @@ export function Conversation() {
     finally { setBusy(false); }
   }
 
-  if (!ready) return <main className="messages-page messages-empty" aria-busy="true">Loading…</main>;
-  if (!signedIn) return <SignInGate />;
+  if (!ready && !thread.events.length) return <main className="messages-page messages-empty" aria-busy="true">Loading…</main>;
+  if (ready && !signedIn) return <SignInGate />;
   return (
     <main className="conversation-page">
       <header className="conversation-head"><button type="button" onClick={() => navigate('/messages')} aria-label="Back to messages">‹</button><span className="messages-avatar" aria-hidden="true">{peer.slice(0, 1).toUpperCase()}</span><div><strong>@{peer}</strong><span>Pokoin conversation</span></div></header>

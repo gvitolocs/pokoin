@@ -1069,7 +1069,7 @@ export default function Chrome({ children }) {
                                       </span>
                                     </span>
                                     {thumb ? (
-                                      <CardArt src={thumb} alt="" loading={thumbLoading} fetchPriority={thumbPriority} />
+                                      <CardArt src={thumb} alt="" loading={thumbLoading} fetchPriority={thumbPriority} dragCard={live ? undefined : card} />
                                     ) : <span className="suggest-ph" />}
                                     <span className="suggest-copy">
                                       <span className="suggest-number">{suggestNumber}</span>
@@ -1114,7 +1114,7 @@ export default function Chrome({ children }) {
                                           pick(card, flat.findIndex((row) => row.optionId === optionId));
                                         }}
                                       >
-                                        <CardArt src={thumb} card={card} cut={artLayout === 'window' || artLayout === 'halfart'} loading={thumbLoading} fetchPriority={thumbPriority} />
+                                        <CardArt src={thumb} card={card} dragCard={live ? undefined : card} cut={artLayout === 'window' || artLayout === 'halfart'} loading={thumbLoading} fetchPriority={thumbPriority} />
                                       </button>
                                       ) : null}
                                     </div>

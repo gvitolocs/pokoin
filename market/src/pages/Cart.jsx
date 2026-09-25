@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPkn } from '../api.js';
+import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { useAuth } from '../auth.jsx';
 import { useCart } from '../cart.jsx';
 import CardArt from '../components/CardArt.jsx';
@@ -42,7 +43,15 @@ export default function Cart() {
           <div className="bag-list">
             {items.map((row) => (
               <article className="bag-row" key={row.id}>
-                <Link to={row.href || '/marketplace'} className="bag-art">
+                <Link
+                  to={row.href || '/marketplace'}
+                  className="bag-art"
+                  draggable
+                  onDragStart={(event) => writeListingDrag(event, looseCardReference({
+                    imageUrl: row.image, name: row.name, href: row.href, cardId: row.cardId,
+                    sellerUid: row.sellerUid, pricePkn: row.pricePkn, listingId: row.listingId,
+                  }))}
+                >
                   {row.image ? <CardArt src={row.image} alt="" /> : <span className="suggest-ph" />}
                 </Link>
                 <div className="bag-info">

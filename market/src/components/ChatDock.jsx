@@ -19,6 +19,7 @@ import {
   removeChatTag,
   subscribeChatDock,
 } from '../chat-dock-store.js';
+import { useSearchLang } from '../locale.js';
 import { useChatThread } from '../use-chat-thread.js';
 import ChatListingTag from './ChatListingTag.jsx';
 import '../chat-dock.css';
@@ -107,6 +108,7 @@ function ConversationList({ signedIn, getBearer, onOpen }) {
 
 export default function ChatDock() {
   const { signedIn, getBearer } = useAuth();
+  const lang = useSearchLang();
   const [dock, setDock] = useState(getChatDock);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -192,7 +194,11 @@ export default function ChatDock() {
         {dock.view === 'thread' ? (
           <button type="button" aria-label="Conversations" onClick={() => openChatList(text)}>‹</button>
         ) : <span />}
-        <strong>{dock.view === 'thread' ? label : 'Messages'}</strong>
+        <strong>
+          {dock.view === 'thread' && dock.peerLabel && dock.peerLabel !== 'Seller' ? (
+            <Link to={`/marketplace/${lang}/users/${encodeURIComponent(dock.peerLabel)}`}>{label}</Link>
+          ) : (dock.view === 'thread' ? label : 'Messages')}
+        </strong>
         <button type="button" aria-label="Close chat" onClick={() => closeChatDock(text)}>×</button>
       </header>
       {dock.view === 'list' ? (
@@ -205,7 +211,7 @@ export default function ChatDock() {
                 {event.text ? <p>{event.text}</p> : null}
                 {(event.listings || []).length ? (
                   <span className="chat-tags">
-                    {(event.listings || []).map((row) => <ChatListingTag key={tagKey(row)} row={row} />)}
+                    {(event.listings || []).map((row, index) => <ChatListingTag key={`${tagKey(row)}:${index}`} row={row} />)}
                   </span>
                 ) : null}
                 {!event.text && !(event.listings || []).length ? <p>…</p> : null}

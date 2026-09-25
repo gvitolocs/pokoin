@@ -72,6 +72,7 @@ function PromoFanCard({ card, role, index, onPointerEnter, onFail }) {
           alt={card.name}
           fallback="hide"
           full
+          dragCard={card}
           loading="eager"
           fetchPriority="high"
           onLoad={() => setReady(true)}
