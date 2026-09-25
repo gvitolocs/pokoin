@@ -113,6 +113,51 @@
   margin: 0.2rem 0 0.1rem;
 }
 
+.display-name-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.display-name-inline.is-editing {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.display-name-inline input {
+  width: min(18rem, 70vw);
+  min-width: 0;
+  padding: 0 0.1rem 0.05rem;
+  border: 0;
+  border-bottom: 2px solid var(--yellow);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+
+.display-name-inline input:focus {
+  outline: none;
+}
+
+.display-name-help {
+  flex: 1 0 100%;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.display-name-help.is-error {
+  color: #ff8a80;
+}
+
 .username-inline {
   display: flex;
   flex-wrap: wrap;

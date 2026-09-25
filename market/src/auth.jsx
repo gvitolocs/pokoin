@@ -162,6 +162,7 @@ function profileFrom(data = {}, uid = '') {
   return {
     uid,
     username: data.username || '',
+    displayName: String(data.displayName || '').trim(),
     role: data.role || '',
     admin,
     silver,
@@ -182,6 +183,7 @@ const AuthContext = createContext({
   getBearer,
   setProfilePhoto: () => {},
   setProfileUsername: () => {},
+  setProfileDisplayName: () => {},
 });
 
 export function AuthProvider({ children }) {
@@ -448,6 +450,12 @@ export function AuthProvider({ children }) {
     setProfile((current) => (current ? { ...current, username } : current));
   }, []);
 
+  const setProfileDisplayName = useCallback((name) => {
+    const displayName = String(name || '').trim();
+    if (!displayName) return;
+    setProfile((current) => (current ? { ...current, displayName } : current));
+  }, []);
+
   const value = useMemo(() => ({
     user,
     ready,
@@ -460,7 +468,8 @@ export function AuthProvider({ children }) {
     getBearer,
     setProfilePhoto,
     setProfileUsername,
-  }), [user, ready, hint, profile, availablePkn, extensionUid, setProfilePhoto, setProfileUsername]);
+    setProfileDisplayName,
+  }), [user, ready, hint, profile, availablePkn, extensionUid, setProfilePhoto, setProfileUsername, setProfileDisplayName]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

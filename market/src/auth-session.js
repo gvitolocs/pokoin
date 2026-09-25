@@ -229,6 +229,8 @@ export function profileFromSession(session) {
 
 /** Public/listing seller label. Prefer real displayName, then username — never email. */
 export function sellerNameOf(user, profile) {
+  const stored = String(profile?.displayName || '').trim();
+  if (stored && !stored.includes('@')) return stored;
   const display = String(user?.displayName || '').trim();
   if (display && !display.includes('@')) {
     return display;
@@ -242,6 +244,8 @@ export function sellerNameOf(user, profile) {
 
 /** Side-panel desks inject uid without a Firebase `user`. Never read user.displayName bare. */
 export function accountHeading(user, profile) {
+  const stored = String(profile?.displayName || '').trim();
+  if (stored) return stored;
   return String(user?.displayName || user?.email || profile?.username || '').trim() || 'Collector';
 }
 

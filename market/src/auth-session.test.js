@@ -82,6 +82,7 @@ test('account heading survives a side-panel session with no Firebase user', () =
   assert.equal(accountHeading(null, { username: 'giuseppe' }), 'giuseppe');
   assert.equal(accountHeading(null, { uid: 'x' }), 'Collector');
   assert.equal(accountHeading({ displayName: 'Giuseppe', email: 'a@b.c' }, null), 'Giuseppe');
+  assert.equal(accountHeading({ displayName: 'vitologiuseeppe17', email: 'a@b.c' }, { displayName: 'Giuseppe' }), 'Giuseppe');
   assert.equal(accountLede(null), 'Signed in');
   assert.equal(accountLede({ email: 'a@b.c' }), 'a@b.c');
 });

@@ -1597,6 +1597,18 @@ export function ensureUsername(token) {
   });
 }
 
+/** Visible profile name (not the @handle). */
+export function changeDisplayName(displayName, token) {
+  return getJson('/api/search-recipient-emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ displayName }),
+  });
+}
+
 /** Claim a new username (3–32 lowercase letters/digits). 409 when taken. */
 export function changeUsername(username, token) {
   return getJson('/api/search-recipient-emails', {

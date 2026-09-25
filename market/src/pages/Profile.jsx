@@ -11,6 +11,7 @@ import CardTraderConnectPanel from '../components/CardTraderConnectPanel.jsx';
 import { formatPknNumber } from '../pkn.js';
 import Avatar from '../components/Avatar.jsx';
 import UsernameEditor from '../components/UsernameEditor.jsx';
+import DisplayNameEditor from '../components/DisplayNameEditor.jsx';
 
 // The cropper (react-easy-crop) loads only when someone edits their photo.
 const AvatarEditor = lazy(() => import('../components/AvatarEditor.jsx'));
@@ -50,7 +51,7 @@ export default function Profile() {
     <div className="page desk">
       <PageHead
         kicker="Account"
-        title={name}
+        title={<DisplayNameEditor onSaved={setToast} />}
         meta={<UsernameEditor onSaved={setToast} />}
         lede={accountLede(user)}
         leading={(
