@@ -1583,6 +1583,41 @@ export function unlockSilver(token) {
   });
 }
 
+/** `imageBase64` is the cropped square data URL from avatar.js. */
+export function uploadProfilePicture(imageBase64, token) {
+  return getJson('/api/upload-profile-picture', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ imageBase64 }),
+  });
+}
+
+/** Server copies the Google account photo to Pokoin storage (no crop). */
+export function copyGoogleProfilePicture(photoUrl, token) {
+  return getJson('/api/cache-google-profile-picture', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ photoUrl }),
+  });
+}
+
+export function removeProfilePicture(token) {
+  return getJson('/api/remove-profile-picture', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: '{}',
+  });
+}
+
 export function fetchSwapPools() {
   return getJson('/chain/swap/pools');
 }

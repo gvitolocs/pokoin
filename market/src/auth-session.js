@@ -7,6 +7,8 @@
  * live ID token into a Domain=.pokoin.com cookie so the seller desk stays
  * signed in when hopping between hosts. */
 
+import { safeAvatarUrl } from './avatar.js';
+
 export const AUTH_SESSION_KEY = 'pokoin.auth.session';
 export const AUTH_TOKEN_COOKIE = 'pokoin.auth.token';
 export const AUTH_SESSION_COOKIE = 'pokoin.auth.session.cookie';
@@ -127,6 +129,7 @@ export function readAuthSession(overrideStore) {
       silver,
       silverUntil: untilLive ? silverUntil : null,
       availablePkn: Number(parsed.availablePkn) || 0,
+      photoUrl: safeAvatarUrl(parsed.photoUrl),
     };
   } catch (_) {
     return null;
@@ -147,6 +150,7 @@ export function writeAuthSession(session, overrideStore) {
     silver: session.silver === true,
     silverUntil: silverUntil ? silverUntil.toISOString() : null,
     availablePkn: Number(session.availablePkn) || 0,
+    photoUrl: safeAvatarUrl(session.photoUrl),
   });
   if (storage?.setItem) {
     try {
@@ -218,6 +222,7 @@ export function profileFromSession(session) {
     admin: Boolean(session.admin),
     silver: Boolean(session.silver),
     silverUntil: session.silverUntil || null,
+    photoUrl: safeAvatarUrl(session.photoUrl),
   };
 }
 
