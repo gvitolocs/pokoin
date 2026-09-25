@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendChatTag, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listingReference, looseCardReference, personListsCard, referenceForPeer, tagKey } from './chat-listing.js';
+import { appendChatTag, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listingReference, looseCardReference, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned } from './chat-listing.js';
 import { readFileSync } from 'node:fs';
 
 test('a listing chat follows the Firebase user id, not the stored email', () => {
@@ -80,6 +80,24 @@ test('dragging the scan keeps the open chat person when they list that card', ()
   assert.equal(cardIdOf({ path: '/marketplace/en/cards/88' }), '88');
   assert.equal(personListsCard(offers, [{ username: 'redshakkio' }]), true);
   assert.equal(personListsCard(offers, [{ username: 'other' }]), false);
+});
+
+test('a trade card remembers gray, and a refresh can turn it color when the seller lists it', () => {
+  const memory = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => (memory.has(key) ? memory.get(key) : null),
+    setItem: (key, value) => memory.set(key, String(value)),
+    removeItem: (key) => memory.delete(key),
+  };
+  const row = { cardId: '219916', cardName: 'Meowth', imageUrl: '', seller: '', sellerUid: '' };
+  const people = [{ uid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2', username: 'redshakkio' }];
+  assert.equal(paintOwned(row, '219916', people), 'no');
+  writeCardOwned('219916', people, 'no');
+  assert.equal(readCardOwned('219916', [{ username: 'redshakkio' }]), 'no');
+  assert.equal(paintOwned(row, '219916', [{ username: 'redshakkio' }]), 'no');
+  writeCardOwned('219916', people, 'yes');
+  assert.equal(readCardOwned('219916', [{ uid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2' }]), 'yes');
+  assert.equal(paintOwned(row, '219916', people), 'yes');
 });
 
 test('a homepage card is not a seller card', () => {

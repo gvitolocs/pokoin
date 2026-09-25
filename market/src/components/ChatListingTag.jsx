@@ -6,8 +6,10 @@ import {
   cardIdOf,
   chatImageSources,
   isSellerCard,
+  paintOwned,
   personListsCard,
   tagKey,
+  writeCardOwned,
 } from '../chat-listing.js';
 import ThumbZoom from './ThumbZoom.jsx';
 
@@ -57,15 +59,19 @@ export default function ChatListingTag({ row, onRemove, peer, me }) {
   const [catalog, setCatalog] = useState([]);
   const [failed, setFailed] = useState(false);
   const [painted, setPainted] = useState(false);
-  const [owned, setOwned] = useState(() => (isSellerCard(row) ? 'yes' : (id ? 'pending' : 'no')));
+  const people = [
+    { uid: peerUid, username: peerName },
+    { uid: meUid, username: meName },
+  ];
+  const [owned, setOwned] = useState(() => paintOwned(row, id, people));
 
   useEffect(() => {
     setStep(0);
     setCatalog([]);
     setFailed(false);
     setPainted(false);
-    setOwned(isSellerCard(row) ? 'yes' : (id ? 'pending' : 'no'));
-  }, [identity, id, row.seller, row.sellerUid, row.imageUrl]);
+    setOwned(paintOwned(row, id, people));
+  }, [identity, id, row.seller, row.sellerUid, row.imageUrl, peerUid, peerName, meUid, meName]);
 
   useEffect(() => {
     if (!id) return undefined;
@@ -80,10 +86,10 @@ export default function ChatListingTag({ row, onRemove, peer, me }) {
     if (!isSellerCard(row)) {
       fetchListings(id).then((data) => {
         if (!live) return;
-        setOwned(personListsCard(data?.listings, people) ? 'yes' : 'no');
-      }).catch(() => {
-        if (live) setOwned('no');
-      });
+        const next = personListsCard(data?.listings, people) ? 'yes' : 'no';
+        writeCardOwned(id, people, next);
+        setOwned(next);
+      }).catch(() => {});
     }
     return () => { live = false; };
   }, [id, identity, peerUid, peerName, meUid, meName, row.seller, row.sellerUid, row.imageUrl]);

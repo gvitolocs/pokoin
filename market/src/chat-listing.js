@@ -94,6 +94,71 @@ export function personListsCard(listings, people = []) {
   return (listings || []).some((offer) => (people || []).some((person) => samePerson(offer, person)));
 }
 
+const OWNED_KEY = 'pokoin.chatOwned';
+
+function personKeys(people) {
+  const keys = [];
+  for (const person of people || []) {
+    const uid = sellerUserId(person?.uid);
+    const handle = chatHandle(person?.username);
+    if (uid) keys.push(`uid:${uid}`);
+    if (handle) keys.push(`name:${handle}`);
+  }
+  return keys;
+}
+
+function readOwnedStore() {
+  try {
+    const data = JSON.parse(localStorage.getItem(OWNED_KEY) || '{}');
+    return data && typeof data === 'object' ? data : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+/** 'yes' or 'no' when this browser already learned whether these people list the card. */
+export function readCardOwned(cardId, people) {
+  const id = String(cardId || '').trim();
+  if (!id) return '';
+  const data = readOwnedStore();
+  for (const key of personKeys(people)) {
+    const value = data?.[key]?.[id];
+    if (value === 'yes' || value === 'no') return value;
+  }
+  return '';
+}
+
+export function writeCardOwned(cardId, people, owned) {
+  const id = String(cardId || '').trim();
+  if (!id || (owned !== 'yes' && owned !== 'no')) return;
+  const data = readOwnedStore();
+  for (const key of personKeys(people)) {
+    const bucket = data[key] && typeof data[key] === 'object' ? data[key] : {};
+    bucket[id] = owned;
+    const cards = Object.keys(bucket);
+    if (cards.length > 60) {
+      for (const extra of cards.slice(0, cards.length - 60)) delete bucket[extra];
+    }
+    data[key] = bucket;
+  }
+  const keys = Object.keys(data);
+  if (keys.length > 40) {
+    for (const extra of keys.slice(0, keys.length - 40)) delete data[extra];
+  }
+  try {
+    localStorage.setItem(OWNED_KEY, JSON.stringify(data));
+  } catch (_) {
+    /* private mode */
+  }
+}
+
+/** Color only a real listing, or a trade card this browser already saw them list. */
+export function paintOwned(row, cardId, people) {
+  if (isSellerCard(row)) return 'yes';
+  if (!cardId) return 'no';
+  return readCardOwned(cardId, people) || 'no';
+}
+
 /**
  * Dragging the catalog scan has no seller. If the open chat's person
  * lists this printing, attach that listing so it stays in color.
