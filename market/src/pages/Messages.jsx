@@ -11,6 +11,7 @@ import {
 import { useChatThread } from '../use-chat-thread.js';
 import { chatTime, eventAriaLabel, requestActionFor } from '../chat-format.js';
 import { tagKey } from '../chat-listing.js';
+import { useSearchLang } from '../locale.js';
 import ChatListingTag from '../components/ChatListingTag.jsx';
 import { createMoneyRequest, payMoneyRequest, requestStatusLabel, respondMoneyRequest } from '../money-requests.js';
 
@@ -194,6 +195,7 @@ function EventCard({ event, busy, onAction, peer, me }) {
 export function Conversation() {
   const { username = '' } = useParams();
   const peer = decodeURIComponent(username).trim().toLowerCase();
+  const lang = useSearchLang();
   const navigate = useNavigate();
   const { ready, signedIn, getBearer, user, profile } = useAuth();
   const [text, setText] = useState('');
@@ -230,7 +232,16 @@ export function Conversation() {
   if (ready && !signedIn) return <SignInGate />;
   return (
     <main className="conversation-page">
-      <header className="conversation-head"><button type="button" onClick={() => navigate('/messages')} aria-label="Back to messages">‹</button><span className="messages-avatar" aria-hidden="true">{peer.slice(0, 1).toUpperCase()}</span><div><strong>@{peer}</strong><span>Pokoin conversation</span></div></header>
+      <header className="conversation-head">
+        <button type="button" onClick={() => navigate('/messages')} aria-label="Back to messages">‹</button>
+        <Link className="conversation-person" to={`/marketplace/${lang}/users/${encodeURIComponent(peer)}`}>
+          <span className="messages-avatar" aria-hidden="true">{peer.slice(0, 1).toUpperCase()}</span>
+          <span>
+            <strong>@{peer}</strong>
+            <span>Pokoin conversation</span>
+          </span>
+        </Link>
+      </header>
       {flash && <button className="chat-flash" type="button" onClick={() => setFlash('')}>{flash} ✓</button>}
       {(error || thread.error) && <p className="chat-error conversation-error" role="alert">{error || thread.error}</p>}
       <section className="chat-timeline" ref={thread.logRef} onScroll={thread.onScroll} aria-live="polite" aria-busy={!thread.settled && !thread.events.length}>

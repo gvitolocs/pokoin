@@ -8842,8 +8842,18 @@ html:has(.wallet-page) .brand span {
 .conversation-head { gap: 0.7rem; padding: 0.5rem 0 1rem; border-bottom: 1px solid var(--g4); }
 .conversation-head > button { width: 36px; height: 36px; border: 0; background: transparent; color: var(--text); font-size: 2rem; cursor: pointer; }
 .conversation-head .messages-avatar { width: 38px; height: 38px; }
-.conversation-head div { display: grid; gap: 0.1rem; }
-.conversation-head div span { color: var(--muted); font-size: 0.75rem; }
+.conversation-person {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+.conversation-person > span:last-child { display: grid; gap: 0.1rem; min-width: 0; }
+.conversation-person strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-person > span:last-child > span { color: var(--muted); font-size: 0.75rem; }
+.conversation-person:hover strong { color: var(--yellow); }
 .chat-timeline { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 0.65rem; padding: 1.2rem 0.2rem; scrollbar-width: thin; }
 .chat-bubble { align-self: flex-start; max-width: min(76%, 520px); padding: 0.65rem 0.8rem 0.4rem; border-radius: 16px 16px 16px 4px; background: var(--g3); overflow-wrap: anywhere; }
 .chat-bubble.mine { align-self: flex-end; border-radius: 16px 16px 4px 16px; background: #f1c40f; color: #18150c; }
