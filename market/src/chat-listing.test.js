@@ -3,6 +3,15 @@ import test from 'node:test';
 import { appendChatTag, listingReference, tagKey } from './chat-listing.js';
 import { readFileSync } from 'node:fs';
 
+test('an email stored as the seller name uses the shop handle', () => {
+  const row = listingReference({
+    offer: { id: '1', sellerUsername: 'redshakkio@gmail.com', cardName: 'Drifloon', pricePkn: 18 },
+    card: { id: '9', name: 'Drifloon' },
+    seller: 'redshakkio',
+  });
+  assert.equal(row.seller, 'redshakkio');
+});
+
 test('a shop listing reference keeps the seller handle and card name', () => {
   const row = listingReference({
     offer: { id: 'lst-1', sellerUsername: 'redshakkio', pricePkn: 76, cardImageUrl: 'https://cdn.pokoin.com/a.jpg' },

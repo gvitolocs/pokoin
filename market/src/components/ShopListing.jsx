@@ -10,7 +10,6 @@ import {
   listingLanguageFlag,
   publicShopSellerLabel,
   sellerCountryFlag,
-  sellerHandle,
   sellerHref,
 } from '../listing-meta.js';
 
@@ -35,6 +34,7 @@ export default function ShopListingRow({
   listingBusy = false,
   editing = false,
   card = null,
+  seller = '',
   onBuy,
   onCart,
   onEdit,
@@ -42,8 +42,8 @@ export default function ShopListingRow({
 }) {
   const [added, setAdded] = useState(false);
   const name = publicShopSellerLabel(offer);
-  const handle = sellerHandle(offer);
-  const reference = listingReference({ offer, card });
+  const reference = listingReference({ offer, card, seller });
+  const handle = reference.seller;
   const href = sellerHref(offer);
   const country = sellerCountryFlag(offer?.sellerCountry);
   const language = listingLanguageFlag(offer?.language);

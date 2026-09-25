@@ -3,12 +3,29 @@ import { sellerHandle } from './listing-meta.js';
 
 export const LISTING_DRAG_TYPE = 'application/x-pokoin-listing';
 
-export function listingReference({ offer, card }) {
+const CHAT_HANDLE = /^[a-z0-9]{3,32}$/;
+
+export function chatHandle(value) {
+  const handle = String(value || '').trim().toLowerCase();
+  return CHAT_HANDLE.test(handle) ? handle : '';
+}
+
+function emailLocalHandle(value) {
+  const text = String(value || '').trim().toLowerCase();
+  const at = text.indexOf('@');
+  if (at < 1) return '';
+  return chatHandle(text.slice(0, at));
+}
+
+export function listingReference({ offer, card, seller = '' }) {
   return {
     kind: 'listing',
     listingId: String(offer?.id || ''),
     cardId: String(card?.id || ''),
-    seller: sellerHandle(offer),
+    seller: chatHandle(sellerHandle(offer))
+      || chatHandle(seller)
+      || emailLocalHandle(offer?.sellerUsername)
+      || emailLocalHandle(offer?.sellerName),
     cardName: card?.name || offer?.cardName || offer?.name || 'Card',
     setName: String(offer?.setName || ''),
     imageUrl: offer?.cardImageUrl || card?.heroImageUrl || card?.imageUrl || card?.gridImageUrl || '',
