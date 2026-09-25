@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { searchRecipientUsernames } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import {
-  getConversation,
   listConversations,
   newClientToken,
   sendChatMessage,
   sendChatPayment,
 } from '../chat-client.js';
+import { useChatThread } from '../use-chat-thread.js';
 import { chatTime, eventAriaLabel, requestActionFor } from '../chat-format.js';
 import { tagKey } from '../chat-listing.js';
 import ChatListingTag from '../components/ChatListingTag.jsx';
@@ -194,41 +194,19 @@ export function Conversation() {
   const peer = decodeURIComponent(username).trim().toLowerCase();
   const navigate = useNavigate();
   const { ready, signedIn, getBearer } = useAuth();
-  const [events, setEvents] = useState([]);
   const [text, setText] = useState('');
   const [moneyMode, setMoneyMode] = useState('');
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [flash, setFlash] = useState('');
-  const endRef = useRef(null);
-
-  const refresh = useCallback(async ({ quiet = false } = {}) => {
-    if (!signedIn || !peer) return;
-    try {
-      const token = await getBearer();
-      const result = await getConversation(peer, token);
-      setEvents(result.events || []); setError('');
-    } catch (err) {
-      if (!quiet) setError(err.message || 'Conversation could not be loaded.');
-    } finally { setLoading(false); }
-  }, [getBearer, peer, signedIn]);
-
-  useEffect(() => {
-    refresh();
-    let timer;
-    const schedule = () => { clearInterval(timer); timer = setInterval(() => refresh({ quiet: true }), document.hidden ? 15000 : 4000); };
-    schedule(); document.addEventListener('visibilitychange', schedule);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', schedule); };
-  }, [refresh]);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [events.length]);
+  const thread = useChatThread({ peer, signedIn, getBearer, enabled: signedIn && Boolean(peer) });
 
   async function send(event) {
     event.preventDefault();
     const message = text.trim();
     if (!message || busy) return;
     setBusy(true); setError('');
-    try { const token = await getBearer(); await sendChatMessage(peer, message, token); setText(''); await refresh(); }
+    try { const token = await getBearer(); await sendChatMessage(peer, message, token); setText(''); await thread.refresh(); }
     catch (err) { setError(err.message || 'Message was not sent.'); }
     finally { setBusy(false); }
   }
@@ -241,7 +219,7 @@ export function Conversation() {
       if (action === 'pay') await payMoneyRequest(event.requestId, token);
       else await respondMoneyRequest(event.requestId, action, token);
       setFlash(action === 'pay' ? `${event.amountPkn} PKN paid` : `Request ${action}d`);
-      await refresh();
+      await thread.refresh();
     } catch (err) { setError(err.message || 'Request could not be updated.'); }
     finally { setBusy(false); }
   }
@@ -252,14 +230,13 @@ export function Conversation() {
     <main className="conversation-page">
       <header className="conversation-head"><button type="button" onClick={() => navigate('/messages')} aria-label="Back to messages">‹</button><span className="messages-avatar" aria-hidden="true">{peer.slice(0, 1).toUpperCase()}</span><div><strong>@{peer}</strong><span>Pokoin conversation</span></div></header>
       {flash && <button className="chat-flash" type="button" onClick={() => setFlash('')}>{flash} ✓</button>}
-      {error && <p className="chat-error conversation-error" role="alert">{error}</p>}
-      <section className="chat-timeline" aria-live="polite" aria-busy={loading}>
-        {loading ? <p className="chat-muted">Loading conversation…</p> : events.length ? events.map((event) => <EventCard key={event.id} event={event} busy={busy} onAction={actOnRequest} />) : <div className="chat-first"><h2>Say hello to @{peer}</h2><p>Messages, requests, and payments appear here in chronological order.</p></div>}
-        <div ref={endRef} />
+      {(error || thread.error) && <p className="chat-error conversation-error" role="alert">{error || thread.error}</p>}
+      <section className="chat-timeline" ref={thread.logRef} onScroll={thread.onScroll} aria-live="polite" aria-busy={!thread.settled && !thread.events.length}>
+        {!thread.settled && !thread.events.length ? <p className="chat-muted">Loading conversation…</p> : thread.events.length ? thread.events.map((event) => <EventCard key={event.id} event={event} busy={busy} onAction={actOnRequest} />) : <div className="chat-first"><h2>Say hello to @{peer}</h2><p>Messages, requests, and payments appear here in chronological order.</p></div>}
       </section>
       <div className="chat-tools"><button type="button" onClick={() => setMoneyMode('request')}>Request</button><button type="button" onClick={() => setMoneyMode('send')}>Send PKN</button></div>
       <form className="chat-composer" onSubmit={send}><label className="sr-only" htmlFor="chat-message">Message</label><textarea id="chat-message" rows="1" maxLength={1000} value={text} onChange={(event) => setText(event.target.value)} placeholder={`Message @${peer}`} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(event); } }} /><button type="submit" disabled={!text.trim() || busy} aria-label="Send message">↑</button></form>
-      {moneyMode && <MoneyModal mode={moneyMode} peer={peer} onClose={() => setMoneyMode('')} onDone={(message) => { setMoneyMode(''); setFlash(message); refresh(); }} />}
+      {moneyMode && <MoneyModal mode={moneyMode} peer={peer} onClose={() => setMoneyMode('')} onDone={(message) => { setMoneyMode(''); setFlash(message); thread.refresh(); }} />}
     </main>
   );
 }

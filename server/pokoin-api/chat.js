@@ -18,7 +18,7 @@ const {
 } = require('./_chat_core');
 const { effectiveStatus } = require('./_money_request_core');
 
-const EVENT_LIMIT = 120;
+const EVENT_PAGE = 100;
 
 function httpError(statusCode, message) {
   return Object.assign(new Error(message), { statusCode });
@@ -58,6 +58,25 @@ async function resolveRegisteredUser(admin, firestore, rawUid) {
   return { uid: record.uid, username: await usernameFor(firestore, record.uid) };
 }
 
+function peerUidOnly(rawUid) {
+  const uid = String(rawUid || '').trim();
+  if (!/^[A-Za-z0-9]{8,128}$/.test(uid)) throw httpError(400, 'That seller account is missing.');
+  return { uid, username: '' };
+}
+
+async function readEventPage(ref, beforeId) {
+  let query = ref.collection('events').orderBy('createdAt', 'asc');
+  if (beforeId) {
+    const cursor = await ref.collection('events').doc(String(beforeId)).get();
+    if (!cursor.exists) return { docs: [], hasMore: false };
+    query = query.endBefore(cursor);
+  }
+  const snap = await query.limitToLast(EVENT_PAGE + 1).get();
+  const docs = snap.docs;
+  const hasMore = docs.length > EVENT_PAGE;
+  return { docs: hasMore ? docs.slice(1) : docs, hasMore };
+}
+
 function serializeEvent(doc, uid, requestsById) {
   const data = doc.data() || {};
   const request = data.requestId ? requestsById.get(data.requestId) : null;
@@ -92,7 +111,8 @@ module.exports = async function handler(req, res) {
     const now = () => admin.firestore.FieldValue.serverTimestamp();
     const url = new URL(req.url, 'https://local');
     const action = String(url.searchParams.get('action') || 'list');
-    const me = { uid: decoded.uid, username: await usernameFor(firestore, decoded.uid) };
+    const me = { uid: decoded.uid, username: '' };
+    if (req.method === 'POST') me.username = await usernameFor(firestore, decoded.uid);
 
     if (req.method === 'GET' && action === 'list') {
       const snap = await firestore.collection('conversations')
@@ -117,7 +137,7 @@ module.exports = async function handler(req, res) {
     const peerUid = req.method === 'GET' ? url.searchParams.get('peerUid') : req.body?.peerUid;
     const peerName = req.method === 'GET' ? url.searchParams.get('peer') : req.body?.peer;
     const peer = peerUid
-      ? await resolveRegisteredUser(admin, firestore, peerUid)
+      ? (req.method === 'GET' ? peerUidOnly(peerUid) : await resolveRegisteredUser(admin, firestore, peerUid))
       : await resolvePeer(firestore, peerName);
     if (peer.uid === me.uid) throw httpError(400, 'You cannot open a conversation with yourself.');
     const pairKey = pairKeyFor(me.uid, peer.uid);
@@ -126,17 +146,22 @@ module.exports = async function handler(req, res) {
     if (req.method === 'GET' && action === 'get') {
       const doc = await ref.get();
       if (doc.exists && !isParticipant(doc.data()?.members, me.uid)) throw httpError(403, 'Not your conversation.');
-      const eventsSnap = await ref.collection('events').orderBy('createdAt', 'asc').limitToLast(EVENT_LIMIT).get();
-      const requestIds = [...new Set(eventsSnap.docs.map((event) => event.data()?.requestId).filter(Boolean))];
-      const requestDocs = await Promise.all(requestIds.map((id) => firestore.collection('money_requests').doc(id).get()));
+      const beforeId = String(url.searchParams.get('before') || '').trim();
+      const { docs, hasMore } = await readEventPage(ref, beforeId);
+      const requestIds = [...new Set(docs.map((event) => event.data()?.requestId).filter(Boolean))];
+      const requestDocs = requestIds.length
+        ? await Promise.all(requestIds.map((id) => firestore.collection('money_requests').doc(id).get()))
+        : [];
       const requestsById = new Map(requestDocs.filter((item) => item.exists).map((item) => [item.id, item.data()]));
-      const unread = doc.exists ? unreadFor(doc.data(), me.uid) : 0;
+      const unread = !beforeId && doc.exists ? unreadFor(doc.data(), me.uid) : 0;
       if (unread) await ref.update({ [`unread.${me.uid}`]: 0 });
+      const storedName = doc.exists ? doc.data()?.memberUsernames?.[peer.uid] : '';
       return res.status(200).json({
         pairKey,
-        peer,
+        peer: { uid: peer.uid, username: storedName || peer.username || '' },
         unread,
-        events: eventsSnap.docs.map((event) => serializeEvent(event, me.uid, requestsById)),
+        hasMore,
+        events: docs.map((event) => serializeEvent(event, me.uid, requestsById)),
       });
     }
 

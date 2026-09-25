@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
-import { getConversation, listConversations, sendChatMessage } from '../chat-client.js';
+import { listConversations, sendChatMessage } from '../chat-client.js';
 import { chatTime } from '../chat-format.js';
 import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
 import {
@@ -19,6 +19,7 @@ import {
   removeChatTag,
   subscribeChatDock,
 } from '../chat-dock-store.js';
+import { useChatThread } from '../use-chat-thread.js';
 import ChatListingTag from './ChatListingTag.jsx';
 import '../chat-dock.css';
 
@@ -107,7 +108,6 @@ function ConversationList({ signedIn, getBearer, onOpen }) {
 export default function ChatDock() {
   const { signedIn, getBearer } = useAuth();
   const [dock, setDock] = useState(getChatDock);
-  const [events, setEvents] = useState([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -115,35 +115,18 @@ export default function ChatDock() {
   const [showDropHint, setShowDropHint] = useState(chatDropHintVisible);
   const textRef = useRef('');
   textRef.current = text;
+  const thread = useChatThread({
+    peerUid: dock.peer,
+    signedIn,
+    getBearer,
+    enabled: dock.open && dock.view === 'thread',
+  });
 
   useEffect(() => subscribeChatDock(setDock), []);
 
   useEffect(() => {
     if (dock.view === 'thread') setText(dock.text || '');
   }, [dock.view, dock.peer]);
-
-  useEffect(() => {
-    if (!dock.open || dock.view !== 'thread' || !signedIn || !dock.peer) {
-      setEvents([]);
-      return undefined;
-    }
-    let live = true;
-    async function load() {
-      try {
-        const token = await getBearer();
-        const result = await getConversation('', token, { peerUid: dock.peer });
-        if (live) {
-          setEvents(result.events || []);
-          setError('');
-        }
-      } catch (err) {
-        if (live) setError(err.message || 'Could not open the chat.');
-      }
-    }
-    load();
-    const timer = setInterval(load, 4000);
-    return () => { live = false; clearInterval(timer); };
-  }, [dock.open, dock.view, dock.peer, signedIn, getBearer]);
 
   useEffect(() => {
     function allowsDrop(event) {
@@ -174,8 +157,7 @@ export default function ChatDock() {
       await sendChatMessage('', message, token, dock.tags, dock.peer);
       setText('');
       clearChatTags();
-      const result = await getConversation('', token, { peerUid: dock.peer });
-      setEvents(result.events || []);
+      await thread.refresh();
     } catch (err) {
       setError(err.message || 'Message was not sent.');
     } finally {
@@ -217,8 +199,8 @@ export default function ChatDock() {
         <ConversationList signedIn={signedIn} getBearer={getBearer} onOpen={(row) => openThread(row.peerUid, row.peerUsername, text)} />
       ) : (
         <>
-          <div className="chat-dock-log">
-            {events.map((event) => (
+          <div className="chat-dock-log" ref={thread.logRef} onScroll={thread.onScroll}>
+            {thread.events.map((event) => (
               <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}`}>
                 {event.text ? <p>{event.text}</p> : null}
                 {(event.listings || []).length ? (
@@ -230,7 +212,7 @@ export default function ChatDock() {
               </div>
             ))}
           </div>
-          {error ? <p className="chat-dock-error" role="alert">{error}</p> : null}
+          {error || thread.error ? <p className="chat-dock-error" role="alert">{error || thread.error}</p> : null}
           {signedIn && dock.peer ? (
             <form className="chat-dock-compose" onSubmit={send}>
               {dock.tags.length ? (

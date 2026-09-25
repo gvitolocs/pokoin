@@ -14,10 +14,11 @@ export function listConversations(token) {
   return getJson('/api/chat?action=list', { headers: authHeaders(token) });
 }
 
-export function getConversation(peer, token, { peerUid = '' } = {}) {
+export function getConversation(peer, token, { peerUid = '', before = '' } = {}) {
   const params = new URLSearchParams({ action: 'get' });
   if (peerUid) params.set('peerUid', peerUid);
   else params.set('peer', peer);
+  if (before) params.set('before', before);
   return getJson(`/api/chat?${params}`, { headers: authHeaders(token) });
 }
 
