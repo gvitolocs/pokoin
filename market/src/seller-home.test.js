@@ -118,9 +118,8 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(viewSrc, /portfolio-view-collection/);
   assert.match(viewSrc, /CollectionHistoryPanel/);
   assert.match(viewSrc, /historyPending/);
-  assert.match(homeSrc, /buildCollectionHistory/);
-  assert.match(homeSrc, /marketValueFromHoldings/);
-  assert.match(homeSrc, /fetchCheapestPricePknMap/);
+  assert.match(homeSrc, /fetchPortfolioHistory/);
+  assert.doesNotMatch(homeSrc, /fetchCheapestPricePknMap/);
   assert.doesNotMatch(homeSrc, /writePortfolioHistory/);
   assert.match(viewSrc, /collection-history-tip/);
   assert.doesNotMatch(viewSrc, /No cards in your collection yet/);
@@ -146,7 +145,8 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.doesNotMatch(viewSrc, /kicker="Seller"/);
   assert.doesNotMatch(viewSrc, /List Cards/);
   assert.doesNotMatch(homeSrc, /marketplace\/portfolio/);
-  assert.doesNotMatch(homeSrc, /fetchPortfolio/);
+  assert.doesNotMatch(homeSrc, /fetchPortfolio\(/);
+  assert.match(homeSrc, /fetchPortfolioHistory/);
 });
 
 test('Dashboard history panel keeps chart frame; never draws a real fake series', () => {

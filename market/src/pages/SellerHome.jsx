@@ -3,11 +3,10 @@ import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   cardFromCatalogRow,
   fetchCardTraderAssets,
-  fetchCheapestPricePknMap,
   fetchCollectionSummary,
+  fetchPortfolioHistory,
   fetchSellerListings,
 } from '../api.js';
-import { fetchOwnedCollectionDocuments } from '../firestore-rest.js';
 import { fetchRail, RAIL } from '../lists.js';
 import { useAuth } from '../auth.jsx';
 import { SellerDashboardView } from '../components/SellerDashboardView.jsx';
@@ -17,11 +16,7 @@ import {
   liveInventoryListings,
   summarizeLiveInventory,
 } from '../inventory-listings.js';
-import {
-  buildCollectionHistory,
-  marketValueFromHoldings,
-  movementFromLedger,
-} from '../portfolio-history.js';
+import { normalizeHistoryDay } from '../portfolio-history.js';
 import {
   portfolioTilesFingerprint,
   portfolioTilesFromSummary,
@@ -131,7 +126,6 @@ export default function SellerHome() {
   const [listingRows, setListingRows] = useState([]);
   const [movers, setMovers] = useState([]);
   const [cardTraderAssets, setCardTraderAssets] = useState(null);
-  const [assetsSettled, setAssetsSettled] = useState(false);
   const [historySeries, setHistorySeries] = useState([]);
   const [historyPending, setHistoryPending] = useState(false);
   const [error, setError] = useState('');
@@ -234,7 +228,6 @@ export default function SellerHome() {
     const uid = user?.uid || profile?.uid;
     if (!signedIn || !uid) return undefined;
     let cancelled = false;
-    setAssetsSettled(false);
     getBearer()
       .then((token) => fetchCardTraderAssets(token))
       .then((data) => {
@@ -242,9 +235,6 @@ export default function SellerHome() {
       })
       .catch(() => {
         if (!cancelled) setCardTraderAssets(null);
-      })
-      .finally(() => {
-        if (!cancelled) setAssetsSettled(true);
       });
     return () => {
       cancelled = true;
@@ -255,38 +245,22 @@ export default function SellerHome() {
     if (preview || !uid) return undefined;
     let cancelled = false;
     setHistoryPending(true);
-    (async () => {
-      let movements = [];
-      try {
-        const token = await getBearer();
-        const rows = await fetchOwnedCollectionDocuments('ledger_entries', uid, token, { limit: 200 });
-        movements = rows.map(movementFromLedger).filter(Boolean);
-      } catch {
-        movements = [];
-      }
-      let marketCardsPkn = null;
-      const items = assetsSettled && cardTraderAssets?.oneDayReady ? cardTraderAssets.items || [] : [];
-      if (assetsSettled && items.length) {
-        const ids = [...new Set(items.map((item) => String(item.cardId || '').trim()).filter((id) => /^\d+$/.test(id)))];
-        const prices = {};
-        const chunks = [];
-        for (let i = 0; i < ids.length; i += 50) chunks.push(ids.slice(i, i + 50));
-        const parts = await Promise.all(chunks.map((chunk) => fetchCheapestPricePknMap(chunk)));
-        for (const part of parts) Object.assign(prices, part);
-        marketCardsPkn = marketValueFromHoldings(items, prices)?.cardsValuePkn ?? null;
-      }
-      if (cancelled) return;
-      setHistorySeries(buildCollectionHistory({
-        movements,
-        balance: availablePkn,
-        marketCardsPkn: assetsSettled ? marketCardsPkn : null,
-      }));
-      setHistoryPending(false);
-    })();
+    getBearer()
+      .then((token) => fetchPortfolioHistory(token))
+      .then((data) => {
+        if (cancelled) return;
+        setHistorySeries((data?.days || []).map((row) => normalizeHistoryDay(row)).filter(Boolean));
+      })
+      .catch(() => {
+        if (!cancelled) setHistorySeries([]);
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryPending(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [preview, uid, availablePkn, cardTraderAssets, assetsSettled, getBearer]);
+  }, [preview, uid, getBearer]);
 
   useEffect(() => {
     if (preview) return undefined;

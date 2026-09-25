@@ -657,6 +657,16 @@ export function fetchCardTraderAssets(token) {
   });
 }
 
+/** Stored collection-value days. The server prices the pile once per UTC day. */
+export function fetchPortfolioHistory(token) {
+  return getJson('/api/marketplace-portfolio-history', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
 export function fetchCardTraderStatus(token) {
   return getJson('/api/cardtrader-sync', {
     headers: {

@@ -51,8 +51,9 @@ export function normalizeHistoryDay(row = {}) {
     row.listedPkn ?? row.listed ?? prior?.listedPkn,
   );
   const cardsKnown = row.cardsKnown === true || prior?.cardsKnown === true;
-  const cardsValuePkn = cardsKnown
-    ? asNonNeg(row.cardsValuePkn ?? prior?.cardsValuePkn)
+  const rawCards = row.cardsValuePkn != null ? row.cardsValuePkn : prior?.cardsValuePkn;
+  const cardsValuePkn = cardsKnown && rawCards != null && rawCards !== ''
+    ? asNonNeg(rawCards)
     : null;
   const nftValuePkn = asNonNeg(
     row.nftValuePkn ?? prior?.nftValuePkn,

@@ -75,6 +75,21 @@
     }
   },
   {
+    "path": "/api/marketplace-portfolio-history",
+    "file": "marketplace-portfolio-history.js",
+    "methods": ["GET"],
+    "purpose": "Stored daily collection value: wallet on the days it moved, plus the homepage minimum of 1-Day Ready cards summed once per UTC day.",
+    "auth": "Required Firebase bearer token; uid from verified token only.",
+    "params": {
+      "query": "none",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": ["FIREBASE_*", "MARKETPLACE_DATABASE_URL"],
+      "services": ["Firebase Admin", "Postgres"]
+    }
+  },
+  {
     "path": "/api/marketplace-recents",
     "file": "marketplace-recents.js",
     "methods": ["GET", "PUT", "POST"],
