@@ -100,13 +100,6 @@ export default function Competitive() {
           </DeskPanel>
         </div>
       </div>
-      <DeskPanel title="Notes">
-        <p className="page-lede">
-          Tournament snapshot ({data.formatLabel}): {data.tournaments.length} events,
-          {' '}{data.decks.length} archetypes, Worlds standings, and {Object.keys(data.lists).length} representative lists.
-          Pictures load from Pokoin Oracle (`/card-images/competitive/…`). This is not a live Limitless scrape.
-        </p>
-      </DeskPanel>
     </div>
   );
 }
