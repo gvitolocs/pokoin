@@ -27,7 +27,7 @@ export default function ChatDock() {
     async function load() {
       try {
         const token = await getBearer();
-        const result = await getConversation(dock.peer, token);
+        const result = await getConversation('', token, { peerUid: dock.peer });
         if (live) {
           setEvents(result.events || []);
           setError('');
@@ -81,10 +81,10 @@ export default function ChatDock() {
     try {
       const token = await getBearer();
       if (!token) throw new Error('Sign in to send a message.');
-      await sendChatMessage(dock.peer, message, token, dock.tags);
+      await sendChatMessage('', message, token, dock.tags, dock.peer);
       setText('');
       clearChatTags();
-      const result = await getConversation(dock.peer, token);
+      const result = await getConversation('', token, { peerUid: dock.peer });
       setEvents(result.events || []);
     } catch (err) {
       setError(err.message || 'Message was not sent.');
@@ -96,7 +96,7 @@ export default function ChatDock() {
   return (
     <section
       className={`chat-dock${over ? ' is-over' : ''}`}
-      aria-label={`Chat with @${dock.peer || 'seller'}`}
+      aria-label={`Chat with ${dock.peerLabel || 'seller'}`}
       onDragOver={(event) => { event.preventDefault(); setOver(true); }}
       onDragLeave={() => setOver(false)}
       onDrop={(event) => {
@@ -108,7 +108,7 @@ export default function ChatDock() {
       }}
     >
       <header className="chat-dock-head">
-        <strong>{dock.peer ? `@${dock.peer}` : 'Drop a listing'}</strong>
+        <strong>{dock.peerLabel ? (dock.peerLabel === 'Seller' ? 'Seller' : `@${dock.peerLabel}`) : 'Drop a listing'}</strong>
         <button type="button" aria-label="Close chat" onClick={closeChatDock}>×</button>
       </header>
       <div className="chat-dock-log">
@@ -139,7 +139,7 @@ export default function ChatDock() {
               rows="2"
               maxLength={1000}
               value={text}
-              placeholder={`Message @${dock.peer}`}
+              placeholder={dock.peerLabel && dock.peerLabel !== 'Seller' ? `Message @${dock.peerLabel}` : 'Message'}
               onChange={(event) => setText(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {

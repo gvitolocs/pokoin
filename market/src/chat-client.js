@@ -14,13 +14,16 @@ export function listConversations(token) {
   return getJson('/api/chat?action=list', { headers: authHeaders(token) });
 }
 
-export function getConversation(peer, token) {
-  return getJson(`/api/chat?action=get&peer=${encodeURIComponent(peer)}`, { headers: authHeaders(token) });
+export function getConversation(peer, token, { peerUid = '' } = {}) {
+  const params = new URLSearchParams({ action: 'get' });
+  if (peerUid) params.set('peerUid', peerUid);
+  else params.set('peer', peer);
+  return getJson(`/api/chat?${params}`, { headers: authHeaders(token) });
 }
 
-export function sendChatMessage(peer, text, token, listings = []) {
+export function sendChatMessage(peer, text, token, listings = [], peerUid = '') {
   return getJson('/api/chat?action=message', {
-    method: 'POST', headers: jsonHeaders(token), body: JSON.stringify({ peer, text, listings }),
+    method: 'POST', headers: jsonHeaders(token), body: JSON.stringify({ peer, peerUid, text, listings }),
   });
 }
 

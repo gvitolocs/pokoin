@@ -4,28 +4,25 @@ import { sellerHandle } from './listing-meta.js';
 export const LISTING_DRAG_TYPE = 'application/x-pokoin-listing';
 
 const CHAT_HANDLE = /^[a-z0-9]{3,32}$/;
+const USER_ID = /^[A-Za-z0-9]{8,128}$/;
 
 export function chatHandle(value) {
   const handle = String(value || '').trim().toLowerCase();
   return CHAT_HANDLE.test(handle) ? handle : '';
 }
 
-function emailLocalHandle(value) {
-  const text = String(value || '').trim().toLowerCase();
-  const at = text.indexOf('@');
-  if (at < 1) return '';
-  return chatHandle(text.slice(0, at));
+export function sellerUserId(value) {
+  const uid = String(value || '').trim();
+  return USER_ID.test(uid) ? uid : '';
 }
 
-export function listingReference({ offer, card, seller = '' }) {
+export function listingReference({ offer, card }) {
   return {
     kind: 'listing',
     listingId: String(offer?.id || ''),
     cardId: String(card?.id || ''),
-    seller: chatHandle(sellerHandle(offer))
-      || chatHandle(seller)
-      || emailLocalHandle(offer?.sellerUsername)
-      || emailLocalHandle(offer?.sellerName),
+    sellerUid: sellerUserId(offer?.sellerUid || offer?.seller_uid),
+    seller: chatHandle(sellerHandle(offer)),
     cardName: card?.name || offer?.cardName || offer?.name || 'Card',
     setName: String(offer?.setName || ''),
     imageUrl: offer?.cardImageUrl || card?.heroImageUrl || card?.imageUrl || card?.gridImageUrl || '',
@@ -39,6 +36,7 @@ export function cardReference(card) {
     kind: 'card',
     listingId: '',
     cardId: String(card?.id || ''),
+    sellerUid: '',
     seller: '',
     cardName: displayName(card) || card?.name || 'Card',
     setName: '',

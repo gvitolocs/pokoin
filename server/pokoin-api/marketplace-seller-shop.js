@@ -25,9 +25,13 @@ function cleanText(value, maxLength = 240) {
 }
 
 function cleanUsername(value) {
-  // Seller handles may be emails (e.g. redshakkio@gmail.com) when that is seller_name.
   const text = cleanText(value, 64).toLowerCase();
   return /^[\p{L}\p{N} .'_@+-]{3,64}$/u.test(text) && /\p{L}/u.test(text) ? text : '';
+}
+
+function currentHandle(value) {
+  const handle = String(value || '').trim().toLowerCase();
+  return /^[a-z0-9]{3,32}$/.test(handle) ? handle : '';
 }
 
 function cleanLimit(value, fallback = PAGE_DEFAULT) {
@@ -92,6 +96,25 @@ async function sellerUidFromListingName(username) {
   return cleanText(result.rows[0]?.seller_uid, 160);
 }
 
+function shopSellerFromProfile({ uid, profile = {}, queried = '', via = '' }) {
+  const handle = currentHandle(profile.username);
+  const asked = currentHandle(queried);
+  if (via === 'listing-name' && handle && handle !== asked) return null;
+  const username = handle || asked;
+  const rawName = cleanText(profile.displayName, 120);
+  const displayName = rawName && !rawName.includes('@') ? rawName : username;
+  return { uid, username, displayName };
+}
+
+async function registeredSeller(firestore, username) {
+  const usernameDoc = await firestore.collection('usernames').doc(username).get();
+  const fromRegistry = cleanText(usernameDoc.data()?.uid, 160);
+  if (fromRegistry) return fromRegistry;
+  const users = await firestore.collection('users').where('usernameLower', '==', username).limit(1).get();
+  const userDoc = users.docs?.[0];
+  return cleanText(userDoc?.data?.()?.uid || userDoc?.id, 160);
+}
+
 async function sellerProfileForUsername(username) {
   const clean = cleanUsername(username);
   if (!clean) {
@@ -100,47 +123,50 @@ async function sellerProfileForUsername(username) {
     throw error;
   }
 
-  let uid = await sellerUidFromListingName(clean);
-  let displayName = '';
-
+  const admin = getFirebaseAdmin();
+  const firestore = admin.firestore();
+  let via = 'firebase';
+  let uid = await registeredSeller(firestore, clean);
   if (!uid) {
-    const admin = getFirebaseAdmin();
-    const firestore = admin.firestore();
-    const usernameDoc = await firestore.collection('usernames').doc(clean).get();
-    const usernameData = usernameDoc.data() || {};
-    uid = cleanText(usernameData.uid, 160);
-    displayName = cleanText(usernameData.displayName, 120);
-
-    if (!uid) {
-      const users = await firestore
-        .collection('users')
-        .where('usernameLower', '==', clean)
-        .limit(1)
-        .get();
-      const userDoc = users.docs?.[0];
-      const userData = userDoc?.data?.() || {};
-      uid = cleanText(userData.uid || userDoc?.id, 160);
-      displayName = cleanText(userData.displayName, 120);
-    }
+    uid = await sellerUidFromListingName(clean);
+    via = 'listing-name';
   }
-
   if (!uid) {
     const error = new Error('Seller not found.');
     error.statusCode = 404;
     throw error;
   }
 
-  return { uid, username: clean, displayName };
+  const userDoc = await firestore.collection('users').doc(uid).get();
+  const data = userDoc.data() || {};
+  const seller = shopSellerFromProfile({
+    uid,
+    queried: clean,
+    via,
+    profile: {
+      username: data.username || data.usernameLower || '',
+      displayName: data.displayName || '',
+    },
+  });
+  if (!seller) {
+    const error = new Error('Seller not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+  return seller;
 }
 
-function listingRow(row) {
+function listingRow(row, seller = {}) {
+  const username = currentHandle(seller.username);
+  const rawName = cleanText(seller.displayName, 120);
+  const displayName = rawName && !rawName.includes('@') ? rawName : (username || 'Pokoin seller');
   return {
     id: row.id,
     cardId: row.card_id,
-    sellerUid: row.seller_uid,
-    sellerName: cleanText(row.seller_name, 120) || 'Pokoin seller',
-    sellerDisplayName: cleanText(row.seller_name, 120) || 'Pokoin seller',
-    sellerUsername: cleanText(row.seller_name, 120),
+    sellerUid: cleanText(row.seller_uid, 160) || seller.uid || '',
+    sellerName: displayName,
+    sellerDisplayName: displayName,
+    sellerUsername: username,
     sellerCountry: row.seller_country,
     sellerReputationLabel: row.seller_reputation_label,
     condition: row.condition,
@@ -245,7 +271,7 @@ async function readSellerShop(url) {
       username: seller.username,
       displayName: seller.displayName || seller.username,
     },
-    listings: result.rows.map(listingRow),
+    listings: result.rows.map((row) => listingRow(row, seller)),
     total,
     unique,
     limit,
@@ -278,4 +304,6 @@ module.exports._test = {
   cleanUsername,
   conditionSql,
   sortSql,
+  shopSellerFromProfile,
+  listingRow,
 };

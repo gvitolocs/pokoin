@@ -34,7 +34,6 @@ export default function ShopListingRow({
   listingBusy = false,
   editing = false,
   card = null,
-  seller = '',
   onBuy,
   onCart,
   onEdit,
@@ -42,8 +41,9 @@ export default function ShopListingRow({
 }) {
   const [added, setAdded] = useState(false);
   const name = publicShopSellerLabel(offer);
-  const reference = listingReference({ offer, card, seller });
+  const reference = listingReference({ offer, card });
   const handle = reference.seller;
+  const sellerUid = reference.sellerUid;
   const href = sellerHref(offer);
   const country = sellerCountryFlag(offer?.sellerCountry);
   const language = listingLanguageFlag(offer?.language);
@@ -116,11 +116,11 @@ export default function ShopListingRow({
       <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>
       {!mine ? (
         <span className="shop-row-actions">
-          {handle ? (
+          {sellerUid ? (
             <button
               type="button"
               className="shop-icon"
-              aria-label={`Message ${handle} about this listing`}
+              aria-label={handle ? `Message ${handle} about this listing` : 'Message this seller about this listing'}
               title="Message"
               onClick={(event) => {
                 event.preventDefault();

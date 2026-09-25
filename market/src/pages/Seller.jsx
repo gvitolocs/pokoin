@@ -236,7 +236,6 @@ export default function Seller() {
                     key={offer.id || `${cardId}-${index}`}
                     offer={enriched}
                     card={cardStub}
-                    seller={username}
                     showCard
                     onCart={() => {
                       if (!cardId || !offer.id) return;

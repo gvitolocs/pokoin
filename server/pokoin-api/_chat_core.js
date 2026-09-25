@@ -77,6 +77,7 @@ function cleanListing(raw) {
     listingId: String(raw.listingId || '').slice(0, 80),
     cardId: String(raw.cardId || '').slice(0, 40),
     seller: USERNAME_RE.test(seller) ? seller : '',
+    sellerUid: /^[A-Za-z0-9]{8,128}$/.test(String(raw.sellerUid || '')) ? String(raw.sellerUid) : '',
     cardName,
     setName: String(raw.setName || '').replace(/\s+/g, ' ').trim().slice(0, 80),
     imageUrl,

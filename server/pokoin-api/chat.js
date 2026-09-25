@@ -45,6 +45,19 @@ async function resolvePeer(firestore, peerUsername) {
   return { uid, username };
 }
 
+async function resolveRegisteredUser(admin, firestore, rawUid) {
+  const uid = String(rawUid || '').trim();
+  if (!/^[A-Za-z0-9]{8,128}$/.test(uid)) throw httpError(400, 'That seller account is missing.');
+  let record;
+  try {
+    record = await admin.auth().getUser(uid);
+  } catch (err) {
+    if (err?.code === 'auth/user-not-found') throw httpError(404, 'No Pokoin account was found for that seller.');
+    throw err;
+  }
+  return { uid: record.uid, username: await usernameFor(firestore, record.uid) };
+}
+
 function serializeEvent(doc, uid, requestsById) {
   const data = doc.data() || {};
   const request = data.requestId ? requestsById.get(data.requestId) : null;
@@ -101,8 +114,11 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ conversations });
     }
 
+    const peerUid = req.method === 'GET' ? url.searchParams.get('peerUid') : req.body?.peerUid;
     const peerName = req.method === 'GET' ? url.searchParams.get('peer') : req.body?.peer;
-    const peer = await resolvePeer(firestore, peerName);
+    const peer = peerUid
+      ? await resolveRegisteredUser(admin, firestore, peerUid)
+      : await resolvePeer(firestore, peerName);
     if (peer.uid === me.uid) throw httpError(400, 'You cannot open a conversation with yourself.');
     const pairKey = pairKeyFor(me.uid, peer.uid);
     const ref = firestore.collection('conversations').doc(pairKey);

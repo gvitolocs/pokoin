@@ -1,8 +1,6 @@
-import { appendChatTag } from './chat-listing.js';
+import { appendChatTag, sellerUserId } from './chat-listing.js';
 
-const USERNAME_RE = /^[a-z0-9]{3,32}$/;
-
-let snapshot = { open: false, peer: '', tags: [] };
+let snapshot = { open: false, peer: '', peerLabel: '', tags: [] };
 const listeners = new Set();
 
 function emit() {
@@ -19,12 +17,13 @@ export function subscribeChatDock(listener) {
 }
 
 export function openListingChat(reference) {
-  const seller = String(reference?.seller || '').trim().toLowerCase();
-  if (!USERNAME_RE.test(seller)) return false;
-  const same = snapshot.open && snapshot.peer === seller;
+  const sellerUid = sellerUserId(reference?.sellerUid);
+  if (!sellerUid) return false;
+  const same = snapshot.open && snapshot.peer === sellerUid;
   snapshot = {
     open: true,
-    peer: seller,
+    peer: sellerUid,
+    peerLabel: reference?.seller || 'Seller',
     tags: appendChatTag(same ? snapshot.tags : [], reference),
   };
   emit();
@@ -33,7 +32,7 @@ export function openListingChat(reference) {
 
 export function addChatTag(reference) {
   if (!snapshot.open) {
-    if (reference?.seller) return openListingChat(reference);
+    if (reference?.sellerUid) return openListingChat(reference);
     return false;
   }
   snapshot = { ...snapshot, tags: appendChatTag(snapshot.tags, reference) };
@@ -47,7 +46,7 @@ export function removeChatTag(key) {
 }
 
 export function closeChatDock() {
-  snapshot = { open: false, peer: '', tags: [] };
+  snapshot = { open: false, peer: '', peerLabel: '', tags: [] };
   emit();
 }
 

@@ -25,6 +25,11 @@ test('listing tags keep https images and drop everything else', () => {
     { cardName: 'Nope', imageUrl: 'javascript:alert(1)', path: 'https://evil.example' },
   ]);
   assert.equal(row.seller, 'redshakkio');
+  assert.equal(core.cleanListings([{
+    cardName: 'Drifloon',
+    seller: 'redshakkio@gmail.com',
+    sellerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2',
+  }])[0].sellerUid, 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2');
   assert.equal(row.imageUrl, 'https://cdn.pokoin.com/a.jpg');
   assert.equal(row.path, '/marketplace/en/cards/9');
   assert.equal(row.pricePkn, 76);
