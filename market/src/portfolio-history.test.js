@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildCollectionHistory,
   formatDayLabel,
   formatHistoryTip,
   historySeriesMax,
+  marketValueFromHoldings,
+  movementFromLedger,
   nearestHistoryDay,
   niceScaleMax,
   normalizeHistoryDay,
@@ -24,7 +27,7 @@ test('y ticks include zero and the top', () => {
   assert.deepEqual(yTickValues(20, 4), [0, 5, 10, 15, 20]);
 });
 
-test('todayHistoryDay totals currency + listed without inventing card PKN', () => {
+test('todayHistoryDay keeps the wallet and does not treat an ask as collection value', () => {
   const day = todayHistoryDay({
     currencyPkn: 15,
     listedPkn: 100,
@@ -33,7 +36,8 @@ test('todayHistoryDay totals currency + listed without inventing card PKN', () =
     date: '2026-09-20T12:00:00.000Z',
   });
   assert.equal(day.date, '2026-09-20');
-  assert.equal(day.totalPkn, 115);
+  assert.equal(day.totalPkn, 15);
+  assert.equal(day.assets.cardsValuePkn, null);
   assert.equal(day.assets.cardsOwned, 3);
   assert.equal(day.assets.nftOwned, 1);
 });
@@ -49,51 +53,63 @@ test('nearest day and tip composition', () => {
   assert.equal(tip.totalLabel, '15 PKN');
   assert.equal(formatDayLabel('2026-09-20'), 'Sep 20');
   assert.ok(tip.rows.some((row) => row.label === 'Currency' && row.value === '15 PKN'));
-  assert.equal(tip.rows.length, 4);
+  assert.equal(tip.rows.length, 1);
   assert.ok(tip.rows.every((row) => String(row.value).endsWith('PKN')));
-  assert.ok(tip.rows.some((row) => row.label === 'Cards owned' && row.value === '0 PKN'));
-  assert.ok(tip.rows.some((row) => row.label === 'Digital / NFT' && row.value === '0 PKN'));
+  assert.equal(tip.rows.some((row) => row.label === 'Cards'), false);
 });
 
-test('collection value includes the CardTrader 1-DR mark and one snapshot per day', () => {
+test('collection history starts at zero, keeps the wallet on its own day, and prices cards at the homepage minimum', () => {
   const memory = new Map();
   globalThis.localStorage = {
     getItem: (key) => (memory.has(key) ? memory.get(key) : null),
     setItem: (key, value) => memory.set(key, String(value)),
     removeItem: (key) => memory.delete(key),
   };
-  const uid = 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2';
-  const first = todayHistoryDay({
-    currencyPkn: 15,
-    cardsValuePkn: 1000,
-    date: '2026-09-24T12:00:00.000Z',
+  const received = movementFromLedger({
+    type: 'account_transfer_received',
+    amountPkn: 15,
+    createdAt: '2026-09-01T12:00:00.000Z',
   });
-  assert.equal(first.totalPkn, 1015);
-  assert.equal(first.assets.cardsValuePkn, 1000);
-  writePortfolioHistory(uid, first);
-  writePortfolioHistory(uid, todayHistoryDay({
-    currencyPkn: 15,
-    cardsValuePkn: 4043760,
-    date: '2026-09-25T18:00:00.000Z',
-  }));
-  writePortfolioHistory(uid, todayHistoryDay({
-    currencyPkn: 15,
-    cardsValuePkn: 4043760,
-    date: '2026-09-25T20:00:00.000Z',
-  }));
+  const spent = movementFromLedger({
+    type: 'account_transfer_sent',
+    amountPkn: 5,
+    createdAt: '2026-09-10T12:00:00.000Z',
+  });
+  assert.equal(received.amountPkn, 15);
+  assert.equal(spent.amountPkn, -5);
+  const prices = marketValueFromHoldings([
+    { cardId: '1', quantity: 2 },
+    { cardId: '2', quantity: 1 },
+    { cardId: '3', quantity: 4 },
+  ], { 1: 10, 2: 0 });
+  assert.equal(prices.cardsValuePkn, 20);
+  assert.equal(prices.copies, 2);
+  assert.equal(marketValueFromHoldings([{ cardId: '9', quantity: 1 }], {}), null);
+  const series = buildCollectionHistory({
+    movements: [received, spent],
+    balance: 10,
+    marketCardsPkn: prices.cardsValuePkn,
+    today: '2026-09-25T18:00:00.000Z',
+  });
+  assert.equal(series[0].date, '2026-08-31');
+  assert.equal(series[0].totalPkn, 0);
+  assert.equal(series[0].assets.cardsValuePkn, null);
+  assert.equal(series.find((row) => row.date === '2026-09-01').totalPkn, 15);
+  assert.equal(series.find((row) => row.date === '2026-09-10').totalPkn, 10);
+  const today = series.find((row) => row.date === '2026-09-25');
+  assert.equal(today.assets.currencyPkn, 10);
+  assert.equal(today.assets.cardsValuePkn, 20);
+  assert.equal(today.totalPkn, 30);
+  const tip = formatHistoryTip(today);
+  assert.ok(tip.rows.some((row) => row.label === 'Cards' && row.value === '20 PKN'));
+  assert.equal(tip.rows.some((row) => row.label === 'Listed'), false);
+  const uid = 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2';
+  writePortfolioHistory(uid, series[0]);
+  writePortfolioHistory(uid, today);
   const saved = readPortfolioHistory(uid);
   assert.equal(saved.length, 2);
-  assert.equal(saved[1].date, '2026-09-25');
-  assert.equal(saved[1].totalPkn, 4043775);
-  const live = withLiveHistoryDay(saved, todayHistoryDay({
-    currencyPkn: 20,
-    cardsValuePkn: 4043760,
-    date: '2026-09-25T21:00:00.000Z',
-  }));
+  const live = withLiveHistoryDay(saved, null);
   assert.equal(live.length, 2);
-  assert.equal(live[1].assets.currencyPkn, 20);
-  const tip = formatHistoryTip(live[1]);
-  assert.ok(tip.rows.some((row) => row.label === 'Cards owned' && row.value === '4043760 PKN'));
 });
 
 test('normalizeHistoryDay is idempotent — desk may re-normalize today()', () => {

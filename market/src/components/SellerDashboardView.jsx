@@ -8,12 +8,10 @@ import MiniCardTile from './MiniCardTile.jsx';
 import { printingIdentity } from '../identity.js';
 import { formatPknNumber, tilePricePkn } from '../pkn.js';
 import {
-  formatDayLabel,
   formatHistoryTip,
   historySeriesMax,
   nearestHistoryDay,
   niceScaleMax,
-  todayHistoryDay,
   withLiveHistoryDay,
   yTickValues,
 } from '../portfolio-history.js';
@@ -27,17 +25,18 @@ const CHART_H = 200;
  * Axis labels live on the borders; hover shows that day's balance + composition.
  * Never paints a fake flat "all assets combined" underline from a single balance.
  */
-export function CollectionHistoryPanel({ series = null, today = null }) {
+export function CollectionHistoryPanel({ series = null, pending = false }) {
   const [hover, setHover] = useState(null);
-  const points = withLiveHistoryDay(series, today);
+  const points = withLiveHistoryDay(series, null);
   const hasLine = points.length >= 2;
   const hasPoint = points.length === 1;
   const hasData = points.length > 0;
   const yMax = niceScaleMax(historySeriesMax(points));
   const yTicks = yTickValues(yMax, 4);
-  // Match card-desk sold graph: first + last date on the x borders (same day twice when lone).
   const xLabels = points.length
-    ? [points[0], points[points.length - 1]]
+    ? (points[0].date === points[points.length - 1].date
+      ? [points[0]]
+      : [points[0], points[points.length - 1]])
     : [];
 
   let polyline = '';
@@ -137,7 +136,7 @@ export function CollectionHistoryPanel({ series = null, today = null }) {
                 }}
               />
             ) : null}
-            {!hasData ? (
+            {!hasData && !pending ? (
               <div className="seller-history-empty">
                 <p className="seller-history-title">Collection history will appear here</p>
                 <p className="seller-history-lede">
@@ -175,8 +174,6 @@ export function CollectionHistoryPanel({ series = null, today = null }) {
     </div>
   );
 }
-
-export { todayHistoryDay };
 
 function AddCardsArt() {
   return (
@@ -387,6 +384,7 @@ export function SellerDashboardView({
   listingHrefFor,
   previewBanner = false,
   historySeries = [],
+  historyPending = false,
 }) {
   const oneDayReadyCards = cardTraderAssets?.oneDayReady
     ? Math.max(0, Number(cardTraderAssets.totals?.cards) || 0)
@@ -486,18 +484,7 @@ export function SellerDashboardView({
                 </p>
               ) : null}
 
-              <CollectionHistoryPanel
-                series={historySeries}
-                today={todayHistoryDay({
-                  currencyPkn: balance,
-                  listedPkn: listed && !listed.failed ? listed.listedPkn : 0,
-                  cardsOwned: owned,
-                  nftOwned: nftQty,
-                  cardsValuePkn: oneDayReadyCards > 0
-                    ? Math.max(0, Number(cardTraderAssets?.totals?.valuePkn) || 0)
-                    : 0,
-                })}
-              />
+              <CollectionHistoryPanel series={historySeries} pending={historyPending} />
 
               <div className="seller-tile-actions">
                 <DeskLink className="btn ghost" href={collectionHref} data-testid="portfolio-view-collection">

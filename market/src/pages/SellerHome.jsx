@@ -3,9 +3,11 @@ import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   cardFromCatalogRow,
   fetchCardTraderAssets,
+  fetchCheapestPricePknMap,
   fetchCollectionSummary,
   fetchSellerListings,
 } from '../api.js';
+import { fetchOwnedCollectionDocuments } from '../firestore-rest.js';
 import { fetchRail, RAIL } from '../lists.js';
 import { useAuth } from '../auth.jsx';
 import { SellerDashboardView } from '../components/SellerDashboardView.jsx';
@@ -16,9 +18,9 @@ import {
   summarizeLiveInventory,
 } from '../inventory-listings.js';
 import {
-  readPortfolioHistory,
-  todayHistoryDay,
-  writePortfolioHistory,
+  buildCollectionHistory,
+  marketValueFromHoldings,
+  movementFromLedger,
 } from '../portfolio-history.js';
 import {
   portfolioTilesFingerprint,
@@ -131,6 +133,7 @@ export default function SellerHome() {
   const [cardTraderAssets, setCardTraderAssets] = useState(null);
   const [assetsSettled, setAssetsSettled] = useState(false);
   const [historySeries, setHistorySeries] = useState([]);
+  const [historyPending, setHistoryPending] = useState(false);
   const [error, setError] = useState('');
   const uid = user?.uid || profile?.uid || '';
 
@@ -249,31 +252,41 @@ export default function SellerHome() {
   }, [preview, signedIn, user?.uid, profile?.uid, getBearer]);
 
   useEffect(() => {
-    setHistorySeries(uid ? readPortfolioHistory(uid) : []);
-  }, [uid]);
-
-  useEffect(() => {
-    if (preview || !uid || ownedCards == null || listed == null || !assetsSettled) return;
-    const day = todayHistoryDay({
-      currencyPkn: availablePkn,
-      listedPkn: listed.failed ? 0 : listed.listedPkn,
-      cardsOwned: ownedCards,
-      nftOwned,
-      cardsValuePkn: cardTraderAssets?.oneDayReady
-        ? Number(cardTraderAssets.totals?.valuePkn) || 0
-        : 0,
-    });
-    setHistorySeries(writePortfolioHistory(uid, day));
-  }, [
-    preview,
-    uid,
-    ownedCards,
-    listed,
-    nftOwned,
-    availablePkn,
-    cardTraderAssets,
-    assetsSettled,
-  ]);
+    if (preview || !uid) return undefined;
+    let cancelled = false;
+    setHistoryPending(true);
+    (async () => {
+      let movements = [];
+      try {
+        const token = await getBearer();
+        const rows = await fetchOwnedCollectionDocuments('ledger_entries', uid, token, { limit: 200 });
+        movements = rows.map(movementFromLedger).filter(Boolean);
+      } catch {
+        movements = [];
+      }
+      let marketCardsPkn = null;
+      const items = assetsSettled && cardTraderAssets?.oneDayReady ? cardTraderAssets.items || [] : [];
+      if (assetsSettled && items.length) {
+        const ids = [...new Set(items.map((item) => String(item.cardId || '').trim()).filter((id) => /^\d+$/.test(id)))];
+        const prices = {};
+        const chunks = [];
+        for (let i = 0; i < ids.length; i += 50) chunks.push(ids.slice(i, i + 50));
+        const parts = await Promise.all(chunks.map((chunk) => fetchCheapestPricePknMap(chunk)));
+        for (const part of parts) Object.assign(prices, part);
+        marketCardsPkn = marketValueFromHoldings(items, prices)?.cardsValuePkn ?? null;
+      }
+      if (cancelled) return;
+      setHistorySeries(buildCollectionHistory({
+        movements,
+        balance: availablePkn,
+        marketCardsPkn: assetsSettled ? marketCardsPkn : null,
+      }));
+      setHistoryPending(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [preview, uid, availablePkn, cardTraderAssets, assetsSettled, getBearer]);
 
   useEffect(() => {
     if (preview) return undefined;
@@ -370,6 +383,7 @@ export default function SellerHome() {
       pknBalance={availablePkn}
       cardTraderAssets={cardTraderAssets}
       historySeries={historySeries}
+      historyPending={historyPending}
       listed={listed}
       listingRows={listingRows}
       movers={movers}

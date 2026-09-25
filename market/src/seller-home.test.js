@@ -117,9 +117,11 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.doesNotMatch(viewSrc, /portfolio-empty-scan/);
   assert.match(viewSrc, /portfolio-view-collection/);
   assert.match(viewSrc, /CollectionHistoryPanel/);
-  assert.match(viewSrc, /todayHistoryDay/);
-  assert.match(viewSrc, /cardsValuePkn/);
-  assert.match(homeSrc, /writePortfolioHistory/);
+  assert.match(viewSrc, /historyPending/);
+  assert.match(homeSrc, /buildCollectionHistory/);
+  assert.match(homeSrc, /marketValueFromHoldings/);
+  assert.match(homeSrc, /fetchCheapestPricePknMap/);
+  assert.doesNotMatch(homeSrc, /writePortfolioHistory/);
   assert.match(viewSrc, /collection-history-tip/);
   assert.doesNotMatch(viewSrc, /No cards in your collection yet/);
   assert.match(viewSrc, /Trending on Pokoin/);

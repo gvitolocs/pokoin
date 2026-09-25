@@ -37,9 +37,9 @@ export function formatDayLabel(dayKey) {
 }
 
 /**
- * One day of portfolio value + composition.
- * totalPkn is currency + listed asking + CardTrader 1-DR mark + NFT mark.
- * Card value is the 1-DR total already on the dashboard — not an invented price.
+ * One day of portfolio value.
+ * totalPkn is the wallet that day plus the market value of cards we could
+ * price. A missing card price is left out — it is not zero and not an ask.
  * Idempotent: already-normalized rows keep assets.* (desk may re-normalize).
  */
 export function normalizeHistoryDay(row = {}) {
@@ -50,9 +50,10 @@ export function normalizeHistoryDay(row = {}) {
   const listedPkn = asNonNeg(
     row.listedPkn ?? row.listed ?? prior?.listedPkn,
   );
-  const cardsValuePkn = asNonNeg(
-    row.cardsValuePkn ?? prior?.cardsValuePkn,
-  );
+  const cardsKnown = row.cardsKnown === true || prior?.cardsKnown === true;
+  const cardsValuePkn = cardsKnown
+    ? asNonNeg(row.cardsValuePkn ?? prior?.cardsValuePkn)
+    : null;
   const nftValuePkn = asNonNeg(
     row.nftValuePkn ?? prior?.nftValuePkn,
   );
@@ -60,7 +61,7 @@ export function normalizeHistoryDay(row = {}) {
     row.cardsOwned ?? row.ownedCards ?? prior?.cardsOwned,
   );
   const nftOwned = asNonNeg(row.nftOwned ?? prior?.nftOwned);
-  const totalPkn = currencyPkn + listedPkn + cardsValuePkn + nftValuePkn;
+  const totalPkn = currencyPkn + (cardsValuePkn || 0);
   const date = utcDayKey(row.date || row.day || new Date());
   if (!date) return null;
   return {
@@ -70,6 +71,7 @@ export function normalizeHistoryDay(row = {}) {
       currencyPkn,
       listedPkn,
       cardsValuePkn,
+      cardsKnown: cardsValuePkn != null,
       nftValuePkn,
       cardsOwned,
       nftOwned,
@@ -187,18 +189,106 @@ export function nearestHistoryDay(days, ratio) {
   return list[index] || list[list.length - 1];
 }
 
+export function addUtcDays(dayKey, delta) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dayKey || ''));
+  if (!match) return '';
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  date.setUTCDate(date.getUTCDate() + Number(delta || 0));
+  return date.toISOString().slice(0, 10);
+}
+
+/** A ledger row becomes a signed wallet movement. Spends stored as positive amounts flip. */
+export function movementFromLedger(row = {}) {
+  const amount = Number(row.amountPkn);
+  if (!Number.isFinite(amount) || amount === 0) return null;
+  const type = String(row.type || '');
+  const outbound = amount < 0 || type.includes('sent') || type.includes('withdraw');
+  const signed = outbound && amount > 0 ? -Math.abs(amount) : amount;
+  const date = utcDayKey(row.createdAt || row.at || row.date);
+  if (!date) return null;
+  return { date, amountPkn: signed };
+}
+
+/**
+ * Homepage cheapest × quantity. A card with no market price is skipped,
+ * so it never contributes a number.
+ */
+export function marketValueFromHoldings(items, prices) {
+  let total = 0;
+  let copies = 0;
+  for (const item of items || []) {
+    const id = String(item?.cardId || item?.card_id || '').trim();
+    const qty = Math.max(0, Math.trunc(Number(item?.quantity) || 0));
+    const price = Number(prices?.[id]);
+    if (!/^\d+$/.test(id) || qty < 1 || !(price > 0)) continue;
+    total += qty * price;
+    copies += qty;
+  }
+  if (!copies) return null;
+  return { cardsValuePkn: Math.round(total * 100) / 100, copies };
+}
+
+/**
+ * Wallet on the days it changed, a zero the day before the first movement,
+ * and today's homepage market only on today. Asks and unpriced cards stay out.
+ */
+export function buildCollectionHistory({
+  movements = [],
+  balance = 0,
+  marketCardsPkn = null,
+  today = new Date(),
+} = {}) {
+  const todayKey = utcDayKey(today);
+  if (!todayKey) return [];
+  const events = (movements || [])
+    .map((row) => (row?.amountPkn != null && row?.date && !row.type ? row : movementFromLedger(row)))
+    .filter((row) => row?.date && row.date <= todayKey && Number.isFinite(row.amountPkn) && row.amountPkn !== 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const byDay = new Map();
+  let running = 0;
+  for (const event of events) {
+    running += event.amountPkn;
+    byDay.set(event.date, Math.max(0, running));
+  }
+  const live = Math.max(0, Number(balance) || 0);
+  const market = marketCardsPkn == null ? null : Math.max(0, Number(marketCardsPkn) || 0);
+  if (!events.length && live === 0 && !(market > 0)) return [];
+  const first = [...byDay.keys()].sort()[0] || todayKey;
+  const points = [];
+  const zeroDate = addUtcDays(first, -1);
+  if (zeroDate && zeroDate < first) {
+    points.push({ date: zeroDate, currencyPkn: 0 });
+  }
+  for (const date of [...byDay.keys()].sort()) {
+    points.push({ date, currencyPkn: byDay.get(date) });
+  }
+  let todayPoint = points.find((row) => row.date === todayKey);
+  if (!todayPoint) {
+    todayPoint = { date: todayKey, currencyPkn: live };
+    points.push(todayPoint);
+    points.sort((a, b) => a.date.localeCompare(b.date));
+  } else {
+    todayPoint.currencyPkn = live;
+  }
+  if (market > 0) {
+    todayPoint.cardsValuePkn = market;
+    todayPoint.cardsKnown = true;
+  }
+  return points.map((row) => normalizeHistoryDay(row)).filter(Boolean);
+}
+
 export function formatHistoryTip(day) {
   if (!day) return null;
   const assets = day.assets || {};
-  // Cards owned is the CardTrader 1-DR mark. Counts stay on the tiles above.
+  const rows = [
+    { label: 'Currency', value: `${formatPknNumber(assets.currencyPkn)} PKN` },
+  ];
+  if (assets.cardsValuePkn != null) {
+    rows.push({ label: 'Cards', value: `${formatPknNumber(assets.cardsValuePkn)} PKN` });
+  }
   return {
     dateLabel: formatDayLabel(day.date),
     totalLabel: `${formatPknNumber(day.totalPkn)} PKN`,
-    rows: [
-      { label: 'Currency', value: `${formatPknNumber(assets.currencyPkn)} PKN` },
-      { label: 'Listed', value: `${formatPknNumber(assets.listedPkn)} PKN` },
-      { label: 'Cards owned', value: `${formatPknNumber(assets.cardsValuePkn ?? 0)} PKN` },
-      { label: 'Digital / NFT', value: `${formatPknNumber(assets.nftValuePkn ?? 0)} PKN` },
-    ],
+    rows,
   };
 }
