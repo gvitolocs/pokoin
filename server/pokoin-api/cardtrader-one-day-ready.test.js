@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const Module = require('module');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -10,7 +11,16 @@ function fakeQuery(sql, params = []) {
   const text = String(sql).replace(/\s+/g, ' ').trim();
   dbCalls.push({ text, params });
   if (text.includes('from public.marketplace_search_candidates')) {
-    return { rows: [{ card_name: 'Doduo', set_name: 'Evolutions', collector_number: '69/108', card_image_url: 'https://cdn/doduo.jpg' }] };
+    const ids = Array.isArray(params[0]) ? params[0] : [params[0]];
+    return {
+      rows: ids.filter(Boolean).map((id) => ({
+        card_id: String(id),
+        card_name: 'Doduo',
+        set_name: 'Evolutions',
+        collector_number: '69/108',
+        card_image_url: 'https://cdn/doduo.jpg',
+      })),
+    };
   }
   if (text.startsWith('update public.marketplace_user_listings')) {
     return { rows: listingsToHide };
@@ -21,9 +31,24 @@ function fakeQuery(sql, params = []) {
   return { rows: [], rowCount: 0 };
 }
 const serverDir = path.join(__dirname, '..', 'server');
+const fakes = {
+  '../server/_marketplace_db': {
+    marketplaceQuery: async (...a) => fakeQuery(...a),
+    marketplaceWriteQuery: async (...a) => fakeQuery(...a),
+  },
+  '../server/_firebase': {
+    getFirebaseAdmin: () => { throw new Error('no firebase in tests'); },
+    verifyBearerToken: async () => ({ uid: 'u1' }),
+  },
+};
+const origRequire = Module.prototype.require;
+Module.prototype.require = function patchedRequire(id) {
+  if (Object.prototype.hasOwnProperty.call(fakes, id)) return fakes[id];
+  return origRequire.apply(this, arguments);
+};
 for (const [name, exports] of [
-  ['_marketplace_db.js', { marketplaceQuery: async (...a) => fakeQuery(...a), marketplaceWriteQuery: async (...a) => fakeQuery(...a) }],
-  ['_firebase.js', { getFirebaseAdmin: () => { throw new Error('no firebase in tests'); }, verifyBearerToken: async () => ({ uid: 'u1' }) }],
+  ['_marketplace_db.js', fakes['../server/_marketplace_db']],
+  ['_firebase.js', fakes['../server/_firebase']],
 ]) {
   const file = path.join(serverDir, name);
   require.cache[file] = { id: file, filename: file, loaded: true, exports };
@@ -33,6 +58,7 @@ const { isOneDayReadyName, normalizeInfo, safeInfoMetadata } = require('./_cardt
 const { reconcileCardTraderInventory } = require('./_cardtrader_inventory_sync');
 const { pushListingToCardTrader } = require('./_cardtrader_seller_listings');
 const { assetItem, readAssetsPayload } = require('./cardtrader-assets')._test;
+Module.prototype.require = origRequire;
 
 function fakeFirestore(docData = null) {
   const writes = [];
@@ -176,6 +202,7 @@ test('assets payload: disconnected sellers get no assets; rows map to camelCase'
   assert.deepEqual(assetItem({ ct_product_id: '1', card_id: '2', card_name: 'Doduo', quantity: '2', price_pkn: '12.5', reverse: true }), {
     ctProductId: '1', cardId: '2', cardName: 'Doduo', setName: '', collectorNumber: '', imageUrl: '',
     condition: '', language: '', reverse: true, firstEdition: false, signed: false, altered: false, graded: false,
-    quantity: 2, pricePkn: 12.5,
+    quantity: 2, pricePkn: null,
   });
 });
+

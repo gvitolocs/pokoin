@@ -36,8 +36,11 @@ test('a shop listing reference keeps the seller handle and card name', () => {
 });
 
 test('chat tags keep one copy of a listing and cap at four', () => {
-  const one = { kind: 'listing', listingId: 'a', cardId: '', cardName: 'A', seller: 'red' };
-  assert.equal(appendChatTag([one], one).length, 1);
+  const one = { kind: 'listing', listingId: 'a', cardId: '', cardName: 'A', seller: 'red', qty: 3, stock: 8 };
+  const kept = appendChatTag([one], one);
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].qty, 3);
+  assert.equal(kept[0].stock, 8);
   let tags = [];
   for (const id of ['a', 'b', 'c', 'd', 'e']) {
     tags = appendChatTag(tags, { kind: 'listing', listingId: id, cardName: id, seller: 'red' });
@@ -183,4 +186,10 @@ test('shop rows show a message icon before the cart icon', () => {
   assert.match(src, /<ThumbZoom src=\{full\} full alt=\{name \|\| ''\}>/);
   assert.match(src, /className="art-cut shop-art"/);
   assert.match(src, /of \{stock \|\| choices\}/);
+  const tag = readFileSync(new URL('./components/ChatListingTag.jsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./chat-dock.css', import.meta.url), 'utf8');
+  assert.match(tag, /className="chat-qty"/);
+  assert.match(tag, /className="chat-qty-badge"/);
+  assert.match(css, /\.chat-qty-badge[\s\S]*var\(--yellow/);
+  assert.equal(tag.includes('footer={quantity}'), false);
 });

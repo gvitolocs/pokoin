@@ -27,7 +27,12 @@ for file in chat.js money-request.js _chat_core.js _money_request_core.js route-
 done
 
 say "API core tests"
-node --test "$SRC"/*.test.js
+# The staged tree is server/pokoin-api only. CardTrader handler tests need the
+# Pi layout (api/ beside server/) and cannot load here.
+node --test \
+  "$SRC/_chat_core.test.js" \
+  "$SRC/_money_request_core.test.js" \
+  "$SRC/patch-route-manifest.test.js"
 node --check "$SRC/chat.js"
 node --check "$SRC/money-request.js"
 

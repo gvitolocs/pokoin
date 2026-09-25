@@ -2,8 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildCollectionHistory,
+  availableHistoryPresets,
   formatDayLabel,
+  formatHistoryDelta,
   formatHistoryTip,
+  historyWindowChange,
+  historyPresetWindow,
+  sliceHistorySeries,
   historySeriesMax,
   marketValueFromHoldings,
   movementFromLedger,
@@ -40,6 +45,35 @@ test('todayHistoryDay keeps the wallet and does not treat an ask as collection v
   assert.equal(day.assets.cardsValuePkn, null);
   assert.equal(day.assets.cardsOwned, 3);
   assert.equal(day.assets.nftOwned, 1);
+});
+
+test('history opens on the last month and hides years the series does not reach', () => {
+  const today = new Date('2026-09-25T12:00:00.000Z');
+  const series = [
+    { date: '2026-05-16', currencyPkn: 0, cardsKnown: false },
+    { date: '2026-05-21', currencyPkn: 15, cardsKnown: false },
+    { date: '2026-09-25', currencyPkn: 15, cardsKnown: true, cardsValuePkn: 4026552 },
+  ];
+  const presets = availableHistoryPresets(series, today).map((row) => row.id);
+  assert.deepEqual(presets, ['1M', '3M', 'MAX']);
+  assert.equal(historyPresetWindow('1M', today).from, '2026-08-26');
+  const month = sliceHistorySeries(series, historyPresetWindow('1M', today));
+  assert.equal(month[0].date, '2026-08-26');
+  assert.equal(month[0].totalPkn, 15);
+  assert.equal(month[0].carried, true);
+  assert.equal(month[month.length - 1].date, '2026-09-25');
+  assert.equal(month[month.length - 1].totalPkn, 4026567);
+  assert.equal(
+    formatHistoryDelta(historyWindowChange(month, '1M')),
+    '+4026552 PKN in the last month',
+  );
+  const change = formatHistoryDelta({ last: 30, delta: 15, pct: 100, phrase: 'in the last month' });
+  assert.equal(change, '+15 PKN (+100%) in the last month');
+  const custom = sliceHistorySeries(series, { from: '2026-09-01', to: '2026-09-10' });
+  assert.equal(custom[0].date, '2026-09-01');
+  assert.equal(custom[custom.length - 1].date, '2026-09-10');
+  assert.equal(custom[0].totalPkn, 15);
+  assert.equal(custom[1].totalPkn, 15);
 });
 
 test('nearest day and tip composition', () => {

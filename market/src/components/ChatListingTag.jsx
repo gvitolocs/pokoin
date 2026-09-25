@@ -6,6 +6,8 @@ import {
   cardIdOf,
   chatImageSources,
   isSellerCard,
+  listingQty,
+  listingStock,
   paintOwned,
   personListsCard,
   tagKey,
@@ -47,7 +49,28 @@ async function loadCatalogImages(id) {
   return urlsFromCard(page?.card);
 }
 
-export default function ChatListingTag({ row, onRemove, peer, me }) {
+function stopControl(event) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function CardQuantity({ row, draft, onQty }) {
+  const qty = listingQty(row?.qty, row?.stock);
+  const cap = listingStock(row?.stock);
+  if (!draft) {
+    if (row?.qty == null || row.qty === '') return null;
+    return <span className="chat-qty-badge">{listingQty(row.qty, 99)}</span>;
+  }
+  return (
+    <span className="chat-qty" onClick={stopControl} onPointerDown={stopControl}>
+      <button type="button" aria-label="Decrease quantity" disabled={qty <= 1} onClick={(event) => { stopControl(event); onQty?.(tagKey(row), qty - 1); }}>−</button>
+      <b>{qty}</b>
+      <button type="button" aria-label="Increase quantity" disabled={qty >= cap} onClick={(event) => { stopControl(event); onQty?.(tagKey(row), qty + 1); }}>+</button>
+    </span>
+  );
+}
+
+export default function ChatListingTag({ row, onRemove, onQty, peer, me }) {
   const label = row.cardName || 'Card';
   const id = cardIdOf(row);
   const identity = `${row.imageUrl || ''}|${id}|${row.sellerUid || ''}|${row.seller || ''}`;
@@ -111,6 +134,8 @@ export default function ChatListingTag({ row, onRemove, peer, me }) {
     else setFailed(true);
   }
 
+  const draft = Boolean(onRemove);
+  const quantity = <CardQuantity row={row} draft={draft} onQty={onQty} />;
   const image = src ? (
     <ThumbZoom src={full} full alt={label}>
       <img
@@ -133,6 +158,7 @@ export default function ChatListingTag({ row, onRemove, peer, me }) {
       ) : (
         <span className="chat-tag-body" role="img" aria-label={label}>{image}</span>
       )}
+      {quantity}
       {onRemove ? (
         <button type="button" aria-label={`Remove ${label}`} onClick={() => onRemove(tagKey(row))}>×</button>
       ) : null}

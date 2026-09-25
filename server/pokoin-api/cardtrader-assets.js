@@ -1,13 +1,31 @@
 const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
+const { marketplaceQuery } = require('../server/_marketplace_db');
 const { readIntegrationDoc } = require('./_cardtrader_integration');
 const { readOneDayReadyAssets, readSellerSync } = require('./_cardtrader_inventory_sync');
-const { oneDayReadyTotals } = require('./_cardtrader_inventory_sync_core');
+const { applyHomepageMinimums, marketPricePkn, oneDayReadyTotals } = require('./_cardtrader_inventory_sync_core');
 
 /**
  * GET /api/cardtrader-assets — the signed-in seller's CardTrader 1-Day Ready
  * inventory as dashboard assets. That stock is CardTrader's to sell, so it is
  * never a Pokoin listing; the dashboard shows it as "CardTrader 1-DR".
  */
+
+const HOMEPAGE_MINIMUM_SQL = `
+  select cache.pokoin_card_id as card_id,
+         min(cache.cheapest_price_pkn) as pkn
+  from public.cheapest_homepage_cache_blueprint cache
+  where cache.pokoin_card_id = any($1::text[])
+    and cache.cheapest_price_pkn > 0
+    and coalesce(cache.eligible_listing_count, 0) > 0
+  group by cache.pokoin_card_id
+`;
+
+async function withHomepageMinimums(rows) {
+  const ids = [...new Set((rows || []).map((row) => String(row.card_id || '')).filter((id) => /^\d+$/.test(id)))];
+  if (!ids.length) return applyHomepageMinimums(rows, []);
+  const result = await marketplaceQuery(HOMEPAGE_MINIMUM_SQL, [ids]);
+  return applyHomepageMinimums(rows, result?.rows || []);
+}
 
 function assetItem(row = {}) {
   return {
@@ -25,7 +43,7 @@ function assetItem(row = {}) {
     altered: row.altered === true,
     graded: row.graded === true,
     quantity: Math.max(0, Math.trunc(Number(row.quantity) || 0)),
-    pricePkn: Math.max(0, Number(row.price_pkn) || 0),
+    pricePkn: marketPricePkn(row),
   };
 }
 
@@ -47,7 +65,17 @@ async function readAssetsPayload(firestore, uid) {
   } catch (error) {
     if (!/does not exist/i.test(String(error.message || ''))) throw error;
   }
-  const items = rows.map(assetItem);
+  let priced = rows;
+  try {
+    priced = await withHomepageMinimums(rows);
+  } catch (error) {
+    console.error('1dr homepage minimum failed', { message: error.message });
+    priced = applyHomepageMinimums(rows, []);
+  }
+  const items = priced.map(assetItem).sort((a, b) => (
+    ((b.pricePkn || 0) * b.quantity) - ((a.pricePkn || 0) * a.quantity)
+    || String(a.cardName).localeCompare(String(b.cardName))
+  ));
   return {
     connected,
     oneDayReady: true,

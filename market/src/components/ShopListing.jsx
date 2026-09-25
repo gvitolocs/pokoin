@@ -67,7 +67,14 @@ export default function ShopListingRow({
 }) {
   const [added, setAdded] = useState(false);
   const name = publicShopSellerLabel(offer);
-  const reference = listingReference({ offer, card });
+  const stock = Math.max(0, Math.trunc(Number(offer?.quantityAvailable ?? offer?.quantity_available) || 0));
+  const choices = Math.max(stock, 1);
+  const [pick, setPick] = useState(1);
+  const reference = {
+    ...listingReference({ offer, card }),
+    qty: showCard ? pick : 1,
+    stock: choices,
+  };
   const handle = reference.seller;
   const sellerUid = reference.sellerUid;
   const href = sellerHref(offer);
@@ -76,9 +83,6 @@ export default function ShopListingRow({
   const tone = conditionTone(offer?.condition) || 'nm';
   const cond = conditionShort(offer?.condition);
   const tags = listingExtraTags(offer);
-  const stock = Math.max(0, Math.trunc(Number(offer?.quantityAvailable ?? offer?.quantity_available) || 0));
-  const choices = Math.max(stock, 1);
-  const [pick, setPick] = useState(1);
   const cardPath = offer?.canonicalPath || offer?.canonical_path || '';
   const cardName = offer?.cardName || offer?.name || '';
   const setName = offer?.setName || '';
@@ -86,6 +90,7 @@ export default function ShopListingRow({
 
   function buy(event) {
     if (mine || !onBuy) return;
+    if (event?.shiftKey || event?.ctrlKey || event?.metaKey) return;
     if (event?.target?.closest?.('a, button, select, .ct-qty')) return;
     onBuy(showCard ? pick : undefined);
   }

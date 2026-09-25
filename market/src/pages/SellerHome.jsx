@@ -16,7 +16,7 @@ import {
   liveInventoryListings,
   summarizeLiveInventory,
 } from '../inventory-listings.js';
-import { normalizeHistoryDay } from '../portfolio-history.js';
+import { addUtcDays, normalizeHistoryDay, utcDayKey } from '../portfolio-history.js';
 import {
   portfolioTilesFingerprint,
   portfolioTilesFromSummary,
@@ -98,6 +98,16 @@ const PREVIEW_FIXTURE = {
     { id: '105', name: 'Charizard', set: '151', number: '006/165', price: 28 },
   ].map(cardFromCatalogRow),
 };
+
+function previewHistorySeries(now = new Date()) {
+  const today = utcDayKey(now);
+  return [
+    { date: addUtcDays(today, -120), currencyPkn: 0, cardsKnown: false },
+    { date: addUtcDays(today, -100), currencyPkn: 15, cardsKnown: false },
+    { date: addUtcDays(today, -20), currencyPkn: 15, cardsKnown: true, cardsValuePkn: 3900 },
+    { date: today, currencyPkn: 15, cardsKnown: true, cardsValuePkn: 4200 },
+  ];
+}
 
 function moversFromRail(rail) {
   const cards = ((rail && rail.cards) || []).map(cardFromCatalogRow).filter((c) => c.id);
@@ -326,6 +336,7 @@ export default function SellerHome() {
         listed={PREVIEW_FIXTURE.listed}
         listingRows={PREVIEW_FIXTURE.listingRows}
         movers={PREVIEW_FIXTURE.movers}
+        historySeries={previewHistorySeries()}
         loading={false}
         error=""
         collectionHref={collectionHref}

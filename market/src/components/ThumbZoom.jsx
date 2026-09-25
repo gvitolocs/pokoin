@@ -15,12 +15,16 @@ export default function ThumbZoom({
   alt = '',
   children,
   disabled = false,
+  footer = null,
 }) {
   const [box, setBox] = useState(null);
   const pointer = useRef({ x: 0, y: 0 });
   const timer = useRef(null);
+  const portal = useRef(null);
   const srcRef = useRef(src);
+  const footerRef = useRef(footer);
   srcRef.current = src;
+  footerRef.current = footer;
 
   function hide() {
     if (timer.current) {
@@ -56,9 +60,15 @@ export default function ThumbZoom({
 
   function move(event) {
     pointer.current = { x: event.clientX, y: event.clientY };
-    if (box) {
+    if (box && !footerRef.current) {
       place(event.clientX, event.clientY);
     }
+  }
+
+  function leave(event) {
+    const next = event.relatedTarget;
+    if (next && portal.current?.contains(next)) return;
+    hide();
   }
 
   useEffect(() => {
@@ -98,11 +108,12 @@ export default function ThumbZoom({
   }, []);
 
   return (
-    <span className="thumb-zoom-host" onMouseEnter={enter} onMouseMove={move} onMouseLeave={hide}>
+    <span className="thumb-zoom-host" onMouseEnter={enter} onMouseMove={move} onMouseLeave={leave}>
       {children}
       {box && src
         ? createPortal(
           <div
+            ref={portal}
             className="suggest-hover"
             style={{
               left: `${box.left}px`,
@@ -110,9 +121,15 @@ export default function ThumbZoom({
               width: `${box.width}px`,
               height: `${box.height}px`,
             }}
-            aria-hidden="true"
+            aria-hidden={footer ? undefined : 'true'}
+            onMouseLeave={(event) => {
+              const next = event.relatedTarget;
+              if (next && event.currentTarget.contains(next)) return;
+              hide();
+            }}
           >
             <CardArt src={src} full={full} alt={alt} />
+            {footer}
           </div>,
           document.body,
         )

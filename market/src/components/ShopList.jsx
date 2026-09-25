@@ -23,6 +23,7 @@ export default function ShopList({ className = '', children }) {
     let origin = null;
     let armed = false;
     let base = new Set();
+    let anchor = '';
 
     function rowBoxes() {
       return [...(list?.querySelectorAll('.shop-row[data-listing-id]') || [])];
@@ -81,17 +82,47 @@ export default function ShopList({ className = '', children }) {
       if (event.key !== 'Escape') return;
       origin = null;
       armed = false;
+      anchor = '';
       setBand(null);
       setSelected(new Set());
       document.documentElement.classList.remove('is-shop-marquee');
     }
 
+    function onClick(event) {
+      if (!(event.shiftKey || event.ctrlKey || event.metaKey)) return;
+      const row = event.target?.closest?.('.shop-row[data-listing-id]');
+      if (!row || !list.contains(row)) return;
+      if (event.target?.closest?.('a, button, input, select, textarea, .ct-qty, .art-frame')) return;
+      event.preventDefault();
+      const id = row.dataset.listingId;
+      const ids = rowBoxes().map((item) => item.dataset.listingId).filter(Boolean);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (event.shiftKey && anchor) {
+          const from = ids.indexOf(anchor);
+          const to = ids.indexOf(id);
+          if (from >= 0 && to >= 0) {
+            const [lo, hi] = from < to ? [from, to] : [to, from];
+            const range = new Set(event.ctrlKey || event.metaKey ? prev : []);
+            for (let i = lo; i <= hi; i += 1) range.add(ids[i]);
+            return range;
+          }
+        }
+        if ((event.ctrlKey || event.metaKey) && next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      anchor = id;
+    }
+
     panel.addEventListener('pointerdown', onDown);
+    panel.addEventListener('click', onClick);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('keydown', onKey);
     return () => {
       panel.removeEventListener('pointerdown', onDown);
+      panel.removeEventListener('click', onClick);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('keydown', onKey);

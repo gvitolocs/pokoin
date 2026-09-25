@@ -17,6 +17,7 @@ import {
   openChatList,
   openThread,
   removeChatTag,
+  setChatTagQty,
   subscribeChatDock,
 } from '../chat-dock-store.js';
 import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
@@ -239,7 +240,8 @@ export default function ChatDock() {
                     <ChatListingTag
                       key={tagKey(row)}
                       row={row}
-                      onRemove={removeChatTag}
+                        onRemove={removeChatTag}
+                        onQty={setChatTagQty}
                       peer={{ uid: dock.peer, username: dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '' }}
                       me={{ uid: user?.uid, username: profile?.username }}
                     />

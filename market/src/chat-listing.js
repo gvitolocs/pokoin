@@ -67,6 +67,21 @@ export function tagKey(row) {
   return `${row?.kind || 'listing'}:${row?.listingId || row?.cardId || row?.cardName || ''}`;
 }
 
+/** 1–99, never past the copies this listing still has. */
+export function listingQty(value, stock = 99) {
+  const rawCap = Math.trunc(Number(stock));
+  const cap = Number.isFinite(rawCap) && rawCap >= 1 ? Math.min(99, rawCap) : 99;
+  const n = Math.trunc(Number(value));
+  const qty = Number.isFinite(n) && n >= 1 ? n : 1;
+  return Math.min(cap, qty);
+}
+
+export function listingStock(value) {
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n) || n < 1) return 99;
+  return Math.min(99, n);
+}
+
 /** A shop listing belongs to a seller. A homepage card does not. */
 export function isSellerCard(row) {
   return Boolean(sellerUserId(row?.sellerUid) || chatHandle(row?.seller));
@@ -172,8 +187,17 @@ export function referenceForPeer(card, offers, peer = {}) {
 export function appendChatTag(tags, reference) {
   if (!reference?.cardName) return tags;
   const key = tagKey(reference);
-  if ((tags || []).some((row) => tagKey(row) === key)) return tags;
-  return [...(tags || []), reference].slice(-4);
+  const stock = listingStock(reference.stock);
+  const qty = listingQty(reference.qty, stock);
+  const next = { ...reference, qty, stock };
+  const at = (tags || []).findIndex((row) => tagKey(row) === key);
+  if (at >= 0) {
+    const copy = tags.slice();
+    const priorStock = listingStock(copy[at].stock);
+    copy[at] = { ...copy[at], qty, stock: Math.max(priorStock, stock) };
+    return copy;
+  }
+  return [...(tags || []), next].slice(-4);
 }
 
 export function catalogPath(href, cardId) {

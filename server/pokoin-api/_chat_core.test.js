@@ -35,6 +35,9 @@ test('listing tags keep https images and drop everything else', () => {
   assert.equal(core.cleanListings([{ cardName: 'Meowth', imageUrl: '//evil.example/a.jpg' }])[0].imageUrl, '');
   assert.equal(row.path, '/marketplace/en/cards/9');
   assert.equal(row.pricePkn, 76);
+  assert.equal(core.cleanListings([{ cardName: 'Zapdos', qty: 3 }])[0].qty, 3);
+  assert.equal(core.cleanListings([{ cardName: 'Zapdos' }])[0].qty, 1);
+  assert.equal(core.cleanListings([{ cardName: 'Zapdos', qty: 400 }])[0].qty, 99);
   assert.equal(core.cleanListings([{ cardName: 'Nope', imageUrl: 'javascript:alert(1)', path: 'https://evil.example' }])[0].imageUrl, '');
   assert.equal(core.cleanListings([{ cardName: 'Nope', imageUrl: 'javascript:alert(1)', path: 'https://evil.example' }])[0].path, '');
 });

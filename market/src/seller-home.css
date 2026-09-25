@@ -144,6 +144,85 @@
   color: var(--muted);
 }
 
+.seller-history-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+}
+
+.seller-history-value strong {
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.seller-history-delta {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.seller-history-delta.is-up { color: var(--yellow); }
+.seller-history-delta.is-down { color: #ff7a7a; }
+
+.seller-history-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.seller-history-presets {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.35);
+  border: 1px solid var(--g5);
+}
+
+.seller-history-presets button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  padding: 0.28rem 0.62rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.seller-history-presets button[aria-pressed="true"] {
+  background: #14121c;
+  color: var(--yellow);
+  box-shadow: inset 0 0 0 1px rgb(255 211 61 / 0.5);
+}
+
+.seller-history-dates {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.seller-history-dates input {
+  background: #0c0b10;
+  color: var(--text);
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.22rem 0.4rem;
+  color-scheme: dark;
+}
+
 .seller-history-chart {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -192,7 +271,13 @@
 }
 
 .seller-history-grid .seller-history-fill {
-  fill: rgb(255 211 61 / 0.12);
+  fill: url(#collection-history-fill);
+}
+
+.seller-history-grid .seller-history-rule {
+  stroke: rgb(255 255 255 / 0.08);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 .seller-history-grid .seller-history-line {
@@ -200,6 +285,7 @@
   stroke-width: 2.5;
   stroke-linejoin: round;
   stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .seller-history-point {
@@ -705,4 +791,7 @@
   .seller-listing-list {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
+
+  .seller-history-value strong { font-size: 1.35rem; }
+  .seller-history-dates input { max-width: 8.5rem; }
 }

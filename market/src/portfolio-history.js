@@ -293,3 +293,117 @@ export function formatHistoryTip(day) {
     rows,
   };
 }
+
+/** Collectr-style windows. Longer ones appear only when history reaches that far. */
+export const HISTORY_PRESETS = [
+  { id: '1M', label: '1M', days: 30, phrase: 'in the last month' },
+  { id: '3M', label: '3M', days: 91, phrase: 'in the last 3 months' },
+  { id: '6M', label: '6M', days: 182, phrase: 'in the last 6 months' },
+  { id: '1Y', label: '1Y', days: 365, phrase: 'in the last year' },
+  { id: '2Y', label: '2Y', days: 730, phrase: 'in the last 2 years' },
+  { id: 'MAX', label: 'MAX', days: null, phrase: 'all time' },
+];
+
+export const DEFAULT_HISTORY_PRESET = '1M';
+
+export function historyPresetWindow(presetId, today = new Date()) {
+  const todayKey = utcDayKey(today);
+  const preset = HISTORY_PRESETS.find((row) => row.id === presetId) || HISTORY_PRESETS[0];
+  if (preset.days == null) return { from: '', to: todayKey, preset: preset.id };
+  return { from: addUtcDays(todayKey, -preset.days), to: todayKey, preset: preset.id };
+}
+
+/** 1M and MAX always. 1Y and 2Y only when the first stored day is at least that old. */
+export function availableHistoryPresets(series, today = new Date()) {
+  const days = withLiveHistoryDay(series, null);
+  if (!days.length) return [];
+  const earliest = days[0].date;
+  const todayKey = utcDayKey(today);
+  return HISTORY_PRESETS.filter((preset) => {
+    if (preset.id === '1M' || preset.id === 'MAX') return true;
+    return earliest <= addUtcDays(todayKey, -preset.days);
+  });
+}
+
+/**
+ * Points inside [from, to]. The value at the window edges is the last real
+ * observation, so a quiet month still draws instead of going blank.
+ */
+export function sliceHistorySeries(series, { from = '', to = '' } = {}) {
+  const days = withLiveHistoryDay(series, null);
+  if (!days.length) return [];
+  let start = from || days[0].date;
+  let end = to || days[days.length - 1].date;
+  if (start && end && start > end) {
+    const swap = start;
+    start = end;
+    end = swap;
+  }
+  const inside = days.filter((day) => day.date >= start && day.date <= end);
+  const prior = [...days].reverse().find((day) => day.date < start);
+  const points = [];
+  if (prior && start && (!inside.length || inside[0].date !== start)) {
+    points.push({ ...prior, date: start, carried: true });
+  }
+  points.push(...inside);
+  if (points.length && end && points[points.length - 1].date < end) {
+    points.push({ ...points[points.length - 1], date: end, carried: true });
+  }
+  return points;
+}
+
+/** Axis hugs the visible values the way a portfolio chart does, and still includes zero when the series does. */
+export function historyAxis(points) {
+  const values = (points || []).map((day) => asNonNeg(day?.totalPkn));
+  if (!values.length) {
+    const yMax = niceScaleMax(0);
+    return { yMin: 0, yMax, ticks: yTickValues(yMax, 4) };
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(max - min, max * 0.08, 1);
+  const yMax = niceScaleMax(max + span * 0.16);
+  const rawMin = Math.max(0, min - span * 0.22);
+  const step = yMax / 4;
+  const yMin = rawMin <= 0 || min === 0 ? 0 : Math.max(0, Math.floor(rawMin / step) * step);
+  const ticks = [];
+  for (let i = 0; i <= 4; i += 1) {
+    ticks.push(Math.round(yMin + ((yMax - yMin) * i) / 4));
+  }
+  return { yMin, yMax: Math.max(yMax, yMin + 1), ticks };
+}
+
+export function historyWindowChange(points, presetId = 'custom') {
+  if (!points?.length) return null;
+  const first = asNonNeg(points[0].totalPkn);
+  const last = asNonNeg(points[points.length - 1].totalPkn);
+  const delta = Math.round((last - first) * 100) / 100;
+  // A window that starts before any card was priced is not a return on the wallet.
+  const gainedCards = points[0]?.assets?.cardsKnown !== true
+    && points.some((day) => day?.assets?.cardsKnown === true);
+  const pct = first > 0 && !gainedCards ? ((last - first) / first) * 100 : null;
+  const preset = HISTORY_PRESETS.find((row) => row.id === presetId);
+  return {
+    last,
+    delta,
+    pct: pct == null || !Number.isFinite(pct) ? null : pct,
+    phrase: preset?.phrase || 'in this period',
+  };
+}
+
+export function formatHistoryDelta(change) {
+  if (!change) return '';
+  const body = `${formatPknNumber(Math.abs(change.delta))} PKN`;
+  const signed = change.delta > 0 ? `+${body}` : (change.delta < 0 ? `-${body}` : body);
+  if (change.pct == null) return `${signed} ${change.phrase}`;
+  const pctAbs = Math.abs(Math.round(change.pct * 10) / 10);
+  const pctText = formatPknNumber(pctAbs, { maximumFractionDigits: 1 });
+  const pctSigned = change.pct > 0 ? `+${pctText}%` : (change.pct < 0 ? `-${pctText}%` : `${pctText}%`);
+  return `${signed} (${pctSigned}) ${change.phrase}`;
+}
+
+export function formatHistoryAxisLabel(dayKey, withYear = false) {
+  const label = formatDayLabel(dayKey);
+  if (!withYear || !label) return label;
+  return `${label} ${String(dayKey || '').slice(0, 4)}`;
+}

@@ -8,13 +8,16 @@ import MiniCardTile from './MiniCardTile.jsx';
 import { printingIdentity } from '../identity.js';
 import { formatPknNumber, tilePricePkn } from '../pkn.js';
 import {
-  formatDayLabel,
+  DEFAULT_HISTORY_PRESET,
+  availableHistoryPresets,
+  formatHistoryAxisLabel,
+  formatHistoryDelta,
   formatHistoryTip,
-  historySeriesMax,
+  historyAxis,
+  historyPresetWindow,
+  historyWindowChange,
   nearestHistoryDay,
-  niceScaleMax,
-  withLiveHistoryDay,
-  yTickValues,
+  sliceHistorySeries,
 } from '../portfolio-history.js';
 import { DASHBOARD_SCAN, marketUrl, goMarket } from '../punchouts.js';
 
@@ -22,49 +25,60 @@ const CHART_W = 640;
 const CHART_H = 200;
 
 /**
- * Collection value chart. Draws a real multi-day series when available.
- * Axis labels live on the borders; hover shows that day's balance + composition.
- * Never paints a fake flat "all assets combined" underline from a single balance.
+ * Collection value chart. Opens on the last month. Longer windows appear only
+ * when stored history reaches them; a calendar picks any other period.
+ * Draws real observations only — never a fake flat from a single balance.
  */
 export function CollectionHistoryPanel({ series = null, pending = false }) {
   const [hover, setHover] = useState(null);
-  const points = withLiveHistoryDay(series, null);
+  const [preset, setPreset] = useState(DEFAULT_HISTORY_PRESET);
+  const [custom, setCustom] = useState(null);
+  const presets = availableHistoryPresets(series);
+  const presetId = custom
+    ? ''
+    : (presets.some((row) => row.id === preset) ? preset : DEFAULT_HISTORY_PRESET);
+  const bounds = custom
+    ? { from: custom.from, to: custom.to, preset: 'custom' }
+    : historyPresetWindow(presetId || 'MAX');
+  const points = sliceHistorySeries(series, bounds);
   const hasLine = points.length >= 2;
   const hasPoint = points.length === 1;
   const hasData = points.length > 0;
-  const yMax = niceScaleMax(historySeriesMax(points));
-  const yTicks = yTickValues(yMax, 4);
+  const axis = historyAxis(points);
+  const change = historyWindowChange(points, custom ? 'custom' : presetId);
+  const withYear = points.length > 1 && points[0].date.slice(0, 4) !== points[points.length - 1].date.slice(0, 4);
   const xLabels = points.length
-    ? (points[0].date === points[points.length - 1].date
-      ? [points[0]]
-      : [points[0], points[points.length - 1]])
+    ? (points[0].date === points[points.length - 1].date ? [points[0]] : [points[0], points[points.length - 1]])
     : [];
+
+  function yOf(total) {
+    const span = Math.max(1, axis.yMax - axis.yMin);
+    const t = (Math.max(0, Number(total) || 0) - axis.yMin) / span;
+    return CHART_H - t * (CHART_H - 28) - 14;
+  }
 
   let polyline = '';
   let area = '';
-  let marker = null;
+  let endDot = null;
   if (hasLine) {
-    const coords = points.map((day, i) => {
-      const x = (i / (points.length - 1)) * CHART_W;
-      const y = CHART_H - (day.totalPkn / yMax) * (CHART_H - 24) - 12;
-      return { x, y, day };
-    });
+    const coords = points.map((day, i) => ({
+      x: (i / (points.length - 1)) * CHART_W,
+      y: yOf(day.totalPkn),
+      day,
+    }));
     polyline = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
     area = `0,${CHART_H} ${polyline} ${CHART_W},${CHART_H}`;
+    endDot = coords[coords.length - 1];
   } else if (hasPoint) {
     const day = points[0];
     // Card sold graph centers a single day (plotW / 2), not flush right.
-    marker = {
-      x: CHART_W / 2,
-      y: CHART_H - (day.totalPkn / yMax) * (CHART_H - 24) - 12,
-      day,
-    };
+    endDot = { x: CHART_W / 2, y: yOf(day.totalPkn), day };
   }
 
   const tipDay = hover?.day || null;
   const tip = formatHistoryTip(tipDay);
   const tipLeftPct = hover?.xPct
-    ?? (marker ? (marker.x / CHART_W) * 100 : 50);
+    ?? (endDot ? (endDot.x / CHART_W) * 100 : 50);
 
   function onMove(event) {
     if (!hasData) {
@@ -74,11 +88,18 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
     const day = nearestHistoryDay(points, ratio);
-    // Snap tip/crosshair to the lone marker; multi-day follows the pointer.
-    const xPct = hasPoint && marker
-      ? (marker.x / CHART_W) * 100
+    const xPct = hasPoint && endDot
+      ? (endDot.x / CHART_W) * 100
       : Math.min(96, Math.max(4, ratio * 100));
     setHover({ day, xPct });
+  }
+
+  function pickDates(nextFrom, nextTo) {
+    if (!nextFrom || !nextTo) {
+      setCustom(null);
+      return;
+    }
+    setCustom({ from: nextFrom, to: nextTo });
   }
 
   return (
@@ -86,13 +107,58 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
       className="seller-history"
       data-testid="collection-history"
       data-history={hasLine ? 'series' : (hasPoint ? 'point' : 'empty')}
+      data-range={custom ? 'custom' : presetId}
     >
       <div className="seller-history-head">
         <h3>Collection value history</h3>
+        {change ? (
+          <div className="seller-history-value">
+            <strong>{formatPknNumber(change.last)} PKN</strong>
+            <span className={`seller-history-delta${change.delta < 0 ? ' is-down' : ' is-up'}`}>
+              {formatHistoryDelta(change)}
+            </span>
+          </div>
+        ) : null}
+        {presets.length ? (
+          <div className="seller-history-ranges">
+            <div className="seller-history-presets" role="group" aria-label="History period">
+              {presets.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  aria-pressed={!custom && presetId === row.id}
+                  onClick={() => {
+                    setPreset(row.id);
+                    setCustom(null);
+                  }}
+                >
+                  {row.label}
+                </button>
+              ))}
+            </div>
+            <div className="seller-history-dates">
+              <input
+                type="date"
+                aria-label="From"
+                value={bounds.from || ''}
+                max={bounds.to || undefined}
+                onChange={(event) => pickDates(event.target.value, bounds.to)}
+              />
+              <span aria-hidden="true">–</span>
+              <input
+                type="date"
+                aria-label="To"
+                value={bounds.to || ''}
+                min={bounds.from || undefined}
+                onChange={(event) => pickDates(bounds.from, event.target.value)}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
       <div className="seller-history-chart">
         <div className="seller-history-y" aria-hidden="true">
-          {[...yTicks].reverse().map((tick) => (
+          {[...axis.ticks].reverse().map((tick) => (
             <span key={tick}>{formatPknNumber(tick)}</span>
           ))}
         </div>
@@ -110,6 +176,22 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
               preserveAspectRatio="none"
               aria-hidden="true"
             >
+              <defs>
+                <linearGradient id="collection-history-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#ffd33d" stopOpacity="0.28" />
+                  <stop offset="100%" stopColor="#ffd33d" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {axis.ticks.map((tick) => (
+                <line
+                  key={`rule-${tick}`}
+                  className="seller-history-rule"
+                  x1="0"
+                  x2={CHART_W}
+                  y1={yOf(tick)}
+                  y2={yOf(tick)}
+                />
+              ))}
               {hasLine ? (
                 <>
                   <polygon className="seller-history-fill" points={area} />
@@ -127,13 +209,13 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
               ) : null}
             </svg>
             {/* CSS circle — SVG circle stretches under preserveAspectRatio=none. */}
-            {marker ? (
+            {endDot ? (
               <span
                 className="seller-history-point"
                 data-testid="collection-history-point"
                 style={{
-                  left: `${(marker.x / CHART_W) * 100}%`,
-                  top: `${(marker.y / CHART_H) * 100}%`,
+                  left: `${(endDot.x / CHART_W) * 100}%`,
+                  top: `${(endDot.y / CHART_H) * 100}%`,
                 }}
               />
             ) : null}
@@ -166,7 +248,7 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
           </div>
           <div className="seller-history-x" aria-hidden="true">
             {xLabels.map((day) => (
-              <span key={day.date}>{formatDayLabel(day.date)}</span>
+              <span key={day.date}>{formatHistoryAxisLabel(day.date, withYear)}</span>
             ))}
             {!xLabels.length ? <span> </span> : null}
           </div>
@@ -481,7 +563,7 @@ export function SellerDashboardView({
               {oneDayReadyCards > 0 ? (
                 <p className="seller-asking" data-testid="cardtrader-1dr-value">
                   <span>CardTrader 1-DR assets · {oneDayReadyCards.toLocaleString('en-US')} cards</span>
-                  <strong>{formatPkn(cardTraderAssets.totals?.valuePkn || 0)}</strong>
+                  <strong title="Homepage minimum">{formatPkn(cardTraderAssets.totals?.valuePkn || 0)}</strong>
                 </p>
               ) : null}
 

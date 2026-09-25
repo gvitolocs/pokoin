@@ -79,6 +79,7 @@ function cleanListing(raw) {
   let path = String(raw.path || '');
   if (!path.startsWith('/') || path.startsWith('//')) path = '';
   const price = Number(raw.pricePkn);
+  const qty = Math.trunc(Number(raw.qty));
   return {
     kind: raw.kind === 'card' ? 'card' : 'listing',
     listingId: String(raw.listingId || '').slice(0, 80),
@@ -90,6 +91,7 @@ function cleanListing(raw) {
     imageUrl,
     path: path.slice(0, 240),
     pricePkn: Number.isFinite(price) && price >= 0 ? Math.min(Math.round(price), 1000000000) : 0,
+    qty: Number.isFinite(qty) && qty >= 1 ? Math.min(qty, 99) : 1,
   };
 }
 

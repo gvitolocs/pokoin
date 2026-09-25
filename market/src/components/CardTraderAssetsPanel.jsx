@@ -40,7 +40,7 @@ export default function CardTraderAssetsPanel({ assets }) {
         <h2 id="ct1dr-title">CardTrader 1-DR</h2>
         {items.length ? (
           <span className="ct1dr-totals" title="Stocked and sold by CardTrader 1-Day Ready — not listed on Pokoin">
-            {Number(totals.cards || 0).toLocaleString('en-US')} cards · {formatPkn(totals.valuePkn || 0)}
+            {Number(totals.cards || 0).toLocaleString('en-US')} cards · {formatPkn(totals.valuePkn || 0) || 'no homepage minimum'}
           </span>
         ) : null}
       </header>

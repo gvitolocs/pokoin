@@ -1,4 +1,4 @@
-import { appendChatTag, sellerUserId } from './chat-listing.js';
+import { appendChatTag, listingQty, sellerUserId, tagKey } from './chat-listing.js';
 
 const DRAFT_KEY = 'pokoin.chatDrafts';
 const DROP_HINT_KEY = 'pokoin.chatDropHint';
@@ -151,6 +151,17 @@ export function addChatTag(reference, text) {
   remember(snapshot.peer, snapshot);
   emit();
   return true;
+}
+
+export function setChatTagQty(key, qty) {
+  snapshot = {
+    ...snapshot,
+    tags: snapshot.tags.map((row) => (
+      tagKey(row) === key ? { ...row, qty: listingQty(qty, row.stock) } : row
+    )),
+  };
+  remember(snapshot.peer, snapshot);
+  emit();
 }
 
 export function removeChatTag(key) {

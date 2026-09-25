@@ -3450,7 +3450,12 @@ a.era-link:focus-visible {
 
 .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
 
-.shop-list { display: flex; flex-direction: column; }
+.shop-list {
+  display: flex;
+  flex-direction: column;
+  /* Empty strip under the last row, so a rubber-band can start. */
+  padding-bottom: 6.5rem;
+}
 
 .shop-row {
   display: grid;

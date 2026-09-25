@@ -438,6 +438,29 @@ function oneDayReadyAssetRow(product = {}, { cardId = '', meta = {} } = {}) {
   };
 }
 
+/**
+ * Dashboard price for a 1-Day Ready row. Homepage cheapest only.
+ * A CardTrader EUR conversion stored on the row is not shown.
+ */
+function marketPricePkn(row = {}) {
+  const market = Number(row.market_pkn ?? row.marketPkn);
+  if (!(market > 0)) return null;
+  return Math.round(market * 100) / 100;
+}
+
+function applyHomepageMinimums(rows, priceRows) {
+  const byId = new Map();
+  for (const price of priceRows || []) {
+    const id = String(price.card_id || '');
+    const pkn = Number(price.pkn);
+    if (id && pkn > 0) byId.set(id, pkn);
+  }
+  return (rows || []).map((row) => {
+    const market = byId.get(String(row.card_id || ''));
+    return { ...row, market_pkn: market > 0 ? market : null };
+  });
+}
+
 /** Quantity-weighted totals of 1-Day Ready assets; empty stacks do not count. */
 function oneDayReadyTotals(rows = []) {
   let products = 0;
@@ -470,6 +493,8 @@ module.exports = {
   isCtLinkedSource,
   isPokemonProduct,
   normalizeProduct,
+  applyHomepageMinimums,
+  marketPricePkn,
   oneDayReadyAssetRow,
   oneDayReadyTotals,
   parseCtProductId,
