@@ -1,6 +1,7 @@
 import { appendChatTag, sellerUserId } from './chat-listing.js';
 
 const DRAFT_KEY = 'pokoin.chatDrafts';
+const DROP_HINT_KEY = 'pokoin.chatDropHint';
 
 let snapshot = { open: false, view: 'list', peer: '', peerLabel: '', tags: [], text: '' };
 const listeners = new Set();
@@ -58,6 +59,23 @@ export function getChatDrafts() {
   return readDrafts();
 }
 
+/** Browser-local: the tip is chrome, not account data, so it stays hidden on this device. */
+export function chatDropHintVisible() {
+  try {
+    return localStorage.getItem(DROP_HINT_KEY) !== 'dismissed';
+  } catch (_) {
+    return true;
+  }
+}
+
+export function dismissChatDropHint() {
+  try {
+    localStorage.setItem(DROP_HINT_KEY, 'dismissed');
+  } catch (_) {
+    /* private mode hides it for this view only */
+  }
+}
+
 export function subscribeChatDock(listener) {
   listeners.add(listener);
   return () => listeners.delete(listener);
@@ -69,6 +87,13 @@ export function openChatList(text) {
   persistCurrent();
   snapshot = { ...snapshot, open: true, view: 'list' };
   emit();
+}
+
+/** Dragging a card opens the list only when no conversation is already open. */
+export function noteListingDrag(text) {
+  if (snapshot.open && snapshot.view === 'thread') return 'thread';
+  openChatList(text);
+  return 'list';
 }
 
 export function openThread(peer, label = '', text) {
@@ -116,11 +141,12 @@ export function openListingChat(reference) {
   return dropOnConversation(sellerUid, reference?.seller || '', reference);
 }
 
-export function addChatTag(reference) {
+export function addChatTag(reference, text) {
   if (!snapshot.open || snapshot.view !== 'thread' || !snapshot.peer) {
-    openChatList();
+    openChatList(text);
     return false;
   }
+  if (text !== undefined) snapshot = { ...snapshot, text };
   snapshot = { ...snapshot, tags: appendChatTag(snapshot.tags, reference) };
   remember(snapshot.peer, snapshot);
   emit();

@@ -5,11 +5,15 @@ import { getConversation, listConversations, sendChatMessage } from '../chat-cli
 import { chatTime } from '../chat-format.js';
 import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
 import {
+  addChatTag,
+  chatDropHintVisible,
   closeChatDock,
   clearChatTags,
+  dismissChatDropHint,
   dropOnConversation,
   getChatDock,
   getChatDrafts,
+  noteListingDrag,
   openChatList,
   openThread,
   removeChatTag,
@@ -107,6 +111,8 @@ export default function ChatDock() {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [over, setOver] = useState(false);
+  const [showDropHint, setShowDropHint] = useState(chatDropHintVisible);
   const textRef = useRef('');
   textRef.current = text;
 
@@ -145,8 +151,8 @@ export default function ChatDock() {
     }
     function onDragOver(event) {
       if (!allowsDrop(event)) return;
+      if (noteListingDrag(textRef.current) === 'thread') return;
       event.preventDefault();
-      openChatList(textRef.current);
     }
     window.addEventListener('dragover', onDragOver);
     return () => window.removeEventListener('dragover', onDragOver);
@@ -178,7 +184,28 @@ export default function ChatDock() {
   }
 
   return (
-    <section className="chat-dock" aria-label={dock.view === 'list' ? 'Messages' : `Chat with ${label}`}>
+    <section
+      className={`chat-dock${over ? ' is-over' : ''}`}
+      aria-label={dock.view === 'list' ? 'Messages' : `Chat with ${label}`}
+      onDragOver={(event) => {
+        if (dock.view !== 'thread' || ![...(event.dataTransfer?.types || [])].includes(LISTING_DRAG_TYPE)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setOver(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget)) return;
+        setOver(false);
+      }}
+      onDrop={(event) => {
+        if (dock.view !== 'thread') return;
+        event.preventDefault();
+        event.stopPropagation();
+        setOver(false);
+        const reference = readListingDrag(event);
+        if (reference) addChatTag(reference, textRef.current);
+      }}
+    >
       <header className="chat-dock-head">
         {dock.view === 'thread' ? (
           <button type="button" aria-label="Conversations" onClick={() => openChatList(text)}>‹</button>
@@ -212,9 +239,20 @@ export default function ChatDock() {
                     <ChatListingTag key={tagKey(row)} row={row} onRemove={removeChatTag} />
                   ))}
                 </div>
-              ) : (
-                <p className="chat-dock-hint">Drop a card on a conversation to attach it.</p>
-              )}
+              ) : showDropHint ? (
+                <p className="chat-dock-hint chat-dock-hint-row">
+                  <span>Drop a card on a conversation to attach it.</span>
+                  <button
+                    type="button"
+                    className="chat-hint-x"
+                    aria-label="Hide hint"
+                    onClick={() => {
+                      dismissChatDropHint();
+                      setShowDropHint(false);
+                    }}
+                  >×</button>
+                </p>
+              ) : null}
               <div className="chat-dock-field">
                 <label className="sr-only" htmlFor="chat-dock-input">Message</label>
                 <textarea

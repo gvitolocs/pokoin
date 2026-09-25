@@ -66,6 +66,11 @@ export function tagKey(row) {
   return `${row?.kind || 'listing'}:${row?.listingId || row?.cardId || row?.cardName || ''}`;
 }
 
+/** A shop listing belongs to a seller. A homepage card does not. */
+export function isSellerCard(row) {
+  return Boolean(sellerUserId(row?.sellerUid) || chatHandle(row?.seller));
+}
+
 export function appendChatTag(tags, reference) {
   if (!reference?.cardName) return tags;
   const key = tagKey(reference);

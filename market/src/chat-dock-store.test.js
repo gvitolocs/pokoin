@@ -9,10 +9,14 @@ globalThis.localStorage = {
 };
 
 const {
+  addChatTag,
+  chatDropHintVisible,
   closeChatDock,
+  dismissChatDropHint,
   dropOnConversation,
   getChatDrafts,
   getChatDock,
+  noteListingDrag,
   openThread,
 } = await import('./chat-dock-store.js');
 
@@ -36,4 +40,24 @@ test('a dropped card stays on that conversation after the panel closes', () => {
   openThread(uid, 'redshakkio');
   assert.equal(getChatDock().tags[0].imageUrl, '/card-images/9.jpg');
   assert.equal(getChatDock().text, 'still writing');
+});
+
+test('dragging a card keeps the conversation that is already open', () => {
+  const uid = 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2';
+  openThread(uid, 'redshakkio');
+  assert.equal(noteListingDrag('still writing'), 'thread');
+  assert.equal(getChatDock().view, 'thread');
+  assert.equal(getChatDock().peer, uid);
+  const trade = { ...card, cardName: 'Pikachu', cardId: '25', imageUrl: '/card-images/25.jpg' };
+  assert.equal(addChatTag(trade, 'still writing'), true);
+  assert.equal(getChatDock().view, 'thread');
+  assert.equal(getChatDock().tags.at(-1).cardName, 'Pikachu');
+  assert.equal(getChatDock().text, 'still writing');
+});
+
+test('dismissing the drop hint stays dismissed in this browser', () => {
+  assert.equal(chatDropHintVisible(), true);
+  dismissChatDropHint();
+  assert.equal(chatDropHintVisible(), false);
+  assert.equal(memory.get('pokoin.chatDropHint'), 'dismissed');
 });

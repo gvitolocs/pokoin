@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendChatTag, listingReference, tagKey } from './chat-listing.js';
+import { appendChatTag, cardReference, isSellerCard, listingReference, tagKey } from './chat-listing.js';
 import { readFileSync } from 'node:fs';
 
 test('a listing chat follows the Firebase user id, not the stored email', () => {
@@ -43,6 +43,16 @@ test('chat tags keep one copy of a listing and cap at four', () => {
     tags = appendChatTag(tags, { kind: 'listing', listingId: id, cardName: id, seller: 'red' });
   }
   assert.deepEqual(tags.map(tagKey), ['listing:b', 'listing:c', 'listing:d', 'listing:e']);
+});
+
+test('a homepage card is not a seller card', () => {
+  const listing = listingReference({
+    offer: { id: '1', sellerUsername: 'redshakkio', sellerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2' },
+    card: { id: '9', name: 'Meowth' },
+  });
+  const traded = cardReference({ id: '25', name: 'Pikachu' });
+  assert.equal(isSellerCard(listing), true);
+  assert.equal(isSellerCard(traded), false);
 });
 
 test('shop rows show a message icon before the cart icon', () => {
