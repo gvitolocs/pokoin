@@ -105,7 +105,7 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.doesNotMatch(viewSrc, /to="\/scan"/);
   assert.match(viewSrc, /Add Cards/);
   assert.match(viewSrc, /Scan cards to add them to your collection or list them for sale/);
-  assert.match(viewSrc, /Collection value history/);
+  assert.doesNotMatch(viewSrc, /<h3>Collection value history<\/h3>/);
   const historyImport = viewSrc.match(/import \{[^}]+\} from '\.\.\/portfolio-history\.js'/)?.[0] || '';
   assert.match(historyImport, /\bformatHistoryAxisLabel\b/);
   assert.match(viewSrc, /useState\(DEFAULT_HISTORY_PRESET\)|useState\('1M'\)/);

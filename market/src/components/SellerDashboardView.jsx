@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc } from '../api.js';
 import { cardReference, writeListingDrag } from '../chat-listing.js';
@@ -18,6 +18,7 @@ import {
   historyWindowChange,
   nearestHistoryDay,
   sliceHistorySeries,
+  stepHistoryPoints,
 } from '../portfolio-history.js';
 import { DASHBOARD_SCAN, marketUrl, goMarket } from '../punchouts.js';
 
@@ -33,6 +34,9 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
   const [hover, setHover] = useState(null);
   const [preset, setPreset] = useState(DEFAULT_HISTORY_PRESET);
   const [custom, setCustom] = useState(null);
+  const [tipNudge, setTipNudge] = useState(0);
+  const frameRef = useRef(null);
+  const tipRef = useRef(null);
   const presets = availableHistoryPresets(series);
   const presetId = custom
     ? ''
@@ -66,7 +70,8 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
       y: yOf(day.totalPkn),
       day,
     }));
-    polyline = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+    const stepped = stepHistoryPoints(coords);
+    polyline = stepped.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
     area = `0,${CHART_H} ${polyline} ${CHART_W},${CHART_H}`;
     endDot = coords[coords.length - 1];
   } else if (hasPoint) {
@@ -94,6 +99,22 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
     setHover({ day, xPct });
   }
 
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    const node = tipRef.current;
+    if (!frame || !node) {
+      if (tipNudge) setTipNudge(0);
+      return;
+    }
+    const frameBox = frame.getBoundingClientRect();
+    const tipBox = node.getBoundingClientRect();
+    const pad = 8;
+    let nudge = 0;
+    if (tipBox.left < frameBox.left + pad) nudge = (frameBox.left + pad) - tipBox.left;
+    else if (tipBox.right > frameBox.right - pad) nudge = (frameBox.right - pad) - tipBox.right;
+    if (Math.abs(nudge - tipNudge) > 0.5) setTipNudge(nudge);
+  }, [tip, tipLeftPct, tipNudge]);
+
   function pickDates(nextFrom, nextTo) {
     if (!nextFrom || !nextTo) {
       setCustom(null);
@@ -110,7 +131,6 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
       data-range={custom ? 'custom' : presetId}
     >
       <div className="seller-history-head">
-        <h3>Collection value history</h3>
         {change ? (
           <div className="seller-history-value">
             <strong>{formatPknNumber(change.last)} PKN</strong>
@@ -164,6 +184,7 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
         </div>
         <div className="seller-history-plot">
           <div
+            ref={frameRef}
             className="seller-history-frame"
             onMouseMove={onMove}
             onMouseLeave={() => setHover(null)}
@@ -229,9 +250,10 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
             ) : null}
             {tip ? (
               <div
+                ref={tipRef}
                 className="seller-history-tip"
                 data-testid="collection-history-tip"
-                style={{ left: `${tipLeftPct}%` }}
+                style={{ left: `${tipLeftPct}%`, transform: `translateX(calc(-50% + ${tipNudge}px))` }}
               >
                 <p className="seller-history-tip-day">{tip.dateLabel}</p>
                 <p className="seller-history-tip-total">{tip.totalLabel}</p>

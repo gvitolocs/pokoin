@@ -3453,8 +3453,7 @@ a.era-link:focus-visible {
 .shop-list {
   display: flex;
   flex-direction: column;
-  /* Empty strip under the last row, so a rubber-band can start. */
-  padding-bottom: 6.5rem;
+  padding-bottom: 2.75rem;
 }
 
 .shop-row {

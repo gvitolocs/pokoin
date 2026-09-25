@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { listingSelectId, marqueeBlocked, marqueeRect, rectsIntersect } from './shop-marquee.js';
 
-test('a press on empty space can start a selection box; a row cannot', () => {
-  const row = { closest: (sel) => (String(sel).includes('.shop-row') ? row : null) };
-  const empty = { closest: () => null };
-  assert.equal(marqueeBlocked(row), true);
-  assert.equal(marqueeBlocked(empty), false);
+test('a rubber band starts on the row body, not on a link or the card scan', () => {
+  const control = { closest: (sel) => (String(sel).includes('button') || String(sel).includes('.shop-art') ? control : null) };
+  const body = { closest: () => null };
+  assert.equal(marqueeBlocked(control), true);
+  assert.equal(marqueeBlocked(body), false);
 
   const rect = marqueeRect(10, 30, 4, 8);
   assert.deepEqual(

@@ -402,6 +402,17 @@ export function formatHistoryDelta(change) {
   return `${signed} (${pctSigned}) ${change.phrase}`;
 }
 
+/** Hold the last value, then jump vertically on the day it changes. */
+export function stepHistoryPoints(coords) {
+  if (!coords?.length) return [];
+  const out = [{ x: coords[0].x, y: coords[0].y }];
+  for (let i = 1; i < coords.length; i += 1) {
+    out.push({ x: coords[i].x, y: coords[i - 1].y });
+    out.push({ x: coords[i].x, y: coords[i].y });
+  }
+  return out;
+}
+
 export function formatHistoryAxisLabel(dayKey, withYear = false) {
   const label = formatDayLabel(dayKey);
   if (!withYear || !label) return label;

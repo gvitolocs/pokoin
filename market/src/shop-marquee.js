@@ -25,9 +25,9 @@ export function listingSelectId(offer) {
   return [offer?.sellerName || offer?.sellerUsername || '', offer?.pricePkn || 0, offer?.cardName || offer?.name || ''].join('|');
 }
 
-/** Pressing a row, control, or card starts a drag or a click, not a selection box. */
+/** Links and controls keep their own click or card drag. The rest of a row can start a box. */
 export function marqueeBlocked(target) {
   return Boolean(target?.closest?.(
-    '.shop-row, a, button, input, select, textarea, label, .art-frame, [draggable="true"], .chat-dock, .chat-tag',
+    'a, button, input, select, textarea, label, .ct-qty, .shop-art, .art-frame, .chat-dock, .chat-tag',
   ));
 }

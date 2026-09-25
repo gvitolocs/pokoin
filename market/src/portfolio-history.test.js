@@ -9,6 +9,7 @@ import {
   historyWindowChange,
   historyPresetWindow,
   sliceHistorySeries,
+  stepHistoryPoints,
   historySeriesMax,
   marketValueFromHoldings,
   movementFromLedger,
@@ -74,6 +75,12 @@ test('history opens on the last month and hides years the series does not reach'
   assert.equal(custom[custom.length - 1].date, '2026-09-10');
   assert.equal(custom[0].totalPkn, 15);
   assert.equal(custom[1].totalPkn, 15);
+  const stepped = stepHistoryPoints([{ x: 0, y: 180 }, { x: 640, y: 20 }]);
+  assert.deepEqual(stepped, [
+    { x: 0, y: 180 },
+    { x: 640, y: 180 },
+    { x: 640, y: 20 },
+  ]);
 });
 
 test('nearest day and tip composition', () => {

@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { marqueeBlocked, marqueeRect, rectsIntersect } from '../shop-marquee.js';
 
 const DRAG_THRESHOLD = 5;
 
 /**
- * Shop rows. A press on empty space and a move draws a selection box and
- * highlights every row the box crosses.
+ * Shop rows. Press the row body or the space under the list and drag,
+ * the same way a desktop selects files. Links and the card scan keep their
+ * own click and drag.
  */
 export default function ShopList({ className = '', children }) {
   const ref = useRef(null);
@@ -14,6 +15,17 @@ export default function ShopList({ className = '', children }) {
   const [selected, setSelected] = useState(() => new Set());
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+
+  useLayoutEffect(() => {
+    const list = ref.current;
+    if (!list || !band) return;
+    for (const row of list.querySelectorAll('.shop-row')) {
+      if (row.draggable) {
+        row.dataset.wasDraggable = '1';
+        row.draggable = false;
+      }
+    }
+  }, [band, selected]);
 
   useEffect(() => {
     const list = ref.current;
@@ -47,9 +59,24 @@ export default function ShopList({ className = '', children }) {
       setSelected(next);
     }
 
+    function restoreDrag() {
+      for (const row of rowBoxes()) {
+        if (row.dataset.wasDraggable) {
+          row.draggable = true;
+          delete row.dataset.wasDraggable;
+        }
+      }
+    }
+
     function onDown(event) {
       if (event.button !== 0) return;
+      if (!panel.contains(event.target)) return;
       if (marqueeBlocked(event.target)) return;
+      const row = event.target.closest?.('.shop-row');
+      if (row?.draggable) {
+        row.dataset.wasDraggable = '1';
+        row.draggable = false;
+      }
       origin = {
         x: event.clientX,
         y: event.clientY,
@@ -57,24 +84,36 @@ export default function ShopList({ className = '', children }) {
       };
       armed = false;
       base = origin.additive ? new Set(selectedRef.current) : new Set();
-      event.preventDefault();
     }
 
     function onMove(event) {
       if (!origin) return;
       const rect = marqueeRect(origin.x, origin.y, event.clientX, event.clientY);
       if (!armed && Math.hypot(rect.width, rect.height) < DRAG_THRESHOLD) return;
-      armed = true;
+      if (!armed) {
+        armed = true;
+        try { panel.setPointerCapture(event.pointerId); } catch { /* already released */ }
+      }
       document.documentElement.classList.add('is-shop-marquee');
       setBand(rect);
       paint(rect);
     }
 
-    function onUp() {
-      if (origin && !armed && !origin.additive) setSelected(new Set());
+    function onUp(event) {
+      if (armed) {
+        const stopClick = (clickEvent) => {
+          clickEvent.preventDefault();
+          clickEvent.stopPropagation();
+          window.removeEventListener('click', stopClick, true);
+        };
+        window.addEventListener('click', stopClick, true);
+      } else if (origin && !origin.additive && !event?.target?.closest?.('.shop-row')) {
+        setSelected(new Set());
+      }
       origin = null;
       armed = false;
       setBand(null);
+      restoreDrag();
       document.documentElement.classList.remove('is-shop-marquee');
     }
 
@@ -85,6 +124,7 @@ export default function ShopList({ className = '', children }) {
       anchor = '';
       setBand(null);
       setSelected(new Set());
+      restoreDrag();
       document.documentElement.classList.remove('is-shop-marquee');
     }
 
