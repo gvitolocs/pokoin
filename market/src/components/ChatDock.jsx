@@ -1,11 +1,104 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
-import { getConversation, sendChatMessage } from '../chat-client.js';
+import { getConversation, listConversations, sendChatMessage } from '../chat-client.js';
+import { chatTime } from '../chat-format.js';
 import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
-import { addChatTag, clearChatTags, closeChatDock, getChatDock, removeChatTag, subscribeChatDock } from '../chat-dock-store.js';
+import {
+  closeChatDock,
+  clearChatTags,
+  dropOnConversation,
+  getChatDock,
+  getChatDrafts,
+  openChatList,
+  openThread,
+  removeChatTag,
+  subscribeChatDock,
+} from '../chat-dock-store.js';
 import ChatListingTag from './ChatListingTag.jsx';
 import '../chat-dock.css';
+
+function draftLine(row, drafts) {
+  const tags = drafts?.[row.peerUid]?.tags || [];
+  const name = tags.length ? tags[tags.length - 1].cardName : '';
+  if (name) return { text: `Draft: ${name}`, draft: true };
+  return { text: row.preview || 'No messages yet', draft: false };
+}
+
+function ConversationList({ signedIn, getBearer, onOpen }) {
+  const [rows, setRows] = useState([]);
+  const [drafts, setDrafts] = useState(getChatDrafts);
+  const [overUid, setOverUid] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!signedIn) return undefined;
+    let live = true;
+    async function load() {
+      try {
+        const token = await getBearer();
+        const result = await listConversations(token);
+        if (live) {
+          setRows(result.conversations || []);
+          setDrafts(getChatDrafts());
+          setError('');
+        }
+      } catch (err) {
+        if (live) setError(err.message || 'Could not load conversations.');
+      }
+    }
+    load();
+    return () => { live = false; };
+  }, [signedIn, getBearer]);
+
+  if (!signedIn) {
+    return (
+      <p className="chat-dock-hint">
+        <Link to={`/auth?from=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in</Link>
+        {' '}to see your conversations.
+      </p>
+    );
+  }
+
+  return (
+    <div className="chat-dock-list" role="list">
+      {error ? <p className="chat-dock-error" role="alert">{error}</p> : null}
+      {rows.length ? rows.map((row) => {
+        const line = draftLine(row, drafts);
+        return (
+          <div
+            key={row.pairKey || row.peerUid}
+            role="listitem"
+            className={`chat-dock-row${overUid === row.peerUid ? ' is-over' : ''}`}
+            onDragOver={(event) => {
+              if (![...(event.dataTransfer?.types || [])].includes(LISTING_DRAG_TYPE)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              setOverUid(row.peerUid);
+            }}
+            onDragLeave={() => setOverUid('')}
+            onDrop={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setOverUid('');
+              const reference = readListingDrag(event);
+              if (reference) dropOnConversation(row.peerUid, row.peerUsername, reference);
+            }}
+          >
+            <button type="button" onClick={() => onOpen(row)}>
+              <span className="chat-dock-avatar" aria-hidden="true">{(row.peerUsername || '?').slice(0, 1).toUpperCase()}</span>
+              <span className="chat-dock-row-copy">
+                <strong>@{row.peerUsername || 'Pokoin user'}</strong>
+                <em className={line.draft ? 'is-draft' : ''}>{line.text}</em>
+              </span>
+              <time>{chatTime(row.updatedAt)}</time>
+            </button>
+          </div>
+        );
+      }) : <p className="chat-dock-hint">No conversations yet. Drop a card on someone after you message them.</p>}
+    </div>
+  );
+}
 
 export default function ChatDock() {
   const { signedIn, getBearer } = useAuth();
@@ -14,12 +107,17 @@ export default function ChatDock() {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [over, setOver] = useState(false);
+  const textRef = useRef('');
+  textRef.current = text;
 
   useEffect(() => subscribeChatDock(setDock), []);
 
   useEffect(() => {
-    if (!dock.open || !signedIn || !dock.peer) {
+    if (dock.view === 'thread') setText(dock.text || '');
+  }, [dock.view, dock.peer]);
+
+  useEffect(() => {
+    if (!dock.open || dock.view !== 'thread' || !signedIn || !dock.peer) {
       setEvents([]);
       return undefined;
     }
@@ -39,7 +137,7 @@ export default function ChatDock() {
     load();
     const timer = setInterval(load, 4000);
     return () => { live = false; clearInterval(timer); };
-  }, [dock.open, dock.peer, signedIn, getBearer]);
+  }, [dock.open, dock.view, dock.peer, signedIn, getBearer]);
 
   useEffect(() => {
     function allowsDrop(event) {
@@ -48,29 +146,15 @@ export default function ChatDock() {
     function onDragOver(event) {
       if (!allowsDrop(event)) return;
       event.preventDefault();
-      setOver(true);
-    }
-    function onDragLeave(event) {
-      if (event.target === window) setOver(false);
-    }
-    function onDrop(event) {
-      if (!allowsDrop(event)) return;
-      event.preventDefault();
-      setOver(false);
-      const reference = readListingDrag(event);
-      if (reference) addChatTag(reference);
+      openChatList(textRef.current);
     }
     window.addEventListener('dragover', onDragOver);
-    window.addEventListener('dragleave', onDragLeave);
-    window.addEventListener('drop', onDrop);
-    return () => {
-      window.removeEventListener('dragover', onDragOver);
-      window.removeEventListener('dragleave', onDragLeave);
-      window.removeEventListener('drop', onDrop);
-    };
+    return () => window.removeEventListener('dragover', onDragOver);
   }, []);
 
-  if (!dock.open && !over) return null;
+  if (!dock.open) return null;
+
+  const label = dock.peerLabel && dock.peerLabel !== 'Seller' ? `@${dock.peerLabel}` : 'Seller';
 
   async function send(event) {
     event?.preventDefault();
@@ -94,72 +178,69 @@ export default function ChatDock() {
   }
 
   return (
-    <section
-      className={`chat-dock${over ? ' is-over' : ''}`}
-      aria-label={`Chat with ${dock.peerLabel || 'seller'}`}
-      onDragOver={(event) => { event.preventDefault(); setOver(true); }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        setOver(false);
-        const reference = readListingDrag(event);
-        if (reference) addChatTag(reference);
-      }}
-    >
+    <section className="chat-dock" aria-label={dock.view === 'list' ? 'Messages' : `Chat with ${label}`}>
       <header className="chat-dock-head">
-        <strong>{dock.peerLabel ? (dock.peerLabel === 'Seller' ? 'Seller' : `@${dock.peerLabel}`) : 'Drop a listing'}</strong>
-        <button type="button" aria-label="Close chat" onClick={closeChatDock}>×</button>
+        {dock.view === 'thread' ? (
+          <button type="button" aria-label="Conversations" onClick={() => openChatList(text)}>‹</button>
+        ) : <span />}
+        <strong>{dock.view === 'thread' ? label : 'Messages'}</strong>
+        <button type="button" aria-label="Close chat" onClick={() => closeChatDock(text)}>×</button>
       </header>
-      <div className="chat-dock-log">
-        {events.map((event) => (
-          <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}`}>
-            {event.text ? <p>{event.text}</p> : null}
-            {(event.listings || []).length ? (
-              <span className="chat-tags">
-                {(event.listings || []).map((row) => <ChatListingTag key={tagKey(row)} row={row} />)}
-              </span>
-            ) : null}
-            {!event.text && !(event.listings || []).length ? <p>…</p> : null}
-          </div>
-        ))}
-      </div>
-      {error ? <p className="chat-dock-error" role="alert">{error}</p> : null}
-      {signedIn && dock.peer ? (
-        <form className="chat-dock-compose" onSubmit={send}>
-          {dock.tags.length ? (
-            <div className="chat-dock-tags">
-              {dock.tags.map((row) => (
-                <ChatListingTag key={tagKey(row)} row={row} onRemove={removeChatTag} />
-              ))}
-            </div>
-          ) : (
-            <p className="chat-dock-hint">Drop a card or listing here to reference it.</p>
-          )}
-          <div className="chat-dock-field">
-            <label className="sr-only" htmlFor="chat-dock-input">Message</label>
-            <textarea
-              id="chat-dock-input"
-              rows="2"
-              maxLength={1000}
-              value={text}
-              placeholder={dock.peerLabel && dock.peerLabel !== 'Seller' ? `Message @${dock.peerLabel}` : 'Message'}
-              onChange={(event) => setText(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  send(event);
-                }
-              }}
-            />
-            <button type="submit" disabled={busy || (!text.trim() && !dock.tags.length)} aria-label="Send">↑</button>
-          </div>
-        </form>
+      {dock.view === 'list' ? (
+        <ConversationList signedIn={signedIn} getBearer={getBearer} onOpen={(row) => openThread(row.peerUid, row.peerUsername, text)} />
       ) : (
-        <p className="chat-dock-hint">
-          <Link to={`/auth?from=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in</Link>
-          {' '}to message this seller.
-        </p>
+        <>
+          <div className="chat-dock-log">
+            {events.map((event) => (
+              <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}`}>
+                {event.text ? <p>{event.text}</p> : null}
+                {(event.listings || []).length ? (
+                  <span className="chat-tags">
+                    {(event.listings || []).map((row) => <ChatListingTag key={tagKey(row)} row={row} />)}
+                  </span>
+                ) : null}
+                {!event.text && !(event.listings || []).length ? <p>…</p> : null}
+              </div>
+            ))}
+          </div>
+          {error ? <p className="chat-dock-error" role="alert">{error}</p> : null}
+          {signedIn && dock.peer ? (
+            <form className="chat-dock-compose" onSubmit={send}>
+              {dock.tags.length ? (
+                <div className="chat-dock-tags">
+                  {dock.tags.map((row) => (
+                    <ChatListingTag key={tagKey(row)} row={row} onRemove={removeChatTag} />
+                  ))}
+                </div>
+              ) : (
+                <p className="chat-dock-hint">Drop a card on a conversation to attach it.</p>
+              )}
+              <div className="chat-dock-field">
+                <label className="sr-only" htmlFor="chat-dock-input">Message</label>
+                <textarea
+                  id="chat-dock-input"
+                  rows="2"
+                  maxLength={1000}
+                  value={text}
+                  placeholder={dock.peerLabel && dock.peerLabel !== 'Seller' ? `Message @${dock.peerLabel}` : 'Message'}
+                  onChange={(event) => setText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      send(event);
+                    }
+                  }}
+                />
+                <button type="submit" disabled={busy || (!text.trim() && !dock.tags.length)} aria-label="Send">↑</button>
+              </div>
+            </form>
+          ) : (
+            <p className="chat-dock-hint">
+              <Link to={`/auth?from=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in</Link>
+              {' '}to message this seller.
+            </p>
+          )}
+        </>
       )}
     </section>
   );
