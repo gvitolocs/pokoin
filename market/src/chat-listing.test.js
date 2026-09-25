@@ -116,6 +116,8 @@ test('dragging a shop row carries a card-sized image, not the whole row', () => 
       fillRect() {},
       restore() {},
       roundRect() {},
+      drawImage() {},
+      getImageData() { return { data: [1, 2, 3, 255] }; },
     }),
   };
   globalThis.document = {
@@ -140,6 +142,26 @@ test('dragging a shop row carries a card-sized image, not the whole row', () => 
   assert.equal(dragged.y, CARD_DRAG_HEIGHT / 2);
 });
 
+test('dragging the desk frame uses the scan inside the frame', () => {
+  let dragged = null;
+  writeListingDrag({
+    currentTarget: {
+      nodeType: 1,
+      tagName: 'BUTTON',
+      matches: (sel) => sel === '.art-frame',
+      querySelector: (selector) => (
+        selector === 'img' ? { naturalWidth: 630, naturalHeight: 880 } : null
+      ),
+    },
+    dataTransfer: {
+      setData() {},
+      setDragImage(el, x, y) { dragged = { el, x, y }; },
+    },
+  }, { cardName: 'Meowth' });
+  assert.equal(dragged.x, CARD_DRAG_WIDTH / 2);
+  assert.equal(dragged.y, CARD_DRAG_HEIGHT / 2);
+});
+
 test('a homepage card is not a seller card', () => {
   const listing = listingReference({
     offer: { id: '1', sellerUsername: 'redshakkio', sellerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2' },
@@ -157,4 +179,6 @@ test('shop rows show a message icon before the cart icon', () => {
   assert.ok(message > 0);
   assert.ok(cart > message);
   assert.match(src, /sellerUid/);
+  assert.match(src, /className="ct-qty"/);
+  assert.match(src, /of \{stock \|\| choices\}/);
 });

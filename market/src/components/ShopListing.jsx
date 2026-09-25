@@ -12,6 +12,7 @@ import {
   sellerCountryFlag,
   sellerHref,
 } from '../listing-meta.js';
+import { listingSelectId } from '../shop-marquee.js';
 
 function Flag({ flag, className }) {
   if (!flag) return null;
@@ -38,6 +39,7 @@ export default function ShopListingRow({
   onCart,
   onEdit,
   onCancel,
+  selected = false,
 }) {
   const [added, setAdded] = useState(false);
   const name = publicShopSellerLabel(offer);
@@ -50,7 +52,9 @@ export default function ShopListingRow({
   const tone = conditionTone(offer?.condition) || 'nm';
   const cond = conditionShort(offer?.condition);
   const tags = listingExtraTags(offer);
-  const qty = offer?.quantityAvailable || 1;
+  const stock = Math.max(0, Math.trunc(Number(offer?.quantityAvailable ?? offer?.quantity_available) || 0));
+  const choices = Math.max(stock, 1);
+  const [pick, setPick] = useState(1);
   const cardPath = offer?.canonicalPath || offer?.canonical_path || '';
   const cardName = offer?.cardName || offer?.name || '';
   const setName = offer?.setName || '';
@@ -58,13 +62,14 @@ export default function ShopListingRow({
 
   function buy(event) {
     if (mine || !onBuy) return;
-    if (event?.target?.closest?.('a, button')) return;
-    onBuy();
+    if (event?.target?.closest?.('a, button, select, .ct-qty')) return;
+    onBuy(showCard ? pick : undefined);
   }
 
   return (
     <div
-      className={`shop-row${mine ? ' mine' : ''}${showCard ? ' is-profile' : ''}${onBuy && !mine ? ' is-buy' : ''}${editing ? ' is-editing' : ''}`}
+      className={`shop-row${mine ? ' mine' : ''}${showCard ? ' is-profile' : ''}${onBuy && !mine ? ' is-buy' : ''}${editing ? ' is-editing' : ''}${selected ? ' is-selected' : ''}`}
+      data-listing-id={listingSelectId(offer)}
       draggable
       onDragStart={(event) => writeListingDrag(event, reference)}
       onClick={buy}
@@ -114,6 +119,24 @@ export default function ShopListingRow({
         ))}
       </span>
       <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>
+      {showCard && !mine ? (
+        <label className="ct-qty" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <select
+            aria-label={`Quantity, ${Math.min(pick, choices)} of ${stock || choices}`}
+            value={Math.min(pick, choices)}
+            onChange={(event) => {
+              event.stopPropagation();
+              setPick(Number(event.target.value) || 1);
+            }}
+          >
+            {Array.from({ length: choices }, (_, index) => {
+              const n = index + 1;
+              return <option key={n} value={n}>{n}</option>;
+            })}
+          </select>
+          <span>of {stock || choices}</span>
+        </label>
+      ) : null}
       {!mine ? (
         <span className="shop-row-actions">
           {sellerUid ? (
@@ -140,7 +163,7 @@ export default function ShopListingRow({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                onCart();
+                onCart(showCard ? pick : undefined);
                 setAdded(true);
               }}
             >
@@ -182,7 +205,7 @@ export default function ShopListingRow({
           </button>
         </span>
       ) : (
-        <span className="shop-act">{qty}</span>
+        showCard ? null : <span className="shop-act">{choices}</span>
       )}
     </div>
   );

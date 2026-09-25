@@ -232,9 +232,22 @@ function dragSourceImage(event) {
   const node = event?.currentTarget;
   if (!node || node.nodeType !== 1) return null;
   if (node.tagName === 'IMG') return node;
-  return node.querySelector?.(
+  const nested = node.querySelector?.(
     '.shop-card img, .tile-art img, .seller-listing-art img, .c-art img, .bag-art img, .seller-mover img',
-  ) || null;
+  );
+  if (nested) return nested;
+  // The desk hero is the frame itself, so `.art-frame img` does not match a descendant.
+  if (node.matches?.('.art-frame')) return node.querySelector?.('img') || null;
+  return null;
+}
+
+function markCardDragging() {
+  const root = typeof document !== 'undefined' ? document.documentElement : null;
+  if (!root?.classList) return;
+  root.classList.add('is-card-dragging');
+  window.addEventListener('dragend', () => {
+    root.classList.remove('is-card-dragging');
+  }, { once: true, capture: true });
 }
 
 function paintDragGhost(image) {
@@ -269,8 +282,9 @@ function paintDragGhost(image) {
       const dw = image.naturalWidth * scale;
       const dh = image.naturalHeight * scale;
       ctx.drawImage(image, (CARD_DRAG_WIDTH - dw) / 2, (CARD_DRAG_HEIGHT - dh) / 2, dw, dh);
+      ctx.getImageData(0, 0, 1, 1);
     } catch (_) {
-      /* a cross-origin thumb still leaves the card-sized plate */
+      return null;
     }
   }
   ctx.restore();
@@ -281,13 +295,20 @@ export function writeListingDrag(event, reference) {
   if (!event?.dataTransfer || !reference?.cardName) return;
   event.dataTransfer.setData(LISTING_DRAG_TYPE, JSON.stringify(reference));
   event.dataTransfer.effectAllowed = 'copy';
-  const ghost = paintDragGhost(dragSourceImage(event));
-  if (!ghost) return;
+  const image = dragSourceImage(event);
+  const ghost = paintDragGhost(image);
   try {
-    event.dataTransfer.setDragImage(ghost, CARD_DRAG_WIDTH / 2, CARD_DRAG_HEIGHT / 2);
+    if (ghost) {
+      event.dataTransfer.setDragImage(ghost, CARD_DRAG_WIDTH / 2, CARD_DRAG_HEIGHT / 2);
+    } else if (image) {
+      const w = image.clientWidth || image.width || CARD_DRAG_WIDTH;
+      const h = image.clientHeight || image.height || CARD_DRAG_HEIGHT;
+      event.dataTransfer.setDragImage(image, w / 2, h / 2);
+    }
   } catch (_) {
     /* the browser keeps its default ghost */
   }
+  markCardDragging();
 }
 
 export function readListingDrag(event) {

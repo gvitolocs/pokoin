@@ -4,7 +4,9 @@ import { fetchSellerShop } from '../api.js';
 import { rewriteCanonicalCardPath } from '../card-stub.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { getSearchLang } from '../locale.js';
+import ShopList from '../components/ShopList.jsx';
 import ShopListingRow from '../components/ShopListing.jsx';
+import { listingSelectId } from '../shop-marquee.js';
 import { Alert, EmptyDesk, Metric, MetricGrid } from '../components/Desk.jsx';
 import {
   publicListingSellerName,
@@ -214,8 +216,8 @@ export default function Seller() {
           </p>
 
           {listings.length ? (
-            <div className="shop-list seller-shop-list">
-              {listings.map((offer, index) => {
+            <ShopList className="seller-shop-list">
+              {(selected) => listings.map((offer, index) => {
                 const cardId = String(offer.cardId || offer.card_id || '');
                 const path = rewriteCanonicalCardPath(
                   offer.canonicalPath || offer.canonical_path || '',
@@ -237,19 +239,22 @@ export default function Seller() {
                     offer={enriched}
                     card={cardStub}
                     showCard
-                    onCart={() => {
+                    selected={selected.has(listingSelectId(enriched))}
+                    onCart={(qty) => {
                       if (!cardId || !offer.id) return;
-                      addItem(cartItemFromOffer(cardStub, enriched));
+                      const item = cartItemFromOffer(cardStub, enriched);
+                      addItem(qty ? { ...item, qty } : item);
                     }}
-                    onBuy={() => {
+                    onBuy={(qty) => {
                       if (!cardId || !offer.id) return;
-                      addItem(cartItemFromOffer(cardStub, enriched));
+                      const item = cartItemFromOffer(cardStub, enriched);
+                      addItem(qty ? { ...item, qty } : item);
                       navigate('/cart');
                     }}
                   />
                 );
               })}
-            </div>
+            </ShopList>
           ) : !loading ? (
             <EmptyDesk title="No listings" lede={`${display} has no live asks for these filters.`} />
           ) : null}

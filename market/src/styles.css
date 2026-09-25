@@ -608,7 +608,9 @@ button, input, select { font: inherit; color: inherit; }
   filter: drop-shadow(0 18px 40px rgb(0 0 0 / 0.55));
 }
 
-html.is-card-dragging .suggest-hover { display: none; }
+html.is-card-dragging .suggest-hover,
+html.is-card-dragging .zoom[open],
+html.is-card-dragging .zoom::backdrop { display: none; }
 
 .suggest-hover img {
   display: block;
@@ -3509,6 +3511,18 @@ a.era-link:focus-visible {
 .shop-row:last-of-type { border-bottom: 0; }
 .shop-row.is-buy { cursor: pointer; }
 .shop-row.is-buy:hover { background: rgb(255 211 61 / 0.04); }
+.shop-row.is-selected { background: rgb(255 211 61 / 0.14); box-shadow: inset 3px 0 0 var(--yellow); }
+
+.shop-marquee {
+  position: fixed;
+  z-index: 80;
+  pointer-events: none;
+  border: 1px solid rgb(255 211 61 / 0.95);
+  background: rgb(255 211 61 / 0.16);
+}
+
+html.is-shop-marquee,
+html.is-shop-marquee * { user-select: none; }
 .shop-row.mine { cursor: default; }
 .shop-row.mine:hover { background: transparent; }
 .shop-row .shop-owner-actions,
@@ -3562,6 +3576,39 @@ a.era-link:focus-visible {
 .shop-txt { color: var(--muted); display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .shop-px { font-weight: 700; font-size: 0.85rem; color: var(--yellow); }
 .shop-act { text-align: right; color: var(--muted); }
+
+.ct-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #8d8d8d;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.ct-qty select {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  min-width: 2.7rem;
+  padding: 0.18rem 1.2rem 0.18rem 0.45rem;
+  border: 1px solid #d5d5d5;
+  border-radius: 3px;
+  background-color: #fff;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23666' d='M1 1.1 5 4.9 9 1.1'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.35rem center;
+  background-size: 0.55rem 0.32rem;
+  color: #222;
+  font: inherit;
+  font-weight: 650;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.ct-qty select:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 1px;
+}
 
 .shop-card {
   display: flex;
@@ -3701,8 +3748,8 @@ dialog.zoom:not([open]) {
   display: block;
   width: auto;
   height: auto;
-  max-width: min(92vw, 42rem);
-  max-height: 90vh;
+  max-width: min(46vw, 21rem);
+  max-height: 45vh;
   object-fit: contain;
   background: transparent;
   border-radius: 0;
@@ -8948,8 +8995,15 @@ html:has(.wallet-page) .brand span {
 .seller-result-count{margin:0 0 .75rem;color:var(--muted);font-size:.88rem}
 .seller-result-count strong{color:var(--text);font-weight:750}
 .seller-shop-list .shop-row.is-profile{
-  grid-template-columns:minmax(12rem,2fr) auto auto minmax(0,1fr) auto auto;
+  grid-template-columns:minmax(12rem,2fr) auto auto minmax(0,1fr) auto auto auto;
   padding:.48rem .1rem;
+}
+@media (max-width: 720px) {
+  .seller-shop-list .shop-row.is-profile {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  .seller-shop-list .shop-row.is-profile .shop-card { grid-column: 1 / -1; }
+  .seller-shop-list .ct-qty { grid-column: 1 / -1; justify-content: flex-end; }
 }
 .seller-shop-list .shop-px{color:var(--yellow,#ffcc03);font-weight:800}
 .seller-pager{

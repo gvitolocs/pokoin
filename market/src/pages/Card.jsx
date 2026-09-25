@@ -85,7 +85,9 @@ import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import { tcgEra, eraHref } from '../set-logos.js';
 import { speciesFromCard, pokemonHref } from '../pokemon-hubs.js';
+import ShopList from '../components/ShopList.jsx';
 import ShopListingRow from '../components/ShopListing.jsx';
+import { listingSelectId } from '../shop-marquee.js';
 import { conditionShort } from '../listing-meta.js';
 import {
   breadcrumbJsonLd,
@@ -2150,8 +2152,8 @@ export default function Card() {
           </header>
           {shopError ? <p className="sell-msg error">{shopError}</p> : null}
           {offers.length ? (
-            <div className="shop-list">
-              {offers.map((offer, index) => {
+            <ShopList>
+              {(selected) => offers.map((offer, index) => {
                 const mine = mineIds.includes(offer.id);
                 return (
                   <ShopListingRow
@@ -2159,6 +2161,7 @@ export default function Card() {
                     offer={offer}
                     card={card}
                     mine={mine}
+                    selected={selected.has(listingSelectId(offer))}
                     listingBusy={listingBusy}
                     editing={editingOffer?.id === offer.id}
                     onCart={() => addItem(cartItemFromOffer(card, offer))}
@@ -2174,7 +2177,7 @@ export default function Card() {
                   />
                 );
               })}
-            </div>
+            </ShopList>
           ) : (
             <div className="empty-shop">
               <p className="status">
