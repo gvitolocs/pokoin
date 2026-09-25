@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendChatTag, cardReference, catalogPath, chatImageSources, isSellerCard, listingReference, looseCardReference, tagKey } from './chat-listing.js';
+import { appendChatTag, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listingReference, looseCardReference, personListsCard, referenceForPeer, tagKey } from './chat-listing.js';
 import { readFileSync } from 'node:fs';
 
 test('a listing chat follows the Firebase user id, not the stored email', () => {
@@ -59,6 +59,27 @@ test('a miniature keeps a site path and tries the homepage thumb before the full
     '/card-images/502874_snorlax.jpg',
   ]);
   assert.equal(row.kind, 'card');
+});
+
+test('dragging the scan keeps the open chat person when they list that card', () => {
+  const card = { id: '88', name: 'Meowth', canonicalPath: '/marketplace/en/cards/88', heroImageUrl: '/card-images/9_meowth.jpg' };
+  const offers = [{
+    id: 'lst',
+    sellerUsername: 'redshakkio',
+    sellerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2',
+    pricePkn: 64,
+    cardImageUrl: '/card-images/9_meowth.jpg',
+  }];
+  const theirs = referenceForPeer(card, offers, { uid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2', username: 'redshakkio' });
+  assert.equal(theirs.kind, 'listing');
+  assert.equal(theirs.seller, 'redshakkio');
+  assert.equal(isSellerCard(theirs), true);
+  const trade = referenceForPeer(card, offers, { uid: 'someoneelse', username: 'other' });
+  assert.equal(trade.kind, 'card');
+  assert.equal(isSellerCard(trade), false);
+  assert.equal(cardIdOf({ path: '/marketplace/en/cards/88' }), '88');
+  assert.equal(personListsCard(offers, [{ username: 'redshakkio' }]), true);
+  assert.equal(personListsCard(offers, [{ username: 'other' }]), false);
 });
 
 test('a homepage card is not a seller card', () => {

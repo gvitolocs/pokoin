@@ -107,7 +107,7 @@ function ConversationList({ signedIn, getBearer, onOpen }) {
 }
 
 export default function ChatDock() {
-  const { signedIn, getBearer } = useAuth();
+  const { signedIn, getBearer, user, profile } = useAuth();
   const lang = useSearchLang();
   const [dock, setDock] = useState(getChatDock);
   const [text, setText] = useState('');
@@ -211,7 +211,14 @@ export default function ChatDock() {
                 {event.text ? <p>{event.text}</p> : null}
                 {(event.listings || []).length ? (
                   <span className="chat-tags">
-                    {(event.listings || []).map((row, index) => <ChatListingTag key={`${tagKey(row)}:${index}`} row={row} />)}
+                    {(event.listings || []).map((row, index) => (
+                      <ChatListingTag
+                        key={`${tagKey(row)}:${index}`}
+                        row={row}
+                        peer={{ uid: dock.peer, username: dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '' }}
+                        me={{ uid: user?.uid, username: profile?.username }}
+                      />
+                    ))}
                   </span>
                 ) : null}
                 {!event.text && !(event.listings || []).length ? <p>…</p> : null}
@@ -224,7 +231,13 @@ export default function ChatDock() {
               {dock.tags.length ? (
                 <div className="chat-dock-tags">
                   {dock.tags.map((row) => (
-                    <ChatListingTag key={tagKey(row)} row={row} onRemove={removeChatTag} />
+                    <ChatListingTag
+                      key={tagKey(row)}
+                      row={row}
+                      onRemove={removeChatTag}
+                      peer={{ uid: dock.peer, username: dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '' }}
+                      me={{ uid: user?.uid, username: profile?.username }}
+                    />
                   ))}
                 </div>
               ) : showDropHint ? (

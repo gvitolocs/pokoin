@@ -1,58 +1,104 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchCardTiles, imageSrc } from '../api.js';
-import { chatImageSources, isSellerCard, tagKey } from '../chat-listing.js';
+import { fetchListings, imageSrc } from '../api.js';
+import { fetchCardTiles } from '../lists.js';
+import {
+  cardIdOf,
+  chatImageSources,
+  isSellerCard,
+  personListsCard,
+  tagKey,
+} from '../chat-listing.js';
 import ThumbZoom from './ThumbZoom.jsx';
 
-export default function ChatListingTag({ row, onRemove }) {
+function unique(list) {
+  const out = [];
+  for (const item of list) {
+    const value = String(item || '').trim();
+    if (value && !out.includes(value)) out.push(value);
+  }
+  return out;
+}
+
+export default function ChatListingTag({ row, onRemove, peer, me }) {
   const label = row.cardName || 'Card';
-  const sources = chatImageSources(row);
+  const id = cardIdOf(row);
+  const identity = `${row.imageUrl || ''}|${id}|${row.sellerUid || ''}|${row.seller || ''}`;
+  const peerUid = peer?.uid || '';
+  const peerName = peer?.username || '';
+  const meUid = me?.uid || '';
+  const meName = me?.username || '';
   const [step, setStep] = useState(0);
-  const [extra, setExtra] = useState('');
-  const identity = `${row.imageUrl || ''}|${row.cardId || ''}`;
+  const [catalog, setCatalog] = useState([]);
+  const [failed, setFailed] = useState(false);
+  const [painted, setPainted] = useState(false);
+  const [owned, setOwned] = useState(() => (isSellerCard(row) ? 'yes' : (id ? 'pending' : 'no')));
 
   useEffect(() => {
     setStep(0);
-    setExtra('');
-  }, [identity]);
+    setCatalog([]);
+    setFailed(false);
+    setPainted(false);
+    setOwned(isSellerCard(row) ? 'yes' : (id ? 'pending' : 'no'));
+  }, [identity, id, row.seller, row.sellerUid, row.imageUrl]);
 
   useEffect(() => {
-    const id = String(row.cardId || '').trim();
-    if (!id || sources.length) return undefined;
+    if (!id) return undefined;
     let live = true;
+    const people = [
+      { uid: peerUid, username: peerName },
+      { uid: meUid, username: meName },
+    ];
     fetchCardTiles([id]).then((tiles) => {
       const card = (tiles || []).find((item) => String(item?.id) === id) || tiles?.[0];
-      const next = imageSrc(card, 'grid') || imageSrc(card, 'hero');
-      if (live && next) setExtra(next);
+      const next = unique([imageSrc(card, 'grid'), imageSrc(card, 'hero')]);
+      if (live && next.length) setCatalog(next);
     }).catch(() => {});
+    if (!isSellerCard(row)) {
+      fetchListings(id).then((data) => {
+        if (!live) return;
+        setOwned(personListsCard(data?.listings, people) ? 'yes' : 'no');
+      }).catch(() => {
+        if (live) setOwned('no');
+      });
+    }
     return () => { live = false; };
-  }, [identity, sources.length, row.cardId]);
+  }, [id, identity, peerUid, peerName, meUid, meName, row.seller, row.sellerUid, row.imageUrl]);
 
-  const list = extra && !sources.includes(extra) ? [...sources, extra] : sources;
+  const list = unique([...chatImageSources(row), ...catalog]);
+  const catalogKey = catalog.join('|');
+  useEffect(() => {
+    if (!catalogKey) return;
+    const at = list.findIndex((item) => catalog.includes(item));
+    if (at < 0) return;
+    if ((!painted || failed) && step !== at) setStep(at);
+  }, [catalogKey, painted, failed, step, list, catalog]);
+
   const src = list[Math.min(step, Math.max(list.length - 1, 0))] || '';
-  const full = sources[sources.length - 1] || extra || src;
+  const full = catalog[catalog.length - 1] || list[list.length - 1] || src;
 
   function onError() {
-    if (step + 1 < list.length) {
-      setStep(step + 1);
-      return;
-    }
-    const id = String(row.cardId || '').trim();
-    if (!id || extra) return;
-    fetchCardTiles([id]).then((tiles) => {
-      const card = (tiles || []).find((item) => String(item?.id) === id) || tiles?.[0];
-      const next = imageSrc(card, 'grid') || imageSrc(card, 'hero');
-      if (next) setExtra(next);
-    }).catch(() => {});
+    if (step + 1 < list.length) setStep(step + 1);
+    else setFailed(true);
   }
 
   const image = src ? (
     <ThumbZoom src={full} full alt={label}>
-      <img src={src} alt="" onError={onError} />
+      <img
+        src={src}
+        alt=""
+        onError={onError}
+        onLoad={(event) => {
+          const img = event.currentTarget;
+          if (img.naturalWidth > 0 && img.naturalWidth < 24) onError();
+          else setPainted(true);
+        }}
+      />
     </ThumbZoom>
   ) : <span className="chat-tag-ph" />;
+  const trade = owned === 'no';
   return (
-    <span className={`chat-tag${isSellerCard(row) ? '' : ' is-trade'}`}>
+    <span className={`chat-tag${trade ? ' is-trade' : ''}`}>
       {row.path ? (
         <Link to={row.path} aria-label={label} onClick={(event) => event.stopPropagation()}>{image}</Link>
       ) : (

@@ -102,7 +102,10 @@ export default function CardArt({
 
   const drag = dragCard ? {
     draggable: true,
-    onDragStart: (event) => writeListingDrag(event, cardReference(dragCard)),
+    onDragStart: (event) => writeListingDrag(
+      event,
+      dragCard.kind && dragCard.cardName ? dragCard : cardReference(dragCard),
+    ),
   } : {};
   const image = (
     <img

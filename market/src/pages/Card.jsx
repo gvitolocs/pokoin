@@ -44,6 +44,8 @@ import {
   readWatchlistIds,
   vintedHref,
 } from '../api.js';
+import { getChatDock } from '../chat-dock-store.js';
+import { referenceForPeer, writeListingDrag } from '../chat-listing.js';
 import {
   activeSoldIndex,
   formatSoldAxisTick,
@@ -1157,6 +1159,12 @@ function replaceToCanonical(path, navigate, card, routerPath) {
   navigate(next, { replace: true, state: card ? { card } : undefined });
 }
 
+function dragThisCard(card, offers) {
+  const dock = getChatDock();
+  const username = dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '';
+  return referenceForPeer(card, offers, { uid: dock.peer, username });
+}
+
 export default function Card() {
   const { lang = 'en', cardId: rawCardId, slug = '' } = useParams();
   const cardId = realPublicCardId(rawCardId);
@@ -1902,12 +1910,14 @@ export default function Card() {
             <button
               type="button"
               className="art-frame"
+              draggable={Boolean(art)}
+              onDragStart={(event) => writeListingDrag(event, dragThisCard(card, payload?.offers || []))}
               onClick={() => {
                 setZoom(true);
                 track(Action.zoomArt, card);
               }}
             >
-              {art ? <CardArt src={art} alt={cardImageAlt(card)} fetchPriority="high" full dragCard={card} /> : <span className="tile-ph" />}
+              {art ? <CardArt src={art} alt={cardImageAlt(card)} fetchPriority="high" full /> : <span className="tile-ph" />}
             </button>
             {(setShortcuts.length || showMoreVersions) ? (
               <div className="set-link tight version-links">
@@ -2212,7 +2222,7 @@ export default function Card() {
               src={art}
               alt={cardImageAlt(card)}
               full
-              dragCard={card}
+              dragCard={dragThisCard(card, payload?.offers || [])}
               onClick={() => setZoom(false)}
             />
           ) : null}

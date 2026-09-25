@@ -161,7 +161,7 @@ function MoneyModal({ mode, peer, onClose, onDone }) {
   );
 }
 
-function EventCard({ event, busy, onAction }) {
+function EventCard({ event, busy, onAction, peer, me }) {
   const action = requestActionFor(event);
   if (event.type === 'money_request') return (
     <article className={`chat-money-card ${event.mine ? 'mine' : ''}`} aria-label={eventAriaLabel(event)}>
@@ -181,7 +181,9 @@ function EventCard({ event, busy, onAction }) {
       {event.text ? <p>{event.text}</p> : null}
       {(event.listings || []).length ? (
         <span className="chat-tags">
-          {(event.listings || []).map((row, index) => <ChatListingTag key={`${tagKey(row)}:${index}`} row={row} />)}
+          {(event.listings || []).map((row, index) => (
+            <ChatListingTag key={`${tagKey(row)}:${index}`} row={row} peer={{ username: peer }} me={me} />
+          ))}
         </span>
       ) : null}
       <time>{chatTime(event.createdAt)}</time>
@@ -193,7 +195,7 @@ export function Conversation() {
   const { username = '' } = useParams();
   const peer = decodeURIComponent(username).trim().toLowerCase();
   const navigate = useNavigate();
-  const { ready, signedIn, getBearer } = useAuth();
+  const { ready, signedIn, getBearer, user, profile } = useAuth();
   const [text, setText] = useState('');
   const [moneyMode, setMoneyMode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -232,7 +234,7 @@ export function Conversation() {
       {flash && <button className="chat-flash" type="button" onClick={() => setFlash('')}>{flash} ✓</button>}
       {(error || thread.error) && <p className="chat-error conversation-error" role="alert">{error || thread.error}</p>}
       <section className="chat-timeline" ref={thread.logRef} onScroll={thread.onScroll} aria-live="polite" aria-busy={!thread.settled && !thread.events.length}>
-        {!thread.settled && !thread.events.length ? <p className="chat-muted">Loading conversation…</p> : thread.events.length ? thread.events.map((event) => <EventCard key={event.id} event={event} busy={busy} onAction={actOnRequest} />) : <div className="chat-first"><h2>Say hello to @{peer}</h2><p>Messages, requests, and payments appear here in chronological order.</p></div>}
+        {!thread.settled && !thread.events.length ? <p className="chat-muted">Loading conversation…</p> : thread.events.length ? thread.events.map((event) => <EventCard key={event.id} event={event} busy={busy} onAction={actOnRequest} peer={peer} me={{ uid: user?.uid, username: profile?.username }} />) : <div className="chat-first"><h2>Say hello to @{peer}</h2><p>Messages, requests, and payments appear here in chronological order.</p></div>}
       </section>
       <div className="chat-tools"><button type="button" onClick={() => setMoneyMode('request')}>Request</button><button type="button" onClick={() => setMoneyMode('send')}>Send PKN</button></div>
       <form className="chat-composer" onSubmit={send}><label className="sr-only" htmlFor="chat-message">Message</label><textarea id="chat-message" rows="1" maxLength={1000} value={text} onChange={(event) => setText(event.target.value)} placeholder={`Message @${peer}`} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(event); } }} /><button type="submit" disabled={!text.trim() || busy} aria-label="Send message">↑</button></form>

@@ -72,6 +72,38 @@ export function isSellerCard(row) {
   return Boolean(sellerUserId(row?.sellerUid) || chatHandle(row?.seller));
 }
 
+export function cardIdOf(row) {
+  const id = String(row?.cardId || row?.id || '').trim();
+  if (/^\d+$/.test(id)) return id;
+  const path = String(row?.path || row?.canonicalPath || '');
+  const match = path.match(/\/cards\/(\d+)/);
+  return match ? match[1] : '';
+}
+
+function samePerson(offer, person) {
+  if (!person) return false;
+  const uid = sellerUserId(person.uid);
+  const handle = chatHandle(person.username);
+  const offerUid = sellerUserId(offer?.sellerUid || offer?.seller_uid);
+  const offerHandle = chatHandle(sellerHandle(offer) || offer?.seller);
+  return Boolean((uid && offerUid === uid) || (handle && offerHandle === handle));
+}
+
+/** True when one of these people has this card listed. */
+export function personListsCard(listings, people = []) {
+  return (listings || []).some((offer) => (people || []).some((person) => samePerson(offer, person)));
+}
+
+/**
+ * Dragging the catalog scan has no seller. If the open chat's person
+ * lists this printing, attach that listing so it stays in color.
+ */
+export function referenceForPeer(card, offers, peer = {}) {
+  const match = (offers || []).find((offer) => samePerson(offer, peer));
+  if (match) return listingReference({ offer: match, card });
+  return cardReference(card);
+}
+
 export function appendChatTag(tags, reference) {
   if (!reference?.cardName) return tags;
   const key = tagKey(reference);
