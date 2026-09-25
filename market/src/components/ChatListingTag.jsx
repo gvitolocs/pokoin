@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchListings, imageSrc } from '../api.js';
+import { fetchCard, fetchListings, imageSrc } from '../api.js';
 import { fetchCardTiles } from '../lists.js';
 import {
   cardIdOf,
@@ -18,6 +18,31 @@ function unique(list) {
     if (value && !out.includes(value)) out.push(value);
   }
   return out;
+}
+
+function urlsFromCard(card) {
+  if (!card) return [];
+  return unique([
+    card.homepageImageUrl,
+    card.tileImageUrl,
+    card.homepage_image_url,
+    card.heroImageUrl,
+    card.imageUrl,
+    card.gridImageUrl,
+    card.image_url,
+    imageSrc(card, 'grid'),
+    imageSrc(card, 'hero'),
+  ]);
+}
+
+/** Tiles miss some printings (Ancient Origins Meowth 219916). The card page still has the scan. */
+async function loadCatalogImages(id) {
+  const tiles = await fetchCardTiles([id]).catch(() => []);
+  const tile = (tiles || []).find((item) => String(item?.id) === id) || tiles?.[0];
+  const fromTiles = urlsFromCard(tile);
+  if (fromTiles.length) return fromTiles;
+  const page = await fetchCard(id).catch(() => null);
+  return urlsFromCard(page?.card);
 }
 
 export default function ChatListingTag({ row, onRemove, peer, me }) {
@@ -49,9 +74,7 @@ export default function ChatListingTag({ row, onRemove, peer, me }) {
       { uid: peerUid, username: peerName },
       { uid: meUid, username: meName },
     ];
-    fetchCardTiles([id]).then((tiles) => {
-      const card = (tiles || []).find((item) => String(item?.id) === id) || tiles?.[0];
-      const next = unique([imageSrc(card, 'grid'), imageSrc(card, 'hero')]);
+    loadCatalogImages(id).then((next) => {
       if (live && next.length) setCatalog(next);
     }).catch(() => {});
     if (!isSellerCard(row)) {
@@ -75,7 +98,7 @@ export default function ChatListingTag({ row, onRemove, peer, me }) {
   }, [catalogKey, painted, failed, step, list, catalog]);
 
   const src = list[Math.min(step, Math.max(list.length - 1, 0))] || '';
-  const full = catalog[catalog.length - 1] || list[list.length - 1] || src;
+  const full = list.find((url) => /\.jpe?g(?:\?|$)/i.test(url)) || list[list.length - 1] || src;
 
   function onError() {
     if (step + 1 < list.length) setStep(step + 1);
