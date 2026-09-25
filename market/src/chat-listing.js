@@ -222,10 +222,72 @@ export function chatImageSources(row) {
   return out;
 }
 
+/** Homepage rail card: 13.5rem wide, portrait 63:88. */
+export const CARD_DRAG_WIDTH = 216;
+export const CARD_DRAG_HEIGHT = 302;
+
+let dragGhost;
+
+function dragSourceImage(event) {
+  const node = event?.currentTarget;
+  if (!node || node.nodeType !== 1) return null;
+  if (node.tagName === 'IMG') return node;
+  return node.querySelector?.(
+    '.shop-card img, .tile-art img, .seller-listing-art img, .c-art img, .bag-art img, .seller-mover img',
+  ) || null;
+}
+
+function paintDragGhost(image) {
+  if (typeof document === 'undefined') return null;
+  if (!dragGhost) {
+    dragGhost = document.createElement('canvas');
+    dragGhost.style.position = 'fixed';
+    dragGhost.style.top = '0';
+    dragGhost.style.pointerEvents = 'none';
+    document.body?.appendChild(dragGhost);
+  }
+  const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
+  dragGhost.width = Math.round(CARD_DRAG_WIDTH * dpr);
+  dragGhost.height = Math.round(CARD_DRAG_HEIGHT * dpr);
+  dragGhost.style.width = `${CARD_DRAG_WIDTH}px`;
+  dragGhost.style.height = `${CARD_DRAG_HEIGHT}px`;
+  dragGhost.style.left = `-${CARD_DRAG_WIDTH + 32}px`;
+  const ctx = dragGhost.getContext('2d');
+  if (!ctx) return null;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect?.(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT, 10);
+  if (!ctx.roundRect) ctx.rect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
+  ctx.clip();
+  ctx.fillStyle = '#07060b';
+  ctx.fillRect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
+  if (image?.naturalWidth) {
+    try {
+      const scale = Math.max(CARD_DRAG_WIDTH / image.naturalWidth, CARD_DRAG_HEIGHT / image.naturalHeight);
+      const dw = image.naturalWidth * scale;
+      const dh = image.naturalHeight * scale;
+      ctx.drawImage(image, (CARD_DRAG_WIDTH - dw) / 2, (CARD_DRAG_HEIGHT - dh) / 2, dw, dh);
+    } catch (_) {
+      /* a cross-origin thumb still leaves the card-sized plate */
+    }
+  }
+  ctx.restore();
+  return dragGhost;
+}
+
 export function writeListingDrag(event, reference) {
   if (!event?.dataTransfer || !reference?.cardName) return;
   event.dataTransfer.setData(LISTING_DRAG_TYPE, JSON.stringify(reference));
   event.dataTransfer.effectAllowed = 'copy';
+  const ghost = paintDragGhost(dragSourceImage(event));
+  if (!ghost) return;
+  try {
+    event.dataTransfer.setDragImage(ghost, CARD_DRAG_WIDTH / 2, CARD_DRAG_HEIGHT / 2);
+  } catch (_) {
+    /* the browser keeps its default ghost */
+  }
 }
 
 export function readListingDrag(event) {

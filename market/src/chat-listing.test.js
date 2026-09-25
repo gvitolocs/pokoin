@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendChatTag, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listingReference, looseCardReference, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned } from './chat-listing.js';
+import { appendChatTag, CARD_DRAG_HEIGHT, CARD_DRAG_WIDTH, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listingReference, looseCardReference, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned, writeListingDrag } from './chat-listing.js';
 import { readFileSync } from 'node:fs';
 
 test('a listing chat follows the Firebase user id, not the stored email', () => {
@@ -98,6 +98,46 @@ test('a trade card remembers gray, and a refresh can turn it color when the sell
   writeCardOwned('219916', people, 'yes');
   assert.equal(readCardOwned('219916', [{ uid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2' }]), 'yes');
   assert.equal(paintOwned(row, '219916', people), 'yes');
+});
+
+test('dragging a shop row carries a card-sized image, not the whole row', () => {
+  let dragged = null;
+  const canvas = {
+    width: 0,
+    height: 0,
+    style: {},
+    getContext: () => ({
+      setTransform() {},
+      clearRect() {},
+      save() {},
+      beginPath() {},
+      rect() {},
+      clip() {},
+      fillRect() {},
+      restore() {},
+      roundRect() {},
+    }),
+  };
+  globalThis.document = {
+    createElement: () => canvas,
+    body: { appendChild() {} },
+  };
+  writeListingDrag({
+    currentTarget: {
+      nodeType: 1,
+      tagName: 'DIV',
+      querySelector: (selector) => (selector.includes('.shop-card img') ? { naturalWidth: 63, naturalHeight: 88 } : null),
+    },
+    dataTransfer: {
+      setData() {},
+      setDragImage(el, x, y) { dragged = { el, x, y }; },
+    },
+  }, { cardName: 'Meowth' });
+  assert.equal(dragged.el, canvas);
+  assert.equal(canvas.width, CARD_DRAG_WIDTH);
+  assert.equal(canvas.height, CARD_DRAG_HEIGHT);
+  assert.equal(dragged.x, CARD_DRAG_WIDTH / 2);
+  assert.equal(dragged.y, CARD_DRAG_HEIGHT / 2);
 });
 
 test('a homepage card is not a seller card', () => {

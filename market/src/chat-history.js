@@ -112,3 +112,34 @@ export function pageHasMore(result) {
 export function nearChatTop(scrollTop, threshold = 48) {
   return Number(scrollTop) <= threshold;
 }
+
+const PREVIEW_KEY = 'pokoin.chatPreviews';
+
+export function readChatPreviews() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(PREVIEW_KEY) || '[]');
+    if (!Array.isArray(rows)) return [];
+    return rows.filter((row) => row && (row.peerUid || row.peerUsername)).slice(0, 100);
+  } catch (_) {
+    return [];
+  }
+}
+
+export function writeChatPreviews(rows) {
+  const clean = (rows || [])
+    .filter((row) => row && (row.peerUid || row.peerUsername))
+    .slice(0, 100)
+    .map((row) => ({
+      pairKey: String(row.pairKey || ''),
+      peerUid: String(row.peerUid || ''),
+      peerUsername: String(row.peerUsername || ''),
+      preview: String(row.preview || '').slice(0, 80),
+      unread: Number(row.unread) || 0,
+      updatedAt: row.updatedAt || null,
+    }));
+  try {
+    localStorage.setItem(PREVIEW_KEY, JSON.stringify(clean));
+  } catch (_) {
+    /* private mode */
+  }
+}

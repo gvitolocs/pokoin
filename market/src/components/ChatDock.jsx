@@ -19,6 +19,7 @@ import {
   removeChatTag,
   subscribeChatDock,
 } from '../chat-dock-store.js';
+import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import { useChatThread } from '../use-chat-thread.js';
 import ChatListingTag from './ChatListingTag.jsx';
@@ -32,7 +33,8 @@ function draftLine(row, drafts) {
 }
 
 function ConversationList({ signedIn, getBearer, onOpen }) {
-  const [rows, setRows] = useState([]);
+  const [rows, setRows] = useState(readChatPreviews);
+  const [seen, setSeen] = useState(() => readChatPreviews().length > 0);
   const [drafts, setDrafts] = useState(getChatDrafts);
   const [overUid, setOverUid] = useState('');
   const [error, setError] = useState('');
@@ -44,13 +46,16 @@ function ConversationList({ signedIn, getBearer, onOpen }) {
       try {
         const token = await getBearer();
         const result = await listConversations(token);
-        if (live) {
-          setRows(result.conversations || []);
-          setDrafts(getChatDrafts());
-          setError('');
-        }
+        if (!live) return;
+        const next = result.conversations || [];
+        setRows(next);
+        writeChatPreviews(next);
+        setDrafts(getChatDrafts());
+        setError('');
       } catch (err) {
         if (live) setError(err.message || 'Could not load conversations.');
+      } finally {
+        if (live) setSeen(true);
       }
     }
     load();
@@ -101,7 +106,7 @@ function ConversationList({ signedIn, getBearer, onOpen }) {
             </button>
           </div>
         );
-      }) : <p className="chat-dock-hint">No conversations yet. Drop a card on someone after you message them.</p>}
+      }) : seen ? <p className="chat-dock-hint">No conversations yet. Drop a card on someone after you message them.</p> : null}
     </div>
   );
 }

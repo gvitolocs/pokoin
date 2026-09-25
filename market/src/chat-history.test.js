@@ -7,7 +7,9 @@ import {
   nearChatTop,
   pageHasMore,
   readChatHistory,
+  readChatPreviews,
   writeChatHistory,
+  writeChatPreviews,
 } from './chat-history.js';
 
 const memory = new Map();
@@ -48,6 +50,24 @@ test('newer messages join the cached thread without dropping older ones', () => 
   assert.deepEqual(merged.map((row) => row.id), ['1', '2', '3']);
   const replaced = mergeChatEvents([event('2', 2)], [{ ...event('2', 2), text: 'edited' }]);
   assert.equal(replaced[0].text, 'edited');
+});
+
+test('the message list keeps the last preview in this browser', () => {
+  writeChatPreviews([
+    {
+      pairKey: 'direct_a',
+      peerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2',
+      peerUsername: 'redshakkio',
+      preview: 'Scambi?',
+      unread: 0,
+      updatedAt: '2026-09-25T13:50:00.000Z',
+    },
+    { preview: 'no one' },
+  ]);
+  const saved = readChatPreviews();
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].peerUsername, 'redshakkio');
+  assert.equal(saved[0].preview, 'Scambi?');
 });
 
 test('scrolling to the top is the cue to fetch older messages', () => {

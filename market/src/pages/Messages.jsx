@@ -11,6 +11,7 @@ import {
 import { useChatThread } from '../use-chat-thread.js';
 import { chatTime, eventAriaLabel, requestActionFor } from '../chat-format.js';
 import { tagKey } from '../chat-listing.js';
+import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import ChatListingTag from '../components/ChatListingTag.jsx';
 import { createMoneyRequest, payMoneyRequest, requestStatusLabel, respondMoneyRequest } from '../money-requests.js';
@@ -74,8 +75,8 @@ function NewConversation({ onClose }) {
 
 export default function Messages() {
   const { ready, signedIn, getBearer } = useAuth();
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState(readChatPreviews);
+  const [loading, setLoading] = useState(() => readChatPreviews().length === 0);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
 
@@ -84,7 +85,9 @@ export default function Messages() {
     try {
       const token = await getBearer();
       const result = await listConversations(token);
-      setRows(result.conversations || []);
+      const next = result.conversations || [];
+      setRows(next);
+      writeChatPreviews(next);
       setError('');
     } catch (err) {
       setError(err.message || 'Messages could not be loaded.');
@@ -101,8 +104,8 @@ export default function Messages() {
     return () => { clearInterval(timer); window.removeEventListener('focus', onFocus); };
   }, [refresh]);
 
-  if (!ready) return <main className="messages-page messages-empty" aria-busy="true">Loading…</main>;
-  if (!signedIn) return <SignInGate />;
+  if (!ready && !rows.length) return <main className="messages-page messages-empty" aria-busy="true">Loading…</main>;
+  if (ready && !signedIn) return <SignInGate />;
   return (
     <main className="messages-page">
       <header className="messages-title-row"><div><p className="messages-kicker">Your people</p><h1>Messages</h1></div><button className="messages-new" type="button" onClick={() => setCreating(true)}>New message</button></header>
