@@ -77,6 +77,26 @@ export default function ThumbZoom({
 
   useEffect(() => hide, []);
 
+  useEffect(() => {
+    const onStart = () => {
+      if (timer.current) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
+      document.documentElement.classList.add('is-card-dragging');
+    };
+    const onEnd = () => {
+      document.documentElement.classList.remove('is-card-dragging');
+      hide();
+    };
+    window.addEventListener('dragstart', onStart, true);
+    window.addEventListener('dragend', onEnd, true);
+    return () => {
+      window.removeEventListener('dragstart', onStart, true);
+      window.removeEventListener('dragend', onEnd, true);
+    };
+  }, []);
+
   return (
     <span className="thumb-zoom-host" onMouseEnter={enter} onMouseMove={move} onMouseLeave={hide}>
       {children}

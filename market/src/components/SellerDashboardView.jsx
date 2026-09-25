@@ -13,8 +13,8 @@ import {
   historySeriesMax,
   nearestHistoryDay,
   niceScaleMax,
-  normalizeHistoryDay,
   todayHistoryDay,
+  withLiveHistoryDay,
   yTickValues,
 } from '../portfolio-history.js';
 import { DASHBOARD_SCAN, marketUrl, goMarket } from '../punchouts.js';
@@ -29,12 +29,8 @@ const CHART_H = 200;
  */
 export function CollectionHistoryPanel({ series = null, today = null }) {
   const [hover, setHover] = useState(null);
-  const days = (Array.isArray(series) ? series : [])
-    .map((row) => normalizeHistoryDay(row))
-    .filter(Boolean);
-  const live = today ? normalizeHistoryDay(today) : null;
-  const points = days.length ? days : (live ? [live] : []);
-  const hasLine = days.length >= 2;
+  const points = withLiveHistoryDay(series, today);
+  const hasLine = points.length >= 2;
   const hasPoint = points.length === 1;
   const hasData = points.length > 0;
   const yMax = niceScaleMax(historySeriesMax(points));
@@ -390,6 +386,7 @@ export function SellerDashboardView({
   onRetry,
   listingHrefFor,
   previewBanner = false,
+  historySeries = [],
 }) {
   const oneDayReadyCards = cardTraderAssets?.oneDayReady
     ? Math.max(0, Number(cardTraderAssets.totals?.cards) || 0)
@@ -490,11 +487,15 @@ export function SellerDashboardView({
               ) : null}
 
               <CollectionHistoryPanel
+                series={historySeries}
                 today={todayHistoryDay({
                   currencyPkn: balance,
                   listedPkn: listed && !listed.failed ? listed.listedPkn : 0,
                   cardsOwned: owned,
                   nftOwned: nftQty,
+                  cardsValuePkn: oneDayReadyCards > 0
+                    ? Math.max(0, Number(cardTraderAssets?.totals?.valuePkn) || 0)
+                    : 0,
                 })}
               />
 

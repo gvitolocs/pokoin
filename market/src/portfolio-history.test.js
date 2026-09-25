@@ -7,7 +7,10 @@ import {
   nearestHistoryDay,
   niceScaleMax,
   normalizeHistoryDay,
+  readPortfolioHistory,
   todayHistoryDay,
+  withLiveHistoryDay,
+  writePortfolioHistory,
   yTickValues,
 } from './portfolio-history.js';
 
@@ -50,6 +53,47 @@ test('nearest day and tip composition', () => {
   assert.ok(tip.rows.every((row) => String(row.value).endsWith('PKN')));
   assert.ok(tip.rows.some((row) => row.label === 'Cards owned' && row.value === '0 PKN'));
   assert.ok(tip.rows.some((row) => row.label === 'Digital / NFT' && row.value === '0 PKN'));
+});
+
+test('collection value includes the CardTrader 1-DR mark and one snapshot per day', () => {
+  const memory = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => (memory.has(key) ? memory.get(key) : null),
+    setItem: (key, value) => memory.set(key, String(value)),
+    removeItem: (key) => memory.delete(key),
+  };
+  const uid = 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2';
+  const first = todayHistoryDay({
+    currencyPkn: 15,
+    cardsValuePkn: 1000,
+    date: '2026-09-24T12:00:00.000Z',
+  });
+  assert.equal(first.totalPkn, 1015);
+  assert.equal(first.assets.cardsValuePkn, 1000);
+  writePortfolioHistory(uid, first);
+  writePortfolioHistory(uid, todayHistoryDay({
+    currencyPkn: 15,
+    cardsValuePkn: 4043760,
+    date: '2026-09-25T18:00:00.000Z',
+  }));
+  writePortfolioHistory(uid, todayHistoryDay({
+    currencyPkn: 15,
+    cardsValuePkn: 4043760,
+    date: '2026-09-25T20:00:00.000Z',
+  }));
+  const saved = readPortfolioHistory(uid);
+  assert.equal(saved.length, 2);
+  assert.equal(saved[1].date, '2026-09-25');
+  assert.equal(saved[1].totalPkn, 4043775);
+  const live = withLiveHistoryDay(saved, todayHistoryDay({
+    currencyPkn: 20,
+    cardsValuePkn: 4043760,
+    date: '2026-09-25T21:00:00.000Z',
+  }));
+  assert.equal(live.length, 2);
+  assert.equal(live[1].assets.currencyPkn, 20);
+  const tip = formatHistoryTip(live[1]);
+  assert.ok(tip.rows.some((row) => row.label === 'Cards owned' && row.value === '4043760 PKN'));
 });
 
 test('normalizeHistoryDay is idempotent — desk may re-normalize today()', () => {

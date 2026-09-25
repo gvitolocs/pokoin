@@ -608,6 +608,8 @@ button, input, select { font: inherit; color: inherit; }
   filter: drop-shadow(0 18px 40px rgb(0 0 0 / 0.55));
 }
 
+html.is-card-dragging .suggest-hover { display: none; }
+
 .suggest-hover img {
   display: block;
   width: 100%;

@@ -16,6 +16,11 @@ import {
   summarizeLiveInventory,
 } from '../inventory-listings.js';
 import {
+  readPortfolioHistory,
+  todayHistoryDay,
+  writePortfolioHistory,
+} from '../portfolio-history.js';
+import {
   portfolioTilesFingerprint,
   portfolioTilesFromSummary,
   readPortfolioTilesCache,
@@ -124,7 +129,10 @@ export default function SellerHome() {
   const [listingRows, setListingRows] = useState([]);
   const [movers, setMovers] = useState([]);
   const [cardTraderAssets, setCardTraderAssets] = useState(null);
+  const [assetsSettled, setAssetsSettled] = useState(false);
+  const [historySeries, setHistorySeries] = useState([]);
   const [error, setError] = useState('');
+  const uid = user?.uid || profile?.uid || '';
 
   const collectionHref = marketUrl(APP.collection);
   const inventoryHref = marketUrl(APP.inventory);
@@ -223,6 +231,7 @@ export default function SellerHome() {
     const uid = user?.uid || profile?.uid;
     if (!signedIn || !uid) return undefined;
     let cancelled = false;
+    setAssetsSettled(false);
     getBearer()
       .then((token) => fetchCardTraderAssets(token))
       .then((data) => {
@@ -230,11 +239,41 @@ export default function SellerHome() {
       })
       .catch(() => {
         if (!cancelled) setCardTraderAssets(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAssetsSettled(true);
       });
     return () => {
       cancelled = true;
     };
   }, [preview, signedIn, user?.uid, profile?.uid, getBearer]);
+
+  useEffect(() => {
+    setHistorySeries(uid ? readPortfolioHistory(uid) : []);
+  }, [uid]);
+
+  useEffect(() => {
+    if (preview || !uid || ownedCards == null || listed == null || !assetsSettled) return;
+    const day = todayHistoryDay({
+      currencyPkn: availablePkn,
+      listedPkn: listed.failed ? 0 : listed.listedPkn,
+      cardsOwned: ownedCards,
+      nftOwned,
+      cardsValuePkn: cardTraderAssets?.oneDayReady
+        ? Number(cardTraderAssets.totals?.valuePkn) || 0
+        : 0,
+    });
+    setHistorySeries(writePortfolioHistory(uid, day));
+  }, [
+    preview,
+    uid,
+    ownedCards,
+    listed,
+    nftOwned,
+    availablePkn,
+    cardTraderAssets,
+    assetsSettled,
+  ]);
 
   useEffect(() => {
     if (preview) return undefined;
@@ -330,6 +369,7 @@ export default function SellerHome() {
       uniqueItems={uniqueItems}
       pknBalance={availablePkn}
       cardTraderAssets={cardTraderAssets}
+      historySeries={historySeries}
       listed={listed}
       listingRows={listingRows}
       movers={movers}

@@ -38,7 +38,8 @@ export function formatDayLabel(dayKey) {
 
 /**
  * One day of portfolio value + composition.
- * totalPkn is currency + listed only — we do not invent card valuations.
+ * totalPkn is currency + listed asking + CardTrader 1-DR mark + NFT mark.
+ * Card value is the 1-DR total already on the dashboard — not an invented price.
  * Idempotent: already-normalized rows keep assets.* (desk may re-normalize).
  */
 export function normalizeHistoryDay(row = {}) {
@@ -49,13 +50,17 @@ export function normalizeHistoryDay(row = {}) {
   const listedPkn = asNonNeg(
     row.listedPkn ?? row.listed ?? prior?.listedPkn,
   );
+  const cardsValuePkn = asNonNeg(
+    row.cardsValuePkn ?? prior?.cardsValuePkn,
+  );
+  const nftValuePkn = asNonNeg(
+    row.nftValuePkn ?? prior?.nftValuePkn,
+  );
   const cardsOwned = asNonNeg(
     row.cardsOwned ?? row.ownedCards ?? prior?.cardsOwned,
   );
   const nftOwned = asNonNeg(row.nftOwned ?? prior?.nftOwned);
-  const totalPkn = asNonNeg(
-    row.totalPkn != null ? row.totalPkn : currencyPkn + listedPkn,
-  );
+  const totalPkn = currencyPkn + listedPkn + cardsValuePkn + nftValuePkn;
   const date = utcDayKey(row.date || row.day || new Date());
   if (!date) return null;
   return {
@@ -64,6 +69,8 @@ export function normalizeHistoryDay(row = {}) {
     assets: {
       currencyPkn,
       listedPkn,
+      cardsValuePkn,
+      nftValuePkn,
       cardsOwned,
       nftOwned,
     },
@@ -74,6 +81,8 @@ export function normalizeHistoryDay(row = {}) {
 export function todayHistoryDay({
   currencyPkn = 0,
   listedPkn = 0,
+  cardsValuePkn = 0,
+  nftValuePkn = 0,
   cardsOwned = 0,
   nftOwned = 0,
   date = new Date(),
@@ -82,9 +91,83 @@ export function todayHistoryDay({
     date,
     currencyPkn,
     listedPkn,
+    cardsValuePkn,
+    nftValuePkn,
     cardsOwned,
     nftOwned,
   });
+}
+
+const HISTORY_KEY = 'pokoin.portfolioHistory';
+const HISTORY_DAYS = 400;
+
+function historyStore() {
+  try {
+    const local = globalThis.localStorage;
+    if (local && typeof local.getItem === 'function') return local;
+  } catch {
+    /* private mode */
+  }
+  return null;
+}
+
+function readHistoryBook() {
+  const store = historyStore();
+  if (!store) return {};
+  try {
+    const raw = JSON.parse(store.getItem(HISTORY_KEY) || '{}');
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Days already saved for this Firebase uid, oldest first. */
+export function readPortfolioHistory(uid) {
+  const id = String(uid || '').trim();
+  if (!id) return [];
+  const rows = readHistoryBook()[id];
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => normalizeHistoryDay(row)).filter(Boolean).slice(-HISTORY_DAYS);
+}
+
+/**
+ * Remember one snapshot per UTC day. A later visit the same day replaces
+ * that point; it does not invent earlier days.
+ */
+export function writePortfolioHistory(uid, day) {
+  const id = String(uid || '').trim();
+  const point = normalizeHistoryDay(day);
+  const prior = readPortfolioHistory(id);
+  if (!id || !point) return prior;
+  const next = prior.filter((row) => row.date !== point.date);
+  next.push(point);
+  next.sort((a, b) => a.date.localeCompare(b.date));
+  const kept = next.slice(-HISTORY_DAYS);
+  const store = historyStore();
+  if (store) {
+    const book = readHistoryBook();
+    book[id] = kept;
+    try {
+      store.setItem(HISTORY_KEY, JSON.stringify(book));
+    } catch {
+      /* quota */
+    }
+  }
+  return kept;
+}
+
+/** Stored days, with today's live totals winning that date. */
+export function withLiveHistoryDay(series, today) {
+  const days = (Array.isArray(series) ? series : [])
+    .map((row) => normalizeHistoryDay(row))
+    .filter(Boolean);
+  const live = today ? normalizeHistoryDay(today) : null;
+  if (!live) return days;
+  const next = days.filter((row) => row.date !== live.date);
+  next.push(live);
+  next.sort((a, b) => a.date.localeCompare(b.date));
+  return next;
 }
 
 export function historySeriesMax(days = []) {
@@ -107,8 +190,7 @@ export function nearestHistoryDay(days, ratio) {
 export function formatHistoryTip(day) {
   if (!day) return null;
   const assets = day.assets || {};
-  // Card/NFT PKN is not invented — value stays 0 until mark-to-market exists.
-  // Counts stay on the Portfolio metric tiles above the chart.
+  // Cards owned is the CardTrader 1-DR mark. Counts stay on the tiles above.
   return {
     dateLabel: formatDayLabel(day.date),
     totalLabel: `${formatPknNumber(day.totalPkn)} PKN`,

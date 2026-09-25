@@ -50,5 +50,7 @@ test('ThumbZoom renders a pointer-following suggest-hover portal with safe teard
   assert.match(zoomSrc, /suggestHoverAllowed\(window\.innerWidth/);
   // Scroll un-anchors a fixed box — hide, don't chase.
   assert.match(zoomSrc, /addEventListener\('scroll', onHide, \{ capture: true, passive: true \}\)/);
+  assert.match(zoomSrc, /addEventListener\('dragstart', onStart, true\)/);
+  assert.match(zoomSrc, /is-card-dragging/);
   assert.match(zoomSrc, /SCAN_ZOOM_DELAY_MS/);
 });
