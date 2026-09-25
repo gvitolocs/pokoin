@@ -7,6 +7,7 @@ import {
   avatarColor,
   MASCOT_GRID,
   mascotRenderSize,
+  mascotFillLimit,
   clampArea,
   dataUrlBytes,
   displayableAvatarUrl,
@@ -121,7 +122,7 @@ test('mascot pixels land on whole device pixels (no uneven columns)', () => {
       assert.equal(devicePerSpritePixel, out.scale, `size ${size} @${dpr}x`);
       assert.ok(Number.isInteger(out.scale) && out.scale >= 1);
       assert.ok(Math.abs((out.height * dpr) / MASCOT_GRID.height - out.scale) < 1e-9);
-      assert.ok(out.width <= size * 0.8 + 1e-9, `size ${size} @${dpr}x overflows`);
+      assert.ok(out.width <= size * mascotFillLimit(size) + 1e-9, `size ${size} @${dpr}x overflows`);
     }
   }
   assert.deepEqual(mascotRenderSize(88, 2), { width: 52, height: 48, scale: 4, crisp: true });
@@ -133,4 +134,9 @@ test('tiny avatars fall back to a smooth downscale instead of overflowing', () =
   assert.equal(out.crisp, false);
   assert.ok(out.width < 24);
   assert.equal(mascotRenderSize(26, 2).crisp, true);
+});
+
+test('the 32 px topbar avatar keeps a crisp 1:1 mascot on 1x screens', () => {
+  assert.deepEqual(mascotRenderSize(32, 1), { width: 26, height: 24, scale: 1, crisp: true });
+  assert.deepEqual(mascotRenderSize(32, 2), { width: 26, height: 24, scale: 2, crisp: true });
 });

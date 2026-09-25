@@ -222,6 +222,30 @@
   display: inline-grid;
 }
 
+/* Header chip: dark disc like the trophy / PKN chips, pastel only as a ring. */
+.pk-avatar.is-chip {
+  background: var(--g3);
+  box-shadow: inset 0 0 0 2px var(--avatar-ground, #b8c0ff);
+}
+
+.pk-avatar.is-chip img.pk-avatar-mascot {
+  margin-top: 4%;
+}
+
+.pk-avatar.is-chip:not(.is-mascot) {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+.icon-nav a.topbar-avatar:hover .pk-avatar,
+.icon-nav a.topbar-avatar.active .pk-avatar {
+  box-shadow: inset 0 0 0 2px var(--yellow);
+}
+
+.icon-nav a.topbar-avatar:hover .pk-avatar:not(.is-mascot),
+.icon-nav a.topbar-avatar.active .pk-avatar:not(.is-mascot) {
+  box-shadow: 0 0 0 2px var(--yellow);
+}
+
 /* ── Editor sheet (bottom sheet on phones, dialog from 720px) ── */
 
 .avatar-sheet-backdrop {
