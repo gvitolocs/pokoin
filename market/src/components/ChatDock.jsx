@@ -115,7 +115,11 @@ export default function ChatDock() {
         {events.map((event) => (
           <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}`}>
             {event.text ? <p>{event.text}</p> : null}
-            {(event.listings || []).map((row) => <ChatListingTag key={tagKey(row)} row={row} />)}
+            {(event.listings || []).length ? (
+              <span className="chat-tags">
+                {(event.listings || []).map((row) => <ChatListingTag key={tagKey(row)} row={row} />)}
+              </span>
+            ) : null}
             {!event.text && !(event.listings || []).length ? <p>…</p> : null}
           </div>
         ))}

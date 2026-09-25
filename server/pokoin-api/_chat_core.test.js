@@ -31,6 +31,8 @@ test('listing tags keep https images and drop everything else', () => {
     sellerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2',
   }])[0].sellerUid, 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2');
   assert.equal(row.imageUrl, 'https://cdn.pokoin.com/a.jpg');
+  assert.equal(core.cleanListings([{ cardName: 'Meowth', imageUrl: '/card-images/1_meowth.jpg' }])[0].imageUrl, '/card-images/1_meowth.jpg');
+  assert.equal(core.cleanListings([{ cardName: 'Meowth', imageUrl: '//evil.example/a.jpg' }])[0].imageUrl, '');
   assert.equal(row.path, '/marketplace/en/cards/9');
   assert.equal(row.pricePkn, 76);
   assert.equal(core.cleanListings([{ cardName: 'Nope', imageUrl: 'javascript:alert(1)', path: 'https://evil.example' }])[0].imageUrl, '');

@@ -1,5 +1,6 @@
 import { displayName } from './identity.js';
 import { sellerHandle } from './listing-meta.js';
+import { tilePricePkn } from './pkn.js';
 
 export const LISTING_DRAG_TYPE = 'application/x-pokoin-listing';
 
@@ -16,6 +17,21 @@ export function sellerUserId(value) {
   return USER_ID.test(uid) ? uid : '';
 }
 
+function cardImage(card, offer) {
+  return String(
+    offer?.cardImageUrl
+    || offer?.imageUrl
+    || card?.heroImageUrl
+    || card?.imageUrl
+    || card?.cdn_image_url
+    || card?.image_url
+    || card?.gridImageUrl
+    || card?.tileImageUrl
+    || card?.homepageImageUrl
+    || '',
+  ).trim();
+}
+
 export function listingReference({ offer, card }) {
   return {
     kind: 'listing',
@@ -25,7 +41,7 @@ export function listingReference({ offer, card }) {
     seller: chatHandle(sellerHandle(offer)),
     cardName: card?.name || offer?.cardName || offer?.name || 'Card',
     setName: String(offer?.setName || ''),
-    imageUrl: offer?.cardImageUrl || card?.heroImageUrl || card?.imageUrl || card?.gridImageUrl || '',
+    imageUrl: cardImage(card, offer),
     path: card?.canonicalPath || offer?.canonicalPath || offer?.canonical_path || '',
     pricePkn: Number(offer?.pricePkn) || 0,
   };
@@ -40,9 +56,9 @@ export function cardReference(card) {
     seller: '',
     cardName: displayName(card) || card?.name || 'Card',
     setName: '',
-    imageUrl: card?.heroImageUrl || card?.imageUrl || card?.gridImageUrl || '',
+    imageUrl: cardImage(card),
     path: card?.canonicalPath || '',
-    pricePkn: Number(card?.pricePkn) || 0,
+    pricePkn: Number(tilePricePkn(card) || card?.pricePkn) || 0,
   };
 }
 

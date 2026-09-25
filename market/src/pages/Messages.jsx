@@ -179,7 +179,11 @@ function EventCard({ event, busy, onAction }) {
   return (
     <div className={`chat-bubble ${event.mine ? ' mine' : ''}`} aria-label={eventAriaLabel(event)}>
       {event.text ? <p>{event.text}</p> : null}
-      {(event.listings || []).map((row) => <ChatListingTag key={tagKey(row)} row={row} />)}
+      {(event.listings || []).length ? (
+        <span className="chat-tags">
+          {(event.listings || []).map((row) => <ChatListingTag key={tagKey(row)} row={row} />)}
+        </span>
+      ) : null}
       <time>{chatTime(event.createdAt)}</time>
     </div>
   );

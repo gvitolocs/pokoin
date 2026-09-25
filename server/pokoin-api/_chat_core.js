@@ -57,18 +57,25 @@ function unreadFor(conversation = {}, uid) {
   return Number((conversation.unread || {})[String(uid)] || 0);
 }
 
+function cleanImageUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 400 || raw.includes('\\') || raw.includes('..')) return '';
+  if (raw.startsWith('/') && !raw.startsWith('//')) return raw;
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'https:') return url.href;
+  } catch (_) {
+    return '';
+  }
+  return '';
+}
+
 function cleanListing(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const cardName = String(raw.cardName || '').replace(/\s+/g, ' ').trim().slice(0, 120);
   if (!cardName) return null;
   const seller = String(raw.seller || '').trim().toLowerCase();
-  let imageUrl = '';
-  try {
-    const url = new URL(String(raw.imageUrl || ''));
-    if (url.protocol === 'https:') imageUrl = url.href.slice(0, 400);
-  } catch (_) {
-    imageUrl = '';
-  }
+  const imageUrl = cleanImageUrl(raw.imageUrl);
   let path = String(raw.path || '');
   if (!path.startsWith('/') || path.startsWith('//')) path = '';
   const price = Number(raw.pricePkn);
