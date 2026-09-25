@@ -60,11 +60,17 @@ export const MASCOT_GRID = { width: 26, height: 24 };
  * so `image-rendering: pixelated` has no uneven columns. Only when even 1:1
  * would not fit (tiny avatars on 1× screens) it falls back to a smooth
  * downscale of the ×8 source. */
+export function mascotFillLimit(avatarSize) {
+  // Small discs (topbar, lists) let the mascot fill more so a 1:1 sprite
+  // still fits instead of dropping to a blurry downscale.
+  return avatarSize < 48 ? 0.86 : 0.8;
+}
+
 export function mascotRenderSize(avatarSize, devicePixelRatio = 1) {
   const dpr = devicePixelRatio > 0 ? devicePixelRatio : 1;
   const size = Math.max(1, Number(avatarSize) || 0);
-  const target = size * 0.64 * dpr;
-  const limit = size * 0.8 * dpr;
+  const target = size * (size < 48 ? 0.8 : 0.64) * dpr;
+  const limit = size * mascotFillLimit(size) * dpr;
   let scale = Math.max(1, Math.round(target / MASCOT_GRID.width));
   while (scale > 1 && MASCOT_GRID.width * scale > limit) scale -= 1;
   if (MASCOT_GRID.width * scale <= limit) {

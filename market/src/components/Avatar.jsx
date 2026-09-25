@@ -25,11 +25,13 @@ function useDevicePixelRatio(active) {
  * shows the golden Pokoin mascot on the user's pastel. `seed` (uid) keeps
  * the pastel stable; `label` makes it an image for screen readers, without
  * it the avatar is decorative (the surrounding link names it). */
-export default function Avatar({ src, seed = '', name = '', size = 40, silver = false, label = '', className = '' }) {
+/** `variant="chip"` renders the topbar look: dark disc like the other
+ * header chips, the user's pastel as a thin ring. */
+export default function Avatar({ src, seed = '', name = '', size = 40, silver = false, label = '', className = '', variant = '' }) {
   const url = displayableAvatarUrl(src);
   const [failedUrl, setFailedUrl] = useState('');
   const showPhoto = Boolean(url) && failedUrl !== url;
-  const classes = ['pk-avatar', showPhoto ? '' : 'is-mascot', silver ? 'is-silver' : '', className].filter(Boolean).join(' ');
+  const classes = ['pk-avatar', showPhoto ? '' : 'is-mascot', variant === 'chip' ? 'is-chip' : '', silver ? 'is-silver' : '', className].filter(Boolean).join(' ');
   const dpr = useDevicePixelRatio(!showPhoto);
   const mascot = showPhoto ? null : mascotRenderSize(size, dpr);
   return (
