@@ -115,6 +115,15 @@
       ]
     },
     {
+      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery)/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
       "source": "/dashboard",
       "headers": [
         {
@@ -683,6 +692,18 @@
     {
       "source": "/",
       "destination": "/landing.html"
+    },
+    {
+      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery)",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery)/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery)/:path*",
+      "destination": "/market/index.html"
     },
     {
       "source": "/working",

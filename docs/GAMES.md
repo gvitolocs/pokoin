@@ -26,6 +26,8 @@ API calls append `?game=` and send `x-pokoin-game`.
 
 `onepiece.pokoin.com` and `riftbound.pokoin.com` redirect to
 `pokoin.com/one-piece` and `pokoin.com/riftbound`. Do not add new game subdomains.
+`vercel.json` rewrites `/{slug}` and `/{slug}/*` to `/market/index.html`. Without
+that rewrite Vercel returns `NOT_FOUND` before the SPA loads.
 
 Pokemon Milo gallery `id` is that same leftover `ct_id` (manifest
 `"identity": "ct_id"`). Public desk = Milo `id` × 2. Not a TCGplayer product
