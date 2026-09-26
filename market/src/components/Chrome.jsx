@@ -1103,7 +1103,7 @@ export default function Chrome({ children }) {
                             const landscapePrint = artLayout === 'landscape';
                             const bleedPrint = artLayout === 'bleed' || artLayout === 'item';
                             const suggestNumber = clipSuggestCollector(identity.number);
-                            const translation = suggestTranslatedLine(card, group.name, suggestNumber);
+                            const translation = suggestTranslatedLine(card, englishName, suggestNumber);
                             const optionId = `suggest-${card.id}`;
                             const active = activeOption?.optionId === optionId;
                             const thumb = imageSrc(card, 'suggest');

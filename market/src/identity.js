@@ -1,6 +1,8 @@
 import { leftoverCdnId } from './card-id.js';
 
 const GENERIC_RARITY = /^(card|cards|single|singles|product|unknown|pokemon|pokémon)$/i;
+/** Words CardTrader pastes in front of a real collector, or instead of one. */
+const NUMBER_NOISE = /^(cosmos|holo|rare|ultra|secret|illustration|special|full|art|gold|metal|reverse|cracked|ice|non|theme|deck|promo|stamped|english|japanese|korean|chinese|italian|french|german|spanish|portuguese)$/i;
 /** CardTrader `version` / leftover ct_id when the blueprint omitted n/m. */
 const CATALOG_ID_NUMBER = /^\d{4,}$/;
 const IMAGE_COLLECTOR = /(?:^|-)(\d{1,4}[A-Za-z]?)-(\d{2,4})(?:[-.]|$)/;
@@ -55,9 +57,25 @@ export function translatedName(card = {}, groupName = '') {
   return '';
 }
 
-/** English identity for a suggest row. Group name wins so a localized `card.name` cannot replace Cynthia with Camilla. */
+/**
+ * English identity for a suggest row.
+ * The group title stays when `card.name` is that card's translation (Cynthia → Camilla).
+ * A different card filed under the group keeps its own name (Raichu is not Charizard ex).
+ */
 export function suggestCardName(card = {}, groupName = '') {
-  return sanitizeCardName(groupName) || displayName(card);
+  const own = displayName(card);
+  const group = sanitizeCardName(groupName);
+  if (!group) {
+    return own;
+  }
+  if (!own || own.toLowerCase() === group.toLowerCase()) {
+    return group;
+  }
+  const localized = sanitizeCardName(card.localized_name || card.localizedName || '');
+  if (localized && localized.toLowerCase() === own.toLowerCase()) {
+    return group;
+  }
+  return own;
 }
 
 /** CardTrader second line: `Gible Di Camilla - 109/217`. */
@@ -105,6 +123,18 @@ export function printingIdentity(card = {}) {
 
   if (GENERIC_RARITY.test(rarity)) {
     rarity = '';
+  }
+
+  // "Cosmos Holo 24" is collector 24. A bare language ("English") is not a number.
+  // "Mewtwo Stamp" stays — it is the printed collector, not rarity noise.
+  if (number && !isCollectorToken(number)) {
+    const parts = number.split(/\s+/).filter(Boolean);
+    const noise = (word) => NUMBER_NOISE.test(word.replace(/[^A-Za-z]/g, ''));
+    if (parts.length > 1 && parts.slice(0, -1).every(noise) && isCollectorToken(parts[parts.length - 1])) {
+      number = parts[parts.length - 1];
+    } else if (parts.length === 1 && noise(parts[0])) {
+      number = '';
+    }
   }
 
   const publicId = String(card.id || card.card_id || '');

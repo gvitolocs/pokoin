@@ -294,6 +294,21 @@ test('title language keeps English names; suggest subtitle is the translation', 
   assert.equal(vintedSearchText(card), 'Ace Trainer 1');
 });
 
+test('a different card keeps its own name when it was filed under another group', () => {
+  assert.equal(suggestCardName({ name: 'Raichu', number: 'Rare | 067/236' }, 'Charizard ex'), 'Raichu');
+  assert.equal(suggestCardName({ name: 'Pikachu VMAX', number: 'SWSH286' }, 'Charizard ex'), 'Pikachu VMAX');
+  assert.equal(suggestCardName({ name: 'Ninetales' }, 'Charizard ex'), 'Ninetales');
+  assert.equal(suggestTranslatedLine({ name: 'Raichu' }, 'Raichu', '067/236'), '');
+});
+
+test('rarity and language words are not the collector number', () => {
+  assert.equal(printingIdentity({ number: 'Cosmos Holo 24', rarity: 'Card' }).number, '24');
+  assert.equal(printingIdentity({ number: 'English', rarity: 'Card' }).number, '');
+  assert.equal(printingIdentity({ number: 'SWSH286', rarity: 'Card' }).number, 'SWSH286');
+  assert.equal(printingIdentity({ number: 'Rare | 067/236', rarity: 'Card' }).number, '067/236');
+  assert.equal(clipSuggestCollector(printingIdentity({ number: 'Cosmos Holo 24' }).number), '24');
+});
+
 test('suggest uses the English group name and CardTrader translation - number line', () => {
   const card = {
     name: 'Camilla',
