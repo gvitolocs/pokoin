@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { setSlug } from '../api.js';
 import { flagSrc, printFlagFromNationality } from '../locale.js';
+import { bundleReference, writeListingDrag } from '../chat-listing.js';
 import { expansionCode, expansionLogoSrc } from '../set-logos.js';
 import ExpansionMark from './ExpansionMark.jsx';
 
@@ -19,7 +20,22 @@ function SetGuideLogo({ row }) {
           />
         </span>
       ) : (
-        <img src={logo} alt="" onError={() => setWordmarkDead(true)} />
+        <img
+          src={logo}
+          alt=""
+          draggable
+          onDragStart={(event) => {
+            const slug = row.slug || '';
+            writeListingDrag(event, bundleReference({
+              kind: 'expansion',
+              slug,
+              name: row.name,
+              imageUrl: logo,
+              path: slug ? `/marketplace/sets/${slug}` : '',
+            }));
+          }}
+          onError={() => setWordmarkDead(true)}
+        />
       )}
     </div>
   );

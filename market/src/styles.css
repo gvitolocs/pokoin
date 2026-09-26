@@ -3778,6 +3778,14 @@ html.is-shop-marquee * { user-select: none; }
   margin-bottom: 1.25rem;
 }
 
+.set-wordmark {
+  display: block;
+  width: 9rem;
+  height: 3.2rem;
+  object-fit: contain;
+  cursor: grab;
+}
+
 .set-sym-wrap {
   width: 3rem;
   height: 3rem;

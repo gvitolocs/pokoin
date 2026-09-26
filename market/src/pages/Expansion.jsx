@@ -16,7 +16,8 @@ import {
   nextSetPreviewCount,
   setDeskSkeletonCount,
 } from '../set-desk-preview.js';
-import { expansionSymbolSrc, eraHref, tcgEra } from '../set-logos.js';
+import { bundleReference, writeListingDrag } from '../chat-listing.js';
+import { expansionLogoSrc, expansionSymbolSrc, eraHref, tcgEra } from '../set-logos.js';
 import { setSeoTitle } from '../seo.js';
 import { rememberPageView, restoredPageView } from '../scroll-restore.js';
 
@@ -220,6 +221,7 @@ export default function Expansion() {
   const loading = !error && !tilesReady;
   const cards = payload?.cards || [];
   const symbol = expansionSymbolSrc(payload?.expansion || { slug });
+  const wordmark = expansionLogoSrc(payload?.expansion || { slug, name });
   const printFlag = printFlagFromNationality(payload?.expansion?.nationality);
   const fallbackLang = searchPrintLang({ nationality: payload?.expansion?.nationality });
   const deskCards = useMemo(() => cards.filter(isSetDeskCard), [cards]);
@@ -339,6 +341,21 @@ export default function Expansion() {
         lede={lede}
         printFlag={printFlag}
       >
+        {wordmark ? (
+          <img
+            className="set-wordmark"
+            src={wordmark}
+            alt=""
+            draggable
+            onDragStart={(event) => writeListingDrag(event, bundleReference({
+              kind: 'expansion',
+              slug,
+              name,
+              imageUrl: wordmark,
+              path: `/marketplace/sets/${slug}`,
+            }))}
+          />
+        ) : null}
         {symbol ? (
           <span className="set-shortcut is-on set-sym-wrap" aria-hidden="true">
             <CardArt className="set-sym set-shortcut-sym" src={symbol} alt="" fallback="hide" />

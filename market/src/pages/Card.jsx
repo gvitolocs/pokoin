@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   artistHref,
+  artistSlug,
+  fetchArtistSummaries,
   versionsHref,
   cardHref,
   cardtraderPublicUrl,
@@ -45,7 +47,8 @@ import {
   vintedHref,
 } from '../api.js';
 import { getChatDock } from '../chat-dock-store.js';
-import { referenceForPeer, writeListingDrag } from '../chat-listing.js';
+import { bundleReference, preloadDragImage, referenceForPeer, writeListingDrag } from '../chat-listing.js';
+import { expansionLogoSrc } from '../set-logos.js';
 import {
   activeSoldIndex,
   formatSoldAxisTick,
@@ -1622,6 +1625,30 @@ export default function Card() {
     }
   }
 
+  const [artistCover, setArtistCover] = useState('');
+  useEffect(() => {
+    const card = payload?.card;
+    if (!card) return undefined;
+    const setTitle = card.set || card.setName || card.expansion_name || '';
+    const logo = expansionLogoSrc({ slug: setSlug(setTitle), name: setTitle });
+    if (logo) preloadDragImage(logo);
+    const illustrator = card.artist || card.illustrator || '';
+    const slug = artistSlug(illustrator);
+    if (!slug) {
+      setArtistCover('');
+      return undefined;
+    }
+    let live = true;
+    fetchArtistSummaries({ limit: 1000 }).then((data) => {
+      const row = (data?.artists || []).find((item) => item.slug === slug);
+      const src = row?.imageUrl || '';
+      if (!live) return;
+      setArtistCover(src);
+      if (src) preloadDragImage(src);
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [payload?.card]);
+
   if (error && !payload?.card) {
     return (
       <div className="status error">
@@ -1828,7 +1855,18 @@ export default function Card() {
         <div className="asset-sub-row">
           <p className="asset-sub">
             {setName ? (
-              <Link to={setHref} onClick={() => track(Action.clickSet, card)}>{setName}</Link>
+              <Link
+                to={setHref}
+                draggable
+                onClick={() => track(Action.clickSet, card)}
+                onDragStart={(event) => writeListingDrag(event, bundleReference({
+                  kind: 'expansion',
+                  slug: setSlug(setName),
+                  name: setName,
+                  imageUrl: expansionLogoSrc({ slug: setSlug(setName), name: setName }),
+                  path: setHref,
+                }))}
+              >{setName}</Link>
             ) : null}
             {collector ? (
               <>
@@ -1840,7 +1878,18 @@ export default function Card() {
               <>
                 {' · '}
                 {artistPath ? (
-                  <Link to={artistPath} onClick={() => track(Action.clickArtist, card)}>{artist}</Link>
+                  <Link
+                    to={artistPath}
+                    draggable
+                    onClick={() => track(Action.clickArtist, card)}
+                    onDragStart={(event) => writeListingDrag(event, bundleReference({
+                      kind: 'artist',
+                      slug: artistSlug(artist),
+                      name: artist,
+                      imageUrl: artistCover,
+                      path: artistPath,
+                    }))}
+                  >{artist}</Link>
                 ) : (
                   <span>{artist}</span>
                 )}

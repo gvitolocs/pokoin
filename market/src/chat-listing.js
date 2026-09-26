@@ -274,7 +274,47 @@ function markCardDragging() {
   }, { once: true, capture: true });
 }
 
-function paintDragGhost(image) {
+const readyImages = new Map();
+
+/** Decode a wordmark or artist cover before the drag, so a text link can still show it. */
+export function preloadDragImage(url) {
+  const src = String(url || '').trim();
+  if (!src || readyImages.has(src) || typeof Image === 'undefined') return;
+  const img = new Image();
+  img.decoding = 'async';
+  img.src = src;
+  readyImages.set(src, img);
+}
+
+function readyDragImage(url) {
+  const img = readyImages.get(String(url || '').trim());
+  return img?.complete && img.naturalWidth ? img : null;
+}
+
+export function bundleReference({ kind, slug, name, imageUrl, path }) {
+  const cleanKind = kind === 'artist' ? 'artist' : 'expansion';
+  const id = String(slug || '').trim();
+  return {
+    kind: cleanKind,
+    listingId: `bundle:${cleanKind}:${id}`.slice(0, 80),
+    cardId: '',
+    sellerUid: '',
+    seller: '',
+    cardName: String(name || id || (cleanKind === 'artist' ? 'Artist' : 'Set')),
+    setName: cleanKind === 'expansion' ? String(name || '') : '',
+    imageUrl: String(imageUrl || ''),
+    path: String(path || ''),
+    pricePkn: 0,
+  };
+}
+
+export function bundleOf(row) {
+  const match = String(row?.listingId || '').match(/^bundle:(artist|expansion):(.+)$/);
+  if (!match) return null;
+  return { kind: match[1], slug: match[2] };
+}
+
+function paintDragGhost(image, fit = 'cover') {
   if (typeof document === 'undefined') return null;
   if (!dragGhost) {
     dragGhost = document.createElement('canvas');
@@ -302,7 +342,9 @@ function paintDragGhost(image) {
   ctx.fillRect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
   if (image?.naturalWidth) {
     try {
-      const scale = Math.max(CARD_DRAG_WIDTH / image.naturalWidth, CARD_DRAG_HEIGHT / image.naturalHeight);
+      const scale = fit === 'contain'
+        ? Math.min(CARD_DRAG_WIDTH / image.naturalWidth, CARD_DRAG_HEIGHT / image.naturalHeight)
+        : Math.max(CARD_DRAG_WIDTH / image.naturalWidth, CARD_DRAG_HEIGHT / image.naturalHeight);
       const dw = image.naturalWidth * scale;
       const dh = image.naturalHeight * scale;
       ctx.drawImage(image, (CARD_DRAG_WIDTH - dw) / 2, (CARD_DRAG_HEIGHT - dh) / 2, dw, dh);
@@ -319,8 +361,8 @@ export function writeListingDrag(event, reference) {
   if (!event?.dataTransfer || !reference?.cardName) return;
   event.dataTransfer.setData(LISTING_DRAG_TYPE, JSON.stringify(reference));
   event.dataTransfer.effectAllowed = 'copy';
-  const image = dragSourceImage(event);
-  const ghost = paintDragGhost(image);
+  const image = dragSourceImage(event) || readyDragImage(reference.imageUrl);
+  const ghost = paintDragGhost(image, reference.kind === 'expansion' ? 'contain' : 'cover');
   try {
     if (ghost) {
       event.dataTransfer.setDragImage(ghost, CARD_DRAG_WIDTH / 2, CARD_DRAG_HEIGHT / 2);

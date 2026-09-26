@@ -1549,6 +1549,7 @@
   width: auto;
   height: auto;
   object-fit: contain;
+  cursor: grab;
 }
 
 .set-guide-logo.is-mark .set-shortcut {

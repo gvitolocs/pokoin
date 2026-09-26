@@ -1,7 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendChatTag, CARD_DRAG_HEIGHT, CARD_DRAG_WIDTH, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listingReference, looseCardReference, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned, writeListingDrag } from './chat-listing.js';
+import { appendChatTag, bundleOf, bundleReference, CARD_DRAG_HEIGHT, CARD_DRAG_WIDTH, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listingReference, looseCardReference, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned, writeListingDrag } from './chat-listing.js';
 import { readFileSync } from 'node:fs';
+
+test('an artist or expansion drag keeps the saved cover and the slug', () => {
+  const artist = bundleReference({
+    kind: 'artist',
+    slug: 'ken-sugimori',
+    name: 'Ken Sugimori',
+    imageUrl: 'https://cdn.pokoin.com/pikachu.jpg',
+    path: '/marketplace/en/artists/ken-sugimori',
+  });
+  assert.equal(artist.kind, 'artist');
+  assert.equal(artist.cardName, 'Ken Sugimori');
+  assert.equal(bundleOf(artist).slug, 'ken-sugimori');
+  const set = bundleReference({
+    kind: 'expansion',
+    slug: 'black-bolt',
+    name: 'Black Bolt',
+    imageUrl: '/card-images/expansions/logos/black-bolt.png',
+    path: '/marketplace/sets/black-bolt',
+  });
+  assert.equal(bundleOf(set).kind, 'expansion');
+  assert.equal(set.imageUrl, '/card-images/expansions/logos/black-bolt.png');
+  assert.equal(appendChatTag([], set)[0].listingId, 'bundle:expansion:black-bolt');
+});
 
 test('a listing chat follows the Firebase user id, not the stored email', () => {
   const row = listingReference({

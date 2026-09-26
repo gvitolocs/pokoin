@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 const CART_KEY = 'pokoin.cartItems';
+const CART_MAX = 400;
 
 function readCart() {
   try {
@@ -12,7 +13,7 @@ function readCart() {
 }
 
 function writeCart(items) {
-  localStorage.setItem(CART_KEY, JSON.stringify(items.slice(0, 40)));
+  localStorage.setItem(CART_KEY, JSON.stringify(items.slice(0, CART_MAX)));
 }
 
 const CartContext = createContext({
@@ -76,7 +77,7 @@ export function CartProvider({ children }) {
               row.id === next.id ? { ...row, qty: Math.min(99, (Number(row.qty) || 1) + (Number(next.qty) || 1)) } : row
             ));
           }
-          return [next, ...current].slice(0, 40);
+          return [next, ...current].slice(0, CART_MAX);
         });
       },
       setQty(id, qty) {

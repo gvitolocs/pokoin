@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { fetchCard, fetchListings, imageSrc } from '../api.js';
 import { fetchCardTiles } from '../lists.js';
 import {
+  bundleOf,
   cardIdOf,
   chatImageSources,
   isSellerCard,
@@ -13,6 +14,7 @@ import {
   tagKey,
   writeCardOwned,
 } from '../chat-listing.js';
+import ChatBundle from './ChatBundle.jsx';
 import ThumbZoom from './ThumbZoom.jsx';
 
 function unique(list) {
@@ -70,7 +72,12 @@ function CardQuantity({ row, draft, onQty }) {
   );
 }
 
-export default function ChatListingTag({ row, onRemove, onQty, peer, me }) {
+export default function ChatListingTag(props) {
+  if (bundleOf(props.row)) return <ChatBundle row={props.row} peer={props.peer} onRemove={props.onRemove} />;
+  return <CardTag {...props} />;
+}
+
+function CardTag({ row, onRemove, onQty, peer, me }) {
   const label = row.cardName || 'Card';
   const id = cardIdOf(row);
   const identity = `${row.imageUrl || ''}|${id}|${row.sellerUid || ''}|${row.seller || ''}`;
