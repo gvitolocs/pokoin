@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { fetchGradedCards, fetchSearch } from '../api.js';
+import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
@@ -128,13 +129,13 @@ export default function Products() {
           <Link className="btn" to="/marketplace">Shop</Link>
         </EmptyDesk>
       ) : (
-        <div className="grid">
+        <CardSelectGrid className="grid" cards={loading ? [] : cards}>
           {loading
             ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} />)
             : cards.map((card, index) => (
                 <CardTile key={card.id} card={card} rank={index} />
               ))}
-        </div>
+        </CardSelectGrid>
       )}
       {hasMore ? <button className="more" type="button" onClick={loadMore}>Load more</button> : null}
     </div>

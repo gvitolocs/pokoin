@@ -165,6 +165,8 @@ test('Dashboard history panel keeps chart frame; never draws a real fake series'
   assert.match(viewSrc, /hasLine \? \([\s\S]*<polyline/);
   assert.match(viewSrc, /seller-history-point/);
   assert.match(viewSrc, /historyPlotX/);
+  assert.match(viewSrc, /projectCardValue/);
+  assert.match(viewSrc, /seller-history-forecast/);
   assert.doesNotMatch(viewSrc, /CHART_W \* 0\.85/);
   assert.doesNotMatch(viewSrc, /<circle[\s\S]*seller-history-point/);
   assert.match(cssSrc, /\.seller-history-point \{[^}]*border-radius:\s*50%/);

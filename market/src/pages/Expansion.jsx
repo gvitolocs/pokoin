@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigationType, useParams } from 'react-router-do
 import { fetchExpansion, fetchExpansionCards, peekExpansion, prettySlug } from '../api.js';
 import { Action, track } from '../track.js';
 import { printFlagFromNationality } from '../locale.js';
+import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import CardArt from '../components/CardArt.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
@@ -484,7 +485,7 @@ export default function Expansion() {
           <button className="btn" type="button" onClick={clearFilters}>Clear filters</button>
         </EmptyDesk>
       ) : (
-        <div className={view === 'list' ? 'grid is-list' : 'grid'}>
+        <CardSelectGrid className={view === 'list' ? 'grid is-list' : 'grid'} cards={loading ? [] : previewCards}>
           {loading
             ? Array.from({ length: walkSkeletons }, (_, index) => (
                 <SkeletonTile key={`walk-${index}`} layout={view} />
@@ -505,7 +506,7 @@ export default function Expansion() {
                 ))}
               </>
             )}
-        </div>
+        </CardSelectGrid>
       )}
       {payload?.hasMore && !query.trim() && !loading ? (
         <button className="more" type="button" onClick={loadMore}>Load more</button>

@@ -60,15 +60,44 @@ export function cardReference(card) {
   return {
     kind: 'card',
     listingId: '',
-    cardId: String(card?.id || ''),
+    cardId: String(card?.id || card?.cardId || ''),
     sellerUid: '',
     seller: '',
-    cardName: displayName(card) || card?.name || 'Card',
+    cardName: displayName(card) || card?.name || card?.cardName || 'Card',
     setName: '',
     imageUrl: cardImage(card),
-    path: card?.canonicalPath || '',
+    path: card?.canonicalPath || card?.path || '',
     pricePkn: Number(tilePricePkn(card) || card?.pricePkn) || 0,
   };
+}
+
+/** One drag for a Windows multi-select. A single card stays a normal card drag. */
+export function cardsReference(cards) {
+  const list = (cards || []).filter((card) => card?.id || card?.cardId).slice(0, 80);
+  if (list.length === 1) return cardReference(list[0]);
+  if (!list.length) return null;
+  const first = cardReference(list[0]);
+  return {
+    kind: 'cards',
+    listingId: '',
+    cardId: first.cardId,
+    sellerUid: '',
+    seller: '',
+    cardName: `${list.length} cards`,
+    setName: '',
+    imageUrl: first.imageUrl,
+    path: '',
+    pricePkn: 0,
+    cards: list.map((card) => cardReference(card)),
+  };
+}
+
+export function dragCardsOf(reference) {
+  if (!reference) return [];
+  if (reference.kind === 'cards' && Array.isArray(reference.cards)) {
+    return reference.cards.filter((row) => row?.cardName);
+  }
+  return [reference];
 }
 
 export function tagKey(row) {

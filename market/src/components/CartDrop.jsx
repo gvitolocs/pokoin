@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchArtist, fetchExpansionCards, fetchListings } from '../api.js';
+import { addCatalogCards } from '../cart-add.js';
 import { cartDropThumb } from '../cart-drop-size.js';
 import { pickCartOffer } from '../cart-offer.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
@@ -35,6 +36,10 @@ export default function CartDrop({ onAdd }) {
         setOver(false);
         const reference = readListingDrag(event);
         if (!reference) return;
+        if (reference.kind === 'cards') {
+          void addCatalogCards(reference.cards, onAdd);
+          return;
+        }
         if (bundleOf(reference)) {
           void addBundle(reference, onAdd);
           return;

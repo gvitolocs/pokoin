@@ -15,6 +15,7 @@ import {
 import { useSearchLang, usePrintLang } from '../locale.js';
 import { cardsForPrint, loadSearchPrintPage } from '../search-print.js';
 import { Action, track } from '../track.js';
+import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk } from '../components/Desk.jsx';
@@ -477,13 +478,13 @@ export default function Search() {
           <button className="btn" type="button" onClick={clearFilters}>Clear filters</button>
         </EmptyDesk>
       ) : (
-        <div className="grid">
+        <CardSelectGrid className="grid" cards={loading ? [] : shown}>
           {loading
             ? Array.from({ length: 24 }, (_, index) => <SkeletonTile key={index} />)
             : shown.map((card, index) => (
                 <CardTile key={card.id} card={card} rank={index} />
               ))}
-        </div>
+        </CardSelectGrid>
       )}
       {hasMore && tab !== 'users' ? (
         <button className="more" type="button" onClick={loadMore}>Load more</button>

@@ -1005,7 +1005,8 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 }
 
 .cart-drop {
-  width: 32rem;
+  width: 18rem;
+  min-height: 12.5rem;
   max-height: min(70vh, 36rem);
   overflow: auto;
 }
@@ -1680,6 +1681,10 @@ h1, h2 { margin: 0 0 0.85rem; }
   overflow: visible;
 }
 
+.rail-scroll .carousel-track {
+  overflow: visible;
+}
+
 .carousel-track::-webkit-scrollbar { display: none; }
 
 .rail-next,
@@ -1748,6 +1753,53 @@ h1, h2 { margin: 0 0 0.85rem; }
 .tile:hover {
   text-decoration: none;
   z-index: 4;
+}
+
+.tile.is-selected {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.card-select-host {
+  display: contents;
+}
+
+.card-select-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.65rem;
+}
+
+.card-select-bar strong {
+  margin-right: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.card-select-bar button {
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: #14121a;
+  color: var(--text);
+  padding: 0.28rem 0.7rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.card-select-bar button:hover {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+
+.card-select-band {
+  position: fixed;
+  z-index: 80;
+  border: 1px solid var(--yellow);
+  background: rgb(255 211 61 / 0.16);
+  pointer-events: none;
 }
 
 .hero-art,

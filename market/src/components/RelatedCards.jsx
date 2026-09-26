@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { overlayCatalogTilePrices } from '../api.js';
+import CardSelectGrid from './CardSelectGrid.jsx';
 import CardTile from './CardTile.jsx';
 
 export default function RelatedCards({ card, related = [], speciesName, speciesHref }) {
@@ -38,11 +39,11 @@ export default function RelatedCards({ card, related = [], speciesName, speciesH
           <Link to={speciesHref}>All {speciesName}</Link>
         ) : null}
       </header>
-      <div className="grid related-grid">
+      <CardSelectGrid className="grid related-grid" cards={priced.slice(0, 12)}>
         {priced.slice(0, 12).map((row, index) => (
           <CardTile key={row.id} card={row} rank={index} />
         ))}
-      </div>
+      </CardSelectGrid>
     </section>
   );
 }

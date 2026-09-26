@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { clearWatchlist, hydrateWatchlist } from '../api.js';
+import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
@@ -47,11 +48,11 @@ export default function Watchlist() {
           <Link className="btn" to="/marketplace">Browse marketplace</Link>
         </EmptyDesk>
       ) : null}
-      <div className="grid">
+      <CardSelectGrid className="grid" cards={cards || []}>
         {(cards || []).map((card, index) => (
           <CardTile key={card.id} card={card} rank={index} />
         ))}
-      </div>
+      </CardSelectGrid>
     </div>
   );
 }

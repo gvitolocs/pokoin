@@ -316,7 +316,7 @@ export function buildCollectionHistory({
   return points.map((row) => normalizeHistoryDay(row)).filter(Boolean);
 }
 
-export function formatHistoryTip(day, { projection = false } = {}) {
+export function formatHistoryTip(day, { projection = false, forecast = null } = {}) {
   if (!day) return null;
   const assets = day.assets || {};
   const rows = [
@@ -325,7 +325,11 @@ export function formatHistoryTip(day, { projection = false } = {}) {
   if (assets.cardsValuePkn != null) {
     rows.push({ label: 'Cards', value: `${formatPknNumber(assets.cardsValuePkn)} PKN` });
   }
-  if (projection) rows.push({ label: 'Projection', value: 'Rest of today' });
+  if (projection && forecast?.value != null) {
+    rows.push({ label: 'Projection', value: `${formatPknNumber(forecast.value)} PKN` });
+  } else if (projection) {
+    rows.push({ label: 'Projection', value: 'Rest of today' });
+  }
   return {
     dateLabel: formatDayLabel(day.date),
     totalLabel: `${formatPknNumber(day.totalPkn)} PKN`,
@@ -396,8 +400,9 @@ export function sliceHistorySeries(series, { from = '', to = '' } = {}) {
  * stretch the scale back to zero — that hides the dump's day-to-day move.
  * A series that actually starts near zero still includes zero.
  */
-export function historyAxis(points) {
+export function historyAxis(points, extraTotals = []) {
   const rows = points || [];
+  const extras = (extraTotals || []).map((value) => asNonNeg(value)).filter((value) => value > 0);
   const totals = rows.map((day) => asNonNeg(day?.totalPkn));
   if (!totals.length) {
     const yMax = niceScaleMax(0);
@@ -405,7 +410,8 @@ export function historyAxis(points) {
   }
   const cardTotals = rows
     .filter((day) => day?.assets?.cardsKnown)
-    .map((day) => asNonNeg(day?.totalPkn));
+    .map((day) => asNonNeg(day?.totalPkn))
+    .concat(extras);
   const floor = Math.max(0, ...totals.filter((_, index) => !rows[index]?.assets?.cardsKnown), 0);
   const cardMin = cardTotals.length ? Math.min(...cardTotals) : 0;
   const cardMax = cardTotals.length ? Math.max(...cardTotals) : 0;
@@ -413,7 +419,7 @@ export function historyAxis(points) {
     && cardMax > cardMin
     && cardMin > Math.max(floor, 1) * 20
     && (cardMax - cardMin) < cardMin * 0.25;
-  const values = piled ? cardTotals : totals;
+  const values = piled ? cardTotals : totals.concat(extras);
   const min = Math.min(...values);
   const max = Math.max(...values);
   if (!piled) {
@@ -472,6 +478,37 @@ export function formatHistoryDelta(change) {
   const pctText = formatPknNumber(pctAbs, { maximumFractionDigits: 1 });
   const pctSigned = change.pct > 0 ? `+${pctText}%` : (change.pct < 0 ? `-${pctText}%` : `${pctText}%`);
   return `${signed} (${pctSigned}) ${change.phrase}`;
+}
+
+/**
+ * One step ahead of the sold-day totals, the same idea as a stock regression
+ * trend / forecast overlay. Uses the last priced days only. A wallet-only
+ * series has nothing to project.
+ */
+export function projectCardValue(points) {
+  const priced = (points || []).filter((day) => (
+    day?.assets?.cardsKnown === true && Number(day.totalPkn) > 0
+  ));
+  if (priced.length < 2) return null;
+  const sample = priced.slice(-8);
+  const n = sample.length;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXX = 0;
+  let sumXY = 0;
+  sample.forEach((day, index) => {
+    const y = Number(day.totalPkn) || 0;
+    sumX += index;
+    sumY += y;
+    sumXX += index * index;
+    sumXY += index * y;
+  });
+  const denom = n * sumXX - sumX * sumX;
+  if (!denom) return null;
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  const value = Math.max(0, Math.round((intercept + slope * n) * 100) / 100);
+  return { value, slope: Math.round(slope * 100) / 100, days: n };
 }
 
 /** Hold the last value, then jump vertically on the day it changes. */

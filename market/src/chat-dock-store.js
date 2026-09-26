@@ -1,4 +1,4 @@
-import { appendChatTag, chatQty, explicitStock, sellerUserId, tagKey } from './chat-listing.js';
+import { appendChatTag, chatQty, dragCardsOf, explicitStock, sellerUserId, tagKey } from './chat-listing.js';
 
 const DRAFT_KEY = 'pokoin.chatDrafts';
 const DROP_HINT_KEY = 'pokoin.chatDropHint';
@@ -116,17 +116,40 @@ export function endCardDrag() {
   closeChatDock();
 }
 
+let stagedCards = [];
+
+export function stageChatCards(references) {
+  const rows = (references || []).filter((row) => row?.cardName);
+  if (!rows.length) return false;
+  if (snapshot.open && snapshot.view === 'thread' && snapshot.peer) {
+    let tags = snapshot.tags;
+    for (const row of rows) tags = appendChatTag(tags, row);
+    snapshot = { ...snapshot, tags };
+    remember(snapshot.peer, snapshot);
+    emit();
+    return true;
+  }
+  stagedCards = rows;
+  openChatList();
+  return true;
+}
+
 export function openThread(peer, label = '', text) {
   const uid = sellerUserId(peer) || String(peer || '').trim();
   if (!uid) return false;
   persistCurrent(text);
   const draft = readDrafts()[uid] || {};
+  let tags = Array.isArray(draft.tags) ? draft.tags : [];
+  if (stagedCards.length) {
+    for (const row of stagedCards) tags = appendChatTag(tags, row);
+    stagedCards = [];
+  }
   snapshot = {
     open: true,
     view: 'thread',
     peer: uid,
     peerLabel: label || draft.label || 'Seller',
-    tags: Array.isArray(draft.tags) ? draft.tags : [],
+    tags,
     text: draft.text || '',
   };
   emit();
@@ -135,11 +158,13 @@ export function openThread(peer, label = '', text) {
 
 export function dropOnConversation(peer, label, reference) {
   const uid = sellerUserId(peer) || String(peer || '').trim();
-  if (!uid || !reference?.cardName) return false;
+  const rows = dragCardsOf(reference);
+  if (!uid || !rows.length) return false;
   markChatDrop();
   persistCurrent();
   const prior = readDrafts()[uid] || {};
-  const tags = appendChatTag(prior.tags || [], reference);
+  let tags = prior.tags || [];
+  for (const row of rows) tags = appendChatTag(tags, row);
   remember(uid, { tags, text: prior.text || '', label: label || prior.label || '' });
   snapshot = {
     open: true,
@@ -169,7 +194,9 @@ export function addChatTag(reference, text) {
   }
   if (text !== undefined) snapshot = { ...snapshot, text };
   markChatDrop();
-  snapshot = { ...snapshot, tags: appendChatTag(snapshot.tags, reference) };
+  let tags = snapshot.tags;
+  for (const row of dragCardsOf(reference)) tags = appendChatTag(tags, row);
+  snapshot = { ...snapshot, tags };
   remember(snapshot.peer, snapshot);
   emit();
   return true;
@@ -211,6 +238,7 @@ export function removeChatTag(key) {
 }
 
 export function closeChatDock(text) {
+  stagedCards = [];
   if (text !== undefined) snapshot = { ...snapshot, text };
   persistCurrent();
   snapshot = { ...snapshot, open: false, view: 'list' };

@@ -1169,18 +1169,18 @@ export default function Chrome({ children }) {
           </form>
           <nav className="nav icon-nav" aria-label="Marketplace">
             <NavHover id="market" pop={navPop} setPop={setNavPop} preview={<MarketPreview />}>
-              <AppLink to="/marketplace" title="Marketplace" aria-label="Marketplace">
+              <AppLink to="/marketplace" aria-label="Marketplace">
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={ICO.storefront} /></svg>
               </AppLink>
             </NavHover>
             <NavHover id="messages" pop={navPop} setPop={setNavPop} preview={<MessagesPreview />}>
-              <AppLink className="messages-link" to={APP.messages} title="Messages" aria-label={messagesAriaLabel}>
+              <AppLink className="messages-link" to={APP.messages} aria-label={messagesAriaLabel}>
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-5 4V6a2 2 0 0 1 2-2Zm2 5v2h12V9H6Zm0 4v2h8v-2H6Z" /></svg>
                 {messagesUnread > 0 ? <span className="messages-unread-dot" aria-hidden="true" /> : null}
               </AppLink>
             </NavHover>
             <NavHover id="dashboard" pop={navPop} setPop={setNavPop} preview={<DashboardPreview />}>
-              <AppLink to={DASHBOARD_HOME} title="Dashboard" aria-label="Dashboard">
+              <AppLink to={DASHBOARD_HOME} aria-label="Dashboard">
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={ICO.dashboard} /></svg>
               </AppLink>
             </NavHover>
@@ -1207,7 +1207,7 @@ export default function Chrome({ children }) {
               onMouseEnter={() => setNavPop('cart')}
               onMouseLeave={() => setNavPop((cur) => (cur === 'cart' ? '' : cur))}
             >
-              <AppLink className="cart-chip" to="/cart" title="Cart" aria-label={`Cart, ${count} items`}>
+              <AppLink className="cart-chip" to="/cart" aria-label={`Cart, ${count} items`}>
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0 0 20 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z" /></svg>
                 <em>{count}</em>
               </AppLink>

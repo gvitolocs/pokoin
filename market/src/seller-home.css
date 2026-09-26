@@ -278,6 +278,14 @@
   fill: url(#collection-history-hatch);
 }
 
+.seller-history-grid .seller-history-forecast {
+  stroke: var(--yellow);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
 .seller-history-grid .seller-history-rule {
   stroke: rgb(255 255 255 / 0.08);
   stroke-width: 1;

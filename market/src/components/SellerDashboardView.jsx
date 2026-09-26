@@ -19,6 +19,7 @@ import {
   historyPointerDay,
   historyWindowChange,
   historyWindowSplit,
+  projectCardValue,
   sliceHistorySeries,
   stepHistoryPoints,
 } from '../portfolio-history.js';
@@ -97,7 +98,8 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
   const hasLine = points.length >= 2;
   const hasPoint = points.length === 1;
   const hasData = points.length > 0;
-  const axis = historyAxis(points);
+  const forecast = historyWindowSplit(points) < 1 ? projectCardValue(points) : null;
+  const axis = historyAxis(points, forecast ? [forecast.value] : []);
   const change = historyWindowChange(points, custom ? 'custom' : presetId);
   const split = historyWindowSplit(points);
   const withYear = points.length > 1
@@ -144,12 +146,21 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
     const day = points[0];
     endDot = { x: xOf(day.date), y: yOf(day.totalPkn, day), day };
   }
-  const projection = split < 1 && endDot
-    ? `${endDot.x.toFixed(1)},${endDot.y.toFixed(1)} ${CHART_W},${endDot.y.toFixed(1)} ${CHART_W},${CHART_H} ${endDot.x.toFixed(1)},${CHART_H}`
+  const forecastY = endDot
+    ? (forecast ? yOf(forecast.value, { assets: { cardsKnown: true } }) : endDot.y)
+    : null;
+  const projection = endDot && forecastY != null && split < 1
+    ? `${endDot.x.toFixed(1)},${endDot.y.toFixed(1)} ${CHART_W},${forecastY.toFixed(1)} ${CHART_W},${CHART_H} ${endDot.x.toFixed(1)},${CHART_H}`
+    : '';
+  const forecastLine = endDot && forecast
+    ? `${endDot.x.toFixed(1)},${endDot.y.toFixed(1)} ${CHART_W},${forecastY.toFixed(1)}`
     : '';
 
   const tipDay = hover?.day || null;
-  const tip = formatHistoryTip(tipDay, { projection: Boolean(hover?.projection) });
+  const tip = formatHistoryTip(tipDay, {
+    projection: Boolean(hover?.projection),
+    forecast: hover?.projection ? forecast : null,
+  });
   const tipLeftPct = hover?.xPct
     ?? (endDot ? (endDot.x / CHART_W) * 100 : 50);
 
@@ -285,6 +296,9 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
                 />
               ))}
               {projection ? <polygon className="seller-history-projection" points={projection} /> : null}
+              {forecastLine ? (
+                <polyline className="seller-history-forecast" points={forecastLine} fill="none" />
+              ) : null}
               {hasLine ? (
                 <>
                   <polygon className="seller-history-fill" points={area} />

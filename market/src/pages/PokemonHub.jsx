@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { fetchExactNameCards } from '../api.js';
+import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
@@ -127,13 +128,13 @@ export default function PokemonHub() {
       {cards && !shown.length ? (
         <EmptyDesk title={`No ${species.name} cards yet`} lede="The catalog has not listed leftover printings for this species." />
       ) : (
-        <div className="grid">
+        <CardSelectGrid className="grid" cards={cards == null ? [] : shown}>
           {cards == null
             ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} />)
             : shown.map((card, index) => (
               <CardTile key={card.id} card={card} rank={index} />
             ))}
-        </div>
+        </CardSelectGrid>
       )}
     </div>
   );

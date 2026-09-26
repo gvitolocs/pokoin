@@ -4,7 +4,8 @@ import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc, rememberCardId } from '../api.js';
 import { displayName, printingIdentity } from '../identity.js';
 import { tilePricePkn } from '../pkn.js';
-import { cardReference, writeListingDrag } from '../chat-listing.js';
+import { cardReference, cardsReference, writeListingDrag } from '../chat-listing.js';
+import { useCardSelect } from './CardSelectGrid.jsx';
 import { cardImageAlt } from '../seo.js';
 import { Action, track } from '../track.js';
 import CardArt from './CardArt.jsx';
@@ -24,8 +25,15 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
   const hero = imageSrc(card, 'hero');
   const art = cut ? hero : imageSrc(card, layout === 'list' ? 'hero' : 'grid');
   const list = layout === 'list';
+  const select = useCardSelect();
+  const picked = Boolean(select?.selected?.has(String(card.id)));
 
-  function onClick() {
+  function onClick(event) {
+    if (select && (event.metaKey || event.ctrlKey || event.shiftKey)) {
+      event.preventDefault();
+      select.click(card.id, event);
+      return;
+    }
     rememberCardId(card);
     track(action, card, { resultRank: rank });
   }
@@ -45,11 +53,17 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
         tall ? 'tile-tall' : '',
         item ? 'tile-item' : '',
         landscape ? 'is-landscape' : '',
+        picked ? 'is-selected' : '',
       ].filter(Boolean).join(' ')}
       to={href}
       state={{ card }}
+      data-card-id={card.id}
+      aria-selected={picked || undefined}
       draggable
-      onDragStart={(event) => writeListingDrag(event, cardReference(card))}
+      onDragStart={(event) => {
+        const group = select?.cardsForDrag(card) || [card];
+        writeListingDrag(event, group.length > 1 ? cardsReference(group) : cardReference(card));
+      }}
       onClick={onClick}
       onPointerEnter={prefetch}
       style={cut ? albumShadeStyle(card) : undefined}

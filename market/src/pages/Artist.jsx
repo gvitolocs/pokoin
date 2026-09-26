@@ -6,6 +6,7 @@ import { bundleReference, preloadDragImage, writeListingDrag } from '../chat-lis
 import { artistDeskIsUnknown, artistNameFromSlug } from '../artist-name.js';
 import { isEnglishFlavorName } from '../ocr-artists.js';
 import CardArt from '../components/CardArt.jsx';
+import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
@@ -449,13 +450,13 @@ function ArtistDesk() {
           <button className="btn" type="button" onClick={clearFilters}>Clear filters</button>
         </EmptyDesk>
       ) : (
-        <div className="grid album-grid">
+        <CardSelectGrid className="grid album-grid" cards={payload ? visibleCards : []}>
           {!payload && !error
             ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} album />)
             : visibleCards.map((card, index) => (
                 <CardTile key={albumTileKey(card)} card={card} rank={index} cut />
               ))}
-        </div>
+        </CardSelectGrid>
       )}
       {payload && shown < cards.length ? (
         <div ref={sentinel} className="album-scroll-sentinel" aria-hidden="true" />

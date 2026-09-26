@@ -17,6 +17,7 @@ import { readRecentCardIds, readRecentTiles, rememberRecentTiles, pruneUnresolve
 import { Action, track } from '../track.js';
 import { isOriginDownError, noteOriginDown, publicErrorMessage } from '../working-page.js';
 import { framedByChromeExtension } from '../extension-auth-bridge.js';
+import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import Carousel, { SkeletonTile } from '../components/Carousel.jsx';
 import PromoCarousel from '../components/PromoCarousel.jsx';
@@ -364,13 +365,13 @@ export default function Home() {
         <div className="carousel-head">
           <h2>Marketplace</h2>
         </div>
-        <div className="grid">
+        <CardSelectGrid className="grid" cards={gridLoading ? [] : gridCards}>
           {gridLoading
             ? Array.from({ length: gridPlaceholders }, (_, index) => <SkeletonTile key={index} />)
             : gridCards.map((card, index) => (
                 <CardTile key={card.id} card={card} rank={index} />
               ))}
-        </div>
+        </CardSelectGrid>
         {englishBrowse && browseHasMore ? (
           <button className="more" type="button" onClick={loadMoreEnglish} disabled={browseMoreBusy}>
             {browseMoreBusy ? 'Loading…' : 'Show more'}

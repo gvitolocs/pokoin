@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import CardSelectGrid from './CardSelectGrid.jsx';
 import CardTile from './CardTile.jsx';
 import { bindRailControls, stepRail } from '../rail-scroll.js';
 
@@ -55,7 +56,7 @@ export default function Carousel({ title, subtitle, cards, href, placeholders = 
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m15.75 19.5-7.5-7.5 7.5-7.5" /></svg>
         </button>
         <div className="rail-scroll" ref={scroller}>
-          <div className="carousel-track">
+          <CardSelectGrid className="carousel-track" cards={ready ? cards : []}>
             {ready
               ? cards.map((card, index) => (
                   <CardTile key={card.id} card={card} rank={index} />
@@ -63,7 +64,7 @@ export default function Carousel({ title, subtitle, cards, href, placeholders = 
               : Array.from({ length: placeholders }, (_, index) => (
                   <SkeletonTile key={index} />
                 ))}
-          </div>
+          </CardSelectGrid>
         </div>
         <button className="rail-next" type="button" onClick={() => step(1)} aria-label="Next">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>

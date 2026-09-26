@@ -16,6 +16,7 @@ import {
   movementFromLedger,
   historyPlotX,
   historyPointerDay,
+  projectCardValue,
   historyWindowSplit,
   nearestHistoryDay,
   niceScaleMax,
@@ -226,4 +227,20 @@ test('today stops at two thirds and the rest of the plot is a projection', () =>
   const known = historyPointerDay(points, 1 / 3, { split: 2 / 3 });
   assert.equal(known.projection, false);
   assert.equal(known.day.date, '2026-09-01');
+});
+
+test('card projection is a one-step regression of sold days', () => {
+  const rising = [
+    normalizeHistoryDay({ date: '2026-09-24', currencyPkn: 0, cardsKnown: true, cardsValuePkn: 100 }),
+    normalizeHistoryDay({ date: '2026-09-25', currencyPkn: 0, cardsKnown: true, cardsValuePkn: 200 }),
+  ];
+  assert.deepEqual(projectCardValue(rising), { value: 300, slope: 100, days: 2 });
+  const tip = formatHistoryTip(rising[1], { projection: true, forecast: projectCardValue(rising) });
+  assert.ok(tip.rows.some((row) => row.label === 'Projection' && row.value === '300 PKN'));
+  const walletOnly = [
+    normalizeHistoryDay({ date: '2026-09-25', currencyPkn: 15 }),
+    normalizeHistoryDay({ date: '2026-09-26', currencyPkn: 15 }),
+  ];
+  assert.equal(projectCardValue(walletOnly), null);
+  assert.equal(projectCardValue([rising[0]]), null);
 });

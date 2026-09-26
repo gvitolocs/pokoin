@@ -5,13 +5,14 @@ import { mergePrintingRows, printLangBadge, splitVersionPage } from '../card-ver
 import { eraHref } from '../set-logos.js';
 import { realPublicCardId } from '../card-stub.js';
 import { applyLastMedianPrices } from '../pkn.js';
+import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
 function TileGrid({ rows, cardId, flags }) {
   return (
-    <div className="grid versions-grid">
+    <CardSelectGrid className="grid versions-grid" cards={rows}>
       {rows.map((row, index) => {
         const flag = flags ? printLangBadge(row) : '';
         const on = String(row.id) === String(cardId);
@@ -22,7 +23,7 @@ function TileGrid({ rows, cardId, flags }) {
           </div>
         );
       })}
-    </div>
+    </CardSelectGrid>
   );
 }
 
