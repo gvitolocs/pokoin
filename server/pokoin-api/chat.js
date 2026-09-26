@@ -1,8 +1,6 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const fs = require('node:fs');
-const path = require('node:path');
 
 const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
 const {
@@ -30,9 +28,9 @@ function httpError(statusCode, message) {
   return Object.assign(new Error(message), { statusCode });
 }
 
-const PHOTO_ROOT = process.env.POKOIN_CARD_IMAGES_DIR || '/srv/pokoin/card-images/objects';
+const PHOTO_BUCKET = process.env.R2_USER_PHOTOS_BUCKET || 'pokoin-user-photos';
 
-function storeUserPhoto(uid, body) {
+async function storeUserPhoto(uid, body) {
   const kind = body.kind === 'listing' ? 'listing' : 'chat';
   const raw = String(body.dataUrl || '');
   const match = raw.match(/^data:image\/jpeg;base64,([A-Za-z0-9+/=\s]+)$/);
@@ -40,14 +38,30 @@ function storeUserPhoto(uid, body) {
   const bytes = Buffer.from(match[1].replace(/\s/g, ''), 'base64');
   if (bytes.length < 32 || bytes.length > 1800000) throw httpError(400, 'That photo is too large.');
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw httpError(400, 'Send a JPEG photo.');
+  const publicBase = String(process.env.R2_USER_PHOTOS_PUBLIC_URL || '').replace(/\/+$/, '');
+  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+  if (!publicBase || !account || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY) {
+    throw httpError(500, 'Photo storage is not configured.');
+  }
   const id = crypto.randomBytes(12).toString('hex');
-  const rel = path.posix.join('user-photos', kind, uid, `${id}.jpg`);
-  const root = path.resolve(PHOTO_ROOT);
-  const dest = path.resolve(root, rel);
-  if (!dest.startsWith(`${root}${path.sep}`)) throw httpError(400, 'Bad photo path.');
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.writeFileSync(dest, bytes);
-  return { url: `/card-images/${rel}` };
+  const key = `user-photos/${kind}/${uid}/${id}.jpg`;
+  const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+  const client = new S3Client({
+    region: 'auto',
+    endpoint: `https://${account}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    },
+  });
+  await client.send(new PutObjectCommand({
+    Bucket: PHOTO_BUCKET,
+    Key: key,
+    Body: bytes,
+    ContentType: 'image/jpeg',
+    CacheControl: 'public, max-age=31536000, immutable',
+  }));
+  return { url: `${publicBase}/${key}` };
 }
 
 async function saveListingPhotos(uid, body) {
@@ -178,7 +192,7 @@ module.exports = async function handler(req, res) {
     }
 
     if (req.method === 'POST' && action === 'photo') {
-      return res.status(200).json(storeUserPhoto(me.uid, req.body || {}));
+      return res.status(200).json(await storeUserPhoto(me.uid, req.body || {}));
     }
 
     if (req.method === 'POST' && action === 'listing-photos') {

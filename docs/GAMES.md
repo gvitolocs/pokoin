@@ -268,9 +268,10 @@ Ball Super keys the Pi does not serve. The CDN still reads the Pi first and
 has no R2 fallback for a miss.
 
 Seller listing photos are at most **2** JPEGs per listing (`photo_urls`).
-Chat messages take at most **4**. Both are written on the Pi under
-`/srv/pokoin/card-images/objects/user-photos/{listing|chat}/{uid}/` and served
-as `/card-images/user-photos/…`. They are not stored in R2.
+Chat messages take at most **4**. Both are stored in Cloudflare R2 bucket
+`pokoin-user-photos` and served from its public `r2.dev` URL. Profile photos
+stay in `pokoin-profile-pictures`. Forum photos stay in `pokoin-forum-media`.
+The Pi `user-photos/` tree is not the store.
 
 ## New CardTrader printing
 

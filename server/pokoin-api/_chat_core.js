@@ -97,17 +97,33 @@ function cleanListing(raw) {
   };
 }
 
+function photoPath(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.includes('..') || raw.includes('\\')) return '';
+  if (raw.startsWith('/card-images/user-photos/')) return raw.slice('/card-images'.length);
+  if (raw.startsWith('https://')) {
+    try {
+      const url = new URL(raw);
+      if (!url.hostname.endsWith('.r2.dev')) return '';
+      return url.pathname;
+    } catch (_) {
+      return '';
+    }
+  }
+  return '';
+}
+
 function cleanOwnedPhotos(value, uid, kind, limit) {
   const owner = String(uid || '').trim();
   if (!/^[A-Za-z0-9]{8,128}$/.test(owner)) return [];
-  const prefix = `/card-images/user-photos/${kind}/${owner}/`;
+  const prefix = `/user-photos/${kind}/${owner}/`;
   if (!Array.isArray(value)) return [];
   const out = [];
   for (const item of value) {
-    const url = String(item || '').trim();
-    if (!url.startsWith(prefix) || url.includes('..') || url.includes('\\')) continue;
-    if (!url.endsWith('.jpg')) continue;
-    out.push(url.slice(0, 240));
+    const path = photoPath(item);
+    if (!path.startsWith(prefix) || !path.endsWith('.jpg')) continue;
+    const raw = String(item || '').trim();
+    out.push(raw.slice(0, 400));
     if (out.length >= limit) break;
   }
   return out;
