@@ -117,6 +117,33 @@ function cookieDoc(initial = '') {
   };
 }
 
+test('ID token cookie is host-only on pokoin.com', () => {
+  const writes = [];
+  const jar = {
+    get cookie() {
+      return '';
+    },
+    set cookie(value) {
+      writes.push(String(value));
+    },
+  };
+  const previous = globalThis.location;
+  globalThis.location = { hostname: 'pokoin.com', protocol: 'https:' };
+  try {
+    writeAuthToken({
+      token: 'x'.repeat(40),
+      uid: 'user-9',
+      expiresAt: Date.now() + 60 * 60 * 1000,
+    }, jar);
+  } finally {
+    if (previous === undefined) delete globalThis.location;
+    else globalThis.location = previous;
+  }
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].includes('Domain='), false);
+  assert.match(writes[0], /Secure/);
+});
+
 test('ID token cookie round-trips for sibling-host handoff', () => {
   const jar = cookieDoc();
   writeAuthToken({

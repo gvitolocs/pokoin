@@ -81,8 +81,20 @@ export function originDeskRequest(request) {
   });
 }
 
+/** Pin frame-ancestors when POKOIN_EXTENSION_IDS is set; otherwise keep the side panel working. */
+export function extensionFrameAncestors(env = {}) {
+  const ids = String(env.POKOIN_EXTENSION_IDS || '')
+    .split(/[\s,]+/)
+    .map((id) => id.trim())
+    .filter((id) => /^[a-p]{32}$/.test(id));
+  if (!ids.length) {
+    return "frame-ancestors 'self' chrome-extension:";
+  }
+  return `frame-ancestors 'self' ${ids.map((id) => `chrome-extension://${id}`).join(' ')}`;
+}
+
 /** Let the Chrome extension iframe Pokoin desk pages. */
-export function allowExtensionDeskFrame(response) {
+export function allowExtensionDeskFrame(response, env = {}) {
   const headers = new Headers(response.headers);
   headers.delete('X-Frame-Options');
   headers.delete('x-frame-options');
@@ -91,7 +103,7 @@ export function allowExtensionDeskFrame(response) {
     .replace(/(?:^|;)\s*frame-ancestors[^;]*/ig, '')
     .replace(/^\s*;\s*/, '')
     .trim();
-  const frameAncestors = "frame-ancestors 'self' chrome-extension:";
+  const frameAncestors = extensionFrameAncestors(env);
   headers.set(
     'Content-Security-Policy',
     existing ? `${existing}; ${frameAncestors}` : frameAncestors,
@@ -129,7 +141,7 @@ export default {
     }
     if (isExtensionFramePath(url.pathname)) {
       const response = await fetchOriginOrWorking(originDeskRequest(satelliteRequest), satelliteRequest);
-      return allowExtensionDeskFrame(response);
+      return allowExtensionDeskFrame(response, env);
     }
     return fetchOriginOrWorking(satelliteRequest);
   },

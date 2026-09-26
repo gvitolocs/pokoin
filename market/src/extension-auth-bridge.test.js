@@ -7,6 +7,7 @@ import {
   EXTENSION_DESK_SESSION_REQUEST,
   extensionAuthTokenPayload,
   framedByChromeExtension,
+  isTrustedDeskSessionEvent,
   publicApiUrl,
   isExtensionAuthRequest,
   isExtensionDeskSession,
@@ -60,6 +61,16 @@ test('framedByChromeExtension detects the credentialless side-panel iframe', () 
   self.self = self;
   self.top = {};
   assert.equal(framedByChromeExtension(self), true);
+});
+
+test('desk session tokens are accepted only from the framing extension', () => {
+  const parent = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+  const win = { location: { origin: 'https://pokoin.com', ancestorOrigins: [parent] } };
+  assert.equal(isTrustedDeskSessionEvent({ origin: parent }, win), true);
+  assert.equal(isTrustedDeskSessionEvent({ origin: 'chrome-extension://zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz' }, win), false);
+  assert.equal(isTrustedDeskSessionEvent({ origin: parent }, { location: { ancestorOrigins: [] } }), false);
+  assert.equal(isTrustedDeskSessionEvent({ origin: 'https://pokoin.com' }, win), true);
+  assert.equal(isTrustedDeskSessionEvent({ origin: 'https://evil.example' }, win), false);
 });
 
 test('publicApiUrl uses api.pokoin.com inside the side-panel iframe', () => {

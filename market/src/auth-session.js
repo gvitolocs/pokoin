@@ -2,10 +2,9 @@
  * `pokoin_user_profile` / `pokoin_account_balance`: paint Silver tools from
  * this browser's previous snapshot instead of waiting on Firebase.
  *
- * Firebase Auth persistence is origin-scoped, so pokoin.com and
- * dashboard.pokoin.com do not share IndexedDB. Mirror the paint hint and the
- * live ID token into a Domain=.pokoin.com cookie so the seller desk stays
- * signed in when hopping between hosts. */
+ * Firebase Auth persistence is origin-scoped. The paint hint is a
+ * Domain=.pokoin.com cookie. The ID token stays host-only so a script on
+ * another Pokoin host cannot read it. */
 
 import { safeAvatarUrl } from './avatar.js';
 
@@ -73,10 +72,12 @@ function readCookie(name, jar) {
   return null;
 }
 
-function writeCookie(name, value, { maxAgeSec = 60 * 60, jar, hostname } = {}) {
+function writeCookie(name, value, { maxAgeSec = 60 * 60, jar, hostname, shared = true } = {}) {
   const doc = cookieJar(jar);
   if (!doc || typeof doc !== 'object') return;
-  const domain = authCookieDomain(hostname || (typeof location !== 'undefined' ? location.hostname : ''));
+  const domain = shared
+    ? authCookieDomain(hostname || (typeof location !== 'undefined' ? location.hostname : ''))
+    : '';
   const encoded = encodeURIComponent(String(value || ''));
   let cookie = `${name}=${encoded}; Path=/; Max-Age=${Math.max(0, Number(maxAgeSec) || 0)}; SameSite=Lax`;
   if (typeof location !== 'undefined' && location.protocol === 'https:') {
@@ -92,8 +93,8 @@ function writeCookie(name, value, { maxAgeSec = 60 * 60, jar, hostname } = {}) {
   }
 }
 
-function clearCookie(name, { jar, hostname } = {}) {
-  writeCookie(name, '', { maxAgeSec: 0, jar, hostname });
+function clearCookie(name, { jar, hostname, shared = true } = {}) {
+  writeCookie(name, '', { maxAgeSec: 0, jar, hostname, shared });
 }
 
 export function readAuthSession(overrideStore) {
@@ -204,11 +205,14 @@ export function writeAuthToken(session, overrideStore) {
   writeCookie(AUTH_TOKEN_COOKIE, JSON.stringify({ token, uid, expiresAt }), {
     maxAgeSec,
     jar: cookieJar(overrideStore),
+    shared: false,
   });
 }
 
 export function clearAuthToken(overrideStore) {
-  clearCookie(AUTH_TOKEN_COOKIE, { jar: cookieJar(overrideStore) });
+  const jar = cookieJar(overrideStore);
+  clearCookie(AUTH_TOKEN_COOKIE, { jar, shared: false });
+  clearCookie(AUTH_TOKEN_COOKIE, { jar, shared: true });
 }
 
 export function profileFromSession(session) {

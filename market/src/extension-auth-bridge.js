@@ -28,6 +28,21 @@ export function isExtensionDeskSession(data) {
   );
 }
 
+/** Accept an injected desk token only from this frame's parent extension. */
+export function isTrustedDeskSessionEvent(event, win = typeof window === 'undefined' ? undefined : window) {
+  const origin = String(event?.origin || '');
+  if (origin.startsWith('chrome-extension://')) {
+    const ancestors = win?.location?.ancestorOrigins;
+    const parentOrigin = ancestors && ancestors.length ? String(ancestors[0] || '') : '';
+    return parentOrigin === origin;
+  }
+  try {
+    return Boolean(win?.location) && origin === win.location.origin;
+  } catch (_) {
+    return false;
+  }
+}
+
 export function isExtensionDeskSessionRequest(data) {
   return Boolean(
     data

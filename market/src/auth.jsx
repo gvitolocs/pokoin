@@ -15,6 +15,7 @@ import {
   EXTENSION_DESK_SESSION_REQUEST,
   framedByChromeExtension,
   isExtensionDeskSession,
+  isTrustedDeskSessionEvent,
 } from './extension-auth-bridge.js';
 import { fetchDeskUserDocuments } from './firestore-rest.js';
 import { safeAvatarUrl } from './avatar.js';
@@ -59,18 +60,6 @@ export const firebaseAuth = createFirebaseAuth(firebaseApp);
 export const firestore = getFirestore(firebaseApp);
 
 let injectedDeskSession = { token: '', uid: '', expiresAt: 0 };
-
-function isTrustedDeskSessionEvent(event) {
-  const origin = String(event?.origin || '');
-  if (origin.startsWith('chrome-extension:')) {
-    return true;
-  }
-  try {
-    return origin === window.location.origin;
-  } catch (_) {
-    return false;
-  }
-}
 
 function applyInjectedDeskSession(data = {}) {
   const token = String(data.token || '').trim();

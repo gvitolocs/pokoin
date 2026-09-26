@@ -40,6 +40,18 @@ test('desk responses drop SAMEORIGIN and allow chrome-extension frames', () => {
   assert.equal(framed.headers.get('x-pokoin-extension-frame'), '1');
 });
 
+test('POKOIN_EXTENSION_IDS pins frame-ancestors to those extensions', () => {
+  const id = 'abcdefghijklmnopabcdefghijklmnop';
+  const framed = allowExtensionDeskFrame(new Response('<html></html>', {
+    status: 200,
+    headers: { 'Content-Type': 'text/html' },
+  }), { POKOIN_EXTENSION_IDS: `${id}, not-an-id` });
+  assert.equal(
+    framed.headers.get('Content-Security-Policy'),
+    `frame-ancestors 'self' chrome-extension://${id}`,
+  );
+});
+
 test('desk origin fetches drop chrome-extension iframe referers', () => {
   const inbound = originDeskRequest(new Request('https://pokoin.com/marketplace/en/cards/548832', {
     headers: {
