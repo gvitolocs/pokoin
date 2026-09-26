@@ -439,7 +439,7 @@ function ArtistDesk() {
             ? (allCards?.length
               ? (filtersOn
                 ? <><strong>{uniqueCardCount}</strong> matching</>
-                : <><strong>{uniqueCardCount}</strong> cards{total > uniqueCardCount ? ` of ${total}` : ''}</>)
+                : <><strong>{uniqueCardCount}</strong> {uniqueCardCount === 1 ? 'card' : 'cards'}{total > uniqueCardCount ? ` of ${total}` : ''}</>)
               : 'No cards for this artist.')
             : 'Loading…'}
         </p>
