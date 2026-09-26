@@ -77,7 +77,6 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
             cutSurface="album"
             full={cut}
             card={cut ? card : undefined}
-            dragCard={card}
             loading={rank != null && rank < 8 ? 'eager' : 'lazy'}
             fetchPriority={rank != null && rank < 4 ? 'high' : undefined}
           />

@@ -71,7 +71,7 @@ export function cardReference(card) {
   };
 }
 
-/** One drag for a Windows multi-select. A single card stays a normal card drag. */
+/** One drag for a Windows multi-select. Pass the held card first; a single card is still a pile of one in the ghost. */
 export function cardsReference(cards) {
   const list = (cards || []).filter((card) => card?.id || card?.cardId).slice(0, 80);
   if (list.length === 1) return cardReference(list[0]);
@@ -443,12 +443,12 @@ function tickDragStack() {
   dragStackFrame = requestAnimationFrame(tickDragStack);
 }
 
-/** The first three scans follow the cursor at different speeds, so the stack jiggles. */
+/** The scans follow the cursor as a pile. One card is still a pile of one. */
 function mountDragStack(cards, event) {
   stopDragStack();
   if (typeof document === 'undefined') return;
   const rows = (cards || []).slice(0, 3).filter((row) => row?.imageUrl || row?.cardName);
-  if (rows.length < 2) return;
+  if (!rows.length) return;
   const root = document.createElement('div');
   root.className = 'drag-stack';
   root.setAttribute('aria-hidden', 'true');
@@ -540,20 +540,21 @@ export function writeListingDrag(event, reference) {
   if (!event?.dataTransfer || !reference?.cardName) return;
   event.dataTransfer.setData(LISTING_DRAG_TYPE, JSON.stringify(reference));
   event.dataTransfer.effectAllowed = 'copy';
-  const image = dragSourceImage(event) || readyDragImage(reference.imageUrl);
-  const fit = reference.kind === 'card' || !reference.kind ? 'cover' : 'contain';
   const stack = dragCardsOf(reference);
-  if (stack.length > 1) {
+  const usePile = stack.length >= 1 && (reference.kind === 'cards' || reference.kind === 'card' || reference.kind === 'listing' || !reference.kind);
+  if (usePile) {
     mountDragStack(stack, event);
     try {
       const blank = invisibleDragImage();
       if (blank) event.dataTransfer.setDragImage(blank, 0, 0);
     } catch (_) {
-      /* the following stack is the ghost */
+      /* the pile is the ghost */
     }
     markCardDragging();
     return;
   }
+  const image = dragSourceImage(event) || readyDragImage(reference.imageUrl);
+  const fit = reference.kind === 'card' || !reference.kind ? 'cover' : 'contain';
   const painted = paintDragGhost(image, fit);
   const ghost = painted || fixedDragSlot(image?.currentSrc || image?.src || reference.imageUrl, fit);
   try {

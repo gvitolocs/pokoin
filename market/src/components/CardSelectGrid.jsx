@@ -130,7 +130,9 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
     cardsForDrag(card) {
       const id = String(card?.id || '');
       if (!id || !selectedRef.current.has(id) || selectedRef.current.size < 2) return [card];
-      return (cards || []).filter((row) => selectedRef.current.has(String(row?.id || '')));
+      const mates = (cards || []).filter((row) => selectedRef.current.has(String(row?.id || '')));
+      const rest = mates.filter((row) => String(row?.id || '') !== id);
+      return [card, ...rest];
     },
   };
 

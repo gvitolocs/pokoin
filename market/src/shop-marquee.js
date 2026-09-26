@@ -32,10 +32,12 @@ export function marqueeBlocked(target) {
   ));
 }
 
-/** Listings that ride along when a selected shop row is dragged. */
+/** Listings that ride along when a selected shop row is dragged. Held row is first. */
 export function shopDragOffers(rows, selected, offer) {
   const id = listingSelectId(offer);
   if (!id || !selected?.has?.(id) || selected.size < 2) return null;
   const mates = (rows || []).filter((row) => selected.has(listingSelectId(row)));
-  return mates.length > 1 ? mates : null;
+  if (mates.length < 2) return null;
+  const rest = mates.filter((row) => listingSelectId(row) !== id);
+  return [offer, ...rest];
 }

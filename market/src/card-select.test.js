@@ -34,17 +34,24 @@ test('a drag box selects the tiles it touches', () => {
 });
 
 test('a selected group drags as cards and one card stays a single reference', () => {
+  const held = { id: '10', name: 'Drifblim' };
   const group = cardsReference([
+    held,
     { id: '9', name: 'Drifloon', canonicalPath: '/marketplace/en/cards/9' },
-    { id: '10', name: 'Drifblim' },
   ]);
   assert.equal(group.kind, 'cards');
   assert.equal(group.cardName, '2 cards');
   assert.equal(dragCardsOf(group).length, 2);
-  assert.equal(dragCardsOf(group)[0].cardId, '9');
+  assert.equal(dragCardsOf(group)[0].cardId, '10');
   const one = cardsReference([{ id: '9', name: 'Drifloon' }]);
   assert.equal(one.kind, 'card');
   assert.equal(dragCardsOf(one).length, 1);
+});
+
+test('the held card leads the multi-select drag pile', () => {
+  const source = fs.readFileSync(path.join(root, 'components/CardSelectGrid.jsx'), 'utf8');
+  assert.match(source, /\[card, \.\.\.rest\]/);
+  assert.match(source, /String\(row\?\.id \|\| ''\) !== id/);
 });
 
 test('every browsing card grid can select tiles', () => {

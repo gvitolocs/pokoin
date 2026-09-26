@@ -12,6 +12,7 @@ test('a rubber band starts on the card scan, not on a button', () => {
   const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
   const selected = new Set(['a', 'c']);
   assert.deepEqual(shopDragOffers(rows, selected, rows[0]).map((row) => row.id), ['a', 'c']);
+  assert.deepEqual(shopDragOffers(rows, selected, rows[2]).map((row) => row.id), ['c', 'a']);
   assert.equal(shopDragOffers(rows, new Set(['a']), rows[0]), null);
 
   const rect = marqueeRect(10, 30, 4, 8);
