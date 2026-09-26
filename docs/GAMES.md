@@ -258,14 +258,14 @@ catalog origin. `pokoin-cdn-card-images` reads the Raspberry Pi first
 misses. Public URLs stay `https://cdn.pokoin.com/…`. The write tree is nezopt
 NVMe `/home/nez/data/pokoin-leftovers`. `api2.pokoin.com` is the same Pi origin
 as `api.pokoin.com`. Nezopt NVMe `/home/nez/data/pokoin-leftovers/objects`
-is the card backup. After every `cardvault-images` key is on that tree, the
-bucket is emptied. `pokoin-profile-pictures` stays; avatars still upload there.
+is the card backup. `cardvault-images` was emptied on 2026-09-26 after that
+copy (`remaining 0`). `pokoin-profile-pictures` stays; avatars still upload there.
 
-2026-09-26 listing of `cardvault-images` before the move: **281,478** objects,
-**10.9 GB** (221,647 webp, 58,099 jpg, plus Magic, Yu-Gi-Oh, Vanguard, Dragon
-Ball Super, and other game prefixes). **85,913** keys already existed at the
-same path. The rest are copied onto the leftover tree, then the bucket is
-deleted.
+The 2026-09-26 listing before the move was **281,478** objects, **10.9 GB**.
+**85,913** keys were already on the leftover tree. The other **198,262** were
+copied there with no failures, including Magic, Yu-Gi-Oh, Vanguard, and Dragon
+Ball Super keys the Pi does not serve. The CDN still reads the Pi first and
+has no R2 fallback for a miss.
 
 Seller listing photos are at most **8** JPEGs per listing (`photo_urls`).
 Chat messages take at most **4**. Both are written on the Pi under
