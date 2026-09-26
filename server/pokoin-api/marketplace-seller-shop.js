@@ -187,7 +187,7 @@ function listingRow(row, seller = {}) {
     status: row.status,
     cardName: row.card_name,
     cardImageUrl: row.card_image_url,
-    photoUrls: Array.isArray(row.photo_urls) ? row.photo_urls.filter((url) => typeof url === 'string').slice(0, 8) : [],
+    photoUrls: Array.isArray(row.photo_urls) ? row.photo_urls.filter((url) => typeof url === 'string').slice(0, 2) : [],
     setName: row.set_name,
     collectorNumber: row.collector_number,
     createdAt: row.created_at,

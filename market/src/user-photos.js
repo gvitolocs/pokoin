@@ -1,5 +1,5 @@
 export const MAX_CHAT_PHOTOS = 4;
-export const MAX_LISTING_PHOTOS = 8;
+export const MAX_LISTING_PHOTOS = 2;
 
 export function photoFileToJpeg(file) {
   return new Promise((resolve, reject) => {

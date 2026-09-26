@@ -267,7 +267,7 @@ copied there with no failures, including Magic, Yu-Gi-Oh, Vanguard, and Dragon
 Ball Super keys the Pi does not serve. The CDN still reads the Pi first and
 has no R2 fallback for a miss.
 
-Seller listing photos are at most **8** JPEGs per listing (`photo_urls`).
+Seller listing photos are at most **2** JPEGs per listing (`photo_urls`).
 Chat messages take at most **4**. Both are written on the Pi under
 `/srv/pokoin/card-images/objects/user-photos/{listing|chat}/{uid}/` and served
 as `/card-images/user-photos/…`. They are not stored in R2.

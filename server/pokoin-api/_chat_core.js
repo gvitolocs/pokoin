@@ -13,7 +13,7 @@ const USERNAME_RE = /^[a-z0-9]{3,32}$/;
 const TEXT_MAX = 1000;
 const NOTE_MAX = 140;
 const MAX_CHAT_PHOTOS = 4;
-const MAX_LISTING_PHOTOS = 8;
+const MAX_LISTING_PHOTOS = 2;
 
 function pairKeyFor(uidA, uidB) {
   const members = [String(uidA || '').trim(), String(uidB || '').trim()].sort();

@@ -3651,7 +3651,7 @@ a.era-link:focus-visible {
   flex: 0 0 auto;
 }
 
-.sell-options-row .condition-pick { width: 5.75rem; }
+.sell-options-row .condition-pick { width: auto; position: relative; }
 .sell-options-row .language-pick { width: auto; position: relative; }
 
 .lang-pick { position: relative; width: auto; }
@@ -9514,6 +9514,9 @@ html:has(.wallet-page) .brand span {
 .seller-pager-status{color:var(--muted);font-size:.85rem}
 
 .listing-photos{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
-.listing-photos img,.shop-photos img{width:3.2rem;height:4.4rem;object-fit:cover;border-radius:.25rem}
+.shop-photos img{width:3.2rem;height:4.4rem;object-fit:cover;border-radius:.25rem}
 .shop-photos{grid-column:1 / -1;display:flex;gap:.35rem}
-.listing-photo-add{cursor:pointer}
+.sell-photos{display:flex;align-items:center;gap:.35rem;flex:0 0 auto}
+.listing-photo-add{display:grid;place-items:center;width:2rem;height:2rem;margin:0;border:1px solid var(--g5);border-radius:999px;background:var(--g2);color:var(--muted);cursor:pointer}
+.listing-photo{padding:0;border:0;background:transparent;cursor:pointer;line-height:0}
+.listing-photo img{width:1.7rem;height:2.2rem;object-fit:cover;border-radius:.25rem}

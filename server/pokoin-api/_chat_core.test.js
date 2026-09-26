@@ -47,7 +47,7 @@ test('chat and listing photos stay on the owner path', () => {
   const own = `/card-images/user-photos/chat/${uid}/abc.jpg`;
   assert.deepEqual(core.cleanChatImages([own, `/card-images/user-photos/chat/someoneelse/abc.jpg`, 'https://evil.example/a.jpg'], uid), [own]);
   const listing = `/card-images/user-photos/listing/${uid}/one.jpg`;
-  assert.equal(core.cleanListingPhotos(Array.from({ length: 12 }, () => listing), uid).length, 8);
+  assert.equal(core.cleanListingPhotos(Array.from({ length: 12 }, () => listing), uid).length, 2);
   assert.equal(core.previewForEvent({ type: 'text', images: [own] }, 'a'), 'Photo');
 });
 

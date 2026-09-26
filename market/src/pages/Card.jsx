@@ -678,6 +678,73 @@ function listingFormFromOffer(offer, card) {
   };
 }
 
+function ConditionPick({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const current = MOOD_CONDS.find((row) => row.value === value) || MOOD_CONDS[0];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function onDoc(event) {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    }
+    function onKey(event) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('pointerdown', onDoc);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDoc);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={`lang-pick${open ? ' is-open' : ''}`} ref={rootRef}>
+      <button
+        type="button"
+        className="lang-pick-btn"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Condition ${current.value}`}
+        onClick={() => setOpen((next) => !next)}
+      >
+        <span aria-hidden="true">{current.label.split(' ')[0]}</span>
+        <span>{current.value}</span>
+      </button>
+      {open ? (
+        <ul className="lang-pick-menu" role="listbox">
+          {MOOD_CONDS.map((row) => (
+            <li key={row.value}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={row.value === value}
+                onClick={() => {
+                  setOpen(false);
+                  onChange(row.value);
+                }}
+              >
+                <span aria-hidden="true">{row.label.split(' ')[0]}</span>
+                <span>{row.value}</span>
+                {row.value === value ? <em aria-hidden="true">✓</em> : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path fill="currentColor" d="M9 4.5 7.8 6.5H5A2.5 2.5 0 0 0 2.5 9v9A2.5 2.5 0 0 0 5 20.5h14a2.5 2.5 0 0 0 2.5-2.5V9A2.5 2.5 0 0 0 19 6.5h-2.8L14.9 4.5H9Zm3 12.2a3.7 3.7 0 1 1 0-7.4 3.7 3.7 0 0 1 0 7.4Z" />
+    </svg>
+  );
+}
+
 function ListingForm({
   card,
   identity,
@@ -955,14 +1022,10 @@ function ListingForm({
         <p className="sell-pkn-eq">Lists at {formatPkn(listedPkn)}</p>
       ) : null}
       <div className="sell-options-row">
-        <label className="sell-field sell-pick condition-pick">
+        <div className="sell-field sell-pick condition-pick">
           <span className="sr-only">Condition</span>
-          <select value={condition} onChange={(event) => setCondition(event.target.value)}>
-            {MOOD_CONDS.map((row) => (
-              <option key={row.value} value={row.value}>{row.label}</option>
-            ))}
-          </select>
-        </label>
+          <ConditionPick value={condition} onChange={setCondition} />
+        </div>
         <div className="sell-field sell-pick language-pick">
           <span className="sr-only">Language</span>
           <ListingLangPick
@@ -994,30 +1057,21 @@ function ListingForm({
             </button>
           ))}
         </div>
-      </div>
-      {chips.graded ? (
-        <div className="sell-row">
-          <label className="sell-field grow">
-            Grading company
-            <input value={company} onChange={(event) => setCompany(event.target.value)} />
-          </label>
-          <label className="sell-field">
-            Grade
-            <input value={grade} onChange={(event) => setGrade(event.target.value)} />
-          </label>
-          <label className="sell-field grow">
-            Certification
-            <input value={cert} onChange={(event) => setCert(event.target.value)} />
-          </label>
-        </div>
-      ) : null}
-      <div className="sell-field comment">
-        <span>Photos ({photos.length}/{MAX_LISTING_PHOTOS})</span>
-        <div className="listing-photos">
-          {photos.map((url) => <img key={url} src={url} alt="" />)}
+        <div className="sell-photos">
+          {photos.map((url) => (
+            <button
+              key={url}
+              type="button"
+              className="listing-photo"
+              aria-label="Remove photo"
+              onClick={() => setPhotos((current) => current.filter((item) => item !== url))}
+            >
+              <img src={url} alt="" />
+            </button>
+          ))}
           {photos.length < MAX_LISTING_PHOTOS ? (
-            <label className="listing-photo-add">
-              Add
+            <label className="listing-photo-add" aria-label="Add photo">
+              <CameraIcon />
               <input
                 type="file"
                 accept="image/*"
@@ -1049,9 +1103,24 @@ function ListingForm({
               />
             </label>
           ) : null}
-          {photos.length ? <button type="button" onClick={() => setPhotos([])}>Clear</button> : null}
         </div>
       </div>
+      {chips.graded ? (
+        <div className="sell-row">
+          <label className="sell-field grow">
+            Grading company
+            <input value={company} onChange={(event) => setCompany(event.target.value)} />
+          </label>
+          <label className="sell-field">
+            Grade
+            <input value={grade} onChange={(event) => setGrade(event.target.value)} />
+          </label>
+          <label className="sell-field grow">
+            Certification
+            <input value={cert} onChange={(event) => setCert(event.target.value)} />
+          </label>
+        </div>
+      ) : null}
       <label className="sell-field comment">
         Seller comment
         <textarea

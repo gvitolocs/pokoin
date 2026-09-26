@@ -256,7 +256,7 @@ export default function ShopListingRow({
       ) : null}
       {Array.isArray(offer?.photoUrls) && offer.photoUrls.length ? (
         <span className="shop-photos">
-          {offer.photoUrls.slice(0, 8).map((url) => <img key={url} src={url} alt="" />)}
+          {offer.photoUrls.slice(0, 2).map((url) => <img key={url} src={url} alt="" />)}
         </span>
       ) : null}
     </div>
