@@ -274,6 +274,10 @@
   fill: url(#collection-history-fill);
 }
 
+.seller-history-grid .seller-history-projection {
+  fill: url(#collection-history-hatch);
+}
+
 .seller-history-grid .seller-history-rule {
   stroke: rgb(255 255 255 / 0.08);
   stroke-width: 1;
@@ -315,6 +319,13 @@
   font-size: 0.68rem;
   color: var(--muted);
   line-height: 1;
+  position: relative;
+}
+
+.seller-history-x.has-projection .is-today {
+  position: absolute;
+  left: 66.666%;
+  transform: translateX(-50%);
 }
 
 .seller-history-empty {

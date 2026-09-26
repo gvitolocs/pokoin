@@ -15,8 +15,10 @@ import {
   formatHistoryTip,
   historyAxis,
   historyPresetWindow,
+  historyPlotX,
+  historyPointerDay,
   historyWindowChange,
-  nearestHistoryDay,
+  historyWindowSplit,
   sliceHistorySeries,
   stepHistoryPoints,
 } from '../portfolio-history.js';
@@ -97,6 +99,7 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
   const hasData = points.length > 0;
   const axis = historyAxis(points);
   const change = historyWindowChange(points, custom ? 'custom' : presetId);
+  const split = historyWindowSplit(points);
   const withYear = points.length > 1
     && String(points[0]?.date || '').slice(0, 4) !== String(points[points.length - 1]?.date || '').slice(0, 4);
   const xLabels = points.length
@@ -104,12 +107,12 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
     : [];
 
   function xOf(date) {
-    const start = Date.parse(`${points[0]?.date || ''}T00:00:00Z`);
-    const end = Date.parse(`${points[points.length - 1]?.date || ''}T00:00:00Z`);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return CHART_W / 2;
-    const at = Date.parse(`${date}T00:00:00Z`);
-    const t = (at - start) / (end - start);
-    return Math.min(1, Math.max(0, t)) * CHART_W;
+    return historyPlotX(date, {
+      from: points[0]?.date,
+      to: points[points.length - 1]?.date,
+      width: CHART_W,
+      split,
+    });
   }
 
   function yOf(total, day) {
@@ -134,16 +137,19 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
     const stepped = stepHistoryPoints(line);
     polyline = stepped.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
     const originX = line[0].x.toFixed(1);
-    area = `${originX},${CHART_H} ${polyline} ${CHART_W},${CHART_H}`;
+    const endX = line[line.length - 1].x.toFixed(1);
+    area = `${originX},${CHART_H} ${polyline} ${endX},${CHART_H}`;
     endDot = line[line.length - 1];
   } else if (hasPoint) {
     const day = points[0];
-    // Card sold graph centers a single day (plotW / 2), not flush right.
-    endDot = { x: CHART_W / 2, y: yOf(day.totalPkn), day };
+    endDot = { x: xOf(day.date), y: yOf(day.totalPkn, day), day };
   }
+  const projection = split < 1 && endDot
+    ? `${endDot.x.toFixed(1)},${endDot.y.toFixed(1)} ${CHART_W},${endDot.y.toFixed(1)} ${CHART_W},${CHART_H} ${endDot.x.toFixed(1)},${CHART_H}`
+    : '';
 
   const tipDay = hover?.day || null;
-  const tip = formatHistoryTip(tipDay);
+  const tip = formatHistoryTip(tipDay, { projection: Boolean(hover?.projection) });
   const tipLeftPct = hover?.xPct
     ?? (endDot ? (endDot.x / CHART_W) * 100 : 50);
 
@@ -154,11 +160,11 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
     }
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
-    const day = nearestHistoryDay(points, ratio);
-    const xPct = hasPoint && endDot
+    const hit = historyPointerDay(points, ratio, { split });
+    const xPct = hasPoint && endDot && !hit.projection
       ? (endDot.x / CHART_W) * 100
-      : Math.min(96, Math.max(4, ratio * 100));
-    setHover({ day, xPct });
+      : Math.min(96, Math.max(4, hit.xPct));
+    setHover({ day: hit.day, xPct, projection: hit.projection });
   }
 
   useLayoutEffect(() => {
@@ -264,6 +270,9 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
                   <stop offset="0%" stopColor="#ffd33d" stopOpacity="0.28" />
                   <stop offset="100%" stopColor="#ffd33d" stopOpacity="0" />
                 </linearGradient>
+                <pattern id="collection-history-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(32)">
+                  <line x1="0" y1="0" x2="0" y2="7" stroke="#ffd33d" strokeOpacity="0.55" strokeWidth="1.6" />
+                </pattern>
               </defs>
               {axis.ticks.map((tick) => (
                 <line
@@ -275,6 +284,7 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
                   y2={yOf(tick)}
                 />
               ))}
+              {projection ? <polygon className="seller-history-projection" points={projection} /> : null}
               {hasLine ? (
                 <>
                   <polygon className="seller-history-fill" points={area} />
@@ -330,9 +340,14 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
               </div>
             ) : null}
           </div>
-          <div className="seller-history-x" aria-hidden="true">
-            {xLabels.map((day) => (
-              <span key={day.date}>{formatHistoryAxisLabel(day.date, withYear)}</span>
+          <div className={`seller-history-x${split < 1 ? ' has-projection' : ''}`} aria-hidden="true">
+            {xLabels.map((day, index) => (
+              <span
+                key={day.date}
+                className={split < 1 && index === xLabels.length - 1 && xLabels.length > 1 ? 'is-today' : undefined}
+              >
+                {formatHistoryAxisLabel(day.date, withYear)}
+              </span>
             ))}
             {!xLabels.length ? <span> </span> : null}
           </div>
@@ -563,7 +578,7 @@ export function SellerDashboardView({
 
   const physicalQty = Math.max(0, Number(physicalOwned) || 0);
   const nftQty = Math.max(0, Number(nftOwned) || 0);
-  const owned = Math.max(0, Number(ownedCards) || 0);
+  const owned = Math.max(0, Number(ownedCards) || 0) + oneDayReadyCards;
   const balance = Math.max(0, Number(pknBalance) || 0);
   const listedCards = Math.max(0, Number(listed?.cards) || 0);
   const mixBase = physicalQty + nftQty;
@@ -647,7 +662,11 @@ export function SellerDashboardView({
               {oneDayReadyCards > 0 ? (
                 <p className="seller-asking" data-testid="cardtrader-1dr-value">
                   <span>CardTrader 1-DR assets · {oneDayReadyCards.toLocaleString('en-US')} cards</span>
-                  <strong title="Dump minimum">{formatPkn(cardTraderAssets.totals?.valuePkn || 0)}</strong>
+                  <strong title="Sold today">
+                    {(Number(cardTraderAssets.totals?.valuePkn) || 0) > 0
+                      ? formatPkn(cardTraderAssets.totals.valuePkn)
+                      : '—'}
+                  </strong>
                 </p>
               ) : null}
 

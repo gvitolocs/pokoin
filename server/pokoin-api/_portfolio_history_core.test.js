@@ -4,24 +4,57 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const core = require('./_portfolio_history_core.js');
 
-test('a stored today with the dump basis is not calculated again', () => {
+test('a stored today with the sold-day basis is not calculated again', () => {
   assert.equal(core.storedIsFresh({
-    priceBasis: 'ct-dump-min',
-    seriesRevision: 2,
+    priceBasis: 'ct-sold-day',
+    seriesRevision: 3,
     updatedAt: '2026-09-25T12:00:00.000Z',
   }, '2026-09-25'), true);
   assert.equal(core.storedIsFresh({
     priceBasis: 'ct-dump-min',
+    seriesRevision: 2,
     updatedAt: '2026-09-25T12:00:00.000Z',
   }, '2026-09-25'), false);
   assert.equal(core.storedIsFresh({
-    priceBasis: 'ct-dump-min',
+    priceBasis: 'ct-sold-day',
+    seriesRevision: 3,
     updatedAt: '2026-09-24T12:00:00.000Z',
   }, '2026-09-25'), false);
   assert.equal(core.storedIsFresh({
     updatedAt: '2026-09-25T20:33:25.586Z',
     days: [{ date: '2026-09-25', cardsKnown: true, cardsValuePkn: 4026552 }],
   }, '2026-09-25'), false);
+});
+
+test('sold prices stay on the day of the sale and do not carry forward', () => {
+  const wallet = core.buildSeries({
+    movements: [
+      { type: 'account_transfer_received', amountPkn: 15, createdAt: '2026-05-21T12:00:00.000Z' },
+    ],
+    balance: 15,
+    marketChecked: false,
+    today: '2026-09-26T18:00:00.000Z',
+  });
+  const series = core.applySoldDayValues(wallet, [
+    { day: '2026-09-22', market_pkn: 900 },
+    { day: '2026-09-25', market_pkn: 1100 },
+  ], {
+    ownershipDate: '2026-09-01T08:00:00.000Z',
+    today: '2026-09-26T18:00:00.000Z',
+  });
+  const may = series.find((row) => row.date === '2026-05-21');
+  assert.equal(may.cardsKnown, false);
+  assert.equal(may.totalPkn, 15);
+  assert.equal(series.find((row) => row.date === '2026-09-22').cardsValuePkn, 900);
+  assert.equal(series.find((row) => row.date === '2026-09-22').priceBasis, 'ct-sold-day');
+  assert.equal(series.find((row) => row.date === '2026-09-23'), undefined);
+  const sold = series.find((row) => row.date === '2026-09-25');
+  assert.equal(sold.cardsValuePkn, 1100);
+  assert.equal(sold.totalPkn, 1115);
+  const today = series.find((row) => row.date === '2026-09-26');
+  assert.equal(today.cardsKnown, false);
+  assert.equal(today.cardsValuePkn, null);
+  assert.equal(today.totalPkn, 15);
 });
 
 test('dump minimums start on the sync day and step when the dump changes', () => {
@@ -46,7 +79,7 @@ test('dump minimums start on the sync day and step when the dump changes', () =>
   assert.equal(may.totalPkn, 15);
   const synced = series.find((row) => row.date === '2026-09-01');
   assert.equal(synced.cardsValuePkn, 1000);
-  assert.equal(synced.priceBasis, 'ct-dump-min');
+  assert.equal(synced.priceBasis, 'ct-sold-day');
   assert.equal(series.find((row) => row.date === '2026-09-22').cardsValuePkn, 900);
   const today = series.find((row) => row.date === '2026-09-25');
   assert.equal(today.cardsValuePkn, 1100);

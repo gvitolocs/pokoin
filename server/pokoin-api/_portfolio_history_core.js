@@ -38,8 +38,8 @@ function movementFromLedger(row = {}) {
   return { date, amountPkn: signed };
 }
 
-const PRICE_BASIS = 'ct-dump-min';
-const SERIES_REVISION = 2;
+const PRICE_BASIS = 'ct-sold-day';
+const SERIES_REVISION = 3;
 
 function compactDay(row = {}) {
   const date = utcDayKey(row.date);
@@ -186,6 +186,46 @@ function applyDumpValues(walletDays, dumps, { ownershipDate, today } = {}) {
   return points.filter(Boolean);
 }
 
+/**
+ * Wallet days stay on the ledger. Card value is only that day's sold median
+ * times quantity still held. A card with no sale that day is left out, and
+ * yesterday's sale is not reused.
+ */
+function applySoldDayValues(walletDays, soldRows, { ownershipDate, today } = {}) {
+  const todayKey = utcDayKey(today);
+  if (!todayKey) return [];
+  const own = utcDayKey(ownershipDate) || '';
+  const soldAt = new Map();
+  for (const row of soldRows || []) {
+    const date = utcDayKey(row.date || row.day);
+    const value = Math.round((Number(row.cardsValuePkn ?? row.market_pkn) || 0) * 100) / 100;
+    if (date && date <= todayKey && value > 0 && (!own || date >= own)) soldAt.set(date, value);
+  }
+  const currencyAt = new Map();
+  for (const day of walletDays || []) {
+    const date = utcDayKey(day?.date);
+    if (date && date <= todayKey) currencyAt.set(date, Math.max(0, Number(day.currencyPkn) || 0));
+  }
+  const dates = new Set([...currencyAt.keys(), todayKey, ...soldAt.keys()]);
+  if (own) dates.add(own);
+  let currency = 0;
+  const points = [];
+  for (const date of [...dates].filter(Boolean).sort()) {
+    if (currencyAt.has(date)) currency = currencyAt.get(date);
+    const inCollection = own ? date >= own : soldAt.has(date);
+    const printed = inCollection ? soldAt.get(date) : undefined;
+    const known = printed != null;
+    points.push(compactDay({
+      date,
+      currencyPkn: currency,
+      cardsValuePkn: known ? printed : null,
+      cardsKnown: known,
+      priceBasis: known ? PRICE_BASIS : '',
+    }));
+  }
+  return points.filter(Boolean);
+}
+
 function upsertDay(days, point) {
   const next = (days || []).map(compactDay).filter((day) => day && day.date !== point.date);
   next.push(compactDay(point));
@@ -203,4 +243,5 @@ module.exports = {
   upsertDay,
   compactDay,
   applyDumpValues,
+  applySoldDayValues,
 };

@@ -2,11 +2,10 @@
 
 /**
  * GET /api/marketplace-portfolio-history
- * One stored series per seller. Card value is quantity times that day's
- * CardTrader dump minimum (cardtrader_blueprint_daily_analytics.min_price_pkn).
- * The series starts the day the seller saved the token and synced, then each
- * new dump day is appended. A visit that already stored today's basis reads
- * the document and does not price the pile again.
+ * One stored series per seller. Card value is quantity times that day's sold
+ * median (cardtrader_sold_daily). A card with no sale that day is left out.
+ * Asks and dump minimums are not used. A visit that already stored today's
+ * basis reads the document and does not price the pile again.
  */
 
 const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
@@ -19,12 +18,12 @@ const {
   buildSeries,
   storedIsFresh,
   compactDay,
-  applyDumpValues,
+  applySoldDayValues,
 } = require('./_portfolio_history_core');
 
 const HISTORY = 'portfolio_history';
 
-const DUMP_SQL = `
+const SOLD_SQL = `
   with held as (
     select blueprint_id, sum(quantity)::numeric as qty
     from public.marketplace_cardtrader_1dr_assets
@@ -32,34 +31,24 @@ const DUMP_SQL = `
       and quantity > 0
       and blueprint_id ~ '^[0-9]+$'
     group by blueprint_id
+  ),
+  sold as (
+    select observed_day,
+           blueprint_id::text as blueprint_id,
+           sum(median_pkn * sold_qty) / nullif(sum(sold_qty), 0) as sold_pkn
+    from public.cardtrader_sold_daily
+    where observed_day >= $2::date
+      and median_pkn > 0
+      and sold_qty > 0
+    group by observed_day, blueprint_id
   )
-  select analytics.observed_day::text as day,
-         round(sum(analytics.min_price_pkn * held.qty)::numeric, 2) as market_pkn,
+  select sold.observed_day::text as day,
+         round(sum(sold.sold_pkn * held.qty)::numeric, 2) as market_pkn,
          count(*)::int as priced
   from held
-  join public.cardtrader_blueprint_daily_analytics analytics
-    on analytics.blueprint_id::text = held.blueprint_id
-  where analytics.observed_day >= $2::date
-    and analytics.min_price_pkn > 0
-  group by analytics.observed_day
-  order by analytics.observed_day
-`;
-
-const CACHE_SQL = `
-  with held as (
-    select blueprint_id, sum(quantity)::numeric as qty
-    from public.marketplace_cardtrader_1dr_assets
-    where seller_uid = $1
-      and quantity > 0
-      and blueprint_id ~ '^[0-9]+$'
-    group by blueprint_id
-  )
-  select coalesce(round(sum(cache.cheapest_price_pkn * held.qty)::numeric, 2), 0) as market_pkn,
-         count(cache.cheapest_price_pkn)::int as priced
-  from held
-  left join public.cardtrader_blueprint_listing_cache cache
-    on cache.blueprint_id::text = held.blueprint_id
-   and cache.cheapest_price_pkn > 0
+  join sold on sold.blueprint_id = held.blueprint_id
+  group by sold.observed_day
+  order by sold.observed_day
 `;
 
 const OWNED_SINCE_SQL = `
@@ -129,25 +118,12 @@ async function readOwnership(firestore, uid) {
   return day;
 }
 
-async function readDumpSeries(uid, sinceDay) {
+async function readSoldSeries(uid, sinceDay) {
   try {
-    const result = await marketplaceQuery(DUMP_SQL, [uid, sinceDay]);
-    const rows = result?.rows || [];
-    if (rows.length) return { ok: true, rows };
+    const result = await marketplaceQuery(SOLD_SQL, [uid, sinceDay]);
+    return { ok: true, rows: result?.rows || [] };
   } catch (error) {
-    console.error('portfolio dump history failed', { message: error.message });
-  }
-  try {
-    const result = await marketplaceQuery(CACHE_SQL, [uid]);
-    const row = result?.rows?.[0] || {};
-    const priced = Number(row.priced) || 0;
-    const value = Number(row.market_pkn) || 0;
-    if (priced > 0 && value > 0) {
-      return { ok: true, rows: [{ day: sinceDay, market_pkn: value, priced }] };
-    }
-    return { ok: true, rows: [] };
-  } catch (error) {
-    console.error('portfolio dump minimum failed', { message: error.message });
+    console.error('portfolio sold history failed', { message: error.message });
     return { ok: false, rows: [] };
   }
 }
@@ -169,8 +145,8 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, days: cleanDays(data.days) });
     }
     const ownershipDate = await readOwnership(firestore, uid);
-    const dump = await readDumpSeries(uid, ownershipDate);
-    if (!dump.ok) {
+    const sold = await readSoldSeries(uid, ownershipDate);
+    if (!sold.ok) {
       return res.status(200).json({ ok: true, days: cleanDays(data.days) });
     }
     const balance = await readBalance(firestore, uid);
@@ -180,12 +156,12 @@ module.exports = async function handler(req, res) {
       marketChecked: false,
       today: new Date(),
     });
-    const days = applyDumpValues(wallet, dump.rows, {
+    const days = applySoldDayValues(wallet, sold.rows, {
       ownershipDate,
       today: new Date(),
     }).slice(-400);
-    const dumpDay = dump.rows.length
-      ? String(dump.rows[dump.rows.length - 1].day || dump.rows[dump.rows.length - 1].date || '')
+    const dumpDay = sold.rows.length
+      ? String(sold.rows[sold.rows.length - 1].day || sold.rows[sold.rows.length - 1].date || '')
       : '';
     await firestore.collection(HISTORY).doc(uid).set({
       days,

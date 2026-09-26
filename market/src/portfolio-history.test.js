@@ -14,6 +14,9 @@ import {
   historySeriesMax,
   marketValueFromHoldings,
   movementFromLedger,
+  historyPlotX,
+  historyPointerDay,
+  historyWindowSplit,
   nearestHistoryDay,
   niceScaleMax,
   normalizeHistoryDay,
@@ -193,4 +196,34 @@ test('normalizeHistoryDay is idempotent — desk may re-normalize today()', () =
   assert.equal(twice.assets.currencyPkn, 15);
   const tip = formatHistoryTip(twice);
   assert.ok(tip.rows.some((row) => row.label === 'Currency' && row.value === '15 PKN'));
+});
+
+test('today stops at two thirds and the rest of the plot is a projection', () => {
+  const points = [
+    normalizeHistoryDay({ date: '2026-09-01', currencyPkn: 15, cardsKnown: true, cardsValuePkn: 100 }),
+    normalizeHistoryDay({ date: '2026-09-26', currencyPkn: 15, cardsKnown: true, cardsValuePkn: 80 }),
+  ];
+  assert.equal(historyWindowSplit(points, '2026-09-26T12:00:00.000Z'), 2 / 3);
+  assert.equal(historyWindowSplit(points, '2026-09-27T12:00:00.000Z'), 1);
+  const end = historyPlotX('2026-09-26', {
+    from: '2026-09-01',
+    to: '2026-09-26',
+    width: 640,
+    split: 2 / 3,
+  });
+  assert.equal(end, 640 * (2 / 3));
+  assert.equal(historyPlotX('2026-09-01', {
+    from: '2026-09-01',
+    to: '2026-09-26',
+    width: 640,
+    split: 2 / 3,
+  }), 0);
+  const hatch = historyPointerDay(points, 0.9, { split: 2 / 3 });
+  assert.equal(hatch.projection, true);
+  assert.equal(hatch.day.date, '2026-09-26');
+  const tip = formatHistoryTip(hatch.day, { projection: true });
+  assert.ok(tip.rows.some((row) => row.label === 'Projection' && row.value === 'Rest of today'));
+  const known = historyPointerDay(points, 1 / 3, { split: 2 / 3 });
+  assert.equal(known.projection, false);
+  assert.equal(known.day.date, '2026-09-01');
 });

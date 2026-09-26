@@ -91,6 +91,10 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(homeSrc, /Couldn't load your collection/);
   assert.match(homeSrc, /marketUrl\(APP\.collection\)/);
   assert.match(viewSrc, /Cards owned|Card owned/);
+  assert.match(viewSrc, /Number\(ownedCards\) \|\| 0\) \+ oneDayReadyCards/);
+  assert.match(viewSrc, /title="Sold today"/);
+  assert.doesNotMatch(viewSrc, /Dump minimum/);
+  assert.match(viewSrc, /collection-history-hatch/);
   assert.match(viewSrc, /Listed for sale/);
   assert.match(viewSrc, /Currency availability/);
   assert.match(viewSrc, /formatPknNumber\(balance\)/);
@@ -160,7 +164,7 @@ test('Dashboard history panel keeps chart frame; never draws a real fake series'
   // Multi-day polyline only; a single live day is a point — no flat underline.
   assert.match(viewSrc, /hasLine \? \([\s\S]*<polyline/);
   assert.match(viewSrc, /seller-history-point/);
-  assert.match(viewSrc, /CHART_W \/ 2/);
+  assert.match(viewSrc, /historyPlotX/);
   assert.doesNotMatch(viewSrc, /CHART_W \* 0\.85/);
   assert.doesNotMatch(viewSrc, /<circle[\s\S]*seller-history-point/);
   assert.match(cssSrc, /\.seller-history-point \{[^}]*border-radius:\s*50%/);

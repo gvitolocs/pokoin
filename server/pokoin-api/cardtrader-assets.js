@@ -10,44 +10,26 @@ const { applyDumpMinimums, marketPricePkn, oneDayReadyTotals } = require('./_car
  * never a Pokoin listing; the dashboard shows it as "CardTrader 1-DR".
  */
 
-const DUMP_LATEST_SQL = `
-  select distinct on (analytics.blueprint_id)
-         analytics.blueprint_id::text as blueprint_id,
-         analytics.min_price_pkn as pkn
-  from public.cardtrader_blueprint_daily_analytics analytics
-  where analytics.blueprint_id::text = any($1::text[])
-    and analytics.min_price_pkn > 0
-    and analytics.observed_day >= (timezone('utc', now()))::date - 21
-  order by analytics.blueprint_id, analytics.observed_day desc
+const SOLD_TODAY_SQL = `
+  select blueprint_id::text as blueprint_id,
+         sum(median_pkn * sold_qty) / nullif(sum(sold_qty), 0) as pkn
+  from public.cardtrader_sold_daily
+  where blueprint_id::text = any($1::text[])
+    and observed_day = (timezone('utc', now()))::date
+    and median_pkn > 0
+    and sold_qty > 0
+  group by blueprint_id
 `;
 
-const LISTING_CACHE_SQL = `
-  select cache.blueprint_id::text as blueprint_id,
-         cache.cheapest_price_pkn as pkn
-  from public.cardtrader_blueprint_listing_cache cache
-  where cache.blueprint_id::text = any($1::text[])
-    and cache.cheapest_price_pkn > 0
-`;
-
-async function withDumpMinimums(rows) {
+async function withSoldToday(rows) {
   const ids = [...new Set((rows || []).map((row) => String(row.blueprint_id || '')).filter((id) => /^\d+$/.test(id)))];
   if (!ids.length) return applyDumpMinimums(rows, []);
   let prices = [];
   try {
-    const result = await marketplaceQuery(DUMP_LATEST_SQL, [ids]);
+    const result = await marketplaceQuery(SOLD_TODAY_SQL, [ids]);
     prices = result?.rows || [];
   } catch (error) {
-    console.error('1dr dump minimum failed', { message: error.message });
-  }
-  const have = new Set(prices.map((row) => String(row.blueprint_id || '')));
-  const missing = ids.filter((id) => !have.has(id));
-  if (missing.length) {
-    try {
-      const result = await marketplaceQuery(LISTING_CACHE_SQL, [missing]);
-      prices = prices.concat(result?.rows || []);
-    } catch (error) {
-      console.error('1dr listing cache minimum failed', { message: error.message });
-    }
+    console.error('1dr sold today failed', { message: error.message });
   }
   return applyDumpMinimums(rows, prices);
 }
@@ -92,9 +74,9 @@ async function readAssetsPayload(firestore, uid) {
   }
   let priced = rows;
   try {
-    priced = await withDumpMinimums(rows);
+    priced = await withSoldToday(rows);
   } catch (error) {
-    console.error('1dr dump minimum failed', { message: error.message });
+    console.error('1dr sold today failed', { message: error.message });
     priced = applyDumpMinimums(rows, []);
   }
   const items = priced.map(assetItem).sort((a, b) => (

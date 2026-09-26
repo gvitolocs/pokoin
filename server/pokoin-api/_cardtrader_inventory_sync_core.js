@@ -439,8 +439,8 @@ function oneDayReadyAssetRow(product = {}, { cardId = '', meta = {} } = {}) {
 }
 
 /**
- * Dashboard price for a 1-Day Ready row. Homepage cheapest only.
- * A CardTrader EUR conversion stored on the row is not shown.
+ * Dashboard price for a 1-Day Ready row. Today's sold median only.
+ * A CardTrader ask or EUR conversion stored on the row is not shown.
  */
 function marketPricePkn(row = {}) {
   const market = Number(row.market_pkn ?? row.marketPkn);
@@ -448,7 +448,7 @@ function marketPricePkn(row = {}) {
   return Math.round(market * 100) / 100;
 }
 
-/** Latest daily-dump minimum, keyed by CardTrader blueprint. Own asks stay off the row. */
+/** Sold price for today, keyed by CardTrader blueprint. Own asks stay off the row. */
 function applyDumpMinimums(rows, priceRows) {
   const byId = new Map();
   for (const price of priceRows || []) {

@@ -181,6 +181,33 @@ export function historySeriesMax(days = []) {
   return max;
 }
 
+/** Realized history ends here when the window includes today. The rest is a projection. */
+export const HISTORY_REALIZED_SPLIT = 2 / 3;
+
+export function historyWindowSplit(points, today = new Date()) {
+  const last = points?.[points.length - 1]?.date || '';
+  return last && last === utcDayKey(today) ? HISTORY_REALIZED_SPLIT : 1;
+}
+
+/** Map a day onto the plot. Today's window uses only the first two thirds. */
+export function historyPlotX(date, { from, to, width, split = 1 } = {}) {
+  const start = Date.parse(`${from || ''}T00:00:00Z`);
+  const end = Date.parse(`${to || ''}T00:00:00Z`);
+  const span = end - start;
+  if (!Number.isFinite(span) || span <= 0) return split < 1 ? width * split : width / 2;
+  const at = Date.parse(`${date}T00:00:00Z`);
+  const t = (at - start) / span;
+  return Math.min(1, Math.max(0, t)) * width * split;
+}
+
+/** Pointer ratio across the plot. Past the split, the day is today and the rest is a projection. */
+export function historyPointerDay(days, ratio, { split = 1 } = {}) {
+  const t = Math.min(1, Math.max(0, Number(ratio) || 0));
+  const projection = split < 1 && t > split;
+  const day = nearestHistoryDay(days, projection || split >= 1 ? (projection ? 1 : t) : t / split);
+  return { day, projection, xPct: t * 100 };
+}
+
 export function nearestHistoryDay(days, ratio) {
   const list = Array.isArray(days) ? days.filter(Boolean) : [];
   if (!list.length) return null;
@@ -289,7 +316,7 @@ export function buildCollectionHistory({
   return points.map((row) => normalizeHistoryDay(row)).filter(Boolean);
 }
 
-export function formatHistoryTip(day) {
+export function formatHistoryTip(day, { projection = false } = {}) {
   if (!day) return null;
   const assets = day.assets || {};
   const rows = [
@@ -298,6 +325,7 @@ export function formatHistoryTip(day) {
   if (assets.cardsValuePkn != null) {
     rows.push({ label: 'Cards', value: `${formatPknNumber(assets.cardsValuePkn)} PKN` });
   }
+  if (projection) rows.push({ label: 'Projection', value: 'Rest of today' });
   return {
     dateLabel: formatDayLabel(day.date),
     totalLabel: `${formatPknNumber(day.totalPkn)} PKN`,
