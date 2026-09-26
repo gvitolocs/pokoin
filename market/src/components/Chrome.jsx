@@ -1016,6 +1016,25 @@ export default function Chrome({ children }) {
             <img src="/home/logo.png" alt="" width="40" height="40" />
             <span>{site.brand}</span>
           </AppLink>
+          <span
+            className="desktop-anchor"
+            onMouseEnter={() => setNavPop('desktop')}
+            onMouseLeave={() => setNavPop((cur) => (cur === 'desktop' ? '' : cur))}
+          >
+            <button
+              type="button"
+              className="desktop-chip"
+              aria-label={`Desktop, ${desktopCount} cards`}
+              title="Desktop"
+              onClick={() => setNavPop((cur) => (cur === 'desktop' ? '' : 'desktop'))}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path fill="currentColor" d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 2v8h14V7H5zm-1 12h16v2H4v-2z" />
+              </svg>
+              {desktopCount > 0 ? <em>{desktopCount}</em> : null}
+            </button>
+            {cardDrag || navPop === 'desktop' ? <DesktopDrop onAddToCart={addItem} /> : null}
+          </span>
           <form className="search" onSubmit={goSearch} role="search" ref={box}>
             <label className="sr-only" htmlFor="market-search">Search cards</label>
             <div className="search-pill">
@@ -1270,25 +1289,6 @@ export default function Chrome({ children }) {
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" /></svg>
               )}
             </AppLink>
-            <span
-              className="desktop-anchor"
-              onMouseEnter={() => setNavPop('desktop')}
-              onMouseLeave={() => setNavPop((cur) => (cur === 'desktop' ? '' : cur))}
-            >
-              <button
-                type="button"
-                className="desktop-chip"
-                aria-label={`Desktop, ${desktopCount} cards`}
-                title="Desktop"
-                onClick={() => setNavPop((cur) => (cur === 'desktop' ? '' : 'desktop'))}
-              >
-                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                  <path fill="currentColor" d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 2v8h14V7H5zm-1 12h16v2H4v-2z" />
-                </svg>
-                {desktopCount > 0 ? <em>{desktopCount}</em> : null}
-              </button>
-              {cardDrag || navPop === 'desktop' ? <DesktopDrop onAddToCart={addItem} /> : null}
-            </span>
             <span
               className="cart-anchor"
               onMouseEnter={() => setNavPop('cart')}

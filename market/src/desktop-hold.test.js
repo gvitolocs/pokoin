@@ -75,11 +75,20 @@ test('readDesktopHold returns the same array when storage is unchanged', () => {
   assert.equal(a.length, 1);
 });
 
-test('Chrome mounts a Desktop tray next to cart', () => {
+test('Chrome mounts Desktop on the left, opposite the cart', () => {
   const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
   const drop = fs.readFileSync(path.join(root, 'components/DesktopDrop.jsx'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
   assert.match(chrome, /import DesktopDrop from '\.\/DesktopDrop\.jsx'/);
   assert.match(chrome, /navPop === 'desktop'/);
+  const brandAt = chrome.indexOf('className="brand"');
+  const desktopAt = chrome.indexOf('className="desktop-anchor"');
+  const searchAt = chrome.indexOf('className="search"');
+  const cartAt = chrome.indexOf('className="cart-anchor"');
+  const iconNavAt = chrome.indexOf('className="nav icon-nav"');
+  assert.ok(brandAt > 0 && desktopAt > brandAt && searchAt > desktopAt);
+  assert.ok(iconNavAt > searchAt && cartAt > iconNavAt);
+  assert.match(css, /\.desktop-drop\s*\{[^}]*left:\s*0/s);
   assert.match(drop, /Clear desktop/);
   assert.match(drop, /Add to cart/);
   assert.match(drop, /Export/);
