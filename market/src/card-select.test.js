@@ -54,6 +54,12 @@ test('the held card leads the multi-select drag pile', () => {
   assert.match(source, /String\(row\?\.id \|\| ''\) !== id/);
 });
 
+test('drag pile CSS styles canvas layers like the old img pile', () => {
+  const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+  assert.match(css, /\.drag-stack img,\s*\.drag-stack canvas\s*\{/);
+  assert.match(css, /\.drag-stack canvas[\s\S]*?position:\s*fixed/);
+});
+
 test('every browsing card grid can select tiles', () => {
   const pages = [
     'pages/Home.jsx',

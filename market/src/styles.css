@@ -4081,7 +4081,8 @@ html.is-shop-marquee * {
   pointer-events: none;
 }
 
-.drag-stack img {
+.drag-stack img,
+.drag-stack canvas {
   position: fixed;
   top: 0;
   left: 0;

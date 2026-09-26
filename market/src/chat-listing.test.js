@@ -271,6 +271,34 @@ test('dragging a shop row uses a pile ghost, including a single card', () => {
   assert.equal(kids.length, 1);
   assert.equal(kids[0].tagName, 'CANVAS');
   assert.equal(kids[0].width, 216);
+  assert.match(String(kids[0].style?.cssText || ''), /position:fixed/);
+});
+
+test('a multi-select pile mounts lagged canvas layers', () => {
+  const { doc, root, kids } = pileDragDocument();
+  globalThis.document = doc;
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 1 };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  writeListingDrag({
+    clientX: 40,
+    clientY: 60,
+    currentTarget: { nodeType: 1, tagName: 'DIV', querySelector: () => null },
+    dataTransfer: { setData() {}, setDragImage() {} },
+  }, {
+    kind: 'cards',
+    cardName: '3 cards',
+    imageUrl: '/a.jpg',
+    cards: [
+      { cardName: 'A', imageUrl: '/a.jpg' },
+      { cardName: 'B', imageUrl: '/b.jpg' },
+      { cardName: 'C', imageUrl: '/c.jpg' },
+    ],
+  });
+  assert.equal(root.className, 'drag-stack');
+  assert.equal(kids.length, 3);
+  assert.ok(kids.every((node) => node.tagName === 'CANVAS'));
+  assert.match(String(kids[1].style?.cssText || ''), /position:fixed/);
 });
 
 test('dragging the desk frame uses a pile of the held card', () => {

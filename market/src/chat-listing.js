@@ -401,8 +401,20 @@ function stackLayerFromWarm(warm, zIndex) {
   const canvas = document.createElement('canvas');
   canvas.width = CARD_DRAG_WIDTH;
   canvas.height = CARD_DRAG_HEIGHT;
+  canvas.className = 'drag-stack-card';
   canvas.setAttribute('aria-hidden', 'true');
-  canvas.style.zIndex = String(zIndex);
+  // Match .drag-stack img: fixed layers so STACK_LAG can trail each card.
+  canvas.style.cssText = [
+    'position:fixed',
+    'top:0',
+    'left:0',
+    `width:${CARD_DRAG_WIDTH}px`,
+    `height:${CARD_DRAG_HEIGHT}px`,
+    'border-radius:10px',
+    'background:#07060b',
+    'box-shadow:0 14px 32px rgb(0 0 0 / 0.5)',
+    `z-index:${zIndex}`,
+  ].join(';');
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
   ctx.fillStyle = '#07060b';
