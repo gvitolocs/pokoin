@@ -42,6 +42,15 @@ test('listing tags keep https images and drop everything else', () => {
   assert.equal(core.cleanListings([{ cardName: 'Nope', imageUrl: 'javascript:alert(1)', path: 'https://evil.example' }])[0].path, '');
 });
 
+test('chat and listing photos stay on the owner path', () => {
+  const uid = 'abcdefghijklmnop';
+  const own = `/card-images/user-photos/chat/${uid}/abc.jpg`;
+  assert.deepEqual(core.cleanChatImages([own, `/card-images/user-photos/chat/someoneelse/abc.jpg`, 'https://evil.example/a.jpg'], uid), [own]);
+  const listing = `/card-images/user-photos/listing/${uid}/one.jpg`;
+  assert.equal(core.cleanListingPhotos(Array.from({ length: 12 }, () => listing), uid).length, 8);
+  assert.equal(core.previewForEvent({ type: 'text', images: [own] }, 'a'), 'Photo');
+});
+
 test('event previews are human readable', () => {
   assert.equal(core.previewForEvent({ type: 'text', text: 'hello' }, 'a'), 'hello');
   assert.equal(core.previewForEvent({ type: 'money_request', amountPkn: 125, senderUid: 'b' }, 'a'), 'Requested 125 PKN');

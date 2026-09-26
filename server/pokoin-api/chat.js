@@ -1,10 +1,16 @@
 'use strict';
 
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+
 const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
 const {
   EVENT_TYPES,
   USERNAME_RE,
   bumpUnread,
+  cleanChatImages,
+  cleanListingPhotos,
   cleanListings,
   cleanNote,
   cleanText,
@@ -22,6 +28,42 @@ const EVENT_PAGE = 100;
 
 function httpError(statusCode, message) {
   return Object.assign(new Error(message), { statusCode });
+}
+
+const PHOTO_ROOT = process.env.POKOIN_CARD_IMAGES_DIR || '/srv/pokoin/card-images/objects';
+
+function storeUserPhoto(uid, body) {
+  const kind = body.kind === 'listing' ? 'listing' : 'chat';
+  const raw = String(body.dataUrl || '');
+  const match = raw.match(/^data:image\/jpeg;base64,([A-Za-z0-9+/=\s]+)$/);
+  if (!match) throw httpError(400, 'Send a JPEG photo.');
+  const bytes = Buffer.from(match[1].replace(/\s/g, ''), 'base64');
+  if (bytes.length < 32 || bytes.length > 1800000) throw httpError(400, 'That photo is too large.');
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw httpError(400, 'Send a JPEG photo.');
+  const id = crypto.randomBytes(12).toString('hex');
+  const rel = path.posix.join('user-photos', kind, uid, `${id}.jpg`);
+  const root = path.resolve(PHOTO_ROOT);
+  const dest = path.resolve(root, rel);
+  if (!dest.startsWith(`${root}${path.sep}`)) throw httpError(400, 'Bad photo path.');
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, bytes);
+  return { url: `/card-images/${rel}` };
+}
+
+async function saveListingPhotos(uid, body) {
+  const id = String(body.listingId || '').trim();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw httpError(400, 'Missing listing.');
+  const photos = cleanListingPhotos(body.urls, uid);
+  const { marketplaceWriteQuery } = require('../server/_marketplace_db');
+  const result = await marketplaceWriteQuery(
+    `update public.marketplace_user_listings
+        set photo_urls = $1::text[], updated_at = now()
+      where id = $2::uuid and seller_uid = $3
+      returning id`,
+    [photos, id, uid],
+  );
+  if (!result.rowCount) throw httpError(404, 'Listing was not found.');
+  return { ok: true, photoUrls: photos };
 }
 
 function timestampMillis(value) {
@@ -87,6 +129,7 @@ function serializeEvent(doc, uid, requestsById) {
     senderUsername: data.senderUsername || '',
     text: data.text || '',
     listings: Array.isArray(data.listings) ? data.listings : [],
+    images: Array.isArray(data.images) ? data.images : [],
     amountPkn: Number(data.amountPkn || request?.amountPkn || 0),
     note: data.note || request?.note || '',
     requestId: data.requestId || '',
@@ -134,6 +177,14 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ conversations });
     }
 
+    if (req.method === 'POST' && action === 'photo') {
+      return res.status(200).json(storeUserPhoto(me.uid, req.body || {}));
+    }
+
+    if (req.method === 'POST' && action === 'listing-photos') {
+      return res.status(200).json(await saveListingPhotos(me.uid, req.body || {}));
+    }
+
     const peerUid = req.method === 'GET' ? url.searchParams.get('peerUid') : req.body?.peerUid;
     const peerName = req.method === 'GET' ? url.searchParams.get('peer') : req.body?.peer;
     const peer = peerUid
@@ -169,9 +220,10 @@ module.exports = async function handler(req, res) {
 
     if (action === 'message') {
       const listings = cleanListings(req.body?.listings);
+      const images = cleanChatImages(req.body?.images, me.uid);
       const text = cleanText(req.body?.text);
-      if (!text && !listings.length) throw httpError(400, 'Write a message first.');
-      const previewText = text || listings[0].cardName;
+      if (!text && !listings.length && !images.length) throw httpError(400, 'Write a message first.');
+      const previewText = text || listings[0]?.cardName || (images.length ? 'Photo' : '');
       await firestore.runTransaction(async (transaction) => {
         const convo = await transaction.get(ref);
         const data = convo.exists ? convo.data() : {};
@@ -183,11 +235,11 @@ module.exports = async function handler(req, res) {
           members,
           memberUsernames: { ...(data.memberUsernames || {}), [me.uid]: me.username, [peer.uid]: peer.username },
           unread: bumpUnread(data.unread, members, me.uid),
-          lastEvent: { type: EVENT_TYPES.TEXT, text: previewText, senderUid: me.uid, at: stamp },
+          lastEvent: { type: EVENT_TYPES.TEXT, text: previewText, images, senderUid: me.uid, at: stamp },
           ...(convo.exists ? {} : { createdAt: stamp }),
         }, { merge: true });
         transaction.set(ref.collection('events').doc(), {
-          type: EVENT_TYPES.TEXT, senderUid: me.uid, senderUsername: me.username, text, listings, createdAt: stamp,
+          type: EVENT_TYPES.TEXT, senderUid: me.uid, senderUsername: me.username, text, listings, images, createdAt: stamp,
         });
       });
       return res.status(200).json({ ok: true });

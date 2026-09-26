@@ -218,7 +218,6 @@ function LangToggle() {
               <button type="button" className={item.code === lang ? 'is-active' : ''} onClick={() => pick(item.code)}>
                 <img src={flagSrc(item.code)} alt="" width="22" height="22" />
                 <span>{item.label}</span>
-                <em>{item.code.toUpperCase()}</em>
               </button>
             </li>
           ))}

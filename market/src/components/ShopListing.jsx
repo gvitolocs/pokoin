@@ -254,6 +254,11 @@ export default function ShopListingRow({
           <span>of {stock || choices}</span>
         </label>
       ) : null}
+      {Array.isArray(offer?.photoUrls) && offer.photoUrls.length ? (
+        <span className="shop-photos">
+          {offer.photoUrls.slice(0, 8).map((url) => <img key={url} src={url} alt="" />)}
+        </span>
+      ) : null}
     </div>
   );
 }

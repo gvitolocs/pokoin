@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
-import { listConversations, sendChatMessage } from '../chat-client.js';
+import { listConversations, sendChatMessage, uploadChatPhoto } from '../chat-client.js';
 import { chatTime } from '../chat-format.js';
 import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
 import {
@@ -27,6 +27,8 @@ import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import { useChatThread } from '../use-chat-thread.js';
 import ChatListingTag from './ChatListingTag.jsx';
+import ChatPhotos from './ChatPhotos.jsx';
+import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
 import '../chat-dock.css';
 
 function draftLine(row, drafts) {
@@ -120,6 +122,7 @@ export default function ChatDock() {
   const lang = useSearchLang();
   const [dock, setDock] = useState(getChatDock);
   const [text, setText] = useState('');
+  const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [over, setOver] = useState(false);
@@ -169,17 +172,41 @@ export default function ChatDock() {
 
   const label = dock.peerLabel && dock.peerLabel !== 'Seller' ? `@${dock.peerLabel}` : 'Seller';
 
+  async function addPhotos(event) {
+    const files = [...(event.target.files || [])];
+    event.target.value = '';
+    const room = MAX_CHAT_PHOTOS - photos.length;
+    if (!files.length || room <= 0) return;
+    setBusy(true);
+    setError('');
+    try {
+      const token = await getBearer();
+      const next = [];
+      for (const file of files.slice(0, room)) {
+        const dataUrl = await photoFileToJpeg(file);
+        const saved = await uploadChatPhoto(token, dataUrl, 'chat');
+        if (saved?.url) next.push(saved.url);
+      }
+      setPhotos((current) => [...current, ...next].slice(0, MAX_CHAT_PHOTOS));
+    } catch (err) {
+      setError(err.message || 'Photo was not added.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function send(event) {
     event?.preventDefault();
     const message = text.trim();
-    if (busy || (!message && !dock.tags.length)) return;
+    if (busy || (!message && !dock.tags.length && !photos.length)) return;
     setBusy(true);
     setError('');
     try {
       const token = await getBearer();
       if (!token) throw new Error('Sign in to send a message.');
-      await sendChatMessage('', message, token, dock.tags, dock.peer);
+      await sendChatMessage('', message, token, dock.tags, dock.peer, photos);
       setText('');
+      setPhotos([]);
       clearChatTags();
       await thread.refresh();
     } catch (err) {
@@ -233,6 +260,7 @@ export default function ChatDock() {
             {thread.events.map((event) => (
               <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}`}>
                 {event.text ? <p>{event.text}</p> : null}
+                <ChatPhotos urls={event.images || []} />
                 {(event.listings || []).length ? (
                   <span className="chat-tags">
                     {(event.listings || []).map((row, index) => (
@@ -245,7 +273,7 @@ export default function ChatDock() {
                     ))}
                   </span>
                 ) : null}
-                {!event.text && !(event.listings || []).length ? <p>…</p> : null}
+                {!event.text && !(event.listings || []).length && !(event.images || []).length ? <p>…</p> : null}
               </div>
             ))}
           </div>
@@ -279,7 +307,17 @@ export default function ChatDock() {
                   >×</button>
                 </p>
               ) : null}
+              {photos.length ? (
+                <div className="chat-photo-draft">
+                  <ChatPhotos urls={photos} />
+                  <button type="button" onClick={() => setPhotos([])}>Clear photos</button>
+                </div>
+              ) : null}
               <div className="chat-dock-field">
+                <label className="chat-photo-add" aria-label="Add photos">
+                  +
+                  <input type="file" accept="image/*" multiple hidden onChange={addPhotos} disabled={busy || photos.length >= MAX_CHAT_PHOTOS} />
+                </label>
                 <label className="sr-only" htmlFor="chat-dock-input">Message</label>
                 <textarea
                   id="chat-dock-input"
@@ -295,7 +333,7 @@ export default function ChatDock() {
                     }
                   }}
                 />
-                <button type="submit" disabled={busy || (!text.trim() && !dock.tags.length)} aria-label="Send">↑</button>
+                <button type="submit" disabled={busy || (!text.trim() && !dock.tags.length && !photos.length)} aria-label="Send">↑</button>
               </div>
             </form>
           ) : (

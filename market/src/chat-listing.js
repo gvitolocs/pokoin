@@ -393,6 +393,81 @@ export function bundleOf(row) {
 }
 
 let dragSlot;
+let blankDrag;
+let dragStack;
+let dragStackFrame = 0;
+let dragStackTarget = { x: 0, y: 0 };
+let dragStackPos = [];
+
+const STACK_LAG = [0.62, 0.36, 0.2];
+const STACK_NUDGE = [
+  { x: 0, y: 0, rot: -1.5 },
+  { x: 16, y: 18, rot: 3.5 },
+  { x: 30, y: 34, rot: -4.5 },
+];
+
+function invisibleDragImage() {
+  if (typeof document === 'undefined') return null;
+  if (!blankDrag || blankDrag.ownerDocument !== document) {
+    blankDrag = document.createElement('canvas');
+    blankDrag.width = 1;
+    blankDrag.height = 1;
+  }
+  return blankDrag;
+}
+
+function stopDragStack() {
+  if (dragStackFrame) cancelAnimationFrame(dragStackFrame);
+  dragStackFrame = 0;
+  dragStack?.remove?.();
+  dragStack = null;
+  dragStackPos = [];
+  document.removeEventListener('dragover', trackDragStack, true);
+}
+
+function trackDragStack(event) {
+  dragStackTarget = { x: event.clientX, y: event.clientY };
+}
+
+function tickDragStack() {
+  if (!dragStack) return;
+  const nodes = dragStack.children;
+  for (let i = 0; i < nodes.length; i += 1) {
+    const lag = STACK_LAG[i] || 0.2;
+    const nudge = STACK_NUDGE[i] || STACK_NUDGE[0];
+    const pos = dragStackPos[i];
+    pos.x += (dragStackTarget.x + nudge.x - pos.x) * lag;
+    pos.y += (dragStackTarget.y + nudge.y - pos.y) * lag;
+    nodes[i].style.transform = `translate(${pos.x - CARD_DRAG_WIDTH / 2}px, ${pos.y - CARD_DRAG_HEIGHT / 2}px) rotate(${nudge.rot}deg)`;
+  }
+  dragStackFrame = requestAnimationFrame(tickDragStack);
+}
+
+/** The first three scans follow the cursor at different speeds, so the stack jiggles. */
+function mountDragStack(cards, event) {
+  stopDragStack();
+  if (typeof document === 'undefined') return;
+  const rows = (cards || []).slice(0, 3).filter((row) => row?.imageUrl || row?.cardName);
+  if (rows.length < 2) return;
+  const root = document.createElement('div');
+  root.className = 'drag-stack';
+  root.setAttribute('aria-hidden', 'true');
+  rows.forEach((row, index) => {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.draggable = false;
+    img.src = String(row.imageUrl || '');
+    img.style.zIndex = String(30 - index);
+    root.appendChild(img);
+  });
+  document.body.appendChild(root);
+  dragStack = root;
+  dragStackTarget = { x: event.clientX, y: event.clientY };
+  dragStackPos = rows.map(() => ({ x: event.clientX, y: event.clientY }));
+  document.addEventListener('dragover', trackDragStack, true);
+  dragStackFrame = requestAnimationFrame(tickDragStack);
+  window.addEventListener('dragend', stopDragStack, { once: true, capture: true });
+}
 
 function paintDragGhost(image, fit = 'cover') {
   if (typeof document === 'undefined') return null;
@@ -467,6 +542,18 @@ export function writeListingDrag(event, reference) {
   event.dataTransfer.effectAllowed = 'copy';
   const image = dragSourceImage(event) || readyDragImage(reference.imageUrl);
   const fit = reference.kind === 'card' || !reference.kind ? 'cover' : 'contain';
+  const stack = dragCardsOf(reference);
+  if (stack.length > 1) {
+    mountDragStack(stack, event);
+    try {
+      const blank = invisibleDragImage();
+      if (blank) event.dataTransfer.setDragImage(blank, 0, 0);
+    } catch (_) {
+      /* the following stack is the ghost */
+    }
+    markCardDragging();
+    return;
+  }
   const painted = paintDragGhost(image, fit);
   const ghost = painted || fixedDragSlot(image?.currentSrc || image?.src || reference.imageUrl, fit);
   try {

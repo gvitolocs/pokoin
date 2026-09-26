@@ -1,9 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { applyCardSelect, bandHits, selectionFromBand } from '../card-select.js';
-import { addCatalogCards } from '../cart-add.js';
-import { useCart } from '../cart.jsx';
-import { cardReference } from '../chat-listing.js';
-import { stageChatCards } from '../chat-dock-store.js';
 
 const CardSelectContext = createContext(null);
 
@@ -26,13 +22,11 @@ function tileRects(root) {
 }
 
 export default function CardSelectGrid({ cards = [], className = 'grid', children }) {
-  const { addItem } = useCart();
   const rootRef = useRef(null);
   const dragRef = useRef(null);
   const [selected, setSelected] = useState(() => new Set());
   const [anchor, setAnchor] = useState('');
   const [band, setBand] = useState(null);
-  const [busy, setBusy] = useState('');
   const ids = useMemo(
     () => (cards || []).map((card) => String(card?.id || '')).filter(Boolean),
     [cards],
@@ -62,11 +56,6 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
     return () => window.removeEventListener('keydown', onKey);
   }, [selected.size]);
 
-  const picked = useMemo(
-    () => (cards || []).filter((card) => selected.has(String(card?.id || ''))),
-    [cards, selected],
-  );
-
   function commit(next, nextAnchor = anchor) {
     setSelected(next);
     if (nextAnchor) setAnchor(nextAnchor);
@@ -75,7 +64,7 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
   useEffect(() => {
     function ignored(target) {
       return target instanceof Element && target.closest(
-        'a, button, input, select, textarea, label, header, footer, nav, .topbar, .card-select-bar, .seller-history, .suggest, .cart-drop',
+        'a, button, input, select, textarea, label, header, footer, nav, .topbar, .seller-history, .suggest, .cart-drop',
       );
     }
     function onDown(event) {
@@ -127,21 +116,6 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
     };
   }, []);
 
-  async function addToCart() {
-    if (!picked.length || busy) return;
-    setBusy('cart');
-    try {
-      await addCatalogCards(picked, addItem);
-    } finally {
-      setBusy('');
-    }
-  }
-
-  function addToChat() {
-    if (!picked.length || busy) return;
-    stageChatCards(picked.map((card) => cardReference(card)));
-  }
-
   const api = {
     selected,
     click(id, event) {
@@ -170,16 +144,6 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
   return (
     <CardSelectContext.Provider value={api}>
       <div className="card-select-host">
-        {picked.length ? (
-          <div className="card-select-bar" role="toolbar" aria-label="Selected cards">
-            <strong>{picked.length} selected</strong>
-            <button type="button" onClick={addToCart} disabled={Boolean(busy)}>
-              {busy === 'cart' ? 'Adding…' : 'Add to cart'}
-            </button>
-            <button type="button" onClick={addToChat} disabled={Boolean(busy)}>Add to chat</button>
-            <button type="button" onClick={() => { setSelected(new Set()); setAnchor(''); }}>Clear</button>
-          </div>
-        ) : null}
         <div
           ref={rootRef}
           className={className}

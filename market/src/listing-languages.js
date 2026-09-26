@@ -5,9 +5,12 @@ export const WESTERN_SELL_LANGS = ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL', 'PL
 
 const SELL_ORDER = ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL', 'PL', 'RU', 'JP', 'KO', 'ZH', 'ZHT', 'ID', 'TH', 'VI'];
 
+/** Japanese and Korean printings list every other Asian language except Chinese. */
+const ASIAN_SELL_LANGS = ['JP', 'KO', 'ID', 'TH', 'VI'];
+
 const PRINT_LANG = {
-  japanese: ['JP'],
-  korean: ['JP'],
+  japanese: ASIAN_SELL_LANGS,
+  korean: ASIAN_SELL_LANGS,
   chinese: ['ZH', 'ZHT'],
   indonesian: ['ID'],
   thai: ['TH'],
@@ -27,7 +30,7 @@ function cleanCodes(codes) {
 
 function rank(codes) {
   const have = new Set(codes);
-  return SELL_ORDER.filter((code) => have.has(code) && code !== 'KO');
+  return SELL_ORDER.filter((code) => have.has(code));
 }
 
 export function setReleaseKey(value) {
@@ -53,10 +56,10 @@ export function releaseLanguagesForSet(setName) {
  * TCGdex release rows win, then the printing nationality.
  */
 export function sellLanguages({ nationality, setName, releaseLanguages } = {}) {
+  const printed = PRINT_LANG[String(nationality || '').toLowerCase()];
+  if (printed) return rank(printed);
   const fromCard = cleanCodes(releaseLanguages);
   if (fromCard.length) return rank(fromCard);
-  const printed = PRINT_LANG[String(nationality || '').toLowerCase()];
-  if (printed) return printed.slice();
   const fromSet = releaseLanguagesForSet(setName);
   if (fromSet) return rank(fromSet);
   return WESTERN_SELL_LANGS.slice();
@@ -66,13 +69,16 @@ export function sellLanguages({ nationality, setName, releaseLanguages } = {}) {
  * Asian codes that are a different printing of the same artwork.
  * Choosing one confirms a redirect instead of listing this card in that language.
  */
-export function versionRedirects(printings, currentId, listed) {
+export function versionRedirects(printings, currentId, listed, options = {}) {
   const rows = printings || [];
   const current = String(currentId || '');
   const have = new Set(cleanCodes(listed));
+  const nation = String(options.nationality || '').toLowerCase();
+  const hideChinese = nation === 'japanese' || nation === 'korean';
   const out = [];
   for (const [code, spec] of Object.entries(REDIRECT)) {
     if (have.has(code)) continue;
+    if (hideChinese && (code === 'ZH' || code === 'ZHT')) continue;
     const candidates = rows.filter((row) => {
       const id = String(row?.id || row?.card_id || '');
       if (!id || id === current) return false;

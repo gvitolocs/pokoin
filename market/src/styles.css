@@ -9512,3 +9512,8 @@ html:has(.wallet-page) .brand span {
   margin-top:1rem;padding-top:.85rem;border-top:1px solid var(--g5);
 }
 .seller-pager-status{color:var(--muted);font-size:.85rem}
+
+.listing-photos{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+.listing-photos img,.shop-photos img{width:3.2rem;height:4.4rem;object-fit:cover;border-radius:.25rem}
+.shop-photos{grid-column:1 / -1;display:flex;gap:.35rem}
+.listing-photo-add{cursor:pointer}

@@ -402,3 +402,8 @@
   line-height: 1;
   cursor: pointer;
 }
+
+.chat-photos{display:flex;flex-wrap:wrap;gap:.35rem}
+.chat-photos img{width:7.5rem;height:7.5rem;object-fit:cover;border-radius:.4rem}
+.chat-photo-add{display:grid;place-items:center;width:2rem;height:2rem;border-radius:50%;cursor:pointer}
+.chat-photo-draft{display:flex;align-items:center;gap:.5rem}

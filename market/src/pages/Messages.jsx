@@ -7,6 +7,7 @@ import {
   newClientToken,
   sendChatMessage,
   sendChatPayment,
+  uploadChatPhoto,
 } from '../chat-client.js';
 import { useChatThread } from '../use-chat-thread.js';
 import { chatTime, eventAriaLabel, requestActionFor } from '../chat-format.js';
@@ -14,6 +15,8 @@ import { tagKey } from '../chat-listing.js';
 import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import ChatListingTag from '../components/ChatListingTag.jsx';
+import ChatPhotos from '../components/ChatPhotos.jsx';
+import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
 import { createMoneyRequest, payMoneyRequest, requestStatusLabel, respondMoneyRequest } from '../money-requests.js';
 
 function SignInGate() {
@@ -183,6 +186,7 @@ function EventCard({ event, busy, onAction, peer, me }) {
   return (
     <div className={`chat-bubble ${event.mine ? ' mine' : ''}`} aria-label={eventAriaLabel(event)}>
       {event.text ? <p>{event.text}</p> : null}
+      <ChatPhotos urls={event.images || []} />
       {(event.listings || []).length ? (
         <span className="chat-tags">
           {(event.listings || []).map((row, index) => (
@@ -202,18 +206,44 @@ export function Conversation() {
   const navigate = useNavigate();
   const { ready, signedIn, getBearer, user, profile } = useAuth();
   const [text, setText] = useState('');
+  const [photos, setPhotos] = useState([]);
   const [moneyMode, setMoneyMode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [flash, setFlash] = useState('');
   const thread = useChatThread({ peer, signedIn, getBearer, enabled: signedIn && Boolean(peer) });
 
+  async function addPhotos(event) {
+    const files = [...(event.target.files || [])];
+    event.target.value = '';
+    const room = MAX_CHAT_PHOTOS - photos.length;
+    if (!files.length || room <= 0) return;
+    setBusy(true); setError('');
+    try {
+      const token = await getBearer();
+      const next = [];
+      for (const file of files.slice(0, room)) {
+        const dataUrl = await photoFileToJpeg(file);
+        const saved = await uploadChatPhoto(token, dataUrl, 'chat');
+        if (saved?.url) next.push(saved.url);
+      }
+      setPhotos((current) => [...current, ...next].slice(0, MAX_CHAT_PHOTOS));
+    } catch (err) { setError(err.message || 'Photo was not added.'); }
+    finally { setBusy(false); }
+  }
+
   async function send(event) {
     event.preventDefault();
     const message = text.trim();
-    if (!message || busy) return;
+    if (busy || (!message && !photos.length)) return;
     setBusy(true); setError('');
-    try { const token = await getBearer(); await sendChatMessage(peer, message, token); setText(''); await thread.refresh(); }
+    try {
+      const token = await getBearer();
+      await sendChatMessage(peer, message, token, [], '', photos);
+      setText('');
+      setPhotos([]);
+      await thread.refresh();
+    }
     catch (err) { setError(err.message || 'Message was not sent.'); }
     finally { setBusy(false); }
   }
@@ -251,7 +281,8 @@ export function Conversation() {
         {!thread.settled && !thread.events.length ? <p className="chat-muted">Loading conversation…</p> : thread.events.length ? thread.events.map((event) => <EventCard key={event.id} event={event} busy={busy} onAction={actOnRequest} peer={peer} me={{ uid: user?.uid, username: profile?.username }} />) : <div className="chat-first"><h2>Say hello to @{peer}</h2><p>Messages, requests, and payments appear here in chronological order.</p></div>}
       </section>
       <div className="chat-tools"><button type="button" onClick={() => setMoneyMode('request')}>Request</button><button type="button" onClick={() => setMoneyMode('send')}>Send PKN</button></div>
-      <form className="chat-composer" onSubmit={send}><label className="sr-only" htmlFor="chat-message">Message</label><textarea id="chat-message" rows="1" maxLength={1000} value={text} onChange={(event) => setText(event.target.value)} placeholder={`Message @${peer}`} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(event); } }} /><button type="submit" disabled={!text.trim() || busy} aria-label="Send message">↑</button></form>
+      {photos.length ? <div className="chat-photo-draft"><ChatPhotos urls={photos} /><button type="button" onClick={() => setPhotos([])}>Clear photos</button></div> : null}
+      <form className="chat-composer" onSubmit={send}><label className="chat-photo-add" aria-label="Add photos">+<input type="file" accept="image/*" multiple hidden onChange={addPhotos} disabled={busy || photos.length >= MAX_CHAT_PHOTOS} /></label><label className="sr-only" htmlFor="chat-message">Message</label><textarea id="chat-message" rows="1" maxLength={1000} value={text} onChange={(event) => setText(event.target.value)} placeholder={`Message @${peer}`} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(event); } }} /><button type="submit" disabled={busy || (!text.trim() && !photos.length)} aria-label="Send message">↑</button></form>
       {moneyMode && <MoneyModal mode={moneyMode} peer={peer} onClose={() => setMoneyMode('')} onDone={(message) => { setMoneyMode(''); setFlash(message); thread.refresh(); }} />}
     </main>
   );

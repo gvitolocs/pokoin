@@ -74,6 +74,8 @@ import { albumShade, cardShadeStyle } from '../art-shade.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '../sold-sales-cache.js';
 import { authFrom } from '../punchouts.js';
 import { useAuth } from '../auth.jsx';
+import { saveListingPhotos, uploadChatPhoto } from '../chat-client.js';
+import { MAX_LISTING_PHOTOS, photoFileToJpeg } from '../user-photos.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { deskClipCandidates, deskSetShortcuts, deskShowMoreVersions, mergePrintingRows, rarityVersions, versionOptionLabel } from '../card-versions.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '../identity.js';
@@ -700,6 +702,7 @@ function ListingForm({
   const [foil, setFoil] = useState(blank.foil);
   const [chips, setChips] = useState(blank.chips);
   const [comment, setComment] = useState(blank.comment);
+  const [photos, setPhotos] = useState(() => (Array.isArray(editing?.photoUrls) ? editing.photoUrls.slice(0, MAX_LISTING_PHOTOS) : []));
   const [company, setCompany] = useState(blank.company);
   const [grade, setGrade] = useState(blank.grade);
   const [cert, setCert] = useState(blank.cert);
@@ -853,6 +856,10 @@ function ListingForm({
         setQty('1');
       }
       const listingRow = saved?.id ? saved : saved?.listing;
+      if (listingRow?.id && photos.length) {
+        const attached = await saveListingPhotos(token, listingRow.id, photos);
+        listingRow.photoUrls = attached?.photoUrls || photos;
+      }
       if (listingRow?.id) {
         onListed?.(listingRow);
       }
@@ -1004,6 +1011,47 @@ function ListingForm({
           </label>
         </div>
       ) : null}
+      <div className="sell-field comment">
+        <span>Photos ({photos.length}/{MAX_LISTING_PHOTOS})</span>
+        <div className="listing-photos">
+          {photos.map((url) => <img key={url} src={url} alt="" />)}
+          {photos.length < MAX_LISTING_PHOTOS ? (
+            <label className="listing-photo-add">
+              Add
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                disabled={saving}
+                onChange={async (event) => {
+                  const files = [...(event.target.files || [])];
+                  event.target.value = '';
+                  const room = MAX_LISTING_PHOTOS - photos.length;
+                  if (!files.length || room <= 0) return;
+                  setSaving(true);
+                  setError('');
+                  try {
+                    const token = await getBearer();
+                    const next = [];
+                    for (const file of files.slice(0, room)) {
+                      const dataUrl = await photoFileToJpeg(file);
+                      const saved = await uploadChatPhoto(token, dataUrl, 'listing');
+                      if (saved?.url) next.push(saved.url);
+                    }
+                    setPhotos((current) => [...current, ...next].slice(0, MAX_LISTING_PHOTOS));
+                  } catch (err) {
+                    setError(err.message || 'Photo was not added.');
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              />
+            </label>
+          ) : null}
+          {photos.length ? <button type="button" onClick={() => setPhotos([])}>Clear</button> : null}
+        </div>
+      </div>
       <label className="sell-field comment">
         Seller comment
         <textarea

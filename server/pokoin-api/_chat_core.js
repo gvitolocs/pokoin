@@ -12,6 +12,8 @@ const EVENT_TYPES = Object.freeze({
 const USERNAME_RE = /^[a-z0-9]{3,32}$/;
 const TEXT_MAX = 1000;
 const NOTE_MAX = 140;
+const MAX_CHAT_PHOTOS = 4;
+const MAX_LISTING_PHOTOS = 8;
 
 function pairKeyFor(uidA, uidB) {
   const members = [String(uidA || '').trim(), String(uidB || '').trim()].sort();
@@ -95,6 +97,30 @@ function cleanListing(raw) {
   };
 }
 
+function cleanOwnedPhotos(value, uid, kind, limit) {
+  const owner = String(uid || '').trim();
+  if (!/^[A-Za-z0-9]{8,128}$/.test(owner)) return [];
+  const prefix = `/card-images/user-photos/${kind}/${owner}/`;
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const item of value) {
+    const url = String(item || '').trim();
+    if (!url.startsWith(prefix) || url.includes('..') || url.includes('\\')) continue;
+    if (!url.endsWith('.jpg')) continue;
+    out.push(url.slice(0, 240));
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function cleanChatImages(value, uid) {
+  return cleanOwnedPhotos(value, uid, 'chat', MAX_CHAT_PHOTOS);
+}
+
+function cleanListingPhotos(value, uid) {
+  return cleanOwnedPhotos(value, uid, 'listing', MAX_LISTING_PHOTOS);
+}
+
 function cleanListings(value) {
   if (!Array.isArray(value)) return [];
   const out = [];
@@ -113,6 +139,7 @@ function previewForEvent(event = {}, viewerUid = '') {
   if (event.type === EVENT_TYPES.TEXT) {
     const text = cleanText(event.text);
     if (text) return text.slice(0, 80);
+    if (Array.isArray(event.images) && event.images.length) return 'Photo';
     const name = event.listings?.[0]?.cardName;
     return name ? String(name).slice(0, 80) : '';
   }
@@ -134,11 +161,15 @@ module.exports = {
   EVENT_TYPES,
   USERNAME_RE,
   TEXT_MAX,
+  MAX_CHAT_PHOTOS,
+  MAX_LISTING_PHOTOS,
   pairKeyFor,
   isParticipant,
   otherMember,
   cleanText,
   cleanListings,
+  cleanChatImages,
+  cleanListingPhotos,
   cleanNote,
   validateAmountPkn,
   bumpUnread,

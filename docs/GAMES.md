@@ -252,13 +252,25 @@ Replica + crop (nezopt, not the Pi): `scripts/install-pi-card-images-replica.sh`
 
 ## R2 free tier
 
-R2 `cardvault-images` free cap is **10 GB**. Homepage `_homepage.webp` may stay
-there as backup (~1.6 GB). Catalog leftover JPEGs and other rasters live on
-the Pi disk. Do not store the 24 GB JPEG tree on R2. `api2.pokoin.com` is the
-same Pi origin as `api.pokoin.com`.
+R2 `cardvault-images` free cap is **10 GB**. The bucket is a backup, not the
+catalog origin. `pokoin-cdn-card-images` reads the Raspberry Pi first
+(`pi-home` `:18081`, `/srv/pokoin/card-images/objects`) and R2 only if the Pi
+misses. Public URLs stay `https://cdn.pokoin.com/…`. The write tree is nezopt
+NVMe `/home/nez/data/pokoin-leftovers`. `api2.pokoin.com` is the same Pi origin
+as `api.pokoin.com`. Nezopt NVMe `/home/nez/data/pokoin-leftovers/objects`
+is the card backup. After every `cardvault-images` key is on that tree, the
+bucket is emptied. `pokoin-profile-pictures` stays; avatars still upload there.
 
-`pokoin-cdn-card-images` reads Pi first and R2 if the Pi misses. Public URLs
-stay `https://cdn.pokoin.com/…`.
+2026-09-26 listing of `cardvault-images` before the move: **281,478** objects,
+**10.9 GB** (221,647 webp, 58,099 jpg, plus Magic, Yu-Gi-Oh, Vanguard, Dragon
+Ball Super, and other game prefixes). **85,913** keys already existed at the
+same path. The rest are copied onto the leftover tree, then the bucket is
+deleted.
+
+Seller listing photos are at most **8** JPEGs per listing (`photo_urls`).
+Chat messages take at most **4**. Both are written on the Pi under
+`/srv/pokoin/card-images/objects/user-photos/{listing|chat}/{uid}/` and served
+as `/card-images/user-photos/…`. They are not stored in R2.
 
 ## New CardTrader printing
 

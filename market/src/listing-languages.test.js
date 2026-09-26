@@ -20,8 +20,22 @@ test('database release languages override the set name', () => {
   );
 });
 
+test('a Japanese printing lists the other Asian languages except Chinese', () => {
+  assert.deepEqual(
+    sellLanguages({ nationality: 'japanese', setName: 'Nihil Zero' }),
+    ['JP', 'KO', 'ID', 'TH', 'VI'],
+  );
+  const jumps = versionRedirects([
+    { id: '30', nationality: 'chinese', name: 'Talonflame' },
+  ], '20', ['JP', 'KO', 'ID', 'TH', 'VI'], { nationality: 'japanese' });
+  assert.deepEqual(jumps, []);
+});
+
 test('a Korean printing is the Japanese version', () => {
-  assert.deepEqual(sellLanguages({ nationality: 'korean', setName: '151' }), ['JP']);
+  assert.deepEqual(
+    sellLanguages({ nationality: 'korean', setName: '151' }),
+    ['JP', 'KO', 'ID', 'TH', 'VI'],
+  );
   const jumps = versionRedirects([
     { id: '20', nationality: 'korean', name: 'Magnemite' },
   ], '10', ['EN', 'FR']);

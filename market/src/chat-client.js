@@ -22,9 +22,21 @@ export function getConversation(peer, token, { peerUid = '', before = '' } = {})
   return getJson(`/api/chat?${params}`, { headers: authHeaders(token) });
 }
 
-export function sendChatMessage(peer, text, token, listings = [], peerUid = '') {
+export function sendChatMessage(peer, text, token, listings = [], peerUid = '', images = []) {
   return getJson('/api/chat?action=message', {
-    method: 'POST', headers: jsonHeaders(token), body: JSON.stringify({ peer, peerUid, text, listings }),
+    method: 'POST', headers: jsonHeaders(token), body: JSON.stringify({ peer, peerUid, text, listings, images }),
+  });
+}
+
+export function uploadChatPhoto(token, dataUrl, kind = 'chat') {
+  return getJson('/api/chat?action=photo', {
+    method: 'POST', headers: jsonHeaders(token), body: JSON.stringify({ dataUrl, kind }),
+  });
+}
+
+export function saveListingPhotos(token, listingId, urls) {
+  return getJson('/api/chat?action=listing-photos', {
+    method: 'POST', headers: jsonHeaders(token), body: JSON.stringify({ listingId, urls }),
   });
 }
 
