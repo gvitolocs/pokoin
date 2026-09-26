@@ -160,12 +160,14 @@ export default function ShopListingRow({
           <span className="shop-brand">{name}</span>
         </span>
       )}
-      <span className={`shop-cond is-${tone}`}>{cond}</span>
-      <Flag flag={language} className="shop-flag shop-flag-lang" />
-      <span className="shop-txt">
-        {tags.map((tag) => (
-          <em key={tag} className={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>
-        ))}
+      <span className="shop-facets">
+        <span className={`shop-cond is-${tone}`}>{cond}</span>
+        <Flag flag={language} className="shop-flag shop-flag-lang" />
+        <span className="shop-txt">
+          {tags.map((tag) => (
+            <em key={tag} className={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>
+          ))}
+        </span>
       </span>
       <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>
       {!mine ? (
@@ -256,7 +258,12 @@ export default function ShopListingRow({
       ) : null}
       {Array.isArray(offer?.photoUrls) && offer.photoUrls.length ? (
         <span className="shop-photos">
-          {offer.photoUrls.slice(0, 2).map((url) => <img key={url} src={url} alt="" />)}
+          {offer.photoUrls.slice(0, 2).map((url) => (
+            <span className="shop-photo" key={url}>
+              <img src={url} alt="" />
+              <img className="shop-photo-big" src={url} alt="" />
+            </span>
+          ))}
         </span>
       ) : null}
     </div>
