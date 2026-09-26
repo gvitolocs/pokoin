@@ -1023,8 +1023,15 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   line-height: 1.35;
 }
 
-.cart-drop p.cart-drop-empty {
-  margin-top: 0.75rem;
+.cart-drop .cart-drop-empty {
+  display: grid;
+  justify-items: center;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.cart-drop .cart-drop-empty p {
+  margin: 0;
   color: var(--text);
   font-size: 1rem;
   font-weight: 750;
@@ -1792,6 +1799,11 @@ h1, h2 { margin: 0 0 0.85rem; }
 .card-select-bar button:hover {
   border-color: var(--yellow);
   color: var(--yellow);
+}
+
+html.is-card-banding,
+html.is-card-banding * {
+  cursor: crosshair !important;
 }
 
 .card-select-band {
@@ -2842,6 +2854,12 @@ select.collector-badge.version-badge option {
   color: var(--muted);
 }
 
+.meta-chip.is-reverse {
+  color: #1a1408;
+  background: var(--yellow);
+  border-color: transparent;
+}
+
 .set-link.tight { margin: 0.75rem 0 0; text-align: center; }
 .version-links {
   display: flex;
@@ -3634,7 +3652,119 @@ a.era-link:focus-visible {
 }
 
 .sell-options-row .condition-pick { width: 5.75rem; }
-.sell-options-row .language-pick { width: 4rem; }
+.sell-options-row .language-pick { width: 6.4rem; position: relative; }
+
+.lang-pick { position: relative; width: 100%; }
+
+.lang-pick-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background-color: var(--g2);
+  border: 1px solid var(--g5);
+  color: inherit;
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lang-pick-btn img,
+.lang-pick-menu img {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+
+.lang-pick-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 7.5rem;
+  margin: 0;
+  padding: 0.35rem;
+  list-style: none;
+  background: #16141c;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+  max-height: 18rem;
+  overflow: auto;
+}
+
+.lang-pick-menu button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 0.4rem 0.45rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lang-pick-menu button[aria-selected="true"] {
+  background: #3b5bff;
+}
+
+.lang-pick-menu em {
+  margin-left: auto;
+  font-style: normal;
+}
+
+.lang-redirect {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.55);
+}
+
+.lang-redirect-card {
+  width: min(24rem, calc(100vw - 2rem));
+  background: #16141c;
+  border: 1px solid var(--g5);
+  border-radius: 16px;
+  padding: 1.1rem 1.15rem 1rem;
+  display: grid;
+  gap: 0.9rem;
+  color: #f4f1ea;
+}
+
+.lang-redirect-card p { margin: 0; }
+
+.lang-redirect-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.lang-redirect-actions button {
+  border-radius: 10px;
+  border: 1px solid var(--g5);
+  background: transparent;
+  color: inherit;
+  padding: 0.45rem 0.75rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.lang-redirect-go {
+  background: #f5c518 !important;
+  color: #1a1408 !important;
+  border-color: transparent !important;
+}
 .sell-options-row .foil-pick { width: 7.4rem; }
 
 .sell-field input,

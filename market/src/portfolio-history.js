@@ -485,6 +485,15 @@ export function formatHistoryDelta(change) {
  * trend / forecast overlay. Uses the last priced days only. A wallet-only
  * series has nothing to project.
  */
+/** Last day that actually priced owned cards. Wallet-only days are not a start. */
+export function lastPricedTotal(points) {
+  const priced = (points || []).filter((day) => (
+    day?.assets?.cardsKnown === true && Number(day.totalPkn) > 0
+  ));
+  if (!priced.length) return null;
+  return Number(priced[priced.length - 1].totalPkn);
+}
+
 export function projectCardValue(points) {
   const priced = (points || []).filter((day) => (
     day?.assets?.cardsKnown === true && Number(day.totalPkn) > 0

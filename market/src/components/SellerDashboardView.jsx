@@ -19,6 +19,7 @@ import {
   historyPointerDay,
   historyWindowChange,
   historyWindowSplit,
+  lastPricedTotal,
   projectCardValue,
   sliceHistorySeries,
   stepHistoryPoints,
@@ -146,14 +147,18 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
     const day = points[0];
     endDot = { x: xOf(day.date), y: yOf(day.totalPkn, day), day };
   }
-  const forecastY = endDot
-    ? (forecast ? yOf(forecast.value, { assets: { cardsKnown: true } }) : endDot.y)
+  const pricedTotal = lastPricedTotal(points);
+  const anchorY = endDot
+    ? (pricedTotal != null ? yOf(pricedTotal, { assets: { cardsKnown: true } }) : endDot.y)
     : null;
-  const projection = endDot && forecastY != null && split < 1
-    ? `${endDot.x.toFixed(1)},${endDot.y.toFixed(1)} ${CHART_W},${forecastY.toFixed(1)} ${CHART_W},${CHART_H} ${endDot.x.toFixed(1)},${CHART_H}`
+  const forecastY = endDot
+    ? (forecast ? yOf(forecast.value, { assets: { cardsKnown: true } }) : anchorY)
+    : null;
+  const projection = endDot && anchorY != null && forecastY != null && split < 1
+    ? `${endDot.x.toFixed(1)},${anchorY.toFixed(1)} ${CHART_W},${forecastY.toFixed(1)} ${CHART_W},${CHART_H} ${endDot.x.toFixed(1)},${CHART_H}`
     : '';
-  const forecastLine = endDot && forecast
-    ? `${endDot.x.toFixed(1)},${endDot.y.toFixed(1)} ${CHART_W},${forecastY.toFixed(1)}`
+  const forecastLine = endDot && forecast && anchorY != null
+    ? `${endDot.x.toFixed(1)},${anchorY.toFixed(1)} ${CHART_W},${forecastY.toFixed(1)}`
     : '';
 
   const tipDay = hover?.day || null;
@@ -172,10 +177,14 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
     const hit = historyPointerDay(points, ratio, { split });
-    const xPct = hasPoint && endDot && !hit.projection
+    if (hit.projection) {
+      setHover(null);
+      return;
+    }
+    const xPct = hasPoint && endDot
       ? (endDot.x / CHART_W) * 100
       : Math.min(96, Math.max(4, hit.xPct));
-    setHover({ day: hit.day, xPct, projection: hit.projection });
+    setHover({ day: hit.day, xPct, projection: false });
   }
 
   useLayoutEffect(() => {

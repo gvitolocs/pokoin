@@ -82,11 +82,11 @@ function effectivePrintBucket(row = {}, expansionNationalityLookup) {
   return 'unknown';
 }
 
-// Search menu folds Korean print into Japanese (jpko) — match both buckets.
+// Korean rides the merged japanese (jpko) menu option.
 function printLangMatchesBucket(want, bucket) {
   const have = String(bucket || '').trim().toLowerCase();
   const selected = String(want || '').trim().toLowerCase();
-  if (selected === 'japanese') {
+  if (selected === 'japanese' || selected === 'korean') {
     return have === 'japanese' || have === 'korean';
   }
   return have === selected;

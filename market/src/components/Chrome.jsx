@@ -57,12 +57,15 @@ import CardArt from './CardArt.jsx';
 import Avatar from './Avatar.jsx';
 import {
   SEARCH_LANGS,
+  PRINT_LANGS,
   flagSrc,
   langMeta,
   printFlagFromNationality,
+  printLangMeta,
   rewriteCatalogLang,
   rowPrintBucket,
   searchLangFromPath,
+  setPrintLang,
   setSearchLang,
   usePrintLang,
   useSearchLang,
@@ -216,6 +219,71 @@ function LangToggle() {
                 <img src={flagSrc(item.code)} alt="" width="22" height="22" />
                 <span>{item.label}</span>
                 <em>{item.code.toUpperCase()}</em>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function PrintLangToggle() {
+  const lang = usePrintLang();
+  const current = printLangMeta(lang);
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+
+  useEffect(() => {
+    function onDoc(event) {
+      if (box.current && !box.current.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+    function onKey(event) {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, []);
+
+  return (
+    <div className="print-lang-toggle" ref={box}>
+      <button
+        type="button"
+        aria-label={`Card print language, ${current.label}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title={current.label}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <svg className="search-go-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+        </svg>
+        <svg className="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true">
+          <path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" />
+        </svg>
+      </button>
+      {open ? (
+        <ul className="lang-menu" role="listbox" aria-label="Card print language">
+          {PRINT_LANGS.map((item) => (
+            <li key={item.code} role="option" aria-selected={item.code === lang}>
+              <button type="button" className={item.code === lang ? 'is-active' : ''} onClick={() => { setPrintLang(item.code); setOpen(false); }}>
+                {item.flag ? (
+                  <img src={flagSrc(item.flag)} alt="" width="22" height="22" />
+                ) : (
+                  <svg className="print-lang-all" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                    <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
+                  </svg>
+                )}
+                <span>{item.label}</span>
+                <em>{item.tag || (item.flag ? item.flag.toUpperCase() : 'ALL')}</em>
               </button>
             </li>
           ))}
@@ -972,11 +1040,8 @@ export default function Chrome({ children }) {
                 aria-autocomplete="list"
                 aria-busy={suggestVisible && pending}
               />
-              <button className="search-submit" type="submit" aria-label="Search">
-                <svg className="search-go-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-                  <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-                </svg>
-              </button>
+              {isPokemonGame() ? <PrintLangToggle /> : null}
+              <button className="sr-only" type="submit">Search</button>
             </div>
             {suggestVisible ? (
               <div

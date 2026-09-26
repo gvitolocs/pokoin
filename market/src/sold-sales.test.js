@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { soldFilterShowsAll, soldFilterValue } from './sold-graph.js';
-import { soldGraphView, soldTraitsForGraphDay, sharedSoldTraits } from './sold-sales.js';
+import { soldGraphView, soldTraitsForGraphDay, sharedSoldTraits, buildSalesSeries } from './sold-sales.js';
 
 const LEDIAN = [
   {
@@ -368,4 +368,17 @@ test('a mixed reverse day keeps the standard default', () => {
     firstEdition: false,
     graded: false,
   });
+});
+
+test('sold change waits three days before comparing medians', () => {
+  const adjacent = buildSalesSeries([
+    { day: '2026-09-25', medianPkn: 100 },
+    { day: '2026-09-26', medianPkn: 150 },
+  ]);
+  assert.equal(adjacent.change24hPct, null);
+  const confirmed = buildSalesSeries([
+    { day: '2026-09-23', medianPkn: 100 },
+    { day: '2026-09-26', medianPkn: 150 },
+  ]);
+  assert.equal(confirmed.change24hPct, 0.5);
 });

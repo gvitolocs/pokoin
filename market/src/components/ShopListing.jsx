@@ -144,7 +144,7 @@ export default function ShopListingRow({
       <Flag flag={language} className="shop-flag shop-flag-lang" />
       <span className="shop-txt">
         {tags.map((tag) => (
-          <em key={tag} className="meta-chip">{tag}</em>
+          <em key={tag} className={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>
         ))}
       </span>
       <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>

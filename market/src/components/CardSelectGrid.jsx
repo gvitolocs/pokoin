@@ -72,40 +72,60 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
     if (nextAnchor) setAnchor(nextAnchor);
   }
 
-  function onPointerDown(event) {
-    if (event.button !== 0) return;
-    if (event.target.closest('a, button, input, select, textarea, label')) return;
-    dragRef.current = {
-      x: event.clientX,
-      y: event.clientY,
-      ctrl: event.ctrlKey || event.metaKey,
-      base: event.ctrlKey || event.metaKey ? new Set(selectedRef.current) : new Set(),
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function onPointerMove(event) {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const box = { x0: drag.x, y0: drag.y, x1: event.clientX, y1: event.clientY };
-    const wide = Math.abs(box.x1 - box.x0) >= 4 || Math.abs(box.y1 - box.y0) >= 4;
-    setBand(wide ? box : null);
-    if (!wide) return;
-    const hits = bandHits(tileRects(rootRef.current), box);
-    setSelected(selectionFromBand(drag.base, hits, { ctrl: drag.ctrl }));
-  }
-
-  function onPointerUp(event) {
-    const drag = dragRef.current;
-    dragRef.current = null;
-    setBand(null);
-    if (!drag) return;
-    const moved = Math.abs(event.clientX - drag.x) >= 4 || Math.abs(event.clientY - drag.y) >= 4;
-    if (!moved) {
-      setSelected(new Set());
-      setAnchor('');
+  useEffect(() => {
+    function ignored(target) {
+      return target instanceof Element && target.closest(
+        'a, button, input, select, textarea, label, header, footer, nav, .topbar, .card-select-bar, .seller-history, .suggest, .cart-drop',
+      );
     }
-  }
+    function onDown(event) {
+      if (event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (ignored(target) || target.closest('[data-card-id]')) return;
+      if (!target.closest('main')) return;
+      dragRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+        ctrl: event.ctrlKey || event.metaKey,
+        base: event.ctrlKey || event.metaKey ? new Set(selectedRef.current) : new Set(),
+      };
+      document.documentElement.classList.add('is-card-banding');
+    }
+    function onMove(event) {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const box = { x0: drag.x, y0: drag.y, x1: event.clientX, y1: event.clientY };
+      const wide = Math.abs(box.x1 - box.x0) >= 4 || Math.abs(box.y1 - box.y0) >= 4;
+      setBand(wide ? box : null);
+      if (!wide) return;
+      const hits = bandHits(tileRects(rootRef.current), box);
+      setSelected(selectionFromBand(drag.base, hits, { ctrl: drag.ctrl }));
+    }
+    function onUp(event) {
+      const drag = dragRef.current;
+      dragRef.current = null;
+      setBand(null);
+      document.documentElement.classList.remove('is-card-banding');
+      if (!drag) return;
+      const moved = Math.abs(event.clientX - drag.x) >= 4 || Math.abs(event.clientY - drag.y) >= 4;
+      if (!moved) {
+        setSelected(new Set());
+        setAnchor('');
+      }
+    }
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      document.documentElement.classList.remove('is-card-banding');
+    };
+  }, []);
 
   async function addToCart() {
     if (!picked.length || busy) return;
@@ -163,10 +183,6 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
         <div
           ref={rootRef}
           className={className}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
         >
           {children}
           {bandStyle ? <div className="card-select-band" style={bandStyle} /> : null}

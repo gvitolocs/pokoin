@@ -97,11 +97,11 @@ export function effectivePrintBucket(row = {}, expansionNationalityLookup) {
   return 'unknown';
 }
 
-/** Search menu buckets fold korean into japanese (jpko flag, one option). */
+/** Japanese print includes Korean. One jpko option, not a separate Korean print. */
 export function printLangMatchesBucket(want, bucket) {
   const have = String(bucket || '').trim().toLowerCase();
   const selected = String(want || '').trim().toLowerCase();
-  if (selected === 'japanese') {
+  if (selected === 'japanese' || selected === 'korean') {
     return have === 'japanese' || have === 'korean';
   }
   return have === selected;
@@ -168,7 +168,6 @@ export function cleanPrintLanguage(value) {
   if (raw === 'jp' || raw === 'ja') {
     return 'japanese';
   }
-  // Korean rides the merged japanese (jpko) menu option.
   if (raw === 'ko' || raw === 'korean') {
     return 'japanese';
   }

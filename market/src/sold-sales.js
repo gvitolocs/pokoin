@@ -203,6 +203,32 @@ export function mergeSoldDailyRows(rows = []) {
   });
 }
 
+function shiftDay(day, delta) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ''));
+  if (!match) return '';
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  date.setUTCDate(date.getUTCDate() + Number(delta || 0));
+  return date.toISOString().slice(0, 10);
+}
+
+/** A vanished listing is a sale only after it has stayed gone for 3 days. */
+export const SOLD_CHANGE_DAYS = 3;
+
+export function changeOverConfirmedDays(days, span = SOLD_CHANGE_DAYS) {
+  const rows = days || [];
+  if (rows.length < 2) return null;
+  const latest = rows[rows.length - 1];
+  const cutoff = shiftDay(latest.day, -span);
+  if (!cutoff) return null;
+  let previous = null;
+  for (const row of rows) {
+    if (row.day <= cutoff) previous = row;
+    else break;
+  }
+  if (!previous || !(previous.medianPkn > 0) || !(latest.medianPkn > 0)) return null;
+  return Number(((latest.medianPkn - previous.medianPkn) / previous.medianPkn).toFixed(6));
+}
+
 export function buildSalesSeries(dayRows = []) {
   const days = (Array.isArray(dayRows) ? dayRows : [])
     .map((row) => ({
@@ -217,14 +243,7 @@ export function buildSalesSeries(dayRows = []) {
     }))
     .filter((row) => row.day && row.medianPkn > 0)
     .sort((left, right) => left.day.localeCompare(right.day));
-  let change24hPct = null;
-  if (days.length >= 2) {
-    const previous = days[days.length - 2].medianPkn;
-    const latest = days[days.length - 1].medianPkn;
-    if (previous > 0) {
-      change24hPct = Number(((latest - previous) / previous).toFixed(6));
-    }
-  }
+  const change24hPct = changeOverConfirmedDays(days);
   return {
     days,
     sampleCount: days.reduce((sum, row) => sum + row.sampleCount, 0),

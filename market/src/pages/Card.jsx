@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   artistHref,
@@ -77,6 +78,8 @@ import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { deskClipCandidates, deskSetShortcuts, deskShowMoreVersions, mergePrintingRows, rarityVersions, versionOptionLabel } from '../card-versions.js';
 import { cardDocumentTitle, displayName, printingIdentity } from '../identity.js';
 import { defaultCardLanguage, getSearchLang, languagesForNationality, rewriteCatalogLang, searchLangFromPath } from '../locale.js';
+import { sellLanguages, versionRedirects } from '../listing-languages.js';
+import ListingLangPick from '../components/ListingLangPick.jsx';
 import ExpansionMark from '../components/ExpansionMark.jsx';
 import { Action, track } from '../track.js';
 import { LIST_CURRENCIES, listPriceHint, listingPriceToPkn } from '../pkn.js';
@@ -180,14 +183,14 @@ function pricedOffers(rows) {
     .sort((a, b) => Number(a.pricePkn || 0) - Number(b.pricePkn || 0));
 }
 
-function formatChange24h(pct) {
+function formatChange72h(pct) {
   if (pct == null || !Number.isFinite(Number(pct))) {
-    return { text: '24h —', empty: true };
+    return { text: '72h —', empty: true };
   }
   const value = Number(pct) * 100;
   const sign = value > 0 ? '+' : '';
   return {
-    text: `24h ${sign}${value.toFixed(1)}%`,
+    text: `72h ${sign}${value.toFixed(1)}%`,
     empty: false,
     up: value >= 0,
   };
@@ -681,6 +684,7 @@ function ListingForm({
   onListed,
   preferredLanguage,
   preferredCondition,
+  versions = [],
   editing = null,
   onCancelEdit,
 }) {
@@ -702,8 +706,14 @@ function ListingForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
-  const sellLangs = languagesForNationality(card.nationality, LIST_LANGS);
-  const listLangs = sellLangs.length ? sellLangs : LIST_LANGS;
+  const [jump, setJump] = useState(null);
+  const listLangs = sellLanguages({
+    nationality: card.nationality,
+    setName: identity?.set || card.set,
+    releaseLanguages: card.releaseLanguages,
+  });
+  const redirects = versionRedirects(versions, card.id, listLangs);
+  const langKey = listLangs.join(',');
   const editingId = editing?.id || '';
   const isEditing = Boolean(editingId);
 
@@ -736,16 +746,14 @@ function ListingForm({
     if (editingId) {
       return;
     }
-    const langs = languagesForNationality(card.nationality, LIST_LANGS);
-    const allowed = langs.length ? langs : LIST_LANGS;
-    if (preferredLanguage && allowed.includes(preferredLanguage)) {
+    if (preferredLanguage && listLangs.includes(preferredLanguage)) {
       setLanguage(preferredLanguage);
       return;
     }
     setLanguage((current) => (
-      allowed.includes(current) ? current : defaultCardLanguage(card.nationality)
+      listLangs.includes(current) ? current : (listLangs[0] || defaultCardLanguage(card.nationality))
     ));
-  }, [preferredLanguage, card.nationality, editingId]);
+  }, [preferredLanguage, langKey, editingId]);
 
   useEffect(() => {
     if (editingId || !preferredCondition) {
@@ -946,14 +954,16 @@ function ListingForm({
             ))}
           </select>
         </label>
-        <label className="sell-field sell-pick language-pick">
+        <div className="sell-field sell-pick language-pick">
           <span className="sr-only">Language</span>
-          <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-            {listLangs.map((code) => (
-              <option key={code} value={code}>{code}</option>
-            ))}
-          </select>
-        </label>
+          <ListingLangPick
+            value={language}
+            listed={listLangs}
+            redirects={redirects}
+            onChange={setLanguage}
+            onRedirect={setJump}
+          />
+        </div>
         <label className="sell-field sell-pick foil-pick">
           <span className="sr-only">Foil</span>
           <select value={foil} onChange={(event) => setFoil(event.target.value)}>
@@ -1002,6 +1012,30 @@ function ListingForm({
       </label>
       {error ? <p className="sell-msg error">{error}</p> : null}
       {done ? <p className="sell-msg ok">{done}</p> : null}
+      {jump ? createPortal(
+        <div className="lang-redirect" role="dialog" aria-modal="true" aria-labelledby="lang-redirect-title">
+          <div className="lang-redirect-card">
+            <p id="lang-redirect-title">You will be taken to the {jump.label} version of this card.</p>
+            <div className="lang-redirect-actions">
+              <button type="button" onClick={() => setJump(null)}>Stay here</button>
+              <button
+                type="button"
+                className="lang-redirect-go"
+                onClick={() => {
+                  const target = jump.card;
+                  const href = cardHref(target);
+                  const id = target?.id || target?.card_id;
+                  setJump(null);
+                  navigate(href && href !== '/marketplace' ? href : `/marketplace/${getSearchLang()}/cards/${id}`);
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
     </section>
   );
 }
@@ -1705,9 +1739,13 @@ export default function Card() {
     ? matchDeal(nativeLive, dealLang || null, dealCond || null)
     : preferredDeal(nativeLive, card.nationality);
   const lastDayPkn = formatPkn(salesSeries?.lastMedianPkn);
-  const change24h = formatChange24h(salesSeries?.change24hPct);
+  const change72h = formatChange72h(salesSeries?.change24hPct);
   const canBuy = Boolean(dealPick);
-  const dealLangs = languagesForNationality(card.nationality, LIST_LANGS);
+  const dealLangs = sellLanguages({
+    nationality: card.nationality,
+    setName: identity.set || card.set,
+    releaseLanguages: card.releaseLanguages,
+  });
   const dealConds = CONDITIONS.map((row) => row.value).filter(Boolean);
   const shownLangRaw = dealLang || offerLang(dealPick) || '';
   const shownLang = !shownLangRaw || dealLangs.includes(shownLangRaw) ? shownLangRaw : '';
@@ -1919,10 +1957,10 @@ export default function Card() {
               {salesSeries == null ? '—' : (lastDayPkn || '—')}
             </span>
             <span
-              className={change24h.empty ? 'quote-pill oos' : 'quote-pill'}
-              title="Day-over-day median of sold prices"
+              className={change72h.empty ? 'quote-pill oos' : 'quote-pill'}
+              title="Change versus the sold median from 3 days earlier"
             >
-              {change24h.text}
+              {change72h.text}
             </span>
           </div>
         </div>
@@ -2083,6 +2121,7 @@ export default function Card() {
             fromPath={fromPath}
             preferredLanguage={dealLang}
             preferredCondition={dealCond}
+            versions={clipPrintings}
             editing={editingOffer}
             onCancelEdit={() => setEditingOffer(null)}
             onListed={(created) => {

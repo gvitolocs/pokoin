@@ -156,8 +156,10 @@ test('game and title language sit on the left of the search pill', () => {
   const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
   const toolbar = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/SearchToolbar.jsx'), 'utf8');
   assert.match(chrome, /className="search-pill"[\s\S]*<div className="search-lead">[\s\S]*<GameSelect \/>[\s\S]*<LangToggle \/>/);
-  assert.equal(chrome.includes('PrintLangToggle'), false);
-  assert.match(chrome, /className="search-submit" type="submit"/);
+  assert.match(chrome, /function PrintLangToggle[\s\S]*search-go-icon/);
+  assert.match(chrome, /isPokemonGame\(\) \? <PrintLangToggle \/>/);
+  assert.match(chrome, /className="sr-only" type="submit"/);
+  assert.equal(chrome.includes('search-submit'), false);
   assert.equal(/<\/form>\s*<LangToggle \/>/.test(chrome), false);
   assert.match(toolbar, /aria-label="Card print"/);
   assert.equal(chrome.includes('variant="drawer"'), false);
