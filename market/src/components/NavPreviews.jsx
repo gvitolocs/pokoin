@@ -4,15 +4,9 @@ import { fetchPortfolioHistory, formatPknNumber } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { listConversations } from '../chat-client.js';
 import { openThread } from '../chat-dock-store.js';
-import { GAMES, game } from '../game.js';
+import { GAMES, game, gameSiteHref } from '../game.js';
 import { normalizeHistoryDay } from '../portfolio-history.js';
 import { DASHBOARD_SCAN } from '../punchouts.js';
-
-const GAME_HOME = {
-  pokemon: 'https://pokoin.com/marketplace',
-  one_piece: 'https://onepiece.pokoin.com',
-  riftbound: 'https://riftbound.pokoin.com',
-};
 
 export function NavHover({ id, pop, setPop, children, preview }) {
   return (
@@ -36,12 +30,11 @@ export function MarketPreview() {
   const current = game().id;
   const others = Object.values(GAMES).filter((row) => row.id !== current);
   return (
-    <div className="nav-preview" role="region" aria-label="Other card games">
-      <strong>Other TCGs</strong>
+    <div className="nav-preview" role="region" aria-label="Card games">
       <ul>
         {others.map((row) => (
           <li key={row.id}>
-            <a href={GAME_HOME[row.id] || GAME_HOME.pokemon}>{row.name}</a>
+            <a href={gameSiteHref(row.id)}>{row.name}</a>
           </li>
         ))}
       </ul>
