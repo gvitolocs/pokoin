@@ -192,17 +192,13 @@ export function nearestHistoryDay(days, ratio) {
     const index = Math.round(t * (list.length - 1));
     return list[index] || list[list.length - 1];
   }
-  const target = start + t * (end - start);
-  let best = list[0];
-  let bestDist = Infinity;
+  const targetKey = new Date(start + t * (end - start)).toISOString().slice(0, 10);
+  let held = list[0];
   for (const day of list) {
-    const dist = Math.abs(Date.parse(`${day.date}T00:00:00Z`) - target);
-    if (dist < bestDist) {
-      best = day;
-      bestDist = dist;
-    }
+    if (day.date <= targetKey) held = day;
+    else break;
   }
-  return best;
+  return held;
 }
 
 export function addUtcDays(dayKey, delta) {

@@ -109,6 +109,14 @@ test('nearest day and tip composition', () => {
   ];
   assert.equal(historySeriesMax(days), 15);
   assert.equal(nearestHistoryDay(days, 1).date, '2026-09-20');
+  assert.equal(nearestHistoryDay(days, 0.25).date, '2026-09-18');
+  const stepped = [
+    { date: '2026-08-27', totalPkn: 15 },
+    { date: '2026-09-21', totalPkn: 4026567 },
+    { date: '2026-09-26', totalPkn: 4026545 },
+  ];
+  assert.equal(nearestHistoryDay(stepped, 0.5).date, '2026-08-27');
+  assert.equal(nearestHistoryDay(stepped, 25 / 30).date, '2026-09-21');
   const tip = formatHistoryTip(days[1]);
   assert.equal(tip.totalLabel, '15 PKN');
   assert.equal(formatDayLabel('2026-09-20'), 'Sep 20');

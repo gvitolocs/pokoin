@@ -129,10 +129,13 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
       y: yOf(day.totalPkn, day),
       day,
     }));
-    const stepped = stepHistoryPoints(coords);
+    const drawn = axis.zoomed ? coords.filter((point) => point.day?.assets?.cardsKnown) : coords;
+    const line = drawn.length > 1 ? drawn : coords;
+    const stepped = stepHistoryPoints(line);
     polyline = stepped.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
-    area = `0,${CHART_H} ${polyline} ${CHART_W},${CHART_H}`;
-    endDot = coords[coords.length - 1];
+    const originX = line[0].x.toFixed(1);
+    area = `${originX},${CHART_H} ${polyline} ${CHART_W},${CHART_H}`;
+    endDot = line[line.length - 1];
   } else if (hasPoint) {
     const day = points[0];
     // Card sold graph centers a single day (plotW / 2), not flush right.
