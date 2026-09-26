@@ -200,66 +200,86 @@ test('a tainted artist cover still drags at a fixed size', () => {
   assert.notEqual(dragged, huge);
 });
 
-test('dragging a shop row carries a card-sized image, not the whole row', () => {
-  let dragged = null;
-  const canvas = {
-    width: 0,
-    height: 0,
-    style: {},
-    getContext: () => ({
-      setTransform() {},
-      clearRect() {},
-      save() {},
-      beginPath() {},
-      rect() {},
-      clip() {},
-      fillRect() {},
-      restore() {},
-      roundRect() {},
-      drawImage() {},
-      getImageData() { return { data: [1, 2, 3, 255] }; },
-    }),
+function pileDragDocument() {
+  const kids = [];
+  const root = {
+    className: '',
+    children: kids,
+    setAttribute() {},
+    appendChild(node) { kids.push(node); },
+    remove() {},
   };
-  globalThis.document = {
-    createElement: () => canvas,
+  const doc = {
+    createElement: (tag) => {
+      if (tag === 'canvas') {
+        const blank = { width: 1, height: 1 };
+        blank.ownerDocument = doc;
+        return blank;
+      }
+      if (tag === 'div') return root;
+      if (tag === 'img') return { style: {}, alt: '', draggable: false, src: '' };
+      return { style: {} };
+    },
     body: { appendChild() {} },
+    addEventListener() {},
+    removeEventListener() {},
   };
+  return { doc, root, kids };
+}
+
+test('dragging a shop row uses a pile ghost, including a single card', () => {
+  let dragged = null;
+  const { doc, root, kids } = pileDragDocument();
+  globalThis.document = doc;
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 1 };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
   writeListingDrag({
+    clientX: 40,
+    clientY: 60,
     currentTarget: {
       nodeType: 1,
       tagName: 'DIV',
-      querySelector: (selector) => (selector.includes('.shop-card img') ? { naturalWidth: 63, naturalHeight: 88 } : null),
+      querySelector: () => null,
     },
     dataTransfer: {
       setData() {},
       setDragImage(el, x, y) { dragged = { el, x, y }; },
     },
-  }, { cardName: 'Meowth' });
-  assert.equal(dragged.el, canvas);
-  assert.equal(canvas.width, CARD_DRAG_WIDTH);
-  assert.equal(canvas.height, CARD_DRAG_HEIGHT);
-  assert.equal(dragged.x, CARD_DRAG_WIDTH / 2);
-  assert.equal(dragged.y, CARD_DRAG_HEIGHT / 2);
+  }, { cardName: 'Meowth', imageUrl: '/card.jpg', kind: 'card' });
+  assert.equal(dragged.el.width, 1);
+  assert.equal(dragged.x, 0);
+  assert.equal(dragged.y, 0);
+  assert.equal(root.className, 'drag-stack');
+  assert.equal(kids.length, 1);
+  assert.equal(kids[0].src, '/card.jpg');
 });
 
-test('dragging the desk frame uses the scan inside the frame', () => {
+test('dragging the desk frame uses a pile of the held card', () => {
   let dragged = null;
+  const { doc, root, kids } = pileDragDocument();
+  globalThis.document = doc;
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 1 };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
   writeListingDrag({
+    clientX: 12,
+    clientY: 18,
     currentTarget: {
       nodeType: 1,
       tagName: 'BUTTON',
       matches: (sel) => sel === '.art-frame',
-      querySelector: (selector) => (
-        selector === 'img' ? { naturalWidth: 630, naturalHeight: 880 } : null
-      ),
+      querySelector: () => null,
     },
     dataTransfer: {
       setData() {},
       setDragImage(el, x, y) { dragged = { el, x, y }; },
     },
-  }, { cardName: 'Meowth' });
-  assert.equal(dragged.x, CARD_DRAG_WIDTH / 2);
-  assert.equal(dragged.y, CARD_DRAG_HEIGHT / 2);
+  }, { cardName: 'Meowth', imageUrl: '/desk.jpg', kind: 'card' });
+  assert.equal(dragged.el.width, 1);
+  assert.equal(root.className, 'drag-stack');
+  assert.equal(kids.length, 1);
+  assert.equal(kids[0].src, '/desk.jpg');
 });
 
 test('a homepage card is not a seller card', () => {

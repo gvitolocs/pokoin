@@ -1,20 +1,37 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchExpansions } from '../api.js';
+import { game, isPokemonGame } from '../game.js';
 import { ERA_CHIPS, groupExpansions, headingHref } from '../set-logos.js';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import SetGuideGrid from '../components/SetGuideGrid.jsx';
 
+function satelliteGroups(expansions, query = '') {
+  const needle = String(query || '').trim().toLowerCase();
+  const rows = (expansions || [])
+    .filter((row) => {
+      if (!needle) return true;
+      const blob = `${row.name || ''} ${row.slug || ''}`.toLowerCase();
+      return blob.includes(needle);
+    })
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en'));
+  return rows.length ? [['Sets', rows]] : [];
+}
+
 export default function Sets() {
+  const site = game();
+  const pokemon = isPokemonGame();
   const [expansions, setExpansions] = useState(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [chip, setChip] = useState('all');
 
   useEffect(() => {
-    document.title = 'Pokémon TCG Set List, Prices & Values | Pokoin';
+    document.title = pokemon
+      ? 'Pokémon TCG Set List, Prices & Values | Pokoin'
+      : `${site.name} Sets | Pokoin`;
     let cancelled = false;
     fetchExpansions({ limit: 2000 })
       .then((data) => {
@@ -26,19 +43,27 @@ export default function Sets() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pokemon, site.name]);
 
   const grouped = useMemo(
-    () => groupExpansions(expansions || [], { query, chip }),
-    [expansions, query, chip],
+    () => (pokemon
+      ? groupExpansions(expansions || [], { query, chip })
+      : satelliteGroups(expansions, query)),
+    [expansions, query, chip, pokemon],
   );
   const shown = grouped.reduce((sum, [, rows]) => sum + rows.length, 0);
+  const title = pokemon
+    ? 'Pokémon TCG Set List, Prices & Values | Pokoin'
+    : `${site.name} Sets | Pokoin`;
+  const description = pokemon
+    ? 'Pokémon expansions from the marketplace catalog: English, Japanese, and Chinese sets with card lists and prices.'
+    : `${site.name} expansions from the marketplace catalog with card lists and prices.`;
 
   return (
     <div className="page desk set-guide-page">
       <SeoHead
-        title="Pokémon TCG Set List, Prices & Values | Pokoin"
-        description="Pokémon expansions from the marketplace catalog: English, Japanese, and Chinese sets with card lists and prices."
+        title={title}
+        description={description}
         canonical="/marketplace/sets"
       />
       <SeoCrumbs items={[
@@ -48,21 +73,25 @@ export default function Sets() {
       <PageHead
         kicker="Catalog"
         title="Sets"
-        lede="English, Japanese, and Chinese expansions. Open a set for the card list."
+        lede={pokemon
+          ? 'English, Japanese, and Chinese expansions. Open a set for the card list.'
+          : `${site.name} expansions. Open a set for the card list.`}
       />
-      <div className="set-guide-filters" role="group" aria-label="Set era">
-        {ERA_CHIPS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            aria-pressed={chip === item.id}
-            className={chip === item.id ? 'on' : ''}
-            onClick={() => setChip(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      {pokemon ? (
+        <div className="set-guide-filters" role="group" aria-label="Set era">
+          {ERA_CHIPS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              aria-pressed={chip === item.id}
+              className={chip === item.id ? 'on' : ''}
+              onClick={() => setChip(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <form className="shop-toolbar" onSubmit={(event) => event.preventDefault()}>
         <p className="result-count">
           {expansions == null ? 'Loading…' : <><strong>{shown}</strong> sets</>}
@@ -89,7 +118,11 @@ export default function Sets() {
         grouped.map(([era, rows]) => (
           <section className="set-guide-era" key={era}>
             <h2>
-              <Link className="era-link" to={headingHref(era)}>{era}</Link>
+              {pokemon ? (
+                <Link className="era-link" to={headingHref(era)}>{era}</Link>
+              ) : (
+                <span>{era}</span>
+              )}
             </h2>
             <SetGuideGrid rows={rows} />
           </section>
