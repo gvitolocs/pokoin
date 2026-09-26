@@ -183,12 +183,10 @@ export async function fetchHome(recentIds = []) {
       /* oracle below */
     }
   }
-  // Satellite catalogs use home-page + ?game=. Never resolve that through the
-  // pokoin.com Worker rails alias (it Cache-API'd Pokemon onto every game).
-  const homePage = withGameQuery('/api/marketplace-home-page');
-  const payload = await getJson(
-    isPokemonGame() ? homePage : `https://api.pokoin.com${homePage}`,
-  );
+  // Satellite catalogs use home-page + ?game= (withGameQuery inside getJson).
+  // Stay same-origin on pokoin.com so Bot Fight clearance applies — a hard
+  // api.pokoin.com hop fails fetch and paints the working page.
+  const payload = await getJson('/api/marketplace-home-page');
   if (payload?.cards?.length) {
     payload.cards = payload.cards.map((card) => applyTilePrice(card));
   }
