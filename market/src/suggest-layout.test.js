@@ -144,7 +144,7 @@ test('suggest thumbs preload into a 128 LRU; hover JPEGs are not cached', () => 
   assert.match(api, /preloadSuggestThumbs\(collectPrintingThumbUrls/);
 });
 
-test('title language is a top-bar flag; print language stays in the pill', () => {
+test('game and title language sit on the left of the search pill', () => {
   assert.match(desktopCss, /\.topbar-row \{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto auto/);
   assert.match(desktopCss, /--topbar-logo:\s*40px/);
   assert.match(desktopCss, /--topbar-flag:\s*32px/);
@@ -154,10 +154,11 @@ test('title language is a top-bar flag; print language stays in the pill', () =>
   assert.match(phoneBar[0], /--topbar-flag:\s*32px/);
   assert.equal(phone720First.includes('.topbar-row > .lang-toggle {'), false);
   const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
-  assert.match(chrome, /className="search-pill"[\s\S]*<PrintLangToggle \/>/);
-  assert.match(chrome, /function PrintLangToggle[\s\S]*search-go-icon/);
-  assert.equal(chrome.includes('className="search-go"'), false);
-  assert.match(chrome, /className="sr-only" type="submit"/);
-  assert.match(chrome, /<\/form>\s*<LangToggle \/>/);
+  const toolbar = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/SearchToolbar.jsx'), 'utf8');
+  assert.match(chrome, /className="search-pill"[\s\S]*<div className="search-lead">[\s\S]*<GameSelect \/>[\s\S]*<LangToggle \/>/);
+  assert.equal(chrome.includes('PrintLangToggle'), false);
+  assert.match(chrome, /className="search-submit" type="submit"/);
+  assert.equal(/<\/form>\s*<LangToggle \/>/.test(chrome), false);
+  assert.match(toolbar, /aria-label="Card print"/);
   assert.equal(chrome.includes('variant="drawer"'), false);
 });
