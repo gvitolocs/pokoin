@@ -106,7 +106,10 @@ export default function CardArt({
       event,
       dragCard.kind && dragCard.cardName ? dragCard : cardReference(dragCard),
     ),
-  } : {};
+  } : {
+    // Native <img> drag would paint a second ghost next to our pile.
+    draggable: false,
+  };
   const image = (
     <img
       ref={imgRef}

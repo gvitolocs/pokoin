@@ -12,6 +12,7 @@ import {
   publicListingSellerName,
   sellerCountryFlag,
   sellerCountryLabel,
+  sellerHandle,
 } from '../listing-meta.js';
 import { seedSellerListings } from '../seller-seed.js';
 
@@ -37,6 +38,21 @@ function isOneDayReady(offer) {
   );
 }
 
+function sellerFromPayload(data, handle, sample) {
+  const row = data?.seller && typeof data.seller === 'object' ? data.seller : null;
+  const username = String(row?.username || sellerHandle(sample) || handle || '')
+    .trim()
+    .replace(/^@/, '');
+  const rawName = String(row?.displayName || publicListingSellerName(sample, username || handle) || '')
+    .trim();
+  const displayName = rawName && !rawName.includes('@') ? rawName : (username || handle);
+  return {
+    uid: row?.uid || sample?.sellerUid || '',
+    username,
+    displayName,
+  };
+}
+
 export default function Seller() {
   const { username = '', lang: routeLang } = useParams();
   const navigate = useNavigate();
@@ -48,6 +64,11 @@ export default function Seller() {
   const [listings, setListings] = useState(() => seeded?.listings ?? null);
   const [total, setTotal] = useState(() => seeded?.total ?? null);
   const [unique, setUnique] = useState(() => seeded?.unique ?? null);
+  const [seller, setSeller] = useState(() => seeded?.seller ?? {
+    uid: '',
+    username: handle,
+    displayName: handle,
+  });
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [condition, setCondition] = useState('');
@@ -61,7 +82,10 @@ export default function Seller() {
   }, [query, condition, language, sort, handle]);
 
   useEffect(() => {
-    document.title = `${handle} · Pokoin`;
+    document.title = `${seller.displayName || handle} · Pokoin`;
+  }, [seller.displayName, handle]);
+
+  useEffect(() => {
     if (!handle) return undefined;
     let cancelled = false;
     setLoading(true);
@@ -78,6 +102,7 @@ export default function Seller() {
         if (cancelled) return;
         const rows = data.listings || data.items || [];
         setListings(rows);
+        setSeller(sellerFromPayload(data, handle, rows[0]));
         setTotal(Number(data.total ?? rows.length) || 0);
         setUnique(
           Number(
@@ -103,7 +128,9 @@ export default function Seller() {
   }, [handle, page, query, condition, language, sort]);
 
   const sample = listings?.[0];
-  const display = publicListingSellerName(sample, handle);
+  const display = seller.displayName || publicListingSellerName(sample, handle);
+  const tag = seller.username || sellerHandle(sample) || handle;
+  const showTag = tag && tag.toLowerCase() !== String(display || '').toLowerCase();
   const country = sellerCountryFlag(sample?.sellerCountry);
   const countryLine = sellerCountryLabel(sample?.sellerCountry);
   const ready = useMemo(() => Boolean((listings || []).some(isOneDayReady)), [listings]);
@@ -132,6 +159,7 @@ export default function Seller() {
         <div className="seller-id">
           <p className="page-kicker">Seller</p>
           <h1 className="page-title">{display}</h1>
+          {showTag ? <p className="seller-handle">@{tag}</p> : null}
           <div className="seller-hero-meta">
             {country ? (
               <p className="seller-country">

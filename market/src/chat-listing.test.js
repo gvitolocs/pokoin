@@ -212,7 +212,7 @@ function pileDragDocument() {
   const doc = {
     createElement: (tag) => {
       if (tag === 'canvas') {
-        const blank = { width: 1, height: 1 };
+        const blank = { width: 1, height: 1, isConnected: false, style: {} };
         blank.ownerDocument = doc;
         return blank;
       }
@@ -220,7 +220,11 @@ function pileDragDocument() {
       if (tag === 'img') return { style: {}, alt: '', draggable: false, src: '' };
       return { style: {} };
     },
-    body: { appendChild() {} },
+    body: {
+      appendChild(node) {
+        if (node) node.isConnected = true;
+      },
+    },
     addEventListener() {},
     removeEventListener() {},
   };

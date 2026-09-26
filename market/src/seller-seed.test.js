@@ -25,6 +25,7 @@ test('seed uses full shop cache key, never a one-row location stub', () => {
 
   // Full first-page shop cache is allowed
   const shop = {
+    seller: { uid: 'u1', username: handle, displayName: 'Simone Di Blasi' },
     listings: Array.from({ length: 3 }, (_, i) => ({ id: String(i), sellerUsername: handle })),
     total: 9153,
     unique: 5981,
@@ -34,5 +35,7 @@ test('seed uses full shop cache key, never a one-row location stub', () => {
   assert.equal(seeded.total, 9153);
   assert.equal(seeded.unique, 5981);
   assert.equal(seeded.listings.length, 3);
+  assert.equal(seeded.seller.displayName, 'Simone Di Blasi');
+  assert.equal(seeded.seller.username, handle);
   assert.equal(peekSellerListings(handle, opts).total, 9153);
 });

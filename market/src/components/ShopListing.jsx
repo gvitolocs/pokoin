@@ -26,6 +26,7 @@ function ShopScan({ image, name, setName = '' }) {
         <img
           src={thumb}
           alt=""
+          draggable={false}
           onError={(event) => {
             const img = event.currentTarget;
             if (img.dataset.fallback) return;
@@ -260,8 +261,8 @@ export default function ShopListingRow({
         <span className="shop-photos">
           {offer.photoUrls.slice(0, 2).map((url) => (
             <span className="shop-photo" key={url}>
-              <img src={url} alt="" />
-              <img className="shop-photo-big" src={url} alt="" />
+              <img src={url} alt="" draggable={false} />
+              <img className="shop-photo-big" src={url} alt="" draggable={false} />
             </span>
           ))}
         </span>

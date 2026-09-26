@@ -23,9 +23,21 @@ export function seedSellerListings(handle, { pageSize = 100, sort = 'price-asc' 
     return null;
   }
   const listings = cached.listings;
+  const fromApi = cached.seller && typeof cached.seller === 'object' ? cached.seller : null;
+  const sample = listings[0] || {};
+  const username = String(fromApi?.username || sample.sellerUsername || handle || '')
+    .trim()
+    .replace(/^@/, '');
+  const displayName = String(fromApi?.displayName || sample.sellerDisplayName || sample.sellerName || username || handle)
+    .trim();
   return {
     listings,
     total: Number(cached.total ?? listings.length) || 0,
     unique: Number(cached.unique ?? 0) || 0,
+    seller: {
+      uid: fromApi?.uid || sample.sellerUid || '',
+      username,
+      displayName: displayName && !displayName.includes('@') ? displayName : username,
+    },
   };
 }

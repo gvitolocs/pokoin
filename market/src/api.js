@@ -2025,10 +2025,8 @@ export function fetchSellerShop(username, {
     return Promise.resolve({ listings: [], total: 0, unique: 0, limit, offset: 0 });
   }
   const opts = { limit, offset, q, condition, language, sort };
-  const cached = peekSellerListings(handle, opts);
-  if (cached) {
-    return Promise.resolve(cached);
-  }
+  // Always hit the network so refresh picks up name/tag changes. Seller.jsx
+  // paints the in-memory shop cache first via seedSellerListings.
   const params = new URLSearchParams({
     sellerUsername: handle,
     limit: String(limit),

@@ -412,6 +412,12 @@ function invisibleDragImage() {
     blankDrag = document.createElement('canvas');
     blankDrag.width = 1;
     blankDrag.height = 1;
+    if (blankDrag.style) {
+      blankDrag.style.cssText = 'position:fixed;top:0;left:-32px;width:1px;height:1px;opacity:0;pointer-events:none';
+    }
+    document.body?.appendChild(blankDrag);
+  } else if (!blankDrag.isConnected) {
+    document.body?.appendChild(blankDrag);
   }
   return blankDrag;
 }
@@ -546,6 +552,8 @@ export function writeListingDrag(event, reference) {
     mountDragStack(stack, event);
     try {
       const blank = invisibleDragImage();
+      // Must be in the document — otherwise Chrome keeps the default tile ghost
+      // and the custom pile shows beside it.
       if (blank) event.dataTransfer.setDragImage(blank, 0, 0);
     } catch (_) {
       /* the pile is the ghost */
