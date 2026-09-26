@@ -16,6 +16,8 @@ const {
   dropOnConversation,
   getChatDrafts,
   getChatDock,
+  beginCardDrag,
+  endCardDrag,
   noteListingDrag,
   openThread,
 } = await import('./chat-dock-store.js');
@@ -53,6 +55,27 @@ test('dragging a card keeps the conversation that is already open', () => {
   assert.equal(getChatDock().view, 'thread');
   assert.equal(getChatDock().tags.at(-1).cardName, 'Pikachu');
   assert.equal(getChatDock().text, 'still writing');
+});
+
+test('a card drag opens messages and closes them unless the card lands there', () => {
+  closeChatDock();
+  assert.equal(getChatDock().open, false);
+  beginCardDrag();
+  assert.equal(getChatDock().open, true);
+  assert.equal(getChatDock().view, 'list');
+  endCardDrag();
+  assert.equal(getChatDock().open, false);
+
+  beginCardDrag();
+  assert.equal(dropOnConversation('PUH1ygG9mOOyQRPXaY5Fa1W6DKd2', 'redshakkio', card), true);
+  endCardDrag();
+  assert.equal(getChatDock().open, true);
+  assert.equal(getChatDock().view, 'thread');
+
+  beginCardDrag();
+  endCardDrag();
+  assert.equal(getChatDock().open, true);
+  closeChatDock();
 });
 
 test('dismissing the drop hint stays dismissed in this browser', () => {

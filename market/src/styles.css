@@ -825,8 +825,47 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   background: rgb(255 211 61 / 0.14);
 }
 
+.icon-nav .cart-anchor {
+  position: relative;
+  display: flex;
+}
+
 .icon-nav .cart-chip {
   position: relative;
+}
+
+.cart-drop {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  width: 16rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: #14121a;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.45);
+  color: var(--text);
+  text-align: left;
+  cursor: default;
+}
+
+.cart-drop.is-over {
+  outline: 2px solid var(--yellow);
+}
+
+.cart-drop strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.cart-drop p {
+  margin: 0;
+  color: var(--muted, #b7b1c2);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
 }
 
 .icon-nav .cart-chip em {

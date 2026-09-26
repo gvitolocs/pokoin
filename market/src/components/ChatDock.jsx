@@ -6,13 +6,16 @@ import { chatTime } from '../chat-format.js';
 import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
 import {
   addChatTag,
+  beginCardDrag,
   chatDropHintVisible,
   closeChatDock,
   clearChatTags,
   dismissChatDropHint,
   dropOnConversation,
+  endCardDrag,
   getChatDock,
   getChatDrafts,
+  markChatDrop,
   noteListingDrag,
   openChatList,
   openThread,
@@ -140,13 +143,26 @@ export default function ChatDock() {
     function allowsDrop(event) {
       return [...(event.dataTransfer?.types || [])].includes(LISTING_DRAG_TYPE);
     }
+    function onDragStart(event) {
+      if (!allowsDrop(event) && !document.documentElement.classList.contains('is-card-dragging')) return;
+      beginCardDrag();
+    }
     function onDragOver(event) {
       if (!allowsDrop(event)) return;
       if (noteListingDrag(textRef.current) === 'thread') return;
       event.preventDefault();
     }
+    function onDragEnd() {
+      endCardDrag();
+    }
+    window.addEventListener('dragstart', onDragStart);
     window.addEventListener('dragover', onDragOver);
-    return () => window.removeEventListener('dragover', onDragOver);
+    window.addEventListener('dragend', onDragEnd);
+    return () => {
+      window.removeEventListener('dragstart', onDragStart);
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('dragend', onDragEnd);
+    };
   }, []);
 
   if (!dock.open) return null;
@@ -178,20 +194,22 @@ export default function ChatDock() {
       className={`chat-dock${over ? ' is-over' : ''}`}
       aria-label={dock.view === 'list' ? 'Messages' : `Chat with ${label}`}
       onDragOver={(event) => {
-        if (dock.view !== 'thread' || ![...(event.dataTransfer?.types || [])].includes(LISTING_DRAG_TYPE)) return;
+        if (![...(event.dataTransfer?.types || [])].includes(LISTING_DRAG_TYPE)) return;
         event.preventDefault();
         event.stopPropagation();
-        setOver(true);
+        if (dock.view === 'thread') setOver(true);
       }}
       onDragLeave={(event) => {
         if (event.currentTarget.contains(event.relatedTarget)) return;
         setOver(false);
       }}
       onDrop={(event) => {
-        if (dock.view !== 'thread') return;
+        if (![...(event.dataTransfer?.types || [])].includes(LISTING_DRAG_TYPE)) return;
         event.preventDefault();
         event.stopPropagation();
         setOver(false);
+        markChatDrop();
+        if (dock.view !== 'thread') return;
         const reference = readListingDrag(event);
         if (reference) addChatTag(reference, textRef.current);
       }}

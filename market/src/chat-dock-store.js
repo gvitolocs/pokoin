@@ -96,6 +96,26 @@ export function noteListingDrag(text) {
   return 'list';
 }
 
+let cardDrag = null;
+
+/** Open the messages panel for this drag. It closes again unless the card lands on it. */
+export function beginCardDrag() {
+  if (cardDrag) return;
+  cardDrag = { wasOpen: snapshot.open, landed: false };
+  if (!snapshot.open) openChatList();
+}
+
+export function markChatDrop() {
+  if (cardDrag) cardDrag.landed = true;
+}
+
+export function endCardDrag() {
+  const session = cardDrag;
+  cardDrag = null;
+  if (!session || session.wasOpen || session.landed) return;
+  closeChatDock();
+}
+
 export function openThread(peer, label = '', text) {
   const uid = sellerUserId(peer) || String(peer || '').trim();
   if (!uid) return false;
@@ -116,6 +136,7 @@ export function openThread(peer, label = '', text) {
 export function dropOnConversation(peer, label, reference) {
   const uid = sellerUserId(peer) || String(peer || '').trim();
   if (!uid || !reference?.cardName) return false;
+  markChatDrop();
   persistCurrent();
   const prior = readDrafts()[uid] || {};
   const tags = appendChatTag(prior.tags || [], reference);
@@ -147,6 +168,7 @@ export function addChatTag(reference, text) {
     return false;
   }
   if (text !== undefined) snapshot = { ...snapshot, text };
+  markChatDrop();
   snapshot = { ...snapshot, tags: appendChatTag(snapshot.tags, reference) };
   remember(snapshot.peer, snapshot);
   emit();
