@@ -60,7 +60,7 @@ export default function Cart() {
                 </div>
                 <label className="bag-qty">
                   <span className="sr-only">Qty</span>
-                  <input inputMode="numeric" value={row.qty} onChange={(event) => setQty(row.id, event.target.value)} />
+                  <input inputMode="numeric" max={row.stock || 1} value={row.qty} onChange={(event) => setQty(row.id, event.target.value)} />
                 </label>
                 <strong className="bag-price">{formatPkn(row.pricePkn * row.qty)}</strong>
                 <button className="bag-remove" type="button" onClick={() => removeItem(row.id)}>Remove</button>

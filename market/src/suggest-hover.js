@@ -23,7 +23,7 @@ export function suggestHoverBox({
   const vw = Number(viewportWidth) || 0;
   const vh = Number(viewportHeight) || 0;
   const ratio = SUGGEST_HOVER_RATIO;
-  const maxH = Math.max(0, Math.min(vh - pad * 2, 680));
+  const maxH = Math.max(0, Math.min(vh - pad * 2, 340));
   let height = maxH;
   let width = height * ratio;
 

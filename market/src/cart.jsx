@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { listingStock, nextCartQty } from './cart-qty.js';
 
 const CART_KEY = 'pokoin.cartItems';
 const CART_MAX = 400;
@@ -30,6 +31,7 @@ export const CHECKOUT_TAX_RATE = 0.08;
 export const CHECKOUT_SHIPPING_PKN = 2000;
 
 export function cartItemFromOffer(card, offer) {
+  const stock = listingStock(offer);
   return {
     id: String(offer?.id || `${card.id}-${offer?.sellerName || 'listing'}`),
     listingId: String(offer?.id || offer?.listingId || ''),
@@ -38,7 +40,8 @@ export function cartItemFromOffer(card, offer) {
     name: card.name || 'Card',
     image: offer?.cardImageUrl || card.gridImageUrl || card.heroImageUrl || card.imageUrl || '',
     pricePkn: Number(offer?.pricePkn) || 0,
-    qty: 1,
+    qty: Math.min(stock, Math.max(1, Math.trunc(Number(offer?.qty) || 1))),
+    stock,
     condition: offer?.condition || 'NM',
     language: offer?.language || '',
     sellerName: offer?.sellerName || offer?.sellerDisplayName || 'Pokoin',
@@ -73,20 +76,25 @@ export function CartProvider({ children }) {
         setItems((current) => {
           const match = current.find((row) => row.id === next.id);
           if (match) {
+            const stock = listingStock(next.stock != null ? next : match);
             return current.map((row) => (
-              row.id === next.id ? { ...row, qty: Math.min(99, (Number(row.qty) || 1) + (Number(next.qty) || 1)) } : row
+              row.id === next.id
+                ? { ...row, stock, qty: nextCartQty(row.qty, next.qty, stock) }
+                : row
             ));
           }
           return [next, ...current].slice(0, CART_MAX);
         });
       },
       setQty(id, qty) {
-        const next = Math.max(0, Math.min(99, Number.parseInt(qty, 10) || 0));
-        setItems((current) => (
-          next < 1
-            ? current.filter((row) => row.id !== id)
-            : current.map((row) => (row.id === id ? { ...row, qty: next } : row))
-        ));
+        setItems((current) => {
+          const row = current.find((item) => item.id === id);
+          const cap = row ? listingStock(row) : 99;
+          const next = Math.max(0, Math.min(cap, Number.parseInt(qty, 10) || 0));
+          return next < 1
+            ? current.filter((item) => item.id !== id)
+            : current.map((item) => (item.id === id ? { ...item, qty: next } : item));
+        });
       },
       removeItem(id) {
         setItems((current) => current.filter((row) => row.id !== id));

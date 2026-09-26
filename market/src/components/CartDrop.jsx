@@ -90,6 +90,8 @@ async function addDraggedCard(reference, onAdd) {
         cardImageUrl: reference.imageUrl,
         condition: reference.condition || 'NM',
         language: reference.language || '',
+        qty: reference.qty,
+        quantityAvailable: reference.stock,
       },
     ));
     return;

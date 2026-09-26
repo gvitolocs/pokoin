@@ -29,8 +29,8 @@ test('scan zoom box flips left near the right edge and clamps into the viewport'
   const bottomClamped = scanZoomBox({ viewportWidth: 1400, viewportHeight: 900, pointerX: 400, pointerY: 9000 });
   assert.ok(bottomClamped.top + bottomClamped.height <= 890, 'bottom clamped to pad');
 
-  const shortViewport = scanZoomBox({ viewportWidth: 1400, viewportHeight: 500, pointerX: 400, pointerY: 250 });
-  assert.equal(shortViewport.height, 480, 'viewport height bounds the card, not the max');
+  const shortViewport = scanZoomBox({ viewportWidth: 1400, viewportHeight: 280, pointerX: 400, pointerY: 140 });
+  assert.equal(shortViewport.height, 260, 'viewport height bounds the card, not the max');
   assert.ok(shortViewport.width <= 1400 - 20);
 });
 

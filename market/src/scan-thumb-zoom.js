@@ -6,7 +6,7 @@
 
 export const SCAN_ZOOM_RATIO = 63 / 88;
 export const SCAN_ZOOM_DELAY_MS = 140;
-export const SCAN_ZOOM_MAX_HEIGHT = 640;
+export const SCAN_ZOOM_MAX_HEIGHT = 320;
 
 /**
  * Fixed-position box for the zoom: right of the pointer, vertically centered
