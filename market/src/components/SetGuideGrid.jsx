@@ -23,17 +23,7 @@ function SetGuideLogo({ row }) {
         <img
           src={logo}
           alt=""
-          draggable
-          onDragStart={(event) => {
-            const slug = row.slug || '';
-            writeListingDrag(event, bundleReference({
-              kind: 'expansion',
-              slug,
-              name: row.name,
-              imageUrl: logo,
-              path: slug ? `/marketplace/sets/${slug}` : '',
-            }));
-          }}
+          draggable={false}
           onError={() => setWordmarkDead(true)}
         />
       )}
@@ -49,13 +39,28 @@ export default function SetGuideGrid({ rows = [] }) {
         const code = expansionCode({ ...row, slug });
         const count = row.cardCount || row.count || row.cards || '';
         const printFlag = printFlagFromNationality(row.nationality);
+        const logo = expansionLogoSrc({ ...row, slug });
         return (
-          <Link className="set-guide-card" key={slug || row.name} to={`/marketplace/sets/${slug}`}>
+          <Link
+            className="set-guide-card"
+            key={slug || row.name}
+            to={`/marketplace/sets/${slug}`}
+            draggable
+            onDragStart={(event) => {
+              writeListingDrag(event, bundleReference({
+                kind: 'expansion',
+                slug,
+                name: row.name,
+                imageUrl: logo,
+                path: slug ? `/marketplace/sets/${slug}` : '',
+              }));
+            }}
+          >
             <SetGuideLogo row={{ ...row, slug }} />
             <strong className={printFlag ? 'has-print-flag' : undefined}>
               {printFlag ? (
                 <span className="set-guide-print-flag">
-                  <img src={flagSrc(printFlag.code)} alt="" width="28" height="28" />
+                  <img src={flagSrc(printFlag.code)} alt="" width="28" height="28" draggable={false} />
                   <span className="sr-only">{printFlag.label}</span>
                 </span>
               ) : null}

@@ -164,7 +164,7 @@ export default function DesktopDrop({ onAddToCart }) {
               <path fill="currentColor" d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 2v8h14V7H5zm-1 12h16v2H4v-2z" />
             </svg>
           </div>
-          <p>Drop cards you are unsure about</p>
+          <p>Draw the shape of your next collection</p>
         </div>
       )}
     </div>

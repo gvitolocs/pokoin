@@ -145,59 +145,47 @@ test('dragging a Pokémon name keeps every printing of that species', () => {
   ], [{ username: 'redshakkio' }]), 2);
 });
 
-test('a tainted artist cover still drags at a fixed size', () => {
+test('an artist cover drags as a warm pile of one, not a network ghost', () => {
   let dragged = null;
-  globalThis.document = {
-    createElement: (tag) => {
-      const el = {
-        tagName: tag,
-        width: 0,
-        height: 0,
-        style: {},
-        src: '',
-        alt: '',
-        draggable: false,
-        setAttribute() {},
-        getAttribute() { return el.src; },
-      };
-      if (tag === 'canvas') {
-        el.getContext = () => ({
-          setTransform() {},
-          clearRect() {},
-          save() {},
-          beginPath() {},
-          rect() {},
-          clip() {},
-          fillRect() {},
-          restore() {},
-          roundRect() {},
-          drawImage() {},
-          getImageData() { throw new Error('tainted'); },
-        });
-      }
-      return el;
-    },
-    body: { appendChild() {} },
-  };
-  const huge = {
+  const { doc, root, kids } = pileDragDocument();
+  globalThis.document = doc;
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 1 };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  const warm = {
     nodeType: 1,
     tagName: 'IMG',
-    naturalWidth: 4000,
-    naturalHeight: 2800,
-    src: 'https://cdn.pokoin.com/cover.jpg',
-    currentSrc: 'https://cdn.pokoin.com/cover.jpg',
+    complete: true,
+    naturalWidth: 400,
+    naturalHeight: 280,
+    src: '/card-images/expansions/logos/black-bolt.png',
+    currentSrc: '/card-images/expansions/logos/black-bolt.png',
   };
   writeListingDrag({
-    currentTarget: huge,
+    clientX: 20,
+    clientY: 30,
+    currentTarget: warm,
     dataTransfer: {
       setData() {},
-      setDragImage(el) { dragged = el; },
+      setDragImage(el, x, y) { dragged = { el, x, y }; },
     },
-  }, { cardName: 'Ken Sugimori', kind: 'artist', imageUrl: huge.src });
-  assert.equal(dragged.tagName, 'img');
-  assert.equal(dragged.width, CARD_DRAG_WIDTH);
-  assert.equal(dragged.height, CARD_DRAG_HEIGHT);
-  assert.notEqual(dragged, huge);
+  }, { cardName: 'Ken Sugimori', kind: 'artist', imageUrl: warm.src });
+  assert.equal(dragged.el.width, 1);
+  assert.equal(dragged.x, 0);
+  assert.equal(root.className, 'drag-stack');
+  assert.equal(kids.length, 1);
+  assert.equal(kids[0].tagName, 'CANVAS');
+  assert.equal(kids[0].width, CARD_DRAG_WIDTH);
+  assert.equal(kids[0].height, CARD_DRAG_HEIGHT);
+});
+
+test('card drag imageUrl prefers the homepage derivative already on rails', () => {
+  const row = cardReference({
+    id: '9',
+    name: 'Meowth',
+    imageUrl: '/card-images/123_meowth.jpg',
+  });
+  assert.match(row.imageUrl, /_homepage\.webp$/);
 });
 
 function pileDragDocument() {
@@ -336,6 +324,13 @@ test('a homepage card is not a seller card', () => {
   const traded = cardReference({ id: '25', name: 'Pikachu' });
   assert.equal(isSellerCard(listing), true);
   assert.equal(isSellerCard(traded), false);
+});
+
+test('SetGuideGrid drags the whole set card, not only the wordmark img', () => {
+  const src = readFileSync(new URL('./components/SetGuideGrid.jsx', import.meta.url), 'utf8');
+  assert.match(src, /className="set-guide-card"[\s\S]*?draggable/);
+  assert.match(src, /kind: 'expansion'/);
+  assert.match(src, /draggable=\{false\}/);
 });
 
 test('shop rows show a message icon before the cart icon', () => {

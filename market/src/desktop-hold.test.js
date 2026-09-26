@@ -124,5 +124,6 @@ test('Chrome mounts Desktop on the left, opposite the cart', () => {
   assert.match(drop, /Export/);
   assert.match(drop, /downloadDesktopHoldCsv/);
   assert.match(drop, /desktop-drop-x/);
-  assert.match(drop, /<strong>Desktop<\/strong>/);
+  assert.match(drop, /Draw the shape of your next collection/);
+  assert.doesNotMatch(drop, /Drop cards you are unsure about/);
 });

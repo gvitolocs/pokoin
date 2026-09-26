@@ -19,7 +19,7 @@ export function sellerUserId(value) {
 }
 
 function cardImage(card, offer) {
-  return String(
+  const raw = String(
     offer?.cardImageUrl
     || offer?.imageUrl
     || card?.heroImageUrl
@@ -31,6 +31,8 @@ function cardImage(card, offer) {
     || card?.homepageImageUrl
     || '',
   ).trim();
+  // Prefer the homepage derivative — same bitmap rails/tiles already painted.
+  return homepageDerivativeUrl(raw) || preferFullImage(raw) || raw;
 }
 
 function offerCopies(offer) {
@@ -338,7 +340,22 @@ function dragSourceImage(event) {
   if (!node || node.nodeType !== 1) return null;
   if (node.tagName === 'IMG') return node;
   const nested = node.querySelector?.(
-    '.shop-card img, .tile-art img, .seller-listing-art img, .c-art img, .bag-art img, .seller-mover img, .art-frame img, .cart-drop-card img, .desktop-drop-card img',
+    [
+      '.shop-card img',
+      '.tile-art img',
+      '.seller-listing-art img',
+      '.c-art img',
+      '.bag-art img',
+      '.seller-mover img',
+      '.art-frame img',
+      '.cart-drop-card img',
+      '.desktop-drop-card img',
+      '.set-guide-logo img',
+      '.set-wordmark',
+      '.set-sym',
+      '.page-title img',
+      'img',
+    ].join(', '),
   );
   if (nested) return nested;
   // The desk hero is the frame itself, so `.art-frame img` does not match a descendant.
@@ -389,6 +406,11 @@ function findWarmDocumentImage(url) {
   if (!src || typeof document === 'undefined') return null;
   const ready = readyDragImage(src);
   if (ready) return ready;
+  const home = homepageDerivativeUrl(src);
+  if (home && home !== src) {
+    const homeReady = readyDragImage(home);
+    if (homeReady) return homeReady;
+  }
   for (const img of document.images || []) {
     if (!img?.complete || !(img.naturalWidth > 0)) continue;
     const cur = String(img.currentSrc || img.src || '');
@@ -396,12 +418,18 @@ function findWarmDocumentImage(url) {
     if (cur === src || cur.endsWith(src) || src.endsWith(cur.replace(/^https?:\/\/[^/]+/, ''))) {
       return rememberWarmImage(img);
     }
+    if (home) {
+      const curHome = homepageDerivativeUrl(cur);
+      if (curHome && (curHome === home || cur.endsWith(home) || home.endsWith(curHome.replace(/^https?:\/\/[^/]+/, '')))) {
+        return rememberWarmImage(img);
+      }
+    }
   }
   return null;
 }
 
 /** Paint a pile layer from an already-decoded bitmap — never assign a network src. */
-function stackLayerFromWarm(warm, zIndex) {
+function stackLayerFromWarm(warm, zIndex, fit = 'cover') {
   const canvas = document.createElement('canvas');
   canvas.width = CARD_DRAG_WIDTH;
   canvas.height = CARD_DRAG_HEIGHT;
@@ -425,7 +453,9 @@ function stackLayerFromWarm(warm, zIndex) {
   ctx.fillRect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
   if (warm?.naturalWidth) {
     try {
-      const scale = Math.max(CARD_DRAG_WIDTH / warm.naturalWidth, CARD_DRAG_HEIGHT / warm.naturalHeight);
+      const scale = fit === 'contain'
+        ? Math.min(CARD_DRAG_WIDTH / warm.naturalWidth, CARD_DRAG_HEIGHT / warm.naturalHeight)
+        : Math.max(CARD_DRAG_WIDTH / warm.naturalWidth, CARD_DRAG_HEIGHT / warm.naturalHeight);
       const dw = warm.naturalWidth * scale;
       const dh = warm.naturalHeight * scale;
       ctx.drawImage(warm, (CARD_DRAG_WIDTH - dw) / 2, (CARD_DRAG_HEIGHT - dh) / 2, dw, dh);
@@ -527,13 +557,19 @@ function mountDragStack(cards, event) {
   const root = document.createElement('div');
   root.className = 'drag-stack';
   root.setAttribute('aria-hidden', 'true');
+  const fit = rows.some((row) => row?.kind === 'artist' || row?.kind === 'expansion' || row?.kind === 'species')
+    ? 'contain'
+    : 'cover';
   rows.forEach((row, index) => {
+    const homepage = homepageDerivativeUrl(row.imageUrl) || row.imageUrl;
     const warm = (index === 0 ? source : null)
+      || findWarmDocumentImage(homepage)
       || findWarmDocumentImage(row.imageUrl)
+      || readyDragImage(homepage)
       || readyDragImage(row.imageUrl);
     // Always paint from a warm bitmap (or a dark plate). Never assign a network
     // src here — that reloads the scan the tile already has in memory.
-    root.appendChild(stackLayerFromWarm(warm, 30 - index));
+    root.appendChild(stackLayerFromWarm(warm, 30 - index, fit));
   });
   document.body.appendChild(root);
   dragStack = root;
@@ -615,10 +651,25 @@ export function writeListingDrag(event, reference) {
   if (!event?.dataTransfer || !reference?.cardName) return;
   event.dataTransfer.setData(LISTING_DRAG_TYPE, JSON.stringify(reference));
   event.dataTransfer.effectAllowed = 'copy';
-  rememberWarmImage(dragSourceImage(event));
-  if (reference.imageUrl) preloadDragImage(reference.imageUrl);
+  const source = rememberWarmImage(dragSourceImage(event));
+  // Only soft-decode when nothing on the page is warm yet (text-only artist title).
+  // Never assign a network src for a tile/desk image that is already in the DOM.
+  if (!source && reference.imageUrl) {
+    const homepage = homepageDerivativeUrl(reference.imageUrl) || reference.imageUrl;
+    if (!findWarmDocumentImage(homepage) && !findWarmDocumentImage(reference.imageUrl)) {
+      preloadDragImage(homepage);
+    }
+  }
   const stack = dragCardsOf(reference);
-  const usePile = stack.length >= 1 && (reference.kind === 'cards' || reference.kind === 'card' || reference.kind === 'listing' || !reference.kind);
+  const usePile = stack.length >= 1 && (
+    reference.kind === 'cards'
+    || reference.kind === 'card'
+    || reference.kind === 'listing'
+    || reference.kind === 'artist'
+    || reference.kind === 'expansion'
+    || reference.kind === 'species'
+    || !reference.kind
+  );
   if (usePile) {
     mountDragStack(stack, event);
     try {
@@ -632,11 +683,16 @@ export function writeListingDrag(event, reference) {
     markCardDragging();
     return;
   }
-  const image = dragSourceImage(event) || readyDragImage(reference.imageUrl);
+  const homepage = homepageDerivativeUrl(reference.imageUrl) || reference.imageUrl;
+  const image = source
+    || findWarmDocumentImage(homepage)
+    || findWarmDocumentImage(reference.imageUrl)
+    || readyDragImage(homepage)
+    || readyDragImage(reference.imageUrl);
   rememberWarmImage(image);
   const fit = reference.kind === 'card' || !reference.kind ? 'cover' : 'contain';
   const painted = paintDragGhost(image, fit);
-  const ghost = painted || fixedDragSlot(image?.currentSrc || image?.src || reference.imageUrl, fit);
+  const ghost = painted || fixedDragSlot(image?.currentSrc || image?.src || homepage, fit);
   try {
     if (ghost) {
       event.dataTransfer.setDragImage(ghost, CARD_DRAG_WIDTH / 2, CARD_DRAG_HEIGHT / 2);
