@@ -448,15 +448,16 @@ function marketPricePkn(row = {}) {
   return Math.round(market * 100) / 100;
 }
 
-function applyHomepageMinimums(rows, priceRows) {
+/** Latest daily-dump minimum, keyed by CardTrader blueprint. Own asks stay off the row. */
+function applyDumpMinimums(rows, priceRows) {
   const byId = new Map();
   for (const price of priceRows || []) {
-    const id = String(price.card_id || '');
+    const id = String(price.blueprint_id || '');
     const pkn = Number(price.pkn);
     if (id && pkn > 0) byId.set(id, pkn);
   }
   return (rows || []).map((row) => {
-    const market = byId.get(String(row.card_id || ''));
+    const market = byId.get(String(row.blueprint_id || ''));
     return { ...row, market_pkn: market > 0 ? market : null };
   });
 }
@@ -493,7 +494,7 @@ module.exports = {
   isCtLinkedSource,
   isPokemonProduct,
   normalizeProduct,
-  applyHomepageMinimums,
+  applyDumpMinimums,
   marketPricePkn,
   oneDayReadyAssetRow,
   oneDayReadyTotals,

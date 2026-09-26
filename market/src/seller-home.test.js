@@ -122,6 +122,8 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.doesNotMatch(viewSrc, /portfolio-empty-scan/);
   assert.match(viewSrc, /portfolio-view-collection/);
   assert.match(viewSrc, /CollectionHistoryPanel/);
+  assert.match(viewSrc, /HistoryBoundary/);
+  assert.match(homeSrc, /DashboardBoundary/);
   assert.match(viewSrc, /historyPending/);
   assert.match(homeSrc, /fetchPortfolioHistory/);
   assert.doesNotMatch(homeSrc, /fetchCheapestPricePknMap/);

@@ -4,16 +4,49 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const core = require('./_portfolio_history_core.js');
 
-test('a stored today with a market check is not calculated again', () => {
-  assert.equal(core.storedIsFresh([
-    { date: '2026-09-25', cardsKnown: true, cardsValuePkn: 20 },
-  ], '2026-09-25'), true);
-  assert.equal(core.storedIsFresh([
-    { date: '2026-09-24', cardsKnown: true, cardsValuePkn: 20 },
-  ], '2026-09-25'), false);
-  assert.equal(core.storedIsFresh([
-    { date: '2026-09-25', cardsKnown: false },
-  ], '2026-09-25'), false);
+test('a stored today with the dump basis is not calculated again', () => {
+  assert.equal(core.storedIsFresh({
+    priceBasis: 'ct-dump-min',
+    updatedAt: '2026-09-25T12:00:00.000Z',
+  }, '2026-09-25'), true);
+  assert.equal(core.storedIsFresh({
+    priceBasis: 'ct-dump-min',
+    updatedAt: '2026-09-24T12:00:00.000Z',
+  }, '2026-09-25'), false);
+  assert.equal(core.storedIsFresh({
+    updatedAt: '2026-09-25T20:33:25.586Z',
+    days: [{ date: '2026-09-25', cardsKnown: true, cardsValuePkn: 4026552 }],
+  }, '2026-09-25'), false);
+});
+
+test('dump minimums start on the sync day and step when the dump changes', () => {
+  const wallet = core.buildSeries({
+    movements: [
+      { type: 'account_transfer_received', amountPkn: 15, createdAt: '2026-05-21T12:00:00.000Z' },
+    ],
+    balance: 15,
+    marketChecked: false,
+    today: '2026-09-25T18:00:00.000Z',
+  });
+  const series = core.applyDumpValues(wallet, [
+    { day: '2026-09-20', market_pkn: 1000 },
+    { day: '2026-09-22', market_pkn: 900 },
+    { day: '2026-09-25', market_pkn: 1100 },
+  ], {
+    ownershipDate: '2026-09-01T08:00:00.000Z',
+    today: '2026-09-25T18:00:00.000Z',
+  });
+  const may = series.find((row) => row.date === '2026-05-21');
+  assert.equal(may.cardsKnown, false);
+  assert.equal(may.totalPkn, 15);
+  const synced = series.find((row) => row.date === '2026-09-01');
+  assert.equal(synced.cardsValuePkn, 1000);
+  assert.equal(synced.priceBasis, 'ct-dump-min');
+  assert.equal(series.find((row) => row.date === '2026-09-22').cardsValuePkn, 900);
+  const today = series.find((row) => row.date === '2026-09-25');
+  assert.equal(today.cardsValuePkn, 1100);
+  assert.equal(today.currencyPkn, 15);
+  assert.equal(today.totalPkn, 1115);
 });
 
 test('the first series keeps the wallet day and prices cards only on today', () => {
@@ -54,7 +87,10 @@ test('a later day is appended and the earlier market value stays', () => {
   });
   assert.equal(next.find((row) => row.date === '2026-09-25').cardsValuePkn, 100);
   assert.equal(next.find((row) => row.date === '2026-09-26').cardsValuePkn, 80);
-  assert.equal(core.storedIsFresh(next, '2026-09-26'), true);
+  assert.equal(core.storedIsFresh({
+    priceBasis: core.PRICE_BASIS,
+    updatedAt: '2026-09-26T01:00:00.000Z',
+  }, '2026-09-26'), true);
 });
 
 test('firestore timestamps become a ledger day', () => {

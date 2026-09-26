@@ -2,7 +2,7 @@ const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
 const { marketplaceQuery } = require('../server/_marketplace_db');
 const { readIntegrationDoc } = require('./_cardtrader_integration');
 const { readOneDayReadyAssets, readSellerSync } = require('./_cardtrader_inventory_sync');
-const { applyHomepageMinimums, marketPricePkn, oneDayReadyTotals } = require('./_cardtrader_inventory_sync_core');
+const { applyDumpMinimums, marketPricePkn, oneDayReadyTotals } = require('./_cardtrader_inventory_sync_core');
 
 /**
  * GET /api/cardtrader-assets — the signed-in seller's CardTrader 1-Day Ready
@@ -10,21 +10,46 @@ const { applyHomepageMinimums, marketPricePkn, oneDayReadyTotals } = require('./
  * never a Pokoin listing; the dashboard shows it as "CardTrader 1-DR".
  */
 
-const HOMEPAGE_MINIMUM_SQL = `
-  select cache.pokoin_card_id as card_id,
-         min(cache.cheapest_price_pkn) as pkn
-  from public.cheapest_homepage_cache_blueprint cache
-  where cache.pokoin_card_id = any($1::text[])
-    and cache.cheapest_price_pkn > 0
-    and coalesce(cache.eligible_listing_count, 0) > 0
-  group by cache.pokoin_card_id
+const DUMP_LATEST_SQL = `
+  select distinct on (analytics.blueprint_id)
+         analytics.blueprint_id::text as blueprint_id,
+         analytics.min_price_pkn as pkn
+  from public.cardtrader_blueprint_daily_analytics analytics
+  where analytics.blueprint_id::text = any($1::text[])
+    and analytics.min_price_pkn > 0
+    and analytics.observed_day >= (timezone('utc', now()))::date - 21
+  order by analytics.blueprint_id, analytics.observed_day desc
 `;
 
-async function withHomepageMinimums(rows) {
-  const ids = [...new Set((rows || []).map((row) => String(row.card_id || '')).filter((id) => /^\d+$/.test(id)))];
-  if (!ids.length) return applyHomepageMinimums(rows, []);
-  const result = await marketplaceQuery(HOMEPAGE_MINIMUM_SQL, [ids]);
-  return applyHomepageMinimums(rows, result?.rows || []);
+const LISTING_CACHE_SQL = `
+  select cache.blueprint_id::text as blueprint_id,
+         cache.cheapest_price_pkn as pkn
+  from public.cardtrader_blueprint_listing_cache cache
+  where cache.blueprint_id::text = any($1::text[])
+    and cache.cheapest_price_pkn > 0
+`;
+
+async function withDumpMinimums(rows) {
+  const ids = [...new Set((rows || []).map((row) => String(row.blueprint_id || '')).filter((id) => /^\d+$/.test(id)))];
+  if (!ids.length) return applyDumpMinimums(rows, []);
+  let prices = [];
+  try {
+    const result = await marketplaceQuery(DUMP_LATEST_SQL, [ids]);
+    prices = result?.rows || [];
+  } catch (error) {
+    console.error('1dr dump minimum failed', { message: error.message });
+  }
+  const have = new Set(prices.map((row) => String(row.blueprint_id || '')));
+  const missing = ids.filter((id) => !have.has(id));
+  if (missing.length) {
+    try {
+      const result = await marketplaceQuery(LISTING_CACHE_SQL, [missing]);
+      prices = prices.concat(result?.rows || []);
+    } catch (error) {
+      console.error('1dr listing cache minimum failed', { message: error.message });
+    }
+  }
+  return applyDumpMinimums(rows, prices);
 }
 
 function assetItem(row = {}) {
@@ -67,10 +92,10 @@ async function readAssetsPayload(firestore, uid) {
   }
   let priced = rows;
   try {
-    priced = await withHomepageMinimums(rows);
+    priced = await withDumpMinimums(rows);
   } catch (error) {
-    console.error('1dr homepage minimum failed', { message: error.message });
-    priced = applyHomepageMinimums(rows, []);
+    console.error('1dr dump minimum failed', { message: error.message });
+    priced = applyDumpMinimums(rows, []);
   }
   const items = priced.map(assetItem).sort((a, b) => (
     ((b.pricePkn || 0) * b.quantity) - ((a.pricePkn || 0) * a.quantity)

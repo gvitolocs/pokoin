@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  applyHomepageMinimums,
+  applyDumpMinimums,
   marketPricePkn,
   claimSaleEventOnce,
   oneDayReadyAssetRow,
@@ -413,15 +413,15 @@ test('1-Day Ready totals weight value by quantity and skip empty stacks', () => 
   assert.deepEqual(oneDayReadyTotals([]), { products: 0, cards: 0, valuePkn: 0 });
 });
 
-test('dashboard 1-DR price is the homepage minimum, not the CardTrader conversion', () => {
+test('dashboard 1-DR price is the daily dump minimum, not the CardTrader conversion', () => {
   assert.equal(marketPricePkn({ price_pkn: 4043, market_pkn: null }), null);
   assert.equal(marketPricePkn({ price_pkn: 4043, market_pkn: '120.5' }), 120.5);
-  const priced = applyHomepageMinimums(
+  const priced = applyDumpMinimums(
     [
-      { card_id: '10', price_pkn: '999', quantity: 2 },
-      { card_id: '11', price_pkn: '50', quantity: 1 },
+      { blueprint_id: '10', price_pkn: '999', quantity: 2 },
+      { blueprint_id: '11', price_pkn: '50', quantity: 1 },
     ],
-    [{ card_id: '10', pkn: '40' }],
+    [{ blueprint_id: '10', pkn: '40' }],
   );
   assert.equal(priced[0].market_pkn, 40);
   assert.equal(priced[1].market_pkn, null);
@@ -430,7 +430,11 @@ test('dashboard 1-DR price is the homepage minimum, not the CardTrader conversio
     { quantity: 1, pricePkn: marketPricePkn(priced[1]) },
   ]).valuePkn, 80);
   const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'cardtrader-assets.js'), 'utf8');
-  assert.match(src, /cheapest_homepage_cache_blueprint/);
-  assert.match(src, /eligible_listing_count/);
+  const historySrc = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'marketplace-portfolio-history.js'), 'utf8');
+  assert.match(src, /cardtrader_blueprint_daily_analytics/);
+  assert.match(src, /min_price_pkn/);
   assert.match(src, /marketPricePkn/);
+  assert.doesNotMatch(src, /cheapest_homepage_cache_blueprint/);
+  assert.match(historySrc, /cardtrader_blueprint_daily_analytics/);
+  assert.doesNotMatch(historySrc, /cheapest_homepage_cache_blueprint/);
 });

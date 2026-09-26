@@ -9,7 +9,7 @@ import {
 } from '../api.js';
 import { fetchRail, RAIL } from '../lists.js';
 import { useAuth } from '../auth.jsx';
-import { SellerDashboardView } from '../components/SellerDashboardView.jsx';
+import { DashboardBoundary, SellerDashboardView } from '../components/SellerDashboardView.jsx';
 import { SessionWait } from '../components/Desk.jsx';
 import {
   inventoryListingHref,
@@ -360,6 +360,7 @@ export default function SellerHome() {
   const loading = ownedCards == null;
 
   return (
+    <DashboardBoundary>
     <SellerDashboardView
       ownedCards={ownedCards ?? 0}
       physicalOwned={physicalOwned}
@@ -383,5 +384,6 @@ export default function SellerHome() {
         return path.startsWith('/marketplace') ? marketUrl(path) : path;
       }}
     />
+    </DashboardBoundary>
   );
 }

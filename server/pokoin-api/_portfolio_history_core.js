@@ -38,6 +38,8 @@ function movementFromLedger(row = {}) {
   return { date, amountPkn: signed };
 }
 
+const PRICE_BASIS = 'ct-dump-min';
+
 function compactDay(row = {}) {
   const date = utcDayKey(row.date);
   if (!date) return null;
@@ -47,13 +49,15 @@ function compactDay(row = {}) {
   const cardsValuePkn = known && raw != null && raw !== ''
     ? Math.max(0, Number(raw) || 0)
     : null;
-  return {
+  const point = {
     date,
     currencyPkn,
     cardsValuePkn,
     cardsKnown: known,
     totalPkn: currencyPkn + (cardsValuePkn || 0),
   };
+  if (known && row.priceBasis === PRICE_BASIS) point.priceBasis = PRICE_BASIS;
+  return point;
 }
 
 function buildSeries({
@@ -99,9 +103,59 @@ function buildSeries({
   return points.map(compactDay).filter(Boolean);
 }
 
-function storedIsFresh(days, todayKey) {
-  const row = (days || []).find((day) => day?.date === todayKey);
-  return Boolean(row && row.cardsKnown === true);
+function storedIsFresh(doc, todayKey) {
+  if (!doc || doc.priceBasis !== PRICE_BASIS) return false;
+  return utcDayKey(doc.updatedAt) === todayKey;
+}
+
+/**
+ * Wallet days stay on the ledger. Card value is the daily CardTrader dump
+ * minimum from the day the seller connected, carried forward until the next
+ * dump. A later first dump is anchored on the sync day so the pile is not
+ * dated as if it arrived the day the chart was computed.
+ */
+function applyDumpValues(walletDays, dumps, { ownershipDate, today } = {}) {
+  const todayKey = utcDayKey(today);
+  if (!todayKey) return [];
+  const own = utcDayKey(ownershipDate) || '';
+  const priced = (dumps || [])
+    .map((row) => ({
+      date: utcDayKey(row.date || row.day),
+      cardsValuePkn: Math.round((Number(row.cardsValuePkn ?? row.market_pkn) || 0) * 100) / 100,
+    }))
+    .filter((row) => row.date && row.cardsValuePkn > 0 && row.date <= todayKey && (!own || row.date >= own))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const currencyAt = new Map();
+  for (const day of walletDays || []) {
+    const date = utcDayKey(day?.date);
+    if (date && date <= todayKey) currencyAt.set(date, Math.max(0, Number(day.currencyPkn) || 0));
+  }
+  const firstDump = priced[0] || null;
+  const marks = new Map(priced.map((row) => [row.date, row.cardsValuePkn]));
+  if (own && firstDump && own < firstDump.date) marks.set(own, firstDump.cardsValuePkn);
+  const dates = new Set([...currencyAt.keys(), ...marks.keys(), todayKey]);
+  if (own) dates.add(own);
+  let currency = 0;
+  let cards = null;
+  let cardsStarted = false;
+  const points = [];
+  for (const date of [...dates].filter(Boolean).sort()) {
+    if (currencyAt.has(date)) currency = currencyAt.get(date);
+    if (marks.has(date)) {
+      cards = marks.get(date);
+      cardsStarted = true;
+    }
+    const inCollection = own ? date >= own : cardsStarted;
+    const known = inCollection && cardsStarted && cards != null;
+    points.push(compactDay({
+      date,
+      currencyPkn: currency,
+      cardsValuePkn: known ? cards : null,
+      cardsKnown: known,
+      priceBasis: known ? PRICE_BASIS : '',
+    }));
+  }
+  return points.filter(Boolean);
 }
 
 function upsertDay(days, point) {
@@ -112,10 +166,12 @@ function upsertDay(days, point) {
 }
 
 module.exports = {
+  PRICE_BASIS,
   utcDayKey,
   movementFromLedger,
   buildSeries,
   storedIsFresh,
   upsertDay,
   compactDay,
+  applyDumpValues,
 };

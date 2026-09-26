@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { Component, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc } from '../api.js';
 import { cardReference, writeListingDrag } from '../chat-listing.js';
@@ -25,6 +25,54 @@ import { DASHBOARD_SCAN, marketUrl, goMarket } from '../punchouts.js';
 const CHART_W = 640;
 const CHART_H = 200;
 
+export class DashboardBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error) {
+    console.error('dashboard render failed', error);
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="page desk seller-home" data-testid="seller-home-error">
+          <p className="seller-panel-empty">The dashboard hit a drawing error. Reload the page.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+class HistoryBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error) {
+    console.error('collection history render failed', error);
+  }
+
+  render() {
+    if (this.state.failed) {
+      return <p className="seller-panel-empty">Collection history is unavailable.</p>;
+    }
+    return this.props.children;
+  }
+}
+
 /**
  * Collection value chart. Opens on the last month. Longer windows appear only
  * when stored history reaches them; a calendar picks any other period.
@@ -34,7 +82,6 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
   const [hover, setHover] = useState(null);
   const [preset, setPreset] = useState(DEFAULT_HISTORY_PRESET);
   const [custom, setCustom] = useState(null);
-  const [tipNudge, setTipNudge] = useState(0);
   const frameRef = useRef(null);
   const tipRef = useRef(null);
   const presets = availableHistoryPresets(series);
@@ -50,7 +97,8 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
   const hasData = points.length > 0;
   const axis = historyAxis(points);
   const change = historyWindowChange(points, custom ? 'custom' : presetId);
-  const withYear = points.length > 1 && points[0].date.slice(0, 4) !== points[points.length - 1].date.slice(0, 4);
+  const withYear = points.length > 1
+    && String(points[0]?.date || '').slice(0, 4) !== String(points[points.length - 1]?.date || '').slice(0, 4);
   const xLabels = points.length
     ? (points[0].date === points[points.length - 1].date ? [points[0]] : [points[0], points[points.length - 1]])
     : [];
@@ -102,18 +150,18 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
   useLayoutEffect(() => {
     const frame = frameRef.current;
     const node = tipRef.current;
-    if (!frame || !node) {
-      if (tipNudge) setTipNudge(0);
-      return;
-    }
+    if (!frame || !node) return;
+    node.style.transform = 'translateX(-50%)';
     const frameBox = frame.getBoundingClientRect();
     const tipBox = node.getBoundingClientRect();
     const pad = 8;
+    const room = frameBox.width - pad * 2;
     let nudge = 0;
-    if (tipBox.left < frameBox.left + pad) nudge = (frameBox.left + pad) - tipBox.left;
+    if (tipBox.width > room && room > 0) nudge = (frameBox.left + pad) - tipBox.left;
+    else if (tipBox.left < frameBox.left + pad) nudge = (frameBox.left + pad) - tipBox.left;
     else if (tipBox.right > frameBox.right - pad) nudge = (frameBox.right - pad) - tipBox.right;
-    if (Math.abs(nudge - tipNudge) > 0.5) setTipNudge(nudge);
-  }, [tip, tipLeftPct, tipNudge]);
+    if (nudge) node.style.transform = `translateX(calc(-50% + ${nudge}px))`;
+  });
 
   function pickDates(nextFrom, nextTo) {
     if (!nextFrom || !nextTo) {
@@ -253,7 +301,7 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
                 ref={tipRef}
                 className="seller-history-tip"
                 data-testid="collection-history-tip"
-                style={{ left: `${tipLeftPct}%`, transform: `translateX(calc(-50% + ${tipNudge}px))` }}
+                style={{ left: `${tipLeftPct}%`, transform: 'translateX(-50%)' }}
               >
                 <p className="seller-history-tip-day">{tip.dateLabel}</p>
                 <p className="seller-history-tip-total">{tip.totalLabel}</p>
@@ -585,11 +633,13 @@ export function SellerDashboardView({
               {oneDayReadyCards > 0 ? (
                 <p className="seller-asking" data-testid="cardtrader-1dr-value">
                   <span>CardTrader 1-DR assets · {oneDayReadyCards.toLocaleString('en-US')} cards</span>
-                  <strong title="Homepage minimum">{formatPkn(cardTraderAssets.totals?.valuePkn || 0)}</strong>
+                  <strong title="Dump minimum">{formatPkn(cardTraderAssets.totals?.valuePkn || 0)}</strong>
                 </p>
               ) : null}
 
-              <CollectionHistoryPanel series={historySeries} pending={historyPending} />
+              <HistoryBoundary>
+                <CollectionHistoryPanel series={historySeries} pending={historyPending} />
+              </HistoryBoundary>
 
               <div className="seller-tile-actions">
                 <DeskLink className="btn ghost" href={collectionHref} data-testid="portfolio-view-collection">

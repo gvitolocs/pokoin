@@ -41,9 +41,33 @@ async function readIntegrationDoc(firestore, uid) {
   return firestore.collection(COLLECTION).doc(integrationDocId(uid)).get();
 }
 
+function stampDay(value) {
+  if (!value) return '';
+  if (typeof value.toDate === 'function') {
+    const date = value.toDate();
+    return Number.isNaN(date?.getTime?.()) ? '' : date.toISOString().slice(0, 10);
+  }
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(String(value));
+  return match ? match[1] : '';
+}
+
 async function storeConnectedIntegration({ admin, firestore, uid, email, token, info }) {
   const now = admin.firestore.FieldValue.serverTimestamp();
-  const metadata = safeInfoMetadata(info);
+  const ref = firestore.collection(COLLECTION).doc(integrationDocId(uid));
+  let prior = {};
+  try {
+    const existing = await ref.get();
+    prior = existing?.exists ? existing.data() || {} : {};
+  } catch (_) {
+    prior = {};
+  }
+  const metadata = {
+    ...(prior.metadata || {}),
+    ...safeInfoMetadata(info),
+  };
+  if (!metadata.firstSyncAt) {
+    metadata.firstSyncAt = stampDay(prior.connectedAt) || new Date().toISOString().slice(0, 10);
+  }
   const payload = {
     uid,
     provider: PROVIDER,
@@ -52,22 +76,36 @@ async function storeConnectedIntegration({ admin, firestore, uid, email, token, 
     metadata,
     encryptedToken: encryptSecret(token),
     encryptedSharedSecret: encryptSecret(info.sharedSecret || ''),
-    connectedAt: now,
+    connectedAt: prior.connectedAt || now,
     updatedAt: now,
     lastValidatedAt: now,
     disconnectedAt: null,
   };
-  await firestore.collection(COLLECTION).doc(integrationDocId(uid)).set(payload, { merge: true });
+  await ref.set(payload, { merge: true });
   return payload;
 }
 
 /** Records the CardTrader account type a sync detected (1-Day Ready or not). */
 async function markOneDayReady(firestore, uid, oneDayReady) {
   if (!firestore || !uid) return;
-  await firestore.collection(COLLECTION).doc(integrationDocId(uid)).set(
-    { metadata: { oneDayReady: oneDayReady === true } },
-    { merge: true },
-  );
+  const ref = firestore.collection(COLLECTION).doc(integrationDocId(uid));
+  let metadata = { oneDayReady: oneDayReady === true };
+  try {
+    const doc = await ref.get();
+    const data = doc?.exists ? doc.data() || {} : {};
+    const prior = data.metadata || {};
+    metadata = {
+      ...prior,
+      oneDayReady: oneDayReady === true,
+    };
+    if (!metadata.firstSyncAt) {
+      const day = stampDay(data.connectedAt);
+      if (day) metadata.firstSyncAt = day;
+    }
+  } catch (_) {
+    /* a store without get still records the account type */
+  }
+  await ref.set({ metadata }, { merge: true });
 }
 
 /** A connected CardTrader 1-Day Ready account: its stock is CardTrader's, never pushed or listed. */
