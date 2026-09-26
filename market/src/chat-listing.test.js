@@ -212,12 +212,24 @@ function pileDragDocument() {
   const doc = {
     createElement: (tag) => {
       if (tag === 'canvas') {
-        const blank = { width: 1, height: 1, isConnected: false, style: {} };
+        const blank = {
+          tagName: 'CANVAS',
+          width: 1,
+          height: 1,
+          isConnected: false,
+          style: {},
+          setAttribute() {},
+          getContext: () => ({
+            fillStyle: '',
+            fillRect() {},
+            drawImage() {},
+          }),
+        };
         blank.ownerDocument = doc;
         return blank;
       }
       if (tag === 'div') return root;
-      if (tag === 'img') return { style: {}, alt: '', draggable: false, src: '' };
+      if (tag === 'img') return { tagName: 'IMG', style: {}, alt: '', draggable: false, src: '' };
       return { style: {} };
     },
     body: {
@@ -225,6 +237,7 @@ function pileDragDocument() {
         if (node) node.isConnected = true;
       },
     },
+    images: [],
     addEventListener() {},
     removeEventListener() {},
   };
@@ -256,7 +269,8 @@ test('dragging a shop row uses a pile ghost, including a single card', () => {
   assert.equal(dragged.y, 0);
   assert.equal(root.className, 'drag-stack');
   assert.equal(kids.length, 1);
-  assert.equal(kids[0].src, '/card.jpg');
+  assert.equal(kids[0].tagName, 'CANVAS');
+  assert.equal(kids[0].width, 216);
 });
 
 test('dragging the desk frame uses a pile of the held card', () => {
@@ -283,7 +297,7 @@ test('dragging the desk frame uses a pile of the held card', () => {
   assert.equal(dragged.el.width, 1);
   assert.equal(root.className, 'drag-stack');
   assert.equal(kids.length, 1);
-  assert.equal(kids[0].src, '/desk.jpg');
+  assert.equal(kids[0].tagName, 'CANVAS');
 });
 
 test('a homepage card is not a seller card', () => {

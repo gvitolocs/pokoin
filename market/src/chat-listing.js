@@ -334,7 +334,7 @@ function dragSourceImage(event) {
   if (!node || node.nodeType !== 1) return null;
   if (node.tagName === 'IMG') return node;
   const nested = node.querySelector?.(
-    '.shop-card img, .tile-art img, .seller-listing-art img, .c-art img, .bag-art img, .seller-mover img',
+    '.shop-card img, .tile-art img, .seller-listing-art img, .c-art img, .bag-art img, .seller-mover img, .art-frame img, .cart-drop-card img, .desktop-drop-card img',
   );
   if (nested) return nested;
   // The desk hero is the frame itself, so `.art-frame img` does not match a descendant.
@@ -353,6 +353,15 @@ function markCardDragging() {
 
 const readyImages = new Map();
 
+function rememberWarmImage(img) {
+  if (!img || !img.complete || !(img.naturalWidth > 0)) return null;
+  for (const key of [img.currentSrc, img.src, img.getAttribute?.('src')]) {
+    const src = String(key || '').trim();
+    if (src && !src.startsWith('data:')) readyImages.set(src, img);
+  }
+  return img;
+}
+
 /** Decode a wordmark or artist cover before the drag, so a text link can still show it. */
 export function preloadDragImage(url) {
   const src = String(url || '').trim();
@@ -364,8 +373,51 @@ export function preloadDragImage(url) {
 }
 
 function readyDragImage(url) {
-  const img = readyImages.get(String(url || '').trim());
-  return img?.complete && img.naturalWidth ? img : null;
+  const src = String(url || '').trim();
+  if (!src) return null;
+  const img = readyImages.get(src);
+  if (img?.complete && img.naturalWidth) return img;
+  return null;
+}
+
+function findWarmDocumentImage(url) {
+  const src = String(url || '').trim();
+  if (!src || typeof document === 'undefined') return null;
+  const ready = readyDragImage(src);
+  if (ready) return ready;
+  for (const img of document.images || []) {
+    if (!img?.complete || !(img.naturalWidth > 0)) continue;
+    const cur = String(img.currentSrc || img.src || '');
+    if (!cur) continue;
+    if (cur === src || cur.endsWith(src) || src.endsWith(cur.replace(/^https?:\/\/[^/]+/, ''))) {
+      return rememberWarmImage(img);
+    }
+  }
+  return null;
+}
+
+/** Paint a pile layer from an already-decoded bitmap — never assign a network src. */
+function stackLayerFromWarm(warm, zIndex) {
+  const canvas = document.createElement('canvas');
+  canvas.width = CARD_DRAG_WIDTH;
+  canvas.height = CARD_DRAG_HEIGHT;
+  canvas.setAttribute('aria-hidden', 'true');
+  canvas.style.zIndex = String(zIndex);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+  ctx.fillStyle = '#07060b';
+  ctx.fillRect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
+  if (warm?.naturalWidth) {
+    try {
+      const scale = Math.max(CARD_DRAG_WIDTH / warm.naturalWidth, CARD_DRAG_HEIGHT / warm.naturalHeight);
+      const dw = warm.naturalWidth * scale;
+      const dh = warm.naturalHeight * scale;
+      ctx.drawImage(warm, (CARD_DRAG_WIDTH - dw) / 2, (CARD_DRAG_HEIGHT - dh) / 2, dw, dh);
+    } catch (_) {
+      /* tainted canvas — leave the dark plate */
+    }
+  }
+  return canvas;
 }
 
 export function bundleReference({ kind, slug, name, imageUrl, path }) {
@@ -455,16 +507,17 @@ function mountDragStack(cards, event) {
   if (typeof document === 'undefined') return;
   const rows = (cards || []).slice(0, 3).filter((row) => row?.imageUrl || row?.cardName);
   if (!rows.length) return;
+  const source = rememberWarmImage(dragSourceImage(event));
   const root = document.createElement('div');
   root.className = 'drag-stack';
   root.setAttribute('aria-hidden', 'true');
   rows.forEach((row, index) => {
-    const img = document.createElement('img');
-    img.alt = '';
-    img.draggable = false;
-    img.src = String(row.imageUrl || '');
-    img.style.zIndex = String(30 - index);
-    root.appendChild(img);
+    const warm = (index === 0 ? source : null)
+      || findWarmDocumentImage(row.imageUrl)
+      || readyDragImage(row.imageUrl);
+    // Always paint from a warm bitmap (or a dark plate). Never assign a network
+    // src here — that reloads the scan the tile already has in memory.
+    root.appendChild(stackLayerFromWarm(warm, 30 - index));
   });
   document.body.appendChild(root);
   dragStack = root;
@@ -546,6 +599,8 @@ export function writeListingDrag(event, reference) {
   if (!event?.dataTransfer || !reference?.cardName) return;
   event.dataTransfer.setData(LISTING_DRAG_TYPE, JSON.stringify(reference));
   event.dataTransfer.effectAllowed = 'copy';
+  rememberWarmImage(dragSourceImage(event));
+  if (reference.imageUrl) preloadDragImage(reference.imageUrl);
   const stack = dragCardsOf(reference);
   const usePile = stack.length >= 1 && (reference.kind === 'cards' || reference.kind === 'card' || reference.kind === 'listing' || !reference.kind);
   if (usePile) {
@@ -562,6 +617,7 @@ export function writeListingDrag(event, reference) {
     return;
   }
   const image = dragSourceImage(event) || readyDragImage(reference.imageUrl);
+  rememberWarmImage(image);
   const fit = reference.kind === 'card' || !reference.kind ? 'cover' : 'contain';
   const painted = paintDragGhost(image, fit);
   const ghost = painted || fixedDragSlot(image?.currentSrc || image?.src || reference.imageUrl, fit);

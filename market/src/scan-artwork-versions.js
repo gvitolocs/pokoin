@@ -3,10 +3,10 @@
  * Source: GET /api/marketplace-version-set (pokoin_version_sets).
  *
  * Batch Defaults / row language drives the default printing:
- * western langs → western, JP/KO → japanese|korean, ZH/ZHT → chinese.
+ * western langs → western, JP/KO/ID/TH/VI → japanese|korean, ZH/ZHT → leave print.
  *
- * Listing language must match the printing region:
- * western print → western langs only; JP/KO/CN print → no EN/IT/….
+ * Scan Desk LANG select lists every language; picking an Asian code remaps the
+ * expansion when a sibling exists. Card desk still restricts langs by nationality.
  */
 
 import { ASIAN_CARD_LANGS } from './locale.js';
@@ -72,7 +72,10 @@ export function listingLanguageForPrint(nationality = '', preferred = 'EN') {
   return want;
 }
 
-/** LANG select options for this printing. */
+/**
+ * Langs valid for a printing nationality (card desk / sell form).
+ * Scan Desk does not use this — it shows the full LANGUAGES list.
+ */
 export function languagesForPrint(nationality = '', languages = []) {
   const list = [...new Set(
     (languages || []).map((code) => String(code || '').trim().toUpperCase()).filter(Boolean),

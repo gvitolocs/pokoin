@@ -1419,11 +1419,23 @@ export function imageSrc(card, kind = 'grid') {
 export function cardFromAutocomplete(row = {}) {
   const id = String(row.card_id || row.id || '');
   const live = row.live === true || id.startsWith('live:');
+  // Multigame API emits camelCase imageUrl / gridImageUrl (prefixed CDN paths).
+  // Ignoring those rebuilds unprefixed Pokémon leftovers and paints missing-card
+  // or the wrong TCG's scan in the search bar.
   const image = ownCatalogImage({
     id,
     name: row.name,
     canonicalPath: row.canonicalPath || row.canonical_path || row.href,
-  }, preferFullImage(row.image || row.cdn_image_url || row.image_url));
+  }, preferFullImage(
+    row.gridImageUrl
+    || row.heroImageUrl
+    || row.imageUrl
+    || row.cdn_image_url
+    || row.cdnImageUrl
+    || row.image_url
+    || row.image
+    || '',
+  ));
   return {
     id,
     card_id: id,
@@ -1440,6 +1452,7 @@ export function cardFromAutocomplete(row = {}) {
     canonicalPath: row.canonicalPath || row.canonical_path || row.href,
     image,
     image_url: image,
+    imageUrl: image,
     gridImageUrl: image,
     heroImageUrl: image,
     isMarketAvailable: row.isMarketAvailable === true,

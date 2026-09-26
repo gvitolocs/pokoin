@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigationType, useParams } from 'react-router-dom';
 import { albumShadeStyle } from '../art-shade.js';
 import { fetchArtist, fetchArtistSummaries, imageSrc, peekArtist } from '../api.js';
+import { addCatalogCards } from '../cart-add.js';
+import { useCart } from '../cart.jsx';
 import { bundleReference, preloadDragImage, writeListingDrag } from '../chat-listing.js';
 import { artistDeskIsUnknown, artistNameFromSlug } from '../artist-name.js';
 import { isEnglishFlavorName } from '../ocr-artists.js';
@@ -158,6 +160,7 @@ function ArtistDesk() {
   const { lang = 'en', artistSlug } = useParams();
   const location = useLocation();
   const navType = useNavigationType();
+  const { addItem } = useCart();
   const restored = restoredPageView(navType, location.key, `${location.pathname}${location.search}`);
   const restoredHere = restored?.slug === artistSlug ? restored : null;
   const [payload, setPayload] = useState(() => peekArtist(artistSlug, 5000));
@@ -168,6 +171,8 @@ function ArtistDesk() {
   const [setName, setSetName] = useState(() => String(restoredHere?.setName || ''));
   const [sort, setSort] = useState(() => restoredHere?.sort || 'pokedex');
   const [print, setPrint] = useState(() => restoredHere?.print || 'western');
+  const [cartBusy, setCartBusy] = useState(false);
+  const [cartNote, setCartNote] = useState('');
   const [shown, setShown] = useState(() => {
     const count = Number(restoredHere?.shown);
     return count > ALBUM_PAGE ? count : ALBUM_PAGE;
@@ -328,6 +333,24 @@ function ArtistDesk() {
     setSetName('');
   }
 
+  async function addArtistToCart() {
+    if (cartBusy || !cards.length) return;
+    setCartBusy(true);
+    setCartNote('');
+    try {
+      const added = await addCatalogCards(cards, addItem);
+      setCartNote(
+        added
+          ? `Added ${added} listed card${added === 1 ? '' : 's'} to cart`
+          : 'No listed copies for these printings',
+      );
+    } catch (_) {
+      setCartNote('Could not add cards to cart');
+    } finally {
+      setCartBusy(false);
+    }
+  }
+
   if (unknown) {
     return (
       <div className="page desk">
@@ -395,6 +418,16 @@ function ArtistDesk() {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            className="btn ghost artist-add-cart"
+            disabled={cartBusy || !cards.length}
+            onClick={() => void addArtistToCart()}
+            title="Add listed copies of these printings to the cart"
+          >
+            {cartBusy ? 'Adding…' : 'Add all to cart'}
+          </button>
+          {cartNote ? <span className="artist-cart-note" role="status">{cartNote}</span> : null}
           <label className="set-search">
             <span className="sr-only">Search this artist</span>
             <input

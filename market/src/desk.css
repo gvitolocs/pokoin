@@ -1110,11 +1110,22 @@
 .artist-desk .set-browse-bar {
   flex: 1 1 auto;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   min-width: 0;
   max-width: 100%;
+}
+
+.artist-add-cart {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.artist-cart-note {
+  flex: 1 1 8rem;
+  font-size: 0.85rem;
+  color: var(--muted, #9aa3b5);
 }
 
 .artist-desk .set-search {

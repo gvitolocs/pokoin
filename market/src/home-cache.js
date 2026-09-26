@@ -3,7 +3,8 @@
 const MAX_AGE_MS = 10 * 60 * 1000;
 
 export function homeVectorCacheKey(gameId = 'pokemon') {
-  return `pokoin.homeVector.${String(gameId || 'pokemon')}.rising`;
+  // v2: drop cached Pokémon rails wrongly stored under satellite game ids.
+  return `pokoin.homeVector.${String(gameId || 'pokemon')}.v2`;
 }
 
 function store(override) {

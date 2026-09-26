@@ -64,7 +64,7 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
   useEffect(() => {
     function ignored(target) {
       return target instanceof Element && target.closest(
-        'a, button, input, select, textarea, label, header, footer, nav, .topbar, .seller-history, .suggest, .cart-drop',
+        'a, button, input, select, textarea, label, header, footer, nav, .topbar, .seller-history, .suggest, .cart-drop, .desktop-drop',
       );
     }
     function onDown(event) {
