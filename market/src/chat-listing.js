@@ -33,7 +33,14 @@ function cardImage(card, offer) {
   ).trim();
 }
 
+function offerCopies(offer) {
+  const n = Math.trunc(Number(offer?.quantityAvailable ?? offer?.quantity_available));
+  if (!Number.isFinite(n) || n < 1) return null;
+  return Math.min(99, n);
+}
+
 export function listingReference({ offer, card }) {
+  const stock = offerCopies(offer);
   return {
     kind: 'listing',
     listingId: String(offer?.id || ''),
@@ -45,6 +52,7 @@ export function listingReference({ offer, card }) {
     imageUrl: cardImage(card, offer),
     path: card?.canonicalPath || offer?.canonicalPath || offer?.canonical_path || '',
     pricePkn: Number(offer?.pricePkn) || 0,
+    ...(stock != null ? { stock } : {}),
   };
 }
 
@@ -74,6 +82,41 @@ export function listingQty(value, stock = 99) {
   const n = Math.trunc(Number(value));
   const qty = Number.isFinite(n) && n >= 1 ? n : 1;
   return Math.min(cap, qty);
+}
+
+/** Quantity the stepper can show, including a count past the seller's copies. */
+export function chatQty(value) {
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(99, n);
+}
+
+/** Copies this listing actually has. Missing stock stays unknown. */
+export function explicitStock(value) {
+  if (value == null || value === '') return null;
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n) || n < 1) return null;
+  return Math.min(99, n);
+}
+
+export function overListingStock(qty, stock) {
+  const cap = explicitStock(stock);
+  return cap != null && chatQty(qty) > cap;
+}
+
+/** Copies the people actually list, preferring one listing id. */
+export function listedCopies(listings, people = [], listingId = '') {
+  const id = String(listingId || '');
+  let best = null;
+  for (const offer of listings || []) {
+    const copies = offerCopies(offer);
+    if (copies == null) continue;
+    if (id && String(offer?.id || offer?.listingId || '') === id) return copies;
+    if ((people || []).some((person) => samePerson(offer, person))) {
+      best = best == null ? copies : Math.max(best, copies);
+    }
+  }
+  return best;
 }
 
 export function listingStock(value) {
@@ -187,14 +230,19 @@ export function referenceForPeer(card, offers, peer = {}) {
 export function appendChatTag(tags, reference) {
   if (!reference?.cardName) return tags;
   const key = tagKey(reference);
-  const stock = listingStock(reference.stock);
-  const qty = listingQty(reference.qty, stock);
-  const next = { ...reference, qty, stock };
+  const stock = explicitStock(reference.stock);
+  const qty = stock != null ? Math.min(stock, chatQty(reference.qty)) : chatQty(reference.qty);
+  const next = { ...reference, qty };
+  if (stock != null) next.stock = stock;
+  else delete next.stock;
   const at = (tags || []).findIndex((row) => tagKey(row) === key);
   if (at >= 0) {
     const copy = tags.slice();
-    const priorStock = listingStock(copy[at].stock);
-    copy[at] = { ...copy[at], qty, stock: Math.max(priorStock, stock) };
+    const prior = explicitStock(copy[at].stock);
+    const merged = stock != null && prior != null ? Math.max(prior, stock) : (stock ?? prior);
+    copy[at] = { ...copy[at], ...next, qty };
+    if (merged != null) copy[at].stock = merged;
+    else delete copy[at].stock;
     return copy;
   }
   return [...(tags || []), next].slice(-4);
@@ -231,7 +279,7 @@ export function looseCardReference({
   };
 }
 
-/** Homepage thumb, then the full scan, then the stored URL. */
+/** Full scan first, so the chat card shows the whole printing. */
 export function chatImageSources(row) {
   const stored = String(row?.imageUrl || '').trim();
   const out = [];
@@ -240,9 +288,9 @@ export function chatImageSources(row) {
     if (value && !out.includes(value)) out.push(value);
   };
   if (!stored) return out;
-  push(homepageDerivativeUrl(stored));
   push(preferFullImage(stored));
   push(stored);
+  push(homepageDerivativeUrl(stored));
   return out;
 }
 
@@ -292,15 +340,16 @@ function readyDragImage(url) {
 }
 
 export function bundleReference({ kind, slug, name, imageUrl, path }) {
-  const cleanKind = kind === 'artist' ? 'artist' : 'expansion';
+  const cleanKind = kind === 'artist' || kind === 'species' ? kind : 'expansion';
   const id = String(slug || '').trim();
+  const fallback = cleanKind === 'artist' ? 'Artist' : cleanKind === 'species' ? 'Pokémon' : 'Set';
   return {
     kind: cleanKind,
-    listingId: `bundle:${cleanKind}:${id}`.slice(0, 80),
+    listingId: `bundle:${cleanKind}:${id}`.slice(0, 120),
     cardId: '',
     sellerUid: '',
     seller: '',
-    cardName: String(name || id || (cleanKind === 'artist' ? 'Artist' : 'Set')),
+    cardName: String(name || id || fallback),
     setName: cleanKind === 'expansion' ? String(name || '') : '',
     imageUrl: String(imageUrl || ''),
     path: String(path || ''),
@@ -309,20 +358,22 @@ export function bundleReference({ kind, slug, name, imageUrl, path }) {
 }
 
 export function bundleOf(row) {
-  const match = String(row?.listingId || '').match(/^bundle:(artist|expansion):(.+)$/);
+  const match = String(row?.listingId || '').match(/^bundle:(artist|expansion|species):(.+)$/);
   if (!match) return null;
   return { kind: match[1], slug: match[2] };
 }
 
+let dragSlot;
+
 function paintDragGhost(image, fit = 'cover') {
   if (typeof document === 'undefined') return null;
-  if (!dragGhost) {
-    dragGhost = document.createElement('canvas');
-    dragGhost.style.position = 'fixed';
-    dragGhost.style.top = '0';
-    dragGhost.style.pointerEvents = 'none';
-    document.body?.appendChild(dragGhost);
-  }
+  const canvas = document.createElement('canvas');
+  canvas.style.position = 'fixed';
+  canvas.style.top = '0';
+  canvas.style.pointerEvents = 'none';
+  document.body?.appendChild(canvas);
+  if (dragGhost && dragGhost !== canvas) dragGhost.remove?.();
+  dragGhost = canvas;
   const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
   dragGhost.width = Math.round(CARD_DRAG_WIDTH * dpr);
   dragGhost.height = Math.round(CARD_DRAG_HEIGHT * dpr);
@@ -357,19 +408,41 @@ function paintDragGhost(image, fit = 'cover') {
   return dragGhost;
 }
 
+/** A cover that cannot be painted still drags inside this box, never at natural size. */
+function fixedDragSlot(src, fit) {
+  if (typeof document === 'undefined') return null;
+  if (!dragSlot || dragSlot.ownerDocument !== document) {
+    dragSlot = document.createElement('img');
+    dragSlot.alt = '';
+    dragSlot.draggable = false;
+    document.body?.appendChild(dragSlot);
+  }
+  dragSlot.width = CARD_DRAG_WIDTH;
+  dragSlot.height = CARD_DRAG_HEIGHT;
+  dragSlot.style.position = 'fixed';
+  dragSlot.style.top = '0';
+  dragSlot.style.left = `-${CARD_DRAG_WIDTH + 48}px`;
+  dragSlot.style.width = `${CARD_DRAG_WIDTH}px`;
+  dragSlot.style.height = `${CARD_DRAG_HEIGHT}px`;
+  dragSlot.style.objectFit = fit === 'cover' ? 'cover' : 'contain';
+  dragSlot.style.pointerEvents = 'none';
+  dragSlot.style.background = '#07060b';
+  const next = String(src || '');
+  if (next && dragSlot.getAttribute('src') !== next) dragSlot.src = next;
+  return dragSlot;
+}
+
 export function writeListingDrag(event, reference) {
   if (!event?.dataTransfer || !reference?.cardName) return;
   event.dataTransfer.setData(LISTING_DRAG_TYPE, JSON.stringify(reference));
   event.dataTransfer.effectAllowed = 'copy';
   const image = dragSourceImage(event) || readyDragImage(reference.imageUrl);
-  const ghost = paintDragGhost(image, reference.kind === 'expansion' ? 'contain' : 'cover');
+  const fit = reference.kind === 'card' || !reference.kind ? 'cover' : 'contain';
+  const painted = paintDragGhost(image, fit);
+  const ghost = painted || fixedDragSlot(image?.currentSrc || image?.src || reference.imageUrl, fit);
   try {
     if (ghost) {
       event.dataTransfer.setDragImage(ghost, CARD_DRAG_WIDTH / 2, CARD_DRAG_HEIGHT / 2);
-    } else if (image) {
-      const w = image.clientWidth || image.width || CARD_DRAG_WIDTH;
-      const h = image.clientHeight || image.height || CARD_DRAG_HEIGHT;
-      event.dataTransfer.setDragImage(image, w / 2, h / 2);
     }
   } catch (_) {
     /* the browser keeps its default ghost */

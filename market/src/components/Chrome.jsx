@@ -36,7 +36,7 @@ import {
   preloadSuggestThumbs,
 } from '../suggest-images.js';
 import { prefetchSearchPage } from '../search-hot.js';
-import { game, isPokemonGame } from '../game.js';
+import { GAMES, game, gameSiteHref, isPokemonGame, sellerDeskUsesGameOverride, setScanGameOverride } from '../game.js';
 import { printingIdentity, clipSuggestCollector, suggestCardName, suggestTranslatedLine } from '../identity.js';
 import { normalizeSearchTab, searchHref, uniqueSellers } from '../search-kind.js';
 import { sellerHref } from '../listing-meta.js';
@@ -49,22 +49,20 @@ import { framedByChromeExtension } from '../extension-auth-bridge.js';
 import { APP, DASHBOARD_HOME, authFrom, goMarket, marketUrl } from '../punchouts.js';
 import { useCart } from '../cart.jsx';
 import CartDrop from './CartDrop.jsx';
+import { DashboardPreview, MarketPreview, MessagesPreview, NavHover } from './NavPreviews.jsx';
 import { useWallet } from '../wallet.jsx';
 import { listConversations } from '../chat-client.js';
 import { MESSAGES_UNREAD_EVENT, MESSAGES_UNREAD_REFRESH_MS, unreadMessagesCount } from '../messages-unread.js';
 import CardArt from './CardArt.jsx';
 import Avatar from './Avatar.jsx';
 import {
-  PRINT_LANGS,
   SEARCH_LANGS,
   flagSrc,
   langMeta,
   printFlagFromNationality,
-  printLangMeta,
   rewriteCatalogLang,
   rowPrintBucket,
   searchLangFromPath,
-  setPrintLang,
   setSearchLang,
   usePrintLang,
   useSearchLang,
@@ -227,22 +225,17 @@ function LangToggle() {
   );
 }
 
-function PrintLangToggle() {
-  const lang = usePrintLang();
-  const current = printLangMeta(lang);
+function GameSelect() {
+  const current = game();
   const [open, setOpen] = useState(false);
   const box = useRef(null);
 
   useEffect(() => {
     function onDoc(event) {
-      if (box.current && !box.current.contains(event.target)) {
-        setOpen(false);
-      }
+      if (box.current && !box.current.contains(event.target)) setOpen(false);
     }
     function onKey(event) {
-      if (event.key === 'Escape') {
-        setOpen(false);
-      }
+      if (event.key === 'Escape') setOpen(false);
     }
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
@@ -252,37 +245,39 @@ function PrintLangToggle() {
     };
   }, []);
 
+  function pick(id) {
+    setOpen(false);
+    if (id === current.id) return;
+    const host = window.location.hostname;
+    if (sellerDeskUsesGameOverride(host, window.location.pathname)) {
+      setScanGameOverride(id);
+      window.location.reload();
+      return;
+    }
+    window.location.assign(gameSiteHref(id));
+  }
+
   return (
-    <div className="print-lang-toggle" ref={box}>
+    <div className="game-select" ref={box}>
       <button
         type="button"
-        aria-label={`Card print language, ${current.label}`}
+        aria-label={`Game, ${current.name}`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={current.label}
+        title={current.name}
         onClick={() => setOpen((value) => !value)}
       >
-        <svg className="search-go-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-          <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-        </svg>
+        <span>{current.name}</span>
         <svg className="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true">
           <path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" />
         </svg>
       </button>
       {open ? (
-        <ul className="lang-menu" role="listbox" aria-label="Card print language">
-          {PRINT_LANGS.map((item) => (
-            <li key={item.code} role="option" aria-selected={item.code === lang}>
-              <button type="button" className={item.code === lang ? 'is-active' : ''} onClick={() => { setPrintLang(item.code); setOpen(false); }}>
-                {item.flag ? (
-                  <img src={flagSrc(item.flag)} alt="" width="22" height="22" />
-                ) : (
-                  <svg className="print-lang-all" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-                    <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
-                  </svg>
-                )}
-                <span>{item.label}</span>
-                <em>{item.tag || (item.flag ? item.flag.toUpperCase() : 'ALL')}</em>
+        <ul className="lang-menu game-menu" role="listbox" aria-label="Game">
+          {Object.values(GAMES).map((item) => (
+            <li key={item.id} role="option" aria-selected={item.id === current.id}>
+              <button type="button" className={item.id === current.id ? 'is-active' : ''} onClick={() => pick(item.id)}>
+                <span>{item.name}</span>
               </button>
             </li>
           ))}
@@ -323,6 +318,7 @@ export default function Chrome({ children }) {
   const showAvatar = Boolean(signedIn && (profile?.uid || user?.uid));
   const { count, addItem } = useCart();
   const [cardDrag, setCardDrag] = useState(false);
+  const [navPop, setNavPop] = useState('');
   const { balance } = useWallet();
   const extensionDesk = framedByChromeExtension();
   const lang = useSearchLang();
@@ -350,6 +346,7 @@ export default function Chrome({ children }) {
   const messagesAriaLabel = messagesUnread > 0 ? 'Messages, unread messages' : 'Messages';
   useEffect(() => {
     function onDragStart() {
+      setNavPop('');
       setCardDrag(document.documentElement.classList.contains('is-card-dragging'));
     }
     function onDragEnd() {
@@ -951,6 +948,10 @@ export default function Chrome({ children }) {
           <form className="search" onSubmit={goSearch} role="search" ref={box}>
             <label className="sr-only" htmlFor="market-search">Search cards</label>
             <div className="search-pill">
+              <div className="search-lead">
+                <GameSelect />
+                <LangToggle />
+              </div>
               <input
                 ref={inputRef}
                 id="market-search"
@@ -971,8 +972,11 @@ export default function Chrome({ children }) {
                 aria-autocomplete="list"
                 aria-busy={suggestVisible && pending}
               />
-              {isPokemonGame() ? <PrintLangToggle /> : null}
-              <button className="sr-only" type="submit">Search</button>
+              <button className="search-submit" type="submit" aria-label="Search">
+                <svg className="search-go-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                  <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                </svg>
+              </button>
             </div>
             {suggestVisible ? (
               <div
@@ -1163,18 +1167,23 @@ export default function Chrome({ children }) {
               </div>
             ) : null}
           </form>
-          <LangToggle />
           <nav className="nav icon-nav" aria-label="Marketplace">
-            <AppLink to="/marketplace" title="Marketplace" aria-label="Marketplace">
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={ICO.storefront} /></svg>
-            </AppLink>
-            <AppLink className="messages-link" to={APP.messages} title="Messages" aria-label={messagesAriaLabel}>
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-5 4V6a2 2 0 0 1 2-2Zm2 5v2h12V9H6Zm0 4v2h8v-2H6Z" /></svg>
-              {messagesUnread > 0 ? <span className="messages-unread-dot" aria-hidden="true" /> : null}
-            </AppLink>
-            <AppLink to={DASHBOARD_HOME} title="Dashboard" aria-label="Dashboard">
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={ICO.dashboard} /></svg>
-            </AppLink>
+            <NavHover id="market" pop={navPop} setPop={setNavPop} preview={<MarketPreview />}>
+              <AppLink to="/marketplace" title="Marketplace" aria-label="Marketplace">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={ICO.storefront} /></svg>
+              </AppLink>
+            </NavHover>
+            <NavHover id="messages" pop={navPop} setPop={setNavPop} preview={<MessagesPreview />}>
+              <AppLink className="messages-link" to={APP.messages} title="Messages" aria-label={messagesAriaLabel}>
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-5 4V6a2 2 0 0 1 2-2Zm2 5v2h12V9H6Zm0 4v2h8v-2H6Z" /></svg>
+                {messagesUnread > 0 ? <span className="messages-unread-dot" aria-hidden="true" /> : null}
+              </AppLink>
+            </NavHover>
+            <NavHover id="dashboard" pop={navPop} setPop={setNavPop} preview={<DashboardPreview />}>
+              <AppLink to={DASHBOARD_HOME} title="Dashboard" aria-label="Dashboard">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={ICO.dashboard} /></svg>
+              </AppLink>
+            </NavHover>
             {site.features.competitive ? (
               <AppLink className="trophy" to="/marketplace/competitive" title="Competitive" aria-label="Competitive">
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94A5.01 5.01 0 0 0 11 17.9V19H7v2h10v-2h-4v-1.1a5.01 5.01 0 0 0 3.61-4.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z" /></svg>
@@ -1193,12 +1202,16 @@ export default function Chrome({ children }) {
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" /></svg>
               )}
             </AppLink>
-            <span className="cart-anchor">
+            <span
+              className="cart-anchor"
+              onMouseEnter={() => setNavPop('cart')}
+              onMouseLeave={() => setNavPop((cur) => (cur === 'cart' ? '' : cur))}
+            >
               <AppLink className="cart-chip" to="/cart" title="Cart" aria-label={`Cart, ${count} items`}>
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0 0 20 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z" /></svg>
                 <em>{count}</em>
               </AppLink>
-              {cardDrag ? <CartDrop onAdd={addItem} /> : null}
+              {cardDrag || navPop === 'cart' ? <CartDrop onAdd={addItem} /> : null}
             </span>
           </nav>
         </div>

@@ -3,7 +3,8 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { createMarketplaceOrder, formatPkn, formatPknNumber } from '../api.js';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { useAuth } from '../auth.jsx';
-import { CHECKOUT_SHIPPING_PKN, CHECKOUT_TAX_RATE, useCart } from '../cart.jsx';
+import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
+import { checkoutFees } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
 import CardArt from '../components/CardArt.jsx';
@@ -35,6 +36,7 @@ export default function Checkout() {
   const { ready, signedIn, user, getBearer, availablePkn } = useAuth();
   const { items, count, subtotalPkn, canNftOnly, clear } = useCart();
   const [nftOnly, setNftOnly] = useState(false);
+  const [insurance, setInsurance] = useState(false);
   const [notes, setNotes] = useState('');
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -42,21 +44,24 @@ export default function Checkout() {
   const [orderId, setOrderId] = useState('');
 
   const nft = nftOnly && canNftOnly;
-  const taxPkn = subtotalPkn * CHECKOUT_TAX_RATE;
   const shippingPkn = nft ? 0 : (items.length ? CHECKOUT_SHIPPING_PKN : 0);
-  const totalPkn = subtotalPkn + taxPkn + shippingPkn;
+  const fees = checkoutFees(subtotalPkn, { insurance: insurance && !nft, shippingPkn });
+  const { commissionPkn, insurancePkn, taxPkn, totalPkn, coveragePkn } = fees;
   const missingListing = items.some((row) => !row.listingId);
 
   useEffect(() => {
     document.title = 'Checkout · Pokoin';
   }, []);
 
-  const totals = useMemo(() => ([
-    ['Subtotal', subtotalPkn],
-    ['Tax 8%', taxPkn],
-    ['Shipping', shippingPkn],
-    ['Total', totalPkn],
-  ]), [subtotalPkn, taxPkn, shippingPkn, totalPkn]);
+  const totals = useMemo(() => {
+    const lines = [
+      ['Subtotal', subtotalPkn],
+      ['Platform commission 3%', commissionPkn],
+    ];
+    if (insurancePkn > 0) lines.push(['Insurance 5%', insurancePkn]);
+    lines.push(['Shipping', shippingPkn], ['Total', totalPkn]);
+    return lines;
+  }, [subtotalPkn, commissionPkn, insurancePkn, shippingPkn, totalPkn]);
 
   if (!ready) {
     return <SessionWait />;
@@ -99,7 +104,9 @@ export default function Checkout() {
       <PageHead
         kicker="Shop"
         title="Checkout"
-        lede={nft ? 'NFT-only pays site PKN now and writes holdings. No physical ship.' : `${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}
+        lede={nft
+          ? 'You pay with your site balance and the cards go into your collection. Nothing is mailed.'
+          : `${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}
       >
         <Link className="btn ghost" to="/cart">Cart</Link>
         {nft ? null : <Link className="btn ghost" to="/protection">Buyer protection</Link>}
@@ -137,7 +144,7 @@ export default function Checkout() {
                       sellerUid: row.sellerUid, pricePkn: row.pricePkn, listingId: row.listingId,
                     }))}
                   >
-                    {row.image ? <CardArt src={row.image} alt="" /> : <span className="suggest-ph" />}
+                    {row.image ? <CardArt src={row.image} alt="" full /> : <span className="suggest-ph" />}
                   </Link>
                   <div className="bag-info">
                     <strong className="bag-name">{row.name}</strong>
@@ -150,10 +157,18 @@ export default function Checkout() {
             {canNftOnly ? (
               <label className="page-lede">
                 <input type="checkbox" checked={nft} onChange={(event) => setNftOnly(event.target.checked)} />
-                {' '}NFT only — no physical ship, shipping 0
+                {' '}Digital only. The cards go into your collection and nothing is mailed. Shipping is 0.
               </label>
             ) : (
-              <p className="page-lede">NFT-only checkout needs every row flagged nftAvailable or reserveAvailable.</p>
+              <p className="page-lede">
+                These cards will be mailed to you. You can skip shipping only when every card in the cart can stay digital instead of being sent in the mail.
+              </p>
+            )}
+            {nft ? null : (
+              <label className="page-lede">
+                <input type="checkbox" checked={insurance} onChange={(event) => setInsurance(event.target.checked)} />
+                {' '}Insurance 5%. If the package is lost, this covers the order up to {formatPkn(coveragePkn)}. Leave it off if you don&apos;t want it.
+              </label>
             )}
             <label className="sell-field">
               Notes
@@ -186,8 +201,8 @@ export default function Checkout() {
             {confirm ? (
               <p className="page-lede">
                 {nft
-                  ? `Pay ${formatPkn(totalPkn)} from site balance, create one NFT-only order, no physical card ships now.`
-                  : `Pay ${formatPkn(totalPkn)} from site balance. ${ESCROW_LINE}`}
+                  ? `Pay ${formatPkn(totalPkn)} from your site balance. The cards go into your collection. Nothing is mailed.`
+                  : `Pay ${formatPkn(totalPkn)} from your site balance. ${ESCROW_LINE}`}
               </p>
             ) : null}
             {missingListing ? <Alert>A cart row is missing listingId. Add the offer from Shop again.</Alert> : null}

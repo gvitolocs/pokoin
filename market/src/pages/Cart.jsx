@@ -52,7 +52,7 @@ export default function Cart() {
                     sellerUid: row.sellerUid, pricePkn: row.pricePkn, listingId: row.listingId,
                   }))}
                 >
-                  {row.image ? <CardArt src={row.image} alt="" /> : <span className="suggest-ph" />}
+                  {row.image ? <CardArt src={row.image} alt="" full /> : <span className="suggest-ph" />}
                 </Link>
                 <div className="bag-info">
                   <Link className="bag-name" to={row.href || '/marketplace'}>{row.name}</Link>

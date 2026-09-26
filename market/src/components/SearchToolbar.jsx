@@ -1,3 +1,5 @@
+import { PRINT_LANGS, setPrintLang, usePrintLang } from '../locale.js';
+
 function FieldLabel({ compact, children }) {
   if (compact) {
     return <span className="sr-only">{children}</span>;
@@ -19,9 +21,25 @@ export default function SearchToolbar({
   filtersOn,
   onClear,
   compact = false,
+  showPrint = false,
 }) {
+  const printLang = usePrintLang();
   return (
     <div className="toolbar-right">
+      {showPrint ? (
+        <label className="sort">
+          <FieldLabel compact={compact}>Print</FieldLabel>
+          <select
+            aria-label="Card print"
+            value={printLang}
+            onChange={(event) => setPrintLang(event.target.value)}
+          >
+            {PRINT_LANGS.map((item) => (
+              <option key={item.code} value={item.code}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label className="sort">
         <FieldLabel compact={compact}>Sort</FieldLabel>
         <select value={sort} onChange={(event) => onSort(event.target.value)}>

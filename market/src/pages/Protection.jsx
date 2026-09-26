@@ -54,9 +54,8 @@ export default function Protection() {
           you need the order id in writing.
         </p>
         <p className="page-lede">
-          NFT-only checkout is not escrow: those rows mint to your holdings as soon as you pay.
-          CardTrader live buy-through still ships from that network; Pokoin escrow is for native
-          Card Reserve listings paid in PKN.
+          A digital-only order is not held until delivery. Those cards go into your collection as soon as you pay.
+          Cards bought from a seller’s live shop are still mailed. Escrow is for Pokoin listings paid in PKN.
         </p>
         <p>
           <Link className="btn" to="/orders">Orders</Link>

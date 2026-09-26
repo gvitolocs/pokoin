@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchArtist, fetchExpansionCards, fetchSellerShop, imageSrc } from '../api.js';
+import { fetchSpeciesCards } from '../species-cards.js';
 import { bundleOf, tagKey } from '../chat-listing.js';
 
 function cardId(card) {
@@ -48,7 +49,9 @@ export default function ChatBundle({ row, peer, onRemove }) {
     let live = true;
     const cardsPromise = bundle.kind === 'artist'
       ? fetchArtist(bundle.slug, { limit: 240 }).then((data) => data?.cards || [])
-      : fetchExpansionCards({ slug: bundle.slug }).then((data) => data?.cards || []);
+      : bundle.kind === 'species'
+        ? fetchSpeciesCards(bundle.slug)
+        : fetchExpansionCards({ slug: bundle.slug }).then((data) => data?.cards || []);
     cardsPromise.then((rows) => {
       if (live) setCards(rows);
     }).catch(() => {});
@@ -68,7 +71,7 @@ export default function ChatBundle({ row, peer, onRemove }) {
   }, [bundle?.kind, bundle?.slug, peer?.username]);
 
   if (!bundle) return null;
-  const label = row?.cardName || (bundle.kind === 'artist' ? 'Artist' : 'Set');
+  const label = row?.cardName || (bundle.kind === 'artist' ? 'Artist' : bundle.kind === 'species' ? 'Pokémon' : 'Set');
   return (
     <span className="chat-bundle">
       <span className="chat-bundle-head">

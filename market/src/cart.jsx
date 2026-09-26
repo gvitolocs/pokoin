@@ -27,7 +27,6 @@ const CartContext = createContext({
   clear: () => {},
 });
 
-export const CHECKOUT_TAX_RATE = 0.08;
 export const CHECKOUT_SHIPPING_PKN = 2000;
 
 export function cartItemFromOffer(card, offer) {

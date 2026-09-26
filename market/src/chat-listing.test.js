@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendChatTag, bundleOf, bundleReference, CARD_DRAG_HEIGHT, CARD_DRAG_WIDTH, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listingReference, looseCardReference, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned, writeListingDrag } from './chat-listing.js';
+import { appendChatTag, bundleOf, bundleReference, CARD_DRAG_HEIGHT, CARD_DRAG_WIDTH, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listedCopies, listingReference, looseCardReference, overListingStock, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned, writeListingDrag } from './chat-listing.js';
 import { readFileSync } from 'node:fs';
 
 test('an artist or expansion drag keeps the saved cover and the slug', () => {
@@ -71,7 +71,7 @@ test('chat tags keep one copy of a listing and cap at four', () => {
   assert.deepEqual(tags.map(tagKey), ['listing:b', 'listing:c', 'listing:d', 'listing:e']);
 });
 
-test('a miniature keeps a site path and tries the homepage thumb before the full scan', () => {
+test('a miniature keeps a site path and shows the full scan before the homepage thumb', () => {
   const row = looseCardReference({
     name: 'Tympole',
     cardId: '968186',
@@ -81,8 +81,8 @@ test('a miniature keeps a site path and tries the homepage thumb before the full
   assert.equal(row.path, '/marketplace/en/cards/968186');
   assert.equal(catalogPath('/marketplace/en/cards/9?x=1', ''), '/marketplace/en/cards/9');
   assert.deepEqual(chatImageSources({ imageUrl: '/card-images/502874_snorlax.jpg' }), [
-    '/card-images/502874_snorlax_homepage.webp',
     '/card-images/502874_snorlax.jpg',
+    '/card-images/502874_snorlax_homepage.webp',
   ]);
   assert.equal(row.kind, 'card');
 });
@@ -124,6 +124,80 @@ test('a trade card remembers gray, and a refresh can turn it color when the sell
   writeCardOwned('219916', people, 'yes');
   assert.equal(readCardOwned('219916', [{ uid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2' }]), 'yes');
   assert.equal(paintOwned(row, '219916', people), 'yes');
+});
+
+test('dragging a Pokémon name keeps every printing of that species', () => {
+  const row = bundleReference({
+    kind: 'species',
+    slug: 'Sandile',
+    name: 'Sandile',
+    imageUrl: '/card-images/sandile.jpg',
+    path: '/marketplace/en/cards/1',
+  });
+  assert.equal(row.kind, 'species');
+  assert.equal(bundleOf(row).slug, 'Sandile');
+  assert.equal(overListingStock(3, 2), true);
+  assert.equal(overListingStock(2, 2), false);
+  assert.equal(overListingStock(3, undefined), false);
+  assert.equal(listedCopies([
+    { id: 'a', sellerUsername: 'redshakkio', quantityAvailable: 2 },
+    { id: 'b', sellerUsername: 'other', quantityAvailable: 9 },
+  ], [{ username: 'redshakkio' }]), 2);
+});
+
+test('a tainted artist cover still drags at a fixed size', () => {
+  let dragged = null;
+  globalThis.document = {
+    createElement: (tag) => {
+      const el = {
+        tagName: tag,
+        width: 0,
+        height: 0,
+        style: {},
+        src: '',
+        alt: '',
+        draggable: false,
+        setAttribute() {},
+        getAttribute() { return el.src; },
+      };
+      if (tag === 'canvas') {
+        el.getContext = () => ({
+          setTransform() {},
+          clearRect() {},
+          save() {},
+          beginPath() {},
+          rect() {},
+          clip() {},
+          fillRect() {},
+          restore() {},
+          roundRect() {},
+          drawImage() {},
+          getImageData() { throw new Error('tainted'); },
+        });
+      }
+      return el;
+    },
+    body: { appendChild() {} },
+  };
+  const huge = {
+    nodeType: 1,
+    tagName: 'IMG',
+    naturalWidth: 4000,
+    naturalHeight: 2800,
+    src: 'https://cdn.pokoin.com/cover.jpg',
+    currentSrc: 'https://cdn.pokoin.com/cover.jpg',
+  };
+  writeListingDrag({
+    currentTarget: huge,
+    dataTransfer: {
+      setData() {},
+      setDragImage(el) { dragged = el; },
+    },
+  }, { cardName: 'Ken Sugimori', kind: 'artist', imageUrl: huge.src });
+  assert.equal(dragged.tagName, 'img');
+  assert.equal(dragged.width, CARD_DRAG_WIDTH);
+  assert.equal(dragged.height, CARD_DRAG_HEIGHT);
+  assert.notEqual(dragged, huge);
 });
 
 test('dragging a shop row carries a card-sized image, not the whole row', () => {

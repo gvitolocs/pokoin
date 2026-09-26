@@ -97,6 +97,13 @@ export function game(hostname = hostName()) {
   return GAMES[gameIdFromHost(hostname)] || GAMES.pokemon;
 }
 
+/** Where the header game picker sends the browser. */
+export function gameSiteHref(id) {
+  if (id === 'one_piece') return 'https://onepiece.pokoin.com/marketplace';
+  if (id === 'riftbound') return 'https://riftbound.pokoin.com/marketplace';
+  return 'https://pokoin.com/marketplace';
+}
+
 /** Phone BattleScan selectCatalog args for the active game. */
 export function scanPhoneCatalog(hostname = hostName()) {
   const id = gameIdFromHost(hostname);

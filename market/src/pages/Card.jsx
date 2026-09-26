@@ -1835,7 +1835,22 @@ export default function Card() {
         style={cardShadeStyle(card)}
       >
         <div className="asset-title-row">
-          <h1>{displayName(card)}{identityEmoji ? <span className="asset-emoji"> {identityEmoji}</span> : null}</h1>
+          <h1>
+            <span
+              className="species-drag"
+              draggable
+              title="Drag to add every printing of this Pokémon"
+              onPointerDown={() => preloadDragImage(art)}
+              onDragStart={(event) => writeListingDrag(event, bundleReference({
+                kind: 'species',
+                slug: displayName(card),
+                name: displayName(card),
+                imageUrl: art,
+                path: cardPath,
+              }))}
+            >{displayName(card)}</span>
+            {identityEmoji ? <span className="asset-emoji"> {identityEmoji}</span> : null}
+          </h1>
           <div className="asset-title-tools">
             <button type="button" className={watched ? 'icon-btn on' : 'icon-btn'} onClick={onWatch} title={watched ? 'Remove from watchlist' : 'Add to watchlist'}>
               {watched ? '♥' : '♡'}

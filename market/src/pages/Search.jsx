@@ -410,9 +410,7 @@ export default function Search() {
                 ? (tab === 'product' ? 'No products match that search.' : 'No cards match that search.')
                 : (filtersOn
                   ? <><strong>{shown.length.toLocaleString('en-US')}</strong> matching</>
-                  : (total || !hasMore
-                    ? <><strong>{(total || cards.length).toLocaleString('en-US')}</strong> results</>
-                    : 'Searching…'))))}
+                  : <><strong>{(total || cards.length).toLocaleString('en-US')}</strong> results</>)))}
         </p>
         {tab !== 'users' && artistEntities.length ? (
           <div className="search-resolved">
@@ -441,6 +439,7 @@ export default function Search() {
             sets={sets}
             filtersOn={filtersOn}
             onClear={clearFilters}
+            showPrint
           />
         ) : null}
       </div>

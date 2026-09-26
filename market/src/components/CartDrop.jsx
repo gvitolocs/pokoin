@@ -1,11 +1,17 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { fetchArtist, fetchExpansionCards, fetchListings } from '../api.js';
+import { cartDropThumb } from '../cart-drop-size.js';
 import { pickCartOffer } from '../cart-offer.js';
-import { cartItemFromOffer } from '../cart.jsx';
+import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { bundleOf, LISTING_DRAG_TYPE, readListingDrag } from '../chat-listing.js';
+import { fetchSpeciesCards } from '../species-cards.js';
+import CardArt from './CardArt.jsx';
 
 export default function CartDrop({ onAdd }) {
+  const { items } = useCart();
   const [over, setOver] = useState(false);
+  const thumb = cartDropThumb(items.length);
 
   return (
     <div
@@ -38,7 +44,25 @@ export default function CartDrop({ onAdd }) {
       }}
     >
       <strong>Cart</strong>
-      <p>Drop a card, an artist, or a set. A card takes the cheapest Near Mint English listing, then the next condition, then another language.</p>
+      <p>Drop a card, a Pokémon, an artist, or a set.</p>
+      {items.length ? (
+        <div className="cart-drop-grid">
+          {items.map((row) => (
+            <Link
+              key={row.id}
+              className="cart-drop-card"
+              to={row.href || '/cart'}
+              title={row.name}
+              style={{ width: thumb, height: Math.round(thumb * 88 / 63) }}
+            >
+              {row.image ? <CardArt src={row.image} alt="" full /> : <span className="suggest-ph" />}
+              {row.qty > 1 ? <em>{row.qty}</em> : null}
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <p className="cart-drop-empty">Cart is empty</p>
+      )}
     </div>
   );
 }
@@ -60,7 +84,9 @@ async function addBundle(reference, onAdd) {
   if (!bundle?.slug) return;
   const cards = bundle.kind === 'artist'
     ? (await fetchArtist(bundle.slug, { limit: 400 }).catch(() => null))?.cards || []
-    : (await fetchExpansionCards({ slug: bundle.slug }).catch(() => null))?.cards || [];
+    : bundle.kind === 'species'
+      ? await fetchSpeciesCards(decodeURIComponent(bundle.slug)).catch(() => [])
+      : (await fetchExpansionCards({ slug: bundle.slug }).catch(() => null))?.cards || [];
   const queue = cards.slice(0, 400);
   let cursor = 0;
   async function worker() {

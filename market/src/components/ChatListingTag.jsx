@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchCard, fetchListings, imageSrc } from '../api.js';
 import { fetchCardTiles } from '../lists.js';
+import { setChatTagStock } from '../chat-dock-store.js';
 import {
   bundleOf,
   cardIdOf,
   chatImageSources,
+  chatQty,
   isSellerCard,
-  listingQty,
-  listingStock,
+  listedCopies,
+  overListingStock,
   paintOwned,
   personListsCard,
   tagKey,
@@ -57,17 +59,16 @@ function stopControl(event) {
 }
 
 function CardQuantity({ row, draft, onQty }) {
-  const qty = listingQty(row?.qty, row?.stock);
-  const cap = listingStock(row?.stock);
+  const qty = chatQty(row?.qty);
   if (!draft) {
     if (row?.qty == null || row.qty === '') return null;
-    return <span className="chat-qty-badge">{listingQty(row.qty, 99)}</span>;
+    return <span className="chat-qty-badge">{qty}</span>;
   }
   return (
     <span className="chat-qty" onClick={stopControl} onPointerDown={stopControl}>
       <button type="button" aria-label="Decrease quantity" disabled={qty <= 1} onClick={(event) => { stopControl(event); onQty?.(tagKey(row), qty - 1); }}>−</button>
       <b>{qty}</b>
-      <button type="button" aria-label="Increase quantity" disabled={qty >= cap} onClick={(event) => { stopControl(event); onQty?.(tagKey(row), qty + 1); }}>+</button>
+      <button type="button" aria-label="Increase quantity" disabled={qty >= 99} onClick={(event) => { stopControl(event); onQty?.(tagKey(row), qty + 1); }}>+</button>
     </span>
   );
 }
@@ -113,21 +114,27 @@ function CardTag({ row, onRemove, onQty, peer, me }) {
     loadCatalogImages(id).then((next) => {
       if (live && next.length) setCatalog(next);
     }).catch(() => {});
-    if (!isSellerCard(row)) {
-      fetchListings(id).then((data) => {
-        if (!live) return;
+    const sellers = [
+      { uid: row.sellerUid, username: row.seller },
+      { uid: peerUid, username: peerName },
+    ];
+    fetchListings(id).then((data) => {
+      if (!live) return;
+      const copies = listedCopies(data?.listings, sellers, row.listingId);
+      if (copies) setChatTagStock(tagKey(row), copies);
+      if (!isSellerCard(row)) {
         const next = personListsCard(data?.listings, people) ? 'yes' : 'no';
         writeCardOwned(id, people, next);
         setOwned(next);
-      }).catch(() => {});
-    }
+      }
+    }).catch(() => {});
     return () => { live = false; };
   }, [id, identity, peerUid, peerName, meUid, meName, row.seller, row.sellerUid, row.imageUrl]);
 
   const list = unique([...chatImageSources(row), ...catalog]);
   const catalogKey = catalog.join('|');
   useEffect(() => {
-    if (!catalogKey) return;
+    if (!catalogKey || !failed) return;
     const at = list.findIndex((item) => catalog.includes(item));
     if (at < 0) return;
     if ((!painted || failed) && step !== at) setStep(at);
@@ -158,8 +165,9 @@ function CardTag({ row, onRemove, onQty, peer, me }) {
     </ThumbZoom>
   ) : <span className="chat-tag-ph" />;
   const trade = owned === 'no';
+  const over = overListingStock(row.qty, row.stock);
   return (
-    <span className={`chat-tag${trade ? ' is-trade' : ''}`}>
+    <span className={`chat-tag${trade ? ' is-trade' : ''}${over ? ' is-overstock' : ''}`}>
       {row.path ? (
         <Link to={row.path} aria-label={label} onClick={(event) => event.stopPropagation()}>{image}</Link>
       ) : (
