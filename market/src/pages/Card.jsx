@@ -47,7 +47,7 @@ import {
   readWatchlistIds,
   vintedHref,
 } from '../api.js';
-import { getChatDock } from '../chat-dock-store.js';
+import { suggestPriceFromSlices } from '../scan-pricing.js';
 import { bundleReference, preloadDragImage, referenceForPeer, writeListingDrag } from '../chat-listing.js';
 import { expansionLogoSrc } from '../set-logos.js';
 import {
@@ -84,7 +84,7 @@ import { sellLanguages, versionRedirects } from '../listing-languages.js';
 import ListingLangPick from '../components/ListingLangPick.jsx';
 import ExpansionMark from '../components/ExpansionMark.jsx';
 import { Action, track } from '../track.js';
-import { LIST_CURRENCIES, listPriceHint, listingPriceToPkn } from '../pkn.js';
+import { LIST_CURRENCIES, fiatFromPkn, listingPriceToPkn } from '../pkn.js';
 import { cardStubFromRoute, mergeDeskCard, realPublicCardId } from '../card-stub.js';
 import CardArt from '../components/CardArt.jsx';
 import RelatedCards from '../components/RelatedCards.jsx';
@@ -748,7 +748,7 @@ function CameraIcon() {
 function ListingForm({
   card,
   identity,
-  suggestedPrice,
+  salesSlices,
   fromPath,
   onListed,
   preferredLanguage,
@@ -762,6 +762,8 @@ function ListingForm({
   const formRef = useRef(null);
   const blank = blankListingForm(card);
   const [price, setPrice] = useState(blank.price);
+  const priceManual = useRef(Boolean(editing?.id));
+  const priceFocused = useRef(false);
   const [currency, setCurrency] = useState(blank.currency);
   const [qty, setQty] = useState(blank.qty);
   const [condition, setCondition] = useState(blank.condition);
@@ -808,9 +810,11 @@ function ListingForm({
   useEffect(() => {
     if (editingId) {
       applyFields(listingFormFromOffer(editing, card));
+      priceManual.current = true;
       formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       return;
     }
+    priceManual.current = false;
     applyFields(blankListingForm(card));
   }, [card.id, editingId]);
 
@@ -834,10 +838,27 @@ function ListingForm({
     setCondition(preferredCondition);
   }, [preferredCondition, editingId]);
 
-  const hint = !price && suggestedPrice ? listPriceHint(suggestedPrice, currency) : '';
+  const graphPkn = suggestPriceFromSlices(salesSlices, {
+    condition,
+    language,
+    reverse: foil === 'reverse',
+    firstEdition: chips.firstEd,
+  });
+  const graphPrice = graphPkn > 0
+    ? (currency === 'PKN'
+      ? formatPknNumber(Math.round(graphPkn), { maximumFractionDigits: 0 })
+      : formatPknNumber(fiatFromPkn(graphPkn, currency), { maximumFractionDigits: 2 }))
+    : '';
+
+  useEffect(() => {
+    if (editingId || priceManual.current || priceFocused.current || !graphPrice) return;
+    setPrice(graphPrice);
+  }, [graphPrice, editingId, card.id, currency]);
+
+  const hint = !price && graphPrice ? graphPrice : '';
   const listedPkn = price
     ? listingPriceToPkn(price, currency)
-    : listingPriceToPkn(suggestedPrice, 'PKN');
+    : listingPriceToPkn(graphPrice, currency);
 
   function toggleChip(key) {
     setChips((current) => ({ ...current, [key]: !current[key] }));
@@ -850,7 +871,7 @@ function ListingForm({
     }
     const amount = price
       ? listingPriceToPkn(price, currency)
-      : listingPriceToPkn(suggestedPrice, 'PKN');
+      : listingPriceToPkn(graphPrice, currency);
     const quantity = Number.parseInt(qty, 10);
     if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 99) {
       setError('Enter a valid price and quantity.');
@@ -967,7 +988,19 @@ function ListingForm({
             inputMode="decimal"
             value={price}
             placeholder={hint}
-            onChange={(event) => setPrice(event.target.value)}
+            onFocus={() => {
+              priceFocused.current = true;
+              if (!priceManual.current) setPrice('');
+            }}
+            onBlur={() => {
+              priceFocused.current = false;
+              if (!priceManual.current && graphPrice) setPrice(graphPrice);
+            }}
+            onChange={(event) => {
+              const next = event.target.value;
+              setPrice(next);
+              priceManual.current = next.trim() !== '';
+            }}
           />
         </label>
         <label className="sell-field currency">
@@ -1880,9 +1913,6 @@ export default function Card() {
       : !dealPick
         ? 'No listing matches this selection.'
         : null;
-  const suggested = nativeLive[0]?.pricePkn > 0
-    ? Number(nativeLive[0].pricePkn)
-    : '';
   const collector = identity.number || '';
   const versionRows = rarityVersions(card, namePrintings);
   const versionLabel = versionOptionLabel(card) || collector;
@@ -2236,7 +2266,7 @@ export default function Card() {
           <ListingForm
             card={card}
             identity={identity}
-            suggestedPrice={suggested}
+            salesSlices={salesSlices}
             fromPath={fromPath}
             preferredLanguage={dealLang}
             preferredCondition={dealCond}
