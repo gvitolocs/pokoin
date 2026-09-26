@@ -3497,22 +3497,21 @@ a.era-link:focus-visible {
 
 .shop-row {
   display: grid;
-  grid-template-columns: auto auto auto auto auto auto auto;
-  gap: 0.35rem 0.7rem;
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto auto auto;
+  gap: 0.45rem 0.75rem;
   align-items: center;
-  padding: 0.38rem 0.1rem;
+  padding: 0.55rem 0.15rem;
   border: 0;
   border-bottom: 1px solid var(--g5);
   background: transparent;
-  width: max-content;
-  max-width: 100%;
+  width: 100%;
   font-size: 0.8rem;
   color: inherit;
   text-align: left;
 }
 
 .shop-row.is-profile {
-  grid-template-columns: max-content auto auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 28rem) auto auto minmax(0, 1fr) auto auto auto;
   width: 100%;
 }
 
@@ -3625,28 +3624,31 @@ html.is-shop-marquee * { user-select: none; }
 .ct-qty {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  color: #8d8d8d;
-  font-size: 0.8rem;
+  justify-self: end;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 650;
   white-space: nowrap;
 }
 .ct-qty select {
   -webkit-appearance: none;
   appearance: none;
   margin: 0;
-  min-width: 2.7rem;
-  padding: 0.18rem 1.2rem 0.18rem 0.45rem;
-  border: 1px solid #d5d5d5;
-  border-radius: 3px;
-  background-color: #fff;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23666' d='M1 1.1 5 4.9 9 1.1'/></svg>");
+  height: 1.85rem;
+  min-width: 2.6rem;
+  padding: 0 1.25rem 0 0.5rem;
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  background-color: var(--g3);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23ffd33d' d='M1 1.1 5 4.9 9 1.1'/></svg>");
   background-repeat: no-repeat;
-  background-position: right 0.35rem center;
+  background-position: right 0.4rem center;
   background-size: 0.55rem 0.32rem;
-  color: #222;
+  color: var(--text);
   font: inherit;
-  font-weight: 650;
-  font-size: 0.8rem;
+  font-weight: 750;
+  font-size: 0.78rem;
   line-height: 1.2;
   cursor: pointer;
 }
@@ -3660,6 +3662,7 @@ html.is-shop-marquee * { user-select: none; }
   align-items: center;
   gap: 0.65rem;
   min-width: 0;
+  max-width: 28rem;
   text-decoration: none;
   color: inherit;
 }
@@ -3707,10 +3710,17 @@ html.is-shop-marquee * { user-select: none; }
   background: var(--g3);
 }
 
+.shop-card > span {
+  min-width: 0;
+}
+
 .shop-card strong {
   display: block;
   font-size: 0.82rem;
   font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shop-card em {
@@ -3718,6 +3728,9 @@ html.is-shop-marquee * { user-select: none; }
   color: var(--muted);
   font-size: 0.72rem;
   font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .seller-hero {
@@ -9080,15 +9093,17 @@ html:has(.wallet-page) .brand span {
 .seller-result-count{margin:0 0 .75rem;color:var(--muted);font-size:.88rem}
 .seller-result-count strong{color:var(--text);font-weight:750}
 .seller-shop-list .shop-row.is-profile{
-  grid-template-columns:max-content auto auto minmax(0,1fr) auto auto auto;
-  padding:.38rem .1rem;
+  grid-template-columns: minmax(0, 28rem) auto auto minmax(0, 1fr) auto auto auto;
+  padding: 0.55rem 0.15rem;
 }
 @media (max-width: 720px) {
   .seller-shop-list .shop-row.is-profile {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
+    row-gap: 0.45rem;
   }
   .seller-shop-list .shop-row.is-profile .shop-card { grid-column: 1 / -1; }
-  .seller-shop-list .ct-qty { grid-column: 1 / -1; justify-content: flex-end; }
+  .seller-shop-list .shop-txt { display: block; }
+  .seller-shop-list .ct-qty { grid-column: auto; justify-self: end; }
 }
 .seller-shop-list .shop-px{color:var(--yellow,#ffcc03);font-weight:800}
 .seller-pager{
