@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { createMarketplaceOrder, formatPkn, formatPknNumber } from '../api.js';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
@@ -9,6 +9,15 @@ import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
+
+function FeeTip({ label, children }) {
+  return (
+    <span className="fee-tip">
+      <button type="button" className="fee-tip-btn" aria-label={label}>i</button>
+      <span className="fee-tip-pop" role="tooltip">{children}</span>
+    </span>
+  );
+}
 
 function snapshot(row, fulfillmentMode, notes) {
   const qty = Number(row.qty) || 1;
@@ -52,16 +61,6 @@ export default function Checkout() {
   useEffect(() => {
     document.title = 'Checkout · Pokoin';
   }, []);
-
-  const totals = useMemo(() => {
-    const lines = [
-      ['Subtotal', subtotalPkn],
-      ['Platform commission 3%', commissionPkn],
-    ];
-    if (insurancePkn > 0) lines.push(['Insurance 5%', insurancePkn]);
-    lines.push(['Shipping', shippingPkn], ['Total', totalPkn]);
-    return lines;
-  }, [subtotalPkn, commissionPkn, insurancePkn, shippingPkn, totalPkn]);
 
   if (!ready) {
     return <SessionWait />;
@@ -164,12 +163,6 @@ export default function Checkout() {
                 These cards will be mailed to you. You can skip shipping only when every card in the cart can stay digital instead of being sent in the mail.
               </p>
             )}
-            {nft ? null : (
-              <label className="page-lede">
-                <input type="checkbox" checked={insurance} onChange={(event) => setInsurance(event.target.checked)} />
-                {' '}Insurance 5%. If the package is lost, this covers the order up to {formatPkn(coveragePkn)}. Leave it off if you don&apos;t want it.
-              </label>
-            )}
             <label className="sell-field">
               Notes
               <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} />
@@ -194,9 +187,46 @@ export default function Checkout() {
             )}
           >
             <dl className="fee-lines">
-              {totals.map(([label, value]) => (
-                <div key={label}><dt>{label}</dt><dd>{formatPkn(value)}</dd></div>
-              ))}
+              <div>
+                <dt>Subtotal</dt>
+                <dd>{formatPkn(subtotalPkn)}</dd>
+              </div>
+              <div>
+                <dt>
+                  <span>Platform commission 3%</span>
+                  <FeeTip label="About the platform commission">
+                    Pokoin keeps 3% of the card prices on every order.
+                  </FeeTip>
+                </dt>
+                <dd>{formatPkn(commissionPkn)}</dd>
+              </div>
+              {nft ? null : (
+                <div>
+                  <dt>
+                    <label className="fee-check">
+                      <input
+                        type="checkbox"
+                        checked={insurance}
+                        onChange={(event) => setInsurance(event.target.checked)}
+                      />
+                      Insurance 5%
+                    </label>
+                    <FeeTip label="About insurance">
+                      If the package is lost, this covers 80% of the order value
+                      {coveragePkn > 0 ? ` (${formatPkn(coveragePkn)})` : ''}. Leave it off if you don&apos;t want it.
+                    </FeeTip>
+                  </dt>
+                  <dd>{formatPkn(insurancePkn)}</dd>
+                </div>
+              )}
+              <div>
+                <dt>Shipping</dt>
+                <dd>{formatPkn(shippingPkn)}</dd>
+              </div>
+              <div>
+                <dt>Total</dt>
+                <dd>{formatPkn(totalPkn)}</dd>
+              </div>
             </dl>
             {confirm ? (
               <p className="page-lede">

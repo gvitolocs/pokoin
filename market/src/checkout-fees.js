@@ -1,18 +1,16 @@
-import { PKN_USDT_PRICE } from './pkn.js';
-
-/** Always charged. The old 8% line was this plus optional insurance. */
+/** Always charged. */
 export const CHECKOUT_COMMISSION_RATE = 0.03;
 /** Optional cover if the parcel is lost. Off unless the buyer adds it. */
 export const CHECKOUT_INSURANCE_RATE = 0.05;
-export const INSURANCE_CAP_USD = 50;
-
-/** $50 at 1 PKN = 0.005 USDT. */
-export function insuranceCoveragePkn() {
-  return INSURANCE_CAP_USD / PKN_USDT_PRICE;
-}
+/** A lost parcel is covered for this share of the card subtotal. */
+export const INSURANCE_COVERAGE_RATE = 0.8;
 
 function money(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+export function insuranceCoveragePkn(subtotalPkn) {
+  return money(Math.max(0, Number(subtotalPkn) || 0) * INSURANCE_COVERAGE_RATE);
 }
 
 export function checkoutFees(subtotalPkn, { insurance = false, shippingPkn = 0 } = {}) {
@@ -26,7 +24,7 @@ export function checkoutFees(subtotalPkn, { insurance = false, shippingPkn = 0 }
     insurancePkn,
     shippingPkn: shipping,
     taxPkn,
-    coveragePkn: insuranceCoveragePkn(),
+    coveragePkn: insuranceCoveragePkn(subtotal),
     totalPkn: money(subtotal + taxPkn + shipping),
   };
 }

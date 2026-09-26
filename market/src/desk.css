@@ -346,16 +346,25 @@
   border-bottom: 1px solid var(--g5);
 }
 .bag-row.summary {
-  grid-template-columns: 64px minmax(0, 1fr) auto;
+  grid-template-columns: calc(7.5rem * 63 / 88) minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 0.65rem 1.15rem;
 }
 .bag-art {
+  display: block;
   width: calc(7.5rem * 63 / 88);
   height: 7.5rem;
-  align-self: stretch;
+  min-width: 0;
+  align-self: center;
   overflow: hidden;
   border-radius: 0;
   border: 0;
   background: transparent;
+}
+.bag-row.summary .bag-art {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 63 / 88;
 }
 .bag-info,
 .bag-qty,
@@ -652,6 +661,62 @@
   border-top: 1px solid var(--g5);
   color: var(--text);
   font-weight: 750;
+}
+.fee-lines dt {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.fee-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.fee-check input {
+  margin: 0;
+}
+.fee-tip {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.fee-tip-btn {
+  display: grid;
+  place-items: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: italic 700 0.68rem/1 ui-serif, Georgia, serif;
+  cursor: help;
+}
+.fee-tip-pop {
+  display: none;
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  width: 15.5rem;
+  transform: translateX(-50%);
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: #121018;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-style: normal;
+  line-height: 1.35;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.4);
+}
+.fee-tip:hover .fee-tip-pop,
+.fee-tip:focus-within .fee-tip-pop {
+  display: block;
 }
 
 .pkg-grid {
