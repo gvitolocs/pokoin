@@ -54,7 +54,9 @@ Game resolution order (`cardvault/.../api/_marketplace_game.js`):
 SPA on satellite hosts **skips** `/api/marketplace-home` and calls `/api/marketplace-home-page` only (the Pokemon Flutter home always returned Pokemon cards and short-circuited the UI). Isolated OP/RB catalogs have no `candidates.version` / `pokoin_version_sets`; home and set lists use newest/hot SQL and `marketplace_set_card_counts`. Pokemon SPA first paint: [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md).
 
 - A game path (`/one-piece`, `/magic`, …) is that game's whole SPA. `/` inside it goes to `/marketplace`.
-- CDN keys stay raw `ct_id` under `one-piece/` and `riftbound/` (do not rewrite to public id).
+- CDN keys stay raw `ct_id` under each game prefix (`one-piece/`, `magic/`,
+  `yugioh/`, …). Never rewrite those keys to public `card_id`. Pokemon
+  leftovers still rewrite leftover → public.
 - Projections: `public.marketplace_search_candidates` + `marketplace_card_urls` in each isolated DB (`cardvault/pokemon_card_vault/oracle-postgres/schema/026_multigame_marketplace_projections.sql`).
 - Refresh: `select public.refresh_multigame_marketplace_projections(...)`.
 - Competitive / Pi rails / Meili: Pokemon-only for now.
