@@ -214,9 +214,12 @@ export function fetchSearch({
   if (productSearchOnly) {
     params.set('productSearchOnly', '1');
   }
-  if (printLang && printLang !== 'all') {
-    params.set('print_language', printLang);
-  }
+  // printLang stays on the signature so prefetch and the results page share
+  // one call. It is not sent: marketplace-search-page drops every row once
+  // print_language is set, because hydrated cards come back with a blank
+  // nationality and unknown is not western/japanese/chinese. The page filters
+  // the unfiltered window with rowPrintBucket (search-print.js).
+  void printLang;
   return getJson(`/api/marketplace-search-page?${params}`, { signal });
 }
 

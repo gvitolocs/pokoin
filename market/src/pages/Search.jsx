@@ -13,8 +13,7 @@ import {
   typedMeiliQuery,
 } from '../suggest-rank.js';
 import { useSearchLang, usePrintLang } from '../locale.js';
-import { rowPrintBucket } from '../print-filter.js';
-import { printLangMatchesBucket } from '../print-bucket.js';
+import { cardsForPrint, loadSearchPrintPage } from '../search-print.js';
 import { Action, track } from '../track.js';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
@@ -115,6 +114,9 @@ export default function Search() {
   const [setName, setSetName] = useState(() => String(restored?.setName || resolvedSetName || ''));
   const [sort, setSort] = useState(() => restored?.sort || 'match');
   const skipFilterReset = useRef(Boolean(restored || resolvedSetName));
+  // Offset into the unfiltered search window. A print chip shortens `cards`,
+  // so the next page cannot use cards.length.
+  const apiOffset = useRef(0);
 
   function setTab(next) {
     const kind = normalizeSearchTab(next);
@@ -137,6 +139,7 @@ export default function Search() {
   useEffect(() => {
     document.title = query ? `${query} · Search | Pokoin` : 'Search · Pokoin';
     let cancelled = false;
+    apiOffset.current = 0;
     if (skipFilterReset.current) {
       skipFilterReset.current = false;
     } else {
@@ -152,13 +155,17 @@ export default function Search() {
     const hot = setAware || tab === 'users'
       ? null
       : takeHotSearchPage(fetchQuery, lang, tab, activePrintLang);
+    const printFiltered = Boolean(activePrintLang && activePrintLang !== 'all');
     function apply(data, totalHits) {
       if (cancelled) {
         return;
       }
-      let next = data?.cards || [];
-      if (activePrintLang && activePrintLang !== 'all') {
-        next = next.filter((card) => printLangMatchesBucket(activePrintLang, rowPrintBucket(card)));
+      const raw = data?.cards || [];
+      const next = printFiltered ? cardsForPrint(raw, activePrintLang) : raw;
+      if (data?.nextOffset != null) {
+        apiOffset.current = data.nextOffset;
+      } else {
+        apiOffset.current = raw.length;
       }
       setCards(next);
       setHasMore(setAware || tab === 'users' ? false : Boolean(data?.hasMore));
@@ -166,7 +173,11 @@ export default function Search() {
       // The total travels with the results: totalHits is either the hot
       // payload's total or this response's own total — the same predicate
       // that produced the rows. Never a suggest-side estimate.
-      if (totalHits != null) {
+      // A print chip is applied here, so the all-print total is the wrong
+      // headline. Count the rows this chip kept.
+      if (printFiltered) {
+        setTotal(next.length);
+      } else if (totalHits != null) {
         setTotal(Number(totalHits) || 0);
       } else if (setAware) {
         setTotal(next.length);
@@ -211,8 +222,43 @@ export default function Search() {
         cancelled = true;
       };
     }
+    function fetchPage(offset) {
+      return fetchSearch({ query: fetchQuery, offset, limit: 48, lang, ...fetchOpts });
+    }
+    function deliver(data, totalHits, retried = false) {
+      if (cancelled) {
+        return Promise.resolve();
+      }
+      if (!data) {
+        if (retried) {
+          apply({ cards: [], hasMore: false }, 0);
+          return Promise.resolve();
+        }
+        return fetchPage(0).then((fresh) => deliver(fresh, payloadTotal(fresh) ?? hot?.count, true));
+      }
+      const raw = data.cards || [];
+      const kept = printFiltered ? cardsForPrint(raw, activePrintLang) : raw;
+      if (printFiltered && !kept.length && data.hasMore && raw.length) {
+        return loadSearchPrintPage({
+          printLang: activePrintLang,
+          offset: raw.length,
+          fetchPage,
+        }).then((more) => {
+          if (cancelled) {
+            return;
+          }
+          apply({
+            cards: more.cards,
+            hasMore: more.hasMore,
+            nextOffset: more.nextOffset,
+          }, more.cards.length);
+        });
+      }
+      apply(data, totalHits);
+      return Promise.resolve();
+    }
     if (hot?.data) {
-      apply(hot.data, hot.count);
+      deliver(hot.data, hot.count);
     } else {
       setLoading(true);
       setCards([]);
@@ -222,18 +268,9 @@ export default function Search() {
           cards: rows,
           hasMore: false,
         }))
-        : (hot?.promise || fetchSearch({ query: fetchQuery, offset: 0, limit: 48, lang, ...fetchOpts }));
+        : (hot?.promise || fetchPage(0));
       pending
-        .then((data) => {
-          if (data) {
-            apply(data, setAware ? data.cards?.length : (payloadTotal(data) ?? hot?.count));
-            return;
-          }
-          if (cancelled) {
-            return;
-          }
-          return fetchSearch({ query: fetchQuery, offset: 0, limit: 48, lang, ...fetchOpts }).then((fresh) => apply(fresh, payloadTotal(fresh) ?? hot?.count));
-        })
+        .then((data) => deliver(data, setAware ? data?.cards?.length : (payloadTotal(data) ?? hot?.count)))
         .catch((err) => {
           if (!cancelled) {
             setError(err.message || 'Search failed.');
@@ -241,7 +278,7 @@ export default function Search() {
           }
         });
     }
-    if (!setAware && tab === 'singles' && fetchQuery.length >= 2 && !(hot?.count > 0)) {
+    if (!printFiltered && !setAware && tab === 'singles' && fetchQuery.length >= 2 && !(hot?.count > 0)) {
       // No search-page total for this universe yet (singles rides the Meili
       // candidates window) and no cached count: keep the suggest estimate so
       // the results page still shows a query-scoped number.
@@ -298,20 +335,41 @@ export default function Search() {
     if (setAware || tab === 'users') {
       return;
     }
+    const printFiltered = Boolean(activePrintLang && activePrintLang !== 'all');
     const data = await fetchSearch({
       query,
-      offset: cards.length,
+      offset: apiOffset.current,
       limit: 48,
       lang,
       printLang: activePrintLang,
       ...searchFetchOptions(tab),
     });
-    let extra = data.cards || [];
-    if (activePrintLang && activePrintLang !== 'all') {
-      extra = extra.filter((card) => printLangMatchesBucket(activePrintLang, rowPrintBucket(card)));
+    const raw = data.cards || [];
+    apiOffset.current += raw.length;
+    let extra = printFiltered ? cardsForPrint(raw, activePrintLang) : raw;
+    let more = Boolean(data.hasMore);
+    if (printFiltered && !extra.length && more && raw.length) {
+      const rest = await loadSearchPrintPage({
+        printLang: activePrintLang,
+        offset: apiOffset.current,
+        fetchPage: (offset) => fetchSearch({
+          query,
+          offset,
+          limit: 48,
+          lang,
+          printLang: activePrintLang,
+          ...searchFetchOptions(tab),
+        }),
+      });
+      extra = rest.cards;
+      apiOffset.current = rest.nextOffset;
+      more = rest.hasMore;
     }
     setCards((current) => [...current, ...extra]);
-    setHasMore(Boolean(data.hasMore));
+    setHasMore(more);
+    if (printFiltered) {
+      setTotal((current) => current + extra.length);
+    }
     if (extra[0]) {
       track(Action.loadMore, extra[0], { query, resultCount: cards.length + extra.length });
     }

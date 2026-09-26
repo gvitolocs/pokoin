@@ -860,6 +860,7 @@ export default function Chrome({ children }) {
       prefetchSearchPage(prefetchQuery, lang, {
         fetchSearchPage: fetchSearch,
         tab: searchTab,
+        printLang,
       });
     }
     navigate(searchHref(resolvedQuery, searchTab, resolvedParam));
