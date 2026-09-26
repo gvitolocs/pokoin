@@ -61,6 +61,20 @@ test('desktopHoldCsv lists parked cards', () => {
   );
 });
 
+test('readDesktopHold returns the same array when storage is unchanged', () => {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)); },
+  };
+  clearDesktopHold();
+  addDesktopCards([{ id: '9', name: 'Stable' }]);
+  const a = readDesktopHold();
+  const b = readDesktopHold();
+  assert.equal(a, b);
+  assert.equal(a.length, 1);
+});
+
 test('Chrome mounts a Desktop tray next to cart', () => {
   const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
   const drop = fs.readFileSync(path.join(root, 'components/DesktopDrop.jsx'), 'utf8');

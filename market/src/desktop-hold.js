@@ -4,7 +4,12 @@ import { useSyncExternalStore } from 'react';
 
 const KEY = 'pokoin.desktopHold';
 const MAX = 200;
+const EMPTY = [];
 const listeners = new Set();
+
+/** Stable getSnapshot for useSyncExternalStore — a fresh [] each call black-screens React. */
+let cachedItems = EMPTY;
+let cachedRaw = null;
 
 function notify() {
   for (const fn of listeners) {
@@ -18,24 +23,31 @@ function notify() {
 
 export function readDesktopHold() {
   try {
-    if (typeof localStorage === 'undefined') return [];
-    const parsed = JSON.parse(localStorage.getItem(KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.filter((row) => row && row.id) : [];
+    if (typeof localStorage === 'undefined') return cachedItems;
+    const raw = localStorage.getItem(KEY) || '[]';
+    if (raw === cachedRaw) return cachedItems;
+    const parsed = JSON.parse(raw);
+    cachedItems = Array.isArray(parsed) ? parsed.filter((row) => row && row.id) : EMPTY;
+    cachedRaw = raw;
+    return cachedItems;
   } catch (_) {
-    return [];
+    return cachedItems;
   }
 }
 
 function writeDesktopHold(items) {
+  const next = (items || []).slice(0, MAX);
+  cachedItems = next.length ? next : EMPTY;
+  cachedRaw = JSON.stringify(cachedItems);
   try {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(KEY, JSON.stringify((items || []).slice(0, MAX)));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(KEY, cachedRaw);
+    }
   } catch (_) {
     /* private mode */
   }
   notify();
 }
-
 export function desktopHoldCard(card = {}) {
   const id = String(card.id || card.cardId || card.card_id || '').trim();
   if (!id) return null;
@@ -131,5 +143,5 @@ export function subscribeDesktopHold(listener) {
 }
 
 export function useDesktopHold() {
-  return useSyncExternalStore(subscribeDesktopHold, readDesktopHold, () => []);
+  return useSyncExternalStore(subscribeDesktopHold, readDesktopHold, () => EMPTY);
 }
