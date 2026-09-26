@@ -3,9 +3,9 @@ import test from 'node:test';
 import { assembleHomeVector, homeOriginFailureResponse, isHomePath, stableHomeCacheRequest } from './marketplace-home.js';
 import { WORKING_MESSAGE } from './working-page.js';
 
-test('home paths include the cached vector API and the old page alias', () => {
+test('home paths are the Pokemon rails vector only — not satellite home-page', () => {
   assert.equal(isHomePath('/api/marketplace-home'), true);
-  assert.equal(isHomePath('/api/marketplace-home-page'), true);
+  assert.equal(isHomePath('/api/marketplace-home-page'), false);
   assert.equal(isHomePath('/api/marketplace-search-page'), false);
 });
 

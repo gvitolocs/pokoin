@@ -22,13 +22,10 @@ const JSON_HEADERS = {
   'access-control-allow-origin': '*',
 };
 
+/** Pokemon rails vector only. Satellite SPAs call marketplace-home-page with
+ *  ?game= — that must reach api.pokoin.com, never this Cache API alias. */
 export function isHomePath(pathname) {
-  return (
-    pathname === '/api/marketplace-home' ||
-    pathname === '/api/marketplace-home/' ||
-    pathname === '/api/marketplace-home-page' ||
-    pathname === '/api/marketplace-home-page/'
-  );
+  return pathname === '/api/marketplace-home' || pathname === '/api/marketplace-home/';
 }
 
 export function isTilesPath(pathname) {

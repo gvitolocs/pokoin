@@ -183,7 +183,12 @@ export async function fetchHome(recentIds = []) {
       /* oracle below */
     }
   }
-  const payload = await getJson('/api/marketplace-home-page');
+  // Satellite catalogs use home-page + ?game=. Never resolve that through the
+  // pokoin.com Worker rails alias (it Cache-API'd Pokemon onto every game).
+  const homePage = withGameQuery('/api/marketplace-home-page');
+  const payload = await getJson(
+    isPokemonGame() ? homePage : `https://api.pokoin.com${homePage}`,
+  );
   if (payload?.cards?.length) {
     payload.cards = payload.cards.map((card) => applyTilePrice(card));
   }
