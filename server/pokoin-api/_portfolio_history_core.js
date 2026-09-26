@@ -39,6 +39,7 @@ function movementFromLedger(row = {}) {
 }
 
 const PRICE_BASIS = 'ct-dump-min';
+const SERIES_REVISION = 2;
 
 function compactDay(row = {}) {
   const date = utcDayKey(row.date);
@@ -104,8 +105,22 @@ function buildSeries({
 }
 
 function storedIsFresh(doc, todayKey) {
-  if (!doc || doc.priceBasis !== PRICE_BASIS) return false;
+  if (!doc || doc.priceBasis !== PRICE_BASIS || doc.seriesRevision !== SERIES_REVISION) return false;
   return utcDayKey(doc.updatedAt) === todayKey;
+}
+
+/** A dump day that prices only a sliver of the pile is not a market print. */
+function fullBookDumps(dumps) {
+  const rows = (dumps || [])
+    .map((row) => ({
+      date: utcDayKey(row.date || row.day),
+      cardsValuePkn: Math.round((Number(row.cardsValuePkn ?? row.market_pkn) || 0) * 100) / 100,
+      priced: Math.max(0, Number(row.priced) || 0),
+    }))
+    .filter((row) => row.date && row.cardsValuePkn > 0);
+  const peak = rows.reduce((max, row) => Math.max(max, row.priced), 0);
+  if (!peak) return rows;
+  return rows.filter((row) => row.priced >= peak * 0.5);
 }
 
 /**
@@ -118,32 +133,45 @@ function applyDumpValues(walletDays, dumps, { ownershipDate, today } = {}) {
   const todayKey = utcDayKey(today);
   if (!todayKey) return [];
   const own = utcDayKey(ownershipDate) || '';
-  const priced = (dumps || [])
-    .map((row) => ({
-      date: utcDayKey(row.date || row.day),
-      cardsValuePkn: Math.round((Number(row.cardsValuePkn ?? row.market_pkn) || 0) * 100) / 100,
-    }))
-    .filter((row) => row.date && row.cardsValuePkn > 0 && row.date <= todayKey && (!own || row.date >= own))
+  const priced = fullBookDumps(dumps)
+    .filter((row) => row.date <= todayKey)
     .sort((a, b) => a.date.localeCompare(b.date));
   const currencyAt = new Map();
   for (const day of walletDays || []) {
     const date = utcDayKey(day?.date);
     if (date && date <= todayKey) currencyAt.set(date, Math.max(0, Number(day.currencyPkn) || 0));
   }
-  const firstDump = priced[0] || null;
-  const marks = new Map(priced.map((row) => [row.date, row.cardsValuePkn]));
-  if (own && firstDump && own < firstDump.date) marks.set(own, firstDump.cardsValuePkn);
-  const dates = new Set([...currencyAt.keys(), ...marks.keys(), todayKey]);
+  function inForce(date) {
+    let value = null;
+    for (const row of priced) {
+      if (row.date <= date) value = row.cardsValuePkn;
+      else break;
+    }
+    return value;
+  }
+  // A later first dump is anchored on the sync day. A dump already printed
+  // before that day stays the price in force — it is not replaced by the next one.
+  const anchor = own && inForce(own) == null
+    ? (priced.find((row) => row.date > own)?.cardsValuePkn ?? null)
+    : null;
+  const dates = new Set([...currencyAt.keys(), todayKey]);
   if (own) dates.add(own);
+  for (const row of priced) {
+    if (!own || row.date >= own) dates.add(row.date);
+  }
   let currency = 0;
   let cards = null;
   let cardsStarted = false;
   const points = [];
   for (const date of [...dates].filter(Boolean).sort()) {
     if (currencyAt.has(date)) currency = currencyAt.get(date);
-    if (marks.has(date)) {
-      cards = marks.get(date);
-      cardsStarted = true;
+    if (!own || date >= own) {
+      const printed = inForce(date);
+      const next = printed == null && date === own ? anchor : printed;
+      if (next != null) {
+        cards = next;
+        cardsStarted = true;
+      }
     }
     const inCollection = own ? date >= own : cardsStarted;
     const known = inCollection && cardsStarted && cards != null;
@@ -167,6 +195,7 @@ function upsertDay(days, point) {
 
 module.exports = {
   PRICE_BASIS,
+  SERIES_REVISION,
   utcDayKey,
   movementFromLedger,
   buildSeries,

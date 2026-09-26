@@ -7,8 +7,13 @@ const core = require('./_portfolio_history_core.js');
 test('a stored today with the dump basis is not calculated again', () => {
   assert.equal(core.storedIsFresh({
     priceBasis: 'ct-dump-min',
+    seriesRevision: 2,
     updatedAt: '2026-09-25T12:00:00.000Z',
   }, '2026-09-25'), true);
+  assert.equal(core.storedIsFresh({
+    priceBasis: 'ct-dump-min',
+    updatedAt: '2026-09-25T12:00:00.000Z',
+  }, '2026-09-25'), false);
   assert.equal(core.storedIsFresh({
     priceBasis: 'ct-dump-min',
     updatedAt: '2026-09-24T12:00:00.000Z',
@@ -47,6 +52,33 @@ test('dump minimums start on the sync day and step when the dump changes', () =>
   assert.equal(today.cardsValuePkn, 1100);
   assert.equal(today.currencyPkn, 15);
   assert.equal(today.totalPkn, 1115);
+});
+
+test('a dump already in force on the sync day is not replaced by the next print', () => {
+  const wallet = core.buildSeries({
+    movements: [
+      { type: 'account_transfer_received', amountPkn: 15, createdAt: '2026-05-21T12:00:00.000Z' },
+    ],
+    balance: 15,
+    marketChecked: false,
+    today: '2026-09-26T08:00:00.000Z',
+  });
+  const series = core.applyDumpValues(wallet, [
+    { day: '2026-08-31', market_pkn: 2760, priced: 2 },
+    { day: '2026-09-19', market_pkn: 4073702, priced: 164 },
+    { day: '2026-09-23', market_pkn: 4026552, priced: 164 },
+    { day: '2026-09-25', market_pkn: 4026530, priced: 164 },
+  ], {
+    ownershipDate: '2026-09-21T17:52:48.000Z',
+    today: '2026-09-26T08:00:00.000Z',
+  });
+  assert.equal(series.some((row) => row.date === '2026-08-31'), false);
+  const synced = series.find((row) => row.date === '2026-09-21');
+  assert.equal(synced.cardsValuePkn, 4073702);
+  assert.equal(series.find((row) => row.date === '2026-09-23').cardsValuePkn, 4026552);
+  assert.equal(series.find((row) => row.date === '2026-09-25').cardsValuePkn, 4026530);
+  assert.equal(series.find((row) => row.date === '2026-09-26').cardsValuePkn, 4026530);
+  assert.equal(series.find((row) => row.date === '2026-05-21').cardsKnown, false);
 });
 
 test('the first series keeps the wallet day and prices cards only on today', () => {
@@ -89,6 +121,7 @@ test('a later day is appended and the earlier market value stays', () => {
   assert.equal(next.find((row) => row.date === '2026-09-26').cardsValuePkn, 80);
   assert.equal(core.storedIsFresh({
     priceBasis: core.PRICE_BASIS,
+    seriesRevision: core.SERIES_REVISION,
     updatedAt: '2026-09-26T01:00:00.000Z',
   }, '2026-09-26'), true);
 });

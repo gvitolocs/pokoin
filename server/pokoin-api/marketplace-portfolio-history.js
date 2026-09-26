@@ -14,6 +14,7 @@ const { marketplaceQuery } = require('../server/_marketplace_db');
 const { integrationDocId, COLLECTION } = require('./_cardtrader_integration');
 const {
   PRICE_BASIS,
+  SERIES_REVISION,
   utcDayKey,
   buildSeries,
   storedIsFresh,
@@ -189,6 +190,7 @@ module.exports = async function handler(req, res) {
     await firestore.collection(HISTORY).doc(uid).set({
       days,
       priceBasis: PRICE_BASIS,
+      seriesRevision: SERIES_REVISION,
       dumpDay,
       updatedAt: new Date().toISOString(),
     });

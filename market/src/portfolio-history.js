@@ -186,8 +186,23 @@ export function nearestHistoryDay(days, ratio) {
   if (!list.length) return null;
   if (list.length === 1) return list[0];
   const t = Math.min(1, Math.max(0, Number(ratio) || 0));
-  const index = Math.round(t * (list.length - 1));
-  return list[index] || list[list.length - 1];
+  const start = Date.parse(`${list[0].date}T00:00:00Z`);
+  const end = Date.parse(`${list[list.length - 1].date}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    const index = Math.round(t * (list.length - 1));
+    return list[index] || list[list.length - 1];
+  }
+  const target = start + t * (end - start);
+  let best = list[0];
+  let bestDist = Infinity;
+  for (const day of list) {
+    const dist = Math.abs(Date.parse(`${day.date}T00:00:00Z`) - target);
+    if (dist < bestDist) {
+      best = day;
+      bestDist = dist;
+    }
+  }
+  return best;
 }
 
 export function addUtcDays(dayKey, delta) {
@@ -352,25 +367,58 @@ export function sliceHistorySeries(series, { from = '', to = '' } = {}) {
   return points;
 }
 
-/** Axis hugs the visible values the way a portfolio chart does, and still includes zero when the series does. */
+/**
+ * Axis hugs the visible values. A wallet line under a priced pile does not
+ * stretch the scale back to zero — that hides the dump's day-to-day move.
+ * A series that actually starts near zero still includes zero.
+ */
 export function historyAxis(points) {
-  const values = (points || []).map((day) => asNonNeg(day?.totalPkn));
-  if (!values.length) {
+  const rows = points || [];
+  const totals = rows.map((day) => asNonNeg(day?.totalPkn));
+  if (!totals.length) {
     const yMax = niceScaleMax(0);
     return { yMin: 0, yMax, ticks: yTickValues(yMax, 4) };
   }
+  const cardTotals = rows
+    .filter((day) => day?.assets?.cardsKnown)
+    .map((day) => asNonNeg(day?.totalPkn));
+  const floor = Math.max(0, ...totals.filter((_, index) => !rows[index]?.assets?.cardsKnown), 0);
+  const cardMin = cardTotals.length ? Math.min(...cardTotals) : 0;
+  const cardMax = cardTotals.length ? Math.max(...cardTotals) : 0;
+  const piled = cardTotals.length > 0
+    && cardMax > cardMin
+    && cardMin > Math.max(floor, 1) * 20
+    && (cardMax - cardMin) < cardMin * 0.25;
+  const values = piled ? cardTotals : totals;
   const min = Math.min(...values);
   const max = Math.max(...values);
-  const span = Math.max(max - min, max * 0.08, 1);
-  const yMax = niceScaleMax(max + span * 0.16);
-  const rawMin = Math.max(0, min - span * 0.22);
-  const step = yMax / 4;
-  const yMin = rawMin <= 0 || min === 0 ? 0 : Math.max(0, Math.floor(rawMin / step) * step);
-  const ticks = [];
-  for (let i = 0; i <= 4; i += 1) {
-    ticks.push(Math.round(yMin + ((yMax - yMin) * i) / 4));
+  if (!piled) {
+    const span = Math.max(max - min, max * 0.08, 1);
+    const yMax = niceScaleMax(max + span * 0.16);
+    const rawMin = Math.max(0, min - span * 0.22);
+    const step = yMax / 4;
+    const yMin = rawMin <= 0 || min === 0 ? 0 : Math.max(0, Math.floor(rawMin / step) * step);
+    const ticks = [];
+    for (let i = 0; i <= 4; i += 1) {
+      ticks.push(Math.round(yMin + ((yMax - yMin) * i) / 4));
+    }
+    return { yMin, yMax: Math.max(yMax, yMin + 1), ticks, zoomed: false };
   }
-  return { yMin, yMax: Math.max(yMax, yMin + 1), ticks };
+  const pad = Math.max((max - min) * 0.45, max * 0.008, 1);
+  const yMin = Math.max(0, min - pad);
+  const yMax = max + pad;
+  const rough = Math.max((yMax - yMin) / 4, 1);
+  const exp = Math.floor(Math.log10(rough));
+  const base = 10 ** Math.max(exp, 0);
+  const fraction = rough / base;
+  const nice = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+  const step = nice * base;
+  const ticks = [];
+  for (let value = Math.ceil(yMin / step) * step; value <= yMax + step * 0.01; value += step) {
+    ticks.push(Math.round(value));
+  }
+  if (ticks.length < 2) ticks.push(Math.round(yMin), Math.round(yMax));
+  return { yMin, yMax, ticks, zoomed: true };
 }
 
 export function historyWindowChange(points, presetId = 'custom') {

@@ -8,6 +8,7 @@ import {
   formatHistoryTip,
   historyWindowChange,
   historyPresetWindow,
+  historyAxis,
   sliceHistorySeries,
   stepHistoryPoints,
   historySeriesMax,
@@ -81,6 +82,24 @@ test('history opens on the last month and hides years the series does not reach'
     { x: 640, y: 180 },
     { x: 640, y: 20 },
   ]);
+});
+
+test('a priced pile does not stretch the axis down to the wallet', () => {
+  const axis = historyAxis([
+    normalizeHistoryDay({ date: '2026-08-26', currencyPkn: 15, cardsKnown: false }),
+    normalizeHistoryDay({ date: '2026-09-21', currencyPkn: 15, cardsKnown: true, cardsValuePkn: 4073702 }),
+    normalizeHistoryDay({ date: '2026-09-23', currencyPkn: 15, cardsKnown: true, cardsValuePkn: 4026552 }),
+    normalizeHistoryDay({ date: '2026-09-26', currencyPkn: 15, cardsKnown: true, cardsValuePkn: 4026530 }),
+  ]);
+  assert.ok(axis.yMin > 3900000);
+  assert.ok(axis.yMax < 4200000);
+  const span = axis.yMax - axis.yMin;
+  assert.ok((4073717 - 4026545) / span > 0.2);
+  const nearZero = historyAxis([
+    normalizeHistoryDay({ date: '2026-09-01', currencyPkn: 0, cardsKnown: false }),
+    normalizeHistoryDay({ date: '2026-09-02', currencyPkn: 15, cardsKnown: true, cardsValuePkn: 100 }),
+  ]);
+  assert.equal(nearZero.yMin, 0);
 });
 
 test('nearest day and tip composition', () => {

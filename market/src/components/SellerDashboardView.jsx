@@ -103,9 +103,20 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
     ? (points[0].date === points[points.length - 1].date ? [points[0]] : [points[0], points[points.length - 1]])
     : [];
 
-  function yOf(total) {
+  function xOf(date) {
+    const start = Date.parse(`${points[0]?.date || ''}T00:00:00Z`);
+    const end = Date.parse(`${points[points.length - 1]?.date || ''}T00:00:00Z`);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return CHART_W / 2;
+    const at = Date.parse(`${date}T00:00:00Z`);
+    const t = (at - start) / (end - start);
+    return Math.min(1, Math.max(0, t)) * CHART_W;
+  }
+
+  function yOf(total, day) {
+    if (axis.zoomed && !day?.assets?.cardsKnown) return CHART_H + 12;
     const span = Math.max(1, axis.yMax - axis.yMin);
-    const t = (Math.max(0, Number(total) || 0) - axis.yMin) / span;
+    const clamped = Math.min(axis.yMax, Math.max(axis.yMin, Number(total) || 0));
+    const t = (clamped - axis.yMin) / span;
     return CHART_H - t * (CHART_H - 28) - 14;
   }
 
@@ -113,9 +124,9 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
   let area = '';
   let endDot = null;
   if (hasLine) {
-    const coords = points.map((day, i) => ({
-      x: (i / (points.length - 1)) * CHART_W,
-      y: yOf(day.totalPkn),
+    const coords = points.map((day) => ({
+      x: xOf(day.date),
+      y: yOf(day.totalPkn, day),
       day,
     }));
     const stepped = stepHistoryPoints(coords);
