@@ -1,6 +1,10 @@
 /** Cards parked on the Desktop hold tray (not the cart). */
 
 import { useSyncExternalStore } from 'react';
+import { gameBasename } from './game.js';
+import { printingIdentity } from './identity.js';
+import { tilePricePkn } from './pkn.js';
+import { tcgEra } from './set-logos.js';
 
 const KEY = 'pokoin.desktopHold';
 const MAX = 200;
@@ -48,12 +52,44 @@ function writeDesktopHold(items) {
   }
   notify();
 }
+
+function defaultCardPath(id) {
+  const base = gameBasename();
+  return `${base}/marketplace/en/cards/${id}`.replace(/\/{2,}/g, '/');
+}
+
 export function desktopHoldCard(card = {}) {
   const id = String(card.id || card.cardId || card.card_id || '').trim();
   if (!id) return null;
+  const identity = printingIdentity(card);
+  const eraRaw = String(card.era || tcgEra(card) || '').trim();
+  const era = eraRaw && eraRaw !== 'Other' ? eraRaw : '';
+  const price = tilePricePkn(card);
+  const priced = price != null
+    ? price
+    : (Number.isFinite(Number(card.pricePkn)) ? Number(card.pricePkn) : null);
   return {
     id,
     name: String(card.name || card.cardName || 'Card'),
+    collectorNumber: String(
+      identity.number
+      || card.collectorNumber
+      || card.number
+      || card.card_number
+      || '',
+    ),
+    expansion: String(
+      identity.set
+      || card.expansion
+      || card.setName
+      || card.set
+      || card.set_name
+      || '',
+    ),
+    era,
+    artist: String(identity.artist || card.artist || card.illustrator || ''),
+    rarity: String(identity.rarity || card.rarity || ''),
+    pricePkn: priced != null && Number.isFinite(priced) ? priced : '',
     imageUrl: String(
       card.imageUrl
       || card.gridImageUrl
@@ -66,7 +102,7 @@ export function desktopHoldCard(card = {}) {
       card.path
       || card.canonicalPath
       || card.canonical_path
-      || `/marketplace/en/cards/${id}`,
+      || defaultCardPath(id),
     ),
   };
 }
@@ -107,16 +143,19 @@ function csvEscape(value) {
   return text;
 }
 
-/** Spreadsheet of parked Desktop cards. */
+/** Spreadsheet of parked Desktop cards — catalog columns Giuseppe asked for. */
 export function desktopHoldCsv(items = readDesktopHold()) {
-  const rows = [['card_id', 'name', 'path', 'image_url']];
+  const rows = [['name', 'collector_number', 'expansion', 'era', 'artist', 'rarity', 'price_pkn']];
   for (const row of items || []) {
-    if (!row?.id) continue;
+    if (!row?.id && !row?.name) continue;
     rows.push([
-      row.id,
       row.name || '',
-      row.path || '',
-      row.imageUrl || '',
+      row.collectorNumber || '',
+      row.expansion || '',
+      row.era || '',
+      row.artist || '',
+      row.rarity || '',
+      row.pricePkn === '' || row.pricePkn == null ? '' : String(row.pricePkn),
     ]);
   }
   return `${rows.map((line) => line.map(csvEscape).join(',')).join('\n')}\n`;

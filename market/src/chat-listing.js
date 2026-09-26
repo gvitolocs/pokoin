@@ -1,4 +1,4 @@
-import { displayName } from './identity.js';
+import { displayName, printingIdentity } from './identity.js';
 import { homepageDerivativeUrl, preferFullImage } from './image-urls.js';
 import { sellerHandle } from './listing-meta.js';
 import { tilePricePkn } from './pkn.js';
@@ -57,6 +57,7 @@ export function listingReference({ offer, card }) {
 }
 
 export function cardReference(card) {
+  const identity = printingIdentity(card || {});
   return {
     kind: 'card',
     listingId: '',
@@ -64,7 +65,10 @@ export function cardReference(card) {
     sellerUid: '',
     seller: '',
     cardName: displayName(card) || card?.name || card?.cardName || 'Card',
-    setName: '',
+    setName: identity.set || String(card?.set || card?.set_name || ''),
+    number: identity.number || '',
+    rarity: identity.rarity || '',
+    artist: identity.artist || '',
     imageUrl: cardImage(card),
     path: card?.canonicalPath || card?.path || '',
     pricePkn: Number(tilePricePkn(card) || card?.pricePkn) || 0,

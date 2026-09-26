@@ -41,10 +41,22 @@ test('desktopHoldCard shapes a catalog row', () => {
       name: 'Aria Wraith',
       imageUrl: '/card-images/sorcery/x.jpg',
       canonicalPath: '/marketplace/en/cards/825230',
+      set: 'Alpha',
+      number: '12/99',
+      rarity: 'Elite',
+      artist: 'Nez',
+      price: 42,
+      era: 'Alpha',
     }),
     {
       id: '825230',
       name: 'Aria Wraith',
+      collectorNumber: '12/99',
+      expansion: 'Alpha',
+      era: 'Alpha',
+      artist: 'Nez',
+      rarity: 'Elite',
+      pricePkn: 42,
       imageUrl: '/card-images/sorcery/x.jpg',
       path: '/marketplace/en/cards/825230',
     },
@@ -54,10 +66,28 @@ test('desktopHoldCard shapes a catalog row', () => {
 test('desktopHoldCsv lists parked cards', () => {
   assert.equal(
     desktopHoldCsv([
-      { id: '1', name: 'A, rare', path: '/a', imageUrl: '/a.jpg' },
-      { id: '2', name: 'B', path: '/b', imageUrl: '' },
+      {
+        id: '1',
+        name: 'A, rare',
+        collectorNumber: '1/10',
+        expansion: 'Base',
+        era: 'Original',
+        artist: 'Ken',
+        rarity: 'Holo',
+        pricePkn: 18,
+      },
+      {
+        id: '2',
+        name: 'B',
+        collectorNumber: '',
+        expansion: '',
+        era: '',
+        artist: '',
+        rarity: '',
+        pricePkn: '',
+      },
     ]),
-    'card_id,name,path,image_url\n1,"A, rare",/a,/a.jpg\n2,B,/b,\n',
+    'name,collector_number,expansion,era,artist,rarity,price_pkn\n"A, rare",1/10,Base,Original,Ken,Holo,18\nB,,,,,,\n',
   );
 });
 

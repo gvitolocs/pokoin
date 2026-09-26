@@ -43,6 +43,12 @@ export default function DesktopDrop({ onAddToCart }) {
       name: reference.cardName,
       imageUrl: reference.imageUrl,
       path: reference.path,
+      set: reference.setName,
+      setName: reference.setName,
+      number: reference.number,
+      rarity: reference.rarity,
+      artist: reference.artist,
+      pricePkn: reference.pricePkn,
     }]);
   }
 

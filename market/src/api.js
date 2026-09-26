@@ -5,6 +5,7 @@ export { formatPkn, formatPknNumber };
 import { readRecentCardIds, rememberCardId, peekRecentTile } from './recents.js';
 import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
 import { withGameQuery, isPokemonGame, gameRequestHeaders, game } from './game.js';
+import { homePayloadMatchesGame } from './home-cache.js';
 import { sanitizeCardName, vintedSearchUrl } from './identity.js';
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { getSearchLang } from './locale.js';
@@ -186,7 +187,11 @@ export async function fetchHome(recentIds = []) {
   // Satellite catalogs use home-page + ?game= (withGameQuery inside getJson).
   // Stay same-origin on pokoin.com so Bot Fight clearance applies — a hard
   // api.pokoin.com hop fails fetch and paints the working page.
+  const site = game();
   const payload = await getJson('/api/marketplace-home-page');
+  if (!homePayloadMatchesGame(payload, site.id)) {
+    throw new Error(`Marketplace home returned ${payload?.game || 'unknown'} for ${site.id}`);
+  }
   if (payload?.cards?.length) {
     payload.cards = payload.cards.map((card) => applyTilePrice(card));
   }
