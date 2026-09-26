@@ -72,7 +72,7 @@ export default function ShopListingRow({
   const [pick, setPick] = useState(1);
   const reference = {
     ...listingReference({ offer, card }),
-    qty: showCard ? pick : 1,
+    qty: pick,
     stock: choices,
   };
   const handle = reference.seller;
@@ -92,7 +92,7 @@ export default function ShopListingRow({
     if (mine || !onBuy) return;
     if (event?.shiftKey || event?.ctrlKey || event?.metaKey) return;
     if (event?.target?.closest?.('a, button, select, .ct-qty')) return;
-    onBuy(showCard ? pick : undefined);
+    onBuy(pick);
   }
 
   return (
@@ -148,24 +148,6 @@ export default function ShopListingRow({
         ))}
       </span>
       <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>
-      {showCard && !mine ? (
-        <label className="ct-qty" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-          <select
-            aria-label={`Quantity, ${Math.min(pick, choices)} of ${stock || choices}`}
-            value={Math.min(pick, choices)}
-            onChange={(event) => {
-              event.stopPropagation();
-              setPick(Number(event.target.value) || 1);
-            }}
-          >
-            {Array.from({ length: choices }, (_, index) => {
-              const n = index + 1;
-              return <option key={n} value={n}>{n}</option>;
-            })}
-          </select>
-          <span>of {stock || choices}</span>
-        </label>
-      ) : null}
       {!mine ? (
         <span className="shop-row-actions">
           {sellerUid ? (
@@ -192,7 +174,7 @@ export default function ShopListingRow({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                onCart(showCard ? pick : undefined);
+                onCart(pick);
                 setAdded(true);
               }}
             >
@@ -233,9 +215,25 @@ export default function ShopListingRow({
             <TrashIcon />
           </button>
         </span>
-      ) : (
-        showCard ? null : <span className="shop-act">{choices}</span>
-      )}
+      ) : null}
+      {!mine ? (
+        <label className="ct-qty" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <select
+            aria-label={`Quantity, ${Math.min(pick, choices)} of ${stock || choices}`}
+            value={Math.min(pick, choices)}
+            onChange={(event) => {
+              event.stopPropagation();
+              setPick(Number(event.target.value) || 1);
+            }}
+          >
+            {Array.from({ length: choices }, (_, index) => {
+              const n = index + 1;
+              return <option key={n} value={n}>{n}</option>;
+            })}
+          </select>
+          <span>of {stock || choices}</span>
+        </label>
+      ) : null}
     </div>
   );
 }

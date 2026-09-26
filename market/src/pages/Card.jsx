@@ -2164,10 +2164,10 @@ export default function Card() {
                     selected={selected.has(listingSelectId(offer))}
                     listingBusy={listingBusy}
                     editing={editingOffer?.id === offer.id}
-                    onCart={() => addItem(cartItemFromOffer(card, offer))}
-                    onBuy={() => {
+                    onCart={(qty) => addItem({ ...cartItemFromOffer(card, offer), qty: qty || 1 })}
+                    onBuy={(qty) => {
                       track(Action.clickListing, card, { resultRank: index });
-                      addItem(cartItemFromOffer(card, offer));
+                      addItem({ ...cartItemFromOffer(card, offer), qty: qty || 1 });
                       navigate('/cart');
                     }}
                     onEdit={() => setEditingOffer(

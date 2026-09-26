@@ -81,9 +81,27 @@ export default function ShopList({ className = '', children }) {
         x: event.clientX,
         y: event.clientY,
         additive: event.ctrlKey || event.metaKey,
+        shift: event.shiftKey,
+        ctrl: event.ctrlKey,
+        meta: event.metaKey,
+        target: event.target,
       };
       armed = false;
       base = origin.additive ? new Set(selectedRef.current) : new Set();
+      try { panel.setPointerCapture(event.pointerId); } catch { /* mouse fallback */ }
+    }
+
+    function onMouseDown(event) {
+      if (event.button !== 0) return;
+      if (!panel.contains(event.target)) return;
+      if (marqueeBlocked(event.target)) return;
+      // A draggable row would steal this gesture for an HTML5 card drag.
+      event.preventDefault();
+    }
+
+    function onDragStart(event) {
+      if (!origin || marqueeBlocked(origin.target)) return;
+      event.preventDefault();
     }
 
     function onMove(event) {
@@ -107,7 +125,18 @@ export default function ShopList({ className = '', children }) {
           window.removeEventListener('click', stopClick, true);
         };
         window.addEventListener('click', stopClick, true);
-      } else if (origin && !origin.additive && !event?.target?.closest?.('.shop-row')) {
+      } else if (origin?.target?.closest?.('.shop-row')) {
+        // mousedown preventDefault cancels the real click, so replay it.
+        origin.target.closest('.shop-row').dispatchEvent(new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          shiftKey: origin.shift,
+          ctrlKey: origin.ctrl,
+          metaKey: origin.meta,
+          clientX: origin.x,
+          clientY: origin.y,
+        }));
+      } else if (origin && !origin.additive) {
         setSelected(new Set());
       }
       origin = null;
@@ -156,12 +185,16 @@ export default function ShopList({ className = '', children }) {
     }
 
     panel.addEventListener('pointerdown', onDown);
+    panel.addEventListener('mousedown', onMouseDown);
+    panel.addEventListener('dragstart', onDragStart, true);
     panel.addEventListener('click', onClick);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('keydown', onKey);
     return () => {
       panel.removeEventListener('pointerdown', onDown);
+      panel.removeEventListener('mousedown', onMouseDown);
+      panel.removeEventListener('dragstart', onDragStart, true);
       panel.removeEventListener('click', onClick);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);

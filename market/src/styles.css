@@ -3453,26 +3453,28 @@ a.era-link:focus-visible {
 .shop-list {
   display: flex;
   flex-direction: column;
-  padding-bottom: 2.75rem;
+  padding-bottom: 0.15rem;
 }
 
 .shop-row {
   display: grid;
-  grid-template-columns: minmax(7rem, 1.4fr) auto auto minmax(0, 1fr) auto auto auto;
-  gap: 0.45rem 0.55rem;
+  grid-template-columns: auto auto auto auto auto auto auto;
+  gap: 0.35rem 0.7rem;
   align-items: center;
-  padding: 0.55rem 0.15rem;
+  padding: 0.38rem 0.1rem;
   border: 0;
   border-bottom: 1px solid var(--g5);
   background: transparent;
-  width: 100%;
+  width: max-content;
+  max-width: 100%;
   font-size: 0.8rem;
   color: inherit;
   text-align: left;
 }
 
 .shop-row.is-profile {
-  grid-template-columns: minmax(11rem, 1.8fr) auto auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns: max-content auto auto minmax(0, 1fr) auto auto auto;
+  width: 100%;
 }
 
 .shop-row-actions {
@@ -6190,11 +6192,10 @@ dialog.zoom:not([open]) {
   .prod-head-price { text-align: left; }
   .prod-layout,
   .prod-side { grid-template-columns: 1fr; }
-  .shop-row { grid-template-columns: minmax(0, 1fr) auto auto auto auto; }
+  .shop-row { width: 100%; grid-template-columns: minmax(0, 1fr) auto auto auto auto auto; }
   .shop-row.is-profile { grid-template-columns: 1fr auto auto auto; }
   .shop-row.is-profile .shop-card { grid-column: 1 / -1; }
   .shop-txt { display: none; }
-  .shop-act { display: none; }
   .list-btn { width: 100%; }
   .about-hero,
   .about-story,
@@ -9032,8 +9033,8 @@ html:has(.wallet-page) .brand span {
 .seller-result-count{margin:0 0 .75rem;color:var(--muted);font-size:.88rem}
 .seller-result-count strong{color:var(--text);font-weight:750}
 .seller-shop-list .shop-row.is-profile{
-  grid-template-columns:minmax(12rem,2fr) auto auto minmax(0,1fr) auto auto auto;
-  padding:.48rem .1rem;
+  grid-template-columns:max-content auto auto minmax(0,1fr) auto auto auto;
+  padding:.38rem .1rem;
 }
 @media (max-width: 720px) {
   .seller-shop-list .shop-row.is-profile {
