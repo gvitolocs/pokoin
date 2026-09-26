@@ -21,14 +21,14 @@ still searches the 27,027-entry TCGPlayer index.
 
 `scanCatalogId(hostname, printLang)`:
 
-| Host | Print language | Catalog |
+| Path | Print language | Catalog |
 | --- | --- | --- |
 | `pokoin.com` | all / western | **`pokemon_generic`** |
 | `pokoin.com` | japanese | `pokemon_japanese` |
 | `pokoin.com` | chinese | `pokemon_chinese` |
-| `onepiece.pokoin.com` | all / english | **`one_piece_singles`** |
-| `onepiece.pokoin.com` | japanese | `one_piece_japanese` |
-| `riftbound.pokoin.com` | any | `riftbound_western` |
+| `pokoin.com/one-piece` | all / english | **`one_piece_singles`** |
+| `pokoin.com/one-piece` | japanese | `one_piece_japanese` |
+| `pokoin.com/riftbound` | any | `riftbound_western` |
 
 `pokemon_generic` and `one_piece_singles` are leftover-**JPEG** galleries (old
 Milo behaviour): cardboard scans, not official product renders / png/webp

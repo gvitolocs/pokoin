@@ -37,6 +37,28 @@ const GAME_ALIASES = {
   riftbound: 'riftbound',
   rb: 'riftbound',
   lol: 'riftbound',
+  magic: 'magic',
+  mtg: 'magic',
+  yugioh: 'yugioh',
+  ygo: 'yugioh',
+  'yu-gi-oh': 'yugioh',
+  yu_gi_oh: 'yugioh',
+  lorcana: 'lorcana',
+  flesh_and_blood: 'flesh_and_blood',
+  fab: 'flesh_and_blood',
+  'flesh-and-blood': 'flesh_and_blood',
+  digimon: 'digimon',
+  dragon_ball_super: 'dragon_ball_super',
+  dbs: 'dragon_ball_super',
+  'dragon-ball-super': 'dragon_ball_super',
+  vanguard: 'vanguard',
+  star_wars: 'star_wars',
+  swu: 'star_wars',
+  'star-wars': 'star_wars',
+  union_arena: 'union_arena',
+  'union-arena': 'union_arena',
+  gundam: 'gundam',
+  sorcery: 'sorcery',
 };
 
 function normalizeRecentIds(values) {
@@ -104,8 +126,8 @@ function knownMarketplaceGame(value) {
 function invalidGameError(value) {
   const error = new Error(
     value
-      ? `Invalid or missing game "${value}". Pass an explicit game (pokemon, one_piece, riftbound).`
-      : 'Missing game. Pass ?game= / body.game / x-pokoin-game (pokemon, one_piece, riftbound).',
+      ? `Invalid or missing game "${value}". Pass an explicit game.`
+      : 'Missing game. Pass ?game= / body.game / x-pokoin-game.',
   );
   error.statusCode = 400;
   error.code = 'INVALID_GAME';

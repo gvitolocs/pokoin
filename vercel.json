@@ -417,8 +417,19 @@
           "value": "onepiece.pokoin.com"
         }
       ],
-      "destination": "/marketplace",
-      "permanent": false
+      "destination": "https://pokoin.com/one-piece/marketplace",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "onepiece.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/one-piece/:path*",
+      "permanent": true
     },
     {
       "source": "/",
@@ -428,8 +439,19 @@
           "value": "riftbound.pokoin.com"
         }
       ],
-      "destination": "/marketplace",
-      "permanent": false
+      "destination": "https://pokoin.com/riftbound/marketplace",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "riftbound.pokoin.com"
+        }
+      ],
+      "destination": "https://pokoin.com/riftbound/:path*",
+      "permanent": true
     },
     {
       "source": "/",

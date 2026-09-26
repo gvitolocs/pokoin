@@ -7,9 +7,11 @@ HTTP API map: [API.md](API.md). Home first paint (auth, cache, images):
 [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md). Live index:
 `GET https://api.pokoin.com/api/__routes?group=1`.
 
-**Multi-game:** the same SPA also serves `onepiece.pokoin.com` and
-`riftbound.pokoin.com` ([GAMES.md](GAMES.md), `market/src/game.js`). Those hosts
-append `?game=one_piece` / `?game=riftbound` on `/api/marketplace-*`. Public
+**Multi-game:** every TCG except Pokémon is a path on the same SPA:
+`pokoin.com/one-piece`, `pokoin.com/riftbound`, `pokoin.com/magic`, and the
+rest in [GAMES.md](GAMES.md) (`market/src/game.js`). Those pages append
+`?game=` on `/api/marketplace-*`. `onepiece.pokoin.com` and
+`riftbound.pokoin.com` redirect to the paths. Public
 card ids are still `ct_id * 2` on every game. Storm Emeralda Combee 006/076
 is leftover `403034` → desk `806068`. Pokemon stays the default when
 `game` is omitted. Re-import of every CardTrader game keeps Oracle as the

@@ -67,7 +67,7 @@ import { useLiveSuggest } from '../use-live-suggest.js';
 import { SessionWait } from '../components/Desk.jsx';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import ThumbZoom from '../components/ThumbZoom.jsx';
-import { game, GAMES, setScanGameOverride, gameIdFromHost } from '../game.js';
+import { game, GAMES, setScanGameOverride, gameIdFromHost, gameBasename } from '../game.js';
 import { marketUrl } from '../punchouts.js';
 import '../scan-desk.css';
 
@@ -1557,7 +1557,7 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull =
     <section className={`scan-defaults${stackFull ? ' is-stack-full' : ''}`} aria-labelledby="scan-defaults-title">
       <h2 id="scan-defaults-title" className="scan-defaults-label" title="New scans take these values. Shift + a row key changes them.">Batch defaults</h2>
       <div className="scan-defaults-row">
-      {/* The TCG comes from the host (pokoin.com, onepiece., riftbound.). */}
+      {/* The TCG is the pokoin.com/{slug} prefix. Pokemon has no prefix. */}
       <label className="sd-field sd-game" title="Switch TCG — phone catalog follows this">
         <span>Game</span>
         <select
@@ -1566,8 +1566,12 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull =
             const next = e.target.value;
             if (next === gameIdFromHost()) return;
             setScanGameOverride(next);
-            // Reload so catalog, pricing, and a fresh pair use the new game.
-            window.location.reload();
+            const base = gameBasename();
+            const path = window.location.pathname;
+            const rest = base && path.startsWith(base) ? (path.slice(base.length) || '/') : path;
+            const slug = GAMES[next]?.slug || '';
+            const tail = rest.startsWith('/') ? rest : `/${rest}`;
+            window.location.assign(`${slug ? `/${slug}` : ''}${tail}`);
           }}
         >
           {Object.values(GAMES).map((g) => (

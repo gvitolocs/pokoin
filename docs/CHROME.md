@@ -6,9 +6,9 @@ Public chrome is this SPA. Android/iOS CardVault is a separate app on
 
 | Host | Vercel project | What |
 | --- | --- | --- |
-| `https://pokoin.com` | `web` (`prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`) | Landing + React market (Pokemon) |
-| `https://onepiece.pokoin.com` | same `web` | Same SPA; hostname → One Piece (`?game=one_piece`) |
-| `https://riftbound.pokoin.com` | same `web` | Same SPA; hostname → Riftbound (`?game=riftbound`) |
+| `https://pokoin.com` | `web` (`prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`) | Landing + React market. Pokémon at `/`. Other TCGs at `/{slug}` |
+| `https://onepiece.pokoin.com` | same `web` | 301 → `https://pokoin.com/one-piece` |
+| `https://riftbound.pokoin.com` | same `web` | 301 → `https://pokoin.com/riftbound` |
 | `https://app.pokoin.com` | `pokoin-flutter` (`prj_nrmYJjDGMPh4fZVO7dexZ77BTPls`) | Flutter CardVault |
 
 `explorer.pokoin.com` is served by the same `web` project via host-based

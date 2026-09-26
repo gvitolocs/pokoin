@@ -4,9 +4,9 @@ export function preferFullImage(value) {
   return rewritePublicImage(value, { allowPreview: false });
 }
 
-/** One Piece / Riftbound masters stay png/webp/jpg. Pokemon leftover scans are JPEG. */
+/** One Piece / Riftbound / other TCG masters stay png/webp/jpg. Pokemon leftover scans are JPEG. */
 export function isPrefixedCatalog(value) {
-  return /(?:^|\/)(one-piece|riftbound)\//i.test(String(value || ''));
+  return /(?:^|\/)(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery)\//i.test(String(value || ''));
 }
 
 import SMALL_SCAN_IDS from './data/small-scan-ctf1.js';

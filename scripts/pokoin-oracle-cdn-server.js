@@ -319,6 +319,48 @@ function sendHeaders(res, extra = {}) {
   for (const [k, v] of Object.entries(extra)) res.setHeader(k, v);
 }
 
+const FALLBACK_ORIGIN = String(process.env.POKOIN_CDN_FALLBACK_ORIGIN || '').replace(/\/+$/, '');
+
+function proxyGamePrefix(req, res, key) {
+  if (!FALLBACK_ORIGIN || !GAME_PREFIX_RE.test(key)) return false;
+  const target = `${FALLBACK_ORIGIN}/${key.split('/').map((part) => encodeURIComponent(part)).join('/')}`;
+  const lib = target.startsWith('https:') ? require('https') : http;
+  const upstream = lib.request(target, {
+    method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+    headers: { 'user-agent': 'pokoin-cdn-fallback' },
+  }, (up) => {
+    if (up.statusCode !== 200) {
+      up.resume();
+      sendHeaders(res, { 'Cache-Control': 'private, no-store', 'X-Pokoin-CDN-Fallback': 'miss' });
+      res.writeHead(404);
+      res.end('Not Found');
+      return;
+    }
+    const headers = {
+      'Content-Type': up.headers['content-type'] || contentType(key),
+      'Cache-Control': 'public, max-age=86400',
+      'X-Pokoin-CDN-Fallback': 'nezopt',
+    };
+    if (up.headers['content-length']) headers['Content-Length'] = up.headers['content-length'];
+    sendHeaders(res, headers);
+    res.writeHead(200);
+    if (req.method === 'HEAD') {
+      up.resume();
+      res.end();
+      return;
+    }
+    pipeline(up, res, () => {});
+  });
+  upstream.on('error', () => {
+    if (res.headersSent) return;
+    sendHeaders(res, { 'Cache-Control': 'private, no-store' });
+    res.writeHead(404);
+    res.end('Not Found');
+  });
+  upstream.end();
+  return true;
+}
+
 function createServer() {
   return http.createServer((req, res) => {
     if (req.method === 'OPTIONS') {
@@ -358,6 +400,7 @@ function createServer() {
 
     const hit = resolveFile(key);
     if (!hit) {
+      if (proxyGamePrefix(req, res, key)) return;
       sendHeaders(res, { 'Cache-Control': 'private, no-store' });
       res.writeHead(404);
       res.end('Not Found');

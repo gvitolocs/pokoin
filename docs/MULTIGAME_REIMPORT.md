@@ -55,9 +55,12 @@ not on the Pi replica of the writer.
 | 23 | Gundam | `pokoin_gundam` | `gundam/` | Ingest API live; discover-only: 37 expansions. |
 | 24 | Sorcery: Contested Realm | `pokoin_sorcery` | `sorcery/` | Ingest API live; discover-only: 9 expansions. |
 
-SPA hosts today: `pokoin.com`, `onepiece.pokoin.com`, `riftbound.pokoin.com`.
-Magic / Yu-Gi-Oh hosts come **after** a catalog exists (`game.js` +
-`_marketplace_game.js` + Vercel DNS). Do not invent `app.pokoin.com` aliases.
+SPA routes: `pokoin.com` (Pokémon) and `pokoin.com/{slug}` for every other
+CardTrader game (`one-piece`, `riftbound`, `magic`, `yugioh`, `lorcana`,
+`flesh-and-blood`, `digimon`, `dragon-ball-super`, `vanguard`, `star-wars`,
+`union-arena`, `gundam`, `sorcery`). `onepiece.pokoin.com` and
+`riftbound.pokoin.com` redirect onto those paths. Do not add
+`magic.pokoin.com` or any other game subdomain.
 
 ## Topology (target)
 
@@ -278,11 +281,14 @@ per-game response JSON in `/home/ubuntu/cardtrader-game-ingest-logs/`.
 CardTrader-side gaps: a few Union Arena expansions return `[]` or 404
 "Data is not ready for blueprints" — nothing to import yet.
 
-### Wave 4 — SPA hosts (after catalogs)
+### Wave 4 — path storefronts
 
-`magic.pokoin.com`, `yugioh.pokoin.com`, … → same Vercel project `web`.
-`market/src/game.js` + Pi `_marketplace_game.js`. `/` on satellites already
-rewrites to `/marketplace`. Competitive / Meili / art-cut stay Pokemon.
+**DONE 2026-09-26.** Every satellite catalog is a path on `pokoin.com`, not a
+subdomain. The databases already stream onto the Pi replica. Search
+projections (`marketplace_search_candidates`) were refreshed on the writer
+the same day. Image trees that are not already on the Pi stay on nezopt
+NVMe; the Pi CDN proxies a miss for those prefixes to the nezopt leftover
+server. Do not rsync Magic / Yu-Gi-Oh / Dragon Ball / Vanguard onto the Pi.
 
 ## Image contract
 

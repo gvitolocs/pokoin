@@ -3,31 +3,42 @@ import { handleMarketplaceHubOgRequest } from './marketplace-hub-og.js';
 import { handleMarketplaceHomeRequest } from './marketplace-home.js';
 import { fetchOriginOrWorking } from './working-page.js';
 
-/** Inject ?game= / x-pokoin-game for satellite hosts so Oracle never defaults to Pokemon. */
+const SATELLITE_HOSTS = {
+  'onepiece.pokoin.com': { slug: 'one-piece', game: 'one_piece' },
+  'riftbound.pokoin.com': { slug: 'riftbound', game: 'riftbound' },
+};
+
+/** Old game subdomains move to pokoin.com/{slug}. */
+export function satelliteHostRedirect(url) {
+  const host = String(url.hostname || '').toLowerCase();
+  const hit = SATELLITE_HOSTS[host] || (host.startsWith('onepiece.') ? SATELLITE_HOSTS['onepiece.pokoin.com'] : null)
+    || (host.startsWith('riftbound.') ? SATELLITE_HOSTS['riftbound.pokoin.com'] : null);
+  if (!hit) return null;
+  if (url.pathname.startsWith('/api/')) {
+    const dest = new URL(`${url.pathname}${url.search}`, 'https://pokoin.com');
+    if (!dest.searchParams.has('game')) dest.searchParams.set('game', hit.game);
+    return dest;
+  }
+  const path = url.pathname === '/' ? '/marketplace' : url.pathname;
+  return new URL(`https://pokoin.com/${hit.slug}${path}${url.search}`);
+}
+
+/** Inject ?game= / x-pokoin-game for satellite hosts so the API never defaults to Pokemon. */
 export function withSatelliteMarketplaceGame(request) {
   const url = new URL(request.url);
-  const host = String(url.hostname || '').toLowerCase();
-  let game = '';
-  if (host === 'onepiece.pokoin.com' || host.startsWith('onepiece.')) {
-    game = 'one_piece';
-  } else if (host === 'riftbound.pokoin.com' || host.startsWith('riftbound.')) {
-    game = 'riftbound';
+  const redirected = satelliteHostRedirect(url);
+  if (redirected && url.pathname.startsWith('/api/')) {
+    const headers = new Headers(request.headers);
+    headers.set('x-pokoin-game', redirected.searchParams.get('game') || '');
+    headers.set('x-pokoin-host', url.hostname);
+    return new Request(redirected.toString(), {
+      method: request.method,
+      headers,
+      body: request.body,
+      redirect: request.redirect,
+    });
   }
-  if (!game || !url.pathname.startsWith('/api/marketplace')) {
-    return request;
-  }
-  const headers = new Headers(request.headers);
-  headers.set('x-pokoin-game', game);
-  headers.set('x-pokoin-host', host);
-  if (!url.searchParams.has('game')) {
-    url.searchParams.set('game', game);
-  }
-  return new Request(url.toString(), {
-    method: request.method,
-    headers,
-    body: request.body,
-    redirect: request.redirect,
-  });
+  return request;
 }
 
 export function isMarketplaceDeskPath(pathname = '') {
@@ -120,6 +131,15 @@ export function allowExtensionDeskFrame(response, env = {}) {
 /** More-specific routes so SPA/API/assets skip the fat shortlink Worker. */
 export default {
   async fetch(request, env, ctx) {
+    try {
+      const incoming = new URL(request.url);
+      const dest = satelliteHostRedirect(incoming);
+      if (dest) {
+        return Response.redirect(dest.toString(), 301);
+      }
+    } catch (_) {
+      /* fall through */
+    }
     const satelliteRequest = withSatelliteMarketplaceGame(request);
     const og = await handleMarketplaceCardOgRequest(satelliteRequest, env, ctx);
     if (og) {

@@ -255,15 +255,13 @@ export async function handleMarketplaceHomeRequest(request, env, ctx) {
     return null;
   }
 
-  // One Piece / Riftbound use ?game= — do not serve Pokemon Pi rails.
+  // Satellite games use ?game= — do not serve Pokemon Pi rails.
   const host = String(url.hostname || '').toLowerCase();
-  const game = String(url.searchParams.get('game') || '').toLowerCase();
+  const game = String(url.searchParams.get('game') || '').toLowerCase().replace(/-/g, '_');
   if (
     host === 'onepiece.pokoin.com' ||
     host === 'riftbound.pokoin.com' ||
-    game === 'one_piece' ||
-    game === 'riftbound' ||
-    game === 'one-piece'
+    (game && game !== 'pokemon' && game !== 'poke' && game !== 'default')
   ) {
     return null;
   }

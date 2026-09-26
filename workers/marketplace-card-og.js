@@ -18,7 +18,23 @@ const SEARCH_BOT_RE =
   /Googlebot|Google-InspectionTool|bingbot|DuckDuckBot|Baiduspider|YandexBot|Applebot/i;
 
 const CARD_PATH_RE =
-  /^\/marketplace\/([a-z]{2}(?:-[a-z]{2})?)\/cards\/(\d+)(?:\/[^/?#]*)?\/?$/i;
+  /^\/(?:([a-z0-9-]+)\/)?marketplace\/([a-z]{2}(?:-[a-z]{2})?)\/cards\/(\d+)(?:\/[^/?#]*)?\/?$/i;
+
+const GAME_SLUGS = {
+  'one-piece': 'one_piece',
+  riftbound: 'riftbound',
+  magic: 'magic',
+  yugioh: 'yugioh',
+  lorcana: 'lorcana',
+  'flesh-and-blood': 'flesh_and_blood',
+  digimon: 'digimon',
+  'dragon-ball-super': 'dragon_ball_super',
+  vanguard: 'vanguard',
+  'star-wars': 'star_wars',
+  'union-arena': 'union_arena',
+  gundam: 'gundam',
+  sorcery: 'sorcery',
+};
 
 export function siteOriginFromHost(hostname) {
   const host = String(hostname || '').toLowerCase().split(':')[0];
@@ -58,7 +74,15 @@ export function parseCardPath(pathname) {
   if (!match) {
     return null;
   }
-  return { language: match[1].toLowerCase(), cardId: realPublicCardId(match[2]) };
+  const slug = match[1] ? match[1].toLowerCase() : '';
+  if (slug && !GAME_SLUGS[slug]) {
+    return null;
+  }
+  return {
+    language: match[2].toLowerCase(),
+    cardId: realPublicCardId(match[3]),
+    game: slug ? GAME_SLUGS[slug] : '',
+  };
 }
 
 export function absoluteUrl(pathOrUrl, origin = SITE) {
@@ -274,7 +298,7 @@ export async function handleMarketplaceCardOgRequest(request, env, ctx) {
 
   const search = isSearchEngineBot(userAgent) && !force;
   const site = siteOriginFromHost(url.hostname);
-  const game = apiGameFromHost(url.hostname);
+  const game = parsed.game || apiGameFromHost(url.hostname);
   const cache = caches.default;
   const cacheKey = new Request(
     `${site}/__og/${OG_CACHE_VERSION}/card/${game || 'pokemon'}/${parsed.language}/${parsed.cardId}/${search ? 'search' : 'social'}`,

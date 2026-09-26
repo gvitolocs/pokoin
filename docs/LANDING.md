@@ -212,8 +212,8 @@ Android/iOS CardVault, leftover Flutter-web `web/home.html` / `app.html` /
 | --- | --- |
 | `pokoin.com` | This landing |
 | `www.pokoin.com` | 301 → `pokoin.com` |
-| `onepiece.pokoin.com` | 307 → `/marketplace` (shared React market SPA, One Piece catalog) |
-| `riftbound.pokoin.com` | 307 → `/marketplace` (shared React market SPA, Riftbound catalog) |
+| `onepiece.pokoin.com` | 301 → `https://pokoin.com/one-piece/marketplace` |
+| `riftbound.pokoin.com` | 301 → `https://pokoin.com/riftbound/marketplace` |
 | `app.pokoin.com` | Flutter CardVault (Android/iOS). Public chrome is `pokoin.com`. [APP.md](APP.md). |
 | `forum.pokoin.com` | Legacy alias. Use `https://pokoin.com/forum`. |
 | `explorer.pokoin.com` | **Vercel `web`** via host rewrite → `/explorer/*`. DNS must be a CNAME to `cname.vercel-dns.com` — never a node/home IP. |

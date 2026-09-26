@@ -21,12 +21,16 @@ test('detects Discord and other link-preview bots', () => {
 test('parses marketplace card paths', () => {
   assert.deepEqual(
     parseCardPath('/marketplace/en/cards/248768/card-drifloon-lv-17-non-holo-promo-6-17-pop-series-6'),
-    { language: 'en', cardId: '248768' },
+    { language: 'en', cardId: '248768', game: '' },
   );
-  assert.deepEqual(parseCardPath('/marketplace/en/cards/248768'), { language: 'en', cardId: '248768' });
+  assert.deepEqual(parseCardPath('/marketplace/en/cards/248768'), { language: 'en', cardId: '248768', game: '' });
   assert.deepEqual(
     parseCardPath('/marketplace/en/cards/999806370/card-zinnia-s-trust-ultra-rare-102-076-storm-emeralda'),
-    { language: 'en', cardId: '806370' },
+    { language: 'en', cardId: '806370', game: '' },
+  );
+  assert.deepEqual(
+    parseCardPath('/one-piece/marketplace/en/cards/818358/luffy'),
+    { language: 'en', cardId: '818358', game: 'one_piece' },
   );
   assert.equal(parseCardPath('/marketplace'), null);
 });

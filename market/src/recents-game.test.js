@@ -6,6 +6,10 @@ test('hostnames map to canonical game ids used by recents', () => {
   assert.equal(gameIdFromHost('pokoin.com'), 'pokemon');
   assert.equal(gameIdFromHost('onepiece.pokoin.com'), 'one_piece');
   assert.equal(gameIdFromHost('riftbound.pokoin.com'), 'riftbound');
+  assert.equal(gameIdFromHost('pokoin.com', '/one-piece/marketplace'), 'one_piece');
+  assert.equal(gameIdFromHost('pokoin.com', '/magic/marketplace/search'), 'magic');
+  assert.equal(gameIdFromHost('pokoin.com', '/yugioh'), 'yugioh');
+  assert.equal(gameIdFromHost('pokoin.com', '/marketplace'), 'pokemon');
 });
 
 test('scan game picker applies on /dashboard, not on the marketplace', () => {

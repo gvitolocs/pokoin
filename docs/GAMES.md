@@ -1,17 +1,31 @@
-# Multi-game hosts + Pi CDN
+# Multi-game paths + Pi CDN
 
 ## Marketplaces (live)
 
-One shared React SPA (`market/`, Vercel project `web`). Hostname picks the game
-via [`market/src/game.js`](../market/src/game.js); API calls append `?game=` and
-send `x-pokoin-game` / `x-pokoin-host`. The CF origin Worker also injects `game`
-for satellite hosts so the Pi API never falls back to Pokemon.
+One shared React SPA (`market/`, Vercel project `web`). The first path segment
+picks the game via [`market/src/game.js`](../market/src/game.js). Pokemon stays
+on `pokoin.com` with no prefix. Every other TCG is `pokoin.com/{slug}`.
+API calls append `?game=` and send `x-pokoin-game`.
 
-| Host | `game` | DB | Public card id |
+| Path | `game` | DB | Public card id |
 | --- | --- | --- | --- |
 | `pokoin.com` | `pokemon` (default) | `pokoin_marketplace` | `ct_id * 2` |
-| `onepiece.pokoin.com` | `one_piece` | `pokoin_one_piece` | `ct_id * 2` |
-| `riftbound.pokoin.com` | `riftbound` | `pokoin_riftbound` | `ct_id * 2` |
+| `pokoin.com/one-piece` | `one_piece` | `pokoin_one_piece` | `ct_id * 2` |
+| `pokoin.com/riftbound` | `riftbound` | `pokoin_riftbound` | `ct_id * 2` |
+| `pokoin.com/magic` | `magic` | `pokoin_magic` | `ct_id * 2` |
+| `pokoin.com/yugioh` | `yugioh` | `pokoin_yugioh` | `ct_id * 2` |
+| `pokoin.com/lorcana` | `lorcana` | `pokoin_lorcana` | `ct_id * 2` |
+| `pokoin.com/flesh-and-blood` | `flesh_and_blood` | `pokoin_flesh_and_blood` | `ct_id * 2` |
+| `pokoin.com/digimon` | `digimon` | `pokoin_digimon` | `ct_id * 2` |
+| `pokoin.com/dragon-ball-super` | `dragon_ball_super` | `pokoin_dragon_ball_super` | `ct_id * 2` |
+| `pokoin.com/vanguard` | `vanguard` | `pokoin_vanguard` | `ct_id * 2` |
+| `pokoin.com/star-wars` | `star_wars` | `pokoin_star_wars` | `ct_id * 2` |
+| `pokoin.com/union-arena` | `union_arena` | `pokoin_union_arena` | `ct_id * 2` |
+| `pokoin.com/gundam` | `gundam` | `pokoin_gundam` | `ct_id * 2` |
+| `pokoin.com/sorcery` | `sorcery` | `pokoin_sorcery` | `ct_id * 2` |
+
+`onepiece.pokoin.com` and `riftbound.pokoin.com` redirect to
+`pokoin.com/one-piece` and `pokoin.com/riftbound`. Do not add new game subdomains.
 
 Pokemon Milo gallery `id` is that same leftover `ct_id` (manifest
 `"identity": "ct_id"`). Public desk = Milo `id` × 2. Not a TCGplayer product
@@ -33,11 +47,11 @@ Game resolution order (`cardvault/.../api/_marketplace_game.js`):
 
 1. `?game=` / `marketplaceGame`
 2. `x-pokoin-game` / `x-marketplace-game`
-3. Host / `x-forwarded-host` / `x-pokoin-host` / Origin (`onepiece.*` → `one_piece`, `riftbound.*` → `riftbound`)
+3. Host / `x-forwarded-host` / `x-pokoin-host` / Origin is only a leftover fallback. The live storefronts are path prefixes on `pokoin.com`.
 
 SPA on satellite hosts **skips** `/api/marketplace-home` and calls `/api/marketplace-home-page` only (the Pokemon Flutter home always returned Pokemon cards and short-circuited the UI). Isolated OP/RB catalogs have no `candidates.version` / `pokoin_version_sets`; home and set lists use newest/hot SQL and `marketplace_set_card_counts`. Pokemon SPA first paint: [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md).
 
-- `/` on satellite hosts → `/marketplace`.
+- A game path (`/one-piece`, `/magic`, …) is that game's whole SPA. `/` inside it goes to `/marketplace`.
 - CDN keys stay raw `ct_id` under `one-piece/` and `riftbound/` (do not rewrite to public id).
 - Projections: `public.marketplace_search_candidates` + `marketplace_card_urls` in each isolated DB (`cardvault/pokemon_card_vault/oracle-postgres/schema/026_multigame_marketplace_projections.sql`).
 - Refresh: `select public.refresh_multigame_marketplace_projections(...)`.
@@ -192,9 +206,9 @@ curl -sS https://api.pokoin.com/healthz
 # 200 only when postgres, valkey, meili, and Pi CDN all answer.
 curl -sSI "https://cdn.pokoin.com/one-piece/301338_burn-bazooka.jpg"
 curl -sS "https://api.pokoin.com/api/marketplace-suggest?game=one_piece&q=luffy&limit=2"
-curl -sS "https://onepiece.pokoin.com/api/marketplace-home-page" | head -c 200   # must be game=one_piece
-curl -sS "https://riftbound.pokoin.com/api/marketplace-home" | head -c 200       # must NOT be Pokemon
-curl -sS "https://api.pokoin.com/api/marketplace-home-page?game=riftbound" | head -c 200
+curl -sS "https://pokoin.com/one-piece/marketplace" | head -c 80
+curl -sS "https://api.pokoin.com/api/marketplace-home-page?game=magic" | head -c 200
+curl -sS "https://api.pokoin.com/api/marketplace-suggest?game=yugioh&q=dark&limit=1" | head -c 200
 ```
 
 ## Pi watchdog
