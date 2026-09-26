@@ -3652,20 +3652,20 @@ a.era-link:focus-visible {
 }
 
 .sell-options-row .condition-pick { width: 5.75rem; }
-.sell-options-row .language-pick { width: 6.4rem; position: relative; }
+.sell-options-row .language-pick { width: auto; position: relative; }
 
-.lang-pick { position: relative; width: 100%; }
+.lang-pick { position: relative; width: auto; }
 
 .lang-pick-btn {
-  width: 100%;
-  display: flex;
+  width: auto;
+  display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
   background-color: var(--g2);
   border: 1px solid var(--g5);
   color: inherit;
   border-radius: 10px;
-  padding: 0.5rem 0.6rem;
+  padding: 0.35rem 0.5rem;
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -3685,9 +3685,10 @@ a.era-link:focus-visible {
   z-index: 40;
   top: calc(100% + 0.35rem);
   left: 0;
-  min-width: 7.5rem;
+  width: max-content;
+  min-width: 0;
   margin: 0;
-  padding: 0.35rem;
+  padding: 0.2rem;
   list-style: none;
   background: #16141c;
   border: 1px solid var(--g5);
@@ -3698,18 +3699,19 @@ a.era-link:focus-visible {
 }
 
 .lang-pick-menu button {
-  width: 100%;
+  width: auto;
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.35rem;
   border: 0;
   background: transparent;
   color: inherit;
   border-radius: 8px;
-  padding: 0.4rem 0.45rem;
+  padding: 0.22rem 0.4rem;
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .lang-pick-menu button[aria-selected="true"] {
@@ -3717,7 +3719,7 @@ a.era-link:focus-visible {
 }
 
 .lang-pick-menu em {
-  margin-left: auto;
+  margin-left: 0.2rem;
   font-style: normal;
 }
 
@@ -3943,7 +3945,29 @@ a.era-link:focus-visible {
 }
 
 html.is-shop-marquee,
-html.is-shop-marquee * { user-select: none; }
+html.is-shop-marquee * {
+  user-select: none;
+  cursor: crosshair !important;
+}
+
+.drag-stack {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+
+.drag-stack img {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 216px;
+  height: 302px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: #07060b;
+  box-shadow: 0 14px 32px rgb(0 0 0 / 0.5);
+}
 .shop-row.mine { cursor: default; }
 .shop-row.mine:hover { background: transparent; }
 .shop-row .shop-owner-actions,

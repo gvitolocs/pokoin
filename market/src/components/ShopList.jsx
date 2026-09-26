@@ -68,10 +68,18 @@ export default function ShopList({ className = '', children }) {
       }
     }
 
+    function selectedRow(target) {
+      const row = target?.closest?.('.shop-row[data-listing-id]');
+      const id = row?.dataset.listingId;
+      if (!id || !selectedRef.current.has(id)) return null;
+      return row;
+    }
+
     function onDown(event) {
       if (event.button !== 0) return;
       if (!panel.contains(event.target)) return;
       if (marqueeBlocked(event.target)) return;
+      if (selectedRow(event.target)) return;
       const row = event.target.closest?.('.shop-row');
       if (row?.draggable) {
         row.dataset.wasDraggable = '1';
@@ -95,6 +103,7 @@ export default function ShopList({ className = '', children }) {
       if (event.button !== 0) return;
       if (!panel.contains(event.target)) return;
       if (marqueeBlocked(event.target)) return;
+      if (selectedRow(event.target)) return;
       // A draggable row would steal this gesture for an HTML5 card drag.
       event.preventDefault();
     }
@@ -125,6 +134,16 @@ export default function ShopList({ className = '', children }) {
           window.removeEventListener('click', stopClick, true);
         };
         window.addEventListener('click', stopClick, true);
+      } else if (origin?.target?.closest?.('a')) {
+        origin.target.closest('a').dispatchEvent(new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          shiftKey: origin.shift,
+          ctrlKey: origin.ctrl,
+          metaKey: origin.meta,
+          clientX: origin.x,
+          clientY: origin.y,
+        }));
       } else if (origin?.target?.closest?.('.shop-row')) {
         // mousedown preventDefault cancels the real click, so replay it.
         origin.target.closest('.shop-row').dispatchEvent(new MouseEvent('click', {

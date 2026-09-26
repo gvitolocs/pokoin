@@ -64,6 +64,7 @@ export default function ShopListingRow({
   onEdit,
   onCancel,
   selected = false,
+  dragOffers = null,
 }) {
   const [added, setAdded] = useState(false);
   const name = publicShopSellerLabel(offer);
@@ -100,7 +101,26 @@ export default function ShopListingRow({
       className={`shop-row${mine ? ' mine' : ''}${showCard ? ' is-profile' : ''}${onBuy && !mine ? ' is-buy' : ''}${editing ? ' is-editing' : ''}${selected ? ' is-selected' : ''}`}
       data-listing-id={listingSelectId(offer)}
       draggable
-      onDragStart={(event) => writeListingDrag(event, reference)}
+      onDragStart={(event) => {
+        if (dragOffers?.length > 1) {
+          const cards = dragOffers.map((row) => listingReference({
+            offer: row,
+            card: row === offer ? card : {
+              id: row.cardId || row.card_id,
+              name: row.cardName || row.name,
+              canonicalPath: row.canonicalPath || row.canonical_path,
+            },
+          }));
+          writeListingDrag(event, {
+            kind: 'cards',
+            cardName: `${cards.length} cards`,
+            imageUrl: cards[0]?.imageUrl || reference.imageUrl,
+            cards,
+          });
+          return;
+        }
+        writeListingDrag(event, reference);
+      }}
       onClick={buy}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {

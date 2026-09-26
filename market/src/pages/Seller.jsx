@@ -6,7 +6,7 @@ import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { getSearchLang } from '../locale.js';
 import ShopList from '../components/ShopList.jsx';
 import ShopListingRow from '../components/ShopListing.jsx';
-import { listingSelectId } from '../shop-marquee.js';
+import { listingSelectId, shopDragOffers } from '../shop-marquee.js';
 import { Alert, EmptyDesk, Metric, MetricGrid } from '../components/Desk.jsx';
 import {
   publicListingSellerName,
@@ -240,6 +240,7 @@ export default function Seller() {
                     card={cardStub}
                     showCard
                     selected={selected.has(listingSelectId(enriched))}
+                    dragOffers={shopDragOffers(listings, selected, enriched)}
                     onCart={(qty) => {
                       if (!cardId || !offer.id) return;
                       const item = cartItemFromOffer(cardStub, enriched);

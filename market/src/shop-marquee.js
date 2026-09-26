@@ -25,9 +25,17 @@ export function listingSelectId(offer) {
   return [offer?.sellerName || offer?.sellerUsername || '', offer?.pricePkn || 0, offer?.cardName || offer?.name || ''].join('|');
 }
 
-/** Links and controls keep their own click or card drag. The rest of a row can start a box. */
+/** Buttons and fields keep their own click. The card scan can start a selection box. */
 export function marqueeBlocked(target) {
   return Boolean(target?.closest?.(
-    'a, button, input, select, textarea, label, .ct-qty, .shop-art, .art-frame, .chat-dock, .chat-tag',
+    'button, input, select, textarea, label, .ct-qty, .shop-row-actions, .chat-dock, .chat-tag',
   ));
+}
+
+/** Listings that ride along when a selected shop row is dragged. */
+export function shopDragOffers(rows, selected, offer) {
+  const id = listingSelectId(offer);
+  if (!id || !selected?.has?.(id) || selected.size < 2) return null;
+  const mates = (rows || []).filter((row) => selected.has(listingSelectId(row)));
+  return mates.length > 1 ? mates : null;
 }

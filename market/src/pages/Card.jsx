@@ -93,7 +93,7 @@ import { tcgEra, eraHref } from '../set-logos.js';
 import { speciesFromCard, pokemonHref } from '../pokemon-hubs.js';
 import ShopList from '../components/ShopList.jsx';
 import ShopListingRow from '../components/ShopListing.jsx';
-import { listingSelectId } from '../shop-marquee.js';
+import { listingSelectId, shopDragOffers } from '../shop-marquee.js';
 import { conditionShort } from '../listing-meta.js';
 import {
   breadcrumbJsonLd,
@@ -712,7 +712,9 @@ function ListingForm({
     setName: identity?.set || card.set,
     releaseLanguages: card.releaseLanguages,
   });
-  const redirects = versionRedirects(versions, card.id, listLangs);
+  const redirects = versionRedirects(versions, card.id, listLangs, {
+    nationality: card.nationality,
+  });
   const langKey = listLangs.join(',');
   const editingId = editing?.id || '';
   const isEditing = Boolean(editingId);
@@ -2265,6 +2267,7 @@ export default function Card() {
                     card={card}
                     mine={mine}
                     selected={selected.has(listingSelectId(offer))}
+                    dragOffers={shopDragOffers(offers, selected, offer)}
                     listingBusy={listingBusy}
                     editing={editingOffer?.id === offer.id}
                     onCart={(qty) => addItem({ ...cartItemFromOffer(card, offer), qty: qty || 1 })}
