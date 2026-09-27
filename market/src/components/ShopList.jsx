@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   clearShopSelectionOnPointer,
-  marqueeBlocked,
+  marqueeStartAllowed,
   marqueeRect,
   rectsIntersect,
 } from '../shop-marquee.js';
@@ -35,7 +35,10 @@ export default function ShopList({ className = '', children }) {
   useEffect(() => {
     const list = ref.current;
     const panel = list?.closest('.shop-panel') || list;
-    if (!panel) return undefined;
+    // Host is main so an empty-background band that covers shop rows still
+    // selects listings (starting only inside .shop-panel missed that case).
+    const host = list?.closest('main') || panel;
+    if (!panel || !host) return undefined;
 
     let origin = null;
     let armed = false;
@@ -89,8 +92,8 @@ export default function ShopList({ className = '', children }) {
 
     function onDown(event) {
       if (event.button !== 0) return;
-      if (!panel.contains(event.target)) return;
-      if (marqueeBlocked(event.target)) return;
+      if (!host.contains(event.target)) return;
+      if (!marqueeStartAllowed(event.target)) return;
       if (selectedRow(event.target)) return;
       const row = event.target.closest?.('.shop-row');
       if (row?.draggable) {
@@ -108,20 +111,20 @@ export default function ShopList({ className = '', children }) {
       };
       armed = false;
       base = origin.additive ? new Set(selectedRef.current) : new Set();
-      try { panel.setPointerCapture(event.pointerId); } catch { /* mouse fallback */ }
+      try { host.setPointerCapture(event.pointerId); } catch { /* mouse fallback */ }
     }
 
     function onMouseDown(event) {
       if (event.button !== 0) return;
-      if (!panel.contains(event.target)) return;
-      if (marqueeBlocked(event.target)) return;
+      if (!host.contains(event.target)) return;
+      if (!marqueeStartAllowed(event.target)) return;
       if (selectedRow(event.target)) return;
       // A draggable row would steal this gesture for an HTML5 card drag.
       event.preventDefault();
     }
 
     function onDragStart(event) {
-      if (!origin || marqueeBlocked(origin.target)) return;
+      if (!origin || !marqueeStartAllowed(origin.target)) return;
       event.preventDefault();
     }
 
@@ -131,7 +134,7 @@ export default function ShopList({ className = '', children }) {
       if (!armed && Math.hypot(rect.width, rect.height) < DRAG_THRESHOLD) return;
       if (!armed) {
         armed = true;
-        try { panel.setPointerCapture(event.pointerId); } catch { /* already released */ }
+        try { host.setPointerCapture(event.pointerId); } catch { /* already released */ }
       }
       document.documentElement.classList.add('is-shop-marquee');
       setBand(rect);
@@ -204,18 +207,18 @@ export default function ShopList({ className = '', children }) {
       anchor = id;
     }
 
-    panel.addEventListener('pointerdown', onDown);
-    panel.addEventListener('mousedown', onMouseDown);
-    panel.addEventListener('dragstart', onDragStart, true);
+    host.addEventListener('pointerdown', onDown);
+    host.addEventListener('mousedown', onMouseDown);
+    host.addEventListener('dragstart', onDragStart, true);
     panel.addEventListener('click', onClick);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('keydown', onKey);
     document.addEventListener('pointerdown', onOutsideDown, true);
     return () => {
-      panel.removeEventListener('pointerdown', onDown);
-      panel.removeEventListener('mousedown', onMouseDown);
-      panel.removeEventListener('dragstart', onDragStart, true);
+      host.removeEventListener('pointerdown', onDown);
+      host.removeEventListener('mousedown', onMouseDown);
+      host.removeEventListener('dragstart', onDragStart, true);
       panel.removeEventListener('click', onClick);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);

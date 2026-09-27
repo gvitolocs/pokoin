@@ -57,14 +57,24 @@ function offerCopies(offer) {
 
 export function listingReference({ offer, card }) {
   const stock = offerCopies(offer);
+  const cardId = String(card?.id || offer?.cardId || offer?.card_id || '');
   return {
     kind: 'listing',
     listingId: String(offer?.id || ''),
-    cardId: String(card?.id || ''),
+    cardId,
     sellerUid: sellerUserId(offer?.sellerUid || offer?.seller_uid),
     seller: chatHandle(sellerHandle(offer)),
+    sellerName: String(offer?.sellerName || offer?.sellerDisplayName || '').trim(),
+    sellerCountry: String(offer?.sellerCountry || offer?.seller_country || '').trim(),
     cardName: card?.name || offer?.cardName || offer?.name || 'Card',
-    setName: String(offer?.setName || ''),
+    setName: String(offer?.setName || offer?.set_name || card?.set || ''),
+    number: String(offer?.cardNumber || offer?.card_number || card?.number || ''),
+    condition: String(offer?.condition || 'NM'),
+    language: String(offer?.language || ''),
+    reverse: Boolean(offer?.reverse),
+    firstEdition: Boolean(offer?.firstEdition || offer?.first_edition),
+    graded: Boolean(offer?.graded),
+    grade: String(offer?.grade || offer?.grader || ''),
     imageUrl: cardImage(card, offer),
     path: card?.canonicalPath || offer?.canonicalPath || offer?.canonical_path || '',
     pricePkn: Number(offer?.pricePkn) || 0,
@@ -402,10 +412,12 @@ let dragGhost;
 function dragSourceImage(event) {
   const node = event?.currentTarget;
   if (!node || node.nodeType !== 1) return null;
-  if (node.tagName === 'IMG') return node;
+  if (node.tagName === 'IMG' && !isShopFlagImage(node)) return node;
   const nested = node.querySelector?.(
     [
+      '.shop-art img',
       '.shop-card img',
+      '.art-cut img',
       '.tile-art img',
       '.seller-listing-art img',
       '.c-art img',
@@ -418,13 +430,18 @@ function dragSourceImage(event) {
       '.set-wordmark',
       '.set-sym',
       '.page-title img',
-      'img',
     ].join(', '),
   );
-  if (nested) return nested;
+  if (nested && !isShopFlagImage(nested)) return nested;
   // The desk hero is the frame itself, so `.art-frame img` does not match a descendant.
   if (node.matches?.('.art-frame')) return node.querySelector?.('img') || null;
   return null;
+}
+
+function isShopFlagImage(img) {
+  if (!img) return false;
+  if (img.classList?.contains?.('shop-flag')) return true;
+  return Boolean(img.closest?.('.shop-flag, .shop-seller, .shop-facets'));
 }
 
 function markCardDragging() {
@@ -561,9 +578,24 @@ function findWarmRowImage(row, source = null) {
     const listingId = String(row.listingId || '').trim();
     if (listingId && !listingId.startsWith('bundle:') && typeof CSS !== 'undefined' && CSS.escape) {
       const shop = document.querySelector(`[data-listing-id="${CSS.escape(listingId)}"]`);
-      const img = shop?.querySelector?.('.shop-card img, img');
-      if (img?.complete && img.naturalWidth > 0) {
+      // Never bare `img` — country/language flags come first in the shop row.
+      const img = shop?.querySelector?.(
+        '.shop-art img, .shop-card img, .art-cut img, .shop-photo img',
+      );
+      if (img?.complete && img.naturalWidth > 0 && !isShopFlagImage(img)) {
         return rememberWarmImage(img);
+      }
+    }
+    // Desk hero for the same printing when the shop row has no thumbnail.
+    if (cardId) {
+      const desk = document.querySelector('.art-frame img, .art-frame canvas');
+      if (desk?.complete && desk.naturalWidth > 0) {
+        const pageId = String(
+          document.querySelector('[data-card-id]')?.getAttribute?.('data-card-id')
+          || location.pathname.match(/\/cards\/(\d+)/)?.[1]
+          || '',
+        );
+        if (!pageId || pageId === cardId) return rememberWarmImage(desk);
       }
     }
     // Public card_id → leftover ct_id filename prefix used on CDN.
@@ -727,7 +759,16 @@ function mountDragStack(cards, event) {
     // Held tile first; every other pile card must resolve its own warm homepage
     // bitmap (by data-card-id / listing row / leftover filename) — URL-only
     // lookup left secondary layers as black plates.
-    const warm = (index === 0 ? source : null) || findWarmRowImage(row, source);
+    // Never trust a shop-row flag as the held source for a listing/card ghost.
+    const held = index === 0 && source && !isShopFlagImage(source)
+      && (!row.imageUrl || urlsLookSame(
+        String(source.currentSrc || source.src || ''),
+        row.imageUrl,
+        homepageDerivativeUrl(row.imageUrl),
+      ))
+      ? source
+      : null;
+    const warm = held || findWarmRowImage(row, held);
     root.appendChild(stackLayerFromWarm(warm, 30 - index, fit));
   });
   document.body.appendChild(root);

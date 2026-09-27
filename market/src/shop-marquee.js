@@ -32,6 +32,23 @@ export function marqueeBlocked(target) {
   ));
 }
 
+/**
+ * Shop marquee may start on a shop row / empty shop panel, or on empty page
+ * background so a band that covers listings still selects them. Never on
+ * art-frame, card tiles, or chrome (those own their own gestures).
+ */
+export function marqueeStartAllowed(target) {
+  if (!target?.closest) return false;
+  if (marqueeBlocked(target)) return false;
+  if (target.closest('.shop-panel, .shop-list, .shop-row')) return true;
+  if (target.closest(
+    '[data-card-id], .art-frame, a, button, input, select, textarea, label, header, footer, nav, .topbar, .suggest, .cart-drop, .desktop-drop, dialog, .chat-dock',
+  )) {
+    return false;
+  }
+  return Boolean(target.closest('main'));
+}
+
 /** A plain pointer outside the selected rows dismisses the current group. */
 export function clearShopSelectionOnPointer(target, list, selected, event = {}) {
   if (!selected?.size) return false;

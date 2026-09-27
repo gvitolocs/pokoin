@@ -58,6 +58,7 @@ test('desk art-frame is ignored by the multi-select band so the scan can HTML5-d
   const source = fs.readFileSync(path.join(root, 'components/CardSelectGrid.jsx'), 'utf8');
   assert.match(source, /\.art-frame/);
   assert.match(source, /dialog\.zoom/);
+  assert.match(source, /\.shop-panel/);
   const page = fs.readFileSync(path.join(root, 'pages/Card.jsx'), 'utf8');
   const classAt = page.indexOf('className="art-frame"');
   const frame = page.slice(classAt - 120, classAt + 200);

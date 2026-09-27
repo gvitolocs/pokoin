@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import {
   clearShopSelectionOnPointer,
   listingSelectId,
   marqueeBlocked,
   marqueeRect,
+  marqueeStartAllowed,
   rectsIntersect,
   shopDragOffers,
 } from './shop-marquee.js';
@@ -30,6 +32,35 @@ test('a rubber band starts on the card scan, not on a button', () => {
   assert.equal(rectsIntersect(rect, { left: 0, top: 0, right: 5, bottom: 10 }), true);
   assert.equal(rectsIntersect(rect, { left: 20, top: 0, right: 30, bottom: 10 }), false);
   assert.equal(listingSelectId({ id: 'lst-1' }), 'lst-1');
+});
+
+test('empty page background may start a shop marquee; art-frame and tiles may not', () => {
+  function mock(hits) {
+    return {
+      closest: (sel) => {
+        const parts = String(sel).split(',').map((part) => part.trim());
+        return parts.some((part) => hits.includes(part)) ? mock(hits) : null;
+      },
+    };
+  }
+  const bg = mock(['main']);
+  const art = mock(['.art-frame', 'main']);
+  const tile = mock(['[data-card-id]', 'main']);
+  const shop = mock(['.shop-row']);
+  assert.equal(marqueeStartAllowed(bg), true);
+  assert.equal(marqueeStartAllowed(art), false);
+  assert.equal(marqueeStartAllowed(tile), false);
+  assert.equal(marqueeStartAllowed(shop), true);
+});
+
+test('ShopList listens on main so a band from empty background can hit listings', () => {
+  const src = readFileSync(new URL('./components/ShopList.jsx', import.meta.url), 'utf8');
+  assert.match(src, /closest\('main'\)/);
+  assert.match(src, /marqueeStartAllowed/);
+  assert.match(
+    readFileSync(new URL('./components/CardSelectGrid.jsx', import.meta.url), 'utf8'),
+    /\.shop-panel/,
+  );
 });
 
 test('a plain pointer outside selected shop rows clears the selection', () => {

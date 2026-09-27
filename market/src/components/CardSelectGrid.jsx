@@ -66,7 +66,8 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
       return target instanceof Element && target.closest(
         // .art-frame used to be a <button>; as a div it must stay listed or
         // the desk scan starts the multi-select band instead of HTML5 drag.
-        'a, button, input, select, textarea, label, header, footer, nav, .topbar, .seller-history, .suggest, .cart-drop, .desktop-drop, .art-frame, dialog.zoom',
+        // .shop-panel owns listing marquee; related-tile banding must not steal it.
+        'a, button, input, select, textarea, label, header, footer, nav, .topbar, .seller-history, .suggest, .cart-drop, .desktop-drop, .art-frame, .shop-panel, dialog.zoom',
       );
     }
     function onDown(event) {

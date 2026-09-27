@@ -35,23 +35,28 @@ test('shop listing line never adds to cart — drag or desk buy-btn only', () =>
   assert.equal(/closest\('\.shop-row'\)\.dispatchEvent/.test(shopList), false);
 });
 
-test('CardSelectGrid keeps art-frame out of the band (PlusCal ArtNeverBands)', () => {
+test('CardSelectGrid keeps art-frame and shop-panel out of tile banding', () => {
   const source = fs.readFileSync(path.join(market, 'components/CardSelectGrid.jsx'), 'utf8');
   assert.match(source, /\.art-frame/);
+  assert.match(source, /\.shop-panel/);
   assert.match(source, /\.cart-drop/);
   assert.match(source, /\.desktop-drop/);
 });
 
 test('PlusCal GestureExclusivity model + TLC invariants', () => {
   const spec = fs.readFileSync(path.join(root, 'specs/GestureExclusivity.tla'), 'utf8');
-  assert.match(spec, /--algorithm GestureExclusivity/);
   assert.match(spec, /InvMutualExclusion/);
   assert.match(spec, /InvArtNeverBands/);
+  assert.match(spec, /InvArtNeverSelected/);
+  assert.match(spec, /InvEmptyBandCanSelectShop/);
+  assert.match(spec, /InvListingGhostIsCardArt/);
+  assert.match(spec, /InvListingRicherThanCard/);
+  assert.match(spec, /BandEmpty/);
   assert.match(spec, /clickShopRow/);
-  assert.match(spec, /ArtFrame/);
   const cfg = fs.readFileSync(path.join(root, 'specs/GestureExclusivity.cfg'), 'utf8');
-  assert.match(cfg, /InvMutualExclusion/);
-  assert.match(cfg, /InvArtNeverBands/);
+  assert.match(cfg, /InvArtNeverSelected/);
+  assert.match(cfg, /InvListingGhostIsCardArt/);
+  assert.match(cfg, /RelatedTile/);
 
   const script = path.join(root, 'scripts/check-gesture-tlc.sh');
   assert.ok(fs.existsSync(script));

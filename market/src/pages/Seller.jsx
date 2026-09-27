@@ -264,6 +264,9 @@ export default function Seller() {
                   id: cardId,
                   name: offer.cardName || offer.name || 'Card',
                   canonicalPath: path || `/marketplace/${lang || 'en'}/cards/${cardId}`,
+                  imageUrl: offer.cardImageUrl || offer.imageUrl || offer.image_url || '',
+                  homepageImageUrl: offer.homepageImageUrl || offer.homepage_image_url || '',
+                  gridImageUrl: offer.gridImageUrl || offer.grid_image_url || '',
                 };
                 return (
                   <ShopListingRow

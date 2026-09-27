@@ -48,6 +48,11 @@ test('a shop listing reference keeps the seller handle and card name', () => {
       sellerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2',
       pricePkn: 76,
       cardImageUrl: 'https://cdn.pokoin.com/a.jpg',
+      condition: 'SP',
+      language: 'IT',
+      reverse: true,
+      setName: 'Temporal Forces',
+      quantityAvailable: 3,
     },
     card: { id: '9', name: 'Drifloon', canonicalPath: '/marketplace/en/cards/9' },
   });
@@ -56,6 +61,23 @@ test('a shop listing reference keeps the seller handle and card name', () => {
   assert.equal(row.seller, 'redshakkio');
   assert.equal(row.cardName, 'Drifloon');
   assert.equal(row.pricePkn, 76);
+  assert.equal(row.condition, 'SP');
+  assert.equal(row.language, 'IT');
+  assert.equal(row.reverse, true);
+  assert.equal(row.setName, 'Temporal Forces');
+  assert.equal(row.stock, 3);
+  assert.equal(row.cardId, '9');
+});
+
+test('listing drag ghost selectors skip shop flags (card art only)', () => {
+  const src = readFileSync(new URL('./chat-listing.js', import.meta.url), 'utf8');
+  assert.match(src, /isShopFlagImage/);
+  assert.match(src, /\.shop-art img/);
+  assert.match(src, /Never bare `img`/);
+  assert.doesNotMatch(src, /\.shop-card img, img`/);
+  const card = cardReference({ id: '9', name: 'Drifloon', imageUrl: '/card-images/9.jpg' });
+  assert.equal(card.kind, 'card');
+  assert.equal(card.condition, undefined);
 });
 
 test('a listing reference never keeps a CardTrader image URL', () => {
