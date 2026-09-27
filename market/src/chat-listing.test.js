@@ -438,13 +438,24 @@ test('dragging the desk frame uses a pile of the held card', () => {
 test('the large desk scan owns the drag gesture instead of its button wrapper', () => {
   const page = readFileSync(new URL('./pages/Card.jsx', import.meta.url), 'utf8');
   const classAt = page.indexOf('className="art-frame"');
-  const openAt = page.lastIndexOf('<button', classAt);
-  const closeAt = page.indexOf('</button>', classAt);
-  const frame = page.slice(openAt, closeAt + '</button>'.length);
+  assert.ok(classAt > 0);
+  const frame = page.slice(classAt - 120, classAt + 700);
   assert.match(page, /import \{ getChatDock \} from '\.\.\/chat-dock-store\.js'/);
+  assert.match(frame, /role="button"/);
   assert.match(frame, /<CardArt[\s\S]*dragCard=\{dragThisCard\(card, payload\?\.offers \|\| \[\]\)\}/);
   assert.doesNotMatch(frame, /draggable=\{Boolean\(art\)\}/);
   assert.doesNotMatch(frame, /onDragStart=/);
+  // <button> hosts cancel HTML5 drag from the nested scan img.
+  assert.doesNotMatch(frame, /<button[\s\S]*className="art-frame"/);
+});
+
+test('writeListingDrag also stamps text/plain so Chrome keeps <a> drags alive', () => {
+  const src = readFileSync(new URL('./chat-listing.js', import.meta.url), 'utf8');
+  assert.match(src, /setData\('text\/plain'/);
+  assert.match(src, /setData\('text\/uri-list'/);
+  const page = readFileSync(new URL('./pages/Card.jsx', import.meta.url), 'utf8');
+  assert.match(page, /onPointerDown=\{\(\) => preloadDragImage\(\s*expansionLogoSrc/);
+  assert.match(page, /onPointerDown=\{\(\) => preloadDragImage\(artistCover\)\}/);
 });
 
 test('a homepage card is not a seller card', () => {

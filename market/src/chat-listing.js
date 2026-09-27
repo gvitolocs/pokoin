@@ -802,7 +802,14 @@ function fixedDragSlot(src, fit) {
 
 export function writeListingDrag(event, reference) {
   if (!event?.dataTransfer || !reference?.cardName) return;
-  event.dataTransfer.setData(LISTING_DRAG_TYPE, JSON.stringify(reference));
+  const payload = JSON.stringify(reference);
+  event.dataTransfer.setData(LISTING_DRAG_TYPE, payload);
+  // Chrome drops custom-only payloads from <a>/<button> hosts; text/plain keeps
+  // the gesture alive so application/x-pokoin-listing still arrives on drop.
+  event.dataTransfer.setData('text/plain', reference.cardName);
+  if (reference.path) {
+    event.dataTransfer.setData('text/uri-list', reference.path);
+  }
   event.dataTransfer.effectAllowed = 'copy';
   const source = rememberWarmImage(dragSourceImage(event));
   // Only soft-decode when nothing on the page is warm yet (text-only artist title).

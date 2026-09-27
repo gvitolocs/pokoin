@@ -2062,6 +2062,9 @@ export default function Card() {
                 to={setHref}
                 draggable
                 onClick={() => track(Action.clickSet, card)}
+                onPointerDown={() => preloadDragImage(
+                  expansionLogoSrc({ slug: setSlug(setName), name: setName }),
+                )}
                 onDragStart={(event) => writeListingDrag(event, bundleReference({
                   kind: 'expansion',
                   slug: setSlug(setName),
@@ -2085,6 +2088,7 @@ export default function Card() {
                     to={artistPath}
                     draggable
                     onClick={() => track(Action.clickArtist, card)}
+                    onPointerDown={() => preloadDragImage(artistCover)}
                     onDragStart={(event) => writeListingDrag(event, bundleReference({
                       kind: 'artist',
                       slug: artistSlug(artist),
@@ -2161,10 +2165,17 @@ export default function Card() {
                 </Link>
               ) : <span className="art-nav ghost" aria-hidden="true"><Chevron dir="right" /></span>}
             </div>
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               className="art-frame"
               onClick={() => {
+                setZoom(true);
+                track(Action.zoomArt, card);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
                 setZoom(true);
                 track(Action.zoomArt, card);
               }}
@@ -2187,7 +2198,7 @@ export default function Card() {
                   }}
                 />
               ) : <span className="tile-ph" />}
-            </button>
+            </div>
             {(setShortcuts.length || showMoreVersions) ? (
               <div className="set-link tight version-links">
                 {setShortcuts.length ? (
