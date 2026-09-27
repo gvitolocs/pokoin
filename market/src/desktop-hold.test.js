@@ -198,14 +198,14 @@ test('Chrome mounts Desktop on the left, opposite the cart', () => {
   const iconNavAt = chrome.indexOf('className="nav icon-nav"');
   assert.ok(brandAt > 0 && desktopAt > brandAt && searchAt > desktopAt);
   assert.ok(iconNavAt > searchAt && cartAt > iconNavAt);
-  assert.match(css, /\.desktop-drop\s*\{[^}]*left:\s*50%/s);
-  assert.match(css, /\.desktop-drop\s*\{[^}]*transform:\s*translateX\(-50%\)/s);
+  assert.match(css, /\.desktop-drop\s*\{[^}]*left:\s*0/s);
   assert.match(css, /\.desktop-drop\s*\{[^}]*width:\s*max-content/s);
-  assert.match(css, /\.desktop-drop\s*\{[^}]*min-width:\s*28rem/s);
+  assert.match(css, /\.desktop-drop\s*\{[^}]*min-width:\s*16rem/s);
   assert.match(css, /\.desktop-drop\s*\{[^}]*overflow-x:\s*clip/s);
   assert.match(css, /\.desktop-drop \.cart-drop-empty p\s*\{[^}]*white-space:\s*nowrap/s);
   assert.doesNotMatch(css, /\.desktop-drop\s*\{[^}]*right:\s*0/s);
-  assert.match(css, /\.desktop-drop-actions\s*\{[^}]*flex-wrap:\s*nowrap/s);
+  assert.doesNotMatch(css, /\.desktop-drop\s*\{[^}]*transform:\s*translateX\(-50%\)/s);
+  assert.match(css, /\.desktop-drop-actions\s*\{[^}]*flex-wrap:\s*wrap/s);
   assert.match(css, /\.cart-drop-card \.chat-qty/);
   assert.match(drop, /Clear desktop/);
   assert.match(drop, /Add to cart/);
