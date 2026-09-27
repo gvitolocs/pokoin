@@ -227,7 +227,8 @@ export function gameIconSrc(gameOrId) {
     : (gameOrId || null);
   const slug = row?.slug || (row?.id === 'pokemon' ? 'pokemon' : '');
   if (!slug && row?.id !== 'pokemon') return '';
-  return `/games/${slug || 'pokemon'}.svg`;
+  const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) || '/';
+  return `${base}games/${slug || 'pokemon'}.svg`;
 }
 
 export { GAMES };

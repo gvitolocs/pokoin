@@ -67,14 +67,14 @@ test('each marketplace game has a CardTrader-matching icon SVG', () => {
   const gamesDir = path.join(root, '../public/games');
   for (const item of Object.values(GAMES)) {
     const src = gameIconSrc(item);
-    assert.match(src, /^\/games\/[a-z0-9-]+\.svg$/);
+    assert.match(src, /(?:^|\/)games\/[a-z0-9-]+\.svg$/);
     const file = path.join(gamesDir, path.basename(src));
     assert.ok(fs.existsSync(file), `missing ${src}`);
     const svg = fs.readFileSync(file, 'utf8');
     assert.match(svg, /<svg[\s\S]*<path[\s\S]*d="/);
   }
-  assert.equal(gameIconSrc('pokemon'), '/games/pokemon.svg');
-  assert.equal(gameIconSrc('riftbound'), '/games/riftbound.svg');
+  assert.match(gameIconSrc('pokemon'), /(?:^|\/)games\/pokemon\.svg$/);
+  assert.match(gameIconSrc('riftbound'), /(?:^|\/)games\/riftbound\.svg$/);
   const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
   assert.match(chrome, /gameIconSrc/);
   assert.match(chrome, /className="game-icon"/);
