@@ -120,11 +120,13 @@ module.exports = async function handler(req, res) {
   } catch (error) {
     const status = Number(error.statusCode) || 500;
     let message = error.message || 'Connect onboard failed.';
+    let dashboardUrl = null;
     if (/signed up for Connect/i.test(message)) {
       message = 'Stripe Connect is not enabled on this platform account yet. Complete Connect setup in the Stripe Dashboard (Connect → Get started), then retry.';
+      dashboardUrl = 'https://dashboard.stripe.com/connect/accounts/overview';
     }
     if (status >= 500) console.error('stripe-connect-onboard', error.message);
-    return res.status(status).json({ error: message });
+    return res.status(status).json({ error: message, ...(dashboardUrl ? { dashboardUrl } : {}) });
   }
 };
 

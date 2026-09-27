@@ -19,12 +19,15 @@ import ChatPhotos from '../components/ChatPhotos.jsx';
 import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
 import { createMoneyRequest, payMoneyRequest, requestStatusLabel, respondMoneyRequest } from '../money-requests.js';
 import {
+  buildPokoPageContext,
+  defaultPokoDeskPrompt,
   isPokoPeer,
   POKO_DISPLAY,
   POKO_LEDE,
   POKO_PEER,
   pokoPreview,
   readPokoHistory,
+  resolvePokoCards,
   writePokoHistory,
 } from '../poko-chat.js';
 import mascotUrl from '../assets/pokoin-mascot@8x.png';
@@ -323,13 +326,21 @@ function PokoConversation() {
     if (busy || (!message && !cards.length && !photos.length)) return;
     setBusy(true);
     setError('');
-    const attached = cards.map((row) => ({ ...row }));
+    const attached = resolvePokoCards({
+      tags: cards,
+      pathname: typeof window !== 'undefined' ? window.location.pathname : '',
+    });
     const attachedImages = photos.slice();
+    const pageContext = buildPokoPageContext({
+      pathname: typeof window !== 'undefined' ? window.location.pathname : '',
+      cards: attached,
+      images: attachedImages,
+    });
     const mine = {
       id: `local-${Date.now()}`,
       mine: true,
       text: message,
-      listings: attached,
+      listings: cards.map((row) => ({ ...row })),
       images: attachedImages,
       createdAt: new Date().toISOString(),
     };
@@ -340,11 +351,12 @@ function PokoConversation() {
     try {
       const token = await getBearer();
       const result = await sendPokoChat({
-        message: message || (attached[0]?.name
-          ? `Tell me about ${attached[0].name}`
+        message: message || (attached[0]
+          ? defaultPokoDeskPrompt(attached[0])
           : attachedImages.length ? 'What can you tell me about this photo?' : ''),
         cards: attached,
         images: attachedImages,
+        pageContext,
         sessionId: uid,
       }, token);
       setEvents((current) => [...current, {

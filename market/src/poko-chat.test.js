@@ -2,10 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   POKO_PEER,
+  buildPokoPageContext,
   cleanPokoImages,
+  clearActiveDeskCard,
+  defaultPokoDeskPrompt,
+  deskCardFromPath,
   isPokoPeer,
   pokoPreview,
   readPokoHistory,
+  resolvePokoCards,
+  setActiveDeskCard,
   tagsToPokoCards,
   writePokoHistory,
 } from './poko-chat.js';
@@ -31,6 +37,27 @@ test('tagsToPokoCards and cleanPokoImages sanitize payloads', () => {
     cleanPokoImages(['https://cdn.pokoin.com/a.jpg', 'not-a-url', 'javascript:alert(1)']),
     ['https://cdn.pokoin.com/a.jpg'],
   );
+});
+
+test('deskCardFromPath and resolvePokoCards prefer live desk then URL', () => {
+  clearActiveDeskCard();
+  const fromPath = deskCardFromPath('/marketplace/en/cards/246912/card-noivern-v-full-art-195-196-evolving-skies');
+  assert.equal(fromPath.cardId, '246912');
+  assert.match(fromPath.name, /Noivern/i);
+  assert.equal(resolvePokoCards({ pathname: fromPath.canonicalPath })[0].cardId, '246912');
+  setActiveDeskCard({ id: '99', name: 'Live Desk', set: 'SV' });
+  assert.equal(resolvePokoCards({ pathname: fromPath.canonicalPath })[0].cardId, '99');
+  assert.equal(resolvePokoCards({ tags: [{ id: '7', name: 'Tagged' }], pathname: fromPath.canonicalPath })[0].cardId, '7');
+  clearActiveDeskCard();
+});
+
+test('buildPokoPageContext and defaultPokoDeskPrompt lead with analytics', () => {
+  const cards = tagsToPokoCards([{ id: '246912', name: 'Noivern V', setName: 'Evolving Skies' }]);
+  const ctx = buildPokoPageContext({ pathname: '/marketplace/en/cards/246912', cards });
+  assert.equal(ctx.deskCardId, '246912');
+  assert.equal(ctx.channel, 'website-messages');
+  assert.match(defaultPokoDeskPrompt(cards[0]), /sold median/i);
+  assert.match(defaultPokoDeskPrompt(cards[0]), /246912/);
 });
 
 test('poko history round-trips in localStorage', () => {
