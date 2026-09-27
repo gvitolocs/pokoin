@@ -9,6 +9,7 @@ export const A4_HEIGHT_PT = 841.89;
 export const CARD_ASPECT = 63 / 88;
 
 export const POKOIN_EXPORT_LABEL = 'Pokoin.com Export';
+export const POKOIN_EXPORT_URL = 'https://pokoin.com/';
 export const POKOIN_BRAND_ICON = '/home/logo.png';
 
 const MARGIN_PT = 28;
@@ -87,6 +88,7 @@ export function desktopPdfBrandOrigin(layout = {}) {
   const totalW = BRAND_ICON_PT + gap + labelW;
   const x = pageW - margin - totalW;
   const y = margin * 0.45;
+  const pad = 2;
   return {
     iconX: x,
     iconY: y,
@@ -95,6 +97,14 @@ export function desktopPdfBrandOrigin(layout = {}) {
     textY: y + 2,
     fontSize: BRAND_FONT_PT,
     label,
+    href: POKOIN_EXPORT_URL,
+    // Clickable hit area over icon + "Pokoin.com Export".
+    linkRect: [
+      x - pad,
+      y - pad,
+      x + totalW + pad,
+      y + BRAND_ICON_PT + pad,
+    ],
   };
 }
 
@@ -260,6 +270,13 @@ export function buildDesktopPdfBytes(cells, { brand = null, layout = null } = {}
     `<< /Length ${bytesOf(contentStream).byteLength} >>\nstream\n${contentStream}\nendstream`,
   );
 
+  const [llx, lly, urx, ury] = brandBox.linkRect;
+  const linkId = add(
+    `<< /Type /Annot /Subtype /Link /Rect [${llx.toFixed(2)} ${lly.toFixed(2)} `
+    + `${urx.toFixed(2)} ${ury.toFixed(2)}] /Border [0 0 0] `
+    + `/A << /S /URI /URI (${pdfEscape(brandBox.href)}) >> >>`,
+  );
+
   const xObjectParts = imageIds
     .map((id, i) => (id ? `/Im${i} ${id} 0 R` : ''))
     .filter(Boolean);
@@ -271,7 +288,7 @@ export function buildDesktopPdfBytes(cells, { brand = null, layout = null } = {}
   const pagesId = add(`<< /Type /Pages /Kids [${pageId} 0 R] /Count 1 >>`);
   objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${A4_WIDTH_PT} ${A4_HEIGHT_PT}] `
     + `/Resources << /Font << /F1 ${fontId} 0 R >> /XObject << ${xObjects} >> >> `
-    + `/Contents ${contentId} 0 R >>`;
+    + `/Contents ${contentId} 0 R /Annots [${linkId} 0 R] >>`;
   const catalogId = add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
 
   const chunks = [bytesOf('%PDF-1.4\n')];

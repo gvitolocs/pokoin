@@ -42,9 +42,13 @@ test('desktopPdfBrandOrigin sits in the bottom-right with Pokoin Export', () => 
   const layout = desktopPdfLayout(3);
   const brand = desktopPdfBrandOrigin(layout);
   assert.equal(brand.label, POKOIN_EXPORT_LABEL);
+  assert.equal(brand.href, 'https://pokoin.com/');
   assert.ok(brand.iconX > A4_WIDTH_PT / 2);
   assert.ok(brand.iconY < layout.bottomMargin);
   assert.ok(brand.textX > brand.iconX);
+  assert.equal(brand.linkRect.length, 4);
+  assert.ok(brand.linkRect[0] < brand.iconX);
+  assert.ok(brand.linkRect[2] > brand.textX);
 });
 
 test('desktopHoldCaption is collector + expansion only', () => {
@@ -110,5 +114,8 @@ test('buildDesktopPdfBytes writes A4 PDF with brand label', () => {
   assert.match(text, /116\/128/);
   assert.match(text, /Pokoin\.com Export/);
   assert.match(text, /\/ImBrand/);
+  assert.match(text, /\/Subtype \/Link/);
+  assert.match(text, /\/URI \(https:\/\/pokoin\.com\/\)/);
+  assert.match(text, /\/Annots \[/);
   assert.match(text, /%%EOF/);
 });
