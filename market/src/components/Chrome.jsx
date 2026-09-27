@@ -214,6 +214,9 @@ function LangToggle() {
         onClick={() => setOpen((value) => !value)}
       >
         <img src={flagSrc(current.code)} alt="" width="40" height="40" />
+        <svg className="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true">
+          <path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" />
+        </svg>
       </button>
       {open ? (
         <ul className="lang-menu" role="listbox" aria-label="Card title language">
@@ -346,7 +349,6 @@ function GameSelect() {
           }}
           aria-hidden="true"
         />
-        <span>{current.name}</span>
         <svg className="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true">
           <path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" />
         </svg>
