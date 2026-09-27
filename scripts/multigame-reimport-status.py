@@ -31,6 +31,8 @@ GAMES = (
     ("pokoin_union_arena", "union-arena", "Union Arena"),
     ("pokoin_gundam", "gundam", "Gundam"),
     ("pokoin_sorcery", "sorcery", "Sorcery"),
+    ("pokoin_palworld", "palworld", "Palworld"),
+    ("pokoin_cyberpunk", "cyberpunk", "Cyberpunk"),
 )
 
 

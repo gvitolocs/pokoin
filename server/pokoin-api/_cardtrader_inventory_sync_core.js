@@ -21,6 +21,8 @@ const MARKETPLACE_GAME_BY_CARDTRADER_ID = Object.freeze({
   22: 'riftbound',
   23: 'gundam',
   24: 'sorcery',
+  26: 'palworld',
+  27: 'cyberpunk',
 });
 const SOURCE_IMPORT = 'cardtrader_seller_import';
 const CT_PREFIX = 'ct:';

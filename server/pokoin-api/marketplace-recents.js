@@ -59,6 +59,8 @@ const GAME_ALIASES = {
   'union-arena': 'union_arena',
   gundam: 'gundam',
   sorcery: 'sorcery',
+  palworld: 'palworld',
+  cyberpunk: 'cyberpunk',
 };
 
 function normalizeRecentIds(values) {

@@ -57,6 +57,12 @@ const GAMES = {
   sorcery: {
     id: 'sorcery', apiGame: 'sorcery', slug: 'sorcery', name: 'Sorcery', brand: 'Pokoin', title: 'Sorcery marketplace', ...SATELLITE,
   },
+  palworld: {
+    id: 'palworld', apiGame: 'palworld', slug: 'palworld', name: 'Palworld', brand: 'Pokoin', title: 'Palworld marketplace', ...SATELLITE,
+  },
+  cyberpunk: {
+    id: 'cyberpunk', apiGame: 'cyberpunk', slug: 'cyberpunk', name: 'Cyberpunk', brand: 'Pokoin', title: 'Cyberpunk marketplace', ...SATELLITE,
+  },
 };
 
 const SLUG_TO_ID = Object.fromEntries(

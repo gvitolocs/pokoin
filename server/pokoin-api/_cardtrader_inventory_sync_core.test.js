@@ -80,6 +80,8 @@ test('normalize pokemon product facets', () => {
 test('supported CardTrader TCGs map to their isolated Pokoin catalogs', () => {
   assert.equal(marketplaceGameForProduct(normalizeProduct({ game_id: 5, blueprint_id: 1 })), 'pokemon');
   assert.equal(marketplaceGameForProduct(normalizeProduct({ game_id: 24, blueprint_id: 2 })), 'sorcery');
+  assert.equal(marketplaceGameForProduct(normalizeProduct({ game_id: 26, blueprint_id: 5 })), 'palworld');
+  assert.equal(marketplaceGameForProduct(normalizeProduct({ game_id: 27, blueprint_id: 6 })), 'cyberpunk');
   assert.equal(marketplaceGameForProduct(normalizeProduct({ game_id: 1, blueprint_id: 3 })), 'magic');
   assert.equal(marketplaceGameForProduct(normalizeProduct({ game_id: 999, blueprint_id: 4 })), '');
 });
