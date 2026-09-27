@@ -175,8 +175,10 @@ test('an artist cover drags as a warm pile of one, not a network ghost', () => {
   assert.equal(root.className, 'drag-stack');
   assert.equal(kids.length, 1);
   assert.equal(kids[0].tagName, 'CANVAS');
-  assert.equal(kids[0].width, CARD_DRAG_WIDTH);
-  assert.equal(kids[0].height, CARD_DRAG_HEIGHT);
+  // Exact pixel copy of the warm logo (natural size), CSS box is CARD_DRAG_*.
+  assert.equal(kids[0].width, 400);
+  assert.equal(kids[0].height, 280);
+  assert.match(String(kids[0].style?.cssText || ''), /width:240px/);
 });
 
 test('card drag imageUrl prefers the homepage derivative already on rails', () => {
@@ -260,6 +262,41 @@ test('dragging a shop row uses a pile ghost, including a single card', () => {
   assert.equal(kids[0].tagName, 'CANVAS');
   assert.equal(kids[0].width, CARD_DRAG_WIDTH);
   assert.match(String(kids[0].style?.cssText || ''), /position:fixed/);
+});
+
+test('drag pile canvas copies homepage pixels 1:1 (no DPR resample)', () => {
+  const { doc, root, kids } = pileDragDocument();
+  globalThis.document = doc;
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 2 };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  writeListingDrag({
+    clientX: 40,
+    clientY: 60,
+    currentTarget: {
+      nodeType: 1,
+      tagName: 'DIV',
+      querySelector: () => ({
+        complete: true,
+        naturalWidth: 240,
+        naturalHeight: 335,
+        src: '/card-images/1_x_homepage.webp',
+        currentSrc: '/card-images/1_x_homepage.webp',
+      }),
+    },
+    dataTransfer: { setData() {}, setDragImage() {} },
+  }, {
+    kind: 'card',
+    cardName: 'Meowth',
+    imageUrl: '/card-images/1_x_homepage.webp',
+  });
+  assert.equal(root.className, 'drag-stack');
+  assert.equal(kids[0].tagName, 'CANVAS');
+  // Backing store matches the warm homepage natural size — not CARD*dpr.
+  assert.equal(kids[0].width, 240);
+  assert.equal(kids[0].height, 335);
+  assert.match(String(kids[0].style?.cssText || ''), /width:240px/);
+  assert.match(String(kids[0].style?.cssText || ''), /height:335px/);
 });
 
 test('a multi-select pile mounts lagged canvas layers', () => {

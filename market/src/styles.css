@@ -4089,6 +4089,7 @@ html.is-shop-marquee * {
   width: 240px;
   height: 335px;
   object-fit: cover;
+  object-position: center;
   border-radius: 10px;
   background: #07060b;
   box-shadow: 0 14px 32px rgb(0 0 0 / 0.5);

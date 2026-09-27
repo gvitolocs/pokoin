@@ -329,10 +329,59 @@ export function chatImageSources(row) {
   return out;
 }
 
-/** Homepage rail card: 13.5rem wide, portrait 63:88. */
-/** Match `_homepage.webp` natural size (~240×335) so drag paints 1:1 from warm tiles. */
+/** Match `_homepage.webp` natural size (~240×335) so drag CSS matches the warm tile. */
 export const CARD_DRAG_WIDTH = 240;
 export const CARD_DRAG_HEIGHT = 335;
+
+function dragPixelRatio() {
+  if (typeof window === 'undefined') return 1;
+  const dpr = Number(window.devicePixelRatio) || 1;
+  return Math.min(Math.max(dpr, 1), 2);
+}
+
+/**
+ * Native setDragImage ghost only — still DPR-sized. The visible pile must NOT
+ * go through this path: drawImage-scaling the homepage webp into a new buffer
+ * is what made the drag look softer than the tile (and black when paint failed).
+ */
+function sizeDragCanvas(canvas, cssW, cssH) {
+  const dpr = dragPixelRatio();
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  if (canvas.style) {
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+  }
+  const ctx = canvas.getContext?.('2d');
+  if (ctx?.setTransform) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  if (ctx) {
+    ctx.imageSmoothingEnabled = true;
+    if ('imageSmoothingQuality' in ctx) {
+      ctx.imageSmoothingQuality = 'high';
+    }
+  }
+  return ctx || null;
+}
+
+function dragLayerStyle(zIndex, fit = 'cover') {
+  return [
+    'position:fixed',
+    'top:0',
+    'left:0',
+    `width:${CARD_DRAG_WIDTH}px`,
+    `height:${CARD_DRAG_HEIGHT}px`,
+    'border-radius:10px',
+    'background:#07060b',
+    'box-shadow:0 14px 32px rgb(0 0 0 / 0.5)',
+    `z-index:${zIndex}`,
+    `object-fit:${fit}`,
+    'object-position:center',
+    'pointer-events:none',
+    'display:block',
+  ].join(';');
+}
 
 let dragGhost;
 
@@ -402,6 +451,26 @@ function readyDragImage(url) {
   return null;
 }
 
+function stripOrigin(url) {
+  return String(url || '').replace(/^https?:\/\/[^/]+/i, '');
+}
+
+function urlsLookSame(a, ...candidates) {
+  const left = stripOrigin(a);
+  if (!left) return false;
+  const leftHome = homepageDerivativeUrl(left) || left;
+  for (const raw of candidates) {
+    const right = stripOrigin(raw);
+    if (!right) continue;
+    if (left === right || left.endsWith(right) || right.endsWith(left)) return true;
+    const rightHome = homepageDerivativeUrl(right) || right;
+    if (leftHome && rightHome && (leftHome === rightHome || leftHome.endsWith(rightHome) || rightHome.endsWith(leftHome))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function findWarmDocumentImage(url) {
   const src = String(url || '').trim();
   if (!src || typeof document === 'undefined') return null;
@@ -429,42 +498,46 @@ function findWarmDocumentImage(url) {
   return null;
 }
 
-/** Paint a pile layer from an already-decoded bitmap — never assign a network src. */
+/**
+ * Visible pile layer from an already-decoded homepage bitmap.
+ * Lossy path we avoid: drawImage-scale into a DPR canvas (soft + easy to leave
+ * a black plate on paint errors). Instead copy pixels 1:1 into a canvas the
+ * same natural size as the warm img; CSS object-fit sizes the layer — same
+ * composite path as the tile's <img>.
+ */
 function stackLayerFromWarm(warm, zIndex, fit = 'cover') {
-  const canvas = document.createElement('canvas');
-  canvas.width = CARD_DRAG_WIDTH;
-  canvas.height = CARD_DRAG_HEIGHT;
-  canvas.className = 'drag-stack-card';
-  canvas.setAttribute('aria-hidden', 'true');
-  // Match .drag-stack img: fixed layers so STACK_LAG can trail each card.
-  canvas.style.cssText = [
-    'position:fixed',
-    'top:0',
-    'left:0',
-    `width:${CARD_DRAG_WIDTH}px`,
-    `height:${CARD_DRAG_HEIGHT}px`,
-    'border-radius:10px',
-    'background:#07060b',
-    'box-shadow:0 14px 32px rgb(0 0 0 / 0.5)',
-    `z-index:${zIndex}`,
-  ].join(';');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return canvas;
-  ctx.fillStyle = '#07060b';
-  ctx.fillRect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
-  if (warm?.naturalWidth) {
-    try {
-      const scale = fit === 'contain'
-        ? Math.min(CARD_DRAG_WIDTH / warm.naturalWidth, CARD_DRAG_HEIGHT / warm.naturalHeight)
-        : Math.max(CARD_DRAG_WIDTH / warm.naturalWidth, CARD_DRAG_HEIGHT / warm.naturalHeight);
-      const dw = warm.naturalWidth * scale;
-      const dh = warm.naturalHeight * scale;
-      ctx.drawImage(warm, (CARD_DRAG_WIDTH - dw) / 2, (CARD_DRAG_HEIGHT - dh) / 2, dw, dh);
-    } catch (_) {
-      /* tainted canvas — leave the dark plate */
+  const style = dragLayerStyle(zIndex, fit);
+  if (warm?.naturalWidth > 0 && warm?.naturalHeight > 0) {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'drag-stack-card';
+    canvas.setAttribute('aria-hidden', 'true');
+    // Exact pixel copy — no resample. naturalWidth×naturalHeight is the
+    // homepage webp (~240×335), identical to what the rail already decoded.
+    canvas.width = warm.naturalWidth;
+    canvas.height = warm.naturalHeight;
+    canvas.style.cssText = style;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      try {
+        ctx.drawImage(warm, 0, 0, warm.naturalWidth, warm.naturalHeight);
+      } catch (_) {
+        /* leave dark plate background from CSS */
+      }
     }
+    return canvas;
   }
-  return canvas;
+  const plate = document.createElement('canvas');
+  plate.className = 'drag-stack-card';
+  plate.setAttribute('aria-hidden', 'true');
+  plate.width = CARD_DRAG_WIDTH;
+  plate.height = CARD_DRAG_HEIGHT;
+  plate.style.cssText = style;
+  const ctx = plate.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = '#07060b';
+    ctx.fillRect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
+  }
+  return plate;
 }
 
 export function bundleReference({ kind, slug, name, imageUrl, path }) {
@@ -563,7 +636,14 @@ function mountDragStack(cards, event) {
     : 'cover';
   rows.forEach((row, index) => {
     const homepage = homepageDerivativeUrl(row.imageUrl) || row.imageUrl;
-    const warm = (index === 0 ? source : null)
+    // Prefer the event's warm tile for every layer that shares that URL, so a
+    // multi-select pile never falls through to empty black plates.
+    const sameAsSource = source && urlsLookSame(
+      String(source.currentSrc || source.src || ''),
+      homepage,
+      row.imageUrl,
+    );
+    const warm = (index === 0 || sameAsSource ? source : null)
       || findWarmDocumentImage(homepage)
       || findWarmDocumentImage(row.imageUrl)
       || readyDragImage(homepage)
@@ -590,15 +670,9 @@ function paintDragGhost(image, fit = 'cover') {
   document.body?.appendChild(canvas);
   if (dragGhost && dragGhost !== canvas) dragGhost.remove?.();
   dragGhost = canvas;
-  const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
-  dragGhost.width = Math.round(CARD_DRAG_WIDTH * dpr);
-  dragGhost.height = Math.round(CARD_DRAG_HEIGHT * dpr);
-  dragGhost.style.width = `${CARD_DRAG_WIDTH}px`;
-  dragGhost.style.height = `${CARD_DRAG_HEIGHT}px`;
+  const ctx = sizeDragCanvas(dragGhost, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
   dragGhost.style.left = `-${CARD_DRAG_WIDTH + 32}px`;
-  const ctx = dragGhost.getContext('2d');
   if (!ctx) return null;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
   ctx.save();
   ctx.beginPath();
