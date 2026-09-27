@@ -7,6 +7,7 @@ import { accountHeading, accountLede } from '../auth-session.js';
 import { useWallet, shortAddress } from '../wallet.jsx';
 import { useCart } from '../cart.jsx';
 import { DeskPanel, Metric, MetricGrid, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
+import SellerShippingSettings from '../components/SellerShippingSettings.jsx';
 import CardTraderConnectPanel from '../components/CardTraderConnectPanel.jsx'
 import TelegramConnectPanel from '../components/TelegramConnectPanel.jsx';;
 import { formatPknNumber } from '../pkn.js';
@@ -110,6 +111,7 @@ export default function Profile() {
         <DeskPanel title="Telegram">
           <TelegramConnectPanel />
         </DeskPanel>
+        <SellerShippingSettings />
         <DeskPanel flush title="Go to">
           <div className="thread-list">
             <Thread to="/marketplace/watchlist" title="Watchlist" meta="Local list on this browser" />

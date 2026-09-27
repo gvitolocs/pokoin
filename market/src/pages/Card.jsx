@@ -12,6 +12,8 @@ import {
   createListing,
   updateListing,
   dropListing,
+  fetchSellerSettings,
+  saveSellerSettings,
   cardFromCatalogRow,
   fetchCard,
   fetchCardSales,
@@ -90,6 +92,7 @@ import { LIST_CURRENCIES, fiatFromPkn, listingPriceToPkn } from '../pkn.js';
 import { cardStubFromRoute, mergeDeskCard, realPublicCardId } from '../card-stub.js';
 import CardArt from '../components/CardArt.jsx';
 import RelatedCards from '../components/RelatedCards.jsx';
+import { ShipFromCountryGate } from '../components/SellerShippingSettings.jsx';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
@@ -781,6 +784,9 @@ function ListingForm({
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
   const [jump, setJump] = useState(null);
+  const [shipFromCountry, setShipFromCountry] = useState('');
+  const [shipGateOpen, setShipGateOpen] = useState(false);
+  const [shipGateDraft, setShipGateDraft] = useState('');
   const listLangs = sellLanguages({
     nationality: card.nationality,
     setName: identity?.set || card.set,
@@ -866,9 +872,29 @@ function ListingForm({
     setChips((current) => ({ ...current, [key]: !current[key] }));
   }
 
+  useEffect(() => {
+    if (!signedIn) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getBearer();
+        const settings = await fetchSellerSettings(token);
+        if (!cancelled) setShipFromCountry(String(settings.shipFromCountry || '').toUpperCase());
+      } catch (_) {
+        // First listing opens the ship-from gate.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [signedIn, getBearer]);
+
   async function submit(targets = { pokoin: true, cardtrader: false }) {
     if (!signedIn) {
       navigate(authFrom(fromPath));
+      return;
+    }
+    if (!isEditing && chips.shipping && !shipFromCountry) {
+      setShipGateDraft('');
+      setShipGateOpen(true);
       return;
     }
     const amount = price
@@ -925,7 +951,8 @@ function ListingForm({
         : await createListing({
           cardId: publicCardId(card),
           sellerName,
-          sellerCountry: 'EU',
+          sellerCountry: shipFromCountry,
+          shipFromCountry,
           sellerReputationLabel: 'New',
           targets: {
             pokoin: targets?.pokoin !== false,
@@ -1190,6 +1217,29 @@ function ListingForm({
         </div>,
         document.body,
       ) : null}
+      <ShipFromCountryGate
+        open={shipGateOpen}
+        value={shipGateDraft}
+        onChange={setShipGateDraft}
+        busy={saving}
+        error={error}
+        onClose={() => setShipGateOpen(false)}
+        onSave={async () => {
+          setSaving(true);
+          setError('');
+          try {
+            const token = await getBearer();
+            const data = await saveSellerSettings({ shipFromCountry: shipGateDraft }, token);
+            setShipFromCountry(data.shipFromCountry || shipGateDraft);
+            setShipGateOpen(false);
+            setSaving(false);
+            await submit({ pokoin: true, cardtrader: false });
+          } catch (err) {
+            setError(err.message || 'Could not save ship-from country.');
+            setSaving(false);
+          }
+        }}
+      />
     </section>
   );
 }

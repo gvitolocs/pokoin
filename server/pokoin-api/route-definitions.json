@@ -192,6 +192,125 @@
     }
   },
   {
+    "path": "/api/marketplace-seller-settings",
+    "file": "marketplace-seller-settings.js",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "purpose": "Seller ship-from country (ISO-2) and Stripe Connect readiness.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "POST { shipFromCountry }"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/account-addresses",
+    "file": "account-addresses.js",
+    "methods": [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE"
+    ],
+    "purpose": "Encrypted buyer shipping addresses; countryCode stays queryable outside ciphertext.",
+    "auth": "Required Firebase bearer token; owner only.",
+    "params": {
+      "query": "id for PUT/DELETE; reveal=1 to decrypt for owner",
+      "body": "Address fields + optional isDefault/label"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "ADDRESS_ENCRYPTION_KEY"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-checkout-quote",
+    "file": "marketplace-checkout-quote.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Per-seller shipment quotes from seeded rate tables. Fail closed when route missing.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "{ items, shippingAddressId }"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "ADDRESS_ENCRYPTION_KEY"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/stripe-connect-onboard",
+    "file": "stripe-connect-onboard.js",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "purpose": "Stripe Connect Express onboarding and READY status sync.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "Optional returnUrl/refreshUrl"
+    },
+    "dependencies": {
+      "env": [
+        "STRIPE_SECRET_KEY",
+        "FIREBASE_*",
+        "PUBLIC_SITE_URL"
+      ],
+      "services": [
+        "Stripe",
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/create-order-checkout-session",
+    "file": "create-order-checkout-session.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Freeze EUR order + encrypted address snapshot, open Stripe Checkout Session.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "{ items, shippingAddressId, buyerEmail? }"
+    },
+    "dependencies": {
+      "env": [
+        "STRIPE_SECRET_KEY",
+        "ADDRESS_ENCRYPTION_KEY",
+        "FIREBASE_*",
+        "PUBLIC_SITE_URL"
+      ],
+      "services": [
+        "Stripe",
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
     "path": "/api/poko-connect",
     "file": "poko-connect.js",
     "methods": [

@@ -1573,6 +1573,80 @@ export function createPknCheckout(body, token) {
   });
 }
 
+export function fetchSellerSettings(token) {
+  return getJson('/api/marketplace-seller-settings', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function saveSellerSettings(body, token) {
+  return getJson('/api/marketplace-seller-settings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchAccountAddresses(token, { reveal = true } = {}) {
+  const q = reveal ? '?reveal=1' : '';
+  return getJson(`/api/account-addresses${q}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function saveAccountAddress(body, token) {
+  return getJson('/api/account-addresses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export function quoteMarketplaceCheckout(body, token) {
+  return getJson('/api/marketplace-checkout-quote', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export function createOrderCheckoutSession(body, token) {
+  return getJson('/api/create-order-checkout-session', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export function startStripeConnectOnboard(body, token) {
+  return getJson('/api/stripe-connect-onboard', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export function fetchStripeConnectStatus(token) {
+  return getJson('/api/stripe-connect-onboard', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 export function createMarketplaceOrder(body, token) {
   return getJson('/api/marketplace-orders', {
     method: 'POST',
@@ -1597,6 +1671,17 @@ export function confirmMarketplaceDelivery(orderId, token) {
 
 export function markMarketplaceShipped(orderId, token) {
   return getJson('/api/marketplace-orders?action=mark-shipped', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ orderId }),
+  });
+}
+
+export function revealMarketplaceShipping(orderId, token) {
+  return getJson('/api/marketplace-orders?action=reveal-shipping', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
