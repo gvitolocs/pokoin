@@ -1,3 +1,4 @@
+import { game, isPokemonGame } from './game.js';
 import { setAbbrev } from './identity.js';
 import { TCG_ERA_CATALOG, TCG_ERA_ORDER, eraHaystack, matchTcgEra, tcgEraYears } from './tcg-eras.js';
 
@@ -327,7 +328,9 @@ function eraFromDumpStamp(row = {}) {
   return matchTcgEra(stamp);
 }
 
-export function tcgEra(row = {}) {
+export function tcgEra(row = {}, hostname) {
+  // Pokémon TCG blocks only — Riftbound Unleashed must not become HS Unleashed.
+  if (!isPokemonGame(hostname)) return '';
   // Desktop / drag payloads often use setName or expansion, not set/set_name.
   const raw = `${row.slug || ''} ${[
     row.set,
@@ -392,11 +395,20 @@ export function isSetVariant(row = {}) {
     .test(`${row.slug || ''} ${row.name || ''}`);
 }
 
-export function expansionLogoSrc(row = {}) {
+/** Game-scoped CDN prefix for satellite expansion art (never the Pokémon tree). */
+function satelliteExpansionPrefix(hostname) {
+  const slug = game(hostname).slug;
+  return slug ? `/card-images/${slug}/expansions` : '';
+}
+
+export function expansionLogoSrc(row = {}, hostname) {
   const fromApi = String(row.logoImageUrl || '').trim();
   if (fromApi) return fromApi;
   const slug = String(row.slug || '').trim();
   if (!slug) return '';
+  // Satellite TCGs never reuse Pokémon LOGO_SLUGS (Unleashed ≠ HS Unleashed).
+  // Wordmarks stay API-stamped until each game’s logo tree is ingested.
+  if (!isPokemonGame(hostname)) return '';
   if (WORDMARK_SLUGS.has(slug)) return `/card-images/expansions/wordmarks/${slug}.png`;
   if (LOGO_SLUGS.has(slug)) return `/card-images/expansions/logos/${slug}.png`;
   return '';
@@ -413,19 +425,25 @@ function withSymbolCache(url) {
 }
 
 /** Circular set mark (desk shortcuts, expansion title). Not the wordmark. */
-export function expansionSymbolSrc(row = {}) {
+export function expansionSymbolSrc(row = {}, hostname) {
   const fromApi = String(
     row.defaultSymbolUrl || row.symbolImageUrl || row.expansionSymbolUrl || '',
   ).trim();
   if (fromApi) return withSymbolCache(fromApi);
   const slug = String(row.slug || '').trim();
   if (!slug) return '';
+  // Satellite: game-scoped symbols only. Pokémon `/expansions/symbols/unleashed.png`
+  // must not paint on Riftbound Unleashed.
+  if (!isPokemonGame(hostname)) {
+    const base = satelliteExpansionPrefix(hostname);
+    return base ? withSymbolCache(`${base}/symbols/${slug}.png`) : '';
+  }
   return withSymbolCache(`/card-images/expansions/symbols/${slug}.png`);
 }
 
-export function expansionCode(row = {}) {
+export function expansionCode(row = {}, hostname) {
   const slug = String(row.slug || '').trim();
-  if (SET_CODES[slug]) return SET_CODES[slug];
+  if (isPokemonGame(hostname) && SET_CODES[slug]) return SET_CODES[slug];
   return setAbbrev(row.name || slug);
 }
 
