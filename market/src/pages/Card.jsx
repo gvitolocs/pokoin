@@ -1243,6 +1243,8 @@ function ListingForm({
     </section>
   );
 }
+
+function Chevron({ dir }) {
   const left = dir === 'left';
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
