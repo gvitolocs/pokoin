@@ -72,6 +72,17 @@ export function marqueeStartAllowed(target) {
   return Boolean(target.closest('main'));
 }
 
+/**
+ * Rubber-band multi-select is desktop mouse only. Touch / phone tap-hold must
+ * not arm a selection box (scroll and long-press stay native).
+ */
+export function selectBandAllowed(event, win = typeof window !== 'undefined' ? window : null) {
+  if (event?.pointerType && event.pointerType !== 'mouse') return false;
+  if (win?.matchMedia?.('(max-width: 720px)')?.matches) return false;
+  if (win?.matchMedia?.('(pointer: coarse)')?.matches) return false;
+  return true;
+}
+
 /** A plain pointer outside the selected rows dismisses the current group. */
 export function clearShopSelectionOnPointer(target, list, selected, event = {}) {
   if (!selected?.size) return false;

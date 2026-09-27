@@ -16,6 +16,7 @@ import {
   marqueeStartAllowed,
   mixedDeskDragReference,
   rectsIntersect,
+  selectBandAllowed,
 } from './shop-marquee.js';
 
 const SelectBandContext = createContext(null);
@@ -142,6 +143,7 @@ export function SelectBandProvider({ children }) {
 
     function onOutsideDown(event) {
       if (event.button !== 0) return;
+      if (!selectBandAllowed(event)) return;
       if (!clearShopSelectionOnPointer(
         event.target,
         document.querySelector('main .shop-list'),
@@ -158,6 +160,7 @@ export function SelectBandProvider({ children }) {
 
     function onDown(event) {
       if (event.button !== 0) return;
+      if (!selectBandAllowed(event)) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (!marqueeStartAllowed(target)) return;
@@ -177,6 +180,7 @@ export function SelectBandProvider({ children }) {
 
     function onMouseDown(event) {
       if (event.button !== 0) return;
+      if (!selectBandAllowed(event)) return;
       if (!marqueeStartAllowed(event.target)) return;
       // Keep empty-background bands from turning into text selection.
       event.preventDefault();
@@ -237,6 +241,7 @@ export function SelectBandProvider({ children }) {
     }
 
     function onListingClick(event) {
+      if (!selectBandAllowed(event)) return;
       if (!(event.shiftKey || event.ctrlKey || event.metaKey)) return;
       const row = event.target?.closest?.('.shop-row[data-listing-id]');
       if (!row) return;
@@ -313,6 +318,7 @@ export function SelectBandProvider({ children }) {
       rebuildCatalog();
     },
     click(id, event, ids = []) {
+      if (!selectBandAllowed(event)) return;
       const next = applyCardSelect(
         { selected: cardSelectedRef.current, anchor: cardAnchorRef.current },
         ids,
