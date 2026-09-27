@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
-import { applyCardSelect, bandHits, selectionFromBand } from './card-select.js';
+import { applyCardSelect, bandHits, cardsForDragFromCatalog, selectionFromBand } from './card-select.js';
 import {
   clearShopSelectionOnPointer,
   marqueeRect,
@@ -74,6 +74,19 @@ export function SelectBandProvider({ children }) {
   cardAnchorRef.current = cardAnchor;
   const originRef = useRef(null);
   const armedRef = useRef(false);
+  const gridCardsRef = useRef(new Map());
+  const catalogRef = useRef(new Map());
+
+  function rebuildCatalog() {
+    const next = new Map();
+    for (const list of gridCardsRef.current.values()) {
+      for (const card of list || []) {
+        const id = String(card?.id || card?.cardId || '');
+        if (id) next.set(id, card);
+      }
+    }
+    catalogRef.current = next;
+  }
 
   // Drop the active selection when the route changes; keep listeners.
   useEffect(() => {
@@ -84,6 +97,8 @@ export function SelectBandProvider({ children }) {
     setBand(null);
     originRef.current = null;
     armedRef.current = false;
+    gridCardsRef.current.clear();
+    catalogRef.current = new Map();
     document.documentElement.classList.remove('is-card-banding', 'is-shop-marquee');
   }, [location.pathname, location.search]);
 
@@ -272,6 +287,18 @@ export function SelectBandProvider({ children }) {
   const api = useMemo(() => ({
     selected: cardSelected,
     listingSelected,
+    registerCards(gridKey, cards) {
+      const key = String(gridKey || '');
+      if (!key) return;
+      gridCardsRef.current.set(key, cards || []);
+      rebuildCatalog();
+    },
+    unregisterCards(gridKey) {
+      const key = String(gridKey || '');
+      if (!key) return;
+      gridCardsRef.current.delete(key);
+      rebuildCatalog();
+    },
     click(id, event, ids = []) {
       const next = applyCardSelect(
         { selected: cardSelectedRef.current, anchor: cardAnchorRef.current },
@@ -282,14 +309,25 @@ export function SelectBandProvider({ children }) {
       setCardSelected(next.selected);
       if (next.anchor) setCardAnchor(next.anchor);
     },
-    cardsForDrag(card, cards = []) {
-      const id = String(card?.id || '');
-      if (!id || !cardSelectedRef.current.has(id) || cardSelectedRef.current.size < 2) {
-        return [card];
+    cardsForDrag(card) {
+      // Prefer DOM order so a pile spanning Recently viewed + New cards stays
+      // left-to-right / top-to-bottom, then fill any selected id still in catalog.
+      const selected = cardSelectedRef.current;
+      const ordered = new Map();
+      if (typeof document !== 'undefined') {
+        for (const node of document.querySelectorAll('main [data-card-id]')) {
+          const cid = node.getAttribute('data-card-id');
+          if (!cid || !selected.has(cid) || ordered.has(cid)) continue;
+          const row = catalogRef.current.get(cid);
+          if (row) ordered.set(cid, row);
+        }
       }
-      const mates = (cards || []).filter((row) => cardSelectedRef.current.has(String(row?.id || '')));
-      const rest = mates.filter((row) => String(row?.id || '') !== id);
-      return [card, ...rest];
+      for (const cid of selected) {
+        if (ordered.has(cid)) continue;
+        const row = catalogRef.current.get(cid);
+        if (row) ordered.set(cid, row);
+      }
+      return cardsForDragFromCatalog(card, selected, ordered.size ? ordered : catalogRef.current);
     },
   }), [cardSelected, listingSelected]);
 

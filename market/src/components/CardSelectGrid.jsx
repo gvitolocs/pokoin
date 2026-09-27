@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo } from 'react';
+import { createContext, useContext, useId, useLayoutEffect, useMemo } from 'react';
 import { useSelectBand } from '../select-band.jsx';
 
 const CardSelectContext = createContext(null);
@@ -9,8 +9,8 @@ export function useCardSelect() {
 
 /**
  * Marks a card grid for multi-select. Gesture listeners live in SelectBandProvider
- * (Chrome) so they stay warm across navigations — this only supplies selection
- * context for the tiles in `cards`.
+ * (Chrome) so they stay warm across navigations — this registers `cards` into the
+ * page-wide catalog so a drag pile can span every rail on the page.
  */
 export default function CardSelectGrid({
   cards = [],
@@ -19,10 +19,17 @@ export default function CardSelectGrid({
   children,
 }) {
   const band = useSelectBand();
+  const gridKey = useId();
   const ids = useMemo(
     () => (cards || []).map((card) => String(card?.id || '')).filter(Boolean),
     [cards],
   );
+
+  useLayoutEffect(() => {
+    if (!band?.registerCards) return undefined;
+    band.registerCards(gridKey, cards);
+    return () => band.unregisterCards?.(gridKey);
+  }, [band, gridKey, cards]);
 
   const api = useMemo(() => {
     if (!band) {
@@ -38,10 +45,10 @@ export default function CardSelectGrid({
         band.click(id, event, ids);
       },
       cardsForDrag(card) {
-        return band.cardsForDrag(card, cards);
+        return band.cardsForDrag(card);
       },
     };
-  }, [band, cards, ids]);
+  }, [band, ids]);
 
   return (
     <CardSelectContext.Provider value={api}>

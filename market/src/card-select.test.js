@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { applyCardSelect, bandHits, selectionFromBand } from './card-select.js';
+import { applyCardSelect, bandHits, cardsForDragFromCatalog, selectionFromBand } from './card-select.js';
 import { cardsReference, dragCardsOf } from './chat-listing.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -50,8 +50,24 @@ test('a selected group drags as cards and one card stays a single reference', ()
 
 test('the held card leads the multi-select drag pile', () => {
   const source = fs.readFileSync(path.join(root, 'select-band.jsx'), 'utf8');
-  assert.match(source, /\[card, \.\.\.rest\]/);
-  assert.match(source, /String\(row\?\.id \|\| ''\) !== id/);
+  assert.match(source, /cardsForDragFromCatalog/);
+  assert.match(source, /registerCards/);
+  const lib = fs.readFileSync(path.join(root, 'card-select.js'), 'utf8');
+  assert.match(lib, /\[head, \.\.\.rest\]/);
+});
+
+test('drag pile spans every registered rail, not only the held card\'s grid', () => {
+  const catalog = new Map([
+    ['1', { id: '1', name: 'Recent A' }],
+    ['2', { id: '2', name: 'Recent B' }],
+    ['3', { id: '3', name: 'New A' }],
+    ['4', { id: '4', name: 'New B' }],
+  ]);
+  const selected = new Set(['1', '2', '3', '4']);
+  const pile = cardsForDragFromCatalog({ id: '3', name: 'New A' }, selected, catalog);
+  assert.equal(pile.length, 4);
+  assert.equal(pile[0].id, '3');
+  assert.deepEqual(pile.slice(1).map((row) => row.id).sort(), ['1', '2', '4']);
 });
 
 test('desk art-frame starts HTML5 drag, but empty-background bands can still select it', () => {

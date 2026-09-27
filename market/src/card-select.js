@@ -42,3 +42,22 @@ export function selectionFromBand(base, hits, { ctrl = false } = {}) {
   for (const id of hits || []) next.add(String(id));
   return next;
 }
+
+/** Resolve a multi-select drag pile from a page-wide card catalog (all rails). */
+export function cardsForDragFromCatalog(held, selected, catalog = new Map()) {
+  const id = String(held?.id || held?.cardId || '');
+  const picks = selected instanceof Set ? selected : new Set([...(selected || [])].map(String));
+  if (!id || !picks.has(id) || picks.size < 2) return held ? [held] : [];
+  const mates = [];
+  const seen = new Set();
+  for (const cid of picks) {
+    const row = catalog.get(String(cid));
+    if (!row || seen.has(String(row.id || cid))) continue;
+    seen.add(String(row.id || cid));
+    mates.push(row);
+  }
+  if (!mates.length) return [held];
+  const head = catalog.get(id) || held;
+  const rest = mates.filter((row) => String(row.id || row.cardId) !== id);
+  return [head, ...rest];
+}
