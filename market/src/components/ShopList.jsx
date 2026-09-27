@@ -124,7 +124,10 @@ export default function ShopList({ className = '', children }) {
     }
 
     function onDragStart(event) {
-      if (!origin || !marqueeStartAllowed(origin.target)) return;
+      // Only cancel HTML5 drag while a marquee is actively armed. A stale
+      // pointerdown origin (or missing pointercancel) used to preventDefault
+      // every later title / set / artist / listing drag on main.
+      if (!origin || !armed) return;
       event.preventDefault();
     }
 
@@ -213,6 +216,7 @@ export default function ShopList({ className = '', children }) {
     panel.addEventListener('click', onClick);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     window.addEventListener('keydown', onKey);
     document.addEventListener('pointerdown', onOutsideDown, true);
     return () => {
@@ -222,6 +226,7 @@ export default function ShopList({ className = '', children }) {
       panel.removeEventListener('click', onClick);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerdown', onOutsideDown, true);
       document.documentElement.classList.remove('is-shop-marquee');

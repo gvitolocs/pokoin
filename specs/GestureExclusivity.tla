@@ -1,50 +1,57 @@
 -------------------------- MODULE GestureExclusivity --------------------------
 (*
-  Desk / shop pointer exclusivity — what must not steal what.
+  Desk / shop pointer exclusivity.
 
-  Mirrors CardSelectGrid.jsx, ShopListing.jsx, ShopList.jsx, CartDrop.jsx,
-  chat-listing.js (drag ghost), shop-marquee.js:
-
-  - Empty-background band is intended (BandEmpty)
-  - Art-frame is never in the multi-select set
-  - Band started outside the shop still selects ShopRows the rect covers
-  - Listing drag ghost is card art, never a shop flag
-  - Listing drag payload is richer than desk card-art drag
-  - shop-row click never adds to cart; cart via CartDrop or buy-btn
-  - banding ⊥ HTML5 dragging
-
-  PlusCal sketch (see comments); TLC checks the TLA+ Spec below.
+  Why earlier proofs missed the regressions Giuseppe hit:
+  - No SpeciesTitle / ExpansionLink / ArtistLink targets — so a stale
+    marquee origin preventDefault-ing their dragstart was invisible.
+  - ArtFrame was forbidden from `selected`, so "band from empty selects
+    the desk scan" could not fail the model.
+  - No pile cardinality — multi listing / related drag without a pile
+    satisfied InvListingGhostIsCardArt with a single cardArt ghost.
 
   Run:  scripts/check-gesture-tlc.sh
 *)
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS
-  ArtFrame, ShopRow, BandEmpty, CartDrop, BuyBtn, Chrome, RelatedTile
+  ArtFrame, ShopRow, BandEmpty, CartDrop, BuyBtn, Chrome, RelatedTile,
+  SpeciesTitle, ExpansionLink, ArtistLink
 
-Targets == {ArtFrame, ShopRow, BandEmpty, CartDrop, BuyBtn, Chrome, RelatedTile}
+Targets == {
+  ArtFrame, ShopRow, BandEmpty, CartDrop, BuyBtn, Chrome, RelatedTile,
+  SpeciesTitle, ExpansionLink, ArtistLink
+}
 
-\* CardSelectGrid ignores these; ShopList marqueeStartAllowed allows BandEmpty + ShopRow.
-BandBlocked(t) == t \in {ArtFrame, CartDrop, BuyBtn, Chrome, RelatedTile}
-CanBand(t)     == t \in {BandEmpty, ShopRow}   \* empty bg OR inside shop
-CanDrag(t)     == t \in {ArtFrame, ShopRow, RelatedTile}
+TitleDrag(t) == t \in {SpeciesTitle, ExpansionLink, ArtistLink}
+BandBlocked(t) == t \in {
+  ArtFrame, CartDrop, BuyBtn, Chrome, RelatedTile,
+  SpeciesTitle, ExpansionLink, ArtistLink
+}
+CanBand(t)     == t \in {BandEmpty, ShopRow}
+CanDrag(t)     == t \in {
+  ArtFrame, ShopRow, RelatedTile, SpeciesTitle, ExpansionLink, ArtistLink
+}
 IsListingDrag(t) == t = ShopRow
 IsCardArtDrag(t) == t \in {ArtFrame, RelatedTile}
 
 VARIABLES
   banding,
   dragging,
+  armed,             \* marquee crossed the threshold (only then may steal drag)
   cartAdds,
   lastAction,
   lastTarget,
-  selected,          \* subset of {ShopRow, RelatedTile} — never ArtFrame
+  selected,          \* ShopRow, RelatedTile, ArtFrame
   dragGhost,         \* "cardArt" | "flag" | "none"
-  dragKind           \* "listing" | "card" | "none"
+  dragKind,          \* "listing" | "card" | "bundle" | "none"
+  pileSize           \* 0..3 visible stack layers
 
-vars == << banding, dragging, cartAdds, lastAction, lastTarget,
-           selected, dragGhost, dragKind >>
+vars == << banding, dragging, armed, cartAdds, lastAction, lastTarget,
+           selected, dragGhost, dragKind, pileSize >>
 
 CartBound == 2
+PileBound == 3
 
 Actions == {
   "idle", "bandArm", "bandPaint", "dragStart", "dropCart",
@@ -54,59 +61,71 @@ Actions == {
 TypeOK ==
   /\ banding \in BOOLEAN
   /\ dragging \in BOOLEAN
+  /\ armed \in BOOLEAN
   /\ cartAdds \in 0..CartBound
   /\ lastAction \in Actions
   /\ lastTarget \in Targets
-  /\ selected \subseteq {ShopRow, RelatedTile}
+  /\ selected \subseteq {ShopRow, RelatedTile, ArtFrame}
   /\ dragGhost \in {"cardArt", "flag", "none"}
-  /\ dragKind \in {"listing", "card", "none"}
+  /\ dragKind \in {"listing", "card", "bundle", "none"}
+  /\ pileSize \in 0..PileBound
 
 Init ==
   /\ banding = FALSE
   /\ dragging = FALSE
+  /\ armed = FALSE
   /\ cartAdds = 0
   /\ lastAction = "idle"
   /\ lastTarget = Chrome
   /\ selected = {}
   /\ dragGhost = "none"
   /\ dragKind = "none"
+  /\ pileSize = 0
 
-\* Empty background or shop body arms the band; art-frame never does.
 BandArm(t) ==
   /\ IF CanBand(t) /\ ~BandBlocked(t) /\ ~dragging
      THEN /\ banding' = TRUE
+          /\ armed' = FALSE
           /\ lastAction' = "bandArm"
           /\ lastTarget' = t
-          /\ UNCHANGED << dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << dragging, cartAdds, selected, dragGhost, dragKind, pileSize >>
      ELSE /\ lastAction' = "idle"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, cartAdds, selected, dragGhost, dragKind, pileSize >>
 
-\* While banding, a covered shop row joins selection; art-frame never does.
+\* Empty-background band may select shop rows, related tiles, AND the desk scan.
 BandPaint(hit) ==
   /\ banding = TRUE
+  /\ armed' = TRUE
   /\ lastAction' = "bandPaint"
   /\ lastTarget' = hit
-  /\ IF hit = ShopRow
-     THEN selected' = selected \cup {ShopRow}
-     ELSE IF hit = RelatedTile
-          THEN selected' = selected \cup {RelatedTile}
-          ELSE UNCHANGED selected   \* ArtFrame / Chrome / etc. ignored
-  /\ UNCHANGED << banding, dragging, cartAdds, dragGhost, dragKind >>
+  /\ IF hit \in {ShopRow, RelatedTile, ArtFrame}
+     THEN selected' = selected \cup {hit}
+     ELSE UNCHANGED selected
+  /\ UNCHANGED << banding, dragging, cartAdds, dragGhost, dragKind, pileSize >>
 
 DragStart(t) ==
-  /\ IF CanDrag(t) /\ ~banding
+  /\ IF CanDrag(t) /\ ~(banding /\ armed)
      THEN /\ dragging' = TRUE
           /\ banding' = FALSE
+          /\ armed' = FALSE
           /\ lastAction' = "dragStart"
           /\ lastTarget' = t
-          /\ dragKind' = IF IsListingDrag(t) THEN "listing" ELSE "card"
-          \* Listing ghosts always use card art (never the seller/lang flag).
+          /\ dragKind' = IF IsListingDrag(t) THEN "listing"
+                         ELSE IF TitleDrag(t) THEN "bundle"
+                         ELSE "card"
           /\ dragGhost' = "cardArt"
+          /\ pileSize' = IF t = ShopRow /\ ShopRow \in selected /\ Cardinality(selected) > 1
+                         THEN IF Cardinality(selected) > PileBound THEN PileBound ELSE Cardinality(selected)
+                         ELSE IF t \in {ArtFrame, RelatedTile} /\ Cardinality(selected \cap {ArtFrame, RelatedTile}) > 1
+                         THEN IF Cardinality(selected \cap {ArtFrame, RelatedTile}) > PileBound
+                              THEN PileBound
+                              ELSE Cardinality(selected \cap {ArtFrame, RelatedTile})
+                         ELSE 1
           /\ UNCHANGED << cartAdds, selected >>
      ELSE /\ lastAction' = "idle"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, cartAdds, selected, dragGhost, dragKind, pileSize >>
 
 DropCart(t) ==
   /\ IF t = CartDrop /\ dragging /\ cartAdds < CartBound
@@ -114,55 +133,58 @@ DropCart(t) ==
           /\ dragging' = FALSE
           /\ dragGhost' = "none"
           /\ dragKind' = "none"
+          /\ pileSize' = 0
           /\ lastAction' = "dropCart"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, selected >>
+          /\ UNCHANGED << banding, armed, selected >>
      ELSE /\ lastAction' = "idle"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, cartAdds, selected, dragGhost, dragKind, pileSize >>
 
 ClickBuy(t) ==
   /\ IF t = BuyBtn /\ cartAdds < CartBound
      THEN /\ cartAdds' = cartAdds + 1
           /\ lastAction' = "clickBuy"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, selected, dragGhost, dragKind, pileSize >>
      ELSE /\ lastAction' = "idle"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, cartAdds, selected, dragGhost, dragKind, pileSize >>
 
 ClickShop(t) ==
   /\ IF t = ShopRow
      THEN /\ lastAction' = "clickShopRow"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, cartAdds, selected, dragGhost, dragKind, pileSize >>
      ELSE /\ lastAction' = "idle"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, cartAdds, selected, dragGhost, dragKind, pileSize >>
 
 ClickArt(t) ==
   /\ IF t = ArtFrame
      THEN /\ lastAction' = "clickArtFrame"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, cartAdds, selected, dragGhost, dragKind, pileSize >>
      ELSE /\ lastAction' = "idle"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, cartAdds, selected, dragGhost, dragKind, pileSize >>
 
 ClickChrome(t) ==
   /\ IF t = Chrome
      THEN /\ lastAction' = "clickChrome"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, cartAdds, selected, dragGhost, dragKind, pileSize >>
      ELSE /\ lastAction' = "idle"
           /\ lastTarget' = t
-          /\ UNCHANGED << banding, dragging, cartAdds, selected, dragGhost, dragKind >>
+          /\ UNCHANGED << banding, dragging, armed, cartAdds, selected, dragGhost, dragKind, pileSize >>
 
 Release(t) ==
   /\ banding' = FALSE
   /\ dragging' = FALSE
+  /\ armed' = FALSE
   /\ dragGhost' = "none"
   /\ dragKind' = "none"
+  /\ pileSize' = 0
   /\ lastAction' = "release"
   /\ lastTarget' = t
   /\ UNCHANGED << cartAdds, selected >>
@@ -183,13 +205,18 @@ Spec == Init /\ [][Next]_vars
 
 InvMutualExclusion == ~(banding /\ dragging)
 
-InvArtNeverBands ==
+\* Pointerdown on the desk scan never arms the band (HTML5 drag owns it).
+InvArtNeverArms ==
   (lastAction = "bandArm") => (lastTarget # ArtFrame)
 
-InvArtNeverSelected ==
-  ArtFrame \notin selected
+\* Title / set / artist never arm the shop marquee.
+InvTitleNeverArms ==
+  (lastAction = "bandArm") => ~TitleDrag(lastTarget)
 
-\* Empty-background arm is allowed; when we paint a shop hit, it joins selection.
+\* Empty-background paint may select the desk scan.
+InvEmptyBandCanSelectArt ==
+  (lastAction = "bandPaint" /\ lastTarget = ArtFrame) => (ArtFrame \in selected)
+
 InvEmptyBandCanSelectShop ==
   (lastAction = "bandPaint" /\ lastTarget = ShopRow) => (ShopRow \in selected)
 
@@ -197,8 +224,24 @@ InvListingGhostIsCardArt ==
   (dragging /\ dragKind = "listing") => (dragGhost = "cardArt")
 
 InvListingRicherThanCard ==
-  \* Listing drag is a distinct kind from desk/related card art.
   (lastAction = "dragStart" /\ lastTarget = ShopRow) => (dragKind = "listing")
+
+InvTitleDragIsBundle ==
+  (lastAction = "dragStart" /\ TitleDrag(lastTarget)) => (dragKind = "bundle")
+
+\* Multi-selected listings or desk+related drag as a pile (size ≥ 2).
+InvMultiDragPiles ==
+  (lastAction = "dragStart"
+    /\ lastTarget = ShopRow
+    /\ ShopRow \in selected
+    /\ Cardinality(selected) > 1)
+  => (pileSize >= 2)
+
+InvRelatedOrDeskMultiPiles ==
+  (lastAction = "dragStart"
+    /\ lastTarget \in {ArtFrame, RelatedTile}
+    /\ Cardinality(selected \cap {ArtFrame, RelatedTile}) > 1)
+  => (pileSize >= 2)
 
 InvClickKeepsCart ==
   (lastAction \in {"clickShopRow", "clickArtFrame"}) => TRUE
@@ -206,11 +249,15 @@ InvClickKeepsCart ==
 THEOREM Spec => [](
   TypeOK
   /\ InvMutualExclusion
-  /\ InvArtNeverBands
-  /\ InvArtNeverSelected
+  /\ InvArtNeverArms
+  /\ InvTitleNeverArms
+  /\ InvEmptyBandCanSelectArt
   /\ InvEmptyBandCanSelectShop
   /\ InvListingGhostIsCardArt
   /\ InvListingRicherThanCard
+  /\ InvTitleDragIsBundle
+  /\ InvMultiDragPiles
+  /\ InvRelatedOrDeskMultiPiles
   /\ InvClickKeepsCart
 )
 =============================================================================

@@ -7,21 +7,30 @@ export function useCardSelect() {
   return useContext(CardSelectContext);
 }
 
-function tileRects(root) {
-  if (!root) return [];
-  return [...root.querySelectorAll('[data-card-id]')].map((node) => {
+function tileRects(root, allowedIds = null) {
+  const scope = root?.closest?.('main') || root;
+  if (!scope) return [];
+  const allow = allowedIds ? new Set(allowedIds) : null;
+  return [...scope.querySelectorAll('[data-card-id]')].flatMap((node) => {
+    const id = node.getAttribute('data-card-id');
+    if (!id || (allow && !allow.has(id))) return [];
     const rect = node.getBoundingClientRect();
-    return {
-      id: node.getAttribute('data-card-id'),
+    return [{
+      id,
       left: rect.left,
       right: rect.right,
       top: rect.top,
       bottom: rect.bottom,
-    };
+    }];
   });
 }
 
-export default function CardSelectGrid({ cards = [], className = 'grid', children }) {
+export default function CardSelectGrid({
+  cards = [],
+  className = 'grid',
+  contents = false,
+  children,
+}) {
   const rootRef = useRef(null);
   const dragRef = useRef(null);
   const [selected, setSelected] = useState(() => new Set());
@@ -34,6 +43,8 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
   const idKey = ids.join('|');
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const idsRef = useRef(ids);
+  idsRef.current = ids;
 
   useEffect(() => {
     const allowed = new Set(ids);
@@ -91,7 +102,7 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
       const wide = Math.abs(box.x1 - box.x0) >= 4 || Math.abs(box.y1 - box.y0) >= 4;
       setBand(wide ? box : null);
       if (!wide) return;
-      const hits = bandHits(tileRects(rootRef.current), box);
+      const hits = bandHits(tileRects(rootRef.current, idsRef.current), box);
       setSelected(selectionFromBand(drag.base, hits, { ctrl: drag.ctrl }));
     }
     function onUp(event) {
@@ -148,10 +159,10 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
 
   return (
     <CardSelectContext.Provider value={api}>
-      <div className="card-select-host">
+      <div className={contents ? 'card-select-host is-contents' : 'card-select-host'}>
         <div
           ref={rootRef}
-          className={className}
+          className={contents ? ['is-contents', className].filter(Boolean).join(' ') : className}
         >
           {children}
           {bandStyle ? <div className="card-select-band" style={bandStyle} /> : null}

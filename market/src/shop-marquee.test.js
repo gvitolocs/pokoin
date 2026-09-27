@@ -47,10 +47,14 @@ test('empty page background may start a shop marquee; art-frame and tiles may no
   const art = mock(['.art-frame', 'main']);
   const tile = mock(['[data-card-id]', 'main']);
   const shop = mock(['.shop-row']);
+  const species = mock(['.species-drag', 'header', 'main']);
+  const setLink = mock(['a', '.asset-sub', 'header', 'main']);
   assert.equal(marqueeStartAllowed(bg), true);
   assert.equal(marqueeStartAllowed(art), false);
   assert.equal(marqueeStartAllowed(tile), false);
   assert.equal(marqueeStartAllowed(shop), true);
+  assert.equal(marqueeStartAllowed(species), false);
+  assert.equal(marqueeStartAllowed(setLink), false);
 });
 
 test('ShopList listens on main so a band from empty background can hit listings', () => {

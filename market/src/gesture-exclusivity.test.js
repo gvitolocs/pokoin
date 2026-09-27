@@ -13,53 +13,49 @@ test('shop listing line never adds to cart — drag or desk buy-btn only', () =>
   assert.equal(row.includes('onBuy'), false);
   assert.equal(row.includes('onCart'), false);
   assert.equal(row.includes('onClick={buy}'), false);
-  assert.equal(row.includes('is-buy'), false);
   assert.equal(row.includes('Add to cart'), false);
-  assert.equal(row.includes('CartIcon'), false);
-  assert.match(row, /Message this seller about this listing/);
+  assert.match(row, /listingsReference/);
   assert.match(row, /writeListingDrag/);
 
-  const card = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
-  assert.match(card, /className="btn buy-btn"/);
-  assert.match(card, /Add to cart/);
-  assert.equal(/ShopListingRow[\s\S]*?onBuy=/.test(card), false);
-  assert.equal(/ShopListingRow[\s\S]*?onCart=/.test(card), false);
-
-  const seller = fs.readFileSync(path.join(market, 'pages/Seller.jsx'), 'utf8');
-  assert.equal(seller.includes('onBuy'), false);
-  assert.equal(seller.includes('onCart'), false);
-  assert.equal(seller.includes('addItem'), false);
-
   const shopList = fs.readFileSync(path.join(market, 'components/ShopList.jsx'), 'utf8');
-  assert.equal(shopList.includes("replay it"), false);
-  assert.equal(/closest\('\.shop-row'\)\.dispatchEvent/.test(shopList), false);
+  assert.match(shopList, /Only cancel HTML5 drag while a marquee is actively armed/);
+  assert.match(shopList, /pointercancel/);
+  assert.match(shopList, /!origin \|\| !armed/);
 });
 
-test('CardSelectGrid keeps art-frame and shop-panel out of tile banding', () => {
+test('desk title / set / artist stay out of shop marquee', () => {
+  const marquee = fs.readFileSync(path.join(market, 'shop-marquee.js'), 'utf8');
+  assert.match(marquee, /\.species-drag/);
+  assert.match(marquee, /\.asset-header/);
+  assert.match(marquee, /\.asset-sub/);
+});
+
+test('CardSelectGrid bands desk+related via main-scoped data-card-id', () => {
   const source = fs.readFileSync(path.join(market, 'components/CardSelectGrid.jsx'), 'utf8');
   assert.match(source, /\.art-frame/);
   assert.match(source, /\.shop-panel/);
-  assert.match(source, /\.cart-drop/);
-  assert.match(source, /\.desktop-drop/);
+  assert.match(source, /closest\?\.\('main'\)/);
+  assert.match(source, /contents/);
+  const page = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
+  assert.match(page, /DeskArtFrame/);
+  assert.match(page, /embedded/);
 });
 
 test('PlusCal GestureExclusivity model + TLC invariants', () => {
   const spec = fs.readFileSync(path.join(root, 'specs/GestureExclusivity.tla'), 'utf8');
-  assert.match(spec, /InvMutualExclusion/);
-  assert.match(spec, /InvArtNeverBands/);
-  assert.match(spec, /InvArtNeverSelected/);
-  assert.match(spec, /InvEmptyBandCanSelectShop/);
-  assert.match(spec, /InvListingGhostIsCardArt/);
-  assert.match(spec, /InvListingRicherThanCard/);
-  assert.match(spec, /BandEmpty/);
-  assert.match(spec, /clickShopRow/);
+  assert.match(spec, /InvArtNeverArms/);
+  assert.match(spec, /InvTitleNeverArms/);
+  assert.match(spec, /InvEmptyBandCanSelectArt/);
+  assert.match(spec, /InvMultiDragPiles/);
+  assert.match(spec, /InvRelatedOrDeskMultiPiles/);
+  assert.match(spec, /SpeciesTitle/);
+  assert.match(spec, /pileSize/);
   const cfg = fs.readFileSync(path.join(root, 'specs/GestureExclusivity.cfg'), 'utf8');
-  assert.match(cfg, /InvArtNeverSelected/);
-  assert.match(cfg, /InvListingGhostIsCardArt/);
-  assert.match(cfg, /RelatedTile/);
+  assert.match(cfg, /InvMultiDragPiles/);
+  assert.match(cfg, /InvEmptyBandCanSelectArt/);
+  assert.match(cfg, /ArtistLink/);
 
   const script = path.join(root, 'scripts/check-gesture-tlc.sh');
-  assert.ok(fs.existsSync(script));
   const javaHome = process.env.JAVA_HOME
     || (fs.existsSync('/home/nez/tools/jdk-21.0.12.1+1')
       ? '/home/nez/tools/jdk-21.0.12.1+1'

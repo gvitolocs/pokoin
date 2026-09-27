@@ -2854,6 +2854,17 @@ select.collector-badge.version-badge option {
   background: #fff;
 }
 
+.card-select-host.is-contents,
+.card-select-host.is-contents > .is-contents {
+  display: contents;
+}
+
+.art-frame.is-selected {
+  outline: 2px solid var(--yellow);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgb(255 211 61 / 0.25);
+}
+
 .art-frame {
   display: block;
   width: 100%;

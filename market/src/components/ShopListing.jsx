@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPkn } from '../api.js';
 import { artCutVars } from '../art-cut.js';
-import { listingReference, writeListingDrag } from '../chat-listing.js';
+import { listingReference, listingsReference, writeListingDrag } from '../chat-listing.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
 import ThumbZoom from './ThumbZoom.jsx';
 import { openListingChat } from '../chat-dock-store.js';
@@ -109,12 +109,7 @@ export default function ShopListingRow({
               gridImageUrl: row.gridImageUrl || row.grid_image_url,
             },
           }));
-          writeListingDrag(event, {
-            kind: 'cards',
-            cardName: `${cards.length} cards`,
-            imageUrl: cards[0]?.imageUrl || reference.imageUrl,
-            cards,
-          });
+          writeListingDrag(event, listingsReference(cards));
           return;
         }
         writeListingDrag(event, reference);

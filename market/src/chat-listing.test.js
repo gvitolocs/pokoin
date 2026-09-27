@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendChatTag, bundleOf, bundleReference, CARD_DRAG_HEIGHT, CARD_DRAG_WIDTH, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listedCopies, listingReference, looseCardReference, overListingStock, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned, writeListingDrag } from './chat-listing.js';
+import { appendChatTag, bundleOf, bundleReference, CARD_DRAG_HEIGHT, CARD_DRAG_WIDTH, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listedCopies, listingReference, listingsReference, looseCardReference, overListingStock, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned, writeListingDrag } from './chat-listing.js';
+
 import { readFileSync } from 'node:fs';
 
 test('an artist or expansion drag keeps the saved cover and the slug', () => {
@@ -38,6 +39,25 @@ test('a listing chat follows the Firebase user id, not the stored email', () => 
   });
   assert.equal(row.sellerUid, 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2');
   assert.equal(row.seller, '');
+});
+
+test('multi listing drag builds a cards pile (same art for same printing is fine)', () => {
+  const a = listingReference({
+    offer: { id: '1', sellerUsername: 'alice', sellerUid: 'A'.repeat(28), pricePkn: 10, condition: 'NM' },
+    card: { id: '9', name: 'Drifloon', imageUrl: '/card-images/9.jpg' },
+  });
+  const b = listingReference({
+    offer: { id: '2', sellerUsername: 'bob', sellerUid: 'B'.repeat(28), pricePkn: 12, condition: 'SP' },
+    card: { id: '9', name: 'Drifloon', imageUrl: '/card-images/9.jpg' },
+  });
+  const pile = listingsReference([a, b]);
+  assert.equal(pile.kind, 'cards');
+  assert.equal(pile.cardName, '2 cards');
+  assert.equal(pile.cards.length, 2);
+  assert.equal(pile.cards[0].listingId, '1');
+  assert.equal(pile.cards[1].seller, 'bob');
+  assert.equal(pile.cards[0].condition, 'NM');
+  assert.equal(pile.cards[1].condition, 'SP');
 });
 
 test('a shop listing reference keeps the seller handle and card name', () => {
@@ -457,18 +477,15 @@ test('dragging the desk frame uses a pile of the held card', () => {
   assert.equal(kids[0].tagName, 'CANVAS');
 });
 
-test('the large desk scan owns the drag gesture instead of its button wrapper', () => {
+test('the large desk scan owns the drag gesture and piles with related multi-select', () => {
   const page = readFileSync(new URL('./pages/Card.jsx', import.meta.url), 'utf8');
-  const classAt = page.indexOf('className="art-frame"');
-  assert.ok(classAt > 0);
-  const frame = page.slice(classAt - 120, classAt + 700);
+  assert.match(page, /function DeskArtFrame/);
+  assert.match(page, /data-card-id=\{id/);
+  assert.match(page, /cardsReference\(group\)/);
+  assert.match(page, /CardSelectGrid/);
+  assert.match(page, /embedded/);
   assert.match(page, /import \{ getChatDock \} from '\.\.\/chat-dock-store\.js'/);
-  assert.match(frame, /role="button"/);
-  assert.match(frame, /<CardArt[\s\S]*dragCard=\{dragThisCard\(card, payload\?\.offers \|\| \[\]\)\}/);
-  assert.doesNotMatch(frame, /draggable=\{Boolean\(art\)\}/);
-  assert.doesNotMatch(frame, /onDragStart=/);
-  // <button> hosts cancel HTML5 drag from the nested scan img.
-  assert.doesNotMatch(frame, /<button[\s\S]*className="art-frame"/);
+  assert.doesNotMatch(page, /<button[\s\S]*className="art-frame"/);
 });
 
 test('writeListingDrag also stamps text/plain so Chrome keeps <a> drags alive', () => {

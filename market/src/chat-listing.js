@@ -122,6 +122,26 @@ export function cardsReference(cards) {
   };
 }
 
+/** One drag for several shop listings (same or different sellers). Held first. */
+export function listingsReference(rows) {
+  const list = (rows || []).filter((row) => row?.cardName || row?.listingId).slice(0, 80);
+  if (list.length === 1) return list[0];
+  if (!list.length) return null;
+  return {
+    kind: 'cards',
+    listingId: '',
+    cardId: list[0].cardId || '',
+    sellerUid: '',
+    seller: '',
+    cardName: `${list.length} cards`,
+    setName: '',
+    imageUrl: list[0].imageUrl || '',
+    path: '',
+    pricePkn: 0,
+    cards: list,
+  };
+}
+
 export function dragCardsOf(reference) {
   if (!reference) return [];
   if (reference.kind === 'cards' && Array.isArray(reference.cards)) {
