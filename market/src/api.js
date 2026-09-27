@@ -1591,14 +1591,14 @@ export function saveSellerSettings(body, token) {
 }
 
 /** Website Poko assistant — Firebase-authed BFF; never calls poko-market from the browser. */
-export function sendPokoChat({ message = '', cards = [], sessionId = '' } = {}, token) {
+export function sendPokoChat({ message = '', cards = [], images = [], sessionId = '' } = {}, token) {
   return getJson('/api/poko-chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ message, cards, sessionId }),
+    body: JSON.stringify({ message, cards, images, sessionId }),
   });
 }
 

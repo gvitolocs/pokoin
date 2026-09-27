@@ -45,6 +45,14 @@ function cleanCards(raw) {
   })).filter((row) => row.cardId || row.name);
 }
 
+function cleanImages(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  return list
+    .map((url) => cleanText(url, 500))
+    .filter((url) => /^https?:\/\//i.test(url))
+    .slice(0, 8);
+}
+
 function cardsContext(cards) {
   if (!cards.length) return '';
   return `Attached cards:\n${cards.map((card, index) => {
@@ -58,6 +66,11 @@ function cardsContext(cards) {
     ].filter(Boolean);
     return `- ${bits.join(' ')}`;
   }).join('\n')}`;
+}
+
+function imagesContext(images) {
+  if (!images.length) return '';
+  return `Attached photos (${images.length}):\n${images.map((url, index) => `- #${index + 1} ${url}`).join('\n')}`;
 }
 
 function looksLikeMarket(message) {
@@ -95,7 +108,7 @@ function formatQuote(result) {
   return lines.join('\n');
 }
 
-async function localMarketReply(message, cards) {
+async function localMarketReply(message, cards, images = []) {
   const TOOLS = marketTools();
   const primary = cards[0];
   const query = primary?.name || message;
@@ -126,18 +139,22 @@ async function localMarketReply(message, cards) {
     return formatQuote(quote);
   }
 
+  if (images.length && !message) {
+    return 'Got your photo. Tell me the card name or drop the listing from the marketplace and I\'ll pull sold medians and asks.';
+  }
+
   return [
-    'Hey — I\'m Poko. Drop a card on this chat or ask about a printing and I\'ll pull sold medians, asks, and sell-time bands from Pokoin\'s market tools.',
+    'Hey — I\'m Poko. Drop a card on this chat, add a photo, or ask about a printing and I\'ll pull sold medians, asks, and sell-time bands from Pokoin\'s market tools.',
     'I only see public catalog and aggregate market data — never private seller accounts.',
   ].join('\n');
 }
 
-async function hermesReply({ message, cards, userId, sessionId, displayName }) {
+async function hermesReply({ message, cards, images, userId, sessionId, displayName }) {
   const base = String(process.env.POKO_CHAT_URL || '').trim().replace(/\/$/, '');
   const token = String(process.env.POKO_API_TOKEN || process.env.POKONTACT_SERVICE_TOKEN || '').trim();
   if (!base || !token) return null;
 
-  const enriched = [message, cardsContext(cards)].filter(Boolean).join('\n\n');
+  const enriched = [message, cardsContext(cards), imagesContext(images)].filter(Boolean).join('\n\n');
   const response = await fetch(`${base}/api/poko/chat`, {
     method: 'POST',
     headers: {
@@ -149,7 +166,9 @@ async function hermesReply({ message, cards, userId, sessionId, displayName }) {
       userId,
       sessionId,
       user: { id: userId, displayName: displayName || '' },
-      pageContext: cards.length ? { attachedCards: cards } : undefined,
+      pageContext: (cards.length || images.length)
+        ? { attachedCards: cards, attachedImages: images }
+        : undefined,
     }),
     signal: AbortSignal.timeout(Number(process.env.POKO_CHAT_TIMEOUT_MS) || 45000),
   });
@@ -169,12 +188,15 @@ module.exports = async function handler(req, res) {
     const decoded = await verifyBearerToken(req);
     const message = cleanText(req.body?.message, 4000);
     const cards = cleanCards(req.body?.cards);
-    if (!message && !cards.length) {
-      return res.status(400).json({ error: 'message or cards required' });
+    const images = cleanImages(req.body?.images);
+    if (!message && !cards.length && !images.length) {
+      return res.status(400).json({ error: 'message, cards, or images required' });
     }
     const prompt = message || (cards[0]?.name
       ? `What can you tell me about ${cards[0].name}?`
-      : 'Tell me about the attached card.');
+      : images.length
+        ? 'What can you tell me about the attached photo?'
+        : 'Tell me about the attached card.');
     const sessionId = cleanText(req.body?.sessionId || decoded.uid, 80) || decoded.uid;
 
     let reply = '';
@@ -183,6 +205,7 @@ module.exports = async function handler(req, res) {
       const remote = await hermesReply({
         message: prompt,
         cards,
+        images,
         userId: decoded.uid,
         sessionId,
         displayName: cleanText(decoded.name || decoded.email, 80),
@@ -195,7 +218,7 @@ module.exports = async function handler(req, res) {
       console.warn('poko-chat hermes failed; using local market tools', String(error?.message || error).slice(0, 200));
     }
     if (!reply) {
-      reply = await localMarketReply(prompt, cards);
+      reply = await localMarketReply(prompt, cards, images);
       source = 'local';
     }
 
@@ -215,7 +238,9 @@ module.exports = async function handler(req, res) {
 
 module.exports._test = {
   cleanCards,
+  cleanImages,
   cardsContext,
+  imagesContext,
   looksLikeMarket,
   formatQuote,
   localMarketReply,

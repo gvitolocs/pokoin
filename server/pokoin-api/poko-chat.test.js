@@ -2,7 +2,14 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { cleanCards, cardsContext, looksLikeMarket, formatQuote } = require('./poko-chat')._test;
+const {
+  cleanCards,
+  cleanImages,
+  cardsContext,
+  imagesContext,
+  looksLikeMarket,
+  formatQuote,
+} = require('./poko-chat')._test;
 
 test('cleanCards keeps id/name and caps at 8', () => {
   const rows = cleanCards([
@@ -16,8 +23,16 @@ test('cleanCards keeps id/name and caps at 8', () => {
   assert.equal(rows[1].name, 'Raichu');
 });
 
-test('cardsContext and market heuristics', () => {
+test('cleanImages keeps http(s) urls only', () => {
+  assert.deepEqual(
+    cleanImages(['https://cdn.pokoin.com/a.jpg', 'ftp://x', 'not']),
+    ['https://cdn.pokoin.com/a.jpg'],
+  );
+});
+
+test('cardsContext, imagesContext and market heuristics', () => {
   assert.match(cardsContext([{ cardId: '1', name: 'Mew' }]), /Attached cards/);
+  assert.match(imagesContext(['https://cdn.pokoin.com/a.jpg']), /Attached photos/);
   assert.equal(looksLikeMarket('how much is this worth?'), true);
   assert.equal(looksLikeMarket('hello there'), false);
 });
