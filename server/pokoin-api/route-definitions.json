@@ -103,5 +103,20 @@
       "env": ["FIREBASE_*", "MARKETPLACE_WRITER_DATABASE_URL", "MARKETPLACE_DATABASE_URL", "ONE_PIECE_MARKETPLACE_DATABASE_URL", "RIFTBOUND_MARKETPLACE_DATABASE_URL"],
       "services": ["Firebase Admin", "Postgres writer + per-game catalog DBs"]
     }
+  },
+  {
+    "path": "/api/poko-market",
+    "file": "poko-market.js",
+    "methods": ["POST"],
+    "purpose": "Poko market intelligence: read-only card resolution, sold-market quotes, liquidity, artist collection quotes, snapshot. One shared tool surface for every Poko channel.",
+    "auth": "Required service bearer token: POKO_MARKET_SERVICE_TOKEN, or POKONTACT_SERVICE_TOKEN (same secret, already in the Pi container env). Server-to-server only; browsers never receive it.",
+    "params": {
+      "query": "none",
+      "body": "{ tool: resolve_card|card_quote|card_liquidity|collection_quote|market_snapshot, params } with tool-specific fields (query, cardId, condition, language, artist, limit)."
+    },
+    "dependencies": {
+      "env": ["MARKETPLACE_DATABASE_URL", "POKO_MARKET_SERVICE_TOKEN", "POKONTACT_SERVICE_TOKEN"],
+      "services": ["Postgres read-only replica"]
+    }
   }
 ]
