@@ -198,9 +198,9 @@ test('Chrome mounts Desktop on the left, opposite the cart', () => {
   const iconNavAt = chrome.indexOf('className="nav icon-nav"');
   assert.ok(brandAt > 0 && desktopAt > brandAt && searchAt > desktopAt);
   assert.ok(iconNavAt > searchAt && cartAt > iconNavAt);
-  assert.match(css, /\.desktop-drop\s*\{[^}]*left:\s*0/s);
+  assert.match(css, /\.desktop-drop\s*\{[^}]*left:\s*-4rem/s);
   assert.match(css, /\.desktop-drop\s*\{[^}]*width:\s*max-content/s);
-  assert.match(css, /\.desktop-drop\s*\{[^}]*min-width:\s*16rem/s);
+  assert.match(css, /\.desktop-drop\s*\{[^}]*min-width:\s*23rem/s);
   assert.match(css, /\.desktop-drop\s*\{[^}]*overflow-x:\s*clip/s);
   assert.match(css, /\.desktop-drop \.cart-drop-empty p\s*\{[^}]*white-space:\s*nowrap/s);
   assert.doesNotMatch(css, /\.desktop-drop\s*\{[^}]*right:\s*0/s);

@@ -1073,11 +1073,11 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 }
 
 .desktop-drop {
-  /* Anchor to the chip; open toward search so the tray never clips the left edge. */
-  left: 0;
+  /* Sit under the chip, nudged left toward the brand; wide enough for the empty-state line. */
+  left: -4rem;
   right: auto;
   width: max-content;
-  min-width: 16rem;
+  min-width: 23rem;
   max-width: calc(100vw - 1.25rem);
   min-height: 12.5rem;
   max-height: min(70vh, 36rem);
