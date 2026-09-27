@@ -299,6 +299,61 @@ test('drag pile canvas copies homepage pixels 1:1 (no DPR resample)', () => {
   assert.match(String(kids[0].style?.cssText || ''), /height:335px/);
 });
 
+test('multi-select pile paints each card from its warm tile by data-card-id', () => {
+  const { doc, root, kids } = pileDragDocument();
+  const warmA = {
+    complete: true,
+    naturalWidth: 240,
+    naturalHeight: 335,
+    src: '/card-images/100_a_homepage.webp',
+    currentSrc: '/card-images/100_a_homepage.webp',
+    classList: { contains: () => false },
+  };
+  const warmB = {
+    complete: true,
+    naturalWidth: 240,
+    naturalHeight: 335,
+    src: '/card-images/200_b_homepage.webp',
+    currentSrc: '/card-images/200_b_homepage.webp',
+    classList: { contains: () => false },
+  };
+  const tiles = {
+    a: { querySelector: () => warmA },
+    b: { querySelector: () => warmB },
+  };
+  doc.querySelector = (sel) => {
+    const match = String(sel).match(/data-card-id="(\d+)"/);
+    return match ? tiles[match[1] === '10' ? 'a' : match[1] === '20' ? 'b' : ''] || null : null;
+  };
+  globalThis.document = doc;
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 1 };
+  globalThis.CSS = { escape: (value) => String(value) };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  writeListingDrag({
+    clientX: 40,
+    clientY: 60,
+    currentTarget: {
+      nodeType: 1,
+      tagName: 'A',
+      querySelector: () => warmA,
+    },
+    dataTransfer: { setData() {}, setDragImage() {} },
+  }, {
+    kind: 'cards',
+    cardName: '2 cards',
+    imageUrl: warmA.src,
+    cards: [
+      { cardName: 'A', cardId: '10', imageUrl: '/card-images/100_a.jpg' },
+      { cardName: 'B', cardId: '20', imageUrl: '/card-images/200_b.jpg' },
+    ],
+  });
+  assert.equal(kids.length, 2);
+  assert.equal(kids[0].width, 240);
+  assert.equal(kids[1].width, 240);
+  assert.equal(kids[1].height, 335);
+});
+
 test('a multi-select pile mounts lagged canvas layers', () => {
   const { doc, root, kids } = pileDragDocument();
   globalThis.document = doc;

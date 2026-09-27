@@ -1,5 +1,6 @@
 import { displayName, printingIdentity } from './identity.js';
-import { homepageDerivativeUrl, preferFullImage } from './image-urls.js';
+import { catalogImageId, homepageDerivativeUrl, preferFullImage } from './image-urls.js';
+import { leftoverCdnId } from './card-stub.js';
 import { sellerHandle } from './listing-meta.js';
 import { tilePricePkn } from './pkn.js';
 
@@ -428,7 +429,17 @@ function rememberWarmImage(img) {
   if (!img || !img.complete || !(img.naturalWidth > 0)) return null;
   for (const key of [img.currentSrc, img.src, img.getAttribute?.('src')]) {
     const src = String(key || '').trim();
-    if (src && !src.startsWith('data:')) readyImages.set(src, img);
+    if (!src || src.startsWith('data:')) continue;
+    readyImages.set(src, img);
+    const path = stripOrigin(src);
+    if (path) readyImages.set(path, img);
+    const home = homepageDerivativeUrl(src);
+    if (home) {
+      readyImages.set(home, img);
+      readyImages.set(stripOrigin(home), img);
+    }
+    const fileId = catalogImageId(src);
+    if (fileId) readyImages.set(`id:${fileId}`, img);
   }
   return img;
 }
@@ -440,14 +451,22 @@ export function preloadDragImage(url) {
   const img = new Image();
   img.decoding = 'async';
   img.src = src;
-  readyImages.set(src, img);
+  rememberWarmImage(img);
 }
 
 function readyDragImage(url) {
   const src = String(url || '').trim();
   if (!src) return null;
-  const img = readyImages.get(src);
-  if (img?.complete && img.naturalWidth) return img;
+  for (const key of [src, stripOrigin(src), homepageDerivativeUrl(src), stripOrigin(homepageDerivativeUrl(src))]) {
+    if (!key) continue;
+    const img = readyImages.get(key);
+    if (img?.complete && img.naturalWidth) return img;
+  }
+  const fileId = catalogImageId(src);
+  if (fileId) {
+    const byId = readyImages.get(`id:${fileId}`);
+    if (byId?.complete && byId.naturalWidth) return byId;
+  }
   return null;
 }
 
@@ -481,21 +500,78 @@ function findWarmDocumentImage(url) {
     const homeReady = readyDragImage(home);
     if (homeReady) return homeReady;
   }
+  const wantId = catalogImageId(src) || catalogImageId(home);
+  const wantPath = stripOrigin(home || src);
   for (const img of document.images || []) {
     if (!img?.complete || !(img.naturalWidth > 0)) continue;
+    if (img.classList?.contains?.('art-figure-layer')) continue;
     const cur = String(img.currentSrc || img.src || '');
     if (!cur) continue;
-    if (cur === src || cur.endsWith(src) || src.endsWith(cur.replace(/^https?:\/\/[^/]+/, ''))) {
+    const curPath = stripOrigin(cur);
+    if (cur === src || curPath === wantPath || cur.endsWith(src) || (wantPath && curPath.endsWith(wantPath))) {
       return rememberWarmImage(img);
     }
     if (home) {
       const curHome = homepageDerivativeUrl(cur);
-      if (curHome && (curHome === home || cur.endsWith(home) || home.endsWith(curHome.replace(/^https?:\/\/[^/]+/, '')))) {
+      if (curHome && (curHome === home || stripOrigin(curHome) === stripOrigin(home))) {
         return rememberWarmImage(img);
       }
     }
+    if (wantId && catalogImageId(cur) === wantId) {
+      return rememberWarmImage(img);
+    }
   }
   return null;
+}
+
+/** Prefer the on-page tile that already painted this card's homepage preview. */
+function findWarmRowImage(row, source = null) {
+  if (!row) return null;
+  if (source && urlsLookSame(
+    String(source.currentSrc || source.src || ''),
+    row.imageUrl,
+    homepageDerivativeUrl(row.imageUrl),
+  )) {
+    return source;
+  }
+  if (typeof document !== 'undefined') {
+    const cardId = String(row.cardId || '').trim();
+    if (cardId && typeof CSS !== 'undefined' && CSS.escape) {
+      const tile = document.querySelector(`[data-card-id="${CSS.escape(cardId)}"]`);
+      const img = tile?.querySelector?.(
+        '.tile-art img:not(.art-figure-layer), .shop-card img, .c-art img, img:not(.art-figure-layer)',
+      );
+      if (img?.complete && img.naturalWidth > 0) {
+        return rememberWarmImage(img);
+      }
+    }
+    const listingId = String(row.listingId || '').trim();
+    if (listingId && !listingId.startsWith('bundle:') && typeof CSS !== 'undefined' && CSS.escape) {
+      const shop = document.querySelector(`[data-listing-id="${CSS.escape(listingId)}"]`);
+      const img = shop?.querySelector?.('.shop-card img, img');
+      if (img?.complete && img.naturalWidth > 0) {
+        return rememberWarmImage(img);
+      }
+    }
+    // Public card_id → leftover ct_id filename prefix used on CDN.
+    const leftover = leftoverCdnId(cardId);
+    if (leftover) {
+      const byId = readyImages.get(`id:${leftover}`);
+      if (byId?.complete && byId.naturalWidth) return byId;
+      for (const img of document.images || []) {
+        if (!img?.complete || !(img.naturalWidth > 0)) continue;
+        if (img.classList?.contains?.('art-figure-layer')) continue;
+        if (catalogImageId(img.currentSrc || img.src) === leftover) {
+          return rememberWarmImage(img);
+        }
+      }
+    }
+  }
+  const homepage = homepageDerivativeUrl(row.imageUrl) || row.imageUrl;
+  return findWarmDocumentImage(homepage)
+    || findWarmDocumentImage(row.imageUrl)
+    || readyDragImage(homepage)
+    || readyDragImage(row.imageUrl);
 }
 
 /**
@@ -635,21 +711,10 @@ function mountDragStack(cards, event) {
     ? 'contain'
     : 'cover';
   rows.forEach((row, index) => {
-    const homepage = homepageDerivativeUrl(row.imageUrl) || row.imageUrl;
-    // Prefer the event's warm tile for every layer that shares that URL, so a
-    // multi-select pile never falls through to empty black plates.
-    const sameAsSource = source && urlsLookSame(
-      String(source.currentSrc || source.src || ''),
-      homepage,
-      row.imageUrl,
-    );
-    const warm = (index === 0 || sameAsSource ? source : null)
-      || findWarmDocumentImage(homepage)
-      || findWarmDocumentImage(row.imageUrl)
-      || readyDragImage(homepage)
-      || readyDragImage(row.imageUrl);
-    // Always paint from a warm bitmap (or a dark plate). Never assign a network
-    // src here — that reloads the scan the tile already has in memory.
+    // Held tile first; every other pile card must resolve its own warm homepage
+    // bitmap (by data-card-id / listing row / leftover filename) — URL-only
+    // lookup left secondary layers as black plates.
+    const warm = (index === 0 ? source : null) || findWarmRowImage(row, source);
     root.appendChild(stackLayerFromWarm(warm, 30 - index, fit));
   });
   document.body.appendChild(root);

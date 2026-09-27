@@ -110,6 +110,9 @@ export default function ShopListingRow({
               id: row.cardId || row.card_id,
               name: row.cardName || row.name,
               canonicalPath: row.canonicalPath || row.canonical_path,
+              imageUrl: row.cardImageUrl || row.imageUrl || row.image_url,
+              homepageImageUrl: row.homepageImageUrl || row.homepage_image_url,
+              gridImageUrl: row.gridImageUrl || row.grid_image_url,
             },
           }));
           writeListingDrag(event, {
