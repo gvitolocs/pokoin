@@ -6,6 +6,15 @@
   font-display: swap;
 }
 
+/* Flyer wordmark only: Fredoka 700 (OFL) subset to P, k, o, i, n, dotless ı. */
+@font-face {
+  font-family: PokoinWordmark;
+  src: url("/home/fredoka-wordmark.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
   --bg: #000;
   --g2: #14121c;
@@ -147,6 +156,41 @@ button, input, select { font: inherit; color: inherit; }
   display: block;
   width: var(--topbar-logo);
   height: var(--topbar-logo);
+}
+
+/* Flyer wordmark: heavy "P·koin" with the pixel coin mascot as the first o. */
+.brand-word {
+  display: inline-flex;
+  align-items: center;
+  font-family: PokoinWordmark, var(--font);
+  font-size: 2.05rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-shadow: 0 0.07em 0 #23376e;
+}
+/* The flyer's i wears a yellow coin dot instead of a plain tittle. */
+.brand-i {
+  position: relative;
+}
+.brand-i::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0.2em;
+  width: 0.26em;
+  height: 0.26em;
+  border-radius: 50%;
+  background: #ffd23f;
+  box-shadow: 0 0.07em 0 #23376e;
+  transform: translateX(-50%);
+}
+.brand .brand-coin {
+  width: 0.98em;
+  height: auto;
+  margin: 0.06em 0.02em 0 0.01em;
+  image-rendering: pixelated;
 }
 
 .search {
@@ -6853,7 +6897,8 @@ dialog.zoom:not([open]) {
     grid-template-columns: auto auto minmax(0, 1fr) auto;
     gap: 0.65rem;
   }
-  .brand span { display: none; }
+  .brand .brand-letters { display: none; }
+  .brand .brand-coin { width: var(--topbar-logo); margin: 0; }
   /* Phone topbar: Cart only. Desktop is a pointer/drag surface — hide the chip. */
   .desktop-anchor { display: none; }
   .icon-nav > :not(.cart-anchor) { display: none; }
