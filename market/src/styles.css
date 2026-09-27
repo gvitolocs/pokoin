@@ -1101,16 +1101,18 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 
 .desktop-drop-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0.3rem;
   margin: 0.35rem 0 0.55rem;
 }
 
 .desktop-drop-actions .btn {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
-  padding: 0.35rem 0.55rem;
-  font-size: 0.75rem;
+  padding: 0.32rem 0.35rem;
+  font-size: 0.68rem;
+  white-space: nowrap;
 }
 
 .desktop-drop-note {
