@@ -9776,6 +9776,31 @@ html:has(.wallet-page) .brand span {
 .chat-flash { margin: 0.65rem auto 0; border: 0; border-radius: 999px; background: rgba(83, 211, 143, 0.14); color: #75e3a9; padding: 0.45rem 0.8rem; font: inherit; font-size: 0.78rem; font-weight: 800; }
 
 .chat-modal-backdrop { position: fixed; z-index: 1400; inset: 0; display: grid; place-items: center; padding: 1rem; background: rgba(0, 0, 0, 0.74); backdrop-filter: blur(7px); }
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 1400;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.74);
+}
+
+.modal-card {
+  width: min(24rem, 100%);
+  padding: 1.1rem 1.2rem 1.2rem;
+  border-radius: 14px;
+  background: #14121a;
+  border: 1px solid var(--g5);
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
 .chat-modal { width: min(430px, 100%); padding: 1.1rem; border: 1px solid var(--g5); border-radius: 22px; background: #17171b; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48); }
 .chat-modal-head { justify-content: space-between; margin-bottom: 1rem; }
 .chat-modal-head h2 { margin: 0; font-size: 1.15rem; }

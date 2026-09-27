@@ -6,6 +6,7 @@ import {
   formatPkn,
   markMarketplaceShipped,
   reportMarketplaceProblem,
+  revealMarketplaceShipping,
 } from '../api.js';
 import { firestore, useAuth } from '../auth.jsx';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
@@ -30,6 +31,18 @@ function mergeOrders(...lists) {
   return [...byId.values()].sort((a, b) => stamp(b.createdAt).localeCompare(stamp(a.createdAt)));
 }
 
+function formatEurCents(cents) {
+  const n = Number(cents) || 0;
+  return `€${(n / 100).toFixed(2)}`;
+}
+
+function moneyLabel(row) {
+  if (row.currency === 'EUR' || row.paymentMethod === 'stripe') {
+    return formatEurCents(row.totalEURCents);
+  }
+  return formatPkn(row.totalPkn);
+}
+
 export default function Orders() {
   const location = useLocation();
   const { ready, signedIn, user, profile, getBearer } = useAuth();
@@ -37,6 +50,7 @@ export default function Orders() {
   const [sold, setSold] = useState(null);
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
+  const [addresses, setAddresses] = useState({});
 
   useEffect(() => {
     document.title = 'Orders · Pokoin';
@@ -74,7 +88,10 @@ export default function Orders() {
     setError('');
     try {
       const token = await getBearer();
-      await fn(token);
+      const result = await fn(token);
+      if (result?.shippingAddress) {
+        setAddresses((current) => ({ ...current, [orderId]: result.shippingAddress }));
+      }
     } catch (err) {
       setError(err.message || 'Order update failed.');
     } finally {
@@ -93,7 +110,7 @@ export default function Orders() {
         <DeskPanel title="History"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       ) : null}
       {rows && !rows.length ? (
-        <EmptyDesk title="No orders yet" lede="Checkout a native listing with site PKN.">
+        <EmptyDesk title="No orders yet" lede="Checkout a native listing with site PKN or Stripe.">
           <Link className="btn" to="/marketplace">Shop</Link>
         </EmptyDesk>
       ) : null}
@@ -103,9 +120,12 @@ export default function Orders() {
             {rows.map((row) => {
               const buyer = row.uid === uid || row.buyerUid === uid;
               const seller = Array.isArray(row.sellerUids) && row.sellerUids.includes(uid);
+              const eur = row.currency === 'EUR' || row.paymentMethod === 'stripe';
               const escrow = row.paymentStatus === 'escrow';
-              const shipped = Boolean(row.shippedAt) || row.fulfillmentStatus === 'shipped';
+              const paid = row.paymentStatus === 'paid' || row.paymentStatus === 'released';
+              const shipped = Boolean(row.shippedAt) || row.fulfillmentStatus === 'shipped' || row.fulfillmentStatus === 'delivered';
               const open = row.disputeStatus === 'open';
+              const address = addresses[row.id];
               return (
                 <article className="thread" key={row.id}>
                   <span className="thread-main">
@@ -113,25 +133,31 @@ export default function Orders() {
                     <span className="thread-meta">
                       {row.paymentStatus || row.status || 'order'}
                       {row.fulfillmentStatus ? ` · ${row.fulfillmentStatus}` : ''}
+                      {eur ? ' · EUR' : ''}
                       {open ? ' · dispute open' : ''}
                       {' · '}
-                      {formatPkn(row.totalPkn)}
+                      {moneyLabel(row)}
                       {' · '}
                       {stamp(row.createdAt) || '—'}
                     </span>
+                    {address ? (
+                      <span className="thread-meta">
+                        Ship to {address.fullName}, {address.addressLine1}, {address.postalCode} {address.city}, {address.countryCode}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="order-actions">
-                    {buyer && escrow ? (
+                    {buyer && (escrow || (eur && paid)) ? (
                       <button
                         className="btn"
                         type="button"
-                        disabled={busyId === row.id}
+                        disabled={busyId === row.id || row.fulfillmentStatus === 'delivered' || row.paymentStatus === 'released'}
                         onClick={() => run(row.id, (token) => confirmMarketplaceDelivery(row.id, token))}
                       >
                         Confirm delivery
                       </button>
                     ) : null}
-                    {seller && escrow && !shipped ? (
+                    {seller && (escrow || (eur && paid)) && !shipped ? (
                       <button
                         className="btn ghost"
                         type="button"
@@ -139,6 +165,16 @@ export default function Orders() {
                         onClick={() => run(row.id, (token) => markMarketplaceShipped(row.id, token))}
                       >
                         Mark shipped
+                      </button>
+                    ) : null}
+                    {seller && eur && (paid || escrow) && !address ? (
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        disabled={busyId === row.id}
+                        onClick={() => run(row.id, (token) => revealMarketplaceShipping(row.id, token))}
+                      >
+                        Show address
                       </button>
                     ) : null}
                     {buyer && escrow && !open ? (

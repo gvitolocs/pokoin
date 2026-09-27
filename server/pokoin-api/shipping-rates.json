@@ -1,0 +1,44 @@
+{
+  "tiers": [
+    { "id": "SMALL", "maxCards": 4 },
+    { "id": "MEDIUM", "maxCards": 20 },
+    { "id": "LARGE", "maxCards": 50 },
+    { "id": "EXTRA_LARGE", "maxCards": 9999 }
+  ],
+  "rates": [
+    { "id": "dk-dk-small", "fromCountry": "DK", "toCountry": "DK", "packageTier": "SMALL", "maxCards": 4, "priceEURCents": 350, "carrier": "PostNord", "serviceName": "Standard", "active": true },
+    { "id": "dk-dk-medium", "fromCountry": "DK", "toCountry": "DK", "packageTier": "MEDIUM", "maxCards": 20, "priceEURCents": 550, "carrier": "PostNord", "serviceName": "Standard", "active": true },
+    { "id": "dk-dk-large", "fromCountry": "DK", "toCountry": "DK", "packageTier": "LARGE", "maxCards": 50, "priceEURCents": 900, "carrier": "PostNord", "serviceName": "Standard", "active": true },
+    { "id": "dk-dk-xl", "fromCountry": "DK", "toCountry": "DK", "packageTier": "EXTRA_LARGE", "maxCards": 9999, "priceEURCents": 1600, "carrier": "PostNord", "serviceName": "Parcel", "active": true },
+
+    { "id": "dk-it-small", "fromCountry": "DK", "toCountry": "IT", "packageTier": "SMALL", "maxCards": 4, "priceEURCents": 600, "carrier": "PostNord", "serviceName": "EU tracked", "active": true },
+    { "id": "dk-it-medium", "fromCountry": "DK", "toCountry": "IT", "packageTier": "MEDIUM", "maxCards": 20, "priceEURCents": 900, "carrier": "PostNord", "serviceName": "EU tracked", "active": true },
+    { "id": "dk-it-large", "fromCountry": "DK", "toCountry": "IT", "packageTier": "LARGE", "maxCards": 50, "priceEURCents": 1400, "carrier": "PostNord", "serviceName": "EU tracked", "active": true },
+    { "id": "dk-it-xl", "fromCountry": "DK", "toCountry": "IT", "packageTier": "EXTRA_LARGE", "maxCards": 9999, "priceEURCents": 2200, "carrier": "PostNord", "serviceName": "EU parcel", "active": true },
+
+    { "id": "it-dk-small", "fromCountry": "IT", "toCountry": "DK", "packageTier": "SMALL", "maxCards": 4, "priceEURCents": 650, "carrier": "Poste", "serviceName": "EU tracked", "active": true },
+    { "id": "it-dk-medium", "fromCountry": "IT", "toCountry": "DK", "packageTier": "MEDIUM", "maxCards": 20, "priceEURCents": 950, "carrier": "Poste", "serviceName": "EU tracked", "active": true },
+    { "id": "it-dk-large", "fromCountry": "IT", "toCountry": "DK", "packageTier": "LARGE", "maxCards": 50, "priceEURCents": 1450, "carrier": "Poste", "serviceName": "EU tracked", "active": true },
+    { "id": "it-dk-xl", "fromCountry": "IT", "toCountry": "DK", "packageTier": "EXTRA_LARGE", "maxCards": 9999, "priceEURCents": 2300, "carrier": "Poste", "serviceName": "EU parcel", "active": true },
+
+    { "id": "de-dk-small", "fromCountry": "DE", "toCountry": "DK", "packageTier": "SMALL", "maxCards": 4, "priceEURCents": 500, "carrier": "DHL", "serviceName": "Warenpost", "active": true },
+    { "id": "de-dk-medium", "fromCountry": "DE", "toCountry": "DK", "packageTier": "MEDIUM", "maxCards": 20, "priceEURCents": 750, "carrier": "DHL", "serviceName": "Warenpost", "active": true },
+    { "id": "de-dk-large", "fromCountry": "DE", "toCountry": "DK", "packageTier": "LARGE", "maxCards": 50, "priceEURCents": 1200, "carrier": "DHL", "serviceName": "Paket", "active": true },
+    { "id": "de-dk-xl", "fromCountry": "DE", "toCountry": "DK", "packageTier": "EXTRA_LARGE", "maxCards": 9999, "priceEURCents": 1900, "carrier": "DHL", "serviceName": "Paket", "active": true },
+
+    { "id": "de-it-small", "fromCountry": "DE", "toCountry": "IT", "packageTier": "SMALL", "maxCards": 4, "priceEURCents": 550, "carrier": "DHL", "serviceName": "EU tracked", "active": true },
+    { "id": "de-it-medium", "fromCountry": "DE", "toCountry": "IT", "packageTier": "MEDIUM", "maxCards": 20, "priceEURCents": 800, "carrier": "DHL", "serviceName": "EU tracked", "active": true },
+    { "id": "de-it-large", "fromCountry": "DE", "toCountry": "IT", "packageTier": "LARGE", "maxCards": 50, "priceEURCents": 1300, "carrier": "DHL", "serviceName": "EU tracked", "active": true },
+    { "id": "de-it-xl", "fromCountry": "DE", "toCountry": "IT", "packageTier": "EXTRA_LARGE", "maxCards": 9999, "priceEURCents": 2100, "carrier": "DHL", "serviceName": "EU parcel", "active": true },
+
+    { "id": "it-it-small", "fromCountry": "IT", "toCountry": "IT", "packageTier": "SMALL", "maxCards": 4, "priceEURCents": 400, "carrier": "Poste", "serviceName": "Standard", "active": true },
+    { "id": "it-it-medium", "fromCountry": "IT", "toCountry": "IT", "packageTier": "MEDIUM", "maxCards": 20, "priceEURCents": 600, "carrier": "Poste", "serviceName": "Standard", "active": true },
+    { "id": "it-it-large", "fromCountry": "IT", "toCountry": "IT", "packageTier": "LARGE", "maxCards": 50, "priceEURCents": 1000, "carrier": "Poste", "serviceName": "Standard", "active": true },
+    { "id": "it-it-xl", "fromCountry": "IT", "toCountry": "IT", "packageTier": "EXTRA_LARGE", "maxCards": 9999, "priceEURCents": 1700, "carrier": "Poste", "serviceName": "Parcel", "active": true },
+
+    { "id": "de-de-small", "fromCountry": "DE", "toCountry": "DE", "packageTier": "SMALL", "maxCards": 4, "priceEURCents": 320, "carrier": "DHL", "serviceName": "Warenpost", "active": true },
+    { "id": "de-de-medium", "fromCountry": "DE", "toCountry": "DE", "packageTier": "MEDIUM", "maxCards": 20, "priceEURCents": 480, "carrier": "DHL", "serviceName": "Warenpost", "active": true },
+    { "id": "de-de-large", "fromCountry": "DE", "toCountry": "DE", "packageTier": "LARGE", "maxCards": 50, "priceEURCents": 850, "carrier": "DHL", "serviceName": "Paket", "active": true },
+    { "id": "de-de-xl", "fromCountry": "DE", "toCountry": "DE", "packageTier": "EXTRA_LARGE", "maxCards": 9999, "priceEURCents": 1500, "carrier": "DHL", "serviceName": "Paket", "active": true }
+  ]
+}
