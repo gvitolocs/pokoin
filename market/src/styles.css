@@ -1235,6 +1235,52 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   text-shadow: 0 1px 2px rgb(0 0 0 / 0.9);
 }
 
+/* − N + qty pill on cart / Desktop tray cards (same control as chat tags). */
+.cart-drop-card .chat-qty,
+.desktop-drop-card .chat-qty {
+  position: absolute;
+  left: 50%;
+  bottom: 0.2rem;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  transform: translateX(-50%);
+  padding: 0.06rem 0.2rem;
+  border-radius: 999px;
+  background: #fff;
+  color: #17130a;
+  box-shadow: 0 6px 16px rgb(0 0 0 / 0.4);
+}
+
+.cart-drop-card .chat-qty button,
+.desktop-drop-card .chat-qty button {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #17130a;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cart-drop-card .chat-qty button:disabled,
+.desktop-drop-card .chat-qty button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.cart-drop-card .chat-qty b,
+.desktop-drop-card .chat-qty b {
+  min-width: 0.9rem;
+  text-align: center;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
 .icon-nav .cart-chip em {
   position: absolute;
   top: -0.05rem;

@@ -17,6 +17,7 @@ import {
   writeCardOwned,
 } from '../chat-listing.js';
 import ChatBundle from './ChatBundle.jsx';
+import QtyStepper from './QtyStepper.jsx';
 import ThumbZoom from './ThumbZoom.jsx';
 
 function unique(list) {
@@ -65,11 +66,11 @@ function CardQuantity({ row, draft, onQty }) {
     return <span className="chat-qty-badge">{qty}</span>;
   }
   return (
-    <span className="chat-qty" onClick={stopControl} onPointerDown={stopControl}>
-      <button type="button" aria-label="Decrease quantity" disabled={qty <= 1} onClick={(event) => { stopControl(event); onQty?.(tagKey(row), qty - 1); }}>−</button>
-      <b>{qty}</b>
-      <button type="button" aria-label="Increase quantity" disabled={qty >= 99} onClick={(event) => { stopControl(event); onQty?.(tagKey(row), qty + 1); }}>+</button>
-    </span>
+    <QtyStepper
+      qty={qty}
+      max={99}
+      onChange={(next) => onQty?.(tagKey(row), next)}
+    />
   );
 }
 

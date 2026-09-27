@@ -7,12 +7,14 @@ import {
   addDesktopCards,
   clearDesktopHold,
   removeDesktopCard,
+  setDesktopQty,
   useDesktopHold,
 } from '../desktop-hold.js';
 import { downloadDesktopHoldPdf } from '../desktop-hold-pdf.js';
 import { bundleOf, LISTING_DRAG_TYPE, readListingDrag } from '../chat-listing.js';
 import { fetchSpeciesCards } from '../species-cards.js';
 import CardArt from './CardArt.jsx';
+import QtyStepper from './QtyStepper.jsx';
 
 export default function DesktopDrop({ onAddToCart }) {
   const items = useDesktopHold();
@@ -25,7 +27,20 @@ export default function DesktopDrop({ onAddToCart }) {
   async function acceptDrop(reference) {
     if (!reference) return;
     if (reference.kind === 'cards') {
-      addDesktopCards(reference.cards || []);
+      addDesktopCards((reference.cards || []).map((row) => ({
+        id: row.cardId || row.id,
+        name: row.cardName || row.name,
+        imageUrl: row.imageUrl,
+        path: row.path,
+        set: row.setName,
+        setName: row.setName,
+        number: row.number,
+        rarity: row.rarity,
+        artist: row.artist,
+        pricePkn: row.pricePkn,
+        qty: row.qty,
+        stock: row.stock,
+      })));
       return;
     }
     const bundle = bundleOf(reference);
@@ -50,6 +65,8 @@ export default function DesktopDrop({ onAddToCart }) {
       rarity: reference.rarity,
       artist: reference.artist,
       pricePkn: reference.pricePkn,
+      qty: reference.qty,
+      stock: reference.stock,
     }]);
   }
 
@@ -158,6 +175,11 @@ export default function DesktopDrop({ onAddToCart }) {
               <Link to={row.path || '/marketplace'} title={row.name}>
                 {row.imageUrl ? <CardArt src={row.imageUrl} alt="" card={row} /> : <span className="suggest-ph" />}
               </Link>
+              <QtyStepper
+                qty={row.qty || 1}
+                max={row.stock || 99}
+                onChange={(next) => setDesktopQty(row.id, next)}
+              />
               <button
                 type="button"
                 className="desktop-drop-x"

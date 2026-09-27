@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendChatTag, bundleOf, bundleReference, CARD_DRAG_HEIGHT, CARD_DRAG_WIDTH, cardIdOf, cardReference, catalogPath, chatImageSources, isSellerCard, listedCopies, listingReference, listingsReference, looseCardReference, overListingStock, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned, writeListingDrag } from './chat-listing.js';
+import { appendChatTag, bundleOf, bundleReference, CARD_DRAG_HEIGHT, CARD_DRAG_WIDTH, cardIdOf, cardReference, catalogPath, chatImageSources, dragCardsOf, dragGhostOf, isSellerCard, listedCopies, listingReference, listingsReference, looseCardReference, overListingStock, paintOwned, personListsCard, readCardOwned, referenceForPeer, tagKey, writeCardOwned, writeListingDrag } from './chat-listing.js';
 
 import { readFileSync } from 'node:fs';
 
@@ -126,6 +126,19 @@ test('chat tags keep one copy of a listing and cap at four', () => {
     tags = appendChatTag(tags, { kind: 'listing', listingId: id, cardName: id, seller: 'red' });
   }
   assert.deepEqual(tags.map(tagKey), ['listing:b', 'listing:c', 'listing:d', 'listing:e']);
+});
+
+test('shop qty 2 fans the drag ghost into two layers but drop payload stays one row', () => {
+  const listing = listingReference({
+    offer: { id: 'L1', quantityAvailable: 2, sellerUsername: 'red', pricePkn: 10 },
+    card: { id: '9', name: 'Magnemite' },
+    qty: 2,
+  });
+  assert.equal(listing.qty, 2);
+  assert.equal(dragCardsOf(listing).length, 1);
+  assert.equal(dragGhostOf(listing).length, 2);
+  assert.equal(dragGhostOf(listing)[0].cardId, '9');
+  assert.equal(dragGhostOf({ ...listing, qty: 1 }).length, 1);
 });
 
 test('a miniature keeps a site path and shows the full scan before the homepage thumb', () => {
@@ -525,9 +538,13 @@ test('shop rows show message + cart icons; row click never adds to cart', () => 
   assert.match(src, /<ThumbZoom src=\{full\} full alt=\{name \|\| ''\} openOnClick>/);
   assert.match(src, /className="art-cut shop-art"/);
   assert.match(src, /of \{stock \|\| choices\}/);
+  assert.match(src, /qty: pick/);
+  assert.match(src, /writeListingDrag\(event, \{ \.\.\.mixed, qty: pick/);
   const tag = readFileSync(new URL('./components/ChatListingTag.jsx', import.meta.url), 'utf8');
+  const stepper = readFileSync(new URL('./components/QtyStepper.jsx', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./chat-dock.css', import.meta.url), 'utf8');
-  assert.match(tag, /className="chat-qty"/);
+  assert.match(tag, /QtyStepper/);
+  assert.match(stepper, /className = 'chat-qty'/);
   assert.match(tag, /className="chat-qty-badge"/);
   assert.match(css, /\.chat-qty-badge[\s\S]*var\(--yellow/);
   assert.equal(tag.includes('footer={quantity}'), false);

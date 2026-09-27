@@ -144,6 +144,8 @@ export function desktopHoldCard(card = {}) {
     artist: String(identity.artist || card.artist || card.illustrator || ''),
     rarity: String(identity.rarity || card.rarity || ''),
     pricePkn: priced != null && Number.isFinite(priced) ? priced : '',
+    qty: Math.max(1, Math.min(99, Math.trunc(Number(card.qty)) || 1)),
+    stock: Math.max(1, Math.min(99, Math.trunc(Number(card.stock ?? card.quantityAvailable)) || 99)),
     imageUrl: holdImageUrl({
       ...card,
       id,
@@ -163,18 +165,39 @@ export function addDesktopCards(cards) {
   const incoming = (cards || []).map(desktopHoldCard).filter(Boolean);
   if (!incoming.length) return 0;
   const current = readDesktopHold();
-  const seen = new Set(current.map((row) => row.id));
-  const next = [...current];
+  const byId = new Map(current.map((row) => [row.id, { ...row, qty: Math.max(1, Number(row.qty) || 1) }]));
   let added = 0;
   for (const card of incoming) {
-    if (seen.has(card.id)) continue;
-    seen.add(card.id);
-    next.push(card);
+    const prior = byId.get(card.id);
+    if (prior) {
+      const cap = Math.min(99, Number(prior.stock) || Number(card.stock) || 99);
+      const nextQty = Math.min(cap, (Number(prior.qty) || 1) + (Number(card.qty) || 1));
+      if (nextQty !== prior.qty) {
+        byId.set(card.id, { ...prior, ...card, qty: nextQty, stock: cap });
+        added += 1;
+      }
+      continue;
+    }
+    if (byId.size >= MAX) break;
+    byId.set(card.id, card);
     added += 1;
-    if (next.length >= MAX) break;
   }
-  if (added) writeDesktopHold(next);
+  if (added) writeDesktopHold([...byId.values()]);
   return added;
+}
+
+export function setDesktopQty(id, qty) {
+  const want = String(id || '');
+  if (!want) return;
+  const next = Math.max(0, Math.min(99, Math.trunc(Number(qty)) || 0));
+  writeDesktopHold(
+    readDesktopHold().flatMap((row) => {
+      if (row.id !== want) return [row];
+      if (next < 1) return [];
+      const cap = Math.min(99, Number(row.stock) || 99);
+      return [{ ...row, qty: Math.min(cap, next) }];
+    }),
+  );
 }
 
 export function removeDesktopCard(id) {

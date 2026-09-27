@@ -55,9 +55,12 @@ function offerCopies(offer) {
   return Math.min(99, n);
 }
 
-export function listingReference({ offer, card }) {
+export function listingReference({ offer, card, qty } = {}) {
   const stock = offerCopies(offer);
   const cardId = String(card?.id || offer?.cardId || offer?.card_id || '');
+  const copies = qty != null
+    ? listingQty(qty, stock ?? 99)
+    : (offer?.qty != null ? listingQty(offer.qty, stock ?? 99) : null);
   return {
     kind: 'listing',
     listingId: String(offer?.id || ''),
@@ -79,6 +82,7 @@ export function listingReference({ offer, card }) {
     path: card?.canonicalPath || offer?.canonicalPath || offer?.canonical_path || '',
     pricePkn: Number(offer?.pricePkn) || 0,
     ...(stock != null ? { stock } : {}),
+    ...(copies != null ? { qty: copies } : {}),
   };
 }
 
@@ -142,12 +146,23 @@ export function listingsReference(rows) {
   };
 }
 
+/** Unique drag rows for drop targets (chat / cart / Desktop). Qty stays on each row. */
 export function dragCardsOf(reference) {
   if (!reference) return [];
   if (reference.kind === 'cards' && Array.isArray(reference.cards)) {
     return reference.cards.filter((row) => row?.cardName);
   }
   return [reference];
+}
+
+/** Ghost pile layers: listing qty 2 → two scans of the same card (cap 8). */
+export function dragGhostOf(reference) {
+  const out = [];
+  for (const row of dragCardsOf(reference)) {
+    const n = Math.min(8, Math.max(1, chatQty(row?.qty)));
+    for (let i = 0; i < n; i += 1) out.push(row);
+  }
+  return out;
 }
 
 export function tagKey(row) {
@@ -712,11 +727,16 @@ let dragStackFrame = 0;
 let dragStackTarget = { x: 0, y: 0 };
 let dragStackPos = [];
 
-const STACK_LAG = [0.62, 0.36, 0.2];
+const STACK_LAG = [0.62, 0.36, 0.28, 0.22, 0.18, 0.16, 0.14, 0.12];
 const STACK_NUDGE = [
   { x: 0, y: 0, rot: -1.5 },
-  { x: 16, y: 18, rot: 3.5 },
-  { x: 30, y: 34, rot: -4.5 },
+  { x: 18, y: 20, rot: 3.5 },
+  { x: 34, y: 38, rot: -4.5 },
+  { x: 48, y: 52, rot: 5 },
+  { x: 60, y: 64, rot: -3 },
+  { x: 70, y: 74, rot: 4 },
+  { x: 78, y: 82, rot: -2.5 },
+  { x: 84, y: 88, rot: 2 },
 ];
 
 function invisibleDragImage() {
@@ -766,7 +786,7 @@ function tickDragStack() {
 function mountDragStack(cards, event) {
   stopDragStack();
   if (typeof document === 'undefined') return;
-  const rows = (cards || []).slice(0, 3).filter((row) => row?.imageUrl || row?.cardName);
+  const rows = (cards || []).slice(0, 8).filter((row) => row?.imageUrl || row?.cardName);
   if (!rows.length) return;
   const source = rememberWarmImage(dragSourceImage(event));
   const root = document.createElement('div');
@@ -881,7 +901,7 @@ export function writeListingDrag(event, reference) {
       preloadDragImage(homepage);
     }
   }
-  const stack = dragCardsOf(reference);
+  const stack = dragGhostOf(reference);
   const usePile = stack.length >= 1 && (
     reference.kind === 'cards'
     || reference.kind === 'card'

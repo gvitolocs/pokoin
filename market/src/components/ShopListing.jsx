@@ -75,7 +75,7 @@ export default function ShopListingRow({
   const choices = Math.max(stock, 1);
   const [pick, setPick] = useState(1);
   const reference = {
-    ...listingReference({ offer, card }),
+    ...listingReference({ offer, card, qty: pick }),
     qty: pick,
     stock: choices,
   };
@@ -118,7 +118,18 @@ export default function ShopListingRow({
       onDragStart={(event) => {
         const mixed = band?.dragReference?.({ heldOffer: offer, heldCard: card });
         if (mixed) {
-          writeListingDrag(event, mixed);
+          // Stamp the held row's qty onto the matching listing in the pile.
+          if (mixed.kind === 'cards' && Array.isArray(mixed.cards)) {
+            const heldId = String(offer?.id || '');
+            writeListingDrag(event, {
+              ...mixed,
+              cards: mixed.cards.map((row) => (
+                row.listingId === heldId ? { ...row, qty: pick, stock: choices } : row
+              )),
+            });
+            return;
+          }
+          writeListingDrag(event, { ...mixed, qty: pick, stock: choices });
           return;
         }
         if (dragOffers?.length > 1) {
@@ -132,6 +143,7 @@ export default function ShopListingRow({
               homepageImageUrl: row.homepageImageUrl || row.homepage_image_url,
               gridImageUrl: row.gridImageUrl || row.grid_image_url,
             },
+            qty: row === offer ? pick : 1,
           }));
           writeListingDrag(event, listingsReference(cards));
           return;

@@ -300,18 +300,24 @@
   box-shadow: 0 6px 16px rgb(0 0 0 / 0.4);
 }
 
-.chat-tag .chat-qty button {
+.chat-tag .chat-qty button,
+.cart-drop-card .chat-qty button,
+.desktop-drop-card .chat-qty button {
   position: static;
   width: 1.2rem;
   height: 1.2rem;
+  border: 0;
   border-radius: 50%;
   background: transparent;
   color: #17130a;
   font-weight: 800;
   line-height: 1;
+  cursor: pointer;
 }
 
-.chat-tag .chat-qty button:disabled {
+.chat-tag .chat-qty button:disabled,
+.cart-drop-card .chat-qty button:disabled,
+.desktop-drop-card .chat-qty button:disabled {
   opacity: 0.35;
   cursor: default;
 }
@@ -321,6 +327,17 @@
   text-align: center;
   font-size: 0.78rem;
   font-weight: 800;
+}
+
+.cart-drop-card .chat-qty,
+.desktop-drop-card .chat-qty {
+  bottom: 0.2rem;
+  padding: 0.06rem 0.2rem;
+}
+
+.cart-drop-card .chat-qty b,
+.desktop-drop-card .chat-qty b {
+  font-size: 0.7rem;
 }
 
 .chat-qty-badge {
