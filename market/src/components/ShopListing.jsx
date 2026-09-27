@@ -60,14 +60,11 @@ export default function ShopListingRow({
   listingBusy = false,
   editing = false,
   card = null,
-  onBuy,
-  onCart,
   onEdit,
   onCancel,
   selected = false,
   dragOffers = null,
 }) {
-  const [added, setAdded] = useState(false);
   const name = publicShopSellerLabel(offer);
   const stock = Math.max(0, Math.trunc(Number(offer?.quantityAvailable ?? offer?.quantity_available) || 0));
   const choices = Math.max(stock, 1);
@@ -94,16 +91,9 @@ export default function ShopListingRow({
     canonicalPath: cardPath,
   }, preferFullImage(offer?.cardImageUrl || offer?.imageUrl || ''));
 
-  function buy(event) {
-    if (mine || !onBuy) return;
-    if (event?.shiftKey || event?.ctrlKey || event?.metaKey) return;
-    if (event?.target?.closest?.('a, button, select, .ct-qty')) return;
-    onBuy(pick);
-  }
-
   return (
     <div
-      className={`shop-row${mine ? ' mine' : ''}${showCard ? ' is-profile' : ''}${onBuy && !mine ? ' is-buy' : ''}${editing ? ' is-editing' : ''}${selected ? ' is-selected' : ''}`}
+      className={`shop-row${mine ? ' mine' : ''}${showCard ? ' is-profile' : ''}${editing ? ' is-editing' : ''}${selected ? ' is-selected' : ''}`}
       data-listing-id={listingSelectId(offer)}
       draggable
       onDragStart={(event) => {
@@ -129,15 +119,6 @@ export default function ShopListingRow({
         }
         writeListingDrag(event, reference);
       }}
-      onClick={buy}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          buy(event);
-        }
-      }}
-      role={onBuy && !mine ? 'button' : undefined}
-      tabIndex={onBuy && !mine ? 0 : undefined}
     >
       {showCard ? (
         cardPath ? (
@@ -178,39 +159,21 @@ export default function ShopListingRow({
         <Flag flag={language} className="shop-flag shop-flag-lang" />
       </span>
       <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>
-      {!mine ? (
+      {!mine && sellerUid ? (
         <span className="shop-row-actions">
-          {sellerUid ? (
-            <button
-              type="button"
-              className="shop-icon"
-              aria-label={handle ? `Message ${handle} about this listing` : 'Message this seller about this listing'}
-              title="Message"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                openListingChat(reference);
-              }}
-            >
-              <MessageIcon />
-            </button>
-          ) : null}
-          {onCart ? (
-            <button
-              type="button"
-              className={`shop-icon is-cart${added ? ' is-added' : ''}`}
-              aria-label={added ? 'Added to cart' : 'Add to cart'}
-              title={added ? 'Added to cart' : 'Add to cart'}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onCart(pick);
-                setAdded(true);
-              }}
-            >
-              <CartIcon />
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="shop-icon"
+            aria-label={handle ? `Message ${handle} about this listing` : 'Message this seller about this listing'}
+            title="Message"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openListingChat(reference);
+            }}
+          >
+            <MessageIcon />
+          </button>
         </span>
       ) : null}
       {mine ? (
@@ -282,14 +245,6 @@ function MessageIcon() {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
       <path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
-    </svg>
-  );
-}
-
-function CartIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-      <path fill="currentColor" d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM6.2 6l.8 2h12.2l-1.6 6H8.1L6.2 6ZM5.2 4H2V2h4l.4 1H22l-2.4 9H7.5L5.2 4Z" />
     </svg>
   );
 }

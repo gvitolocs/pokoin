@@ -156,17 +156,6 @@ export default function ShopList({ className = '', children }) {
           clientX: origin.x,
           clientY: origin.y,
         }));
-      } else if (origin?.target?.closest?.('.shop-row')) {
-        // mousedown preventDefault cancels the real click, so replay it.
-        origin.target.closest('.shop-row').dispatchEvent(new MouseEvent('click', {
-          bubbles: true,
-          cancelable: true,
-          shiftKey: origin.shift,
-          ctrlKey: origin.ctrl,
-          metaKey: origin.meta,
-          clientX: origin.x,
-          clientY: origin.y,
-        }));
       } else if (origin && !origin.additive) {
         setSelected(new Set());
       }

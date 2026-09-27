@@ -2444,12 +2444,6 @@ export default function Card() {
                     dragOffers={shopDragOffers(offers, selected, offer)}
                     listingBusy={listingBusy}
                     editing={editingOffer?.id === offer.id}
-                    onCart={(qty) => addItem({ ...cartItemFromOffer(card, offer), qty: qty || 1 })}
-                    onBuy={(qty) => {
-                      track(Action.clickListing, card, { resultRank: index });
-                      addItem({ ...cartItemFromOffer(card, offer), qty: qty || 1 });
-                      navigate('/cart');
-                    }}
                     onEdit={() => setEditingOffer(
                       editingOffer?.id === offer.id ? null : offer,
                     )}
