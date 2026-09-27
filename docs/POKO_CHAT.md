@@ -24,11 +24,25 @@ the LLM, and may call `POST /api/poko-market` for sold/ask/liquidity tools
 
 | Variable | Role |
 |---|---|
-| `POKONTACT_SERVICE_URL` | Base ending in `/api/poko` (already used by `pokoin-assistant`) |
-| `POKONTACT_SERVICE_TOKEN` | Bearer Hermes accepts (same secret family as market tools) |
+| `POKONTACT_SERVICE_URL` | Base ending in `/api/poko` |
+| `POKONTACT_SERVICE_TOKEN` | Bearer Hermes accepts |
 | `POKO_CHAT_URL` | Optional override of the base / full chat URL |
 | `POKO_API_TOKEN` | Optional override of the bearer |
 | `POKO_CHAT_TIMEOUT_MS` | Optional (default 45000) |
+
+### Network (important)
+
+Hermes listens on peer1 private/loopback `:8789` and is **not** open on the
+public IP. The Pi reaches it through an SSH local forward:
+
+- systemd: `hermes-pi-poko-tunnel.service` on pi-home  
+- `127.0.0.1:18789` → peer1 `127.0.0.1:8789`  
+- peer1 `authorized_keys` for the Pi tunnel key must include  
+  `permitopen="127.0.0.1:8789"`  
+- API env: `POKONTACT_SERVICE_URL=http://127.0.0.1:18789/api/poko`
+
+Do **not** point the Pi at `http://10.0.0.170:8789` (Oracle VCN private) or
+the public `92.5.153.117:8789` — both fail from pi-home.
 
 URL resolve (same as CardVault `pokoin-assistant.js`):
 
