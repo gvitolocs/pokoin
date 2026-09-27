@@ -22,3 +22,12 @@ test('game paths rewrite to the market SPA', () => {
   );
   assert.ok(hit, '/one-piece/marketplace must rewrite to the market SPA');
 });
+
+test('satellite search ignores the Pokémon print chip (blank nationality)', () => {
+  const root = path.dirname(fileURLToPath(import.meta.url));
+  const search = fs.readFileSync(path.join(root, 'pages/Search.jsx'), 'utf8');
+  const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
+  assert.match(search, /activePrintLang = \(!isPokemonGame\(\) \|\| tab === 'users'\) \? 'all' : printLang/);
+  assert.match(search, /showPrint=\{isPokemonGame\(\)\}/);
+  assert.match(chrome, /fetchSuggest\(term, \{[^}]*printLang: 'all'/s);
+});

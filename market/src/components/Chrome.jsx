@@ -768,7 +768,9 @@ export default function Chrome({ children }) {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setPending(true);
-      fetchSuggest(term, { limit: 20, signal: controller.signal, lang, printLang })
+      // Satellite catalogs have no print nationality; never inherit a Pokémon
+      // western/japanese chip from localStorage into suggest or the hot page.
+      fetchSuggest(term, { limit: 20, signal: controller.signal, lang, printLang: 'all' })
         .then((data) => {
           const tab = searchTabRef.current;
           const groups = (Array.isArray(data.groups) ? data.groups : [])
@@ -794,6 +796,7 @@ export default function Chrome({ children }) {
             fetchSearchPage: fetchSearch,
             signal: controller.signal,
             tab: searchTabRef.current,
+            printLang: 'all',
           });
         })
         .catch((error) => {
