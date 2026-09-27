@@ -186,6 +186,7 @@ button, input, select { font: inherit; color: inherit; }
   box-shadow: 0 0.07em 0 #23376e;
   transform: translateX(-50%);
 }
+.brand .brand-badge { display: none; }
 .brand .brand-coin {
   width: 0.98em;
   height: auto;
@@ -6897,8 +6898,8 @@ dialog.zoom:not([open]) {
     grid-template-columns: auto auto minmax(0, 1fr) auto;
     gap: 0.65rem;
   }
-  .brand .brand-letters { display: none; }
-  .brand .brand-coin { width: var(--topbar-logo); margin: 0; }
+  .brand .brand-word { display: none; }
+  .brand .brand-badge { display: block; }
   /* Phone topbar: Cart only. Desktop is a pointer/drag surface — hide the chip. */
   .desktop-anchor { display: none; }
   .icon-nav > :not(.cart-anchor) { display: none; }

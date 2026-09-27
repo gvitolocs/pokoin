@@ -37,7 +37,7 @@
   <link rel="preload" href="home/satoshi.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="home/logo.png" as="image">
   <script src="home/landing-boot.js"></script>
-  <link rel="stylesheet" href="home/landing.css?v=20260910-protect2">
+  <link rel="stylesheet" href="home/landing.css?v=20260927-wordmark">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -95,8 +95,8 @@
     <div class="nav-glow" aria-hidden="true"></div>
     <div class="nav-inner">
       <a class="nav-logo" href="/" aria-label="Pokoin home">
-        <img src="home/logo.png" width="52" height="52" alt="">
-        Pokoin
+        <img class="brand-badge" src="home/logo.png" width="52" height="52" alt="">
+        <span class="brand-word" aria-hidden="true">P<img class="brand-coin" src="home/pokoin-mascot.png" width="26" height="24" alt="">ko<span class="brand-i">ı</span>n</span>
       </a>
       <nav class="nav-links" aria-label="Primary">
         <a href="/marketplace">marketplace</a>
@@ -364,7 +364,7 @@
     <div class="pad">
       <div class="wrap footer-top">
         <div class="footer-brand reveal">
-          <a class="nav-logo" href="/"><img src="home/logo.png" width="52" height="52" alt=""> Pokoin</a>
+          <a class="nav-logo" href="/" aria-label="Pokoin home"><img class="brand-badge" src="home/logo.png" width="52" height="52" alt=""><span class="brand-word" aria-hidden="true">P<img class="brand-coin" src="home/pokoin-mascot.png" width="26" height="24" alt="">ko<span class="brand-i">ı</span>n</span></a>
           <p>Card Reserve and PokoinPoS. From the community for the community. Permissioned proof-of-stake.</p>
         </div>
         <div class="footer-cols">

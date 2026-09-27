@@ -224,6 +224,51 @@ html:not(.js) .reveal {
   height: 3.25rem;
 }
 
+/* Flyer wordmark (same as the marketplace header): coin mascot as the o,
+   yellow coin dot on the i. Phone keeps the round badge. */
+@font-face {
+  font-family: PokoinWordmark;
+  src: url("/home/fredoka-wordmark.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+.nav-logo .brand-badge { display: none; }
+.brand-word {
+  display: inline-flex;
+  align-items: center;
+  font-family: PokoinWordmark, var(--font);
+  font-size: 2.3rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-shadow: 0 0.07em 0 #23376e;
+}
+.nav-logo .brand-coin {
+  width: 0.98em;
+  height: auto;
+  margin: 0.06em 0.02em 0 0.01em;
+  image-rendering: pixelated;
+}
+.brand-i { position: relative; }
+.brand-i::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0.2em;
+  width: 0.26em;
+  height: 0.26em;
+  border-radius: 50%;
+  background: #ffd23f;
+  box-shadow: 0 0.07em 0 #23376e;
+  transform: translateX(-50%);
+}
+@media (max-width: 720px) {
+  .nav-logo .brand-word { display: none; }
+  .nav-logo .brand-badge { display: block; }
+}
+
 .nav-links {
   display: flex;
   justify-content: center;
