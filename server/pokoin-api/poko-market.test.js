@@ -23,31 +23,18 @@ function makeDb(stubs) {
   return async function marketplaceQuery(sql, params = []) {
     stubs.queries.push({ sql, params });
     // Order matters: tool-specific tables first, generic card-row lookup last.
-    if (/marketplace_card_weights/.test(sql)) {
-      return stubs.weightRows ?? [];
-    }
-    if (/group by artist/.test(sql)) {
-      return stubs.artistRows ?? [{ artist: 'Yuka Morii', cards: 42 }];
-    }
-    if (/order by s\.name\s+limit \$2/.test(sql)) {
-      return stubs.collectionCards ?? [FIXTURE_CARD_ROW];
-    }
-    if (/cardtrader_sold_daily/.test(sql) && /group by blueprint_id/.test(sql)) {
-      return stubs.collectionSold ?? [];
-    }
-    if (/distinct on \(blueprint_id\)/.test(sql)) {
-      return stubs.collectionAsks ?? [];
-    }
-    if (/cardtrader_sold_daily/.test(sql)) {
-      return stubs.soldRows ?? [];
-    }
-    if (/cardtrader_blueprint_daily_analytics/.test(sql)) {
-      return stubs.askRows ?? [];
-    }
+    const rows = (table) => stubs[table] ?? [];
+    if (/marketplace_card_weights/.test(sql)) return { rows: rows('weightRows') };
+    if (/group by artist/.test(sql)) return { rows: stubs.artistRows ?? [{ artist: 'Yuka Morii', cards: 42 }] };
+    if (/order by s\.name\s+limit \$2/.test(sql)) return { rows: rows('collectionCards') };
+    if (/cardtrader_sold_daily/.test(sql) && /group by blueprint_id/.test(sql)) return { rows: rows('collectionSold') };
+    if (/distinct on \(blueprint_id\)/.test(sql)) return { rows: rows('collectionAsks') };
+    if (/cardtrader_sold_daily/.test(sql)) return { rows: rows('soldRows') };
+    if (/cardtrader_blueprint_daily_analytics/.test(sql)) return { rows: rows('askRows') };
     if (/limit 7/.test(sql) || (/limit 1/.test(sql) && /card_id = \$1/.test(sql))) {
-      return [stubs.cardRow || FIXTURE_CARD_ROW];
+      return { rows: [stubs.cardRow || FIXTURE_CARD_ROW] };
     }
-    return [];
+    return { rows: [] };
   };
 }
 
@@ -56,7 +43,7 @@ function loadHandler(dbStub) {
   delete require.cache[TARGET];
   Module._load = function load(request, parent, isMain) {
     if (request === './_marketplace_db') {
-      return { marketplaceQuery: dbStub };
+      return { marketplaceQuery: dbStub }; // dbStub returns pg-shaped { rows }
     }
     return originalLoad(request, parent, isMain);
   };
@@ -238,13 +225,13 @@ test('resolve_card returns catalog candidates only and marks ambiguity', async (
 
   const handler3 = loadHandler(async (sql, params = []) => {
     if (/limit 7/.test(sql)) {
-      return [
+      return { rows: [
         FIXTURE_CARD_ROW,
         { ...FIXTURE_CARD_ROW, card_id: '246914', name: 'Raichu', set_name: 'Base Set' },
         { ...FIXTURE_CARD_ROW, card_id: '246916', name: 'Raichu ex', set_name: 'Deoxys' },
-      ];
+      ] };
     }
-    return [];
+    return { rows: [] };
   });
   const res3 = makeRes();
   await handler3(makeReq({ body: { tool: 'resolve_card', params: { query: 'Raichu' } } }), res3);
@@ -293,12 +280,12 @@ test('vague condition wording quotes a range instead of claiming a grade', async
   const handler = loadHandler(async (sql, params = []) => {
     if (/cardtrader_sold_daily/.test(sql)) {
       soldByCall.push(params[1]);
-      return [{ sold_qty: 6, p25_daily: 20, median_daily: 24, p75_daily: 28, last_sale_day: '2026-09-18' }];
+      return { rows: [{ sold_qty: 6, p25_daily: 20, median_daily: 24, p75_daily: 28, last_sale_day: '2026-09-18' }] };
     }
-    if (/cardtrader_blueprint_daily_analytics/.test(sql)) return [{ min_price_pkn: 26, median_price_pkn: 30, observed_day: '2026-09-26' }];
-    if (/marketplace_card_weights/.test(sql)) return [];
-    if (/limit 1/.test(sql) || /limit 7/.test(sql)) return [FIXTURE_CARD_ROW];
-    return [];
+    if (/cardtrader_blueprint_daily_analytics/.test(sql)) return { rows: [{ min_price_pkn: 26, median_price_pkn: 30, observed_day: '2026-09-26' }] };
+    if (/marketplace_card_weights/.test(sql)) return { rows: [] };
+    if (/limit 1/.test(sql) || /limit 7/.test(sql)) return { rows: [FIXTURE_CARD_ROW] };
+    return { rows: [] };
   });
   const res = makeRes();
   await handler(makeReq({
