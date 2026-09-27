@@ -50,11 +50,16 @@ test('desktopPdfBrandOrigin sits in the bottom-right with Pokoin Export', () => 
 test('desktopHoldCaption is collector + expansion only', () => {
   assert.equal(
     desktopHoldCaption({ collectorNumber: '116/128', expansion: '30th Celebration' }),
-    '116/128 · 30th Celebration',
+    '116/128 - 30th Celebration',
+  );
+  assert.equal(
+    desktopHoldCaption({ collectorNumber: '9/17', expansion: 'POP Series 7' }),
+    '9/17 - POP Series 7',
   );
   assert.equal(desktopHoldCaption({ collectorNumber: '090/103' }), '090/103');
   assert.equal(desktopHoldCaption({ expansion: 'Base Set' }), 'Base Set');
   assert.equal(desktopHoldCaption({ name: 'Eevee' }), '');
+  assert.equal(POKOIN_EXPORT_LABEL, 'Pokoin.com Export');
 });
 
 test('desktopHoldFullImage prefers leftover JPEG with cache bust', () => {
@@ -90,7 +95,7 @@ test('buildDesktopPdfBytes writes A4 PDF with brand label', () => {
   ]);
   const bytes = buildDesktopPdfBytes([{
     box,
-    caption: '116/128 · 30th Celebration',
+    caption: '116/128 - 30th Celebration',
     jpeg,
     pxW: 1,
     pxH: 1,
@@ -103,7 +108,7 @@ test('buildDesktopPdfBytes writes A4 PDF with brand label', () => {
   assert.match(text, /\/MediaBox \[0 0 595\.28 841\.89\]/);
   assert.match(text, /\/Count 1/);
   assert.match(text, /116\/128/);
-  assert.match(text, /Pokoin Export/);
+  assert.match(text, /Pokoin\.com Export/);
   assert.match(text, /\/ImBrand/);
   assert.match(text, /%%EOF/);
 });

@@ -8,7 +8,7 @@ export const A4_HEIGHT_PT = 841.89;
 /** Pokemon card face ratio (width : height). */
 export const CARD_ASPECT = 63 / 88;
 
-export const POKOIN_EXPORT_LABEL = 'Pokoin Export';
+export const POKOIN_EXPORT_LABEL = 'Pokoin.com Export';
 export const POKOIN_BRAND_ICON = '/home/logo.png';
 
 const MARGIN_PT = 28;
@@ -127,7 +127,8 @@ export function desktopPdfCellOrigin(layout, index) {
 export function desktopHoldCaption(row = {}) {
   const number = String(row.collectorNumber || row.number || '').trim();
   const expansion = String(row.expansion || row.setName || row.set || '').trim();
-  if (number && expansion) return `${number} · ${expansion}`;
+  // ASCII separator only — Helvetica PDF escape turns · into ?.
+  if (number && expansion) return `${number} - ${expansion}`;
   return number || expansion || '';
 }
 
@@ -220,7 +221,7 @@ export function buildDesktopPdfBytes(cells, { brand = null, layout = null } = {}
     if (caption) {
       const maxChars = Math.max(8, Math.floor(cardW / (LABEL_FONT_PT * 0.42)));
       const shown = caption.length > maxChars
-        ? `${caption.slice(0, Math.max(0, maxChars - 1))}?`
+        ? `${caption.slice(0, Math.max(0, maxChars - 3))}...`
         : caption;
       const textW = shown.length * LABEL_FONT_PT * 0.42;
       const textX = labelX - textW / 2;
