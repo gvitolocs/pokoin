@@ -1546,6 +1546,8 @@ h1, h2 { margin: 0 0 0.85rem; }
 }
 
 .promo .btn {
+  position: relative;
+  top: -15px;
   margin-top: 0.15rem;
   box-sizing: border-box;
   min-height: 44px;
