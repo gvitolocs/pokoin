@@ -2473,6 +2473,7 @@ export default function Card() {
                     dragOffers={shopDragOffers(offers, selected, offer)}
                     listingBusy={listingBusy}
                     editing={editingOffer?.id === offer.id}
+                    onCart={(qty) => addItem({ ...cartItemFromOffer(card, offer), qty: qty || 1 })}
                     onEdit={() => setEditingOffer(
                       editingOffer?.id === offer.id ? null : offer,
                     )}

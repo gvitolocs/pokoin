@@ -207,7 +207,9 @@ async function sellerCardIdsForGame(sellerUid, game, {
   query = marketplaceQuery,
   run = withGameContext,
 } = {}) {
-  if (!game || game === 'pokemon') return null;
+  // Shared listings live in the pokemon DB; intersect with the selected
+  // catalog so Pokemon shops never show satellite TCG rows (and vice versa).
+  const catalogGame = game || 'pokemon';
   const listed = await run('pokemon', () => query(
     `
       select distinct card_id
@@ -221,7 +223,7 @@ async function sellerCardIdsForGame(sellerUid, game, {
   ));
   const ids = listed.rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean);
   if (!ids.length) return [];
-  const catalog = await run(game, () => query(
+  const catalog = await run(catalogGame, () => query(
     `
       select card_id::text as card_id
       from public.marketplace_search_candidates

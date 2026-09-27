@@ -104,5 +104,23 @@ test('seller game filter intersects shared listings with the selected catalog', 
   });
   assert.deepEqual(calls, ['pokemon', 'sorcery']);
   assert.deepEqual(ids, ['20']);
-  assert.equal(await sellerCardIdsForGame('u1', 'pokemon'), null);
+
+  const pokemonCalls = [];
+  let pokemonGame = '';
+  const pokemonIds = await sellerCardIdsForGame('u1', 'pokemon', {
+    run: async (game, fn) => {
+      pokemonGame = game;
+      pokemonCalls.push(game);
+      return fn();
+    },
+    query: async () => pokemonGame === 'pokemon'
+      ? (
+        pokemonCalls.length === 1
+          ? { rows: [{ card_id: '10' }, { card_id: '99' }] }
+          : { rows: [{ card_id: '10' }] }
+      )
+      : { rows: [] },
+  });
+  assert.deepEqual(pokemonCalls, ['pokemon', 'pokemon']);
+  assert.deepEqual(pokemonIds, ['10']);
 });

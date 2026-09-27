@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { fetchSellerShop } from '../api.js';
 import { rewriteCanonicalCardPath } from '../card-stub.js';
+import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { getSearchLang } from '../locale.js';
 import ShopList from '../components/ShopList.jsx';
 import ShopListingRow from '../components/ShopListing.jsx';
@@ -55,6 +56,7 @@ function sellerFromPayload(data, handle, sample) {
 
 export default function Seller() {
   const { username = '', lang: routeLang } = useParams();
+  const { addItem } = useCart();
   const lang = routeLang || getSearchLang();
   const handle = decodeURIComponent(String(username || '').trim());
   const selectedGame = game().apiGame;
@@ -276,6 +278,11 @@ export default function Seller() {
                     showCard
                     selected={selected.has(listingSelectId(enriched))}
                     dragOffers={shopDragOffers(listings, selected, enriched)}
+                    onCart={(qty) => {
+                      if (!cardId || !offer.id) return;
+                      const item = cartItemFromOffer(cardStub, enriched);
+                      addItem(qty ? { ...item, qty } : item);
+                    }}
                   />
                 );
               })}

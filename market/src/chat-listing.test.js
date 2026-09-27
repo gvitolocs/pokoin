@@ -514,12 +514,12 @@ test('SetGuideGrid drags the whole set card, not only the wordmark img', () => {
   assert.match(src, /draggable=\{false\}/);
 });
 
-test('shop rows show a message icon; cart is drag-to-CartDrop, not a row button', () => {
+test('shop rows show message + cart icons; row click never adds to cart', () => {
   const src = readFileSync(new URL('./components/ShopListing.jsx', import.meta.url), 'utf8');
   assert.match(src, /Message this seller about this listing/);
-  assert.equal(src.includes('Add to cart'), false);
+  assert.match(src, /Add to cart/);
+  assert.match(src, /onCart/);
   assert.equal(src.includes('onBuy'), false);
-  assert.equal(src.includes('onCart'), false);
   assert.match(src, /sellerUid/);
   assert.match(src, /className="ct-qty"/);
   assert.match(src, /<ThumbZoom src=\{full\} full alt=\{name \|\| ''\}>/);

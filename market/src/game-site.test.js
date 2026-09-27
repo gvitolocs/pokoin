@@ -13,6 +13,21 @@ test('the game picker sends each TCG to its own site', () => {
   assert.equal(gameSiteHref(''), 'https://pokoin.com/marketplace');
 });
 
+test('game picker on a seller desk keeps the handle under the new TCG path', () => {
+  assert.equal(
+    gameSiteHref('one_piece', '/marketplace/en/users/redshakkio'),
+    'https://pokoin.com/one-piece/marketplace/en/users/redshakkio',
+  );
+  assert.equal(
+    gameSiteHref('pokemon', '/one-piece/marketplace/en/users/redshakkio'),
+    'https://pokoin.com/marketplace/en/users/redshakkio',
+  );
+  assert.equal(
+    gameSiteHref('yugioh', '/marketplace/en/cards/123/card-foo'),
+    'https://pokoin.com/yugioh/marketplace',
+  );
+});
+
 test('game paths rewrite to the market SPA', () => {
   const root = path.dirname(fileURLToPath(import.meta.url));
   const config = JSON.parse(fs.readFileSync(path.join(root, '../../vercel.json'), 'utf8'));

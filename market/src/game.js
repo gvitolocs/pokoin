@@ -152,10 +152,24 @@ export function game(hostname = hostName()) {
   return GAMES[gameIdFromHost(hostname)] || GAMES.pokemon;
 }
 
-/** Where the header game picker sends the browser. */
-export function gameSiteHref(id) {
-  const path = gamePublicPath(id || 'pokemon');
-  return `https://pokoin.com${path}`;
+/** Where the header game picker sends the browser. Seller desks keep the handle. */
+export function gameSiteHref(id, pathname = currentPath()) {
+  const base = gamePublicPath(id || 'pokemon');
+  const seller = sellerDeskRest(pathname);
+  return `https://pokoin.com${base}${seller}`;
+}
+
+/** `/en/users/handle…` when the path is a public seller desk; else empty. */
+function sellerDeskRest(pathname = '') {
+  let path = String(pathname || '');
+  const parts = path.split('/').filter(Boolean);
+  if (parts[0] && SLUG_TO_ID[parts[0]]) {
+    path = `/${parts.slice(1).join('/')}`;
+  }
+  const match = path.match(/^\/marketplace\/([^/]+)\/users\/([^/?#]+)(.*)$/);
+  if (!match) return '';
+  const [, lang, handle, tail] = match;
+  return `/${lang}/users/${handle}${tail || ''}`;
 }
 
 /** Phone BattleScan selectCatalog args for the active game. */

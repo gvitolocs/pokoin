@@ -323,7 +323,7 @@ function GameSelect() {
       window.location.reload();
       return;
     }
-    window.location.assign(gameSiteHref(id));
+    window.location.assign(gameSiteHref(id, window.location.pathname));
   }
 
   return (

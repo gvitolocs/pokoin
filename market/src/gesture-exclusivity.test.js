@@ -8,12 +8,12 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const market = path.join(root, 'market/src');
 
-test('shop listing line never adds to cart — drag or desk buy-btn only', () => {
+test('shop listing line never adds to cart on row click — cart icon, buy-btn, or drag', () => {
   const row = fs.readFileSync(path.join(market, 'components/ShopListing.jsx'), 'utf8');
   assert.equal(row.includes('onBuy'), false);
-  assert.equal(row.includes('onCart'), false);
+  assert.match(row, /onCart/);
+  assert.match(row, /Add to cart/);
   assert.equal(row.includes('onClick={buy}'), false);
-  assert.equal(row.includes('Add to cart'), false);
   assert.match(row, /listingsReference/);
   assert.match(row, /writeListingDrag/);
 
@@ -21,6 +21,11 @@ test('shop listing line never adds to cart — drag or desk buy-btn only', () =>
   assert.match(shopList, /Only cancel HTML5 drag while a marquee is actively armed/);
   assert.match(shopList, /pointercancel/);
   assert.match(shopList, /!origin \|\| !armed/);
+
+  const card = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
+  assert.match(card, /onCart=\{\(qty\) => addItem/);
+  const seller = fs.readFileSync(path.join(market, 'pages/Seller.jsx'), 'utf8');
+  assert.match(seller, /onCart=\{\(qty\) =>/);
 });
 
 test('desk title / set / artist stay out of shop marquee', () => {
