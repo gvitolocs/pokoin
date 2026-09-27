@@ -5,8 +5,10 @@ const assert = require('node:assert/strict');
 const {
   cleanCards,
   cleanImages,
+  cleanPageContext,
   cardsContext,
   imagesContext,
+  marketFirstDirective,
   resolveHermesChatUrl,
   hermesToken,
 } = require('./poko-chat')._test;
@@ -32,6 +34,18 @@ test('cleanImages keeps http(s) urls only', () => {
 test('cardsContext and imagesContext', () => {
   assert.match(cardsContext([{ cardId: '1', name: 'Mew' }]), /Attached cards/);
   assert.match(imagesContext(['https://cdn.pokoin.com/a.jpg']), /Attached photos/);
+});
+
+test('marketFirstDirective and cleanPageContext pin desk cardId', () => {
+  const cards = cleanCards([{ cardId: '246912', name: 'Noivern V', setName: 'Evolving Skies' }]);
+  const ctx = cleanPageContext({ path: '/marketplace/en/cards/246912' }, cards, []);
+  assert.equal(ctx.deskCardId, '246912');
+  assert.equal(ctx.deskCardName, 'Noivern V');
+  const directive = marketFirstDirective(cards, ctx);
+  assert.match(directive, /card_quote/);
+  assert.match(directive, /246912/);
+  assert.match(directive, /Never invent/);
+  assert.equal(marketFirstDirective([], {}), '');
 });
 
 test('resolveHermesChatUrl matches pokoin-assistant convention', () => {

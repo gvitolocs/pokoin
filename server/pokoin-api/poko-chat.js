@@ -2,7 +2,7 @@
 
 /**
  * Website Poko chat BFF — Hermes only.
- * POST /api/poko-chat  { message, cards?, images?, sessionId? }
+ * POST /api/poko-chat  { message, cards?, images?, sessionId?, pageContext? }
  *
  * Firebase-authed. Proxies to Hermes Poko at POKONTACT_SERVICE_URL/chat
  * (same convention as pokoin-assistant). No local scripted replies and no
@@ -48,6 +48,20 @@ function cleanImages(raw) {
     .slice(0, 8);
 }
 
+function cleanPageContext(raw, cards, images) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const desk = cards[0] || {};
+  return {
+    channel: cleanText(src.channel || 'website-messages', 40) || 'website-messages',
+    path: cleanText(src.path, 300),
+    deskCardId: cleanText(src.deskCardId || desk.cardId, 40),
+    deskCardName: cleanText(src.deskCardName || desk.name, 120),
+    deskSetName: cleanText(src.deskSetName || desk.setName, 120),
+    attachedCards: cards,
+    attachedImages: images,
+  };
+}
+
 function cardsContext(cards) {
   if (!cards.length) return '';
   return `Attached cards:\n${cards.map((card, index) => {
@@ -68,6 +82,23 @@ function imagesContext(images) {
   return `Attached photos (${images.length}):\n${images.map((url, index) => `- #${index + 1} ${url}`).join('\n')}`;
 }
 
+/** Force market-tool path on Hermes: desk card → quote analytics first, never invent identity. */
+function marketFirstDirective(cards, pageContext) {
+  const card = cards[0];
+  const id = card?.cardId || pageContext?.deskCardId;
+  if (!id && !card?.name) return '';
+  const name = card?.name || pageContext?.deskCardName || 'this card';
+  const set = card?.setName || pageContext?.deskSetName || '';
+  const bits = [name, set ? `(${set})` : '', id ? `cardId=${id}` : ''].filter(Boolean).join(' ');
+  return [
+    'Operator directive for this turn:',
+    `- The user is on the Pokoin marketplace looking at ${bits}.`,
+    '- First purpose: Pokoin card analytics (sold median, asks, liquidity) via market_query → card_quote (use the given cardId when present).',
+    '- Never invent a different card name, set, HP, or attack. If tools fail, say you do not know yet.',
+    '- Lore/flavor only after quoting site numbers, and only if it matches the same cardId.',
+  ].join('\n');
+}
+
 /** Same URL convention as CardVault pokoin-assistant: base …/api/poko + /chat. */
 function resolveHermesChatUrl(env = process.env) {
   const raw = String(env.POKO_CHAT_URL || env.POKONTACT_SERVICE_URL || '').trim().replace(/\/+$/, '');
@@ -82,7 +113,7 @@ function hermesToken(env = process.env) {
 
 const HERMES_UNAVAILABLE = 'I don’t know the answer yet, but I’m always improving ✨ Ask me another way, or try a cute card question while my tiny brain levels up.';
 
-async function hermesReply({ message, cards, images, userId, sessionId, displayName }) {
+async function hermesReply({ message, cards, images, pageContext, userId, sessionId, displayName }) {
   const url = resolveHermesChatUrl();
   const token = hermesToken();
   if (!url || !token) {
@@ -91,7 +122,12 @@ async function hermesReply({ message, cards, images, userId, sessionId, displayN
     throw error;
   }
 
-  const enriched = [message, cardsContext(cards), imagesContext(images)].filter(Boolean).join('\n\n');
+  const enriched = [
+    marketFirstDirective(cards, pageContext),
+    message,
+    cardsContext(cards),
+    imagesContext(images),
+  ].filter(Boolean).join('\n\n');
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -103,9 +139,7 @@ async function hermesReply({ message, cards, images, userId, sessionId, displayN
       userId,
       sessionId,
       user: { id: userId, displayName: displayName || '' },
-      pageContext: (cards.length || images.length)
-        ? { attachedCards: cards, attachedImages: images, channel: 'website-messages' }
-        : { channel: 'website-messages' },
+      pageContext,
     }),
     signal: AbortSignal.timeout(Number(process.env.POKO_CHAT_TIMEOUT_MS) || 45000),
   });
@@ -134,14 +168,15 @@ module.exports = async function handler(req, res) {
     const message = cleanText(req.body?.message, 4000);
     const cards = cleanCards(req.body?.cards);
     const images = cleanImages(req.body?.images);
+    const pageContext = cleanPageContext(req.body?.pageContext, cards, images);
     if (!message && !cards.length && !images.length) {
       return res.status(400).json({ error: 'message, cards, or images required' });
     }
     const prompt = message || (cards[0]?.name
-      ? `What can you tell me about ${cards[0].name}?`
+      ? `Quote Pokoin sold median, current asks, and liquidity for ${cards[0].name}${cards[0].cardId ? ` (cardId=${cards[0].cardId})` : ''}. Lead with site analytics.`
       : images.length
-        ? 'What can you tell me about the attached photo?'
-        : 'Tell me about the attached card.');
+        ? 'What can you tell me about the attached photo? Prefer OCR identity then Pokoin market tools when you can resolve a card.'
+        : 'Tell me about the attached card with Pokoin sold/ask/liquidity analytics first.');
     const sessionId = cleanText(req.body?.sessionId || decoded.uid, 80) || decoded.uid;
 
     try {
@@ -149,6 +184,7 @@ module.exports = async function handler(req, res) {
         message: prompt,
         cards,
         images,
+        pageContext,
         userId: decoded.uid,
         sessionId,
         displayName: cleanText(decoded.name || decoded.email, 80),
@@ -180,8 +216,10 @@ module.exports = async function handler(req, res) {
 module.exports._test = {
   cleanCards,
   cleanImages,
+  cleanPageContext,
   cardsContext,
   imagesContext,
+  marketFirstDirective,
   resolveHermesChatUrl,
   hermesToken,
   HERMES_UNAVAILABLE,

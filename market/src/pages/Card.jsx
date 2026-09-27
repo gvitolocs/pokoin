@@ -90,6 +90,7 @@ import ExpansionMark from '../components/ExpansionMark.jsx';
 import { Action, track } from '../track.js';
 import { LIST_CURRENCIES, fiatFromPkn, listingPriceToPkn } from '../pkn.js';
 import { cardStubFromRoute, mergeDeskCard, realPublicCardId } from '../card-stub.js';
+import { clearActiveDeskCard, setActiveDeskCard } from '../poko-chat.js';
 import CardArt from '../components/CardArt.jsx';
 import RelatedCards from '../components/RelatedCards.jsx';
 import { ShipFromCountryGate } from '../components/SellerShippingSettings.jsx';
@@ -1802,6 +1803,14 @@ export default function Card() {
       cancelled = true;
     };
   }, [cardId]);
+
+  useEffect(() => {
+    const card = payload?.card || stubCard;
+    if (card?.id || card?.name) {
+      setActiveDeskCard(card);
+    }
+    return () => clearActiveDeskCard();
+  }, [payload?.card, stubCard]);
 
   useEffect(() => {
     const name = String(payload?.card?.name || stubCard?.name || '').trim();

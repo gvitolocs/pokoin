@@ -28,11 +28,13 @@ import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import { MESSAGES_UNREAD_EVENT, MESSAGES_UNREAD_REFRESH_MS, unreadMessagesCount } from '../messages-unread.js';
 import {
+  buildPokoPageContext,
+  defaultPokoDeskPrompt,
   isPokoPeer,
   POKO_DISPLAY,
   POKO_PEER,
   readPokoHistory,
-  tagsToPokoCards,
+  resolvePokoCards,
   writePokoHistory,
 } from '../poko-chat.js';
 import { useChatThread } from '../use-chat-thread.js';
@@ -314,15 +316,21 @@ export default function ChatDock() {
   async function send(event) {
     event?.preventDefault();
     const message = text.trim();
-    if (busy || (!message && !dock.tags.length && !photos.length)) return;
+    const deskCards = resolvePokoCards({ tags: dock.tags, pathname: location.pathname });
+    if (busy || (!message && !dock.tags.length && !photos.length && !deskCards.length)) return;
     setBusy(true);
     setError('');
     try {
       const token = await getBearer();
       if (!token) throw new Error('Sign in to send a message.');
       if (poko) {
-        const attachedCards = tagsToPokoCards(dock.tags);
+        const attachedCards = deskCards;
         const attachedImages = photos.slice();
+        const pageContext = buildPokoPageContext({
+          pathname: location.pathname,
+          cards: attachedCards,
+          images: attachedImages,
+        });
         const mine = {
           id: `local-${Date.now()}`,
           mine: true,
@@ -336,11 +344,12 @@ export default function ChatDock() {
         setPhotos([]);
         clearChatTags();
         const result = await sendPokoChat({
-          message: message || (attachedCards[0]?.name
-            ? `Tell me about ${attachedCards[0].name}`
+          message: message || (attachedCards[0]
+            ? defaultPokoDeskPrompt(attachedCards[0])
             : attachedImages.length ? 'What can you tell me about this photo?' : ''),
           cards: attachedCards,
           images: attachedImages,
+          pageContext,
           sessionId: user?.uid || '',
         }, token);
         setPokoEvents((current) => [...current, {

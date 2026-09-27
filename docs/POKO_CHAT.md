@@ -8,12 +8,16 @@ replies and no local `poko-market` fallback inside this BFF.
 ```
 Browser (Messages / chat dock)
   → Firebase bearer
-  → POST /api/poko-chat   { message, cards?, images?, sessionId? }
+  → POST /api/poko-chat   { message, cards?, images?, sessionId?, pageContext? }
   → Pi BFF server/pokoin-api/poko-chat.js
   → Hermes peer1  POST {POKONTACT_SERVICE_URL}/chat
        default base: http://92.5.153.117:8789/api/poko
        full URL:     …/api/poko/chat
 ```
+
+On a card desk the SPA always includes the open printing in `cards[]` /
+`pageContext.deskCardId` (even with no drag-attach). The BFF prepends a
+market-first directive so Hermes runs `card_quote` instead of inventing lore.
 
 Hermes (`/opt/hermes-poko` on oracle-peer1, `hermes-poko.service` :8789)
 loads `docs/poko-knowledge.md` + `docs/poko-behavior-seed.jsonl`, plans with

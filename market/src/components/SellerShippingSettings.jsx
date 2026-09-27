@@ -9,12 +9,27 @@ import { useAuth } from '../auth.jsx';
 import { SHIP_FROM_COUNTRIES, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { Alert, DeskPanel } from './Desk.jsx';
 
+/** Platform owner must enable Connect once; sellers then get Express Account Links. */
+const STRIPE_CONNECT_GET_STARTED = 'https://dashboard.stripe.com/connect/accounts/overview';
+
+function isPlatformConnectDisabled(message) {
+  return /signed up for Connect|Connect is not enabled/i.test(String(message || ''));
+}
+
 function friendlyStripeError(message) {
   const text = String(message || '');
-  if (/signed up for Connect/i.test(text)) {
+  if (isPlatformConnectDisabled(text)) {
     return 'Stripe Connect is not enabled on the Pokoin platform account yet. Finish Connect setup in the Stripe Dashboard (Connect → Get started), then try again.';
   }
   return text || 'Connect failed.';
+}
+
+function openStripeUrl(url) {
+  if (!url) return false;
+  const win = window.open(url, '_blank', 'noopener,noreferrer');
+  if (win) return true;
+  window.location.assign(url);
+  return true;
 }
 
 /** Brand purple Connect button — sits next to CardTrader actions on Profile. */
@@ -52,9 +67,15 @@ export function StripeConnectButton({ className = '', shipFromCountry = '', onCo
       onCountrySaved?.(saved.shipFromCountry || shipFromCountry);
       const data = await startStripeConnectOnboard({}, token);
       if (!data.url) throw new Error('Stripe did not return an onboarding URL.');
-      window.location.assign(data.url);
+      openStripeUrl(data.url);
+      setBusy(false);
     } catch (err) {
-      onError?.(friendlyStripeError(err.message));
+      const msg = friendlyStripeError(err.message);
+      onError?.(msg);
+      const dashboardUrl = err.body?.dashboardUrl || (
+        isPlatformConnectDisabled(err.message) ? STRIPE_CONNECT_GET_STARTED : null
+      );
+      if (dashboardUrl) openStripeUrl(dashboardUrl);
       setBusy(false);
     }
   }

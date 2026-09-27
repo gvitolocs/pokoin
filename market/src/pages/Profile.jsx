@@ -125,7 +125,7 @@ export default function Profile() {
             <p className="page-lede">Admin</p>
           </DeskPanel>
         ) : null}
-        <DeskPanel title="CardTrader">
+        <DeskPanel title="Connections">
           <CardTraderConnectPanel stripeAction={stripeAction} />
         </DeskPanel>
         <DeskPanel title="Telegram">
