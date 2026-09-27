@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   POKO_PEER,
+  cleanPokoImages,
   isPokoPeer,
   pokoPreview,
   readPokoHistory,
+  tagsToPokoCards,
   writePokoHistory,
 } from './poko-chat.js';
 
@@ -18,6 +20,17 @@ test('isPokoPeer recognizes reserved peer', () => {
 test('pokoPreview falls back and prefers last text', () => {
   assert.match(pokoPreview([]), /Ask about cards/);
   assert.equal(pokoPreview([{ text: 'hi' }, { text: 'worth?' }]), 'worth?');
+  assert.equal(pokoPreview([{ images: ['https://cdn.pokoin.com/a.jpg'] }]), 'Photo attached');
+});
+
+test('tagsToPokoCards and cleanPokoImages sanitize payloads', () => {
+  const cards = tagsToPokoCards([{ cardId: '1', cardName: 'Mew', setName: '151' }, { name: '' }]);
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].name, 'Mew');
+  assert.deepEqual(
+    cleanPokoImages(['https://cdn.pokoin.com/a.jpg', 'not-a-url', 'javascript:alert(1)']),
+    ['https://cdn.pokoin.com/a.jpg'],
+  );
 });
 
 test('poko history round-trips in localStorage', () => {

@@ -244,16 +244,18 @@ function cardPayload(row) {
     language: String(row?.language || ''),
     canonicalPath: String(row?.canonicalPath || row?.href || ''),
     imageUrl: String(row?.imageUrl || row?.cardImageUrl || ''),
+    cardName: String(row?.cardName || row?.name || ''),
   };
 }
 
 function PokoConversation() {
   const navigate = useNavigate();
-  const { ready, signedIn, getBearer, user } = useAuth();
+  const { ready, signedIn, getBearer, user, profile } = useAuth();
   const uid = user?.uid || '';
   const [events, setEvents] = useState(() => readPokoHistory(uid));
   const [text, setText] = useState('');
   const [cards, setCards] = useState([]);
+  const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [over, setOver] = useState(false);
@@ -292,28 +294,57 @@ function PokoConversation() {
     });
   }
 
+  async function addPhotos(event) {
+    const files = [...(event.target.files || [])];
+    event.target.value = '';
+    const room = MAX_CHAT_PHOTOS - photos.length;
+    if (!files.length || room <= 0) return;
+    setBusy(true);
+    setError('');
+    try {
+      const token = await getBearer();
+      const next = [];
+      for (const file of files.slice(0, room)) {
+        const dataUrl = await photoFileToJpeg(file);
+        const saved = await uploadChatPhoto(token, dataUrl, 'chat');
+        if (saved?.url) next.push(saved.url);
+      }
+      setPhotos((current) => [...current, ...next].slice(0, MAX_CHAT_PHOTOS));
+    } catch (err) {
+      setError(err.message || 'Photo was not added.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function send(event) {
     event?.preventDefault();
     const message = text.trim();
-    if (busy || (!message && !cards.length)) return;
+    if (busy || (!message && !cards.length && !photos.length)) return;
     setBusy(true);
     setError('');
+    const attached = cards.map((row) => ({ ...row }));
+    const attachedImages = photos.slice();
     const mine = {
       id: `local-${Date.now()}`,
       mine: true,
       text: message,
-      cards: cards.map((row) => ({ ...row })),
+      listings: attached,
+      images: attachedImages,
       createdAt: new Date().toISOString(),
     };
     setEvents((current) => [...current, mine]);
     setText('');
-    const attached = cards.map((row) => ({ ...row }));
     setCards([]);
+    setPhotos([]);
     try {
       const token = await getBearer();
       const result = await sendPokoChat({
-        message: message || `Tell me about ${attached[0]?.name || 'this card'}`,
+        message: message || (attached[0]?.name
+          ? `Tell me about ${attached[0].name}`
+          : attachedImages.length ? 'What can you tell me about this photo?' : ''),
         cards: attached,
+        images: attachedImages,
         sessionId: uid,
       }, token);
       setEvents((current) => [...current, {
@@ -370,15 +401,16 @@ function PokoConversation() {
           <div className="chat-first">
             <PokoAvatar className="messages-avatar is-poko is-large" />
             <h2>Chat with Poko</h2>
-            <p>Drop a card here or ask about prices, sold comps, and how long a printing may take to sell. I use Pokoin’s public market tools.</p>
+            <p>Same as any chat — drop a card, add a photo, or ask about prices and liquidity. I use Pokoin’s public market tools.</p>
           </div>
         ) : events.map((event) => (
           <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ' is-poko'}`}>
             {event.text ? <p>{event.text}</p> : null}
-            {(event.cards || []).length ? (
+            <ChatPhotos urls={event.images || []} />
+            {(event.listings || event.cards || []).length ? (
               <span className="chat-tags">
-                {event.cards.map((row, index) => (
-                  <ChatListingTag key={`${tagKey(row)}:${index}`} row={row} peer={{ username: POKO_PEER }} me={{ uid }} />
+                {(event.listings || event.cards || []).map((row, index) => (
+                  <ChatListingTag key={`${tagKey(row)}:${index}`} row={row} peer={{ username: POKO_PEER }} me={{ uid, username: profile?.username }} />
                 ))}
               </span>
             ) : null}
@@ -395,17 +427,28 @@ function PokoConversation() {
                 key={`${tagKey(row)}:${index}`}
                 row={row}
                 peer={{ username: POKO_PEER }}
-                me={{ uid }}
+                me={{ uid, username: profile?.username }}
                 onRemove={() => setCards((current) => current.filter((_, i) => i !== index))}
               />
             ))}
           </span>
           <button type="button" onClick={() => setCards([])}>Clear cards</button>
         </div>
-      ) : (
-        <p className="poko-drop-hint">Drag a listing or card onto this chat to attach it.</p>
-      )}
+      ) : null}
+      {photos.length ? (
+        <div className="chat-photo-draft">
+          <ChatPhotos urls={photos} />
+          <button type="button" onClick={() => setPhotos([])}>Clear photos</button>
+        </div>
+      ) : null}
+      {!cards.length && !photos.length ? (
+        <p className="poko-drop-hint">Drag a listing or card onto this chat to attach it — or tap + for a photo.</p>
+      ) : null}
       <form className="chat-composer" onSubmit={send}>
+        <label className="chat-photo-add" aria-label="Add photos">
+          +
+          <input type="file" accept="image/*" multiple hidden onChange={addPhotos} disabled={busy || photos.length >= MAX_CHAT_PHOTOS} />
+        </label>
         <label className="sr-only" htmlFor="poko-message">Message Poko</label>
         <textarea
           id="poko-message"
@@ -413,7 +456,7 @@ function PokoConversation() {
           maxLength={1000}
           value={text}
           onChange={(event) => setText(event.target.value)}
-          placeholder="Ask Poko about a card…"
+          placeholder="Message Poko"
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
@@ -421,7 +464,7 @@ function PokoConversation() {
             }
           }}
         />
-        <button type="submit" disabled={busy || (!text.trim() && !cards.length)} aria-label="Send to Poko">↑</button>
+        <button type="submit" disabled={busy || (!text.trim() && !cards.length && !photos.length)} aria-label="Send to Poko">↑</button>
       </form>
     </main>
   );

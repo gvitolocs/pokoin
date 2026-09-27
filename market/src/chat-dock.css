@@ -181,10 +181,21 @@
   font-size: 0.68rem;
 }
 
-.chat-dock-head strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.chat-dock-head strong.chat-dock-person.is-poko {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  overflow: visible;
+}
+
+.chat-dock-head strong.chat-dock-person.is-poko .chat-dock-avatar {
+  width: 1.55rem;
+  height: 1.55rem;
+}
+
+.chat-dock-head strong.chat-dock-person.is-poko .chat-dock-avatar img {
+  width: 14px;
+  height: 12px;
 }
 
 .chat-dock-head button {
