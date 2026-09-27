@@ -26,7 +26,7 @@
 - `countryCode` stored plaintext for rate lookup; street/name/city/postal only in ciphertext.
 - Address key: `ADDRESS_ENCRYPTION_KEY` on API host; ops mirror on InPhysical — never Firebase.
 - Package tiers from seed table `maxCards` bands (see rates file).
-- Multi-seller: one Checkout Session charges platform for grand total; per-seller Connect Transfers after buyer confirms delivery.
+- Multi-seller: one Checkout Session charges the platform for the cart total, with **one Stripe line item per seller shipment**. After delivery confirm, `releaseSellerTransfers` creates **one Connect Transfer per seller** (Separate Charges and Transfers + `transfer_group` + `source_transaction`). Not a single payout to one seller.
 - **PKN path:** keeps flat `CHECKOUT_SHIPPING_PKN = 2000` until the same rate table is converted at the fixed PKN↔EUR ratio. EUR physical checkout never uses the flat fee.
 - Seller address reveal: `POST /api/marketplace-orders?action=reveal-shipping` decrypts the snapshot only for a seller on that order (plus their shipment subset).
 

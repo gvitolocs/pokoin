@@ -300,20 +300,20 @@ function SoldGraphFilters({
         />
       ) : null}
       <SoldGraphFilter
-        label="Sold language"
-        allLabel="All languages"
-        options={languages}
-        value={language}
-        onChange={onLanguage}
-        optionLabel={soldLanguageLabel}
-      />
-      <SoldGraphFilter
         label="Sold condition"
         allLabel="All conditions"
         options={conditions}
         value={condition}
         onChange={onCondition}
         optionLabel={soldConditionLabel}
+      />
+      <SoldGraphFilter
+        label="Sold language"
+        allLabel="All languages"
+        options={languages}
+        value={language}
+        onChange={onLanguage}
+        optionLabel={soldLanguageLabel}
       />
       {unitsLabel ? <p className="sold-graph-units">{unitsLabel}</p> : null}
     </div>
