@@ -1068,15 +1068,16 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 }
 
 .desktop-drop {
-  /* Open under the chip toward the search bar — never past the left viewport edge. */
-  left: 0;
+  /* Center under the Desktop chip; wide enough for the empty-state line + action chips. */
+  left: 50%;
   right: auto;
   width: max-content;
-  min-width: 18rem;
-  max-width: min(32rem, calc(100vw - 1.25rem));
+  min-width: 28rem;
+  max-width: min(36rem, calc(100vw - 1.25rem));
   min-height: 12.5rem;
   max-height: min(70vh, 36rem);
-  overflow-x: hidden;
+  transform: translateX(-50%);
+  overflow-x: clip;
   overflow-y: auto;
 }
 
@@ -1194,6 +1195,12 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   min-height: 12.5rem;
   max-height: min(70vh, 36rem);
   overflow: auto;
+}
+
+/* cart-drop's overflow shorthand must not re-enable a horizontal bar on Desktop. */
+.desktop-drop {
+  overflow-x: clip;
+  overflow-y: auto;
 }
 
 .desktop-drop-actions {
