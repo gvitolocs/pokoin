@@ -7,7 +7,8 @@ import { accountHeading, accountLede } from '../auth-session.js';
 import { useWallet, shortAddress } from '../wallet.jsx';
 import { useCart } from '../cart.jsx';
 import { DeskPanel, Metric, MetricGrid, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
-import CardTraderConnectPanel from '../components/CardTraderConnectPanel.jsx';
+import CardTraderConnectPanel from '../components/CardTraderConnectPanel.jsx'
+import TelegramConnectPanel from '../components/TelegramConnectPanel.jsx';;
 import { formatPknNumber } from '../pkn.js';
 import Avatar from '../components/Avatar.jsx';
 import UsernameEditor from '../components/UsernameEditor.jsx';
@@ -105,6 +106,9 @@ export default function Profile() {
         </DeskPanel>
         <DeskPanel title="CardTrader">
           <CardTraderConnectPanel />
+        </DeskPanel>
+        <DeskPanel title="Telegram">
+          <TelegramConnectPanel />
         </DeskPanel>
         <DeskPanel flush title="Go to">
           <div className="thread-list">

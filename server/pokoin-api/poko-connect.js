@@ -155,6 +155,34 @@ async function status(params = {}) {
   };
 }
 
+async function myStatus(uid) {
+  const rows = await marketplaceQuery(
+    `select telegram_username, linked_at
+       from poko_telegram_links
+      where firebase_uid = $1 and unlinked_at is null
+      limit 1`,
+    [uid],
+  );
+  const row = rows.rows?.[0];
+  if (!row) return { action: 'my_status', linked: false };
+  return {
+    action: 'my_status',
+    linked: true,
+    telegramUsername: row.telegram_username || '',
+    linkedAt: row.linked_at,
+  };
+}
+
+async function unlinkMe(uid) {
+  await marketplaceWriteQuery(
+    `update poko_telegram_links
+        set unlinked_at = now()
+      where firebase_uid = $1 and unlinked_at is null`,
+    [uid],
+  );
+  return { action: 'unlink_me', linked: false };
+}
+
 async function unlink(params = {}) {
   const telegramUserId = cleanText(params.telegramUserId, 40).replace(/[^0-9]/g, '');
   if (!telegramUserId) {
@@ -169,7 +197,8 @@ async function unlink(params = {}) {
   return { action: 'unlink', linked: false };
 }
 
-const ACTIONS = { create_code: createCode, redeem, status, unlink };
+const FIREBASE_ACTIONS = { create_code: createCode, my_status: myStatus, unlink_me: unlinkMe };
+const ACTIONS = { redeem, status, unlink };
 
 // ---------------------------------------------------------------------------
 // HTTP plumbing
@@ -186,14 +215,13 @@ module.exports = async function handler(req, res) {
   }
   const action = cleanText(req.body?.action, 20);
 
-  if (action === 'create_code') {
+  // Firebase-user actions (website): create_code, my_status, unlink_me.
+  if (FIREBASE_ACTIONS[action]) {
     let uid = '';
     try {
       uid = await verifyBearerToken(req);
-    } catch (error) {
-      const authError = authErrorResponse({ statusCode: 401, message: 'unauthorized' });
-      sendJson(res, authError.statusCode, authError.body);
-      return;
+    } catch {
+      uid = '';
     }
     if (!uid) {
       const authError = authErrorResponse({ statusCode: 401, message: 'unauthorized' });
@@ -201,10 +229,11 @@ module.exports = async function handler(req, res) {
       return;
     }
     try {
-      sendJson(res, 200, { ok: true, ...(await createCode(uid)) });
+      const result = action === 'create_code' ? await createCode(uid) : await FIREBASE_ACTIONS[action](uid);
+      sendJson(res, 200, { ok: true, ...result });
     } catch (error) {
-      console.error('poko-connect create_code failed', { error: String(error?.message || error).slice(0, 300) });
-      sendJson(res, 500, { ok: false, error: 'could not create link code' });
+      console.error('poko-connect firebase action failed', { action, error: String(error?.message || error).slice(0, 300) });
+      sendJson(res, 500, { ok: false, error: 'connect action failed' });
     }
     return;
   }
@@ -220,7 +249,7 @@ module.exports = async function handler(req, res) {
   }
   const run = ACTIONS[action];
   if (!run || action === 'create_code') {
-    sendJson(res, 400, { error: `unknown action; expected one of ${Object.keys(ACTIONS).join(', ')}` });
+    sendJson(res, 400, { error: `unknown action; expected one of ${[...Object.keys(FIREBASE_ACTIONS), ...Object.keys(ACTIONS)].join(', ')}` });
     return;
   }
   const params = req.body && typeof req.body === 'object' ? req.body : {};
@@ -240,6 +269,7 @@ module.exports._test = {
   isServiceAuthorized,
   serviceToken,
   ACTIONS,
+  FIREBASE_ACTIONS,
   CODE_LENGTH,
   CODE_TTL_MINUTES,
 };

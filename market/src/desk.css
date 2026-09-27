@@ -1758,3 +1758,14 @@
 }
 .stock-csv-failed { color: var(--danger, #f07178); }
 .stock-csv-ok { color: var(--muted, #8a8f98); }
+
+/* Telegram connect panel (mirrors ct-connect) */
+.tg-connect { display: flex; flex-direction: column; gap: 0.6rem; }
+.tg-connect-note { margin: 0; font-size: 0.92rem; opacity: 0.85; }
+.tg-connect-ok { margin: 0; color: #1c7c31; font-weight: 600; }
+.tg-connect-err { margin: 0; color: #b3261e; font-weight: 600; }
+.tg-connect-actions { margin: 0; }
+.tg-code-box { display: flex; flex-direction: column; gap: 0.5rem; }
+.tg-code-label { margin: 0; font-size: 0.9rem; }
+.tg-code { margin: 0; font-family: ui-monospace, monospace; font-size: 1.6rem; letter-spacing: 0.18em; font-weight: 700; }
+.tg-steps { margin: 0 0 0.4rem 1.1rem; padding: 0; }

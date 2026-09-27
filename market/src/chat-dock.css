@@ -424,3 +424,12 @@
 .chat-photos img{width:7.5rem;height:7.5rem;object-fit:cover;border-radius:.4rem}
 .chat-photo-add{display:grid;place-items:center;width:2rem;height:2rem;border-radius:50%;cursor:pointer}
 .chat-photo-draft{display:flex;align-items:center;gap:.5rem}
+
+/* Poko assistant row + panel */
+.chat-dock-row.poko-row { border-bottom: 1px solid rgba(0, 0, 0, 0.06); }
+.chat-dock-row.poko-row .poko-avatar { background: #ffd75e; color: #5b4200; font-weight: 700; }
+.chat-dock-row.poko-row .chat-dock-row-copy em { color: #7a6a2f; }
+.poko-panel { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.poko-log { flex: 1; }
+.poko-input-row { display: flex; gap: 0.5rem; padding: 0.5rem; border-top: 1px solid rgba(0, 0, 0, 0.08); }
+.poko-input-row input { flex: 1; min-width: 0; }

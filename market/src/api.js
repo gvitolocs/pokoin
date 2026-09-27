@@ -703,6 +703,28 @@ export function connectCardTrader(token, cardTraderToken) {
   });
 }
 
+export function askPoko(bearer, message, sessionId) {
+  return getJson('/api/pokoin-assistant', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearer}`,
+    },
+    body: JSON.stringify({ message: String(message || '').slice(0, 2000), sessionId: String(sessionId || '') }),
+  });
+}
+
+export function pokoConnectAction(bearer, body) {
+  return getJson('/api/poko-connect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearer}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 export function disconnectCardTrader(token) {
   return getJson('/api/cardtrader-disconnect', {
     method: 'POST',
