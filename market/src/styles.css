@@ -1550,6 +1550,13 @@ h1, h2 { margin: 0 0 0.85rem; }
   padding: 1.55rem 3.4rem 1.35rem;
 }
 
+@media (min-width: 721px) {
+  .promo-slide {
+    position: relative;
+    top: -20px;
+  }
+}
+
 @keyframes promo-rise {
   from {
     opacity: 0;
