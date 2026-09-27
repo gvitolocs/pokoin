@@ -40,6 +40,28 @@ test('inventory meta marks paused and non-EN language', () => {
   assert.equal(meta, '324 PKN · NM · qty 1 · paused · JP');
 });
 
+test('inventory meta includes scan location when present', () => {
+  const meta = inventoryListingMeta(
+    {
+      pricePkn: 200,
+      condition: 'NM',
+      quantityAvailable: 2,
+      language: 'EN',
+      location: 'box1·47',
+    },
+    (n) => `${n} PKN`,
+  );
+  assert.equal(meta, '200 PKN · NM · qty 2 · box1·47');
+});
+
+test('inventory meta omits blank location', () => {
+  const meta = inventoryListingMeta(
+    { pricePkn: 100, condition: 'LP', quantityAvailable: 1, location: '  ' },
+    (n) => `${n} PKN`,
+  );
+  assert.equal(meta, '100 PKN · LP · qty 1');
+});
+
 test('summarizeLiveInventory counts qty and asking value for live rows only', () => {
   const summary = summarizeLiveInventory([
     { status: 'active', quantityAvailable: 2, pricePkn: 100 },

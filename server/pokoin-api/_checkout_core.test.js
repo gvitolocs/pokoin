@@ -1,0 +1,127 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const {
+  packageTierForCount,
+  quoteShipment,
+  quoteCheckout,
+  groupCartBySeller,
+  assertShipFromCountry,
+  validateAddressFields,
+  findRate,
+  DEFAULT_RATES,
+} = require('./_checkout_core');
+const { encryptAddressPayload, decryptAddressPayload } = require('./_address_crypto');
+
+const TEST_KEY = Buffer.alloc(32, 7).toString('hex');
+
+test('EU is rejected as ship-from', () => {
+  assert.throws(() => assertShipFromCountry('EU'), /ISO/);
+  assert.equal(assertShipFromCountry('dk'), 'DK');
+});
+
+test('package tier boundaries match seed table', () => {
+  assert.equal(packageTierForCount(1), 'SMALL');
+  assert.equal(packageTierForCount(4), 'SMALL');
+  assert.equal(packageTierForCount(5), 'MEDIUM');
+  assert.equal(packageTierForCount(20), 'MEDIUM');
+  assert.equal(packageTierForCount(21), 'LARGE');
+  assert.equal(packageTierForCount(50), 'LARGE');
+  assert.equal(packageTierForCount(51), 'EXTRA_LARGE');
+});
+
+test('country routing differs by origin/destination for same tier', () => {
+  const dkIt = findRate({ fromCountry: 'DK', toCountry: 'IT', packageTier: 'SMALL' });
+  const dkDk = findRate({ fromCountry: 'DK', toCountry: 'DK', packageTier: 'SMALL' });
+  const deIt = findRate({ fromCountry: 'DE', toCountry: 'IT', packageTier: 'MEDIUM' });
+  assert.equal(dkIt.priceEURCents, 600);
+  assert.equal(dkDk.priceEURCents, 350);
+  assert.equal(deIt.priceEURCents, 800);
+  assert.notEqual(dkIt.priceEURCents, dkDk.priceEURCents);
+});
+
+test('missing route fails closed', () => {
+  assert.throws(
+    () => findRate({ fromCountry: 'FR', toCountry: 'PT', packageTier: 'SMALL' }),
+    (err) => err.code === 'shipping_rate_missing',
+  );
+});
+
+test('multi-seller cart becomes two shipments', () => {
+  const groups = groupCartBySeller([
+    { sellerUid: 'A', qty: 4, pricePkn: 200 },
+    { sellerUid: 'B', qty: 12, pricePkn: 200 },
+  ]);
+  assert.equal(groups.length, 2);
+  assert.equal(groups.find((g) => g.sellerId === 'A').cardCount, 4);
+  assert.equal(groups.find((g) => g.sellerId === 'B').cardCount, 12);
+});
+
+test('quoteCheckout sums per-seller shipping', () => {
+  const quote = quoteCheckout({
+    toCountry: 'IT',
+    sellerOrigins: { A: 'DK', B: 'DE' },
+    items: [
+      { sellerUid: 'A', qty: 4, pricePkn: 2000 },
+      { sellerUid: 'B', qty: 12, pricePkn: 1000 },
+    ],
+  });
+  assert.equal(quote.shipments.length, 2);
+  const a = quote.shipments.find((s) => s.sellerId === 'A');
+  const b = quote.shipments.find((s) => s.sellerId === 'B');
+  assert.equal(a.packageTier, 'SMALL');
+  assert.equal(a.amountCents, 600);
+  assert.equal(b.packageTier, 'MEDIUM');
+  assert.equal(b.amountCents, 800);
+  assert.equal(quote.shippingTotalCents, 1400);
+  assert.equal(quote.grandTotalCents, quote.itemsSubtotalCents + 1400);
+});
+
+test('adding a fifth card bumps DK→IT tier', () => {
+  const four = quoteShipment({
+    sellerId: 'A',
+    fromCountry: 'DK',
+    toCountry: 'IT',
+    items: [{ qty: 4 }],
+  });
+  const five = quoteShipment({
+    sellerId: 'A',
+    fromCountry: 'DK',
+    toCountry: 'IT',
+    items: [{ qty: 5 }],
+  });
+  assert.equal(four.packageTier, 'SMALL');
+  assert.equal(five.packageTier, 'MEDIUM');
+  assert.ok(five.amountCents > four.amountCents);
+});
+
+test('address validation and encryption round-trip', () => {
+  const address = validateAddressFields({
+    fullName: 'Mario Rossi',
+    addressLine1: 'Via Roma 12',
+    postalCode: '20100',
+    city: 'Milano',
+    countryCode: 'IT',
+  });
+  const enc = encryptAddressPayload({
+    fullName: address.fullName,
+    addressLine1: address.addressLine1,
+    addressLine2: address.addressLine2,
+    postalCode: address.postalCode,
+    city: address.city,
+    stateProvinceRegion: address.stateProvinceRegion,
+    phoneNumber: address.phoneNumber,
+    deliveryInstructions: address.deliveryInstructions,
+  }, TEST_KEY);
+  assert.ok(enc.ciphertext);
+  assert.equal(enc.ciphertext.includes('Mario'), false);
+  const dec = decryptAddressPayload(enc, TEST_KEY);
+  assert.equal(dec.fullName, 'Mario Rossi');
+  assert.equal(dec.city, 'Milano');
+});
+
+test('seed catalog is loaded', () => {
+  assert.ok(DEFAULT_RATES.rates.length >= 20);
+  assert.ok(DEFAULT_RATES.tiers.some((t) => t.id === 'SMALL'));
+});
