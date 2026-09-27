@@ -2088,13 +2088,16 @@ export default function Card() {
               draggable
               title="Drag to add every printing of this Pokémon"
               onPointerDown={() => preloadDragImage(art)}
-              onDragStart={(event) => writeListingDrag(event, bundleReference({
-                kind: 'species',
-                slug: displayName(card),
-                name: displayName(card),
-                imageUrl: art,
-                path: cardPath,
-              }))}
+              onDragStart={(event) => {
+                event.stopPropagation();
+                writeListingDrag(event, bundleReference({
+                  kind: 'species',
+                  slug: species?.name || displayName(card),
+                  name: species?.name || displayName(card),
+                  imageUrl: art,
+                  path: species ? pokemonHref(card, lang) : cardPath,
+                }));
+              }}
             >{displayName(card)}</span>
             {identityEmoji ? <span className="asset-emoji"> {identityEmoji}</span> : null}
           </h1>
@@ -2124,13 +2127,16 @@ export default function Card() {
                 onPointerDown={() => preloadDragImage(
                   expansionLogoSrc({ slug: setSlug(setName), name: setName }),
                 )}
-                onDragStart={(event) => writeListingDrag(event, bundleReference({
-                  kind: 'expansion',
-                  slug: setSlug(setName),
-                  name: setName,
-                  imageUrl: expansionLogoSrc({ slug: setSlug(setName), name: setName }),
-                  path: setHref,
-                }))}
+                onDragStart={(event) => {
+                  event.stopPropagation();
+                  writeListingDrag(event, bundleReference({
+                    kind: 'expansion',
+                    slug: setSlug(setName),
+                    name: setName,
+                    imageUrl: expansionLogoSrc({ slug: setSlug(setName), name: setName }),
+                    path: setHref,
+                  }));
+                }}
               >{setName}</Link>
             ) : null}
             {collector ? (
@@ -2148,13 +2154,16 @@ export default function Card() {
                     draggable
                     onClick={() => track(Action.clickArtist, card)}
                     onPointerDown={() => preloadDragImage(artistCover)}
-                    onDragStart={(event) => writeListingDrag(event, bundleReference({
-                      kind: 'artist',
-                      slug: artistSlug(artist),
-                      name: artist,
-                      imageUrl: artistCover,
-                      path: artistPath,
-                    }))}
+                    onDragStart={(event) => {
+                      event.stopPropagation();
+                      writeListingDrag(event, bundleReference({
+                        kind: 'artist',
+                        slug: artistSlug(artist),
+                        name: artist,
+                        imageUrl: artistCover,
+                        path: artistPath,
+                      }));
+                    }}
                   >{artist}</Link>
                 ) : (
                   <span>{artist}</span>

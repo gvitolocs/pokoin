@@ -417,16 +417,29 @@ export default function Chrome({ children }) {
   const [messagesUnread, setMessagesUnread] = useState(0);
   const messagesAriaLabel = messagesUnread > 0 ? 'Messages, unread messages' : 'Messages';
   useEffect(() => {
+    let openTray = 0;
     function onDragStart() {
-      setNavPop('');
-      setCardDrag(document.documentElement.classList.contains('is-card-dragging'));
+      // Mounting Cart/Desktop in the same turn as dragstart re-renders the
+      // tree and Chrome aborts HTML5 drags that started from text links
+      // (Pokémon name / set / artist). Open the trays on the next frame.
+      if (openTray) cancelAnimationFrame(openTray);
+      openTray = requestAnimationFrame(() => {
+        openTray = 0;
+        setNavPop('');
+        setCardDrag(document.documentElement.classList.contains('is-card-dragging'));
+      });
     }
     function onDragEnd() {
+      if (openTray) {
+        cancelAnimationFrame(openTray);
+        openTray = 0;
+      }
       setCardDrag(false);
     }
     window.addEventListener('dragstart', onDragStart);
     window.addEventListener('dragend', onDragEnd);
     return () => {
+      if (openTray) cancelAnimationFrame(openTray);
       window.removeEventListener('dragstart', onDragStart);
       window.removeEventListener('dragend', onDragEnd);
     };

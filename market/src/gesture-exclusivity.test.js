@@ -36,6 +36,23 @@ test('desk title / set / artist stay out of shop marquee', () => {
   assert.match(marquee, /\.asset-sub/);
 });
 
+test('Chrome defers Cart/Desktop mount so title/set/artist HTML5 drag is not aborted', () => {
+  const chrome = fs.readFileSync(path.join(market, 'components/Chrome.jsx'), 'utf8');
+  // Sync setCardDrag inside dragstart remounts trays and Chrome cancels text-link drags.
+  assert.match(chrome, /requestAnimationFrame/);
+  assert.match(chrome, /setCardDrag\(document\.documentElement\.classList\.contains\('is-card-dragging'\)\)/);
+  const dragStartAt = chrome.indexOf('function onDragStart');
+  const rAFAt = chrome.indexOf('requestAnimationFrame', dragStartAt);
+  const setCardAt = chrome.indexOf("setCardDrag(document.documentElement.classList.contains('is-card-dragging'))", dragStartAt);
+  assert.ok(dragStartAt > 0 && rAFAt > dragStartAt && setCardAt > rAFAt);
+  const page = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
+  assert.match(page, /className="species-drag"/);
+  assert.match(page, /kind: 'species'/);
+  assert.match(page, /kind: 'expansion'/);
+  assert.match(page, /kind: 'artist'/);
+  assert.match(page, /event\.stopPropagation\(\)/);
+});
+
 test('CardSelectGrid bands desk+related via main-scoped data-card-id', () => {
   const host = fs.readFileSync(path.join(market, 'select-band.jsx'), 'utf8');
   assert.match(host, /\[data-card-id\]/);
