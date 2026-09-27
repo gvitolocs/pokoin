@@ -3,6 +3,12 @@
 Status: implemented, awaiting deploy. One authoritative read-only market
 tool surface for every Poko channel (website chat, Telegram, YouTube replies).
 
+Website Messages mounts a permanent **Poko** thread at `/messages/poko`. The
+browser calls Firebase-authed `POST /api/poko-chat` (never the service token).
+That BFF prefers Hermes `/api/poko/chat` when `POKO_CHAT_URL` + `POKO_API_TOKEN`
+are set, otherwise answers card questions through the local tools below.
+Attached cards from drag-and-drop are forwarded as `cards[]`.
+
 ## Contract
 
 `POST /api/poko-market` — server-to-server only. Never call it from a browser.

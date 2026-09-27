@@ -61,19 +61,32 @@ test('empty page background may start a shop marquee; shop rows and art may not'
   assert.equal(marqueeStartAllowed(setLink), false);
 });
 
-test('select band stays off on touch and phone widths', () => {
-  assert.equal(selectBandAllowed({ pointerType: 'mouse' }, { matchMedia: () => ({ matches: false }) }), true);
-  assert.equal(selectBandAllowed({ pointerType: 'touch' }, { matchMedia: () => ({ matches: false }) }), false);
-  assert.equal(selectBandAllowed({ pointerType: 'pen' }, { matchMedia: () => ({ matches: false }) }), false);
+test('select band stays off on touch, phone widths, and account pages', () => {
+  const marketWin = {
+    location: { pathname: '/marketplace/en/cards/1' },
+    matchMedia: () => ({ matches: false }),
+  };
+  assert.equal(selectBandAllowed({ pointerType: 'mouse' }, marketWin), true);
+  assert.equal(selectBandAllowed({ pointerType: 'touch' }, marketWin), false);
+  assert.equal(selectBandAllowed({ pointerType: 'pen' }, marketWin), false);
   assert.equal(
     selectBandAllowed({ pointerType: 'mouse' }, {
+      location: { pathname: '/marketplace' },
       matchMedia: (query) => ({ matches: String(query).includes('max-width: 720px') }),
     }),
     false,
   );
   assert.equal(
     selectBandAllowed({ button: 0 }, {
+      location: { pathname: '/marketplace' },
       matchMedia: (query) => ({ matches: String(query).includes('pointer: coarse') }),
+    }),
+    false,
+  );
+  assert.equal(
+    selectBandAllowed({ pointerType: 'mouse' }, {
+      location: { pathname: '/profile' },
+      matchMedia: () => ({ matches: false }),
     }),
     false,
   );

@@ -4,6 +4,11 @@
  * Seller ship-from country + Stripe Connect readiness on users/{uid}.
  * GET  /api/marketplace-seller-settings
  * POST /api/marketplace-seller-settings  { shipFromCountry?, stripeConnectReturn? }
+ *
+ * When shipFromCountry is empty, GET seeds it from the request IP country
+ * (CF-IPCountry / Vercel / CloudFront) if that ISO code is an allowed sell-from
+ * country. Sellers can change it anytime on Profile. Selling still requires a
+ * stored shipFromCountry (IP seed or manual).
  */
 
 const path = require('path');
@@ -19,19 +24,66 @@ function requireHelper(name) {
 
 const { getFirebaseAdmin, verifyBearerToken } = requireHelper('_firebase');
 const { assertShipFromCountry, normalizeCountry } = require('./_checkout_core');
+const { shipFromCountryFromRequest } = require('./_client_country');
+const { marketplaceWriteQuery } = require('./_marketplace_db');
 
 function profileRef(firestore, uid) {
   return firestore.collection('users').doc(uid);
+}
+
+async function stampSellerCountryOnListings(sellerUid, country) {
+  const code = normalizeCountry(country);
+  if (!sellerUid || !code) return 0;
+  try {
+    const result = await marketplaceWriteQuery(
+      `
+        update public.marketplace_user_listings
+        set seller_country = $2, updated_at = now()
+        where seller_uid = $1
+          and coalesce(upper(seller_country), '') is distinct from $2
+      `,
+      [sellerUid, code],
+    );
+    return result?.rowCount || 0;
+  } catch (_) {
+    return 0;
+  }
 }
 
 async function readSettings(firestore, uid) {
   const snap = await profileRef(firestore, uid).get();
   const data = snap.exists ? snap.data() || {} : {};
   const shipFromCountry = normalizeCountry(data.shipFromCountry || data.ship_from_country || '');
+  const source = String(data.shipFromCountrySource || '').trim().toLowerCase();
   return {
     shipFromCountry: shipFromCountry || '',
+    shipFromCountrySource: shipFromCountry
+      ? (source === 'ip' || source === 'user' ? source : 'user')
+      : '',
     stripeConnectAccountId: String(data.stripeConnectAccountId || ''),
     stripeConnectStatus: String(data.stripeConnectStatus || 'not_started'),
+  };
+}
+
+async function seedFromIpIfNeeded(firestore, admin, uid, headers) {
+  const current = await readSettings(firestore, uid);
+  if (current.shipFromCountry) {
+    return { ...current, seededFromIp: false };
+  }
+  const fromIp = shipFromCountryFromRequest(headers || {});
+  if (!fromIp) {
+    return { ...current, suggestedShipFromCountry: '', seededFromIp: false };
+  }
+  await profileRef(firestore, uid).set({
+    shipFromCountry: fromIp,
+    shipFromCountrySource: 'ip',
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+  await stampSellerCountryOnListings(uid, fromIp);
+  return {
+    ...(await readSettings(firestore, uid)),
+    suggestedShipFromCountry: fromIp,
+    seededFromIp: true,
   };
 }
 
@@ -46,7 +98,7 @@ module.exports = async function handler(req, res) {
     const firestore = admin.firestore();
 
     if (req.method === 'GET') {
-      const settings = await readSettings(firestore, decoded.uid);
+      const settings = await seedFromIpIfNeeded(firestore, admin, decoded.uid, req.headers);
       return res.status(200).json(settings);
     }
 
@@ -54,10 +106,15 @@ module.exports = async function handler(req, res) {
     const patch = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
     if (body.shipFromCountry != null) {
       patch.shipFromCountry = assertShipFromCountry(body.shipFromCountry);
+      patch.shipFromCountrySource = 'user';
     }
     await profileRef(firestore, decoded.uid).set(patch, { merge: true });
+    let listingsStamped = 0;
+    if (patch.shipFromCountry) {
+      listingsStamped = await stampSellerCountryOnListings(decoded.uid, patch.shipFromCountry);
+    }
     const settings = await readSettings(firestore, decoded.uid);
-    return res.status(200).json(settings);
+    return res.status(200).json({ ...settings, listingsStamped });
   } catch (error) {
     const status = error.statusCode || 500;
     return res.status(status).json({ error: error.message || 'Seller settings failed.', code: error.code });
@@ -65,4 +122,12 @@ module.exports = async function handler(req, res) {
 };
 
 module.exports.readSellerSettings = readSettings;
-module.exports._test = { readSettings, assertShipFromCountry, normalizeCountry };
+module.exports.seedFromIpIfNeeded = seedFromIpIfNeeded;
+module.exports._test = {
+  readSettings,
+  assertShipFromCountry,
+  normalizeCountry,
+  stampSellerCountryOnListings,
+  seedFromIpIfNeeded,
+  shipFromCountryFromRequest,
+};

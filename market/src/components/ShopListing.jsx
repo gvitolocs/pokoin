@@ -42,6 +42,14 @@ function ShopScan({ image, name, setName = '' }) {
 
 function Flag({ flag, className }) {
   if (!flag) return null;
+  if (flag.emoji) {
+    return (
+      <span className={className} title={flag.label || flag.short} aria-label={flag.label || flag.short}>
+        {flag.emoji}
+      </span>
+    );
+  }
+  if (!flag.src) return null;
   return (
     <img
       className={className}
@@ -182,11 +190,13 @@ export default function ShopListingRow({
       ) : href ? (
         <Link className="shop-seller" to={href} state={{ listing: offer }} onClick={(event) => event.stopPropagation()}>
           <Flag flag={country} className="shop-flag shop-flag-country" />
+          {country?.short ? <span className="shop-country-code">{country.short}</span> : null}
           <span className="shop-brand">{name}</span>
         </Link>
       ) : (
         <span className="shop-seller">
           <Flag flag={country} className="shop-flag shop-flag-country" />
+          {country?.short ? <span className="shop-country-code">{country.short}</span> : null}
           <span className="shop-brand">{name}</span>
         </span>
       )}

@@ -41,7 +41,11 @@ test('listing language uses circle flags, not EN text', () => {
 test('seller country flag sits next to the username', () => {
   assert.equal(sellerCountryFlag('IT').code, 'it');
   assert.equal(sellerCountryFlag('IT').label, 'Italy');
-  assert.equal(sellerCountryFlag('EU').code, 'eu');
+  assert.equal(sellerCountryFlag('IT').short, 'IT');
+  assert.equal(sellerCountryFlag('IT').emoji, '🇮🇹');
+  assert.equal(sellerCountryFlag('HU').short, 'HU');
+  assert.equal(sellerCountryFlag('HU').emoji, '🇭🇺');
+  assert.equal(sellerCountryFlag('EU'), null);
   assert.equal(sellerCountryFlag('US').code, 'us');
 });
 

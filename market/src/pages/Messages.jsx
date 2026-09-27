@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { searchRecipientUsernames } from '../api.js';
+import { searchRecipientUsernames, sendPokoChat } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import {
   listConversations,
@@ -11,13 +11,31 @@ import {
 } from '../chat-client.js';
 import { useChatThread } from '../use-chat-thread.js';
 import { chatTime, eventAriaLabel, requestActionFor } from '../chat-format.js';
-import { tagKey } from '../chat-listing.js';
+import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
 import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import ChatListingTag from '../components/ChatListingTag.jsx';
 import ChatPhotos from '../components/ChatPhotos.jsx';
 import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
 import { createMoneyRequest, payMoneyRequest, requestStatusLabel, respondMoneyRequest } from '../money-requests.js';
+import {
+  isPokoPeer,
+  POKO_DISPLAY,
+  POKO_LEDE,
+  POKO_PEER,
+  pokoPreview,
+  readPokoHistory,
+  writePokoHistory,
+} from '../poko-chat.js';
+import mascotUrl from '../assets/pokoin-mascot@8x.png';
+
+function PokoAvatar({ className = 'messages-avatar is-poko' }) {
+  return (
+    <span className={className} aria-hidden="true">
+      <img src={mascotUrl} alt="" width="28" height="26" />
+    </span>
+  );
+}
 
 function SignInGate() {
   return (
@@ -77,11 +95,13 @@ function NewConversation({ onClose }) {
 }
 
 export default function Messages() {
-  const { ready, signedIn, getBearer } = useAuth();
+  const { ready, signedIn, getBearer, user } = useAuth();
   const [rows, setRows] = useState(readChatPreviews);
   const [loading, setLoading] = useState(() => readChatPreviews().length === 0);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const uid = user?.uid || '';
+  const pokoEvents = readPokoHistory(uid);
 
   const refresh = useCallback(async () => {
     if (!signedIn) return;
@@ -113,17 +133,26 @@ export default function Messages() {
     <main className="messages-page">
       <header className="messages-title-row"><div><p className="messages-kicker">Your people</p><h1>Messages</h1></div><button className="messages-new" type="button" onClick={() => setCreating(true)}>New message</button></header>
       {error && <p className="chat-error" role="alert">{error}</p>}
-      {loading ? <div className="messages-list-skeleton" aria-label="Loading conversations" /> : rows.length ? (
-        <div className="messages-list">{rows.map((row) => (
+      <div className="messages-list">
+        <Link className="messages-row is-poko" to={`/messages/${POKO_PEER}`}>
+          <PokoAvatar />
+          <span className="messages-row-copy">
+            <strong>{POKO_DISPLAY}</strong>
+            <span>{pokoPreview(pokoEvents)}</span>
+          </span>
+          <span className="messages-row-meta"><time>Assistant</time></span>
+        </Link>
+        {loading ? <div className="messages-list-skeleton" aria-label="Loading conversations" /> : rows.map((row) => (
           <Link key={row.pairKey} className="messages-row" to={`/messages/${encodeURIComponent(row.peerUsername)}`}>
             <span className="messages-avatar" aria-hidden="true">{row.peerUsername?.slice(0, 1).toUpperCase() || '?'}</span>
             <span className="messages-row-copy"><strong>@{row.peerUsername || 'Pokoin user'}</strong><span>{row.preview || 'Start the conversation'}</span></span>
             <span className="messages-row-meta"><time>{chatTime(row.updatedAt)}</time>{row.unread > 0 && <b aria-label={`${row.unread} unread`}>{row.unread}</b>}</span>
           </Link>
-        ))}</div>
-      ) : (
-        <div className="messages-empty-card compact"><h2>No conversations yet</h2><p>Message someone by their Pokoin username. Payments and requests stay in the same timeline.</p><button className="wallet-primary" type="button" onClick={() => setCreating(true)}>Start a conversation</button></div>
-      )}
+        ))}
+      </div>
+      {!loading && !rows.length ? (
+        <p className="messages-hint">Chat with Poko about cards above, or start a conversation with another Pokoin username.</p>
+      ) : null}
       {creating && <NewConversation onClose={() => setCreating(false)} />}
     </main>
   );
@@ -202,6 +231,203 @@ function EventCard({ event, busy, onAction, peer, me }) {
 export function Conversation() {
   const { username = '' } = useParams();
   const peer = decodeURIComponent(username).trim().toLowerCase();
+  if (isPokoPeer(peer)) return <PokoConversation />;
+  return <HumanConversation peer={peer} />;
+}
+
+function cardPayload(row) {
+  return {
+    cardId: String(row?.cardId || row?.id || ''),
+    name: String(row?.cardName || row?.name || ''),
+    setName: String(row?.setName || row?.set || ''),
+    condition: String(row?.condition || ''),
+    language: String(row?.language || ''),
+    canonicalPath: String(row?.canonicalPath || row?.href || ''),
+    imageUrl: String(row?.imageUrl || row?.cardImageUrl || ''),
+  };
+}
+
+function PokoConversation() {
+  const navigate = useNavigate();
+  const { ready, signedIn, getBearer, user } = useAuth();
+  const uid = user?.uid || '';
+  const [events, setEvents] = useState(() => readPokoHistory(uid));
+  const [text, setText] = useState('');
+  const [cards, setCards] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [over, setOver] = useState(false);
+  const logRef = useRef(null);
+
+  useEffect(() => {
+    setEvents(readPokoHistory(uid));
+  }, [uid]);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('pokoin.pokoPendingCard');
+      if (!raw) return;
+      sessionStorage.removeItem('pokoin.pokoPendingCard');
+      const next = cardPayload(JSON.parse(raw));
+      if (next.cardId || next.name) setCards([next]);
+    } catch (_) { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    writePokoHistory(uid, events);
+  }, [uid, events]);
+
+  useEffect(() => {
+    const node = logRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [events, busy]);
+
+  function addCard(reference) {
+    const next = cardPayload(reference);
+    if (!next.cardId && !next.name) return;
+    setCards((current) => {
+      const key = `${next.cardId}|${next.name}|${next.condition}`;
+      if (current.some((row) => `${row.cardId}|${row.name}|${row.condition}` === key)) return current;
+      return [...current, next].slice(-4);
+    });
+  }
+
+  async function send(event) {
+    event?.preventDefault();
+    const message = text.trim();
+    if (busy || (!message && !cards.length)) return;
+    setBusy(true);
+    setError('');
+    const mine = {
+      id: `local-${Date.now()}`,
+      mine: true,
+      text: message,
+      cards: cards.map((row) => ({ ...row })),
+      createdAt: new Date().toISOString(),
+    };
+    setEvents((current) => [...current, mine]);
+    setText('');
+    const attached = cards.map((row) => ({ ...row }));
+    setCards([]);
+    try {
+      const token = await getBearer();
+      const result = await sendPokoChat({
+        message: message || `Tell me about ${attached[0]?.name || 'this card'}`,
+        cards: attached,
+        sessionId: uid,
+      }, token);
+      setEvents((current) => [...current, {
+        id: `poko-${Date.now()}`,
+        mine: false,
+        text: result?.reply || '…',
+        createdAt: new Date().toISOString(),
+      }]);
+    } catch (err) {
+      setError(err.message || 'Poko could not reply.');
+      setEvents((current) => [...current, {
+        id: `poko-err-${Date.now()}`,
+        mine: false,
+        text: 'Sorry — I could not reach the market tools just now. Try again in a moment.',
+        createdAt: new Date().toISOString(),
+      }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!ready) return <main className="messages-page messages-empty" aria-busy="true">Loading…</main>;
+  if (ready && !signedIn) return <SignInGate />;
+
+  return (
+    <main
+      className={`conversation-page${over ? ' is-poko-over' : ''}`}
+      onDragOver={(event) => {
+        if (![...(event.dataTransfer?.types || [])].includes(LISTING_DRAG_TYPE)) return;
+        event.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        setOver(false);
+        const reference = readListingDrag(event);
+        if (reference) addCard(reference);
+      }}
+    >
+      <header className="conversation-head">
+        <button type="button" onClick={() => navigate('/messages')} aria-label="Back to messages">‹</button>
+        <span className="conversation-person">
+          <PokoAvatar className="messages-avatar is-poko" />
+          <span>
+            <strong>{POKO_DISPLAY}</strong>
+            <span>{POKO_LEDE}</span>
+          </span>
+        </span>
+      </header>
+      {error ? <p className="chat-error conversation-error" role="alert">{error}</p> : null}
+      <section className="chat-timeline" ref={logRef} aria-live="polite">
+        {!events.length ? (
+          <div className="chat-first">
+            <PokoAvatar className="messages-avatar is-poko is-large" />
+            <h2>Chat with Poko</h2>
+            <p>Drop a card here or ask about prices, sold comps, and how long a printing may take to sell. I use Pokoin’s public market tools.</p>
+          </div>
+        ) : events.map((event) => (
+          <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ' is-poko'}`}>
+            {event.text ? <p>{event.text}</p> : null}
+            {(event.cards || []).length ? (
+              <span className="chat-tags">
+                {event.cards.map((row, index) => (
+                  <ChatListingTag key={`${tagKey(row)}:${index}`} row={row} peer={{ username: POKO_PEER }} me={{ uid }} />
+                ))}
+              </span>
+            ) : null}
+            <time>{chatTime(event.createdAt)}</time>
+          </div>
+        ))}
+        {busy ? <p className="chat-muted">Poko is checking the market…</p> : null}
+      </section>
+      {cards.length ? (
+        <div className="chat-photo-draft poko-card-draft">
+          <span className="chat-tags">
+            {cards.map((row, index) => (
+              <ChatListingTag
+                key={`${tagKey(row)}:${index}`}
+                row={row}
+                peer={{ username: POKO_PEER }}
+                me={{ uid }}
+                onRemove={() => setCards((current) => current.filter((_, i) => i !== index))}
+              />
+            ))}
+          </span>
+          <button type="button" onClick={() => setCards([])}>Clear cards</button>
+        </div>
+      ) : (
+        <p className="poko-drop-hint">Drag a listing or card onto this chat to attach it.</p>
+      )}
+      <form className="chat-composer" onSubmit={send}>
+        <label className="sr-only" htmlFor="poko-message">Message Poko</label>
+        <textarea
+          id="poko-message"
+          rows="1"
+          maxLength={1000}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder="Ask Poko about a card…"
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              send(event);
+            }
+          }}
+        />
+        <button type="submit" disabled={busy || (!text.trim() && !cards.length)} aria-label="Send to Poko">↑</button>
+      </form>
+    </main>
+  );
+}
+
+function HumanConversation({ peer }) {
   const lang = useSearchLang();
   const navigate = useNavigate();
   const { ready, signedIn, getBearer, user, profile } = useAuth();

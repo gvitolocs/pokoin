@@ -75,11 +75,25 @@ export function marqueeStartAllowed(target) {
 /**
  * Rubber-band multi-select is desktop mouse only. Touch / phone tap-hold must
  * not arm a selection box (scroll and long-press stay native).
+ * Account / static pages keep Chrome text selection and copy.
  */
+export function selectBandRoute(pathname = '') {
+  const path = String(pathname || '');
+  if (!path) return false;
+  return (
+    path.includes('/marketplace')
+    || path.startsWith('/inventory')
+    || path.startsWith('/collection')
+    || path.startsWith('/dashboard')
+  );
+}
+
 export function selectBandAllowed(event, win = typeof window !== 'undefined' ? window : null) {
   if (event?.pointerType && event.pointerType !== 'mouse') return false;
   if (win?.matchMedia?.('(max-width: 720px)')?.matches) return false;
   if (win?.matchMedia?.('(pointer: coarse)')?.matches) return false;
+  const path = win?.location?.pathname || '';
+  if (!selectBandRoute(path)) return false;
   return true;
 }
 
