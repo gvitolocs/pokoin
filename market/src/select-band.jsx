@@ -14,6 +14,7 @@ import {
   clearShopSelectionOnPointer,
   marqueeRect,
   marqueeStartAllowed,
+  mixedDeskDragReference,
   rectsIntersect,
 } from './shop-marquee.js';
 
@@ -76,6 +77,7 @@ export function SelectBandProvider({ children }) {
   const armedRef = useRef(false);
   const gridCardsRef = useRef(new Map());
   const catalogRef = useRef(new Map());
+  const shopRef = useRef({ offers: [], deskCard: null });
 
   function rebuildCatalog() {
     const next = new Map();
@@ -85,6 +87,8 @@ export function SelectBandProvider({ children }) {
         if (id) next.set(id, card);
       }
     }
+    const desk = shopRef.current.deskCard;
+    if (desk?.id) next.set(String(desk.id), desk);
     catalogRef.current = next;
   }
 
@@ -99,6 +103,7 @@ export function SelectBandProvider({ children }) {
     armedRef.current = false;
     gridCardsRef.current.clear();
     catalogRef.current = new Map();
+    shopRef.current = { offers: [], deskCard: null };
     document.documentElement.classList.remove('is-card-banding', 'is-shop-marquee');
   }, [location.pathname, location.search]);
 
@@ -299,6 +304,14 @@ export function SelectBandProvider({ children }) {
       gridCardsRef.current.delete(key);
       rebuildCatalog();
     },
+    registerShop({ offers = [], deskCard = null } = {}) {
+      shopRef.current = { offers: offers || [], deskCard: deskCard || null };
+      rebuildCatalog();
+    },
+    unregisterShop() {
+      shopRef.current = { offers: [], deskCard: null };
+      rebuildCatalog();
+    },
     click(id, event, ids = []) {
       const next = applyCardSelect(
         { selected: cardSelectedRef.current, anchor: cardAnchorRef.current },
@@ -328,6 +341,23 @@ export function SelectBandProvider({ children }) {
         if (row) ordered.set(cid, row);
       }
       return cardsForDragFromCatalog(card, selected, ordered.size ? ordered : catalogRef.current);
+    },
+    /** Desk drag: listings + tiles together when both are multi-selected. */
+    dragReference({ heldCard = null, heldOffer = null } = {}) {
+      const shop = shopRef.current;
+      const cards = cardSelectedRef.current;
+      const listings = listingSelectedRef.current;
+      const total = cards.size + listings.size;
+      if (total < 2) return null;
+      return mixedDeskDragReference({
+        heldOffer,
+        heldCard,
+        offers: shop.offers,
+        catalog: catalogRef.current,
+        cardSelected: cards,
+        listingSelected: listings,
+        deskCard: shop.deskCard,
+      });
     },
   }), [cardSelected, listingSelected]);
 

@@ -1,5 +1,7 @@
 /** Rubber-band selection, the same gesture as files on the Windows desktop. */
 
+import { cardReference, listingReference, listingsReference } from './chat-listing.js';
+
 export function marqueeRect(x1, y1, x2, y2) {
   const left = Math.min(x1, x2);
   const top = Math.min(y1, y2);
@@ -90,4 +92,79 @@ export function shopDragOffers(rows, selected, offer) {
   if (mates.length < 2) return null;
   const rest = mates.filter((row) => listingSelectId(row) !== id);
   return [offer, ...rest];
+}
+
+/**
+ * Card desk pile: selected shop listings + selected tiles (desk art / related)
+ * in one drag. Held item first. Listings keep seller metadata; tiles are cards.
+ */
+export function mixedDeskDragReference({
+  heldOffer = null,
+  heldCard = null,
+  offers = [],
+  catalog = new Map(),
+  cardSelected = new Set(),
+  listingSelected = new Set(),
+  deskCard = null,
+} = {}) {
+  const rows = [];
+  const seenListings = new Set();
+  const seenCards = new Set();
+  const cards = cardSelected instanceof Set ? cardSelected : new Set([...(cardSelected || [])].map(String));
+  const listings = listingSelected instanceof Set
+    ? listingSelected
+    : new Set([...(listingSelected || [])].map(String));
+
+  function pushListing(offer, cardStub) {
+    const id = listingSelectId(offer);
+    if (!id || seenListings.has(id)) return;
+    seenListings.add(id);
+    rows.push(listingReference({
+      offer,
+      card: cardStub || deskCard || {
+        id: offer?.cardId || offer?.card_id,
+        name: offer?.cardName || offer?.name,
+        canonicalPath: offer?.canonicalPath || offer?.canonical_path,
+        imageUrl: offer?.cardImageUrl || offer?.imageUrl || offer?.image_url,
+      },
+    }));
+  }
+
+  function pushCard(card) {
+    const id = String(card?.id || card?.cardId || '');
+    if (!id || seenCards.has(id)) return;
+    seenCards.add(id);
+    rows.push(cardReference(card));
+  }
+
+  if (heldOffer) {
+    pushListing(heldOffer, heldCard || deskCard);
+  } else if (heldCard) {
+    pushCard(heldCard);
+  }
+
+  for (const offer of offers || []) {
+    if (!listings.has(listingSelectId(offer))) continue;
+    pushListing(offer, deskCard);
+  }
+
+  // Prefer catalog order, then any remaining selected ids.
+  const orderedIds = [];
+  if (typeof document !== 'undefined') {
+    for (const node of document.querySelectorAll('main [data-card-id]')) {
+      const id = node.getAttribute('data-card-id');
+      if (id && cards.has(id) && !orderedIds.includes(id)) orderedIds.push(id);
+    }
+  }
+  for (const id of cards) {
+    if (!orderedIds.includes(id)) orderedIds.push(id);
+  }
+  for (const id of orderedIds) {
+    const row = catalog.get(String(id));
+    if (row) pushCard(row);
+  }
+
+  if (!rows.length) return null;
+  if (rows.length === 1) return rows[0];
+  return listingsReference(rows);
 }

@@ -41,9 +41,13 @@ test('CardSelectGrid bands desk+related via main-scoped data-card-id', () => {
   assert.match(host, /\[data-card-id\]/);
   assert.match(host, /marqueeStartAllowed/);
   assert.match(host, /listingRects|shop-row/);
+  assert.match(host, /dragReference/);
+  assert.match(host, /mixedDeskDragReference|registerShop/);
   const page = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
   assert.match(page, /DeskArtFrame/);
   assert.match(page, /embedded/);
+  assert.match(page, /dragReference/);
+  assert.match(page, /offers=\{offers\} deskCard=\{card\}/);
 });
 
 test('PlusCal GestureExclusivity model + TLC invariants', () => {

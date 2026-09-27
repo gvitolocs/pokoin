@@ -250,7 +250,7 @@ export default function Seller() {
           </p>
 
           {listings.length ? (
-            <ShopList className="seller-shop-list">
+            <ShopList className="seller-shop-list" offers={listings}>
               {(selected) => listings.map((offer, index) => {
                 const cardId = String(offer.cardId || offer.card_id || '');
                 const path = rewriteCanonicalCardPath(

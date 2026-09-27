@@ -47,6 +47,9 @@ export default function CardSelectGrid({
       cardsForDrag(card) {
         return band.cardsForDrag(card);
       },
+      dragReference(held) {
+        return band.dragReference?.(held) || null;
+      },
     };
   }, [band, ids]);
 

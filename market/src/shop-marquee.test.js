@@ -7,6 +7,7 @@ import {
   marqueeBlocked,
   marqueeRect,
   marqueeStartAllowed,
+  mixedDeskDragReference,
   rectsIntersect,
   shopDragOffers,
 } from './shop-marquee.js';
@@ -84,4 +85,39 @@ test('a plain pointer outside selected shop rows clears the selection', () => {
     clearShopSelectionOnPointer(target(otherRow), list, selected, { ctrlKey: true }),
     false,
   );
+});
+
+test('mixed desk drag piles listings with desk art and related tiles', () => {
+  const desk = { id: '100', name: 'Desk Card', canonicalPath: '/c/100' };
+  const related = { id: '200', name: 'Related', canonicalPath: '/c/200' };
+  const offerA = { id: 'L1', cardId: '100', pricePkn: 10, sellerName: 'A', condition: 'NM' };
+  const offerB = { id: 'L2', cardId: '100', pricePkn: 12, sellerName: 'B', condition: 'NM' };
+  const catalog = new Map([['100', desk], ['200', related]]);
+  const pile = mixedDeskDragReference({
+    heldOffer: offerA,
+    heldCard: desk,
+    offers: [offerA, offerB],
+    catalog,
+    cardSelected: new Set(['100', '200']),
+    listingSelected: new Set(['L1', 'L2']),
+    deskCard: desk,
+  });
+  assert.equal(pile.kind, 'cards');
+  assert.equal(pile.cards.length, 4);
+  assert.equal(pile.cards[0].listingId, 'L1');
+  assert.equal(pile.cards[0].kind, 'listing');
+  assert.ok(pile.cards.some((row) => row.listingId === 'L2'));
+  assert.ok(pile.cards.some((row) => row.kind === 'card' && row.cardId === '100'));
+  assert.ok(pile.cards.some((row) => row.kind === 'card' && row.cardId === '200'));
+
+  const fromArt = mixedDeskDragReference({
+    heldCard: desk,
+    offers: [offerA, offerB],
+    catalog,
+    cardSelected: new Set(['100', '200']),
+    listingSelected: new Set(['L1']),
+    deskCard: desk,
+  });
+  assert.equal(fromArt.cards[0].cardId, '100');
+  assert.equal(fromArt.cards.length, 3);
 });

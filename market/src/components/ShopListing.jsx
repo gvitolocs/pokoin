@@ -16,6 +16,7 @@ import {
   sellerHref,
 } from '../listing-meta.js';
 import { listingSelectId } from '../shop-marquee.js';
+import { useSelectBand } from '../select-band.jsx';
 
 function ShopScan({ image, name, setName = '' }) {
   const full = preferFullImage(image) || image;
@@ -67,6 +68,7 @@ export default function ShopListingRow({
   dragOffers = null,
   onInspect,
 }) {
+  const band = useSelectBand();
   const [added, setAdded] = useState(false);
   const name = publicShopSellerLabel(offer);
   const stock = Math.max(0, Math.trunc(Number(offer?.quantityAvailable ?? offer?.quantity_available) || 0));
@@ -114,6 +116,11 @@ export default function ShopListingRow({
       draggable
       onClick={inspectListing}
       onDragStart={(event) => {
+        const mixed = band?.dragReference?.({ heldOffer: offer, heldCard: card });
+        if (mixed) {
+          writeListingDrag(event, mixed);
+          return;
+        }
         if (dragOffers?.length > 1) {
           const cards = dragOffers.map((row) => listingReference({
             offer: row,

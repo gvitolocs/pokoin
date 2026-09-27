@@ -1377,6 +1377,11 @@ function DeskArtFrame({ card, art, offers, onZoom }) {
         onZoom?.();
       }}
       onDragStart={(event) => {
+        const mixed = select?.dragReference?.({ heldCard: card });
+        if (mixed) {
+          writeListingDrag(event, mixed);
+          return;
+        }
         const group = select?.cardsForDrag(card) || [card];
         if (group.length > 1) {
           writeListingDrag(event, cardsReference(group));
@@ -2460,7 +2465,7 @@ export default function Card() {
           </header>
           {shopError ? <p className="sell-msg error">{shopError}</p> : null}
           {offers.length ? (
-            <ShopList>
+            <ShopList offers={offers} deskCard={card}>
               {(selected) => offers.map((offer, index) => {
                 const mine = mineIds.includes(offer.id);
                 return (
