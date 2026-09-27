@@ -1,0 +1,13 @@
+[Unit]
+Description=Pokoin connected CardTrader seller inventory reconcile
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flock -n /run/lock/pokoin-cardtrader-seller-reconcile.lock /usr/bin/docker exec -w /app pokoin-oracle-api node /app/api/cardtrader-reconcile-all.js
+TimeoutStartSec=20min
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

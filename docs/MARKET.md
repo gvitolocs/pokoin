@@ -944,6 +944,11 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
 Native POST /api/marketplace-listings
   appear / qty-down / sold_out → marketplace_user_listing_events
 
+Connected-seller CardTrader stock is a separate exact mirror, not the global
+sold-comps inference above. Order webhooks decrement immediately; a complete
+seller export reconciles every five minutes and removes missing `ct:` rows.
+See `docs/CARDTRADER_SELLER_SYNC.md`.
+
 every 15 min  refresh-listing-weights.py
   population (skip if fresh) → stats_daily → marketplace_card_weights
   best_seller = sold_qty_7d × ln(1+copies); popular = copies first seen in last 30d

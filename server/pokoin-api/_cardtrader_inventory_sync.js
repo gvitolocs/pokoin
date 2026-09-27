@@ -26,6 +26,7 @@ const {
   oneDayReadyTotals,
   parseCtProductId,
   publicCardIdFromBlueprint,
+  productLinkNeedsRefresh,
   resolveProductAttachment,
 } = require('./_cardtrader_inventory_sync_core');
 
@@ -855,15 +856,23 @@ async function reconcileCardTraderInventory({
           await applyCtQuantity(listing.id, product.quantity);
           summary.updated += 1;
         }
-        await upsertProductLink({
-          sellerUid,
-          ctProductId: product.id,
+        const existingLink = linkByProduct.get(product.id);
+        if (productLinkNeedsRefresh(existingLink, {
           listingId: listing.id,
           blueprintId: product.blueprintId,
           quantity: product.quantity,
-          origin: linkByProduct.get(product.id)?.origin || 'push',
           missingFromCt: false,
-        });
+        })) {
+          await upsertProductLink({
+            sellerUid,
+            ctProductId: product.id,
+            listingId: listing.id,
+            blueprintId: product.blueprintId,
+            quantity: product.quantity,
+            origin: existingLink?.origin || 'push',
+            missingFromCt: false,
+          });
+        }
         await bump();
         return;
       }
@@ -937,15 +946,23 @@ async function reconcileCardTraderInventory({
       if (!productId || seenProductIds.has(productId)) continue;
       if (!isCtLinkedSource(listing.source_listing_id)) continue;
       if (listing.status === 'sold_out' && Number(listing.quantity_available) === 0) {
-        await upsertProductLink({
-          sellerUid,
-          ctProductId: productId,
+        const existingLink = linkByProduct.get(productId);
+        if (productLinkNeedsRefresh(existingLink, {
           listingId: listing.id,
           blueprintId: '',
           quantity: 0,
-          origin: linkByProduct.get(productId)?.origin || 'import',
           missingFromCt: true,
-        });
+        })) {
+          await upsertProductLink({
+            sellerUid,
+            ctProductId: productId,
+            listingId: listing.id,
+            blueprintId: '',
+            quantity: 0,
+            origin: existingLink?.origin || 'import',
+            missingFromCt: true,
+          });
+        }
         continue;
       }
       const updated = await applyCtQuantity(listing.id, 0);

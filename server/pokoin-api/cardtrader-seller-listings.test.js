@@ -2,6 +2,9 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  itemProductId,
+  itemUserDataField,
+  orderItemId,
   shouldDecrementStock,
   verifyWebhookSignature,
   eventDocId,
@@ -51,6 +54,15 @@ test('CardTrader webhook signature is base64 HMAC-SHA256 of raw body', () => {
   const signature = crypto.createHmac('sha256', secret).update(body).digest('base64');
   assert.equal(verifyWebhookSignature(body, signature, secret), true);
   assert.equal(verifyWebhookSignature(body, 'bad', secret), false);
+});
+
+test('CardTrader order items resolve flat and nested seller-product fields', () => {
+  assert.equal(itemProductId({ product_id: 12 }), '12');
+  assert.equal(itemProductId({ seller_product_id: 13 }), '13');
+  assert.equal(itemProductId({ product: { id: 14 } }), '14');
+  assert.equal(itemUserDataField({ product: { user_data_field: 'pokoin:abc' } }), 'pokoin:abc');
+  assert.equal(orderItemId({ order_item_id: 88 }), '88');
+  assert.equal(orderItemId({ product: { id: 14 } }), '14');
 });
 
 test('inventory targets default and normalize', () => {

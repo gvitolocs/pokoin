@@ -19,10 +19,29 @@ import {
   normalizeProduct,
   parseCtProductId,
   planInventoryReconcile,
+  productLinkNeedsRefresh,
   publicCardIdFromBlueprint,
   resolveProductAttachment,
   pknFromProduct,
 } from './_cardtrader_inventory_sync_core.js';
+
+test('periodic reconcile skips unchanged product-link writes', () => {
+  const link = {
+    listing_id: 'listing-1',
+    blueprint_id: '351670',
+    last_ct_quantity: 2,
+    missing_from_ct: false,
+  };
+  assert.equal(productLinkNeedsRefresh(link, {
+    listingId: 'listing-1', blueprintId: '351670', quantity: 2, missingFromCt: false,
+  }), false);
+  assert.equal(productLinkNeedsRefresh(link, {
+    listingId: 'listing-1', blueprintId: '351670', quantity: 0, missingFromCt: true,
+  }), true);
+  assert.equal(productLinkNeedsRefresh(null, {
+    listingId: 'listing-1', blueprintId: '351670', quantity: 2,
+  }), true);
+});
 
 test('public card id is blueprint × 2', () => {
   assert.equal(publicCardIdFromBlueprint('248086'), '496172');

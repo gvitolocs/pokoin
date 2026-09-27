@@ -64,6 +64,11 @@ databases. Pokemon stays on this Pi map. Plan: [MULTIGAME_REIMPORT.md](MULTIGAME
 Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings are
 never modified by reconcile. Incomplete/failed CT exports never trigger
 destructive “missing product” removal (CT has no product-delete webhook).
+Order webhook is the immediate path; the Pi
+`pokoin-cardtrader-seller-reconcile.timer` repairs webhook registration and
+runs a complete-export safety reconcile every five minutes. Full incident,
+idempotency, formal model, and operations:
+[CARDTRADER_SELLER_SYNC.md](CARDTRADER_SELLER_SYNC.md).
 
 Tokens: CardTrader app tokens are RS256 JWTs. `cleanToken` (server) and
 `market/src/cardtrader-token.js` (Profile panel) drop whitespace, a `Bearer `
@@ -96,6 +101,9 @@ Deploy note: `scripts/deploy-cardtrader-sync-api.sh` overlays only
 (`scripts/e2e-cardtrader-inventory-sync.sh`) is repo tooling and is **not** part
 of the Pi runtime artifact — a main tip that changes only that script does not
 require an API redeploy.
+After deploying a runtime that includes the periodic runner, install/update
+the Pi timer from the same exact origin/main commit with
+`scripts/deploy-cardtrader-reconcile-timer.sh`.
 
 
 **Navigate live**

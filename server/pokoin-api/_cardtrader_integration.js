@@ -22,6 +22,7 @@ function safeStatusFromDoc(doc) {
       updatedAt: null,
       lastValidatedAt: null,
       disconnectedAt: null,
+      webhook: null,
     };
   }
   const data = doc.data() || {};
@@ -34,6 +35,7 @@ function safeStatusFromDoc(doc) {
     updatedAt: timestampToIso(data.updatedAt),
     lastValidatedAt: timestampToIso(data.lastValidatedAt),
     disconnectedAt: timestampToIso(data.disconnectedAt),
+    webhook: data.webhookRegistration || null,
   };
 }
 
@@ -108,6 +110,23 @@ async function markOneDayReady(firestore, uid, oneDayReady) {
   await ref.set({ metadata }, { merge: true });
 }
 
+/** Persist only non-secret webhook health so failed registration is visible and retryable. */
+async function recordWebhookRegistration({ admin, firestore, uid, webhookUrl, ok, error = '' }) {
+  if (!firestore || !uid) return;
+  const now = admin?.firestore?.FieldValue?.serverTimestamp?.() || new Date().toISOString();
+  const payload = {
+    ok: ok === true,
+    url: String(webhookUrl || '').slice(0, 500),
+    error: ok === true ? '' : String(error || 'Webhook registration failed.').slice(0, 500),
+    lastAttemptAt: now,
+  };
+  if (ok === true) payload.registeredAt = now;
+  await firestore.collection(COLLECTION).doc(integrationDocId(uid)).set(
+    { webhookRegistration: payload, updatedAt: now },
+    { merge: true },
+  );
+}
+
 /** A connected CardTrader 1-Day Ready account: its stock is CardTrader's, never pushed or listed. */
 function isOneDayReadyIntegration(doc) {
   const data = doc?.exists ? doc.data() || {} : {};
@@ -157,6 +176,7 @@ module.exports = {
   integrationDocId,
   isOneDayReadyIntegration,
   markOneDayReady,
+  recordWebhookRegistration,
   readIntegrationDoc,
   safeStatusFromDoc,
   storeConnectedIntegration,

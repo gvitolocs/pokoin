@@ -30,6 +30,8 @@ CT_FILES=(
   _cardtrader_inventory_sync_core.js
   _cardtrader_inventory_sync.js
   _cardtrader_inventory_async.js
+  _cardtrader_webhook_core.js
+  _cardtrader_webhook_registration.js
   cardtrader-connect.js
   cardtrader-disconnect.js
   cardtrader-status.js
@@ -38,6 +40,7 @@ CT_FILES=(
   cardtrader-clean-listings.js
   cardtrader-sync.js
   cardtrader-assets.js
+  cardtrader-reconcile-all.js
   marketplace-portfolio-history.js
   _portfolio_history_core.js
   route-definitions.json
@@ -58,6 +61,9 @@ done
 say "CardTrader sync unit tests"
 node --test \
   "$SRC/_cardtrader_inventory_sync_core.test.js" \
+  "$SRC/_cardtrader_webhook_core.test.js" \
+  "$SRC/_cardtrader_webhook_registration.test.js" \
+  "$SRC/cardtrader-reconcile-all.test.js" \
   "$SRC/_portfolio_history_core.test.js" \
   "$SRC/patch-route-manifest.test.js"
 for file in "${CT_FILES[@]}"; do
@@ -79,6 +85,8 @@ tar -C "$SRC" -cf - \
   _cardtrader_inventory_sync_core.js \
   _cardtrader_inventory_sync.js \
   _cardtrader_inventory_async.js \
+  _cardtrader_webhook_core.js \
+  _cardtrader_webhook_registration.js \
   cardtrader-connect.js \
   cardtrader-disconnect.js \
   cardtrader-status.js \
@@ -87,6 +95,7 @@ tar -C "$SRC" -cf - \
   cardtrader-clean-listings.js \
   cardtrader-sync.js \
   cardtrader-assets.js \
+  cardtrader-reconcile-all.js \
   marketplace-portfolio-history.js \
   _portfolio_history_core.js \
   route-definitions.json \
