@@ -37,8 +37,8 @@ import {
 } from '../suggest-images.js';
 import { prefetchSearchPage } from '../search-hot.js';
 import { GAMES, game, gameSiteHref, isPokemonGame, sellerDeskUsesGameOverride, setScanGameOverride } from '../game.js';
+import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '../search-kind.js';
 import { printingIdentity, clipSuggestCollector, suggestCardName, suggestTranslatedLine } from '../identity.js';
-import { normalizeSearchTab, searchHref, uniqueSellers } from '../search-kind.js';
 import { sellerHref } from '../listing-meta.js';
 import CatalogMenu from './CatalogHubs.jsx';
 import ExpansionMark from './ExpansionMark.jsx';
@@ -769,11 +769,20 @@ export default function Chrome({ children }) {
     const timer = setTimeout(() => {
       setPending(true);
       fetchSuggest(term, { limit: 20, signal: controller.signal, lang, printLang })
-        .then((data) => ({
-          groups: Array.isArray(data.groups) ? data.groups : [],
-          count: Number(data.count) || 0,
-          resolvedQuery: term,
-        }))
+        .then((data) => {
+          const tab = searchTabRef.current;
+          const groups = (Array.isArray(data.groups) ? data.groups : [])
+            .map((group) => ({
+              ...group,
+              printings: (group.printings || []).filter((row) => printingMatchesSearchTab(row, tab)),
+            }))
+            .filter((group) => (group.printings || []).length > 0);
+          return {
+            groups,
+            count: groups.reduce((sum, group) => sum + group.printings.length, 0),
+            resolvedQuery: term,
+          };
+        })
         .then((data) => {
           if (controller.signal.aborted) {
             return;
@@ -802,7 +811,7 @@ export default function Chrome({ children }) {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [query, lang, printLang]);
+  }, [query, lang, printLang, searchTab]);
 
   useEffect(() => {
     function onDoc(event) {

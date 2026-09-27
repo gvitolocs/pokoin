@@ -16,10 +16,13 @@ STAMP="$(date -u +%Y%m%d%H%M%S)"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Files this repository owns, at their release-relative paths.
+# Multigame SQL is the satellite TCG search/suggest engine (Magic, OP, …) —
+# previously only on the Pi via CardVault copies; source of truth is here.
 API_FILES=(
   api/marketplace-search-page.js
   api/marketplace-cards.js
   api/_print_bucket.js
+  api/_marketplace_multigame_sql.js
 )
 
 die() { echo "deploy-search-api: $*" >&2; exit 1; }
@@ -42,20 +45,28 @@ say "health"
 health_ok=0
 for i in $(seq 1 45); do
   if universe_json="$(ssh pi-home "curl -fsS 'http://127.0.0.1:18080/api/marketplace-search-page?query=blastoise&productSearchOnly=1&limit=6&offset=0&includeFacets=0&lang=en'" 2>/dev/null)" \
-    && aisle_json="$(ssh pi-home "curl -fsS 'http://127.0.0.1:18080/api/marketplace-search-page?query=blastoise&productType=jumbo&limit=3&offset=0&includeFacets=0&lang=en'" 2>/dev/null)"; then
-    if printf '%s\n%s\n' "$universe_json" "$aisle_json" | python3 -c '
+    && aisle_json="$(ssh pi-home "curl -fsS 'http://127.0.0.1:18080/api/marketplace-search-page?query=blastoise&productType=jumbo&limit=3&offset=0&includeFacets=0&lang=en'" 2>/dev/null)" \
+    && magic_json="$(ssh pi-home "curl -fsS 'http://127.0.0.1:18080/api/marketplace-search-page?query=reality%20fracture&game=magic&productType=card&limit=6&offset=0&includeFacets=0&lang=en'" 2>/dev/null)" \
+    && magic_typo_json="$(ssh pi-home "curl -fsS 'http://127.0.0.1:18080/api/marketplace-suggest?q=relity%20fracture&game=magic&limit=8'" 2>/dev/null)"; then
+    if printf '%s\n%s\n%s\n%s\n' "$universe_json" "$aisle_json" "$magic_json" "$magic_typo_json" | python3 -c '
 import json, sys
-universe, aisle = [json.loads(line) for line in sys.stdin if line.strip()]
+universe, aisle, magic, typo = [json.loads(line) for line in sys.stdin if line.strip()]
 total = universe.get("total")
 assert total is not None and total > 0, f"product universe total missing: {total!r}"
 assert universe.get("cards"), "product universe returned no rows"
 jumbo = (aisle.get("cards") or [])
 assert jumbo, "productType=jumbo probe returned no rows"
 assert all("Jumbo Oversized" in str(c.get("number") or "") for c in jumbo), "narrow jumbo filter leaked non-jumbo rows"
+magic_cards = magic.get("cards") or []
+assert magic_cards, "Magic Singles reality fracture returned no rows"
+assert all(str(c.get("productType") or "") == "card" for c in magic_cards), "Magic Singles leaked non-card rows"
+assert any("reality fracture" in str(c.get("set") or c.get("set_name") or "").lower() for c in magic_cards), "Magic Singles missed Reality Fracture set"
+typo_groups = typo.get("groups") or []
+assert typo_groups, "Magic suggest typo relity fracture returned no groups"
 ' ; then
       listings="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-listings?cardId=220962&nativeOnly=1&limit=1'")"
       pair="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{\"pin\":\"0000\"}' http://127.0.0.1:18080/api/scan-pair")"
-      say "search-page universe total OK · jumbo narrow filter OK · listings → $listings (expect 200) · scan-pair wrong code → $pair (expect 400)"
+      say "search-page universe total OK · jumbo OK · magic Singles OK · magic typo suggest OK · listings → $listings (expect 200) · scan-pair wrong code → $pair (expect 400)"
       if [[ "$listings" == "200" && "$pair" == "400" ]]; then
         health_ok=1
         break

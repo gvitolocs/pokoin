@@ -258,7 +258,7 @@ test('dragging a shop row uses a pile ghost, including a single card', () => {
   assert.equal(root.className, 'drag-stack');
   assert.equal(kids.length, 1);
   assert.equal(kids[0].tagName, 'CANVAS');
-  assert.equal(kids[0].width, 216);
+  assert.equal(kids[0].width, CARD_DRAG_WIDTH);
   assert.match(String(kids[0].style?.cssText || ''), /position:fixed/);
 });
 

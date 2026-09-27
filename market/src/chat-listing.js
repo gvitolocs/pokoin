@@ -330,8 +330,9 @@ export function chatImageSources(row) {
 }
 
 /** Homepage rail card: 13.5rem wide, portrait 63:88. */
-export const CARD_DRAG_WIDTH = 216;
-export const CARD_DRAG_HEIGHT = 302;
+/** Match `_homepage.webp` natural size (~240×335) so drag paints 1:1 from warm tiles. */
+export const CARD_DRAG_WIDTH = 240;
+export const CARD_DRAG_HEIGHT = 335;
 
 let dragGhost;
 
