@@ -28,7 +28,7 @@ BandBlocked(t) == t \in {
   ArtFrame, CartDrop, BuyBtn, Chrome, RelatedTile,
   SpeciesTitle, ExpansionLink, ArtistLink
 }
-CanBand(t)     == t \in {BandEmpty, ShopRow}
+CanBand(t)     == t = BandEmpty
 CanDrag(t)     == t \in {
   ArtFrame, ShopRow, RelatedTile, SpeciesTitle, ExpansionLink, ArtistLink
 }
@@ -213,6 +213,10 @@ InvArtNeverArms ==
 InvTitleNeverArms ==
   (lastAction = "bandArm") => ~TitleDrag(lastTarget)
 
+\* Shop rows never arm the marquee — only empty background does.
+InvShopRowNeverArms ==
+  (lastAction = "bandArm") => (lastTarget # ShopRow)
+
 \* Empty-background paint may select the desk scan.
 InvEmptyBandCanSelectArt ==
   (lastAction = "bandPaint" /\ lastTarget = ArtFrame) => (ArtFrame \in selected)
@@ -251,6 +255,7 @@ THEOREM Spec => [](
   /\ InvMutualExclusion
   /\ InvArtNeverArms
   /\ InvTitleNeverArms
+  /\ InvShopRowNeverArms
   /\ InvEmptyBandCanSelectArt
   /\ InvEmptyBandCanSelectShop
   /\ InvListingGhostIsCardArt

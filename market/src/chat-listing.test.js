@@ -522,7 +522,7 @@ test('shop rows show message + cart icons; row click never adds to cart', () => 
   assert.equal(src.includes('onBuy'), false);
   assert.match(src, /sellerUid/);
   assert.match(src, /className="ct-qty"/);
-  assert.match(src, /<ThumbZoom src=\{full\} full alt=\{name \|\| ''\}>/);
+  assert.match(src, /<ThumbZoom src=\{full\} full alt=\{name \|\| ''\} openOnClick>/);
   assert.match(src, /className="art-cut shop-art"/);
   assert.match(src, /of \{stock \|\| choices\}/);
   const tag = readFileSync(new URL('./components/ChatListingTag.jsx', import.meta.url), 'utf8');

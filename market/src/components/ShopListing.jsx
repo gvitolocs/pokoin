@@ -21,7 +21,7 @@ function ShopScan({ image, name, setName = '' }) {
   const full = preferFullImage(image) || image;
   const thumb = homepageDerivativeUrl(image) || image;
   return (
-    <ThumbZoom src={full} full alt={name || ''}>
+    <ThumbZoom src={full} full alt={name || ''} openOnClick>
       <span className="art-cut shop-art" style={artCutVars({ set: setName, name })}>
         <img
           src={thumb}
@@ -65,6 +65,7 @@ export default function ShopListingRow({
   onCancel,
   selected = false,
   dragOffers = null,
+  onInspect,
 }) {
   const [added, setAdded] = useState(false);
   const name = publicShopSellerLabel(offer);
@@ -93,11 +94,25 @@ export default function ShopListingRow({
     canonicalPath: cardPath,
   }, preferFullImage(offer?.cardImageUrl || offer?.imageUrl || ''));
 
+  function inspectListing(event) {
+    if (event.target?.closest?.(
+      'a, button, input, select, textarea, label, .ct-qty, .shop-row-actions, .shop-owner-actions',
+    )) {
+      return;
+    }
+    if (onInspect) {
+      event.preventDefault();
+      event.stopPropagation();
+      onInspect(event);
+    }
+  }
+
   return (
     <div
       className={`shop-row${mine ? ' mine' : ''}${showCard ? ' is-profile' : ''}${editing ? ' is-editing' : ''}${selected ? ' is-selected' : ''}`}
       data-listing-id={listingSelectId(offer)}
       draggable
+      onClick={inspectListing}
       onDragStart={(event) => {
         if (dragOffers?.length > 1) {
           const cards = dragOffers.map((row) => listingReference({
@@ -119,7 +134,17 @@ export default function ShopListingRow({
     >
       {showCard ? (
         cardPath ? (
-          <Link className="shop-card" to={cardPath} onClick={(event) => event.stopPropagation()}>
+          <Link
+            className="shop-card"
+            to={cardPath}
+            onClick={(event) => {
+              event.stopPropagation();
+              // Card scan click opens the overlay; name text still navigates.
+              if (event.target?.closest?.('.shop-art, .thumb-zoom-host')) {
+                event.preventDefault();
+              }
+            }}
+          >
             {image ? <ShopScan image={image} name={cardName} setName={setName} /> : <span className="shop-card-ph" />}
             <span>
               <strong>{cardName || 'Card'}</strong>

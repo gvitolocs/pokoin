@@ -34,7 +34,7 @@ test('a rubber band starts on the card scan, not on a button', () => {
   assert.equal(listingSelectId({ id: 'lst-1' }), 'lst-1');
 });
 
-test('empty page background may start a shop marquee; art-frame and tiles may not', () => {
+test('empty page background may start a shop marquee; shop rows and art may not', () => {
   function mock(hits) {
     return {
       closest: (sel) => {
@@ -47,12 +47,14 @@ test('empty page background may start a shop marquee; art-frame and tiles may no
   const art = mock(['.art-frame', 'main']);
   const tile = mock(['[data-card-id]', 'main']);
   const shop = mock(['.shop-row']);
+  const panel = mock(['.shop-panel', 'main']);
   const species = mock(['.species-drag', 'header', 'main']);
   const setLink = mock(['a', '.asset-sub', 'header', 'main']);
   assert.equal(marqueeStartAllowed(bg), true);
   assert.equal(marqueeStartAllowed(art), false);
   assert.equal(marqueeStartAllowed(tile), false);
-  assert.equal(marqueeStartAllowed(shop), true);
+  assert.equal(marqueeStartAllowed(shop), false);
+  assert.equal(marqueeStartAllowed(panel), false);
   assert.equal(marqueeStartAllowed(species), false);
   assert.equal(marqueeStartAllowed(setLink), false);
 });

@@ -16,6 +16,7 @@ export default function ThumbZoom({
   children,
   disabled = false,
   footer = null,
+  openOnClick = false,
 }) {
   const [box, setBox] = useState(null);
   const pointer = useRef({ x: 0, y: 0 });
@@ -71,6 +72,18 @@ export default function ThumbZoom({
     hide();
   }
 
+  function click(event) {
+    if (!openOnClick || disabled || !srcRef.current) return;
+    if (event.target?.closest?.('a, button, input, select, textarea, label')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    place(event.clientX, event.clientY);
+  }
+
   useEffect(() => {
     if (!box) {
       return undefined;
@@ -108,7 +121,13 @@ export default function ThumbZoom({
   }, []);
 
   return (
-    <span className="thumb-zoom-host" onMouseEnter={enter} onMouseMove={move} onMouseLeave={leave}>
+    <span
+      className="thumb-zoom-host"
+      onMouseEnter={enter}
+      onMouseMove={move}
+      onMouseLeave={leave}
+      onClick={openOnClick ? click : undefined}
+    >
       {children}
       {box && src
         ? createPortal(

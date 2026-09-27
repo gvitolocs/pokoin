@@ -10,9 +10,8 @@ import {
 const DRAG_THRESHOLD = 5;
 
 /**
- * Shop rows. Press the row body or the space under the list and drag,
- * the same way a desktop selects files. Links and the card scan keep their
- * own click and drag.
+ * Shop rows. Multi-select rubber-band starts only on empty page background
+ * outside the shop; listings keep click, drag, and the card overlay.
  */
 export default function ShopList({ className = '', children }) {
   const ref = useRef(null);

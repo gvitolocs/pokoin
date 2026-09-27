@@ -24,8 +24,10 @@ test('shop listing line never adds to cart on row click — cart icon, buy-btn, 
 
   const card = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
   assert.match(card, /onCart=\{\(qty\) => addItem/);
+  assert.match(card, /onInspect=\{\(\) =>/);
   const seller = fs.readFileSync(path.join(market, 'pages/Seller.jsx'), 'utf8');
   assert.match(seller, /onCart=\{\(qty\) =>/);
+  assert.match(row, /onInspect/);
 });
 
 test('desk title / set / artist stay out of shop marquee', () => {
@@ -50,14 +52,18 @@ test('PlusCal GestureExclusivity model + TLC invariants', () => {
   const spec = fs.readFileSync(path.join(root, 'specs/GestureExclusivity.tla'), 'utf8');
   assert.match(spec, /InvArtNeverArms/);
   assert.match(spec, /InvTitleNeverArms/);
+  assert.match(spec, /InvShopRowNeverArms/);
   assert.match(spec, /InvEmptyBandCanSelectArt/);
+  assert.match(spec, /InvEmptyBandCanSelectShop/);
   assert.match(spec, /InvMultiDragPiles/);
   assert.match(spec, /InvRelatedOrDeskMultiPiles/);
   assert.match(spec, /SpeciesTitle/);
   assert.match(spec, /pileSize/);
+  assert.match(spec, /CanBand\(t\)\s*==\s*t = BandEmpty/);
   const cfg = fs.readFileSync(path.join(root, 'specs/GestureExclusivity.cfg'), 'utf8');
   assert.match(cfg, /InvMultiDragPiles/);
   assert.match(cfg, /InvEmptyBandCanSelectArt/);
+  assert.match(cfg, /InvShopRowNeverArms/);
   assert.match(cfg, /ArtistLink/);
 
   const script = path.join(root, 'scripts/check-gesture-tlc.sh');

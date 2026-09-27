@@ -2474,6 +2474,10 @@ export default function Card() {
                     listingBusy={listingBusy}
                     editing={editingOffer?.id === offer.id}
                     onCart={(qty) => addItem({ ...cartItemFromOffer(card, offer), qty: qty || 1 })}
+                    onInspect={() => {
+                      setZoom(true);
+                      track(Action.zoomArt, card);
+                    }}
                     onEdit={() => setEditingOffer(
                       editingOffer?.id === offer.id ? null : offer,
                     )}

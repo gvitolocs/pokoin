@@ -33,14 +33,13 @@ export function marqueeBlocked(target) {
 }
 
 /**
- * Shop marquee may start on a shop row / empty shop panel, or on empty page
- * background so a band that covers listings still selects them. Never on
- * art-frame, card tiles, title/set/artist drags, or chrome.
+ * Shop marquee starts only on empty page background (outside the shop panel
+ * and its rows). Listings keep click → card overlay, drag, and controls.
  */
 export function marqueeStartAllowed(target) {
   if (!target?.closest) return false;
   if (marqueeBlocked(target)) return false;
-  if (target.closest('.shop-panel, .shop-list, .shop-row')) return true;
+  if (target.closest('.shop-panel, .shop-list, .shop-row')) return false;
   if (target.closest(
     [
       '[data-card-id]',
