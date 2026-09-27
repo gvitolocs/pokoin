@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { gameSiteHref } from './game.js';
+import { GAMES, gameIconSrc, gameSiteHref } from './game.js';
 
 test('the game picker sends each TCG to its own site', () => {
   assert.equal(gameSiteHref('pokemon'), 'https://pokoin.com/marketplace');
@@ -60,4 +60,22 @@ test('satellite eras and set icons stay off the Pokémon catalogs', () => {
   assert.match(logos, /\/card-images\/\$\{slug\}\/expansions/);
   assert.match(sets, /satelliteGroups/);
   assert.match(sets, /pokemon \? \(/);
+});
+
+test('each marketplace game has a CardTrader-matching icon SVG', () => {
+  const root = path.dirname(fileURLToPath(import.meta.url));
+  const gamesDir = path.join(root, '../public/games');
+  for (const item of Object.values(GAMES)) {
+    const src = gameIconSrc(item);
+    assert.match(src, /^\/games\/[a-z0-9-]+\.svg$/);
+    const file = path.join(gamesDir, path.basename(src));
+    assert.ok(fs.existsSync(file), `missing ${src}`);
+    const svg = fs.readFileSync(file, 'utf8');
+    assert.match(svg, /<svg[\s\S]*<path[\s\S]*d="/);
+  }
+  assert.equal(gameIconSrc('pokemon'), '/games/pokemon.svg');
+  assert.equal(gameIconSrc('riftbound'), '/games/riftbound.svg');
+  const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
+  assert.match(chrome, /gameIconSrc/);
+  assert.match(chrome, /className="game-icon"/);
 });

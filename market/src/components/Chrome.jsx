@@ -37,7 +37,8 @@ import {
 } from '../suggest-images.js';
 import { prefetchSearchPage } from '../search-hot.js';
 import { SelectBandProvider } from '../select-band.jsx';
-import { GAMES, game, gameSiteHref, isPokemonGame, sellerDeskUsesGameOverride, setScanGameOverride } from '../game.js';
+import { GAMES, game, gameIconSrc, gameSiteHref, isPokemonGame, sellerDeskUsesGameOverride, setScanGameOverride } from '../game.js';
+
 import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '../search-kind.js';
 import { printingIdentity, clipSuggestCollector, suggestCardName, suggestTranslatedLine } from '../identity.js';
 import { sellerHref } from '../listing-meta.js';
@@ -337,6 +338,14 @@ function GameSelect() {
         title={current.name}
         onClick={() => setOpen((value) => !value)}
       >
+        <span
+          className="game-icon"
+          style={{
+            WebkitMaskImage: `url(${gameIconSrc(current)})`,
+            maskImage: `url(${gameIconSrc(current)})`,
+          }}
+          aria-hidden="true"
+        />
         <span>{current.name}</span>
         <svg className="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true">
           <path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" />
@@ -347,6 +356,14 @@ function GameSelect() {
           {Object.values(GAMES).map((item) => (
             <li key={item.id} role="option" aria-selected={item.id === current.id}>
               <button type="button" className={item.id === current.id ? 'is-active' : ''} onClick={() => pick(item.id)}>
+                <span
+                  className="game-icon"
+                  style={{
+                    WebkitMaskImage: `url(${gameIconSrc(item)})`,
+                    maskImage: `url(${gameIconSrc(item)})`,
+                  }}
+                  aria-hidden="true"
+                />
                 <span>{item.name}</span>
               </button>
             </li>

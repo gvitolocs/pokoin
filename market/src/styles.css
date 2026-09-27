@@ -199,7 +199,7 @@ button, input, select { font: inherit; color: inherit; }
   align-items: center;
   gap: 0.28rem;
   height: 26px;
-  max-width: 8.5rem;
+  max-width: 9.5rem;
   padding: 0 0.15rem;
   border: 0;
   background: transparent;
@@ -211,21 +211,43 @@ button, input, select { font: inherit; color: inherit; }
   white-space: nowrap;
 }
 
-.game-select > button span {
+.game-select > button span:not(.game-icon) {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.game-icon {
+  display: block;
+  flex: none;
+  width: 1.05rem;
+  height: 1.05rem;
+  background: currentColor;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
 }
 
 .game-menu {
   left: 0;
   right: auto;
   width: max-content;
-  min-width: 11.5rem;
+  min-width: 12.5rem;
 }
 
-.game-menu button {
+.lang-menu.game-menu button {
   display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 0.65rem;
   white-space: nowrap;
+}
+
+.game-menu .game-icon {
+  width: 1.2rem;
+  height: 1.2rem;
 }
 
 .search-pill .lang-toggle > button,

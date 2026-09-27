@@ -221,4 +221,13 @@ export function gameRequestHeaders(hostname = hostName()) {
   };
 }
 
+export function gameIconSrc(gameOrId) {
+  const row = typeof gameOrId === 'string'
+    ? (GAMES[gameOrId] || null)
+    : (gameOrId || null);
+  const slug = row?.slug || (row?.id === 'pokemon' ? 'pokemon' : '');
+  if (!slug && row?.id !== 'pokemon') return '';
+  return `/games/${slug || 'pokemon'}.svg`;
+}
+
 export { GAMES };
