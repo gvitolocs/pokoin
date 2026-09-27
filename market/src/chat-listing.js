@@ -1,5 +1,5 @@
 import { displayName } from './identity.js';
-import { homepageDerivativeUrl, preferFullImage } from './image-urls.js';
+import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from './image-urls.js';
 import { sellerHandle } from './listing-meta.js';
 import { tilePricePkn } from './pkn.js';
 
@@ -19,7 +19,7 @@ export function sellerUserId(value) {
 }
 
 function cardImage(card, offer) {
-  return String(
+  const advertised = String(
     offer?.cardImageUrl
     || offer?.imageUrl
     || card?.heroImageUrl
@@ -31,6 +31,12 @@ function cardImage(card, offer) {
     || card?.homepageImageUrl
     || '',
   ).trim();
+  const identity = card || {
+    id: offer?.cardId || offer?.card_id,
+    name: offer?.cardName || offer?.card_name || offer?.name,
+    canonicalPath: offer?.canonicalPath || offer?.canonical_path,
+  };
+  return ownCatalogImage(identity, preferFullImage(advertised));
 }
 
 function offerCopies(offer) {

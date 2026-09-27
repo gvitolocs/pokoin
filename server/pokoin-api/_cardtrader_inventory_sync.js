@@ -20,6 +20,7 @@ const {
   facetKey,
   isCtLinkedSource,
   isPokemonProduct,
+  marketplaceGameForProduct,
   normalizeProduct,
   oneDayReadyAssetRow,
   oneDayReadyTotals,
@@ -27,6 +28,11 @@ const {
   publicCardIdFromBlueprint,
   resolveProductAttachment,
 } = require('./_cardtrader_inventory_sync_core');
+
+function runWithMarketplaceGame(game, fn) {
+  if (!game || game === 'pokemon') return fn();
+  return require('./_marketplace_game').runWithGame(game, fn);
+}
 
 async function fetchCompleteSellerInventory(token) {
   const products = await fetchProductsExport(token);
@@ -179,8 +185,9 @@ async function readSellerSync(sellerUid) {
   }
 }
 
-async function cardMetadata(cardId) {
-  try {
+async function cardMetadata(cardId, game = 'pokemon') {
+  return runWithMarketplaceGame(game, async () => {
+    try {
     // marketplace_search_candidates names these name / card_number (not
     // card_name / collector_number); a wrong column made every lookup fail and
     // synced cards had no image, set or number.
@@ -197,39 +204,42 @@ async function cardMetadata(cardId) {
       `,
       [cardId],
     );
-    return result.rows[0] || {};
-  } catch (error) {
-    console.warn('cardtrader card metadata lookup failed', { cardId, message: error.message });
-    return {};
-  }
+      return result.rows[0] || {};
+    } catch (error) {
+      console.warn('cardtrader card metadata lookup failed', { cardId, game, message: error.message });
+      return {};
+    }
+  });
 }
 
 
-async function cardMetadataMany(cardIds) {
+async function cardMetadataMany(cardIds, game = 'pokemon') {
   const ids = [...new Set((cardIds || []).map((id) => cleanText(id, 80)).filter(Boolean))];
   const out = new Map();
   if (!ids.length) return out;
-  try {
-    const result = await marketplaceQuery(
-      `
-        select
-          card_id::text as card_id,
-          coalesce(nullif(name, ''), '') as card_name,
-          coalesce(nullif(set_name, ''), nullif(expansion_name, ''), 'Pokemon') as set_name,
-          coalesce(nullif(card_number, ''), '') as collector_number,
-          coalesce(nullif(image_url, ''), nullif(cdn_image_url, ''), '') as card_image_url
-        from public.marketplace_search_candidates
-        where card_id::text = any($1::text[])
-      `,
-      [ids],
-    );
-    for (const row of result.rows || []) {
-      out.set(String(row.card_id), row);
+  return runWithMarketplaceGame(game, async () => {
+    try {
+      const result = await marketplaceQuery(
+        `
+          select
+            card_id::text as card_id,
+            coalesce(nullif(name, ''), '') as card_name,
+            coalesce(nullif(set_name, ''), nullif(expansion_name, ''), $2) as set_name,
+            coalesce(nullif(card_number, ''), '') as collector_number,
+            coalesce(nullif(cdn_image_url, ''), nullif(preview_image_url, ''), nullif(image_url, ''), '') as card_image_url
+          from public.marketplace_search_candidates
+          where card_id::text = any($1::text[])
+        `,
+        [ids, game === 'pokemon' ? 'Pokemon' : game],
+      );
+      for (const row of result.rows || []) {
+        out.set(String(row.card_id), row);
+      }
+    } catch (error) {
+      console.warn('cardtrader batch metadata lookup failed', { game, message: error.message, count: ids.length });
     }
-  } catch (error) {
-    console.warn('cardtrader batch metadata lookup failed', { message: error.message, count: ids.length });
-  }
-  return out;
+    return out;
+  });
 }
 
 /** Run async work over items with a fixed concurrency (I/O parallel, not OS threads). */
@@ -299,8 +309,8 @@ async function linkExistingListing(listingId, product) {
   return result.rows[0] || null;
 }
 
-async function createImportedListing({ sellerUid, sellerName, product, cardId, reactivateHidden = false, meta: metaIn = null }) {
-  const meta = metaIn && typeof metaIn === 'object' ? metaIn : await cardMetadata(cardId);
+async function createImportedListing({ sellerUid, sellerName, product, cardId, marketplaceGame = 'pokemon', reactivateHidden = false, meta: metaIn = null }) {
+  const meta = metaIn && typeof metaIn === 'object' ? metaIn : await cardMetadata(cardId, marketplaceGame);
   const qty = Math.max(0, Math.min(999999, product.quantity));
   const pricePkn = product.pricePkn;
   if (!(pricePkn > 0)) {
@@ -379,7 +389,7 @@ async function createImportedListing({ sellerUid, sellerName, product, cardId, r
       sourceListingId,
       product.name || meta.card_name || cardId,
       meta.card_image_url || '',
-      meta.set_name || 'Pokemon',
+      meta.set_name || (marketplaceGame === 'pokemon' ? 'Pokemon' : marketplaceGame),
       meta.collector_number || '',
       product.altered === true,
     ],
@@ -732,11 +742,13 @@ async function reconcileCardTraderInventory({
   // each product awaited metadata+insert+link one-by-one.
   const planned = [];
   for (const product of products) {
-    if (!isPokemonProduct(product)) {
+    const marketplaceGame = marketplaceGameForProduct(product);
+    if (!marketplaceGame) {
       summary.skippedNonPokemon += 1;
       continue;
     }
-    summary.pokemonInventory += 1;
+    summary.supportedInventory += 1;
+    if (marketplaceGame === 'pokemon') summary.pokemonInventory += 1;
     seenProductIds.add(product.id);
 
     if (!bySourceId.has(ctSourceListingId(product.id))) {
@@ -755,7 +767,7 @@ async function reconcileCardTraderInventory({
       byListingId,
       unlinkedByFacet,
     });
-    planned.push({ product, decision });
+    planned.push({ product, decision, marketplaceGame });
 
     // Keep decision-time map updates for facet matching of later products.
     if (decision.action === 'link_existing' && decision.facetKey) {
@@ -779,9 +791,20 @@ async function reconcileCardTraderInventory({
   });
 
   const importJobs = planned.filter((row) => row.decision.action === 'import');
-  const metaByCard = await cardMetadataMany(
-    importJobs.map((row) => row.decision.cardId || publicCardIdFromBlueprint(row.product.blueprintId)),
-  );
+  const importsByGame = new Map();
+  for (const row of importJobs) {
+    const bucket = importsByGame.get(row.marketplaceGame) || [];
+    bucket.push(row);
+    importsByGame.set(row.marketplaceGame, bucket);
+  }
+  const metaByCard = new Map();
+  await Promise.all([...importsByGame.entries()].map(async ([marketplaceGame, rows]) => {
+    const metadata = await cardMetadataMany(
+      rows.map((row) => row.decision.cardId || publicCardIdFromBlueprint(row.product.blueprintId)),
+      marketplaceGame,
+    );
+    for (const [cardId, meta] of metadata.entries()) metaByCard.set(cardId, meta);
+  }));
 
   await emitProgress({
     phase: 'import',
@@ -808,7 +831,7 @@ async function reconcileCardTraderInventory({
     }
   };
 
-  await mapPool(planned, writeConcurrency, async ({ product, decision }) => {
+  await mapPool(planned, writeConcurrency, async ({ product, decision, marketplaceGame }) => {
     try {
       if (decision.action === 'unresolved') {
         summary.unresolved += 1;
@@ -875,6 +898,7 @@ async function reconcileCardTraderInventory({
           sellerName,
           product,
           cardId,
+          marketplaceGame,
           reactivateHidden: !linkByProduct.has(product.id),
           meta: metaByCard.get(String(cardId || '')) || {},
         });

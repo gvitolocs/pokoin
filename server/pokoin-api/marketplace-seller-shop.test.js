@@ -10,6 +10,8 @@ const {
   sortSql,
   shopSellerFromProfile,
   listingRow,
+  sellerCardIdsForGame,
+  withGameContext,
 } = require('./marketplace-seller-shop.js')._test;
 
 test('cleanLimit caps at 100 for shop pages', () => {
@@ -75,4 +77,32 @@ test('a nickname or email change keeps the listing on the Firebase user', () => 
 test('sortSql defaults to price asc', () => {
   assert.match(sortSql(''), /price_pkn asc/);
   assert.match(sortSql('price-desc'), /price_pkn desc/);
+});
+
+test('seller queries run inside the selected TCG database context', async () => {
+  const calls = [];
+  const result = await withGameContext('sorcery', async () => 'shop', async (game, fn) => {
+    calls.push(game);
+    return fn();
+  });
+  assert.equal(result, 'shop');
+  assert.deepEqual(calls, ['sorcery']);
+});
+
+test('seller game filter intersects shared listings with the selected catalog', async () => {
+  let currentGame = '';
+  const calls = [];
+  const ids = await sellerCardIdsForGame('u1', 'sorcery', {
+    run: async (game, fn) => {
+      currentGame = game;
+      calls.push(game);
+      return fn();
+    },
+    query: async () => currentGame === 'pokemon'
+      ? { rows: [{ card_id: '10' }, { card_id: '20' }] }
+      : { rows: [{ card_id: '20' }] },
+  });
+  assert.deepEqual(calls, ['pokemon', 'sorcery']);
+  assert.deepEqual(ids, ['20']);
+  assert.equal(await sellerCardIdsForGame('u1', 'pokemon'), null);
 });

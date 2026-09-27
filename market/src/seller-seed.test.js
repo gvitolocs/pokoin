@@ -10,7 +10,7 @@ import { seedSellerListings, sellerShopSeedOpts } from './seller-seed.js';
 test('seed uses full shop cache key, never a one-row location stub', () => {
   resetListingsCacheForTests();
   const handle = 'redshakkio';
-  const opts = sellerShopSeedOpts({ pageSize: 100, sort: 'price-asc' });
+  const opts = sellerShopSeedOpts({ pageSize: 100, sort: 'price-asc', game: 'pokemon' });
 
   // No cache → null (would previously paint location.state.listing)
   assert.equal(seedSellerListings(handle, { pageSize: 100, sort: 'price-asc' }), null);
@@ -38,4 +38,15 @@ test('seed uses full shop cache key, never a one-row location stub', () => {
   assert.equal(seeded.seller.displayName, 'Simone Di Blasi');
   assert.equal(seeded.seller.username, handle);
   assert.equal(peekSellerListings(handle, opts).total, 9153);
+});
+
+test('seed never crosses from another game cache', () => {
+  resetListingsCacheForTests();
+  const handle = 'redshakkio';
+  rememberSellerListings(handle, {
+    listings: [{ id: 'pokemon' }],
+    total: 1,
+    unique: 1,
+  }, sellerShopSeedOpts({ game: 'pokemon' }));
+  assert.equal(seedSellerListings(handle, { game: 'sorcery' }), null);
 });

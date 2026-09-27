@@ -15,6 +15,7 @@ import {
   facetKey,
   isCtLinkedSource,
   isPokemonProduct,
+  marketplaceGameForProduct,
   normalizeProduct,
   parseCtProductId,
   planInventoryReconcile,
@@ -55,6 +56,26 @@ test('normalize pokemon product facets', () => {
   assert.equal(product.firstEdition, true);
   assert.equal(product.quantity, 3);
   assert.equal(isPokemonProduct(product), true);
+});
+
+test('supported CardTrader TCGs map to their isolated Pokoin catalogs', () => {
+  assert.equal(marketplaceGameForProduct(normalizeProduct({ game_id: 5, blueprint_id: 1 })), 'pokemon');
+  assert.equal(marketplaceGameForProduct(normalizeProduct({ game_id: 24, blueprint_id: 2 })), 'sorcery');
+  assert.equal(marketplaceGameForProduct(normalizeProduct({ game_id: 1, blueprint_id: 3 })), 'magic');
+  assert.equal(marketplaceGameForProduct(normalizeProduct({ game_id: 999, blueprint_id: 4 })), '');
+});
+
+test('normal seller reconcile keeps supported non-Pokemon inventory', () => {
+  const plan = planInventoryReconcile({
+    products: [{ id: 9, game_id: 24, blueprint_id: 400, quantity: 1, price: 2 }],
+    listings: [],
+    exportComplete: true,
+    exportOk: true,
+  });
+  assert.equal(plan.summary.supportedInventory, 1);
+  assert.equal(plan.summary.skippedNonPokemon, 0);
+  assert.equal(plan.actions[0]?.type, 'import');
+  assert.equal(plan.actions[0]?.cardId, '800');
 });
 
 test('destructive gate blocks incomplete and failed exports', () => {

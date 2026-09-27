@@ -49,6 +49,7 @@ import {
 } from '../api.js';
 import { suggestPriceFromSlices } from '../scan-pricing.js';
 import { bundleReference, preloadDragImage, referenceForPeer, writeListingDrag } from '../chat-listing.js';
+import { getChatDock } from '../chat-dock-store.js';
 import { expansionLogoSrc } from '../set-logos.js';
 import {
   activeSoldIndex,
@@ -2163,14 +2164,20 @@ export default function Card() {
             <button
               type="button"
               className="art-frame"
-              draggable={Boolean(art)}
-              onDragStart={(event) => writeListingDrag(event, dragThisCard(card, payload?.offers || []))}
               onClick={() => {
                 setZoom(true);
                 track(Action.zoomArt, card);
               }}
             >
-              {art ? <CardArt src={art} alt={cardImageAlt(card)} fetchPriority="high" full /> : <span className="tile-ph" />}
+              {art ? (
+                <CardArt
+                  src={art}
+                  alt={cardImageAlt(card)}
+                  fetchPriority="high"
+                  full
+                  dragCard={dragThisCard(card, payload?.offers || [])}
+                />
+              ) : <span className="tile-ph" />}
             </button>
             {(setShortcuts.length || showMoreVersions) ? (
               <div className="set-link tight version-links">

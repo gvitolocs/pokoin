@@ -5,7 +5,7 @@ import { useAuth } from '../auth.jsx';
 import { listConversations } from '../chat-client.js';
 import { openThread } from '../chat-dock-store.js';
 import { GAMES, game, gameSiteHref } from '../game.js';
-import { normalizeHistoryDay } from '../portfolio-history.js';
+import { loadPortfolioHistory, peekPortfolioHistory } from '../portfolio-history-cache.js';
 import { DASHBOARD_SCAN } from '../punchouts.js';
 
 export function NavHover({ id, pop, setPop, children, preview }) {
@@ -97,21 +97,21 @@ function sparkline(days) {
 }
 
 export function DashboardPreview() {
-  const { signedIn, getBearer } = useAuth();
-  const [days, setDays] = useState([]);
-  const [pending, setPending] = useState(Boolean(signedIn));
+  const { signedIn, user, profile, getBearer } = useAuth();
+  const uid = user?.uid || profile?.uid || '';
+  const [days, setDays] = useState(() => peekPortfolioHistory(uid) || []);
+  const [pending, setPending] = useState(Boolean(signedIn && !peekPortfolioHistory(uid)));
 
   useEffect(() => {
-    if (!signedIn) return undefined;
+    if (!signedIn || !uid) return undefined;
     let live = true;
-    setPending(true);
-    getBearer()
-      .then((token) => fetchPortfolioHistory(token))
-      .then((data) => {
+    const cached = peekPortfolioHistory(uid);
+    if (cached) setDays(cached);
+    setPending(!cached);
+    loadPortfolioHistory(uid, () => getBearer().then((token) => fetchPortfolioHistory(token)))
+      .then((series) => {
         if (!live) return;
-        const series = (data?.days || []).map((row) => normalizeHistoryDay(row)).filter(Boolean);
-        const known = series.filter((day) => day.assets?.cardsKnown);
-        setDays(known.length ? known : series);
+        setDays(series);
       })
       .catch(() => {
         if (live) setDays([]);
@@ -120,7 +120,7 @@ export function DashboardPreview() {
         if (live) setPending(false);
       });
     return () => { live = false; };
-  }, [signedIn, getBearer]);
+  }, [signedIn, uid, getBearer]);
 
   const points = sparkline(days);
   const last = days.length ? days[days.length - 1].totalPkn : 0;
@@ -140,10 +140,15 @@ export function DashboardPreview() {
           </>
         ) : null}
       </div>
-      <Link className="nav-scan" to={DASHBOARD_SCAN}>
-        <svg viewBox="0 0 72 100" width="54" height="76" aria-hidden="true">
-          <rect width="72" height="100" rx="6" fill="#1a1620" stroke="#ffd33d" strokeOpacity="0.55" />
-          <circle cx="36" cy="50" r="12" fill="none" stroke="#ffd33d" strokeOpacity="0.5" />
+      <Link className="nav-scan" to={DASHBOARD_SCAN} aria-label="Scan cards">
+        <svg viewBox="0 0 72 100" width="72" height="100" aria-hidden="true">
+          <rect x="1" y="1" width="70" height="98" rx="7" fill="#17131f" stroke="#6f5414" strokeWidth="2" />
+          <rect x="7" y="7" width="58" height="86" rx="4" fill="none" stroke="#ffd33d" strokeWidth="2" />
+          <path d="M11 20V11h9M52 11h9v9M11 80v9h9M52 89h9v-9" fill="none" stroke="#ffd33d" strokeWidth="1.5" strokeLinecap="round" />
+          <circle cx="36" cy="50" r="20" fill="#211b2b" stroke="#ffd33d" strokeWidth="2" />
+          <path d="M17 50h38" fill="none" stroke="#ffd33d" strokeWidth="3" />
+          <circle cx="36" cy="50" r="7" fill="#17131f" stroke="#ffd33d" strokeWidth="3" />
+          <circle cx="36" cy="50" r="2.5" fill="#ffd33d" />
         </svg>
         <strong>Scan cards</strong>
       </Link>

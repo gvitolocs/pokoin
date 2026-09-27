@@ -1,6 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { marqueeBlocked, marqueeRect, rectsIntersect } from '../shop-marquee.js';
+import {
+  clearShopSelectionOnPointer,
+  marqueeBlocked,
+  marqueeRect,
+  rectsIntersect,
+} from '../shop-marquee.js';
 
 const DRAG_THRESHOLD = 5;
 
@@ -73,6 +78,13 @@ export default function ShopList({ className = '', children }) {
       const id = row?.dataset.listingId;
       if (!id || !selectedRef.current.has(id)) return null;
       return row;
+    }
+
+    function onOutsideDown(event) {
+      if (event.button !== 0) return;
+      if (!clearShopSelectionOnPointer(event.target, list, selectedRef.current, event)) return;
+      anchor = '';
+      setSelected(new Set());
     }
 
     function onDown(event) {
@@ -210,6 +222,7 @@ export default function ShopList({ className = '', children }) {
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onOutsideDown, true);
     return () => {
       panel.removeEventListener('pointerdown', onDown);
       panel.removeEventListener('mousedown', onMouseDown);
@@ -218,6 +231,7 @@ export default function ShopList({ className = '', children }) {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onOutsideDown, true);
       document.documentElement.classList.remove('is-shop-marquee');
     };
   }, []);

@@ -1,7 +1,7 @@
 import { peekHasListingRows, peekSellerListings } from './listings-cache.js';
 
 /** Default first-page shop key — must match fetchSellerShop defaults in Seller.jsx. */
-export function sellerShopSeedOpts({ pageSize = 100, sort = 'price-asc' } = {}) {
+export function sellerShopSeedOpts({ pageSize = 100, sort = 'price-asc', game = 'pokemon' } = {}) {
   return {
     limit: pageSize,
     offset: 0,
@@ -9,6 +9,7 @@ export function sellerShopSeedOpts({ pageSize = 100, sort = 'price-asc' } = {}) 
     condition: '',
     language: '',
     sort,
+    game,
   };
 }
 
@@ -17,8 +18,8 @@ export function sellerShopSeedOpts({ pageSize = 100, sort = 'price-asc' } = {}) 
  * Only reuse a full handle-matched shop cache (same key as fetchSellerShop).
  * Never seed from a single navigated `location.state.listing` stub.
  */
-export function seedSellerListings(handle, { pageSize = 100, sort = 'price-asc' } = {}) {
-  const cached = peekSellerListings(handle, sellerShopSeedOpts({ pageSize, sort }));
+export function seedSellerListings(handle, { pageSize = 100, sort = 'price-asc', game = 'pokemon' } = {}) {
+  const cached = peekSellerListings(handle, sellerShopSeedOpts({ pageSize, sort, game }));
   if (!peekHasListingRows(cached)) {
     return null;
   }

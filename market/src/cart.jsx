@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { cartImageFor, repairCartImage } from './cart-image.js';
 import { listingStock, nextCartQty } from './cart-qty.js';
 
 const CART_KEY = 'pokoin.cartItems';
@@ -7,7 +8,12 @@ const CART_MAX = 400;
 function readCart() {
   try {
     const parsed = JSON.parse(localStorage.getItem(CART_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.filter((row) => row && row.id) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((row) => row && row.id).map((row) => ({
+        ...row,
+        image: repairCartImage(row) || row.image || '',
+      }))
+      : [];
   } catch (_) {
     return [];
   }
@@ -37,7 +43,7 @@ export function cartItemFromOffer(card, offer) {
     sellerUid: String(offer?.sellerUid || offer?.seller_uid || ''),
     cardId: String(card.id),
     name: card.name || 'Card',
-    image: offer?.cardImageUrl || card.gridImageUrl || card.heroImageUrl || card.imageUrl || '',
+    image: cartImageFor(card, offer),
     pricePkn: Number(offer?.pricePkn) || 0,
     qty: Math.min(stock, Math.max(1, Math.trunc(Number(offer?.qty) || 1))),
     stock,

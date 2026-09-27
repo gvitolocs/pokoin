@@ -2018,13 +2018,14 @@ export function fetchSellerShop(username, {
   condition = '',
   language = '',
   sort = 'price-asc',
+  game: marketplaceGame = game().apiGame,
   signal,
 } = {}) {
   const handle = String(username || '').trim();
   if (!handle) {
     return Promise.resolve({ listings: [], total: 0, unique: 0, limit, offset: 0 });
   }
-  const opts = { limit, offset, q, condition, language, sort };
+  const opts = { limit, offset, q, condition, language, sort, game: marketplaceGame };
   // Always hit the network so refresh picks up name/tag changes. Seller.jsx
   // paints the in-memory shop cache first via seedSellerListings.
   const params = new URLSearchParams({
@@ -2036,6 +2037,7 @@ export function fetchSellerShop(username, {
   if (condition) params.set('condition', String(condition));
   if (language) params.set('language', String(language));
   if (sort) params.set('sort', String(sort));
+  if (marketplaceGame) params.set('game', String(marketplaceGame));
   return getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) =>
     rememberSellerListings(handle, data, opts),
   );

@@ -1731,14 +1731,6 @@
   color: inherit;
   font: inherit;
 }
-.stock-csv-hint {
-  margin: 0.75rem 0 0;
-  font-size: 0.8rem;
-  color: var(--muted, #8a8f98);
-}
-.stock-csv-hint code {
-  font-size: 0.78em;
-}
 .stock-csv-preview {
   margin-top: 0.85rem;
   padding-top: 0.75rem;

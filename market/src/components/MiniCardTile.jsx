@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
-import { homepageDerivativeUrl } from '../image-urls.js';
+import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
 import { goMarket } from '../punchouts.js';
 import ThumbZoom from './ThumbZoom.jsx';
 
@@ -13,7 +13,10 @@ import ThumbZoom from './ThumbZoom.jsx';
 export default function MiniCardTile({
   imageUrl = '', name = 'Card', title = '', href = '', badge = '', cardId = '', sellerUid = '', seller = '', pricePkn = 0, listingId = '',
 }) {
-  const full = String(imageUrl || '').trim();
+  const full = ownCatalogImage(
+    { id: cardId, name, canonicalPath: href },
+    preferFullImage(imageUrl),
+  );
   const thumb = full ? homepageDerivativeUrl(full) || full : '';
   const drag = {
     draggable: true,
