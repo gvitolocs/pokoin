@@ -69,6 +69,8 @@ Order webhook is the immediate path; the Pi
 runs a complete-export safety reconcile every five minutes. Full incident,
 idempotency, formal model, and operations:
 [CARDTRADER_SELLER_SYNC.md](CARDTRADER_SELLER_SYNC.md).
+Linked `ct:` quantity changes emit `cardtrader_synced`, not native sold events;
+the CardTrader sold-comps pipeline is the sole sale-price evidence.
 
 Tokens: CardTrader app tokens are RS256 JWTs. `cleanToken` (server) and
 `market/src/cardtrader-token.js` (Profile panel) drop whitespace, a `Bearer `

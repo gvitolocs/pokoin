@@ -14,6 +14,8 @@ The model checks:
 - state types and non-negative bounded quantities;
 - after a sale has been observed and no reconciliation work remains, Pokoin
   stock equals CardTrader stock; and
+- connected-seller webhook/export updates never increment Pokoin-native sold
+  evidence—the sale is counted exactly once by CardTrader sold comps; and
 - every CardTrader sell-out eventually becomes zero Pokoin stock under fair
   webhook/reconcile scheduling.
 

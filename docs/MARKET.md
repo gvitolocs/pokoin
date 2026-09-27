@@ -947,6 +947,9 @@ Native POST /api/marketplace-listings
 Connected-seller CardTrader stock is a separate exact mirror, not the global
 sold-comps inference above. Order webhooks decrement immediately; a complete
 seller export reconciles every five minutes and removes missing `ct:` rows.
+Those mirror decrements are `cardtrader_synced` audit events, never native
+Pokoin sales: CardTrader sold comps remain the single price-graph/weight source
+for that transaction, preventing double counting.
 See `docs/CARDTRADER_SELLER_SYNC.md`.
 
 every 15 min  refresh-listing-weights.py

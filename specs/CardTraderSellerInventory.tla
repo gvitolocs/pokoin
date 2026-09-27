@@ -11,7 +11,9 @@ CONSTANT MaxQty
     webhookRegistered = FALSE,
     webhookPending = FALSE,
     reconcileDue = FALSE,
-    saleHappened = FALSE;
+    saleHappened = FALSE,
+    cardTraderSoldQty = 0,
+    nativeSoldQty = 0;
 
   define {
     TypeOK ==
@@ -21,9 +23,15 @@ CONSTANT MaxQty
       /\ webhookPending \in BOOLEAN
       /\ reconcileDue \in BOOLEAN
       /\ saleHappened \in BOOLEAN
+      /\ cardTraderSoldQty \in 0..MaxQty
+      /\ nativeSoldQty \in 0..MaxQty
 
     NoStaleAfterObservation ==
       (saleHappened /\ ~reconcileDue /\ ~webhookPending) => pokoinQty = ctQty
+
+    NoDoubleCount ==
+      /\ nativeSoldQty = 0
+      /\ (saleHappened => cardTraderSoldQty = MaxQty)
 
     SoldEventuallyRemoved == saleHappened ~> pokoinQty = 0
   }
@@ -31,6 +39,7 @@ CONSTANT MaxQty
   fair process (Seller = "seller") {
     Sell:
       await ~saleHappened;
+      cardTraderSoldQty := cardTraderSoldQty + ctQty;
       ctQty := 0;
       saleHappened := TRUE;
       reconcileDue := TRUE;
@@ -69,8 +78,8 @@ CONSTANT MaxQty
   }
 }
 *)
-\* BEGIN TRANSLATION (chksum(pcal) = "aa5d5fd4" /\ chksum(tla) = "5a2c55f9")
-VARIABLES ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened, pc
+\* BEGIN TRANSLATION (chksum(pcal) = "b42e8324" /\ chksum(tla) = "64dfeb6e")
+VARIABLES ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened, cardTraderSoldQty, nativeSoldQty, pc
 
 (* define statement *)
 TypeOK ==
@@ -80,14 +89,20 @@ TypeOK ==
   /\ webhookPending \in BOOLEAN
   /\ reconcileDue \in BOOLEAN
   /\ saleHappened \in BOOLEAN
+  /\ cardTraderSoldQty \in 0..MaxQty
+  /\ nativeSoldQty \in 0..MaxQty
 
 NoStaleAfterObservation ==
   (saleHappened /\ ~reconcileDue /\ ~webhookPending) => pokoinQty = ctQty
 
+NoDoubleCount ==
+  /\ nativeSoldQty = 0
+  /\ (saleHappened => cardTraderSoldQty = MaxQty)
+
 SoldEventuallyRemoved == saleHappened ~> pokoinQty = 0
 
 
-vars == << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened, pc >>
+vars == << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened, cardTraderSoldQty, nativeSoldQty, pc >>
 
 ProcSet == {"seller"} \cup {"webhook"} \cup {"reconciler"} \cup {"repair"}
 
@@ -98,6 +113,8 @@ Init == (* Global variables *)
         /\ webhookPending = FALSE
         /\ reconcileDue = FALSE
         /\ saleHappened = FALSE
+        /\ cardTraderSoldQty = 0
+        /\ nativeSoldQty = 0
         /\ pc = [self \in ProcSet |-> CASE self = "seller" -> "Sell"
                                         [] self = "webhook" -> "WaitForWebhook"
                                         [] self = "reconciler" -> "WaitForReconcile"
@@ -105,6 +122,7 @@ Init == (* Global variables *)
 
 Sell == /\ pc["seller"] = "Sell"
         /\ ~saleHappened
+        /\ cardTraderSoldQty' = cardTraderSoldQty + ctQty
         /\ ctQty' = 0
         /\ saleHappened' = TRUE
         /\ reconcileDue' = TRUE
@@ -113,50 +131,50 @@ Sell == /\ pc["seller"] = "Sell"
               ELSE /\ TRUE
                    /\ UNCHANGED webhookPending
         /\ pc' = [pc EXCEPT !["seller"] = "SellerDone"]
-        /\ UNCHANGED << pokoinQty, webhookRegistered >>
+        /\ UNCHANGED << pokoinQty, webhookRegistered, nativeSoldQty >>
 
 SellerDone == /\ pc["seller"] = "SellerDone"
               /\ pc' = [pc EXCEPT !["seller"] = "SellerDone"]
-              /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened >>
+              /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened, cardTraderSoldQty, nativeSoldQty >>
 
 Seller == Sell \/ SellerDone
 
 WaitForWebhook == /\ pc["webhook"] = "WaitForWebhook"
                   /\ webhookPending
                   /\ pc' = [pc EXCEPT !["webhook"] = "ApplyWebhook"]
-                  /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened >>
+                  /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened, cardTraderSoldQty, nativeSoldQty >>
 
 ApplyWebhook == /\ pc["webhook"] = "ApplyWebhook"
                 /\ pokoinQty' = ctQty
                 /\ webhookPending' = FALSE
                 /\ reconcileDue' = FALSE
                 /\ pc' = [pc EXCEPT !["webhook"] = "WaitForWebhook"]
-                /\ UNCHANGED << ctQty, webhookRegistered, saleHappened >>
+                /\ UNCHANGED << ctQty, webhookRegistered, saleHappened, cardTraderSoldQty, nativeSoldQty >>
 
 Webhook == WaitForWebhook \/ ApplyWebhook
 
 WaitForReconcile == /\ pc["reconciler"] = "WaitForReconcile"
                     /\ reconcileDue
                     /\ pc' = [pc EXCEPT !["reconciler"] = "ApplyCompleteExport"]
-                    /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened >>
+                    /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened, cardTraderSoldQty, nativeSoldQty >>
 
 ApplyCompleteExport == /\ pc["reconciler"] = "ApplyCompleteExport"
                        /\ pokoinQty' = ctQty
                        /\ reconcileDue' = FALSE
                        /\ webhookPending' = FALSE
                        /\ pc' = [pc EXCEPT !["reconciler"] = "WaitForReconcile"]
-                       /\ UNCHANGED << ctQty, webhookRegistered, saleHappened >>
+                       /\ UNCHANGED << ctQty, webhookRegistered, saleHappened, cardTraderSoldQty, nativeSoldQty >>
 
 Reconciler == WaitForReconcile \/ ApplyCompleteExport
 
 RepairRegistration == /\ pc["repair"] = "RepairRegistration"
                       /\ webhookRegistered' = TRUE
                       /\ pc' = [pc EXCEPT !["repair"] = "RepairDone"]
-                      /\ UNCHANGED << ctQty, pokoinQty, webhookPending, reconcileDue, saleHappened >>
+                      /\ UNCHANGED << ctQty, pokoinQty, webhookPending, reconcileDue, saleHappened, cardTraderSoldQty, nativeSoldQty >>
 
 RepairDone == /\ pc["repair"] = "RepairDone"
               /\ pc' = [pc EXCEPT !["repair"] = "RepairDone"]
-              /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened >>
+              /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened, cardTraderSoldQty, nativeSoldQty >>
 
 WebhookRepair == RepairRegistration \/ RepairDone
 

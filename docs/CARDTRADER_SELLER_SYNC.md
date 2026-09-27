@@ -20,6 +20,20 @@ For every `marketplace_user_listings` row whose `source_listing_id` is
 `sold_out` rows remain in Postgres for audit/history but are excluded from the
 seller shop and inventory UI.
 
+## Sale accounting invariant
+
+A connected seller's `ct:<product_id>` row is an inventory mirror. When its
+quantity decreases through an order webhook or complete-export reconcile, the
+listing audit trigger records `cardtrader_synced`, never Pokoin-native `sold`
+or `quantity_decreased`. The same transaction is already represented by the
+global CardTrader sold-comps pipeline; counting the mirror update as a native
+sale would double its price/weight evidence.
+
+Migration `scripts/sql/092_cardtrader_sale_dedupe.sql` reclassifies historical
+linked mirror events, rebuilds native daily sold counters from the remaining
+genuine Pokoin events, and refreshes marketplace weights. It deliberately
+preserves the audit rows and CardTrader sold-comps history.
+
 ## Delivery and fallback
 
 Connect registers this exact callback and requires CardTrader to echo it:
@@ -88,6 +102,7 @@ and the complete-export fallback. TLC checks:
 
 - bounded/type-correct stock state;
 - no stale Pokoin quantity after an observation has fully settled; and
+- zero Pokoin-native sold evidence for CardTrader mirror updates; and
 - every CardTrader sell-out eventually reaches zero Pokoin stock under fair
   webhook/reconcile scheduling.
 
@@ -102,3 +117,9 @@ ssh pi-home 'journalctl -u pokoin-cardtrader-seller-reconcile.service -n 100 --n
 
 A manual seller sync remains available from the Profile UI or authenticated
 `POST /api/cardtrader-sync`. Never infer removal from an incomplete export.
+
+Deploy the sale-accounting guard from an exact `origin/main` commit:
+
+```bash
+bash scripts/deploy-cardtrader-sale-dedupe.sh <origin-main-commit>
+```

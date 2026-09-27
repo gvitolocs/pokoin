@@ -122,14 +122,17 @@ declare
   is_new boolean := false;
   is_sold boolean := false;
   is_removed boolean := false;
+  is_cardtrader_link boolean := false;
 begin
   if tg_op = 'INSERT' then
+    is_cardtrader_link := lower(coalesce(new.source_listing_id, '')) like 'ct:%';
     card := new.card_id;
     ev := 'listed';
     q_before := 0;
     q_after := coalesce(new.quantity_available, 0);
     is_new := true;
   elsif tg_op = 'DELETE' then
+    is_cardtrader_link := lower(coalesce(old.source_listing_id, '')) like 'ct:%';
     card := old.card_id;
     q_before := coalesce(old.quantity_available, 0);
     q_after := 0;
@@ -142,6 +145,7 @@ begin
       is_removed := true;
     end if;
   else
+    is_cardtrader_link := lower(coalesce(new.source_listing_id, old.source_listing_id, '')) like 'ct:%';
     card := coalesce(new.card_id, old.card_id);
     q_before := coalesce(old.quantity_available, 0);
     q_after := coalesce(new.quantity_available, 0);
@@ -165,6 +169,15 @@ begin
     else
       ev := 'updated';
     end if;
+  end if;
+
+  -- A linked CardTrader row is an inventory mirror. Its sale evidence already
+  -- belongs to the CardTrader sold-comps pipeline, so a webhook/export quantity
+  -- sync must never become a second Pokoin-native sale.
+  if is_cardtrader_link and is_sold then
+    ev := 'cardtrader_synced';
+    sold_qty := 0;
+    is_sold := false;
   end if;
 
   if card is null or card = '' then
