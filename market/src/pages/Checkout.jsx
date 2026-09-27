@@ -15,7 +15,8 @@ import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
 import { checkoutFees } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
-import { fiatFromPkn } from '../pkn.js';
+import { fiatFromPkn, formatEurAndDkkFromPkn } from '../pkn.js';
+import { pknFromEurCents, previewShipmentCents } from '../shipping-quote.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 
@@ -31,6 +32,16 @@ function FeeTip({ label, children }) {
 function formatEurCents(cents) {
   const n = Number(cents) || 0;
   return `€${(n / 100).toFixed(2)}`;
+}
+
+function formatDkkFromEurCents(cents) {
+  const eur = (Number(cents) || 0) / 100;
+  const dkk = eur * 7.5;
+  return `${dkk.toFixed(2)} DKK`;
+}
+
+function formatEurAndDkkCents(cents) {
+  return `${formatEurCents(cents)} · ${formatDkkFromEurCents(cents)}`;
 }
 
 function snapshot(row, fulfillmentMode, notes) {
@@ -74,9 +85,14 @@ const EMPTY_ADDRESS = {
   addressLine2: '',
   postalCode: '',
   city: '',
-  countryCode: 'IT',
+  countryCode: 'DK',
   phoneNumber: '',
 };
+
+function selectedAddressCountry(addresses, addressId) {
+  const row = (addresses || []).find((item) => item.id === addressId);
+  return String(row?.countryCode || '').trim().toUpperCase();
+}
 
 export default function Checkout() {
   const location = useLocation();
@@ -99,14 +115,54 @@ export default function Checkout() {
   const [quoteError, setQuoteError] = useState('');
 
   const nft = nftOnly && canNftOnly;
-  const shippingPkn = nft ? 0 : (items.length ? CHECKOUT_SHIPPING_PKN : 0);
+  const buyerCountry = String(
+    selectedAddressCountry(addresses, addressId) || draft.countryCode || 'DK',
+  ).toUpperCase();
+  const shippingPreviewCents = useMemo(() => {
+    if (nft || !items.length) return 0;
+    let total = 0;
+    let missing = false;
+    const bySeller = new Map();
+    for (const row of items) {
+      const sid = String(row.sellerUid || '');
+      const list = bySeller.get(sid) || { count: 0, from: row.sellerCountry || '' };
+      list.count += Number(row.qty) || 0;
+      list.from = list.from || row.sellerCountry || '';
+      bySeller.set(sid, list);
+    }
+    for (const group of bySeller.values()) {
+      const cents = previewShipmentCents({
+        fromCountry: group.from,
+        toCountry: buyerCountry,
+        cardCount: group.count,
+      });
+      if (cents == null) {
+        missing = true;
+        break;
+      }
+      total += cents;
+    }
+    return missing ? null : total;
+  }, [nft, items, buyerCountry]);
+
+  const shippingPkn = nft
+    ? 0
+    : (shippingPreviewCents != null
+      ? pknFromEurCents(shippingPreviewCents)
+      : (items.length ? CHECKOUT_SHIPPING_PKN : 0));
   const fees = checkoutFees(subtotalPkn, { insurance: insurance && !nft, shippingPkn });
   const { commissionPkn, insurancePkn, taxPkn, totalPkn, coveragePkn } = fees;
   const missingListing = items.some((row) => !row.listingId);
+  const canPayWithPkn = Number(availablePkn) >= Number(totalPkn);
+  const preferFiat = !nft && !canPayWithPkn;
   const eurSubtotal = useMemo(
     () => Math.round((Number(fiatFromPkn(subtotalPkn, 'EUR')) || 0) * 100),
     [subtotalPkn],
   );
+
+  useEffect(() => {
+    if (preferFiat && payMethod === 'pkn') setPayMethod('stripe');
+  }, [preferFiat, payMethod]);
 
   useEffect(() => {
     document.title = 'Checkout · Pokoin';
@@ -270,10 +326,23 @@ export default function Checkout() {
         <Metric value={count} label="Items" />
         <Metric value={formatPknNumber(availablePkn)} label="Site PKN" />
         <Metric
-          value={payMethod === 'stripe' && quote ? formatEurCents(quote.grandTotalCents) : formatPkn(totalPkn)}
+          value={
+            payMethod === 'stripe'
+              ? (quote
+                ? formatEurAndDkkCents(quote.grandTotalCents)
+                : (shippingPreviewCents != null
+                  ? formatEurAndDkkCents(eurSubtotal + shippingPreviewCents)
+                  : `${formatEurAndDkkFromPkn(subtotalPkn)} + ship`))
+              : formatPkn(totalPkn)
+          }
           label="Due"
         />
       </MetricGrid>
+      {preferFiat ? (
+        <Alert>
+          Site PKN ({formatPknNumber(availablePkn)}) is not enough for this order — paying in EUR / DKK with Stripe.
+        </Alert>
+      ) : null}
       <Alert>{error}</Alert>
       {orderId ? (
         <p className="desk-ok">
@@ -308,7 +377,11 @@ export default function Checkout() {
                     <strong className="bag-name">{row.name}</strong>
                     <p className="bag-seller">{row.condition} · {row.sellerName} · qty {row.qty}</p>
                   </div>
-                  <strong className="bag-price">{formatPkn((Number(row.pricePkn) || 0) * (Number(row.qty) || 1))}</strong>
+                  <strong className="bag-price">
+                    {preferFiat || payMethod === 'stripe'
+                      ? formatEurAndDkkFromPkn((Number(row.pricePkn) || 0) * (Number(row.qty) || 1))
+                      : formatPkn((Number(row.pricePkn) || 0) * (Number(row.qty) || 1))}
+                  </strong>
                 </article>
               ))}
             </div>
@@ -339,9 +412,10 @@ export default function Checkout() {
                     type="radio"
                     name="payMethod"
                     checked={payMethod === 'pkn'}
+                    disabled={preferFiat}
                     onChange={() => setPayMethod('pkn')}
                   />
-                  Site PKN
+                  Site PKN{preferFiat ? ' (not enough)' : ''}
                 </label>
               </div>
             ) : null}
@@ -445,22 +519,45 @@ export default function Checkout() {
                   <div key={shipment.sellerId}>
                     <dt>
                       Shipping {shipment.fromCountry} → {shipment.toCountry}
-                      {' '}({shipment.itemCount} cards · {shipment.serviceName || 'Standard'})
+                      {' '}({shipment.cardCount || shipment.itemCount} cards · {shipment.serviceName || 'Standard'})
                     </dt>
-                    <dd>{formatEurCents(shipment.amountCents)}</dd>
+                    <dd>{formatEurAndDkkCents(shipment.amountCents)}</dd>
                   </div>
                 ))}
                 <div>
                   <dt>Items</dt>
-                  <dd>{formatEurCents(quote.itemsSubtotalCents || eurSubtotal)}</dd>
+                  <dd>{formatEurAndDkkCents(quote.itemsSubtotalCents || eurSubtotal)}</dd>
                 </div>
                 <div>
                   <dt>Shipping total</dt>
-                  <dd>{formatEurCents(quote.shippingTotalCents)}</dd>
+                  <dd>{formatEurAndDkkCents(quote.shippingTotalCents)}</dd>
                 </div>
                 <div>
                   <dt>Total</dt>
-                  <dd>{formatEurCents(quote.grandTotalCents)}</dd>
+                  <dd>{formatEurAndDkkCents(quote.grandTotalCents)}</dd>
+                </div>
+              </dl>
+            ) : payMethod === 'stripe' && !nft ? (
+              <dl className="fee-lines">
+                <div>
+                  <dt>Items</dt>
+                  <dd>{formatEurAndDkkFromPkn(subtotalPkn)}</dd>
+                </div>
+                <div>
+                  <dt>Shipping{shippingPreviewCents != null ? ` (${buyerCountry})` : ''}</dt>
+                  <dd>
+                    {shippingPreviewCents != null
+                      ? formatEurAndDkkCents(shippingPreviewCents)
+                      : 'Quoted after you save a shipping address'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Estimated total</dt>
+                  <dd>
+                    {shippingPreviewCents != null
+                      ? formatEurAndDkkCents(eurSubtotal + shippingPreviewCents)
+                      : formatEurAndDkkFromPkn(subtotalPkn)}
+                  </dd>
                 </div>
               </dl>
             ) : (

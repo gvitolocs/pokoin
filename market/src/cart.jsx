@@ -50,6 +50,7 @@ export function cartItemFromOffer(card, offer) {
     condition: offer?.condition || 'NM',
     language: offer?.language || '',
     sellerName: offer?.sellerName || offer?.sellerDisplayName || 'Pokoin',
+    sellerCountry: String(offer?.sellerCountry || offer?.seller_country || offer?.shipFromCountry || '').trim().toUpperCase(),
     nftAvailable: Boolean(offer?.nftAvailable || offer?.isNftEligible),
     reserveAvailable: Boolean(offer?.reserveAvailable),
     href: card.canonicalPath || `/marketplace/en/cards/${card.id}`,

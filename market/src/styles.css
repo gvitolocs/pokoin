@@ -1315,11 +1315,18 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   background: #07060b;
 }
 
-.cart-drop-card img,
-.cart-drop-card .card-art {
+.cart-drop-card > a {
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+}
+
+.cart-drop-card img,
+.cart-drop-card .card-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   border-radius: 0;
 }
 

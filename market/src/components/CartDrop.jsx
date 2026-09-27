@@ -143,6 +143,7 @@ async function addDraggedCard(reference, onAdd) {
         pricePkn: reference.pricePkn,
         sellerUid: reference.sellerUid,
         sellerName: reference.sellerName || reference.seller,
+        sellerCountry: reference.sellerCountry || '',
         cardImageUrl: reference.imageUrl,
         condition: reference.condition || 'NM',
         language: reference.language || '',

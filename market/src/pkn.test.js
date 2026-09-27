@@ -5,6 +5,8 @@ import {
   LIST_CURRENCIES,
   applyLastMedianPrices,
   fiatFromPkn,
+  formatEurAndDkkFromPkn,
+  formatFiatFromPkn,
   formatPkn,
   formatPknNumber,
   idsMissingTilePrice,
@@ -23,6 +25,13 @@ test('PKN prices are digits only so a comma cannot look like a decimal', () => {
   assert.equal(formatPkn(12.5), '12.5 PKN');
   assert.equal(formatPkn(0), '');
   assert.doesNotMatch(formatPkn(2642), /,/);
+});
+
+test('EUR and DKK display helpers for short PKN balance', () => {
+  assert.equal(formatFiatFromPkn(20, 'EUR'), '€0.1');
+  assert.equal(formatFiatFromPkn(20, 'DKK'), '0.75 DKK');
+  assert.match(formatEurAndDkkFromPkn(20), /€0\.1/);
+  assert.match(formatEurAndDkkFromPkn(20), /0\.75 DKK/);
 });
 
 test('EUR and USDT asks use 1 PKN = 0.005', () => {
