@@ -49,22 +49,38 @@ test('a selected group drags as cards and one card stays a single reference', ()
 });
 
 test('the held card leads the multi-select drag pile', () => {
-  const source = fs.readFileSync(path.join(root, 'components/CardSelectGrid.jsx'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'select-band.jsx'), 'utf8');
   assert.match(source, /\[card, \.\.\.rest\]/);
   assert.match(source, /String\(row\?\.id \|\| ''\) !== id/);
 });
 
 test('desk art-frame starts HTML5 drag, but empty-background bands can still select it', () => {
-  const source = fs.readFileSync(path.join(root, 'components/CardSelectGrid.jsx'), 'utf8');
-  assert.match(source, /\.art-frame/);
-  assert.match(source, /dialog\.zoom/);
-  assert.match(source, /\.shop-panel/);
-  assert.match(source, /closest\?\.\('main'\)/);
+  const host = fs.readFileSync(path.join(root, 'select-band.jsx'), 'utf8');
+  assert.match(host, /marqueeStartAllowed/);
+  assert.match(host, /\[data-card-id\]/);
+  assert.match(host, /useLayoutEffect/);
+  const marquee = fs.readFileSync(path.join(root, 'shop-marquee.js'), 'utf8');
+  assert.match(marquee, /\.art-frame/);
+  assert.match(marquee, /\.shop-panel/);
   const page = fs.readFileSync(path.join(root, 'pages/Card.jsx'), 'utf8');
   assert.match(page, /function DeskArtFrame/);
   assert.match(page, /data-card-id=\{id/);
   assert.match(page, /contents/);
   assert.doesNotMatch(page, /<button[\s\S]*className="art-frame"/);
+});
+
+test('select band stays mounted under Chrome so navigation does not rewarm it', () => {
+  const chrome = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
+  assert.match(chrome, /SelectBandProvider/);
+  const host = fs.readFileSync(path.join(root, 'select-band.jsx'), 'utf8');
+  assert.match(host, /useLayoutEffect/);
+  assert.match(host, /App-lifetime rubber-band host/);
+  const grid = fs.readFileSync(path.join(root, 'components/CardSelectGrid.jsx'), 'utf8');
+  assert.match(grid, /useSelectBand/);
+  assert.doesNotMatch(grid, /addEventListener\('pointerdown'/);
+  const shop = fs.readFileSync(path.join(root, 'components/ShopList.jsx'), 'utf8');
+  assert.match(shop, /useSelectBand/);
+  assert.doesNotMatch(shop, /addEventListener\('pointerdown'/);
 });
 
 test('drag pile CSS styles canvas layers like the old img pile', () => {

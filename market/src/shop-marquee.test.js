@@ -60,12 +60,13 @@ test('empty page background may start a shop marquee; shop rows and art may not'
 });
 
 test('ShopList listens on main so a band from empty background can hit listings', () => {
-  const src = readFileSync(new URL('./components/ShopList.jsx', import.meta.url), 'utf8');
-  assert.match(src, /closest\('main'\)/);
-  assert.match(src, /marqueeStartAllowed/);
+  const host = readFileSync(new URL('./select-band.jsx', import.meta.url), 'utf8');
+  assert.match(host, /marqueeStartAllowed/);
+  assert.match(host, /listingRects|shop-row/);
+  assert.match(host, /SelectBandProvider/);
   assert.match(
-    readFileSync(new URL('./components/CardSelectGrid.jsx', import.meta.url), 'utf8'),
-    /\.shop-panel/,
+    readFileSync(new URL('./components/Chrome.jsx', import.meta.url), 'utf8'),
+    /SelectBandProvider/,
   );
 });
 

@@ -18,9 +18,8 @@ test('shop listing line never adds to cart on row click — cart icon, buy-btn, 
   assert.match(row, /writeListingDrag/);
 
   const shopList = fs.readFileSync(path.join(market, 'components/ShopList.jsx'), 'utf8');
-  assert.match(shopList, /Only cancel HTML5 drag while a marquee is actively armed/);
-  assert.match(shopList, /pointercancel/);
-  assert.match(shopList, /!origin \|\| !armed/);
+  assert.match(shopList, /useSelectBand/);
+  assert.match(shopList, /listingSelected/);
 
   const card = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
   assert.match(card, /onCart=\{\(qty\) => addItem/);
@@ -38,11 +37,10 @@ test('desk title / set / artist stay out of shop marquee', () => {
 });
 
 test('CardSelectGrid bands desk+related via main-scoped data-card-id', () => {
-  const source = fs.readFileSync(path.join(market, 'components/CardSelectGrid.jsx'), 'utf8');
-  assert.match(source, /\.art-frame/);
-  assert.match(source, /\.shop-panel/);
-  assert.match(source, /closest\?\.\('main'\)/);
-  assert.match(source, /contents/);
+  const host = fs.readFileSync(path.join(market, 'select-band.jsx'), 'utf8');
+  assert.match(host, /\[data-card-id\]/);
+  assert.match(host, /marqueeStartAllowed/);
+  assert.match(host, /listingRects|shop-row/);
   const page = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
   assert.match(page, /DeskArtFrame/);
   assert.match(page, /embedded/);

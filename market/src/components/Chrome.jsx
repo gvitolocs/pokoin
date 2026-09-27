@@ -36,6 +36,7 @@ import {
   preloadSuggestThumbs,
 } from '../suggest-images.js';
 import { prefetchSearchPage } from '../search-hot.js';
+import { SelectBandProvider } from '../select-band.jsx';
 import { GAMES, game, gameSiteHref, isPokemonGame, sellerDeskUsesGameOverride, setScanGameOverride } from '../game.js';
 import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '../search-kind.js';
 import { printingIdentity, clipSuggestCollector, suggestCardName, suggestTranslatedLine } from '../identity.js';
@@ -1348,7 +1349,9 @@ export default function Chrome({ children }) {
         {admin ? <MobileTile to={APP.admin} label="Admin" icon="admin" onClick={closeMenu} /> : null}
         {signedIn ? null : <MobileTile to={from} label="Sign in" icon="signin" onClick={closeMenu} />}
       </nav>
+      <SelectBandProvider>
       <main>{children}</main>
+      </SelectBandProvider>
       <footer className="foot">
         <div className="foot-grid">
           <div>
