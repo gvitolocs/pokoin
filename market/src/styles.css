@@ -234,6 +234,11 @@ button, input, select { font: inherit; color: inherit; }
   padding: 0 0.85rem;
 }
 
+/* Non-Pokemon TCGs omit PrintLangToggle; round the input so the yellow ring stays a pill. */
+.search-pill > input:nth-last-child(2) {
+  border-radius: 0 999px 999px 0;
+}
+
 .game-select {
   position: relative;
   flex: none;

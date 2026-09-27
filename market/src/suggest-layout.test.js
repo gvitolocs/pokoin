@@ -164,6 +164,7 @@ test('game and title language sit on the left of the search pill', () => {
   assert.match(chrome, /className="sr-only" type="submit"/);
   assert.equal(chrome.includes('search-submit'), false);
   assert.equal(/<\/form>\s*<LangToggle \/>/.test(chrome), false);
+  assert.match(css, /\.search-pill > input:nth-last-child\(2\)\s*\{[^}]*border-radius:\s*0 999px 999px 0/s);
   assert.match(toolbar, /aria-label="Card print"/);
   assert.equal(chrome.includes('variant="drawer"'), false);
 });
