@@ -214,6 +214,9 @@ test('Chrome mounts Desktop on the left, opposite the cart', () => {
   assert.match(drop, /Draw the shape of your next collection/);
   assert.doesNotMatch(drop, /Drop cards you are unsure about/);
   assert.doesNotMatch(drop, /downloadDesktopHoldCsv/);
+  // Phone ≤720px hides the Desktop chip; cart stays in the topbar.
+  const phone = css.slice(css.indexOf('@media (max-width: 720px)'));
+  assert.match(phone, /\.desktop-anchor \{ display: none; \}/);
 });
 
 test('Desktop hold merges qty and setDesktopQty caps at stock', () => {

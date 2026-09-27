@@ -6810,11 +6810,12 @@ dialog.zoom:not([open]) {
   }
   .topbar-row {
     --topbar-flag: 32px;
-    grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
     gap: 0.65rem;
   }
   .brand span { display: none; }
-  /* Phone topbar keeps Desktop (left) + Cart (right); other icon-nav links stay in the drawer. */
+  /* Phone topbar: Cart only. Desktop is a pointer/drag surface — hide the chip. */
+  .desktop-anchor { display: none; }
   .icon-nav > :not(.cart-anchor) { display: none; }
   .search { position: static; max-width: none; min-width: 0; margin: 0; }
   .suggest {
