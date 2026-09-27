@@ -52,22 +52,32 @@ export default function Versions() {
     let cancelled = false;
     setPayload(null);
     setNameRows([]);
+    setError('');
+    // Satellite TCGs have no CLIP version-set yet — soft-fail so card-page
+    // rarities still paint the Rarity Lineup.
     Promise.all([
-      fetchVersionSet(cardId),
-      fetchCard(cardId, { lang }).catch(() => null),
+      fetchVersionSet(cardId).catch(() => ({ printings: [] })),
+      fetchCard(cardId, { lang, slug }).catch(() => null),
     ])
       .then(([data, page]) => {
         if (cancelled) return;
-        setPayload(data);
+        setPayload(data || { printings: [] });
         const name = data?.printings?.find((row) => String(row.id) === String(cardId))?.name
           || data?.printings?.[0]?.name
           || page?.card?.name
           || 'Card';
         document.title = `${name} · versions · Pokoin`;
-        setError('');
-        const rarities = (page?.rarities || []).map(cardFromCatalogRow).filter((row) => row.id);
+        const rarities = [
+          ...(page?.rarities || []),
+          ...(page?.versions || []),
+          page?.card || null,
+        ].map(cardFromCatalogRow).filter((row) => row.id);
         if (rarities.length) {
           setNameRows(rarities);
+        }
+        const hasArt = Array.isArray(data?.printings) && data.printings.length > 0;
+        if (!hasArt && !rarities.length && !page?.card) {
+          setError('Card not found.');
         }
         if (name && name !== 'Card') {
           fetchExactNameCards(name, { lang }).then((rows) => {
@@ -83,7 +93,7 @@ export default function Versions() {
     return () => {
       cancelled = true;
     };
-  }, [cardId, lang]);
+  }, [cardId, lang, slug]);
 
   const artCards = (payload?.printings || []).map(cardFromCatalogRow).filter((row) => row.id);
   const current = artCards.find((row) => String(row.id) === String(cardId))

@@ -4410,8 +4410,8 @@ dialog.zoom:not([open]) {
   display: block;
   width: auto;
   height: auto;
-  max-width: min(46vw, 21rem);
-  max-height: 45vh;
+  max-width: min(96vw, 42rem);
+  max-height: min(92vh, 58rem);
   object-fit: contain;
   background: transparent;
   border-radius: 0;
