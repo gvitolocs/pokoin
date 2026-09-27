@@ -216,7 +216,7 @@ async function loadMultigameCardPage(cardId) {
     cardId,
     ...siblings.map((entry) => entry.card_id),
   ]);
-  const neighbors = await sql.readSetNeighbors(row.set_name, cardId, 3);
+  const neighbors = await sql.readSetNeighbors(row.set_name, cardId, 6);
   const emptyCheapest = { byCardId: new Map(), byBlueprint: new Map() };
   return {
     row: sql.applyCanonicalAndCheapest([row], siblingPaths, emptyCheapest)[0],

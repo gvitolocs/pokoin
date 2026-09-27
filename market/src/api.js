@@ -1261,8 +1261,8 @@ export function rememberNeighbors(center, neighbors) {
     const nid = neighborCardId(next[0]);
     if (nid) {
       neighborCache.set(nid, {
-        prev: [center, ...prev].filter((row) => neighborCardId(row) && neighborCardId(row) !== nid).slice(0, 3),
-        next: next.slice(1).filter((row) => neighborCardId(row) !== nid).slice(0, 3),
+        prev: [center, ...prev].filter((row) => neighborCardId(row) && neighborCardId(row) !== nid).slice(0, 6),
+        next: next.slice(1).filter((row) => neighborCardId(row) !== nid).slice(0, 6),
       });
     }
   }
@@ -1270,8 +1270,8 @@ export function rememberNeighbors(center, neighbors) {
     const pid = neighborCardId(prev[0]);
     if (pid) {
       neighborCache.set(pid, {
-        prev: prev.slice(1).filter((row) => neighborCardId(row) !== pid).slice(0, 3),
-        next: [center, ...next].filter((row) => neighborCardId(row) && neighborCardId(row) !== pid).slice(0, 3),
+        prev: prev.slice(1).filter((row) => neighborCardId(row) !== pid).slice(0, 6),
+        next: [center, ...next].filter((row) => neighborCardId(row) && neighborCardId(row) !== pid).slice(0, 6),
       });
     }
   }
