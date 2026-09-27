@@ -1,6 +1,11 @@
 -------------------------- MODULE GestureExclusivity --------------------------
 (*
-  Desk / shop pointer exclusivity.
+  Desk / shop pointer exclusivity — pokoin market (tcg-paths).
+
+  One pointer against the desk + shop surface: the empty-background marquee
+  (select band), HTML5 drags (listing rows, desk art, related tiles, title /
+  set / artist links), cart adds (drag onto CartDrop, BuyBtn click), and the
+  inert targets (Chrome, clicks).
 
   Why earlier proofs missed the regressions Giuseppe hit:
   - No SpeciesTitle / ExpansionLink / ArtistLink targets — so a stale
@@ -9,6 +14,40 @@
     the desk scan" could not fail the model.
   - No pile cardinality — multi listing / related drag without a pile
     satisfied InvListingGhostIsCardArt with a single cardArt ghost.
+
+  Incidents pinned (2026-09-27 "things getting stolen" session):
+  - Shop-row click-add silently put items in the cart (the theft).
+    Cart may only grow via drag-onto-CartDrop or BuyBtn — 6bb3c1c
+    -> CartOnlyViaDropOrBuy.
+  - Marquee started from listing rows and stole their drags -> fd3c4d7
+    -> InvShopRowNeverArms.
+  - Title / set / artist dragstart swallowed by the armed band -> d01443c
+    -> InvTitleNeverArms, InvTitleDragIsBundle (W4 witness).
+  - Desk art not band-selectable from empty background
+    -> InvEmptyBandCanSelectArt (W1 witness).
+  - Multi-select piles dragged a single card instead of the pile
+    -> a108a62, d01443c
+    -> InvMultiDragPiles, InvRelatedOrDeskMultiPiles (W2, W3 witnesses).
+
+  clickChrome intentionally leaves banding/armed untouched: the rubber band
+  stays "warm" across browser chrome (e3f78be).
+
+  Bounds:
+  - CartBound = 2: two increments expose drop/buy interleavings and the cap;
+    larger values only lengthen traces.
+  - PileBound = 3: exactly three targets are selectable (ShopRow, RelatedTile,
+    ArtFrame), so the model's clamp never binds; it pins the UI cap.
+
+  Out of scope: pointer geometry and timing (armed abstracts the marquee
+  threshold), multi-touch / a second pointer, keyboard modifiers, network cart
+  behaviour (cartAdds is client-side intent), window blur/focus.
+
+  Configs (scripts/check-gesture-tlc.sh runs all):
+  - GestureExclusivity.cfg  safety: TypeOK + Inv* + CartOnlyViaDropOrBuy
+  - G2-liveness.cfg         gestures terminate under a fair release
+                            (TermDrag / TermBand)
+  - W1..W5-*.cfg            witnesses: must FAIL (rc 12), else the model is
+                            over-tightened and the run fails.
 
   Run:  scripts/check-gesture-tlc.sh
 *)
@@ -203,6 +242,13 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
+\* A fair user eventually lets go of the pointer. Release is the only action
+\* that unconditionally ends a gesture; it is enabled with a state change in
+\* every reachable state, so WF forces it to recur.
+FairAssump == WF_vars(\E t \in Targets: Release(t))
+
+LivenessSpec == Spec /\ FairAssump
+
 InvMutualExclusion == ~(banding /\ dragging)
 
 \* Pointerdown on the desk scan never arms the band (HTML5 drag owns it).
@@ -247,8 +293,36 @@ InvRelatedOrDeskMultiPiles ==
     /\ Cardinality(selected \cap {ArtFrame, RelatedTile}) > 1)
   => (pileSize >= 2)
 
-InvClickKeepsCart ==
-  (lastAction \in {"clickShopRow", "clickArtFrame"}) => TRUE
+\* The theft invariant: cart grows ONLY by drag-onto-CartDrop or BuyBtn.
+\* An action property (quantifies over steps), so it replaces the old
+\* vacuous InvClickKeepsCart == (... ) => TRUE.
+CartOnlyViaDropOrBuy ==
+  [][ (lastAction' \notin {"dropCart", "clickBuy"}) => cartAdds' = cartAdds ]_vars
+
+\* Gestures terminate: no action sequence under a fair user can latch a
+\* marquee or a drag forever (catches a Release that forgets a reset).
+TermDrag == [](dragging => <> ~dragging)
+TermBand == [](banding => <> ~banding)
+
+\* ---- Reachability witnesses (checked ONLY by W*.cfg; must FAIL there) ----
+\* Each No* invariant asserts the fixed behaviour is UNREACHABLE; TLC's
+\* counterexample (rc 12) is the witness that the model still exercises it.
+\* A passing witness means guards were over-tightened: model too weak.
+
+\* W1: empty-background band really can select the desk scan.
+NoArtBandSel == ~(lastAction = "bandPaint" /\ lastTarget = ArtFrame)
+
+\* W2: dragging a multi-selected listing row really produces a pile.
+NoListingPileDrag == ~(dragKind = "listing" /\ pileSize >= 2)
+
+\* W3: dragging with desk + related tiles selected really produces a pile.
+NoCardPileDrag == ~(dragKind = "card" /\ pileSize >= 2)
+
+\* W4: title / set / artist really drag as bundles.
+NoBundleDrag == ~(dragging /\ dragKind = "bundle")
+
+\* W5: drag-onto-cart really fires (DropCart guard not over-tightened).
+NoCartDrop == ~(lastAction = "dropCart")
 
 THEOREM Spec => [](
   TypeOK
@@ -263,6 +337,10 @@ THEOREM Spec => [](
   /\ InvTitleDragIsBundle
   /\ InvMultiDragPiles
   /\ InvRelatedOrDeskMultiPiles
-  /\ InvClickKeepsCart
 )
+
+THEOREM Spec => CartOnlyViaDropOrBuy
+
+THEOREM LivenessSpec => (TermDrag /\ TermBand)
+
 =============================================================================
