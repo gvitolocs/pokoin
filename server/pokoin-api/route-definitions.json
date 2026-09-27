@@ -309,5 +309,31 @@
         "Firebase Admin"
       ]
     }
+  },
+  {
+    "path": "/api/poko-connect",
+    "file": "poko-connect.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Link a signed-in Pokoin account to a Telegram user for the Poko assistant: create link code (Firebase user), redeem/status/unlink (service token via Hermes).",
+    "auth": "create_code: Firebase bearer token. redeem/status/unlink: service bearer token (POKO_MARKET_SERVICE_TOKEN or POKONTACT_SERVICE_TOKEN).",
+    "params": {
+      "query": "none",
+      "body": "{ action: create_code|redeem|status|unlink, ... } — create_code takes no params; redeem takes code + telegram { userId, username, displayName }; status/unlink take telegramUserId."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_WRITER_DATABASE_URL",
+        "MARKETPLACE_DATABASE_URL",
+        "POKO_MARKET_SERVICE_TOKEN",
+        "POKONTACT_SERVICE_TOKEN"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres writer (link writes) + read replica (status)"
+      ]
+    }
   }
 ]
