@@ -28,6 +28,28 @@ export function formatPkn(value) {
   return `${formatPknNumber(amount)} PKN`;
 }
 
+/** Fiat label for cart/checkout when site PKN is not enough (EUR primary, DKK for DK buyers). */
+export function formatFiatFromPkn(pkn, currency = 'EUR') {
+  const code = String(currency || 'EUR').trim().toUpperCase();
+  const amount = fiatFromPkn(pkn, code);
+  if (amount == null) return '';
+  if (code === 'DKK') {
+    return `${formatPknNumber(amount, { maximumFractionDigits: 2 })} DKK`;
+  }
+  if (code === 'USD') {
+    return `$${formatPknNumber(amount, { maximumFractionDigits: 2 })}`;
+  }
+  return `€${formatPknNumber(amount, { maximumFractionDigits: 2 })}`;
+}
+
+/** Compact dual line: EUR · DKK (used when balance cannot cover PKN). */
+export function formatEurAndDkkFromPkn(pkn) {
+  const eur = formatFiatFromPkn(pkn, 'EUR');
+  const dkk = formatFiatFromPkn(pkn, 'DKK');
+  if (!eur) return '';
+  return dkk ? `${eur} · ${dkk}` : eur;
+}
+
 export function pknFromEur(eur) {
   const amount = parseListAmount(eur);
   if (!Number.isFinite(amount) || amount <= 0) {

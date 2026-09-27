@@ -346,14 +346,14 @@
   border-bottom: 1px solid var(--g5);
 }
 .bag-row.summary {
-  grid-template-columns: calc(7.5rem * 63 / 88) minmax(0, 1fr) auto;
+  grid-template-columns: calc(9.5rem * 63 / 88) minmax(0, 1fr) auto;
   align-items: center;
   padding: 0.65rem 1.15rem;
 }
 .bag-art {
   display: block;
-  width: calc(7.5rem * 63 / 88);
-  height: 7.5rem;
+  width: calc(9.5rem * 63 / 88);
+  height: 9.5rem;
   min-width: 0;
   align-self: center;
   overflow: hidden;
