@@ -28,6 +28,12 @@ const crypto = require('node:crypto');
 
 const { marketplaceQuery } = require('./_marketplace_db');
 
+// marketplaceQuery resolves to the pg QueryResult; the tools want rows.
+async function queryRows(text, values = []) {
+  const result = await marketplaceQuery(text, values);
+  return result?.rows ?? [];
+}
+
 const ROUTE_PATH = '/api/poko-market';
 
 // CardTrader condition scale used by cardtrader_sold_daily (schema 042).
@@ -225,7 +231,7 @@ async function resolveCard(params = {}) {
   }
   const namePattern = query ? `%${escapeLike(query)}%` : null;
   const artistPattern = artist ? `%${escapeLike(artist)}%` : null;
-  const rows = await marketplaceQuery(
+  const rows = await queryRows(
     `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
             coalesce(nullif(c.card_number, ''), '') as card_number
        from marketplace_search_candidates s
@@ -249,7 +255,7 @@ async function resolveCard(params = {}) {
 }
 
 async function soldSummaryForBlueprint(blueprintId, condition, language, days) {
-  const rows = await marketplaceQuery(
+  const rows = await queryRows(
     `select sum(sold_qty)::int as sold_qty,
             percentile_cont(0.25) within group (order by median_pkn) as p25_daily,
             percentile_cont(0.5) within group (order by median_pkn) as median_daily,
@@ -267,7 +273,7 @@ async function soldSummaryForBlueprint(blueprintId, condition, language, days) {
 }
 
 async function askSignalForBlueprint(blueprintId) {
-  const rows = await marketplaceQuery(
+  const rows = await queryRows(
     `select min_price_pkn, median_price_pkn, observed_day
        from cardtrader_blueprint_daily_analytics
       where blueprint_id = $1::bigint
@@ -289,7 +295,7 @@ async function askSignalForBlueprint(blueprintId) {
 async function requireCard(params) {
   const cardId = cleanText(params.cardId, 40);
   if (/^\d+$/.test(cardId)) {
-    const rows = await marketplaceQuery(
+    const rows = await queryRows(
       `select card_id, name, set_name, artist, item_kind
          from marketplace_search_candidates
         where card_id = $1 limit 1`,
@@ -357,7 +363,7 @@ async function cardLiquidity(params = {}) {
   const owned = await requireCard(params);
   if (owned.error) return owned.error;
   const card = owned.card;
-  const rows = await marketplaceQuery(
+  const rows = await queryRows(
     `select sold_qty_7d, listed_now, sell_through, days_of_supply, demand_score, updated_at
        from marketplace_card_weights
       where card_id = $1
@@ -409,7 +415,7 @@ async function collectionQuote(params = {}) {
 
   // Fuzzy artist resolution: exact first, then subsequence pattern; never silently
   // pick when several artists fit.
-  const artistRows = await marketplaceQuery(
+  const artistRows = await queryRows(
     `select artist, count(*)::int as cards
        from marketplace_search_candidates
       where item_kind <> 'product' and artist <> ''
@@ -429,7 +435,7 @@ async function collectionQuote(params = {}) {
   }
   const artist = artistRows[0].artist;
 
-  const cardRows = await marketplaceQuery(
+  const cardRows = await queryRows(
     `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
             coalesce(nullif(c.card_number, ''), '') as card_number
        from marketplace_search_candidates s
@@ -447,7 +453,7 @@ async function collectionQuote(params = {}) {
   if (!cards.length) return { status: 'not_found', error: 'no catalog cards for that artist' };
 
   const soldRows = blueprintIds.length
-    ? await marketplaceQuery(
+    ? await queryRows(
         `select blueprint_id,
                 sum(sold_qty)::int as sold_qty,
                 percentile_cont(0.5) within group (order by median_pkn) as median_daily
@@ -462,7 +468,7 @@ async function collectionQuote(params = {}) {
       )
     : [];
   const askRows = blueprintIds.length
-    ? await marketplaceQuery(
+    ? await queryRows(
         `select distinct on (blueprint_id) blueprint_id, min_price_pkn, observed_day
            from cardtrader_blueprint_daily_analytics
           where blueprint_id = any($1::bigint[])
@@ -523,7 +529,7 @@ async function collectionQuote(params = {}) {
 
 async function marketSnapshot(params = {}) {
   const limit = Math.min(Math.max(Number(params.limit) || 10, 1), 50);
-  const rows = await marketplaceQuery(
+  const rows = await queryRows(
     `select w.card_id, w.sold_qty_7d, w.listed_now, w.sell_through,
             w.median_sold_eur, w.sold_value_eur_7d,
             s.name, s.set_name, s.artist
