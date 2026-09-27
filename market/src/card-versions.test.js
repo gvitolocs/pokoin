@@ -628,3 +628,28 @@ test('Holiday Calendar stamps inherit the era from a unique same-number artwork'
     'Diamond & Pearl',
   );
 });
+
+test('Yu-Gi-Oh letter-suffix collectors still join the rarity lineup', () => {
+  const qsec = {
+    id: '660444',
+    name: "Dark Magician Girl the Magician's Apprentice",
+    set: 'Alliance Insight',
+    number: '004qsec',
+    rarity: 'Quarter Century Secret Rare',
+  };
+  const secret = {
+    id: '660442',
+    name: "Dark Magician Girl the Magician's Apprentice",
+    set: 'Alliance Insight',
+    number: '004',
+    rarity: 'Secret Rare',
+  };
+  assert.equal(isRaritySibling(qsec, secret), true);
+  assert.deepEqual(
+    rarityVersions(qsec, [secret]).map((row) => row.id),
+    ['660444', '660442'],
+  );
+  const page = splitVersionPage({ current: qsec, nameRows: [qsec, secret], artRows: [] });
+  assert.equal(page.versions.length, 2);
+  assert.equal(page.eras.length, 0);
+});

@@ -5,6 +5,25 @@ import { cardReference, writeListingDrag } from '../chat-listing.js';
 import { rasterSiblings } from '../image-urls.js';
 import { isCardTraderPlaceholderSize, MISSING_CARD_SRC } from '../missing-card.js';
 
+function artDebugEnabled() {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('pokoinDebugArt') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function logCardArt(event, detail) {
+  if (typeof console === 'undefined' || typeof console.warn !== 'function') {
+    return;
+  }
+  // Always surface desk/hero failures; verbose loads need localStorage.pokoinDebugArt=1.
+  if (event !== 'error' && event !== 'dead' && event !== 'placeholder' && !artDebugEnabled()) {
+    return;
+  }
+  console.warn('[pokoin:card-art]', event, detail);
+}
+
 export default function CardArt({
   src,
   alt = '',
@@ -44,13 +63,27 @@ export default function CardArt({
     ?? (cut && cutSurface === 'album' ? artworkFigureMaskSrc(card) : '');
 
   function failCurrent() {
+    const failed = urlsRef.current[indexRef.current] || current || src;
     const next = indexRef.current + 1;
     if (next < urlsRef.current.length) {
+      logCardArt('error', {
+        full,
+        cardId: card?.id || card?.card_id || '',
+        failed,
+        next: urlsRef.current[next],
+        siblings: urlsRef.current,
+      });
       indexRef.current = next;
       setIndex(next);
       return;
     }
     setDead(true);
+    logCardArt('dead', {
+      full,
+      cardId: card?.id || card?.card_id || '',
+      src,
+      siblings: urlsRef.current,
+    });
     if (!errorSent.current) {
       errorSent.current = true;
       onError?.();
@@ -62,8 +95,22 @@ export default function CardArt({
       return;
     }
     if (isCardTraderPlaceholderSize(img.naturalWidth, img.naturalHeight)) {
+      logCardArt('placeholder', {
+        full,
+        cardId: card?.id || card?.card_id || '',
+        src: img.currentSrc || current,
+        natural: `${img.naturalWidth}x${img.naturalHeight}`,
+      });
       failCurrent();
       return;
+    }
+    if (full) {
+      logCardArt('load', {
+        cardId: card?.id || card?.card_id || '',
+        src: img.currentSrc || current,
+        natural: `${img.naturalWidth}x${img.naturalHeight}`,
+        siblings: urlsRef.current,
+      });
     }
     onLoad?.();
   }
@@ -77,8 +124,14 @@ export default function CardArt({
       return;
     }
     errorSent.current = true;
+    logCardArt('dead', {
+      full,
+      cardId: card?.id || card?.card_id || '',
+      src,
+      reason: 'empty-siblings',
+    });
     onError?.();
-  }, [urls.length, onError]);
+  }, [urls.length, onError, full, card, src]);
 
   if (!current || dead) {
     if (fallback === 'hide') {

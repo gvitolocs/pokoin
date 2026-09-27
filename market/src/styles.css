@@ -252,6 +252,16 @@ button, input, select { font: inherit; color: inherit; }
 
 .species-drag {
   cursor: grab;
+  user-select: none;
+  -webkit-user-drag: element;
+}
+
+.asset-sub a {
+  color: var(--yellow);
+  font-weight: 700;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-drag: element;
 }
 
 .search-go-icon {
@@ -976,11 +986,14 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 }
 
 .desktop-drop {
+  /* Open under the chip toward the search bar — never past the left viewport edge. */
   left: 0;
   right: auto;
+  width: min(26rem, calc(100vw - 1.25rem));
   min-height: 12.5rem;
   max-height: min(70vh, 36rem);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .nav-preview::before,
@@ -1101,16 +1114,18 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 
 .desktop-drop-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0.3rem;
   margin: 0.35rem 0 0.55rem;
 }
 
 .desktop-drop-actions .btn {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
-  padding: 0.35rem 0.55rem;
-  font-size: 0.75rem;
+  padding: 0.32rem 0.35rem;
+  font-size: 0.68rem;
+  white-space: nowrap;
 }
 
 .desktop-drop-note {
@@ -1175,6 +1190,15 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   color: var(--text);
   font-size: 1rem;
   font-weight: 750;
+  line-height: 1.35;
+  text-wrap: balance;
+  max-width: 22rem;
+  padding: 0 0.35rem;
+  text-align: center;
+}
+
+.desktop-drop .cart-drop-empty p {
+  max-width: none;
 }
 
 .cart-drop-grid {
@@ -1209,6 +1233,52 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   font-style: normal;
   font-weight: 800;
   text-shadow: 0 1px 2px rgb(0 0 0 / 0.9);
+}
+
+/* − N + qty pill on cart / Desktop tray cards (same control as chat tags). */
+.cart-drop-card .chat-qty,
+.desktop-drop-card .chat-qty {
+  position: absolute;
+  left: 50%;
+  bottom: 0.2rem;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  transform: translateX(-50%);
+  padding: 0.06rem 0.2rem;
+  border-radius: 999px;
+  background: #fff;
+  color: #17130a;
+  box-shadow: 0 6px 16px rgb(0 0 0 / 0.4);
+}
+
+.cart-drop-card .chat-qty button,
+.desktop-drop-card .chat-qty button {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #17130a;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cart-drop-card .chat-qty button:disabled,
+.desktop-drop-card .chat-qty button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.cart-drop-card .chat-qty b,
+.desktop-drop-card .chat-qty b {
+  min-width: 0.9rem;
+  text-align: center;
+  font-size: 0.7rem;
+  font-weight: 800;
 }
 
 .icon-nav .cart-chip em {
@@ -2700,8 +2770,6 @@ html.is-card-banding * {
   line-height: 1.35;
 }
 
-.asset-sub a { color: var(--yellow); font-weight: 700; }
-
 .quote-pill {
   font-size: 0.72rem;
   font-weight: 800;
@@ -2842,6 +2910,17 @@ select.collector-badge.version-badge {
 select.collector-badge.version-badge option {
   color: #111;
   background: #fff;
+}
+
+.card-select-host.is-contents,
+.card-select-host.is-contents > .is-contents {
+  display: contents;
+}
+
+.art-frame.is-selected {
+  outline: 2px solid var(--yellow);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgb(255 211 61 / 0.25);
 }
 
 .art-frame {
@@ -4400,8 +4479,8 @@ dialog.zoom:not([open]) {
   display: block;
   width: auto;
   height: auto;
-  max-width: min(46vw, 21rem);
-  max-height: 45vh;
+  max-width: min(96vw, 42rem);
+  max-height: min(92vh, 58rem);
   object-fit: contain;
   background: transparent;
   border-radius: 0;

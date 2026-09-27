@@ -36,6 +36,7 @@ import {
   preloadSuggestThumbs,
 } from '../suggest-images.js';
 import { prefetchSearchPage } from '../search-hot.js';
+import { SelectBandProvider } from '../select-band.jsx';
 import { GAMES, game, gameSiteHref, isPokemonGame, sellerDeskUsesGameOverride, setScanGameOverride } from '../game.js';
 import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '../search-kind.js';
 import { printingIdentity, clipSuggestCollector, suggestCardName, suggestTranslatedLine } from '../identity.js';
@@ -323,7 +324,7 @@ function GameSelect() {
       window.location.reload();
       return;
     }
-    window.location.assign(gameSiteHref(id));
+    window.location.assign(gameSiteHref(id, window.location.pathname));
   }
 
   return (
@@ -768,7 +769,9 @@ export default function Chrome({ children }) {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setPending(true);
-      fetchSuggest(term, { limit: 20, signal: controller.signal, lang, printLang })
+      // Satellite catalogs have no print nationality; never inherit a Pokémon
+      // western/japanese chip from localStorage into suggest or the hot page.
+      fetchSuggest(term, { limit: 20, signal: controller.signal, lang, printLang: 'all' })
         .then((data) => {
           const tab = searchTabRef.current;
           const groups = (Array.isArray(data.groups) ? data.groups : [])
@@ -794,6 +797,7 @@ export default function Chrome({ children }) {
             fetchSearchPage: fetchSearch,
             signal: controller.signal,
             tab: searchTabRef.current,
+            printLang: 'all',
           });
         })
         .catch((error) => {
@@ -1345,7 +1349,9 @@ export default function Chrome({ children }) {
         {admin ? <MobileTile to={APP.admin} label="Admin" icon="admin" onClick={closeMenu} /> : null}
         {signedIn ? null : <MobileTile to={from} label="Sign in" icon="signin" onClick={closeMenu} />}
       </nav>
+      <SelectBandProvider>
       <main>{children}</main>
+      </SelectBandProvider>
       <footer className="foot">
         <div className="foot-grid">
           <div>

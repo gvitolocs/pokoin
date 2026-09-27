@@ -69,9 +69,8 @@ CONSTANT MaxQty
   }
 }
 *)
-\* BEGIN TRANSLATION (chksum(pcal) = "aa5d5fd4" /\ chksum(tla) = "e8b8fdd0")
-VARIABLES ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue,
-          saleHappened, pc
+\* BEGIN TRANSLATION (chksum(pcal) = "aa5d5fd4" /\ chksum(tla) = "5a2c55f9")
+VARIABLES ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened, pc
 
 (* define statement *)
 TypeOK ==
@@ -88,8 +87,7 @@ NoStaleAfterObservation ==
 SoldEventuallyRemoved == saleHappened ~> pokoinQty = 0
 
 
-vars == << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue,
-           saleHappened, pc >>
+vars == << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened, pc >>
 
 ProcSet == {"seller"} \cup {"webhook"} \cup {"reconciler"} \cup {"repair"}
 
@@ -119,16 +117,14 @@ Sell == /\ pc["seller"] = "Sell"
 
 SellerDone == /\ pc["seller"] = "SellerDone"
               /\ pc' = [pc EXCEPT !["seller"] = "SellerDone"]
-              /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered,
-                              webhookPending, reconcileDue, saleHappened >>
+              /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened >>
 
 Seller == Sell \/ SellerDone
 
 WaitForWebhook == /\ pc["webhook"] = "WaitForWebhook"
                   /\ webhookPending
                   /\ pc' = [pc EXCEPT !["webhook"] = "ApplyWebhook"]
-                  /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered,
-                                  webhookPending, reconcileDue, saleHappened >>
+                  /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened >>
 
 ApplyWebhook == /\ pc["webhook"] = "ApplyWebhook"
                 /\ pokoinQty' = ctQty
@@ -142,8 +138,7 @@ Webhook == WaitForWebhook \/ ApplyWebhook
 WaitForReconcile == /\ pc["reconciler"] = "WaitForReconcile"
                     /\ reconcileDue
                     /\ pc' = [pc EXCEPT !["reconciler"] = "ApplyCompleteExport"]
-                    /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered,
-                                    webhookPending, reconcileDue, saleHappened >>
+                    /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened >>
 
 ApplyCompleteExport == /\ pc["reconciler"] = "ApplyCompleteExport"
                        /\ pokoinQty' = ctQty
@@ -157,13 +152,11 @@ Reconciler == WaitForReconcile \/ ApplyCompleteExport
 RepairRegistration == /\ pc["repair"] = "RepairRegistration"
                       /\ webhookRegistered' = TRUE
                       /\ pc' = [pc EXCEPT !["repair"] = "RepairDone"]
-                      /\ UNCHANGED << ctQty, pokoinQty, webhookPending,
-                                      reconcileDue, saleHappened >>
+                      /\ UNCHANGED << ctQty, pokoinQty, webhookPending, reconcileDue, saleHappened >>
 
 RepairDone == /\ pc["repair"] = "RepairDone"
               /\ pc' = [pc EXCEPT !["repair"] = "RepairDone"]
-              /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered,
-                              webhookPending, reconcileDue, saleHappened >>
+              /\ UNCHANGED << ctQty, pokoinQty, webhookRegistered, webhookPending, reconcileDue, saleHappened >>
 
 WebhookRepair == RepairRegistration \/ RepairDone
 

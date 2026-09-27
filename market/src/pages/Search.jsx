@@ -66,9 +66,10 @@ export default function Search() {
       : typedQuery);
   const lang = useSearchLang();
   const printLang = usePrintLang();
-  // Print filter applies to Singles and Product (expansion nationality).
-  // Users are people — print language does not apply.
-  const activePrintLang = tab === 'users' ? 'all' : printLang;
+  // Print filter is Pokémon-only (expansion nationality catalog). Satellite
+  // rows ship blank nationality, so a stored "Western print" chip wiped every
+  // Yu-Gi-Oh / Magic / … result. Users are people — print never applies.
+  const activePrintLang = (!isPokemonGame() || tab === 'users') ? 'all' : printLang;
   const resolvedParamRaw = (params.get('resolved') || '').trim();
   const localResolved = useMemo(
     () => (isPokemonGame() && typedQuery && resolvedParamRaw ? resolveSuggestQuery(typedQuery) : null),
@@ -440,7 +441,7 @@ export default function Search() {
             sets={sets}
             filtersOn={filtersOn}
             onClear={clearFilters}
-            showPrint
+            showPrint={isPokemonGame()}
           />
         ) : null}
       </div>

@@ -328,7 +328,14 @@ function eraFromDumpStamp(row = {}) {
 }
 
 export function tcgEra(row = {}) {
-  const raw = `${row.slug || ''} ${[row.set, row.set_name, row.expansion_name].filter(Boolean).join(' ') || row.name || ''}`;
+  // Desktop / drag payloads often use setName or expansion, not set/set_name.
+  const raw = `${row.slug || ''} ${[
+    row.set,
+    row.set_name,
+    row.setName,
+    row.expansion,
+    row.expansion_name,
+  ].filter(Boolean).join(' ') || row.name || ''}`;
   const key = eraHaystack(raw);
   const hit = matchTcgEra(raw);
   if (hit) return hit;

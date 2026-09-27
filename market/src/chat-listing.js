@@ -37,14 +37,16 @@ function cardImage(card, offer) {
     || card?.homepageImageUrl
     || '',
   ).trim();
+  // Prefer offer identity when card is missing (listing-only drag).
   const identity = card || {
     id: offer?.cardId || offer?.card_id,
     name: offer?.cardName || offer?.card_name || offer?.name,
     canonicalPath: offer?.canonicalPath || offer?.canonical_path,
   };
-  const owned = ownCatalogImage(identity, preferFullImage(raw));
+  // Drop CardTrader preview_ / foreign hosts; keep leftover ct_id (Eevee 813554).
+  const owned = ownCatalogImage(identity, preferFullImage(raw) || raw);
   // Prefer the homepage derivative — same bitmap rails/tiles already painted.
-  return homepageDerivativeUrl(owned) || owned;
+  return homepageDerivativeUrl(owned) || owned || '';
 }
 
 function offerCopies(offer) {
@@ -53,20 +55,34 @@ function offerCopies(offer) {
   return Math.min(99, n);
 }
 
-export function listingReference({ offer, card }) {
+export function listingReference({ offer, card, qty } = {}) {
   const stock = offerCopies(offer);
+  const cardId = String(card?.id || offer?.cardId || offer?.card_id || '');
+  const copies = qty != null
+    ? listingQty(qty, stock ?? 99)
+    : (offer?.qty != null ? listingQty(offer.qty, stock ?? 99) : null);
   return {
     kind: 'listing',
     listingId: String(offer?.id || ''),
-    cardId: String(card?.id || ''),
+    cardId,
     sellerUid: sellerUserId(offer?.sellerUid || offer?.seller_uid),
     seller: chatHandle(sellerHandle(offer)),
+    sellerName: String(offer?.sellerName || offer?.sellerDisplayName || '').trim(),
+    sellerCountry: String(offer?.sellerCountry || offer?.seller_country || '').trim(),
     cardName: card?.name || offer?.cardName || offer?.name || 'Card',
-    setName: String(offer?.setName || ''),
+    setName: String(offer?.setName || offer?.set_name || card?.set || ''),
+    number: String(offer?.cardNumber || offer?.card_number || card?.number || ''),
+    condition: String(offer?.condition || 'NM'),
+    language: String(offer?.language || ''),
+    reverse: Boolean(offer?.reverse),
+    firstEdition: Boolean(offer?.firstEdition || offer?.first_edition),
+    graded: Boolean(offer?.graded),
+    grade: String(offer?.grade || offer?.grader || ''),
     imageUrl: cardImage(card, offer),
     path: card?.canonicalPath || offer?.canonicalPath || offer?.canonical_path || '',
     pricePkn: Number(offer?.pricePkn) || 0,
     ...(stock != null ? { stock } : {}),
+    ...(copies != null ? { qty: copies } : {}),
   };
 }
 
@@ -110,12 +126,43 @@ export function cardsReference(cards) {
   };
 }
 
+/** One drag for several shop listings (same or different sellers). Held first. */
+export function listingsReference(rows) {
+  const list = (rows || []).filter((row) => row?.cardName || row?.listingId).slice(0, 80);
+  if (list.length === 1) return list[0];
+  if (!list.length) return null;
+  return {
+    kind: 'cards',
+    listingId: '',
+    cardId: list[0].cardId || '',
+    sellerUid: '',
+    seller: '',
+    cardName: `${list.length} cards`,
+    setName: '',
+    imageUrl: list[0].imageUrl || '',
+    path: '',
+    pricePkn: 0,
+    cards: list,
+  };
+}
+
+/** Unique drag rows for drop targets (chat / cart / Desktop). Qty stays on each row. */
 export function dragCardsOf(reference) {
   if (!reference) return [];
   if (reference.kind === 'cards' && Array.isArray(reference.cards)) {
     return reference.cards.filter((row) => row?.cardName);
   }
   return [reference];
+}
+
+/** Ghost pile layers: listing qty 2 → two scans of the same card (cap 8). */
+export function dragGhostOf(reference) {
+  const out = [];
+  for (const row of dragCardsOf(reference)) {
+    const n = Math.min(8, Math.max(1, chatQty(row?.qty)));
+    for (let i = 0; i < n; i += 1) out.push(row);
+  }
+  return out;
 }
 
 export function tagKey(row) {
@@ -400,10 +447,12 @@ let dragGhost;
 function dragSourceImage(event) {
   const node = event?.currentTarget;
   if (!node || node.nodeType !== 1) return null;
-  if (node.tagName === 'IMG') return node;
+  if (node.tagName === 'IMG' && !isShopFlagImage(node)) return node;
   const nested = node.querySelector?.(
     [
+      '.shop-art img',
       '.shop-card img',
+      '.art-cut img',
       '.tile-art img',
       '.seller-listing-art img',
       '.c-art img',
@@ -416,13 +465,18 @@ function dragSourceImage(event) {
       '.set-wordmark',
       '.set-sym',
       '.page-title img',
-      'img',
     ].join(', '),
   );
-  if (nested) return nested;
+  if (nested && !isShopFlagImage(nested)) return nested;
   // The desk hero is the frame itself, so `.art-frame img` does not match a descendant.
   if (node.matches?.('.art-frame')) return node.querySelector?.('img') || null;
   return null;
+}
+
+function isShopFlagImage(img) {
+  if (!img) return false;
+  if (img.classList?.contains?.('shop-flag')) return true;
+  return Boolean(img.closest?.('.shop-flag, .shop-seller, .shop-facets'));
 }
 
 function markCardDragging() {
@@ -559,9 +613,24 @@ function findWarmRowImage(row, source = null) {
     const listingId = String(row.listingId || '').trim();
     if (listingId && !listingId.startsWith('bundle:') && typeof CSS !== 'undefined' && CSS.escape) {
       const shop = document.querySelector(`[data-listing-id="${CSS.escape(listingId)}"]`);
-      const img = shop?.querySelector?.('.shop-card img, img');
-      if (img?.complete && img.naturalWidth > 0) {
+      // Never bare `img` — country/language flags come first in the shop row.
+      const img = shop?.querySelector?.(
+        '.shop-art img, .shop-card img, .art-cut img, .shop-photo img',
+      );
+      if (img?.complete && img.naturalWidth > 0 && !isShopFlagImage(img)) {
         return rememberWarmImage(img);
+      }
+    }
+    // Desk hero for the same printing when the shop row has no thumbnail.
+    if (cardId) {
+      const desk = document.querySelector('.art-frame img, .art-frame canvas');
+      if (desk?.complete && desk.naturalWidth > 0) {
+        const pageId = String(
+          document.querySelector('[data-card-id]')?.getAttribute?.('data-card-id')
+          || location.pathname.match(/\/cards\/(\d+)/)?.[1]
+          || '',
+        );
+        if (!pageId || pageId === cardId) return rememberWarmImage(desk);
       }
     }
     // Public card_id → leftover ct_id filename prefix used on CDN.
@@ -658,11 +727,16 @@ let dragStackFrame = 0;
 let dragStackTarget = { x: 0, y: 0 };
 let dragStackPos = [];
 
-const STACK_LAG = [0.62, 0.36, 0.2];
+const STACK_LAG = [0.62, 0.36, 0.28, 0.22, 0.18, 0.16, 0.14, 0.12];
 const STACK_NUDGE = [
   { x: 0, y: 0, rot: -1.5 },
-  { x: 16, y: 18, rot: 3.5 },
-  { x: 30, y: 34, rot: -4.5 },
+  { x: 18, y: 20, rot: 3.5 },
+  { x: 34, y: 38, rot: -4.5 },
+  { x: 48, y: 52, rot: 5 },
+  { x: 60, y: 64, rot: -3 },
+  { x: 70, y: 74, rot: 4 },
+  { x: 78, y: 82, rot: -2.5 },
+  { x: 84, y: 88, rot: 2 },
 ];
 
 function invisibleDragImage() {
@@ -712,7 +786,7 @@ function tickDragStack() {
 function mountDragStack(cards, event) {
   stopDragStack();
   if (typeof document === 'undefined') return;
-  const rows = (cards || []).slice(0, 3).filter((row) => row?.imageUrl || row?.cardName);
+  const rows = (cards || []).slice(0, 8).filter((row) => row?.imageUrl || row?.cardName);
   if (!rows.length) return;
   const source = rememberWarmImage(dragSourceImage(event));
   const root = document.createElement('div');
@@ -725,7 +799,16 @@ function mountDragStack(cards, event) {
     // Held tile first; every other pile card must resolve its own warm homepage
     // bitmap (by data-card-id / listing row / leftover filename) — URL-only
     // lookup left secondary layers as black plates.
-    const warm = (index === 0 ? source : null) || findWarmRowImage(row, source);
+    // Never trust a shop-row flag as the held source for a listing/card ghost.
+    const held = index === 0 && source && !isShopFlagImage(source)
+      && (!row.imageUrl || urlsLookSame(
+        String(source.currentSrc || source.src || ''),
+        row.imageUrl,
+        homepageDerivativeUrl(row.imageUrl),
+      ))
+      ? source
+      : null;
+    const warm = held || findWarmRowImage(row, held);
     root.appendChild(stackLayerFromWarm(warm, 30 - index, fit));
   });
   document.body.appendChild(root);
@@ -800,7 +883,14 @@ function fixedDragSlot(src, fit) {
 
 export function writeListingDrag(event, reference) {
   if (!event?.dataTransfer || !reference?.cardName) return;
-  event.dataTransfer.setData(LISTING_DRAG_TYPE, JSON.stringify(reference));
+  const payload = JSON.stringify(reference);
+  event.dataTransfer.setData(LISTING_DRAG_TYPE, payload);
+  // Chrome drops custom-only payloads from <a>/<button> hosts; text/plain keeps
+  // the gesture alive so application/x-pokoin-listing still arrives on drop.
+  event.dataTransfer.setData('text/plain', reference.cardName);
+  if (reference.path) {
+    event.dataTransfer.setData('text/uri-list', reference.path);
+  }
   event.dataTransfer.effectAllowed = 'copy';
   const source = rememberWarmImage(dragSourceImage(event));
   // Only soft-decode when nothing on the page is warm yet (text-only artist title).
@@ -811,7 +901,7 @@ export function writeListingDrag(event, reference) {
       preloadDragImage(homepage);
     }
   }
-  const stack = dragCardsOf(reference);
+  const stack = dragGhostOf(reference);
   const usePile = stack.length >= 1 && (
     reference.kind === 'cards'
     || reference.kind === 'card'

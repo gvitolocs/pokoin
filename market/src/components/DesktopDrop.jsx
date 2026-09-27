@@ -6,25 +6,41 @@ import { cartDropThumb } from '../cart-drop-size.js';
 import {
   addDesktopCards,
   clearDesktopHold,
-  downloadDesktopHoldCsv,
   removeDesktopCard,
+  setDesktopQty,
   useDesktopHold,
 } from '../desktop-hold.js';
+import { downloadDesktopHoldPdf } from '../desktop-hold-pdf.js';
 import { bundleOf, LISTING_DRAG_TYPE, readListingDrag } from '../chat-listing.js';
 import { fetchSpeciesCards } from '../species-cards.js';
 import CardArt from './CardArt.jsx';
+import QtyStepper from './QtyStepper.jsx';
 
 export default function DesktopDrop({ onAddToCart }) {
   const items = useDesktopHold();
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [note, setNote] = useState('');
   const thumb = cartDropThumb(items.length);
 
   async function acceptDrop(reference) {
     if (!reference) return;
     if (reference.kind === 'cards') {
-      addDesktopCards(reference.cards || []);
+      addDesktopCards((reference.cards || []).map((row) => ({
+        id: row.cardId || row.id,
+        name: row.cardName || row.name,
+        imageUrl: row.imageUrl,
+        path: row.path,
+        set: row.setName,
+        setName: row.setName,
+        number: row.number,
+        rarity: row.rarity,
+        artist: row.artist,
+        pricePkn: row.pricePkn,
+        qty: row.qty,
+        stock: row.stock,
+      })));
       return;
     }
     const bundle = bundleOf(reference);
@@ -49,6 +65,8 @@ export default function DesktopDrop({ onAddToCart }) {
       rarity: reference.rarity,
       artist: reference.artist,
       pricePkn: reference.pricePkn,
+      qty: reference.qty,
+      stock: reference.stock,
     }]);
   }
 
@@ -73,6 +91,22 @@ export default function DesktopDrop({ onAddToCart }) {
       setNote('Could not add to cart');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function exportPdf() {
+    if (!items.length || exporting) return;
+    setExporting(true);
+    setNote('Building PDF…');
+    try {
+      const ok = await downloadDesktopHoldPdf(items);
+      setNote(ok
+        ? `Exported ${items.length} card${items.length === 1 ? '' : 's'} as PDF`
+        : 'Could not export PDF');
+    } catch (_) {
+      setNote('Could not export PDF');
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -115,14 +149,10 @@ export default function DesktopDrop({ onAddToCart }) {
         <button
           type="button"
           className="btn ghost"
-          disabled={!items.length}
-          onClick={() => {
-            if (downloadDesktopHoldCsv(items)) {
-              setNote(`Exported ${items.length} card${items.length === 1 ? '' : 's'}`);
-            }
-          }}
+          disabled={!items.length || exporting}
+          onClick={() => void exportPdf()}
         >
-          Export
+          {exporting ? 'Exporting…' : 'Export PDF'}
         </button>
         <button
           type="button"
@@ -143,8 +173,13 @@ export default function DesktopDrop({ onAddToCart }) {
               style={{ width: thumb, height: Math.round(thumb * 88 / 63) }}
             >
               <Link to={row.path || '/marketplace'} title={row.name}>
-                {row.imageUrl ? <CardArt src={row.imageUrl} alt="" full /> : <span className="suggest-ph" />}
+                {row.imageUrl ? <CardArt src={row.imageUrl} alt="" card={row} /> : <span className="suggest-ph" />}
               </Link>
+              <QtyStepper
+                qty={row.qty || 1}
+                max={row.stock || 99}
+                onChange={(next) => setDesktopQty(row.id, next)}
+              />
               <button
                 type="button"
                 className="desktop-drop-x"

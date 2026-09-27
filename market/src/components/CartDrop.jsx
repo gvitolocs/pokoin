@@ -8,9 +8,10 @@ import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { bundleOf, LISTING_DRAG_TYPE, readListingDrag } from '../chat-listing.js';
 import { fetchSpeciesCards } from '../species-cards.js';
 import CardArt from './CardArt.jsx';
+import QtyStepper from './QtyStepper.jsx';
 
 export default function CartDrop({ onAdd }) {
-  const { items } = useCart();
+  const { items, setQty } = useCart();
   const [over, setOver] = useState(false);
   const thumb = cartDropThumb(items.length);
 
@@ -37,7 +38,7 @@ export default function CartDrop({ onAdd }) {
         const reference = readListingDrag(event);
         if (!reference) return;
         if (reference.kind === 'cards') {
-          void addCatalogCards(reference.cards, onAdd);
+          void addDraggedGroup(reference.cards || [], onAdd);
           return;
         }
         if (bundleOf(reference)) {
@@ -53,16 +54,20 @@ export default function CartDrop({ onAdd }) {
       {items.length ? (
         <div className="cart-drop-grid">
           {items.map((row) => (
-            <Link
+            <span
               key={row.id}
               className="cart-drop-card"
-              to={row.href || '/cart'}
-              title={row.name}
               style={{ width: thumb, height: Math.round(thumb * 88 / 63) }}
             >
-              {row.image ? <CardArt src={row.image} alt="" full /> : <span className="suggest-ph" />}
-              {row.qty > 1 ? <em>{row.qty}</em> : null}
-            </Link>
+              <Link to={row.href || '/cart'} title={row.name}>
+                {row.image ? <CardArt src={row.image} alt="" full /> : <span className="suggest-ph" />}
+              </Link>
+              <QtyStepper
+                qty={row.qty}
+                max={row.stock || 99}
+                onChange={(next) => setQty(row.id, next)}
+              />
+            </span>
           ))}
         </div>
       ) : (
@@ -89,6 +94,19 @@ function catalogCard(card, fallbackName) {
     gridImageUrl: card?.gridImageUrl || card?.cdn_image_url || '',
     heroImageUrl: card?.heroImageUrl || '',
   };
+}
+
+async function addDraggedGroup(rows, onAdd) {
+  const listings = [];
+  const catalog = [];
+  for (const row of rows || []) {
+    if (row?.kind === 'listing' && row.listingId) listings.push(row);
+    else if (row?.cardId || row?.id) catalog.push(row);
+  }
+  for (const row of listings) {
+    await addDraggedCard(row, onAdd);
+  }
+  if (catalog.length) await addCatalogCards(catalog, onAdd);
 }
 
 async function addBundle(reference, onAdd) {
@@ -124,10 +142,14 @@ async function addDraggedCard(reference, onAdd) {
         id: reference.listingId,
         pricePkn: reference.pricePkn,
         sellerUid: reference.sellerUid,
-        sellerName: reference.seller,
+        sellerName: reference.sellerName || reference.seller,
         cardImageUrl: reference.imageUrl,
         condition: reference.condition || 'NM',
         language: reference.language || '',
+        reverse: reference.reverse,
+        firstEdition: reference.firstEdition,
+        graded: reference.graded,
+        grade: reference.grade,
         qty: reference.qty,
         quantityAvailable: reference.stock,
       },
@@ -139,6 +161,6 @@ async function addDraggedCard(reference, onAdd) {
   if (!offer) return;
   onAdd(cartItemFromOffer(
     { id: reference.cardId, name: reference.cardName, canonicalPath: reference.path, imageUrl: reference.imageUrl },
-    offer,
+    { ...offer, qty: reference.qty },
   ));
 }

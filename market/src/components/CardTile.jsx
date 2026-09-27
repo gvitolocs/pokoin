@@ -61,6 +61,11 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
       aria-selected={picked || undefined}
       draggable
       onDragStart={(event) => {
+        const mixed = select?.dragReference?.({ heldCard: card });
+        if (mixed) {
+          writeListingDrag(event, mixed);
+          return;
+        }
         const group = select?.cardsForDrag(card) || [card];
         writeListingDrag(event, group.length > 1 ? cardsReference(group) : cardReference(card));
       }}

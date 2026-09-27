@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import {
   clearShopSelectionOnPointer,
   listingSelectId,
   marqueeBlocked,
   marqueeRect,
+  marqueeStartAllowed,
+  mixedDeskDragReference,
   rectsIntersect,
   shopDragOffers,
 } from './shop-marquee.js';
@@ -32,6 +35,42 @@ test('a rubber band starts on the card scan, not on a button', () => {
   assert.equal(listingSelectId({ id: 'lst-1' }), 'lst-1');
 });
 
+test('empty page background may start a shop marquee; shop rows and art may not', () => {
+  function mock(hits) {
+    return {
+      closest: (sel) => {
+        const parts = String(sel).split(',').map((part) => part.trim());
+        return parts.some((part) => hits.includes(part)) ? mock(hits) : null;
+      },
+    };
+  }
+  const bg = mock(['main']);
+  const art = mock(['.art-frame', 'main']);
+  const tile = mock(['[data-card-id]', 'main']);
+  const shop = mock(['.shop-row']);
+  const panel = mock(['.shop-panel', 'main']);
+  const species = mock(['.species-drag', 'header', 'main']);
+  const setLink = mock(['a', '.asset-sub', 'header', 'main']);
+  assert.equal(marqueeStartAllowed(bg), true);
+  assert.equal(marqueeStartAllowed(art), false);
+  assert.equal(marqueeStartAllowed(tile), false);
+  assert.equal(marqueeStartAllowed(shop), false);
+  assert.equal(marqueeStartAllowed(panel), false);
+  assert.equal(marqueeStartAllowed(species), false);
+  assert.equal(marqueeStartAllowed(setLink), false);
+});
+
+test('ShopList listens on main so a band from empty background can hit listings', () => {
+  const host = readFileSync(new URL('./select-band.jsx', import.meta.url), 'utf8');
+  assert.match(host, /marqueeStartAllowed/);
+  assert.match(host, /listingRects|shop-row/);
+  assert.match(host, /SelectBandProvider/);
+  assert.match(
+    readFileSync(new URL('./components/Chrome.jsx', import.meta.url), 'utf8'),
+    /SelectBandProvider/,
+  );
+});
+
 test('a plain pointer outside selected shop rows clears the selection', () => {
   const selected = new Set(['a', 'b']);
   const selectedRow = { dataset: { listingId: 'a' } };
@@ -46,4 +85,39 @@ test('a plain pointer outside selected shop rows clears the selection', () => {
     clearShopSelectionOnPointer(target(otherRow), list, selected, { ctrlKey: true }),
     false,
   );
+});
+
+test('mixed desk drag piles listings with desk art and related tiles', () => {
+  const desk = { id: '100', name: 'Desk Card', canonicalPath: '/c/100' };
+  const related = { id: '200', name: 'Related', canonicalPath: '/c/200' };
+  const offerA = { id: 'L1', cardId: '100', pricePkn: 10, sellerName: 'A', condition: 'NM' };
+  const offerB = { id: 'L2', cardId: '100', pricePkn: 12, sellerName: 'B', condition: 'NM' };
+  const catalog = new Map([['100', desk], ['200', related]]);
+  const pile = mixedDeskDragReference({
+    heldOffer: offerA,
+    heldCard: desk,
+    offers: [offerA, offerB],
+    catalog,
+    cardSelected: new Set(['100', '200']),
+    listingSelected: new Set(['L1', 'L2']),
+    deskCard: desk,
+  });
+  assert.equal(pile.kind, 'cards');
+  assert.equal(pile.cards.length, 4);
+  assert.equal(pile.cards[0].listingId, 'L1');
+  assert.equal(pile.cards[0].kind, 'listing');
+  assert.ok(pile.cards.some((row) => row.listingId === 'L2'));
+  assert.ok(pile.cards.some((row) => row.kind === 'card' && row.cardId === '100'));
+  assert.ok(pile.cards.some((row) => row.kind === 'card' && row.cardId === '200'));
+
+  const fromArt = mixedDeskDragReference({
+    heldCard: desk,
+    offers: [offerA, offerB],
+    catalog,
+    cardSelected: new Set(['100', '200']),
+    listingSelected: new Set(['L1']),
+    deskCard: desk,
+  });
+  assert.equal(fromArt.cards[0].cardId, '100');
+  assert.equal(fromArt.cards.length, 3);
 });

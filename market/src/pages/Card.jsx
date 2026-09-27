@@ -49,7 +49,8 @@ import {
 } from '../api.js';
 import { suggestPriceFromSlices } from '../scan-pricing.js';
 import { getChatDock } from '../chat-dock-store.js';
-import { bundleReference, preloadDragImage, referenceForPeer, writeListingDrag } from '../chat-listing.js';
+import { bundleReference, cardsReference, preloadDragImage, referenceForPeer, writeListingDrag } from '../chat-listing.js';
+import CardSelectGrid, { useCardSelect } from '../components/CardSelectGrid.jsx';
 import { expansionLogoSrc } from '../set-logos.js';
 import {
   activeSoldIndex,
@@ -1357,6 +1358,59 @@ function dragThisCard(card, offers) {
   return referenceForPeer(card, offers, { uid: dock.peer, username });
 }
 
+/** Desk scan: participates in page multi-select and drags a pile with related tiles. */
+function DeskArtFrame({ card, art, offers, onZoom }) {
+  const select = useCardSelect();
+  const id = String(card?.id || '');
+  const picked = Boolean(id && select?.selected?.has(id));
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`art-frame${picked ? ' is-selected' : ''}`}
+      data-card-id={id || undefined}
+      draggable
+      onClick={() => onZoom?.()}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onZoom?.();
+      }}
+      onDragStart={(event) => {
+        const mixed = select?.dragReference?.({ heldCard: card });
+        if (mixed) {
+          writeListingDrag(event, mixed);
+          return;
+        }
+        const group = select?.cardsForDrag(card) || [card];
+        if (group.length > 1) {
+          writeListingDrag(event, cardsReference(group));
+          return;
+        }
+        writeListingDrag(event, dragThisCard(card, offers || []));
+      }}
+    >
+      {art ? (
+        <CardArt
+          src={art}
+          card={card}
+          alt={cardImageAlt(card)}
+          fetchPriority="high"
+          full
+          onError={() => {
+            console.warn('[pokoin:desk-art] hero failed', {
+              cardId: card?.id,
+              art,
+              imageUrl: card?.imageUrl,
+              heroImageUrl: card?.heroImageUrl,
+            });
+          }}
+        />
+      ) : <span className="tile-ph" />}
+    </div>
+  );
+}
+
 export default function Card() {
   const { lang = 'en', cardId: rawCardId, slug = '' } = useParams();
   const cardId = realPublicCardId(rawCardId);
@@ -2004,6 +2058,11 @@ export default function Card() {
 
   return (
     <article className="card-page flutter-page">
+      <CardSelectGrid
+        cards={[card, ...related.filter((row) => row?.id && String(row.id) !== String(card?.id || '')).slice(0, 12)]}
+        className="card-desk-select"
+        contents
+      >
       <SeoHead
         title={cardDocumentTitle(card)}
         description={cardSeoDescription(card)}
@@ -2062,6 +2121,9 @@ export default function Card() {
                 to={setHref}
                 draggable
                 onClick={() => track(Action.clickSet, card)}
+                onPointerDown={() => preloadDragImage(
+                  expansionLogoSrc({ slug: setSlug(setName), name: setName }),
+                )}
                 onDragStart={(event) => writeListingDrag(event, bundleReference({
                   kind: 'expansion',
                   slug: setSlug(setName),
@@ -2085,6 +2147,7 @@ export default function Card() {
                     to={artistPath}
                     draggable
                     onClick={() => track(Action.clickArtist, card)}
+                    onPointerDown={() => preloadDragImage(artistCover)}
                     onDragStart={(event) => writeListingDrag(event, bundleReference({
                       kind: 'artist',
                       slug: artistSlug(artist),
@@ -2161,24 +2224,15 @@ export default function Card() {
                 </Link>
               ) : <span className="art-nav ghost" aria-hidden="true"><Chevron dir="right" /></span>}
             </div>
-            <button
-              type="button"
-              className="art-frame"
-              onClick={() => {
+            <DeskArtFrame
+              card={card}
+              art={art}
+              offers={payload?.offers || []}
+              onZoom={() => {
                 setZoom(true);
                 track(Action.zoomArt, card);
               }}
-            >
-              {art ? (
-                <CardArt
-                  src={art}
-                  alt={cardImageAlt(card)}
-                  fetchPriority="high"
-                  full
-                  dragCard={dragThisCard(card, payload?.offers || [])}
-                />
-              ) : <span className="tile-ph" />}
-            </button>
+            />
             {(setShortcuts.length || showMoreVersions) ? (
               <div className="set-link tight version-links">
                 {setShortcuts.length ? (
@@ -2411,7 +2465,7 @@ export default function Card() {
           </header>
           {shopError ? <p className="sell-msg error">{shopError}</p> : null}
           {offers.length ? (
-            <ShopList>
+            <ShopList offers={offers} deskCard={card}>
               {(selected) => offers.map((offer, index) => {
                 const mine = mineIds.includes(offer.id);
                 return (
@@ -2425,10 +2479,9 @@ export default function Card() {
                     listingBusy={listingBusy}
                     editing={editingOffer?.id === offer.id}
                     onCart={(qty) => addItem({ ...cartItemFromOffer(card, offer), qty: qty || 1 })}
-                    onBuy={(qty) => {
-                      track(Action.clickListing, card, { resultRank: index });
-                      addItem({ ...cartItemFromOffer(card, offer), qty: qty || 1 });
-                      navigate('/cart');
+                    onInspect={() => {
+                      setZoom(true);
+                      track(Action.zoomArt, card);
                     }}
                     onEdit={() => setEditingOffer(
                       editingOffer?.id === offer.id ? null : offer,
@@ -2453,6 +2506,7 @@ export default function Card() {
         related={related}
         speciesName={species?.name}
         speciesHref={species ? pokemonHref(card, lang) : ''}
+        embedded
       />
       <details className="catalog-fold">
         <summary>More in the catalog</summary>
@@ -2491,6 +2545,7 @@ export default function Card() {
           ) : null}
         </dialog>
       ) : null}
+      </CardSelectGrid>
     </article>
   );
 }

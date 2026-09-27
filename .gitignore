@@ -22,3 +22,7 @@ unsloth_compiled_cache/
 scripts/out/
 __pycache__/
 *.pyc
+
+# TLC
+specs/states/
+specs/*_TTrace_*

@@ -27,6 +27,15 @@ export const TEAM_UP_CHARIZARD_CACHE = 'ct397';
 /** Leftovers whose missing-card coin was replaced by a real scan; keyed by leftover ct_id. */
 const RESCAN_IDS = new Set([286866, 122705, 126934, 331755, 331756]);
 export const RESCAN_CACHE = 'rscan1';
+/**
+ * 30th Celebration leftovers that were CardTrader WebP bytes behind a `.jpg` key
+ * (Content-Type image/jpeg). Re-encoded to real JPEG on Pi; bust immutable CF.
+ * Includes Eevee 116/128 (ct 406777 / public 813554).
+ */
+const WEBP_AS_JPEG_IDS = new Set([
+  406703, 406711, 406749, 406763, 406774, 406777, 406800, 406805,
+]);
+export const WEBP_AS_JPEG_CACHE = 'wj1';
 const SMALL_SCAN_ID_SET = new Set(SMALL_SCAN_IDS.map(Number));
 const POKOIN_PLACEHOLDER_ID_SET = new Set(POKOIN_PLACEHOLDER_IDS.map(Number));
 /** 312×437 catalog thumbs replaced with CardTrader full (SV Magnemite cohort). */
@@ -37,6 +46,9 @@ function catalogCacheToken(id) {
   const value = Number(id);
   if (value === 397269) {
     return TEAM_UP_CHARIZARD_CACHE;
+  }
+  if (WEBP_AS_JPEG_IDS.has(value)) {
+    return WEBP_AS_JPEG_CACHE;
   }
   if (RESCAN_IDS.has(value)) {
     return RESCAN_CACHE;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { fetchSellerShop } from '../api.js';
 import { rewriteCanonicalCardPath } from '../card-stub.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
@@ -56,7 +56,6 @@ function sellerFromPayload(data, handle, sample) {
 
 export default function Seller() {
   const { username = '', lang: routeLang } = useParams();
-  const navigate = useNavigate();
   const { addItem } = useCart();
   const lang = routeLang || getSearchLang();
   const handle = decodeURIComponent(String(username || '').trim());
@@ -251,7 +250,7 @@ export default function Seller() {
           </p>
 
           {listings.length ? (
-            <ShopList className="seller-shop-list">
+            <ShopList className="seller-shop-list" offers={listings}>
               {(selected) => listings.map((offer, index) => {
                 const cardId = String(offer.cardId || offer.card_id || '');
                 const path = rewriteCanonicalCardPath(
@@ -267,6 +266,9 @@ export default function Seller() {
                   id: cardId,
                   name: offer.cardName || offer.name || 'Card',
                   canonicalPath: path || `/marketplace/${lang || 'en'}/cards/${cardId}`,
+                  imageUrl: offer.cardImageUrl || offer.imageUrl || offer.image_url || '',
+                  homepageImageUrl: offer.homepageImageUrl || offer.homepage_image_url || '',
+                  gridImageUrl: offer.gridImageUrl || offer.grid_image_url || '',
                 };
                 return (
                   <ShopListingRow
@@ -280,12 +282,6 @@ export default function Seller() {
                       if (!cardId || !offer.id) return;
                       const item = cartItemFromOffer(cardStub, enriched);
                       addItem(qty ? { ...item, qty } : item);
-                    }}
-                    onBuy={(qty) => {
-                      if (!cardId || !offer.id) return;
-                      const item = cartItemFromOffer(cardStub, enriched);
-                      addItem(qty ? { ...item, qty } : item);
-                      navigate('/cart');
                     }}
                   />
                 );

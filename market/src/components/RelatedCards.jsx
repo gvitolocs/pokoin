@@ -4,7 +4,14 @@ import { overlayCatalogTilePrices } from '../api.js';
 import CardSelectGrid from './CardSelectGrid.jsx';
 import CardTile from './CardTile.jsx';
 
-export default function RelatedCards({ card, related = [], speciesName, speciesHref }) {
+export default function RelatedCards({
+  card,
+  related = [],
+  speciesName,
+  speciesHref,
+  /** When true, parent CardSelectGrid already owns selection (desk + related). */
+  embedded = false,
+}) {
   const relatedKey = (related || []).map((row) => String(row?.id || '')).join('|');
   const rows = useMemo(
     () => (related || []).filter((row) => row?.id && String(row.id) !== String(card?.id || '')),
@@ -31,6 +38,9 @@ export default function RelatedCards({ card, related = [], speciesName, speciesH
   if (!rows.length) {
     return null;
   }
+  const tiles = priced.slice(0, 12).map((row, index) => (
+    <CardTile key={row.id} card={row} rank={index} />
+  ));
   return (
     <section className="panel related-panel">
       <header className="panel-head">
@@ -39,11 +49,13 @@ export default function RelatedCards({ card, related = [], speciesName, speciesH
           <Link to={speciesHref}>All {speciesName}</Link>
         ) : null}
       </header>
-      <CardSelectGrid className="grid related-grid" cards={priced.slice(0, 12)}>
-        {priced.slice(0, 12).map((row, index) => (
-          <CardTile key={row.id} card={row} rank={index} />
-        ))}
-      </CardSelectGrid>
+      {embedded ? (
+        <div className="grid related-grid">{tiles}</div>
+      ) : (
+        <CardSelectGrid className="grid related-grid" cards={priced.slice(0, 12)}>
+          {tiles}
+        </CardSelectGrid>
+      )}
     </section>
   );
 }

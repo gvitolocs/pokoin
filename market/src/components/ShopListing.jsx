@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPkn } from '../api.js';
 import { artCutVars } from '../art-cut.js';
-import { listingReference, writeListingDrag } from '../chat-listing.js';
+import { listingReference, listingsReference, writeListingDrag } from '../chat-listing.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
 import ThumbZoom from './ThumbZoom.jsx';
 import { openListingChat } from '../chat-dock-store.js';
@@ -16,12 +16,13 @@ import {
   sellerHref,
 } from '../listing-meta.js';
 import { listingSelectId } from '../shop-marquee.js';
+import { useSelectBand } from '../select-band.jsx';
 
 function ShopScan({ image, name, setName = '' }) {
   const full = preferFullImage(image) || image;
   const thumb = homepageDerivativeUrl(image) || image;
   return (
-    <ThumbZoom src={full} full alt={name || ''}>
+    <ThumbZoom src={full} full alt={name || ''} openOnClick>
       <span className="art-cut shop-art" style={artCutVars({ set: setName, name })}>
         <img
           src={thumb}
@@ -60,20 +61,21 @@ export default function ShopListingRow({
   listingBusy = false,
   editing = false,
   card = null,
-  onBuy,
   onCart,
   onEdit,
   onCancel,
   selected = false,
   dragOffers = null,
+  onInspect,
 }) {
+  const band = useSelectBand();
   const [added, setAdded] = useState(false);
   const name = publicShopSellerLabel(offer);
   const stock = Math.max(0, Math.trunc(Number(offer?.quantityAvailable ?? offer?.quantity_available) || 0));
   const choices = Math.max(stock, 1);
   const [pick, setPick] = useState(1);
   const reference = {
-    ...listingReference({ offer, card }),
+    ...listingReference({ offer, card, qty: pick }),
     qty: pick,
     stock: choices,
   };
@@ -94,19 +96,42 @@ export default function ShopListingRow({
     canonicalPath: cardPath,
   }, preferFullImage(offer?.cardImageUrl || offer?.imageUrl || ''));
 
-  function buy(event) {
-    if (mine || !onBuy) return;
-    if (event?.shiftKey || event?.ctrlKey || event?.metaKey) return;
-    if (event?.target?.closest?.('a, button, select, .ct-qty')) return;
-    onBuy(pick);
+  function inspectListing(event) {
+    if (event.target?.closest?.(
+      'a, button, input, select, textarea, label, .ct-qty, .shop-row-actions, .shop-owner-actions',
+    )) {
+      return;
+    }
+    if (onInspect) {
+      event.preventDefault();
+      event.stopPropagation();
+      onInspect(event);
+    }
   }
 
   return (
     <div
-      className={`shop-row${mine ? ' mine' : ''}${showCard ? ' is-profile' : ''}${onBuy && !mine ? ' is-buy' : ''}${editing ? ' is-editing' : ''}${selected ? ' is-selected' : ''}`}
+      className={`shop-row${mine ? ' mine' : ''}${showCard ? ' is-profile' : ''}${editing ? ' is-editing' : ''}${selected ? ' is-selected' : ''}`}
       data-listing-id={listingSelectId(offer)}
       draggable
+      onClick={inspectListing}
       onDragStart={(event) => {
+        const mixed = band?.dragReference?.({ heldOffer: offer, heldCard: card });
+        if (mixed) {
+          // Stamp the held row's qty onto the matching listing in the pile.
+          if (mixed.kind === 'cards' && Array.isArray(mixed.cards)) {
+            const heldId = String(offer?.id || '');
+            writeListingDrag(event, {
+              ...mixed,
+              cards: mixed.cards.map((row) => (
+                row.listingId === heldId ? { ...row, qty: pick, stock: choices } : row
+              )),
+            });
+            return;
+          }
+          writeListingDrag(event, { ...mixed, qty: pick, stock: choices });
+          return;
+        }
         if (dragOffers?.length > 1) {
           const cards = dragOffers.map((row) => listingReference({
             offer: row,
@@ -118,30 +143,27 @@ export default function ShopListingRow({
               homepageImageUrl: row.homepageImageUrl || row.homepage_image_url,
               gridImageUrl: row.gridImageUrl || row.grid_image_url,
             },
+            qty: row === offer ? pick : 1,
           }));
-          writeListingDrag(event, {
-            kind: 'cards',
-            cardName: `${cards.length} cards`,
-            imageUrl: cards[0]?.imageUrl || reference.imageUrl,
-            cards,
-          });
+          writeListingDrag(event, listingsReference(cards));
           return;
         }
         writeListingDrag(event, reference);
       }}
-      onClick={buy}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          buy(event);
-        }
-      }}
-      role={onBuy && !mine ? 'button' : undefined}
-      tabIndex={onBuy && !mine ? 0 : undefined}
     >
       {showCard ? (
         cardPath ? (
-          <Link className="shop-card" to={cardPath} onClick={(event) => event.stopPropagation()}>
+          <Link
+            className="shop-card"
+            to={cardPath}
+            onClick={(event) => {
+              event.stopPropagation();
+              // Card scan click opens the overlay; name text still navigates.
+              if (event.target?.closest?.('.shop-art, .thumb-zoom-host')) {
+                event.preventDefault();
+              }
+            }}
+          >
             {image ? <ShopScan image={image} name={cardName} setName={setName} /> : <span className="shop-card-ph" />}
             <span>
               <strong>{cardName || 'Card'}</strong>
