@@ -106,6 +106,7 @@ module.exports = async function handler(req, res) {
     const now = admin.firestore.FieldValue.serverTimestamp();
     const shipments = quote.shipments.map((shipment) => ({
       sellerId: shipment.sellerId,
+      sellerName: shipment.sellerName || '',
       stripeConnectAccountId: accounts[shipment.sellerId],
       fromCountry: shipment.fromCountry,
       toCountry: shipment.toCountry,
@@ -122,6 +123,34 @@ module.exports = async function handler(req, res) {
       quoteCreatedAt: new Date().toISOString(),
       serviceName: shipment.serviceName,
     }));
+
+    // One Checkout line per seller shipment so Stripe shows the multi-seller split.
+    // Platform still takes one charge; Connect Transfers go out per seller later.
+    const lineItems = shipments.map((shipment, index) => {
+      const unitAmount = Number(shipment.itemsSubtotalCents || 0) + Number(shipment.shippingAmountEURCents || 0);
+      const sellerLabel = String(shipment.sellerName || shipment.sellerId || `Seller ${index + 1}`).slice(0, 80);
+      return {
+        quantity: 1,
+        price_data: {
+          currency: 'eur',
+          unit_amount: unitAmount,
+          product_data: {
+            name: `Shipment from ${sellerLabel}`,
+            description: [
+              `${shipment.cardCount} card(s)`,
+              shipment.fromCountry && shipment.toCountry
+                ? `${shipment.fromCountry}→${shipment.toCountry}`
+                : '',
+              shipment.serviceName || '',
+            ].filter(Boolean).join(' · ').slice(0, 200),
+          },
+        },
+      };
+    });
+    const lineTotal = lineItems.reduce((sum, row) => sum + Number(row.price_data.unit_amount || 0), 0);
+    if (lineTotal !== quote.grandTotalCents) {
+      throw httpError(500, 'Shipment line items do not sum to checkout total.', 'checkout_line_mismatch');
+    }
 
     await firestore.collection('orders').doc(orderId).set({
       uid: decoded.uid,
@@ -160,25 +189,14 @@ module.exports = async function handler(req, res) {
       customer_email: decoded.email || undefined,
       success_url: `${siteUrl()}/orders?eur_session={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl()}/checkout?cancelled=1`,
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: 'eur',
-            unit_amount: quote.grandTotalCents,
-            product_data: {
-              name: 'Pokoin marketplace order',
-              description: `${items.length} listing(s), ${shipments.length} shipment(s)`,
-            },
-          },
-        },
-      ],
+      line_items: lineItems,
       payment_intent_data: {
         transfer_group: orderId,
         metadata: {
           pokoinOrderId: orderId,
           pokoinUid: decoded.uid,
           kind: 'marketplace_order_eur',
+          sellerCount: String(shipments.length),
         },
       },
       metadata: {
@@ -186,6 +204,7 @@ module.exports = async function handler(req, res) {
         pokoinUid: decoded.uid,
         kind: 'marketplace_order_eur',
         amountCents: String(quote.grandTotalCents),
+        sellerCount: String(shipments.length),
       },
     });
 

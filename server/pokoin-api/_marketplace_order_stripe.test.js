@@ -73,6 +73,38 @@ test('releaseSellerTransfers is idempotent', async () => {
   assert.equal(transfers.length, 1);
 });
 
+test('releaseSellerTransfers creates one Transfer per seller shipment', async () => {
+  const store = {
+    paymentStatus: 'paid',
+    transfersReleased: false,
+    stripePaymentIntentId: 'pi_1',
+    stripeChargeId: 'ch_1',
+    shipments: [
+      { sellerId: 's1', stripeConnectAccountId: 'acct_1', sellerTransferCents: 1000 },
+      { sellerId: 's2', stripeConnectAccountId: 'acct_2', sellerTransferCents: 2500 },
+    ],
+  };
+  const transfers = [];
+  const admin = makeAdmin(store);
+  const stripe = {
+    transfers: {
+      create: async (body) => {
+        transfers.push(body);
+        return { id: `tr_${transfers.length}` };
+      },
+    },
+  };
+  const result = await releaseSellerTransfers({ admin, stripe, orderId: 'eur_multi' });
+  assert.equal(result.duplicate, false);
+  assert.equal(transfers.length, 2);
+  assert.equal(transfers[0].destination, 'acct_1');
+  assert.equal(transfers[0].amount, 1000);
+  assert.equal(transfers[0].source_transaction, 'ch_1');
+  assert.equal(transfers[0].transfer_group, 'eur_multi');
+  assert.equal(transfers[1].destination, 'acct_2');
+  assert.equal(transfers[1].amount, 2500);
+});
+
 test('amount mismatch fails closed', async () => {
   const store = {
     buyerUid: 'buyer1',
