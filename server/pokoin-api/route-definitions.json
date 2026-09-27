@@ -197,24 +197,24 @@
     "methods": [
       "POST"
     ],
-    "purpose": "Website Poko assistant chat. Accepts message + attached cards; proxies Hermes when configured, otherwise consults local poko-market tools.",
-    "auth": "Required Firebase bearer token. Browser never receives the Hermes/poko-market service token.",
+    "purpose": "Website Poko assistant chat (Messages + dock). Firebase-authed Hermes proxy only: forwards message + cards + images to POKONTACT_SERVICE_URL/chat. No local FAQ or market-tool fallback.",
+    "auth": "Required Firebase bearer token. Browser never receives the Hermes service token.",
     "params": {
       "query": "none",
-      "body": "{ message, cards?: [{ cardId, name, setName, condition, language }], sessionId? }"
+      "body": "{ message, cards?: [{ cardId, name, setName, condition, language }], images?: string[], sessionId? }"
     },
     "dependencies": {
       "env": [
         "FIREBASE_*",
+        "POKONTACT_SERVICE_URL",
         "POKO_CHAT_URL",
         "POKO_API_TOKEN",
         "POKONTACT_SERVICE_TOKEN",
-        "MARKETPLACE_DATABASE_URL"
+        "POKO_CHAT_TIMEOUT_MS"
       ],
       "services": [
         "Firebase Admin",
-        "Hermes (optional)",
-        "Postgres read-only replica"
+        "Hermes Poko (peer1 :8789)"
       ]
     }
   },

@@ -1,13 +1,12 @@
 'use strict';
 
 /**
- * Website Poko chat BFF.
- * POST /api/poko-chat  { message, cards?, sessionId? }
+ * Website Poko chat BFF — Hermes only.
+ * POST /api/poko-chat  { message, cards?, images?, sessionId? }
  *
- * Firebase-authed. Proxies to Hermes /api/poko/chat when POKO_CHAT_URL is set;
- * otherwise answers market questions through the local poko-market tools so
- * sellers can attach cards and ask about prices/liquidity without the browser
- * ever seeing the service token.
+ * Firebase-authed. Proxies to Hermes Poko at POKONTACT_SERVICE_URL/chat
+ * (same convention as pokoin-assistant). No local scripted replies and no
+ * local market-tool fallback — Hermes owns answers and may call poko-market.
  */
 
 const path = require('path');
@@ -23,10 +22,6 @@ function requireHelper(name) {
 
 function verifyBearerToken(...args) {
   return requireHelper('_firebase').verifyBearerToken(...args);
-}
-
-function marketTools() {
-  return require('./poko-market')._test.TOOLS;
 }
 
 function cleanText(value, max = 2000) {
@@ -73,89 +68,31 @@ function imagesContext(images) {
   return `Attached photos (${images.length}):\n${images.map((url, index) => `- #${index + 1} ${url}`).join('\n')}`;
 }
 
-function looksLikeMarket(message) {
-  return /\b(price|worth|value|sold|sell|buy|quote|liquidity|market|median|how much|quanto|valore|prezzo)\b/i.test(message);
+/** Same URL convention as CardVault pokoin-assistant: base …/api/poko + /chat. */
+function resolveHermesChatUrl(env = process.env) {
+  const raw = String(env.POKO_CHAT_URL || env.POKONTACT_SERVICE_URL || '').trim().replace(/\/+$/, '');
+  if (!raw) return '';
+  if (/\/chat$/i.test(raw)) return raw;
+  return `${raw}/chat`;
 }
 
-function formatQuote(result) {
-  if (!result || result.status === 'not_found') {
-    return 'I could not find that card in the Pokoin catalog. Try another name or attach the card from the marketplace.';
-  }
-  if (result.status === 'ambiguous') {
-    const names = (result.candidates || []).slice(0, 5).map((row) => row.name || row.cardId).filter(Boolean);
-    return `I found a few matches — which one did you mean?\n${names.map((name) => `• ${name}`).join('\n')}`;
-  }
-  const name = result.name || result.card?.name || 'That card';
-  const setName = result.setName || result.card?.setName || '';
-  const sold = result.sold || result.estimate || {};
-  const median = sold.medianPkn ?? sold.median ?? result.medianSoldPkn;
-  const asks = result.asks || result.asking || {};
-  const ask = asks.minPkn ?? asks.lowestPkn ?? result.lowestAskPkn;
-  const lines = [
-    `${name}${setName ? ` · ${setName}` : ''}`,
-  ];
-  if (median != null) lines.push(`Sold median (90d): ${median} PKN`);
-  if (ask != null) lines.push(`Lowest ask now: ${ask} PKN`);
-  if (result.askingPriceOnly) lines.push('No solid sold sample yet — this is asking-price only.');
-  if (result.liquidity) {
-    const liq = result.liquidity;
-    if (liq.typicalDays != null) {
-      lines.push(`Typical sell time: ~${liq.typicalDays} days (${liq.lowDays ?? '?'}–${liq.highDays ?? '?'}).`);
-    }
-  }
-  if (result.confidence) lines.push(`Confidence: ${result.confidence}.`);
-  lines.push('Ask me anything else about this printing — I use Pokoin’s public market tools only.');
-  return lines.join('\n');
+function hermesToken(env = process.env) {
+  return String(env.POKO_API_TOKEN || env.POKONTACT_SERVICE_TOKEN || '').trim();
 }
 
-async function localMarketReply(message, cards, images = []) {
-  const TOOLS = marketTools();
-  const primary = cards[0];
-  const query = primary?.name || message;
-  const cardId = primary?.cardId || '';
-  const condition = primary?.condition || '';
-  const language = primary?.language || '';
-
-  if (cardId || looksLikeMarket(message) || primary?.name) {
-    const quote = await TOOLS.card_quote({
-      cardId: cardId || undefined,
-      query: cardId ? undefined : query,
-      condition: condition || undefined,
-      language: language || undefined,
-    });
-    if (quote?.status === 'ambiguous' || quote?.status === 'not_found') {
-      const resolved = await TOOLS.resolve_card({ query });
-      if (resolved?.status === 'ambiguous') return formatQuote(resolved);
-      if (resolved?.candidates?.[0]?.cardId) {
-        const again = await TOOLS.card_quote({
-          cardId: resolved.candidates[0].cardId,
-          condition: condition || undefined,
-          language: language || undefined,
-        });
-        return formatQuote({ ...again, name: resolved.candidates[0].name, setName: resolved.candidates[0].setName });
-      }
-      return formatQuote(quote);
-    }
-    return formatQuote(quote);
-  }
-
-  if (images.length && !message) {
-    return 'Got your photo. Tell me the card name or drop the listing from the marketplace and I\'ll pull sold medians and asks.';
-  }
-
-  return [
-    'Hey — I\'m Poko. Drop a card on this chat, add a photo, or ask about a printing and I\'ll pull sold medians, asks, and sell-time bands from Pokoin\'s market tools.',
-    'I only see public catalog and aggregate market data — never private seller accounts.',
-  ].join('\n');
-}
+const HERMES_UNAVAILABLE = 'I don’t know the answer yet, but I’m always improving ✨ Ask me another way, or try a cute card question while my tiny brain levels up.';
 
 async function hermesReply({ message, cards, images, userId, sessionId, displayName }) {
-  const base = String(process.env.POKO_CHAT_URL || '').trim().replace(/\/$/, '');
-  const token = String(process.env.POKO_API_TOKEN || process.env.POKONTACT_SERVICE_TOKEN || '').trim();
-  if (!base || !token) return null;
+  const url = resolveHermesChatUrl();
+  const token = hermesToken();
+  if (!url || !token) {
+    const error = new Error('Poko Hermes is not configured (POKONTACT_SERVICE_URL / token).');
+    error.statusCode = 503;
+    throw error;
+  }
 
   const enriched = [message, cardsContext(cards), imagesContext(images)].filter(Boolean).join('\n\n');
-  const response = await fetch(`${base}/api/poko/chat`, {
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -167,16 +104,24 @@ async function hermesReply({ message, cards, images, userId, sessionId, displayN
       sessionId,
       user: { id: userId, displayName: displayName || '' },
       pageContext: (cards.length || images.length)
-        ? { attachedCards: cards, attachedImages: images }
-        : undefined,
+        ? { attachedCards: cards, attachedImages: images, channel: 'website-messages' }
+        : { channel: 'website-messages' },
     }),
     signal: AbortSignal.timeout(Number(process.env.POKO_CHAT_TIMEOUT_MS) || 45000),
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.message || data?.error || `Poko chat failed (${response.status})`);
+    const error = new Error(data?.message || data?.error || `Poko chat failed (${response.status})`);
+    error.statusCode = response.status >= 400 && response.status < 600 ? response.status : 502;
+    throw error;
   }
-  return cleanText(data?.reply || data?.text || '', 8000);
+  const reply = cleanText(data?.reply || data?.text || '', 8000);
+  if (!reply) {
+    const error = new Error('Poko returned an empty reply.');
+    error.statusCode = 502;
+    throw error;
+  }
+  return reply;
 }
 
 module.exports = async function handler(req, res) {
@@ -199,10 +144,8 @@ module.exports = async function handler(req, res) {
         : 'Tell me about the attached card.');
     const sessionId = cleanText(req.body?.sessionId || decoded.uid, 80) || decoded.uid;
 
-    let reply = '';
-    let source = 'local';
     try {
-      const remote = await hermesReply({
+      const reply = await hermesReply({
         message: prompt,
         cards,
         images,
@@ -210,25 +153,23 @@ module.exports = async function handler(req, res) {
         sessionId,
         displayName: cleanText(decoded.name || decoded.email, 80),
       });
-      if (remote) {
-        reply = remote;
-        source = 'hermes';
-      }
+      return res.status(200).json({
+        ok: true,
+        assistant: 'poko',
+        persona: 'Poko',
+        reply,
+        source: 'hermes',
+      });
     } catch (error) {
-      console.warn('poko-chat hermes failed; using local market tools', String(error?.message || error).slice(0, 200));
+      console.warn('poko-chat hermes failed', String(error?.message || error).slice(0, 200));
+      return res.status(200).json({
+        ok: true,
+        assistant: 'poko',
+        persona: 'Poko',
+        reply: HERMES_UNAVAILABLE,
+        source: 'unavailable',
+      });
     }
-    if (!reply) {
-      reply = await localMarketReply(prompt, cards, images);
-      source = 'local';
-    }
-
-    return res.status(200).json({
-      ok: true,
-      assistant: 'poko',
-      persona: 'Poko',
-      reply,
-      source,
-    });
   } catch (error) {
     const status = error.statusCode || 500;
     if (status >= 500) console.error('poko-chat', error.message);
@@ -241,7 +182,7 @@ module.exports._test = {
   cleanImages,
   cardsContext,
   imagesContext,
-  looksLikeMarket,
-  formatQuote,
-  localMarketReply,
+  resolveHermesChatUrl,
+  hermesToken,
+  HERMES_UNAVAILABLE,
 };

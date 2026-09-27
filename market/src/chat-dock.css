@@ -131,14 +131,16 @@
 
 .chat-dock-avatar.is-poko {
   overflow: hidden;
+  padding: 0;
   background: radial-gradient(circle at 32% 28%, #ffe9a0, #c98912 70%);
 }
 
 .chat-dock-avatar.is-poko img {
-  width: 18px;
-  height: 16px;
-  margin-top: 2px;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  object-position: center 42%;
   image-rendering: pixelated;
 }
 
@@ -194,8 +196,11 @@
 }
 
 .chat-dock-head strong.chat-dock-person.is-poko .chat-dock-avatar img {
-  width: 14px;
-  height: 12px;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  object-position: center 42%;
 }
 
 .chat-dock-head button {
@@ -523,15 +528,17 @@
 .chat-dock-row.poko-row .poko-avatar,
 .chat-dock-row.poko-row .chat-dock-avatar.is-poko {
   overflow: hidden;
+  padding: 0;
   background: radial-gradient(circle at 32% 28%, #ffe9a0, #c98912 70%);
   color: #5b4200;
   font-weight: 700;
 }
 .chat-dock-row.poko-row .chat-dock-avatar.is-poko img {
-  width: 18px;
-  height: 16px;
-  margin-top: 2px;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  object-position: center 42%;
   image-rendering: pixelated;
 }
 .chat-dock-row.poko-row .chat-dock-row-copy em { color: #7a6a2f; }

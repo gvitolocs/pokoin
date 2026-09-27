@@ -111,7 +111,7 @@ function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
         >
           <button type="button" onClick={onPoko}>
             <span className="chat-dock-avatar is-poko poko-avatar" aria-hidden="true">
-              <img src={mascotUrl} alt="" width="22" height="20" />
+              <img src={mascotUrl} alt="" />
             </span>
             <span className="chat-dock-row-copy">
               <strong>{POKO_DISPLAY}</strong>
@@ -404,7 +404,7 @@ export default function ChatDock() {
           {poko ? (
             <>
               <span className="chat-dock-avatar is-poko poko-avatar" aria-hidden="true">
-                <img src={mascotUrl} alt="" width="18" height="16" />
+                <img src={mascotUrl} alt="" />
               </span>
               {POKO_DISPLAY}
             </>
