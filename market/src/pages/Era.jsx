@@ -5,6 +5,7 @@ import SetGuideGrid from '../components/SetGuideGrid.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
+import { game, isPokemonGame } from '../game.js';
 import {
   TCG_ERA_ORDER,
   eraFromParam,
@@ -13,13 +14,43 @@ import {
 } from '../set-logos.js';
 import { tcgEraYears } from '../tcg-eras.js';
 
+/** Satellite TCGs do not reuse Pokémon era blocks. */
+function SatelliteEras() {
+  const site = game();
+  return (
+    <div className="page desk set-guide-page">
+      <SeoHead
+        title={`${site.name} Eras | Pokoin`}
+        description={`${site.name} expansions live under Sets — each TCG keeps its own era catalog.`}
+        canonical="/marketplace/eras"
+      />
+      <SeoCrumbs items={[
+        { name: 'Marketplace', href: '/marketplace' },
+        { name: 'Sets', href: '/marketplace/sets' },
+        { name: 'Eras' },
+      ]} />
+      <EmptyDesk
+        title={`${site.name} eras`}
+        lede={`${site.name} does not use Pokémon TCG blocks. Open Sets for this game’s expansions.`}
+      >
+        <Link className="btn" to="/marketplace/sets">Sets</Link>
+      </EmptyDesk>
+    </div>
+  );
+}
+
 export default function Era() {
+  const pokemon = isPokemonGame();
   const { eraId } = useParams();
   const era = eraId ? eraFromParam(eraId) : '';
   const [expansions, setExpansions] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (!pokemon) {
+      document.title = `${game().name} Eras | Pokoin`;
+      return undefined;
+    }
     document.title = era ? `${era} Pokémon TCG Sets | Pokoin` : 'Pokémon TCG Eras | Pokoin';
     if (!era) return undefined;
     let cancelled = false;
@@ -33,13 +64,17 @@ export default function Era() {
     return () => {
       cancelled = true;
     };
-  }, [era]);
+  }, [era, pokemon]);
 
   const rows = useMemo(
     () => (era ? expansionsForEraPage(expansions || [], era) : []),
     [expansions, era],
   );
   const years = era ? tcgEraYears(era) : '';
+
+  if (!pokemon) {
+    return <SatelliteEras />;
+  }
 
   if (eraId && !era) {
     return (

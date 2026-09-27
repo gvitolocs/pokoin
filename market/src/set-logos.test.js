@@ -161,6 +161,37 @@ test('desk shortcuts use the circular expansion symbol, not the wordmark', () =>
   );
 });
 
+test('satellite TCGs never reuse Pokémon expansion logos or eras', () => {
+  const rift = 'riftbound.pokoin.com';
+  const piece = 'onepiece.pokoin.com';
+  // Slug collision: Riftbound Unleashed ≠ HS Unleashed CDN assets.
+  assert.equal(
+    expansionSymbolSrc({ slug: 'unleashed' }, rift),
+    '/card-images/riftbound/expansions/symbols/unleashed.png?v=cm1',
+  );
+  assert.equal(expansionLogoSrc({ slug: 'unleashed' }, rift), '');
+  assert.equal(
+    expansionSymbolSrc({ slug: 'unleashed' }, piece),
+    '/card-images/one-piece/expansions/symbols/unleashed.png?v=cm1',
+  );
+  assert.equal(tcgEra({ slug: 'unleashed', name: 'Unleashed', set: 'Unleashed' }, rift), '');
+  assert.equal(tcgEra({ slug: 'unleashed', name: 'Unleashed', set: 'Unleashed' }, piece), '');
+  // Pokémon host still maps Unleashed → HGSS and the shared Pokémon CDN.
+  assert.equal(tcgEra({ slug: 'unleashed', name: 'Unleashed', set: 'Unleashed' }, 'pokoin.com'), 'HeartGold & SoulSilver');
+  assert.equal(
+    expansionLogoSrc({ slug: 'unleashed' }, 'pokoin.com'),
+    '/card-images/expansions/logos/unleashed.png',
+  );
+  // API-provided satellite marks win over the game-scoped fallback.
+  assert.equal(
+    expansionSymbolSrc({
+      slug: 'unleashed',
+      defaultSymbolUrl: 'https://cdn.pokoin.com/riftbound/expansions/symbols/unleashed.png',
+    }, rift),
+    'https://cdn.pokoin.com/riftbound/expansions/symbols/unleashed.png?v=cm1',
+  );
+});
+
 test('official codes prefer Watchtower marks', () => {
   assert.equal(expansionCode({ slug: '151', name: '151' }), 'MEW');
   assert.equal(expansionCode({ slug: 'paldean-fates', name: 'Paldean Fates' }), 'PAF');
