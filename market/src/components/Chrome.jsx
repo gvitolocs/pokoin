@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useWindowScrollRestore } from '../scroll-restore.js';
+import mascotUrl from '../assets/pokoin-mascot@8x.png';
 import {
   cardFromAutocomplete,
   cardHref,
@@ -1059,8 +1060,12 @@ export default function Chrome({ children }) {
             <span /><span /><span />
           </button>
           <AppLink className="brand" to="/marketplace" aria-label={site.title}>
-            <img src="/home/logo.png" alt="" width="40" height="40" />
-            <span>{site.brand}</span>
+            {/* Flyer wordmark: the coin mascot is the "o" in Pokoin. Phone keeps only the coin. */}
+            <span className="brand-word" aria-hidden="true">
+              <span className="brand-letters">P</span>
+              <img className="brand-coin" src={mascotUrl} alt="" width="26" height="24" />
+              <span className="brand-letters">koin</span>
+            </span>
           </AppLink>
           <span
             className="desktop-anchor"
