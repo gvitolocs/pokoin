@@ -1060,7 +1060,8 @@ export default function Chrome({ children }) {
             <span /><span /><span />
           </button>
           <AppLink className="brand" to="/marketplace" aria-label={site.title}>
-            {/* Flyer wordmark: the coin mascot is the "o" in Pokoin. Phone keeps only the coin. */}
+            {/* Flyer wordmark: the coin mascot is the "o" in Pokoin. Phone keeps the round badge. */}
+            <img className="brand-badge" src="/home/logo.png" alt="" width="40" height="40" />
             <span className="brand-word" aria-hidden="true">
               <span className="brand-letters">P</span>
               <img className="brand-coin" src={mascotUrl} alt="" width="26" height="24" />
