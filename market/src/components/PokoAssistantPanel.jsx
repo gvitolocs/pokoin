@@ -6,7 +6,7 @@ import '../chat-dock.css';
 const WELCOME = {
   id: 'poko-welcome',
   mine: false,
-  text: 'Hi! I\'m Poko ✨ your Pokoin assistant. Ask me about cards, prices, or the marketplace — this chat is private to you. 😊',
+  text: 'Hey, welcome to Pokoin! ✨ I\'m Poko — a small AI with a big love for cardboard. Card prices, market vibes, set lore, or help finding your way around: just ask. And everything you tell me stays strictly between us. 😊',
 };
 
 let pokoSessionCounter = 0;
