@@ -418,7 +418,7 @@ export default function Chrome({ children }) {
   const messagesAriaLabel = messagesUnread > 0 ? 'Messages, unread messages' : 'Messages';
   useEffect(() => {
     let openTray = 0;
-    function onDragStart() {
+    function openDragTrays() {
       // Mounting Cart/Desktop in the same turn as dragstart re-renders the
       // tree and Chrome aborts HTML5 drags that started from text links
       // (Pokémon name / set / artist). Open the trays on the next frame.
@@ -426,7 +426,7 @@ export default function Chrome({ children }) {
       openTray = requestAnimationFrame(() => {
         openTray = 0;
         setNavPop('');
-        setCardDrag(document.documentElement.classList.contains('is-card-dragging'));
+        setCardDrag(true);
       });
     }
     function onDragEnd() {
@@ -436,11 +436,12 @@ export default function Chrome({ children }) {
       }
       setCardDrag(false);
     }
-    window.addEventListener('dragstart', onDragStart);
+    // writeListingDrag → markCardDragging dispatches this (survives stopPropagation).
+    window.addEventListener('pokoin-card-drag', openDragTrays);
     window.addEventListener('dragend', onDragEnd);
     return () => {
       if (openTray) cancelAnimationFrame(openTray);
-      window.removeEventListener('dragstart', onDragStart);
+      window.removeEventListener('pokoin-card-drag', openDragTrays);
       window.removeEventListener('dragend', onDragEnd);
     };
   }, []);

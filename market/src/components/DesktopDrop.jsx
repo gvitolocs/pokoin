@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchArtist, fetchExpansionCards } from '../api.js';
+import { fetchArtist } from '../api.js';
 import { addCatalogCards } from '../cart-add.js';
 import { cartDropThumb } from '../cart-drop-size.js';
 import {
@@ -45,11 +45,21 @@ export default function DesktopDrop({ onAddToCart }) {
     }
     const bundle = bundleOf(reference);
     if (bundle?.slug) {
+      // Expansion drops park the set logo only — not every card in the set.
+      if (bundle.kind === 'expansion') {
+        addDesktopCards([{
+          id: `expansion:${bundle.slug}`,
+          name: reference.cardName,
+          imageUrl: reference.imageUrl,
+          path: reference.path || `/marketplace/sets/${bundle.slug}`,
+          set: reference.setName || reference.cardName,
+          setName: reference.setName || reference.cardName,
+        }]);
+        return;
+      }
       const cards = bundle.kind === 'artist'
         ? (await fetchArtist(bundle.slug, { limit: 400 }).catch(() => null))?.cards || []
-        : bundle.kind === 'species'
-          ? await fetchSpeciesCards(decodeURIComponent(bundle.slug)).catch(() => [])
-          : (await fetchExpansionCards({ slug: bundle.slug }).catch(() => null))?.cards || [];
+        : await fetchSpeciesCards(decodeURIComponent(bundle.slug)).catch(() => []);
       addDesktopCards(cards);
       return;
     }
@@ -173,7 +183,7 @@ export default function DesktopDrop({ onAddToCart }) {
               style={{ width: thumb, height: Math.round(thumb * 88 / 63) }}
             >
               <Link to={row.path || '/marketplace'} title={row.name}>
-                {row.imageUrl ? <CardArt src={row.imageUrl} alt="" card={row} /> : <span className="suggest-ph" />}
+                {row.imageUrl ? <CardArt src={row.imageUrl} alt="" card={row} full /> : <span className="suggest-ph" />}
               </Link>
               <QtyStepper
                 qty={row.qty || 1}

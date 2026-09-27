@@ -232,3 +232,25 @@ test('Desktop hold merges qty and setDesktopQty caps at stock', () => {
   setDesktopQty('7', 0);
   assert.equal(readDesktopHold().length, 0);
 });
+
+test('Desktop parks an expansion as its logo tile, not every card', () => {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)); },
+  };
+  clearDesktopHold();
+  const logo = '/card-images/expansions/logos/aquapolis.png';
+  assert.equal(addDesktopCards([{
+    id: 'expansion:aquapolis',
+    name: 'Aquapolis',
+    imageUrl: logo,
+    path: '/marketplace/sets/aquapolis',
+    setName: 'Aquapolis',
+  }]), 1);
+  const row = readDesktopHold()[0];
+  assert.equal(row.id, 'expansion:aquapolis');
+  assert.equal(row.name, 'Aquapolis');
+  assert.equal(row.imageUrl, logo);
+  clearDesktopHold();
+});

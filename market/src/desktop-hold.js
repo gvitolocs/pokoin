@@ -41,6 +41,10 @@ function holdImageUrl(card = {}) {
     || card.image_url
     || '',
   ).trim();
+  // Expansion logos / wordmarks / symbols are not leftover scans — keep them.
+  if (/\/expansions\/(?:logos|wordmarks|symbols)\//i.test(raw)) {
+    return raw;
+  }
   const owned = ownCatalogImage(withId, preferFullImage(raw) || raw);
   if (owned) {
     return homepageDerivativeUrl(owned) || owned;

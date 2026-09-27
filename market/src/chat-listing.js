@@ -483,6 +483,13 @@ function markCardDragging() {
   const root = typeof document !== 'undefined' ? document.documentElement : null;
   if (!root?.classList) return;
   root.classList.add('is-card-dragging');
+  // Desk title/set/artist call stopPropagation so window dragstart never
+  // fires — notify Chrome directly so Cart/Desktop still mount.
+  try {
+    window.dispatchEvent(new CustomEvent('pokoin-card-drag'));
+  } catch (_) {
+    /* jsdom */
+  }
   window.addEventListener('dragend', () => {
     root.classList.remove('is-card-dragging');
   }, { once: true, capture: true });
