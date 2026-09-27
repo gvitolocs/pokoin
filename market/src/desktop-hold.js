@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from 'react';
 import { gameBasename } from './game.js';
 import { printingIdentity } from './identity.js';
+import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from './image-urls.js';
 import { tilePricePkn } from './pkn.js';
 import { tcgEra } from './set-logos.js';
 
@@ -25,14 +26,58 @@ function notify() {
   }
 }
 
+function holdImageUrl(card = {}) {
+  const id = String(card.id || card.cardId || card.card_id || '').trim();
+  const withId = {
+    id,
+    name: card.name || card.cardName || '',
+    canonicalPath: card.path || card.canonicalPath || card.canonical_path || '',
+  };
+  const raw = String(
+    card.imageUrl
+    || card.gridImageUrl
+    || card.heroImageUrl
+    || card.image
+    || card.image_url
+    || '',
+  ).trim();
+  const owned = ownCatalogImage(withId, preferFullImage(raw) || raw);
+  if (owned) {
+    return homepageDerivativeUrl(owned) || owned;
+  }
+  return '';
+}
+
 export function readDesktopHold() {
   try {
     if (typeof localStorage === 'undefined') return cachedItems;
     const raw = localStorage.getItem(KEY) || '[]';
     if (raw === cachedRaw) return cachedItems;
     const parsed = JSON.parse(raw);
-    cachedItems = Array.isArray(parsed) ? parsed.filter((row) => row && row.id) : EMPTY;
+    const rows = Array.isArray(parsed) ? parsed.filter((row) => row && row.id) : EMPTY;
+    // Rewrite stale CardTrader preview_ URLs parked before ownCatalogImage (Eevee coin).
+    let dirty = false;
+    cachedItems = rows.map((row) => {
+      const imageUrl = holdImageUrl(row);
+      if (imageUrl && imageUrl !== row.imageUrl) {
+        dirty = true;
+        return { ...row, imageUrl };
+      }
+      if (!imageUrl && row.imageUrl) {
+        dirty = true;
+        return { ...row, imageUrl: '' };
+      }
+      return row;
+    });
     cachedRaw = raw;
+    if (dirty && cachedItems !== EMPTY) {
+      cachedRaw = JSON.stringify(cachedItems);
+      try {
+        localStorage.setItem(KEY, cachedRaw);
+      } catch (_) {
+        /* private mode */
+      }
+    }
     return cachedItems;
   } catch (_) {
     return cachedItems;
@@ -58,12 +103,28 @@ function defaultCardPath(id) {
   return `${base}/marketplace/en/cards/${id}`.replace(/\/{2,}/g, '/');
 }
 
+function eraForHold(card = {}, expansion = '') {
+  const eraRaw = String(
+    card.era
+    || tcgEra({ ...card, set: expansion || card.set || card.set_name || card.setName || card.expansion })
+    || '',
+  ).trim();
+  return eraRaw && eraRaw !== 'Other' ? eraRaw : '';
+}
+
 export function desktopHoldCard(card = {}) {
   const id = String(card.id || card.cardId || card.card_id || '').trim();
   if (!id) return null;
   const identity = printingIdentity(card);
-  const eraRaw = String(card.era || tcgEra(card) || '').trim();
-  const era = eraRaw && eraRaw !== 'Other' ? eraRaw : '';
+  const expansion = String(
+    identity.set
+    || card.expansion
+    || card.setName
+    || card.set
+    || card.set_name
+    || '',
+  );
+  const era = eraForHold(card, expansion);
   const price = tilePricePkn(card);
   const priced = price != null
     ? price
@@ -78,26 +139,17 @@ export function desktopHoldCard(card = {}) {
       || card.card_number
       || '',
     ),
-    expansion: String(
-      identity.set
-      || card.expansion
-      || card.setName
-      || card.set
-      || card.set_name
-      || '',
-    ),
+    expansion,
     era,
     artist: String(identity.artist || card.artist || card.illustrator || ''),
     rarity: String(identity.rarity || card.rarity || ''),
     pricePkn: priced != null && Number.isFinite(priced) ? priced : '',
-    imageUrl: String(
-      card.imageUrl
-      || card.gridImageUrl
-      || card.heroImageUrl
-      || card.image
-      || card.image_url
-      || '',
-    ),
+    imageUrl: holdImageUrl({
+      ...card,
+      id,
+      name: card.name || card.cardName,
+      path: card.path || card.canonicalPath || card.canonical_path,
+    }),
     path: String(
       card.path
       || card.canonicalPath
@@ -143,37 +195,23 @@ function csvEscape(value) {
   return text;
 }
 
-/** Spreadsheet of parked Desktop cards — catalog columns Giuseppe asked for. */
+/** @deprecated CSV export replaced by single-page A4 PDF (`desktop-hold-pdf.js`). */
 export function desktopHoldCsv(items = readDesktopHold()) {
   const rows = [['name', 'collector_number', 'expansion', 'era', 'artist', 'rarity', 'price_pkn']];
   for (const row of items || []) {
     if (!row?.id && !row?.name) continue;
+    const era = row.era || eraForHold(row, row.expansion || '');
     rows.push([
       row.name || '',
       row.collectorNumber || '',
       row.expansion || '',
-      row.era || '',
+      era,
       row.artist || '',
       row.rarity || '',
       row.pricePkn === '' || row.pricePkn == null ? '' : String(row.pricePkn),
     ]);
   }
   return `${rows.map((line) => line.map(csvEscape).join(',')).join('\n')}\n`;
-}
-
-export function downloadDesktopHoldCsv(items = readDesktopHold()) {
-  if (typeof document === 'undefined') return false;
-  const list = items || [];
-  if (!list.length) return false;
-  const stamp = new Date().toISOString().slice(0, 10);
-  const blob = new Blob([desktopHoldCsv(list)], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `pokoin-desktop-${stamp}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-  return true;
 }
 
 export function subscribeDesktopHold(listener) {

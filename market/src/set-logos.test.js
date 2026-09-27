@@ -51,6 +51,12 @@ test('black bolt is SV, not Black & White', () => {
   assert.equal(expansionEra({ slug: 'black-bolt', name: 'Black Bolt', nationality: 'western' }), 'Scarlet & Violet');
 });
 
+test('tcgEra reads setName and expansion aliases used by Desktop drag', () => {
+  assert.equal(tcgEra({ setName: '30th Celebration' }), 'Mega Evolution');
+  assert.equal(tcgEra({ expansion: '30th Celebration JP' }), 'Mega Evolution');
+  assert.equal(tcgEra({ name: 'Eevee', expansion: '30th Celebration' }), 'Mega Evolution');
+});
+
 test('printings group by TCG era, JP with EN, Original before EX', () => {
   assert.equal(tcgEra({ set: 'Ascended Heroes', nationality: 'western' }), 'Mega Evolution');
   assert.equal(tcgEra({ set: 'Mega Brave', nationality: 'japanese' }), 'Mega Evolution');

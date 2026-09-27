@@ -128,6 +128,17 @@ test('Team Up Charizard 397269 busts the pokemontcg.io leftover after CardTrader
   );
 });
 
+test('30th Celebration WebP-as-jpg leftovers bust after real JPEG re-encode', () => {
+  assert.equal(
+    preferFullImage('https://cdn.pokoin.com/406777_eevee.jpg'),
+    '/card-images/406777_eevee.jpg?v=wj1',
+  );
+  assert.equal(
+    homepageDerivativeUrl('/card-images/406774_meowth.jpg'),
+    '/card-images/406774_meowth_homepage.webp?v=wj1',
+  );
+});
+
 test('Base Set leftovers bust 1st Edition / shadowless scans after unlimited reimport', () => {
   assert.equal(
     preferFullImage('https://cdn.pokoin.com/111151_charizard-holo-rare-4-102-base-set.jpg'),

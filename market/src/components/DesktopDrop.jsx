@@ -6,10 +6,10 @@ import { cartDropThumb } from '../cart-drop-size.js';
 import {
   addDesktopCards,
   clearDesktopHold,
-  downloadDesktopHoldCsv,
   removeDesktopCard,
   useDesktopHold,
 } from '../desktop-hold.js';
+import { downloadDesktopHoldPdf } from '../desktop-hold-pdf.js';
 import { bundleOf, LISTING_DRAG_TYPE, readListingDrag } from '../chat-listing.js';
 import { fetchSpeciesCards } from '../species-cards.js';
 import CardArt from './CardArt.jsx';
@@ -18,6 +18,7 @@ export default function DesktopDrop({ onAddToCart }) {
   const items = useDesktopHold();
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [note, setNote] = useState('');
   const thumb = cartDropThumb(items.length);
 
@@ -76,6 +77,22 @@ export default function DesktopDrop({ onAddToCart }) {
     }
   }
 
+  async function exportPdf() {
+    if (!items.length || exporting) return;
+    setExporting(true);
+    setNote('Building PDF…');
+    try {
+      const ok = await downloadDesktopHoldPdf(items);
+      setNote(ok
+        ? `Exported ${items.length} card${items.length === 1 ? '' : 's'} as PDF`
+        : 'Could not export PDF');
+    } catch (_) {
+      setNote('Could not export PDF');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div
       className={`cart-drop desktop-drop${over ? ' is-over' : ''}`}
@@ -115,14 +132,10 @@ export default function DesktopDrop({ onAddToCart }) {
         <button
           type="button"
           className="btn ghost"
-          disabled={!items.length}
-          onClick={() => {
-            if (downloadDesktopHoldCsv(items)) {
-              setNote(`Exported ${items.length} card${items.length === 1 ? '' : 's'}`);
-            }
-          }}
+          disabled={!items.length || exporting}
+          onClick={() => void exportPdf()}
         >
-          Export
+          {exporting ? 'Exporting…' : 'Export PDF'}
         </button>
         <button
           type="button"
@@ -143,7 +156,7 @@ export default function DesktopDrop({ onAddToCart }) {
               style={{ width: thumb, height: Math.round(thumb * 88 / 63) }}
             >
               <Link to={row.path || '/marketplace'} title={row.name}>
-                {row.imageUrl ? <CardArt src={row.imageUrl} alt="" full /> : <span className="suggest-ph" />}
+                {row.imageUrl ? <CardArt src={row.imageUrl} alt="" card={row} /> : <span className="suggest-ph" />}
               </Link>
               <button
                 type="button"

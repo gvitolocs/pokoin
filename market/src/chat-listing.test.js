@@ -190,6 +190,18 @@ test('card drag imageUrl prefers the homepage derivative already on rails', () =
   assert.match(row.imageUrl, /_homepage\.webp$/);
 });
 
+test('card drag rewrites CardTrader preview_ to leftover homepage (Eevee desk)', () => {
+  const row = cardReference({
+    id: '813554',
+    name: 'Eevee',
+    set: '30th Celebration',
+    imageUrl: 'https://cardtrader.com/uploads/blueprints/image/406777/preview_406777-eevee-116-128-30th-celebration.webp',
+    canonicalPath: '/marketplace/en/cards/813554/card-eevee-116-128-30th-celebration',
+  });
+  assert.match(row.imageUrl, /\/card-images\/406777_eevee_homepage\.webp/);
+  assert.doesNotMatch(row.imageUrl, /cardtrader/i);
+});
+
 function pileDragDocument() {
   const kids = [];
   const root = {

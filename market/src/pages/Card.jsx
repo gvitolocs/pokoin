@@ -2171,7 +2171,23 @@ export default function Card() {
                 track(Action.zoomArt, card);
               }}
             >
-              {art ? <CardArt src={art} alt={cardImageAlt(card)} fetchPriority="high" full /> : <span className="tile-ph" />}
+              {art ? (
+                <CardArt
+                  src={art}
+                  card={card}
+                  alt={cardImageAlt(card)}
+                  fetchPriority="high"
+                  full
+                  onError={() => {
+                    console.warn('[pokoin:desk-art] hero failed', {
+                      cardId: card?.id,
+                      art,
+                      imageUrl: card?.imageUrl,
+                      heroImageUrl: card?.heroImageUrl,
+                    });
+                  }}
+                />
+              ) : <span className="tile-ph" />}
             </button>
             {(setShortcuts.length || showMoreVersions) ? (
               <div className="set-link tight version-links">

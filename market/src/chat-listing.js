@@ -1,5 +1,5 @@
 import { displayName, printingIdentity } from './identity.js';
-import { catalogImageId, homepageDerivativeUrl, preferFullImage } from './image-urls.js';
+import { catalogImageId, homepageDerivativeUrl, ownCatalogImage, preferFullImage } from './image-urls.js';
 import { leftoverCdnId } from './card-stub.js';
 import { sellerHandle } from './listing-meta.js';
 import { tilePricePkn } from './pkn.js';
@@ -32,8 +32,13 @@ function cardImage(card, offer) {
     || card?.homepageImageUrl
     || '',
   ).trim();
-  // Prefer the homepage derivative — same bitmap rails/tiles already painted.
-  return homepageDerivativeUrl(raw) || preferFullImage(raw) || raw;
+  // Drop CardTrader preview_ / foreign hosts; keep leftover ct_id (Eevee 813554).
+  const owned = ownCatalogImage(card || {}, preferFullImage(raw) || raw);
+  if (owned) {
+    // Prefer the homepage derivative — same bitmap rails/tiles already painted.
+    return homepageDerivativeUrl(owned) || owned;
+  }
+  return homepageDerivativeUrl(raw) || preferFullImage(raw) || '';
 }
 
 function offerCopies(offer) {

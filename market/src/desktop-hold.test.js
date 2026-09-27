@@ -57,9 +57,66 @@ test('desktopHoldCard shapes a catalog row', () => {
       artist: 'Nez',
       rarity: 'Elite',
       pricePkn: 42,
-      imageUrl: '/card-images/sorcery/x.jpg',
+      imageUrl: '/card-images/sorcery/x_homepage.webp',
       path: '/marketplace/en/cards/825230',
     },
+  );
+});
+
+test('desktopHoldCard rewrites CardTrader preview_ to leftover homepage', () => {
+  const row = desktopHoldCard({
+    id: '813554',
+    name: 'Eevee',
+    expansion: '30th Celebration',
+    number: '116/128',
+    imageUrl: 'https://cardtrader.com/uploads/blueprints/image/406777/preview_406777-eevee-116-128-30th-celebration.webp',
+    canonicalPath: '/marketplace/en/cards/813554/card-eevee-116-128-30th-celebration',
+  });
+  assert.match(row.imageUrl, /\/card-images\/406777_eevee_homepage\.webp/);
+  assert.match(row.imageUrl, /\?v=wj1/);
+  assert.equal(row.era, 'Mega Evolution');
+});
+
+test('readDesktopHold rewrites parked CardTrader preview_ URLs', () => {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)); },
+  };
+  clearDesktopHold();
+  store.set('pokoin.desktopHold', JSON.stringify([{
+    id: '813554',
+    name: 'Eevee',
+    expansion: '30th Celebration',
+    era: '',
+    imageUrl: 'https://cardtrader.com/uploads/blueprints/image/406777/preview_406777-eevee.webp',
+    path: '/marketplace/en/cards/813554/card-eevee-116-128-30th-celebration',
+  }]));
+  const rows = readDesktopHold();
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].imageUrl, /\/card-images\/406777_eevee_homepage\.webp/);
+  assert.match(rows[0].imageUrl, /\?v=wj1/);
+});
+
+test('desktopHoldCard derives Mega Evolution era from expansion/setName aliases', () => {
+  assert.equal(
+    desktopHoldCard({
+      id: '813554',
+      name: 'Eevee',
+      expansion: '30th Celebration',
+      number: '116/128',
+      artist: 'Wintr Wandr',
+    }).era,
+    'Mega Evolution',
+  );
+  assert.equal(
+    desktopHoldCard({
+      id: '2',
+      name: 'Hakamo-o',
+      setName: '30th Celebration JP',
+      collectorNumber: '090/103',
+    }).era,
+    'Mega Evolution',
   );
 });
 
@@ -88,6 +145,24 @@ test('desktopHoldCsv lists parked cards', () => {
       },
     ]),
     'name,collector_number,expansion,era,artist,rarity,price_pkn\n"A, rare",1/10,Base,Original,Ken,Holo,18\nB,,,,,,\n',
+  );
+});
+
+test('desktopHoldCsv backfills blank era from expansion', () => {
+  assert.equal(
+    desktopHoldCsv([
+      {
+        id: '813554',
+        name: 'Eevee',
+        collectorNumber: '116/128',
+        expansion: '30th Celebration',
+        era: '',
+        artist: 'Wintr Wandr',
+        rarity: '',
+        pricePkn: 24,
+      },
+    ]),
+    'name,collector_number,expansion,era,artist,rarity,price_pkn\nEevee,116/128,30th Celebration,Mega Evolution,Wintr Wandr,,24\n',
   );
 });
 
@@ -121,9 +196,10 @@ test('Chrome mounts Desktop on the left, opposite the cart', () => {
   assert.match(css, /\.desktop-drop\s*\{[^}]*left:\s*0/s);
   assert.match(drop, /Clear desktop/);
   assert.match(drop, /Add to cart/);
-  assert.match(drop, /Export/);
-  assert.match(drop, /downloadDesktopHoldCsv/);
+  assert.match(drop, /Export PDF/);
+  assert.match(drop, /downloadDesktopHoldPdf/);
   assert.match(drop, /desktop-drop-x/);
   assert.match(drop, /Draw the shape of your next collection/);
   assert.doesNotMatch(drop, /Drop cards you are unsure about/);
+  assert.doesNotMatch(drop, /downloadDesktopHoldCsv/);
 });
