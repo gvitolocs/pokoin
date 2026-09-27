@@ -95,6 +95,7 @@ test('CardTrader status payload never exposes encrypted secrets', () => {
       encryptedToken: { ciphertext: 'hidden' },
       encryptedSharedSecret: { ciphertext: 'hidden-too' },
       metadata: { user: { id: 'ct-user' } },
+      webhookRegistration: { ok: true, url: 'https://api.pokoin.com/hook' },
       connectedAt: { toDate: () => new Date('2026-05-22T08:00:00.000Z') },
     }),
   });
@@ -104,6 +105,7 @@ test('CardTrader status payload never exposes encrypted secrets', () => {
   assert.equal(status.encryptedToken, undefined);
   assert.equal(status.encryptedSharedSecret, undefined);
   assert.equal(status.connectedAt, '2026-05-22T08:00:00.000Z');
+  assert.deepEqual(status.webhook, { ok: true, url: 'https://api.pokoin.com/hook' });
 });
 
 test('CardTrader store helper writes encrypted integration fields only', async () => {
@@ -365,7 +367,18 @@ test('CardTrader webhook URL registration uses seller uid', async (t) => {
   const original = process.env.CARDTRADER_WEBHOOK_BASE_URL;
   process.env.CARDTRADER_WEBHOOK_BASE_URL = 'https://api.pokoin.com';
   try {
-    await registerSellerWebhook('ct_token', 'uid');
+    const writes = [];
+    await registerSellerWebhook({
+      admin: { firestore: { FieldValue: { serverTimestamp: () => 'now' } } },
+      firestore: {
+        collection: () => ({
+          doc: () => ({ set: async (payload) => writes.push(payload) }),
+        }),
+      },
+      token: 'ct_token',
+      uid: 'uid',
+    });
+    assert.equal(writes[0].webhookRegistration.ok, true);
   } finally {
     if (original === undefined) delete process.env.CARDTRADER_WEBHOOK_BASE_URL;
     else process.env.CARDTRADER_WEBHOOK_BASE_URL = original;

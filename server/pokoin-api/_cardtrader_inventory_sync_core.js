@@ -208,6 +208,20 @@ function isCtLinkedSource(sourceListingId) {
   return cleanText(sourceListingId, 160).startsWith(CT_PREFIX);
 }
 
+/** Avoid rewriting every product link during frequent complete-export safety syncs. */
+function productLinkNeedsRefresh(link, {
+  listingId,
+  blueprintId = '',
+  quantity = 0,
+  missingFromCt = false,
+} = {}) {
+  if (!link) return true;
+  return String(link.listing_id || '') !== String(listingId || '')
+    || cleanText(link.blueprint_id, 80) !== cleanText(blueprintId, 80)
+    || Number(link.last_ct_quantity) !== Number(quantity)
+    || (link.missing_from_ct === true || link.missing_from_ct === 't') !== (missingFromCt === true);
+}
+
 /**
  * Safety gate: incomplete/failed exports must never trigger disappearance.
  * @returns {{ allowDestructive: boolean, reason: string }}
@@ -528,6 +542,7 @@ module.exports = {
   parseCtProductId,
   parsePokoinListingId,
   planInventoryReconcile,
+  productLinkNeedsRefresh,
   pknFromProduct,
   publicCardIdFromBlueprint,
   resolveProductAttachment,

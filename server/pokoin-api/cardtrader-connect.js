@@ -1,11 +1,11 @@
 const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
 const { parseEncryptionKey } = require('./_cardtrader_crypto');
 const {
-  cardTraderWebhookUrlForUid,
   cleanToken,
   updateAppWebhookUrl,
   validateCardTraderToken,
 } = require('./_cardtrader_client');
+const { registerSellerWebhook } = require('./_cardtrader_webhook_registration');
 const {
   decryptIntegrationToken,
   disconnectIntegration,
@@ -17,12 +17,6 @@ const { enqueueCardTraderInventorySync } = require('./_cardtrader_inventory_asyn
 
 function setNoStore(res) {
   res.setHeader('Cache-Control', 'no-store');
-}
-
-async function registerSellerWebhook(token, uid) {
-  const webhookUrl = cardTraderWebhookUrlForUid(uid);
-  if (!webhookUrl) return null;
-  return updateAppWebhookUrl(token, webhookUrl);
 }
 
 async function clearSellerWebhook(token) {
@@ -48,7 +42,7 @@ async function connect(req, decoded, admin, firestore) {
     info,
   });
   try {
-    await registerSellerWebhook(token, decoded.uid);
+    await registerSellerWebhook({ admin, firestore, token, uid: decoded.uid });
   } catch (error) {
     console.error('cardtrader webhook registration failed', {
       uid: decoded.uid,

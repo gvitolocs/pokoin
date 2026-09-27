@@ -1,18 +1,26 @@
-const crypto = require('node:crypto');
 const { getFirebaseAdmin } = require('../server/_firebase');
-const { decryptIntegrationSharedSecret } = require('./_cardtrader_integration');
+const {
+  decryptIntegrationSharedSecret,
+  decryptIntegrationToken,
+} = require('./_cardtrader_integration');
 const { marketplaceWriteQuery, marketplaceQuery } = require('../server/_marketplace_db');
 const {
   ctSourceListingId,
   parsePokoinListingId,
 } = require('./_cardtrader_seller_listings');
 const { decrementSellerOwnershipForSale } = require('./_user_card_collection');
+const { enqueueCardTraderInventorySync } = require('./_cardtrader_inventory_async');
+const {
+  cleanText,
+  eventDocId,
+  itemProductId,
+  itemUserDataField,
+  orderItemId,
+  shouldDecrementStock,
+  verifyWebhookSignature,
+} = require('./_cardtrader_webhook_core');
 
 const EVENTS_COLLECTION = 'cardtrader_webhook_events';
-
-function cleanText(value, maxLength = 240) {
-  return String(value || '').trim().slice(0, maxLength);
-}
 
 function rawBodyBuffer(req) {
   if (Buffer.isBuffer(req.rawBody)) return req.rawBody;
@@ -21,45 +29,6 @@ function rawBodyBuffer(req) {
     return Buffer.from(JSON.stringify(req.body), 'utf8');
   }
   return Buffer.alloc(0);
-}
-
-function verifyWebhookSignature(rawBody, signatureHeader, sharedSecret) {
-  const expected = crypto
-    .createHmac('sha256', String(sharedSecret || ''))
-    .update(rawBody)
-    .digest('base64');
-  const provided = String(signatureHeader || '').trim();
-  if (!provided || !expected) return false;
-  const a = Buffer.from(expected);
-  const b = Buffer.from(provided);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
-}
-
-/**
- * CardTrader How-to-sell stock gate:
- * hub_pending + via_cardtrader_zero → yes (pre-sale: order.id == item.hub_pending_order_id)
- * paid + !via_cardtrader_zero → yes
- * else → no
- */
-function shouldDecrementStock(order = {}, item = {}) {
-  const state = cleanText(order.state, 40).toLowerCase();
-  const viaZero = order.via_cardtrader_zero === true;
-  if (viaZero && state === 'hub_pending') {
-    const hubPendingOrderId = item.hub_pending_order_id ?? item.hubPendingOrderId;
-    if (hubPendingOrderId == null || hubPendingOrderId === '') {
-      return true;
-    }
-    return String(hubPendingOrderId) === String(order.id);
-  }
-  if (!viaZero && state === 'paid') {
-    return true;
-  }
-  return false;
-}
-
-function eventDocId(uid, orderId, orderItemId) {
-  return `${cleanText(uid, 80)}_${cleanText(orderId, 40)}_${cleanText(orderItemId, 40)}`;
 }
 
 async function claimWebhookEvent(firestore, { uid, orderId, orderItemId, cause }) {
@@ -82,8 +51,13 @@ async function claimWebhookEvent(firestore, { uid, orderId, orderItemId, cause }
   }
 }
 
+async function releaseWebhookEvent(firestore, id) {
+  if (!id) return;
+  await firestore.collection(EVENTS_COLLECTION).doc(id).delete();
+}
+
 async function findLinkedListing(sellerUid, item = {}) {
-  const listingId = parsePokoinListingId(item.user_data_field || item.userDataField);
+  const listingId = parsePokoinListingId(itemUserDataField(item));
   if (listingId) {
     const byId = await marketplaceQuery(
       `
@@ -96,7 +70,7 @@ async function findLinkedListing(sellerUid, item = {}) {
     );
     if (byId.rows[0]) return byId.rows[0];
   }
-  const productId = item.product_id ?? item.productId;
+  const productId = itemProductId(item);
   if (productId == null || productId === '') return null;
   const sourceId = ctSourceListingId(productId);
   const bySource = await marketplaceQuery(
@@ -159,29 +133,37 @@ async function handleOrderPayload({ admin, firestore, uid, cause, order }) {
   const items = Array.isArray(order.order_items) ? order.order_items : [];
   const results = [];
   for (const item of items) {
+    const currentOrderItemId = orderItemId(item);
     if (!shouldDecrementStock(order, item)) {
-      results.push({ orderItemId: item.id, skipped: true, reason: 'not_sale_state' });
+      results.push({ orderItemId: currentOrderItemId, skipped: true, reason: 'not_sale_state' });
+      continue;
+    }
+    if (!currentOrderItemId) {
+      results.push({ orderItemId: '', skipped: true, reason: 'missing_order_item_id' });
+      continue;
+    }
+    // Resolve before claiming. A not-yet-linked item must remain retryable and
+    // the complete-export fallback will reconcile it without double decrement.
+    const listing = await findLinkedListing(uid, item);
+    if (!listing) {
+      results.push({ orderItemId: currentOrderItemId, skipped: true, reason: 'no_linked_listing' });
       continue;
     }
     const claim = await claimWebhookEvent(firestore, {
       uid,
       orderId: order.id,
-      orderItemId: item.id,
+      orderItemId: currentOrderItemId,
       cause,
     });
     if (!claim.claimed) {
-      results.push({ orderItemId: item.id, skipped: true, reason: 'already_processed' });
-      continue;
-    }
-    const listing = await findLinkedListing(uid, item);
-    if (!listing) {
-      results.push({ orderItemId: item.id, skipped: true, reason: 'no_linked_listing' });
+      results.push({ orderItemId: currentOrderItemId, skipped: true, reason: 'already_processed' });
       continue;
     }
     const qty = Math.max(1, Math.trunc(Number(item.quantity) || 1));
     const updated = await decrementPokoinListing(listing, qty);
     if (!updated) {
-      results.push({ orderItemId: item.id, ok: false, reason: 'decrement_failed', listingId: listing.id });
+      await releaseWebhookEvent(firestore, claim.id).catch(() => {});
+      results.push({ orderItemId: currentOrderItemId, ok: false, reason: 'decrement_failed', listingId: listing.id });
       continue;
     }
     await marketplaceQuery(
@@ -207,7 +189,7 @@ async function handleOrderPayload({ admin, firestore, uid, cause, order }) {
       });
     }
     results.push({
-      orderItemId: item.id,
+      orderItemId: currentOrderItemId,
       ok: true,
       listingId: updated.id,
       quantity: qty,
@@ -253,6 +235,24 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, skipped: true, reason: 'buyer_order' });
     }
     const results = await handleOrderPayload({ admin, firestore, uid, cause, order });
+    if (results.some((row) => row.reason === 'no_linked_listing' || row.reason === 'decrement_failed')) {
+      try {
+        const token = await decryptIntegrationToken(firestore, uid);
+        enqueueCardTraderInventorySync({ firestore, uid, sellerName: 'Pokoin seller', token });
+      } catch (error) {
+        console.error('cardtrader-webhook fallback sync enqueue failed', { uid, message: error.message });
+      }
+    }
+    console.log('cardtrader-webhook processed', {
+      uid,
+      cause,
+      orderId: cleanText(order.id, 80),
+      items: Array.isArray(order.order_items) ? order.order_items.length : 0,
+      updated: results.filter((row) => row.ok === true).length,
+      skipped: results.filter((row) => row.skipped === true).length,
+      failed: results.filter((row) => row.ok === false).length,
+      reasons: [...new Set(results.map((row) => row.reason).filter(Boolean))],
+    });
     return res.status(200).json({ ok: true, results });
   } catch (error) {
     console.error('cardtrader-webhook failed', {
@@ -270,6 +270,11 @@ module.exports._test = {
   claimWebhookEvent,
   eventDocId,
   findLinkedListing,
+  handleOrderPayload,
+  itemProductId,
+  itemUserDataField,
+  orderItemId,
+  releaseWebhookEvent,
   shouldDecrementStock,
   verifyWebhookSignature,
 };
