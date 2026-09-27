@@ -16,7 +16,6 @@ import {
   artworkVersionLabel,
   artworkVersionShortLabel,
   draftArtworkBucket,
-  languagesForPrint,
   listingLanguageForPrint,
   preferArtworkPrinting,
   preferDraftArtwork,
@@ -572,15 +571,14 @@ export default function ScanDesk() {
           || '',
         nationality,
         imageUrl: fromVersions?.image_url || fromVersions?.imageUrl || targets[0].imageUrl || '',
+        // After a version remap, align listing lang to the new print region.
+        // Language-only edits keep the chosen code — expansion remaps separately.
         language: listingLanguageForPrint(nationality, preferredLang),
         reviewed: true,
       });
       if (!Object.prototype.hasOwnProperty.call(changes, 'language')) {
         changes.language = optimistic.language;
       }
-    } else if (changes.language && targets[0]?.nationality) {
-      optimistic.language = listingLanguageForPrint(targets[0].nationality, changes.language);
-      changes.language = optimistic.language;
     }
     setPending((current) => {
       const next = { ...current };
@@ -1701,13 +1699,11 @@ function thumbFor(cardId, name, imageUrl) {
   }
 }
 
-function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick, onLanguage }) {
+function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick }) {
   const [printings, setPrintings] = useState(null);
   const remapTried = useRef(new Set());
   const onPickRef = useRef(onPick);
-  const onLanguageRef = useRef(onLanguage);
   onPickRef.current = onPick;
-  onLanguageRef.current = onLanguage;
   // Batch defaults language is the region intent (EN → western sibling).
   const listingLanguage = preferredLanguage || row.language || 'EN';
 
@@ -1731,14 +1727,10 @@ function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick, onLangua
         const nextId = String(preferred?.id || preferred?.card_id || '');
         if (nextId && nextId !== cardId) {
           onPickRef.current(nextId);
-          return;
         }
       }
-      const current = rows.find((p) => String(p.id || p.card_id) === cardId);
-      const nationality = String(current?.nationality || row.nationality || '').toLowerCase();
-      if (!nationality) return;
-      const nextLang = listingLanguageForPrint(nationality, listingLanguage);
-      if (nextLang !== row.language) onLanguageRef.current?.(nextLang);
+      // Do not coerce row.language here — Scan Desk keeps the full LANG list;
+      // picking JP/KO remaps the expansion; ZH/ZHT leave the print (D000065).
     });
     return () => { cancelled = true; };
   }, [row.cardId, row.id, row.nationality, row.language, closed, listingLanguage]);
@@ -1848,11 +1840,9 @@ function QueueRow({
   const tone = row.status === 'submitted' ? 'ok' : problem === 'no_printing' ? 'bad' : problem ? 'warn' : 'ok';
   const showCandidates = !closed && (row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed;
   const unidentified = !closed && !row.cardId;
-  const allowedLangs = languagesForPrint(row.nationality, LANGUAGES);
-  const langValue = allowedLangs.includes(row.language)
-    ? row.language
-    : listingLanguageForPrint(row.nationality, row.language);
-  const langWarn = row.nationality && row.language !== langValue;
+  // Full LANG list — expansion remaps when the language implies another print.
+  // Card desk still restricts via languagesForNationality.
+  const langValue = LANGUAGES.includes(row.language) ? row.language : (row.language || 'EN');
   const thumbArt = thumbFor(row.cardId, row.cardName, row.imageUrl);
   const thumb = thumbArt.thumb;
   const zoomSrc = thumbArt.hero || thumbArt.thumb;
@@ -1905,21 +1895,20 @@ function QueueRow({
           closed={closed}
           preferredLanguage={remapLang}
           onPick={onPick}
-          onLanguage={(language) => onPatch({ language })}
         />
         {showCandidates ? (
           <CandidateAlts row={row} preferredLanguage={remapLang} onPick={onPick} />
         ) : null}
         {replacing && !unidentified ? <ReplacePrinting onPick={(id) => { onPick(id); onReplaceDone(); }} onClose={onReplaceDone} seed={row.cardName} /> : null}
       </span>
-      <span className={`c-lang${langWarn ? ' warn' : ''}`} title={langWarn ? `Not a ${row.nationality || 'this'} print language` : ''}>
+      <span className="c-lang">
         {closed ? langValue : (
           <select
             value={langValue}
             onChange={(e) => onPatch({ language: e.target.value })}
             tabIndex={-1}
           >
-            {(allowedLangs.length ? allowedLangs : [langValue]).map((code) => (
+            {(LANGUAGES.includes(langValue) ? LANGUAGES : [langValue, ...LANGUAGES]).map((code) => (
               <option key={code} value={code}>{code}</option>
             ))}
           </select>

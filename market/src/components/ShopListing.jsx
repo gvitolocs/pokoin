@@ -114,6 +114,9 @@ export default function ShopListingRow({
               id: row.cardId || row.card_id,
               name: row.cardName || row.name,
               canonicalPath: row.canonicalPath || row.canonical_path,
+              imageUrl: row.cardImageUrl || row.imageUrl || row.image_url,
+              homepageImageUrl: row.homepageImageUrl || row.homepage_image_url,
+              gridImageUrl: row.gridImageUrl || row.grid_image_url,
             },
           }));
           writeListingDrag(event, {
@@ -166,13 +169,13 @@ export default function ShopListingRow({
         </span>
       )}
       <span className="shop-facets">
-        <span className={`shop-cond is-${tone}`}>{cond}</span>
-        <Flag flag={language} className="shop-flag shop-flag-lang" />
         <span className="shop-txt">
           {tags.map((tag) => (
             <em key={tag} className={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>
           ))}
         </span>
+        <span className={`shop-cond is-${tone}`}>{cond}</span>
+        <Flag flag={language} className="shop-flag shop-flag-lang" />
       </span>
       <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>
       {!mine ? (

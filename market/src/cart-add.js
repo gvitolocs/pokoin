@@ -4,7 +4,7 @@ import { pickCartOffer } from './cart-offer.js';
 
 /** Same cheapest-listing cascade as dropping one card on the cart, for a selected group. */
 export async function addCatalogCards(cards, onAdd) {
-  const queue = (cards || []).filter((card) => card?.id || card?.cardId).slice(0, 80);
+  const queue = (cards || []).filter((card) => card?.id || card?.cardId).slice(0, 400);
   if (!queue.length || typeof onAdd !== 'function') return 0;
   let cursor = 0;
   let added = 0;

@@ -70,7 +70,7 @@ test('a listing reference never keeps a CardTrader image URL', () => {
       canonicalPath: '/marketplace/en/cards/741644/card-buddy-buddy-poffin-184-217-ascended-heroes',
     },
   });
-  assert.equal(row.imageUrl, '/card-images/370822_buddy-buddy-poffin.jpg');
+  assert.equal(row.imageUrl, '/card-images/370822_buddy-buddy-poffin_homepage.webp');
 });
 
 test('chat tags keep one copy of a listing and cap at four', () => {
@@ -160,59 +160,49 @@ test('dragging a Pokémon name keeps every printing of that species', () => {
   ], [{ username: 'redshakkio' }]), 2);
 });
 
-test('a tainted artist cover still drags at a fixed size', () => {
+test('an artist cover drags as a warm pile of one, not a network ghost', () => {
   let dragged = null;
-  globalThis.document = {
-    createElement: (tag) => {
-      const el = {
-        tagName: tag,
-        width: 0,
-        height: 0,
-        style: {},
-        src: '',
-        alt: '',
-        draggable: false,
-        setAttribute() {},
-        getAttribute() { return el.src; },
-      };
-      if (tag === 'canvas') {
-        el.getContext = () => ({
-          setTransform() {},
-          clearRect() {},
-          save() {},
-          beginPath() {},
-          rect() {},
-          clip() {},
-          fillRect() {},
-          restore() {},
-          roundRect() {},
-          drawImage() {},
-          getImageData() { throw new Error('tainted'); },
-        });
-      }
-      return el;
-    },
-    body: { appendChild() {} },
-  };
-  const huge = {
+  const { doc, root, kids } = pileDragDocument();
+  globalThis.document = doc;
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 1 };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  const warm = {
     nodeType: 1,
     tagName: 'IMG',
-    naturalWidth: 4000,
-    naturalHeight: 2800,
-    src: 'https://cdn.pokoin.com/cover.jpg',
-    currentSrc: 'https://cdn.pokoin.com/cover.jpg',
+    complete: true,
+    naturalWidth: 400,
+    naturalHeight: 280,
+    src: '/card-images/expansions/logos/black-bolt.png',
+    currentSrc: '/card-images/expansions/logos/black-bolt.png',
   };
   writeListingDrag({
-    currentTarget: huge,
+    clientX: 20,
+    clientY: 30,
+    currentTarget: warm,
     dataTransfer: {
       setData() {},
-      setDragImage(el) { dragged = el; },
+      setDragImage(el, x, y) { dragged = { el, x, y }; },
     },
-  }, { cardName: 'Ken Sugimori', kind: 'artist', imageUrl: huge.src });
-  assert.equal(dragged.tagName, 'img');
-  assert.equal(dragged.width, CARD_DRAG_WIDTH);
-  assert.equal(dragged.height, CARD_DRAG_HEIGHT);
-  assert.notEqual(dragged, huge);
+  }, { cardName: 'Ken Sugimori', kind: 'artist', imageUrl: warm.src });
+  assert.equal(dragged.el.width, 1);
+  assert.equal(dragged.x, 0);
+  assert.equal(root.className, 'drag-stack');
+  assert.equal(kids.length, 1);
+  assert.equal(kids[0].tagName, 'CANVAS');
+  // Exact pixel copy of the warm logo (natural size), CSS box is CARD_DRAG_*.
+  assert.equal(kids[0].width, 400);
+  assert.equal(kids[0].height, 280);
+  assert.match(String(kids[0].style?.cssText || ''), /width:240px/);
+});
+
+test('card drag imageUrl prefers the homepage derivative already on rails', () => {
+  const row = cardReference({
+    id: '9',
+    name: 'Meowth',
+    imageUrl: '/card-images/123_meowth.jpg',
+  });
+  assert.match(row.imageUrl, /_homepage\.webp$/);
 });
 
 function pileDragDocument() {
@@ -227,12 +217,24 @@ function pileDragDocument() {
   const doc = {
     createElement: (tag) => {
       if (tag === 'canvas') {
-        const blank = { width: 1, height: 1, isConnected: false, style: {} };
+        const blank = {
+          tagName: 'CANVAS',
+          width: 1,
+          height: 1,
+          isConnected: false,
+          style: {},
+          setAttribute() {},
+          getContext: () => ({
+            fillStyle: '',
+            fillRect() {},
+            drawImage() {},
+          }),
+        };
         blank.ownerDocument = doc;
         return blank;
       }
       if (tag === 'div') return root;
-      if (tag === 'img') return { style: {}, alt: '', draggable: false, src: '' };
+      if (tag === 'img') return { tagName: 'IMG', style: {}, alt: '', draggable: false, src: '' };
       return { style: {} };
     },
     body: {
@@ -240,6 +242,7 @@ function pileDragDocument() {
         if (node) node.isConnected = true;
       },
     },
+    images: [],
     addEventListener() {},
     removeEventListener() {},
   };
@@ -271,7 +274,126 @@ test('dragging a shop row uses a pile ghost, including a single card', () => {
   assert.equal(dragged.y, 0);
   assert.equal(root.className, 'drag-stack');
   assert.equal(kids.length, 1);
-  assert.equal(kids[0].src, '/card.jpg');
+  assert.equal(kids[0].tagName, 'CANVAS');
+  assert.equal(kids[0].width, CARD_DRAG_WIDTH);
+  assert.match(String(kids[0].style?.cssText || ''), /position:fixed/);
+});
+
+test('drag pile canvas copies homepage pixels 1:1 (no DPR resample)', () => {
+  const { doc, root, kids } = pileDragDocument();
+  globalThis.document = doc;
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 2 };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  writeListingDrag({
+    clientX: 40,
+    clientY: 60,
+    currentTarget: {
+      nodeType: 1,
+      tagName: 'DIV',
+      querySelector: () => ({
+        complete: true,
+        naturalWidth: 240,
+        naturalHeight: 335,
+        src: '/card-images/1_x_homepage.webp',
+        currentSrc: '/card-images/1_x_homepage.webp',
+      }),
+    },
+    dataTransfer: { setData() {}, setDragImage() {} },
+  }, {
+    kind: 'card',
+    cardName: 'Meowth',
+    imageUrl: '/card-images/1_x_homepage.webp',
+  });
+  assert.equal(root.className, 'drag-stack');
+  assert.equal(kids[0].tagName, 'CANVAS');
+  // Backing store matches the warm homepage natural size — not CARD*dpr.
+  assert.equal(kids[0].width, 240);
+  assert.equal(kids[0].height, 335);
+  assert.match(String(kids[0].style?.cssText || ''), /width:240px/);
+  assert.match(String(kids[0].style?.cssText || ''), /height:335px/);
+});
+
+test('multi-select pile paints each card from its warm tile by data-card-id', () => {
+  const { doc, root, kids } = pileDragDocument();
+  const warmA = {
+    complete: true,
+    naturalWidth: 240,
+    naturalHeight: 335,
+    src: '/card-images/100_a_homepage.webp',
+    currentSrc: '/card-images/100_a_homepage.webp',
+    classList: { contains: () => false },
+  };
+  const warmB = {
+    complete: true,
+    naturalWidth: 240,
+    naturalHeight: 335,
+    src: '/card-images/200_b_homepage.webp',
+    currentSrc: '/card-images/200_b_homepage.webp',
+    classList: { contains: () => false },
+  };
+  const tiles = {
+    a: { querySelector: () => warmA },
+    b: { querySelector: () => warmB },
+  };
+  doc.querySelector = (sel) => {
+    const match = String(sel).match(/data-card-id="(\d+)"/);
+    return match ? tiles[match[1] === '10' ? 'a' : match[1] === '20' ? 'b' : ''] || null : null;
+  };
+  globalThis.document = doc;
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 1 };
+  globalThis.CSS = { escape: (value) => String(value) };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  writeListingDrag({
+    clientX: 40,
+    clientY: 60,
+    currentTarget: {
+      nodeType: 1,
+      tagName: 'A',
+      querySelector: () => warmA,
+    },
+    dataTransfer: { setData() {}, setDragImage() {} },
+  }, {
+    kind: 'cards',
+    cardName: '2 cards',
+    imageUrl: warmA.src,
+    cards: [
+      { cardName: 'A', cardId: '10', imageUrl: '/card-images/100_a.jpg' },
+      { cardName: 'B', cardId: '20', imageUrl: '/card-images/200_b.jpg' },
+    ],
+  });
+  assert.equal(kids.length, 2);
+  assert.equal(kids[0].width, 240);
+  assert.equal(kids[1].width, 240);
+  assert.equal(kids[1].height, 335);
+});
+
+test('a multi-select pile mounts lagged canvas layers', () => {
+  const { doc, root, kids } = pileDragDocument();
+  globalThis.document = doc;
+  globalThis.window = { addEventListener() {}, devicePixelRatio: 1 };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  writeListingDrag({
+    clientX: 40,
+    clientY: 60,
+    currentTarget: { nodeType: 1, tagName: 'DIV', querySelector: () => null },
+    dataTransfer: { setData() {}, setDragImage() {} },
+  }, {
+    kind: 'cards',
+    cardName: '3 cards',
+    imageUrl: '/a.jpg',
+    cards: [
+      { cardName: 'A', imageUrl: '/a.jpg' },
+      { cardName: 'B', imageUrl: '/b.jpg' },
+      { cardName: 'C', imageUrl: '/c.jpg' },
+    ],
+  });
+  assert.equal(root.className, 'drag-stack');
+  assert.equal(kids.length, 3);
+  assert.ok(kids.every((node) => node.tagName === 'CANVAS'));
+  assert.match(String(kids[1].style?.cssText || ''), /position:fixed/);
 });
 
 test('dragging the desk frame uses a pile of the held card', () => {
@@ -298,7 +420,7 @@ test('dragging the desk frame uses a pile of the held card', () => {
   assert.equal(dragged.el.width, 1);
   assert.equal(root.className, 'drag-stack');
   assert.equal(kids.length, 1);
-  assert.equal(kids[0].src, '/desk.jpg');
+  assert.equal(kids[0].tagName, 'CANVAS');
 });
 
 test('the large desk scan owns the drag gesture instead of its button wrapper', () => {
@@ -321,6 +443,13 @@ test('a homepage card is not a seller card', () => {
   const traded = cardReference({ id: '25', name: 'Pikachu' });
   assert.equal(isSellerCard(listing), true);
   assert.equal(isSellerCard(traded), false);
+});
+
+test('SetGuideGrid drags the whole set card, not only the wordmark img', () => {
+  const src = readFileSync(new URL('./components/SetGuideGrid.jsx', import.meta.url), 'utf8');
+  assert.match(src, /className="set-guide-card"[\s\S]*?draggable/);
+  assert.match(src, /kind: 'expansion'/);
+  assert.match(src, /draggable=\{false\}/);
 });
 
 test('shop rows show a message icon before the cart icon', () => {

@@ -5,6 +5,7 @@ export { formatPkn, formatPknNumber };
 import { readRecentCardIds, rememberCardId, peekRecentTile } from './recents.js';
 import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
 import { withGameQuery, isPokemonGame, gameRequestHeaders, game } from './game.js';
+import { homePayloadMatchesGame } from './home-cache.js';
 import { sanitizeCardName, vintedSearchUrl } from './identity.js';
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { getSearchLang } from './locale.js';
@@ -183,12 +184,14 @@ export async function fetchHome(recentIds = []) {
       /* oracle below */
     }
   }
-  // Satellite catalogs use home-page + ?game=. Never resolve that through the
-  // pokoin.com Worker rails alias (it Cache-API'd Pokemon onto every game).
-  const homePage = withGameQuery('/api/marketplace-home-page');
-  const payload = await getJson(
-    isPokemonGame() ? homePage : `https://api.pokoin.com${homePage}`,
-  );
+  // Satellite catalogs use home-page + ?game= (withGameQuery inside getJson).
+  // Stay same-origin on pokoin.com so Bot Fight clearance applies — a hard
+  // api.pokoin.com hop fails fetch and paints the working page.
+  const site = game();
+  const payload = await getJson('/api/marketplace-home-page');
+  if (!homePayloadMatchesGame(payload, site.id)) {
+    throw new Error(`Marketplace home returned ${payload?.game || 'unknown'} for ${site.id}`);
+  }
   if (payload?.cards?.length) {
     payload.cards = payload.cards.map((card) => applyTilePrice(card));
   }
@@ -1421,11 +1424,23 @@ export function imageSrc(card, kind = 'grid') {
 export function cardFromAutocomplete(row = {}) {
   const id = String(row.card_id || row.id || '');
   const live = row.live === true || id.startsWith('live:');
+  // Multigame API emits camelCase imageUrl / gridImageUrl (prefixed CDN paths).
+  // Ignoring those rebuilds unprefixed Pokémon leftovers and paints missing-card
+  // or the wrong TCG's scan in the search bar.
   const image = ownCatalogImage({
     id,
     name: row.name,
     canonicalPath: row.canonicalPath || row.canonical_path || row.href,
-  }, preferFullImage(row.image || row.cdn_image_url || row.image_url));
+  }, preferFullImage(
+    row.gridImageUrl
+    || row.heroImageUrl
+    || row.imageUrl
+    || row.cdn_image_url
+    || row.cdnImageUrl
+    || row.image_url
+    || row.image
+    || '',
+  ));
   return {
     id,
     card_id: id,
@@ -1442,6 +1457,7 @@ export function cardFromAutocomplete(row = {}) {
     canonicalPath: row.canonicalPath || row.canonical_path || row.href,
     image,
     image_url: image,
+    imageUrl: image,
     gridImageUrl: image,
     heroImageUrl: image,
     isMarketAvailable: row.isMarketAvailable === true,

@@ -145,12 +145,13 @@ test('suggest thumbs preload into a 128 LRU; hover JPEGs are not cached', () => 
 });
 
 test('game and title language sit on the left of the search pill', () => {
-  assert.match(desktopCss, /\.topbar-row \{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto auto/);
+  // brand | Desktop | search | icon-nav (Desktop opposite the cart)
+  assert.match(desktopCss, /\.topbar-row \{[^}]*grid-template-columns:\s*auto auto minmax\(0,\s*1fr\) auto/);
   assert.match(desktopCss, /--topbar-logo:\s*40px/);
   assert.match(desktopCss, /--topbar-flag:\s*32px/);
   const phoneBar = phone720First.match(/\.topbar-row \{[^}]+\}/);
   assert.ok(phoneBar, 'phone .topbar-row');
-  assert.match(phoneBar[0], /grid-template-columns:\s*auto auto minmax\(0,\s*1fr\) auto/);
+  assert.match(phoneBar[0], /grid-template-columns:\s*auto auto auto minmax\(0,\s*1fr\) auto/);
   assert.match(phoneBar[0], /--topbar-flag:\s*32px/);
   assert.equal(phone720First.includes('.topbar-row > .lang-toggle {'), false);
   const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');

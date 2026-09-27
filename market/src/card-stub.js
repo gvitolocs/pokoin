@@ -1,5 +1,6 @@
 import { rewriteCatalogLang } from './locale.js';
 import { PROVISIONAL_PUBLIC_OFFSET, leftoverCdnId, realPublicCardId } from './card-id.js';
+import { game } from './game.js';
 
 export { PROVISIONAL_PUBLIC_OFFSET, leftoverCdnId, realPublicCardId };
 
@@ -116,7 +117,8 @@ export function leftoverUrl(cardId, nameSlug) {
     return '';
   }
   const stem = String(nameSlug || '').replace(/^-+|-+$/g, '');
-  return `/card-images/${leftover}_${stem}.jpg`;
+  const prefix = game().slug ? `${game().slug}/` : '';
+  return `/card-images/${prefix}${leftover}_${stem}.jpg`;
 }
 
 /** Leftover JPEG key (`ct_id`, public / 2). Used when the BFF only has a CardTrader preview_ (tiles drop those). */

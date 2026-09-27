@@ -48,8 +48,8 @@ import {
   vintedHref,
 } from '../api.js';
 import { suggestPriceFromSlices } from '../scan-pricing.js';
-import { bundleReference, preloadDragImage, referenceForPeer, writeListingDrag } from '../chat-listing.js';
 import { getChatDock } from '../chat-dock-store.js';
+import { bundleReference, preloadDragImage, referenceForPeer, writeListingDrag } from '../chat-listing.js';
 import { expansionLogoSrc } from '../set-logos.js';
 import {
   activeSoldIndex,

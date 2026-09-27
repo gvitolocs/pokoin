@@ -1,5 +1,11 @@
-import { displayName } from './identity.js';
-import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from './image-urls.js';
+import { displayName, printingIdentity } from './identity.js';
+import {
+  catalogImageId,
+  homepageDerivativeUrl,
+  ownCatalogImage,
+  preferFullImage,
+} from './image-urls.js';
+import { leftoverCdnId } from './card-stub.js';
 import { sellerHandle } from './listing-meta.js';
 import { tilePricePkn } from './pkn.js';
 
@@ -19,7 +25,7 @@ export function sellerUserId(value) {
 }
 
 function cardImage(card, offer) {
-  const advertised = String(
+  const raw = String(
     offer?.cardImageUrl
     || offer?.imageUrl
     || card?.heroImageUrl
@@ -36,7 +42,9 @@ function cardImage(card, offer) {
     name: offer?.cardName || offer?.card_name || offer?.name,
     canonicalPath: offer?.canonicalPath || offer?.canonical_path,
   };
-  return ownCatalogImage(identity, preferFullImage(advertised));
+  const owned = ownCatalogImage(identity, preferFullImage(raw));
+  // Prefer the homepage derivative — same bitmap rails/tiles already painted.
+  return homepageDerivativeUrl(owned) || owned;
 }
 
 function offerCopies(offer) {
@@ -63,6 +71,7 @@ export function listingReference({ offer, card }) {
 }
 
 export function cardReference(card) {
+  const identity = printingIdentity(card || {});
   return {
     kind: 'card',
     listingId: '',
@@ -70,7 +79,10 @@ export function cardReference(card) {
     sellerUid: '',
     seller: '',
     cardName: displayName(card) || card?.name || card?.cardName || 'Card',
-    setName: '',
+    setName: identity.set || String(card?.set || card?.set_name || ''),
+    number: identity.number || '',
+    rarity: identity.rarity || '',
+    artist: identity.artist || '',
     imageUrl: cardImage(card),
     path: card?.canonicalPath || card?.path || '',
     pricePkn: Number(tilePricePkn(card) || card?.pricePkn) || 0,
@@ -329,9 +341,59 @@ export function chatImageSources(row) {
   return out;
 }
 
-/** Homepage rail card: 13.5rem wide, portrait 63:88. */
-export const CARD_DRAG_WIDTH = 216;
-export const CARD_DRAG_HEIGHT = 302;
+/** Match `_homepage.webp` natural size (~240×335) so drag CSS matches the warm tile. */
+export const CARD_DRAG_WIDTH = 240;
+export const CARD_DRAG_HEIGHT = 335;
+
+function dragPixelRatio() {
+  if (typeof window === 'undefined') return 1;
+  const dpr = Number(window.devicePixelRatio) || 1;
+  return Math.min(Math.max(dpr, 1), 2);
+}
+
+/**
+ * Native setDragImage ghost only — still DPR-sized. The visible pile must NOT
+ * go through this path: drawImage-scaling the homepage webp into a new buffer
+ * is what made the drag look softer than the tile (and black when paint failed).
+ */
+function sizeDragCanvas(canvas, cssW, cssH) {
+  const dpr = dragPixelRatio();
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  if (canvas.style) {
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+  }
+  const ctx = canvas.getContext?.('2d');
+  if (ctx?.setTransform) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  if (ctx) {
+    ctx.imageSmoothingEnabled = true;
+    if ('imageSmoothingQuality' in ctx) {
+      ctx.imageSmoothingQuality = 'high';
+    }
+  }
+  return ctx || null;
+}
+
+function dragLayerStyle(zIndex, fit = 'cover') {
+  return [
+    'position:fixed',
+    'top:0',
+    'left:0',
+    `width:${CARD_DRAG_WIDTH}px`,
+    `height:${CARD_DRAG_HEIGHT}px`,
+    'border-radius:10px',
+    'background:#07060b',
+    'box-shadow:0 14px 32px rgb(0 0 0 / 0.5)',
+    `z-index:${zIndex}`,
+    `object-fit:${fit}`,
+    'object-position:center',
+    'pointer-events:none',
+    'display:block',
+  ].join(';');
+}
 
 let dragGhost;
 
@@ -340,7 +402,22 @@ function dragSourceImage(event) {
   if (!node || node.nodeType !== 1) return null;
   if (node.tagName === 'IMG') return node;
   const nested = node.querySelector?.(
-    '.shop-card img, .tile-art img, .seller-listing-art img, .c-art img, .bag-art img, .seller-mover img',
+    [
+      '.shop-card img',
+      '.tile-art img',
+      '.seller-listing-art img',
+      '.c-art img',
+      '.bag-art img',
+      '.seller-mover img',
+      '.art-frame img',
+      '.cart-drop-card img',
+      '.desktop-drop-card img',
+      '.set-guide-logo img',
+      '.set-wordmark',
+      '.set-sym',
+      '.page-title img',
+      'img',
+    ].join(', '),
   );
   if (nested) return nested;
   // The desk hero is the frame itself, so `.art-frame img` does not match a descendant.
@@ -359,6 +436,25 @@ function markCardDragging() {
 
 const readyImages = new Map();
 
+function rememberWarmImage(img) {
+  if (!img || !img.complete || !(img.naturalWidth > 0)) return null;
+  for (const key of [img.currentSrc, img.src, img.getAttribute?.('src')]) {
+    const src = String(key || '').trim();
+    if (!src || src.startsWith('data:')) continue;
+    readyImages.set(src, img);
+    const path = stripOrigin(src);
+    if (path) readyImages.set(path, img);
+    const home = homepageDerivativeUrl(src);
+    if (home) {
+      readyImages.set(home, img);
+      readyImages.set(stripOrigin(home), img);
+    }
+    const fileId = catalogImageId(src);
+    if (fileId) readyImages.set(`id:${fileId}`, img);
+  }
+  return img;
+}
+
 /** Decode a wordmark or artist cover before the drag, so a text link can still show it. */
 export function preloadDragImage(url) {
   const src = String(url || '').trim();
@@ -366,12 +462,169 @@ export function preloadDragImage(url) {
   const img = new Image();
   img.decoding = 'async';
   img.src = src;
-  readyImages.set(src, img);
+  rememberWarmImage(img);
 }
 
 function readyDragImage(url) {
-  const img = readyImages.get(String(url || '').trim());
-  return img?.complete && img.naturalWidth ? img : null;
+  const src = String(url || '').trim();
+  if (!src) return null;
+  for (const key of [src, stripOrigin(src), homepageDerivativeUrl(src), stripOrigin(homepageDerivativeUrl(src))]) {
+    if (!key) continue;
+    const img = readyImages.get(key);
+    if (img?.complete && img.naturalWidth) return img;
+  }
+  const fileId = catalogImageId(src);
+  if (fileId) {
+    const byId = readyImages.get(`id:${fileId}`);
+    if (byId?.complete && byId.naturalWidth) return byId;
+  }
+  return null;
+}
+
+function stripOrigin(url) {
+  return String(url || '').replace(/^https?:\/\/[^/]+/i, '');
+}
+
+function urlsLookSame(a, ...candidates) {
+  const left = stripOrigin(a);
+  if (!left) return false;
+  const leftHome = homepageDerivativeUrl(left) || left;
+  for (const raw of candidates) {
+    const right = stripOrigin(raw);
+    if (!right) continue;
+    if (left === right || left.endsWith(right) || right.endsWith(left)) return true;
+    const rightHome = homepageDerivativeUrl(right) || right;
+    if (leftHome && rightHome && (leftHome === rightHome || leftHome.endsWith(rightHome) || rightHome.endsWith(leftHome))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function findWarmDocumentImage(url) {
+  const src = String(url || '').trim();
+  if (!src || typeof document === 'undefined') return null;
+  const ready = readyDragImage(src);
+  if (ready) return ready;
+  const home = homepageDerivativeUrl(src);
+  if (home && home !== src) {
+    const homeReady = readyDragImage(home);
+    if (homeReady) return homeReady;
+  }
+  const wantId = catalogImageId(src) || catalogImageId(home);
+  const wantPath = stripOrigin(home || src);
+  for (const img of document.images || []) {
+    if (!img?.complete || !(img.naturalWidth > 0)) continue;
+    if (img.classList?.contains?.('art-figure-layer')) continue;
+    const cur = String(img.currentSrc || img.src || '');
+    if (!cur) continue;
+    const curPath = stripOrigin(cur);
+    if (cur === src || curPath === wantPath || cur.endsWith(src) || (wantPath && curPath.endsWith(wantPath))) {
+      return rememberWarmImage(img);
+    }
+    if (home) {
+      const curHome = homepageDerivativeUrl(cur);
+      if (curHome && (curHome === home || stripOrigin(curHome) === stripOrigin(home))) {
+        return rememberWarmImage(img);
+      }
+    }
+    if (wantId && catalogImageId(cur) === wantId) {
+      return rememberWarmImage(img);
+    }
+  }
+  return null;
+}
+
+/** Prefer the on-page tile that already painted this card's homepage preview. */
+function findWarmRowImage(row, source = null) {
+  if (!row) return null;
+  if (source && urlsLookSame(
+    String(source.currentSrc || source.src || ''),
+    row.imageUrl,
+    homepageDerivativeUrl(row.imageUrl),
+  )) {
+    return source;
+  }
+  if (typeof document !== 'undefined') {
+    const cardId = String(row.cardId || '').trim();
+    if (cardId && typeof CSS !== 'undefined' && CSS.escape) {
+      const tile = document.querySelector(`[data-card-id="${CSS.escape(cardId)}"]`);
+      const img = tile?.querySelector?.(
+        '.tile-art img:not(.art-figure-layer), .shop-card img, .c-art img, img:not(.art-figure-layer)',
+      );
+      if (img?.complete && img.naturalWidth > 0) {
+        return rememberWarmImage(img);
+      }
+    }
+    const listingId = String(row.listingId || '').trim();
+    if (listingId && !listingId.startsWith('bundle:') && typeof CSS !== 'undefined' && CSS.escape) {
+      const shop = document.querySelector(`[data-listing-id="${CSS.escape(listingId)}"]`);
+      const img = shop?.querySelector?.('.shop-card img, img');
+      if (img?.complete && img.naturalWidth > 0) {
+        return rememberWarmImage(img);
+      }
+    }
+    // Public card_id → leftover ct_id filename prefix used on CDN.
+    const leftover = leftoverCdnId(cardId);
+    if (leftover) {
+      const byId = readyImages.get(`id:${leftover}`);
+      if (byId?.complete && byId.naturalWidth) return byId;
+      for (const img of document.images || []) {
+        if (!img?.complete || !(img.naturalWidth > 0)) continue;
+        if (img.classList?.contains?.('art-figure-layer')) continue;
+        if (catalogImageId(img.currentSrc || img.src) === leftover) {
+          return rememberWarmImage(img);
+        }
+      }
+    }
+  }
+  const homepage = homepageDerivativeUrl(row.imageUrl) || row.imageUrl;
+  return findWarmDocumentImage(homepage)
+    || findWarmDocumentImage(row.imageUrl)
+    || readyDragImage(homepage)
+    || readyDragImage(row.imageUrl);
+}
+
+/**
+ * Visible pile layer from an already-decoded homepage bitmap.
+ * Lossy path we avoid: drawImage-scale into a DPR canvas (soft + easy to leave
+ * a black plate on paint errors). Instead copy pixels 1:1 into a canvas the
+ * same natural size as the warm img; CSS object-fit sizes the layer — same
+ * composite path as the tile's <img>.
+ */
+function stackLayerFromWarm(warm, zIndex, fit = 'cover') {
+  const style = dragLayerStyle(zIndex, fit);
+  if (warm?.naturalWidth > 0 && warm?.naturalHeight > 0) {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'drag-stack-card';
+    canvas.setAttribute('aria-hidden', 'true');
+    // Exact pixel copy — no resample. naturalWidth×naturalHeight is the
+    // homepage webp (~240×335), identical to what the rail already decoded.
+    canvas.width = warm.naturalWidth;
+    canvas.height = warm.naturalHeight;
+    canvas.style.cssText = style;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      try {
+        ctx.drawImage(warm, 0, 0, warm.naturalWidth, warm.naturalHeight);
+      } catch (_) {
+        /* leave dark plate background from CSS */
+      }
+    }
+    return canvas;
+  }
+  const plate = document.createElement('canvas');
+  plate.className = 'drag-stack-card';
+  plate.setAttribute('aria-hidden', 'true');
+  plate.width = CARD_DRAG_WIDTH;
+  plate.height = CARD_DRAG_HEIGHT;
+  plate.style.cssText = style;
+  const ctx = plate.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = '#07060b';
+    ctx.fillRect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
+  }
+  return plate;
 }
 
 export function bundleReference({ kind, slug, name, imageUrl, path }) {
@@ -461,16 +714,19 @@ function mountDragStack(cards, event) {
   if (typeof document === 'undefined') return;
   const rows = (cards || []).slice(0, 3).filter((row) => row?.imageUrl || row?.cardName);
   if (!rows.length) return;
+  const source = rememberWarmImage(dragSourceImage(event));
   const root = document.createElement('div');
   root.className = 'drag-stack';
   root.setAttribute('aria-hidden', 'true');
+  const fit = rows.some((row) => row?.kind === 'artist' || row?.kind === 'expansion' || row?.kind === 'species')
+    ? 'contain'
+    : 'cover';
   rows.forEach((row, index) => {
-    const img = document.createElement('img');
-    img.alt = '';
-    img.draggable = false;
-    img.src = String(row.imageUrl || '');
-    img.style.zIndex = String(30 - index);
-    root.appendChild(img);
+    // Held tile first; every other pile card must resolve its own warm homepage
+    // bitmap (by data-card-id / listing row / leftover filename) — URL-only
+    // lookup left secondary layers as black plates.
+    const warm = (index === 0 ? source : null) || findWarmRowImage(row, source);
+    root.appendChild(stackLayerFromWarm(warm, 30 - index, fit));
   });
   document.body.appendChild(root);
   dragStack = root;
@@ -490,15 +746,9 @@ function paintDragGhost(image, fit = 'cover') {
   document.body?.appendChild(canvas);
   if (dragGhost && dragGhost !== canvas) dragGhost.remove?.();
   dragGhost = canvas;
-  const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
-  dragGhost.width = Math.round(CARD_DRAG_WIDTH * dpr);
-  dragGhost.height = Math.round(CARD_DRAG_HEIGHT * dpr);
-  dragGhost.style.width = `${CARD_DRAG_WIDTH}px`;
-  dragGhost.style.height = `${CARD_DRAG_HEIGHT}px`;
+  const ctx = sizeDragCanvas(dragGhost, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
   dragGhost.style.left = `-${CARD_DRAG_WIDTH + 32}px`;
-  const ctx = dragGhost.getContext('2d');
   if (!ctx) return null;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, CARD_DRAG_WIDTH, CARD_DRAG_HEIGHT);
   ctx.save();
   ctx.beginPath();
@@ -552,8 +802,25 @@ export function writeListingDrag(event, reference) {
   if (!event?.dataTransfer || !reference?.cardName) return;
   event.dataTransfer.setData(LISTING_DRAG_TYPE, JSON.stringify(reference));
   event.dataTransfer.effectAllowed = 'copy';
+  const source = rememberWarmImage(dragSourceImage(event));
+  // Only soft-decode when nothing on the page is warm yet (text-only artist title).
+  // Never assign a network src for a tile/desk image that is already in the DOM.
+  if (!source && reference.imageUrl) {
+    const homepage = homepageDerivativeUrl(reference.imageUrl) || reference.imageUrl;
+    if (!findWarmDocumentImage(homepage) && !findWarmDocumentImage(reference.imageUrl)) {
+      preloadDragImage(homepage);
+    }
+  }
   const stack = dragCardsOf(reference);
-  const usePile = stack.length >= 1 && (reference.kind === 'cards' || reference.kind === 'card' || reference.kind === 'listing' || !reference.kind);
+  const usePile = stack.length >= 1 && (
+    reference.kind === 'cards'
+    || reference.kind === 'card'
+    || reference.kind === 'listing'
+    || reference.kind === 'artist'
+    || reference.kind === 'expansion'
+    || reference.kind === 'species'
+    || !reference.kind
+  );
   if (usePile) {
     mountDragStack(stack, event);
     try {
@@ -567,10 +834,16 @@ export function writeListingDrag(event, reference) {
     markCardDragging();
     return;
   }
-  const image = dragSourceImage(event) || readyDragImage(reference.imageUrl);
+  const homepage = homepageDerivativeUrl(reference.imageUrl) || reference.imageUrl;
+  const image = source
+    || findWarmDocumentImage(homepage)
+    || findWarmDocumentImage(reference.imageUrl)
+    || readyDragImage(homepage)
+    || readyDragImage(reference.imageUrl);
+  rememberWarmImage(image);
   const fit = reference.kind === 'card' || !reference.kind ? 'cover' : 'contain';
   const painted = paintDragGhost(image, fit);
-  const ghost = painted || fixedDragSlot(image?.currentSrc || image?.src || reference.imageUrl, fit);
+  const ghost = painted || fixedDragSlot(image?.currentSrc || image?.src || homepage, fit);
   try {
     if (ghost) {
       event.dataTransfer.setDragImage(ghost, CARD_DRAG_WIDTH / 2, CARD_DRAG_HEIGHT / 2);

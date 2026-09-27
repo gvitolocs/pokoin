@@ -3,7 +3,8 @@
 const MAX_AGE_MS = 10 * 60 * 1000;
 
 export function homeVectorCacheKey(gameId = 'pokemon') {
-  return `pokoin.homeVector.${String(gameId || 'pokemon')}.rising`;
+  // v3: also stamp payload.game so a wrong-game vector cannot seed a satellite home.
+  return `pokoin.homeVector.${String(gameId || 'pokemon')}.v3`;
 }
 
 function store(override) {
@@ -27,6 +28,21 @@ export function stripHomePersonalization(payload) {
   return { ...rest, sections };
 }
 
+/** Drop a cached Pokemon rails vector that was stored under a satellite game id. */
+export function homePayloadMatchesGame(payload, gameId = 'pokemon') {
+  if (!payload || typeof payload !== 'object') return false;
+  const want = String(gameId || 'pokemon').toLowerCase().replace(/-/g, '_');
+  const got = String(payload.game || '').toLowerCase().replace(/-/g, '_');
+  if (!got) {
+    // Pokemon Worker rails often omit game; only accept that on the Pokemon storefront.
+    return want === 'pokemon';
+  }
+  if (want === 'pokemon') {
+    return got === 'pokemon' || got === 'poke' || got === 'default';
+  }
+  return got === want;
+}
+
 export function readHomeVectorCache(gameId = 'pokemon', overrideStore) {
   const storage = store(overrideStore);
   if (!storage?.getItem) {
@@ -35,6 +51,9 @@ export function readHomeVectorCache(gameId = 'pokemon', overrideStore) {
   try {
     const parsed = JSON.parse(storage.getItem(homeVectorCacheKey(gameId)) || 'null');
     if (!parsed?.payload?.cards?.length) {
+      return null;
+    }
+    if (!homePayloadMatchesGame(parsed.payload, gameId)) {
       return null;
     }
     const savedAt = Number(parsed.savedAt || 0);
@@ -50,6 +69,9 @@ export function readHomeVectorCache(gameId = 'pokemon', overrideStore) {
 export function writeHomeVectorCache(gameId, payload, overrideStore) {
   const storage = store(overrideStore);
   if (!storage?.setItem || !payload?.cards?.length) {
+    return;
+  }
+  if (!homePayloadMatchesGame(payload, gameId)) {
     return;
   }
   try {

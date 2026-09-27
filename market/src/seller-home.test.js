@@ -212,6 +212,14 @@ test('ScanDesk has list|collection intent without resetting batch', () => {
   assert.match(deskSrc, /What do you want to do\?/);
 });
 
+test('ScanDesk queue LANG lists every language; Card desk still restricts', () => {
+  assert.doesNotMatch(deskSrc, /languagesForPrint/);
+  assert.match(deskSrc, /LANGUAGES\.includes\(langValue\) \? LANGUAGES/);
+  assert.match(deskSrc, /Full LANG list/);
+  const cardSrc = fs.readFileSync(path.join(root, 'pages/Card.jsx'), 'utf8');
+  assert.match(cardSrc, /languagesForNationality/);
+});
+
 test('SellerHome gates unsigned users like other seller desks', () => {
   assert.match(homeSrc, /Navigate to=\{`\/auth\?from=/);
   assert.match(homeSrc, /SessionWait/);

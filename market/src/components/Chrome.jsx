@@ -37,8 +37,8 @@ import {
 } from '../suggest-images.js';
 import { prefetchSearchPage } from '../search-hot.js';
 import { GAMES, game, gameSiteHref, isPokemonGame, sellerDeskUsesGameOverride, setScanGameOverride } from '../game.js';
+import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '../search-kind.js';
 import { printingIdentity, clipSuggestCollector, suggestCardName, suggestTranslatedLine } from '../identity.js';
-import { normalizeSearchTab, searchHref, uniqueSellers } from '../search-kind.js';
 import { sellerHref } from '../listing-meta.js';
 import CatalogMenu from './CatalogHubs.jsx';
 import ExpansionMark from './ExpansionMark.jsx';
@@ -48,7 +48,9 @@ import { useAuth } from '../auth.jsx';
 import { framedByChromeExtension } from '../extension-auth-bridge.js';
 import { APP, DASHBOARD_HOME, authFrom, goMarket, marketUrl } from '../punchouts.js';
 import { useCart } from '../cart.jsx';
+import { useDesktopHold } from '../desktop-hold.js';
 import CartDrop from './CartDrop.jsx';
+import DesktopDrop from './DesktopDrop.jsx';
 import { DashboardPreview, MarketPreview, MessagesPreview, NavHover } from './NavPreviews.jsx';
 import { useWallet } from '../wallet.jsx';
 import { listConversations } from '../chat-client.js';
@@ -384,6 +386,8 @@ export default function Chrome({ children }) {
   const { signedIn, admin, silver, availablePkn, getBearer, profile, user } = useAuth();
   const showAvatar = Boolean(signedIn && (profile?.uid || user?.uid));
   const { count, addItem } = useCart();
+  const desktopCards = useDesktopHold();
+  const desktopCount = desktopCards.length;
   const [cardDrag, setCardDrag] = useState(false);
   const [navPop, setNavPop] = useState('');
   const { balance } = useWallet();
@@ -765,11 +769,20 @@ export default function Chrome({ children }) {
     const timer = setTimeout(() => {
       setPending(true);
       fetchSuggest(term, { limit: 20, signal: controller.signal, lang, printLang })
-        .then((data) => ({
-          groups: Array.isArray(data.groups) ? data.groups : [],
-          count: Number(data.count) || 0,
-          resolvedQuery: term,
-        }))
+        .then((data) => {
+          const tab = searchTabRef.current;
+          const groups = (Array.isArray(data.groups) ? data.groups : [])
+            .map((group) => ({
+              ...group,
+              printings: (group.printings || []).filter((row) => printingMatchesSearchTab(row, tab)),
+            }))
+            .filter((group) => (group.printings || []).length > 0);
+          return {
+            groups,
+            count: groups.reduce((sum, group) => sum + group.printings.length, 0),
+            resolvedQuery: term,
+          };
+        })
         .then((data) => {
           if (controller.signal.aborted) {
             return;
@@ -798,7 +811,7 @@ export default function Chrome({ children }) {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [query, lang, printLang]);
+  }, [query, lang, printLang, searchTab]);
 
   useEffect(() => {
     function onDoc(event) {
@@ -1012,6 +1025,25 @@ export default function Chrome({ children }) {
             <img src="/home/logo.png" alt="" width="40" height="40" />
             <span>{site.brand}</span>
           </AppLink>
+          <span
+            className="desktop-anchor"
+            onMouseEnter={() => setNavPop('desktop')}
+            onMouseLeave={() => setNavPop((cur) => (cur === 'desktop' ? '' : cur))}
+          >
+            <button
+              type="button"
+              className="desktop-chip"
+              aria-label={`Desktop, ${desktopCount} cards`}
+              title="Desktop"
+              onClick={() => setNavPop((cur) => (cur === 'desktop' ? '' : 'desktop'))}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path fill="currentColor" d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 2v8h14V7H5zm-1 12h16v2H4v-2z" />
+              </svg>
+              {desktopCount > 0 ? <em>{desktopCount}</em> : null}
+            </button>
+            {cardDrag || navPop === 'desktop' ? <DesktopDrop onAddToCart={addItem} /> : null}
+          </span>
           <form className="search" onSubmit={goSearch} role="search" ref={box}>
             <label className="sr-only" htmlFor="market-search">Search cards</label>
             <div className="search-pill">

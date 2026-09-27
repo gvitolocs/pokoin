@@ -1,5 +1,6 @@
 /** Titles, JSON-LD, related-card scoring, and hub paths for marketplace SEO. */
 import { cardDocumentTitle, displayName, printingIdentity } from './identity.js';
+import { game } from './game.js';
 import { speciesFromCard, speciesFromSlug } from './pokemon-hubs.js';
 import { pokedexNumber } from './pokedex.js';
 
@@ -108,7 +109,8 @@ export function cardSeoDescription(card = {}) {
 
 export function cardImageAlt(card = {}) {
   const identity = printingIdentity(card);
-  return [displayName(card), identity.set, identity.number, 'Pokemon card']
+  const label = game().slug ? `${game().name} card` : 'Pokemon card';
+  return [displayName(card), identity.set, identity.number, label]
     .filter(Boolean)
     .join(' ');
 }
