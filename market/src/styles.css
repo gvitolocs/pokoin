@@ -6,6 +6,15 @@
   font-display: swap;
 }
 
+/* Flyer wordmark only: Fredoka 700 (OFL) subset to P, k, o, i, n, dotless ı. */
+@font-face {
+  font-family: PokoinWordmark;
+  src: url("/home/fredoka-wordmark.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
   --bg: #000;
   --g2: #14121c;
@@ -153,11 +162,29 @@ button, input, select { font: inherit; color: inherit; }
 .brand-word {
   display: inline-flex;
   align-items: center;
-  font-size: 2rem;
-  font-weight: 900;
+  font-family: PokoinWordmark, var(--font);
+  font-size: 2.05rem;
+  font-weight: 700;
   line-height: 1;
-  letter-spacing: -0.045em;
+  letter-spacing: -0.02em;
   color: #fff;
+  text-shadow: 0 0.07em 0 #23376e;
+}
+/* The flyer's i wears a yellow coin dot instead of a plain tittle. */
+.brand-i {
+  position: relative;
+}
+.brand-i::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0.2em;
+  width: 0.26em;
+  height: 0.26em;
+  border-radius: 50%;
+  background: #ffd23f;
+  box-shadow: 0 0.07em 0 #23376e;
+  transform: translateX(-50%);
 }
 .brand .brand-coin {
   width: 0.98em;

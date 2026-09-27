@@ -1064,7 +1064,7 @@ export default function Chrome({ children }) {
             <span className="brand-word" aria-hidden="true">
               <span className="brand-letters">P</span>
               <img className="brand-coin" src={mascotUrl} alt="" width="26" height="24" />
-              <span className="brand-letters">koin</span>
+              <span className="brand-letters">ko<span className="brand-i">ı</span>n</span>
             </span>
           </AppLink>
           <span
