@@ -64,7 +64,9 @@ export default function CardSelectGrid({ cards = [], className = 'grid', childre
   useEffect(() => {
     function ignored(target) {
       return target instanceof Element && target.closest(
-        'a, button, input, select, textarea, label, header, footer, nav, .topbar, .seller-history, .suggest, .cart-drop, .desktop-drop',
+        // .art-frame used to be a <button>; as a div it must stay listed or
+        // the desk scan starts the multi-select band instead of HTML5 drag.
+        'a, button, input, select, textarea, label, header, footer, nav, .topbar, .seller-history, .suggest, .cart-drop, .desktop-drop, .art-frame, dialog.zoom',
       );
     }
     function onDown(event) {

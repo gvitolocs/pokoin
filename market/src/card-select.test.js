@@ -54,6 +54,17 @@ test('the held card leads the multi-select drag pile', () => {
   assert.match(source, /String\(row\?\.id \|\| ''\) !== id/);
 });
 
+test('desk art-frame is ignored by the multi-select band so the scan can HTML5-drag', () => {
+  const source = fs.readFileSync(path.join(root, 'components/CardSelectGrid.jsx'), 'utf8');
+  assert.match(source, /\.art-frame/);
+  assert.match(source, /dialog\.zoom/);
+  const page = fs.readFileSync(path.join(root, 'pages/Card.jsx'), 'utf8');
+  const classAt = page.indexOf('className="art-frame"');
+  const frame = page.slice(classAt - 120, classAt + 200);
+  assert.match(frame, /role="button"/);
+  assert.doesNotMatch(frame, /<button[\s\S]*className="art-frame"/);
+});
+
 test('drag pile CSS styles canvas layers like the old img pile', () => {
   const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
   assert.match(css, /\.drag-stack img,\s*\.drag-stack canvas\s*\{/);
