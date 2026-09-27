@@ -32,7 +32,7 @@ import mascotUrl from '../assets/pokoin-mascot@8x.png';
 function PokoAvatar({ className = 'messages-avatar is-poko' }) {
   return (
     <span className={className} aria-hidden="true">
-      <img src={mascotUrl} alt="" width="28" height="26" />
+      <img src={mascotUrl} alt="" />
     </span>
   );
 }
