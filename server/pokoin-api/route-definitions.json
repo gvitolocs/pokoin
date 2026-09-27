@@ -192,6 +192,33 @@
     }
   },
   {
+    "path": "/api/poko-chat",
+    "file": "poko-chat.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Website Poko assistant chat. Accepts message + attached cards; proxies Hermes when configured, otherwise consults local poko-market tools.",
+    "auth": "Required Firebase bearer token. Browser never receives the Hermes/poko-market service token.",
+    "params": {
+      "query": "none",
+      "body": "{ message, cards?: [{ cardId, name, setName, condition, language }], sessionId? }"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "POKO_CHAT_URL",
+        "POKO_API_TOKEN",
+        "POKONTACT_SERVICE_TOKEN",
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Hermes (optional)",
+        "Postgres read-only replica"
+      ]
+    }
+  },
+  {
     "path": "/api/marketplace-seller-settings",
     "file": "marketplace-seller-settings.js",
     "methods": [

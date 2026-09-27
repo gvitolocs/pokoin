@@ -434,6 +434,10 @@
   grid-column: 1 / -1;
 }
 
+.profile-grid > .profile-shipping {
+  grid-column: 1 / -1;
+}
+
 .ct-connect-form {
   display: grid;
   gap: 0.75rem;
@@ -474,6 +478,62 @@
   flex-wrap: wrap;
   gap: 0.55rem;
   margin-top: 0.75rem;
+  align-items: center;
+}
+
+.ct-connect-form .btn-stripe {
+  margin-top: 0;
+}
+
+/* CardTrader brand blue + Stripe purple for profile connect actions. */
+.btn-cardtrader {
+  border: 0;
+  background: #4db8e8;
+  color: #0b1c26;
+}
+
+.btn-cardtrader:hover:not(:disabled),
+.btn-cardtrader:focus-visible:not(:disabled) {
+  background: #6ac6ee;
+  color: #0b1c26;
+}
+
+.btn-stripe {
+  border: 0;
+  background: #635bff;
+  color: #fff;
+}
+
+.btn-stripe:hover:not(:disabled),
+.btn-stripe:focus-visible:not(:disabled) {
+  background: #7a73ff;
+  color: #fff;
+}
+
+.profile-page {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.profile-title-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+}
+
+.profile-silver-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgb(212 175 55 / 0.55);
+  background: linear-gradient(180deg, rgb(250 230 150 / 0.22), rgb(180 140 40 / 0.18));
+  color: #f0d78c;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
 }
 
 

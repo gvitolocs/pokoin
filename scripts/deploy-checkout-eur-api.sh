@@ -18,6 +18,8 @@ FILES=(
   _checkout_core.js
   _checkout_core.test.js
   _address_crypto.js
+  _client_country.js
+  _client_country.test.js
   shipping-rates.json
   account-addresses.js
   marketplace-checkout-quote.js
@@ -48,6 +50,7 @@ say "unit tests"
 ADDRESS_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
   node --test \
     "$SRC/_checkout_core.test.js" \
+    "$SRC/_client_country.test.js" \
     "$SRC/_marketplace_order_stripe.test.js" \
     "$SRC/patch-route-manifest.test.js"
 for file in account-addresses.js marketplace-checkout-quote.js marketplace-seller-settings.js \

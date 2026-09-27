@@ -1,4 +1,5 @@
 import { flagSrc, getSearchLang, isSearchLang } from './locale.js';
+import { countryFlagEmoji, shipFromCountryName } from './ship-countries.js';
 
 const CONDITION_TONE = {
   NM: 'nm',
@@ -32,7 +33,6 @@ const CONDITION_TONE = {
 
 const COUNTRY_LABEL = {
   IT: 'Italy',
-  EU: 'Europe',
   US: 'United States',
   DE: 'Germany',
   FR: 'France',
@@ -47,6 +47,22 @@ const COUNTRY_LABEL = {
   CH: 'Switzerland',
   DK: 'Denmark',
   SE: 'Sweden',
+  HU: 'Hungary',
+  IE: 'Ireland',
+  CZ: 'Czechia',
+  SK: 'Slovakia',
+  SI: 'Slovenia',
+  HR: 'Croatia',
+  RO: 'Romania',
+  BG: 'Bulgaria',
+  GR: 'Greece',
+  FI: 'Finland',
+  EE: 'Estonia',
+  LV: 'Latvia',
+  LT: 'Lithuania',
+  LU: 'Luxembourg',
+  MT: 'Malta',
+  CY: 'Cyprus',
   JP: 'Japan',
   KR: 'South Korea',
   CN: 'China',
@@ -186,28 +202,40 @@ export function listingLanguageFlag(language) {
 
 export function sellerCountryCode(country) {
   const raw = String(country || '').trim().toUpperCase();
-  if (!raw || raw === 'EU') return raw === 'EU' ? 'eu' : '';
+  // EU is not a ship-from country — never paint the EU mark on listings.
+  if (!raw || raw === 'EU' || raw === 'EUROPE' || raw === 'EUROPEAN UNION') return '';
   if (COUNTRY_FLAG[raw]) return COUNTRY_FLAG[raw];
   const lower = raw.toLowerCase();
-  if (lower === 'europe' || lower === 'european union') return 'eu';
-  if (isSearchLang(lower) || lower === 'eu' || lower === 'us') return lower;
+  if (isSearchLang(lower) || lower === 'us') return lower;
   if (raw.length === 2) return lower;
   return '';
 }
 
+/** ISO alpha-2 for chips (HU, IT). Empty when missing or EU. */
+export function sellerCountryShort(country) {
+  const raw = String(country || '').trim().toUpperCase();
+  if (!raw || raw === 'EU' || raw === 'EUROPE' || raw === 'EUROPEAN UNION') return '';
+  if (raw === 'UK') return 'GB';
+  return /^[A-Z]{2}$/.test(raw) ? raw : '';
+}
+
 export function sellerCountryLabel(country) {
   const raw = String(country || '').trim().toUpperCase();
-  if (!raw) return '';
-  return COUNTRY_LABEL[raw] || raw;
+  if (!raw || raw === 'EU' || raw === 'EUROPE' || raw === 'EUROPEAN UNION') return '';
+  return COUNTRY_LABEL[raw] || shipFromCountryName(raw) || raw;
 }
 
 export function sellerCountryFlag(country) {
+  const short = sellerCountryShort(country);
   const code = sellerCountryCode(country);
-  if (!code) return null;
+  if (!short && !code) return null;
+  const emoji = countryFlagEmoji(short || code);
   return {
-    code,
-    src: flagSrc(code),
-    label: sellerCountryLabel(country) || code.toUpperCase(),
+    code: code || String(short || '').toLowerCase(),
+    short: short || String(code || '').toUpperCase(),
+    emoji,
+    src: code ? flagSrc(code) : '',
+    label: sellerCountryLabel(country) || short || String(code || '').toUpperCase(),
   };
 }
 

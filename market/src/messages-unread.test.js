@@ -25,3 +25,14 @@ test('refresh cadence and event name are stable constants', () => {
   assert.equal(MESSAGES_UNREAD_REFRESH_MS, 60000);
   assert.equal(MESSAGES_UNREAD_EVENT, 'pokoin:messages-unread');
 });
+
+test('closed ChatDock shows a fixed bottom-right FAB that opens the list', () => {
+  const dock = readFileSync(new URL('./components/ChatDock.jsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./chat-dock.css', import.meta.url), 'utf8');
+  assert.match(dock, /className="chat-fab"/);
+  assert.match(dock, /openChatList\(\)/);
+  assert.match(dock, /chat-fab-badge/);
+  assert.match(css, /\.chat-fab[\s\S]*position:\s*fixed/);
+  assert.match(css, /\.chat-fab[\s\S]*bottom:/);
+  assert.match(css, /\.chat-fab[\s\S]*right:/);
+});

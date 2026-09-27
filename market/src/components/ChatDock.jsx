@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { listConversations, sendChatMessage, uploadChatPhoto } from '../chat-client.js';
 import { chatTime } from '../chat-format.js';
@@ -25,10 +25,12 @@ import {
 } from '../chat-dock-store.js';
 import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
+import { MESSAGES_UNREAD_EVENT, MESSAGES_UNREAD_REFRESH_MS, unreadMessagesCount } from '../messages-unread.js';
 import { useChatThread } from '../use-chat-thread.js';
 import ChatListingTag from './ChatListingTag.jsx';
 import ChatPhotos from './ChatPhotos.jsx';
 import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
+import mascotUrl from '../assets/pokoin-mascot@8x.png';
 import '../chat-dock.css';
 import PokoAssistantPanel from './PokoAssistantPanel.jsx';
 
@@ -40,6 +42,7 @@ function draftLine(row, drafts) {
 }
 
 function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
+  const navigate = useNavigate();
   const [rows, setRows] = useState(readChatPreviews);
   const [seen, setSeen] = useState(() => readChatPreviews().length > 0);
   const [drafts, setDrafts] = useState(getChatDrafts);
@@ -81,12 +84,36 @@ function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
   return (
     <div className="chat-dock-list" role="list">
       {onPoko ? (
-        <div className="chat-dock-row poko-row">
+        <div
+          role="listitem"
+          className={`chat-dock-row poko-row is-poko${overUid === 'poko' ? ' is-over' : ''}`}
+          onDragOver={(event) => {
+            if (![...(event.dataTransfer?.types || [])].includes(LISTING_DRAG_TYPE)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setOverUid('poko');
+          }}
+          onDragLeave={() => setOverUid('')}
+          onDrop={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setOverUid('');
+            const reference = readListingDrag(event);
+            if (!reference) return;
+            try {
+              sessionStorage.setItem('pokoin.pokoPendingCard', JSON.stringify(reference));
+            } catch (_) { /* private mode */ }
+            closeChatDock();
+            navigate('/messages/poko');
+          }}
+        >
           <button type="button" onClick={onPoko}>
-            <span className="chat-dock-avatar poko-avatar" aria-hidden="true">P</span>
+            <span className="chat-dock-avatar is-poko poko-avatar" aria-hidden="true">
+              <img src={mascotUrl} alt="" width="22" height="20" />
+            </span>
             <span className="chat-dock-row-copy">
-              <strong>Poko ✨</strong>
-              <em>Hi! I'm your Pokoin assistant — tap to chat</em>
+              <strong>Poko</strong>
+              <em>Ask about cards — drop one here to attach</em>
             </span>
           </button>
         </div>
@@ -124,13 +151,14 @@ function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
             </button>
           </div>
         );
-      }) : seen ? <p className="chat-dock-hint">No conversations yet. Drop a card on someone after you message them.</p> : null}
+      }) : seen ? <p className="chat-dock-hint">No people yet — talk to Poko above, or message a seller.</p> : null}
     </div>
   );
 }
 
 export default function ChatDock() {
   const { signedIn, getBearer, user, profile } = useAuth();
+  const location = useLocation();
   const lang = useSearchLang();
   const [dock, setDock] = useState(getChatDock);
   const [pokoOpen, setPokoOpen] = useState(false);
@@ -140,6 +168,7 @@ export default function ChatDock() {
   const [error, setError] = useState('');
   const [over, setOver] = useState(false);
   const [showDropHint, setShowDropHint] = useState(chatDropHintVisible);
+  const [unread, setUnread] = useState(0);
   const textRef = useRef('');
   textRef.current = text;
   const thread = useChatThread({
@@ -150,6 +179,39 @@ export default function ChatDock() {
   });
 
   useEffect(() => subscribeChatDock(setDock), []);
+
+  useEffect(() => {
+    function onUnread(event) {
+      if (typeof event?.detail?.count === 'number') setUnread(event.detail.count);
+    }
+    window.addEventListener(MESSAGES_UNREAD_EVENT, onUnread);
+    return () => window.removeEventListener(MESSAGES_UNREAD_EVENT, onUnread);
+  }, []);
+
+  useEffect(() => {
+    if (!signedIn || dock.open) {
+      if (!signedIn) setUnread(0);
+      return undefined;
+    }
+    let live = true;
+    const refresh = async () => {
+      try {
+        const token = await getBearer();
+        if (!token || !live) return;
+        const result = await listConversations(token);
+        if (!live) return;
+        setUnread(unreadMessagesCount(result?.conversations || []));
+      } catch (_) {
+        /* badge is best-effort */
+      }
+    };
+    refresh();
+    const timer = setInterval(refresh, MESSAGES_UNREAD_REFRESH_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [signedIn, dock.open, getBearer, location.pathname]);
 
   useEffect(() => {
     if (dock.view === 'thread') setText(dock.text || '');
@@ -181,7 +243,24 @@ export default function ChatDock() {
     };
   }, []);
 
-  if (!dock.open) return null;
+  if (!dock.open) {
+    return (
+      <button
+        type="button"
+        className="chat-fab"
+        aria-label={unread > 0 ? `Open messages, ${unread} unread` : 'Open messages'}
+        onClick={() => openChatList()}
+      >
+        <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M12 3C6.48 3 2 6.92 2 11.75c0 2.68 1.35 5.08 3.48 6.74V21l3.2-1.76c1.05.3 2.17.46 3.32.46 5.52 0 10-3.92 10-8.75S17.52 3 12 3zm-1.1 10.5H7.8v-1.5h3.1v1.5zm5.3 0h-3.1v-1.5h3.1v1.5zm0-3.25H7.8V8.75h8.4v1.5z"
+          />
+        </svg>
+        {unread > 0 ? <span className="chat-fab-badge" aria-hidden="true">{unread > 9 ? '9+' : unread}</span> : null}
+      </button>
+    );
+  }
 
   const label = dock.peerLabel && dock.peerLabel !== 'Seller' ? `@${dock.peerLabel}` : 'Seller';
 

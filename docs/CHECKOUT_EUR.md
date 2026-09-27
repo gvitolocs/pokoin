@@ -13,7 +13,7 @@
 | Quantity | Per listing; capped by `stock` from the offer. One listing row can hold multiple units of that listing. |
 | Checkout API | `POST /api/marketplace-orders` — **site PKN escrow**. Flat `CHECKOUT_SHIPPING_PKN = 2000` remains on the **PKN path only**. |
 | Stripe | `/buy` PKN packages via `create-pkn-checkout-session` + `stripe-webhook`. EUR orders use `create-order-checkout-session` + Connect Transfers after delivery confirm. |
-| Seller country | Profile `shipFromCountry` (ISO-2). Native listing insert rejects `EU`. CardTrader live rows keep real `seller.country` or blank — never invent `EU`. |
+| Seller country | Profile `shipFromCountry` (ISO-2). Empty profiles are seeded from request IP (`CF-IPCountry` / Vercel / CloudFront) when that code is an allowed EU sell-from country; otherwise the seller must set it on Profile before listing. Native listing insert rejects `EU`. |
 | Saved addresses | `users/{uid}/shipping_addresses/{id}` with `countryCode` plaintext + AES-GCM `encryptedPayload`. |
 | Encryption | `ADDRESS_ENCRYPTION_KEY` (32 bytes) on API host; ops mirror on InPhysical — never Firebase. Pattern matches CardTrader token crypto. |
 | Shipping tables | Seeded in-repo `server/pokoin-api/shipping-rates.json` (+ SQL stub `scripts/sql/080_shipping_rates.sql`). Quote **fails closed** when no row matches. |

@@ -11,7 +11,7 @@ import { Alert, EmptyDesk, Metric, MetricGrid } from '../components/Desk.jsx';
 import {
   publicListingSellerName,
   sellerCountryFlag,
-  sellerCountryLabel,
+  sellerCountryShort,
   sellerHandle,
 } from '../listing-meta.js';
 import { seedSellerListings } from '../seller-seed.js';
@@ -138,7 +138,7 @@ export default function Seller() {
   const tag = seller.username || sellerHandle(sample) || handle;
   const showTag = tag && tag.toLowerCase() !== String(display || '').toLowerCase();
   const country = sellerCountryFlag(sample?.sellerCountry);
-  const countryLine = sellerCountryLabel(sample?.sellerCountry);
+  const countryShort = sellerCountryShort(sample?.sellerCountry);
   const ready = useMemo(() => Boolean((listings || []).some(isOneDayReady)), [listings]);
 
   const totalItems = total ?? 0;
@@ -167,10 +167,14 @@ export default function Seller() {
           <h1 className="page-title">{display}</h1>
           {showTag ? <p className="seller-handle">@{tag}</p> : null}
           <div className="seller-hero-meta">
-            {country ? (
+            {country && countryShort ? (
               <p className="seller-country">
-                <img src={country.src} alt="" width="22" height="22" />
-                <span>({(countryLine || country.label).toUpperCase()})</span>
+                {country.emoji ? (
+                  <span aria-hidden="true">{country.emoji}</span>
+                ) : country.src ? (
+                  <img src={country.src} alt="" width="22" height="22" />
+                ) : null}
+                <span>({countryShort})</span>
               </p>
             ) : null}
             {ready ? <span className="seller-badge seller-badge-ready">1-Day Ready</span> : null}
