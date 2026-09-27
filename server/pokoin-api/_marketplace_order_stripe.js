@@ -39,16 +39,31 @@ async function handleMarketplaceOrderPaid({ admin, stripe, session }) {
   }
 
   const now = admin.firestore.FieldValue.serverTimestamp();
+  let stripeChargeId = '';
+  const paymentIntentId = session.payment_intent
+    ? (typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent.id)
+    : '';
+  if (paymentIntentId && stripe?.paymentIntents?.retrieve) {
+    try {
+      const pi = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ['latest_charge'] });
+      const latest = pi.latest_charge;
+      stripeChargeId = typeof latest === 'string' ? latest : String(latest?.id || '');
+    } catch (_) {
+      // Charge id is optional at webhook time; releaseSellerTransfers can re-fetch.
+    }
+  }
+
   await orderRef.set({
     paymentStatus: 'paid',
     status: 'paid',
     paidAt: now,
     updatedAt: now,
     stripePaidSessionId: session.id,
-    stripePaymentIntentId: session.payment_intent || '',
+    stripePaymentIntentId: paymentIntentId || '',
+    ...(stripeChargeId ? { stripeChargeId } : {}),
   }, { merge: true });
 
-  // Transfers are released after delivery confirmation (see markOrderCompleteTransfer).
+  // Per-seller Connect Transfers after delivery confirmation (multi-seller loop).
   return { orderId, duplicate: false, deferredTransfers: true };
 }
 
@@ -73,11 +88,20 @@ async function releaseSellerTransfers({ admin, stripe, orderId }) {
 
   const shipments = Array.isArray(order.shipments) ? order.shipments : [];
   const transferIds = [];
+  let sourceTransaction = String(order.stripeChargeId || '').trim();
+  if (!sourceTransaction && order.stripePaymentIntentId) {
+    const pi = await stripe.paymentIntents.retrieve(String(order.stripePaymentIntentId), {
+      expand: ['latest_charge'],
+    });
+    const latest = pi.latest_charge;
+    sourceTransaction = typeof latest === 'string' ? latest : String(latest?.id || '');
+  }
+
   for (const shipment of shipments) {
     const amount = Number(shipment.sellerTransferCents) || 0;
     const account = String(shipment.stripeConnectAccountId || '');
     if (amount < 1 || !account) continue;
-    const transfer = await stripe.transfers.create({
+    const body = {
       amount,
       currency: 'eur',
       destination: account,
@@ -86,7 +110,10 @@ async function releaseSellerTransfers({ admin, stripe, orderId }) {
         pokoinOrderId: orderId,
         sellerId: String(shipment.sellerId || ''),
       },
-    }, {
+    };
+    // Tie each seller Transfer to the single Checkout charge (Stripe Separate Charges and Transfers).
+    if (sourceTransaction) body.source_transaction = sourceTransaction;
+    const transfer = await stripe.transfers.create(body, {
       idempotencyKey: `pokoin-transfer-${orderId}-${shipment.sellerId}`,
     });
     transferIds.push(transfer.id);
