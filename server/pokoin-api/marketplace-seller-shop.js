@@ -17,6 +17,14 @@ function getFirebaseAdmin(...args) {
   return require('./_firebase').getFirebaseAdmin(...args);
 }
 
+function parseGameFromRequest(...args) {
+  return require('./_marketplace_game').parseGameFromRequest(...args);
+}
+
+function runWithGame(...args) {
+  return require('./_marketplace_game').runWithGame(...args);
+}
+
 const PAGE_DEFAULT = 100;
 const PAGE_MAX = 100;
 
@@ -195,7 +203,36 @@ function listingRow(row, seller = {}) {
   };
 }
 
-async function readSellerShop(url) {
+async function sellerCardIdsForGame(sellerUid, game, {
+  query = marketplaceQuery,
+  run = withGameContext,
+} = {}) {
+  if (!game || game === 'pokemon') return null;
+  const listed = await run('pokemon', () => query(
+    `
+      select distinct card_id
+      from public.marketplace_user_listings
+      where seller_uid = $1
+        and status = 'active'
+        and quantity_available > 0
+        and nullif(card_id, '') is not null
+    `,
+    [sellerUid],
+  ));
+  const ids = listed.rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean);
+  if (!ids.length) return [];
+  const catalog = await run(game, () => query(
+    `
+      select card_id::text as card_id
+      from public.marketplace_search_candidates
+      where card_id::text = any($1::text[])
+    `,
+    [ids],
+  ));
+  return catalog.rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean);
+}
+
+async function readSellerShopData(url, game) {
   const sellerUsername = cleanText(url.searchParams.get('sellerUsername'), 64);
   if (!sellerUsername) {
     const error = new Error('sellerUsername is required.');
@@ -203,7 +240,7 @@ async function readSellerShop(url) {
     throw error;
   }
 
-  const seller = await sellerProfileForUsername(sellerUsername);
+  const seller = await withGameContext('pokemon', () => sellerProfileForUsername(sellerUsername));
   const limit = cleanLimit(url.searchParams.get('limit'));
   const offset = cleanOffset(url.searchParams.get('offset'));
   const q = cleanText(url.searchParams.get('q') || url.searchParams.get('query'), 120).toLowerCase();
@@ -217,6 +254,12 @@ async function readSellerShop(url) {
     "status = 'active'",
     'quantity_available > 0',
   ];
+
+  const gameCardIds = await sellerCardIdsForGame(seller.uid, game);
+  if (gameCardIds) {
+    values.push(gameCardIds);
+    where.push(`card_id = any($${values.length}::text[])`);
+  }
 
   if (q) {
     values.push(`%${q}%`);
@@ -240,7 +283,7 @@ async function readSellerShop(url) {
 
   const whereSql = where.join(' and ');
 
-  const totals = await marketplaceQuery(
+  const totals = await withGameContext('pokemon', () => marketplaceQuery(
     `
       select
         count(*)::int as total,
@@ -249,12 +292,12 @@ async function readSellerShop(url) {
       where ${whereSql}
     `,
     values,
-  );
+  ));
   const total = Number(totals.rows[0]?.total || 0);
   const unique = Number(totals.rows[0]?.unique_cards || 0);
 
   const pageValues = [...values, limit, offset];
-  const result = await marketplaceQuery(
+  const result = await withGameContext('pokemon', () => marketplaceQuery(
     `
       select *
       from public.marketplace_user_listings
@@ -264,9 +307,10 @@ async function readSellerShop(url) {
       offset $${pageValues.length}
     `,
     pageValues,
-  );
+  ));
 
   return {
+    game,
     seller: {
       uid: seller.uid,
       username: seller.username,
@@ -280,6 +324,14 @@ async function readSellerShop(url) {
   };
 }
 
+function withGameContext(game, fn, runner = runWithGame) {
+  return runner(game, fn);
+}
+
+async function readSellerShop(url, game = 'pokemon') {
+  return readSellerShopData(url, game);
+}
+
 module.exports = async function handler(req, res) {
   try {
     if (req.method !== 'GET') {
@@ -287,7 +339,8 @@ module.exports = async function handler(req, res) {
       return res.status(405).json({ error: 'Method not allowed.' });
     }
     const url = new URL(req.url, `https://${req.headers.host || 'pokoin.com'}`);
-    const payload = await readSellerShop(url);
+    const game = parseGameFromRequest(req);
+    const payload = await readSellerShop(url, game);
     res.setHeader('Cache-Control', 'private, no-store');
     return res.status(200).json(payload);
   } catch (error) {
@@ -307,4 +360,6 @@ module.exports._test = {
   sortSql,
   shopSellerFromProfile,
   listingRow,
+  sellerCardIdsForGame,
+  withGameContext,
 };

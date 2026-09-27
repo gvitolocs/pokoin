@@ -23,6 +23,7 @@ export function sellerCacheKey(username, opts = {}) {
   const condition = String(opts.condition || '').trim().toLowerCase();
   const language = String(opts.language || '').trim().toLowerCase();
   const sort = String(opts.sort || '').trim().toLowerCase();
+  const game = String(opts.game || '').trim().toLowerCase();
   // Bare username key remains valid for legacy fetchSellerByUsername callers.
   if (
     !Number.isFinite(limit) &&
@@ -30,7 +31,8 @@ export function sellerCacheKey(username, opts = {}) {
     !q &&
     !condition &&
     !language &&
-    !sort
+    !sort &&
+    !game
   ) {
     return handle;
   }
@@ -42,6 +44,7 @@ export function sellerCacheKey(username, opts = {}) {
     `c${condition}`,
     `lang${language}`,
     `s${sort}`,
+    `g${game}`,
   ].join('::');
 }
 

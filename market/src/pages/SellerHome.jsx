@@ -16,7 +16,8 @@ import {
   liveInventoryListings,
   summarizeLiveInventory,
 } from '../inventory-listings.js';
-import { addUtcDays, normalizeHistoryDay, utcDayKey } from '../portfolio-history.js';
+import { addUtcDays, utcDayKey } from '../portfolio-history.js';
+import { loadPortfolioHistory, peekPortfolioHistory } from '../portfolio-history-cache.js';
 import {
   portfolioTilesFingerprint,
   portfolioTilesFromSummary,
@@ -254,12 +255,13 @@ export default function SellerHome() {
   useEffect(() => {
     if (preview || !uid) return undefined;
     let cancelled = false;
-    setHistoryPending(true);
-    getBearer()
-      .then((token) => fetchPortfolioHistory(token))
-      .then((data) => {
+    const cached = peekPortfolioHistory(uid);
+    if (cached) setHistorySeries(cached);
+    setHistoryPending(!cached);
+    loadPortfolioHistory(uid, () => getBearer().then((token) => fetchPortfolioHistory(token)))
+      .then((series) => {
         if (cancelled) return;
-        setHistorySeries((data?.days || []).map((row) => normalizeHistoryDay(row)).filter(Boolean));
+        setHistorySeries(series);
       })
       .catch(() => {
         if (!cancelled) setHistorySeries([]);

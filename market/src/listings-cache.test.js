@@ -90,3 +90,12 @@ test('seller shop cache includes limit/offset so short fetches cannot poison', (
   rememberSellerListings('redshakkio', { listings: [{ id: 'legacy' }] });
   assert.equal(peekSellerListings('redshakkio').listings[0].id, 'legacy');
 });
+
+test('seller shop cache is isolated by selected game', () => {
+  resetListingsCacheForTests();
+  const base = { limit: 100, offset: 0, sort: 'price-asc' };
+  rememberSellerListings('redshakkio', { listings: [{ id: 'pokemon' }] }, { ...base, game: 'pokemon' });
+  rememberSellerListings('redshakkio', { listings: [{ id: 'sorcery' }] }, { ...base, game: 'sorcery' });
+  assert.equal(peekSellerListings('redshakkio', { ...base, game: 'pokemon' }).listings[0].id, 'pokemon');
+  assert.equal(peekSellerListings('redshakkio', { ...base, game: 'sorcery' }).listings[0].id, 'sorcery');
+});

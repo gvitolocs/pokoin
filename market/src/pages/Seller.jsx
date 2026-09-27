@@ -15,6 +15,7 @@ import {
   sellerHandle,
 } from '../listing-meta.js';
 import { seedSellerListings } from '../seller-seed.js';
+import { game } from '../game.js';
 
 const PAGE_SIZE = 100;
 
@@ -59,7 +60,12 @@ export default function Seller() {
   const { addItem } = useCart();
   const lang = routeLang || getSearchLang();
   const handle = decodeURIComponent(String(username || '').trim());
-  const seeded = seedSellerListings(handle, { pageSize: PAGE_SIZE, sort: 'price-asc' });
+  const selectedGame = game().apiGame;
+  const seeded = seedSellerListings(handle, {
+    pageSize: PAGE_SIZE,
+    sort: 'price-asc',
+    game: selectedGame,
+  });
 
   const [listings, setListings] = useState(() => seeded?.listings ?? null);
   const [total, setTotal] = useState(() => seeded?.total ?? null);
@@ -79,7 +85,7 @@ export default function Seller() {
 
   useEffect(() => {
     setPage(1);
-  }, [query, condition, language, sort, handle]);
+  }, [query, condition, language, sort, handle, selectedGame]);
 
   useEffect(() => {
     document.title = `${seller.displayName || handle} · Pokoin`;
@@ -97,6 +103,7 @@ export default function Seller() {
       condition,
       language,
       sort,
+      game: selectedGame,
     })
       .then((data) => {
         if (cancelled) return;
@@ -125,7 +132,7 @@ export default function Seller() {
     return () => {
       cancelled = true;
     };
-  }, [handle, page, query, condition, language, sort]);
+  }, [handle, page, query, condition, language, sort, selectedGame]);
 
   const sample = listings?.[0];
   const display = seller.displayName || publicListingSellerName(sample, handle);

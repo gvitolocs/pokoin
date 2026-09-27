@@ -1,5 +1,10 @@
 import { displayName, printingIdentity } from './identity.js';
-import { catalogImageId, homepageDerivativeUrl, ownCatalogImage, preferFullImage } from './image-urls.js';
+import {
+  catalogImageId,
+  homepageDerivativeUrl,
+  ownCatalogImage,
+  preferFullImage,
+} from './image-urls.js';
 import { leftoverCdnId } from './card-stub.js';
 import { sellerHandle } from './listing-meta.js';
 import { tilePricePkn } from './pkn.js';
@@ -32,13 +37,16 @@ function cardImage(card, offer) {
     || card?.homepageImageUrl
     || '',
   ).trim();
+  // Prefer offer identity when card is missing (listing-only drag).
+  const identity = card || {
+    id: offer?.cardId || offer?.card_id,
+    name: offer?.cardName || offer?.card_name || offer?.name,
+    canonicalPath: offer?.canonicalPath || offer?.canonical_path,
+  };
   // Drop CardTrader preview_ / foreign hosts; keep leftover ct_id (Eevee 813554).
-  const owned = ownCatalogImage(card || {}, preferFullImage(raw) || raw);
-  if (owned) {
-    // Prefer the homepage derivative — same bitmap rails/tiles already painted.
-    return homepageDerivativeUrl(owned) || owned;
-  }
-  return homepageDerivativeUrl(raw) || preferFullImage(raw) || '';
+  const owned = ownCatalogImage(identity, preferFullImage(raw) || raw);
+  // Prefer the homepage derivative — same bitmap rails/tiles already painted.
+  return homepageDerivativeUrl(owned) || owned || '';
 }
 
 function offerCopies(offer) {

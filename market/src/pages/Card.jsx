@@ -2164,8 +2164,6 @@ export default function Card() {
             <button
               type="button"
               className="art-frame"
-              draggable={Boolean(art)}
-              onDragStart={(event) => writeListingDrag(event, dragThisCard(card, payload?.offers || []))}
               onClick={() => {
                 setZoom(true);
                 track(Action.zoomArt, card);
@@ -2178,6 +2176,7 @@ export default function Card() {
                   alt={cardImageAlt(card)}
                   fetchPriority="high"
                   full
+                  dragCard={dragThisCard(card, payload?.offers || [])}
                   onError={() => {
                     console.warn('[pokoin:desk-art] hero failed', {
                       cardId: card?.id,

@@ -6,6 +6,22 @@
 'use strict';
 
 const POKEMON_GAME_ID = 5;
+const MARKETPLACE_GAME_BY_CARDTRADER_ID = Object.freeze({
+  1: 'magic',
+  4: 'yugioh',
+  5: 'pokemon',
+  6: 'flesh_and_blood',
+  8: 'digimon',
+  9: 'dragon_ball_super',
+  10: 'vanguard',
+  15: 'one_piece',
+  18: 'lorcana',
+  20: 'star_wars',
+  21: 'union_arena',
+  22: 'riftbound',
+  23: 'gundam',
+  24: 'sorcery',
+});
 const SOURCE_IMPORT = 'cardtrader_seller_import';
 const CT_PREFIX = 'ct:';
 const PKN_USDT_PRICE = 0.005;
@@ -48,6 +64,7 @@ function cleanText(value, maxLength = 240) {
 function emptySummary() {
   return {
     inventory: 0,
+    supportedInventory: 0,
     pokemonInventory: 0,
     alreadyLinked: 0,
     matchedExisting: 0,
@@ -165,6 +182,13 @@ function isPokemonProduct(product) {
     return Boolean(product.blueprintId);
   }
   return product.gameId === POKEMON_GAME_ID;
+}
+
+function marketplaceGameForProduct(product) {
+  if (product.gameId == null) {
+    return isPokemonProduct(product) ? 'pokemon' : '';
+  }
+  return MARKETPLACE_GAME_BY_CARDTRADER_ID[product.gameId] || '';
 }
 
 function facetKey(row) {
@@ -320,11 +344,13 @@ function planInventoryReconcile({
   const normalized = products.map(normalizeProduct).filter((p) => p.id);
 
   for (const product of normalized) {
-    if (!isPokemonProduct(product)) {
+    const marketplaceGame = marketplaceGameForProduct(product);
+    if (!marketplaceGame) {
       summary.skippedNonPokemon += 1;
       continue;
     }
-    summary.pokemonInventory += 1;
+    summary.supportedInventory += 1;
+    if (marketplaceGame === 'pokemon') summary.pokemonInventory += 1;
     seenProductIds.add(product.id);
     const decision = resolveProductAttachment(product, {
       bySourceId,
@@ -493,6 +519,7 @@ module.exports = {
   facetKey,
   isCtLinkedSource,
   isPokemonProduct,
+  marketplaceGameForProduct,
   normalizeProduct,
   applyDumpMinimums,
   marketPricePkn,

@@ -166,10 +166,6 @@ export default function Inventory() {
           </button>
           <input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={onPickFile} />
         </div>
-        <p className="stock-csv-hint">
-          PowerTools <code>location</code> becomes box stack/position on import.
-          Stack size 1 stores <code>box·N</code> and never flashes stack-full.
-        </p>
         {preview ? (
           <div className="stock-csv-preview">
             <p>

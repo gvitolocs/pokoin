@@ -32,6 +32,18 @@ export function marqueeBlocked(target) {
   ));
 }
 
+/** A plain pointer outside the selected rows dismisses the current group. */
+export function clearShopSelectionOnPointer(target, list, selected, event = {}) {
+  if (!selected?.size) return false;
+  const row = target?.closest?.('.shop-row[data-listing-id]');
+  const id = row?.dataset?.listingId || '';
+  if (id && selected.has(id)) return false;
+  if (row && list?.contains?.(row) && (event.shiftKey || event.ctrlKey || event.metaKey)) {
+    return false;
+  }
+  return true;
+}
+
 /** Listings that ride along when a selected shop row is dragged. Held row is first. */
 export function shopDragOffers(rows, selected, offer) {
   const id = listingSelectId(offer);

@@ -1043,7 +1043,7 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 
 .nav-preview-dash {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 6.5rem;
+  grid-template-columns: minmax(0, 1fr) 8.5rem;
   gap: 0.75rem;
   width: 28rem;
 }
@@ -1054,16 +1054,42 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   font-weight: 750;
 }
 
-.nav-scan {
+.nav-preview .nav-scan {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  padding: 0.45rem;
-  border: 1px solid var(--g5);
+  gap: 0.45rem;
+  padding: 0.7rem;
+  border: 1px solid #ffe074;
   border-radius: 12px;
+  background: var(--yellow);
+  color: #17120a;
+  text-align: center;
   text-decoration: none;
+}
+
+.icon-nav .nav-preview .nav-scan {
+  width: 100%;
+  height: auto;
+  min-height: 8.75rem;
+}
+
+.nav-preview .nav-scan:hover,
+.nav-preview .nav-scan:focus-visible {
+  background: #ffe276;
+  box-shadow: 0 0 0 2px rgb(255 211 61 / 0.28);
+}
+
+.nav-preview .nav-scan strong {
+  margin: 0;
+  color: inherit;
+}
+
+.icon-nav .nav-preview .nav-scan svg {
+  width: 4.5rem;
+  height: 6.25rem;
+  flex: 0 0 auto;
 }
 
 .cart-drop {

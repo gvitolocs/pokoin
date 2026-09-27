@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { formatPkn } from '../api.js';
 import { artCutVars } from '../art-cut.js';
 import { listingReference, writeListingDrag } from '../chat-listing.js';
-import { homepageDerivativeUrl, preferFullImage } from '../image-urls.js';
+import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
 import ThumbZoom from './ThumbZoom.jsx';
 import { openListingChat } from '../chat-dock-store.js';
 import {
@@ -88,7 +88,11 @@ export default function ShopListingRow({
   const cardPath = offer?.canonicalPath || offer?.canonical_path || '';
   const cardName = offer?.cardName || offer?.name || '';
   const setName = offer?.setName || '';
-  const image = offer?.cardImageUrl || offer?.imageUrl || '';
+  const image = ownCatalogImage(card || {
+    id: offer?.cardId || offer?.card_id,
+    name: cardName,
+    canonicalPath: cardPath,
+  }, preferFullImage(offer?.cardImageUrl || offer?.imageUrl || ''));
 
   function buy(event) {
     if (mine || !onBuy) return;

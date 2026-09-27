@@ -58,6 +58,21 @@ test('a shop listing reference keeps the seller handle and card name', () => {
   assert.equal(row.pricePkn, 76);
 });
 
+test('a listing reference never keeps a CardTrader image URL', () => {
+  const row = listingReference({
+    offer: {
+      id: 'poffin',
+      cardImageUrl: 'https://cardtrader.com/uploads/blueprints/image/370822/preview_buddy-buddy-poffin-184-217-ascended-heroes.jpg',
+    },
+    card: {
+      id: '741644',
+      name: 'Buddy-Buddy Poffin',
+      canonicalPath: '/marketplace/en/cards/741644/card-buddy-buddy-poffin-184-217-ascended-heroes',
+    },
+  });
+  assert.equal(row.imageUrl, '/card-images/370822_buddy-buddy-poffin_homepage.webp');
+});
+
 test('chat tags keep one copy of a listing and cap at four', () => {
   const one = { kind: 'listing', listingId: 'a', cardId: '', cardName: 'A', seller: 'red', qty: 3, stock: 8 };
   const kept = appendChatTag([one], one);
@@ -418,6 +433,18 @@ test('dragging the desk frame uses a pile of the held card', () => {
   assert.equal(root.className, 'drag-stack');
   assert.equal(kids.length, 1);
   assert.equal(kids[0].tagName, 'CANVAS');
+});
+
+test('the large desk scan owns the drag gesture instead of its button wrapper', () => {
+  const page = readFileSync(new URL('./pages/Card.jsx', import.meta.url), 'utf8');
+  const classAt = page.indexOf('className="art-frame"');
+  const openAt = page.lastIndexOf('<button', classAt);
+  const closeAt = page.indexOf('</button>', classAt);
+  const frame = page.slice(openAt, closeAt + '</button>'.length);
+  assert.match(page, /import \{ getChatDock \} from '\.\.\/chat-dock-store\.js'/);
+  assert.match(frame, /<CardArt[\s\S]*dragCard=\{dragThisCard\(card, payload\?\.offers \|\| \[\]\)\}/);
+  assert.doesNotMatch(frame, /draggable=\{Boolean\(art\)\}/);
+  assert.doesNotMatch(frame, /onDragStart=/);
 });
 
 test('a homepage card is not a seller card', () => {

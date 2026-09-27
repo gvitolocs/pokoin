@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { listingSelectId, marqueeBlocked, marqueeRect, rectsIntersect, shopDragOffers } from './shop-marquee.js';
+import {
+  clearShopSelectionOnPointer,
+  listingSelectId,
+  marqueeBlocked,
+  marqueeRect,
+  rectsIntersect,
+  shopDragOffers,
+} from './shop-marquee.js';
 
 test('a rubber band starts on the card scan, not on a button', () => {
   const control = { closest: (sel) => (String(sel).includes('button') ? control : null) };
@@ -23,4 +30,20 @@ test('a rubber band starts on the card scan, not on a button', () => {
   assert.equal(rectsIntersect(rect, { left: 0, top: 0, right: 5, bottom: 10 }), true);
   assert.equal(rectsIntersect(rect, { left: 20, top: 0, right: 30, bottom: 10 }), false);
   assert.equal(listingSelectId({ id: 'lst-1' }), 'lst-1');
+});
+
+test('a plain pointer outside selected shop rows clears the selection', () => {
+  const selected = new Set(['a', 'b']);
+  const selectedRow = { dataset: { listingId: 'a' } };
+  const otherRow = { dataset: { listingId: 'c' } };
+  const list = { contains: (row) => row === selectedRow || row === otherRow };
+  const target = (row) => ({ closest: () => row });
+
+  assert.equal(clearShopSelectionOnPointer(target(selectedRow), list, selected), false);
+  assert.equal(clearShopSelectionOnPointer(target(otherRow), list, selected), true);
+  assert.equal(clearShopSelectionOnPointer({ closest: () => null }, list, selected), true);
+  assert.equal(
+    clearShopSelectionOnPointer(target(otherRow), list, selected, { ctrlKey: true }),
+    false,
+  );
 });
