@@ -362,5 +362,26 @@
         "Postgres writer (link writes) + read replica (status)"
       ]
     }
+  },
+  {
+    "path": "/api/marketplace-native-sales",
+    "file": "marketplace-native-sales.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Public Sold on Pokoin rows for a card desk: paid native PKN/EUR orders, no buyer identity.",
+    "auth": "Public. cardId required.",
+    "params": {
+      "query": "cardId required; limit (max 50).",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
   }
 ]

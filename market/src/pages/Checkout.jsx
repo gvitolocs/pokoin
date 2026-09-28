@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  cancelEurOrder,
   createMarketplaceOrder,
   createOrderCheckoutSession,
   fetchAccountAddresses,
@@ -107,6 +108,7 @@ export default function Checkout() {
   const [quoteError, setQuoteError] = useState('');
   const [shippingService, setShippingService] = useState('tracked'); // tracked | untracked
   const stripeCancelled = searchParams.get('cancelled') === '1';
+  const cancelledOrderId = String(searchParams.get('order') || '').trim();
 
   const nft = nftOnly && canNftOnly;
   const buyerCountry = String(
@@ -224,15 +226,33 @@ export default function Checkout() {
 
   useEffect(() => {
     if (!stripeCancelled) return;
-    setNotice('Stripe payment was cancelled. Your cart is still here — you can pay when ready.');
+    setNotice('Stripe payment was cancelled. Nothing was charged and your cart is still here.');
     setBusy(false);
     setSearchParams((prev) => {
-      if (!prev.has('cancelled')) return prev;
+      if (!prev.has('cancelled') && !prev.has('order')) return prev;
       const next = new URLSearchParams(prev);
       next.delete('cancelled');
+      next.delete('order');
       return next;
     }, { replace: true });
   }, [stripeCancelled, setSearchParams]);
+
+  // Stripe Cancel → close that session now so the held cards go straight back
+  // on sale instead of waiting out the 30-minute hold.
+  useEffect(() => {
+    if (!stripeCancelled || !cancelledOrderId || !signedIn) return;
+    (async () => {
+      try {
+        const token = await getBearer();
+        await cancelEurOrder(cancelledOrderId, token);
+      } catch (err) {
+        if (err?.body?.code === 'already_paid') {
+          navigate('/orders', { replace: true });
+        }
+        // Otherwise the hold simply expires on its own.
+      }
+    })();
+  }, [stripeCancelled, cancelledOrderId, signedIn, getBearer, navigate]);
 
   useEffect(() => {
     if (!signedIn || nft) return undefined;
@@ -371,7 +391,10 @@ export default function Checkout() {
       // Keep the cart until Stripe success (/orders?eur_session=…) so cancel can return here.
       window.location.assign(data.checkoutUrl);
     } catch (err) {
-      setError(err.message || 'Could not open Stripe.');
+      const code = err?.body?.code;
+      setError(code === 'price_mismatch' || err?.status === 409
+        ? `${err.message} Refresh the card in your cart and try again — nothing was charged.`
+        : (err.message || 'Could not open Stripe.'));
       setBusy(false);
     }
   }
