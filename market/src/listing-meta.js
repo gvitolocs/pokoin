@@ -173,7 +173,7 @@ export function conditionShort(condition) {
   if (tone === 'sp') return 'SP';
   if (tone === 'mp') return 'MP';
   if (tone === 'pl') return 'PL';
-    if (tone === 'poor') return 'PO';
+  if (tone === 'poor') return 'PO';
   const text = String(condition || '').trim();
   return text || 'NM';
 }

@@ -30,6 +30,18 @@ test('condition tones match CardTrader grades', () => {
   assert.equal(conditionShort('Poor'), 'PO');
 });
 
+test('shop-cond pills use CardTrader solids plus red PO', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname, join } = await import('node:path');
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'styles.css'), 'utf8');
+  assert.match(css, /\.shop-cond\.is-nm \{[^}]*background:\s*#6f8f3a/);
+  assert.match(css, /\.shop-cond\.is-sp \{[^}]*background:\s*#9bb84a/);
+  assert.match(css, /\.shop-cond\.is-mp \{[^}]*background:\s*#d4a017/);
+  assert.match(css, /\.shop-cond\.is-pl \{[^}]*background:\s*#c45a22/);
+  assert.match(css, /\.shop-cond\.is-poor \{[^}]*background:\s*#d32f2f/);
+});
+
 test('listing language uses circle flags, not EN text', () => {
   assert.equal(listingLanguageFlag('EN').code, 'en');
   assert.equal(listingLanguageFlag('en').src.includes('/flags/en.svg'), true);

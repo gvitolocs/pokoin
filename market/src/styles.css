@@ -4380,18 +4380,28 @@ span.shop-flag {
 }
 
 .shop-cond {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.85rem;
+  padding: 0.12rem 0.38rem;
+  border-radius: 0.35rem;
   font-weight: 800;
   letter-spacing: 0.04em;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  color: #fff;
+  background: #6f8f3a; /* fallback NM-ish */
 }
 
-.shop-cond.is-nm { color: #3ee0b0; }
-.shop-cond.is-ex { color: #6ee7b7; }
-.shop-cond.is-sp { color: #f0c14b; }
-.shop-cond.is-mp { color: #f5a623; }
-.shop-cond.is-pl { color: #e67e22; }
-.shop-cond.is-hp { color: #e67e22; } /* legacy unused; CT HP → PL */
-.shop-cond.is-poor { color: #dc143c; } /* Pokoin Poor / PO — scarlet */
+/* CardTrader-style condition pills (white on solid). Pokoin adds red PO. */
+.shop-cond.is-nm { background: #6f8f3a; color: #fff; }   /* Near Mint */
+.shop-cond.is-ex { background: #7fad4a; color: #fff; }   /* Excellent (legacy) */
+.shop-cond.is-sp { background: #9bb84a; color: #fff; }   /* Slightly Played */
+.shop-cond.is-mp { background: #d4a017; color: #fff; }   /* Moderately Played */
+.shop-cond.is-pl { background: #c45a22; color: #fff; }   /* Played (CT Heavily Played → PL) */
+.shop-cond.is-hp { background: #c45a22; color: #fff; }   /* legacy unused; CT HP → PL */
+.shop-cond.is-poor { background: #d32f2f; color: #fff; } /* Poor / PO — red */
 
 .shop-txt { color: var(--muted); display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .shop-px { font-weight: 700; font-size: 0.85rem; color: var(--yellow); }
