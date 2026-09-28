@@ -128,6 +128,7 @@ export default function Inventory() {
         title="My listings"
       >
         <Link className="btn" to="/inventory/scan">Scan cards</Link>
+        <Link className="btn ghost" to="/sales">Sold history</Link>
         <Link className="btn ghost" to="/marketplace">List a card</Link>
       </PageHead>
       <Alert>{error}</Alert>

@@ -74,6 +74,7 @@ import {
   SOLD_GRAPH_PAD,
 } from '../sold-graph.js';
 import { soldGraphView, soldTraitsForGraphDay } from '../sold-sales.js';
+import NativeSales from '../components/NativeSales.jsx';
 import { albumShade, cardShadeStyle } from '../art-shade.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '../sold-sales-cache.js';
 import { authFrom } from '../punchouts.js';
@@ -2392,6 +2393,7 @@ export default function Card() {
               setSalesGraded(Boolean(traits.graded));
             }}
           />
+          <NativeSales cardId={card.id} />
           <ListingForm
             card={card}
             identity={identity}

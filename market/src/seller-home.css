@@ -813,3 +813,10 @@
   .seller-history-value strong { font-size: 1.35rem; }
   .seller-history-dates input { max-width: 8.5rem; }
 }
+
+.seller-panel-links {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  justify-content: flex-end;
+}
