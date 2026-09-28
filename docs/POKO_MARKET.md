@@ -35,6 +35,7 @@ Body: `{ "tool": "...", "params": { ... } }`. Unknown tool → 400.
 | `card_quote` | `cardId` or `query`; optional `condition`, `language` | sold estimate (median/p25/p75, 90d, `cardtrader_sold_daily`), current asks (`cardtrader_blueprint_daily_analytics`), liquidity band, quick/market/patient strategies when sample supports |
 | `card_liquidity` | `cardId` or `query` | deterministic `lowDays/typicalDays/highDays` + `methodology` + confidence |
 | `collection_quote` | `artist` (+ optional `condition`, `language`, default NM/EN/1 copy) | per-artist totals with explicit `coveragePct`; market value vs acquisition cost kept separate |
+| `suggest_cards` | `subject` (+ `excludeCardId`, `limit` 1-12) | real catalog cards matching the subject with current lowest ask — powers "another cool steelix card?" |
 | `market_snapshot` | `limit` (1-50) | top `sold_qty_7d` cards |
 
 ## Product rules baked into the handler

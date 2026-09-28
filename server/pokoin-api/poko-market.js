@@ -629,6 +629,47 @@ async function collectionQuote(params = {}) {
   };
 }
 
+async function suggestCards(params = {}) {
+  const subject = cleanText(params.subject, 80);
+  const excludeCardId = cleanText(params.excludeCardId, 40);
+  const limit = Math.min(Math.max(Number(params.limit) || 6, 1), 12);
+  if (!subject) return { status: 'invalid', error: 'subject required' };
+  const tokens = subject.toLowerCase().split(/\s+/).filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+  if (!tokens.length) return { status: 'invalid', error: 'subject required' };
+  const conditions = tokens.map((_, i) => `s.search_text ilike $${i + 1}`);
+  const values = tokens.map((t) => `%${escapeLike(t)}%`);
+  const rows = await queryRows(
+    `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
+            coalesce(nullif(c.card_number, ''), '') as card_number,
+            ask.min_price_pkn
+       from marketplace_search_candidates s
+       left join marketplace_cards c on c.card_id = s.card_id
+       left join cardtrader_blueprint_daily_analytics ask
+         on ask.blueprint_id = (s.card_id::bigint / 2)
+        and ask.observed_day = (select max(observed_day) from cardtrader_blueprint_daily_analytics)
+      where s.item_kind <> 'product'
+        and ${conditions.join(' and ')}
+        and ($${values.length + 1}::text is null or s.card_id <> $${values.length + 1})
+      order by s.search_weight desc nulls last, s.name
+      limit ${limit + 1}`,
+    [...values, excludeCardId || null],
+  );
+  const candidates = rows
+    .filter((r) => String(r.card_id) !== excludeCardId)
+    .slice(0, limit)
+    .map((r) => ({
+      ...candidateFromRow(r),
+      minAsk: r.min_price_pkn != null ? round2(r.min_price_pkn) : null,
+    }));
+  if (!candidates.length) return { status: 'not_found', error: 'no catalog cards match that subject' };
+  return {
+    status: 'ok',
+    subject,
+    cards: candidates,
+    note: 'Real cards from the Pokoin catalog with current lowest ask (PKN minor units, EUR).',
+  };
+}
+
 async function marketSnapshot(params = {}) {
   const limit = Math.min(Math.max(Number(params.limit) || 10, 1), 50);
   const rows = await queryRows(
@@ -664,6 +705,7 @@ const TOOLS = {
   card_quote: cardQuote,
   card_liquidity: cardLiquidity,
   collection_quote: collectionQuote,
+  suggest_cards: suggestCards,
   market_snapshot: marketSnapshot,
 };
 
