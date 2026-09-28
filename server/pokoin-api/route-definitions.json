@@ -335,5 +335,29 @@
         "Postgres writer (link writes) + read replica (status)"
       ]
     }
+  },
+  {
+    "path": "/api/poko-chat",
+    "file": "poko-chat.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Site chat dock pass-through to the real Poko (Hermes /api/poko/chat on peer1). Always forwards — no legacy local brain.",
+    "auth": "Firebase bearer token; uid forwarded as Poko userId so memory is private per user.",
+    "params": {
+      "query": "none",
+      "body": "{ message, sessionId? }."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "POKONTACT_SERVICE_TOKEN",
+        "POKONTACT_SERVICE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Hermes poko runtime (peer1)"
+      ]
+    }
   }
 ]

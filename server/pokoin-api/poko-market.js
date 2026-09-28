@@ -223,26 +223,44 @@ function candidateFromRow(row) {
 // Tools
 // ---------------------------------------------------------------------------
 
+// Chatter words that must never break a card-name match. 'ex'/'gx'/'v' are
+// deliberately NOT here — they are part of real card names.
+const QUERY_FILLER_RE = /\b(hi|hello|hey|please|can|could|tell|me|do|does|did|you|know|i|im|i have|have|has|got|how|much|what|whats|worth|price|prices|priced|cost|costs|value|valued|values|market|sell|selling|sold|sale|buy|buying|for|about|around|roughly|approximately|near|mint|lightly|slightly|played|moderately|heavily|damaged|poor|condition|in|on|of|the|a|an|is|are|was|were|it|its|this|that|and|or|english|italian|french|german|spanish|japanese|from|with|any|some|one|copy|copies|right|now|currently|today|it is|its)\b/gi;
+
+function queryVariants(rawQuery) {
+  const text = cleanText(rawQuery, 120);
+  if (!text) return [];
+  const variants = [];
+  const cleaned = text.replace(QUERY_FILLER_RE, ' ').replace(/\s+/g, ' ').trim();
+  if (cleaned.length >= 4) variants.push(cleaned);
+  if (text !== cleaned && text.length >= 4) variants.push(text);
+  return variants.slice(0, 3);
+}
+
 async function resolveCard(params = {}) {
   const query = cleanText(params.query, 120);
   const artist = cleanText(params.artist, 80);
   if (!query && !artist) {
     return { status: 'invalid', error: 'query or artist required' };
   }
-  const namePattern = query ? `%${escapeLike(query)}%` : null;
   const artistPattern = artist ? `%${escapeLike(artist)}%` : null;
-  const rows = await queryRows(
-    `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
-            coalesce(nullif(c.card_number, ''), '') as card_number
-       from marketplace_search_candidates s
-       left join marketplace_cards c on c.card_id = s.card_id
-      where s.item_kind <> 'product'
-        and ($1::text is null or s.name ilike $1 or s.search_text ilike $1)
-        and ($2::text is null or s.artist ilike $2)
-      order by s.search_weight desc nulls last, s.name
-      limit 7`,
-    [namePattern, artistPattern],
-  );
+  let rows = [];
+  for (const variant of queryVariants(query)) {
+    const namePattern = `%${escapeLike(variant)}%`;
+    rows = await queryRows(
+      `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
+              coalesce(nullif(c.card_number, ''), '') as card_number
+         from marketplace_search_candidates s
+         left join marketplace_cards c on c.card_id = s.card_id
+        where s.item_kind <> 'product'
+          and (s.name ilike $1 or s.search_text ilike $1)
+          and ($2::text is null or s.artist ilike $2)
+        order by s.search_weight desc nulls last, s.name
+        limit 7`,
+      [namePattern, artistPattern],
+    );
+    if (rows.length) break;
+  }
   const candidates = rows.map(candidateFromRow);
   const status = candidates.length === 0 ? 'not_found' : (candidates.length === 1 ? 'ok' : 'ambiguous');
   return {
