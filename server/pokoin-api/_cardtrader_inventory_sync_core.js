@@ -31,12 +31,21 @@ const PKN_USDT_PRICE = 0.005;
 const CONDITION_FROM_CT = {
   mint: 'NM',
   'near mint': 'NM',
-  'slightly played': 'LP',
+  // Pokoin desk grades: NM / SP / MP / PL / Poor (same as PowerTools CSV map).
+  'slightly played': 'SP',
+  'lightly played': 'MP',
   'moderately played': 'MP',
-  played: 'HP',
-  'heavily played': 'HP',
-  poor: 'PO',
-  'lightly played': 'LP',
+  played: 'PL',
+  'heavily played': 'PL',
+  poor: 'Poor',
+  // Already-normalized shorts (and legacy LP/HP stored on older imports).
+  nm: 'NM',
+  sp: 'SP',
+  lp: 'SP',
+  mp: 'MP',
+  hp: 'PL',
+  pl: 'PL',
+  po: 'Poor',
 };
 
 const LANG_FROM_CT = {

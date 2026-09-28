@@ -2,94 +2,189 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   stockMatchKey,
   compactCollector,
   reconcilePowerToolsWithCardTrader,
   gamesFromCardTraderProducts,
 } = require('./_powertools_ct_match');
+const { importCsvText, assignStackPositions, parseLocation } = require('./_stock_csv');
+const { ctConditionToPokoin } = require('./_cardtrader_inventory_sync_core');
 
-test('collector numbers normalize leading zeros', () => {
-  assert.equal(compactCollector('069/101'), '69/101');
-  assert.equal(compactCollector('69/101'), '69/101');
+const FIXTURE = [
+  path.join(__dirname, '../../../cardvault/pokemon_card_vault/api/fixtures/powertools-F006-16.csv'),
+  '/home/nez/Projects/cardvault/pokemon_card_vault/api/fixtures/powertools-F006-16.csv',
+  '/tmp/cardvault-security/pokemon_card_vault/api/fixtures/powertools-F006-16.csv',
+].find((p) => fs.existsSync(p));
+
+test('collector numbers: bare, padded, n/m, and rarity prefix align', () => {
+  assert.equal(compactCollector('069/101'), '69');
+  assert.equal(compactCollector('69/101'), '69');
+  assert.equal(compactCollector('69'), '69');
+  assert.equal(compactCollector('102/131'), '102');
+  assert.equal(compactCollector('102'), '102');
+  assert.equal(compactCollector('Rare | 070/131'), '70');
+  assert.equal(compactCollector('Holo Rare | 008/182'), '8');
 });
 
-test('stock match key ignores set title noise', () => {
-  const a = stockMatchKey({
-    name: 'Plusle',
-    collectorNumber: '069/101',
-    condition: 'NM',
-    language: 'EN',
-    reverse: true,
-  });
-  const b = stockMatchKey({
-    name: 'Plusle',
-    collectorNumber: '69/101',
-    condition: 'NM',
-    language: 'EN',
-    reverse: true,
-  });
-  assert.equal(a, b);
+test('CT Slightly Played / Heavily Played map to Pokoin SP / PL (same as PT EX / HP)', () => {
+  assert.equal(ctConditionToPokoin('Slightly Played'), 'SP');
+  assert.equal(ctConditionToPokoin('Near Mint'), 'NM');
+  assert.equal(ctConditionToPokoin('Moderately Played'), 'MP');
+  assert.equal(ctConditionToPokoin('Heavily Played'), 'PL');
+  assert.equal(ctConditionToPokoin('Poor'), 'Poor');
+  assert.equal(ctConditionToPokoin('LP'), 'SP'); // legacy stored grade
+  assert.equal(ctConditionToPokoin('HP'), 'PL');
 });
 
-test('Power Tools locations attach to matching CardTrader products', () => {
+test('stock match key equates PT bare cn + EX with CT n/m + Slightly Played', () => {
+  const pt = stockMatchKey({
+    name: 'Bug Catching Set',
+    collectorNumber: '102',
+    condition: 'SP', // EX → SP via CSV import
+    language: 'IT',
+    reverse: false,
+  });
+  const ct = stockMatchKey({
+    name: 'Bug Catching Set',
+    collectorNumber: '102/131',
+    condition: 'SP', // Slightly Played → SP
+    language: 'IT',
+    reverse: false,
+  });
+  assert.equal(pt, ct);
+});
+
+test('legacy LP on a CT listing still matches PT SP', () => {
+  const pt = stockMatchKey({
+    name: 'Carmine',
+    collectorNumber: '103',
+    condition: 'SP',
+    language: 'IT',
+    reverse: false,
+  });
+  const ct = stockMatchKey({
+    name: 'Carmine',
+    collectorNumber: '103/131',
+    condition: 'LP',
+    language: 'IT',
+    reverse: false,
+  });
+  assert.equal(pt, ct);
+});
+
+test('bare FUOCOBOMBA location stays box name; stackSize 1 assigns ·N slots', () => {
+  const parsed = parseLocation('FUOCOBOMBA 006 - 16');
+  assert.equal(parsed.box, 'FUOCOBOMBA 006 - 16');
+  const slotted = assignStackPositions([
+    { name: 'A', location: 'FUOCOBOMBA 006 - 16' },
+    { name: 'B', location: 'FUOCOBOMBA 006 - 16' },
+    { name: 'C', location: 'other' },
+  ], 1);
+  assert.equal(slotted[0].location, 'FUOCOBOMBA 006 - 16·1');
+  assert.equal(slotted[1].location, 'FUOCOBOMBA 006 - 16·2');
+  assert.equal(slotted[2].location, 'other·1');
+});
+
+test('stackSize > 1 fills box·stack·pos and keeps structured ·strings', () => {
+  const slotted = assignStackPositions([
+    { location: 'boxA' },
+    { location: 'boxA' },
+    { location: 'boxA' },
+    { location: 'boxA·2·1' },
+  ], 2);
+  assert.equal(slotted[0].location, 'boxA·1·1');
+  assert.equal(slotted[1].location, 'boxA·1·2');
+  assert.equal(slotted[2].location, 'boxA·2·1');
+  assert.equal(slotted[3].location, 'boxA·2·1'); // already structured, kept
+});
+
+test('Power Tools fixture rows match simulated CT products and keep locations', () => {
+  assert.ok(FIXTURE, 'powertools-F006-16.csv fixture missing');
+  const csv = fs.readFileSync(FIXTURE, 'utf8');
+  const imported = importCsvText(csv, { format: 'powertools', stackSize: 1 });
+  const ptRows = imported.results.filter((r) => r.ok).map((r) => r.row);
+  assert.equal(ptRows.length, 47);
+  assert.ok(ptRows.every((r) => String(r.location).startsWith('FUOCOBOMBA 006 - 16')));
+
+  // Simulate CardTrader export products from the same PT identities.
+  const products = ptRows.map((row, index) => ({
+    id: String(1000 + index),
+    name: row.name,
+    condition: row.condition, // already Pokoin-normalized from CSV
+    language: row.language,
+    reverse: row.reverse === true,
+    firstEdition: row.firstEdition === true,
+    blueprintId: String(index + 1),
+    quantity: row.quantity,
+    raw: {
+      expansion: { name_en: row.setName },
+      properties_hash: {
+        // CT usually ships collector as n/m
+        collector_number: row.collectorNumber.includes('/')
+          ? row.collectorNumber
+          : `${row.collectorNumber}/131`,
+        condition: row.condition === 'SP' ? 'Slightly Played'
+          : row.condition === 'MP' ? 'Moderately Played'
+            : row.condition === 'PL' ? 'Heavily Played'
+              : row.condition === 'Poor' ? 'Poor'
+                : 'Near Mint',
+      },
+    },
+  }));
+
+  const result = reconcilePowerToolsWithCardTrader(products, ptRows, 'pokemon');
+  assert.equal(result.matched.length, 47, `matched=${result.matched.length} ctOnly=${result.ctOnly.length} ptOnly=${result.ptOnly.length}`);
+  assert.equal(result.ctOnly.length, 0);
+  assert.equal(result.ptOnly.length, 0);
+  for (const hit of result.matched) {
+    assert.ok(hit.location.startsWith('FUOCOBOMBA 006 - 16'), hit.location);
+  }
+});
+
+test('set soft-match picks Prismatic Evolutions when two collector twins exist', () => {
   const products = [
     {
-      id: '100',
-      name: 'Plusle',
+      id: 'a',
+      name: 'Bug Catching Set',
       condition: 'NM',
-      language: 'EN',
+      language: 'IT',
       reverse: true,
-      firstEdition: false,
-      blueprintId: '1',
-      quantity: 1,
-      raw: { properties_hash: { collector_number: '069/101' } },
-    },
-    {
-      id: '200',
-      name: 'Minun',
-      condition: 'NM',
-      language: 'EN',
-      reverse: false,
-      firstEdition: false,
-      blueprintId: '2',
-      quantity: 1,
-      raw: { properties_hash: { collector_number: '70/101' } },
+      raw: {
+        expansion: { name_en: 'Prismatic Evolutions' },
+        properties_hash: { collector_number: '102/131' },
+      },
     },
   ];
   const pt = [
     {
-      name: 'Plusle',
-      collectorNumber: '69/101',
+      name: 'Bug Catching Set',
+      collectorNumber: '102',
       condition: 'NM',
-      language: 'EN',
+      language: 'IT',
       reverse: true,
-      location: 'box1·3',
+      setName: 'Twilight Masquerade',
+      location: 'wrong-box',
+      quantity: 1,
+    },
+    {
+      name: 'Bug Catching Set',
+      collectorNumber: '102',
+      condition: 'NM',
+      language: 'IT',
+      reverse: true,
+      setName: 'Prismatic Evolutions',
+      location: 'FUOCOBOMBA 006 - 16·1',
       quantity: 1,
     },
   ];
   const result = reconcilePowerToolsWithCardTrader(products, pt, 'pokemon');
   assert.equal(result.matched.length, 1);
-  assert.equal(result.matched[0].location, 'box1·3');
-  assert.equal(result.matched[0].product.id, '100');
-  assert.equal(result.ctOnly.length, 1);
-  assert.equal(result.ctOnly[0].product.id, '200');
-  assert.equal(result.ptOnly.length, 0);
-});
-
-test('unmatched Power Tools rows stay ptOnly', () => {
-  const result = reconcilePowerToolsWithCardTrader([], [{
-    name: 'Orphan',
-    collectorNumber: '1/1',
-    condition: 'NM',
-    language: 'EN',
-    reverse: false,
-    location: 'shelf',
-    quantity: 2,
-  }], 'pokemon');
-  assert.equal(result.matched.length, 0);
+  assert.equal(result.matched[0].location, 'FUOCOBOMBA 006 - 16·1');
   assert.equal(result.ptOnly.length, 1);
-  assert.equal(result.ptOnly[0].location, 'shelf');
+  assert.equal(result.ptOnly[0].location, 'wrong-box');
 });
 
 test('gamesFromCardTraderProducts groups supported games', () => {

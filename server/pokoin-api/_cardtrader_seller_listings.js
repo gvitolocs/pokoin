@@ -15,10 +15,13 @@ const PKN_USDT_PRICE = 0.005;
 
 const CONDITION_TO_CT = {
   NM: 'Near Mint',
-  LP: 'Slightly Played',
+  SP: 'Slightly Played',
+  LP: 'Slightly Played', // legacy Pokoin grade
   MP: 'Moderately Played',
-  HP: 'Heavily Played',
+  PL: 'Heavily Played',
+  HP: 'Heavily Played', // legacy
   PO: 'Poor',
+  Poor: 'Poor',
 };
 
 const LANG_TO_CT = {

@@ -18,18 +18,28 @@ function compactKey(value) {
     .replace(/[^a-z0-9]+/g, '');
 }
 
-/** Collector numbers like 069/101 and 69/101 compare equal. */
+/** Collector numbers like 069/101, 69/101, and bare 69 compare equal. */
 function compactCollector(value) {
-  const raw = cleanText(value, 40).toLowerCase();
+  let raw = cleanText(value, 40).toLowerCase();
   if (!raw) return '';
-  const m = raw.match(/^0*(\d+)\s*\/\s*0*(\d+)/);
-  if (m) return `${m[1]}/${m[2]}`;
+  // CardTrader / catalog often prefix rarity: "Rare | 070/131".
+  raw = raw.replace(/^.*\|\s*/, '');
+  const slash = raw.match(/^0*(\d+)\s*\/\s*0*\d+/);
+  if (slash) return slash[1];
+  const bare = raw.match(/^0*(\d+)\b/);
+  if (bare) return bare[1];
   return raw.replace(/^0+(\d)/, '$1');
 }
 
 function facetBits(row = {}) {
+  let condition = cleanText(row.condition, 20).toUpperCase() || 'NM';
+  // Normalize legacy Pokoin shorts so CT imports (LP/HP/PO) still meet PT (SP/PL/Poor).
+  if (condition === 'LP') condition = 'SP';
+  if (condition === 'HP') condition = 'PL';
+  if (condition === 'PO') condition = 'POOR';
+  if (condition === 'POOR') condition = 'POOR';
   return [
-    cleanText(row.condition, 20).toUpperCase() || 'NM',
+    condition === 'POOR' ? 'POOR' : condition,
     cleanText(row.language, 10).toUpperCase() || 'EN',
     row.reverse === true || row.reverse === 't' || row.reverse === 1 ? '1' : '0',
     row.firstEdition === true || row.first_edition === true || row.firstEdition === 't' ? '1' : '0',
