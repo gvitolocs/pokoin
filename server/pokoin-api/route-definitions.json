@@ -95,6 +95,28 @@
     }
   },
   {
+    "path": "/api/cardtrader-clean-listings",
+    "file": "cardtrader-clean-listings.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Hide CardTrader-linked listings, or wipe the seller's entire inventory across TCGs (confirm required) so Sync can re-import.",
+    "auth": "Required Firebase bearer token; seller uid from token only.",
+    "params": {
+      "body": "scope=linked|all; when scope=all, confirm must be DELETE ALL LISTINGS"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_WRITER_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres writer"
+      ]
+    }
+  },
+  {
     "path": "/api/cardtrader-assets",
     "file": "cardtrader-assets.js",
     "methods": [
