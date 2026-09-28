@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, Navigate, useLocation } from 'react-router-dom';
+import { Link, Navigate, useLocation, useMatch } from 'react-router-dom';
 import { exportStockCsv, fetchSellerListings, formatPkn, importStockCsv } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
@@ -30,8 +30,10 @@ function downloadText(text, filename) {
   downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), filename);
 }
 
+/** Pokemon seller stock desk — live path is /mypokoin (legacy /inventory redirects). */
 export default function Inventory() {
   const location = useLocation();
+  const onImportTab = Boolean(useMatch({ path: '/mypokoin/import', end: true }));
   const { user, ready, signedIn, profile, getBearer } = useAuth();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
@@ -53,7 +55,7 @@ export default function Inventory() {
   }
 
   useEffect(() => {
-    document.title = 'Inventory · Pokoin';
+    document.title = onImportTab ? 'Import / export · MyPokoin' : 'MyPokoin · Pokoin';
     const uid = user?.uid || profile?.uid;
     if (!signedIn || !uid) return undefined;
     let cancelled = false;
@@ -68,7 +70,7 @@ export default function Inventory() {
     return () => {
       cancelled = true;
     };
-  }, [signedIn, user?.uid, profile?.uid, getBearer]);
+  }, [signedIn, user?.uid, profile?.uid, getBearer, onImportTab]);
 
   async function onExport() {
     setError('');
@@ -119,7 +121,7 @@ export default function Inventory() {
 
   if (!ready) return <SessionWait />;
   if (!signedIn) {
-    return <Navigate to={`/auth?from=${encodeURIComponent(location.pathname || '/inventory')}`} replace />;
+    return <Navigate to={`/auth?from=${encodeURIComponent(location.pathname || '/mypokoin')}`} replace />;
   }
 
   const counts = preview?.counts;
@@ -128,7 +130,7 @@ export default function Inventory() {
     <div className="page desk">
       <PageHead
         kicker="Seller"
-        title="Inventory"
+        title="MyPokoin"
       >
         <Link className="btn" to="/inventory/scan">Scan cards</Link>
         <Link className="btn ghost" to="/marketplace">List a card</Link>
@@ -137,112 +139,115 @@ export default function Inventory() {
       <Alert>{error}</Alert>
       {message ? <p className="ct-connect-ok" role="status">{message}</p> : null}
 
-      <DeskPanel title="Import / export stock">
-        <div className="stock-csv-bar">
-          <label>
-            Format
-            <select value={format} onChange={(e) => setFormat(e.target.value)} disabled={Boolean(busy)}>
-              {FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-            </select>
-          </label>
-          <label title="Used when importing: size 1 = one card per divider (no stack-full UI)">
-            Stack size
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={stackSize}
-              onChange={(e) => setStackSize(Math.max(1, Number(e.target.value) || 1))}
-              disabled={Boolean(busy)}
-            />
-          </label>
-          <label>
-            Price
-            <select value={priceMode} onChange={(e) => setPriceMode(e.target.value)} disabled={Boolean(busy)}>
-              <option value="eur_to_pkn">EUR → PKN (×200)</option>
-              <option value="as_pkn">Already PKN</option>
-            </select>
-          </label>
-          <button type="button" className="btn ghost" onClick={onExport} disabled={Boolean(busy)}>
-            {busy === 'export' ? 'Exporting…' : 'Export CSV'}
-          </button>
-          <button type="button" className="btn" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>
-            {busy === 'preview' ? 'Reading…' : 'Import CSV…'}
-          </button>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={onPickFile} />
-        </div>
-        {preview ? (
-          <div className="stock-csv-preview">
-            <p>
-              {preview.dryRun ? 'Preview' : 'Import'} · {preview.format}
-              {counts ? ` · ${counts.total} rows · ${counts.preview || counts.created || 0} ok · ${counts.failed} failed · ${counts.skipped || 0} skipped` : ''}
-            </p>
-            {preview.dryRun && pendingCsv && (counts?.preview > 0) ? (
-              <button
-                type="button"
-                className="btn"
+      {onImportTab ? (
+        <DeskPanel title="Import / export stock">
+          <div className="stock-csv-bar">
+            <label>
+              Format
+              <select value={format} onChange={(e) => setFormat(e.target.value)} disabled={Boolean(busy)}>
+                {FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+            </label>
+            <label title="Used when importing: size 1 = one card per divider (no stack-full UI)">
+              Stack size
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={stackSize}
+                onChange={(e) => setStackSize(Math.max(1, Number(e.target.value) || 1))}
                 disabled={Boolean(busy)}
-                onClick={() => runImport(pendingCsv, { dryRun: false })}
-              >
-                {busy === 'import' ? 'Importing…' : `Confirm import (${counts.preview})`}
-              </button>
-            ) : null}
-            {preview.failedCsv ? (
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={() => downloadText(preview.failedCsv, `pokoin-import-failed-${preview.format}.csv`)}
-              >
-                Download failed rows
-              </button>
-            ) : null}
-            {preview.failed?.length ? (
-              <ul className="stock-csv-failed">
-                {preview.failed.slice(0, 8).map((f) => (
-                  <li key={`${f.line}-${f.error}`}>Line {f.line}: {f.error}</li>
-                ))}
-                {preview.failed.length > 8 ? <li>…and {preview.failed.length - 8} more</li> : null}
-              </ul>
-            ) : null}
-            {preview.preview?.length ? (
-              <ul className="stock-csv-ok">
-                {preview.preview.slice(0, 6).map((p) => (
-                  <li key={`${p.line}-${p.cardId}`}>
-                    {p.name} · {p.condition} {p.language} · {formatPkn(p.pricePkn)} · {p.location}
-                  </li>
-                ))}
-                {preview.preview.length > 6 ? <li>…and {preview.preview.length - 6} more</li> : null}
-              </ul>
-            ) : null}
+              />
+            </label>
+            <label>
+              Price
+              <select value={priceMode} onChange={(e) => setPriceMode(e.target.value)} disabled={Boolean(busy)}>
+                <option value="eur_to_pkn">EUR → PKN (×200)</option>
+                <option value="as_pkn">Already PKN</option>
+              </select>
+            </label>
+            <button type="button" className="btn ghost" onClick={onExport} disabled={Boolean(busy)}>
+              {busy === 'export' ? 'Exporting…' : 'Export CSV'}
+            </button>
+            <button type="button" className="btn" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>
+              {busy === 'preview' ? 'Reading…' : 'Import CSV…'}
+            </button>
+            <input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={onPickFile} />
           </div>
-        ) : null}
-        <WipeAllInventory
-          disabled={Boolean(busy)}
-          onError={(text) => {
-            setError(text || '');
-            if (text) setMessage('');
-          }}
-          onMessage={(text) => {
-            setMessage(text || '');
-            setError('');
-          }}
-          onWiped={() => {
-            setRows([]);
-            reload().catch(() => {});
-          }}
-        />
-      </DeskPanel>
-
-      {rows == null && !error ? (
-        <DeskPanel title="Inventory"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
+          {preview ? (
+            <div className="stock-csv-preview">
+              <p>
+                {preview.dryRun ? 'Preview' : 'Import'} · {preview.format}
+                {counts ? ` · ${counts.total} rows · ${counts.preview || counts.created || 0} ok · ${counts.failed} failed · ${counts.skipped || 0} skipped` : ''}
+              </p>
+              {preview.dryRun && pendingCsv && (counts?.preview > 0) ? (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={Boolean(busy)}
+                  onClick={() => runImport(pendingCsv, { dryRun: false })}
+                >
+                  {busy === 'import' ? 'Importing…' : `Confirm import (${counts.preview})`}
+                </button>
+              ) : null}
+              {preview.failedCsv ? (
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => downloadText(preview.failedCsv, `pokoin-import-failed-${preview.format}.csv`)}
+                >
+                  Download failed rows
+                </button>
+              ) : null}
+              {preview.failed?.length ? (
+                <ul className="stock-csv-failed">
+                  {preview.failed.slice(0, 8).map((f) => (
+                    <li key={`${f.line}-${f.error}`}>Line {f.line}: {f.error}</li>
+                  ))}
+                  {preview.failed.length > 8 ? <li>…and {preview.failed.length - 8} more</li> : null}
+                </ul>
+              ) : null}
+              {preview.preview?.length ? (
+                <ul className="stock-csv-ok">
+                  {preview.preview.slice(0, 6).map((p) => (
+                    <li key={`${p.line}-${p.cardId}`}>
+                      {p.name} · {p.condition} {p.language} · {formatPkn(p.pricePkn)} · {p.location}
+                    </li>
+                  ))}
+                  {preview.preview.length > 6 ? <li>…and {preview.preview.length - 6} more</li> : null}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          <WipeAllInventory
+            disabled={Boolean(busy)}
+            onError={(text) => {
+              setError(text || '');
+              if (text) setMessage('');
+            }}
+            onMessage={(text) => {
+              setMessage(text || '');
+              setError('');
+            }}
+            onWiped={() => {
+              setRows([]);
+              reload().catch(() => {});
+            }}
+          />
+        </DeskPanel>
       ) : null}
-      {rows && !rows.length ? (
+
+      {!onImportTab && rows == null && !error ? (
+        <DeskPanel title="MyPokoin"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
+      ) : null}
+      {!onImportTab && rows && !rows.length ? (
         <EmptyDesk title="No live listings" lede="Scan a pile with your phone, import a CSV, or open a card and use List your card.">
           <Link className="btn" to="/inventory/scan">Scan cards</Link>
+          <Link className="btn ghost" to="/mypokoin/import">Import CSV</Link>
           <Link className="btn ghost" to="/marketplace">Find a card</Link>
         </EmptyDesk>
       ) : null}
-      {rows?.length ? (
+      {!onImportTab && rows?.length ? (
         <DeskPanel flush title={`${rows.length} listing${rows.length === 1 ? '' : 's'}`}>
           <div className="thread-list">
             {rows.map((row) => (

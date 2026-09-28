@@ -82,6 +82,7 @@ export function selectBandRoute(pathname = '') {
   if (!path) return false;
   return (
     path.includes('/marketplace')
+    || path.startsWith('/mypokoin')
     || path.startsWith('/inventory')
     || path.startsWith('/collection')
     || path.startsWith('/dashboard')

@@ -982,6 +982,22 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/mypokoin/import/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/import",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/inventory/",
       "destination": "/market/index.html"
     },

@@ -750,7 +750,7 @@ export function SellerDashboardView({
             <h2 id="seller-listings-title">Your listings</h2>
             <span className="seller-panel-links">
               {salesHref ? <DeskLink className="seller-panel-link" href={salesHref}>Sold history →</DeskLink> : null}
-              <DeskLink className="seller-panel-link" href={inventoryHref}>View inventory →</DeskLink>
+              <DeskLink className="seller-panel-link" href={inventoryHref}>View MyPokoin →</DeskLink>
             </span>
           </header>
           {listed?.failed ? (

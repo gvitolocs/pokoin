@@ -198,7 +198,9 @@ function AppShell() {
       {both('/cardscan', <Scan />)}
       {both('/scancard', <Scan />)}
       {both('/dashboard/scan', <ScanDesk />)}
-      {both('/inventory', <Inventory />)}
+      {both('/mypokoin/import', <Inventory />)}
+      {both('/mypokoin', <Inventory />)}
+      {both('/inventory', <Navigate to="/mypokoin" replace />)}
       {both('/inventory/scan', <ScanDesk />)}
       {both('/docs', <Site />)}
       {both('/about', <About />)}

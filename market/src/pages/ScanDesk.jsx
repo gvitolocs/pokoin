@@ -1200,7 +1200,7 @@ export default function ScanDesk() {
             <button type="button" className="btn" onClick={() => startSession(batch?.id)}>Start new session</button>
           ) : null}
           <button type="button" className="btn ghost icon-btn" onClick={() => setHelpOpen(true)} title="Keyboard shortcuts (?)">?</button>
-          <Link className="btn ghost" to="/inventory">Inventory</Link>
+          <Link className="btn ghost" to="/mypokoin">MyPokoin</Link>
         </div>
       </header>
 
@@ -1256,7 +1256,7 @@ export default function ScanDesk() {
           <div className="scan-done-actions">
             <a className="btn ghost" href={marketUrl('/collection')}>View collection</a>
             {batch.submitResult?.intent !== 'collection' ? (
-              <Link className="btn ghost" to="/inventory">Open inventory</Link>
+              <Link className="btn ghost" to="/mypokoin">Open MyPokoin</Link>
             ) : null}
             <button type="button" className="btn" onClick={newBatch}>Scan another batch</button>
           </div>

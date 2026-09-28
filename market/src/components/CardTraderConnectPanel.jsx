@@ -384,7 +384,7 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
             {stripeAction}
             {oneDayReady
               ? <a className="btn ghost" href={DASHBOARD_HOME}>Open dashboard</a>
-              : <Link className="btn ghost" to="/inventory">Open inventory</Link>}
+              : <Link className="btn ghost" to="/mypokoin">Open MyPokoin</Link>}
             <button type="button" className="btn ghost" disabled={busy || syncing} onClick={onDisconnect}>
               {busy ? 'Working…' : 'Disconnect'}
             </button>

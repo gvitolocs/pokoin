@@ -1,16 +1,17 @@
 import { NavLink } from 'react-router-dom';
 
 const TABS = [
-  { to: '/inventory', label: 'Inventory', end: true },
+  { to: '/mypokoin', label: 'MyPokoin', end: true },
+  { to: '/mypokoin/import', label: 'Import / export', end: true },
   { to: '/sales', label: 'Sold history' },
   { to: '/bought', label: 'Buy history' },
   { to: '/inventory/sync-review', label: 'CT ↔ Power Tools' },
 ];
 
-/** Shared Inventory / Sold / Bought strip for the stock desk pages. */
+/** Shared MyPokoin / Sold / Bought / import strip for the stock desk pages. */
 export default function StockNav() {
   return (
-    <nav className="stock-nav" aria-label="Stock">
+    <nav className="stock-nav" aria-label="MyPokoin">
       {TABS.map((tab) => (
         <NavLink
           key={tab.to}

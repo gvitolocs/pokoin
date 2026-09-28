@@ -88,7 +88,7 @@ export const APP = {
   messages: route('/messages'),
   cart: route('/cart'),
   profile: route('/profile'),
-  inventory: route('/inventory'),
+  inventory: route('/mypokoin'),
   scan: route('/scan'),
   extensionAuthBridge: route('/extension/auth-bridge'),
   docs: route('/docs'),

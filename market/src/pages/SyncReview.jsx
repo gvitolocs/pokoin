@@ -235,7 +235,7 @@ export default function SyncReview() {
         title="CardTrader ↔ Power Tools"
         lede="Cards only on CardTrader or only in Power Tools after the last sync. Set a stock location, list them, or remove Pokoin listings."
       >
-        <Link className="btn ghost" to="/inventory">Inventory</Link>
+        <Link className="btn ghost" to="/mypokoin">MyPokoin</Link>
         <Link className="btn ghost" to="/profile">Profile</Link>
       </PageHead>
       <StockNav />
@@ -387,7 +387,7 @@ export default function SyncReview() {
 
       {reconcile && !ctOnly.length && !ptOnly.length ? (
         <EmptyDesk title="Fully matched" lede="Every CardTrader product lined up with a Power Tools row.">
-          <Link className="btn" to="/inventory">Open inventory</Link>
+          <Link className="btn" to="/mypokoin">Open MyPokoin</Link>
         </EmptyDesk>
       ) : null}
     </div>

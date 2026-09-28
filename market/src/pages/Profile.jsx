@@ -142,7 +142,7 @@ export default function Profile() {
           <div className="thread-list">
             <Thread to="/marketplace/watchlist" title="Watchlist" meta="Local list on this browser" />
             <Thread to="/stock" title="Stock" meta="Inventory · sold · buy history" />
-            <Thread to="/inventory" title="My listings" meta="Seller inventory" />
+            <Thread to="/mypokoin" title="MyPokoin" meta="Seller inventory" />
             <Thread to="/orders" title="Orders" meta="Paid checkouts" />
             <Thread to="/wallet" title="Wallet" meta="Send, swap, WPKN" />
             <Thread to="/buy" title="Buy PKN" meta="Stripe site balance" />

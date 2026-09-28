@@ -26,7 +26,7 @@ export default function Stock() {
       <StockNav />
       <DeskPanel flush title="Go to">
         <div className="thread-list">
-          <Thread to="/inventory" title="Inventory" meta="Live My listings across this TCG" />
+          <Thread to="/mypokoin" title="MyPokoin" meta="Live listings for Pokémon" />
           <Thread to="/sales" title="Sold history" meta="Pokoin checkout and CardTrader sales" />
           <Thread to="/bought" title="Buy history" meta="Orders you paid for as a buyer" />
         </div>

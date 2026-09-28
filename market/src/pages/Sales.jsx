@@ -212,7 +212,7 @@ export default function Sales() {
 
       {sales && !sales.length ? (
         <EmptyDesk title="Nothing sold yet" lede="Paid Pokoin orders and CardTrader sales of your linked cards land here.">
-          <Link className="btn" to="/inventory">My listings</Link>
+          <Link className="btn" to="/mypokoin">MyPokoin</Link>
         </EmptyDesk>
       ) : null}
 
