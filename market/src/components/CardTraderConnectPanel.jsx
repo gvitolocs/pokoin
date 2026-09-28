@@ -216,6 +216,10 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
 
   async function onDisconnect() {
     if (busy) return;
+    // Without the token Pokoin can't see CardTrader sales, so imported stock comes off Pokoin.
+    if (!window.confirm('Disconnect CardTrader? Cards imported from CardTrader come off Pokoin (nothing changes on CardTrader). Reconnect any time to bring them back.')) {
+      return;
+    }
     setBusy(true);
     setError('');
     setMessage('');
@@ -226,7 +230,10 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
       const data = await disconnectCardTrader(bearer);
       setStatus(data?.status || { connected: false });
       setSyncSummary(null);
-      setMessage('CardTrader disconnected.');
+      const hidden = Number(data?.hiddenListings) || 0;
+      setMessage(hidden > 0
+        ? `CardTrader disconnected. ${hidden} imported listing${hidden === 1 ? '' : 's'} taken off Pokoin — reconnect to bring them back.`
+        : 'CardTrader disconnected.');
     } catch (err) {
       setError(err.message || 'Could not disconnect CardTrader.');
     } finally {

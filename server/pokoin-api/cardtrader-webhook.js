@@ -286,10 +286,12 @@ module.exports = async function handler(req, res) {
       payload = raw.length ? JSON.parse(raw.toString('utf8')) : {};
     }
     const cause = cleanText(payload.cause, 40).toLowerCase();
-    if (cause !== 'order.create' && cause !== 'order.update') {
+    if (cause !== 'order.create' && cause !== 'order.update' && cause !== 'order.destroy') {
       return res.status(200).json({ ok: true, skipped: true, reason: 'ignored_cause' });
     }
-    const order = payload.data && typeof payload.data === 'object' ? payload.data : {};
+    const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+    // A destroyed order never completed: same as a cancellation (restock once).
+    const order = cause === 'order.destroy' ? { ...data, state: 'canceled' } : data;
     if (cleanText(order.order_as, 20).toLowerCase() === 'buyer') {
       return res.status(200).json({ ok: true, skipped: true, reason: 'buyer_order' });
     }

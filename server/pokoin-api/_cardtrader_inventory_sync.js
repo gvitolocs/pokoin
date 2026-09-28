@@ -7,12 +7,15 @@
 
 'use strict';
 
-const { fetchProductsExport, validateCardTraderToken } = require('./_cardtrader_client');
+const { fetchProductsExport, fetchSellerOrders, validateCardTraderToken } = require('./_cardtrader_client');
+const { eventDocId, orderItemId } = require('./_cardtrader_webhook_core');
+const { recordCardTraderSale } = require('./_native_sales');
 const { decryptIntegrationToken, markOneDayReady } = require('./_cardtrader_integration');
 const { marketplaceWriteQuery, marketplaceQuery } = require('../server/_marketplace_db');
 const {
   CT_PREFIX,
   SOURCE_IMPORT,
+  classifyVanishedProduct,
   cleanText,
   ctSourceListingId,
   destructiveReconcileGate,
@@ -28,7 +31,11 @@ const {
   publicCardIdFromBlueprint,
   productLinkNeedsRefresh,
   resolveProductAttachment,
+  saleItemsByProduct,
 } = require('./_cardtrader_inventory_sync_core');
+
+// Sale evidence window for products that left the export between reconciles.
+const SALE_EVIDENCE_DAYS = 30;
 
 function runWithMarketplaceGame(game, fn) {
   if (!game || game === 'pokemon') return fn();
@@ -52,7 +59,7 @@ async function loadSellerListings(sellerUid) {
       select id, card_id, seller_uid, condition, language, price_pkn, quantity_available,
              signed, reverse, first_edition, foil_state, sealed, graded, altered,
              status, source, source_listing_id, card_name, set_name, collector_number,
-             seller_comment, shipping_available
+             seller_comment, shipping_available, created_at
       from public.marketplace_user_listings
       where seller_uid = $1
         and status in ('active', 'paused', 'sold_out')
@@ -284,6 +291,60 @@ async function applyCtQuantity(listingId, quantity) {
   return result.rows[0] || null;
 }
 
+/**
+ * The seller removed this product on CardTrader: take it off Pokoin as
+ * inactive (not sold_out — nothing sold). CardTrader itself is never touched.
+ */
+async function delistCtListing(listingId) {
+  const result = await marketplaceWriteQuery(
+    `
+      update public.marketplace_user_listings
+      set quantity_available = 0, status = 'inactive', updated_at = now()
+      where id = $1
+        and source_listing_id like 'ct:%'
+        and status in ('active', 'paused', 'sold_out')
+      returning id, quantity_available, status, card_id, source_listing_id
+    `,
+    [listingId],
+  );
+  return result.rows[0] || null;
+}
+
+/** Claim + record a CardTrader sale the webhook did not deliver (idempotent). */
+async function recordMissedCardTraderSales({ firestore, sellerUid, listing, sales }) {
+  const { getFirebaseAdmin } = require('../server/_firebase');
+  const admin = getFirebaseAdmin();
+  let recorded = 0;
+  for (const { order, item } of sales) {
+    const id = eventDocId(sellerUid, order.id, orderItemId(item));
+    try {
+      await firestore.collection('cardtrader_webhook_events').doc(id).create({
+        uid: sellerUid,
+        orderId: String(order.id),
+        orderItemId: orderItemId(item),
+        cause: 'reconcile',
+        listingId: listing.id,
+        quantity: Math.max(1, Math.trunc(Number(item.quantity) || 1)),
+        productId: cleanText(item.product_id, 80),
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      if (error.code === 6 || /already exists/i.test(String(error.message || ''))) continue;
+      throw error;
+    }
+    await recordCardTraderSale({
+      admin,
+      firestore,
+      sellerUid,
+      order,
+      item,
+      listing: { id: listing.id, card_id: listing.card_id },
+    });
+    recorded += 1;
+  }
+  return recorded;
+}
+
 async function linkExistingListing(listingId, product) {
   const sourceListingId = ctSourceListingId(product.id);
   const qty = Math.max(0, Math.min(999999, product.quantity));
@@ -467,7 +528,13 @@ async function removeMissingOneDayReadyAssets(sellerUid, keepProductIds) {
  * earlier listing-mode sync imported, and drop their product links so order
  * webhooks leave them alone. Pokoin-only and pushed listings are untouched.
  */
-async function hideImportedCardTraderListings(sellerUid) {
+/**
+ * Take CardTrader-imported listings off Pokoin (inactive, never deleted) and
+ * drop their import links, so a later sync re-imports them fresh. CardTrader
+ * itself and the seller's own Pokoin listings are never touched.
+ * keepSoldOut leaves sold_out rows labelled as they are (disconnect).
+ */
+async function hideImportedCardTraderListings(sellerUid, { keepSoldOut = false } = {}) {
   const hidden = await marketplaceWriteQuery(
     `
       update public.marketplace_user_listings
@@ -476,9 +543,10 @@ async function hideImportedCardTraderListings(sellerUid) {
         and source = $2
         and source_listing_id like 'ct:%'
         and status <> 'inactive'
+        and ($3::boolean is false or status <> 'sold_out')
       returning id, card_id
     `,
-    [sellerUid, SOURCE_IMPORT],
+    [sellerUid, SOURCE_IMPORT, keepSoldOut === true],
   );
   const rows = hidden.rows || [];
   await marketplaceWriteQuery(
@@ -933,7 +1001,11 @@ async function reconcileCardTraderInventory({
           product,
           cardId,
           marketplaceGame,
-          reactivateHidden: !linkByProduct.has(product.id),
+          // Relisted on CardTrader after it left the export → public again.
+          // A listing the seller hid on Pokoin (link still present) stays hidden.
+          reactivateHidden: !linkByProduct.has(product.id)
+            || linkByProduct.get(product.id)?.missing_from_ct === true
+            || linkByProduct.get(product.id)?.missing_from_ct === 't',
           meta: metaByCard.get(String(cardId || '')) || {},
         });
         if (!created) {
@@ -966,6 +1038,7 @@ async function reconcileCardTraderInventory({
   });
 
   if (gate.allowDestructive) {
+    const vanished = [];
     for (const [sourceId, listing] of bySourceId.entries()) {
       const productId = parseCtProductId(sourceId);
       if (!productId || seenProductIds.has(productId)) continue;
@@ -990,7 +1063,36 @@ async function reconcileCardTraderInventory({
         }
         continue;
       }
-      const updated = await applyCtQuantity(listing.id, 0);
+      vanished.push({ productId, listing });
+    }
+
+    // Sale evidence comes from CardTrader's own seller orders, never from
+    // "it vanished from the export".
+    let sales = null;
+    if (vanished.length) {
+      try {
+        const from = new Date(Date.now() - SALE_EVIDENCE_DAYS * 86400000).toISOString().slice(0, 10);
+        sales = saleItemsByProduct(await fetchSellerOrders(token, { from }));
+      } catch (error) {
+        console.error('cardtrader reconcile: seller orders unavailable', { sellerUid, message: error.message });
+      }
+    }
+
+    for (const { productId, listing } of vanished) {
+      const verdict = classifyVanishedProduct({ productId, listing, sales });
+      let updated = null;
+      if (verdict.kind === 'sold') {
+        updated = await applyCtQuantity(listing.id, 0);
+        summary.soldOnCardTrader = (summary.soldOnCardTrader || 0) + 1;
+        await recordMissedCardTraderSales({ firestore, sellerUid, listing, sales: verdict.sales })
+          .catch((error) => {
+            console.error('cardtrader reconcile: sale record failed', { sellerUid, listingId: listing.id, message: error.message });
+          });
+      } else {
+        // Removed by the seller on CardTrader (or unverifiable): off sale, not sold.
+        updated = await delistCtListing(listing.id);
+        summary.delisted = (summary.delisted || 0) + 1;
+      }
       if (updated) summary.removed += 1;
       await upsertProductLink({
         sellerUid,
@@ -1046,6 +1148,7 @@ async function reconcileCardTraderInventory({
 
 module.exports = {
   applyCtQuantity,
+  hideImportedCardTraderListings,
   fetchCompleteSellerInventory,
   readOneDayReadyAssets,
   readSellerSync,
