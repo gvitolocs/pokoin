@@ -16,6 +16,7 @@ import {
   setActiveDeskCard,
   tagsToPokoCards,
   writePokoHistory,
+  pokoUserTurnKey,
 } from './poko-chat.js';
 
 test('isPokoPeer recognizes reserved peer', () => {
@@ -92,4 +93,35 @@ test('mergePokoEvents and reconcile keep unmatched local optimistic rows', () =>
   );
   assert.equal(pending.some((row) => row.id === 'local-2'), true);
   assert.equal(pending.length, 2);
+});
+
+test('reconcile keeps card-attached local rows until the server twin includes the card', () => {
+  const local = {
+    id: 'local-card',
+    text: 'quanto vale',
+    mine: true,
+    cards: [{ cardId: '123', name: 'Gengar & Mimikyu GX' }],
+  };
+  const stillPending = reconcilePokoEvents(
+    [local],
+    [{ id: 'old', text: 'quanto vale', mine: true, cards: [] }],
+  );
+  assert.equal(stillPending.some((row) => row.id === 'local-card'), true);
+
+  const replaced = reconcilePokoEvents(
+    [local],
+    [{
+      id: 'srv-user',
+      text: 'quanto vale',
+      mine: true,
+      cards: [{ cardId: '123', name: 'Gengar & Mimikyu GX' }],
+    }, {
+      id: 'srv-bot',
+      text: 'Checking…',
+      mine: false,
+    }],
+  );
+  assert.equal(replaced.some((row) => row.id === 'local-card'), false);
+  assert.equal(replaced.some((row) => row.id === 'srv-user'), true);
+  assert.equal(pokoUserTurnKey(local), pokoUserTurnKey(replaced.find((row) => row.id === 'srv-user')));
 });

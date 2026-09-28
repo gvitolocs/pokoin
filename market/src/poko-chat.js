@@ -67,19 +67,29 @@ export function mergePokoEvents(...pages) {
   }).slice(-80);
 }
 
+/** Fingerprint a user turn so optimistic local-* rows survive until the server twin arrives. */
+export function pokoUserTurnKey(row = {}) {
+  const text = String(row?.text || '');
+  const images = Array.isArray(row?.images) ? row.images.length : 0;
+  const cards = (Array.isArray(row?.cards) ? row.cards : (Array.isArray(row?.listings) ? row.listings : []))
+    .map((card) => String(card?.cardId || card?.id || card?.card_id || card?.name || card?.cardName || ''))
+    .filter(Boolean)
+    .join(',');
+  return `${text}\0${images}\0${cards}`;
+}
+
 /** Keep optimistic local-* rows until a matching server user turn arrives. */
 export function reconcilePokoEvents(current, serverEvents) {
   const server = mergePokoEvents(serverEvents);
   const serverUserKeys = new Set(
     server
       .filter((row) => row.role === 'user')
-      .map((row) => `${row.text}\0${(row.images || []).length}`),
+      .map((row) => pokoUserTurnKey(row)),
   );
   const pendingLocal = (current || []).filter((row) => {
     const id = String(row?.id || '');
     if (!id.startsWith('local-')) return false;
-    const key = `${row.text || ''}\0${(row.images || []).length}`;
-    return !serverUserKeys.has(key);
+    return !serverUserKeys.has(pokoUserTurnKey(row));
   });
   return mergePokoEvents(
     (current || []).filter((row) => !String(row?.id || '').startsWith('local-')),

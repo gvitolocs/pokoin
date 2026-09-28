@@ -4,6 +4,7 @@ import {
   buildPokoPageContext,
   defaultPokoDeskPrompt,
   mergePokoEvents,
+  pokoUserTurnKey,
   readPokoHistory,
   reconcilePokoEvents,
   resolvePokoCards,
@@ -29,6 +30,8 @@ export function usePokoThread({
   const pinBottom = useRef(true);
   const eventsRef = useRef(events);
   eventsRef.current = events;
+  const busyRef = useRef(false);
+  busyRef.current = busy;
   const refreshRef = useRef(async () => {});
 
   if (uid !== cacheUid) {
@@ -47,16 +50,16 @@ export function usePokoThread({
     if (!active) return undefined;
     let live = true;
     async function loadLatest() {
+      // Do not race history over an in-flight send — that was wiping the
+      // optimistic user bubble until a full page refresh.
+      if (busyRef.current) return;
       try {
         const token = await getBearer();
-        if (!token || !live) return;
+        if (!token || !live || busyRef.current) return;
         const result = await fetchPokoChatHistory(token);
-        if (!live) return;
+        if (!live || busyRef.current) return;
         const page = result?.events || [];
-        setEvents((current) => {
-          const next = reconcilePokoEvents(current, page);
-          return next;
-        });
+        setEvents((current) => reconcilePokoEvents(current, page));
         setError('');
       } catch (err) {
         if (live && !eventsRef.current.length) {
@@ -87,6 +90,7 @@ export function usePokoThread({
     const attachedImages = (photos || []).slice();
     if (busy || (!message.trim() && !attached.length && !attachedImages.length)) return null;
     setBusy(true);
+    busyRef.current = true;
     setError('');
     pinBottom.current = true;
     const localId = `local-${Date.now()}`;
@@ -120,8 +124,17 @@ export function usePokoThread({
       }, token);
       const serverEvents = Array.isArray(result?.events) ? result.events : [];
       setEvents((current) => {
-        const withoutLocal = (current || []).filter((row) => row.id !== localId);
-        if (serverEvents.length) return reconcilePokoEvents(withoutLocal, serverEvents);
+        // Keep local-* in `current` so reconcile can match/replace it. Never
+        // strip the optimistic row before we know the server twin is present.
+        if (serverEvents.length) {
+          const next = reconcilePokoEvents(current, serverEvents);
+          const key = pokoUserTurnKey(mine);
+          const hasUser = next.some((row) => (
+            row.role === 'user' && (row.id === localId || pokoUserTurnKey(row) === key)
+          ));
+          if (hasUser) return next;
+          return mergePokoEvents(next, [{ ...mine, id: `user-${Date.now()}` }]);
+        }
         const assistant = {
           id: `poko-${Date.now()}`,
           role: 'assistant',
@@ -130,13 +143,14 @@ export function usePokoThread({
           source: result?.source || '',
           createdAt: new Date().toISOString(),
         };
-        // Promote the optimistic user row off local-* so history polls cannot
-        // strip it before Firestore catches up.
         const confirmedMine = {
           ...mine,
           id: `user-${Date.now()}`,
         };
-        return mergePokoEvents(withoutLocal, [confirmedMine, assistant]);
+        return mergePokoEvents(
+          (current || []).filter((row) => row.id !== localId),
+          [confirmedMine, assistant],
+        );
       });
       if (result?.source === 'unavailable' || result?.ok === false) {
         setError(result?.error || 'Poko could not reply. Try again.');
@@ -152,6 +166,7 @@ export function usePokoThread({
       setError(err.message || 'Poko could not reply.');
       throw err;
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
