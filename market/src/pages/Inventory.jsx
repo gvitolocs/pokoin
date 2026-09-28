@@ -128,7 +128,7 @@ export default function Inventory() {
     <div className="page desk">
       <PageHead
         kicker="Seller"
-        title="My listings"
+        title="Inventory"
       >
         <Link className="btn" to="/inventory/scan">Scan cards</Link>
         <Link className="btn ghost" to="/marketplace">List a card</Link>
