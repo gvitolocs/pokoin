@@ -6,9 +6,9 @@
   display: flex;
   flex-direction: column;
   width: min(20.5rem, calc(100vw - 1.5rem));
-  /* Leave headroom so the nav cart/desktop drops can sit above without stacking through the panel. */
-  height: min(20rem, calc(100vh - 14rem));
-  max-height: calc(100vh - 12rem);
+  /* ~392px on desktop; leave ~11.5rem for nav + cart so the pair share the column. */
+  height: min(24.5rem, calc(100vh - 11.5rem));
+  max-height: calc(100vh - 10rem);
   border: 1px solid var(--g5);
   border-bottom: 0;
   border-radius: 16px 16px 0 0;
