@@ -1197,7 +1197,8 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 .cart-drop {
   width: 18rem;
   min-height: 0;
-  max-height: min(38vh, 18rem);
+  /* ~200px thumb + header ≈ 340px; allow scroll before eating the Messages dock. */
+  max-height: min(48vh, 22rem);
   overflow: auto;
 }
 
