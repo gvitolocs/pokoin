@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation } from 'react-router-dom';
 import { exportStockCsv, fetchSellerListings, formatPkn, importStockCsv } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
+import WipeAllInventory from '../components/WipeAllInventory.jsx';
 import {
   inventoryListingHref,
   inventoryListingMeta,
@@ -39,6 +40,7 @@ export default function Inventory() {
   const [busy, setBusy] = useState('');
   const [preview, setPreview] = useState(null);
   const [pendingCsv, setPendingCsv] = useState();
+  const [message, setMessage] = useState('');
   const fileRef = useRef(null);
 
   async function reload() {
@@ -132,6 +134,7 @@ export default function Inventory() {
         <Link className="btn ghost" to="/marketplace">List a card</Link>
       </PageHead>
       <Alert>{error}</Alert>
+      {message ? <p className="ct-connect-ok" role="status">{message}</p> : null}
 
       <DeskPanel title="Import / export stock">
         <div className="stock-csv-bar">
@@ -212,6 +215,21 @@ export default function Inventory() {
             ) : null}
           </div>
         ) : null}
+        <WipeAllInventory
+          disabled={Boolean(busy)}
+          onError={(text) => {
+            setError(text || '');
+            if (text) setMessage('');
+          }}
+          onMessage={(text) => {
+            setMessage(text || '');
+            setError('');
+          }}
+          onWiped={() => {
+            setRows([]);
+            reload().catch(() => {});
+          }}
+        />
       </DeskPanel>
 
       {rows == null && !error ? (
