@@ -264,7 +264,10 @@ test('card_quote reports sold estimate, asks and strategies without inventing da
     body: { tool: 'card_quote', params: { query: 'Raichu ex', condition: 'near mint', language: 'English' } },
   }), res);
   assert.equal(res.statusCode, 200);
+  assert.equal(res.body.priceUnit, 'PKN');
+  assert.equal(res.body.pknEurRate, 0.005);
   assert.equal(res.body.quotes[0].estimate.median, 34);
+  assert.equal(res.body.quotes[0].estimate.currency, 'PKN');
   assert.equal(res.body.quotes[0].estimate.confidence, 'high');
   assert.equal(res.body.quotes[0].currentAsk.min, 36);
   assert.equal(res.body.quotes[0].strategies.market.price, 34);
@@ -332,6 +335,8 @@ test('collection_quote resolves fuzzy artists, reports coverage honestly', async
   assert.equal(res.body.cardsPriced, 3);
   assert.equal(res.body.cardsUnpriced, 1);
   assert.equal(res.body.coveragePct, 75);
+  assert.equal(res.body.priceUnit, 'PKN');
+  assert.equal(res.body.pknEurRate, 0.005);
   assert.ok(res.body.estimatedMarketValue > 0);
   assert.match(res.body.note, /different metrics/);
   assert.equal(res.body.mostExpensive[0].name, 'Morii Card 1');
@@ -429,6 +434,7 @@ test('top_movers ranks a subject by ask change and drops sub-floor noise', async
       { card_id: '1000', name: 'Raikou', set_name: 'Aquapolis', card_number: 'H21/H32', start_px: 5000, start_day: '2026-08-29', end_px: 6500, end_day: '2026-09-27', points: 20, seller_uid: 'X' },
       { card_id: '2000', name: 'Raikou V', set_name: 'Brilliant Stars', card_number: '172/172', start_px: 20000, start_day: '2026-08-29', end_px: 36000, end_day: '2026-09-27', points: 25 },
       { card_id: '3000', name: 'Raikou', set_name: 'Unleashed', card_number: '12/95', start_px: 900, start_day: '2026-08-29', end_px: 700, end_day: '2026-09-27', points: 8 },
+      { card_id: '4000', name: 'Raikou', set_name: 'Bulk', card_number: '1/100', start_px: 20, start_day: '2026-08-29', end_px: 80, end_day: '2026-09-27', points: 9 },
     ],
   };
   const handler = loadHandler(makeDb(stubs));
@@ -441,11 +447,17 @@ test('top_movers ranks a subject by ask change and drops sub-floor noise', async
   assert.equal(res.body.movers[0].changePct, 80);
   assert.equal(res.body.movers[0].fromAsk, 20000);
   assert.equal(res.body.movers[0].toAsk, 36000);
+  assert.equal(res.body.movers[0].fromAskEur, 100);
+  assert.equal(res.body.movers[0].toAskEur, 180);
   assert.equal(res.body.movers[0].cardNumber, '172/172');
   assert.equal(res.body.window.days, 30);
+  assert.equal(res.body.priceUnit, 'PKN');
+  assert.equal(res.body.pknEurRate, 0.005);
+  assert.equal(res.body.minPricePkn, 400);
+  assert.equal(res.body.minPriceEur, 2);
   assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
   const sql = stubs.queries.find((q) => /with cands as/.test(q.sql));
-  assert.deepEqual(sql.params, [30, 200, '%raikou%']);
+  assert.deepEqual(sql.params, [30, 400, '%raikou%']);
 });
 
 test('top_movers supports falling direction and answers empty windows with 200', async () => {

@@ -195,7 +195,8 @@ function buildSoldSummary(row) {
   const p25 = round2(row.p25_daily);
   const p75 = round2(row.p75_daily);
   return {
-    currency: 'EUR',
+    currency: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
     median: median,
     p25: p25,
     p75: p75,
@@ -386,6 +387,8 @@ async function askSignalForBlueprint(blueprintId) {
   return {
     min: round2(row.min_price_pkn),
     median: round2(row.median_price_pkn),
+    currency: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
     observedDay: row.observed_day ? String(row.observed_day).slice(0, 10) : null,
     note: 'current asks, all conditions; asking price is not a confirmed sale',
   };
@@ -452,6 +455,8 @@ async function cardQuote(params = {}) {
   return {
     status: 'ok',
     today: todayIso(),
+    priceUnit: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
     card,
     filters: { condition: cond.primary, language: lang.code, conditionVague: cond.vague },
     window: { soldDays: 90, from: daysAgoIso(90), to: daysAgoIso(0) },
@@ -614,6 +619,8 @@ async function collectionQuote(params = {}) {
   return {
     status: 'ok',
     artist,
+    priceUnit: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
     filters: { condition: cond.primary, language: lang.code, quantityPerCard: 1 },
     cardsTotal: cards.length,
     cardsPriced: priced,
@@ -667,8 +674,10 @@ async function suggestCards(params = {}) {
   return {
     status: 'ok',
     subject,
+    priceUnit: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
     cards: candidates,
-    note: 'Real cards from the Pokoin catalog with current lowest ask (PKN minor units, EUR).',
+    note: 'Real cards from the Pokoin catalog with current lowest ask in PKN (1 PKN = €0.005).',
   };
 }
 
@@ -702,9 +711,11 @@ async function marketSnapshot(params = {}) {
   };
 }
 
-// Cards whose asks sit below this (PKN minor units, EUR cents) are bulk noise:
-// a €0.10 → €0.40 common is "+300%" but never what "grew the most" means.
-const MOVERS_MIN_PRICE = 200;
+// Marketplace analytics are stored in PKN, where 1 PKN = €0.005. Exclude
+// cards below €2 (400 PKN): a €0.10 → €0.40 common is "+300%" but never
+// what "grew the most" means.
+const PKN_EUR_RATE = 0.005;
+const MOVERS_MIN_PRICE_PKN = 400;
 const MOVERS_MAX_CANDIDATES = 300;
 
 /**
@@ -726,7 +737,7 @@ async function topMovers(params = {}) {
   if (subject && !tokens.length) return { status: 'invalid', error: 'subject has no searchable words' };
 
   const conditions = tokens.map((_, i) => `s.search_text ilike $${i + 3}`);
-  const values = [days, MOVERS_MIN_PRICE, ...tokens.map((t) => `%${escapeLike(t)}%`)];
+  const values = [days, MOVERS_MIN_PRICE_PKN, ...tokens.map((t) => `%${escapeLike(t)}%`)];
   const rows = await queryRows(
     `with cands as (
        select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
@@ -777,11 +788,14 @@ async function topMovers(params = {}) {
         toDay: row.end_day ? String(row.end_day).slice(0, 10) : null,
         fromAsk: round2(start),
         toAsk: round2(end),
+        fromAskEur: round2(start * PKN_EUR_RATE),
+        toAskEur: round2(end * PKN_EUR_RATE),
         changePct: Math.round(((end - start) / start) * 1000) / 10,
         observations: Number(row.points) || 0,
       };
     })
     .filter(Boolean)
+    .filter((m) => Math.max(m.fromAsk, m.toAsk) >= MOVERS_MIN_PRICE_PKN)
     .filter((m) => (direction === 'up' ? m.changePct > 0 : m.changePct < 0))
     .sort((a, b) => (direction === 'up' ? b.changePct - a.changePct : a.changePct - b.changePct))
     .slice(0, limit);
@@ -791,7 +805,10 @@ async function topMovers(params = {}) {
     direction,
     window: { days, from: daysAgoIso(days), to: daysAgoIso(0) },
     basis: 'daily median asking price (min ask when median missing), all conditions; asks are not confirmed sales',
-    minPrice: MOVERS_MIN_PRICE,
+    priceUnit: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
+    minPricePkn: MOVERS_MIN_PRICE_PKN,
+    minPriceEur: round2(MOVERS_MIN_PRICE_PKN * PKN_EUR_RATE),
     pricedCards: rows.length,
   };
   if (!movers.length) {
