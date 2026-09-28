@@ -219,7 +219,7 @@ test('resolve_card returns catalog candidates only and marks ambiguity', async (
 
   // Fuzzy user text travels as a parameter, wildcards escaped, never inline SQL.
   const resolveQuery = queries.find((q) => /limit 7/.test(q.sql));
-  assert.ok(resolveQuery.params[0].includes('Raichu'));
+  assert.ok(resolveQuery.params[0].includes('raichu')); // token-AND: lowercase contains-patterns
   assert.ok(resolveQuery.params[0].startsWith('%'));
   assert.ok(!resolveQuery.sql.includes('Raichu'));
 
