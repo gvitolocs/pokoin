@@ -4,9 +4,13 @@ import {
   DKK_PER_EUR,
   LIST_CURRENCIES,
   applyLastMedianPrices,
+  currencyForCountry,
+  currencyFromLocale,
   fiatFromPkn,
   formatEurAndDkkFromPkn,
   formatFiatFromPkn,
+  formatLocalFromEurCents,
+  formatLocalFromPkn,
   formatPkn,
   formatPknNumber,
   idsMissingTilePrice,
@@ -27,11 +31,16 @@ test('PKN prices are digits only so a comma cannot look like a decimal', () => {
   assert.doesNotMatch(formatPkn(2642), /,/);
 });
 
-test('EUR and DKK display helpers for short PKN balance', () => {
-  assert.equal(formatFiatFromPkn(20, 'EUR'), '€0.1');
+test('buyer currency follows country; DK shows DKK converted from PKN', () => {
+  assert.equal(currencyForCountry('DK'), 'DKK');
+  assert.equal(currencyForCountry('IT'), 'EUR');
+  assert.equal(currencyForCountry('US'), 'USD');
+  assert.equal(currencyFromLocale('da-DK'), 'DKK');
   assert.equal(formatFiatFromPkn(20, 'DKK'), '0.75 DKK');
-  assert.match(formatEurAndDkkFromPkn(20), /€0\.1/);
-  assert.match(formatEurAndDkkFromPkn(20), /0\.75 DKK/);
+  assert.equal(formatFiatFromPkn(20, 'EUR'), '€0.1');
+  assert.equal(formatLocalFromPkn(20, 'DKK'), '0.75 DKK (20 PKN)');
+  assert.equal(formatLocalFromEurCents(650, 'DKK'), '48.75 DKK');
+  assert.equal(formatEurAndDkkFromPkn(20), '0.75 DKK (20 PKN)');
 });
 
 test('EUR and USDT asks use 1 PKN = 0.005', () => {
