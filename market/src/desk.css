@@ -565,6 +565,55 @@
 .ct-connect-ok { color: #7dcea0; margin: 0.55rem 0 0; font-size: 0.9rem; }
 .ct-connect-err { color: #f07178; margin: 0.55rem 0 0; font-size: 0.9rem; }
 
+.ct-wipe {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--g4);
+}
+
+.ct-wipe-open {
+  color: #f0b86e;
+}
+
+.ct-wipe-panel {
+  display: grid;
+  gap: 0.65rem;
+  max-width: 36rem;
+}
+
+.ct-wipe-warn {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #f0b86e;
+}
+
+.ct-wipe-field input {
+  width: 100%;
+  border: 1px solid rgb(240 184 110 / 0.45);
+  border-radius: 10px;
+  background: var(--g2);
+  color: var(--text);
+  padding: 0.65rem 0.8rem;
+  font: inherit;
+}
+
+.ct-wipe-confirm {
+  border: 0;
+  background: #c45c5c;
+  color: #fff;
+}
+
+.ct-wipe-confirm:hover:not(:disabled),
+.ct-wipe-confirm:focus-visible:not(:disabled) {
+  background: #d47070;
+  color: #fff;
+}
+
+.ct-wipe-confirm:disabled {
+  opacity: 0.45;
+}
+
 .inventory-targets {
   display: flex;
   flex-wrap: wrap;

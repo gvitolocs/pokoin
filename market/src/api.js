@@ -747,6 +747,21 @@ export function syncCardTraderInventory(token) {
   });
 }
 
+/** Wipe every Pokoin listing for the signed-in seller (all TCGs). Requires confirm phrase. */
+export function wipeSellerInventory(token, { confirm } = {}) {
+  return getJson('/api/cardtrader-clean-listings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      scope: 'all',
+      confirm: String(confirm || ''),
+    }),
+  });
+}
+
 export function fetchCardTraderSyncStatus(token) {
   return getJson('/api/cardtrader-sync', {
     headers: {

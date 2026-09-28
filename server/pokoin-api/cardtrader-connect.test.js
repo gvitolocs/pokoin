@@ -388,3 +388,10 @@ test('CardTrader webhook URL registration uses seller uid', async (t) => {
   assert.equal(calls[0].method, 'PATCH');
   assert.match(calls[0].body, /cardtrader-webhook\/uid/);
 });
+
+test('inventory wipe confirm phrase is exact DELETE ALL LISTINGS', () => {
+  const clean = require('./cardtrader-clean-listings');
+  assert.equal(clean.WIPE_CONFIRM, 'DELETE ALL LISTINGS');
+  assert.equal(clean._test.WIPE_CONFIRM, 'DELETE ALL LISTINGS');
+  assert.match(clean._test.linkedListingPredicate(), /ct:%/);
+});
