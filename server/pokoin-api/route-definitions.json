@@ -178,7 +178,7 @@
     "auth": "Required service bearer token: POKO_MARKET_SERVICE_TOKEN, or POKONTACT_SERVICE_TOKEN (same secret, already in the Pi container env). Server-to-server only; browsers never receive it.",
     "params": {
       "query": "none",
-      "body": "{ tool: resolve_card|card_quote|card_liquidity|collection_quote|market_snapshot, params } with tool-specific fields (query, cardId, condition, language, artist, limit)."
+      "body": "{ tool: resolve_card|card_quote|card_liquidity|collection_quote|suggest_cards|market_snapshot, params } with tool-specific fields (query, cardId, condition, language, artist, subject, excludeCardId, limit)."
     },
     "dependencies": {
       "env": [
