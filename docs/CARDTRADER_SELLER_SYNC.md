@@ -137,6 +137,14 @@ token they gave us.
   changed on CardTrader is not overwritten; if CardTrader refuses (already
   gone), nothing else is touched. Other marketplaces are never touched.
 - Webhook `order.destroy` restocks like a cancellation.
+- **Disconnect** wipes the token and secret, so Pokoin can no longer see
+  CardTrader sales. `cardtrader-disconnect` therefore takes the
+  CardTrader-imported listings off Pokoin (`inactive`, never deleted; `sold_out`
+  rows keep their label) and drops their import links. Nothing changes on
+  CardTrader, and the seller's own Pokoin listings stay live. Reconnecting
+  re-imports them with fresh quantities and prices. 2026-09-28: redshakkio
+  disconnected at 13:01 UTC with 12,028 imported listings still live; they were
+  taken off the same way.
 
 ## PlusCal / TLC
 

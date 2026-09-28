@@ -527,7 +527,13 @@ async function removeMissingOneDayReadyAssets(sellerUid, keepProductIds) {
  * earlier listing-mode sync imported, and drop their product links so order
  * webhooks leave them alone. Pokoin-only and pushed listings are untouched.
  */
-async function hideImportedCardTraderListings(sellerUid) {
+/**
+ * Take CardTrader-imported listings off Pokoin (inactive, never deleted) and
+ * drop their import links, so a later sync re-imports them fresh. CardTrader
+ * itself and the seller's own Pokoin listings are never touched.
+ * keepSoldOut leaves sold_out rows labelled as they are (disconnect).
+ */
+async function hideImportedCardTraderListings(sellerUid, { keepSoldOut = false } = {}) {
   const hidden = await marketplaceWriteQuery(
     `
       update public.marketplace_user_listings
@@ -536,9 +542,10 @@ async function hideImportedCardTraderListings(sellerUid) {
         and source = $2
         and source_listing_id like 'ct:%'
         and status <> 'inactive'
+        and ($3::boolean is false or status <> 'sold_out')
       returning id, card_id
     `,
-    [sellerUid, SOURCE_IMPORT],
+    [sellerUid, SOURCE_IMPORT, keepSoldOut === true],
   );
   const rows = hidden.rows || [];
   await marketplaceWriteQuery(
@@ -1140,6 +1147,7 @@ async function reconcileCardTraderInventory({
 
 module.exports = {
   applyCtQuantity,
+  hideImportedCardTraderListings,
   fetchCompleteSellerInventory,
   readOneDayReadyAssets,
   readSellerSync,
