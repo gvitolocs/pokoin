@@ -200,7 +200,7 @@
     "auth": "Required service bearer token: POKO_MARKET_SERVICE_TOKEN, or POKONTACT_SERVICE_TOKEN (same secret, already in the Pi container env). Server-to-server only; browsers never receive it.",
     "params": {
       "query": "none",
-      "body": "{ tool: resolve_card|card_quote|card_liquidity|collection_quote|market_snapshot, params } with tool-specific fields (query, cardId, condition, language, artist, limit)."
+      "body": "{ tool: resolve_card|card_quote|card_liquidity|collection_quote|suggest_cards|market_snapshot, params } with tool-specific fields (query, cardId, condition, language, artist, subject, excludeCardId, limit)."
     },
     "dependencies": {
       "env": [
@@ -382,6 +382,27 @@
       "services": [
         "Firebase Admin",
         "Postgres writer (link writes) + read replica (status)"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-native-sales",
+    "file": "marketplace-native-sales.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Public Sold on Pokoin rows for a card desk: paid native PKN/EUR orders, no buyer identity.",
+    "auth": "Public. cardId required.",
+    "params": {
+      "query": "cardId required; limit (max 50).",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
       ]
     }
   }

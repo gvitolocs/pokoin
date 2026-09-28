@@ -18,7 +18,11 @@ function requireServerHelper(name) {
 
 const { getFirebaseAdmin } = requireServerHelper('_firebase');
 const { handleCompletedCheckout } = requireServerHelper('_pkn_purchase');
-const { handleMarketplaceOrderPaid } = requireServerHelper('_marketplace_order_stripe');
+const {
+  handleMarketplaceOrderPaid,
+  handleMarketplaceOrderUnpaid,
+  isEurSession,
+} = requireServerHelper('_marketplace_order_stripe');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -55,9 +59,9 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    const session = event.data.object;
     if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      if (session.metadata?.kind === 'marketplace_order_eur') {
+      if (isEurSession(session)) {
         await handleMarketplaceOrderPaid({
           admin: getFirebaseAdmin(),
           stripe,
@@ -69,6 +73,13 @@ module.exports = async function handler(req, res) {
           session,
         });
       }
+    } else if (event.type === 'checkout.session.async_payment_succeeded' && isEurSession(session)) {
+      await handleMarketplaceOrderPaid({ admin: getFirebaseAdmin(), stripe, session });
+    } else if (event.type === 'checkout.session.async_payment_failed' && isEurSession(session)) {
+      await handleMarketplaceOrderUnpaid({ admin: getFirebaseAdmin(), session, reason: 'payment_failed' });
+    } else if (event.type === 'checkout.session.expired' && isEurSession(session)) {
+      // Buyer never paid inside the 30-minute hold: give the cards back.
+      await handleMarketplaceOrderUnpaid({ admin: getFirebaseAdmin(), session, reason: 'expired' });
     }
     return res.status(200).json({ received: true });
   } catch (error) {

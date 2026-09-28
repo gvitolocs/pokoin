@@ -13,6 +13,14 @@ const {
   },
 } = require('./cardtrader-live-listings');
 const { decrementSellerOwnershipForSale } = require('./_user_card_collection');
+const {
+  SALES_COLLECTION,
+  orderIsSold,
+  recordNativeSales,
+  sellerCardTraderRow,
+  sellerHistoryRow,
+  voidNativeSales,
+} = require('./_native_sales');
 
 function cleanText(value, maxLength = 240) {
   return String(value || '').trim().slice(0, maxLength);
@@ -92,6 +100,11 @@ function orderPayload(orderId, data) {
     createdAt: timestampToIso(data.createdAt),
     updatedAt: timestampToIso(data.updatedAt),
     paidAt: timestampToIso(data.paidAt),
+    currency: data.currency === 'EUR' ? 'EUR' : 'PKN',
+    paymentMethod: data.paymentMethod || 'pkn',
+    totalEURCents: numberValue(data.totalEURCents),
+    refundedTotal: numberValue(data.refundedTotal),
+    cancelReason: data.cancelReason || '',
   };
 }
 
@@ -616,6 +629,31 @@ async function verifyAndDecrementListings(items, { writeQuery = marketplaceWrite
   return decremented;
 }
 
+/** Put held/sold quantity back (EUR hold release, rollbacks). */
+async function restoreListingQuantities(entries = [], { writeQuery = marketplaceWriteQuery } = {}) {
+  const cardIds = new Set();
+  for (const entry of entries) {
+    if (!entry || entry.external || !entry.listingId || !(Number(entry.quantity) > 0)) continue;
+    await writeQuery(
+      `
+        update public.marketplace_user_listings
+        set
+          quantity_available = quantity_available + $2,
+          status = case when status = 'sold_out' then 'active' else status end,
+          updated_at = now()
+        where id = $1
+      `,
+      [entry.listingId, Number(entry.quantity)],
+    );
+    if (entry.cardId) cardIds.add(entry.cardId);
+  }
+  for (const cardId of cardIds) {
+    await writeQuery('select public.refresh_marketplace_blueprint_price_summary($1)', [cardId])
+      .catch((error) => console.error('marketplace price summary refresh failed', error));
+  }
+  return { restored: entries.length };
+}
+
 async function syncCardTraderAfterPokoinSale({ admin, firestore, decremented = [] }) {
   const results = [];
   for (const entry of decremented) {
@@ -860,6 +898,23 @@ async function createPaidOrder({ admin, firestore, decoded, body }) {
       return { ok: false, error: error.message || 'Seller notification failed.' };
     });
 
+  // Native sold history (desk "Sold on Pokoin" + seller sold history).
+  const cardIdByListing = new Map(decremented.map((entry) => [entry.listingId, entry.cardId]));
+  await recordNativeSales({
+    admin,
+    firestore,
+    orderId: orderRef.id,
+    order: {
+      ...orderData,
+      items: orderData.items.map((item) => ({
+        ...item,
+        card: { ...item.card, id: cardIdByListing.get(item.listingId) || item.card?.id },
+      })),
+    },
+  }).catch((error) => {
+    console.error('marketplace native sale record failed', error);
+  });
+
   const cardTraderPurchase = orderData.fulfillmentMode === 'nft_only'
     ? { ok: true, skipped: true, reason: 'NFT-only checkout keeps reserve custody and skips live CardTrader buy-through.' }
     : await buyCardTraderItemsForPaidOrder({
@@ -1051,16 +1106,7 @@ async function confirmDelivery({ admin, firestore, decoded, orderId }) {
       error.statusCode = 400;
       throw error;
     }
-    const Stripe = require('stripe');
-    const stripeSecret = process.env.STRIPE_SECRET_KEY;
-    if (!stripeSecret) {
-      const error = new Error('Stripe is not configured.');
-      error.statusCode = 500;
-      throw error;
-    }
-    const stripe = new Stripe(stripeSecret, process.env.STRIPE_API_VERSION
-      ? { apiVersion: process.env.STRIPE_API_VERSION }
-      : {});
+    const stripe = stripeFromEnv();
     const { releaseSellerTransfers } = require('./_marketplace_order_stripe');
     await releaseSellerTransfers({ admin, stripe, orderId });
     const now = admin.firestore.FieldValue.serverTimestamp();
@@ -1079,8 +1125,14 @@ async function confirmDelivery({ admin, firestore, decoded, orderId }) {
   }
   const now = admin.firestore.FieldValue.serverTimestamp();
   const sellerTotals = sellerTotalsFromItems(data.items || []);
+  // Partial refunds already went back to the buyer out of escrow.
+  const refunded = data.refundsBySeller && typeof data.refundsBySeller === 'object' ? data.refundsBySeller : {};
+  for (const [sellerUid, amountPkn] of sellerTotals.entries()) {
+    sellerTotals.set(sellerUid, Math.max(0, amountPkn - numberValue(refunded[sellerUid])));
+  }
   await firestore.runTransaction(async (transaction) => {
     for (const [sellerUid, amountPkn] of sellerTotals.entries()) {
+      if (amountPkn <= 0) continue;
       transaction.set(
         firestore.collection('balances').doc(sellerUid),
         {
@@ -1227,6 +1279,9 @@ async function reportProblem({ admin, firestore, decoded, orderId, reason, notes
         updatedAt: now,
       }, { merge: true });
     });
+    await voidNativeSales({ admin, firestore, orderId, reason: 'refunded_not_shipped' }).catch((error) => {
+      console.error('marketplace native sale void failed', error);
+    });
   } else {
     await orderRef.set({
       disputeStatus: 'open',
@@ -1239,6 +1294,81 @@ async function reportProblem({ admin, firestore, decoded, orderId, reason, notes
   return { order: orderPayload(orderId, next.data() || data) };
 }
 
+function stripeFromEnv() {
+  const Stripe = require('stripe');
+  const stripeSecret = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecret) {
+    const error = new Error('Stripe is not configured.');
+    error.statusCode = 500;
+    throw error;
+  }
+  return new Stripe(stripeSecret, process.env.STRIPE_API_VERSION
+    ? { apiVersion: process.env.STRIPE_API_VERSION }
+    : {});
+}
+
+/** Buyer backs out of an unpaid EUR checkout: expire Stripe, release the hold. */
+async function cancelEurOrder({ admin, firestore, decoded, orderId }) {
+  const stripe = stripeFromEnv();
+  const { cancelPendingEurOrder } = require('./_eur_order_inventory');
+  const { handleMarketplaceOrderPaid } = require('./_marketplace_order_stripe');
+  const result = await cancelPendingEurOrder({
+    admin,
+    firestore,
+    stripe,
+    orderId,
+    uid: decoded.uid,
+    onPaid: (session) => handleMarketplaceOrderPaid({ admin, stripe, session }),
+  });
+  const next = await firestore.collection('orders').doc(orderId).get();
+  return { ...result, order: orderPayload(orderId, next.data() || {}) };
+}
+
+async function refundOrder({ admin, firestore, decoded, orderId, body = {} }) {
+  const { refundSellerShare } = require('./_order_refund');
+  const { data } = await loadOrderOrThrow(firestore, orderId);
+  if (!sellerOnOrder(data, decoded.uid)) {
+    const error = new Error('Only a seller on this order can refund it.');
+    error.statusCode = 403;
+    throw error;
+  }
+  const eur = data.currency === 'EUR' || data.paymentMethod === 'stripe';
+  const result = await refundSellerShare({
+    admin,
+    firestore,
+    stripe: eur ? stripeFromEnv() : null,
+    orderId,
+    sellerUid: decoded.uid,
+    amount: Number(body.amount),
+    reason: body.reason,
+    clientToken: body.clientToken,
+  });
+  const next = await firestore.collection('orders').doc(orderId).get();
+  return { ...result, sale: sellerHistoryRow(orderId, next.data() || {}, decoded.uid) };
+}
+
+/** Seller sold history: native Pokoin orders (refundable) + CardTrader sales. */
+async function sellerSoldHistory({ firestore, decoded, limit = 200 }) {
+  const [orders, cardTrader] = await Promise.all([
+    firestore.collection('orders').where('sellerUids', 'array-contains', decoded.uid).get(),
+    firestore.collection(SALES_COLLECTION).where('sellerUid', '==', decoded.uid).get(),
+  ]);
+  const rows = [];
+  for (const doc of orders.docs) {
+    const data = doc.data() || {};
+    const refundedAway = data.paymentStatus === 'refunded';
+    if (!orderIsSold(data) && !refundedAway) continue;
+    rows.push({ ...sellerHistoryRow(doc.id, data, decoded.uid), source: 'pokoin' });
+  }
+  for (const doc of cardTrader.docs) {
+    const data = doc.data() || {};
+    if (data.source !== 'cardtrader') continue;
+    rows.push(sellerCardTraderRow(doc.id, data));
+  }
+  rows.sort((a, b) => String(b.soldAt || '').localeCompare(String(a.soldAt || '')));
+  return { sales: rows.slice(0, limit) };
+}
+
 module.exports = async function handler(req, res) {
   try {
     const decoded = await verifyBearerToken(req);
@@ -1246,6 +1376,12 @@ module.exports = async function handler(req, res) {
     const firestore = admin.firestore();
     const url = new URL(req.url, `https://${req.headers.host || 'pokoin.com'}`);
     const action = cleanText(url.searchParams.get('action') || req.body?.action, 40);
+
+    if (req.method === 'GET' && action === 'sold-history') {
+      const result = await sellerSoldHistory({ firestore, decoded });
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json({ ok: true, ...result });
+    }
 
     if (req.method === 'POST' && (!action || action === 'checkout')) {
       const result = await createPaidOrder({
@@ -1286,6 +1422,8 @@ module.exports = async function handler(req, res) {
       || action === 'mark-shipped'
       || action === 'report-problem'
       || action === 'reveal-shipping'
+      || action === 'cancel-eur'
+      || action === 'refund'
     )) {
       const orderId = cleanOrderId(url.searchParams.get('orderId') || req.body?.orderId);
       if (!orderId) {
@@ -1303,6 +1441,14 @@ module.exports = async function handler(req, res) {
         const result = await revealShippingAddress({ firestore, decoded, orderId });
         return res.status(200).json({ ok: true, ...result });
       }
+      if (action === 'cancel-eur') {
+        const result = await cancelEurOrder({ admin, firestore, decoded, orderId });
+        return res.status(200).json({ ok: true, ...result });
+      }
+      if (action === 'refund') {
+        const result = await refundOrder({ admin, firestore, decoded, orderId, body: req.body || {} });
+        return res.status(200).json({ ok: true, ...result });
+      }
       const result = await reportProblem({
         admin,
         firestore,
@@ -1314,14 +1460,27 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, ...result });
     }
 
-    res.setHeader('Allow', 'POST');
+    res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Method not allowed.' });
   } catch (error) {
     console.error('marketplace-orders failed', error);
     return res.status(error.statusCode || 500).json({
       error: error.message || 'Marketplace order failed.',
+      ...(error.code ? { code: error.code } : {}),
     });
   }
+};
+
+// Shared with the EUR (Stripe) order lifecycle in _eur_order_inventory.js.
+module.exports.fulfillment = {
+  buyCardTraderItemsForPaidOrder,
+  isCardTraderLiveItem,
+  normalizedItems,
+  restoreListingQuantities,
+  syncCardTraderAfterPokoinSale,
+  syncSellerOwnershipAfterPhysicalSale,
+  verifyAndDecrementListings,
+  verifyCardTraderLiveItems,
 };
 
 module.exports._test = {

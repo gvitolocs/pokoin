@@ -89,6 +89,14 @@ function weightsAreFresh(updatedAt) {
   return (Date.now() - ts) / 86_400_000 <= FRESH_WEIGHTS_MAX_AGE_DAYS;
 }
 
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function daysAgoIso(days) {
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+}
+
 function cleanText(value, max = 200) {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   return text.slice(0, max);
@@ -223,34 +231,78 @@ function candidateFromRow(row) {
 // Tools
 // ---------------------------------------------------------------------------
 
+// Chatter words that must never break a card-name match. 'ex'/'gx'/'v' are
+// deliberately NOT here — they are part of real card names.
+const QUERY_FILLER_RE = /\b(hi|hello|hey|please|can|could|tell|me|do|does|did|you|know|i|im|i have|have|has|got|how|much|what|whats|worth|price|prices|priced|cost|costs|value|valued|values|market|sell|selling|sold|sale|buy|buying|for|about|around|roughly|approximately|near|mint|lightly|slightly|played|moderately|heavily|damaged|poor|condition|in|on|of|the|a|an|is|are|was|were|it|its|this|that|and|or|english|italian|french|german|spanish|japanese|from|with|any|some|one|copy|copies|right|now|currently|today|it is|its)\b/gi;
+
+const STOPWORDS = new Set([
+  'the', 'a', 'an', 'of', 'from', 'old', 'in', 'on', 'for', 'and', 'or', 'is', 'are',
+  'was', 'it', 'its', 'this', 'that', 'my', 'your', 'have', 'has', 'how',
+  'much', 'what', 'worth', 'price', 'cost', 'value', 'sell', 'sold', 'near',
+  'mint', 'played', 'damaged', 'condition', 'english', 'italian', 'japanese',
+]);
+
+function queryVariants(rawQuery) {
+  const text = cleanText(rawQuery, 120);
+  if (!text) return [];
+  const variants = [];
+  const cleaned = text
+    .replace(/[,.!?;:()]+/g, ' ')
+    .replace(QUERY_FILLER_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (cleaned.length >= 4) variants.push(cleaned);
+  if (text !== cleaned && text.length >= 4) variants.push(text);
+  return variants.slice(0, 3);
+}
+
 async function resolveCard(params = {}) {
   const query = cleanText(params.query, 120);
   const artist = cleanText(params.artist, 80);
   if (!query && !artist) {
     return { status: 'invalid', error: 'query or artist required' };
   }
-  const namePattern = query ? `%${escapeLike(query)}%` : null;
   const artistPattern = artist ? `%${escapeLike(artist)}%` : null;
-  const rows = await queryRows(
-    `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
-            coalesce(nullif(c.card_number, ''), '') as card_number
-       from marketplace_search_candidates s
-       left join marketplace_cards c on c.card_id = s.card_id
-      where s.item_kind <> 'product'
-        and ($1::text is null or s.name ilike $1 or s.search_text ilike $1)
-        and ($2::text is null or s.artist ilike $2)
-      order by s.search_weight desc nulls last, s.name
-      limit 7`,
-    [namePattern, artistPattern],
-  );
-  const candidates = rows.map(candidateFromRow);
-  const status = candidates.length === 0 ? 'not_found' : (candidates.length === 1 ? 'ok' : 'ambiguous');
+  // Token-AND search: every significant word of the chat phrase must appear in
+  // search_text, in any order — "rocky helmet boundaries crossed secret rare
+  // 153/149" and "claydol ex ex power keepers" both resolve.
+  for (const variant of queryVariants(query)) {
+    const tokens = variant
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+    if (!tokens.length) continue;
+    const conditions = tokens.map((_, i) => `s.search_text ilike $${i + 1}`);
+    const params2 = tokens.map((t) => `%${escapeLike(t)}%`);
+    if (artistPattern) {
+      conditions.push(`s.artist ilike $${params2.length + 1}`);
+      params2.push(artistPattern);
+    }
+    const rows = await queryRows(
+      `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
+              coalesce(nullif(c.card_number, ''), '') as card_number
+         from marketplace_search_candidates s
+         left join marketplace_cards c on c.card_id = s.card_id
+        where s.item_kind <> 'product'
+          and ${conditions.join(' and ')}
+        order by s.search_weight desc nulls last, s.name
+        limit 7`,
+      params2,
+    );
+    if (rows.length) {
+      return {
+        status: rows.length === 1 ? 'ok' : 'ambiguous',
+        candidates: rows.map(candidateFromRow),
+        note: rows.length > 1
+          ? 'Multiple printings match; ask the user which one they mean.'
+          : undefined,
+      };
+    }
+  }
   return {
-    status,
-    candidates,
-    note: status === 'ambiguous'
-      ? 'Multiple printings match; ask one concise clarification question.'
-      : undefined,
+    status: 'not_found',
+    error: 'no catalog match',
+    note: 'The assistant should ask the user to double-check the card name or set.',
   };
 }
 
@@ -270,6 +322,52 @@ async function soldSummaryForBlueprint(blueprintId, condition, language, days) {
     [String(blueprintId), condition, language, days],
   );
   return buildSoldSummary(rows[0]);
+}
+
+const FLUCTUATION_PCT = 15;
+
+/** Daily min/median asks over the last `days`, with dated fluctuation moves. */
+async function askHistoryForBlueprint(blueprintId, days = 14) {
+  const rows = await queryRows(
+    `select observed_day, min_price_pkn, median_price_pkn
+       from cardtrader_blueprint_daily_analytics
+      where blueprint_id = $1::bigint
+        and observed_day >= current_date - ($2::int || ' days')::interval
+      order by observed_day`,
+    [String(blueprintId), days],
+  );
+  const series = rows.map((r) => ({
+    day: String(r.observed_day).slice(0, 10),
+    min: round2(r.min_price_pkn),
+    median: round2(r.median_price_pkn),
+  })).filter((p) => p.min != null);
+  const fluctuations = [];
+  for (let i = 1; i < series.length; i += 1) {
+    const prev = series[i - 1];
+    const cur = series[i];
+    if (!prev.min || !cur.min) continue;
+    const changePct = Math.round(((cur.min - prev.min) / prev.min) * 100);
+    if (Math.abs(changePct) >= FLUCTUATION_PCT) {
+      fluctuations.push({
+        fromDay: prev.day,
+        toDay: cur.day,
+        from: prev.min,
+        to: cur.min,
+        changePct,
+      });
+    }
+  }
+  let trend = 'stable';
+  if (series.length >= 2) {
+    const first = series[0].min;
+    const last = series[series.length - 1].min;
+    if (first && last) {
+      const move = ((last - first) / first) * 100;
+      if (move >= 10) trend = 'rising';
+      else if (move <= -10) trend = 'falling';
+    }
+  }
+  return { days, series, fluctuations, trend };
 }
 
 async function askSignalForBlueprint(blueprintId) {
@@ -329,6 +427,7 @@ async function cardQuote(params = {}) {
     variants.push({ condition: cond.alternatives[0], language: lang.code, vague: true });
   }
 
+  const askHistory = await askHistoryForBlueprint(blueprintId, 14);
   const quotes = [];
   for (const variant of variants) {
     const [summary, asks] = await Promise.all([
@@ -350,8 +449,11 @@ async function cardQuote(params = {}) {
 
   return {
     status: 'ok',
+    today: todayIso(),
     card,
     filters: { condition: cond.primary, language: lang.code, conditionVague: cond.vague },
+    window: { soldDays: 90, from: daysAgoIso(90), to: daysAgoIso(0) },
+    askHistory,
     conditionNote: cond.vague
       ? `Vague condition wording: showing ${cond.primary} and ${cond.alternatives[0]} ranges instead of claiming a grade.`
       : undefined,
@@ -527,6 +629,47 @@ async function collectionQuote(params = {}) {
   };
 }
 
+async function suggestCards(params = {}) {
+  const subject = cleanText(params.subject, 80);
+  const excludeCardId = cleanText(params.excludeCardId, 40);
+  const limit = Math.min(Math.max(Number(params.limit) || 6, 1), 12);
+  if (!subject) return { status: 'invalid', error: 'subject required' };
+  const tokens = subject.toLowerCase().split(/\s+/).filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+  if (!tokens.length) return { status: 'invalid', error: 'subject required' };
+  const conditions = tokens.map((_, i) => `s.search_text ilike $${i + 1}`);
+  const values = tokens.map((t) => `%${escapeLike(t)}%`);
+  const rows = await queryRows(
+    `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
+            coalesce(nullif(c.card_number, ''), '') as card_number,
+            ask.min_price_pkn
+       from marketplace_search_candidates s
+       left join marketplace_cards c on c.card_id = s.card_id
+       left join cardtrader_blueprint_daily_analytics ask
+         on ask.blueprint_id = case when s.card_id::text ~ '^[0-9]+$' then (s.card_id::text::bigint / 2) end
+        and ask.observed_day = (select max(observed_day) from cardtrader_blueprint_daily_analytics)
+      where s.item_kind <> 'product'
+        and ${conditions.join(' and ')}
+        and ($${values.length + 1}::text is null or s.card_id::text <> $${values.length + 1}::text)
+      order by s.search_weight desc nulls last, s.name
+      limit ${limit + 1}`,
+    [...values, excludeCardId || null],
+  );
+  const candidates = rows
+    .filter((r) => String(r.card_id) !== excludeCardId)
+    .slice(0, limit)
+    .map((r) => ({
+      ...candidateFromRow(r),
+      minAsk: r.min_price_pkn != null ? round2(r.min_price_pkn) : null,
+    }));
+  if (!candidates.length) return { status: 'not_found', error: 'no catalog cards match that subject' };
+  return {
+    status: 'ok',
+    subject,
+    cards: candidates,
+    note: 'Real cards from the Pokoin catalog with current lowest ask (PKN minor units, EUR).',
+  };
+}
+
 async function marketSnapshot(params = {}) {
   const limit = Math.min(Math.max(Number(params.limit) || 10, 1), 50);
   const rows = await queryRows(
@@ -562,6 +705,7 @@ const TOOLS = {
   card_quote: cardQuote,
   card_liquidity: cardLiquidity,
   collection_quote: collectionQuote,
+  suggest_cards: suggestCards,
   market_snapshot: marketSnapshot,
 };
 
@@ -615,6 +759,7 @@ module.exports = async function handler(req, res) {
     return;
   }
   const params = req.body?.params && typeof req.body.params === 'object' ? req.body.params : {};
+  console.log('poko-market request', { tool, params });
   try {
     const result = await run(params);
     const status = result.status === 'invalid' ? 400
@@ -622,7 +767,7 @@ module.exports = async function handler(req, res) {
       : result.status === 'ambiguous' ? 200
       : result.status === 'unsupported' ? 422
       : 200;
-    sendJson(res, status, { ok: true, tool, ...result });
+    sendJson(res, status, { ok: true, tool, today: todayIso(), ...result });
   } catch (error) {
     console.error('poko-market tool failed', { tool, error: String(error?.message || error).slice(0, 300) });
     sendJson(res, 500, { ok: false, tool, error: 'market query failed' });
@@ -634,6 +779,8 @@ module.exports._test = {
   CONDITIONS,
   LANGUAGES,
   cleanText,
+  todayIso,
+  daysAgoIso,
   escapeLike,
   fuzzyArtistPattern,
   normalizeCondition,

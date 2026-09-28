@@ -1941,3 +1941,108 @@
 .tg-code-label { margin: 0; font-size: 0.9rem; }
 .tg-code { margin: 0; font-family: ui-monospace, monospace; font-size: 1.6rem; letter-spacing: 0.18em; font-weight: 700; }
 .tg-steps { margin: 0 0 0.4rem 1.1rem; padding: 0; }
+
+/* Orders + Sold history: payment status pills, refunds, held checkouts. */
+.order-pill {
+  display: inline-block;
+  margin-left: 0.35rem;
+  vertical-align: 0.1em;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.order-pill.is-ok { color: var(--yellow); border-color: rgb(255 211 61 / 0.45); }
+.order-pill.is-wait { color: var(--text); border-color: var(--g5); background: var(--g3); }
+.order-pill.is-muted { color: var(--muted); }
+.order-pill.is-warn { color: #fecaca; border-color: rgb(252 165 165 / 0.45); }
+.order-pill.is-ct { color: var(--ct-blue); border-color: rgb(91 186 213 / 0.45); }
+.order-row,
+.sale-row { align-items: flex-start; flex-wrap: wrap; }
+.order-row.is-focus,
+.sale-row.is-focus { background: var(--g2); box-shadow: inset 3px 0 0 var(--yellow); }
+.order-id { font-variant-numeric: tabular-nums; opacity: 0.7; }
+.sale-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+}
+.sale-line a { color: var(--text); font-weight: 700; }
+.sale-line a:hover { color: var(--yellow); }
+.sales-source {
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--g5);
+  background: var(--g2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+.refund-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem 0.85rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgb(255 211 61 / 0.35);
+  border-radius: 12px;
+  background: var(--g2);
+}
+.refund-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.refund-form input {
+  width: 7.5rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--g5);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.refund-form input[aria-invalid="true"] { border-color: rgb(252 165 165 / 0.6); }
+.refund-form .refund-reason { flex: 1 1 14rem; }
+.refund-form .refund-reason input { width: 100%; }
+.refund-hint {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.refund-buttons { display: flex; gap: 0.45rem; }
+.refund-error { flex-basis: 100%; color: #fecaca; font-size: 0.82rem; }
+
+/* Card desk: what actually sold through Pokoin checkout. */
+.native-sales { margin-top: 0.75rem; }
+.native-sales .muted { font-size: 0.75rem; }
+.native-sales-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+.native-sales-list li {
+  display: grid;
+  grid-template-columns: 6.2rem 1fr auto;
+  gap: 0.5rem;
+  padding: 0.28rem 0;
+  border-top: 1px solid var(--g4);
+  font-variant-numeric: tabular-nums;
+}
+.native-sales-list li:first-child { border-top: 0; }
+.native-sales-day,
+.native-sales-traits { color: var(--muted); }
+.native-sales-price { color: var(--yellow); }
+
+@media (max-width: 720px) {
+  .order-row .order-actions,
+  .sale-row .order-actions { flex-basis: 100%; }
+  .refund-form input { width: 100%; }
+  .refund-form label { flex: 1 1 100%; }
+}

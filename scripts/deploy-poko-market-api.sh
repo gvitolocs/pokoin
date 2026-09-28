@@ -16,6 +16,16 @@ STAGE="$(mktemp -d /tmp/pokoin-poko-market-api-XXXXXX)"
 trap 'rm -rf "$STAGE"' EXIT
 
 git -C "$REPO" fetch -q origin || die "git fetch origin failed"
+# Multiple agents deploy this overlay family; wait until two consecutive
+# fetches agree on origin/main so we never ship a stale tip.
+prev_main=""
+for _ in $(seq 1 10); do
+  cur_main="$(git -C "$REPO" rev-parse origin/main)"
+  [ "$cur_main" = "$prev_main" ] && break
+  prev_main="$cur_main"
+  sleep 3
+  git -C "$REPO" fetch -q origin || true
+done
 git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
   || die "commit is not on origin/main; integrate and push it first"
 

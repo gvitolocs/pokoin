@@ -41,6 +41,8 @@ CT_FILES=(
   cardtrader-sync.js
   cardtrader-assets.js
   cardtrader-reconcile-all.js
+  cardtrader-sales-backfill.js
+  _native_sales.js
   marketplace-listings.js
   marketplace-portfolio-history.js
   _portfolio_history_core.js
@@ -65,6 +67,7 @@ node --test \
   "$SRC/_cardtrader_webhook_core.test.js" \
   "$SRC/_cardtrader_webhook_registration.test.js" \
   "$SRC/cardtrader-reconcile-all.test.js" \
+  "$SRC/cardtrader-sales-backfill.test.js" \
   "$SRC/_portfolio_history_core.test.js" \
   "$SRC/patch-route-manifest.test.js"
 for file in "${CT_FILES[@]}"; do
@@ -97,6 +100,8 @@ tar -C "$SRC" -cf - \
   cardtrader-sync.js \
   cardtrader-assets.js \
   cardtrader-reconcile-all.js \
+  cardtrader-sales-backfill.js \
+  _native_sales.js \
   marketplace-portfolio-history.js \
   _portfolio_history_core.js \
   route-definitions.json \

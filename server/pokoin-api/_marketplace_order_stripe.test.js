@@ -40,11 +40,15 @@ test('paid webhook is idempotent on duplicate session', async () => {
     payment_intent: 'pi_1',
     metadata: { kind: 'marketplace_order_eur', pokoinOrderId: 'eur_1', pokoinUid: 'buyer1' },
   };
-  const first = await handleMarketplaceOrderPaid({ admin, stripe: {}, session });
+  const fulfilled = [];
+  const fulfill = async ({ orderId }) => { fulfilled.push(orderId); return { done: true }; };
+  const first = await handleMarketplaceOrderPaid({ admin, stripe: {}, session, fulfill });
   assert.equal(first.duplicate, false);
   assert.equal(store.paymentStatus, 'paid');
-  const second = await handleMarketplaceOrderPaid({ admin, stripe: {}, session });
+  const second = await handleMarketplaceOrderPaid({ admin, stripe: {}, session, fulfill });
   assert.equal(second.duplicate, true);
+  // Fulfilment itself is idempotent; a Stripe retry must still reach it.
+  assert.deepEqual(fulfilled, ['eur_1', 'eur_1']);
 });
 
 test('releaseSellerTransfers is idempotent', async () => {
@@ -185,4 +189,45 @@ test('amount mismatch fails closed', async () => {
     }),
     /does not match/,
   );
+});
+
+test('delayed payment methods stay processing until Stripe confirms', async () => {
+  const store = { buyerUid: 'buyer1', totalEURCents: 4100, paymentStatus: 'pending_stripe' };
+  const admin = makeAdmin(store);
+  const session = {
+    id: 'cs_sepa',
+    amount_total: 4100,
+    payment_status: 'unpaid',
+    metadata: { kind: 'marketplace_order_eur', pokoinOrderId: 'eur_1', pokoinUid: 'buyer1' },
+  };
+  let fulfilled = 0;
+  const result = await handleMarketplaceOrderPaid({ admin, stripe: {}, session, fulfill: async () => { fulfilled += 1; } });
+  assert.equal(result.processing, true);
+  assert.equal(store.paymentStatus, 'processing');
+  assert.equal(fulfilled, 0);
+});
+
+test('seller Transfer is net of partial refunds made before payout', async () => {
+  const store = {
+    paymentStatus: 'paid',
+    transfersReleased: false,
+    stripeChargeId: 'ch_1',
+    shipments: [
+      { sellerId: 's1', stripeConnectAccountId: 'acct_1', sellerTransferCents: 1000, refundedCents: 300 },
+      { sellerId: 's2', stripeConnectAccountId: 'acct_2', sellerTransferCents: 500, refundedCents: 500 },
+    ],
+  };
+  const transfers = [];
+  const stripe = {
+    transfers: {
+      create: async (body) => {
+        transfers.push(body);
+        return { id: `tr_${transfers.length}` };
+      },
+    },
+  };
+  await releaseSellerTransfers({ admin: makeAdmin(store), stripe, orderId: 'eur_r' });
+  assert.equal(transfers.length, 1, 'fully refunded seller gets no Transfer');
+  assert.equal(transfers[0].amount, 700);
+  assert.deepEqual(store.transfersBySeller, { s1: 'tr_1' });
 });
