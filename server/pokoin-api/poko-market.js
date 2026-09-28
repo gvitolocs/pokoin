@@ -235,6 +235,13 @@ function candidateFromRow(row) {
 // deliberately NOT here — they are part of real card names.
 const QUERY_FILLER_RE = /\b(hi|hello|hey|please|can|could|tell|me|do|does|did|you|know|i|im|i have|have|has|got|how|much|what|whats|worth|price|prices|priced|cost|costs|value|valued|values|market|sell|selling|sold|sale|buy|buying|for|about|around|roughly|approximately|near|mint|lightly|slightly|played|moderately|heavily|damaged|poor|condition|in|on|of|the|a|an|is|are|was|were|it|its|this|that|and|or|english|italian|french|german|spanish|japanese|from|with|any|some|one|copy|copies|right|now|currently|today|it is|its)\b/gi;
 
+const STOPWORDS = new Set([
+  'the', 'a', 'an', 'of', 'from', 'in', 'on', 'for', 'and', 'or', 'is', 'are',
+  'was', 'it', 'its', 'this', 'that', 'my', 'your', 'have', 'has', 'how',
+  'much', 'what', 'worth', 'price', 'cost', 'value', 'sell', 'sold', 'near',
+  'mint', 'played', 'damaged', 'condition', 'english', 'italian', 'japanese',
+]);
+
 function queryVariants(rawQuery) {
   const text = cleanText(rawQuery, 120);
   if (!text) return [];
@@ -256,31 +263,40 @@ async function resolveCard(params = {}) {
     return { status: 'invalid', error: 'query or artist required' };
   }
   const artistPattern = artist ? `%${escapeLike(artist)}%` : null;
-  let rows = [];
+  // Token-AND search: every significant word of the chat phrase must appear in
+  // search_text, in any order — "rocky helmet boundaries crossed secret rare
+  // 153/149" and "claydol ex ex power keepers" both resolve.
   for (const variant of queryVariants(query)) {
-    const namePattern = `%${escapeLike(variant)}%`;
-    rows = await queryRows(
+    const tokens = variant
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+    if (!tokens.length) continue;
+    const conditions = tokens.map((_, i) => `s.search_text ilike $${i + 1}`);
+    const params2 = tokens.map((t) => `%${escapeLike(t)}%`);
+    if (artistPattern) {
+      conditions.push(`s.artist ilike $${params2.length + 1}`);
+      params2.push(artistPattern);
+    }
+    const rows = await queryRows(
       `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
               coalesce(nullif(c.card_number, ''), '') as card_number
          from marketplace_search_candidates s
          left join marketplace_cards c on c.card_id = s.card_id
         where s.item_kind <> 'product'
-          and (s.name ilike $1 or s.search_text ilike $1)
-          and ($2::text is null or s.artist ilike $2)
+          and ${conditions.join(' and ')}
         order by s.search_weight desc nulls last, s.name
         limit 7`,
-      [namePattern, artistPattern],
+      params2,
     );
-    if (rows.length) break;
+    if (rows.length) {
+      return { status: rows.length === 1 ? 'ok' : 'ambiguous', candidates: rows.map(candidateFromRow) };
+    }
   }
-  const candidates = rows.map(candidateFromRow);
-  const status = candidates.length === 0 ? 'not_found' : (candidates.length === 1 ? 'ok' : 'ambiguous');
   return {
-    status,
-    candidates,
-    note: status === 'ambiguous'
-      ? 'Multiple printings match; ask one concise clarification question.'
-      : undefined,
+    status: 'not_found',
+    error: 'no catalog match',
+    note: 'The assistant should ask the user to double-check the card name or set.',
   };
 }
 
