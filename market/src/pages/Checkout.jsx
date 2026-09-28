@@ -15,7 +15,7 @@ import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
 import { checkoutFees } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
-import { fiatFromPkn, formatEurAndDkkFromPkn } from '../pkn.js';
+import { fiatFromPkn, currencyForCountry, currencyFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
 import { pknFromEurCents, previewShipmentCents } from '../shipping-quote.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
@@ -27,21 +27,6 @@ function FeeTip({ label, children }) {
       <span className="fee-tip-pop" role="tooltip">{children}</span>
     </span>
   );
-}
-
-function formatEurCents(cents) {
-  const n = Number(cents) || 0;
-  return `€${(n / 100).toFixed(2)}`;
-}
-
-function formatDkkFromEurCents(cents) {
-  const eur = (Number(cents) || 0) / 100;
-  const dkk = eur * 7.5;
-  return `${dkk.toFixed(2)} DKK`;
-}
-
-function formatEurAndDkkCents(cents) {
-  return `${formatEurCents(cents)} · ${formatDkkFromEurCents(cents)}`;
 }
 
 function snapshot(row, fulfillmentMode, notes) {
@@ -155,10 +140,21 @@ export default function Checkout() {
   const missingListing = items.some((row) => !row.listingId);
   const canPayWithPkn = Number(availablePkn) >= Number(totalPkn);
   const preferFiat = !nft && !canPayWithPkn;
+  const displayCurrency = currencyForCountry(buyerCountry) || currencyFromLocale();
   const eurSubtotal = useMemo(
     () => Math.round((Number(fiatFromPkn(subtotalPkn, 'EUR')) || 0) * 100),
     [subtotalPkn],
   );
+
+  function moneyFromPkn(pkn) {
+    return preferFiat || payMethod === 'stripe'
+      ? formatLocalFromPkn(pkn, displayCurrency)
+      : formatPkn(pkn);
+  }
+
+  function moneyFromEurCents(cents) {
+    return formatLocalFromEurCents(cents, displayCurrency);
+  }
 
   useEffect(() => {
     if (preferFiat && payMethod === 'pkn') setPayMethod('stripe');
@@ -316,7 +312,7 @@ export default function Checkout() {
         lede={nft
           ? 'You pay with your site balance and the cards go into your collection. Nothing is mailed.'
           : payMethod === 'stripe'
-            ? 'Pay in EUR with Stripe. Shipping is calculated per seller from your address.'
+            ? `Prices shown in ${displayCurrency} (converted from PKN). Stripe charges the EUR equivalent; shipping is quoted from your address.`
             : `${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}
       >
         <Link className="btn ghost" to="/cart">Cart</Link>
@@ -329,10 +325,10 @@ export default function Checkout() {
           value={
             payMethod === 'stripe'
               ? (quote
-                ? formatEurAndDkkCents(quote.grandTotalCents)
+                ? moneyFromEurCents(quote.grandTotalCents)
                 : (shippingPreviewCents != null
-                  ? formatEurAndDkkCents(eurSubtotal + shippingPreviewCents)
-                  : `${formatEurAndDkkFromPkn(subtotalPkn)} + ship`))
+                  ? moneyFromEurCents(eurSubtotal + shippingPreviewCents)
+                  : `${moneyFromPkn(subtotalPkn)} + ship`))
               : formatPkn(totalPkn)
           }
           label="Due"
@@ -340,7 +336,7 @@ export default function Checkout() {
       </MetricGrid>
       {preferFiat ? (
         <Alert>
-          Site PKN ({formatPknNumber(availablePkn)}) is not enough for this order — paying in EUR / DKK with Stripe.
+          Site PKN ({formatPknNumber(availablePkn)}) is not enough — amounts are PKN converted to {displayCurrency}. Pay with card (Stripe charges EUR).
         </Alert>
       ) : null}
       <Alert>{error}</Alert>
@@ -378,9 +374,7 @@ export default function Checkout() {
                     <p className="bag-seller">{row.condition} · {row.sellerName} · qty {row.qty}</p>
                   </div>
                   <strong className="bag-price">
-                    {preferFiat || payMethod === 'stripe'
-                      ? formatEurAndDkkFromPkn((Number(row.pricePkn) || 0) * (Number(row.qty) || 1))
-                      : formatPkn((Number(row.pricePkn) || 0) * (Number(row.qty) || 1))}
+                    {moneyFromPkn((Number(row.pricePkn) || 0) * (Number(row.qty) || 1))}
                   </strong>
                 </article>
               ))}
@@ -396,18 +390,21 @@ export default function Checkout() {
               </p>
             )}
             {!nft ? (
-              <div className="sell-field">
-                <span>Pay with</span>
-                <label className="fee-check">
+              <div className="checkout-pay" role="radiogroup" aria-label="Pay with">
+                <span className="checkout-pay-label">Pay with</span>
+                <label className={`checkout-pay-option${payMethod === 'stripe' ? ' is-on' : ''}`}>
                   <input
                     type="radio"
                     name="payMethod"
                     checked={payMethod === 'stripe'}
                     onChange={() => setPayMethod('stripe')}
                   />
-                  Stripe (EUR)
+                  <span>
+                    <strong>Card (Stripe)</strong>
+                    <em>Shown in {displayCurrency} · charged in EUR</em>
+                  </span>
                 </label>
-                <label className="fee-check">
+                <label className={`checkout-pay-option${payMethod === 'pkn' ? ' is-on' : ''}${preferFiat ? ' is-disabled' : ''}`}>
                   <input
                     type="radio"
                     name="payMethod"
@@ -415,7 +412,10 @@ export default function Checkout() {
                     disabled={preferFiat}
                     onChange={() => setPayMethod('pkn')}
                   />
-                  Site PKN{preferFiat ? ' (not enough)' : ''}
+                  <span>
+                    <strong>Site PKN</strong>
+                    <em>{preferFiat ? `Need ${formatPknNumber(totalPkn)} PKN · you have ${formatPknNumber(availablePkn)}` : 'Pay from your Pokoin balance'}</em>
+                  </span>
                 </label>
               </div>
             ) : null}
@@ -521,33 +521,33 @@ export default function Checkout() {
                       Shipping {shipment.fromCountry} → {shipment.toCountry}
                       {' '}({shipment.cardCount || shipment.itemCount} cards · {shipment.serviceName || 'Standard'})
                     </dt>
-                    <dd>{formatEurAndDkkCents(shipment.amountCents)}</dd>
+                    <dd>{moneyFromEurCents(shipment.amountCents)}</dd>
                   </div>
                 ))}
                 <div>
                   <dt>Items</dt>
-                  <dd>{formatEurAndDkkCents(quote.itemsSubtotalCents || eurSubtotal)}</dd>
+                  <dd>{moneyFromEurCents(quote.itemsSubtotalCents || eurSubtotal)}</dd>
                 </div>
                 <div>
                   <dt>Shipping total</dt>
-                  <dd>{formatEurAndDkkCents(quote.shippingTotalCents)}</dd>
+                  <dd>{moneyFromEurCents(quote.shippingTotalCents)}</dd>
                 </div>
                 <div>
                   <dt>Total</dt>
-                  <dd>{formatEurAndDkkCents(quote.grandTotalCents)}</dd>
+                  <dd>{moneyFromEurCents(quote.grandTotalCents)}</dd>
                 </div>
               </dl>
             ) : payMethod === 'stripe' && !nft ? (
               <dl className="fee-lines">
                 <div>
                   <dt>Items</dt>
-                  <dd>{formatEurAndDkkFromPkn(subtotalPkn)}</dd>
+                  <dd>{moneyFromPkn(subtotalPkn)}</dd>
                 </div>
                 <div>
                   <dt>Shipping{shippingPreviewCents != null ? ` (${buyerCountry})` : ''}</dt>
                   <dd>
                     {shippingPreviewCents != null
-                      ? formatEurAndDkkCents(shippingPreviewCents)
+                      ? moneyFromEurCents(shippingPreviewCents)
                       : 'Quoted after you save a shipping address'}
                   </dd>
                 </div>
@@ -555,8 +555,8 @@ export default function Checkout() {
                   <dt>Estimated total</dt>
                   <dd>
                     {shippingPreviewCents != null
-                      ? formatEurAndDkkCents(eurSubtotal + shippingPreviewCents)
-                      : formatEurAndDkkFromPkn(subtotalPkn)}
+                      ? moneyFromEurCents(eurSubtotal + shippingPreviewCents)
+                      : moneyFromPkn(subtotalPkn)}
                   </dd>
                 </div>
               </dl>
@@ -609,7 +609,7 @@ export default function Checkout() {
                 {nft
                   ? `Pay ${formatPkn(totalPkn)} from your site balance. The cards go into your collection. Nothing is mailed.`
                   : payMethod === 'stripe'
-                    ? `Pay ${formatEurCents(quote?.grandTotalCents)} with Stripe. Shipping quote is frozen on the server.`
+                    ? `Pay ${moneyFromEurCents(quote?.grandTotalCents)} with card. Stripe charges the EUR equivalent; shipping quote is frozen on the server.`
                     : `Pay ${formatPkn(totalPkn)} from your site balance. ${ESCROW_LINE}`}
               </p>
             ) : null}
