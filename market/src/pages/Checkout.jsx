@@ -112,26 +112,27 @@ export default function Checkout() {
   const shippingTracked = shippingService !== 'untracked';
 
   const sellerParcels = useMemo(() => {
+    const origins = quote?.sellerOrigins || {};
     const bySeller = new Map();
     for (const row of items) {
       const sid = String(row.sellerUid || '');
+      const fromProfile = String(origins[sid] || '').toUpperCase();
       const list = bySeller.get(sid) || {
         sellerId: sid,
         sellerName: row.sellerName || '',
         count: 0,
-        from: String(row.sellerCountry || '').toUpperCase(),
+        from: fromProfile || String(row.sellerCountry || '').toUpperCase(),
       };
       list.count += Number(row.qty) || 0;
-      list.from = list.from || String(row.sellerCountry || '').toUpperCase();
+      list.from = list.from || fromProfile || String(row.sellerCountry || '').toUpperCase();
       list.sellerName = list.sellerName || row.sellerName || '';
       bySeller.set(sid, list);
     }
     return [...bySeller.values()];
-  }, [items]);
+  }, [items, quote?.sellerOrigins]);
 
   const shipOptions = useMemo(() => {
     if (nft || !sellerParcels.length) return [];
-    // One shared service choice for the cart; options from the first resolvable parcel.
     for (const group of sellerParcels) {
       if (!group.from) continue;
       const options = shippingServiceOptions({
@@ -146,6 +147,9 @@ export default function Checkout() {
 
   const shippingPreviewCents = useMemo(() => {
     if (nft || !items.length) return 0;
+    if (quote && Number.isFinite(Number(quote.shippingTotalCents))) {
+      return Number(quote.shippingTotalCents);
+    }
     let total = 0;
     let missing = false;
     for (const group of sellerParcels) {
@@ -166,7 +170,7 @@ export default function Checkout() {
       total += cents;
     }
     return missing ? null : total;
-  }, [nft, items.length, sellerParcels, buyerCountry, shippingTracked]);
+  }, [nft, items.length, sellerParcels, buyerCountry, shippingTracked, quote]);
 
   const shippingPkn = nft
     ? 0
@@ -183,6 +187,12 @@ export default function Checkout() {
     () => Math.round((Number(fiatFromPkn(subtotalPkn, 'EUR')) || 0) * 100),
     [subtotalPkn],
   );
+  const canPayStripe = !nft
+    && payMethod === 'stripe'
+    && Boolean(addressId)
+    && Boolean(quote?.grandTotalCents)
+    && !missingListing
+    && !quote?.preview;
 
   function moneyFromPkn(pkn) {
     return preferFiat || payMethod === 'stripe'
@@ -230,7 +240,7 @@ export default function Checkout() {
   }, [signedIn, nft, getBearer]);
 
   useEffect(() => {
-    if (nft || payMethod !== 'stripe' || !addressId || !items.length || missingListing) {
+    if (nft || payMethod !== 'stripe' || !items.length || missingListing || !buyerCountry) {
       setQuote(null);
       setQuoteError('');
       return undefined;
@@ -241,7 +251,7 @@ export default function Checkout() {
         const token = await getBearer();
         const data = await quoteMarketplaceCheckout({
           items: cartPayload(items),
-          shippingAddressId: addressId,
+          ...(addressId ? { shippingAddressId: addressId } : { toCountry: buyerCountry }),
           shippingService,
           tracked: shippingTracked,
         }, token);
@@ -258,7 +268,7 @@ export default function Checkout() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [nft, payMethod, addressId, items, missingListing, getBearer, shippingService, shippingTracked]);
+  }, [nft, payMethod, addressId, buyerCountry, items, missingListing, getBearer, shippingService, shippingTracked]);
 
   if (!ready) {
     return <SessionWait />;
@@ -471,10 +481,10 @@ export default function Checkout() {
                       </label>
                     ))}
                   </div>
+                ) : quoteError ? (
+                  <Alert>{quoteError}</Alert>
                 ) : (
-                  <Alert>
-                    Shipping preview needs the seller ship-from country on the listing. Re-add the card from Shop, or save your address to get a server quote.
-                  </Alert>
+                  <p className="page-lede">Looking up shipping…</p>
                 )}
               </>
             )}
@@ -590,51 +600,65 @@ export default function Checkout() {
 
           <DeskPanel
             title="Pay"
-            actions={confirm ? (
-              <>
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={busy || (payMethod === 'stripe' && !quote)}
-                  onClick={() => (payMethod === 'stripe' && !nft ? placeStripe() : placePkn())}
-                >
-                  {busy
-                    ? (payMethod === 'stripe' && !nft ? 'Opening Stripe…' : 'Paying…')
-                    : (payMethod === 'stripe' && !nft ? 'Pay with Stripe' : 'Confirm order')}
-                </button>
-                <button className="btn ghost" type="button" onClick={() => setConfirm(false)}>Review again</button>
-              </>
-            ) : (
-              <>
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={busy || missingListing || (payMethod === 'stripe' && !nft && (!addressId || !quote))}
-                  onClick={() => setConfirm(true)}
-                >
-                  Place order
-                </button>
-                <button className="btn ghost" type="button" onClick={() => navigate('/cart')}>Back to cart</button>
-              </>
-            )}
+            actions={
+              payMethod === 'stripe' && !nft ? (
+                <>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={busy || !canPayStripe}
+                    onClick={() => placeStripe()}
+                  >
+                    {busy ? 'Opening Stripe…' : 'Pay with Stripe'}
+                  </button>
+                  <button className="btn ghost" type="button" onClick={() => navigate('/cart')}>
+                    Back to cart
+                  </button>
+                </>
+              ) : confirm ? (
+                <>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => placePkn()}
+                  >
+                    {busy ? 'Paying…' : 'Confirm order'}
+                  </button>
+                  <button className="btn ghost" type="button" onClick={() => setConfirm(false)}>
+                    Review again
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={busy || missingListing}
+                    onClick={() => setConfirm(true)}
+                  >
+                    Place order
+                  </button>
+                  <button className="btn ghost" type="button" onClick={() => navigate('/cart')}>
+                    Back to cart
+                  </button>
+                </>
+              )
+            }
           >
             {payMethod === 'stripe' && !nft && quote ? (
               <dl className="fee-lines">
-                {(quote.shipments || []).map((shipment) => (
-                  <div key={shipment.sellerId}>
-                    <dt>
-                      Shipping {shipment.fromCountry} → {shipment.toCountry}
-                      {' '}({shipment.cardCount || shipment.itemCount} cards · {shipment.serviceName || 'Standard'})
-                    </dt>
-                    <dd>{moneyFromEurCents(shipment.amountCents)}</dd>
-                  </div>
-                ))}
                 <div>
                   <dt>Items</dt>
                   <dd>{moneyFromEurCents(quote.itemsSubtotalCents || eurSubtotal)}</dd>
                 </div>
                 <div>
-                  <dt>Shipping total</dt>
+                  <dt>
+                    Shipping
+                    {quote.shipments?.[0]
+                      ? ` · ${quote.shipments[0].fromCountry} → ${quote.shipments[0].toCountry}`
+                      : ''}
+                  </dt>
                   <dd>{moneyFromEurCents(quote.shippingTotalCents)}</dd>
                 </div>
                 <div>
@@ -649,11 +673,11 @@ export default function Checkout() {
                   <dd>{moneyFromPkn(subtotalPkn)}</dd>
                 </div>
                 <div>
-                  <dt>Shipping{shippingPreviewCents != null ? ` (${buyerCountry})` : ''}</dt>
+                  <dt>Shipping{shippingPreviewCents != null ? ` · ${shipFromCountryName(buyerCountry) || buyerCountry}` : ''}</dt>
                   <dd>
                     {shippingPreviewCents != null
                       ? moneyFromEurCents(shippingPreviewCents)
-                      : 'Quoted after you save a shipping address'}
+                      : (quoteError || 'Looking up shipping…')}
                   </dd>
                 </div>
                 <div>
@@ -709,14 +733,15 @@ export default function Checkout() {
                 </div>
               </dl>
             )}
-            {confirm ? (
+            {confirm && payMethod === 'pkn' ? (
               <p className="page-lede">
                 {nft
                   ? `Pay ${formatPkn(totalPkn)} from your site balance. The cards go into your collection. Nothing is mailed.`
-                  : payMethod === 'stripe'
-                    ? `Pay ${moneyFromEurCents(quote?.grandTotalCents)} with card. Stripe charges the EUR equivalent; shipping quote is frozen on the server.`
-                    : `Pay ${formatPkn(totalPkn)} from your site balance. ${ESCROW_LINE}`}
+                  : `Pay ${formatPkn(totalPkn)} from your site balance. ${ESCROW_LINE}`}
               </p>
+            ) : null}
+            {!canPayStripe && payMethod === 'stripe' && !nft && !addressId ? (
+              <p className="page-lede">Save a shipping address to pay with Stripe.</p>
             ) : null}
             {missingListing ? <Alert>A cart row is missing listingId. Add the offer from Shop again.</Alert> : null}
           </DeskPanel>
