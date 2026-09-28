@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate, useLocation } from 'react-router-dom';
+import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
   confirmMarketplaceDelivery,
@@ -9,6 +9,7 @@ import {
   revealMarketplaceShipping,
 } from '../api.js';
 import { firestore, useAuth } from '../auth.jsx';
+import { useCart } from '../cart.jsx';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { authFrom } from '../punchouts.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
@@ -45,12 +46,16 @@ function moneyLabel(row) {
 
 export default function Orders() {
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { ready, signedIn, user, profile, getBearer } = useAuth();
+  const { clear } = useCart();
   const [bought, setBought] = useState(null);
   const [sold, setSold] = useState(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busyId, setBusyId] = useState('');
   const [addresses, setAddresses] = useState({});
+  const eurSession = String(searchParams.get('eur_session') || '').trim();
 
   useEffect(() => {
     document.title = 'Orders · Pokoin';
@@ -74,6 +79,18 @@ export default function Orders() {
       unsubSell();
     };
   }, [user?.uid, profile?.uid]);
+
+  useEffect(() => {
+    if (!eurSession) return;
+    clear();
+    setNotice('Card payment received. Your order is listed below once Stripe confirms.');
+    setSearchParams((prev) => {
+      if (!prev.has('eur_session')) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete('eur_session');
+      return next;
+    }, { replace: true });
+  }, [eurSession, clear, setSearchParams]);
 
   if (!ready) return <SessionWait />;
   if (!signedIn) {
@@ -106,6 +123,7 @@ export default function Orders() {
         <Link className="btn ghost" to="/cart">Cart</Link>
       </PageHead>
       <Alert>{error}</Alert>
+      {notice ? <p className="desk-ok">{notice}</p> : null}
       {bought == null && sold == null && !error ? (
         <DeskPanel title="History"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       ) : null}
