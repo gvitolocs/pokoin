@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   canResumePayment,
   formatOrderMoney,
@@ -49,4 +52,15 @@ test('refund input converts to the order unit', () => {
   assert.equal(formatOrderMoney(410, 'EUR'), '€4.10');
   assert.equal(formatOrderMoney(20, 'PKN'), '20 PKN');
   assert.match(newRefundToken(), /^rf[0-9a-f]{24}$/);
+});
+
+test('vercel and vite serve /sales (Sold history) as the market SPA', () => {
+  const root = path.dirname(fileURLToPath(import.meta.url));
+  const vercel = JSON.parse(fs.readFileSync(path.join(root, '../../vercel.json'), 'utf8'));
+  const viteSrc = fs.readFileSync(path.join(root, '../vite.config.js'), 'utf8');
+  const rewrites = vercel.rewrites || [];
+  for (const source of ['/sales', '/sales/', '/orders']) {
+    assert.ok(rewrites.some((r) => r.source === source && r.destination === '/market/index.html'), source);
+  }
+  assert.match(viteSrc, /url === '\/sales'/);
 });
