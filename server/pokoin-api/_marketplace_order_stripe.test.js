@@ -105,6 +105,68 @@ test('releaseSellerTransfers creates one Transfer per seller shipment', async ()
   assert.equal(transfers[1].amount, 2500);
 });
 
+test('releaseSellerTransfers waits when seller Connect is not READY yet', async () => {
+  const store = {
+    paymentStatus: 'paid',
+    transfersReleased: false,
+    stripeChargeId: 'ch_1',
+    shipments: [
+      { sellerId: 's1', stripeConnectAccountId: '', sellerTransferCents: 1000 },
+    ],
+  };
+  const profiles = {
+    s1: { stripeConnectStatus: 'not_started', stripeConnectAccountId: '' },
+  };
+  const transfers = [];
+  const admin = {
+    firestore() {
+      return {
+        FieldValue: { serverTimestamp: () => 'TS' },
+        collection(name) {
+          return {
+            doc(id) {
+              if (name === 'users') {
+                return {
+                  async get() {
+                    return { exists: Boolean(profiles[id]), data: () => profiles[id] || {} };
+                  },
+                };
+              }
+              return {
+                async get() { return { exists: true, data: () => store }; },
+                async set(payload) { Object.assign(store, payload); },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  admin.firestore.FieldValue = { serverTimestamp: () => 'TS' };
+  const stripe = {
+    transfers: {
+      create: async (body) => {
+        transfers.push(body);
+        return { id: `tr_${transfers.length}` };
+      },
+    },
+  };
+  const first = await releaseSellerTransfers({ admin, stripe, orderId: 'eur_wait' });
+  assert.equal(first.complete, false);
+  assert.deepEqual(first.pendingSellerIds, ['s1']);
+  assert.equal(transfers.length, 0);
+  assert.equal(store.transfersReleased, false);
+  assert.equal(store.paymentStatus, 'escrow');
+
+  profiles.s1 = { stripeConnectStatus: 'READY', stripeConnectAccountId: 'acct_later' };
+  const second = await releaseSellerTransfers({ admin, stripe, orderId: 'eur_wait' });
+  assert.equal(second.complete, true);
+  assert.equal(transfers.length, 1);
+  assert.equal(transfers[0].destination, 'acct_later');
+  assert.equal(store.transfersReleased, true);
+  assert.equal(store.paymentStatus, 'released');
+});
+
 test('amount mismatch fails closed', async () => {
   const store = {
     buyerUid: 'buyer1',
