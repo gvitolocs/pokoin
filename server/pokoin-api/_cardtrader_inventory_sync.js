@@ -371,7 +371,7 @@ async function createImportedListing({
         first_edition, foil_state, variant_state, sealed, graded,
         shipping_available, reserve_available, nft_available, seller_comment,
         source, source_listing_id, status, card_name, card_image_url,
-        set_name, collector_number, altered
+        set_name, collector_number, altered, marketplace_game
       )
       values (
         $1,$2,$3,$4,'New',
@@ -379,9 +379,9 @@ async function createImportedListing({
         $11,$12,'',false,$13,
         true,false,false,$14,
         $15,$16,'active',$17,$18,
-        $19,$20,$21
+        $19,$20,$21,$22
       )
-      returning id, source_listing_id, quantity_available, status, card_id
+      returning id, source_listing_id, quantity_available, status, card_id, marketplace_game
     `,
     [
       cardId,
@@ -405,6 +405,7 @@ async function createImportedListing({
       meta.set_name || (marketplaceGame === 'pokemon' ? 'Pokemon' : marketplaceGame),
       meta.collector_number || '',
       product.altered === true,
+      marketplaceGame || 'pokemon',
     ],
   );
   return result.rows[0] || null;

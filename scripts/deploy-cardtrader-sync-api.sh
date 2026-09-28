@@ -43,6 +43,7 @@ CT_FILES=(
   cardtrader-reconcile-all.js
   cardtrader-sales-backfill.js
   _native_sales.js
+  marketplace-listings.js
   marketplace-portfolio-history.js
   _portfolio_history_core.js
   route-definitions.json
