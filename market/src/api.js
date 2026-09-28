@@ -736,14 +736,21 @@ export function disconnectCardTrader(token) {
   });
 }
 
-export function syncCardTraderInventory(token) {
+export function syncCardTraderInventory(token, options = {}) {
+  const body = {};
+  if (options.previewGames) body.previewGames = true;
+  if (options.powerToolsCsv && typeof options.powerToolsCsv === 'object') {
+    body.powerToolsCsv = options.powerToolsCsv;
+  }
+  if (options.stackSize != null) body.stackSize = options.stackSize;
+  if (options.priceMode) body.priceMode = options.priceMode;
   return getJson('/api/cardtrader-sync', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: '{}',
+    body: JSON.stringify(body),
   });
 }
 

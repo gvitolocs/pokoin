@@ -13,6 +13,7 @@ import {
   describeCardTraderToken,
 } from '../cardtrader-token.js';
 import WipeAllInventory from './WipeAllInventory.jsx';
+import CardTraderPowerToolsModal from './CardTraderPowerToolsModal.jsx';
 
 const CT_TOKEN_DOCS = 'https://www.cardtrader.com/en/docs/api/full/reference';
 
@@ -91,6 +92,9 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
   const [error, setError] = useState('');
   const [syncSummary, setSyncSummary] = useState(null);
   const [syncProgress, setSyncProgress] = useState(null);
+  const [ptModalOpen, setPtModalOpen] = useState(false);
+  const [ptGames, setPtGames] = useState(null);
+  const [ptGamesLoading, setPtGamesLoading] = useState(false);
   const pollRef = useRef(null);
   const pasted = useMemo(() => describeCardTraderToken(token), [token]);
   const hint = tokenHint(pasted);
@@ -159,6 +163,10 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
           if (data?.sync?.lastSyncOk === false || summary?.phase === 'failed') {
             setError(data?.sync?.lastSyncError || 'CardTrader sync failed.');
             setMessage('');
+          } else if (summary?.needsPowerToolsReview) {
+            setSyncSummary(summary);
+            setMessage('Sync done — review CardTrader ↔ Power Tools mismatches.');
+            window.location.assign('/inventory/sync-review');
           } else if (summary) {
             setMessage(`CardTrader synced. ${formatSyncSummary(summary)}`);
           }
@@ -241,14 +249,14 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
     }
   }
 
-  async function onSync() {
-    if (busy) return;
+  async function runSync(options = {}) {
     setBusy(true);
     setError('');
     setMessage('');
+    setPtModalOpen(false);
     try {
       const bearer = await getBearer();
-      const data = await syncCardTraderInventory(bearer);
+      const data = await syncCardTraderInventory(bearer, options);
       if (data?.async || data?.running) {
         setSyncProgress({
           running: true,
@@ -256,7 +264,11 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
           processed: 0,
           total: 0,
         });
-        setMessage('Import started — this stays on the page while it runs.');
+        setMessage(
+          options.powerToolsCsv
+            ? 'Importing CardTrader with Power Tools locations…'
+            : 'Import started — this stays on the page while it runs.',
+        );
         startPolling();
         return;
       }
@@ -265,6 +277,9 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
         setMessage(`Sync incomplete — no stock removed. ${data.error || 'Retry when CardTrader is reachable.'}`);
       } else if (data?.ok === false) {
         setError(data.error || 'CardTrader sync failed.');
+      } else if (data?.summary?.needsPowerToolsReview) {
+        setMessage('Sync done — review CardTrader ↔ Power Tools mismatches.');
+        window.location.assign('/inventory/sync-review');
       } else {
         setMessage(`CardTrader synced. ${formatSyncSummary(data.summary)}`);
       }
@@ -272,6 +287,28 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
     } catch (err) {
       setError(err.message || 'Could not sync CardTrader inventory.');
       setBusy(false);
+    }
+  }
+
+  function onSync() {
+    if (busy || syncing) return;
+    setPtGames(null);
+    setPtModalOpen(true);
+  }
+
+  async function onPreviewGames() {
+    if (ptGamesLoading) return;
+    setPtGamesLoading(true);
+    setError('');
+    try {
+      const bearer = await getBearer();
+      const data = await syncCardTraderInventory(bearer, { previewGames: true });
+      setPtGames(Array.isArray(data?.games) ? data.games : []);
+    } catch (err) {
+      setError(err.message || 'Could not read CardTrader games.');
+      setPtGames([]);
+    } finally {
+      setPtGamesLoading(false);
     }
   }
 
@@ -420,6 +457,19 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
       ) : null}
       {message ? <p className="ct-connect-ok">{message}</p> : null}
       {error ? <p className="ct-connect-err">{error}</p> : null}
+      <CardTraderPowerToolsModal
+        open={ptModalOpen}
+        busy={busy || syncing}
+        games={ptGames}
+        loadingGames={ptGamesLoading}
+        onClose={() => {
+          if (busy || syncing) return;
+          setPtModalOpen(false);
+        }}
+        onSkipPowerTools={() => runSync({})}
+        onPreviewGames={onPreviewGames}
+        onConfirmWithCsv={(opts) => runSync(opts)}
+      />
     </div>
   );
 }
