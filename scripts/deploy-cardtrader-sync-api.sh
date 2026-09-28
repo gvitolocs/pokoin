@@ -86,30 +86,16 @@ say "Pi release $release (overlay; preserves other handlers)"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .cardtrader-sync-previous; cp -a \$prev '$release'; mkdir -p '$release/api'"
 
 # Overlay Pokoin CT domain files onto api/ (replaces legacy CardVault copies).
+# Use CT_FILES so new helpers (Power Tools match, stock CSV) cannot be forgotten.
+overlay_js=()
+for file in "${CT_FILES[@]}"; do
+  [[ "$file" == *.js ]] || continue
+  [[ "$file" == *.test.js ]] && continue
+  [[ "$file" == patch-route-manifest.js ]] && continue
+  overlay_js+=("$file")
+done
 tar -C "$SRC" -cf - \
-  _cardtrader_crypto.js \
-  _cardtrader_client.js \
-  _cardtrader_integration.js \
-  _cardtrader_seller_listings.js \
-  _cardtrader_inventory_sync_core.js \
-  _cardtrader_inventory_sync.js \
-  _cardtrader_inventory_async.js \
-  _cardtrader_webhook_core.js \
-  _cardtrader_webhook_registration.js \
-  cardtrader-connect.js \
-  cardtrader-disconnect.js \
-  cardtrader-status.js \
-  cardtrader-webhook.js \
-  cardtrader-import-dry-run.js \
-  cardtrader-clean-listings.js \
-  cardtrader-sync.js \
-  cardtrader-assets.js \
-  cardtrader-reconcile-all.js \
-  cardtrader-sales-backfill.js \
-  _native_sales.js \
-  marketplace-listings.js \
-  marketplace-portfolio-history.js \
-  _portfolio_history_core.js \
+  "${overlay_js[@]}" \
   route-definitions.json \
   patch-route-manifest.js \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
