@@ -52,6 +52,8 @@ import Admin from './pages/Admin.jsx';
 import Checkout from './pages/Checkout.jsx';
 import Orders from './pages/Orders.jsx';
 import Sales from './pages/Sales.jsx';
+import Bought from './pages/Bought.jsx';
+import Stock from './pages/Stock.jsx';
 import Collection from './pages/Collection.jsx';
 import NftRedirect from './pages/Nft.jsx';
 import Protection from './pages/Protection.jsx';
@@ -184,6 +186,8 @@ function AppShell() {
       {both('/checkout', <Checkout />)}
       {both('/orders', <Orders />)}
       {both('/sales', <Sales />)}
+      {both('/bought', <Bought />)}
+      {both('/stock', <Stock />)}
       {both('/collection', <Collection />)}
       {both('/forum', <Forum />)}
       {both('/forum/category/:categoryId', <Forum />)}

@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation } from 'react-router-dom';
 import { exportStockCsv, fetchSellerListings, formatPkn, importStockCsv } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
+import StockNav from '../components/StockNav.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
 import {
   inventoryListingHref,
@@ -130,9 +131,9 @@ export default function Inventory() {
         title="My listings"
       >
         <Link className="btn" to="/inventory/scan">Scan cards</Link>
-        <Link className="btn ghost" to="/sales">Sold history</Link>
         <Link className="btn ghost" to="/marketplace">List a card</Link>
       </PageHead>
+      <StockNav />
       <Alert>{error}</Alert>
       {message ? <p className="ct-connect-ok" role="status">{message}</p> : null}
 
