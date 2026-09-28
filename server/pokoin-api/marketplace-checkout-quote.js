@@ -73,11 +73,15 @@ module.exports = async function handler(req, res) {
       );
     }
 
-    const quote = quoteCheckout({ items, sellerOrigins, toCountry });
+    const tracked = body.tracked !== false && body.shippingTracked !== false
+      && String(body.shippingService || '').toLowerCase() !== 'untracked';
+
+    const quote = quoteCheckout({ items, sellerOrigins, toCountry, tracked });
     return res.status(200).json({
       ...quote,
       shippingAddressId: addressId,
       toCountry,
+      tracked,
       quotedAt: new Date().toISOString(),
     });
   } catch (error) {
