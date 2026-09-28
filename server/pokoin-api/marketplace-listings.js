@@ -15,6 +15,19 @@ const {
   pushListingToCardTrader,
 } = require('./_cardtrader_seller_listings');
 
+function parseGameFromRequest(...args) {
+  return require('./_marketplace_game').parseGameFromRequest(...args);
+}
+
+function normalizeMarketplaceGame(value) {
+  try {
+    return require('./_marketplace_game').normalizeGame(value);
+  } catch (_) {
+    const raw = String(value || '').trim().toLowerCase().replace(/-/g, '_');
+    return raw || 'pokemon';
+  }
+}
+
 function cleanLimit(value, fallback = 500) {
   if (value === undefined || value === null || value === '') return fallback;
   const limit = Number(value);
@@ -131,6 +144,7 @@ function listingRow(row, { owner = false } = {}) {
     800,
   );
   const sellerDisplayName = displaySellerName(row, source, sourceListingId);
+  const marketplaceGame = cleanText(row.marketplace_game || row.marketplaceGame, 40) || 'pokemon';
   return {
     id: row.id,
     cardId: row.card_id,
@@ -140,6 +154,7 @@ function listingRow(row, { owner = false } = {}) {
     sellerUsername: listingUsername(row, source, sourceListingId),
     sellerCountry: row.seller_country,
     sellerReputationLabel: row.seller_reputation_label,
+    marketplaceGame,
     condition: row.condition,
     language: row.language,
     pricePkn: Number(row.price_pkn || 0),
@@ -531,7 +546,45 @@ function addBooleanField(sets, values, body, bodyKey, columnName, trueDefault = 
   sets.push(`${columnName} = $${values.length}`);
 }
 
-async function readListings(url, decoded) {
+async function sellerCardIdsForGame(sellerUid, game) {
+  const catalogGame = normalizeMarketplaceGame(game);
+  let runWithGame;
+  try {
+    runWithGame = require('./_marketplace_game').runWithGame;
+  } catch (_) {
+    runWithGame = async (_game, fn) => fn();
+  }
+  const listed = await marketplaceQuery(
+    `
+      select distinct card_id
+      from public.marketplace_user_listings
+      where seller_uid = $1
+        and nullif(card_id, '') is not null
+    `,
+    [sellerUid],
+  );
+  const ids = listed.rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean);
+  if (!ids.length) return [];
+  try {
+    const catalog = await runWithGame(catalogGame, () => marketplaceQuery(
+      `
+        select card_id::text as card_id
+        from public.marketplace_search_candidates
+        where card_id::text = any($1::text[])
+      `,
+      [ids],
+    ));
+    return catalog.rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean);
+  } catch (error) {
+    // Satellite catalogs may be missing; fall back to marketplace_game only.
+    if (error.code === '42P01' || /does not exist/i.test(String(error.message || ''))) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function readListings(url, decoded, { marketplaceGame = 'pokemon' } = {}) {
   const values = [];
   const where = [];
   const rawListingId = cleanText(url.searchParams.get('id'), 80);
@@ -539,6 +592,7 @@ async function readListings(url, decoded) {
   const cardId = cleanText(url.searchParams.get('cardId'), 80);
   const sellerUid = cleanText(url.searchParams.get('sellerUid'), 160);
   const sellerUsername = cleanText(url.searchParams.get('sellerUsername'), 64);
+  const game = normalizeMarketplaceGame(marketplaceGame);
   if (rawListingId && !listingId) {
     return [];
   }
@@ -555,16 +609,19 @@ async function readListings(url, decoded) {
     values.push(listingId);
     where.push(`id = $${values.length}`);
   }
+  let ownerUid = '';
   if (sellerUid) {
     if (!decoded || decoded.uid !== sellerUid) {
       const error = new Error('You can only read your own seller listings.');
       error.statusCode = 403;
       throw error;
     }
+    ownerUid = sellerUid;
     values.push(sellerUid);
     where.push(`seller_uid = $${values.length}`);
   } else if (sellerUsername) {
     const seller = await sellerProfileForUsername(sellerUsername, { listingsFirst: true });
+    ownerUid = seller.uid;
     values.push(seller.uid);
     where.push(`seller_uid = $${values.length}`);
     where.push("status = 'active'");
@@ -572,6 +629,36 @@ async function readListings(url, decoded) {
   } else {
     where.push("status = 'active'");
     where.push('quantity_available > 0');
+  }
+  // Game scope: tagged marketplace_game from CT sync / createListing, plus
+  // catalog intersection for seller inventory so pre-tag mixed CT imports
+  // (all stored in the pokemon listings table) stay site-scoped.
+  if (!listingId) {
+    let gameCardIds = null;
+    if (ownerUid) {
+      gameCardIds = await sellerCardIdsForGame(ownerUid, game);
+    }
+    if (game === 'pokemon') {
+      values.push(game);
+      where.push(`coalesce(nullif(marketplace_game, ''), 'pokemon') = $${values.length}`);
+      if (Array.isArray(gameCardIds)) {
+        values.push(gameCardIds);
+        where.push(`card_id = any($${values.length}::text[])`);
+      }
+    } else if (Array.isArray(gameCardIds)) {
+      values.push(game);
+      values.push(gameCardIds);
+      where.push(`(
+        coalesce(nullif(marketplace_game, ''), 'pokemon') = $${values.length - 1}
+        or (
+          coalesce(nullif(marketplace_game, ''), 'pokemon') = 'pokemon'
+          and card_id = any($${values.length}::text[])
+        )
+      )`);
+    } else {
+      values.push(game);
+      where.push(`coalesce(nullif(marketplace_game, ''), 'pokemon') = $${values.length}`);
+    }
   }
   values.push(cleanLimit(url.searchParams.get('limit')));
   const qualifiedWhere = addListingTableAlias(where);
@@ -740,6 +827,7 @@ async function createListing(req, decoded) {
     collectorNumber,
     cleanText(body.location, 64),
     body.altered === true,
+    normalizeMarketplaceGame(body.marketplaceGame || parseGameFromRequest(req)),
   ];
   const result = await marketplaceWriteQuery(
     `
@@ -750,10 +838,11 @@ async function createListing(req, decoded) {
         grading_company, grade, certification_id, shipping_available,
         reserve_available, nft_available, seller_comment, source,
         source_listing_id, card_name,
-        card_image_url, set_name, collector_number, location, altered
+        card_image_url, set_name, collector_number, location, altered,
+        marketplace_game
       )
       values (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32
       )
       returning *
     `,
@@ -945,6 +1034,7 @@ async function readPublicOffersForCard(cardId, limit = 40, options = {}) {
 
 module.exports = async function handler(req, res) {
   try {
+    const marketplaceGame = normalizeMarketplaceGame(parseGameFromRequest(req));
     if (req.method === 'GET') {
       const url = new URL(req.url, `https://${req.headers.host || 'pokoin.com'}`);
       const sellerUid = cleanText(url.searchParams.get('sellerUid'), 160);
@@ -953,7 +1043,7 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: 'Use either sellerUid or sellerUsername, not both.' });
       }
       const decoded = sellerUid ? await verifyBearerToken(req) : null;
-      const listings = await readListings(url, decoded);
+      const listings = await readListings(url, decoded, { marketplaceGame });
       res.setHeader('Cache-Control', 'private, no-store');
       return res.status(200).json({ listings });
     }
@@ -1002,6 +1092,7 @@ module.exports._test = {
   enrichListingRowsWithCardUrls,
   isPublicCardPageListingRead,
   listingRow,
+  normalizeMarketplaceGame,
   readLiveCardTraderListingsForCard,
   sourceListingIdForCardTrader,
   syntheticCardTraderListingRow,

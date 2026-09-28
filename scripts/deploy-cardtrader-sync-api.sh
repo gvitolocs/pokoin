@@ -41,6 +41,7 @@ CT_FILES=(
   cardtrader-sync.js
   cardtrader-assets.js
   cardtrader-reconcile-all.js
+  marketplace-listings.js
   marketplace-portfolio-history.js
   _portfolio_history_core.js
   route-definitions.json
