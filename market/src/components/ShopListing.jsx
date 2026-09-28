@@ -7,6 +7,7 @@ import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../imag
 import ThumbZoom from './ThumbZoom.jsx';
 import { openListingChat } from '../chat-dock-store.js';
 import {
+  conditionChipSrc,
   conditionShort,
   conditionTone,
   listingExtraTags,
@@ -206,7 +207,15 @@ export default function ShopListingRow({
             <em key={tag} className={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>
           ))}
         </span>
-        <span className={`shop-cond is-${tone}`}>{cond}</span>
+        <img
+          className={`shop-cond is-${tone}`}
+          src={conditionChipSrc(offer?.condition)}
+          alt={cond}
+          title={cond}
+          width="56"
+          height="28"
+          draggable={false}
+        />
         <Flag flag={language} className="shop-flag shop-flag-lang" />
       </span>
       <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>

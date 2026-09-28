@@ -178,6 +178,23 @@ export function conditionShort(condition) {
   return text || 'NM';
 }
 
+/** CardTrader-style condition chip SVG (one file per grade). */
+const CONDITION_CHIP_FILE = Object.freeze({
+  nm: 'nm.svg',
+  ex: 'nm.svg',
+  sp: 'sp.svg',
+  mp: 'mp.svg',
+  pl: 'pl.svg',
+  poor: 'po.svg',
+});
+
+export function conditionChipSrc(condition) {
+  const tone = conditionTone(condition) || 'nm';
+  const file = CONDITION_CHIP_FILE[tone] || 'nm.svg';
+  const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) || '/';
+  return `${base}conditions/${file}`;
+}
+
 export function listingLanguageCode(language) {
   const raw = String(language || '').trim().toLowerCase();
   if (!raw) return '';
