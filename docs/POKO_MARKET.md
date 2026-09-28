@@ -82,8 +82,12 @@ serialized output).
 (`poko-api.js`), Telegram (`telegram.js`), and the future YouTube adapter:
 env `POKO_MARKET_API_URL` (e.g. `https://api.pokoin.com/api/poko-market`),
 `POKO_MARKET_API_TOKEN`, optional `POKO_MARKET_TIMEOUT_MS` (default 12s).
-The LLM selects the tool through the `market_query` plan action; all math
-stays server-side.
+
+Market plans are **multipath**: `market_query` carries `tools[]` with every
+matching tool (e.g. `card_quote` + `card_ocr` for “worth and attacks”), run in
+parallel. If none return useful data and a `cardId`/`query` is present, Hermes
+retries with the full card set (`card_quote`, `card_ocr`, `card_liquidity`).
+All math stays server-side.
 
 ## Deploy
 
