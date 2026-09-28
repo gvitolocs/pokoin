@@ -24,6 +24,7 @@ function makeDb(stubs) {
     stubs.queries.push({ sql, params });
     // Order matters: tool-specific tables first, generic card-row lookup last.
     const rows = (table) => stubs[table] ?? [];
+    if (/with cands as/.test(sql)) return { rows: rows('moverRows') };
     if (/marketplace_card_weights/.test(sql)) return { rows: rows('weightRows') };
     if (/group by artist/.test(sql)) return { rows: stubs.artistRows ?? [{ artist: 'Yuka Morii', cards: 42 }] };
     if (/order by s\.name\s+limit \$2/.test(sql)) return { rows: rows('collectionCards') };
@@ -419,4 +420,51 @@ test('card_quote anchors today and dated windows for relative time expressions',
   assert.equal(res.body.window.soldDays, 90);
   const expectedFrom = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
   assert.equal(res.body.window.from, expectedFrom);
+});
+
+test('top_movers ranks a subject by ask change and drops sub-floor noise', async () => {
+  const stubs = {
+    queries: [],
+    moverRows: [
+      { card_id: '1000', name: 'Raikou', set_name: 'Aquapolis', card_number: 'H21/H32', start_px: 5000, start_day: '2026-08-29', end_px: 6500, end_day: '2026-09-27', points: 20, seller_uid: 'X' },
+      { card_id: '2000', name: 'Raikou V', set_name: 'Brilliant Stars', card_number: '172/172', start_px: 20000, start_day: '2026-08-29', end_px: 36000, end_day: '2026-09-27', points: 25 },
+      { card_id: '3000', name: 'Raikou', set_name: 'Unleashed', card_number: '12/95', start_px: 900, start_day: '2026-08-29', end_px: 700, end_day: '2026-09-27', points: 8 },
+    ],
+  };
+  const handler = loadHandler(makeDb(stubs));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'top_movers', params: { subject: 'Raikou', days: 30 } } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'ok');
+  assert.equal(res.body.direction, 'up');
+  assert.deepEqual(res.body.movers.map((m) => m.setName), ['Brilliant Stars', 'Aquapolis']);
+  assert.equal(res.body.movers[0].changePct, 80);
+  assert.equal(res.body.movers[0].fromAsk, 20000);
+  assert.equal(res.body.movers[0].toAsk, 36000);
+  assert.equal(res.body.movers[0].cardNumber, '172/172');
+  assert.equal(res.body.window.days, 30);
+  assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
+  const sql = stubs.queries.find((q) => /with cands as/.test(q.sql));
+  assert.deepEqual(sql.params, [30, 200, '%raikou%']);
+});
+
+test('top_movers supports falling direction and answers empty windows with 200', async () => {
+  const rows = [
+    { card_id: '1000', name: 'Raikou', set_name: 'A', start_px: 5000, start_day: '2026-09-01', end_px: 6500, end_day: '2026-09-27', points: 5 },
+    { card_id: '3000', name: 'Raikou', set_name: 'B', start_px: 900, start_day: '2026-09-01', end_px: 700, end_day: '2026-09-27', points: 5 },
+  ];
+  let res = makeRes();
+  await loadHandler(makeDb({ queries: [], moverRows: rows }))(
+    makeReq({ body: { tool: 'top_movers', params: { subject: 'raikou', direction: 'down' } } }), res,
+  );
+  assert.deepEqual(res.body.movers.map((m) => m.setName), ['B']);
+  assert.equal(res.body.movers[0].changePct, -22.2);
+
+  res = makeRes();
+  await loadHandler(makeDb({ queries: [] }))(
+    makeReq({ body: { tool: 'top_movers', params: { subject: 'raikou' } } }), res,
+  );
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.movers, []);
+  assert.match(res.body.note, /raikou/i);
 });

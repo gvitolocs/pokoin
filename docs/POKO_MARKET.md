@@ -37,6 +37,7 @@ Body: `{ "tool": "...", "params": { ... } }`. Unknown tool → 400.
 | `collection_quote` | `artist` (+ optional `condition`, `language`, default NM/EN/1 copy) | per-artist totals with explicit `coveragePct`; market value vs acquisition cost kept separate |
 | `suggest_cards` | `subject` (+ `excludeCardId`, `limit` 1-12) | real catalog cards matching the subject with current lowest ask — powers "another cool steelix card?" |
 | `market_snapshot` | `limit` (1-50) | top `sold_qty_7d` cards |
+| `top_movers` | `subject` (pokemon/card words, optional), `days` (7-90, default 30), `direction` (`up`\|`down`), `limit` (1-10) | singles ranked by % change of daily median ask (first vs latest day in window), cards under €2 excluded as bulk noise — powers "which Raikou card rose the most lately?"; empty window → 200 with `movers: []` + `note` |
 
 ## Product rules baked into the handler
 

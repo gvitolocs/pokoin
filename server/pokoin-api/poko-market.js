@@ -16,6 +16,8 @@
  *   card_liquidity   — deterministic sell-time range from marketplace_card_weights.
  *   collection_quote — artist-level collection estimate with explicit coverage.
  *   market_snapshot  — top sold_qty_7d cards (public aggregates only).
+ *   top_movers       — biggest dated ask-price moves for a subject ("which
+ *                      Raikou card rose the most?").
  *
  * Privacy boundary: the SQL in this file selects public aggregates only. Fields
  * like seller_uid, buyer_uid, emails, addresses or account ids are never part
@@ -700,6 +702,112 @@ async function marketSnapshot(params = {}) {
   };
 }
 
+// Cards whose asks sit below this (PKN minor units, EUR cents) are bulk noise:
+// a €0.10 → €0.40 common is "+300%" but never what "grew the most" means.
+const MOVERS_MIN_PRICE = 200;
+const MOVERS_MAX_CANDIDATES = 300;
+
+/**
+ * Biggest ask-price moves for a subject ("which Raikou card rose the most?").
+ * Compares each matching single's first vs latest daily median ask (min ask
+ * when the median is missing) inside the window, then ranks by % change.
+ * Without a subject it ranks the most-searched catalog cards.
+ */
+async function topMovers(params = {}) {
+  const subject = cleanText(params.subject || params.query, 80);
+  const days = Math.min(Math.max(Number(params.days) || 30, 7), 90);
+  const limit = Math.min(Math.max(Number(params.limit) || 5, 1), 10);
+  const direction = /^(down|fall|falling|drop|losers?)$/i.test(cleanText(params.direction, 12)) ? 'down' : 'up';
+  const tokens = subject
+    .toLowerCase()
+    .replace(/[,.!?;:()]+/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+  if (subject && !tokens.length) return { status: 'invalid', error: 'subject has no searchable words' };
+
+  const conditions = tokens.map((_, i) => `s.search_text ilike $${i + 3}`);
+  const values = [days, MOVERS_MIN_PRICE, ...tokens.map((t) => `%${escapeLike(t)}%`)];
+  const rows = await queryRows(
+    `with cands as (
+       select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
+              coalesce(nullif(c.card_number, ''), '') as card_number,
+              (case when s.card_id::text ~ '^[0-9]+$' then s.card_id::text::bigint end) / 2 as blueprint_id
+         from marketplace_search_candidates s
+         left join marketplace_cards c on c.card_id = s.card_id
+        where s.item_kind <> 'product'
+          and (case when s.card_id::text ~ '^[0-9]+$' then s.card_id::text::bigint end) % 2 = 0
+          ${conditions.length ? `and ${conditions.join(' and ')}` : ''}
+        order by s.search_weight desc nulls last, s.name
+        limit ${MOVERS_MAX_CANDIDATES}
+     ), series as (
+       select a.blueprint_id, a.observed_day,
+              coalesce(a.median_price_pkn, a.min_price_pkn) as px
+         from cardtrader_blueprint_daily_analytics a
+         join cands on cands.blueprint_id = a.blueprint_id
+        where a.observed_day >= current_date - ($1::int || ' days')::interval
+          and coalesce(a.median_price_pkn, a.min_price_pkn) > 0
+     ), ends as (
+       select blueprint_id,
+              (array_agg(px order by observed_day asc))[1] as start_px,
+              min(observed_day) as start_day,
+              (array_agg(px order by observed_day desc))[1] as end_px,
+              max(observed_day) as end_day,
+              count(*)::int as points
+         from series
+        group by blueprint_id
+     )
+     select cands.card_id, cands.name, cands.set_name, cands.artist, cands.item_kind,
+            cands.card_number, ends.start_px, ends.start_day, ends.end_px, ends.end_day, ends.points
+       from ends
+       join cands on cands.blueprint_id = ends.blueprint_id
+      where ends.points >= 2
+        and ends.end_day > ends.start_day
+        and greatest(ends.start_px, ends.end_px) >= $2`,
+    values,
+  );
+
+  const movers = rows
+    .map((row) => {
+      const start = Number(row.start_px);
+      const end = Number(row.end_px);
+      if (!(start > 0) || !Number.isFinite(end)) return null;
+      return {
+        ...candidateFromRow(row),
+        fromDay: row.start_day ? String(row.start_day).slice(0, 10) : null,
+        toDay: row.end_day ? String(row.end_day).slice(0, 10) : null,
+        fromAsk: round2(start),
+        toAsk: round2(end),
+        changePct: Math.round(((end - start) / start) * 1000) / 10,
+        observations: Number(row.points) || 0,
+      };
+    })
+    .filter(Boolean)
+    .filter((m) => (direction === 'up' ? m.changePct > 0 : m.changePct < 0))
+    .sort((a, b) => (direction === 'up' ? b.changePct - a.changePct : a.changePct - b.changePct))
+    .slice(0, limit);
+
+  const base = {
+    subject: subject || undefined,
+    direction,
+    window: { days, from: daysAgoIso(days), to: daysAgoIso(0) },
+    basis: 'daily median asking price (min ask when median missing), all conditions; asks are not confirmed sales',
+    minPrice: MOVERS_MIN_PRICE,
+    pricedCards: rows.length,
+  };
+  if (!movers.length) {
+    // Always 200: "nothing moved" is an answer, not a lookup failure.
+    return {
+      status: 'ok',
+      ...base,
+      movers: [],
+      note: rows.length
+        ? `No ${subject || 'catalog'} card moved ${direction} in the last ${days} days.`
+        : `No ${subject || 'catalog'} cards above the price floor have ask history in the last ${days} days.`,
+    };
+  }
+  return { status: 'ok', ...base, movers };
+}
+
 const TOOLS = {
   resolve_card: resolveCard,
   card_quote: cardQuote,
@@ -707,6 +815,7 @@ const TOOLS = {
   collection_quote: collectionQuote,
   suggest_cards: suggestCards,
   market_snapshot: marketSnapshot,
+  top_movers: topMovers,
 };
 
 // ---------------------------------------------------------------------------
