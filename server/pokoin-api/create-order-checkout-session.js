@@ -40,7 +40,7 @@ function stripeClient() {
   return new Stripe(secret, options);
 }
 
-async function assertSellersReady(firestore, sellerIds) {
+async function loadSellerCheckoutContext(firestore, sellerIds) {
   const origins = {};
   const accounts = {};
   for (const sellerId of sellerIds) {
@@ -50,11 +50,13 @@ async function assertSellersReady(firestore, sellerIds) {
     if (!from) {
       throw httpError(409, `Seller ${sellerId} must set shipFromCountry before EUR checkout.`, 'missing_ship_from');
     }
-    if (data.stripeConnectStatus !== 'READY' || !data.stripeConnectAccountId) {
-      throw httpError(409, `Seller ${sellerId} Stripe Connect is not READY.`, 'stripe_connect_not_ready');
-    }
     origins[sellerId] = from;
-    accounts[sellerId] = String(data.stripeConnectAccountId);
+    // Connect can be finished later — buyer pay still works; Transfer waits until READY.
+    if (data.stripeConnectStatus === 'READY' && data.stripeConnectAccountId) {
+      accounts[sellerId] = String(data.stripeConnectAccountId);
+    } else {
+      accounts[sellerId] = '';
+    }
   }
   return { origins, accounts };
 }
@@ -95,7 +97,7 @@ module.exports = async function handler(req, res) {
     });
 
     const sellerIds = [...new Set(items.map((row) => String(row.sellerUid || '').trim()).filter(Boolean))];
-    const { origins, accounts } = await assertSellersReady(firestore, sellerIds);
+    const { origins, accounts } = await loadSellerCheckoutContext(firestore, sellerIds);
     const tracked = body.tracked !== false && body.shippingTracked !== false
       && String(body.shippingService || '').toLowerCase() !== 'untracked';
     const quote = quoteCheckout({ items, sellerOrigins: origins, toCountry, tracked });
@@ -230,4 +232,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { assertSellersReady, eurCentsFromPkn };
+module.exports._test = { loadSellerCheckoutContext, assertSellersReady: loadSellerCheckoutContext, eurCentsFromPkn };

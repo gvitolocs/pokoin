@@ -18,7 +18,7 @@
 | Encryption | `ADDRESS_ENCRYPTION_KEY` (32 bytes) on API host; ops mirror on InPhysical — never Firebase. Pattern matches CardTrader token crypto. |
 | Shipping tables | Seeded in-repo `server/pokoin-api/shipping-rates.json` (+ SQL stub `scripts/sql/080_shipping_rates.sql`). Quote **fails closed** when no row matches. |
 | Orders | Firestore `orders` with `shipments[]`, `totalEURCents`, encrypted immutable address snapshot. |
-| Connect | Sellers need `stripeConnectAccountId` + `stripeConnectStatus=READY` before EUR pay. |
+| Connect | Sellers can finish Stripe Connect later. Buyer EUR pay only needs seller `shipFromCountry`. Connect Transfers run after delivery when the seller is `READY` (account resolved at payout time). |
 
 ## Design decisions locked
 
