@@ -9,12 +9,12 @@ const LOCATION_MODES = [
   {
     id: 'as_is',
     label: 'Location is the box name',
-    hint: 'Keep the CSV location as written (Power Tools box label).',
+    hint: 'Keep the CSV location as written (whole Power Tools box label).',
   },
   {
     id: 'trailing_stack',
-    label: 'Last number is the stack',
-    hint: 'e.g. FUOCOBOMBA 006 - 16 → box “FUOCOBOMBA 006”, stack 16.',
+    label: 'Last number is the stack index',
+    hint: 'e.g. FUOCOBOMBA 006 - 16 → box “FUOCOBOMBA 006”, stack #16 (16th divider). Not card count.',
   },
   {
     id: 'structured',
@@ -41,10 +41,11 @@ export default function CardTraderPowerToolsModal({
 }) {
   const [step, setStep] = useState('ask'); // ask | upload | preview
   const [files, setFiles] = useState({});
-  const [stackSize, setStackSize] = useState(60);
+  const [stackSize, setStackSize] = useState(80);
   const [numberedInStack, setNumberedInStack] = useState(false);
   const [locationParse, setLocationParse] = useState('trailing_stack');
   const [localError, setLocalError] = useState('');
+  const [stackSizeTouched, setStackSizeTouched] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -53,9 +54,18 @@ export default function CardTraderPowerToolsModal({
       setLocalError('');
       setNumberedInStack(false);
       setLocationParse('trailing_stack');
-      setStackSize(60);
+      setStackSize(80);
+      setStackSizeTouched(false);
     }
   }, [open]);
+
+  // After preview, propose the observed cards-per-stack unless the seller already chose one.
+  useEffect(() => {
+    const suggested = Number(preview?.suggestedStackSize) || 0;
+    if (step === 'preview' && suggested > 0 && !stackSizeTouched) {
+      setStackSize(suggested);
+    }
+  }, [preview, step, stackSizeTouched]);
 
   useEffect(() => {
     if (open && step === 'upload' && !games && !loadingGames) {
@@ -74,6 +84,13 @@ export default function CardTraderPowerToolsModal({
     numberedInStack,
     locationParse,
   }), [files, stackSize, numberedInStack, locationParse]);
+
+  // Overflows were computed against the capacity sent with the last preview;
+  // re-filter locally when the seller raises capacity to the suggested value.
+  const visibleOverflows = useMemo(() => {
+    const rows = preview?.overflows || [];
+    return rows.filter((row) => Number(row.count) > stackSize);
+  }, [preview, stackSize]);
 
   if (!open) return null;
 
@@ -174,19 +191,23 @@ export default function CardTraderPowerToolsModal({
             </fieldset>
 
             <label className="ct-pt-stack">
-              Cards per stack
+              Cards per stack (capacity)
               <input
                 type="number"
                 min={1}
                 max={500}
                 value={stackSize}
                 disabled={busy || previewBusy}
-                onChange={(event) => setStackSize(Math.max(1, Number(event.target.value) || 1))}
+                onChange={(event) => {
+                  setStackSizeTouched(true);
+                  setStackSize(Math.max(1, Number(event.target.value) || 1));
+                }}
               />
             </label>
             <p className="page-lede muted">
-              Used to warn when a box/stack has more cards than this capacity
-              {numberedInStack ? ', and to number cards inside the stack' : ''}.
+              How many cards fit in one divider — not the stack number in the location.
+              Example: in <code>FUOCOBOMBA 006 - 16</code>, <strong>16</strong> is the 16th stack
+              in box 006; capacity is usually ~80 for this kind of seller stock.
             </p>
 
             <label className="ct-pt-check">
@@ -255,20 +276,57 @@ export default function CardTraderPowerToolsModal({
               Sample of how Power Tools locations map onto Pokoin. Confirm before the full
               CardTrader + Power Tools import.
             </p>
-            {preview?.overflows?.length ? (
+            {preview?.suggestedStackSize ? (
+              <div className="ct-pt-suggest">
+                <p className="page-lede">
+                  From your CSV, the fullest stack has{' '}
+                  <strong>{preview.suggestedStackSize}</strong> cards
+                  {preview.occupancy?.[0]?.label ? (
+                    <>
+                      {' '}
+                      (<code>{preview.occupancy[0].label}</code>)
+                    </>
+                  ) : null}
+                  . That is a good cards-per-stack capacity for this seller.
+                </p>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    setStackSizeTouched(true);
+                    setStackSize(Number(preview.suggestedStackSize) || stackSize);
+                  }}
+                >
+                  Use suggested capacity ({preview.suggestedStackSize})
+                </button>
+              </div>
+            ) : null}
+            {visibleOverflows.length ? (
               <div className="ct-pt-warn">
-                <strong>Stack overflow</strong>
+                <strong>Over capacity</strong>
                 <ul>
-                  {preview.overflows.slice(0, 8).map((row) => (
+                  {visibleOverflows.slice(0, 8).map((row) => (
                     <li key={`${row.game}:${row.box}:${row.stack}`}>
-                      {GAME_LABEL[row.game] || row.game}: {row.message || `${row.count} &gt; ${row.stackSize}`}
+                      {GAME_LABEL[row.game] || row.game}:{' '}
+                      {row.count} cards in this stack (capacity {stackSize})
+                      {row.box ? (
+                        <>
+                          {' '}
+                          — <code>{row.label || `${row.box}·${row.stack}`}</code>
+                        </>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
-                <p className="page-lede muted">Raise “Cards per stack” or split that box before importing.</p>
+                <p className="page-lede muted">
+                  Raise “Cards per stack (capacity)” to at least the suggested value, or split that stack.
+                </p>
               </div>
             ) : (
-              <p className="ct-connect-ok">No stack overflows for size {stackSize}.</p>
+              <p className="ct-connect-ok">
+                No stack is over the capacity of {stackSize} cards.
+              </p>
             )}
             <ul className="ct-pt-samples">
               {(preview?.samples || []).map((row, index) => (

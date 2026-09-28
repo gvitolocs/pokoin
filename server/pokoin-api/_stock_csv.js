@@ -318,8 +318,18 @@ function assignStackPositions(rows, stackSize = 1) {
 
 /**
  * Power Tools → Pokoin locations for CardTrader sync.
- * Default keeps box (+ stack); does not invent card-in-stack numbers unless opted in.
- * @returns {{ rows: object[], overflows: object[] }}
+ * Default keeps box (+ stack index); does not invent card-in-stack numbers unless opted in.
+ *
+ * Important: the number after the box (e.g. 16 in "FUOCOBOMBA 006 - 16") is the
+ * stack *index* (which divider), NOT how many cards fit in a stack. Capacity is
+ * `stackSize` / "cards per stack", suggested from how many CSV rows share each box·stack.
+ *
+ * @returns {{
+ *   rows: object[],
+ *   overflows: object[],
+ *   occupancy: object[],
+ *   suggestedStackSize: number,
+ * }}
  */
 function assignPowerToolsLocations(rows = [], options = {}) {
   const stackSize = Math.max(1, Math.trunc(Number(options.stackSize) || 1));
@@ -344,7 +354,7 @@ function assignPowerToolsLocations(rows = [], options = {}) {
       } else {
         const abs = (posCounters.get(key) || 0) + 1;
         posCounters.set(key, abs);
-        // Fill within declared stack; spill into following stacks if over capacity.
+        // Fill within declared capacity; spill into following stacks if over capacity.
         const spillStack = stack + Math.floor((abs - 1) / stackSize);
         position = ((abs - 1) % stackSize) + 1;
         stack = spillStack;
@@ -370,20 +380,41 @@ function assignPowerToolsLocations(rows = [], options = {}) {
     };
   });
 
-  const overflows = [];
+  const occupancy = [];
+  let suggestedStackSize = 1;
   for (const [key, count] of counts.entries()) {
-    if (count <= stackSize) continue;
     const [box, stack] = key.split('|');
-    overflows.push({
+    occupancy.push({
       box,
       stack: Number(stack) || 1,
       count,
+      label: `${box}${Number(stack) > 1 || locationParse === 'trailing_stack' ? `·${stack}` : ''}`,
+    });
+    if (count > suggestedStackSize) suggestedStackSize = count;
+  }
+  occupancy.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+  // Overflow = more cards share this box·stack than the declared *capacity*
+  // (cards per stack). The stack index in the location is unrelated.
+  const overflows = [];
+  for (const row of occupancy) {
+    if (row.count <= stackSize) continue;
+    overflows.push({
+      box: row.box,
+      stack: row.stack,
+      count: row.count,
       stackSize,
-      message: `${box}${Number(stack) > 1 ? `·${stack}` : ''}: ${count} cards but stack size is ${stackSize}`,
+      label: row.label,
+      message: `${row.label}: ${row.count} cards in this stack, but capacity is set to ${stackSize}`,
     });
   }
 
-  return { rows: out, overflows };
+  return {
+    rows: out,
+    overflows,
+    occupancy,
+    suggestedStackSize: Math.max(1, suggestedStackSize),
+  };
 }
 
 function priceToPkn(raw, { priceMode = 'eur_to_pkn', currency = 'EUR' } = {}) {
@@ -685,6 +716,8 @@ function importCsvText(text, options = {}) {
   const okRows = normalized.filter((r) => r.ok).map((r) => r.row);
   let withSlots;
   let overflows = [];
+  let occupancy = [];
+  let suggestedStackSize = 1;
   if (options.powerToolsSync === true) {
     const assigned = assignPowerToolsLocations(okRows, {
       stackSize: options.stackSize ?? 1,
@@ -693,6 +726,8 @@ function importCsvText(text, options = {}) {
     });
     withSlots = assigned.rows;
     overflows = assigned.overflows;
+    occupancy = assigned.occupancy;
+    suggestedStackSize = assigned.suggestedStackSize;
   } else {
     withSlots = assignStackPositions(okRows, options.stackSize ?? 1);
   }
@@ -702,7 +737,7 @@ function importCsvText(text, options = {}) {
     const row = withSlots[slotIdx++];
     return { ...entry, row };
   });
-  return { format, headers, results, overflows };
+  return { format, headers, results, overflows, occupancy, suggestedStackSize };
 }
 
 function sourceForFormat(format) {

@@ -724,6 +724,15 @@
   gap: 0.35rem;
 }
 
+.ct-pt-suggest {
+  border: 1px solid var(--g4);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  background: var(--g2);
+  display: grid;
+  gap: 0.45rem;
+}
+
 .ct-pt-warn ul {
   margin: 0;
   padding-left: 1.1rem;

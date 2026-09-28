@@ -36,10 +36,14 @@ function powerToolsImportOptions(body = {}) {
 
 function parsePowerToolsByGame(body = {}) {
   const raw = body.powerToolsCsv || body.powerToolsByGame || null;
-  if (!raw || typeof raw !== 'object') return { byGame: null, overflows: [] };
+  if (!raw || typeof raw !== 'object') {
+    return { byGame: null, overflows: [], occupancy: [], suggestedStackSize: 1 };
+  }
   const opts = powerToolsImportOptions(body);
   const out = {};
   const overflows = [];
+  const occupancy = [];
+  let suggestedStackSize = 1;
   for (const [game, csvText] of Object.entries(raw)) {
     const text = String(csvText || '');
     if (!text.trim()) continue;
@@ -51,22 +55,32 @@ function parsePowerToolsByGame(body = {}) {
     for (const overflow of imported.overflows || []) {
       overflows.push({ game: String(game), ...overflow });
     }
+    for (const row of imported.occupancy || []) {
+      occupancy.push({ game: String(game), ...row });
+    }
+    if (Number(imported.suggestedStackSize) > suggestedStackSize) {
+      suggestedStackSize = Number(imported.suggestedStackSize);
+    }
   }
   return {
     byGame: Object.keys(out).length ? out : null,
     overflows,
+    occupancy,
+    suggestedStackSize: Math.max(1, suggestedStackSize),
   };
 }
 
 /** Dry-run: map CSV locations + optional CT match samples (no import write). */
 async function previewPowerToolsMatch({ firestore, uid, sellerName, body }) {
-  const { byGame, overflows } = parsePowerToolsByGame(body);
+  const { byGame, overflows, occupancy, suggestedStackSize } = parsePowerToolsByGame(body);
   if (!byGame) {
     return {
       ok: false,
       error: 'Upload at least one Power Tools CSV.',
       samples: [],
       overflows: [],
+      occupancy: [],
+      suggestedStackSize: 1,
     };
   }
 
@@ -137,6 +151,8 @@ async function previewPowerToolsMatch({ firestore, uid, sellerName, body }) {
     totalPowerToolsRows: totalPt,
     samples: samples.slice(0, 3),
     overflows,
+    occupancy: occupancy.slice(0, 20),
+    suggestedStackSize,
     games: gamesFromCardTraderProducts(exportProducts, marketplaceGameForProduct),
   };
 }

@@ -21,12 +21,12 @@ When syncing CardTrader with Power Tools CSVs, the seller chooses how location m
 | Mode | Behaviour |
 | --- | --- |
 | **Location is the box name** | Keep the CSV string as the box label |
-| **Last number is the stack** | `FUOCOBOMBA 006 - 16` → box `FUOCOBOMBA 006`, stack `16` → `FUOCOBOMBA 006·16` |
+| **Last number is the stack index** | `FUOCOBOMBA 006 - 16` → box `FUOCOBOMBA 006`, stack **#16** (16th divider in that box) → `FUOCOBOMBA 006·16`. The `16` is which stack, not how many cards are in it. |
 | **Already box·stack** | Parse existing `·` / `#` structured slots |
 
-**Cards per stack** is capacity: if a box/stack has more CSV rows than that, the preview warns.
+**Cards per stack (capacity)** is how many cards fit in one divider. Preview counts CSV rows that share the same box·stack and proposes that total (often ~80 for sellers like this). If a stack has more cards than the capacity you set, the preview warns.
 
-**Numbered cards in stack** is off by default (Power Tools is usually box + stack only). When on, Pokoin adds `·pos` inside the stack.
+**Numbered cards in stack** is off by default (Power Tools is usually box + stack index only). When on, Pokoin adds `·pos` inside the stack using that capacity.
 
 A **3-card preview** runs before the full import so the seller can confirm mapping.
 
@@ -39,7 +39,7 @@ On `/inventory` import, Pokoin still applies **stack size** (default 1):
 
 Structured strings already using `·` (`box·2·5`) are kept.
 
-Bare names like `FUOCOBOMBA 006 - 16` stay the box name (not parsed as stack/position) unless the sync popup uses “Last number is the stack”.
+Bare names like `FUOCOBOMBA 006 - 16` stay the box name (not parsed as stack/position) unless the sync popup uses “Last number is the stack index”.
 
 ## Price
 

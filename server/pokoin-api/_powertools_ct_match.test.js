@@ -225,6 +225,38 @@ test('Power Tools sync keeps box·stack without inventing card positions', () =>
   assert.equal(overflows.length, 1);
   assert.equal(overflows[0].count, 3);
   assert.equal(overflows[0].stackSize, 2);
+  assert.equal(overflows[0].label, 'FUOCOBOMBA 006·16');
+  assert.match(overflows[0].message, /capacity is set to 2/);
+});
+
+test('suggestedStackSize is occupancy of fullest box·stack, not the stack index', () => {
+  // 16 = which divider; ~80 cards share FUOCOBOMBA 006·16 → propose capacity 80.
+  const rows = [];
+  for (let i = 0; i < 80; i += 1) {
+    rows.push({ name: `Card${i}`, location: 'FUOCOBOMBA 006 - 16' });
+  }
+  for (let i = 0; i < 12; i += 1) {
+    rows.push({ name: `Other${i}`, location: 'FUOCOBOMBA 006 - 17' });
+  }
+  const assigned = assignPowerToolsLocations(rows, {
+    stackSize: 16, // wrong old default (treating index as capacity)
+    locationParse: 'trailing_stack',
+    numberedInStack: false,
+  });
+  assert.equal(assigned.suggestedStackSize, 80);
+  assert.equal(assigned.occupancy[0].label, 'FUOCOBOMBA 006·16');
+  assert.equal(assigned.occupancy[0].count, 80);
+  assert.equal(assigned.overflows.length, 1);
+  assert.equal(assigned.overflows[0].count, 80);
+  assert.match(assigned.overflows[0].message, /capacity is set to 16/);
+
+  const ok = assignPowerToolsLocations(rows, {
+    stackSize: assigned.suggestedStackSize,
+    locationParse: 'trailing_stack',
+    numberedInStack: false,
+  });
+  assert.equal(ok.overflows.length, 0);
+  assert.equal(ok.rows[0].location, 'FUOCOBOMBA 006·16');
 });
 
 test('numberedInStack adds ·pos and respects capacity', () => {
