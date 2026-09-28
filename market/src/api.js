@@ -1617,6 +1617,9 @@ export function saveSellerSettings(body, token) {
 
 /** Website Poko assistant — Firebase-authed BFF; never calls poko-market from the browser. */
 export function sendPokoChat({ message = '', cards = [], images = [], sessionId = '', pageContext = null } = {}, token) {
+  const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(95_000)
+    : undefined;
   return getJson('/api/poko-chat', {
     method: 'POST',
     headers: {
@@ -1624,6 +1627,7 @@ export function sendPokoChat({ message = '', cards = [], images = [], sessionId 
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ message, cards, images, sessionId, pageContext }),
+    signal,
   });
 }
 
