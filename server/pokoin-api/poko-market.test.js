@@ -219,8 +219,12 @@ test('resolve_card returns catalog candidates only and marks ambiguity', async (
 
   // Fuzzy user text travels as a parameter, wildcards escaped, never inline SQL.
   const resolveQuery = queries.find((q) => /limit 7/.test(q.sql));
-  assert.ok(resolveQuery.params[0].includes('Raichu'));
-  assert.ok(resolveQuery.params[0].startsWith('%'));
+  assert.ok(resolveQuery, 'resolve query captured');
+  const patterns = resolveQuery.params.filter((pt) => typeof pt === 'string');
+  if (!patterns.some((pt) => pt.includes('raichu'))) {
+    assert.fail(`token patterns missing raichu: ${JSON.stringify(resolveQuery.params)}`);
+  }
+  assert.ok(patterns.every((pt) => pt.startsWith('%')));
   assert.ok(!resolveQuery.sql.includes('Raichu'));
 
   const handler3 = loadHandler(async (sql, params = []) => {
@@ -237,7 +241,7 @@ test('resolve_card returns catalog candidates only and marks ambiguity', async (
   await handler3(makeReq({ body: { tool: 'resolve_card', params: { query: 'Raichu' } } }), res3);
   assert.equal(res3.body.status, 'ambiguous');
   assert.equal(res3.body.candidates.length, 3);
-  assert.match(res3.body.note, /clarification/i);
+  assert.match(res3.body.note, /which one they mean/i);
 });
 
 test('card_quote reports sold estimate, asks and strategies without inventing data', async () => {
@@ -400,4 +404,19 @@ test('market_snapshot returns public aggregates only', async () => {
   assert.equal(res.body.cards[0].soldQty7d, 9);
   assert.equal(res.body.cards[0].medianSoldEur, 33.5);
   assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
+});
+
+test('card_quote anchors today and dated windows for relative time expressions', async () => {
+  const handler = loadHandler(makeDb({
+    queries: [],
+    soldRows: [{ sold_qty: 14, p25_daily: 30, median_daily: 34, p75_daily: 37, last_sale_day: '2026-09-20' }],
+    askRows: [{ min_price_pkn: 36, median_price_pkn: 41, observed_day: '2026-09-26' }],
+    weightRows: [{ sold_qty_7d: 2, listed_now: 5, sell_through: 0.4, days_of_supply: 12, updated_at: new Date().toISOString() }],
+  }));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '246912' } } }), res);
+  assert.equal(res.body.today, new Date().toISOString().slice(0, 10));
+  assert.equal(res.body.window.soldDays, 90);
+  const expectedFrom = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+  assert.equal(res.body.window.from, expectedFrom);
 });

@@ -158,10 +158,27 @@ async function hermesReply({ message, cards, images, pageContext, userId, sessio
   return reply;
 }
 
+// Per-IP rate limit, same shape as the legacy assistant (20 msgs / minute).
+const chatHits = new Map();
+
+function chatRateLimited(req) {
+  const forwarded = String(req.headers?.['x-forwarded-for'] || req.headers?.['X-Forwarded-For'] || '').split(',')[0].trim();
+  const ip = forwarded || String(req.socket?.remoteAddress || 'unknown');
+  const now = Date.now();
+  const fresh = (chatHits.get(ip) || []).filter((stamp) => now - stamp < 60_000);
+  fresh.push(now);
+  chatHits.set(ip, fresh);
+  if (chatHits.size > 5000) chatHits.clear();
+  return fresh.length > 20;
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed.' });
+  }
+  if (chatRateLimited(req)) {
+    return res.status(429).json({ error: 'Too many messages, please slow down.' });
   }
   try {
     const decoded = await verifyBearerToken(req);

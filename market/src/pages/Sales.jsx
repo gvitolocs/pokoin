@@ -12,6 +12,7 @@ import {
   refundInputFromAmount,
 } from '../order-status.js';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
+import StockNav from '../components/StockNav.jsx';
 
 const SOURCES = [
   { id: 'all', label: 'All sales' },
@@ -186,9 +187,9 @@ export default function Sales() {
         title="Sold history"
         lede="Every card that actually sold: Pokoin checkout and your linked CardTrader store. Refund part of a Pokoin order from here."
       >
-        <Link className="btn ghost" to="/inventory">My listings</Link>
-        <Link className="btn ghost" to="/orders">Orders</Link>
+        <Link className="btn ghost" to="/inventory/scan">Scan cards</Link>
       </PageHead>
+      <StockNav />
       <Alert>{error}</Alert>
       {notice ? <p className="desk-ok">{notice}</p> : null}
 

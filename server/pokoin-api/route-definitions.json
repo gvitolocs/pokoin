@@ -95,6 +95,28 @@
     }
   },
   {
+    "path": "/api/cardtrader-clean-listings",
+    "file": "cardtrader-clean-listings.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Hide CardTrader-linked listings, or wipe the seller's entire inventory across TCGs (confirm required) so Sync can re-import.",
+    "auth": "Required Firebase bearer token; seller uid from token only.",
+    "params": {
+      "body": "scope=linked|all; when scope=all, confirm must be DELETE ALL LISTINGS"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_WRITER_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres writer"
+      ]
+    }
+  },
+  {
     "path": "/api/cardtrader-assets",
     "file": "cardtrader-assets.js",
     "methods": [
@@ -178,7 +200,7 @@
     "auth": "Required service bearer token: POKO_MARKET_SERVICE_TOKEN, or POKONTACT_SERVICE_TOKEN (same secret, already in the Pi container env). Server-to-server only; browsers never receive it.",
     "params": {
       "query": "none",
-      "body": "{ tool: resolve_card|card_quote|card_liquidity|collection_quote|market_snapshot, params } with tool-specific fields (query, cardId, condition, language, artist, limit)."
+      "body": "{ tool: resolve_card|card_quote|card_liquidity|collection_quote|suggest_cards|market_snapshot, params } with tool-specific fields (query, cardId, condition, language, artist, subject, excludeCardId, limit)."
     },
     "dependencies": {
       "env": [

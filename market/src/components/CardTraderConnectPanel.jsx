@@ -12,6 +12,7 @@ import {
   MIN_CARDTRADER_TOKEN_LENGTH,
   describeCardTraderToken,
 } from '../cardtrader-token.js';
+import WipeAllInventory from './WipeAllInventory.jsx';
 
 const CT_TOKEN_DOCS = 'https://www.cardtrader.com/en/docs/api/full/reference';
 
@@ -324,6 +325,18 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
               {busy ? 'Working…' : 'Disconnect'}
             </button>
           </div>
+          <WipeAllInventory
+            disabled={busy || syncing}
+            onError={(text) => {
+              setError(text || '');
+              if (text) setMessage('');
+            }}
+            onMessage={(text) => {
+              setMessage(text || '');
+              setError('');
+              setSyncSummary(null);
+            }}
+          />
         </>
       ) : null}
       {!loading && !connected ? (

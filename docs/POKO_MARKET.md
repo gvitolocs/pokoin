@@ -1,13 +1,22 @@
 # POKO MARKET — Poko market intelligence API
 
-Status: implemented, awaiting deploy. One authoritative read-only market
-tool surface for every Poko channel (website chat, Telegram, YouTube replies).
+Status: **live** (Pi release `poko-market-102dc55`, 2026-09-28). One
+authoritative read-only market tool surface for every Poko channel (site chat
+dock + `/messages/poko`, Telegram, YouTube replies).
 
 Website Messages mounts a permanent **Poko** thread at `/messages/poko` and
 in the chat dock. The browser calls Firebase-authed `POST /api/poko-chat`
 (see [POKO_CHAT.md](./POKO_CHAT.md)), which proxies **only** to Hermes
 `…/api/poko/chat`. Hermes may call the tools below via `POKO_MARKET_API_URL`.
 Attached cards and photos are forwarded as `cards[]` / `images[]`.
+
+## Resolution behaviour
+
+Card resolution is sentence-tolerant: chatter ("how much is a … worth? near
+mint english") is stripped server-side and the query retries progressively, so
+planner-extracted free text resolves without exact card names. Ambiguous
+results return the candidate list — the assistant asks one clarification and
+never guesses a card id.
 
 ## Contract
 
@@ -26,6 +35,7 @@ Body: `{ "tool": "...", "params": { ... } }`. Unknown tool → 400.
 | `card_quote` | `cardId` or `query`; optional `condition`, `language` | sold estimate (median/p25/p75, 90d, `cardtrader_sold_daily`), current asks (`cardtrader_blueprint_daily_analytics`), liquidity band, quick/market/patient strategies when sample supports |
 | `card_liquidity` | `cardId` or `query` | deterministic `lowDays/typicalDays/highDays` + `methodology` + confidence |
 | `collection_quote` | `artist` (+ optional `condition`, `language`, default NM/EN/1 copy) | per-artist totals with explicit `coveragePct`; market value vs acquisition cost kept separate |
+| `suggest_cards` | `subject` (+ `excludeCardId`, `limit` 1-12) | real catalog cards matching the subject with current lowest ask — powers "another cool steelix card?" |
 | `market_snapshot` | `limit` (1-50) | top `sold_qty_7d` cards |
 
 ## Product rules baked into the handler

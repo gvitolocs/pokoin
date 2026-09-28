@@ -1,6 +1,8 @@
 'use strict';
 
 const test = require('node:test');
+const Module = require('node:module');
+const TARGET = require('node:path').resolve(__dirname, 'poko-chat.js');
 const assert = require('node:assert/strict');
 const {
   cleanCards,
@@ -67,4 +69,45 @@ test('resolveHermesChatUrl matches pokoin-assistant convention', () => {
 test('hermesToken prefers POKO_API_TOKEN then POKONTACT', () => {
   assert.equal(hermesToken({ POKO_API_TOKEN: 'a', POKONTACT_SERVICE_TOKEN: 'b' }), 'a');
   assert.equal(hermesToken({ POKONTACT_SERVICE_TOKEN: 'b' }), 'b');
+});
+
+test('hammering the endpoint from one IP hits the 20/min rate limit', async () => {
+  const originalLoad = Module._load;
+  const originalFetch = globalThis.fetch;
+  process.env.POKONTACT_SERVICE_TOKEN = 'svc';
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ ok: true, reply: 'Pong ✨' }),
+  });
+  Module._load = function load(request, parent, isMain) {
+    if (request === './_firebase') {
+      return { verifyBearerToken: async () => ({ uid: 'fb-1', email: '', name: '' }) };
+    }
+    return originalLoad(request, parent, isMain);
+  };
+  delete require.cache[TARGET];
+  try {
+    const handler = require(TARGET);
+    let saw429 = false;
+    for (let i = 0; i < 25; i += 1) {
+      const res = {
+        statusCode: 0,
+        headersSent: false,
+        setHeader() { return this; },
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; },
+      };
+      await handler({
+        method: 'POST',
+        headers: { authorization: 'Bearer fb-token', 'x-forwarded-for': '203.0.113.7' },
+        body: { message: `msg ${i}` },
+      }, res);
+      if (res.statusCode === 429) { saw429 = true; break; }
+    }
+    assert.ok(saw429, 'expected a 429 within 25 rapid messages');
+  } finally {
+    Module._load = originalLoad;
+    globalThis.fetch = originalFetch;
+  }
 });

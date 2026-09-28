@@ -1,16 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
   cancelEurOrder,
   confirmMarketplaceDelivery,
   formatPkn,
-  markMarketplaceShipped,
   reportMarketplaceProblem,
-  revealMarketplaceShipping,
 } from '../api.js';
 import { firestore, useAuth } from '../auth.jsx';
-import { useCart } from '../cart.jsx';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { authFrom } from '../punchouts.js';
 import {
@@ -20,7 +17,6 @@ import {
   holdMinutesLeft,
   isEurOrder,
   orderStatus,
-  visibleOrders,
 } from '../order-status.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
 import StockNav from '../components/StockNav.jsx';
@@ -33,25 +29,13 @@ function stamp(value) {
   return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
 }
 
-function mergeOrders(...lists) {
-  const byId = new Map();
-  for (const list of lists) {
-    for (const row of list || []) {
-      byId.set(row.id, row);
-    }
-  }
-  return [...byId.values()].sort((a, b) => stamp(b.createdAt).localeCompare(stamp(a.createdAt)));
-}
-
 function formatEurCents(cents) {
   const n = Number(cents) || 0;
   return `€${(n / 100).toFixed(2)}`;
 }
 
 function moneyLabel(row) {
-  if (isEurOrder(row)) {
-    return formatEurCents(row.totalEURCents);
-  }
+  if (isEurOrder(row)) return formatEurCents(row.totalEURCents);
   return formatPkn(row.totalPkn);
 }
 
@@ -63,84 +47,48 @@ function itemsTitle(row) {
   return more > 0 ? `${first} +${more}` : first;
 }
 
-export default function Orders() {
+export default function Bought() {
   const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { ready, signedIn, user, profile, getBearer } = useAuth();
-  const { clear } = useCart();
-  const [bought, setBought] = useState(null);
-  const [sold, setSold] = useState(null);
+  const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [busyId, setBusyId] = useState('');
-  const [addresses, setAddresses] = useState({});
   const [now, setNow] = useState(() => Date.now());
-  const eurSession = String(searchParams.get('eur_session') || '').trim();
-  const returnedOrder = String(searchParams.get('order') || '').trim();
-  const [focusOrder, setFocusOrder] = useState('');
 
   useEffect(() => {
-    document.title = 'Orders · Pokoin';
+    document.title = 'Buy history · Pokoin';
     const uid = user?.uid || profile?.uid;
     if (!uid) {
-      setBought(null);
-      setSold(null);
+      setRows(null);
       return undefined;
     }
     const buys = query(collection(firestore, 'orders'), where('uid', '==', uid));
-    const sales = query(collection(firestore, 'orders'), where('sellerUids', 'array-contains', uid));
-    const unsubBuy = onSnapshot(buys, (snap) => {
-      setBought(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+    const unsub = onSnapshot(buys, (snap) => {
+      const list = snap.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .sort((a, b) => stamp(b.createdAt).localeCompare(stamp(a.createdAt)));
+      setRows(list);
       setError('');
-    }, (err) => setError(err.message || 'Orders failed.'));
-    const unsubSell = onSnapshot(sales, (snap) => {
-      setSold(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    }, (err) => setError(err.message || 'Orders failed.'));
-    return () => {
-      unsubBuy();
-      unsubSell();
-    };
+    }, (err) => setError(err.message || 'Buy history failed.'));
+    return () => unsub();
   }, [user?.uid, profile?.uid]);
 
-  // Hold countdowns on unpaid EUR orders.
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (!eurSession) return;
-    // The cards are held for this order, so the cart can go. "Paid" only shows
-    // once Stripe's webhook confirms — the row below updates live.
-    clear();
-    setFocusOrder(returnedOrder);
-    setNotice('Payment submitted. The order turns Paid as soon as Stripe confirms it.');
-    setSearchParams((prev) => {
-      if (!prev.has('eur_session') && !prev.has('order')) return prev;
-      const next = new URLSearchParams(prev);
-      next.delete('eur_session');
-      next.delete('order');
-      return next;
-    }, { replace: true });
-  }, [eurSession, returnedOrder, clear, setSearchParams]);
-
   if (!ready) return <SessionWait />;
   if (!signedIn) {
-    return <Navigate to={authFrom(location.pathname || '/orders')} replace />;
+    return <Navigate to={authFrom(location.pathname || '/bought')} replace />;
   }
-
-  const uid = user?.uid || profile?.uid || '';
-  const rows = visibleOrders(mergeOrders(bought, sold), uid);
 
   async function run(orderId, fn) {
     setBusyId(orderId);
     setError('');
     try {
       const token = await getBearer();
-      const result = await fn(token);
-      if (result?.shippingAddress) {
-        setAddresses((current) => ({ ...current, [orderId]: result.shippingAddress }));
-      }
+      await fn(token);
     } catch (err) {
       setError(err.message || 'Order update failed.');
     } finally {
@@ -150,40 +98,41 @@ export default function Orders() {
 
   return (
     <div className="page desk">
-      <PageHead kicker="Account" title="Orders" lede={`${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}>
+      <PageHead
+        kicker="Account"
+        title="Buy history"
+        lede={`${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}
+      >
         <Link className="btn ghost" to="/protection">Buyer protection</Link>
-        <Link className="btn ghost" to="/bought">Buy history</Link>
-        <Link className="btn ghost" to="/sales">Sold history</Link>
         <Link className="btn ghost" to="/cart">Cart</Link>
       </PageHead>
+      <StockNav />
       <Alert>{error}</Alert>
-      {notice ? <p className="desk-ok">{notice}</p> : null}
-      {bought == null && sold == null && !error ? (
-        <DeskPanel title="History"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
+      {rows == null && !error ? (
+        <DeskPanel title="Purchases"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       ) : null}
       {rows && !rows.length ? (
-        <EmptyDesk title="No orders yet" lede="Checkout a native listing with site PKN or Stripe.">
+        <EmptyDesk title="No purchases yet" lede="Checkout a native listing with site PKN or Stripe.">
           <Link className="btn" to="/marketplace">Shop</Link>
         </EmptyDesk>
       ) : null}
       {rows?.length ? (
-        <DeskPanel flush title={`${rows.length} order${rows.length === 1 ? '' : 's'}`}>
+        <DeskPanel flush title={`${rows.length} purchase${rows.length === 1 ? '' : 's'}`}>
           <div className="thread-list">
             {rows.map((row) => {
-              const buyer = row.uid === uid || row.buyerUid === uid;
-              const seller = Array.isArray(row.sellerUids) && row.sellerUids.includes(uid);
               const eur = isEurOrder(row);
               const escrow = row.paymentStatus === 'escrow';
               const paid = row.paymentStatus === 'paid' || row.paymentStatus === 'released';
-              const shipped = Boolean(row.shippedAt) || row.fulfillmentStatus === 'shipped' || row.fulfillmentStatus === 'delivered';
+              const shipped = Boolean(row.shippedAt)
+                || row.fulfillmentStatus === 'shipped'
+                || row.fulfillmentStatus === 'delivered';
               const open = row.disputeStatus === 'open';
-              const address = addresses[row.id];
               const status = orderStatus(row);
               const step = fulfillmentLabel(row);
-              const resumable = buyer && canResumePayment(row, now);
+              const resumable = canResumePayment(row, now);
               const refunded = Number(row.refundedTotal) || 0;
               return (
-                <article className={`thread order-row${focusOrder === row.id ? ' is-focus' : ''}`} key={row.id}>
+                <article className="thread order-row" key={row.id}>
                   <span className="thread-main">
                     <strong className="thread-title">
                       {itemsTitle(row)}
@@ -191,7 +140,7 @@ export default function Orders() {
                       <span className={`pill order-pill is-${status.tone}`}>{status.label}</span>
                     </strong>
                     <span className="thread-meta">
-                      {buyer ? 'Bought' : 'Sold'}
+                      Bought
                       {step ? ` · ${step}` : ''}
                       {' · '}
                       {moneyLabel(row)}
@@ -206,20 +155,15 @@ export default function Orders() {
                         Cards held for you for {holdMinutesLeft(row, now)} more min. Not charged until you pay.
                       </span>
                     ) : null}
-                    {buyer && ['expired', 'cancelled', 'failed'].includes(row.paymentStatus) ? (
+                    {['expired', 'cancelled', 'failed'].includes(row.paymentStatus) ? (
                       <span className="thread-meta">Nothing was charged. The cards went back on sale.</span>
-                    ) : null}
-                    {address ? (
-                      <span className="thread-meta">
-                        Ship to {address.fullName}, {address.addressLine1}, {address.postalCode} {address.city}, {address.countryCode}
-                      </span>
                     ) : null}
                   </span>
                   <span className="order-actions">
                     {resumable ? (
                       <a className="btn" href={row.stripeCheckoutUrl}>Pay now</a>
                     ) : null}
-                    {buyer && row.paymentStatus === 'pending_stripe' ? (
+                    {row.paymentStatus === 'pending_stripe' ? (
                       <button
                         className="btn ghost"
                         type="button"
@@ -229,10 +173,7 @@ export default function Orders() {
                         Cancel
                       </button>
                     ) : null}
-                    {seller && (paid || escrow) ? (
-                      <Link className="btn ghost" to={`/sales#${row.id}`}>Refund</Link>
-                    ) : null}
-                    {buyer && (escrow || (eur && paid)) ? (
+                    {(escrow || (eur && paid)) ? (
                       <button
                         className="btn"
                         type="button"
@@ -242,27 +183,7 @@ export default function Orders() {
                         Confirm delivery
                       </button>
                     ) : null}
-                    {seller && (escrow || (eur && paid)) && !shipped ? (
-                      <button
-                        className="btn ghost"
-                        type="button"
-                        disabled={busyId === row.id}
-                        onClick={() => run(row.id, (token) => markMarketplaceShipped(row.id, token))}
-                      >
-                        Mark shipped
-                      </button>
-                    ) : null}
-                    {seller && eur && (paid || escrow) && !address ? (
-                      <button
-                        className="btn ghost"
-                        type="button"
-                        disabled={busyId === row.id}
-                        onClick={() => run(row.id, (token) => revealMarketplaceShipping(row.id, token))}
-                      >
-                        Show address
-                      </button>
-                    ) : null}
-                    {buyer && escrow && !open ? (
+                    {escrow && !open ? (
                       <button
                         className="btn ghost"
                         type="button"
