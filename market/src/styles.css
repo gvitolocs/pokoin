@@ -1867,6 +1867,15 @@ h1, h2 { margin: 0 0 0.85rem; }
   border: 1px solid var(--g5);
 }
 
+.btn.stripe {
+  background: #635bff;
+  color: #fff;
+}
+
+.btn.stripe:hover:not(:disabled) {
+  background: #5851e0;
+}
+
 .btn:disabled,
 .list-btn:disabled,
 .more:disabled {
