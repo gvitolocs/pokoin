@@ -672,7 +672,7 @@
 .ct-pt-stack {
   display: grid;
   gap: 0.35rem;
-  max-width: 8rem;
+  max-width: 10rem;
   font-size: 0.9rem;
   color: var(--muted);
 }
@@ -684,6 +684,75 @@
   color: var(--text);
   padding: 0.5rem 0.65rem;
   font: inherit;
+}
+
+.ct-pt-fieldset {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--g4);
+  border-radius: 12px;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.ct-pt-fieldset legend {
+  padding: 0 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.ct-pt-radio,
+.ct-pt-check {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.ct-pt-radio input,
+.ct-pt-check input {
+  margin-top: 0.2rem;
+}
+
+.ct-pt-warn {
+  border: 1px solid rgb(212 175 55 / 0.45);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  background: rgb(250 230 150 / 0.08);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.ct-pt-warn ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.ct-pt-samples {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.ct-pt-samples li {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--g4);
+  border-radius: 12px;
+  background: var(--g2);
+}
+
+.ct-pt-loc {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.ct-pt-loc code {
+  color: var(--text);
 }
 
 .ct-pt-games {

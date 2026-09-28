@@ -743,6 +743,9 @@ export function syncCardTraderInventory(token, options = {}) {
     body.powerToolsCsv = options.powerToolsCsv;
   }
   if (options.stackSize != null) body.stackSize = options.stackSize;
+  if (options.numberedInStack === true) body.numberedInStack = true;
+  if (options.locationParse) body.locationParse = options.locationParse;
+  if (options.previewPowerTools) body.previewPowerTools = true;
   if (options.priceMode) body.priceMode = options.priceMode;
   return getJson('/api/cardtrader-sync', {
     method: 'POST',

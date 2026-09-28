@@ -10,7 +10,7 @@ const {
   reconcilePowerToolsWithCardTrader,
   gamesFromCardTraderProducts,
 } = require('./_powertools_ct_match');
-const { importCsvText, assignStackPositions, parseLocation } = require('./_stock_csv');
+const { importCsvText, assignStackPositions, assignPowerToolsLocations, parseLocation, parsePowerToolsLocation } = require('./_stock_csv');
 const { ctConditionToPokoin } = require('./_cardtrader_inventory_sync_core');
 
 const FIXTURE = [
@@ -205,4 +205,50 @@ test('gamesFromCardTraderProducts groups supported games', () => {
     { id: 'pokemon', count: 2 },
     { id: 'one_piece', count: 1 },
   ]);
+});
+
+test('trailing_stack parses FUOCOBOMBA 006 - 16 as box + stack 16', () => {
+  const parsed = parsePowerToolsLocation('FUOCOBOMBA 006 - 16', 'trailing_stack');
+  assert.equal(parsed.box, 'FUOCOBOMBA 006');
+  assert.equal(parsed.stack, 16);
+});
+
+test('Power Tools sync keeps box·stack without inventing card positions', () => {
+  const { rows, overflows } = assignPowerToolsLocations([
+    { name: 'A', location: 'FUOCOBOMBA 006 - 16' },
+    { name: 'B', location: 'FUOCOBOMBA 006 - 16' },
+    { name: 'C', location: 'FUOCOBOMBA 006 - 16' },
+  ], { stackSize: 2, locationParse: 'trailing_stack', numberedInStack: false });
+  assert.equal(rows[0].location, 'FUOCOBOMBA 006·16');
+  assert.equal(rows[1].location, 'FUOCOBOMBA 006·16');
+  assert.equal(rows[2].location, 'FUOCOBOMBA 006·16');
+  assert.equal(overflows.length, 1);
+  assert.equal(overflows[0].count, 3);
+  assert.equal(overflows[0].stackSize, 2);
+});
+
+test('numberedInStack adds ·pos and respects capacity', () => {
+  const { rows } = assignPowerToolsLocations([
+    { name: 'A', location: 'boxA - 1' },
+    { name: 'B', location: 'boxA - 1' },
+    { name: 'C', location: 'boxA - 1' },
+  ], { stackSize: 2, locationParse: 'trailing_stack', numberedInStack: true });
+  assert.equal(rows[0].location, 'boxA·1·1');
+  assert.equal(rows[1].location, 'boxA·1·2');
+  assert.equal(rows[2].location, 'boxA·2·1'); // spills
+});
+
+test('importCsvText powerToolsSync does not invent ·N on bare box', () => {
+  const csv = 'cardmarketId,quantity,name,set,setCode,cn,condition,language,isFirstEd,isReverseHolo,isSigned,finishType,price,comment,location\n'
+    + '1,1,Alpha,Set,S,1,NM,English,,,,,1,,BOX1\n'
+    + '2,1,Beta,Set,S,2,NM,English,,,,,1,,BOX1\n';
+  const imported = importCsvText(csv, {
+    format: 'powertools',
+    powerToolsSync: true,
+    stackSize: 60,
+    numberedInStack: false,
+    locationParse: 'as_is',
+  });
+  const locs = imported.results.filter((r) => r.ok).map((r) => r.row.location);
+  assert.deepEqual(locs, ['BOX1', 'BOX1']);
 });

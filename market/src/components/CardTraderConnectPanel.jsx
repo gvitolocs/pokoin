@@ -95,6 +95,8 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
   const [ptModalOpen, setPtModalOpen] = useState(false);
   const [ptGames, setPtGames] = useState(null);
   const [ptGamesLoading, setPtGamesLoading] = useState(false);
+  const [ptPreviewBusy, setPtPreviewBusy] = useState(false);
+  const [ptPreview, setPtPreview] = useState(null);
   const pollRef = useRef(null);
   const pasted = useMemo(() => describeCardTraderToken(token), [token]);
   const hint = tokenHint(pasted);
@@ -293,6 +295,7 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
   function onSync() {
     if (busy || syncing) return;
     setPtGames(null);
+    setPtPreview(null);
     setPtModalOpen(true);
   }
 
@@ -309,6 +312,30 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
       setPtGames([]);
     } finally {
       setPtGamesLoading(false);
+    }
+  }
+
+  async function onPreviewPowerToolsSample(options = {}) {
+    setPtPreviewBusy(true);
+    setError('');
+    try {
+      const bearer = await getBearer();
+      const data = await syncCardTraderInventory(bearer, {
+        ...options,
+        previewPowerTools: true,
+      });
+      setPtPreview(data);
+      if (data?.ok === false) {
+        setError(data.error || 'Power Tools preview failed.');
+        return false;
+      }
+      return true;
+    } catch (err) {
+      setError(err.message || 'Power Tools preview failed.');
+      setPtPreview(null);
+      return false;
+    } finally {
+      setPtPreviewBusy(false);
     }
   }
 
@@ -462,12 +489,16 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
         busy={busy || syncing}
         games={ptGames}
         loadingGames={ptGamesLoading}
+        previewBusy={ptPreviewBusy}
+        preview={ptPreview}
         onClose={() => {
-          if (busy || syncing) return;
+          if (busy || syncing || ptPreviewBusy) return;
           setPtModalOpen(false);
+          setPtPreview(null);
         }}
         onSkipPowerTools={() => runSync({})}
         onPreviewGames={onPreviewGames}
+        onPreviewSample={onPreviewPowerToolsSample}
         onConfirmWithCsv={(opts) => runSync(opts)}
       />
     </div>

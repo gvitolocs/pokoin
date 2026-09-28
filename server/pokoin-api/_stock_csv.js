@@ -179,40 +179,104 @@ function mapFinishToPowerTools({ foilState, reverse, variantState } = {}) {
  */
 function parseLocation(raw) {
   const text = cleanText(raw, 120);
-  if (!text) return { box: '', stack: 1, position: 1 };
+  if (!text) return { box: '', stack: 1, position: 1, structured: false };
   const mid = text.match(/^(.+?)[·•](\d+)(?:[·•](\d+))?$/);
   if (mid) {
     return {
       box: cleanText(mid[1], 64),
       stack: clampInt(mid[2], 1, 9999, 1),
       position: clampInt(mid[3] || 1, 1, 9999, 1),
+      structured: true,
+      hasPosition: Boolean(mid[3]),
     };
   }
   const dash = text.match(/^(.+?)[\s_-]+(\d+)[\s_-]+(\d+)$/);
   if (dash && !/^\d+$/.test(dash[1])) {
     // Ambiguous with box names like "FUOCOBOMBA 006 - 16" — treat as bare box.
-    return { box: text, stack: 1, position: 1 };
+    return { box: text, stack: 1, position: 1, structured: false, hasPosition: false };
   }
   const hash = text.match(/^(.+?)\s*#\s*(\d+)$/);
   if (hash) {
-    return { box: cleanText(hash[1], 64), stack: clampInt(hash[2], 1, 9999, 1), position: 1 };
+    return {
+      box: cleanText(hash[1], 64),
+      stack: clampInt(hash[2], 1, 9999, 1),
+      position: 1,
+      structured: true,
+      hasPosition: false,
+    };
   }
-  return { box: text, stack: 1, position: 1 };
+  return { box: text, stack: 1, position: 1, structured: false, hasPosition: false };
+}
+
+/**
+ * Power Tools location modes for CardTrader sync:
+ * - as_is: whole CSV location is the box label (keep as written)
+ * - trailing_stack: last " - N" / " N" is the stack; rest is the box
+ * - structured: already box·stack (or box·stack·pos)
+ */
+function parsePowerToolsLocation(raw, locationParse = 'as_is') {
+  const text = cleanText(raw, 120);
+  if (!text) return { box: '', stack: 1, position: 1, structured: false, hasPosition: false };
+  const mode = cleanText(locationParse, 40) || 'as_is';
+
+  if (mode === 'structured' || /[·•]\d+/.test(text)) {
+    return parseLocation(text);
+  }
+
+  if (mode === 'trailing_stack') {
+    // "FUOCOBOMBA 006 - 16" → box "FUOCOBOMBA 006", stack 16
+    const dash = text.match(/^(.+?)\s+-\s+(\d+)$/);
+    if (dash) {
+      return {
+        box: cleanText(dash[1], 64),
+        stack: clampInt(dash[2], 1, 9999, 1),
+        position: 1,
+        structured: true,
+        hasPosition: false,
+      };
+    }
+    const space = text.match(/^(.+?)[\s_]+(\d+)$/);
+    if (space && /[a-zA-Z]/.test(space[1])) {
+      return {
+        box: cleanText(space[1], 64),
+        stack: clampInt(space[2], 1, 9999, 1),
+        position: 1,
+        structured: true,
+        hasPosition: false,
+      };
+    }
+  }
+
+  // as_is (default): entire string is the box; no invented stack index
+  return { box: text, stack: 1, position: 1, structured: false, hasPosition: false };
 }
 
 /** Encode listing location for Pokoin (matches scan slotText). */
-function formatListingLocation({ box, stack, position, stackSize = 1 } = {}) {
+function formatListingLocation({
+  box,
+  stack,
+  position,
+  stackSize = 1,
+  numberedInStack = false,
+  includeStack = false,
+} = {}) {
   const loc = cleanText(box, 64);
   if (!loc) return '';
   const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
   const s = Math.max(1, Math.trunc(Number(stack)) || 1);
   const p = Math.max(1, Math.trunc(Number(position)) || 1);
+  // Power Tools default: box only, or box·stack — never invent card-in-stack pos.
+  if (!numberedInStack) {
+    if (includeStack || s > 1) return `${loc}·${s}`;
+    return loc;
+  }
   if (size === 1) return `${loc}·${s}`;
   return `${loc}·${s}·${p}`;
 }
 
 /**
  * Assign stack/position within each box for a list of rows (file order).
+ * Legacy Inventory CSV import: invents ·N / ·stack·pos from stackSize.
  * Mutates nothing — returns new array of { ...row, box, stack, position, location }.
  */
 function assignStackPositions(rows, stackSize = 1) {
@@ -245,9 +309,81 @@ function assignStackPositions(rows, stackSize = 1) {
       stack,
       position,
       stackSize: size,
-      location: formatListingLocation({ box, stack, position, stackSize: size }),
+      location: formatListingLocation({
+        box, stack, position, stackSize: size, numberedInStack: true, includeStack: true,
+      }),
     };
   });
+}
+
+/**
+ * Power Tools → Pokoin locations for CardTrader sync.
+ * Default keeps box (+ stack); does not invent card-in-stack numbers unless opted in.
+ * @returns {{ rows: object[], overflows: object[] }}
+ */
+function assignPowerToolsLocations(rows = [], options = {}) {
+  const stackSize = Math.max(1, Math.trunc(Number(options.stackSize) || 1));
+  const numberedInStack = options.numberedInStack === true;
+  const locationParse = cleanText(options.locationParse, 40) || 'as_is';
+  const counts = new Map(); // box|stack -> count
+  const posCounters = new Map(); // box|stack -> next position when numbering
+
+  const out = (rows || []).map((row) => {
+    const rawLoc = cleanText(row.location || row.box || '', 120);
+    const parsed = parsePowerToolsLocation(rawLoc, locationParse);
+    const box = parsed.box || rawLoc || 'box';
+    let stack = Math.max(1, parsed.stack || 1);
+    let position = 1;
+    const key = `${box}|${stack}`;
+    const nextCount = (counts.get(key) || 0) + 1;
+    counts.set(key, nextCount);
+
+    if (numberedInStack) {
+      if (parsed.hasPosition) {
+        position = parsed.position;
+      } else {
+        const abs = (posCounters.get(key) || 0) + 1;
+        posCounters.set(key, abs);
+        // Fill within declared stack; spill into following stacks if over capacity.
+        const spillStack = stack + Math.floor((abs - 1) / stackSize);
+        position = ((abs - 1) % stackSize) + 1;
+        stack = spillStack;
+      }
+    }
+
+    const includeStack = parsed.structured || locationParse === 'trailing_stack' || stack > 1;
+    return {
+      ...row,
+      box,
+      stack,
+      position,
+      stackSize,
+      location: formatListingLocation({
+        box,
+        stack,
+        position,
+        stackSize,
+        numberedInStack,
+        includeStack: includeStack || numberedInStack,
+      }),
+      sourceLocation: rawLoc,
+    };
+  });
+
+  const overflows = [];
+  for (const [key, count] of counts.entries()) {
+    if (count <= stackSize) continue;
+    const [box, stack] = key.split('|');
+    overflows.push({
+      box,
+      stack: Number(stack) || 1,
+      count,
+      stackSize,
+      message: `${box}${Number(stack) > 1 ? `·${stack}` : ''}: ${count} cards but stack size is ${stackSize}`,
+    });
+  }
+
+  return { rows: out, overflows };
 }
 
 function priceToPkn(raw, { priceMode = 'eur_to_pkn', currency = 'EUR' } = {}) {
@@ -546,17 +682,27 @@ function importCsvText(text, options = {}) {
       return { ok: false, index: index + 2, error: error.message || 'Invalid row', raw };
     }
   });
-  const withSlots = assignStackPositions(
-    normalized.filter((r) => r.ok).map((r) => r.row),
-    options.stackSize ?? 1,
-  );
+  const okRows = normalized.filter((r) => r.ok).map((r) => r.row);
+  let withSlots;
+  let overflows = [];
+  if (options.powerToolsSync === true) {
+    const assigned = assignPowerToolsLocations(okRows, {
+      stackSize: options.stackSize ?? 1,
+      numberedInStack: options.numberedInStack === true,
+      locationParse: options.locationParse || 'as_is',
+    });
+    withSlots = assigned.rows;
+    overflows = assigned.overflows;
+  } else {
+    withSlots = assignStackPositions(okRows, options.stackSize ?? 1);
+  }
   let slotIdx = 0;
   const results = normalized.map((entry) => {
     if (!entry.ok) return entry;
     const row = withSlots[slotIdx++];
     return { ...entry, row };
   });
-  return { format, headers, results };
+  return { format, headers, results, overflows };
 }
 
 function sourceForFormat(format) {
@@ -591,8 +737,10 @@ module.exports = {
   mapFinishFromPowerTools,
   mapFinishToPowerTools,
   parseLocation,
+  parsePowerToolsLocation,
   formatListingLocation,
   assignStackPositions,
+  assignPowerToolsLocations,
   priceToPkn,
   pknToEur,
   pknToCents,
