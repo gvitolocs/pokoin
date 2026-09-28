@@ -1,13 +1,22 @@
 # POKO MARKET — Poko market intelligence API
 
-Status: implemented, awaiting deploy. One authoritative read-only market
-tool surface for every Poko channel (website chat, Telegram, YouTube replies).
+Status: **live** (Pi release `poko-market-102dc55`, 2026-09-28). One
+authoritative read-only market tool surface for every Poko channel (site chat
+dock + `/messages/poko`, Telegram, YouTube replies).
 
 Website Messages mounts a permanent **Poko** thread at `/messages/poko` and
 in the chat dock. The browser calls Firebase-authed `POST /api/poko-chat`
 (see [POKO_CHAT.md](./POKO_CHAT.md)), which proxies **only** to Hermes
 `…/api/poko/chat`. Hermes may call the tools below via `POKO_MARKET_API_URL`.
 Attached cards and photos are forwarded as `cards[]` / `images[]`.
+
+## Resolution behaviour
+
+Card resolution is sentence-tolerant: chatter ("how much is a … worth? near
+mint english") is stripped server-side and the query retries progressively, so
+planner-extracted free text resolves without exact card names. Ambiguous
+results return the candidate list — the assistant asks one clarification and
+never guesses a card id.
 
 ## Contract
 
