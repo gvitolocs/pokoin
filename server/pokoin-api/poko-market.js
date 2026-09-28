@@ -231,7 +231,11 @@ function queryVariants(rawQuery) {
   const text = cleanText(rawQuery, 120);
   if (!text) return [];
   const variants = [];
-  const cleaned = text.replace(QUERY_FILLER_RE, ' ').replace(/\s+/g, ' ').trim();
+  const cleaned = text
+    .replace(/[,.!?;:()]+/g, ' ')
+    .replace(QUERY_FILLER_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (cleaned.length >= 4) variants.push(cleaned);
   if (text !== cleaned && text.length >= 4) variants.push(text);
   return variants.slice(0, 3);
@@ -633,6 +637,7 @@ module.exports = async function handler(req, res) {
     return;
   }
   const params = req.body?.params && typeof req.body.params === 'object' ? req.body.params : {};
+  console.log('poko-market request', { tool, params });
   try {
     const result = await run(params);
     const status = result.status === 'invalid' ? 400
