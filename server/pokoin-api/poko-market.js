@@ -89,6 +89,14 @@ function weightsAreFresh(updatedAt) {
   return (Date.now() - ts) / 86_400_000 <= FRESH_WEIGHTS_MAX_AGE_DAYS;
 }
 
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function daysAgoIso(days) {
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+}
+
 function cleanText(value, max = 200) {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   return text.slice(0, max);
@@ -294,6 +302,52 @@ async function soldSummaryForBlueprint(blueprintId, condition, language, days) {
   return buildSoldSummary(rows[0]);
 }
 
+const FLUCTUATION_PCT = 15;
+
+/** Daily min/median asks over the last `days`, with dated fluctuation moves. */
+async function askHistoryForBlueprint(blueprintId, days = 14) {
+  const rows = await queryRows(
+    `select observed_day, min_price_pkn, median_price_pkn
+       from cardtrader_blueprint_daily_analytics
+      where blueprint_id = $1::bigint
+        and observed_day >= current_date - ($2::int || ' days')::interval
+      order by observed_day`,
+    [String(blueprintId), days],
+  );
+  const series = rows.map((r) => ({
+    day: String(r.observed_day).slice(0, 10),
+    min: round2(r.min_price_pkn),
+    median: round2(r.median_price_pkn),
+  })).filter((p) => p.min != null);
+  const fluctuations = [];
+  for (let i = 1; i < series.length; i += 1) {
+    const prev = series[i - 1];
+    const cur = series[i];
+    if (!prev.min || !cur.min) continue;
+    const changePct = Math.round(((cur.min - prev.min) / prev.min) * 100);
+    if (Math.abs(changePct) >= FLUCTUATION_PCT) {
+      fluctuations.push({
+        fromDay: prev.day,
+        toDay: cur.day,
+        from: prev.min,
+        to: cur.min,
+        changePct,
+      });
+    }
+  }
+  let trend = 'stable';
+  if (series.length >= 2) {
+    const first = series[0].min;
+    const last = series[series.length - 1].min;
+    if (first && last) {
+      const move = ((last - first) / first) * 100;
+      if (move >= 10) trend = 'rising';
+      else if (move <= -10) trend = 'falling';
+    }
+  }
+  return { days, series, fluctuations, trend };
+}
+
 async function askSignalForBlueprint(blueprintId) {
   const rows = await queryRows(
     `select min_price_pkn, median_price_pkn, observed_day
@@ -351,6 +405,7 @@ async function cardQuote(params = {}) {
     variants.push({ condition: cond.alternatives[0], language: lang.code, vague: true });
   }
 
+  const askHistory = await askHistoryForBlueprint(blueprintId, 14);
   const quotes = [];
   for (const variant of variants) {
     const [summary, asks] = await Promise.all([
@@ -372,8 +427,11 @@ async function cardQuote(params = {}) {
 
   return {
     status: 'ok',
+    today: todayIso(),
     card,
     filters: { condition: cond.primary, language: lang.code, conditionVague: cond.vague },
+    window: { soldDays: 90, from: daysAgoIso(90), to: daysAgoIso(0) },
+    askHistory,
     conditionNote: cond.vague
       ? `Vague condition wording: showing ${cond.primary} and ${cond.alternatives[0]} ranges instead of claiming a grade.`
       : undefined,
@@ -645,7 +703,7 @@ module.exports = async function handler(req, res) {
       : result.status === 'ambiguous' ? 200
       : result.status === 'unsupported' ? 422
       : 200;
-    sendJson(res, status, { ok: true, tool, ...result });
+    sendJson(res, status, { ok: true, tool, today: todayIso(), ...result });
   } catch (error) {
     console.error('poko-market tool failed', { tool, error: String(error?.message || error).slice(0, 300) });
     sendJson(res, 500, { ok: false, tool, error: 'market query failed' });
@@ -657,6 +715,8 @@ module.exports._test = {
   CONDITIONS,
   LANGUAGES,
   cleanText,
+  todayIso,
+  daysAgoIso,
   escapeLike,
   fuzzyArtistPattern,
   normalizeCondition,

@@ -401,3 +401,18 @@ test('market_snapshot returns public aggregates only', async () => {
   assert.equal(res.body.cards[0].medianSoldEur, 33.5);
   assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
 });
+
+test('card_quote anchors today and dated windows for relative time expressions', async () => {
+  const handler = loadHandler(makeDb({
+    queries: [],
+    soldRows: [{ sold_qty: 14, p25_daily: 30, median_daily: 34, p75_daily: 37, last_sale_day: '2026-09-20' }],
+    askRows: [{ min_price_pkn: 36, median_price_pkn: 41, observed_day: '2026-09-26' }],
+    weightRows: [{ sold_qty_7d: 2, listed_now: 5, sell_through: 0.4, days_of_supply: 12, updated_at: new Date().toISOString() }],
+  }));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '246912' } } }), res);
+  assert.equal(res.body.today, new Date().toISOString().slice(0, 10));
+  assert.equal(res.body.window.soldDays, 90);
+  const expectedFrom = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+  assert.equal(res.body.window.from, expectedFrom);
+});
