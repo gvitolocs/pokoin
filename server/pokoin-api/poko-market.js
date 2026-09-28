@@ -645,11 +645,11 @@ async function suggestCards(params = {}) {
        from marketplace_search_candidates s
        left join marketplace_cards c on c.card_id = s.card_id
        left join cardtrader_blueprint_daily_analytics ask
-         on ask.blueprint_id = (s.card_id::bigint / 2)
+         on ask.blueprint_id = case when s.card_id ~ '^[0-9]+$' then (s.card_id::bigint / 2) end
         and ask.observed_day = (select max(observed_day) from cardtrader_blueprint_daily_analytics)
       where s.item_kind <> 'product'
         and ${conditions.join(' and ')}
-        and ($${values.length + 1}::text is null or s.card_id <> $${values.length + 1})
+        and ($${values.length + 1}::text is null or s.card_id::text <> $${values.length + 1}::text)
       order by s.search_weight desc nulls last, s.name
       limit ${limit + 1}`,
     [...values, excludeCardId || null],
