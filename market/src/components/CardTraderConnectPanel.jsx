@@ -7,15 +7,14 @@ import {
   disconnectCardTrader,
   fetchCardTraderStatus,
   syncCardTraderInventory,
-  wipeSellerInventory,
 } from '../api.js';
 import {
   MIN_CARDTRADER_TOKEN_LENGTH,
   describeCardTraderToken,
 } from '../cardtrader-token.js';
+import WipeAllInventory from './WipeAllInventory.jsx';
 
 const CT_TOKEN_DOCS = 'https://www.cardtrader.com/en/docs/api/full/reference';
-const WIPE_CONFIRM = 'DELETE ALL LISTINGS';
 
 /** One line under the token field: which CardTrader app it belongs to, or what is wrong. */
 function tokenHint(pasted) {
@@ -92,8 +91,6 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
   const [error, setError] = useState('');
   const [syncSummary, setSyncSummary] = useState(null);
   const [syncProgress, setSyncProgress] = useState(null);
-  const [wipeOpen, setWipeOpen] = useState(false);
-  const [wipeConfirm, setWipeConfirm] = useState('');
   const pollRef = useRef(null);
   const pasted = useMemo(() => describeCardTraderToken(token), [token]);
   const hint = tokenHint(pasted);
@@ -271,29 +268,6 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
     }
   }
 
-  async function onWipeInventory() {
-    if (busy || wipeConfirm !== WIPE_CONFIRM) return;
-    setBusy(true);
-    setError('');
-    setMessage('');
-    try {
-      const bearer = await getBearer();
-      const data = await wipeSellerInventory(bearer, { confirm: WIPE_CONFIRM });
-      setWipeOpen(false);
-      setWipeConfirm('');
-      setSyncSummary(null);
-      setMessage(
-        `Deleted ${Number(data?.listingsRemoved || 0)} listings`
-        + (data?.linksRemoved ? ` · ${data.linksRemoved} CardTrader links` : '')
-        + '. Run Sync CardTrader to re-import.',
-      );
-    } catch (err) {
-      setError(err.message || 'Could not delete inventory.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const connected = status?.connected === true;
   // 1-Day Ready: CardTrader stocks and sells the cards, so they are dashboard
   // assets, never Pokoin listings.
@@ -344,64 +318,18 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
               {busy ? 'Working…' : 'Disconnect'}
             </button>
           </div>
-          <div className="ct-wipe">
-            {!wipeOpen ? (
-              <button
-                type="button"
-                className="btn ghost ct-wipe-open"
-                disabled={busy || syncing}
-                onClick={() => {
-                  setWipeOpen(true);
-                  setWipeConfirm('');
-                  setError('');
-                }}
-              >
-                Delete all inventory…
-              </button>
-            ) : (
-              <div className="ct-wipe-panel" role="group" aria-label="Delete all inventory">
-                <p className="ct-wipe-warn">
-                  This permanently deletes every Pokoin listing for your account across all TCGs
-                  (Pokémon and others), including CardTrader links. Your CardTrader stock is not
-                  deleted. Type <strong>{WIPE_CONFIRM}</strong> then confirm, then run Sync CardTrader
-                  to re-import.
-                </p>
-                <label className="ct-wipe-field">
-                  <span className="sr-only">Confirmation phrase</span>
-                  <input
-                    type="text"
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder={WIPE_CONFIRM}
-                    value={wipeConfirm}
-                    disabled={busy || syncing}
-                    onChange={(event) => setWipeConfirm(event.target.value)}
-                  />
-                </label>
-                <div className="ct-connect-actions">
-                  <button
-                    type="button"
-                    className="btn ct-wipe-confirm"
-                    disabled={busy || syncing || wipeConfirm !== WIPE_CONFIRM}
-                    onClick={onWipeInventory}
-                  >
-                    {busy ? 'Deleting…' : 'Delete all listings'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn ghost"
-                    disabled={busy || syncing}
-                    onClick={() => {
-                      setWipeOpen(false);
-                      setWipeConfirm('');
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          <WipeAllInventory
+            disabled={busy || syncing}
+            onError={(text) => {
+              setError(text || '');
+              if (text) setMessage('');
+            }}
+            onMessage={(text) => {
+              setMessage(text || '');
+              setError('');
+              setSyncSummary(null);
+            }}
+          />
         </>
       ) : null}
       {!loading && !connected ? (
