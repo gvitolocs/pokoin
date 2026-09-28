@@ -178,7 +178,13 @@ export function conditionShort(condition) {
   return text || 'NM';
 }
 
-/** CardTrader-style condition chip SVG (one file per grade). */
+/** CardTrader-style condition chip SVG (one file per grade).
+ *
+ * Assets live in `market/public/conditions/` (see README there):
+ *   nm.svg · sp.svg · mp.svg · pl.svg · po.svg (red Poor)
+ * Intrinsic size 40×28. Served as `/conditions/{file}` like `/flags/*.svg`.
+ * EX reuses NM; LP/SP share Slightly Played; CT Heavily Played → PL.
+ */
 const CONDITION_CHIP_FILE = Object.freeze({
   nm: 'nm.svg',
   ex: 'nm.svg',
@@ -188,6 +194,7 @@ const CONDITION_CHIP_FILE = Object.freeze({
   poor: 'po.svg',
 });
 
+/** Public URL for the SVG chip matching this condition grade. */
 export function conditionChipSrc(condition) {
   const tone = conditionTone(condition) || 'nm';
   const file = CONDITION_CHIP_FILE[tone] || 'nm.svg';

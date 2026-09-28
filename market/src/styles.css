@@ -4025,6 +4025,15 @@ a.era-link:focus-visible {
   flex: none;
 }
 
+/* Condition chips are rectangular SVGs under /conditions/, not circular flags. */
+.lang-pick-btn img.shop-cond,
+.lang-pick-menu img.shop-cond {
+  width: 1.55rem;
+  height: 1.1rem;
+  border-radius: 0.28rem;
+  object-fit: contain;
+}
+
 .lang-pick-menu {
   position: absolute;
   z-index: 40;

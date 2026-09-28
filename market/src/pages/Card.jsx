@@ -103,7 +103,7 @@ import { speciesFromCard, pokemonHref } from '../pokemon-hubs.js';
 import ShopList from '../components/ShopList.jsx';
 import ShopListingRow from '../components/ShopListing.jsx';
 import { listingSelectId, shopDragOffers } from '../shop-marquee.js';
-import { conditionShort } from '../listing-meta.js';
+import { conditionChipSrc, conditionShort } from '../listing-meta.js';
 import {
   breadcrumbJsonLd,
   cardImageAlt,
@@ -136,12 +136,13 @@ const FOILS = [
   { value: 'other', label: 'Other' },
 ];
 
+/** Listing form condition grades — display is the /conditions/*.svg chip, not emoji. */
 const MOOD_CONDS = [
-  { value: 'NM', label: '😄 NM' },
-  { value: 'SP', label: '🙂 SP' },
-  { value: 'MP', label: '😐 MP' },
-  { value: 'PL', label: '🙁 PL' },
-  { value: 'Poor', label: '😭 Poor' },
+  { value: 'NM', label: 'Near Mint' },
+  { value: 'SP', label: 'Slightly Played' },
+  { value: 'MP', label: 'Moderately Played' },
+  { value: 'PL', label: 'Played' },
+  { value: 'Poor', label: 'Poor' },
 ];
 
 const LIST_CHIPS = [
@@ -629,6 +630,8 @@ function foilFromOffer(offer, card) {
 
 function moodCondition(offer) {
   const short = conditionShort(offer?.condition) || 'NM';
+  // conditionShort maps Poor → PO; the form still stores Pokoin value "Poor".
+  if (short === 'PO') return 'Poor';
   return MOOD_CONDS.some((row) => row.value === short) ? short : 'NM';
 }
 
@@ -713,27 +716,40 @@ function ConditionPick({ value, onChange }) {
         className="lang-pick-btn"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`Condition ${current.value}`}
+        aria-label={`Condition ${current.label}`}
         onClick={() => setOpen((next) => !next)}
       >
-        <span aria-hidden="true">{current.label.split(' ')[0]}</span>
-        <span>{current.value}</span>
+        <img
+          className="shop-cond"
+          src={conditionChipSrc(current.value)}
+          alt=""
+          width="40"
+          height="28"
+          draggable={false}
+        />
       </button>
       {open ? (
-        <ul className="lang-pick-menu" role="listbox">
+        <ul className="lang-pick-menu" role="listbox" aria-label="Condition">
           {MOOD_CONDS.map((row) => (
             <li key={row.value}>
               <button
                 type="button"
                 role="option"
                 aria-selected={row.value === value}
+                aria-label={row.label}
                 onClick={() => {
                   setOpen(false);
                   onChange(row.value);
                 }}
               >
-                <span aria-hidden="true">{row.label.split(' ')[0]}</span>
-                <span>{row.value}</span>
+                <img
+                  className="shop-cond"
+                  src={conditionChipSrc(row.value)}
+                  alt=""
+                  width="40"
+                  height="28"
+                  draggable={false}
+                />
                 {row.value === value ? <em aria-hidden="true">✓</em> : null}
               </button>
             </li>
