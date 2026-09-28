@@ -642,6 +642,92 @@
   background: linear-gradient(180deg, rgb(250 230 150 / 0.16), rgb(180 140 40 / 0.12));
 }
 
+.ct-pt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(4 6 12 / 0.72);
+}
+
+.ct-pt-modal {
+  width: min(36rem, 100%);
+  max-height: min(90vh, 44rem);
+  overflow: auto;
+  border-radius: 16px;
+  border: 1px solid var(--g4);
+  background: var(--g1);
+  padding: 1.15rem 1.25rem 1.25rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.ct-pt-modal h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.ct-pt-stack {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 8rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.ct-pt-stack input {
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  background: var(--g2);
+  color: var(--text);
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+}
+
+.ct-pt-games {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.ct-pt-games li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--g4);
+  border-radius: 12px;
+  background: var(--g2);
+}
+
+.ct-pt-file {
+  margin: 0;
+}
+
+.ct-pt-inline {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.45rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  max-width: 14rem;
+}
+
+.ct-pt-inline input {
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  background: var(--g2);
+  color: var(--text);
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+}
+
 .inventory-targets {
   display: flex;
   flex-wrap: wrap;

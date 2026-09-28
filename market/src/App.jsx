@@ -54,6 +54,7 @@ import Orders from './pages/Orders.jsx';
 import Sales from './pages/Sales.jsx';
 import Bought from './pages/Bought.jsx';
 import Stock from './pages/Stock.jsx';
+import SyncReview from './pages/SyncReview.jsx';
 import Collection from './pages/Collection.jsx';
 import NftRedirect from './pages/Nft.jsx';
 import Protection from './pages/Protection.jsx';
@@ -188,6 +189,7 @@ function AppShell() {
       {both('/sales', <Sales />)}
       {both('/bought', <Bought />)}
       {both('/stock', <Stock />)}
+      {both('/inventory/sync-review', <SyncReview />)}
       {both('/collection', <Collection />)}
       {both('/forum', <Forum />)}
       {both('/forum/category/:categoryId', <Forum />)}

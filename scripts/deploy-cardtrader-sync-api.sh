@@ -43,6 +43,8 @@ CT_FILES=(
   cardtrader-reconcile-all.js
   cardtrader-sales-backfill.js
   _native_sales.js
+  _stock_csv.js
+  _powertools_ct_match.js
   marketplace-listings.js
   marketplace-portfolio-history.js
   _portfolio_history_core.js
@@ -69,7 +71,8 @@ node --test \
   "$SRC/cardtrader-reconcile-all.test.js" \
   "$SRC/cardtrader-sales-backfill.test.js" \
   "$SRC/_portfolio_history_core.test.js" \
-  "$SRC/patch-route-manifest.test.js"
+  "$SRC/patch-route-manifest.test.js" \
+  "$SRC/_powertools_ct_match.test.js"
 for file in "${CT_FILES[@]}"; do
   [[ "$file" == *.js ]] || continue
   [[ "$file" == *.test.js ]] && continue

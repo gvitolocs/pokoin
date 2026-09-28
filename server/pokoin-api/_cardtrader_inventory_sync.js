@@ -29,6 +29,10 @@ const {
   productLinkNeedsRefresh,
   resolveProductAttachment,
 } = require('./_cardtrader_inventory_sync_core');
+const {
+  gamesFromCardTraderProducts,
+  reconcilePowerToolsWithCardTrader,
+} = require('./_powertools_ct_match');
 
 function runWithMarketplaceGame(game, fn) {
   if (!game || game === 'pokemon') return fn();
@@ -319,6 +323,7 @@ async function createImportedListing({
   marketplaceGame = 'pokemon',
   reactivateHidden = false,
   meta: metaIn = null,
+  location = '',
 }) {
   const meta = metaIn && typeof metaIn === 'object' ? metaIn : await cardMetadata(cardId, marketplaceGame);
   const qty = Math.max(0, Math.min(999999, product.quantity));
@@ -336,10 +341,11 @@ async function createImportedListing({
   const sourceListingId = ctSourceListingId(product.id);
   const country = cleanText(sellerCountry, 2).toUpperCase();
   const countryCode = /^[A-Z]{2}$/.test(country) && country !== 'EU' ? country : '';
+  const stockLocation = cleanText(location, 120);
 
   const existing = await marketplaceQuery(
     `
-      select id, source_listing_id, quantity_available, status, card_id
+      select id, source_listing_id, quantity_available, status, card_id, location
       from public.marketplace_user_listings
       where seller_uid = $1 and source_listing_id = $2
       limit 1
@@ -353,15 +359,34 @@ async function createImportedListing({
     const reactivated = await marketplaceWriteQuery(
       `
         update public.marketplace_user_listings
-        set status = 'active', quantity_available = $2, price_pkn = $3, updated_at = now()
+        set status = 'active', quantity_available = $2, price_pkn = $3,
+            location = case
+              when $4 <> '' then $4
+              else coalesce(location, '')
+            end,
+            updated_at = now()
         where id = $1
-        returning id, source_listing_id, quantity_available, status, card_id
+        returning id, source_listing_id, quantity_available, status, card_id, location
       `,
-      [found.id, qty, pricePkn],
+      [found.id, qty, pricePkn, stockLocation],
     );
     return reactivated.rows[0] || found;
   }
-  if (found) return found;
+  if (found) {
+    if (stockLocation && !cleanText(found.location, 120)) {
+      const patched = await marketplaceWriteQuery(
+        `
+          update public.marketplace_user_listings
+          set location = $2, updated_at = now()
+          where id = $1
+          returning id, source_listing_id, quantity_available, status, card_id, location
+        `,
+        [found.id, stockLocation],
+      );
+      return patched.rows[0] || found;
+    }
+    return found;
+  }
 
   const result = await marketplaceWriteQuery(
     `
@@ -371,7 +396,7 @@ async function createImportedListing({
         first_edition, foil_state, variant_state, sealed, graded,
         shipping_available, reserve_available, nft_available, seller_comment,
         source, source_listing_id, status, card_name, card_image_url,
-        set_name, collector_number, altered, marketplace_game
+        set_name, collector_number, altered, marketplace_game, location
       )
       values (
         $1,$2,$3,$4,'New',
@@ -379,9 +404,9 @@ async function createImportedListing({
         $11,$12,'',false,$13,
         true,false,false,$14,
         $15,$16,'active',$17,$18,
-        $19,$20,$21,$22
+        $19,$20,$21,$22,$23
       )
-      returning id, source_listing_id, quantity_available, status, card_id, marketplace_game
+      returning id, source_listing_id, quantity_available, status, card_id, marketplace_game, location
     `,
     [
       cardId,
@@ -406,6 +431,7 @@ async function createImportedListing({
       meta.collector_number || '',
       product.altered === true,
       marketplaceGame || 'pokemon',
+      stockLocation,
     ],
   );
   return result.rows[0] || null;
@@ -625,6 +651,8 @@ async function reconcileCardTraderInventory({
   oneDayReady: providedOneDayReady,
   onProgress = null,
   writeConcurrency = 8,
+  powerToolsByGame = null,
+  previewGamesOnly = false,
 } = {}) {
   const emitProgress = async (partial) => {
     if (typeof onProgress !== 'function') return;
@@ -728,6 +756,129 @@ async function reconcileCardTraderInventory({
   const gate = destructiveReconcileGate(exportResult);
   const products = (exportResult.products || []).map(normalizeProduct).filter((p) => p.id);
   summary.inventory = products.length;
+
+  if (previewGamesOnly) {
+    const games = gamesFromCardTraderProducts(products, marketplaceGameForProduct);
+    const preview = {
+      ...summary,
+      running: false,
+      phase: 'preview_games',
+      games,
+      previewGamesOnly: true,
+    };
+    return {
+      ok: true,
+      connected: true,
+      previewGamesOnly: true,
+      games,
+      summary: preview,
+    };
+  }
+
+  // Power Tools CSV → location by CT product id (matched per marketplace game).
+  const locationByCtProductId = new Map();
+  const powerToolsReconcile = {
+    matched: 0,
+    locationsApplied: 0,
+    ctOnly: [],
+    ptOnly: [],
+    games: [],
+  };
+  if (powerToolsByGame && typeof powerToolsByGame === 'object') {
+    const byGameProducts = new Map();
+    for (const product of products) {
+      const game = marketplaceGameForProduct(product);
+      if (!game) continue;
+      const bucket = byGameProducts.get(game) || [];
+      bucket.push(product);
+      byGameProducts.set(game, bucket);
+    }
+    for (const [game, gameProducts] of byGameProducts.entries()) {
+      const ptRows = Array.isArray(powerToolsByGame[game]) ? powerToolsByGame[game] : [];
+      if (!ptRows.length) {
+        for (const product of gameProducts) {
+          powerToolsReconcile.ctOnly.push({
+            game,
+            ctProductId: product.id,
+            cardId: publicCardIdFromBlueprint(product.blueprintId) || '',
+            name: product.name || '',
+            condition: product.condition,
+            language: product.language,
+            reverse: product.reverse === true,
+            quantity: product.quantity,
+            pricePkn: product.pricePkn,
+          });
+        }
+        continue;
+      }
+      const paired = reconcilePowerToolsWithCardTrader(gameProducts, ptRows, game);
+      powerToolsReconcile.games.push({
+        id: game,
+        ct: gameProducts.length,
+        pt: ptRows.length,
+        matched: paired.matched.length,
+        ctOnly: paired.ctOnly.length,
+        ptOnly: paired.ptOnly.length,
+      });
+      for (const row of paired.matched) {
+        powerToolsReconcile.matched += 1;
+        if (row.location) {
+          locationByCtProductId.set(String(row.product.id), row.location);
+          powerToolsReconcile.locationsApplied += 1;
+        }
+      }
+      for (const row of paired.ctOnly) {
+        powerToolsReconcile.ctOnly.push({
+          game,
+          ctProductId: row.product.id,
+          cardId: publicCardIdFromBlueprint(row.product.blueprintId) || '',
+          name: row.product.name || '',
+          condition: row.product.condition,
+          language: row.product.language,
+          reverse: row.product.reverse === true,
+          quantity: row.product.quantity,
+          pricePkn: row.product.pricePkn,
+        });
+      }
+      for (const entry of paired.ptOnly) {
+        powerToolsReconcile.ptOnly.push({
+          game,
+          name: entry.name,
+          setName: entry.setName,
+          collectorNumber: entry.collectorNumber,
+          condition: entry.condition,
+          language: entry.language,
+          reverse: entry.reverse,
+          firstEdition: entry.firstEdition === true,
+          quantity: entry.quantity,
+          location: entry.location,
+          pricePkn: entry.pricePkn || 0,
+        });
+      }
+    }
+    for (const [game, ptRows] of Object.entries(powerToolsByGame)) {
+      if (byGameProducts.has(game) || !Array.isArray(ptRows) || !ptRows.length) continue;
+      for (const entry of ptRows) {
+        powerToolsReconcile.ptOnly.push({
+          game,
+          name: cleanText(entry.name, 240),
+          setName: cleanText(entry.setName || entry.set, 240),
+          collectorNumber: cleanText(entry.collectorNumber || entry.cn, 40),
+          condition: cleanText(entry.condition, 20) || 'NM',
+          language: cleanText(entry.language, 10).toUpperCase() || 'EN',
+          reverse: entry.reverse === true,
+          firstEdition: entry.firstEdition === true || entry.first_edition === true,
+          quantity: Math.max(0, Math.trunc(Number(entry.quantity) || 0)),
+          location: cleanText(entry.location, 120),
+          pricePkn: Math.max(0, Math.trunc(Number(entry.pricePkn) || 0)),
+        });
+      }
+    }
+    // Cap review payload size.
+    powerToolsReconcile.ctOnly = powerToolsReconcile.ctOnly.slice(0, 500);
+    powerToolsReconcile.ptOnly = powerToolsReconcile.ptOnly.slice(0, 500);
+    summary.powerToolsReconcile = powerToolsReconcile;
+  }
 
   if (oneDayReady) {
     return reconcileOneDayReadyAssets({
@@ -880,6 +1031,18 @@ async function reconcileCardTraderInventory({
           await applyCtQuantity(listing.id, product.quantity);
           summary.updated += 1;
         }
+        const ptLocation = locationByCtProductId.get(String(product.id)) || '';
+        if (ptLocation) {
+          await marketplaceWriteQuery(
+            `
+              update public.marketplace_user_listings
+              set location = $2, updated_at = now()
+              where id = $1
+                and (location is null or btrim(location) = '')
+            `,
+            [listing.id, ptLocation],
+          ).catch(() => null);
+        }
         const existingLink = linkByProduct.get(product.id);
         if (productLinkNeedsRefresh(existingLink, {
           listingId: listing.id,
@@ -911,6 +1074,18 @@ async function reconcileCardTraderInventory({
         }
         summary.matchedExisting += 1;
         bySourceId.set(decision.sourceId, { ...decision.listing, ...updated });
+        const ptLocation = locationByCtProductId.get(String(product.id)) || '';
+        if (ptLocation) {
+          await marketplaceWriteQuery(
+            `
+              update public.marketplace_user_listings
+              set location = $2, updated_at = now()
+              where id = $1
+                and (location is null or btrim(location) = '')
+            `,
+            [updated.id, ptLocation],
+          ).catch(() => null);
+        }
         await upsertProductLink({
           sellerUid,
           ctProductId: product.id,
@@ -935,6 +1110,7 @@ async function reconcileCardTraderInventory({
           marketplaceGame,
           reactivateHidden: !linkByProduct.has(product.id),
           meta: metaByCard.get(String(cardId || '')) || {},
+          location: locationByCtProductId.get(String(product.id)) || '',
         });
         if (!created) {
           summary.errors += 1;
@@ -1023,6 +1199,11 @@ async function reconcileCardTraderInventory({
     total: planned.length,
     unresolvedItems: summary.unresolvedItems.slice(0, 25),
     errorItems: summary.errorItems.slice(0, 25),
+    needsPowerToolsReview: Boolean(
+      summary.powerToolsReconcile
+      && ((summary.powerToolsReconcile.ctOnly || []).length
+        || (summary.powerToolsReconcile.ptOnly || []).length),
+    ),
   };
 
   await recordSellerSync(sellerUid, {

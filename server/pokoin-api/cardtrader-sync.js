@@ -3,14 +3,38 @@
 const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
 const { parseEncryptionKey } = require('./_cardtrader_crypto');
 const { readIntegrationDoc, safeStatusFromDoc } = require('./_cardtrader_integration');
-const { readSellerSync } = require('./_cardtrader_inventory_sync');
+const {
+  readSellerSync,
+  reconcileCardTraderInventory,
+} = require('./_cardtrader_inventory_sync');
 const {
   enqueueCardTraderInventorySync,
   readInventorySyncProgress,
 } = require('./_cardtrader_inventory_async');
+const { importCsvText } = require('./_stock_csv');
 
 function setNoStore(res) {
   res.setHeader('Cache-Control', 'no-store');
+}
+
+function parsePowerToolsByGame(body = {}) {
+  const raw = body.powerToolsCsv || body.powerToolsByGame || null;
+  if (!raw || typeof raw !== 'object') return null;
+  const out = {};
+  for (const [game, csvText] of Object.entries(raw)) {
+    const text = String(csvText || '');
+    if (!text.trim()) continue;
+    const imported = importCsvText(text, {
+      format: 'powertools',
+      stackSize: Number(body.stackSize) > 0 ? Number(body.stackSize) : 1,
+      priceMode: body.priceMode || 'eur_to_pkn',
+    });
+    const rows = imported.results
+      .filter((entry) => entry.ok && entry.row)
+      .map((entry) => entry.row);
+    if (rows.length) out[String(game)] = rows;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 module.exports = async function handler(req, res) {
@@ -74,10 +98,42 @@ module.exports = async function handler(req, res) {
       || decoded.email
       || 'Pokoin seller';
 
+    const body = req.body || {};
+    const previewGamesOnly = body.previewGames === true || body.previewGamesOnly === true;
+
+    // Game preview is synchronous so the Power Tools upload UI can list TCGs.
+    if (previewGamesOnly) {
+      const preview = await reconcileCardTraderInventory({
+        firestore,
+        uid: decoded.uid,
+        sellerName: String(sellerName),
+        previewGamesOnly: true,
+      });
+      return res.status(200).json({
+        ok: preview.ok !== false,
+        connected: true,
+        previewGamesOnly: true,
+        games: preview.games || [],
+        summary: preview.summary || {},
+        status,
+      });
+    }
+
+    let powerToolsByGame = null;
+    try {
+      powerToolsByGame = parsePowerToolsByGame(body);
+    } catch (error) {
+      return res.status(error.statusCode || 400).json({
+        error: error.message || 'Invalid Power Tools CSV.',
+        code: error.code || 'powertools_csv',
+      });
+    }
+
     const job = enqueueCardTraderInventorySync({
       firestore,
       uid: decoded.uid,
       sellerName: String(sellerName),
+      powerToolsByGame,
     });
 
     return res.status(200).json({
@@ -89,6 +145,7 @@ module.exports = async function handler(req, res) {
       running: true,
       incomplete: true,
       destructiveSkipped: false,
+      powerTools: Boolean(powerToolsByGame),
       error: null,
       summary: { running: true, phase: 'starting', processed: 0, total: 0 },
       status,
