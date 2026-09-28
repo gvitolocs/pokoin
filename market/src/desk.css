@@ -346,14 +346,14 @@
   border-bottom: 1px solid var(--g5);
 }
 .bag-row.summary {
-  grid-template-columns: calc(7.5rem * 63 / 88) minmax(0, 1fr) auto;
+  grid-template-columns: calc(11rem * 63 / 88) minmax(0, 1fr) minmax(7rem, auto);
   align-items: center;
-  padding: 0.65rem 1.15rem;
+  padding: 0.75rem 1.15rem;
 }
 .bag-art {
   display: block;
-  width: calc(7.5rem * 63 / 88);
-  height: 7.5rem;
+  width: calc(11rem * 63 / 88);
+  height: 11rem;
   min-width: 0;
   align-self: center;
   overflow: hidden;
@@ -434,6 +434,10 @@
   grid-column: 1 / -1;
 }
 
+.profile-grid > .profile-shipping {
+  grid-column: 1 / -1;
+}
+
 .ct-connect-form {
   display: grid;
   gap: 0.75rem;
@@ -474,6 +478,62 @@
   flex-wrap: wrap;
   gap: 0.55rem;
   margin-top: 0.75rem;
+  align-items: center;
+}
+
+.ct-connect-form .btn-stripe {
+  margin-top: 0;
+}
+
+/* CardTrader brand blue + Stripe purple for profile connect actions. */
+.btn-cardtrader {
+  border: 0;
+  background: #4db8e8;
+  color: #0b1c26;
+}
+
+.btn-cardtrader:hover:not(:disabled),
+.btn-cardtrader:focus-visible:not(:disabled) {
+  background: #6ac6ee;
+  color: #0b1c26;
+}
+
+.btn-stripe {
+  border: 0;
+  background: #635bff;
+  color: #fff;
+}
+
+.btn-stripe:hover:not(:disabled),
+.btn-stripe:focus-visible:not(:disabled) {
+  background: #7a73ff;
+  color: #fff;
+}
+
+.profile-page {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.profile-title-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+}
+
+.profile-silver-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgb(212 175 55 / 0.55);
+  background: linear-gradient(180deg, rgb(250 230 150 / 0.22), rgb(180 140 40 / 0.18));
+  color: #f0d78c;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
 }
 
 
@@ -676,6 +736,69 @@
 }
 .fee-check input {
   margin: 0;
+}
+
+.checkout-pay {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.85rem 0 0.35rem;
+  padding: 0 1.15rem;
+}
+.checkout-pay-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.checkout-pay-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: var(--g2);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.checkout-pay-option input {
+  flex: none;
+  margin: 0.2rem 0 0;
+}
+.checkout-pay-option span {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.checkout-pay-option strong {
+  font-size: 0.95rem;
+  font-weight: 750;
+}
+.checkout-pay-option em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.checkout-pay-option.is-on {
+  border-color: var(--yellow);
+  box-shadow: inset 0 0 0 1px var(--yellow);
+}
+.checkout-pay-option.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.bag-row.summary .bag-price {
+  text-align: right;
+  font-size: 0.92rem;
+  line-height: 1.25;
+  max-width: 11rem;
+  white-space: normal;
 }
 .fee-tip {
   position: relative;
@@ -1769,3 +1892,108 @@
 .tg-code-label { margin: 0; font-size: 0.9rem; }
 .tg-code { margin: 0; font-family: ui-monospace, monospace; font-size: 1.6rem; letter-spacing: 0.18em; font-weight: 700; }
 .tg-steps { margin: 0 0 0.4rem 1.1rem; padding: 0; }
+
+/* Orders + Sold history: payment status pills, refunds, held checkouts. */
+.order-pill {
+  display: inline-block;
+  margin-left: 0.35rem;
+  vertical-align: 0.1em;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.order-pill.is-ok { color: var(--yellow); border-color: rgb(255 211 61 / 0.45); }
+.order-pill.is-wait { color: var(--text); border-color: var(--g5); background: var(--g3); }
+.order-pill.is-muted { color: var(--muted); }
+.order-pill.is-warn { color: #fecaca; border-color: rgb(252 165 165 / 0.45); }
+.order-pill.is-ct { color: var(--ct-blue); border-color: rgb(91 186 213 / 0.45); }
+.order-row,
+.sale-row { align-items: flex-start; flex-wrap: wrap; }
+.order-row.is-focus,
+.sale-row.is-focus { background: var(--g2); box-shadow: inset 3px 0 0 var(--yellow); }
+.order-id { font-variant-numeric: tabular-nums; opacity: 0.7; }
+.sale-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+}
+.sale-line a { color: var(--text); font-weight: 700; }
+.sale-line a:hover { color: var(--yellow); }
+.sales-source {
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--g5);
+  background: var(--g2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+.refund-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem 0.85rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgb(255 211 61 / 0.35);
+  border-radius: 12px;
+  background: var(--g2);
+}
+.refund-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.refund-form input {
+  width: 7.5rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--g5);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.refund-form input[aria-invalid="true"] { border-color: rgb(252 165 165 / 0.6); }
+.refund-form .refund-reason { flex: 1 1 14rem; }
+.refund-form .refund-reason input { width: 100%; }
+.refund-hint {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.refund-buttons { display: flex; gap: 0.45rem; }
+.refund-error { flex-basis: 100%; color: #fecaca; font-size: 0.82rem; }
+
+/* Card desk: what actually sold through Pokoin checkout. */
+.native-sales { margin-top: 0.75rem; }
+.native-sales .muted { font-size: 0.75rem; }
+.native-sales-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+.native-sales-list li {
+  display: grid;
+  grid-template-columns: 6.2rem 1fr auto;
+  gap: 0.5rem;
+  padding: 0.28rem 0;
+  border-top: 1px solid var(--g4);
+  font-variant-numeric: tabular-nums;
+}
+.native-sales-list li:first-child { border-top: 0; }
+.native-sales-day,
+.native-sales-traits { color: var(--muted); }
+.native-sales-price { color: var(--yellow); }
+
+@media (max-width: 720px) {
+  .order-row .order-actions,
+  .sale-row .order-actions { flex-basis: 100%; }
+  .refund-form input { width: 100%; }
+  .refund-form label { flex: 1 1 100%; }
+}

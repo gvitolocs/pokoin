@@ -2,8 +2,14 @@
 
 /**
  * POST /api/marketplace-checkout-quote
- * Body: { items: [{listingId, sellerUid, qty|quantity, pricePkn|unitPricePkn}], shippingAddressId }
- * Server resolves origins + rates. Never trusts client shipping cents.
+ * Body: {
+ *   items: [{listingId, sellerUid, qty|quantity, pricePkn|unitPricePkn}],
+ *   shippingAddressId?,  // preferred — toCountry from saved address
+ *   toCountry?,          // preview when no address yet (buyer locale / draft)
+ *   shippingService?, tracked?
+ * }
+ * Server resolves seller origins from profile (user-set or IP-seeded) + rates.
+ * Never trusts client shipping cents.
  */
 
 const path = require('path');
@@ -46,21 +52,29 @@ module.exports = async function handler(req, res) {
     }
 
     const addressId = String(body.shippingAddressId || '').trim();
-    if (!addressId) {
-      return res.status(400).json({ error: 'shippingAddressId required.', code: 'address_required' });
+    let toCountry = '';
+    if (addressId) {
+      const addressRef = firestore.collection('users').doc(decoded.uid).collection('shipping_addresses').doc(addressId);
+      const addressSnap = await addressRef.get();
+      if (!addressSnap.exists) {
+        return res.status(404).json({ error: 'Shipping address not found.' });
+      }
+      const addressData = addressSnap.data() || {};
+      toCountry = normalizeCountry(addressData.countryCode);
+      if (!toCountry) {
+        return res.status(400).json({ error: 'Address countryCode invalid.' });
+      }
+      // Decrypt only to confirm payload exists for the owner — not logged.
+      decryptAddressPayload(addressData.encryptedPayload);
+    } else {
+      toCountry = normalizeCountry(body.toCountry);
+      if (!toCountry) {
+        return res.status(400).json({
+          error: 'shippingAddressId or toCountry required.',
+          code: 'address_required',
+        });
+      }
     }
-    const addressRef = firestore.collection('users').doc(decoded.uid).collection('shipping_addresses').doc(addressId);
-    const addressSnap = await addressRef.get();
-    if (!addressSnap.exists) {
-      return res.status(404).json({ error: 'Shipping address not found.' });
-    }
-    const addressData = addressSnap.data() || {};
-    const toCountry = normalizeCountry(addressData.countryCode);
-    if (!toCountry) {
-      return res.status(400).json({ error: 'Address countryCode invalid.' });
-    }
-    // Decrypt only to confirm payload exists for the owner — not logged.
-    decryptAddressPayload(addressData.encryptedPayload);
 
     const sellerIds = [...new Set(items.map((row) => String(row.sellerUid || '').trim()).filter(Boolean))];
     const sellerOrigins = {};
@@ -73,11 +87,17 @@ module.exports = async function handler(req, res) {
       );
     }
 
-    const quote = quoteCheckout({ items, sellerOrigins, toCountry });
+    const tracked = body.tracked !== false && body.shippingTracked !== false
+      && String(body.shippingService || '').toLowerCase() !== 'untracked';
+
+    const quote = quoteCheckout({ items, sellerOrigins, toCountry, tracked });
     return res.status(200).json({
       ...quote,
-      shippingAddressId: addressId,
+      sellerOrigins,
+      shippingAddressId: addressId || null,
       toCountry,
+      tracked,
+      preview: !addressId,
       quotedAt: new Date().toISOString(),
     });
   } catch (error) {

@@ -13,6 +13,12 @@ const path = require('path');
 const crypto = require('node:crypto');
 const { quoteCheckout, normalizeCountry, httpError, eurCentsFromPkn } = require('./_checkout_core');
 const { encryptAddressPayload, decryptAddressPayload } = require('./_address_crypto');
+const {
+  CHECKOUT_HOLD_SECONDS,
+  releaseEurReservation,
+  reserveEurCheckoutItems,
+  rollbackReservation,
+} = require('./_eur_order_inventory');
 
 function requireHelper(name) {
   try {
@@ -40,7 +46,7 @@ function stripeClient() {
   return new Stripe(secret, options);
 }
 
-async function assertSellersReady(firestore, sellerIds) {
+async function loadSellerCheckoutContext(firestore, sellerIds) {
   const origins = {};
   const accounts = {};
   for (const sellerId of sellerIds) {
@@ -50,11 +56,13 @@ async function assertSellersReady(firestore, sellerIds) {
     if (!from) {
       throw httpError(409, `Seller ${sellerId} must set shipFromCountry before EUR checkout.`, 'missing_ship_from');
     }
-    if (data.stripeConnectStatus !== 'READY' || !data.stripeConnectAccountId) {
-      throw httpError(409, `Seller ${sellerId} Stripe Connect is not READY.`, 'stripe_connect_not_ready');
-    }
     origins[sellerId] = from;
-    accounts[sellerId] = String(data.stripeConnectAccountId);
+    // Connect can be finished later — buyer pay still works; Transfer waits until READY.
+    if (data.stripeConnectStatus === 'READY' && data.stripeConnectAccountId) {
+      accounts[sellerId] = String(data.stripeConnectAccountId);
+    } else {
+      accounts[sellerId] = '';
+    }
   }
   return { origins, accounts };
 }
@@ -95,123 +103,168 @@ module.exports = async function handler(req, res) {
     });
 
     const sellerIds = [...new Set(items.map((row) => String(row.sellerUid || '').trim()).filter(Boolean))];
-    const { origins, accounts } = await assertSellersReady(firestore, sellerIds);
-    const quote = quoteCheckout({ items, sellerOrigins: origins, toCountry });
-
-    if (!quote.grandTotalCents || quote.grandTotalCents < 50) {
+    const { origins, accounts } = await loadSellerCheckoutContext(firestore, sellerIds);
+    const tracked = body.tracked !== false && body.shippingTracked !== false
+      && String(body.shippingService || '').toLowerCase() !== 'untracked';
+    // Route/price sanity before touching stock (fails closed on no shipping row).
+    const preview = quoteCheckout({ items, sellerOrigins: origins, toCountry, tracked });
+    if (!preview.grandTotalCents || preview.grandTotalCents < 50) {
       return res.status(400).json({ error: 'Order total too small for Stripe Checkout.' });
     }
 
+    // Take the stock now (same decrement as the PKN path) and re-price every
+    // row from Postgres — client prices never reach Stripe.
+    const reserved = await reserveEurCheckoutItems({ rawItems: items });
     const orderId = `eur_${crypto.randomBytes(12).toString('hex')}`;
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    const shipments = quote.shipments.map((shipment) => ({
-      sellerId: shipment.sellerId,
-      sellerName: shipment.sellerName || '',
-      stripeConnectAccountId: accounts[shipment.sellerId],
-      fromCountry: shipment.fromCountry,
-      toCountry: shipment.toCountry,
-      cardCount: shipment.cardCount,
-      packageTier: shipment.packageTier,
-      shippingRateId: shipment.rateId,
-      shippingAmountEURCents: shipment.amountCents,
-      itemsSubtotalCents: shipment.itemsSubtotalCents,
-      // Seller settlement = items − 3% platform fee + shipping for their parcel.
-      sellerTransferCents: Math.max(
-        0,
-        Math.round(shipment.itemsSubtotalCents * 0.97) + shipment.amountCents,
-      ),
-      quoteCreatedAt: new Date().toISOString(),
-      serviceName: shipment.serviceName,
-    }));
+    const orderRef = firestore.collection('orders').doc(orderId);
+    let orderWritten = false;
+    let quote;
+    let session;
+    try {
+      quote = quoteCheckout({ items: reserved.items, sellerOrigins: origins, toCountry, tracked });
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const holdExpiresAt = Math.floor(Date.now() / 1000) + CHECKOUT_HOLD_SECONDS;
+      const shipments = quote.shipments.map((shipment) => ({
+        sellerId: shipment.sellerId,
+        sellerName: shipment.sellerName || '',
+        stripeConnectAccountId: accounts[shipment.sellerId],
+        fromCountry: shipment.fromCountry,
+        toCountry: shipment.toCountry,
+        cardCount: shipment.cardCount,
+        packageTier: shipment.packageTier,
+        shippingRateId: shipment.rateId,
+        shippingAmountEURCents: shipment.amountCents,
+        itemsSubtotalCents: shipment.itemsSubtotalCents,
+        // Seller settlement = items − 3% platform fee + shipping for their parcel.
+        sellerTransferCents: Math.max(
+          0,
+          Math.round(shipment.itemsSubtotalCents * 0.97) + shipment.amountCents,
+        ),
+        quoteCreatedAt: new Date().toISOString(),
+        serviceName: shipment.serviceName,
+      }));
 
-    // One Checkout line per seller shipment so Stripe shows the multi-seller split.
-    // Platform still takes one charge; Connect Transfers go out per seller later.
-    const lineItems = shipments.map((shipment, index) => {
-      const unitAmount = Number(shipment.itemsSubtotalCents || 0) + Number(shipment.shippingAmountEURCents || 0);
-      const sellerLabel = String(shipment.sellerName || shipment.sellerId || `Seller ${index + 1}`).slice(0, 80);
-      return {
-        quantity: 1,
-        price_data: {
-          currency: 'eur',
-          unit_amount: unitAmount,
-          product_data: {
-            name: `Shipment from ${sellerLabel}`,
-            description: [
-              `${shipment.cardCount} card(s)`,
-              shipment.fromCountry && shipment.toCountry
-                ? `${shipment.fromCountry}→${shipment.toCountry}`
-                : '',
-              shipment.serviceName || '',
-            ].filter(Boolean).join(' · ').slice(0, 200),
+      // One Checkout line per seller shipment so Stripe shows the multi-seller split.
+      // Platform still takes one charge; Connect Transfers go out per seller later.
+      const lineItems = shipments.map((shipment, index) => {
+        const unitAmount = Number(shipment.itemsSubtotalCents || 0) + Number(shipment.shippingAmountEURCents || 0);
+        const sellerLabel = String(shipment.sellerName || shipment.sellerId || `Seller ${index + 1}`).slice(0, 80);
+        return {
+          quantity: 1,
+          price_data: {
+            currency: 'eur',
+            unit_amount: unitAmount,
+            product_data: {
+              name: `Shipment from ${sellerLabel}`,
+              description: [
+                `${shipment.cardCount} card(s)`,
+                shipment.fromCountry && shipment.toCountry
+                  ? `${shipment.fromCountry}→${shipment.toCountry}`
+                  : '',
+                shipment.serviceName || '',
+              ].filter(Boolean).join(' · ').slice(0, 200),
+            },
+          },
+        };
+      });
+      const lineTotal = lineItems.reduce((sum, row) => sum + Number(row.price_data.unit_amount || 0), 0);
+      if (lineTotal !== quote.grandTotalCents) {
+        throw httpError(500, 'Shipment line items do not sum to checkout total.', 'checkout_line_mismatch');
+      }
+
+      await orderRef.set({
+        uid: decoded.uid,
+        buyerUid: decoded.uid,
+        buyerEmail: String(body.buyerEmail || decoded.email || '').slice(0, 240),
+        currency: 'EUR',
+        paymentMethod: 'stripe',
+        items: reserved.items.map((row) => ({
+          listingId: row.listingId,
+          sellerUid: row.sellerUid,
+          sellerName: row.sellerName || '',
+          quantity: row.quantity,
+          unitPricePkn: row.unitPricePkn,
+          unitPriceEURCents: eurCentsFromPkn(row.unitPricePkn),
+          totalPricePkn: row.unitPricePkn * row.quantity,
+          condition: row.condition || '',
+          language: row.language || '',
+          source: row.source || '',
+          sourceListingId: row.sourceListingId || '',
+          sourceMetadata: row.sourceMetadata || {},
+          card: { id: row.card?.id || '', name: row.card?.name || '' },
+          fulfillmentMode: 'physical',
+        })),
+        shipments,
+        itemsSubtotalCents: quote.itemsSubtotalCents,
+        shippingTotalCents: quote.shippingTotalCents,
+        totalEURCents: quote.grandTotalCents,
+        shippingAddressId: addressId,
+        shippingAddressSnapshotEncrypted: snapshotEncrypted,
+        shippingAddressCountryCode: toCountry,
+        sellerUids: sellerIds,
+        status: 'pending',
+        paymentStatus: 'pending_stripe',
+        fulfillmentStatus: 'pending',
+        fulfillmentMode: 'physical',
+        // Stock is held for this buyer until Stripe pays or the hold expires.
+        inventory: {
+          state: 'reserved',
+          lines: reserved.lines,
+          reservedAt: new Date().toISOString(),
+          expiresAt: new Date(holdExpiresAt * 1000).toISOString(),
+        },
+        createdAt: now,
+        updatedAt: now,
+      });
+      orderWritten = true;
+
+      session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer_email: decoded.email || undefined,
+        expires_at: holdExpiresAt,
+        success_url: `${siteUrl()}/orders?eur_session={CHECKOUT_SESSION_ID}&order=${orderId}`,
+        cancel_url: `${siteUrl()}/checkout?cancelled=1&order=${orderId}`,
+        line_items: lineItems,
+        payment_intent_data: {
+          transfer_group: orderId,
+          metadata: {
+            pokoinOrderId: orderId,
+            pokoinUid: decoded.uid,
+            kind: 'marketplace_order_eur',
+            sellerCount: String(shipments.length),
           },
         },
-      };
-    });
-    const lineTotal = lineItems.reduce((sum, row) => sum + Number(row.price_data.unit_amount || 0), 0);
-    if (lineTotal !== quote.grandTotalCents) {
-      throw httpError(500, 'Shipment line items do not sum to checkout total.', 'checkout_line_mismatch');
-    }
-
-    await firestore.collection('orders').doc(orderId).set({
-      uid: decoded.uid,
-      buyerUid: decoded.uid,
-      buyerEmail: String(body.buyerEmail || decoded.email || '').slice(0, 240),
-      currency: 'EUR',
-      paymentMethod: 'stripe',
-      items: items.map((row) => ({
-        listingId: String(row.listingId || ''),
-        sellerUid: String(row.sellerUid || ''),
-        quantity: Number(row.quantity || row.qty) || 1,
-        unitPricePkn: Number(row.unitPricePkn || row.pricePkn) || 0,
-        unitPriceEURCents: eurCentsFromPkn(Number(row.unitPricePkn || row.pricePkn) || 0),
-        totalPricePkn: (Number(row.unitPricePkn || row.pricePkn) || 0) * (Number(row.quantity || row.qty) || 1),
-        card: row.card || { id: row.cardId, name: row.name },
-        fulfillmentMode: 'physical',
-      })),
-      shipments,
-      itemsSubtotalCents: quote.itemsSubtotalCents,
-      shippingTotalCents: quote.shippingTotalCents,
-      totalEURCents: quote.grandTotalCents,
-      shippingAddressId: addressId,
-      shippingAddressSnapshotEncrypted: snapshotEncrypted,
-      shippingAddressCountryCode: toCountry,
-      sellerUids: sellerIds,
-      status: 'pending',
-      paymentStatus: 'pending_stripe',
-      fulfillmentStatus: 'pending',
-      fulfillmentMode: 'physical',
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      customer_email: decoded.email || undefined,
-      success_url: `${siteUrl()}/orders?eur_session={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${siteUrl()}/checkout?cancelled=1`,
-      line_items: lineItems,
-      payment_intent_data: {
-        transfer_group: orderId,
         metadata: {
           pokoinOrderId: orderId,
           pokoinUid: decoded.uid,
           kind: 'marketplace_order_eur',
+          amountCents: String(quote.grandTotalCents),
           sellerCount: String(shipments.length),
         },
-      },
-      metadata: {
-        pokoinOrderId: orderId,
-        pokoinUid: decoded.uid,
-        kind: 'marketplace_order_eur',
-        amountCents: String(quote.grandTotalCents),
-        sellerCount: String(shipments.length),
-      },
-    });
+      });
 
-    await firestore.collection('orders').doc(orderId).set({
-      stripeCheckoutSessionId: session.id,
-      updatedAt: now,
-    }, { merge: true });
+      await orderRef.set({
+        stripeCheckoutSessionId: session.id,
+        stripeCheckoutUrl: String(session.url || ''),
+        updatedAt: now,
+      }, { merge: true });
+    } catch (error) {
+      // Nothing may stay held for a checkout the buyer can never pay.
+      if (orderWritten) {
+        await releaseEurReservation({
+          admin,
+          firestore,
+          orderId,
+          reason: 'session_failed',
+          paymentStatus: 'failed',
+        }).catch((releaseError) => {
+          console.error('create-order-checkout-session release failed', releaseError.message);
+        });
+      } else {
+        await rollbackReservation({ lines: reserved.lines });
+      }
+      throw error;
+    }
 
     return res.status(200).json({
       orderId,
@@ -228,4 +281,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { assertSellersReady, eurCentsFromPkn };
+module.exports._test = { loadSellerCheckoutContext, assertSellersReady: loadSellerCheckoutContext, eurCentsFromPkn };

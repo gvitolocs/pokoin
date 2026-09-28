@@ -7,9 +7,9 @@ import { accountHeading, accountLede } from '../auth-session.js';
 import { useWallet, shortAddress } from '../wallet.jsx';
 import { useCart } from '../cart.jsx';
 import { DeskPanel, Metric, MetricGrid, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
-import SellerShippingSettings from '../components/SellerShippingSettings.jsx';
-import CardTraderConnectPanel from '../components/CardTraderConnectPanel.jsx'
-import TelegramConnectPanel from '../components/TelegramConnectPanel.jsx';;
+import SellerShippingSettings, { StripeConnectButton } from '../components/SellerShippingSettings.jsx';
+import CardTraderConnectPanel from '../components/CardTraderConnectPanel.jsx';
+import TelegramConnectPanel from '../components/TelegramConnectPanel.jsx';
 import { formatPknNumber } from '../pkn.js';
 import Avatar from '../components/Avatar.jsx';
 import UsernameEditor from '../components/UsernameEditor.jsx';
@@ -25,6 +25,8 @@ export default function Profile() {
   const { count } = useCart();
   const [editing, setEditing] = useState(false);
   const [toast, setToast] = useState('');
+  const [shipFromCountry, setShipFromCountry] = useState('');
+  const [stripeError, setStripeError] = useState('');
 
   useEffect(() => {
     document.title = 'Profile · Pokoin';
@@ -41,19 +43,35 @@ export default function Profile() {
     return <Navigate to={`/auth?from=${encodeURIComponent(location.pathname || '/profile')}`} replace />;
   }
 
-  const silverLine = silver
-    ? `Silver${profile?.silverUntil ? ` until ${profile.silverUntil.toISOString?.().slice(0, 10) || profile.silverUntil}` : ''}`
-    : 'No Silver on this session. Unlock from a card Best Deal for 20 site PKN.';
-
   const name = accountHeading(user, profile);
   const photoUrl = profile?.photoUrl || '';
   const uid = profile?.uid || user?.uid || '';
+  const silverUntil = profile?.silverUntil
+    ? (profile.silverUntil.toISOString?.().slice(0, 10) || profile.silverUntil)
+    : '';
+
+  const stripeAction = (
+    <StripeConnectButton
+      shipFromCountry={shipFromCountry}
+      onCountrySaved={setShipFromCountry}
+      onError={setStripeError}
+    />
+  );
 
   return (
-    <div className="page desk">
+    <div className="page desk profile-page">
       <PageHead
         kicker="Account"
-        title={<DisplayNameEditor onSaved={setToast} />}
+        title={(
+          <span className="profile-title-row">
+            <DisplayNameEditor onSaved={setToast} />
+            {silver ? (
+              <span className="profile-silver-chip" title={silverUntil ? `Silver until ${silverUntil}` : 'Silver'}>
+                Silver{silverUntil ? ` · ${silverUntil}` : ''}
+              </span>
+            ) : null}
+          </span>
+        )}
         meta={<UsernameEditor onSaved={setToast} />}
         lede={accountLede(user)}
         leading={(
@@ -102,16 +120,24 @@ export default function Profile() {
         <Metric value={address ? shortAddress(address) : '—'} label="Wallet" />
       </MetricGrid>
       <div className="profile-grid">
-        <DeskPanel title="Status">
-          <p className="page-lede">{silverLine}{admin ? ' · Admin' : ''}</p>
-        </DeskPanel>
-        <DeskPanel title="CardTrader">
-          <CardTraderConnectPanel />
+        {admin ? (
+          <DeskPanel title="Status">
+            <p className="page-lede">Admin</p>
+          </DeskPanel>
+        ) : null}
+        <DeskPanel title="Connections">
+          <CardTraderConnectPanel stripeAction={stripeAction} />
         </DeskPanel>
         <DeskPanel title="Telegram">
           <TelegramConnectPanel />
         </DeskPanel>
-        <SellerShippingSettings />
+        <SellerShippingSettings
+          shipFromCountry={shipFromCountry}
+          onCountryChange={setShipFromCountry}
+          stripeError={stripeError}
+          onStripeError={setStripeError}
+          hideStripeButton
+        />
         <DeskPanel flush title="Go to">
           <div className="thread-list">
             <Thread to="/marketplace/watchlist" title="Watchlist" meta="Local list on this browser" />

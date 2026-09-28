@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import { sendPokoChat } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { listConversations, sendChatMessage, uploadChatPhoto } from '../chat-client.js';
 import { chatTime } from '../chat-format.js';
@@ -25,12 +26,23 @@ import {
 } from '../chat-dock-store.js';
 import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
+import { MESSAGES_UNREAD_EVENT, MESSAGES_UNREAD_REFRESH_MS, unreadMessagesCount } from '../messages-unread.js';
+import {
+  buildPokoPageContext,
+  defaultPokoDeskPrompt,
+  isPokoPeer,
+  POKO_DISPLAY,
+  POKO_PEER,
+  readPokoHistory,
+  resolvePokoCards,
+  writePokoHistory,
+} from '../poko-chat.js';
 import { useChatThread } from '../use-chat-thread.js';
 import ChatListingTag from './ChatListingTag.jsx';
 import ChatPhotos from './ChatPhotos.jsx';
 import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
+import mascotUrl from '../assets/pokoin-mascot@8x.png';
 import '../chat-dock.css';
-import PokoAssistantPanel from './PokoAssistantPanel.jsx';
 
 function draftLine(row, drafts) {
   const tags = drafts?.[row.peerUid]?.tags || [];
@@ -81,12 +93,31 @@ function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
   return (
     <div className="chat-dock-list" role="list">
       {onPoko ? (
-        <div className="chat-dock-row poko-row">
+        <div
+          role="listitem"
+          className={`chat-dock-row poko-row is-poko${overUid === 'poko' ? ' is-over' : ''}`}
+          onDragOver={(event) => {
+            if (![...(event.dataTransfer?.types || [])].includes(LISTING_DRAG_TYPE)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setOverUid('poko');
+          }}
+          onDragLeave={() => setOverUid('')}
+          onDrop={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setOverUid('');
+            const reference = readListingDrag(event);
+            if (reference) dropOnConversation(POKO_PEER, POKO_DISPLAY, reference);
+          }}
+        >
           <button type="button" onClick={onPoko}>
-            <span className="chat-dock-avatar poko-avatar" aria-hidden="true">P</span>
+            <span className="chat-dock-avatar is-poko poko-avatar" aria-hidden="true">
+              <img src={mascotUrl} alt="" />
+            </span>
             <span className="chat-dock-row-copy">
-              <strong>Poko ✨</strong>
-              <em>Hi! I'm your Pokoin assistant — tap to chat</em>
+              <strong>{POKO_DISPLAY}</strong>
+              <em>Ask about cards — drop one to attach</em>
             </span>
           </button>
         </div>
@@ -124,32 +155,85 @@ function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
             </button>
           </div>
         );
-      }) : seen ? <p className="chat-dock-hint">No conversations yet. Drop a card on someone after you message them.</p> : null}
+      }) : seen ? <p className="chat-dock-hint">No people yet — talk to Poko above, or message a seller.</p> : null}
     </div>
   );
 }
 
 export default function ChatDock() {
   const { signedIn, getBearer, user, profile } = useAuth();
+  const location = useLocation();
   const lang = useSearchLang();
   const [dock, setDock] = useState(getChatDock);
-  const [pokoOpen, setPokoOpen] = useState(false);
   const [text, setText] = useState('');
   const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [over, setOver] = useState(false);
   const [showDropHint, setShowDropHint] = useState(chatDropHintVisible);
+  const [unread, setUnread] = useState(0);
+  const [pokoEvents, setPokoEvents] = useState(() => readPokoHistory(user?.uid || ''));
+  const logRef = useRef(null);
   const textRef = useRef('');
   textRef.current = text;
+  const poko = isPokoPeer(dock.peer);
   const thread = useChatThread({
     peerUid: dock.peer,
     signedIn,
     getBearer,
-    enabled: dock.open && dock.view === 'thread',
+    enabled: dock.open && dock.view === 'thread' && !poko,
   });
 
   useEffect(() => subscribeChatDock(setDock), []);
+
+  useEffect(() => {
+    if (!poko || !user?.uid) return;
+    setPokoEvents(readPokoHistory(user.uid));
+  }, [poko, user?.uid, dock.open, dock.view]);
+
+  useEffect(() => {
+    if (!poko || !user?.uid) return;
+    writePokoHistory(user.uid, pokoEvents);
+  }, [poko, user?.uid, pokoEvents]);
+
+  useEffect(() => {
+    if (!poko) return;
+    const node = logRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [poko, pokoEvents, busy]);
+
+  useEffect(() => {
+    function onUnread(event) {
+      if (typeof event?.detail?.count === 'number') setUnread(event.detail.count);
+    }
+    window.addEventListener(MESSAGES_UNREAD_EVENT, onUnread);
+    return () => window.removeEventListener(MESSAGES_UNREAD_EVENT, onUnread);
+  }, []);
+
+  useEffect(() => {
+    if (!signedIn || dock.open) {
+      if (!signedIn) setUnread(0);
+      return undefined;
+    }
+    let live = true;
+    const refresh = async () => {
+      try {
+        const token = await getBearer();
+        if (!token || !live) return;
+        const result = await listConversations(token);
+        if (!live) return;
+        setUnread(unreadMessagesCount(result?.conversations || []));
+      } catch (_) {
+        /* badge is best-effort */
+      }
+    };
+    refresh();
+    const timer = setInterval(refresh, MESSAGES_UNREAD_REFRESH_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [signedIn, dock.open, getBearer, location.pathname]);
 
   useEffect(() => {
     if (dock.view === 'thread') setText(dock.text || '');
@@ -181,9 +265,30 @@ export default function ChatDock() {
     };
   }, []);
 
-  if (!dock.open) return null;
+  if (!dock.open) {
+    return (
+      <button
+        type="button"
+        className="chat-fab"
+        aria-label={unread > 0 ? `Open messages, ${unread} unread` : 'Open messages'}
+        onClick={() => openChatList()}
+      >
+        <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M12 3C6.48 3 2 6.92 2 11.75c0 2.68 1.35 5.08 3.48 6.74V21l3.2-1.76c1.05.3 2.17.46 3.32.46 5.52 0 10-3.92 10-8.75S17.52 3 12 3zm-1.1 10.5H7.8v-1.5h3.1v1.5zm5.3 0h-3.1v-1.5h3.1v1.5zm0-3.25H7.8V8.75h8.4v1.5z"
+          />
+        </svg>
+        {unread > 0 ? <span className="chat-fab-badge" aria-hidden="true">{unread > 9 ? '9+' : unread}</span> : null}
+      </button>
+    );
+  }
 
-  const label = dock.peerLabel && dock.peerLabel !== 'Seller' ? `@${dock.peerLabel}` : 'Seller';
+  const label = poko
+    ? POKO_DISPLAY
+    : (dock.peerLabel && dock.peerLabel !== 'Seller' ? `@${dock.peerLabel}` : 'Seller');
+  const events = poko ? pokoEvents : thread.events;
+  const activeLogRef = poko ? logRef : thread.logRef;
 
   async function addPhotos(event) {
     const files = [...(event.target.files || [])];
@@ -211,19 +316,65 @@ export default function ChatDock() {
   async function send(event) {
     event?.preventDefault();
     const message = text.trim();
-    if (busy || (!message && !dock.tags.length && !photos.length)) return;
+    const deskCards = resolvePokoCards({ tags: dock.tags, pathname: location.pathname });
+    if (busy || (!message && !dock.tags.length && !photos.length && !deskCards.length)) return;
     setBusy(true);
     setError('');
     try {
       const token = await getBearer();
       if (!token) throw new Error('Sign in to send a message.');
-      await sendChatMessage('', message, token, dock.tags, dock.peer, photos);
-      setText('');
-      setPhotos([]);
-      clearChatTags();
-      await thread.refresh();
+      if (poko) {
+        const attachedCards = deskCards;
+        const attachedImages = photos.slice();
+        const pageContext = buildPokoPageContext({
+          pathname: location.pathname,
+          cards: attachedCards,
+          images: attachedImages,
+        });
+        const mine = {
+          id: `local-${Date.now()}`,
+          mine: true,
+          text: message,
+          listings: dock.tags.map((row) => ({ ...row })),
+          images: attachedImages,
+          createdAt: new Date().toISOString(),
+        };
+        setPokoEvents((current) => [...current, mine]);
+        setText('');
+        setPhotos([]);
+        clearChatTags();
+        const result = await sendPokoChat({
+          message: message || (attachedCards[0]
+            ? defaultPokoDeskPrompt(attachedCards[0])
+            : attachedImages.length ? 'What can you tell me about this photo?' : ''),
+          cards: attachedCards,
+          images: attachedImages,
+          pageContext,
+          sessionId: user?.uid || '',
+        }, token);
+        setPokoEvents((current) => [...current, {
+          id: `poko-${Date.now()}`,
+          mine: false,
+          text: result?.reply || '…',
+          createdAt: new Date().toISOString(),
+        }]);
+      } else {
+        await sendChatMessage('', message, token, dock.tags, dock.peer, photos);
+        setText('');
+        setPhotos([]);
+        clearChatTags();
+        await thread.refresh();
+      }
     } catch (err) {
       setError(err.message || 'Message was not sent.');
+      if (poko) {
+        setPokoEvents((current) => [...current, {
+          id: `poko-err-${Date.now()}`,
+          mine: false,
+          text: 'Sorry — I could not reply just now. Try again in a moment.',
+          createdAt: new Date().toISOString(),
+        }]);
+      }
     } finally {
       setBusy(false);
     }
@@ -255,44 +406,55 @@ export default function ChatDock() {
       }}
     >
       <header className="chat-dock-head">
-        {pokoOpen || dock.view === 'thread' ? (
-          <button type="button" aria-label="Conversations" onClick={() => (pokoOpen ? setPokoOpen(false) : openChatList(text))}>‹</button>
+        {dock.view === 'thread' ? (
+          <button type="button" aria-label="Conversations" onClick={() => openChatList(text)}>‹</button>
         ) : <span />}
-        <strong>{pokoOpen ? 'Poko ✨' : (
-          dock.view === 'thread' && dock.peerLabel && dock.peerLabel !== 'Seller' ? (
+        <strong className={poko ? 'chat-dock-person is-poko' : undefined}>
+          {poko ? (
+            <>
+              <span className="chat-dock-avatar is-poko poko-avatar" aria-hidden="true">
+                <img src={mascotUrl} alt="" />
+              </span>
+              {POKO_DISPLAY}
+            </>
+          ) : dock.view === 'thread' && dock.peerLabel && dock.peerLabel !== 'Seller' ? (
             <Link to={`/marketplace/${lang}/users/${encodeURIComponent(dock.peerLabel)}`}>{label}</Link>
-          ) : (dock.view === 'thread' ? label : 'Messages')
-        )}</strong>
+          ) : (dock.view === 'thread' ? label : 'Messages')}
+        </strong>
         <button type="button" aria-label="Close chat" onClick={() => closeChatDock(text)}>×</button>
       </header>
-      {pokoOpen ? (
-        <PokoAssistantPanel />
-      ) : dock.view === 'list' ? (
-        <ConversationList signedIn={signedIn} getBearer={getBearer} onPoko={() => setPokoOpen(true)} onOpen={(row) => openThread(row.peerUid, row.peerUsername, text)} />
+      {dock.view === 'list' ? (
+        <ConversationList
+          signedIn={signedIn}
+          getBearer={getBearer}
+          onPoko={() => openThread(POKO_PEER, POKO_DISPLAY, text)}
+          onOpen={(row) => openThread(row.peerUid, row.peerUsername, text)}
+        />
       ) : (
         <>
-          <div className="chat-dock-log" ref={thread.logRef} onScroll={thread.onScroll}>
-            {thread.events.map((event) => (
-              <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}`}>
+          <div className="chat-dock-log" ref={activeLogRef} onScroll={poko ? undefined : thread.onScroll}>
+            {events.map((event) => (
+              <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}${!event.mine && poko ? ' is-poko' : ''}`}>
                 {event.text ? <p>{event.text}</p> : null}
                 <ChatPhotos urls={event.images || []} />
-                {(event.listings || []).length ? (
+                {(event.listings || event.cards || []).length ? (
                   <span className="chat-tags">
-                    {(event.listings || []).map((row, index) => (
+                    {(event.listings || event.cards || []).map((row, index) => (
                       <ChatListingTag
                         key={`${tagKey(row)}:${index}`}
                         row={row}
-                        peer={{ uid: dock.peer, username: dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '' }}
+                        peer={{ uid: dock.peer, username: poko ? POKO_PEER : (dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '') }}
                         me={{ uid: user?.uid, username: profile?.username }}
                       />
                     ))}
                   </span>
                 ) : null}
-                {!event.text && !(event.listings || []).length && !(event.images || []).length ? <p>…</p> : null}
+                {!event.text && !(event.listings || event.cards || []).length && !(event.images || []).length ? <p>…</p> : null}
               </div>
             ))}
+            {poko && busy ? <p className="chat-dock-hint">Poko is checking the market…</p> : null}
           </div>
-          {error || thread.error ? <p className="chat-dock-error" role="alert">{error || thread.error}</p> : null}
+          {error || (!poko && thread.error) ? <p className="chat-dock-error" role="alert">{error || thread.error}</p> : null}
           {signedIn && dock.peer ? (
             <form className="chat-dock-compose" onSubmit={send}>
               {dock.tags.length ? (
@@ -301,16 +463,16 @@ export default function ChatDock() {
                     <ChatListingTag
                       key={tagKey(row)}
                       row={row}
-                        onRemove={removeChatTag}
-                        onQty={setChatTagQty}
-                      peer={{ uid: dock.peer, username: dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '' }}
+                      onRemove={removeChatTag}
+                      onQty={setChatTagQty}
+                      peer={{ uid: dock.peer, username: poko ? POKO_PEER : (dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '') }}
                       me={{ uid: user?.uid, username: profile?.username }}
                     />
                   ))}
                 </div>
               ) : showDropHint ? (
                 <p className="chat-dock-hint chat-dock-hint-row">
-                  <span>Drop a card on a conversation to attach it.</span>
+                  <span>Drop a card here to attach it.</span>
                   <button
                     type="button"
                     className="chat-hint-x"
@@ -339,7 +501,7 @@ export default function ChatDock() {
                   rows="2"
                   maxLength={1000}
                   value={text}
-                  placeholder={dock.peerLabel && dock.peerLabel !== 'Seller' ? `Message @${dock.peerLabel}` : 'Message'}
+                  placeholder={poko ? 'Message Poko' : (dock.peerLabel && dock.peerLabel !== 'Seller' ? `Message @${dock.peerLabel}` : 'Message')}
                   onChange={(event) => setText(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
@@ -354,7 +516,7 @@ export default function ChatDock() {
           ) : (
             <p className="chat-dock-hint">
               <Link to={`/auth?from=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in</Link>
-              {' '}to message this seller.
+              {' '}to message {poko ? 'Poko' : 'this seller'}.
             </p>
           )}
         </>

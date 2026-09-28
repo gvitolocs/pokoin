@@ -80,7 +80,7 @@ function progressPercent(processed, total) {
 }
 
 /** CardTrader connect / disconnect / sync panel for Profile. */
-export default function CardTraderConnectPanel() {
+export default function CardTraderConnectPanel({ stripeAction = null }) {
   const [status, setStatus] = useState(null);
   const [token, setToken] = useState('');
   const [tokenVisible, setTokenVisible] = useState(false);
@@ -306,9 +306,10 @@ export default function CardTraderConnectPanel() {
             </div>
           ) : null}
           <div className="ct-connect-actions">
-            <button type="button" className="btn" disabled={busy || syncing} onClick={onSync}>
+            <button type="button" className="btn btn-cardtrader" disabled={busy || syncing} onClick={onSync}>
               {syncing ? 'Syncing…' : busy ? 'Working…' : 'Sync CardTrader'}
             </button>
+            {stripeAction}
             {oneDayReady
               ? <a className="btn ghost" href={DASHBOARD_HOME}>Open dashboard</a>
               : <Link className="btn ghost" to="/inventory">Open inventory</Link>}
@@ -385,13 +386,16 @@ export default function CardTraderConnectPanel() {
               </div>
             </div>
           ) : null}
-          <button
-            type="submit"
-            className="btn"
-            disabled={busy || syncing || pasted.token.length < MIN_CARDTRADER_TOKEN_LENGTH}
-          >
-            {busy || syncing ? 'Connecting…' : 'Connect CardTrader'}
-          </button>
+          <div className="ct-connect-actions">
+            <button
+              type="submit"
+              className="btn btn-cardtrader"
+              disabled={busy || syncing || pasted.token.length < MIN_CARDTRADER_TOKEN_LENGTH}
+            >
+              {busy || syncing ? 'Connecting…' : 'Connect CardTrader'}
+            </button>
+            {stripeAction}
+          </div>
         </form>
       ) : null}
       {message ? <p className="ct-connect-ok">{message}</p> : null}

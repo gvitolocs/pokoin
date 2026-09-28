@@ -1110,6 +1110,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/sales/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/sales",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/collection/",
       "destination": "/market/index.html"
     },

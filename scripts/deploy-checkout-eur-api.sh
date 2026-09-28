@@ -18,6 +18,8 @@ FILES=(
   _checkout_core.js
   _checkout_core.test.js
   _address_crypto.js
+  _client_country.js
+  _client_country.test.js
   shipping-rates.json
   account-addresses.js
   marketplace-checkout-quote.js
@@ -26,6 +28,15 @@ FILES=(
   create-order-checkout-session.js
   _marketplace_order_stripe.js
   _marketplace_order_stripe.test.js
+  _eur_order_inventory.js
+  _eur_order_inventory.test.js
+  _native_sales.js
+  _native_sales.test.js
+  _order_refund.js
+  _order_refund.test.js
+  _firestore_fake.js
+  eur-orders-sweep.js
+  marketplace-native-sales.js
   stripe-webhook.js
   marketplace-orders.js
   marketplace-listings.js
@@ -48,10 +59,15 @@ say "unit tests"
 ADDRESS_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
   node --test \
     "$SRC/_checkout_core.test.js" \
+    "$SRC/_client_country.test.js" \
     "$SRC/_marketplace_order_stripe.test.js" \
+    "$SRC/_eur_order_inventory.test.js" \
+    "$SRC/_native_sales.test.js" \
+    "$SRC/_order_refund.test.js" \
     "$SRC/patch-route-manifest.test.js"
 for file in account-addresses.js marketplace-checkout-quote.js marketplace-seller-settings.js \
-  stripe-connect-onboard.js create-order-checkout-session.js stripe-webhook.js marketplace-orders.js; do
+  stripe-connect-onboard.js create-order-checkout-session.js stripe-webhook.js marketplace-orders.js \
+  _eur_order_inventory.js _native_sales.js _order_refund.js eur-orders-sweep.js marketplace-native-sales.js; do
   node --check "$SRC/$file"
 done
 
@@ -60,7 +76,7 @@ say "Pi release $release"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .checkout-eur-previous; cp -a \$prev '$release'; mkdir -p '$release/api'"
 tar -C "$SRC" -cf - "${FILES[@]}" \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
-ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'; rm -f '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json' '/srv/pokoin/api/$release/api/'*.test.js"
+ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'; rm -f '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json' '/srv/pokoin/api/$release/api/'*.test.js '/srv/pokoin/api/$release/api/_firestore_fake.js'"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-checkout-eur-commit'"
 
 # Ensure ADDRESS_ENCRYPTION_KEY exists in the container env (idempotent).

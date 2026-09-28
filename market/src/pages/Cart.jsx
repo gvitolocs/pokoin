@@ -4,12 +4,16 @@ import { formatPkn } from '../api.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { useAuth } from '../auth.jsx';
 import { useCart } from '../cart.jsx';
+import { currencyFromLocale, formatLocalFromPkn } from '../pkn.js';
 import CardArt from '../components/CardArt.jsx';
 import { DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
 export default function Cart() {
   const { items, count, totalPkn, setQty, removeItem, clear } = useCart();
-  const { signedIn } = useAuth();
+  const { signedIn, availablePkn } = useAuth();
+  const canPayWithPkn = Number(availablePkn) >= Number(totalPkn);
+  const showFiat = signedIn && !canPayWithPkn && totalPkn > 0;
+  const displayCurrency = currencyFromLocale();
 
   useEffect(() => {
     document.title = 'Cart · Pokoin';
@@ -20,7 +24,7 @@ export default function Cart() {
       <PageHead
         kicker="Shop"
         title="Cart"
-        lede={`${count} ${count === 1 ? 'item' : 'items'} on this browser. Checkout pays PKN.`}
+        lede={`${count} ${count === 1 ? 'item' : 'items'} on this browser. Checkout pays with site PKN or card.`}
       >
         {items.length ? <button className="btn ghost" type="button" onClick={clear}>Clear</button> : null}
         <Link className="btn ghost" to="/marketplace">Keep shopping</Link>
@@ -62,14 +66,22 @@ export default function Cart() {
                   <span className="sr-only">Qty</span>
                   <input inputMode="numeric" max={row.stock || 1} value={row.qty} onChange={(event) => setQty(row.id, event.target.value)} />
                 </label>
-                <strong className="bag-price">{formatPkn(row.pricePkn * row.qty)}</strong>
+                <strong className="bag-price">
+                  {showFiat
+                    ? formatLocalFromPkn(row.pricePkn * row.qty, displayCurrency)
+                    : formatPkn(row.pricePkn * row.qty)}
+                </strong>
                 <button className="bag-remove" type="button" onClick={() => removeItem(row.id)}>Remove</button>
               </article>
             ))}
           </div>
           <div className="bag-total">
-            <span className="page-lede" style={{ maxWidth: 'none' }}>Estimated total</span>
-            <strong>{formatPkn(totalPkn)}</strong>
+            <span className="page-lede" style={{ maxWidth: 'none' }}>
+              {showFiat ? `Estimated (${displayCurrency} from PKN)` : 'Estimated total'}
+            </span>
+            <strong>
+              {showFiat ? formatLocalFromPkn(totalPkn, displayCurrency) : formatPkn(totalPkn)}
+            </strong>
           </div>
         </DeskPanel>
       )}

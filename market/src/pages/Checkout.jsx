@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  cancelEurOrder,
   createMarketplaceOrder,
   createOrderCheckoutSession,
   fetchAccountAddresses,
@@ -15,7 +16,9 @@ import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
 import { checkoutFees } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
-import { fiatFromPkn } from '../pkn.js';
+import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
+import { SHIP_FROM_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
+import { pknFromEurCents, previewShipmentCents, shippingServiceOptions } from '../shipping-quote.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 
@@ -26,11 +29,6 @@ function FeeTip({ label, children }) {
       <span className="fee-tip-pop" role="tooltip">{children}</span>
     </span>
   );
-}
-
-function formatEurCents(cents) {
-  const n = Number(cents) || 0;
-  return `€${(n / 100).toFixed(2)}`;
 }
 
 function snapshot(row, fulfillmentMode, notes) {
@@ -68,19 +66,29 @@ function cartPayload(items) {
   }));
 }
 
-const EMPTY_ADDRESS = {
-  fullName: '',
-  addressLine1: '',
-  addressLine2: '',
-  postalCode: '',
-  city: '',
-  countryCode: 'IT',
-  phoneNumber: '',
-};
+function emptyAddressDraft() {
+  const localeCountry = countryFromLocale();
+  const known = SHIP_FROM_COUNTRIES.some((row) => row.code === localeCountry);
+  return {
+    fullName: '',
+    addressLine1: '',
+    addressLine2: '',
+    postalCode: '',
+    city: '',
+    countryCode: known ? localeCountry : 'DK',
+    phoneNumber: '',
+  };
+}
+
+function selectedAddressCountry(addresses, addressId) {
+  const row = (addresses || []).find((item) => item.id === addressId);
+  return String(row?.countryCode || '').trim().toUpperCase();
+}
 
 export default function Checkout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { ready, signedIn, user, getBearer, availablePkn } = useAuth();
   const { items, count, subtotalPkn, canNftOnly, clear } = useCart();
   const [nftOnly, setNftOnly] = useState(false);
@@ -89,28 +97,162 @@ export default function Checkout() {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [orderId, setOrderId] = useState('');
   const [payMethod, setPayMethod] = useState('stripe'); // stripe | pkn
   const [addresses, setAddresses] = useState([]);
   const [addressId, setAddressId] = useState('');
-  const [draft, setDraft] = useState(EMPTY_ADDRESS);
+  const [draft, setDraft] = useState(emptyAddressDraft);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState('');
+  const [shippingService, setShippingService] = useState('tracked'); // tracked | untracked
+  const stripeCancelled = searchParams.get('cancelled') === '1';
+  const cancelledOrderId = String(searchParams.get('order') || '').trim();
 
   const nft = nftOnly && canNftOnly;
-  const shippingPkn = nft ? 0 : (items.length ? CHECKOUT_SHIPPING_PKN : 0);
+  const buyerCountry = String(
+    selectedAddressCountry(addresses, addressId) || draft.countryCode || 'DK',
+  ).toUpperCase();
+  const shippingTracked = shippingService !== 'untracked';
+
+  const sellerParcels = useMemo(() => {
+    const origins = quote?.sellerOrigins || {};
+    const bySeller = new Map();
+    for (const row of items) {
+      const sid = String(row.sellerUid || '');
+      const fromProfile = String(origins[sid] || '').toUpperCase();
+      const list = bySeller.get(sid) || {
+        sellerId: sid,
+        sellerName: row.sellerName || '',
+        count: 0,
+        from: fromProfile || String(row.sellerCountry || '').toUpperCase(),
+      };
+      list.count += Number(row.qty) || 0;
+      list.from = list.from || fromProfile || String(row.sellerCountry || '').toUpperCase();
+      list.sellerName = list.sellerName || row.sellerName || '';
+      bySeller.set(sid, list);
+    }
+    return [...bySeller.values()];
+  }, [items, quote?.sellerOrigins]);
+
+  const shipOptions = useMemo(() => {
+    if (nft || !sellerParcels.length) return [];
+    for (const group of sellerParcels) {
+      if (!group.from) continue;
+      const options = shippingServiceOptions({
+        fromCountry: group.from,
+        toCountry: buyerCountry,
+        cardCount: group.count,
+      });
+      if (options.length) return options;
+    }
+    return [];
+  }, [nft, sellerParcels, buyerCountry]);
+
+  const shippingPreviewCents = useMemo(() => {
+    if (nft || !items.length) return 0;
+    if (quote && Number.isFinite(Number(quote.shippingTotalCents))) {
+      return Number(quote.shippingTotalCents);
+    }
+    let total = 0;
+    let missing = false;
+    for (const group of sellerParcels) {
+      if (!group.from) {
+        missing = true;
+        break;
+      }
+      const cents = previewShipmentCents({
+        fromCountry: group.from,
+        toCountry: buyerCountry,
+        cardCount: group.count,
+        tracked: shippingTracked,
+      });
+      if (cents == null) {
+        missing = true;
+        break;
+      }
+      total += cents;
+    }
+    return missing ? null : total;
+  }, [nft, items.length, sellerParcels, buyerCountry, shippingTracked, quote]);
+
+  const shippingPkn = nft
+    ? 0
+    : (shippingPreviewCents != null
+      ? pknFromEurCents(shippingPreviewCents)
+      : (items.length ? CHECKOUT_SHIPPING_PKN : 0));
   const fees = checkoutFees(subtotalPkn, { insurance: insurance && !nft, shippingPkn });
   const { commissionPkn, insurancePkn, taxPkn, totalPkn, coveragePkn } = fees;
   const missingListing = items.some((row) => !row.listingId);
+  const canPayWithPkn = Number(availablePkn) >= Number(totalPkn);
+  const preferFiat = !nft && !canPayWithPkn;
+  const displayCurrency = currencyForCountry(buyerCountry) || currencyFromLocale();
   const eurSubtotal = useMemo(
     () => Math.round((Number(fiatFromPkn(subtotalPkn, 'EUR')) || 0) * 100),
     [subtotalPkn],
   );
+  const canPayStripe = !nft
+    && payMethod === 'stripe'
+    && Boolean(addressId)
+    && Boolean(quote?.grandTotalCents)
+    && !missingListing
+    && !quote?.preview;
+
+  function moneyFromPkn(pkn) {
+    return preferFiat || payMethod === 'stripe'
+      ? formatLocalFromPkn(pkn, displayCurrency)
+      : formatPkn(pkn);
+  }
+
+  function moneyFromEurCents(cents) {
+    return formatLocalFromEurCents(cents, displayCurrency);
+  }
+
+  useEffect(() => {
+    if (!shipOptions.length) return;
+    if (!shipOptions.some((row) => row.id === shippingService)) {
+      setShippingService(shipOptions[0].id);
+    }
+  }, [shipOptions, shippingService]);
+
+  useEffect(() => {
+    if (preferFiat && payMethod === 'pkn') setPayMethod('stripe');
+  }, [preferFiat, payMethod]);
 
   useEffect(() => {
     document.title = 'Checkout · Pokoin';
   }, []);
+
+  useEffect(() => {
+    if (!stripeCancelled) return;
+    setNotice('Stripe payment was cancelled. Nothing was charged and your cart is still here.');
+    setBusy(false);
+    setSearchParams((prev) => {
+      if (!prev.has('cancelled') && !prev.has('order')) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete('cancelled');
+      next.delete('order');
+      return next;
+    }, { replace: true });
+  }, [stripeCancelled, setSearchParams]);
+
+  // Stripe Cancel → close that session now so the held cards go straight back
+  // on sale instead of waiting out the 30-minute hold.
+  useEffect(() => {
+    if (!stripeCancelled || !cancelledOrderId || !signedIn) return;
+    (async () => {
+      try {
+        const token = await getBearer();
+        await cancelEurOrder(cancelledOrderId, token);
+      } catch (err) {
+        if (err?.body?.code === 'already_paid') {
+          navigate('/orders', { replace: true });
+        }
+        // Otherwise the hold simply expires on its own.
+      }
+    })();
+  }, [stripeCancelled, cancelledOrderId, signedIn, getBearer, navigate]);
 
   useEffect(() => {
     if (!signedIn || nft) return undefined;
@@ -133,7 +275,7 @@ export default function Checkout() {
   }, [signedIn, nft, getBearer]);
 
   useEffect(() => {
-    if (nft || payMethod !== 'stripe' || !addressId || !items.length || missingListing) {
+    if (nft || payMethod !== 'stripe' || !items.length || missingListing || !buyerCountry) {
       setQuote(null);
       setQuoteError('');
       return undefined;
@@ -144,7 +286,9 @@ export default function Checkout() {
         const token = await getBearer();
         const data = await quoteMarketplaceCheckout({
           items: cartPayload(items),
-          shippingAddressId: addressId,
+          ...(addressId ? { shippingAddressId: addressId } : { toCountry: buyerCountry }),
+          shippingService,
+          tracked: shippingTracked,
         }, token);
         if (cancelled) return;
         setQuote(data);
@@ -159,7 +303,7 @@ export default function Checkout() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [nft, payMethod, addressId, items, missingListing, getBearer]);
+  }, [nft, payMethod, addressId, buyerCountry, items, missingListing, getBearer, shippingService, shippingTracked]);
 
   if (!ready) {
     return <SessionWait />;
@@ -179,7 +323,7 @@ export default function Checkout() {
       setAddresses((current) => [saved, ...current.filter((row) => row.id !== saved.id)]);
       setAddressId(saved.id);
       setShowAddressForm(false);
-      setDraft(EMPTY_ADDRESS);
+      setDraft(emptyAddressDraft());
     } catch (err) {
       setError(err.message || 'Could not save address.');
     } finally {
@@ -238,14 +382,19 @@ export default function Checkout() {
         buyerEmail: user?.email || '',
         items: cartPayload(items),
         shippingAddressId: addressId,
+        shippingService,
+        tracked: shippingTracked,
       }, token);
       if (!data.checkoutUrl) {
         throw new Error('Stripe did not return a checkout URL.');
       }
-      clear();
+      // Keep the cart until Stripe success (/orders?eur_session=…) so cancel can return here.
       window.location.assign(data.checkoutUrl);
     } catch (err) {
-      setError(err.message || 'Could not open Stripe.');
+      const code = err?.body?.code;
+      setError(code === 'price_mismatch' || err?.status === 409
+        ? `${err.message} Refresh the card in your cart and try again — nothing was charged.`
+        : (err.message || 'Could not open Stripe.'));
       setBusy(false);
     }
   }
@@ -260,7 +409,7 @@ export default function Checkout() {
         lede={nft
           ? 'You pay with your site balance and the cards go into your collection. Nothing is mailed.'
           : payMethod === 'stripe'
-            ? 'Pay in EUR with Stripe. Shipping is calculated per seller from your address.'
+            ? `Prices in ${displayCurrency}. Stripe charges EUR; shipping is quoted from your address.`
             : `${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}
       >
         <Link className="btn ghost" to="/cart">Cart</Link>
@@ -270,11 +419,20 @@ export default function Checkout() {
         <Metric value={count} label="Items" />
         <Metric value={formatPknNumber(availablePkn)} label="Site PKN" />
         <Metric
-          value={payMethod === 'stripe' && quote ? formatEurCents(quote.grandTotalCents) : formatPkn(totalPkn)}
+          value={
+            payMethod === 'stripe'
+              ? (quote
+                ? moneyFromEurCents(quote.grandTotalCents)
+                : (shippingPreviewCents != null
+                  ? moneyFromEurCents(eurSubtotal + shippingPreviewCents)
+                  : `${moneyFromPkn(subtotalPkn)} + ship`))
+              : formatPkn(totalPkn)
+          }
           label="Due"
         />
       </MetricGrid>
       <Alert>{error}</Alert>
+      {notice ? <p className="desk-ok">{notice}</p> : null}
       {orderId ? (
         <p className="desk-ok">
           Paid order {orderId}.{' '}
@@ -283,8 +441,12 @@ export default function Checkout() {
         </p>
       ) : null}
       {!items.length && !orderId ? (
-        <EmptyDesk title="Nothing to pay" lede="Add a native listing from Shop, then return here.">
-          <Link className="btn" to="/marketplace">Marketplace</Link>
+        <EmptyDesk
+          title="Cart is empty"
+          lede="Add a listing from Shop, then come back to pay with card or site PKN."
+        >
+          <Link className="btn" to="/marketplace">Browse marketplace</Link>
+          <Link className="btn ghost" to="/cart">Open cart</Link>
         </EmptyDesk>
       ) : null}
       {items.length ? (
@@ -308,7 +470,9 @@ export default function Checkout() {
                     <strong className="bag-name">{row.name}</strong>
                     <p className="bag-seller">{row.condition} · {row.sellerName} · qty {row.qty}</p>
                   </div>
-                  <strong className="bag-price">{formatPkn((Number(row.pricePkn) || 0) * (Number(row.qty) || 1))}</strong>
+                  <strong className="bag-price">
+                    {moneyFromPkn((Number(row.pricePkn) || 0) * (Number(row.qty) || 1))}
+                  </strong>
                 </article>
               ))}
             </div>
@@ -318,30 +482,77 @@ export default function Checkout() {
                 {' '}Digital only. The cards go into your collection and nothing is mailed. Shipping is 0.
               </label>
             ) : (
-              <p className="page-lede">
-                Physical delivery. Shipping is quoted per seller once you choose an address.
-              </p>
+              <>
+                <p className="page-lede">
+                  Physical delivery to {shipFromCountryName(buyerCountry) || buyerCountry}
+                  {sellerParcels[0]?.from
+                    ? ` · from ${sellerParcels.map((g) => shipFromCountryName(g.from) || g.from).filter(Boolean).join(', ')}`
+                    : ''}
+                  {shippingPreviewCents != null
+                    ? ` · ${moneyFromEurCents(shippingPreviewCents)}`
+                    : ''}
+                </p>
+                {shipOptions.length ? (
+                  <div className="checkout-pay" role="radiogroup" aria-label="Shipping service">
+                    <span className="checkout-pay-label">Shipping</span>
+                    {shipOptions.map((option) => (
+                      <label
+                        key={option.id}
+                        className={`checkout-pay-option${shippingService === option.id ? ' is-on' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="shippingService"
+                          checked={shippingService === option.id}
+                          onChange={() => setShippingService(option.id)}
+                        />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <em>
+                            {moneyFromEurCents(option.amountCents)}
+                            {option.serviceName ? ` · ${option.serviceName}` : ''}
+                            {option.fromCountry && option.toCountry
+                              ? ` · ${option.fromCountry} → ${option.toCountry}`
+                              : ''}
+                          </em>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : quoteError ? (
+                  <Alert>{quoteError}</Alert>
+                ) : (
+                  <p className="page-lede">Looking up shipping…</p>
+                )}
+              </>
             )}
             {!nft ? (
-              <div className="sell-field">
-                <span>Pay with</span>
-                <label className="fee-check">
+              <div className="checkout-pay" role="radiogroup" aria-label="Pay with">
+                <span className="checkout-pay-label">Pay with</span>
+                <label className={`checkout-pay-option${payMethod === 'stripe' ? ' is-on' : ''}`}>
                   <input
                     type="radio"
                     name="payMethod"
                     checked={payMethod === 'stripe'}
                     onChange={() => setPayMethod('stripe')}
                   />
-                  Stripe (EUR)
+                  <span>
+                    <strong>Card (Stripe)</strong>
+                    <em>Shown in {displayCurrency} · charged in EUR</em>
+                  </span>
                 </label>
-                <label className="fee-check">
+                <label className={`checkout-pay-option${payMethod === 'pkn' ? ' is-on' : ''}${preferFiat ? ' is-disabled' : ''}`}>
                   <input
                     type="radio"
                     name="payMethod"
                     checked={payMethod === 'pkn'}
+                    disabled={preferFiat}
                     onChange={() => setPayMethod('pkn')}
                   />
-                  Site PKN
+                  <span>
+                    <strong>Site PKN</strong>
+                    <em>{preferFiat ? 'Not enough balance' : 'Pay from your Pokoin balance'}</em>
+                  </span>
                 </label>
               </div>
             ) : null}
@@ -387,7 +598,6 @@ export default function Checkout() {
                     ['addressLine2', 'Address line 2 (optional)'],
                     ['postalCode', 'Postal code'],
                     ['city', 'City'],
-                    ['countryCode', 'Country code (ISO)'],
                     ['phoneNumber', 'Phone (optional)'],
                   ].map(([key, label]) => (
                     <label className="sell-field" key={key}>
@@ -396,10 +606,27 @@ export default function Checkout() {
                         value={draft[key]}
                         onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
                         required={key !== 'addressLine2' && key !== 'phoneNumber'}
-                        maxLength={key === 'countryCode' ? 2 : 180}
+                        maxLength={180}
                       />
                     </label>
                   ))}
+                  <label className="sell-field">
+                    Country
+                    <select
+                      value={draft.countryCode}
+                      onChange={(event) => setDraft((current) => ({
+                        ...current,
+                        countryCode: event.target.value.toUpperCase(),
+                      }))}
+                      required
+                    >
+                      {SHIP_FROM_COUNTRIES.map((row) => (
+                        <option key={row.code} value={row.code}>
+                          {shipFromCountryOptionLabel(row.code)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button className="btn" type="submit" disabled={busy}>
                     {busy ? 'Saving…' : 'Save address'}
                   </button>
@@ -411,56 +638,93 @@ export default function Checkout() {
 
           <DeskPanel
             title="Pay"
-            actions={confirm ? (
-              <>
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={busy || (payMethod === 'stripe' && !quote)}
-                  onClick={() => (payMethod === 'stripe' && !nft ? placeStripe() : placePkn())}
-                >
-                  {busy
-                    ? (payMethod === 'stripe' && !nft ? 'Opening Stripe…' : 'Paying…')
-                    : (payMethod === 'stripe' && !nft ? 'Pay with Stripe' : 'Confirm order')}
-                </button>
-                <button className="btn ghost" type="button" onClick={() => setConfirm(false)}>Review again</button>
-              </>
-            ) : (
-              <>
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={busy || missingListing || (payMethod === 'stripe' && !nft && (!addressId || !quote))}
-                  onClick={() => setConfirm(true)}
-                >
-                  Place order
-                </button>
-                <button className="btn ghost" type="button" onClick={() => navigate('/cart')}>Back to cart</button>
-              </>
-            )}
+            actions={
+              payMethod === 'stripe' && !nft ? (
+                <>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={busy || !canPayStripe}
+                    onClick={() => placeStripe()}
+                  >
+                    {busy ? 'Opening Stripe…' : 'Pay with Stripe'}
+                  </button>
+                  <button className="btn ghost" type="button" onClick={() => navigate('/cart')}>
+                    Back to cart
+                  </button>
+                </>
+              ) : confirm ? (
+                <>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => placePkn()}
+                  >
+                    {busy ? 'Paying…' : 'Confirm order'}
+                  </button>
+                  <button className="btn ghost" type="button" onClick={() => setConfirm(false)}>
+                    Review again
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={busy || missingListing}
+                    onClick={() => setConfirm(true)}
+                  >
+                    Place order
+                  </button>
+                  <button className="btn ghost" type="button" onClick={() => navigate('/cart')}>
+                    Back to cart
+                  </button>
+                </>
+              )
+            }
           >
             {payMethod === 'stripe' && !nft && quote ? (
               <dl className="fee-lines">
-                {(quote.shipments || []).map((shipment) => (
-                  <div key={shipment.sellerId}>
-                    <dt>
-                      Shipping {shipment.fromCountry} → {shipment.toCountry}
-                      {' '}({shipment.itemCount} cards · {shipment.serviceName || 'Standard'})
-                    </dt>
-                    <dd>{formatEurCents(shipment.amountCents)}</dd>
-                  </div>
-                ))}
                 <div>
                   <dt>Items</dt>
-                  <dd>{formatEurCents(quote.itemsSubtotalCents || eurSubtotal)}</dd>
+                  <dd>{moneyFromEurCents(quote.itemsSubtotalCents || eurSubtotal)}</dd>
                 </div>
                 <div>
-                  <dt>Shipping total</dt>
-                  <dd>{formatEurCents(quote.shippingTotalCents)}</dd>
+                  <dt>
+                    Shipping
+                    {quote.shipments?.[0]
+                      ? ` · ${quote.shipments[0].fromCountry} → ${quote.shipments[0].toCountry}`
+                      : ''}
+                  </dt>
+                  <dd>{moneyFromEurCents(quote.shippingTotalCents)}</dd>
                 </div>
                 <div>
                   <dt>Total</dt>
-                  <dd>{formatEurCents(quote.grandTotalCents)}</dd>
+                  <dd>{moneyFromEurCents(quote.grandTotalCents)}</dd>
+                </div>
+              </dl>
+            ) : payMethod === 'stripe' && !nft ? (
+              <dl className="fee-lines">
+                <div>
+                  <dt>Items</dt>
+                  <dd>{moneyFromPkn(subtotalPkn)}</dd>
+                </div>
+                <div>
+                  <dt>Shipping{shippingPreviewCents != null ? ` · ${shipFromCountryName(buyerCountry) || buyerCountry}` : ''}</dt>
+                  <dd>
+                    {shippingPreviewCents != null
+                      ? moneyFromEurCents(shippingPreviewCents)
+                      : (quoteError || 'Looking up shipping…')}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Estimated total</dt>
+                  <dd>
+                    {shippingPreviewCents != null
+                      ? moneyFromEurCents(eurSubtotal + shippingPreviewCents)
+                      : moneyFromPkn(subtotalPkn)}
+                  </dd>
                 </div>
               </dl>
             ) : (
@@ -507,14 +771,15 @@ export default function Checkout() {
                 </div>
               </dl>
             )}
-            {confirm ? (
+            {confirm && payMethod === 'pkn' ? (
               <p className="page-lede">
                 {nft
                   ? `Pay ${formatPkn(totalPkn)} from your site balance. The cards go into your collection. Nothing is mailed.`
-                  : payMethod === 'stripe'
-                    ? `Pay ${formatEurCents(quote?.grandTotalCents)} with Stripe. Shipping quote is frozen on the server.`
-                    : `Pay ${formatPkn(totalPkn)} from your site balance. ${ESCROW_LINE}`}
+                  : `Pay ${formatPkn(totalPkn)} from your site balance. ${ESCROW_LINE}`}
               </p>
+            ) : null}
+            {!canPayStripe && payMethod === 'stripe' && !nft && !addressId ? (
+              <p className="page-lede">Save a shipping address to pay with Stripe.</p>
             ) : null}
             {missingListing ? <Alert>A cart row is missing listingId. Add the offer from Shop again.</Alert> : null}
           </DeskPanel>

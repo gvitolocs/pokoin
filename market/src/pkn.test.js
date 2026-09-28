@@ -4,7 +4,14 @@ import {
   DKK_PER_EUR,
   LIST_CURRENCIES,
   applyLastMedianPrices,
+  countryFromLocale,
+  currencyForCountry,
+  currencyFromLocale,
   fiatFromPkn,
+  formatEurAndDkkFromPkn,
+  formatFiatFromPkn,
+  formatLocalFromEurCents,
+  formatLocalFromPkn,
   formatPkn,
   formatPknNumber,
   idsMissingTilePrice,
@@ -23,6 +30,21 @@ test('PKN prices are digits only so a comma cannot look like a decimal', () => {
   assert.equal(formatPkn(12.5), '12.5 PKN');
   assert.equal(formatPkn(0), '');
   assert.doesNotMatch(formatPkn(2642), /,/);
+});
+
+test('buyer currency follows country; DK shows DKK converted from PKN', () => {
+  assert.equal(currencyForCountry('DK'), 'DKK');
+  assert.equal(currencyForCountry('IT'), 'EUR');
+  assert.equal(currencyForCountry('US'), 'USD');
+  assert.equal(countryFromLocale('da-DK'), 'DK');
+  assert.equal(countryFromLocale('en-US'), 'US');
+  assert.equal(currencyFromLocale('da-DK'), 'DKK');
+  assert.equal(currencyFromLocale('en-US'), 'USD');
+  assert.equal(formatFiatFromPkn(20, 'DKK'), '0.75 DKK');
+  assert.equal(formatFiatFromPkn(20, 'EUR'), '€0.1');
+  assert.equal(formatLocalFromPkn(20, 'DKK'), '0.75 DKK (20 PKN)');
+  assert.equal(formatLocalFromEurCents(650, 'DKK'), '48.75 DKK');
+  assert.equal(formatEurAndDkkFromPkn(20), '0.75 DKK (20 PKN)');
 });
 
 test('EUR and USDT asks use 1 PKN = 0.005', () => {

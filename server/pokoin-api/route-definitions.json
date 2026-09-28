@@ -192,6 +192,33 @@
     }
   },
   {
+    "path": "/api/poko-chat",
+    "file": "poko-chat.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Website Poko assistant chat (Messages + dock). Firebase-authed Hermes proxy only: forwards message + cards + images to POKONTACT_SERVICE_URL/chat. No local FAQ or market-tool fallback.",
+    "auth": "Required Firebase bearer token. Browser never receives the Hermes service token.",
+    "params": {
+      "query": "none",
+      "body": "{ message, cards?: [{ cardId, name, setName, condition, language }], images?: string[], sessionId? }"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "POKONTACT_SERVICE_URL",
+        "POKO_CHAT_URL",
+        "POKO_API_TOKEN",
+        "POKONTACT_SERVICE_TOKEN",
+        "POKO_CHAT_TIMEOUT_MS"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Hermes Poko (peer1 :8789)"
+      ]
+    }
+  },
+  {
     "path": "/api/marketplace-seller-settings",
     "file": "marketplace-seller-settings.js",
     "methods": [
@@ -337,26 +364,23 @@
     }
   },
   {
-    "path": "/api/poko-chat",
-    "file": "poko-chat.js",
+    "path": "/api/marketplace-native-sales",
+    "file": "marketplace-native-sales.js",
     "methods": [
-      "POST"
+      "GET"
     ],
-    "purpose": "Site chat dock pass-through to the real Poko (Hermes /api/poko/chat on peer1). Always forwards — no legacy local brain.",
-    "auth": "Firebase bearer token; uid forwarded as Poko userId so memory is private per user.",
+    "purpose": "Public Sold on Pokoin rows for a card desk: paid native PKN/EUR orders, no buyer identity.",
+    "auth": "Public. cardId required.",
     "params": {
-      "query": "none",
-      "body": "{ message, sessionId? }."
+      "query": "cardId required; limit (max 50).",
+      "body": "none"
     },
     "dependencies": {
       "env": [
-        "FIREBASE_*",
-        "POKONTACT_SERVICE_TOKEN",
-        "POKONTACT_SERVICE_URL"
+        "FIREBASE_*"
       ],
       "services": [
-        "Firebase Admin",
-        "Hermes poko runtime (peer1)"
+        "Firebase Admin"
       ]
     }
   }

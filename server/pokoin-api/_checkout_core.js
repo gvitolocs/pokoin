@@ -66,23 +66,27 @@ function groupCartBySeller(items = []) {
   }));
 }
 
-function findRate({ fromCountry, toCountry, packageTier, catalog = DEFAULT_RATES }) {
+function findRate({ fromCountry, toCountry, packageTier, tracked = true, catalog = DEFAULT_RATES }) {
   const from = assertShipFromCountry(fromCountry);
   const to = assertShipFromCountry(toCountry);
   const tier = String(packageTier || '').trim().toUpperCase();
-  const row = (catalog.rates || []).find((rate) => (
+  const wantTracked = tracked !== false;
+  const matches = (catalog.rates || []).filter((rate) => (
     rate.active !== false
     && String(rate.fromCountry).toUpperCase() === from
     && String(rate.toCountry).toUpperCase() === to
     && String(rate.packageTier).toUpperCase() === tier
   ));
+  const row = matches.find((rate) => Boolean(rate.tracked !== false) === wantTracked)
+    || matches.find((rate) => wantTracked) // fall back to any tracked
+    || matches[0];
   if (!row) {
     const error = httpError(
       409,
       'Shipping is not currently available for this route.',
       'shipping_rate_missing',
     );
-    error.meta = { fromCountry: from, toCountry: to, packageTier: tier };
+    error.meta = { fromCountry: from, toCountry: to, packageTier: tier, tracked: wantTracked };
     throw error;
   }
   return row;
@@ -93,11 +97,12 @@ function quoteShipment({
   fromCountry,
   toCountry,
   items,
+  tracked = true,
   catalog = DEFAULT_RATES,
 } = {}) {
   const count = cardCount(items);
   const packageTier = packageTierForCount(count, catalog);
-  const rate = findRate({ fromCountry, toCountry, packageTier, catalog });
+  const rate = findRate({ fromCountry, toCountry, packageTier, tracked, catalog });
   return {
     sellerId: String(sellerId || '').trim(),
     rateId: rate.id,
@@ -105,6 +110,7 @@ function quoteShipment({
     toCountry: String(rate.toCountry).toUpperCase(),
     cardCount: count,
     packageTier,
+    tracked: rate.tracked !== false,
     estimatedWeightGrams: count * 2,
     carrier: rate.carrier || '',
     serviceName: rate.serviceName || 'Standard',
@@ -138,6 +144,7 @@ function quoteCheckout({
   items,
   sellerOrigins = {},
   toCountry,
+  tracked = true,
   catalog = DEFAULT_RATES,
 } = {}) {
   const groups = groupCartBySeller(items);
@@ -148,6 +155,7 @@ function quoteCheckout({
       fromCountry,
       toCountry,
       items: group.items,
+      tracked,
       catalog,
     });
     const itemsCents = itemsSubtotalCents(group.items);
@@ -166,6 +174,7 @@ function quoteCheckout({
     shippingTotalCents: shippingTotal,
     grandTotalCents: itemsSubtotal + shippingTotal,
     currency: 'EUR',
+    tracked: tracked !== false,
   };
 }
 

@@ -9,6 +9,7 @@
 const Stripe = require('stripe');
 const path = require('path');
 const { normalizeCountry } = require('./_checkout_core');
+const { shipFromCountryFromRequest } = require('./_client_country');
 
 function requireHelper(name) {
   try {
@@ -76,7 +77,14 @@ module.exports = async function handler(req, res) {
     }
 
     if (!accountId) {
-      const country = normalizeCountry(data.shipFromCountry) || 'DK';
+      const country = normalizeCountry(data.shipFromCountry)
+        || shipFromCountryFromRequest(req.headers)
+        || '';
+      if (!country) {
+        const error = new Error('Set ship-from country on Profile before Stripe Connect.');
+        error.statusCode = 400;
+        throw error;
+      }
       const account = await stripe.accounts.create({
         type: 'express',
         country,
@@ -90,6 +98,8 @@ module.exports = async function handler(req, res) {
       await userRef.set({
         stripeConnectAccountId: accountId,
         stripeConnectStatus: 'onboarding',
+        shipFromCountry: normalizeCountry(data.shipFromCountry) || country,
+        shipFromCountrySource: data.shipFromCountry ? (data.shipFromCountrySource || 'user') : 'ip',
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
     }
@@ -108,9 +118,15 @@ module.exports = async function handler(req, res) {
       stripeConnectStatus: 'onboarding',
     });
   } catch (error) {
-    const status = error.statusCode || 500;
+    const status = Number(error.statusCode) || 500;
+    let message = error.message || 'Connect onboard failed.';
+    let dashboardUrl = null;
+    if (/signed up for Connect/i.test(message)) {
+      message = 'Stripe Connect is not enabled on this platform account yet. Complete Connect setup in the Stripe Dashboard (Connect → Get started), then retry.';
+      dashboardUrl = 'https://dashboard.stripe.com/connect/accounts/overview';
+    }
     if (status >= 500) console.error('stripe-connect-onboard', error.message);
-    return res.status(status).json({ error: error.message || 'Connect onboard failed.' });
+    return res.status(status).json({ error: message, ...(dashboardUrl ? { dashboardUrl } : {}) });
   }
 };
 

@@ -1315,11 +1315,18 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   background: #07060b;
 }
 
-.cart-drop-card img,
-.cart-drop-card .card-art {
+.cart-drop-card > a {
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+}
+
+.cart-drop-card img,
+.cart-drop-card .card-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   border-radius: 0;
 }
 
@@ -4341,6 +4348,24 @@ html.is-shop-marquee * {
   border-radius: 50%;
   object-fit: cover;
   flex: none;
+}
+
+span.shop-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+  border-radius: 0;
+  object-fit: unset;
+}
+
+.shop-country-code {
+  flex: none;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted, #9aa0a6);
 }
 
 .shop-cond {
@@ -9714,6 +9739,55 @@ html:has(.wallet-page) .brand span {
 .messages-row:last-child { border-bottom: 0; }
 .messages-row:hover { background: rgba(255, 255, 255, 0.04); }
 .messages-avatar { flex: 0 0 auto; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(145deg, #ffd33d, #d99d00); color: #17130a; font-weight: 900; }
+.messages-avatar.is-poko {
+  overflow: hidden;
+  padding: 0;
+  background: radial-gradient(circle at 32% 28%, #ffe9a0, #c98912 70%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.messages-avatar.is-poko img {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  object-position: center 42%;
+  image-rendering: pixelated;
+}
+.messages-avatar.is-poko.is-large {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 0.85rem;
+}
+.messages-avatar.is-poko.is-large img {
+  width: 100%;
+  height: 100%;
+}
+.messages-row.is-poko {
+  background: linear-gradient(90deg, rgba(255, 211, 61, 0.08), transparent 55%);
+}
+.messages-hint {
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  text-align: center;
+}
+.chat-bubble.is-poko {
+  border: 1px solid rgba(255, 211, 61, 0.22);
+  background: linear-gradient(160deg, rgba(255, 211, 61, 0.12), var(--g3));
+}
+.poko-drop-hint {
+  margin: 0.35rem 0 0.15rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+.conversation-page.is-poko-over {
+  outline: 2px dashed rgba(255, 211, 61, 0.55);
+  outline-offset: -6px;
+}
+.poko-card-draft {
+  gap: 0.55rem;
+}
 .messages-row-copy { min-width: 0; flex: 1; display: grid; gap: 0.22rem; }
 .messages-row-copy strong { font-size: 0.95rem; }
 .messages-row-copy span { overflow: hidden; color: var(--muted); font-size: 0.84rem; white-space: nowrap; text-overflow: ellipsis; }
@@ -9732,6 +9806,13 @@ html:has(.wallet-page) .brand span {
 .conversation-head { gap: 0.7rem; padding: 0.5rem 0 1rem; border-bottom: 1px solid var(--g4); }
 .conversation-head > button { width: 36px; height: 36px; border: 0; background: transparent; color: var(--text); font-size: 2rem; cursor: pointer; }
 .conversation-head .messages-avatar { width: 38px; height: 38px; }
+.conversation-head .messages-avatar.is-poko img {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  object-position: center 42%;
+}
 .conversation-person {
   display: flex;
   align-items: center;

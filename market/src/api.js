@@ -1590,6 +1590,18 @@ export function saveSellerSettings(body, token) {
   });
 }
 
+/** Website Poko assistant — Firebase-authed BFF; never calls poko-market from the browser. */
+export function sendPokoChat({ message = '', cards = [], images = [], sessionId = '', pageContext = null } = {}, token) {
+  return getJson('/api/poko-chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ message, cards, images, sessionId, pageContext }),
+  });
+}
+
 export function fetchAccountAddresses(token, { reveal = true } = {}) {
   const q = reveal ? '?reveal=1' : '';
   return getJson(`/api/account-addresses${q}`, {
@@ -1689,6 +1701,44 @@ export function revealMarketplaceShipping(orderId, token) {
     },
     body: JSON.stringify({ orderId }),
   });
+}
+
+/** Buyer backs out of an unpaid EUR checkout: Stripe session expires, cards go back on Shop. */
+export function cancelEurOrder(orderId, token) {
+  return getJson('/api/marketplace-orders?action=cancel-eur', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ orderId }),
+  });
+}
+
+/** Seller partial refund: amount is EUR cents on EUR orders, whole PKN on PKN orders. */
+export function refundMarketplaceOrder({ orderId, amount, reason, clientToken }, token) {
+  return getJson('/api/marketplace-orders?action=refund', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ orderId, amount, reason, clientToken }),
+  });
+}
+
+/** Seller sold history: native Pokoin orders plus linked CardTrader sales. */
+export function fetchSoldHistory(token) {
+  return getJson('/api/marketplace-orders?action=sold-history', {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+}
+
+/** Public "Sold on Pokoin" rows for one card desk (no buyer identity). */
+export function fetchNativeSales(cardId, { signal } = {}) {
+  const params = new URLSearchParams({ cardId: String(cardId || '') });
+  return getJson(`/api/marketplace-native-sales?${params}`, { signal });
 }
 
 export function reportMarketplaceProblem({ orderId, reason, notes }, token) {

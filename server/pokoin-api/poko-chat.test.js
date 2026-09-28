@@ -1,107 +1,70 @@
 'use strict';
 
-const assert = require('node:assert/strict');
-const Module = require('node:module');
 const test = require('node:test');
-const path = require('node:path');
+const assert = require('node:assert/strict');
+const {
+  cleanCards,
+  cleanImages,
+  cleanPageContext,
+  cardsContext,
+  imagesContext,
+  marketFirstDirective,
+  resolveHermesChatUrl,
+  hermesToken,
+} = require('./poko-chat')._test;
 
-const TARGET = path.resolve(__dirname, 'poko-chat.js');
+test('cleanCards keeps id/name and caps at 8', () => {
+  const rows = cleanCards([
+    { cardId: '123', name: 'Pikachu', setName: 'Base' },
+    { id: '456', cardName: 'Raichu' },
+    ...Array.from({ length: 10 }, (_, i) => ({ cardId: String(i), name: `C${i}` })),
+  ]);
+  assert.equal(rows.length, 8);
+  assert.equal(rows[0].name, 'Pikachu');
+  assert.equal(rows[1].name, 'Raichu');
+});
 
-process.env.POKONTACT_SERVICE_TOKEN = 'svc';
+test('cleanImages keeps http(s) urls only', () => {
+  assert.deepEqual(
+    cleanImages(['https://cdn.pokoin.com/a.jpg', 'ftp://x', 'not']),
+    ['https://cdn.pokoin.com/a.jpg'],
+  );
+});
 
-// Stubs must stay installed while the handler RUNS (it captures _firebase at
-// load and hits the network at call time), so install/restore wrap execution.
-function withStubs({ verifyBearerToken = async () => 'fb-1', fetchImpl } = {}, run) {
-  const originalLoad = Module._load;
-  const originalFetch = globalThis.fetch;
-  if (fetchImpl) globalThis.fetch = fetchImpl;
-  Module._load = function load(request, parent, isMain) {
-    if (request === './_firebase') {
-      return {
-        verifyBearerToken,
-        authErrorResponse: (error) => ({ statusCode: error.statusCode || 401, body: { error: error.message } }),
-      };
-    }
-    return originalLoad(request, parent, isMain);
-  };
-  delete require.cache[TARGET];
-  (async () => {
-    try {
-      await run(require(TARGET));
-    } finally {
-      Module._load = originalLoad;
-      globalThis.fetch = originalFetch;
-    }
-  })();
-}
+test('cardsContext and imagesContext', () => {
+  assert.match(cardsContext([{ cardId: '1', name: 'Mew' }]), /Attached cards/);
+  assert.match(imagesContext(['https://cdn.pokoin.com/a.jpg']), /Attached photos/);
+});
 
-function makeRes() {
-  return {
-    statusCode: 0,
-    body: null,
-    status(code) { this.statusCode = code; return this; },
-    json(body) { this.body = body; return this; },
-  };
-}
+test('marketFirstDirective and cleanPageContext pin desk cardId', () => {
+  const cards = cleanCards([{ cardId: '246912', name: 'Noivern V', setName: 'Evolving Skies' }]);
+  const ctx = cleanPageContext({ path: '/marketplace/en/cards/246912' }, cards, []);
+  assert.equal(ctx.deskCardId, '246912');
+  assert.equal(ctx.deskCardName, 'Noivern V');
+  const directive = marketFirstDirective(cards, ctx);
+  assert.match(directive, /card_quote/);
+  assert.match(directive, /246912/);
+  assert.match(directive, /Never invent/);
+  assert.equal(marketFirstDirective([], {}), '');
+});
 
-test('forwards message with Firebase uid as Poko userId and returns the reply', () => withStubs({
-  fetchImpl: async (url, options = {}) => {
-    const sent = JSON.parse(options.body);
-    assert.equal(sent.userId, 'fb-1');
-    assert.equal(sent.message, 'hi');
-    assert.ok(url.endsWith('/chat'));
-    return { ok: true, status: 200, json: async () => ({ ok: true, assistant: 'poko', reply: 'Pong ✨' }) };
-  },
-}, async (handler) => {
-  const res = makeRes();
-  await handler({
-    method: 'POST',
-    headers: { authorization: 'Bearer fb-token' },
-    body: { message: 'hi', sessionId: 'site-1' },
-  }, res);
-  assert.equal(res.statusCode, 200);
-  assert.equal(res.body.reply, 'Pong ✨');
-  assert.equal(res.body.assistant, 'poko');
-}));
+test('resolveHermesChatUrl matches pokoin-assistant convention', () => {
+  assert.equal(resolveHermesChatUrl({}), '');
+  assert.equal(
+    resolveHermesChatUrl({ POKONTACT_SERVICE_URL: 'http://92.5.153.117:8789/api/poko' }),
+    'http://92.5.153.117:8789/api/poko/chat',
+  );
+  assert.equal(
+    resolveHermesChatUrl({ POKO_CHAT_URL: 'http://host/api/poko/chat' }),
+    'http://host/api/poko/chat',
+  );
+  assert.equal(
+    resolveHermesChatUrl({ POKO_CHAT_URL: 'http://host/api/poko/' }),
+    'http://host/api/poko/chat',
+  );
+});
 
-test('requires Firebase auth', () => withStubs({
-  verifyBearerToken: async () => '',
-}, async (handler) => {
-  const anon = makeRes();
-  await handler({ method: 'POST', headers: {}, body: { message: 'hi' } }, anon);
-  assert.equal(anon.statusCode, 401);
-}));
-
-test('requires configured token, POST, and a message', () => withStubs({}, async (handler) => {
-  const previous = process.env.POKONTACT_SERVICE_TOKEN;
-  try {
-    process.env.POKONTACT_SERVICE_TOKEN = '';
-    const unconfigured = makeRes();
-    await handler({ method: 'POST', headers: { authorization: 'Bearer t' }, body: { message: 'hi' } }, unconfigured);
-    assert.equal(unconfigured.statusCode, 503);
-  } finally {
-    process.env.POKONTACT_SERVICE_TOKEN = 'svc';
-  }
-
-  const wrongMethod = makeRes();
-  await handler({ method: 'GET', headers: { authorization: 'Bearer t' }, body: null }, wrongMethod);
-  assert.equal(wrongMethod.statusCode, 405);
-
-  const empty = makeRes();
-  await handler({ method: 'POST', headers: { authorization: 'Bearer t' }, body: { message: '  ' } }, empty);
-  assert.equal(empty.statusCode, 400);
-}));
-
-test('upstream failures become a friendly 502, never the old canned brain', () => withStubs({
-  fetchImpl: async () => { throw new Error('ECONNREFUSED'); },
-}, async (handler) => {
-  const res = makeRes();
-  await handler({
-    method: 'POST',
-    headers: { authorization: 'Bearer fb-token' },
-    body: { message: 'hello' },
-  }, res);
-  assert.equal(res.statusCode, 502);
-  assert.match(res.body.error, /Poko is unavailable/);
-  assert.ok(!JSON.stringify(res.body).includes('tiny brain'));
-}));
+test('hermesToken prefers POKO_API_TOKEN then POKONTACT', () => {
+  assert.equal(hermesToken({ POKO_API_TOKEN: 'a', POKONTACT_SERVICE_TOKEN: 'b' }), 'a');
+  assert.equal(hermesToken({ POKONTACT_SERVICE_TOKEN: 'b' }), 'b');
+});

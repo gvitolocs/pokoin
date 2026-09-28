@@ -31,6 +31,31 @@ test('package tier boundaries match seed table', () => {
   assert.equal(packageTierForCount(51), 'EXTRA_LARGE');
 });
 
+test('Italy to Denmark one-card SMALL is seeded at 650 EUR cents tracked', () => {
+  const itDk = findRate({ fromCountry: 'IT', toCountry: 'DK', packageTier: 'SMALL', tracked: true });
+  assert.equal(itDk.id, 'it-dk-small');
+  assert.equal(itDk.priceEURCents, 650);
+  const shipment = quoteShipment({
+    sellerId: 'redshakkio',
+    fromCountry: 'IT',
+    toCountry: 'DK',
+    items: [{ qty: 1 }],
+    tracked: true,
+  });
+  assert.equal(shipment.amountCents, 650);
+  assert.equal(shipment.packageTier, 'SMALL');
+  assert.equal(shipment.tracked, true);
+  const cheap = quoteShipment({
+    sellerId: 'redshakkio',
+    fromCountry: 'IT',
+    toCountry: 'DK',
+    items: [{ qty: 1 }],
+    tracked: false,
+  });
+  assert.ok(cheap.amountCents < shipment.amountCents);
+  assert.equal(cheap.tracked, false);
+});
+
 test('country routing differs by origin/destination for same tier', () => {
   const dkIt = findRate({ fromCountry: 'DK', toCountry: 'IT', packageTier: 'SMALL' });
   const dkDk = findRate({ fromCountry: 'DK', toCountry: 'DK', packageTier: 'SMALL' });

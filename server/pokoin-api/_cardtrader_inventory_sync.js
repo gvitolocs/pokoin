@@ -310,7 +310,16 @@ async function linkExistingListing(listingId, product) {
   return result.rows[0] || null;
 }
 
-async function createImportedListing({ sellerUid, sellerName, product, cardId, marketplaceGame = 'pokemon', reactivateHidden = false, meta: metaIn = null }) {
+async function createImportedListing({
+  sellerUid,
+  sellerName,
+  sellerCountry = '',
+  product,
+  cardId,
+  marketplaceGame = 'pokemon',
+  reactivateHidden = false,
+  meta: metaIn = null,
+}) {
   const meta = metaIn && typeof metaIn === 'object' ? metaIn : await cardMetadata(cardId, marketplaceGame);
   const qty = Math.max(0, Math.min(999999, product.quantity));
   const pricePkn = product.pricePkn;
@@ -325,6 +334,8 @@ async function createImportedListing({ sellerUid, sellerName, product, cardId, m
     throw error;
   }
   const sourceListingId = ctSourceListingId(product.id);
+  const country = cleanText(sellerCountry, 2).toUpperCase();
+  const countryCode = /^[A-Z]{2}$/.test(country) && country !== 'EU' ? country : '';
 
   const existing = await marketplaceQuery(
     `
@@ -363,12 +374,12 @@ async function createImportedListing({ sellerUid, sellerName, product, cardId, m
         set_name, collector_number, altered
       )
       values (
-        $1,$2,$3,'EU','New',
-        $4,$5,$6,$7,$8,$9,
-        $10,$11,'',false,$12,
-        true,false,false,$13,
-        $14,$15,'active',$16,$17,
-        $18,$19,$20
+        $1,$2,$3,$4,'New',
+        $5,$6,$7,$8,$9,$10,
+        $11,$12,'',false,$13,
+        true,false,false,$14,
+        $15,$16,'active',$17,$18,
+        $19,$20,$21
       )
       returning id, source_listing_id, quantity_available, status, card_id
     `,
@@ -376,6 +387,7 @@ async function createImportedListing({ sellerUid, sellerName, product, cardId, m
       cardId,
       sellerUid,
       cleanText(sellerName, 120) || 'Pokoin seller',
+      countryCode,
       product.condition,
       product.language,
       pricePkn,
@@ -650,6 +662,17 @@ async function reconcileCardTraderInventory({
     };
   }
 
+  let sellerCountry = '';
+  try {
+    const profile = await firestore.collection('users').doc(sellerUid).get();
+    const raw = String(profile.exists ? profile.data()?.shipFromCountry || '' : '')
+      .trim()
+      .toUpperCase();
+    if (/^[A-Z]{2}$/.test(raw) && raw !== 'EU') sellerCountry = raw;
+  } catch (_) {
+    sellerCountry = '';
+  }
+
   // Account type decides where the stock goes: 1-Day Ready → dashboard assets.
   let oneDayReady = typeof providedOneDayReady === 'boolean' ? providedOneDayReady : null;
   if (oneDayReady === null) {
@@ -905,6 +928,7 @@ async function reconcileCardTraderInventory({
         const created = await createImportedListing({
           sellerUid,
           sellerName,
+          sellerCountry,
           product,
           cardId,
           marketplaceGame,

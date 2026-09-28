@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate, useLocation } from 'react-router-dom';
+import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
+  cancelEurOrder,
   confirmMarketplaceDelivery,
   formatPkn,
   markMarketplaceShipped,
@@ -9,8 +10,18 @@ import {
   revealMarketplaceShipping,
 } from '../api.js';
 import { firestore, useAuth } from '../auth.jsx';
+import { useCart } from '../cart.jsx';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { authFrom } from '../punchouts.js';
+import {
+  canResumePayment,
+  formatOrderMoney,
+  fulfillmentLabel,
+  holdMinutesLeft,
+  isEurOrder,
+  orderStatus,
+  visibleOrders,
+} from '../order-status.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
 
 function stamp(value) {
@@ -37,20 +48,35 @@ function formatEurCents(cents) {
 }
 
 function moneyLabel(row) {
-  if (row.currency === 'EUR' || row.paymentMethod === 'stripe') {
+  if (isEurOrder(row)) {
     return formatEurCents(row.totalEURCents);
   }
   return formatPkn(row.totalPkn);
 }
 
+function itemsTitle(row) {
+  const items = Array.isArray(row.items) ? row.items : [];
+  const first = items[0]?.card?.name || items[0]?.cardName || '';
+  if (!first) return row.id;
+  const more = items.length - 1;
+  return more > 0 ? `${first} +${more}` : first;
+}
+
 export default function Orders() {
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { ready, signedIn, user, profile, getBearer } = useAuth();
+  const { clear } = useCart();
   const [bought, setBought] = useState(null);
   const [sold, setSold] = useState(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busyId, setBusyId] = useState('');
   const [addresses, setAddresses] = useState({});
+  const [now, setNow] = useState(() => Date.now());
+  const eurSession = String(searchParams.get('eur_session') || '').trim();
+  const returnedOrder = String(searchParams.get('order') || '').trim();
+  const [focusOrder, setFocusOrder] = useState('');
 
   useEffect(() => {
     document.title = 'Orders · Pokoin';
@@ -75,13 +101,35 @@ export default function Orders() {
     };
   }, [user?.uid, profile?.uid]);
 
+  // Hold countdowns on unpaid EUR orders.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!eurSession) return;
+    // The cards are held for this order, so the cart can go. "Paid" only shows
+    // once Stripe's webhook confirms — the row below updates live.
+    clear();
+    setFocusOrder(returnedOrder);
+    setNotice('Payment submitted. The order turns Paid as soon as Stripe confirms it.');
+    setSearchParams((prev) => {
+      if (!prev.has('eur_session') && !prev.has('order')) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete('eur_session');
+      next.delete('order');
+      return next;
+    }, { replace: true });
+  }, [eurSession, returnedOrder, clear, setSearchParams]);
+
   if (!ready) return <SessionWait />;
   if (!signedIn) {
     return <Navigate to={authFrom(location.pathname || '/orders')} replace />;
   }
 
-  const rows = mergeOrders(bought, sold);
   const uid = user?.uid || profile?.uid || '';
+  const rows = visibleOrders(mergeOrders(bought, sold), uid);
 
   async function run(orderId, fn) {
     setBusyId(orderId);
@@ -103,9 +151,11 @@ export default function Orders() {
     <div className="page desk">
       <PageHead kicker="Account" title="Orders" lede={`${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}>
         <Link className="btn ghost" to="/protection">Buyer protection</Link>
+        <Link className="btn ghost" to="/sales">Sold history</Link>
         <Link className="btn ghost" to="/cart">Cart</Link>
       </PageHead>
       <Alert>{error}</Alert>
+      {notice ? <p className="desk-ok">{notice}</p> : null}
       {bought == null && sold == null && !error ? (
         <DeskPanel title="History"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       ) : null}
@@ -120,26 +170,43 @@ export default function Orders() {
             {rows.map((row) => {
               const buyer = row.uid === uid || row.buyerUid === uid;
               const seller = Array.isArray(row.sellerUids) && row.sellerUids.includes(uid);
-              const eur = row.currency === 'EUR' || row.paymentMethod === 'stripe';
+              const eur = isEurOrder(row);
               const escrow = row.paymentStatus === 'escrow';
               const paid = row.paymentStatus === 'paid' || row.paymentStatus === 'released';
               const shipped = Boolean(row.shippedAt) || row.fulfillmentStatus === 'shipped' || row.fulfillmentStatus === 'delivered';
               const open = row.disputeStatus === 'open';
               const address = addresses[row.id];
+              const status = orderStatus(row);
+              const step = fulfillmentLabel(row);
+              const resumable = buyer && canResumePayment(row, now);
+              const refunded = Number(row.refundedTotal) || 0;
               return (
-                <article className="thread" key={row.id}>
+                <article className={`thread order-row${focusOrder === row.id ? ' is-focus' : ''}`} key={row.id}>
                   <span className="thread-main">
-                    <strong className="thread-title">{row.id}</strong>
+                    <strong className="thread-title">
+                      {itemsTitle(row)}
+                      {' '}
+                      <span className={`pill order-pill is-${status.tone}`}>{status.label}</span>
+                    </strong>
                     <span className="thread-meta">
-                      {row.paymentStatus || row.status || 'order'}
-                      {row.fulfillmentStatus ? ` · ${row.fulfillmentStatus}` : ''}
-                      {eur ? ' · EUR' : ''}
-                      {open ? ' · dispute open' : ''}
+                      {buyer ? 'Bought' : 'Sold'}
+                      {step ? ` · ${step}` : ''}
                       {' · '}
                       {moneyLabel(row)}
+                      {refunded > 0 ? ` · ${formatOrderMoney(refunded, eur ? 'EUR' : 'PKN')} refunded` : ''}
                       {' · '}
                       {stamp(row.createdAt) || '—'}
+                      {' · '}
+                      <span className="order-id">{row.id}</span>
                     </span>
+                    {resumable ? (
+                      <span className="thread-meta">
+                        Cards held for you for {holdMinutesLeft(row, now)} more min. Not charged until you pay.
+                      </span>
+                    ) : null}
+                    {buyer && ['expired', 'cancelled', 'failed'].includes(row.paymentStatus) ? (
+                      <span className="thread-meta">Nothing was charged. The cards went back on sale.</span>
+                    ) : null}
                     {address ? (
                       <span className="thread-meta">
                         Ship to {address.fullName}, {address.addressLine1}, {address.postalCode} {address.city}, {address.countryCode}
@@ -147,6 +214,22 @@ export default function Orders() {
                     ) : null}
                   </span>
                   <span className="order-actions">
+                    {resumable ? (
+                      <a className="btn" href={row.stripeCheckoutUrl}>Pay now</a>
+                    ) : null}
+                    {buyer && row.paymentStatus === 'pending_stripe' ? (
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        disabled={busyId === row.id}
+                        onClick={() => run(row.id, (token) => cancelEurOrder(row.id, token))}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                    {seller && (paid || escrow) ? (
+                      <Link className="btn ghost" to={`/sales#${row.id}`}>Refund</Link>
+                    ) : null}
                     {buyer && (escrow || (eur && paid)) ? (
                       <button
                         className="btn"
