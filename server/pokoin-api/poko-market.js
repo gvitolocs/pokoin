@@ -236,7 +236,7 @@ function candidateFromRow(row) {
 const QUERY_FILLER_RE = /\b(hi|hello|hey|please|can|could|tell|me|do|does|did|you|know|i|im|i have|have|has|got|how|much|what|whats|worth|price|prices|priced|cost|costs|value|valued|values|market|sell|selling|sold|sale|buy|buying|for|about|around|roughly|approximately|near|mint|lightly|slightly|played|moderately|heavily|damaged|poor|condition|in|on|of|the|a|an|is|are|was|were|it|its|this|that|and|or|english|italian|french|german|spanish|japanese|from|with|any|some|one|copy|copies|right|now|currently|today|it is|its)\b/gi;
 
 const STOPWORDS = new Set([
-  'the', 'a', 'an', 'of', 'from', 'in', 'on', 'for', 'and', 'or', 'is', 'are',
+  'the', 'a', 'an', 'of', 'from', 'old', 'in', 'on', 'for', 'and', 'or', 'is', 'are',
   'was', 'it', 'its', 'this', 'that', 'my', 'your', 'have', 'has', 'how',
   'much', 'what', 'worth', 'price', 'cost', 'value', 'sell', 'sold', 'near',
   'mint', 'played', 'damaged', 'condition', 'english', 'italian', 'japanese',
