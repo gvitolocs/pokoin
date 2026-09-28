@@ -290,7 +290,13 @@ async function resolveCard(params = {}) {
       params2,
     );
     if (rows.length) {
-      return { status: rows.length === 1 ? 'ok' : 'ambiguous', candidates: rows.map(candidateFromRow) };
+      return {
+        status: rows.length === 1 ? 'ok' : 'ambiguous',
+        candidates: rows.map(candidateFromRow),
+        note: rows.length > 1
+          ? 'Multiple printings match; ask the user which one they mean.'
+          : undefined,
+      };
     }
   }
   return {
