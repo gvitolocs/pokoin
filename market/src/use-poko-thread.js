@@ -130,14 +130,25 @@ export function usePokoThread({
           source: result?.source || '',
           createdAt: new Date().toISOString(),
         };
-        return mergePokoEvents(withoutLocal, [mine, assistant]);
+        // Promote the optimistic user row off local-* so history polls cannot
+        // strip it before Firestore catches up.
+        const confirmedMine = {
+          ...mine,
+          id: `user-${Date.now()}`,
+        };
+        return mergePokoEvents(withoutLocal, [confirmedMine, assistant]);
       });
       if (result?.source === 'unavailable' || result?.ok === false) {
         setError(result?.error || 'Poko could not reply. Try again.');
       }
       return result;
     } catch (err) {
-      setEvents((current) => (current || []).filter((row) => row.id !== localId));
+      // Keep the user's bubble visible; only flag the failure.
+      setEvents((current) => (current || []).map((row) => (
+        row.id === localId
+          ? { ...row, source: 'send_failed' }
+          : row
+      )));
       setError(err.message || 'Poko could not reply.');
       throw err;
     } finally {

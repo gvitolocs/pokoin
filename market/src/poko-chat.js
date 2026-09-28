@@ -67,13 +67,25 @@ export function mergePokoEvents(...pages) {
   }).slice(-80);
 }
 
-/** Drop optimistic local-* rows once matching server events arrive. */
+/** Keep optimistic local-* rows until a matching server user turn arrives. */
 export function reconcilePokoEvents(current, serverEvents) {
-  const merged = mergePokoEvents(
-    (current || []).filter((row) => !String(row?.id || '').startsWith('local-')),
-    serverEvents,
+  const server = mergePokoEvents(serverEvents);
+  const serverUserKeys = new Set(
+    server
+      .filter((row) => row.role === 'user')
+      .map((row) => `${row.text}\0${(row.images || []).length}`),
   );
-  return merged;
+  const pendingLocal = (current || []).filter((row) => {
+    const id = String(row?.id || '');
+    if (!id.startsWith('local-')) return false;
+    const key = `${row.text || ''}\0${(row.images || []).length}`;
+    return !serverUserKeys.has(key);
+  });
+  return mergePokoEvents(
+    (current || []).filter((row) => !String(row?.id || '').startsWith('local-')),
+    server,
+    pendingLocal,
+  );
 }
 
 export function readPokoHistory(uid) {

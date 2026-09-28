@@ -73,17 +73,23 @@ test('poko history round-trips in localStorage', () => {
   assert.equal(readPokoHistory(uid)[0].text, 'hello');
 });
 
-test('mergePokoEvents and reconcile drop local optimistic rows', () => {
+test('mergePokoEvents and reconcile keep unmatched local optimistic rows', () => {
   const merged = mergePokoEvents(
     [{ id: 'a', text: 'hi', mine: true, createdAt: '2026-01-01T00:00:00.000Z' }],
     [{ id: 'b', text: 'yo', mine: false, createdAt: '2026-01-01T00:00:01.000Z' }],
   );
   assert.equal(merged.length, 2);
   assert.equal(merged[0].id, 'a');
-  const reconciled = reconcilePokoEvents(
+  const matched = reconcilePokoEvents(
     [{ id: 'local-1', text: 'pending', mine: true }, { id: 'a', text: 'hi', mine: true }],
-    [{ id: 'a', text: 'hi', mine: true }, { id: 'b', text: 'yo', mine: false }],
+    [{ id: 'a', text: 'hi', mine: true }, { id: 'srv', text: 'pending', mine: true }, { id: 'b', text: 'yo', mine: false }],
   );
-  assert.equal(reconciled.some((row) => String(row.id).startsWith('local-')), false);
-  assert.equal(reconciled.length, 2);
+  assert.equal(matched.some((row) => String(row.id).startsWith('local-')), false);
+  assert.equal(matched.length, 3);
+  const pending = reconcilePokoEvents(
+    [{ id: 'local-2', text: 'still sending', mine: true }, { id: 'a', text: 'hi', mine: true }],
+    [{ id: 'a', text: 'hi', mine: true }],
+  );
+  assert.equal(pending.some((row) => row.id === 'local-2'), true);
+  assert.equal(pending.length, 2);
 });

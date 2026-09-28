@@ -151,7 +151,7 @@ async function hermesReply({ message, cards, images, pageContext, userId, sessio
       user: { id: userId, displayName: displayName || '' },
       pageContext,
     }),
-    signal: AbortSignal.timeout(Number(process.env.POKO_CHAT_TIMEOUT_MS) || 45000),
+    signal: AbortSignal.timeout(Number(process.env.POKO_CHAT_TIMEOUT_MS) || 90000),
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
@@ -186,6 +186,25 @@ function conversationRef(firestore, uid) {
   return firestore.collection('poko_conversations').doc(String(uid));
 }
 
+function firestoreTimeIso(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value.toDate === 'function') {
+    try {
+      return value.toDate().toISOString();
+    } catch (_) {
+      return null;
+    }
+  }
+  if (typeof value._seconds === 'number') {
+    return new Date(value._seconds * 1000).toISOString();
+  }
+  if (typeof value.seconds === 'number') {
+    return new Date(value.seconds * 1000).toISOString();
+  }
+  return null;
+}
+
 function serializeEvent(doc) {
   const data = doc.data() || {};
   const role = data.role === 'assistant' ? 'assistant' : 'user';
@@ -199,7 +218,7 @@ function serializeEvent(doc) {
     listings: cards,
     images: Array.isArray(data.images) ? data.images : [],
     source: data.source || '',
-    createdAt: data.createdAt || null,
+    createdAt: firestoreTimeIso(data.createdAt),
   };
 }
 
