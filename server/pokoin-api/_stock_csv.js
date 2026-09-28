@@ -251,6 +251,44 @@ function parsePowerToolsLocation(raw, locationParse = 'as_is') {
   return { box: text, stack: 1, position: 1, structured: false, hasPosition: false };
 }
 
+/**
+ * Infer locationParse + example strings from the seller's CSV locations.
+ * Never invent box names — examples come only from uploaded rows.
+ */
+function detectPowerToolsLocationStyle(locations = []) {
+  const locationExamples = [];
+  let structured = 0;
+  let trailing = 0;
+  let asIs = 0;
+  for (const raw of locations) {
+    const text = cleanText(raw, 120);
+    if (!text) continue;
+    if (locationExamples.length < 6 && !locationExamples.includes(text)) {
+      locationExamples.push(text);
+    }
+    if (/[·•#]\d+/.test(text)) {
+      structured += 1;
+      continue;
+    }
+    if (/^.+?\s+-\s+\d+$/.test(text) || (/^.+?[\s_]+\d+$/.test(text) && /[a-zA-ZÀ-ÿ]/.test(text))) {
+      trailing += 1;
+      continue;
+    }
+    asIs += 1;
+  }
+  const total = structured + trailing + asIs;
+  let locationParse = 'as_is';
+  if (total > 0) {
+    if (structured >= trailing && structured >= asIs && structured > 0) locationParse = 'structured';
+    else if (trailing > asIs) locationParse = 'trailing_stack';
+  }
+  return {
+    locationParse,
+    locationExamples,
+    counts: { structured, trailing, asIs, total },
+  };
+}
+
 /** Encode listing location for Pokoin (matches scan slotText). */
 function formatListingLocation({
   box,
@@ -718,16 +756,34 @@ function importCsvText(text, options = {}) {
   let overflows = [];
   let occupancy = [];
   let suggestedStackSize = 1;
+  let locationDetection = null;
   if (options.powerToolsSync === true) {
+    let locationParse = cleanText(options.locationParse, 40) || 'auto';
+    if (locationParse === 'auto' || options.detectLocation === true) {
+      locationDetection = detectPowerToolsLocationStyle(
+        okRows.map((row) => row.location || row.box || ''),
+      );
+      locationParse = locationDetection.locationParse;
+    }
+    // No capacity yet → use a high ceiling so overflow is only reported after the
+    // seller confirms (or after suggestedStackSize is applied by the client).
+    const stackSize = Number(options.stackSize) > 0 ? Number(options.stackSize) : 10000;
     const assigned = assignPowerToolsLocations(okRows, {
-      stackSize: options.stackSize ?? 1,
+      stackSize,
       numberedInStack: options.numberedInStack === true,
-      locationParse: options.locationParse || 'as_is',
+      locationParse,
     });
     withSlots = assigned.rows;
     overflows = assigned.overflows;
     occupancy = assigned.occupancy;
     suggestedStackSize = assigned.suggestedStackSize;
+    if (!locationDetection) {
+      locationDetection = {
+        locationParse,
+        locationExamples: occupancy.slice(0, 6).map((row) => row.label).filter(Boolean),
+        counts: null,
+      };
+    }
   } else {
     withSlots = assignStackPositions(okRows, options.stackSize ?? 1);
   }
@@ -737,7 +793,15 @@ function importCsvText(text, options = {}) {
     const row = withSlots[slotIdx++];
     return { ...entry, row };
   });
-  return { format, headers, results, overflows, occupancy, suggestedStackSize };
+  return {
+    format,
+    headers,
+    results,
+    overflows,
+    occupancy,
+    suggestedStackSize,
+    locationDetection,
+  };
 }
 
 function sourceForFormat(format) {
@@ -773,6 +837,7 @@ module.exports = {
   mapFinishToPowerTools,
   parseLocation,
   parsePowerToolsLocation,
+  detectPowerToolsLocationStyle,
   formatListingLocation,
   assignStackPositions,
   assignPowerToolsLocations,

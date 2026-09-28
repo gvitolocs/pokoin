@@ -9,12 +9,12 @@ const LOCATION_MODES = [
   {
     id: 'as_is',
     label: 'Location is the box name',
-    hint: 'Keep the CSV location as written (whole Power Tools box label).',
+    hint: 'Keep each CSV location as written (whole Power Tools box label).',
   },
   {
     id: 'trailing_stack',
     label: 'Last number is the stack index',
-    hint: 'e.g. FUOCOBOMBA 006 - 16 → box “FUOCOBOMBA 006”, stack #16 (16th divider). Not card count.',
+    hint: 'The trailing number is which divider, not how many cards are in it.',
   },
   {
     id: 'structured',
@@ -24,7 +24,7 @@ const LOCATION_MODES = [
 ];
 
 /**
- * After Sync: ask Power Tools? → upload CSV per TCG → map box/stack → preview 3 → full import.
+ * After Sync: ask Power Tools? → upload CSV per TCG → analyze → confirm mapping from their data.
  */
 export default function CardTraderPowerToolsModal({
   open,
@@ -41,11 +41,12 @@ export default function CardTraderPowerToolsModal({
 }) {
   const [step, setStep] = useState('ask'); // ask | upload | preview
   const [files, setFiles] = useState({});
-  const [stackSize, setStackSize] = useState(80);
+  const [stackSize, setStackSize] = useState(0); // 0 = use suggested after analyze
   const [numberedInStack, setNumberedInStack] = useState(false);
-  const [locationParse, setLocationParse] = useState('trailing_stack');
+  const [locationParse, setLocationParse] = useState('auto');
   const [localError, setLocalError] = useState('');
   const [stackSizeTouched, setStackSizeTouched] = useState(false);
+  const [locationTouched, setLocationTouched] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -53,19 +54,24 @@ export default function CardTraderPowerToolsModal({
       setFiles({});
       setLocalError('');
       setNumberedInStack(false);
-      setLocationParse('trailing_stack');
-      setStackSize(80);
+      setLocationParse('auto');
+      setStackSize(0);
       setStackSizeTouched(false);
+      setLocationTouched(false);
     }
   }, [open]);
 
-  // After preview, propose the observed cards-per-stack unless the seller already chose one.
+  // After analyze, adopt what the CSV actually contains unless the seller already chose.
   useEffect(() => {
-    const suggested = Number(preview?.suggestedStackSize) || 0;
-    if (step === 'preview' && suggested > 0 && !stackSizeTouched) {
+    if (step !== 'preview' || !preview?.ok) return;
+    if (!locationTouched && preview.locationParse) {
+      setLocationParse(preview.locationParse);
+    }
+    const suggested = Number(preview.suggestedStackSize) || 0;
+    if (!stackSizeTouched && suggested > 0) {
       setStackSize(suggested);
     }
-  }, [preview, step, stackSizeTouched]);
+  }, [preview, step, locationTouched, stackSizeTouched]);
 
   useEffect(() => {
     if (open && step === 'upload' && !games && !loadingGames) {
@@ -78,18 +84,21 @@ export default function CardTraderPowerToolsModal({
     return [];
   }, [games]);
 
+  const examples = preview?.locationExamples || preview?.locationDetection?.locationExamples || [];
+  const exampleHint = examples[0] || '';
+
   const syncOptions = useMemo(() => ({
     powerToolsCsv: files,
-    stackSize,
+    stackSize: stackSize > 0 ? stackSize : undefined,
     numberedInStack,
-    locationParse,
+    locationParse: locationParse === 'auto' ? 'auto' : locationParse,
   }), [files, stackSize, numberedInStack, locationParse]);
 
-  // Overflows were computed against the capacity sent with the last preview;
-  // re-filter locally when the seller raises capacity to the suggested value.
   const visibleOverflows = useMemo(() => {
+    const capacity = stackSize > 0 ? stackSize : Number(preview?.suggestedStackSize) || 0;
     const rows = preview?.overflows || [];
-    return rows.filter((row) => Number(row.count) > stackSize);
+    if (!capacity) return [];
+    return rows.filter((row) => Number(row.count) > capacity);
   }, [preview, stackSize]);
 
   if (!open) return null;
@@ -121,19 +130,36 @@ export default function CardTraderPowerToolsModal({
     return Object.keys(files).filter((id) => files[id]?.trim());
   }
 
-  async function runPreview() {
+  async function runAnalyze(options = syncOptions) {
     setLocalError('');
     if (!uploadedIds().length) {
       setLocalError('Upload at least one Power Tools CSV, or choose No.');
-      return;
+      return false;
     }
-    const ok = await onPreviewSample?.(syncOptions);
+    const ok = await onPreviewSample?.(options);
     if (ok !== false) setStep('preview');
+    return ok !== false;
+  }
+
+  async function reAnalyzeWith(next) {
+    setLocalError('');
+    await onPreviewSample?.({
+      ...syncOptions,
+      ...next,
+    });
   }
 
   async function confirmFull() {
     setLocalError('');
-    await onConfirmWithCsv?.(syncOptions);
+    const capacity = stackSize > 0 ? stackSize : Number(preview?.suggestedStackSize) || 1;
+    const parse = locationParse === 'auto'
+      ? (preview?.locationParse || 'as_is')
+      : locationParse;
+    await onConfirmWithCsv?.({
+      ...syncOptions,
+      stackSize: capacity,
+      locationParse: parse,
+    });
   }
 
   return (
@@ -163,67 +189,13 @@ export default function CardTraderPowerToolsModal({
         {step === 'upload' ? (
           <>
             <p className="page-lede">
-              Upload a Power Tools CSV for each game. Map how the location column becomes
-              box / stack — we do not invent card numbers inside a stack unless you opt in.
+              Upload a Power Tools CSV for each game you keep in Power Tools. We will read the
+              location column from your file next — nothing is guessed before that.
             </p>
             {loadingGames ? <p className="page-lede muted">Reading games from CardTrader…</p> : null}
             {!loadingGames && !gameRows.length ? (
               <p className="ct-connect-err">No supported TCG products in your CardTrader export.</p>
             ) : null}
-
-            <fieldset className="ct-pt-fieldset">
-              <legend>Location numbers</legend>
-              {LOCATION_MODES.map((mode) => (
-                <label key={mode.id} className="ct-pt-radio">
-                  <input
-                    type="radio"
-                    name="ct-pt-location-parse"
-                    checked={locationParse === mode.id}
-                    disabled={busy || previewBusy}
-                    onChange={() => setLocationParse(mode.id)}
-                  />
-                  <span>
-                    <strong>{mode.label}</strong>
-                    <span className="page-lede muted"> — {mode.hint}</span>
-                  </span>
-                </label>
-              ))}
-            </fieldset>
-
-            <label className="ct-pt-stack">
-              Cards per stack (capacity)
-              <input
-                type="number"
-                min={1}
-                max={500}
-                value={stackSize}
-                disabled={busy || previewBusy}
-                onChange={(event) => {
-                  setStackSizeTouched(true);
-                  setStackSize(Math.max(1, Number(event.target.value) || 1));
-                }}
-              />
-            </label>
-            <p className="page-lede muted">
-              How many cards fit in one divider — not the stack number in the location.
-              Example: in <code>FUOCOBOMBA 006 - 16</code>, <strong>16</strong> is the 16th stack
-              in box 006; capacity is usually ~80 for this kind of seller stock.
-            </p>
-
-            <label className="ct-pt-check">
-              <input
-                type="checkbox"
-                checked={numberedInStack}
-                disabled={busy || previewBusy}
-                onChange={(event) => setNumberedInStack(event.target.checked)}
-              />
-              <span>
-                Numbered cards in stack
-                <span className="page-lede muted">
-                  {' '}— off by default (Power Tools is usually box + stack only). On = add ·pos.
-                </span>
-              </span>
-            </label>
 
             <ul className="ct-pt-games">
               {gameRows.map((row) => {
@@ -255,10 +227,14 @@ export default function CardTraderPowerToolsModal({
               <button
                 type="button"
                 className="btn btn-cardtrader"
-                disabled={busy || previewBusy || loadingGames}
-                onClick={runPreview}
+                disabled={busy || previewBusy || loadingGames || !uploadedIds().length}
+                onClick={() => runAnalyze({
+                  powerToolsCsv: files,
+                  locationParse: 'auto',
+                  numberedInStack: false,
+                })}
               >
-                {previewBusy ? 'Checking…' : 'Preview 3 cards'}
+                {previewBusy ? 'Reading CSV…' : 'Analyze CSV'}
               </button>
               <button type="button" className="btn ghost" disabled={busy || previewBusy} onClick={() => setStep('ask')}>
                 Back
@@ -273,35 +249,105 @@ export default function CardTraderPowerToolsModal({
         {step === 'preview' ? (
           <>
             <p className="page-lede">
-              Sample of how Power Tools locations map onto Pokoin. Confirm before the full
-              CardTrader + Power Tools import.
+              From your CSV
+              {preview?.totalPowerToolsRows ? ` (${preview.totalPowerToolsRows} rows)` : ''}, we found how
+              locations are written. Confirm the mapping before the full import.
             </p>
-            {preview?.suggestedStackSize ? (
+
+            {examples.length ? (
               <div className="ct-pt-suggest">
                 <p className="page-lede">
-                  From your CSV, the fullest stack has{' '}
-                  <strong>{preview.suggestedStackSize}</strong> cards
-                  {preview.occupancy?.[0]?.label ? (
-                    <>
-                      {' '}
-                      (<code>{preview.occupancy[0].label}</code>)
-                    </>
-                  ) : null}
-                  . That is a good cards-per-stack capacity for this seller.
+                  Location samples from your file:{' '}
+                  {examples.slice(0, 3).map((ex, i) => (
+                    <span key={ex}>
+                      {i ? ', ' : ''}
+                      <code>{ex}</code>
+                    </span>
+                  ))}
                 </p>
-                <button
-                  type="button"
-                  className="btn ghost"
-                  disabled={busy}
-                  onClick={() => {
-                    setStackSizeTouched(true);
-                    setStackSize(Number(preview.suggestedStackSize) || stackSize);
-                  }}
-                >
-                  Use suggested capacity ({preview.suggestedStackSize})
-                </button>
               </div>
+            ) : (
+              <p className="page-lede muted">No location values found in the uploaded CSV.</p>
+            )}
+
+            <fieldset className="ct-pt-fieldset">
+              <legend>How should we read those locations?</legend>
+              {LOCATION_MODES.map((mode) => (
+                <label key={mode.id} className="ct-pt-radio">
+                  <input
+                    type="radio"
+                    name="ct-pt-location-parse"
+                    checked={locationParse === mode.id}
+                    disabled={busy || previewBusy}
+                    onChange={() => {
+                      setLocationTouched(true);
+                      setLocationParse(mode.id);
+                      reAnalyzeWith({ locationParse: mode.id });
+                    }}
+                  />
+                  <span>
+                    <strong>{mode.label}</strong>
+                    <span className="page-lede muted">
+                      {' '}— {mode.hint}
+                      {mode.id === 'trailing_stack' && exampleHint ? (
+                        <>
+                          {' '}Your file: <code>{exampleHint}</code>
+                        </>
+                      ) : null}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+
+            <label className="ct-pt-stack">
+              Cards per stack (capacity)
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={stackSize > 0 ? stackSize : (preview?.suggestedStackSize || '')}
+                disabled={busy || previewBusy}
+                onChange={(event) => {
+                  setStackSizeTouched(true);
+                  const next = Math.max(1, Number(event.target.value) || 1);
+                  setStackSize(next);
+                  reAnalyzeWith({ stackSize: next });
+                }}
+              />
+            </label>
+            {preview?.suggestedStackSize ? (
+              <p className="page-lede muted">
+                Fullest stack in your CSV has <strong>{preview.suggestedStackSize}</strong> cards
+                {preview.occupancy?.[0]?.label ? (
+                  <>
+                    {' '}
+                    (<code>{preview.occupancy[0].label}</code>)
+                  </>
+                ) : null}
+                . That is the proposed capacity — not a stack index from the location string.
+              </p>
             ) : null}
+
+            <label className="ct-pt-check">
+              <input
+                type="checkbox"
+                checked={numberedInStack}
+                disabled={busy || previewBusy}
+                onChange={(event) => {
+                  const next = event.target.checked;
+                  setNumberedInStack(next);
+                  reAnalyzeWith({ numberedInStack: next });
+                }}
+              />
+              <span>
+                Numbered cards in stack
+                <span className="page-lede muted">
+                  {' '}— off by default. On = add ·pos inside each stack.
+                </span>
+              </span>
+            </label>
+
             {visibleOverflows.length ? (
               <div className="ct-pt-warn">
                 <strong>Over capacity</strong>
@@ -309,7 +355,7 @@ export default function CardTraderPowerToolsModal({
                   {visibleOverflows.slice(0, 8).map((row) => (
                     <li key={`${row.game}:${row.box}:${row.stack}`}>
                       {GAME_LABEL[row.game] || row.game}:{' '}
-                      {row.count} cards in this stack (capacity {stackSize})
+                      {row.count} cards in this stack (capacity {stackSize || preview?.suggestedStackSize})
                       {row.box ? (
                         <>
                           {' '}
@@ -319,15 +365,13 @@ export default function CardTraderPowerToolsModal({
                     </li>
                   ))}
                 </ul>
-                <p className="page-lede muted">
-                  Raise “Cards per stack (capacity)” to at least the suggested value, or split that stack.
-                </p>
               </div>
             ) : (
               <p className="ct-connect-ok">
-                No stack is over the capacity of {stackSize} cards.
+                No stack is over the capacity of {stackSize || preview?.suggestedStackSize || '—'} cards.
               </p>
             )}
+
             <ul className="ct-pt-samples">
               {(preview?.samples || []).map((row, index) => (
                 <li key={`${row.name}:${index}`}>
@@ -353,15 +397,15 @@ export default function CardTraderPowerToolsModal({
               <button
                 type="button"
                 className="btn btn-cardtrader"
-                disabled={busy || !preview?.samples?.length}
+                disabled={busy || previewBusy || !preview?.samples?.length}
                 onClick={confirmFull}
               >
                 {busy ? 'Starting…' : 'Looks good — full import'}
               </button>
-              <button type="button" className="btn ghost" disabled={busy} onClick={() => setStep('upload')}>
-                Adjust settings
+              <button type="button" className="btn ghost" disabled={busy || previewBusy} onClick={() => setStep('upload')}>
+                Change CSV
               </button>
-              <button type="button" className="btn ghost" disabled={busy} onClick={onClose}>
+              <button type="button" className="btn ghost" disabled={busy || previewBusy} onClick={onClose}>
                 Cancel
               </button>
             </div>

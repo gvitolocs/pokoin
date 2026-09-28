@@ -10,7 +10,7 @@ const {
   reconcilePowerToolsWithCardTrader,
   gamesFromCardTraderProducts,
 } = require('./_powertools_ct_match');
-const { importCsvText, assignStackPositions, assignPowerToolsLocations, parseLocation, parsePowerToolsLocation } = require('./_stock_csv');
+const { importCsvText, assignStackPositions, assignPowerToolsLocations, parseLocation, parsePowerToolsLocation, detectPowerToolsLocationStyle } = require('./_stock_csv');
 const { ctConditionToPokoin } = require('./_cardtrader_inventory_sync_core');
 
 const FIXTURE = [
@@ -211,6 +211,38 @@ test('trailing_stack parses FUOCOBOMBA 006 - 16 as box + stack 16', () => {
   const parsed = parsePowerToolsLocation('FUOCOBOMBA 006 - 16', 'trailing_stack');
   assert.equal(parsed.box, 'FUOCOBOMBA 006');
   assert.equal(parsed.stack, 16);
+});
+
+test('detectPowerToolsLocationStyle reads trailing_stack from the CSV locations', () => {
+  const detected = detectPowerToolsLocationStyle([
+    'FUOCOBOMBA 006 - 16',
+    'FUOCOBOMBA 006 - 16',
+    'FUOCOBOMBA 006 - 17',
+    'BOX ALPHA - 3',
+  ]);
+  assert.equal(detected.locationParse, 'trailing_stack');
+  assert.ok(detected.locationExamples.includes('FUOCOBOMBA 006 - 16'));
+  assert.equal(detected.locationExamples.includes('MADE UP BOX'), false);
+});
+
+test('detectPowerToolsLocationStyle prefers structured when · is present', () => {
+  const detected = detectPowerToolsLocationStyle(['Shelf A·2', 'Shelf A·2·1', 'Shelf B·4']);
+  assert.equal(detected.locationParse, 'structured');
+});
+
+test('importCsvText auto-detects location style from uploaded rows', () => {
+  const csv = 'cardmarketId,quantity,name,set,setCode,cn,condition,language,isFirstEd,isReverseHolo,isSigned,finishType,price,comment,location\n'
+    + '1,1,Alpha,Set,S,1,NM,English,,,,,1,,FUOCOBOMBA 006 - 16\n'
+    + '2,1,Beta,Set,S,2,NM,English,,,,,1,,FUOCOBOMBA 006 - 16\n';
+  const imported = importCsvText(csv, {
+    format: 'powertools',
+    powerToolsSync: true,
+    locationParse: 'auto',
+  });
+  assert.equal(imported.locationDetection.locationParse, 'trailing_stack');
+  assert.equal(imported.suggestedStackSize, 2);
+  const locs = imported.results.filter((r) => r.ok).map((r) => r.row.location);
+  assert.deepEqual(locs, ['FUOCOBOMBA 006·16', 'FUOCOBOMBA 006·16']);
 });
 
 test('Power Tools sync keeps box·stack without inventing card positions', () => {

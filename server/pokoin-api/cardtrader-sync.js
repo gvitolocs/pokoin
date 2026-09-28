@@ -22,14 +22,16 @@ function setNoStore(res) {
 }
 
 function powerToolsImportOptions(body = {}) {
+  const rawParse = String(body.locationParse || 'auto');
   return {
     format: 'powertools',
     powerToolsSync: true,
-    stackSize: Number(body.stackSize) > 0 ? Number(body.stackSize) : 1,
+    // 0 / missing → importCsvText uses a high ceiling until the seller confirms capacity
+    stackSize: Number(body.stackSize) > 0 ? Number(body.stackSize) : 0,
     numberedInStack: body.numberedInStack === true,
-    locationParse: ['as_is', 'trailing_stack', 'structured'].includes(String(body.locationParse || ''))
-      ? String(body.locationParse)
-      : 'as_is',
+    locationParse: ['as_is', 'trailing_stack', 'structured', 'auto'].includes(rawParse)
+      ? rawParse
+      : 'auto',
     priceMode: body.priceMode || 'eur_to_pkn',
   };
 }
@@ -37,13 +39,20 @@ function powerToolsImportOptions(body = {}) {
 function parsePowerToolsByGame(body = {}) {
   const raw = body.powerToolsCsv || body.powerToolsByGame || null;
   if (!raw || typeof raw !== 'object') {
-    return { byGame: null, overflows: [], occupancy: [], suggestedStackSize: 1 };
+    return {
+      byGame: null,
+      overflows: [],
+      occupancy: [],
+      suggestedStackSize: 1,
+      locationDetection: null,
+    };
   }
   const opts = powerToolsImportOptions(body);
   const out = {};
   const overflows = [];
   const occupancy = [];
   let suggestedStackSize = 1;
+  let locationDetection = null;
   for (const [game, csvText] of Object.entries(raw)) {
     const text = String(csvText || '');
     if (!text.trim()) continue;
@@ -61,18 +70,37 @@ function parsePowerToolsByGame(body = {}) {
     if (Number(imported.suggestedStackSize) > suggestedStackSize) {
       suggestedStackSize = Number(imported.suggestedStackSize);
     }
+    if (!locationDetection && imported.locationDetection) {
+      locationDetection = imported.locationDetection;
+    } else if (imported.locationDetection?.locationExamples?.length) {
+      // Merge unique examples across games
+      const seen = new Set(locationDetection?.locationExamples || []);
+      const merged = [...(locationDetection?.locationExamples || [])];
+      for (const ex of imported.locationDetection.locationExamples) {
+        if (seen.has(ex) || merged.length >= 6) continue;
+        seen.add(ex);
+        merged.push(ex);
+      }
+      locationDetection = {
+        ...(locationDetection || imported.locationDetection),
+        locationExamples: merged,
+        locationParse: locationDetection?.locationParse || imported.locationDetection.locationParse,
+      };
+    }
   }
+  occupancy.sort((a, b) => b.count - a.count || String(a.label || '').localeCompare(String(b.label || '')));
   return {
     byGame: Object.keys(out).length ? out : null,
     overflows,
     occupancy,
     suggestedStackSize: Math.max(1, suggestedStackSize),
+    locationDetection,
   };
 }
 
 /** Dry-run: map CSV locations + optional CT match samples (no import write). */
 async function previewPowerToolsMatch({ firestore, uid, sellerName, body }) {
-  const { byGame, overflows, occupancy, suggestedStackSize } = parsePowerToolsByGame(body);
+  const { byGame, overflows, occupancy, suggestedStackSize, locationDetection } = parsePowerToolsByGame(body);
   if (!byGame) {
     return {
       ok: false,
@@ -81,6 +109,7 @@ async function previewPowerToolsMatch({ firestore, uid, sellerName, body }) {
       overflows: [],
       occupancy: [],
       suggestedStackSize: 1,
+      locationDetection: null,
     };
   }
 
@@ -142,17 +171,21 @@ async function previewPowerToolsMatch({ firestore, uid, sellerName, body }) {
   }
 
   const totalPt = Object.values(byGame).reduce((n, rows) => n + rows.length, 0);
+  const resolvedParse = locationDetection?.locationParse
+    || powerToolsImportOptions(body).locationParse;
   return {
     ok: true,
     previewPowerTools: true,
-    stackSize: powerToolsImportOptions(body).stackSize,
+    stackSize: Number(body.stackSize) > 0 ? Number(body.stackSize) : suggestedStackSize,
     numberedInStack: powerToolsImportOptions(body).numberedInStack,
-    locationParse: powerToolsImportOptions(body).locationParse,
+    locationParse: resolvedParse === 'auto' ? 'as_is' : resolvedParse,
     totalPowerToolsRows: totalPt,
     samples: samples.slice(0, 3),
     overflows,
     occupancy: occupancy.slice(0, 20),
     suggestedStackSize,
+    locationDetection,
+    locationExamples: locationDetection?.locationExamples || [],
     games: gamesFromCardTraderProducts(exportProducts, marketplaceGameForProduct),
   };
 }

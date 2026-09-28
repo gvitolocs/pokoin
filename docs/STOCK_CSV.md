@@ -16,19 +16,19 @@ PowerTools stores the physical slot in the **`location`** string (no separate Po
 
 ### CardTrader sync popup
 
-When syncing CardTrader with Power Tools CSVs, the seller chooses how location maps:
+1. Upload Power Tools CSV(s) per TCG — no location guesses yet.
+2. **Analyze CSV** — the API reads the seller’s location column, detects the style
+   (`as_is` / trailing stack index / already `box·stack`), and proposes cards-per-stack
+   from how many rows share each box·stack.
+3. Confirm mapping using **examples from that CSV**, then full import.
 
 | Mode | Behaviour |
 | --- | --- |
 | **Location is the box name** | Keep the CSV string as the box label |
-| **Last number is the stack index** | `FUOCOBOMBA 006 - 16` → box `FUOCOBOMBA 006`, stack **#16** (16th divider in that box) → `FUOCOBOMBA 006·16`. The `16` is which stack, not how many cards are in it. |
+| **Last number is the stack index** | e.g. trailing ` - 16` → stack **#16** (which divider). Not card count. |
 | **Already box·stack** | Parse existing `·` / `#` structured slots |
 
-**Cards per stack (capacity)** is how many cards fit in one divider. Preview counts CSV rows that share the same box·stack and proposes that total (often ~80 for sellers like this). If a stack has more cards than the capacity you set, the preview warns.
-
-**Numbered cards in stack** is off by default (Power Tools is usually box + stack index only). When on, Pokoin adds `·pos` inside the stack using that capacity.
-
-A **3-card preview** runs before the full import so the seller can confirm mapping.
+**Cards per stack (capacity)** is proposed from the fullest box·stack in the uploaded file.
 
 ### Inventory CSV import (legacy)
 
