@@ -619,7 +619,7 @@ export default function Checkout() {
               payMethod === 'stripe' && !nft ? (
                 <>
                   <button
-                    className="btn"
+                    className="btn stripe"
                     type="button"
                     disabled={busy || !canPayStripe}
                     onClick={() => placeStripe()}
