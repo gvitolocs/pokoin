@@ -67,6 +67,7 @@ node --test \
   "$SRC/_cardtrader_webhook_registration.test.js" \
   "$SRC/cardtrader-reconcile-all.test.js" \
   "$SRC/cardtrader-sales-backfill.test.js" \
+  "$SRC/cardtrader-delist-vs-sold.test.js" \
   "$SRC/_portfolio_history_core.test.js" \
   "$SRC/patch-route-manifest.test.js"
 for file in "${CT_FILES[@]}"; do

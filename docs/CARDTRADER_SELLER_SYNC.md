@@ -115,6 +115,29 @@ Only items sold after the listing was imported count. Linked listings that left
 CardTrader with no seller order are delistings, not sales: `--apply` sets them
 `inactive`, not `sold_out`.
 
+## Sold vs delisted (2026-09-28)
+
+The seller's CardTrader account is theirs; Pokoin only mirrors it with the API
+token they gave us.
+
+- **Sold** = a CardTrader seller order (`GET /orders?order_as=seller`) for that
+  product, not `pending`/cancelled, placed after the listing was linked. The
+  webhook records it immediately; when a product leaves the complete export,
+  the reconcile looks at the last 30 days of seller orders and records any sale
+  the webhook missed (same `cardtrader_webhook_events` claim, same
+  `marketplace_sales` row id). Listing → `sold_out`.
+- **Delisted** = gone from the export with no such order: the seller removed it
+  on CardTrader. Listing → `inactive`, quantity 0, **no sale**. If the seller
+  relists that product on CardTrader it comes back; a listing the seller hid on
+  Pokoin stays hidden.
+- Order data unavailable → treated as delisted (off sale, nothing claimed).
+- **Never written back:** reconcile only reads CardTrader. A Pokoin sale takes
+  exactly the sold quantity off CardTrader with `POST /products/:id/increment`
+  (`delta_quantity: -n`), never an absolute quantity, so stock the seller
+  changed on CardTrader is not overwritten; if CardTrader refuses (already
+  gone), nothing else is touched. Other marketplaces are never touched.
+- Webhook `order.destroy` restocks like a cancellation.
+
 ## PlusCal / TLC
 
 [`../specs/CardTraderSellerInventory.tla`](../specs/CardTraderSellerInventory.tla)
