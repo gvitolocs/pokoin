@@ -29,6 +29,10 @@ Missing token in env → 503; wrong token → 401.
 
 Body: `{ "tool": "...", "params": { ... } }`. Unknown tool → 400.
 
+All fields derived from `*_pkn` columns are PKN token amounts. Responses mark
+them with `priceUnit: "PKN"` / `currency: "PKN"` and `pknEurRate: 0.005`;
+consumers must not interpret PKN as euro cents.
+
 | Tool | Params | Returns |
 |---|---|---|
 | `resolve_card` | `query` and/or `artist` | catalog candidates only (`status: ok \| ambiguous \| not_found`); never an invented cardId |
@@ -37,6 +41,7 @@ Body: `{ "tool": "...", "params": { ... } }`. Unknown tool → 400.
 | `collection_quote` | `artist` (+ optional `condition`, `language`, default NM/EN/1 copy) | per-artist totals with explicit `coveragePct`; market value vs acquisition cost kept separate |
 | `suggest_cards` | `subject` (+ `excludeCardId`, `limit` 1-12) | real catalog cards matching the subject with current lowest ask — powers "another cool steelix card?" |
 | `market_snapshot` | `limit` (1-50) | top `sold_qty_7d` cards |
+| `top_movers` | `subject` (pokemon/card words, optional), `days` (7-90, default 30), `direction` (`up`\|`down`), `limit` (1-10) | singles ranked by % change of daily median ask (first vs latest day in window), cards under €2 / 400 PKN excluded as bulk noise; returns explicit PKN and EUR values — powers "which Raikou card rose the most lately?"; empty window → 200 with `movers: []` + `note` |
 
 ## Product rules baked into the handler
 
