@@ -132,6 +132,7 @@ function rewriteMarketplace(server) {
       || url === '/swap' || url.startsWith('/swap/')
       || url === '/checkout' || url.startsWith('/checkout/')
       || url === '/orders' || url.startsWith('/orders/')
+      || url === '/sales' || url.startsWith('/sales/')
       || url === '/collection' || url.startsWith('/collection/')
       || url === '/dash-preview'
     ) {
