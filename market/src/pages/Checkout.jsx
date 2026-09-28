@@ -15,8 +15,9 @@ import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
 import { checkoutFees } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
-import { fiatFromPkn, currencyForCountry, currencyFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
-import { pknFromEurCents, previewShipmentCents } from '../shipping-quote.js';
+import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
+import { SHIP_FROM_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
+import { pknFromEurCents, previewShipmentCents, shippingServiceOptions } from '../shipping-quote.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 
@@ -64,15 +65,19 @@ function cartPayload(items) {
   }));
 }
 
-const EMPTY_ADDRESS = {
-  fullName: '',
-  addressLine1: '',
-  addressLine2: '',
-  postalCode: '',
-  city: '',
-  countryCode: 'DK',
-  phoneNumber: '',
-};
+function emptyAddressDraft() {
+  const localeCountry = countryFromLocale();
+  const known = SHIP_FROM_COUNTRIES.some((row) => row.code === localeCountry);
+  return {
+    fullName: '',
+    addressLine1: '',
+    addressLine2: '',
+    postalCode: '',
+    city: '',
+    countryCode: known ? localeCountry : 'DK',
+    phoneNumber: '',
+  };
+}
 
 function selectedAddressCountry(addresses, addressId) {
   const row = (addresses || []).find((item) => item.id === addressId);
@@ -94,32 +99,65 @@ export default function Checkout() {
   const [payMethod, setPayMethod] = useState('stripe'); // stripe | pkn
   const [addresses, setAddresses] = useState([]);
   const [addressId, setAddressId] = useState('');
-  const [draft, setDraft] = useState(EMPTY_ADDRESS);
+  const [draft, setDraft] = useState(emptyAddressDraft);
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState('');
+  const [shippingService, setShippingService] = useState('tracked'); // tracked | untracked
 
   const nft = nftOnly && canNftOnly;
   const buyerCountry = String(
     selectedAddressCountry(addresses, addressId) || draft.countryCode || 'DK',
   ).toUpperCase();
+  const shippingTracked = shippingService !== 'untracked';
+
+  const sellerParcels = useMemo(() => {
+    const bySeller = new Map();
+    for (const row of items) {
+      const sid = String(row.sellerUid || '');
+      const list = bySeller.get(sid) || {
+        sellerId: sid,
+        sellerName: row.sellerName || '',
+        count: 0,
+        from: String(row.sellerCountry || '').toUpperCase(),
+      };
+      list.count += Number(row.qty) || 0;
+      list.from = list.from || String(row.sellerCountry || '').toUpperCase();
+      list.sellerName = list.sellerName || row.sellerName || '';
+      bySeller.set(sid, list);
+    }
+    return [...bySeller.values()];
+  }, [items]);
+
+  const shipOptions = useMemo(() => {
+    if (nft || !sellerParcels.length) return [];
+    // One shared service choice for the cart; options from the first resolvable parcel.
+    for (const group of sellerParcels) {
+      if (!group.from) continue;
+      const options = shippingServiceOptions({
+        fromCountry: group.from,
+        toCountry: buyerCountry,
+        cardCount: group.count,
+      });
+      if (options.length) return options;
+    }
+    return [];
+  }, [nft, sellerParcels, buyerCountry]);
+
   const shippingPreviewCents = useMemo(() => {
     if (nft || !items.length) return 0;
     let total = 0;
     let missing = false;
-    const bySeller = new Map();
-    for (const row of items) {
-      const sid = String(row.sellerUid || '');
-      const list = bySeller.get(sid) || { count: 0, from: row.sellerCountry || '' };
-      list.count += Number(row.qty) || 0;
-      list.from = list.from || row.sellerCountry || '';
-      bySeller.set(sid, list);
-    }
-    for (const group of bySeller.values()) {
+    for (const group of sellerParcels) {
+      if (!group.from) {
+        missing = true;
+        break;
+      }
       const cents = previewShipmentCents({
         fromCountry: group.from,
         toCountry: buyerCountry,
         cardCount: group.count,
+        tracked: shippingTracked,
       });
       if (cents == null) {
         missing = true;
@@ -128,7 +166,7 @@ export default function Checkout() {
       total += cents;
     }
     return missing ? null : total;
-  }, [nft, items, buyerCountry]);
+  }, [nft, items.length, sellerParcels, buyerCountry, shippingTracked]);
 
   const shippingPkn = nft
     ? 0
@@ -155,6 +193,13 @@ export default function Checkout() {
   function moneyFromEurCents(cents) {
     return formatLocalFromEurCents(cents, displayCurrency);
   }
+
+  useEffect(() => {
+    if (!shipOptions.length) return;
+    if (!shipOptions.some((row) => row.id === shippingService)) {
+      setShippingService(shipOptions[0].id);
+    }
+  }, [shipOptions, shippingService]);
 
   useEffect(() => {
     if (preferFiat && payMethod === 'pkn') setPayMethod('stripe');
@@ -197,6 +242,8 @@ export default function Checkout() {
         const data = await quoteMarketplaceCheckout({
           items: cartPayload(items),
           shippingAddressId: addressId,
+          shippingService,
+          tracked: shippingTracked,
         }, token);
         if (cancelled) return;
         setQuote(data);
@@ -211,7 +258,7 @@ export default function Checkout() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [nft, payMethod, addressId, items, missingListing, getBearer]);
+  }, [nft, payMethod, addressId, items, missingListing, getBearer, shippingService, shippingTracked]);
 
   if (!ready) {
     return <SessionWait />;
@@ -231,7 +278,7 @@ export default function Checkout() {
       setAddresses((current) => [saved, ...current.filter((row) => row.id !== saved.id)]);
       setAddressId(saved.id);
       setShowAddressForm(false);
-      setDraft(EMPTY_ADDRESS);
+      setDraft(emptyAddressDraft());
     } catch (err) {
       setError(err.message || 'Could not save address.');
     } finally {
@@ -290,6 +337,8 @@ export default function Checkout() {
         buyerEmail: user?.email || '',
         items: cartPayload(items),
         shippingAddressId: addressId,
+        shippingService,
+        tracked: shippingTracked,
       }, token);
       if (!data.checkoutUrl) {
         throw new Error('Stripe did not return a checkout URL.');
@@ -385,9 +434,49 @@ export default function Checkout() {
                 {' '}Digital only. The cards go into your collection and nothing is mailed. Shipping is 0.
               </label>
             ) : (
-              <p className="page-lede">
-                Physical delivery. Shipping is quoted per seller once you choose an address.
-              </p>
+              <>
+                <p className="page-lede">
+                  Physical delivery to {shipFromCountryName(buyerCountry) || buyerCountry}
+                  {sellerParcels[0]?.from
+                    ? ` · from ${sellerParcels.map((g) => shipFromCountryName(g.from) || g.from).filter(Boolean).join(', ')}`
+                    : ''}
+                  {shippingPreviewCents != null
+                    ? ` · ${moneyFromEurCents(shippingPreviewCents)}`
+                    : ''}
+                </p>
+                {shipOptions.length ? (
+                  <div className="checkout-pay" role="radiogroup" aria-label="Shipping service">
+                    <span className="checkout-pay-label">Shipping</span>
+                    {shipOptions.map((option) => (
+                      <label
+                        key={option.id}
+                        className={`checkout-pay-option${shippingService === option.id ? ' is-on' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="shippingService"
+                          checked={shippingService === option.id}
+                          onChange={() => setShippingService(option.id)}
+                        />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <em>
+                            {moneyFromEurCents(option.amountCents)}
+                            {option.serviceName ? ` · ${option.serviceName}` : ''}
+                            {option.fromCountry && option.toCountry
+                              ? ` · ${option.fromCountry} → ${option.toCountry}`
+                              : ''}
+                          </em>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <Alert>
+                    Shipping preview needs the seller ship-from country on the listing. Re-add the card from Shop, or save your address to get a server quote.
+                  </Alert>
+                )}
+              </>
             )}
             {!nft ? (
               <div className="checkout-pay" role="radiogroup" aria-label="Pay with">
@@ -461,7 +550,6 @@ export default function Checkout() {
                     ['addressLine2', 'Address line 2 (optional)'],
                     ['postalCode', 'Postal code'],
                     ['city', 'City'],
-                    ['countryCode', 'Country code (ISO)'],
                     ['phoneNumber', 'Phone (optional)'],
                   ].map(([key, label]) => (
                     <label className="sell-field" key={key}>
@@ -470,10 +558,27 @@ export default function Checkout() {
                         value={draft[key]}
                         onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))}
                         required={key !== 'addressLine2' && key !== 'phoneNumber'}
-                        maxLength={key === 'countryCode' ? 2 : 180}
+                        maxLength={180}
                       />
                     </label>
                   ))}
+                  <label className="sell-field">
+                    Country
+                    <select
+                      value={draft.countryCode}
+                      onChange={(event) => setDraft((current) => ({
+                        ...current,
+                        countryCode: event.target.value.toUpperCase(),
+                      }))}
+                      required
+                    >
+                      {SHIP_FROM_COUNTRIES.map((row) => (
+                        <option key={row.code} value={row.code}>
+                          {shipFromCountryOptionLabel(row.code)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button className="btn" type="submit" disabled={busy}>
                     {busy ? 'Saving…' : 'Save address'}
                   </button>

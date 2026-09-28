@@ -96,7 +96,9 @@ module.exports = async function handler(req, res) {
 
     const sellerIds = [...new Set(items.map((row) => String(row.sellerUid || '').trim()).filter(Boolean))];
     const { origins, accounts } = await assertSellersReady(firestore, sellerIds);
-    const quote = quoteCheckout({ items, sellerOrigins: origins, toCountry });
+    const tracked = body.tracked !== false && body.shippingTracked !== false
+      && String(body.shippingService || '').toLowerCase() !== 'untracked';
+    const quote = quoteCheckout({ items, sellerOrigins: origins, toCountry, tracked });
 
     if (!quote.grandTotalCents || quote.grandTotalCents < 50) {
       return res.status(400).json({ error: 'Order total too small for Stripe Checkout.' });

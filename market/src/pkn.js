@@ -43,16 +43,31 @@ export function currencyForCountry(countryCode = '') {
   return 'EUR';
 }
 
-/** Browser locale hint before an address exists (da-DK → DKK). */
-export function currencyFromLocale(locale = '') {
+/** Browser locale → ISO country when no saved address (da-DK → DK). */
+export function countryFromLocale(locale = '') {
   const tag = String(
     locale
     || (typeof navigator !== 'undefined' ? navigator.language : '')
     || '',
-  ).toLowerCase();
-  if (tag === 'da' || tag.startsWith('da-') || tag.endsWith('-dk')) return 'DKK';
-  if (tag === 'en-us' || tag.endsWith('-us')) return 'USD';
-  return 'EUR';
+  ).trim();
+  const region = tag.match(/[-_]([A-Za-z]{2})$/)?.[1];
+  if (region) return region.toUpperCase();
+  const lang = tag.toLowerCase().split(/[-_]/)[0];
+  if (lang === 'da') return 'DK';
+  if (lang === 'it') return 'IT';
+  if (lang === 'de') return 'DE';
+  if (lang === 'fr') return 'FR';
+  if (lang === 'es') return 'ES';
+  if (lang === 'nl') return 'NL';
+  if (lang === 'sv') return 'SE';
+  if (lang === 'pt') return 'PT';
+  if (lang === 'pl') return 'PL';
+  return 'DK';
+}
+
+/** Browser locale hint before an address exists (da-DK → DKK). */
+export function currencyFromLocale(locale = '') {
+  return currencyForCountry(countryFromLocale(locale));
 }
 
 /** Fiat label: PKN converted at 1 PKN = €0.005 (DKK via 7.5). */
