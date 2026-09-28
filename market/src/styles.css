@@ -4382,11 +4382,11 @@ span.shop-flag {
 .shop-cond {
   display: inline-block;
   width: 1.55rem;
-  height: 0.88rem;
+  height: 1.1rem;
   object-fit: contain;
   vertical-align: middle;
   flex: none;
-  border-radius: 0.22rem;
+  border-radius: 0.28rem;
 }
 
 /* Tone classes kept for selectors; color lives in each conditions/*.svg. */

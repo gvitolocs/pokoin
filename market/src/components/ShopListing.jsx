@@ -212,8 +212,8 @@ export default function ShopListingRow({
           src={conditionChipSrc(offer?.condition)}
           alt={cond}
           title={cond}
-          width="36"
-          height="20"
+          width="40"
+          height="28"
           draggable={false}
         />
         <Flag flag={language} className="shop-flag shop-flag-lang" />
