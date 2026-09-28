@@ -80,6 +80,41 @@ The card itself remains in the catalog and can still show global CardTrader
 market availability from other sellers; catalog presence is not this seller's
 stock.
 
+## 2026-09-28 webhook never verified a delivery
+
+Every real CardTrader delivery was rejected with a silent `401`. The Pi API
+server hands `rawBody: true` routes the untouched request stream — it sets
+neither `req.rawBody` nor `req.body` — and `cardtrader-webhook.js` only read
+those two, so it signed an empty buffer. A correctly signed self-test through
+`https://api.pokoin.com` reproduced the `401`; the stored shared secrets matched
+CardTrader's `GET /info` for all three connected sellers. Firestore had zero
+`cardtrader_webhook_events`, and every CardTrader sale since the import
+(redshakkio: 235 order items over 141 orders) was removed from Pokoin only by
+the 5-minute complete-export reconcile.
+
+Fix: `rawBodyBuffer` (in `_cardtrader_webhook_core.js`) reads the exact bytes
+from the stream when nothing buffered them, and rejections now log
+`cardtrader-webhook rejected` with the reason and body size.
+
+A CardTrader sale of a linked listing is now a **real sale**: the webhook
+writes `marketplace_sales/ct_{order}__{item}` (`source: cardtrader`, seller
+price, condition, language, CardTrader order code) next to the stock decrement,
+and it shows in the seller's Sold history. A cancelled CardTrader order puts
+the quantity back and voids that row, once, via the claimed event.
+
+Historic sales are backfilled from CardTrader's seller orders — never from
+"vanished from the export":
+
+```bash
+# dry run (read-only), then --apply
+docker exec -w /app pokoin-oracle-api node /app/api/cardtrader-sales-backfill.js --uid <firebaseUid>
+docker exec -w /app pokoin-oracle-api node /app/api/cardtrader-sales-backfill.js --uid <firebaseUid> --apply
+```
+
+Only items sold after the listing was imported count. Linked listings that left
+CardTrader with no seller order are delistings, not sales: `--apply` sets them
+`inactive`, not `sold_out`.
+
 ## PlusCal / TLC
 
 [`../specs/CardTraderSellerInventory.tla`](../specs/CardTraderSellerInventory.tla)

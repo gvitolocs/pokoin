@@ -28,6 +28,27 @@ function shouldDecrementStock(order = {}, item = {}) {
   return !viaZero && state === 'paid';
 }
 
+// rawBody routes on the Pi API server get the untouched request stream (no
+// req.rawBody / req.body). Signing an empty buffer made every real CardTrader
+// delivery 401, so read the exact bytes from the stream when nothing buffered them.
+async function rawBodyBuffer(req) {
+  if (Buffer.isBuffer(req.rawBody)) return req.rawBody;
+  if (typeof req.rawBody === 'string') return Buffer.from(req.rawBody, 'utf8');
+  if (Buffer.isBuffer(req.body)) return req.body;
+  if (typeof req.body === 'string') return Buffer.from(req.body, 'utf8');
+  if (typeof req[Symbol.asyncIterator] === 'function' && !req.readableEnded) {
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    if (chunks.length) return Buffer.concat(chunks);
+  }
+  if (req.body && typeof req.body === 'object') {
+    return Buffer.from(JSON.stringify(req.body), 'utf8');
+  }
+  return Buffer.alloc(0);
+}
+
 function eventDocId(uid, orderId, orderItemId) {
   return `${cleanText(uid, 80)}_${cleanText(orderId, 40)}_${cleanText(orderItemId, 40)}`;
 }
@@ -55,6 +76,7 @@ function orderItemId(item = {}) {
 
 module.exports = {
   cleanText,
+  rawBodyBuffer,
   eventDocId,
   itemProductId,
   itemUserDataField,

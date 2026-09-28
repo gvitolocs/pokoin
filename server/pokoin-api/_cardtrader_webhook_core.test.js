@@ -43,3 +43,24 @@ test('webhook signature is base64 HMAC-SHA256 of the raw body', () => {
   assert.equal(verifyWebhookSignature(body, signature, secret), true);
   assert.equal(verifyWebhookSignature(body, 'bad', secret), false);
 });
+
+test('raw body is read from the untouched stream the Pi server hands rawBody routes', async () => {
+  const { Readable } = require('node:stream');
+  const { rawBodyBuffer } = require('./_cardtrader_webhook_core');
+  const body = '{"cause":"order.update","data":{"id":1,"state":"paid"}}';
+  const secret = 'shared-secret';
+  const req = Readable.from([Buffer.from(body.slice(0, 20)), Buffer.from(body.slice(20))]);
+  req.headers = {};
+  const raw = await rawBodyBuffer(req);
+  assert.equal(raw.toString('utf8'), body);
+  const signature = crypto.createHmac('sha256', secret).update(body).digest('base64');
+  assert.equal(verifyWebhookSignature(raw, signature, secret), true);
+  // The old path signed an empty buffer: a real delivery could never verify.
+  assert.equal(verifyWebhookSignature(Buffer.alloc(0), signature, secret), false);
+});
+
+test('raw body prefers an already-buffered rawBody', async () => {
+  const { rawBodyBuffer } = require('./_cardtrader_webhook_core');
+  const raw = await rawBodyBuffer({ rawBody: Buffer.from('abc') });
+  assert.equal(raw.toString('utf8'), 'abc');
+});
