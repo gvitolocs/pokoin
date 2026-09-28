@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   createMarketplaceOrder,
   createOrderCheckoutSession,
@@ -87,6 +87,7 @@ function selectedAddressCountry(addresses, addressId) {
 export default function Checkout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { ready, signedIn, user, getBearer, availablePkn } = useAuth();
   const { items, count, subtotalPkn, canNftOnly, clear } = useCart();
   const [nftOnly, setNftOnly] = useState(false);
@@ -95,6 +96,7 @@ export default function Checkout() {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [orderId, setOrderId] = useState('');
   const [payMethod, setPayMethod] = useState('stripe'); // stripe | pkn
   const [addresses, setAddresses] = useState([]);
@@ -104,6 +106,7 @@ export default function Checkout() {
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState('');
   const [shippingService, setShippingService] = useState('tracked'); // tracked | untracked
+  const stripeCancelled = searchParams.get('cancelled') === '1';
 
   const nft = nftOnly && canNftOnly;
   const buyerCountry = String(
@@ -218,6 +221,18 @@ export default function Checkout() {
   useEffect(() => {
     document.title = 'Checkout · Pokoin';
   }, []);
+
+  useEffect(() => {
+    if (!stripeCancelled) return;
+    setNotice('Stripe payment was cancelled. Your cart is still here — you can pay when ready.');
+    setBusy(false);
+    setSearchParams((prev) => {
+      if (!prev.has('cancelled')) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete('cancelled');
+      return next;
+    }, { replace: true });
+  }, [stripeCancelled, setSearchParams]);
 
   useEffect(() => {
     if (!signedIn || nft) return undefined;
@@ -353,7 +368,7 @@ export default function Checkout() {
       if (!data.checkoutUrl) {
         throw new Error('Stripe did not return a checkout URL.');
       }
-      clear();
+      // Keep the cart until Stripe success (/orders?eur_session=…) so cancel can return here.
       window.location.assign(data.checkoutUrl);
     } catch (err) {
       setError(err.message || 'Could not open Stripe.');
@@ -394,6 +409,7 @@ export default function Checkout() {
         />
       </MetricGrid>
       <Alert>{error}</Alert>
+      {notice ? <p className="desk-ok">{notice}</p> : null}
       {orderId ? (
         <p className="desk-ok">
           Paid order {orderId}.{' '}
@@ -402,8 +418,12 @@ export default function Checkout() {
         </p>
       ) : null}
       {!items.length && !orderId ? (
-        <EmptyDesk title="Nothing to pay" lede="Add a native listing from Shop, then return here.">
-          <Link className="btn" to="/marketplace">Marketplace</Link>
+        <EmptyDesk
+          title="Cart is empty"
+          lede="Add a listing from Shop, then come back to pay with card or site PKN."
+        >
+          <Link className="btn" to="/marketplace">Browse marketplace</Link>
+          <Link className="btn ghost" to="/cart">Open cart</Link>
         </EmptyDesk>
       ) : null}
       {items.length ? (
