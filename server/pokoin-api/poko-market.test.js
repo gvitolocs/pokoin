@@ -219,8 +219,12 @@ test('resolve_card returns catalog candidates only and marks ambiguity', async (
 
   // Fuzzy user text travels as a parameter, wildcards escaped, never inline SQL.
   const resolveQuery = queries.find((q) => /limit 7/.test(q.sql));
-  assert.ok(resolveQuery.params.some((pt) => String(pt).includes('raichu'))); // token-AND patterns
-  assert.ok(resolveQuery.params[0].startsWith('%'));
+  assert.ok(resolveQuery, 'resolve query captured');
+  const patterns = resolveQuery.params.filter((pt) => typeof pt === 'string');
+  if (!patterns.some((pt) => pt.includes('raichu'))) {
+    assert.fail(`token patterns missing raichu: ${JSON.stringify(resolveQuery.params)}`);
+  }
+  assert.ok(patterns.every((pt) => pt.startsWith('%')));
   assert.ok(!resolveQuery.sql.includes('Raichu'));
 
   const handler3 = loadHandler(async (sql, params = []) => {
@@ -237,7 +241,7 @@ test('resolve_card returns catalog candidates only and marks ambiguity', async (
   await handler3(makeReq({ body: { tool: 'resolve_card', params: { query: 'Raichu' } } }), res3);
   assert.equal(res3.body.status, 'ambiguous');
   assert.equal(res3.body.candidates.length, 3);
-  assert.match(res3.body.note, /clarification/i);
+  assert.match(res3.body.note, /which one they mean/i);
 });
 
 test('card_quote reports sold estimate, asks and strategies without inventing data', async () => {
