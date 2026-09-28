@@ -3,13 +3,16 @@
 /**
  * Website Poko chat BFF — Hermes only.
  * POST /api/poko-chat  { message, cards?, images?, sessionId?, pageContext? }
+ * GET  /api/poko-chat?action=history&before=
  *
- * Firebase-authed. Proxies to Hermes Poko at POKONTACT_SERVICE_URL/chat
- * (same convention as pokoin-assistant). No local scripted replies and no
- * local market-tool fallback — Hermes owns answers and may call poko-market.
+ * Firebase-authed. Proxies to Hermes Poko at POKONTACT_SERVICE_URL/chat.
+ * Transcript is stored in Firestore poko_conversations/{uid}/events so web
+ * clients can sync across devices. No local scripted replies.
  */
 
 const path = require('path');
+
+const EVENT_PAGE = 80;
 
 function requireHelper(name) {
   try {
@@ -22,6 +25,10 @@ function requireHelper(name) {
 
 function verifyBearerToken(...args) {
   return requireHelper('_firebase').verifyBearerToken(...args);
+}
+
+function getFirebaseAdmin() {
+  return requireHelper('_firebase').getFirebaseAdmin();
 }
 
 function cleanText(value, max = 2000) {
@@ -37,6 +44,7 @@ function cleanCards(raw) {
     condition: cleanText(row?.condition, 20),
     language: cleanText(row?.language, 12),
     canonicalPath: cleanText(row?.canonicalPath || row?.href, 200),
+    imageUrl: cleanText(row?.imageUrl || row?.cardImageUrl, 500),
   })).filter((row) => row.cardId || row.name);
 }
 
@@ -94,6 +102,7 @@ function marketFirstDirective(cards, pageContext) {
     'Operator directive for this turn:',
     `- The user is on the Pokoin marketplace looking at ${bits}.`,
     '- First purpose: Pokoin card analytics (sold median, asks, liquidity) via market_query → card_quote (use the given cardId when present).',
+    '- For attacks, abilities, HP, or printed rules on this card, also call market_query → card_ocr with the same cardId (western leftover OCR; approximate).',
     '- Never invent a different card name, set, HP, or attack. If tools fail, say you do not know yet.',
     '- Lore/flavor only after quoting site numbers, and only if it matches the same cardId.',
   ].join('\n');
@@ -112,6 +121,7 @@ function hermesToken(env = process.env) {
 }
 
 const HERMES_UNAVAILABLE = 'I don’t know the answer yet, but I’m always improving ✨ Ask me another way, or try a cute card question while my tiny brain levels up.';
+const HERMES_UNAVAILABLE_ERROR = 'Poko could not reach the assistant in time. Try again in a moment.';
 
 async function hermesReply({ message, cards, images, pageContext, userId, sessionId, displayName }) {
   const url = resolveHermesChatUrl();
@@ -172,57 +182,198 @@ function chatRateLimited(req) {
   return fresh.length > 20;
 }
 
-module.exports = async function handler(req, res) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'Method not allowed.' });
+function conversationRef(firestore, uid) {
+  return firestore.collection('poko_conversations').doc(String(uid));
+}
+
+function serializeEvent(doc) {
+  const data = doc.data() || {};
+  const role = data.role === 'assistant' ? 'assistant' : 'user';
+  const cards = Array.isArray(data.cards) ? data.cards : [];
+  return {
+    id: doc.id,
+    role,
+    mine: role === 'user',
+    text: data.text || '',
+    cards,
+    listings: cards,
+    images: Array.isArray(data.images) ? data.images : [],
+    source: data.source || '',
+    createdAt: data.createdAt || null,
+  };
+}
+
+async function readEventPage(ref, beforeId) {
+  let query = ref.collection('events').orderBy('createdAt', 'asc');
+  if (beforeId) {
+    const cursor = await ref.collection('events').doc(String(beforeId)).get();
+    if (!cursor.exists) return { docs: [], hasMore: false };
+    query = query.endBefore(cursor);
   }
+  const snap = await query.limitToLast(EVENT_PAGE + 1).get();
+  const docs = snap.docs;
+  const hasMore = docs.length > EVENT_PAGE;
+  return { docs: hasMore ? docs.slice(1) : docs, hasMore };
+}
+
+async function appendTurn({ firestore, uid, userText, cards, images, reply, source }) {
+  const admin = getFirebaseAdmin();
+  const stamp = admin.firestore.FieldValue.serverTimestamp();
+  const iso = new Date().toISOString();
+  const ref = conversationRef(firestore, uid);
+  const userRef = ref.collection('events').doc();
+  const assistantRef = ref.collection('events').doc();
+  const batch = firestore.batch();
+  batch.set(ref, { uid, updatedAt: stamp }, { merge: true });
+  batch.set(userRef, {
+    role: 'user',
+    text: userText || '',
+    cards,
+    images,
+    createdAt: stamp,
+  });
+  batch.set(assistantRef, {
+    role: 'assistant',
+    text: reply || '',
+    cards: [],
+    images: [],
+    source: source || 'hermes',
+    createdAt: stamp,
+  });
+  await batch.commit();
+  return [
+    {
+      id: userRef.id,
+      role: 'user',
+      mine: true,
+      text: userText || '',
+      cards,
+      listings: cards,
+      images,
+      source: '',
+      createdAt: iso,
+    },
+    {
+      id: assistantRef.id,
+      role: 'assistant',
+      mine: false,
+      text: reply || '',
+      cards: [],
+      listings: [],
+      images: [],
+      source: source || 'hermes',
+      createdAt: iso,
+    },
+  ];
+}
+
+async function handleHistory(req, res, uid) {
+  const url = new URL(req.url, 'https://local');
+  const before = cleanText(url.searchParams.get('before'), 80);
+  const admin = getFirebaseAdmin();
+  const firestore = admin.firestore();
+  const ref = conversationRef(firestore, uid);
+  const { docs, hasMore } = await readEventPage(ref, before);
+  return res.status(200).json({
+    ok: true,
+    events: docs.map(serializeEvent),
+    hasMore,
+  });
+}
+
+async function handleChat(req, res, decoded) {
   if (chatRateLimited(req)) {
     return res.status(429).json({ error: 'Too many messages, please slow down.' });
   }
+  const message = cleanText(req.body?.message, 4000);
+  const cards = cleanCards(req.body?.cards);
+  const images = cleanImages(req.body?.images);
+  const pageContext = cleanPageContext(req.body?.pageContext, cards, images);
+  if (!message && !cards.length && !images.length) {
+    return res.status(400).json({ error: 'message, cards, or images required' });
+  }
+  const prompt = message || (cards[0]?.name
+    ? `Quote Pokoin sold median, current asks, and liquidity for ${cards[0].name}${cards[0].cardId ? ` (cardId=${cards[0].cardId})` : ''}. Lead with site analytics.`
+    : images.length
+      ? 'What can you tell me about the attached photo? Prefer OCR identity then Pokoin market tools when you can resolve a card.'
+      : 'Tell me about the attached card with Pokoin sold/ask/liquidity analytics first.');
+  const sessionId = cleanText(req.body?.sessionId || decoded.uid, 80) || decoded.uid;
+  const userVisible = message || prompt;
+  const firestore = getFirebaseAdmin().firestore();
+
+  let reply = '';
+  let source = 'hermes';
+  let hermesError = '';
+  try {
+    reply = await hermesReply({
+      message: prompt,
+      cards,
+      images,
+      pageContext,
+      userId: decoded.uid,
+      sessionId,
+      displayName: cleanText(decoded.name || decoded.email, 80),
+    });
+  } catch (error) {
+    hermesError = String(error?.message || error).slice(0, 200);
+    console.warn('poko-chat hermes failed', hermesError);
+    reply = HERMES_UNAVAILABLE;
+    source = 'unavailable';
+  }
+
+  let events = [];
+  try {
+    events = await appendTurn({
+      firestore,
+      uid: decoded.uid,
+      userText: userVisible,
+      cards,
+      images,
+      reply,
+      source,
+    });
+  } catch (error) {
+    console.error('poko-chat persist failed', String(error?.message || error).slice(0, 200));
+  }
+
+  if (source === 'unavailable') {
+    return res.status(200).json({
+      ok: false,
+      assistant: 'poko',
+      persona: 'Poko',
+      reply,
+      source,
+      error: HERMES_UNAVAILABLE_ERROR,
+      events,
+    });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    assistant: 'poko',
+    persona: 'Poko',
+    reply,
+    source,
+    events,
+  });
+}
+
+module.exports = async function handler(req, res) {
+  if (!['GET', 'POST'].includes(req.method)) {
+    res.setHeader('Allow', 'GET, POST');
+    return res.status(405).json({ error: 'Method not allowed.' });
+  }
   try {
     const decoded = await verifyBearerToken(req);
-    const message = cleanText(req.body?.message, 4000);
-    const cards = cleanCards(req.body?.cards);
-    const images = cleanImages(req.body?.images);
-    const pageContext = cleanPageContext(req.body?.pageContext, cards, images);
-    if (!message && !cards.length && !images.length) {
-      return res.status(400).json({ error: 'message, cards, or images required' });
+    if (req.method === 'GET') {
+      const url = new URL(req.url, 'https://local');
+      const action = cleanText(url.searchParams.get('action') || 'history', 40) || 'history';
+      if (action !== 'history') {
+        return res.status(400).json({ error: 'Unknown action.' });
+      }
+      return handleHistory(req, res, decoded.uid);
     }
-    const prompt = message || (cards[0]?.name
-      ? `Quote Pokoin sold median, current asks, and liquidity for ${cards[0].name}${cards[0].cardId ? ` (cardId=${cards[0].cardId})` : ''}. Lead with site analytics.`
-      : images.length
-        ? 'What can you tell me about the attached photo? Prefer OCR identity then Pokoin market tools when you can resolve a card.'
-        : 'Tell me about the attached card with Pokoin sold/ask/liquidity analytics first.');
-    const sessionId = cleanText(req.body?.sessionId || decoded.uid, 80) || decoded.uid;
-
-    try {
-      const reply = await hermesReply({
-        message: prompt,
-        cards,
-        images,
-        pageContext,
-        userId: decoded.uid,
-        sessionId,
-        displayName: cleanText(decoded.name || decoded.email, 80),
-      });
-      return res.status(200).json({
-        ok: true,
-        assistant: 'poko',
-        persona: 'Poko',
-        reply,
-        source: 'hermes',
-      });
-    } catch (error) {
-      console.warn('poko-chat hermes failed', String(error?.message || error).slice(0, 200));
-      return res.status(200).json({
-        ok: true,
-        assistant: 'poko',
-        persona: 'Poko',
-        reply: HERMES_UNAVAILABLE,
-        source: 'unavailable',
-      });
-    }
+    return handleChat(req, res, decoded);
   } catch (error) {
     const status = error.statusCode || 500;
     if (status >= 500) console.error('poko-chat', error.message);
@@ -239,5 +390,8 @@ module.exports._test = {
   marketFirstDirective,
   resolveHermesChatUrl,
   hermesToken,
+  serializeEvent,
   HERMES_UNAVAILABLE,
+  HERMES_UNAVAILABLE_ERROR,
+  EVENT_PAGE,
 };

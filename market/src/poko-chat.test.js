@@ -8,8 +8,10 @@ import {
   defaultPokoDeskPrompt,
   deskCardFromPath,
   isPokoPeer,
+  mergePokoEvents,
   pokoPreview,
   readPokoHistory,
+  reconcilePokoEvents,
   resolvePokoCards,
   setActiveDeskCard,
   tagsToPokoCards,
@@ -69,4 +71,19 @@ test('poko history round-trips in localStorage', () => {
   };
   writePokoHistory(uid, [{ id: '1', text: 'hello', mine: true }]);
   assert.equal(readPokoHistory(uid)[0].text, 'hello');
+});
+
+test('mergePokoEvents and reconcile drop local optimistic rows', () => {
+  const merged = mergePokoEvents(
+    [{ id: 'a', text: 'hi', mine: true, createdAt: '2026-01-01T00:00:00.000Z' }],
+    [{ id: 'b', text: 'yo', mine: false, createdAt: '2026-01-01T00:00:01.000Z' }],
+  );
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].id, 'a');
+  const reconciled = reconcilePokoEvents(
+    [{ id: 'local-1', text: 'pending', mine: true }, { id: 'a', text: 'hi', mine: true }],
+    [{ id: 'a', text: 'hi', mine: true }, { id: 'b', text: 'yo', mine: false }],
+  );
+  assert.equal(reconciled.some((row) => String(row.id).startsWith('local-')), false);
+  assert.equal(reconciled.length, 2);
 });

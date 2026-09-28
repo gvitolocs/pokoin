@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { searchRecipientUsernames, sendPokoChat } from '../api.js';
+import { searchRecipientUsernames } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import {
   listConversations,
@@ -10,6 +10,7 @@ import {
   uploadChatPhoto,
 } from '../chat-client.js';
 import { useChatThread } from '../use-chat-thread.js';
+import { usePokoThread } from '../use-poko-thread.js';
 import { chatTime, eventAriaLabel, requestActionFor } from '../chat-format.js';
 import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
 import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
@@ -19,16 +20,12 @@ import ChatPhotos from '../components/ChatPhotos.jsx';
 import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
 import { createMoneyRequest, payMoneyRequest, requestStatusLabel, respondMoneyRequest } from '../money-requests.js';
 import {
-  buildPokoPageContext,
-  defaultPokoDeskPrompt,
   isPokoPeer,
   POKO_DISPLAY,
   POKO_LEDE,
   POKO_PEER,
   pokoPreview,
   readPokoHistory,
-  resolvePokoCards,
-  writePokoHistory,
 } from '../poko-chat.js';
 import mascotUrl from '../assets/pokoin-mascot@8x.png';
 
@@ -255,18 +252,22 @@ function PokoConversation() {
   const navigate = useNavigate();
   const { ready, signedIn, getBearer, user, profile } = useAuth();
   const uid = user?.uid || '';
-  const [events, setEvents] = useState(() => readPokoHistory(uid));
   const [text, setText] = useState('');
   const [cards, setCards] = useState([]);
   const [photos, setPhotos] = useState([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState('');
   const [over, setOver] = useState(false);
-  const logRef = useRef(null);
-
-  useEffect(() => {
-    setEvents(readPokoHistory(uid));
-  }, [uid]);
+  const pokoThread = usePokoThread({
+    uid,
+    signedIn,
+    getBearer,
+    enabled: ready && signedIn,
+    pathname: typeof window !== 'undefined' ? window.location.pathname : '',
+  });
+  const events = pokoThread.events;
+  const busy = photoBusy || pokoThread.busy;
+  const error = photoError || pokoThread.error;
 
   useEffect(() => {
     try {
@@ -277,15 +278,6 @@ function PokoConversation() {
       if (next.cardId || next.name) setCards([next]);
     } catch (_) { /* ignore */ }
   }, []);
-
-  useEffect(() => {
-    writePokoHistory(uid, events);
-  }, [uid, events]);
-
-  useEffect(() => {
-    const node = logRef.current;
-    if (node) node.scrollTop = node.scrollHeight;
-  }, [events, busy]);
 
   function addCard(reference) {
     const next = cardPayload(reference);
@@ -302,8 +294,8 @@ function PokoConversation() {
     event.target.value = '';
     const room = MAX_CHAT_PHOTOS - photos.length;
     if (!files.length || room <= 0) return;
-    setBusy(true);
-    setError('');
+    setPhotoBusy(true);
+    setPhotoError('');
     try {
       const token = await getBearer();
       const next = [];
@@ -314,9 +306,9 @@ function PokoConversation() {
       }
       setPhotos((current) => [...current, ...next].slice(0, MAX_CHAT_PHOTOS));
     } catch (err) {
-      setError(err.message || 'Photo was not added.');
+      setPhotoError(err.message || 'Photo was not added.');
     } finally {
-      setBusy(false);
+      setPhotoBusy(false);
     }
   }
 
@@ -324,57 +316,16 @@ function PokoConversation() {
     event?.preventDefault();
     const message = text.trim();
     if (busy || (!message && !cards.length && !photos.length)) return;
-    setBusy(true);
-    setError('');
-    const attached = resolvePokoCards({
-      tags: cards,
-      pathname: typeof window !== 'undefined' ? window.location.pathname : '',
-    });
+    const tags = cards.slice();
     const attachedImages = photos.slice();
-    const pageContext = buildPokoPageContext({
-      pathname: typeof window !== 'undefined' ? window.location.pathname : '',
-      cards: attached,
-      images: attachedImages,
-    });
-    const mine = {
-      id: `local-${Date.now()}`,
-      mine: true,
-      text: message,
-      listings: cards.map((row) => ({ ...row })),
-      images: attachedImages,
-      createdAt: new Date().toISOString(),
-    };
-    setEvents((current) => [...current, mine]);
     setText('');
     setCards([]);
     setPhotos([]);
+    setPhotoError('');
     try {
-      const token = await getBearer();
-      const result = await sendPokoChat({
-        message: message || (attached[0]
-          ? defaultPokoDeskPrompt(attached[0])
-          : attachedImages.length ? 'What can you tell me about this photo?' : ''),
-        cards: attached,
-        images: attachedImages,
-        pageContext,
-        sessionId: uid,
-      }, token);
-      setEvents((current) => [...current, {
-        id: `poko-${Date.now()}`,
-        mine: false,
-        text: result?.reply || '…',
-        createdAt: new Date().toISOString(),
-      }]);
-    } catch (err) {
-      setError(err.message || 'Poko could not reply.');
-      setEvents((current) => [...current, {
-        id: `poko-err-${Date.now()}`,
-        mine: false,
-        text: 'Sorry — I could not reach the market tools just now. Try again in a moment.',
-        createdAt: new Date().toISOString(),
-      }]);
-    } finally {
-      setBusy(false);
+      await pokoThread.send({ message, tags, photos: attachedImages });
+    } catch (_) {
+      /* error surfaced via pokoThread.error */
     }
   }
 
@@ -408,7 +359,7 @@ function PokoConversation() {
         </span>
       </header>
       {error ? <p className="chat-error conversation-error" role="alert">{error}</p> : null}
-      <section className="chat-timeline" ref={logRef} aria-live="polite">
+      <section className="chat-timeline" ref={pokoThread.logRef} aria-live="polite">
         {!events.length ? (
           <div className="chat-first">
             <PokoAvatar className="messages-avatar is-poko is-large" />
@@ -416,8 +367,11 @@ function PokoConversation() {
             <p>Same as any chat — drop a card, add a photo, or ask about prices and liquidity. I use Pokoin’s public market tools.</p>
           </div>
         ) : events.map((event) => (
-          <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ' is-poko'}`}>
+          <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ' is-poko'}${event.source === 'unavailable' ? ' is-unavailable' : ''}`}>
             {event.text ? <p>{event.text}</p> : null}
+            {event.source === 'unavailable' ? (
+              <p className="chat-muted">Assistant unreachable — try again.</p>
+            ) : null}
             <ChatPhotos urls={event.images || []} />
             {(event.listings || event.cards || []).length ? (
               <span className="chat-tags">
@@ -429,7 +383,7 @@ function PokoConversation() {
             <time>{chatTime(event.createdAt)}</time>
           </div>
         ))}
-        {busy ? <p className="chat-muted">Poko is checking the market…</p> : null}
+        {pokoThread.busy ? <p className="chat-muted">Poko is checking the market…</p> : null}
       </section>
       {cards.length ? (
         <div className="chat-photo-draft poko-card-draft">

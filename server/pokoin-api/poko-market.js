@@ -18,6 +18,8 @@
  *   market_snapshot  — top sold_qty_7d cards (public aggregates only).
  *   top_movers       — biggest dated ask-price moves for a subject ("which
  *                      Raikou card rose the most?").
+ *   card_ocr         — approximate western leftover OCR (attacks/rules/HP)
+ *                      from marketplace_card_ocr; never invent card text.
  *
  * Privacy boundary: the SQL in this file selects public aggregates only. Fields
  * like seller_uid, buyer_uid, emails, addresses or account ids are never part
@@ -412,6 +414,64 @@ async function requireCard(params) {
     return { error: { status: resolved.status === 'invalid' ? 400 : 422, ...resolved } };
   }
   return { card: resolved.candidates[0] };
+}
+
+/**
+ * Approximate western leftover OCR for attacks / abilities / rules chrome.
+ * Source rows come from scripts/import-marketplace-card-ocr.py (PP-OCRv5 jsonl).
+ * Missing or junk OCR → not_found / low-confidence note; never invent text.
+ */
+async function cardOcr(params = {}) {
+  const owned = await requireCard(params);
+  if (owned.error) return owned.error;
+  const card = owned.card;
+  const leftoverId = blueprintIdFromCardId(card.cardId);
+  const rows = await queryRows(
+    `select card_id, leftover_id, name, set_name, card_number, text, junk, ok,
+            engine, crop, line_count, updated_at
+       from marketplace_card_ocr
+      where card_id = $1
+         or ($2::bigint is not null and leftover_id = $2)
+      order by (card_id = $1) desc
+      limit 1`,
+    [String(card.cardId), leftoverId],
+  );
+  const row = rows[0];
+  if (!row || !row.ok) {
+    return {
+      status: 'not_found',
+      card,
+      error: 'no OCR text for this printing yet (western leftovers only)',
+      note: 'Say you do not have scanned card text for this printing; do not invent attacks or HP.',
+    };
+  }
+  const text = String(row.text || '').trim().slice(0, 1500);
+  if (!text) {
+    return {
+      status: 'not_found',
+      card,
+      error: 'OCR row empty',
+      note: 'Say you do not have scanned card text for this printing; do not invent attacks or HP.',
+    };
+  }
+  return {
+    status: 'ok',
+    card,
+    ocr: {
+      text,
+      junk: Boolean(row.junk),
+      crop: row.crop || null,
+      engine: row.engine || null,
+      lineCount: Number(row.line_count) || null,
+      leftoverId: Number(row.leftover_id) || leftoverId,
+      updatedAt: row.updated_at ? String(row.updated_at) : null,
+      methodology: 'western leftover PP-OCRv5 chrome; approximate, not official card text',
+      confidence: row.junk ? 'low' : 'medium',
+    },
+    note: row.junk
+      ? 'OCR looks noisy (energy/short chrome). Prefer catalog identity over this text.'
+      : 'Use this OCR only for attacks/abilities/rules on this cardId; never swap to another printing.',
+  };
 }
 
 async function cardQuote(params = {}) {
@@ -828,6 +888,7 @@ async function topMovers(params = {}) {
 const TOOLS = {
   resolve_card: resolveCard,
   card_quote: cardQuote,
+  card_ocr: cardOcr,
   card_liquidity: cardLiquidity,
   collection_quote: collectionQuote,
   suggest_cards: suggestCards,

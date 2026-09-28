@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { sendPokoChat } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { listConversations, sendChatMessage, uploadChatPhoto } from '../chat-client.js';
 import { chatTime } from '../chat-format.js';
@@ -28,16 +27,13 @@ import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import { MESSAGES_UNREAD_EVENT, MESSAGES_UNREAD_REFRESH_MS, unreadMessagesCount } from '../messages-unread.js';
 import {
-  buildPokoPageContext,
-  defaultPokoDeskPrompt,
   isPokoPeer,
   POKO_DISPLAY,
   POKO_PEER,
-  readPokoHistory,
   resolvePokoCards,
-  writePokoHistory,
 } from '../poko-chat.js';
 import { useChatThread } from '../use-chat-thread.js';
+import { usePokoThread } from '../use-poko-thread.js';
 import ChatListingTag from './ChatListingTag.jsx';
 import ChatPhotos from './ChatPhotos.jsx';
 import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
@@ -172,8 +168,6 @@ export default function ChatDock() {
   const [over, setOver] = useState(false);
   const [showDropHint, setShowDropHint] = useState(chatDropHintVisible);
   const [unread, setUnread] = useState(0);
-  const [pokoEvents, setPokoEvents] = useState(() => readPokoHistory(user?.uid || ''));
-  const logRef = useRef(null);
   const textRef = useRef('');
   textRef.current = text;
   const poko = isPokoPeer(dock.peer);
@@ -183,24 +177,15 @@ export default function ChatDock() {
     getBearer,
     enabled: dock.open && dock.view === 'thread' && !poko,
   });
+  const pokoThread = usePokoThread({
+    uid: user?.uid || '',
+    signedIn,
+    getBearer,
+    enabled: dock.open && dock.view === 'thread' && poko,
+    pathname: location.pathname,
+  });
 
   useEffect(() => subscribeChatDock(setDock), []);
-
-  useEffect(() => {
-    if (!poko || !user?.uid) return;
-    setPokoEvents(readPokoHistory(user.uid));
-  }, [poko, user?.uid, dock.open, dock.view]);
-
-  useEffect(() => {
-    if (!poko || !user?.uid) return;
-    writePokoHistory(user.uid, pokoEvents);
-  }, [poko, user?.uid, pokoEvents]);
-
-  useEffect(() => {
-    if (!poko) return;
-    const node = logRef.current;
-    if (node) node.scrollTop = node.scrollHeight;
-  }, [poko, pokoEvents, busy]);
 
   useEffect(() => {
     function onUnread(event) {
@@ -287,8 +272,10 @@ export default function ChatDock() {
   const label = poko
     ? POKO_DISPLAY
     : (dock.peerLabel && dock.peerLabel !== 'Seller' ? `@${dock.peerLabel}` : 'Seller');
-  const events = poko ? pokoEvents : thread.events;
-  const activeLogRef = poko ? logRef : thread.logRef;
+  const events = poko ? pokoThread.events : thread.events;
+  const activeLogRef = poko ? pokoThread.logRef : thread.logRef;
+  const sending = busy || (poko && pokoThread.busy);
+  const threadError = error || (poko ? pokoThread.error : thread.error);
 
   async function addPhotos(event) {
     const files = [...(event.target.files || [])];
@@ -317,48 +304,20 @@ export default function ChatDock() {
     event?.preventDefault();
     const message = text.trim();
     const deskCards = resolvePokoCards({ tags: dock.tags, pathname: location.pathname });
-    if (busy || (!message && !dock.tags.length && !photos.length && !deskCards.length)) return;
-    setBusy(true);
+    if (sending || (!message && !dock.tags.length && !photos.length && !deskCards.length)) return;
     setError('');
     try {
-      const token = await getBearer();
-      if (!token) throw new Error('Sign in to send a message.');
       if (poko) {
-        const attachedCards = deskCards;
+        const tags = dock.tags.slice();
         const attachedImages = photos.slice();
-        const pageContext = buildPokoPageContext({
-          pathname: location.pathname,
-          cards: attachedCards,
-          images: attachedImages,
-        });
-        const mine = {
-          id: `local-${Date.now()}`,
-          mine: true,
-          text: message,
-          listings: dock.tags.map((row) => ({ ...row })),
-          images: attachedImages,
-          createdAt: new Date().toISOString(),
-        };
-        setPokoEvents((current) => [...current, mine]);
         setText('');
         setPhotos([]);
         clearChatTags();
-        const result = await sendPokoChat({
-          message: message || (attachedCards[0]
-            ? defaultPokoDeskPrompt(attachedCards[0])
-            : attachedImages.length ? 'What can you tell me about this photo?' : ''),
-          cards: attachedCards,
-          images: attachedImages,
-          pageContext,
-          sessionId: user?.uid || '',
-        }, token);
-        setPokoEvents((current) => [...current, {
-          id: `poko-${Date.now()}`,
-          mine: false,
-          text: result?.reply || '…',
-          createdAt: new Date().toISOString(),
-        }]);
+        await pokoThread.send({ message, tags, photos: attachedImages });
       } else {
+        const token = await getBearer();
+        if (!token) throw new Error('Sign in to send a message.');
+        setBusy(true);
         await sendChatMessage('', message, token, dock.tags, dock.peer, photos);
         setText('');
         setPhotos([]);
@@ -367,14 +326,6 @@ export default function ChatDock() {
       }
     } catch (err) {
       setError(err.message || 'Message was not sent.');
-      if (poko) {
-        setPokoEvents((current) => [...current, {
-          id: `poko-err-${Date.now()}`,
-          mine: false,
-          text: 'Sorry — I could not reply just now. Try again in a moment.',
-          createdAt: new Date().toISOString(),
-        }]);
-      }
     } finally {
       setBusy(false);
     }
@@ -434,8 +385,9 @@ export default function ChatDock() {
         <>
           <div className="chat-dock-log" ref={activeLogRef} onScroll={poko ? undefined : thread.onScroll}>
             {events.map((event) => (
-              <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}${!event.mine && poko ? ' is-poko' : ''}`}>
+              <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}${!event.mine && poko ? ' is-poko' : ''}${event.source === 'unavailable' ? ' is-unavailable' : ''}`}>
                 {event.text ? <p>{event.text}</p> : null}
+                {event.source === 'unavailable' ? <p className="chat-dock-hint">Assistant unreachable — try again.</p> : null}
                 <ChatPhotos urls={event.images || []} />
                 {(event.listings || event.cards || []).length ? (
                   <span className="chat-tags">
@@ -452,9 +404,9 @@ export default function ChatDock() {
                 {!event.text && !(event.listings || event.cards || []).length && !(event.images || []).length ? <p>…</p> : null}
               </div>
             ))}
-            {poko && busy ? <p className="chat-dock-hint">Poko is checking the market…</p> : null}
+            {poko && pokoThread.busy ? <p className="chat-dock-hint">Poko is checking the market…</p> : null}
           </div>
-          {error || (!poko && thread.error) ? <p className="chat-dock-error" role="alert">{error || thread.error}</p> : null}
+          {threadError ? <p className="chat-dock-error" role="alert">{threadError}</p> : null}
           {signedIn && dock.peer ? (
             <form className="chat-dock-compose" onSubmit={send}>
               {dock.tags.length ? (
@@ -493,7 +445,7 @@ export default function ChatDock() {
               <div className="chat-dock-field">
                 <label className="chat-photo-add" aria-label="Add photos">
                   +
-                  <input type="file" accept="image/*" multiple hidden onChange={addPhotos} disabled={busy || photos.length >= MAX_CHAT_PHOTOS} />
+                  <input type="file" accept="image/*" multiple hidden onChange={addPhotos} disabled={sending || photos.length >= MAX_CHAT_PHOTOS} />
                 </label>
                 <label className="sr-only" htmlFor="chat-dock-input">Message</label>
                 <textarea
@@ -510,7 +462,7 @@ export default function ChatDock() {
                     }
                   }}
                 />
-                <button type="submit" disabled={busy || (!text.trim() && !dock.tags.length && !photos.length)} aria-label="Send">↑</button>
+                <button type="submit" disabled={sending || (!text.trim() && !dock.tags.length && !photos.length)} aria-label="Send">↑</button>
               </div>
             </form>
           ) : (

@@ -32,11 +32,55 @@ export function clearActiveDeskCard() {
   activeDeskCard = null;
 }
 
+export function normalizePokoEvent(row = {}) {
+  const role = row.role === 'assistant' || row.mine === false ? 'assistant' : 'user';
+  const cards = Array.isArray(row.cards)
+    ? row.cards
+    : (Array.isArray(row.listings) ? row.listings : []);
+  return {
+    id: String(row.id || ''),
+    role,
+    mine: role === 'user',
+    text: String(row.text || ''),
+    cards,
+    listings: cards,
+    images: Array.isArray(row.images) ? row.images : [],
+    source: String(row.source || ''),
+    createdAt: row.createdAt || null,
+  };
+}
+
+export function mergePokoEvents(...pages) {
+  const byId = new Map();
+  for (const page of pages) {
+    for (const raw of page || []) {
+      const event = normalizePokoEvent(raw);
+      if (!event.id) continue;
+      byId.set(event.id, event);
+    }
+  }
+  return [...byId.values()].sort((a, b) => {
+    const at = Date.parse(a.createdAt) || 0;
+    const bt = Date.parse(b.createdAt) || 0;
+    if (at !== bt) return at - bt;
+    return String(a.id).localeCompare(String(b.id));
+  }).slice(-80);
+}
+
+/** Drop optimistic local-* rows once matching server events arrive. */
+export function reconcilePokoEvents(current, serverEvents) {
+  const merged = mergePokoEvents(
+    (current || []).filter((row) => !String(row?.id || '').startsWith('local-')),
+    serverEvents,
+  );
+  return merged;
+}
+
 export function readPokoHistory(uid) {
   if (!uid) return [];
   try {
     const raw = JSON.parse(localStorage.getItem(`${HISTORY_PREFIX}${uid}`) || '[]');
-    return Array.isArray(raw) ? raw.slice(-80) : [];
+    return Array.isArray(raw) ? mergePokoEvents(raw) : [];
   } catch (_) {
     return [];
   }
@@ -45,7 +89,7 @@ export function readPokoHistory(uid) {
 export function writePokoHistory(uid, events) {
   if (!uid) return;
   try {
-    localStorage.setItem(`${HISTORY_PREFIX}${uid}`, JSON.stringify((events || []).slice(-80)));
+    localStorage.setItem(`${HISTORY_PREFIX}${uid}`, JSON.stringify(mergePokoEvents(events)));
   } catch (_) {
     /* private mode */
   }

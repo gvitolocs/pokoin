@@ -200,7 +200,7 @@
     "auth": "Required service bearer token: POKO_MARKET_SERVICE_TOKEN, or POKONTACT_SERVICE_TOKEN (same secret, already in the Pi container env). Server-to-server only; browsers never receive it.",
     "params": {
       "query": "none",
-      "body": "{ tool: resolve_card|card_quote|card_liquidity|collection_quote|suggest_cards|market_snapshot, params } with tool-specific fields (query, cardId, condition, language, artist, subject, excludeCardId, limit)."
+      "body": "{ tool: resolve_card|card_quote|card_ocr|card_liquidity|collection_quote|suggest_cards|market_snapshot|top_movers, params } with tool-specific fields (query, cardId, condition, language, artist, subject, excludeCardId, limit, days, direction)."
     },
     "dependencies": {
       "env": [
@@ -217,13 +217,14 @@
     "path": "/api/poko-chat",
     "file": "poko-chat.js",
     "methods": [
+      "GET",
       "POST"
     ],
-    "purpose": "Website Poko assistant chat (Messages + dock). Firebase-authed Hermes proxy only: forwards message + cards + images to POKONTACT_SERVICE_URL/chat. No local FAQ or market-tool fallback.",
+    "purpose": "Website Poko assistant chat (Messages + dock). Firebase-authed Hermes proxy; persists transcript to Firestore poko_conversations/{uid}/events for cross-device sync. No local FAQ or market-tool fallback.",
     "auth": "Required Firebase bearer token. Browser never receives the Hermes service token.",
     "params": {
-      "query": "none",
-      "body": "{ message, cards?: [{ cardId, name, setName, condition, language }], images?: string[], sessionId? }"
+      "query": "action=history&before? (GET)",
+      "body": "{ message, cards?: [{ cardId, name, setName, condition, language }], images?: string[], sessionId?, pageContext? } (POST)"
     },
     "dependencies": {
       "env": [

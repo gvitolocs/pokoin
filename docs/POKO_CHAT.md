@@ -3,16 +3,22 @@
 Status: live path. Website Poko is **Hermes only** — no local scripted
 replies and no local `poko-market` fallback inside this BFF.
 
+Transcript is **server-backed** in Firestore
+`poko_conversations/{uid}/events` and synced to the browser via a thin
+cache (localStorage) + poll. Local storage alone is not the source of truth.
+
 ## Flow
 
 ```
 Browser (Messages / chat dock)
   → Firebase bearer
+  → GET  /api/poko-chat?action=history   (sync transcript)
   → POST /api/poko-chat   { message, cards?, images?, sessionId?, pageContext? }
   → Pi BFF server/pokoin-api/poko-chat.js
-  → Hermes peer1  POST {POKONTACT_SERVICE_URL}/chat
-       default base: http://92.5.153.117:8789/api/poko
-       full URL:     …/api/poko/chat
+       1) POST Hermes peer1  {POKONTACT_SERVICE_URL}/chat
+       2) append user+assistant events to Firestore
+  → response includes `events[]` (server ids) and `source`
+       source=hermes | unavailable (timeout / planner failure)
 ```
 
 On a card desk the SPA always includes the open printing in `cards[]` /
@@ -56,7 +62,9 @@ URL resolve (same as CardVault `pokoin-assistant.js`):
 ## Failure behaviour
 
 If Hermes is unreachable or misconfigured, the BFF returns HTTP 200 with
-`source: "unavailable"` and the soft line:
+`ok: false`, `source: "unavailable"`, persists the turn, and sets `error`
+so the UI can show retry instead of treating the soft line as a normal
+Hermes answer:
 
 > I don’t know the answer yet, but I’m always improving ✨ …
 

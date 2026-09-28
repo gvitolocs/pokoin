@@ -30,6 +30,7 @@ function makeDb(stubs) {
     if (/order by s\.name\s+limit \$2/.test(sql)) return { rows: rows('collectionCards') };
     if (/cardtrader_sold_daily/.test(sql) && /group by blueprint_id/.test(sql)) return { rows: rows('collectionSold') };
     if (/distinct on \(blueprint_id\)/.test(sql)) return { rows: rows('collectionAsks') };
+    if (/marketplace_card_ocr/.test(sql)) return { rows: rows('ocrRows') };
     if (/cardtrader_sold_daily/.test(sql)) return { rows: rows('soldRows') };
     if (/cardtrader_blueprint_daily_analytics/.test(sql)) return { rows: rows('askRows') };
     if (/limit 7/.test(sql) || (/limit 1/.test(sql) && /card_id = \$1/.test(sql))) {
@@ -425,6 +426,42 @@ test('card_quote anchors today and dated windows for relative time expressions',
   assert.equal(res.body.window.soldDays, 90);
   const expectedFrom = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
   assert.equal(res.body.window.from, expectedFrom);
+});
+
+test('card_ocr returns leftover chrome text and refuses missing/junk inventively', async () => {
+  const ocrRows = [{
+    card_id: '246912',
+    leftover_id: 123456,
+    name: 'Raichu ex',
+    set_name: 'EX Team Rocket Returns',
+    card_number: '8/109',
+    text: 'BASIC\nRaichu ex\nHP90\nThunderbolt\n40\nDiscard all Energy attached to Raichu ex.',
+    junk: false,
+    ok: true,
+    engine: 'ppocrv5-onnx-rocm',
+    crop: 'chrome',
+    line_count: 8,
+    updated_at: '2026-09-14T18:00:00.000Z',
+    seller_uid: 'MUST_NOT_LEAK',
+  }];
+  let res = makeRes();
+  await loadHandler(makeDb({ queries: [], ocrRows }))(
+    makeReq({ body: { tool: 'card_ocr', params: { cardId: '246912' } } }), res,
+  );
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'ok');
+  assert.match(res.body.ocr.text, /Thunderbolt/);
+  assert.equal(res.body.ocr.confidence, 'medium');
+  assert.equal(res.body.ocr.leftoverId, 123456);
+  assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
+
+  res = makeRes();
+  await loadHandler(makeDb({ queries: [], ocrRows: [] }))(
+    makeReq({ body: { tool: 'card_ocr', params: { cardId: '246912' } } }), res,
+  );
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.status, 'not_found');
+  assert.match(res.body.note, /do not invent/i);
 });
 
 test('top_movers ranks a subject by ask change and drops sub-floor noise', async () => {
