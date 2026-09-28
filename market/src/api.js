@@ -1627,6 +1627,15 @@ export function sendPokoChat({ message = '', cards = [], images = [], sessionId 
   });
 }
 
+/** Server-backed Poko transcript (Firestore via BFF). */
+export function fetchPokoChatHistory(token, { before = '' } = {}) {
+  const params = new URLSearchParams({ action: 'history' });
+  if (before) params.set('before', before);
+  return getJson(`/api/poko-chat?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 export function fetchAccountAddresses(token, { reveal = true } = {}) {
   const q = reveal ? '?reveal=1' : '';
   return getJson(`/api/account-addresses${q}`, {

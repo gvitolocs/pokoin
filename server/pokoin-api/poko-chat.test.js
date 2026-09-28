@@ -45,6 +45,7 @@ test('marketFirstDirective and cleanPageContext pin desk cardId', () => {
   assert.equal(ctx.deskCardName, 'Noivern V');
   const directive = marketFirstDirective(cards, ctx);
   assert.match(directive, /card_quote/);
+  assert.match(directive, /card_ocr/);
   assert.match(directive, /246912/);
   assert.match(directive, /Never invent/);
   assert.equal(marketFirstDirective([], {}), '');
@@ -81,8 +82,26 @@ test('hammering the endpoint from one IP hits the 20/min rate limit', async () =
     json: async () => ({ ok: true, reply: 'Pong ✨' }),
   });
   Module._load = function load(request, parent, isMain) {
-    if (request === './_firebase') {
-      return { verifyBearerToken: async () => ({ uid: 'fb-1', email: '', name: '' }) };
+    if (request === './_firebase' || String(request).endsWith('_firebase') || String(request).includes('/_firebase')) {
+      return {
+        verifyBearerToken: async () => ({ uid: 'fb-1', email: '', name: '' }),
+        getFirebaseAdmin: () => ({
+          firestore: Object.assign(() => ({
+            collection: () => ({
+              doc: () => ({
+                collection: () => ({ doc: () => ({ id: `evt-${Math.random().toString(16).slice(2)}` }) }),
+                set: async () => {},
+              }),
+            }),
+            batch: () => ({
+              set() { return this; },
+              async commit() {},
+            }),
+          }), {
+            FieldValue: { serverTimestamp: () => new Date() },
+          }),
+        }),
+      };
     }
     return originalLoad(request, parent, isMain);
   };

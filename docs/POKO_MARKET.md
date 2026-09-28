@@ -42,6 +42,7 @@ consumers must not interpret PKN as euro cents.
 | `suggest_cards` | `subject` (+ `excludeCardId`, `limit` 1-12) | real catalog cards matching the subject with current lowest ask — powers "another cool steelix card?" |
 | `market_snapshot` | `limit` (1-50) | top `sold_qty_7d` cards |
 | `top_movers` | `subject` (pokemon/card words, optional), `days` (7-90, default 30), `direction` (`up`\|`down`), `limit` (1-10) | singles ranked by % change of daily median ask (first vs latest day in window), cards under €2 / 400 PKN excluded as bulk noise; returns explicit PKN and EUR values — powers "which Raikou card rose the most lately?"; empty window → 200 with `movers: []` + `note` |
+| `card_ocr` | `cardId` or `query` | approximate western leftover PP-OCRv5 chrome (`marketplace_card_ocr`): attacks/abilities/HP text; `junk`/`confidence` when noisy; missing printing → `not_found` (never invent text) |
 
 ## Product rules baked into the handler
 
@@ -70,6 +71,9 @@ serialized output).
 - `cardtrader_blueprint_daily_analytics` — latest min/median asks per blueprint.
 - `marketplace_card_weights` — sell-through / days-of-supply signals.
 - `marketplace_search_candidates` (+ `marketplace_cards`) — catalog resolution.
+- `marketplace_card_ocr` — western leftover PP-OCRv5 chrome (attacks/rules);
+  loaded by `scripts/import-marketplace-card-ocr.py` from
+  `western-full-ocr-gpu.jsonl` after `scripts/sql/093_marketplace_card_ocr.sql`.
 - Public card id = CardTrader blueprint × 2 for singles.
 
 ## Hermes side
@@ -89,5 +93,9 @@ stays server-side.
 scripts/deploy-poko-market-api.sh   # from an origin/main commit; verifies 401 + health, auto-rollback
 ```
 
-No new SQL/migrations: existing aggregates are sufficient for v1. If quote
-latency ever demands it, add a keyed aggregate under `scripts/sql/092_*`.
+No new SQL/migrations for quotes/movers. Card text needs
+`scripts/sql/093_marketplace_card_ocr.sql` on the writer plus
+`scripts/import-marketplace-card-ocr.py --apply` before `card_ocr` returns
+rows. **Do not** run `deploy-poko-market-api.sh` while Honcho workspaces
+`hermes-peer1` / `poko-peer1` share the Pi API container unless deploy is
+explicitly approved — that script restarts `pokoin-oracle-api`.
