@@ -24,9 +24,7 @@ export default function Cart() {
       <PageHead
         kicker="Shop"
         title="Cart"
-        lede={showFiat
-          ? `${count} ${count === 1 ? 'item' : 'items'} — site PKN is short, so totals show as PKN converted to ${displayCurrency}.`
-          : `${count} ${count === 1 ? 'item' : 'items'} on this browser. Checkout pays with site PKN or card.`}
+        lede={`${count} ${count === 1 ? 'item' : 'items'} on this browser. Checkout pays with site PKN or card.`}
       >
         {items.length ? <button className="btn ghost" type="button" onClick={clear}>Clear</button> : null}
         <Link className="btn ghost" to="/marketplace">Keep shopping</Link>

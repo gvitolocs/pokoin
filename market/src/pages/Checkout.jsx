@@ -371,7 +371,7 @@ export default function Checkout() {
         lede={nft
           ? 'You pay with your site balance and the cards go into your collection. Nothing is mailed.'
           : payMethod === 'stripe'
-            ? `Prices shown in ${displayCurrency} (converted from PKN). Stripe charges the EUR equivalent; shipping is quoted from your address.`
+            ? `Prices in ${displayCurrency}. Stripe charges EUR; shipping is quoted from your address.`
             : `${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}
       >
         <Link className="btn ghost" to="/cart">Cart</Link>
@@ -393,11 +393,6 @@ export default function Checkout() {
           label="Due"
         />
       </MetricGrid>
-      {preferFiat ? (
-        <Alert>
-          Site PKN ({formatPknNumber(availablePkn)}) is not enough — amounts are PKN converted to {displayCurrency}. Pay with card (Stripe charges EUR).
-        </Alert>
-      ) : null}
       <Alert>{error}</Alert>
       {orderId ? (
         <p className="desk-ok">
@@ -513,7 +508,7 @@ export default function Checkout() {
                   />
                   <span>
                     <strong>Site PKN</strong>
-                    <em>{preferFiat ? `Need ${formatPknNumber(totalPkn)} PKN · you have ${formatPknNumber(availablePkn)}` : 'Pay from your Pokoin balance'}</em>
+                    <em>{preferFiat ? 'Not enough balance' : 'Pay from your Pokoin balance'}</em>
                   </span>
                 </label>
               </div>
