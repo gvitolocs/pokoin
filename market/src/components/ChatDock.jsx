@@ -27,6 +27,10 @@ import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import { MESSAGES_UNREAD_EVENT, MESSAGES_UNREAD_REFRESH_MS, unreadMessagesCount } from '../messages-unread.js';
 import {
+  acceptTrayDrop,
+  messagesTrayId,
+} from '../tray-drag.js';
+import {
   isPokoPeer,
   POKO_DISPLAY,
   POKO_PEER,
@@ -105,7 +109,10 @@ function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
             event.stopPropagation();
             setOverUid('');
             const reference = readListingDrag(event);
-            if (reference) dropOnConversation(POKO_PEER, POKO_DISPLAY, reference);
+            if (reference) {
+              acceptTrayDrop(messagesTrayId(POKO_PEER));
+              dropOnConversation(POKO_PEER, POKO_DISPLAY, reference);
+            }
           }}
         >
           <button type="button" onClick={onPoko}>
@@ -139,7 +146,10 @@ function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
               event.stopPropagation();
               setOverUid('');
               const reference = readListingDrag(event);
-              if (reference) dropOnConversation(row.peerUid, row.peerUsername, reference);
+              if (reference) {
+                acceptTrayDrop(messagesTrayId(row.peerUid));
+                dropOnConversation(row.peerUid, row.peerUsername, reference);
+              }
             }}
           >
             <button type="button" onClick={() => onOpen(row)}>
@@ -354,7 +364,10 @@ export default function ChatDock() {
         markChatDrop();
         if (dock.view !== 'thread') return;
         const reference = readListingDrag(event);
-        if (reference) addChatTag(reference, textRef.current);
+        if (reference) {
+          acceptTrayDrop(messagesTrayId(dock.peer || POKO_PEER));
+          addChatTag(reference, textRef.current);
+        }
       }}
     >
       <header className="chat-dock-head">
@@ -417,6 +430,7 @@ export default function ChatDock() {
                     <ChatListingTag
                       key={tagKey(row)}
                       row={row}
+                      trayId={messagesTrayId(dock.peer || POKO_PEER)}
                       onRemove={removeChatTag}
                       onQty={setChatTagQty}
                       peer={{ uid: dock.peer, username: poko ? POKO_PEER : (dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '') }}

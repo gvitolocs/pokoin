@@ -1315,6 +1315,7 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   overflow: hidden;
   border-radius: 0;
   background: #07060b;
+  cursor: grab;
 }
 
 .cart-drop-card > a {
