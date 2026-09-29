@@ -292,6 +292,10 @@ function fetchEntry(req, pathname, search, leaderRes) {
       const upstream = upstreamRequest(req, origin, pathname, search, (up) => {
         const policy = cachePolicy(up.statusCode, up.headers);
         if (!policy) {
+          // Only an endpoint that says it is never storable skips coalescing;
+          // one 404 or 500 must not switch caching off for every URL on it.
+          const neverStorable = !/\bpublic\b/i.test(String(up.headers['cache-control'] || ''))
+            || /\b(private|no-store)\b/i.test(String(up.headers['cache-control'] || ''));
           if (leaderRes && !leaderRes.headersSent) {
             leaderRes.setHeader('x-pokoin-origin', local ? 'pi' : 'nezopt');
             leaderRes.setHeader('x-pokoin-edge-cache', 'BYPASS');
@@ -302,7 +306,7 @@ function fetchEntry(req, pathname, search, leaderRes) {
           }
           up.on('end', release);
           up.on('error', release);
-          resolve({ uncacheable: true });
+          resolve({ uncacheable: true, neverStorable });
           return;
         }
         const chunks = [];
@@ -352,8 +356,10 @@ function refresh(key, req, pathname, search, leaderRes) {
   const flight = fetchEntry(req, pathname, search, leaderRes)
     .then((entry) => {
       if (entry.uncacheable) {
-        if (uncacheablePaths.size > 500) uncacheablePaths.clear();
-        uncacheablePaths.set(pathname, Date.now() + UNCACHEABLE_MS);
+        if (entry.neverStorable) {
+          if (uncacheablePaths.size > 500) uncacheablePaths.clear();
+          uncacheablePaths.set(pathname, Date.now() + UNCACHEABLE_MS);
+        }
       } else if (entry.body.length <= CACHE_MAX_ENTRY) {
         cache.set(key, entry);
       }
