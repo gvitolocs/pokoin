@@ -1,0 +1,11 @@
+{
+  // pokoin.com/brand/* → /market/brand/* (workers/pokoin-brand.js).
+  "name": "pokoin-brand",
+  "main": "workers/pokoin-brand.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "pokoin.com/brand/*", "zone_name": "pokoin.com" },
+    { "pattern": "www.pokoin.com/brand/*", "zone_name": "pokoin.com" }
+  ]
+}
