@@ -8,7 +8,7 @@
 # dirty trees, plus Vercel's GitHub auto-deploy of main. Each deploy silently removed
 # the previous one's work (/email-preferences, Scan Connect). Git-built deploys also
 # served a 404 /download/extension.zip (gitignored). vercel.json now sets
-# git.deploymentEnabled.main=false, and this script enforces:
+# git.deploymentEnabled=false (no push or PR preview builds), and this script enforces:
 #   1. the commit is on origin/main (integrate there first);
 #   2. the commit contains the commit production runs (meta gitCommitSha / githubCommitSha);
 #   3. the build is a git archive of that commit + an allowlist of gitignored inputs;

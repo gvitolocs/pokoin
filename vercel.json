@@ -1,8 +1,6 @@
 {
   "git": {
-    "deploymentEnabled": {
-      "main": false
-    }
+    "deploymentEnabled": false
   },
   "installCommand": "true",
   "buildCommand": "bash scripts/build-web.sh",
