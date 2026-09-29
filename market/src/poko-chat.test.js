@@ -137,3 +137,31 @@ test('reconcile keeps card-attached local rows until the server twin includes th
   assert.equal(replaced.some((row) => row.id === 'srv-user'), true);
   assert.equal(pokoUserTurnKey(local), pokoUserTurnKey(replaced.find((row) => row.id === 'srv-user')));
 });
+
+test('a reply never sorts above its question, even with the old shared timestamp', () => {
+  const at = '2026-09-28T20:00:00.000Z';
+  // Legacy turn: same createdAt, random ids that would put the answer first.
+  const legacy = mergePokoEvents([
+    { id: 'aaa', role: 'assistant', text: 'Jessie & James…', createdAt: at },
+    { id: 'zzz', role: 'user', text: 'carte simili con piu trainers', createdAt: at },
+  ]);
+  assert.deepEqual(legacy.map((row) => row.role), ['user', 'assistant']);
+  // New turns share a turnId: question first no matter the clock.
+  const paired = mergePokoEvents([
+    { id: 'b', role: 'assistant', text: 'reply', turnId: 't1', createdAt: '2026-09-28T20:00:00.000Z' },
+    { id: 'a', role: 'user', text: 'ask', turnId: 't1', createdAt: '2026-09-28T20:00:05.000Z' },
+  ]);
+  assert.deepEqual(paired.map((row) => row.id), ['a', 'b']);
+});
+
+test('reconcile drops the optimistic bubble when the server echoes its clientTurnId', () => {
+  const local = { id: 'local-1-abc', role: 'user', text: '', cards: [{ cardId: '713650', name: 'Mimikyu' }], createdAt: '2026-09-28T20:00:09.000Z' };
+  const server = [
+    // Card-only send: the server stores a generated prompt, so text differs.
+    { id: 'u1', role: 'user', text: 'Quote Pokoin sold median…', cards: [{ cardId: '713650' }], clientTurnId: 'local-1-abc', turnId: 'u1', createdAt: '2026-09-28T20:00:08.000Z' },
+    { id: 'p1', role: 'assistant', text: 'Mimikyu…', cards: [{ cardId: '713650', cardName: 'Mimikyu' }], turnId: 'u1', createdAt: '2026-09-28T20:00:20.000Z' },
+  ];
+  const next = reconcilePokoEvents([local], server);
+  assert.deepEqual(next.map((row) => row.id), ['u1', 'p1']);
+  assert.equal(next[1].cards[0].cardName, 'Mimikyu');
+});

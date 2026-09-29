@@ -1616,7 +1616,14 @@ export function saveSellerSettings(body, token) {
 }
 
 /** Website Poko assistant — Firebase-authed BFF; never calls poko-market from the browser. */
-export function sendPokoChat({ message = '', cards = [], images = [], sessionId = '', pageContext = null } = {}, token) {
+export function sendPokoChat({
+  message = '',
+  cards = [],
+  images = [],
+  sessionId = '',
+  pageContext = null,
+  clientTurnId = '',
+} = {}, token) {
   const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
     ? AbortSignal.timeout(95_000)
     : undefined;
@@ -1626,7 +1633,7 @@ export function sendPokoChat({ message = '', cards = [], images = [], sessionId 
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ message, cards, images, sessionId, pageContext }),
+    body: JSON.stringify({ message, cards, images, sessionId, pageContext, clientTurnId }),
     signal,
   });
 }

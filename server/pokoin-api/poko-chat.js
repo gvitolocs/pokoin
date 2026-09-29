@@ -13,6 +13,7 @@
 const path = require('path');
 
 const EVENT_PAGE = 80;
+const { REPLY_CARDS_DIRECTIVE, attachReplyCards } = require('./_poko_reply_cards');
 
 function requireHelper(name) {
   try {
@@ -210,6 +211,7 @@ async function hermesReply({
     message,
     cardsContext(cards),
     imagesContext(images),
+    REPLY_CARDS_DIRECTIVE,
   ].filter(Boolean).join('\n\n');
   const pageWithPersonal = personal
     ? { ...pageContext, personal }
@@ -242,7 +244,10 @@ async function hermesReply({
     error.statusCode = 502;
     throw error;
   }
-  return reply;
+  // Structured cards win when Hermes sends them; otherwise names in the text.
+  const hermesCards = Array.isArray(data?.cards) ? data.cards
+    : (Array.isArray(data?.cardIds) ? data.cardIds : []);
+  return { reply, hermesCards };
 }
 
 // Per-IP rate limit, same shape as the legacy assistant (20 msgs / minute).
@@ -295,6 +300,8 @@ function serializeEvent(doc) {
     listings: cards,
     images: Array.isArray(data.images) ? data.images : [],
     source: data.source || '',
+    turnId: data.turnId || '',
+    clientTurnId: data.clientTurnId || '',
     createdAt: firestoreTimeIso(data.createdAt),
   };
 }
@@ -312,29 +319,53 @@ async function readEventPage(ref, beforeId) {
   return { docs: hasMore ? docs.slice(1) : docs, hasMore };
 }
 
-async function appendTurn({ firestore, uid, userText, cards, images, reply, source }) {
+/**
+ * One user turn + its reply. The question is stamped when it arrived and the
+ * reply strictly later, so they can never tie (a shared serverTimestamp made
+ * the random doc id decide, and the reply showed above the question). Both
+ * carry turnId; the user row echoes the client's optimistic id.
+ */
+async function appendTurn({
+  firestore,
+  uid,
+  userText,
+  cards,
+  images,
+  reply,
+  replyCards = [],
+  source,
+  userAtMs = Date.now(),
+  replyAtMs = Date.now(),
+  clientTurnId = '',
+}) {
   const admin = getFirebaseAdmin();
-  const stamp = admin.firestore.FieldValue.serverTimestamp();
-  const iso = new Date().toISOString();
+  const Timestamp = admin.firestore.Timestamp;
+  const askedAt = Math.trunc(Number(userAtMs) || Date.now());
+  const answeredAt = Math.max(Math.trunc(Number(replyAtMs) || Date.now()), askedAt + 1);
+  const at = (ms) => (Timestamp?.fromMillis ? Timestamp.fromMillis(ms) : new Date(ms));
   const ref = conversationRef(firestore, uid);
   const userRef = ref.collection('events').doc();
   const assistantRef = ref.collection('events').doc();
+  const turnId = userRef.id;
   const batch = firestore.batch();
-  batch.set(ref, { uid, updatedAt: stamp }, { merge: true });
+  batch.set(ref, { uid, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
   batch.set(userRef, {
     role: 'user',
     text: userText || '',
     cards,
     images,
-    createdAt: stamp,
+    turnId,
+    clientTurnId,
+    createdAt: at(askedAt),
   });
   batch.set(assistantRef, {
     role: 'assistant',
     text: reply || '',
-    cards: [],
+    cards: replyCards,
     images: [],
     source: source || 'hermes',
-    createdAt: stamp,
+    turnId,
+    createdAt: at(answeredAt),
   });
   await batch.commit();
   return [
@@ -347,20 +378,29 @@ async function appendTurn({ firestore, uid, userText, cards, images, reply, sour
       listings: cards,
       images,
       source: '',
-      createdAt: iso,
+      turnId,
+      clientTurnId,
+      createdAt: new Date(askedAt).toISOString(),
     },
     {
       id: assistantRef.id,
       role: 'assistant',
       mine: false,
       text: reply || '',
-      cards: [],
-      listings: [],
+      cards: replyCards,
+      listings: replyCards,
       images: [],
       source: source || 'hermes',
-      createdAt: iso,
+      turnId,
+      clientTurnId: '',
+      createdAt: new Date(answeredAt).toISOString(),
     },
   ];
+}
+
+function cleanClientTurnId(value) {
+  const text = cleanText(value, 80);
+  return /^[A-Za-z0-9_-]{1,80}$/.test(text) ? text : '';
 }
 
 async function handleHistory(req, res, uid) {
@@ -381,6 +421,8 @@ async function handleChat(req, res, decoded) {
   if (chatRateLimited(req)) {
     return res.status(429).json({ error: 'Too many messages, please slow down.' });
   }
+  const receivedAtMs = Date.now();
+  const clientTurnId = cleanClientTurnId(req.body?.clientTurnId);
   const message = cleanText(req.body?.message, 4000);
   const cards = cleanCards(req.body?.cards);
   const images = cleanImages(req.body?.images);
@@ -399,10 +441,11 @@ async function handleChat(req, res, decoded) {
   const { personal, intent: personalIntent } = await loadPersonalForChat(decoded.uid, pageContext);
 
   let reply = '';
+  let replyCards = [];
   let source = 'hermes';
   let hermesError = '';
   try {
-    reply = await hermesReply({
+    const answer = await hermesReply({
       message: prompt,
       cards,
       images,
@@ -413,6 +456,13 @@ async function handleChat(req, res, decoded) {
       sessionId,
       displayName: cleanText(decoded.name || decoded.email, 80),
     });
+    // Cards Poko names come back as real catalog cards (images in the chat).
+    const attachedReply = await attachReplyCards(answer.reply, {
+      hermesCards: answer.hermesCards,
+      query: marketplaceQuery,
+    });
+    reply = attachedReply.text || answer.reply;
+    replyCards = attachedReply.cards;
   } catch (error) {
     hermesError = String(error?.message || error).slice(0, 200);
     console.warn('poko-chat hermes failed', hermesError);
@@ -429,7 +479,11 @@ async function handleChat(req, res, decoded) {
       cards,
       images,
       reply,
+      replyCards,
       source,
+      userAtMs: receivedAtMs,
+      replyAtMs: Date.now(),
+      clientTurnId,
     });
   } catch (error) {
     console.error('poko-chat persist failed', String(error?.message || error).slice(0, 200));
@@ -452,6 +506,7 @@ async function handleChat(req, res, decoded) {
     assistant: 'poko',
     persona: 'Poko',
     reply,
+    cards: replyCards,
     source,
     events,
   });
@@ -490,6 +545,8 @@ module.exports._test = {
   resolveHermesChatUrl,
   hermesToken,
   serializeEvent,
+  appendTurn,
+  cleanClientTurnId,
   loadPersonalForChat,
   HERMES_UNAVAILABLE,
   HERMES_UNAVAILABLE_ERROR,
