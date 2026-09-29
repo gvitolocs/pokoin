@@ -191,44 +191,62 @@ test('resolves CT user id when snapshot name differs and returns Psychic Energy 
   process.env.DEAL_SCAN_TOKEN = 'secret-deal';
   const handler = loadHandler(
     async (sql) => {
-      if (/seller_account_name ilike/i.test(sql)) return { rows: [] };
-      // Prefer the scan CTE match before resolve heuristics.
-      if (/\bwith\s+seller\s+as\b/i.test(sql)) {
-        return {
-          rows: [{
-            blueprint_id: '121202',
-            card_id: '242404',
-            card_name: 'Psychic Energy',
-            expansion_name: 'heartgold soulsilver',
-            card_number: '119/123',
-            condition_raw: 'Played',
-            condition_code: 'MP',
-            language_raw: 'it',
-            language_code: 'IT',
-            reverse: false,
-            first_edition: false,
-            graded: false,
-            ask_eur: 5.11,
-            quantity: 1,
-            sold_median_eur: 18.77,
-            live_cheapest_eur: 5.11,
-            live_median_eur: 20.27,
-            live_listing_count: 27,
-            sold_qty_90d: 5,
-            last_sold_day: '2026-09-25',
-            flag: 'cheap_vs_sold',
-            sold_over_ask: 3.67,
-            ask_over_sold: 0.27,
-          }],
-        };
-      }
-      if (/as quantity_sum/i.test(sql) && /seller_account_id = \$1/i.test(sql)) {
+      // Resolve: exact snapshot name miss, then id hit after CT fetch.
+      if (/seller_account_name = \$1/i.test(sql)) return { rows: [] };
+      if (/as quantity_sum/i.test(sql) && /seller_account_id = \$1/i.test(sql) && !/distinct on/i.test(sql)) {
         return {
           rows: [{
             account_id: '433468',
             snapshot_name: 'Gotta-collect_em-all',
             listing_count: 2836,
             quantity_sum: 3462,
+          }],
+        };
+      }
+      // Step 1: seller listings (+ catalog join).
+      if (/distinct on/i.test(sql) && /marketplace_search_candidates/i.test(sql)) {
+        return {
+          rows: [{
+            blueprint_id: '121202',
+            ask_eur: 5.11,
+            quantity: 1,
+            condition_raw: 'Played',
+            language_raw: 'it',
+            reverse: false,
+            first_edition: false,
+            graded: false,
+            card_name: 'Psychic Energy',
+            expansion_name: 'heartgold soulsilver',
+            card_number: '119/123',
+            card_id: '242404',
+          }],
+        };
+      }
+      // Step 2: live book median from snapshots.
+      if (/percentile_cont\(0\.5\)/i.test(sql) && /cardtrader_market_listing_snapshots/i.test(sql)) {
+        return {
+          rows: [{
+            blueprint_id: '121202',
+            live_cheapest_eur: 5.11,
+            live_median_eur: 20.27,
+            live_listing_count: 27,
+          }],
+        };
+      }
+      // Step 3: facet sold medians (MP|IT only — cross-facet would not match).
+      if (/cardtrader_sold_daily/i.test(sql) && /sold_days/i.test(sql)) {
+        return {
+          rows: [{
+            blueprint_id: '121202',
+            condition_code: 'MP',
+            language_code: 'IT',
+            reverse: false,
+            first_edition: false,
+            graded: false,
+            sold_median_eur: 18.77,
+            sold_qty_90d: 5,
+            sold_day_rows: 3,
+            last_sold_day: '2026-09-25',
           }],
         };
       }
@@ -256,6 +274,84 @@ test('resolves CT user id when snapshot name differs and returns Psychic Energy 
     assert.equal(res.body.deals.cheap[0].language, 'IT');
     assert.equal(res.body.deals.cheap[0].condition, 'MP');
     assert.ok(res.body.deals.cheap[0].soldOverAsk >= 3);
+  } finally {
+    handler.restore();
+  }
+});
+
+test('facet join rejects cross-condition sold matches (Poor IT ≠ NM EN)', async () => {
+  process.env.DEAL_SCAN_TOKEN = 'secret-deal';
+  const handler = loadHandler(
+    async (sql) => {
+      if (/seller_account_name = \$1/i.test(sql)) {
+        return {
+          rows: [{
+            account_id: '1',
+            snapshot_name: 'tester',
+            listing_count: 1,
+            quantity_sum: 1,
+          }],
+        };
+      }
+      if (/distinct on/i.test(sql)) {
+        return {
+          rows: [{
+            blueprint_id: '99',
+            ask_eur: 0.5,
+            quantity: 1,
+            condition_raw: 'Poor',
+            language_raw: 'it',
+            reverse: false,
+            first_edition: false,
+            graded: false,
+            card_name: 'Cyndaquil',
+            expansion_name: 'ex unseen forces',
+            card_number: '54/115',
+            card_id: '100',
+          }],
+        };
+      }
+      if (/percentile_cont\(0\.5\)/i.test(sql) && /cardtrader_market_listing_snapshots/i.test(sql)) {
+        return {
+          rows: [{
+            blueprint_id: '99',
+            live_cheapest_eur: 0.5,
+            live_median_eur: 2.0,
+            live_listing_count: 10,
+          }],
+        };
+      }
+      if (/cardtrader_sold_daily/i.test(sql)) {
+        // Only NM EN sold history — must NOT match Poor IT listing.
+        return {
+          rows: [{
+            blueprint_id: '99',
+            condition_code: 'NM',
+            language_code: 'EN',
+            reverse: false,
+            first_edition: false,
+            graded: false,
+            sold_median_eur: 5.0,
+            sold_qty_90d: 20,
+            sold_day_rows: 5,
+            last_sold_day: '2026-09-20',
+          }],
+        };
+      }
+      return { rows: [] };
+    },
+  );
+  try {
+    const res = mockRes();
+    await handler({
+      method: 'GET',
+      url: '/api/cardtrader-deal-scan?seller=tester',
+      headers: { authorization: 'Bearer secret-deal' },
+    }, res);
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+    assert.equal(res.body.deals.cheap.length, 0);
+    assert.equal(res.body.deals.expensive.length, 0);
+    assert.equal(res.body.unmatchedCount, 1);
   } finally {
     handler.restore();
   }
