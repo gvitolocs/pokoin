@@ -1141,6 +1141,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/associate/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/associate",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/sales/",
       "destination": "/market/index.html"
     },
