@@ -451,5 +451,28 @@
         "Partner store directory (placeholder until Flex launch)"
       ]
     }
+  },
+  {
+    "path": "/api/cardtrader-deal-scan",
+    "file": "cardtrader-deal-scan.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Scan a CardTrader seller (username or profile URL) for crazy asks vs facet-perfect sold comps (blueprint + condition + language + reverse/1st/graded).",
+    "auth": "Required Bearer DEAL_SCAN_TOKEN. Intended for the pokoin-ct-deals Vercel proxy; not a public browser endpoint.",
+    "params": {
+      "query": "seller={ctUsername} or url={cardtrader profile URL}.",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "MARKETPLACE_DATABASE_URL",
+        "DEAL_SCAN_TOKEN"
+      ],
+      "services": [
+        "Postgres marketplace (snapshots + cardtrader_sold_daily)",
+        "CardTrader public user JSON (username → account id)"
+      ]
+    }
   }
 ]
