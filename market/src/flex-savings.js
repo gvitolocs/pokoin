@@ -1,14 +1,15 @@
-// Pokoin Flex savings from the real carrier table (shipping-rates.json).
-// "Alone" is the tracked rate the seller pays today at checkout. "Flex" is a
-// weight share of one ~20 kg bag, priced at the same carriers' parcel rate
-// (EXTRA_LARGE tier) for the leg to the sorting center and the leg out.
+// Pokoin Flex savings from the real carrier table (shipping-rates.json, the
+// same rates checkout quotes). "Alone" is the service the seller picks for
+// that route and pack size (tracked or untracked letter). "Flex" is a weight
+// share of one ~20 kg bag sent as one parcel on the same route (EXTRA_LARGE
+// tier), plus — for home delivery — the same kind of service inside the
+// destination country.
 
 import ratesCatalog from './shipping-rates.json' with { type: 'json' };
 import { findShippingRate, packageTierForCount } from './shipping-quote.js';
 
 /** Every number here is shown on /flex so the estimate can be checked. */
 export const FLEX_ASSUMPTIONS = Object.freeze({
-  hubCountry: 'DK',
   bagGrams: 20000,
   defaultBagFill: 0.6,
   boxGrams: 45,
@@ -21,6 +22,34 @@ const TRUNK_TIER = 'EXTRA_LARGE';
 
 function cents(rate) {
   return rate ? Number(rate.priceEURCents) || 0 : null;
+}
+
+/**
+ * Every live service for one route and pack size, cheapest first:
+ * [{ id, tracked, carrier, service, cents }]. What checkout would offer.
+ */
+export function routeServices({ from, to, cards, catalog = ratesCatalog } = {}) {
+  const fromCode = String(from || '').toUpperCase();
+  const toCode = String(to || '').toUpperCase();
+  const tier = packageTierForCount(Math.max(1, Math.trunc(Number(cards) || 0)));
+  return (catalog.rates || [])
+    .filter((rate) => rate.active !== false
+      && String(rate.fromCountry).toUpperCase() === fromCode
+      && String(rate.toCountry).toUpperCase() === toCode
+      && String(rate.packageTier).toUpperCase() === tier)
+    .map((rate) => ({
+      id: rate.id,
+      tracked: rate.tracked !== false,
+      carrier: rate.carrier || '',
+      service: rate.serviceName || '',
+      cents: cents(rate),
+    }))
+    .sort((a, b) => a.cents - b.cents);
+}
+
+/** Cheapest service with the wanted tracking, else the cheapest at all. */
+function pickService(services, tracked) {
+  return services.find((row) => row.tracked === tracked) || services[0] || null;
 }
 
 /** Countries with at least one live rate, sender side and receiver side. */
@@ -52,8 +81,8 @@ export function flexLanes(catalog = ratesCatalog) {
 }
 
 /**
- * One trunk leg priced at the carrier parcel rate. A lane missing from the
- * table borrows its reverse direction and is flagged as an estimate.
+ * The bag as one parcel on the route (carrier parcel rate). A lane missing
+ * from the table borrows its reverse direction and is flagged as an estimate.
  */
 export function trunkLeg(from, to, catalog = ratesCatalog) {
   const direct = findShippingRate({ fromCountry: from, toCountry: to, packageTier: TRUNK_TIER, catalog });
@@ -69,14 +98,16 @@ export function packGrams(cardCount, assumptions = FLEX_ASSUMPTIONS) {
 }
 
 /**
- * Alone vs Flex for one pack. `delivery` is 'pickup' (partner shop, no last
- * mile) or 'home' (tracked small parcel inside the destination country).
- * Returns null when either side has no price.
+ * Alone vs Flex for one pack. `tracked` picks the service the seller would
+ * use alone (and, for home delivery, inside the destination country).
+ * `delivery` is 'pickup' (partner shop, no last mile) or 'home'.
+ * Returns null when a price is missing.
  */
 export function flexQuote({
   from,
   to,
   cards,
+  tracked = true,
   delivery = 'pickup',
   bagFill = FLEX_ASSUMPTIONS.defaultBagFill,
   assumptions = FLEX_ASSUMPTIONS,
@@ -86,33 +117,27 @@ export function flexQuote({
   const toCode = String(to || '').toUpperCase();
   const count = Math.max(1, Math.trunc(Number(cards) || 0));
   const tier = packageTierForCount(count);
-  const aloneRate = findShippingRate({ fromCountry: fromCode, toCountry: toCode, packageTier: tier, tracked: true, catalog });
-  const alone = cents(aloneRate);
-  const hub = assumptions.hubCountry;
-  const inbound = trunkLeg(fromCode, hub, catalog);
-  const outbound = trunkLeg(hub, toCode, catalog);
-  if (alone == null || !inbound || !outbound) return null;
+  const services = routeServices({ from: fromCode, to: toCode, cards: count, catalog });
+  const alone = pickService(services, tracked !== false);
+  const trunk = trunkLeg(fromCode, toCode, catalog);
+  if (!alone || !trunk) return null;
 
   const fill = Math.min(1, Math.max(0.1, Number(bagFill) || assumptions.defaultBagFill));
   const grams = packGrams(count, assumptions);
   const filledGrams = assumptions.bagGrams * fill;
-  const trunkCents = inbound.cents + outbound.cents;
-  const trunkShare = (trunkCents * grams) / filledGrams;
-  let lastMile = 0;
-  let lastMileRate = null;
+  let lastMile = null;
   if (delivery === 'home') {
-    lastMileRate = findShippingRate({ fromCountry: toCode, toCountry: toCode, packageTier: tier, tracked: true, catalog });
-    if (!lastMileRate) return null;
-    lastMile = cents(lastMileRate);
+    lastMile = pickService(routeServices({ from: toCode, to: toCode, cards: count, catalog }), alone.tracked);
+    if (!lastMile) return null;
   }
   const parts = {
     box: assumptions.boxCents,
     handling: assumptions.handlingCents,
-    trunk: Math.round(trunkShare),
-    lastMile,
+    trunk: Math.round((trunk.cents * grams) / filledGrams),
+    lastMile: lastMile ? lastMile.cents : 0,
   };
   const flex = parts.box + parts.handling + parts.trunk + parts.lastMile;
-  const saved = alone - flex;
+  const saved = alone.cents - flex;
   return {
     from: fromCode,
     to: toCode,
@@ -120,25 +145,15 @@ export function flexQuote({
     tier,
     delivery,
     bagFill: fill,
-    alone: {
-      cents: alone,
-      carrier: aloneRate.carrier,
-      service: aloneRate.serviceName,
-    },
+    services,
+    alone,
     flex: { cents: flex, parts },
     savedCents: saved,
-    savedPct: alone > 0 ? Math.round((saved / alone) * 100) : 0,
+    savedPct: alone.cents > 0 ? Math.round((saved / alone.cents) * 100) : 0,
     packGrams: grams,
     packsPerBag: Math.floor(filledGrams / grams),
-    trunk: {
-      cents: trunkCents,
-      inbound,
-      outbound,
-      estimated: inbound.estimated || outbound.estimated,
-    },
-    lastMile: lastMileRate
-      ? { cents: lastMile, carrier: lastMileRate.carrier, service: lastMileRate.serviceName }
-      : null,
+    trunk,
+    lastMile,
   };
 }
 

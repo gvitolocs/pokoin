@@ -9,6 +9,7 @@ import {
   flexLaneTable,
   flexQuote,
   formatEur,
+  routeServices,
 } from '../flex-savings.js';
 import { shipFromCountryName } from '../ship-countries.js';
 import '../flex.css';
@@ -45,9 +46,15 @@ function Calculator() {
   const [from, setFrom] = useState('DK');
   const [to, setTo] = useState('IT');
   const [cards, setCards] = useState(20);
+  const [tracked, setTracked] = useState(true);
   const [delivery, setDelivery] = useState('pickup');
   const [fill, setFill] = useState(Math.round(FLEX_ASSUMPTIONS.defaultBagFill * 100));
-  const quote = flexQuote({ from, to, cards, delivery, bagFill: fill / 100 });
+  const services = routeServices({ from, to, cards });
+  const quote = flexQuote({ from, to, cards, tracked, delivery, bagFill: fill / 100 });
+  const pickup = delivery === 'home' ? flexQuote({ from, to, cards, tracked, bagFill: fill / 100 }) : null;
+  const serviceChoices = [true, false]
+    .map((wantTracked) => services.find((row) => row.tracked === wantTracked))
+    .filter(Boolean);
   const parts = quote?.flex.parts;
   const alone = quote?.alone.cents || 0;
   const bar = (value) => `${Math.max(0, Math.min(100, (value / Math.max(1, alone)) * 100))}%`;
@@ -57,8 +64,8 @@ function Calculator() {
       <header className="flex-panel-head">
         <h2 id="flex-calc-title">What you’d save</h2>
         <p>
-          “Alone” is the tracked price Pokoin checkout charges today. Flex is an estimate from the
-          same carriers’ parcel prices — how it’s worked out is at the bottom of the page.
+          “Alone” is the price Pokoin checkout charges today for the service you pick. Flex is an
+          estimate from the same carriers’ prices — how it’s worked out is at the bottom of the page.
         </p>
       </header>
       <div className="flex-calc-grid">
@@ -82,6 +89,22 @@ function Calculator() {
             <span>Cards in the pack <strong>{cards}</strong></span>
             <input type="range" min="1" max="60" value={cards} onChange={(event) => setCards(Number(event.target.value))} />
           </label>
+          <fieldset className="flex-seg flex-services">
+            <legend>Ship alone with</legend>
+            {serviceChoices.map((row) => (
+              <label key={row.id} className={quote?.alone.id === row.id ? 'is-on' : ''}>
+                <input
+                  type="radio"
+                  name="flex-service"
+                  value={row.tracked ? 'tracked' : 'untracked'}
+                  checked={quote?.alone.id === row.id}
+                  onChange={() => setTracked(row.tracked)}
+                />
+                <span>{row.tracked ? 'Tracked' : 'Untracked letter'}</span>
+                <small>{row.carrier} · {formatEur(row.cents)}</small>
+              </label>
+            ))}
+          </fieldset>
           <fieldset className="flex-seg">
             <legend>Delivery</legend>
             {[['pickup', 'Partner pickup'], ['home', 'Home delivery']].map(([value, label]) => (
@@ -109,16 +132,23 @@ function Calculator() {
                 <div className="is-flex">
                   <span>With Flex</span>
                   <strong><Money cents={quote.flex.cents} /></strong>
-                  <em>{delivery === 'home' ? 'home delivery' : 'pickup at a partner'}</em>
+                  <em>{delivery === 'home' ? `home delivery, ${quote.lastMile.tracked ? 'tracked' : 'untracked'}` : 'pickup at a partner'}</em>
                 </div>
               </div>
               <p className={`flex-saving${quote.savedCents > 0 ? '' : ' is-none'}`}>
                 {quote.savedCents > 0 ? (
                   <>You save <strong><Money cents={quote.savedCents} /></strong> · {quote.savedPct}% on this pack</>
                 ) : (
-                  <>Flex is not cheaper on this pack</>
+                  <>Flex is not cheaper with home delivery here</>
                 )}
               </p>
+              {quote.savedCents <= 0 && pickup && pickup.savedCents > 0 ? (
+                <p className="flex-note">
+                  Home delivery inside {country(to)} costs about what posting it yourself does.
+                  With partner pickup this pack is <strong><Money cents={pickup.flex.cents} /></strong> —
+                  {' '}{pickup.savedPct}% less.
+                </p>
+              ) : null}
               <div className="flex-bars" aria-hidden="true">
                 <div className="flex-bar is-alone"><span style={{ width: '100%' }} /></div>
                 <div className="flex-bar is-flex">
@@ -134,20 +164,19 @@ function Calculator() {
                 <li>
                   <i className="p-trunk" />Your share of the bag <Money cents={parts.trunk} />
                   <small>
-                    {quote.packGrams} g of a {Math.round(FLEX_ASSUMPTIONS.bagGrams * quote.bagFill / 1000)} kg load ·
-                    {' '}{quote.trunk.inbound.carrier} parcel to the sorting center + {quote.trunk.outbound.carrier} parcel out
-                    {' '}= <Money cents={quote.trunk.cents} /> per bag
+                    {quote.packGrams} g of a {Math.round(FLEX_ASSUMPTIONS.bagGrams * quote.bagFill / 1000)} kg bag ·
+                    {' '}one {quote.trunk.carrier} parcel {country(from)} → {country(to)} = <Money cents={quote.trunk.cents} /> per bag
                   </small>
                 </li>
                 {quote.lastMile ? (
-                  <li><i className="p-last" />Home delivery <Money cents={parts.lastMile} /><small>{quote.lastMile.carrier} · {quote.lastMile.service}</small></li>
+                  <li><i className="p-last" />Home delivery <Money cents={parts.lastMile} /><small>{quote.lastMile.carrier} · {quote.lastMile.service} inside {country(to)}</small></li>
                 ) : null}
               </ul>
               <p className="flex-road">
                 <strong>{quote.packsPerBag}</strong> packs like this fill one bag — {quote.packsPerBag} parcels become 2 bag moves.
               </p>
               {quote.trunk.estimated ? (
-                <p className="flex-note">One leg on this route has no direct rate yet, so it uses the reverse direction’s price.</p>
+                <p className="flex-note">This route has no parcel rate yet in one direction, so the bag uses the reverse direction’s price.</p>
               ) : null}
             </>
           ) : (
@@ -233,7 +262,7 @@ export default function Flex() {
           </p>
           <div className="flex-stats">
             {average ? (
-              <div><strong>{average.savedPct}%</strong><span>cheaper on average across our shipping routes</span></div>
+              <div><strong>{average.savedPct}%</strong><span>cheaper than tracked post on average, with partner pickup</span></div>
             ) : null}
             {example ? (
               <>
@@ -319,10 +348,10 @@ export default function Flex() {
       <details className="flex-panel flex-method">
         <summary>How the estimate is worked out</summary>
         <ul>
-          <li><strong>Shipping alone</strong> is the tracked rate Pokoin checkout uses today for that route and pack size (4 / 20 / 50 / more cards).</li>
-          <li><strong>The bag</strong> is priced at the same carriers’ largest parcel rate: one leg to the sorting center in {shipFromCountryName(FLEX_ASSUMPTIONS.hubCountry)}, one leg out. A route with no direct rate borrows the reverse direction.</li>
+          <li><strong>Shipping alone</strong> is the rate Pokoin checkout uses today for that route and pack size (4 / 20 / 50 / more cards) — tracked or untracked letter, as you pick.</li>
+          <li><strong>The bag</strong> travels as one parcel on the same route at the carrier’s largest parcel rate. A route with no direct rate borrows the reverse direction.</li>
           <li><strong>Your share</strong> is your pack’s weight ({FLEX_ASSUMPTIONS.boxGrams} g box + {FLEX_ASSUMPTIONS.gramsPerCard} g per sleeved card) out of a {FLEX_ASSUMPTIONS.bagGrams / 1000} kg bag at the fill level you choose.</li>
-          <li><strong>Fixed costs</strong>: Flex box {formatEur(FLEX_ASSUMPTIONS.boxCents)}, partner handling {formatEur(FLEX_ASSUMPTIONS.handlingCents)} per pack. Home delivery adds the tracked small-parcel rate inside the destination country.</li>
+          <li><strong>Fixed costs</strong>: Flex box {formatEur(FLEX_ASSUMPTIONS.boxCents)}, partner handling {formatEur(FLEX_ASSUMPTIONS.handlingCents)} per pack. Home delivery adds the same kind of service (tracked or untracked) inside the destination country.</li>
           <li>These are planning numbers — the final Flex price is set when partner shops open.</li>
         </ul>
       </details>
