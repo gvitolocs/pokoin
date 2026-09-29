@@ -16,6 +16,7 @@ import {
 } from '../listing-meta.js';
 import { seedSellerListings } from '../seller-seed.js';
 import { game } from '../game.js';
+import { associateRoleLabel } from '../associate-roles.js';
 
 const PAGE_SIZE = 100;
 
@@ -199,7 +200,7 @@ export default function Seller() {
           <h1 className="page-title">
             {display}
             {seller.associate?.role ? (
-              <span className={`seller-associate-badge is-${seller.associate.role}`}>{seller.associate.role}</span>
+              <span className={`seller-associate-badge is-${seller.associate.role}`}>{associateRoleLabel(seller.associate.role)}</span>
             ) : null}
           </h1>
           {showTag ? <p className="seller-handle">@{tag}</p> : null}

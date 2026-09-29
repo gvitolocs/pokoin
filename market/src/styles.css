@@ -10162,3 +10162,10 @@ html:has(.wallet-page) .brand span {
   background: rgb(150 120 255 / 0.1);
   border-color: rgb(150 120 255 / 0.4);
 }
+
+.seller-associate-badge.is-founder_ambassador,
+.suggest-user-associate-badge.is-founder_ambassador {
+  color: #1a1400;
+  background: linear-gradient(90deg, #ffd33d, #f5b7ff 55%, #c9b8ff);
+  border-color: transparent;
+}

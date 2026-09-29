@@ -32,6 +32,7 @@ import { normalizeSearchTab, searchFetchOptions, searchHref, uniqueSellers } fro
 import { parseResolutionParam, resolveSuggestQuery } from '../suggest-resolve.js';
 import { sellerHref } from '../listing-meta.js';
 import { rememberPageView, restoredPageView } from '../scroll-restore.js';
+import { associateRoleLabel } from '../associate-roles.js';
 
 /** Artist rows carry display names; the resolved param carries slugs. */
 function normalizeArtistName(value) {
@@ -462,7 +463,7 @@ export default function Search() {
                   <span>
                     <strong>{seller.name}</strong>
                     {seller.associateRole ? (
-                      <span className={`suggest-user-associate-badge is-${seller.associateRole}`}>{seller.associateRole}</span>
+                      <span className={`suggest-user-associate-badge is-${seller.associateRole}`}>{associateRoleLabel(seller.associateRole)}</span>
                     ) : null}
                     {seller.count ? (
                       <em>{seller.count} listing{seller.count === 1 ? '' : 's'}</em>
