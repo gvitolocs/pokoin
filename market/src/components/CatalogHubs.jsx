@@ -15,10 +15,10 @@ export function catalogLinks(lang = 'en') {
 
 const EXTRA = new Set(['Eras', 'Rarities', 'Languages', 'Guides']);
 
-export default function CatalogMenu({ lang = 'en', variant = 'foot', onNavigate }) {
+export default function CatalogMenu({ lang = 'en', onNavigate }) {
   const extras = catalogLinks(lang).filter((row) => EXTRA.has(row.label));
   return (
-    <details className={variant === 'mobile' ? 'mobile-catalog' : 'foot-catalog'}>
+    <details className="foot-catalog">
       <summary>Catalog</summary>
       <nav aria-label="Catalog">
         {extras.map((row) => (

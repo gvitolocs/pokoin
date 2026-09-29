@@ -44,6 +44,7 @@ import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers
 import { printingIdentity, clipSuggestCollector, suggestCardName, suggestTranslatedLine } from '../identity.js';
 import { sellerHref } from '../listing-meta.js';
 import CatalogMenu from './CatalogHubs.jsx';
+import MobileMenu from './MobileMenu.jsx';
 import ExpansionMark from './ExpansionMark.jsx';
 import SearchTabs from './SearchTabs.jsx';
 import { Action, track } from '../track.js';
@@ -111,29 +112,6 @@ const ICO = {
   signin: 'M11 7L9.6 8.4l2.6 2.6H2v2h10.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z',
   admin: 'M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z',
 };
-
-function MobileTile({ to, href, label, icon, onClick }) {
-  const body = (
-    <>
-      <Icon d={ICO[icon]} />
-      <span>{label}</span>
-    </>
-  );
-  const external = href || (to ? marketUrl(to) : '');
-  // An absolute marketUrl means the legacy dashboard host; leave that origin.
-  if (href || (to && String(external).startsWith('http'))) {
-    return <a className="mobile-tile" href={external} onClick={onClick}>{body}</a>;
-  }
-  return (
-    <NavLink
-      className={({ isActive }) => `mobile-tile${isActive ? ' is-active' : ''}`}
-      to={to}
-      onClick={onClick}
-    >
-      {body}
-    </NavLink>
-  );
-}
 
 /** Same-origin NavLink, or absolute pokoin.com <a> when the SPA is on dashboard. */
 function AppLink({ to, className, title, 'aria-label': ariaLabel, children }) {
@@ -948,6 +926,8 @@ export default function Chrome({ children }) {
     }
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Floating chat button sits above the drawer otherwise.
+    document.body.classList.add('menu-open');
     function onKey(event) {
       if (event.key === 'Escape') {
         setMenu(false);
@@ -956,6 +936,7 @@ export default function Chrome({ children }) {
     document.addEventListener('keydown', onKey);
     return () => {
       document.body.style.overflow = previous;
+      document.body.classList.remove('menu-open');
       document.removeEventListener('keydown', onKey);
     };
   }, [menu]);
@@ -1362,32 +1343,35 @@ export default function Chrome({ children }) {
         aria-label="Close menu"
         onClick={closeMenu}
       />
-      <nav id="mobile-menu" className={`mobile-panel ${menu ? 'on' : ''}`} aria-label="Menu" aria-hidden={!menu}>
-        <MobileTile to="/marketplace" label="Marketplace" icon="market" onClick={closeMenu} />
-        <MobileTile to="/marketplace/search" label="Search" icon="search" onClick={closeMenu} />
-        <MobileTile href={homeHref} label="Home" icon="home" onClick={closeMenu} />
-        <MobileTile to={APP.messages} label="Messages" icon="forum" onClick={closeMenu} />
-        <MobileTile to={DASHBOARD_HOME} label="Dashboard" icon="dashboard" onClick={closeMenu} />
-        {site.features.competitive ? (
-          <MobileTile to="/marketplace/competitive" label="Competitive" icon="trophy" onClick={closeMenu} />
-        ) : null}
-        <MobileTile to="/marketplace/explore" label="Explore" icon="explore" onClick={closeMenu} />
-        <MobileTile to="/marketplace/portfolio" label="Portfolio" icon="portfolio" onClick={closeMenu} />
-        <MobileTile to="/marketplace/sets" label="Sets" icon="sets" onClick={closeMenu} />
-        <MobileTile to={`/marketplace/${lang}/pokemon`} label="Pokémon" icon="sets" onClick={closeMenu} />
-        <MobileTile to={`/marketplace/${lang}/artists`} label="Artists" icon="sets" onClick={closeMenu} />
-        {isPokemonGame() ? <CatalogMenu lang={lang} variant="mobile" onNavigate={closeMenu} /> : null}
-        <MobileTile to="/marketplace/watchlist" label="Watchlist" icon="watch" onClick={closeMenu} />
-        <MobileTile to={APP.wallet} label="Wallet" icon="wallet" onClick={closeMenu} />
-        <MobileTile to={APP.buy} label="Buy PKN" icon="buy" onClick={closeMenu} />
-        <MobileTile to={APP.cart} label="Cart" icon="cart" onClick={closeMenu} />
-        <MobileTile to="/checkout" label="Checkout" icon="checkout" onClick={closeMenu} />
-        <MobileTile to="/orders" label="Orders" icon="orders" onClick={closeMenu} />
-        <MobileTile to="/collection" label="Collection" icon="nft" onClick={closeMenu} />
-        <MobileTile to={APP.profile} label="Profile" icon="profile" onClick={closeMenu} />
-        {admin ? <MobileTile to={APP.admin} label="Admin" icon="admin" onClick={closeMenu} /> : null}
-        {signedIn ? null : <MobileTile to={from} label="Sign in" icon="signin" onClick={closeMenu} />}
-      </nav>
+      <MobileMenu
+        open={menu}
+        onClose={closeMenu}
+        ico={ICO}
+        lang={lang}
+        pokemon={isPokemonGame()}
+        competitive={Boolean(site.features.competitive)}
+        signedIn={signedIn}
+        admin={admin}
+        profile={profile}
+        user={user}
+        silver={silver}
+        pknLabel={pknLabel}
+        cartCount={count}
+        messagesUnread={messagesUnread}
+        signInTo={from}
+        homeHref={homeHref}
+        paths={{
+          profile: APP.profile,
+          messages: APP.messages,
+          cart: APP.cart,
+          wallet: APP.wallet,
+          buy: APP.buy,
+          admin: APP.admin,
+          forum: APP.forum,
+          protection: APP.protection,
+          dashboard: DASHBOARD_HOME,
+        }}
+      />
       <SelectBandProvider>
       <main>{children}</main>
       </SelectBandProvider>
