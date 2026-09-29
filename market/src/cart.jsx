@@ -59,6 +59,8 @@ export function cartItemFromOffer(card, offer) {
     name: card.name || 'Card',
     image: cartImageFor(card, offer),
     pricePkn: Number(offer?.pricePkn) || 0,
+    // false = seller takes card payments only (local currency first in the bag).
+    sellerAcceptsPkn: offer?.sellerAcceptsPkn !== false,
     qty: Math.min(stock, Math.max(1, Math.trunc(Number(offer?.qty) || 1))),
     stock,
     condition: offer?.condition || 'NM',

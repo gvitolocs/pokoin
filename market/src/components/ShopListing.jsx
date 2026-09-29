@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { formatPkn } from '../api.js';
+import { formatListingPrice } from '../seller-currency.js';
 import { artCutVars } from '../art-cut.js';
 import { listingReference, listingsReference, writeListingDrag } from '../chat-listing.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
@@ -218,7 +218,7 @@ export default function ShopListingRow({
         />
         <Flag flag={language} className="shop-flag shop-flag-lang" />
       </span>
-      <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>
+      <span className="shop-px">{formatListingPrice(offer.pricePkn, offer.sellerAcceptsPkn) || '—'}</span>
       {!mine ? (
         <span className="shop-row-actions">
           {sellerUid ? (

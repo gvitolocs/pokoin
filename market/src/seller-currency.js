@@ -5,7 +5,7 @@
  * stored in PKN (1 PKN = €0.005) — this only changes what the seller types
  * and sees. Buyers of those sellers pay by card (server/pokoin-api/_seller_pkn_policy.js).
  */
-import { currencyForCountry, fiatFromPkn, formatFiatFromPkn, formatPkn, formatPknNumber, listingPriceToPkn } from './pkn.js';
+import { currencyForCountry, currencyFromLocale, fiatFromPkn, formatLocalFromPkn, formatPkn, formatPknNumber, listingPriceToPkn } from './pkn.js';
 
 /** 'PKN' for PKN-accepting sellers, else the ship-from country's currency. */
 export function sellerListCurrency(settings) {
@@ -13,9 +13,17 @@ export function sellerListCurrency(settings) {
   return currencyForCountry(settings.shipFromCountry) || 'EUR';
 }
 
-/** Stored PKN → the seller's price label (2642 PKN, €13.21, 99.08 DKK). */
+/** Stored PKN → the seller's price label: 2642 PKN, or €13.21 (2642 PKN). */
 export function formatSellerPrice(pkn, currency = 'PKN') {
-  return currency === 'PKN' ? formatPkn(pkn) : formatFiatFromPkn(pkn, currency);
+  return currency === 'PKN' ? formatPkn(pkn) : formatLocalFromPkn(pkn, currency);
+}
+
+/**
+ * Buyer-facing listing price. Sellers who take card payments only show the
+ * buyer's local currency first, PKN in brackets: €13.21 (2642 PKN).
+ */
+export function formatListingPrice(pkn, sellerAcceptsPkn = true, currency = currencyFromLocale()) {
+  return sellerAcceptsPkn === false ? formatLocalFromPkn(pkn, currency) : formatPkn(pkn);
 }
 
 /** Stored PKN → what the price input shows in the seller's currency. */

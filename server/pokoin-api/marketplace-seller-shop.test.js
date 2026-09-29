@@ -146,3 +146,9 @@ test('seller game filter intersects shared listings with the selected catalog', 
   assert.deepEqual(pokemonCalls, ['pokemon', 'pokemon']);
   assert.deepEqual(pokemonIds, ['10']);
 });
+
+test('shop listings carry the seller PKN payment choice', () => {
+  const base = { id: '1', card_id: '9', seller_uid: 'u1', price_pkn: 2642 };
+  assert.equal(listingRow(base, { uid: 'u1', username: 'marco' }).sellerAcceptsPkn, true);
+  assert.equal(listingRow(base, { uid: 'u1', username: 'marco', acceptsPkn: false }).sellerAcceptsPkn, false);
+});

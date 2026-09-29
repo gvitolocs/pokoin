@@ -158,6 +158,8 @@ function listingRow(row, { owner = false } = {}) {
     condition: row.condition,
     language: row.language,
     pricePkn: Number(row.price_pkn || 0),
+    // false = seller opted out of PKN payments: buyers see local currency first.
+    sellerAcceptsPkn: row.profile_accepts_pkn !== false,
     quantityAvailable: Number(row.quantity_available || 0),
     signed: row.signed === true,
     reverse: row.reverse === true,
@@ -470,6 +472,7 @@ async function enrichListingRowsWithSellerProfiles(rows = []) {
       profiles.set(uids[index], {
         displayName: cleanText(data.displayName, 120),
         username: cleanText(data.username || data.usernameLower, 120),
+        acceptsPkn: data.acceptsPkn !== false,
       });
     });
     return rows.map((row) => {
@@ -479,6 +482,7 @@ async function enrichListingRowsWithSellerProfiles(rows = []) {
             ...row,
             profile_display_name: profile.displayName,
             profile_username: profile.username,
+            profile_accepts_pkn: profile.acceptsPkn,
           }
         : row;
     });

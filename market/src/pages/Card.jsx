@@ -97,7 +97,7 @@ import CardArt from '../components/CardArt.jsx';
 import RelatedCards from '../components/RelatedCards.jsx';
 import { ShipFromCountryGate } from '../components/SellerShippingSettings.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
-import { priceInputFromPkn } from '../seller-currency.js';
+import { formatListingPrice, formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
@@ -1112,7 +1112,10 @@ function ListingForm({
         </div>
       ) : null}
       {sellerCurrency !== 'PKN' ? (
-        <p className="sell-pkn-eq">Buyers pay you by card · PKN payments are off in <Link to="/profile">Profile</Link></p>
+        <p className="sell-pkn-eq">
+          {listedPkn ? `Lists at ${formatSellerPrice(listedPkn, sellerCurrency)} · ` : ''}
+          Buyers pay you by card · PKN payments are off in <Link to="/profile">Profile</Link>
+        </p>
       ) : currency !== 'PKN' && listedPkn ? (
         <p className="sell-pkn-eq">Lists at {formatPkn(listedPkn)}</p>
       ) : null}
@@ -2471,7 +2474,7 @@ export default function Card() {
               <SilverHead card={card} fromPath={fromPath} />
             </div>
             <div className={canBuy ? 'prod-px' : 'prod-px oos'}>
-              {offersReady ? (canBuy ? formatPkn(dealPick.pricePkn) : '—') : '—'}
+              {offersReady ? (canBuy ? formatListingPrice(dealPick.pricePkn, dealPick.sellerAcceptsPkn) : '—') : '—'}
             </div>
             {canBuy && offersReady ? null : (
               <p className="muted own-k">{dealCopy || '\u00a0'}</p>
