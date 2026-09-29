@@ -383,7 +383,7 @@ export default function ChatDock() {
         />
       ) : (
         <>
-          <div className="chat-dock-log" ref={activeLogRef} onScroll={poko ? undefined : thread.onScroll}>
+          <div className="chat-dock-log" ref={activeLogRef} onScroll={poko ? pokoThread.onScroll : thread.onScroll}>
             {events.map((event) => (
               <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}${!event.mine && poko ? ' is-poko' : ''}${event.source === 'unavailable' || event.source === 'send_failed' ? ' is-unavailable' : ''}`}>
                 {event.text ? <p>{event.text}</p> : null}

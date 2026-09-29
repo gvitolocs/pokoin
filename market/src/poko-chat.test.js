@@ -12,6 +12,7 @@ import {
   pokoPreview,
   readPokoHistory,
   reconcilePokoEvents,
+  pokoEventsSignature,
   resolvePokoCards,
   setActiveDeskCard,
   tagsToPokoCards,
@@ -136,4 +137,17 @@ test('reconcile keeps card-attached local rows until the server twin includes th
   assert.equal(replaced.some((row) => row.id === 'local-card'), false);
   assert.equal(replaced.some((row) => row.id === 'srv-user'), true);
   assert.equal(pokoUserTurnKey(local), pokoUserTurnKey(replaced.find((row) => row.id === 'srv-user')));
+});
+
+test('pokoEventsSignature is stable for identical content so idle polls can skip setState', () => {
+  const a = [
+    { id: '1', role: 'user', text: 'hi', source: '', images: [], cards: [] },
+    { id: '2', role: 'assistant', text: 'yo', source: 'hermes', images: [], cards: [] },
+  ];
+  const b = a.map((row) => ({ ...row }));
+  assert.equal(pokoEventsSignature(a), pokoEventsSignature(b));
+  assert.notEqual(
+    pokoEventsSignature(a),
+    pokoEventsSignature([{ ...a[0] }, { ...a[1], text: 'changed' }]),
+  );
 });

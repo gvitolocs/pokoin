@@ -111,6 +111,24 @@ export function pokoUserTurnKey(row = {}) {
   return `${text}\0${images}\0${cards}`;
 }
 
+/** Stable fingerprint so idle history polls can skip setState. */
+export function pokoEventsSignature(events = []) {
+  return (Array.isArray(events) ? events : []).map((row) => {
+    const cards = (Array.isArray(row?.cards) ? row.cards : (Array.isArray(row?.listings) ? row.listings : []))
+      .map((card) => String(card?.cardId || card?.id || card?.name || ''))
+      .join(',');
+    const images = Array.isArray(row?.images) ? row.images.length : 0;
+    return [
+      String(row?.id || ''),
+      String(row?.role || ''),
+      String(row?.text || ''),
+      String(row?.source || ''),
+      images,
+      cards,
+    ].join('\0');
+  }).join('|');
+}
+
 /** Keep optimistic local-* rows until a matching server user turn arrives. */
 export function reconcilePokoEvents(current, serverEvents) {
   const server = mergePokoEvents(serverEvents);
