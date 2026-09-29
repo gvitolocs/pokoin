@@ -325,8 +325,9 @@ export default function Associate() {
         <PageHead kicker="Pokoin Associates" title="Associate desk" />
         <EmptyDesk
           title="This desk is by invitation"
-          lede="Pokoin Associates is a partner program. If you were promised a desk here, ask Giuseppe to add your email to the roster, then reload."
+          lede="Pokoin Associates is a partner program. If you were promised a desk here, contact admin@pokoin.com to be added to the roster, then reload."
         >
+          <a className="btn ghost" href="mailto:admin@pokoin.com?subject=Pokoin%20Associates">Contact admin@pokoin.com</a>
           <Link className="btn" to="/marketplace">Back to the marketplace</Link>
         </EmptyDesk>
       </div>
