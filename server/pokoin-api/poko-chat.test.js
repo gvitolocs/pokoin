@@ -40,9 +40,15 @@ test('cardsContext and imagesContext', () => {
 
 test('marketFirstDirective and cleanPageContext pin desk cardId', () => {
   const cards = cleanCards([{ cardId: '246912', name: 'Noivern V', setName: 'Evolving Skies' }]);
-  const ctx = cleanPageContext({ path: '/marketplace/en/cards/246912' }, cards, []);
+  const ctx = cleanPageContext({
+    path: '/marketplace/en/cards/246912',
+    watchlistIds: ['11'],
+    cart: [{ cardId: '22', name: 'Cart', qty: 1, pricePkn: 9 }],
+  }, cards, []);
   assert.equal(ctx.deskCardId, '246912');
   assert.equal(ctx.deskCardName, 'Noivern V');
+  assert.deepEqual(ctx.watchlistIds, ['11']);
+  assert.equal(ctx.cart[0].cardId, '22');
   const directive = marketFirstDirective(cards, ctx);
   assert.match(directive, /card_quote/);
   assert.match(directive, /card_ocr/);

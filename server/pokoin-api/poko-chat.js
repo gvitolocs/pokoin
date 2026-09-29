@@ -31,6 +31,26 @@ function getFirebaseAdmin() {
   return requireHelper('_firebase').getFirebaseAdmin();
 }
 
+function marketplaceQuery(...args) {
+  return requireHelper('_marketplace_db').marketplaceQuery(...args);
+}
+
+function marketplaceWriteQuery(...args) {
+  return requireHelper('_marketplace_db').marketplaceWriteQuery(...args);
+}
+
+function personalContextHelpers() {
+  return require('./_poko_personal_context');
+}
+
+function summarizeOwnedCollectionSafe() {
+  try {
+    return requireHelper('_user_card_collection').summarizeOwnedCollection;
+  } catch (_) {
+    return null;
+  }
+}
+
 function cleanText(value, max = 2000) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
@@ -59,15 +79,57 @@ function cleanImages(raw) {
 function cleanPageContext(raw, cards, images) {
   const src = raw && typeof raw === 'object' ? raw : {};
   const desk = cards[0] || {};
+  const { cleanCartItems, normalizeCardIds } = personalContextHelpers();
+  const watchlistIds = normalizeCardIds(src.watchlistIds || src.watchlist || []);
+  const cart = cleanCartItems(src.cart || []);
   return {
     channel: cleanText(src.channel || 'website-messages', 40) || 'website-messages',
     path: cleanText(src.path, 300),
     deskCardId: cleanText(src.deskCardId || desk.cardId, 40),
     deskCardName: cleanText(src.deskCardName || desk.name, 120),
     deskSetName: cleanText(src.deskSetName || desk.setName, 120),
+    watchlistIds: watchlistIds.map(String),
+    cart,
     attachedCards: cards,
     attachedImages: images,
   };
+}
+
+async function loadPersonalForChat(uid, pageContext) {
+  try {
+    const { buildPersonalContext, formatPersonalIntent } = personalContextHelpers();
+    let firestore = null;
+    try {
+      firestore = getFirebaseAdmin().firestore();
+    } catch (_) {
+      firestore = null;
+    }
+    const personal = await buildPersonalContext({
+      query: marketplaceQuery,
+      writeQuery: marketplaceWriteQuery,
+      uid,
+      firestore,
+      summarizeOwnedCollection: summarizeOwnedCollectionSafe(),
+      overlay: {
+        watchlistIds: pageContext.watchlistIds,
+        cart: pageContext.cart,
+        desk: {
+          cardId: pageContext.deskCardId,
+          name: pageContext.deskCardName,
+          setName: pageContext.deskSetName,
+        },
+      },
+      // Persist browser cart/watchlist/desk so Telegram/Discord Connect sees them.
+      persistOverlay: true,
+    });
+    return {
+      personal,
+      intent: formatPersonalIntent(personal),
+    };
+  } catch (error) {
+    console.warn('poko-chat personal context skipped', String(error?.message || error).slice(0, 160));
+    return { personal: null, intent: '' };
+  }
 }
 
 function cardsContext(cards) {
@@ -123,7 +185,17 @@ function hermesToken(env = process.env) {
 const HERMES_UNAVAILABLE = 'I don’t know the answer yet, but I’m always improving ✨ Ask me another way, or try a cute card question while my tiny brain levels up.';
 const HERMES_UNAVAILABLE_ERROR = 'Poko could not reach the assistant in time. Try again in a moment.';
 
-async function hermesReply({ message, cards, images, pageContext, userId, sessionId, displayName }) {
+async function hermesReply({
+  message,
+  cards,
+  images,
+  pageContext,
+  personalIntent = '',
+  personal = null,
+  userId,
+  sessionId,
+  displayName,
+}) {
   const url = resolveHermesChatUrl();
   const token = hermesToken();
   if (!url || !token) {
@@ -134,10 +206,14 @@ async function hermesReply({ message, cards, images, pageContext, userId, sessio
 
   const enriched = [
     marketFirstDirective(cards, pageContext),
+    personalIntent,
     message,
     cardsContext(cards),
     imagesContext(images),
   ].filter(Boolean).join('\n\n');
+  const pageWithPersonal = personal
+    ? { ...pageContext, personal }
+    : pageContext;
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -149,7 +225,8 @@ async function hermesReply({ message, cards, images, pageContext, userId, sessio
       userId,
       sessionId,
       user: { id: userId, displayName: displayName || '' },
-      pageContext,
+      pageContext: pageWithPersonal,
+      personalIntent,
     }),
     signal: AbortSignal.timeout(Number(process.env.POKO_CHAT_TIMEOUT_MS) || 90000),
   });
@@ -319,6 +396,7 @@ async function handleChat(req, res, decoded) {
   const sessionId = cleanText(req.body?.sessionId || decoded.uid, 80) || decoded.uid;
   const userVisible = message || prompt;
   const firestore = getFirebaseAdmin().firestore();
+  const { personal, intent: personalIntent } = await loadPersonalForChat(decoded.uid, pageContext);
 
   let reply = '';
   let source = 'hermes';
@@ -329,6 +407,8 @@ async function handleChat(req, res, decoded) {
       cards,
       images,
       pageContext,
+      personalIntent,
+      personal,
       userId: decoded.uid,
       sessionId,
       displayName: cleanText(decoded.name || decoded.email, 80),
@@ -410,6 +490,7 @@ module.exports._test = {
   resolveHermesChatUrl,
   hermesToken,
   serializeEvent,
+  loadPersonalForChat,
   HERMES_UNAVAILABLE,
   HERMES_UNAVAILABLE_ERROR,
   EVENT_PAGE,

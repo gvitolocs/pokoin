@@ -1,5 +1,38 @@
 import { cardStubFromRoute } from './card-stub.js';
 
+const CART_KEY = 'pokoin.cartItems';
+const WATCH_KEY = 'pokoin.watchlistIds';
+
+function peekBrowserCart(limit = 24) {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CART_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.slice(0, limit).map((row) => ({
+      cardId: String(row?.cardId || row?.card?.id || ''),
+      name: String(row?.name || row?.card?.name || ''),
+      qty: Number(row?.qty) || 0,
+      pricePkn: Number(row?.pricePkn) || 0,
+      sellerName: String(row?.sellerName || ''),
+      condition: String(row?.condition || ''),
+      language: String(row?.language || ''),
+    })).filter((row) => row.cardId && row.qty > 0);
+  } catch (_) {
+    return [];
+  }
+}
+
+function peekBrowserWatchlist(limit = 24) {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WATCH_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((id) => String(id)).filter((id) => /^\d+$/.test(id)).slice(0, limit);
+  } catch (_) {
+    return [];
+  }
+}
+
 /** Reserved peer for the Poko assistant in Messages / chat dock. */
 export const POKO_PEER = 'poko';
 export const POKO_DISPLAY = 'Poko';
@@ -172,6 +205,8 @@ export function buildPokoPageContext({ pathname = '', cards = [], images = [] } 
     deskCardId: desk?.cardId || '',
     deskCardName: desk?.name || '',
     deskSetName: desk?.setName || '',
+    watchlistIds: peekBrowserWatchlist(24),
+    cart: peekBrowserCart(24),
     attachedCards: cards,
     attachedImages: images,
   };
