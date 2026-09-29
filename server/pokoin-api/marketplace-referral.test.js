@@ -127,4 +127,8 @@ test('ambassador tiers: 3 missions unlock, senior needs 5 + 10 referrals, city n
   assert.equal(ambassadorProgress({ roster: { role: 'ambassador', city: 'Milano' } }).tier, 'city');
   assert.equal(ambassadorProgress({ roster: { role: 'distributor', city: 'Milano' } }).tier, 'collector');
   assert.equal(ambassadorProgress({ roster: { role: 'ambassador', city: 'Roma', active: false } }).tier, 'collector');
+  const founder = ambassadorProgress({ roster: { role: 'founder_ambassador', city: '' } });
+  assert.deepEqual([founder.tier, founder.founder, founder.onRoster], ['ambassador', true, true]);
+  assert.equal(ambassadorProgress({ roster: { role: 'ambassador' } }).founder, false);
+  assert.equal(ambassadorProgress({ roster: { role: 'founder_ambassador', city: 'Napoli' } }).tier, 'city');
 });

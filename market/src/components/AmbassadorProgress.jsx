@@ -61,8 +61,9 @@ export function TrainerCard({ progress, username = '' }) {
   const completed = progress?.completed || [];
   const pct = Math.round((completed.length / MISSIONS.length) * 100);
   return (
-    <section className={`amb-trainer is-${progress?.tier || 'collector'}`}>
+    <section className={`amb-trainer is-${progress?.tier || 'collector'}${progress?.founder ? ' is-founder' : ''}`}>
       <div className="amb-trainer-head">
+        {progress?.founder ? <span className="amb-trainer-badge is-founder">Founder Ambassador</span> : null}
         <span className="amb-trainer-badge">{TIERS[tierIndex(progress?.tier)].title}</span>
         {username ? <strong className="amb-trainer-name">@{username}</strong> : null}
       </div>

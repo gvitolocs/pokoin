@@ -81,6 +81,13 @@ update public.marketplace_associates set city = 'Milano', updated_at = now()
  where email = 'someone@gmail.com' and role = 'ambassador';
 ```
 
+**Founder Ambassador** (`role='founder_ambassador'`, `scripts/sql/097_founder_ambassador.sql`):
+Andrea Paolo Ciliberti, the program's first ambassador — a one-off title. It
+progresses like any ambassador, shows a gold/violet "Founder Ambassador" badge
+on search and his shop, and `/associate` opens with a personal congratulations
+hero and the No. 001 founder medal (`market/src/components/FounderWelcome.jsx`).
+Preview locally: `/associate?associatePreview&role=founder_ambassador`.
+
 Roster ambassadors see the program on `/associate` (missions, verified
 contributions, Invite & Earn stats, perks) instead of the distributor
 royalty desk.

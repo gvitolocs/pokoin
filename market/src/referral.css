@@ -576,3 +576,172 @@
     min-width: 30rem;
   }
 }
+
+/* Founder Ambassador welcome on /associate (components/FounderWelcome.jsx). */
+.founder-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+  padding: 2.25rem 2.25rem 2rem;
+  overflow: hidden;
+  border: 1px solid rgb(255 211 61 / 0.45);
+  border-radius: 26px;
+  background:
+    radial-gradient(26rem 18rem at 85% 45%, rgb(255 211 61 / 0.22), transparent 65%),
+    radial-gradient(30rem 20rem at 0% 0%, rgb(139 108 240 / 0.38), transparent 70%),
+    radial-gradient(20rem 14rem at 40% 120%, rgb(245 183 255 / 0.16), transparent 70%),
+    #0d0a16;
+  box-shadow: 0 0 0 1px rgb(255 211 61 / 0.08), 0 24px 60px rgb(0 0 0 / 0.45);
+}
+
+.founder-kicker {
+  display: inline-block;
+  margin: 0 0 0.9rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffd33d, #f5b7ff 55%, #c9b8ff);
+  color: #1a1400;
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.founder-hero h1 {
+  margin: 0 0 0.8rem;
+  font-size: clamp(2.2rem, 5vw, 3.6rem);
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+  background: linear-gradient(90deg, #fff 0%, #fff3b0 45%, #ffd33d 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.founder-lede {
+  max-width: 38rem;
+  margin: 0 0 1.25rem;
+  color: #e4e0ee;
+  font-size: 1.12rem;
+  line-height: 1.6;
+}
+
+.founder-lede strong {
+  color: var(--yellow);
+}
+
+.founder-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0 0 1.1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.founder-facts li {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.04);
+}
+
+.founder-facts span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.founder-sign {
+  margin: 0;
+  color: #c9b8ff;
+  font-style: italic;
+}
+
+.founder-medal {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  filter: drop-shadow(0 16px 36px rgb(255 211 61 / 0.35));
+  animation: founder-float 5s ease-in-out infinite;
+}
+
+.founder-medal:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 6px;
+  border-radius: 50%;
+}
+
+.founder-confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.founder-confetti span {
+  position: absolute;
+  top: -14px;
+  height: 14px;
+  border-radius: 2px;
+  opacity: 0;
+  animation-name: founder-confetti;
+  animation-timing-function: cubic-bezier(0.2, 0.6, 0.4, 1);
+  animation-fill-mode: forwards;
+}
+
+@keyframes founder-confetti {
+  0% { opacity: 1; transform: translateY(0) rotate(var(--tilt)); }
+  85% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(460px) rotate(calc(var(--tilt) + 540deg)); }
+}
+
+@keyframes founder-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-8px) rotate(2deg); }
+}
+
+.amb-trainer-badge.is-founder {
+  background: linear-gradient(90deg, #ffd33d, #f5b7ff 55%, #c9b8ff);
+  color: #1a1400;
+}
+
+.amb-trainer.is-founder {
+  border-color: rgb(255 211 61 / 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .founder-medal {
+    animation: none;
+  }
+
+  .founder-confetti {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .founder-hero {
+    grid-template-columns: 1fr;
+    padding: 1.5rem 1.1rem;
+  }
+
+  .founder-medal {
+    order: -1;
+    justify-self: center;
+  }
+
+  .founder-medal svg {
+    width: 120px;
+    height: 139px;
+  }
+}

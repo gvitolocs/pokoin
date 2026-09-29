@@ -26,6 +26,12 @@
   border-color: rgb(150 120 255 / 0.4);
 }
 
+.associate-badge.is-founder {
+  color: #1a1400;
+  background: linear-gradient(90deg, #ffd33d, #f5b7ff 55%, #c9b8ff);
+  border-color: transparent;
+}
+
 .associate-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(14rem, 0.6fr);

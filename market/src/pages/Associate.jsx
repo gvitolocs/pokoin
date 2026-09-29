@@ -5,6 +5,8 @@ import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
 import { MissionGrid, TrainerCard } from '../components/AmbassadorProgress.jsx';
+import FounderWelcome from '../components/FounderWelcome.jsx';
+import { isFounderRole } from '../associate-roles.js';
 import { MISSIONS, PERKS, applyMailto } from '../ambassador-program.js';
 import { REFERRAL_REWARD_PKN, inviteLink } from '../referral.js';
 import '../associate.css';
@@ -91,6 +93,16 @@ const ROLES = {
     tagline: 'Your desk tracks your missions, tier and perks in the Pokoin Ambassador program.',
     accent: 'is-violet',
     missions: true,
+    how: [],
+  },
+  // Pokoin's first ambassador: same program, one-off title, personal welcome.
+  founder_ambassador: {
+    badge: 'Founder Ambassador',
+    kicker: 'Pokoin Associates · Founder Ambassador',
+    tagline: 'The first Ambassador of the Pokoin program.',
+    accent: 'is-founder',
+    missions: true,
+    founder: true,
     how: [],
   },
   associate: {
@@ -309,7 +321,9 @@ function AmbassadorDesk({ data, overview = null, onView = null, viewingAs = fals
     return () => { cancelled = true; };
   }, [viewingAs, preview, getBearer]);
 
+  const founder = isFounderRole(data.associate.role);
   const fallback = {
+    founder,
     tier: data.associate.city ? 'city' : 'ambassador',
     city: data.associate.city || '',
     completed: [],
@@ -318,13 +332,17 @@ function AmbassadorDesk({ data, overview = null, onView = null, viewingAs = fals
     next: data.associate.city ? null : { tier: 'senior', missionsLeft: 5, referralsLeft: 10 },
     contributions: [],
   };
-  const progress = referral?.ambassador || fallback;
+  const progress = referral?.ambassador ? { ...referral.ambassador, founder: referral.ambassador.founder || founder } : fallback;
   const link = inviteLink(referral?.code);
   return (
-    <div className="page desk associate-page amb-desk">
-      <PageHead kicker="Pokoin Associates · Ambassador" title="Your missions">
-        <span className="associate-badge is-violet">Ambassador</span>
-      </PageHead>
+    <div className={`page desk associate-page amb-desk${founder ? ' is-founder' : ''}`}>
+      {founder ? (
+        <FounderWelcome name={data.associate.displayName} since={data.associate.windowStart} />
+      ) : (
+        <PageHead kicker="Pokoin Associates · Ambassador" title="Your missions">
+          <span className="associate-badge is-violet">Ambassador</span>
+        </PageHead>
+      )}
       {!data.associate.active ? <Alert>Your ambassador record is paused. Contact the Pokoin team to reactivate it.</Alert> : null}
       {viewingAs ? <Alert>Mission progress is personal: the ambassador sees their own tier, missions and invites here.</Alert> : null}
       {error ? <Alert>{error}</Alert> : null}
@@ -515,7 +533,7 @@ export default function Associate() {
       const fixtureOverview = [
         { associate: PREVIEW_FIXTURE.associate, window: PREVIEW_FIXTURE.window, earnings: PREVIEW_FIXTURE.earnings },
         {
-          associate: { ...PREVIEW_FIXTURE.associate, email: 'apciliberti@gmail.com', role: 'ambassador', displayName: 'Apciliberti' },
+          associate: { ...PREVIEW_FIXTURE.associate, email: 'apciliberti@gmail.com', role: 'founder_ambassador', displayName: 'Andrea Paolo' },
           window: PREVIEW_FIXTURE.window,
           earnings: { ...PREVIEW_FIXTURE.earnings, qualifyingOrders: 2, earningPkn: 21.3, earningEurCents: 612 },
         },
@@ -530,7 +548,10 @@ export default function Associate() {
       ...PREVIEW_FIXTURE,
       associate: {
         ...PREVIEW_FIXTURE.associate,
-        role: searchParams.get('role') === 'ambassador' ? 'ambassador' : PREVIEW_FIXTURE.associate.role,
+        ...(ROLES[searchParams.get('role')] && searchParams.get('role') !== 'associate'
+          ? { role: searchParams.get('role') }
+          : {}),
+        ...(isFounderRole(searchParams.get('role')) ? { displayName: 'Andrea Paolo' } : {}),
       },
     };
     return <AssociateView data={fixture} preview />;

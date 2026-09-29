@@ -6,11 +6,14 @@
  * Referrals reward who you bring; Ambassadors are recognised for what they
  * contribute. "Bring 3 collectors" counts itself from rewarded referrals;
  * every other mission is verified by the Pokoin team and stored in
- * public.marketplace_ambassador_contributions (scripts/sql/093_ambassador_program.sql).
+ * public.marketplace_ambassador_contributions (scripts/sql/096_ambassador_program.sql).
  *
  * Tiers: Collector → Ambassador (3 missions, or named on the roster) →
  * Senior Ambassador (5 missions and 10 activated referrals) → City
  * Ambassador (an ambassador the roster assigns to a city).
+ *
+ * Roster role `founder_ambassador` is an ambassador with the one-off Founder
+ * title (Pokoin's first ambassador); it progresses like any ambassador.
  */
 
 const MISSION_KEYS = ['referrals', 'content', 'bug_report', 'seller_onboard', 'community_event', 'feedback'];
@@ -18,6 +21,7 @@ const REFERRAL_MISSION_TARGET = 3;
 const AMBASSADOR_MISSIONS = 3;
 const SENIOR_MISSIONS = 5;
 const SENIOR_REFERRALS = 10;
+const AMBASSADOR_ROLES = new Set(['ambassador', 'founder_ambassador']);
 
 /**
  * { tier, completed: [keys], progress: { referrals, missions }, next }
@@ -31,7 +35,8 @@ function ambassadorProgress({ activatedReferrals = 0, contributions = [], roster
   );
   if (activatedReferrals >= REFERRAL_MISSION_TARGET) verified.add('referrals');
   const completed = MISSION_KEYS.filter((key) => verified.has(key));
-  const onRoster = roster && roster.active !== false && String(roster.role || '').toLowerCase() === 'ambassador';
+  const role = String(roster?.role || '').trim().toLowerCase();
+  const onRoster = Boolean(roster) && roster.active !== false && AMBASSADOR_ROLES.has(role);
   const city = onRoster ? String(roster.city || '').trim() : '';
 
   let tier = 'collector';
@@ -55,7 +60,8 @@ function ambassadorProgress({ activatedReferrals = 0, contributions = [], roster
     completed,
     activatedReferrals,
     referralTarget: REFERRAL_MISSION_TARGET,
-    onRoster: Boolean(onRoster),
+    onRoster,
+    founder: onRoster && role === 'founder_ambassador',
     next,
   };
 }
@@ -66,5 +72,6 @@ module.exports = {
   AMBASSADOR_MISSIONS,
   SENIOR_MISSIONS,
   SENIOR_REFERRALS,
+  AMBASSADOR_ROLES,
   ambassadorProgress,
 };

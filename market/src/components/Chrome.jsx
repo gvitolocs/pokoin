@@ -52,6 +52,7 @@ import { Action, track } from '../track.js';
 import { useAuth } from '../auth.jsx';
 import { framedByChromeExtension } from '../extension-auth-bridge.js';
 import { APP, DASHBOARD_HOME, authFrom, goMarket, marketUrl } from '../punchouts.js';
+import { associateRoleLabel } from '../associate-roles.js';
 import { useCart } from '../cart.jsx';
 import { useDesktopHold } from '../desktop-hold.js';
 import CartDrop from './CartDrop.jsx';
@@ -1128,7 +1129,7 @@ export default function Chrome({ children }) {
                             <span className="suggest-copy">
                               <strong>{seller.name}</strong>
                               {seller.associateRole ? (
-                                <span className={`suggest-user-associate-badge is-${seller.associateRole}`}>{seller.associateRole}</span>
+                                <span className={`suggest-user-associate-badge is-${seller.associateRole}`}>{associateRoleLabel(seller.associateRole)}</span>
                               ) : null}
                               {seller.count ? (
                                 <em>{seller.count} listing{seller.count === 1 ? '' : 's'}</em>
