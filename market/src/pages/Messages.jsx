@@ -359,7 +359,7 @@ function PokoConversation() {
         </span>
       </header>
       {error ? <p className="chat-error conversation-error" role="alert">{error}</p> : null}
-      <section className="chat-timeline" ref={pokoThread.logRef} aria-live="polite">
+      <section className="chat-timeline" ref={pokoThread.logRef} onScroll={pokoThread.onScroll} aria-live="polite">
         {!events.length ? (
           <div className="chat-first">
             <PokoAvatar className="messages-avatar is-poko is-large" />

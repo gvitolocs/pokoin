@@ -12,6 +12,7 @@ import {
   pokoPreview,
   readPokoHistory,
   reconcilePokoEvents,
+  pokoEventsSignature,
   resolvePokoCards,
   setActiveDeskCard,
   tagsToPokoCards,
@@ -164,4 +165,17 @@ test('reconcile drops the optimistic bubble when the server echoes its clientTur
   const next = reconcilePokoEvents([local], server);
   assert.deepEqual(next.map((row) => row.id), ['u1', 'p1']);
   assert.equal(next[1].cards[0].cardName, 'Mimikyu');
+});
+
+test('pokoEventsSignature is stable for identical content so idle polls can skip setState', () => {
+  const a = [
+    { id: '1', role: 'user', text: 'hi', source: '', images: [], cards: [] },
+    { id: '2', role: 'assistant', text: 'yo', source: 'hermes', images: [], cards: [] },
+  ];
+  const b = a.map((row) => ({ ...row }));
+  assert.equal(pokoEventsSignature(a), pokoEventsSignature(b));
+  assert.notEqual(
+    pokoEventsSignature(a),
+    pokoEventsSignature([{ ...a[0] }, { ...a[1], text: 'changed' }]),
+  );
 });
