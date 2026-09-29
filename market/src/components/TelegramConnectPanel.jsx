@@ -72,7 +72,7 @@ export default function TelegramConnectPanel() {
     <div className="tg-connect">
       <p className="tg-connect-note">
         Link Poko on Telegram and/or Discord with one profile code. Linked chats share the same
-        private memory as website Messages — never another user&apos;s. ✨
+        private memory as website Messages. ✨
       </p>
 
       {telegram.linked ? (

@@ -83,6 +83,10 @@ export function normalizePokoEvent(row = {}) {
   };
 }
 
+export const POKO_CHAT_PAGE = 20;
+/** Soft cap for an open thread after scroll-up loads (not the initial page). */
+const POKO_CHAT_MEMORY = 200;
+
 export function mergePokoEvents(...pages) {
   const byId = new Map();
   for (const page of pages) {
@@ -97,7 +101,7 @@ export function mergePokoEvents(...pages) {
     const bt = Date.parse(b.createdAt) || 0;
     if (at !== bt) return at - bt;
     return String(a.id).localeCompare(String(b.id));
-  }).slice(-80);
+  }).slice(-POKO_CHAT_MEMORY);
 }
 
 /** Fingerprint a user turn so optimistic local-* rows survive until the server twin arrives. */
@@ -150,22 +154,42 @@ export function reconcilePokoEvents(current, serverEvents) {
 }
 
 export function readPokoHistory(uid) {
-  if (!uid) return [];
+  if (!uid) return { events: [], hasMore: false };
   try {
-    const raw = JSON.parse(localStorage.getItem(`${HISTORY_PREFIX}${uid}`) || '[]');
-    return Array.isArray(raw) ? mergePokoEvents(raw) : [];
+    const raw = JSON.parse(localStorage.getItem(`${HISTORY_PREFIX}${uid}`) || 'null');
+    if (Array.isArray(raw)) {
+      const events = mergePokoEvents(raw).slice(-POKO_CHAT_PAGE);
+      return { events, hasMore: raw.length > events.length || events.length >= POKO_CHAT_PAGE };
+    }
+    if (raw && typeof raw === 'object' && Array.isArray(raw.events)) {
+      const events = mergePokoEvents(raw.events).slice(-POKO_CHAT_PAGE);
+      const hasMore = typeof raw.hasMore === 'boolean'
+        ? raw.hasMore
+        : (raw.events.length > events.length || events.length >= POKO_CHAT_PAGE);
+      return { events, hasMore };
+    }
+    return { events: [], hasMore: false };
   } catch (_) {
-    return [];
+    return { events: [], hasMore: false };
   }
 }
 
-export function writePokoHistory(uid, events) {
+export function writePokoHistory(uid, events, hasMore = false) {
   if (!uid) return;
   try {
-    localStorage.setItem(`${HISTORY_PREFIX}${uid}`, JSON.stringify(mergePokoEvents(events)));
+    const page = mergePokoEvents(events).slice(-POKO_CHAT_PAGE);
+    localStorage.setItem(`${HISTORY_PREFIX}${uid}`, JSON.stringify({
+      events: page,
+      hasMore: Boolean(hasMore) || (Array.isArray(events) && events.length > page.length),
+    }));
   } catch (_) {
     /* private mode */
   }
+}
+
+export function pokoHistoryHasMore(result) {
+  if (typeof result?.hasMore === 'boolean') return result.hasMore;
+  return (result?.events || []).length >= POKO_CHAT_PAGE;
 }
 
 export function pokoPreview(events = []) {

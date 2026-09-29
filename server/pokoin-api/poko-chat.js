@@ -12,7 +12,7 @@
 
 const path = require('path');
 
-const EVENT_PAGE = 80;
+const EVENT_PAGE = 20;
 
 function requireHelper(name) {
   try {
