@@ -46,12 +46,15 @@ function Calculator() {
   const [from, setFrom] = useState('DK');
   const [to, setTo] = useState('IT');
   const [cards, setCards] = useState(20);
+  const [sellers, setSellers] = useState(3);
   const [tracked, setTracked] = useState(true);
   const [delivery, setDelivery] = useState('pickup');
   const [fill, setFill] = useState(Math.round(FLEX_ASSUMPTIONS.defaultBagFill * 100));
-  const services = routeServices({ from, to, cards });
-  const quote = flexQuote({ from, to, cards, tracked, delivery, bagFill: fill / 100 });
-  const pickup = delivery === 'home' ? flexQuote({ from, to, cards, tracked, bagFill: fill / 100 }) : null;
+  const quote = flexQuote({ from, to, cards, sellers, tracked, delivery, bagFill: fill / 100 });
+  const pickup = delivery === 'home'
+    ? flexQuote({ from, to, cards, sellers, tracked, bagFill: fill / 100 })
+    : null;
+  const services = quote?.services || routeServices({ from, to, cards: Math.ceil(cards / sellers) });
   const serviceChoices = [true, false]
     .map((wantTracked) => services.find((row) => row.tracked === wantTracked))
     .filter(Boolean);
@@ -64,8 +67,8 @@ function Calculator() {
       <header className="flex-panel-head">
         <h2 id="flex-calc-title">What you’d save</h2>
         <p>
-          “Alone” is the price Pokoin checkout charges today for the service you pick. Flex is an
-          estimate from the same carriers’ prices — how it’s worked out is at the bottom of the page.
+          “Alone” is what checkout charges when each seller posts their own pack. Flex is the same
+          cards as Flex boxes sharing one ~20 kg bag — how it’s worked out is at the bottom of the page.
         </p>
       </header>
       <div className="flex-calc-grid">
@@ -86,8 +89,23 @@ function Calculator() {
             </label>
           </div>
           <label className="flex-range">
-            <span>Cards in the pack <strong>{cards}</strong></span>
+            <span>Cards in the order <strong>{cards}</strong></span>
             <input type="range" min="1" max="60" value={cards} onChange={(event) => setCards(Number(event.target.value))} />
+          </label>
+          <label className="flex-range">
+            <span>Sellers <strong>{sellers}</strong></span>
+            <input
+              type="range"
+              min="1"
+              max={FLEX_ASSUMPTIONS.maxSellers}
+              value={sellers}
+              onChange={(event) => setSellers(Number(event.target.value))}
+            />
+            <small className="flex-range-hint">
+              {sellers === 1
+                ? 'One seller ships every card alone — Flex shines with several packs in one bag.'
+                : `${sellers} sellers · ~${Math.ceil(cards / sellers)} cards each · ${sellers} parcels alone vs 1 shared bag`}
+            </small>
           </label>
           <fieldset className="flex-seg flex-services">
             <legend>Ship alone with</legend>
@@ -101,7 +119,10 @@ function Calculator() {
                   onChange={() => setTracked(row.tracked)}
                 />
                 <span>{row.tracked ? 'Tracked' : 'Untracked letter'}</span>
-                <small>{row.carrier} · {formatEur(row.cents)}</small>
+                <small>
+                  {row.carrier} · {formatEur(row.cents)}
+                  {sellers > 1 ? ` × ${sellers} = ${formatEur(row.cents * sellers)}` : ''}
+                </small>
               </label>
             ))}
           </fieldset>
@@ -127,7 +148,11 @@ function Calculator() {
                 <div className="is-alone">
                   <span>Shipping alone</span>
                   <strong><Money cents={quote.alone.cents} /></strong>
-                  <em>{quote.alone.carrier} · {quote.alone.service}</em>
+                  <em>
+                    {quote.sellers > 1
+                      ? `${quote.sellers}× ${quote.alone.carrier} · ${quote.alone.service}`
+                      : `${quote.alone.carrier} · ${quote.alone.service}`}
+                  </em>
                 </div>
                 <div className="is-flex">
                   <span>With Flex</span>
@@ -137,16 +162,24 @@ function Calculator() {
               </div>
               <p className={`flex-saving${quote.savedCents > 0 ? '' : ' is-none'}`}>
                 {quote.savedCents > 0 ? (
-                  <>You save <strong><Money cents={quote.savedCents} /></strong> · {quote.savedPct}% on this pack</>
+                  <>You save <strong><Money cents={quote.savedCents} /></strong> · {quote.savedPct}% on this order</>
+                ) : sellers === 1 ? (
+                  <>Flex is not cheaper with one seller{delivery === 'home' ? ' and home delivery' : ''} here</>
                 ) : (
-                  <>Flex is not cheaper with home delivery here</>
+                  <>Flex is not cheaper here</>
                 )}
               </p>
-              {quote.savedCents <= 0 && pickup && pickup.savedCents > 0 ? (
+              {quote.savedCents <= 0 && sellers === 1 && pickup && pickup.savedCents > 0 ? (
                 <p className="flex-note">
                   Home delivery inside {country(to)} costs about what posting it yourself does.
                   With partner pickup this pack is <strong><Money cents={pickup.flex.cents} /></strong> —
-                  {' '}{pickup.savedPct}% less.
+                  {' '}{pickup.savedPct}% less. Add more sellers to see Flex fill a shared bag.
+                </p>
+              ) : null}
+              {quote.sellers > 1 ? (
+                <p className="flex-note">
+                  {quote.sellers} sellers · {quote.perSellerCards} cards each · {quote.sellers} parcels alone
+                  become {quote.sellers} Flex boxes in one bag.
                 </p>
               ) : null}
               <div className="flex-bars" aria-hidden="true">
@@ -159,21 +192,30 @@ function Calculator() {
                 </div>
               </div>
               <ul className="flex-breakdown">
-                <li><i className="p-box" />Flex box <Money cents={parts.box} /></li>
-                <li><i className="p-handling" />Partner handling <Money cents={parts.handling} /></li>
                 <li>
-                  <i className="p-trunk" />Your share of the bag <Money cents={parts.trunk} />
+                  <i className="p-box" />Flex box{quote.sellers > 1 ? ` ×${quote.sellers}` : ''} <Money cents={parts.box} />
+                </li>
+                <li>
+                  <i className="p-handling" />Partner handling{quote.sellers > 1 ? ` ×${quote.sellers}` : ''} <Money cents={parts.handling} />
+                </li>
+                <li>
+                  <i className="p-trunk" />Share of the bag <Money cents={parts.trunk} />
                   <small>
-                    {quote.packGrams} g of a {Math.round(FLEX_ASSUMPTIONS.bagGrams * quote.bagFill / 1000)} kg bag ·
+                    {quote.totalGrams} g of a {Math.round(FLEX_ASSUMPTIONS.bagGrams * quote.bagFill / 1000)} kg bag ·
                     {' '}one {quote.trunk.carrier} parcel {country(from)} → {country(to)} = <Money cents={quote.trunk.cents} /> per bag
                   </small>
                 </li>
                 {quote.lastMile ? (
-                  <li><i className="p-last" />Home delivery <Money cents={parts.lastMile} /><small>{quote.lastMile.carrier} · {quote.lastMile.service} inside {country(to)}</small></li>
+                  <li>
+                    <i className="p-last" />
+                    Home delivery{quote.sellers > 1 ? ` ×${quote.sellers}` : ''} <Money cents={parts.lastMile} />
+                    <small>{quote.lastMile.carrier} · {quote.lastMile.service} inside {country(to)}</small>
+                  </li>
                 ) : null}
               </ul>
               <p className="flex-road">
-                <strong>{quote.packsPerBag}</strong> packs like this fill one bag — {quote.packsPerBag} parcels become 2 bag moves.
+                <strong>{quote.packsPerBag}</strong> packs like each seller’s fill one bag —
+                {' '}{quote.packsPerBag} parcels become 2 bag moves.
               </p>
               {quote.trunk.estimated ? (
                 <p className="flex-note">This route has no parcel rate yet in one direction, so the bag uses the reverse direction’s price.</p>
@@ -189,12 +231,12 @@ function Calculator() {
 }
 
 function LaneTable() {
-  const rows = useMemo(() => flexLaneTable({ sizes: TABLE_SIZES }), []);
+  const rows = useMemo(() => flexLaneTable({ sizes: TABLE_SIZES, sellers: 3 }), []);
   return (
     <section className="flex-panel flex-lanes" aria-labelledby="flex-lanes-title">
       <header className="flex-panel-head">
         <h2 id="flex-lanes-title">Every route we ship today</h2>
-        <p>Tracked price alone → Flex with partner pickup, at a 60% full bag.</p>
+        <p>Tracked alone → Flex pickup for <strong>3 sellers</strong> splitting that card count, 60% full bag.</p>
       </header>
       <div className="flex-table-wrap">
         <table className="flex-table">

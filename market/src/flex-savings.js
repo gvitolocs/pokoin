@@ -1,9 +1,7 @@
 // Pokoin Flex savings from the real carrier table (shipping-rates.json, the
-// same rates checkout quotes). "Alone" is the service the seller picks for
-// that route and pack size (tracked or untracked letter). "Flex" is a weight
-// share of one ~20 kg bag sent as one parcel on the same route (EXTRA_LARGE
-// tier), plus — for home delivery — the same kind of service inside the
-// destination country.
+// same rates checkout quotes). "Alone" is N sellers each posting their share.
+// "Flex" is N Flex boxes sharing one ~20 kg bag (EXTRA_LARGE trunk), plus —
+// for home delivery — last-mile of each Flex box inside the destination country.
 
 import ratesCatalog from './shipping-rates.json' with { type: 'json' };
 import { findShippingRate, packageTierForCount } from './shipping-quote.js';
@@ -16,6 +14,7 @@ export const FLEX_ASSUMPTIONS = Object.freeze({
   gramsPerCard: 2,
   boxCents: 60,
   handlingCents: 50,
+  maxSellers: 8,
 });
 
 const TRUNK_TIER = 'EXTRA_LARGE';
@@ -97,6 +96,16 @@ export function packGrams(cardCount, assumptions = FLEX_ASSUMPTIONS) {
   return assumptions.boxGrams + n * assumptions.gramsPerCard;
 }
 
+/** Cards each of N sellers ships when the cart has `cards` total. */
+export function perSellerCards(cards, sellers) {
+  const n = Math.min(
+    FLEX_ASSUMPTIONS.maxSellers,
+    Math.max(1, Math.trunc(Number(sellers) || 1)),
+  );
+  const c = Math.max(1, Math.trunc(Number(cards) || 0));
+  return Math.ceil(c / n);
+}
+
 /**
  * Card-count proxy for last-mile of one Flex box. EXTRA_LARGE is the ~20 kg
  * bag/trunk tier only — never quote that for a ~100–200 g padded box.
@@ -109,8 +118,8 @@ export function lastMileCardCount(grams) {
 }
 
 /**
- * Alone vs Flex for one pack. `tracked` picks the service the seller would
- * use alone (and, for home delivery, inside the destination country).
+ * Alone vs Flex for `sellers` packs on one route.
+ * `tracked` picks the service each seller would use alone (and last-mile).
  * `delivery` is 'pickup' (partner shop, no last mile) or 'home'.
  * Returns null when a price is missing.
  */
@@ -118,6 +127,7 @@ export function flexQuote({
   from,
   to,
   cards,
+  sellers = 1,
   tracked = true,
   delivery = 'pickup',
   bagFill = FLEX_ASSUMPTIONS.defaultBagFill,
@@ -127,35 +137,50 @@ export function flexQuote({
   const fromCode = String(from || '').toUpperCase();
   const toCode = String(to || '').toUpperCase();
   const count = Math.max(1, Math.trunc(Number(cards) || 0));
-  const tier = packageTierForCount(count);
-  const services = routeServices({ from: fromCode, to: toCode, cards: count, catalog });
-  const alone = pickService(services, tracked !== false);
+  const sellerCount = Math.min(
+    assumptions.maxSellers || FLEX_ASSUMPTIONS.maxSellers,
+    Math.max(1, Math.trunc(Number(sellers) || 1)),
+  );
+  const perSeller = perSellerCards(count, sellerCount);
+  const tier = packageTierForCount(perSeller);
+  const services = routeServices({ from: fromCode, to: toCode, cards: perSeller, catalog });
+  const aloneOne = pickService(services, tracked !== false);
   const trunk = trunkLeg(fromCode, toCode, catalog);
-  if (!alone || !trunk) return null;
+  if (!aloneOne || !trunk) return null;
 
   const fill = Math.min(1, Math.max(0.1, Number(bagFill) || assumptions.defaultBagFill));
-  const grams = packGrams(count, assumptions);
+  const gramsOne = packGrams(perSeller, assumptions);
+  const totalGrams = gramsOne * sellerCount;
   const filledGrams = assumptions.bagGrams * fill;
-  let lastMile = null;
+  let lastMileOne = null;
   if (delivery === 'home') {
-    lastMile = pickService(
-      routeServices({ from: toCode, to: toCode, cards: lastMileCardCount(grams), catalog }),
-      alone.tracked,
+    lastMileOne = pickService(
+      routeServices({ from: toCode, to: toCode, cards: lastMileCardCount(gramsOne), catalog }),
+      aloneOne.tracked,
     );
-    if (!lastMile) return null;
+    if (!lastMileOne) return null;
   }
   const parts = {
-    box: assumptions.boxCents,
-    handling: assumptions.handlingCents,
-    trunk: Math.round((trunk.cents * grams) / filledGrams),
-    lastMile: lastMile ? lastMile.cents : 0,
+    box: assumptions.boxCents * sellerCount,
+    handling: assumptions.handlingCents * sellerCount,
+    trunk: Math.round((trunk.cents * totalGrams) / filledGrams),
+    lastMile: lastMileOne ? lastMileOne.cents * sellerCount : 0,
   };
   const flex = parts.box + parts.handling + parts.trunk + parts.lastMile;
-  const saved = alone.cents - flex;
+  const aloneCents = aloneOne.cents * sellerCount;
+  const alone = {
+    ...aloneOne,
+    cents: aloneCents,
+    perSellerCents: aloneOne.cents,
+    sellers: sellerCount,
+  };
+  const saved = aloneCents - flex;
   return {
     from: fromCode,
     to: toCode,
     cards: count,
+    sellers: sellerCount,
+    perSellerCards: perSeller,
     tier,
     delivery,
     bagFill: fill,
@@ -163,19 +188,26 @@ export function flexQuote({
     alone,
     flex: { cents: flex, parts },
     savedCents: saved,
-    savedPct: alone.cents > 0 ? Math.round((saved / alone.cents) * 100) : 0,
-    packGrams: grams,
-    packsPerBag: Math.floor(filledGrams / grams),
+    savedPct: aloneCents > 0 ? Math.round((saved / aloneCents) * 100) : 0,
+    packGrams: gramsOne,
+    totalGrams,
+    packsPerBag: Math.floor(filledGrams / gramsOne),
     trunk,
-    lastMile,
+    lastMile: lastMileOne,
   };
 }
 
 /** Every lane × a few pack sizes, for the table under the calculator. */
-export function flexLaneTable({ sizes = [4, 20, 50], ...options } = {}) {
+export function flexLaneTable({ sizes = [4, 20, 50], sellers = 3, ...options } = {}) {
   return flexLanes(options.catalog).map((lane) => ({
     ...lane,
-    quotes: sizes.map((cards) => flexQuote({ ...options, from: lane.from, to: lane.to, cards })),
+    quotes: sizes.map((cards) => flexQuote({
+      ...options,
+      from: lane.from,
+      to: lane.to,
+      cards,
+      sellers,
+    })),
   }));
 }
 
