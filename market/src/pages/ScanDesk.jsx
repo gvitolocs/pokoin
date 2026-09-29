@@ -288,7 +288,9 @@ export default function ScanDesk() {
           setServerOffset(Number(data.serverTime) - Date.now());
         } else if (name === 'items') {
           const arrivedAt = Date.now();
-          const events = frameEvents(rowsRef.current, data.items);
+          const events = frameEvents(rowsRef.current, data.items, {
+            serverNowMs: arrivedAt + serverOffsetRef.current,
+          });
           dispatch({ type: 'items', items: data.items });
           for (const event of events) {
             if (event.type === 'merged') {
