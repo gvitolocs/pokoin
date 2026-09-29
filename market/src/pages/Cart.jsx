@@ -67,7 +67,7 @@ export default function Cart() {
                   <input inputMode="numeric" max={row.stock || 1} value={row.qty} onChange={(event) => setQty(row.id, event.target.value)} />
                 </label>
                 <strong className="bag-price">
-                  {showFiat
+                  {showFiat || row.sellerAcceptsPkn === false
                     ? formatLocalFromPkn(row.pricePkn * row.qty, displayCurrency)
                     : formatPkn(row.pricePkn * row.qty)}
                 </strong>

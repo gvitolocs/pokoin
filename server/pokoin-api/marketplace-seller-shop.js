@@ -279,7 +279,8 @@ async function sellerProfileForUsername(username) {
     error.statusCode = 404;
     throw error;
   }
-  return seller;
+  // false = card payments only (Profile → "Get paid in PKN" off).
+  return { ...seller, acceptsPkn: data.acceptsPkn !== false };
 }
 
 function listingRow(row, seller = {}) {
@@ -298,6 +299,7 @@ function listingRow(row, seller = {}) {
     condition: row.condition,
     language: row.language,
     pricePkn: Number(row.price_pkn || 0),
+    sellerAcceptsPkn: seller.acceptsPkn !== false,
     quantityAvailable: Number(row.quantity_available || 0),
     signed: row.signed === true,
     reverse: row.reverse === true,
@@ -451,6 +453,7 @@ async function readSellerShopData(url, game) {
       username: seller.username,
       displayName: seller.displayName || seller.username,
       associate: await associateBadgeForUid(seller.uid),
+      acceptsPkn: seller.acceptsPkn !== false,
     },
     listings: result.rows.map((row) => listingRow(row, seller)),
     total,
