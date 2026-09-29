@@ -34,6 +34,20 @@ ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev 
 tar -C "$SRC" -cf - marketplace-associate.js \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-associate-commit'"
+
+say "patch Pi route manifest"
+ssh pi-home "cat '/srv/pokoin/api/$release/server/api-route-manifest.js'" > "$STAGE/manifest.js"
+node -e '
+const fs = require("node:fs");
+const all = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const route = all.find((row) => row.path === "/api/marketplace-associate");
+if (!route) throw new Error("associate route missing from route-definitions.json");
+fs.writeFileSync(process.argv[2], JSON.stringify([route], null, 2));
+' "$SRC/route-definitions.json" "$STAGE/associate-routes.json"
+node "$SRC/patch-route-manifest.js" "$STAGE/manifest.js" "$STAGE/associate-routes.json"
+node --check "$STAGE/manifest.js"
+ssh pi-home "cat > '/srv/pokoin/api/$release/server/api-route-manifest.js'" < "$STAGE/manifest.js"
+
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
 say "verify health + auth gate"
@@ -47,6 +61,10 @@ for _ in $(seq 1 45); do
   fi
   sleep 2
 done
-[[ "$healthy" == "1" ]] || die "associate endpoint did not come up healthy (health/anon codes above)"
+if [[ "$healthy" != "1" ]]; then
+  echo "health failed (health=$health anon=$anon) — rolling back" >&2
+  ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .associate-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
+  die "Pi API verification failed; previous release restored"
+fi
 
 say "deployed $COMMIT — anonymous GET is correctly 401; sign in on pokoin.com/associate to verify a real desk."
