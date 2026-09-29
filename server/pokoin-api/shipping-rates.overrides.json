@@ -1,0 +1,45 @@
+{
+  "_comment": "Verified rates that win over PackZoo. PackZoo DK→IT only returns flat parcel quotes (DAO 150 DKK) and omits PostNord international letters. Sources: PostNord Breve til Udlandet stamp table (portoservice PDF) + seller-verified PostNord DK→IT ~€9 for a small card pack.",
+  "rates": [
+    {
+      "id": "dk-it-small",
+      "priceEURCents": 600,
+      "carrier": "PostNord",
+      "serviceName": "EU tracked",
+      "tracked": true,
+      "source": "postnord-letter-band + seller check"
+    },
+    {
+      "id": "dk-it-medium",
+      "priceEURCents": 900,
+      "carrier": "PostNord",
+      "serviceName": "EU tracked",
+      "tracked": true,
+      "source": "seller-paid PostNord DK→IT pack ≈€9 (2026)"
+    },
+    {
+      "id": "dk-it-large",
+      "priceEURCents": 900,
+      "carrier": "PostNord",
+      "serviceName": "EU tracked",
+      "tracked": true,
+      "source": "same PostNord letter/pack band as medium (≤250 g)"
+    },
+    {
+      "id": "dk-it-small-untracked",
+      "priceEURCents": 442,
+      "carrier": "PostNord",
+      "serviceName": "Untracked letter",
+      "tracked": false,
+      "source": "PostNord Breve til Udlandet ≤100 g = 33 DKK"
+    },
+    {
+      "id": "dk-it-medium-untracked",
+      "priceEURCents": 442,
+      "carrier": "PostNord",
+      "serviceName": "Untracked letter",
+      "tracked": false,
+      "source": "PostNord Breve til Udlandet ≤100 g = 33 DKK"
+    }
+  ]
+}

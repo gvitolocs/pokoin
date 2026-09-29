@@ -45,6 +45,24 @@ test('missing route returns null for preview', () => {
   assert.equal(previewShipmentCents({ fromCountry: 'FR', toCountry: 'PT', cardCount: 1 }), null);
 });
 
+test('DK → IT medium tracked is PostNord ≈€9, not PackZoo parcel floor', () => {
+  const rate = findShippingRate({
+    fromCountry: 'DK',
+    toCountry: 'IT',
+    packageTier: 'MEDIUM',
+    tracked: true,
+  });
+  assert.equal(rate.carrier, 'PostNord');
+  assert.equal(rate.priceEURCents, 900);
+  const untracked = findShippingRate({
+    fromCountry: 'DK',
+    toCountry: 'IT',
+    packageTier: 'MEDIUM',
+    tracked: false,
+  });
+  assert.ok(untracked.priceEURCents < rate.priceEURCents);
+});
+
 test('60 cards stay LARGE letter rates, not the Flex bag EXTRA_LARGE', () => {
   assert.equal(packageTierForCount(60), 'LARGE');
   const alone = findShippingRate({ fromCountry: 'IT', toCountry: 'IT', packageTier: 'LARGE', tracked: true });

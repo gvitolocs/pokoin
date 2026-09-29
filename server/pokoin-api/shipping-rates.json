@@ -28,7 +28,8 @@
       "carrier": "GLS",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "dk-dk-medium",
@@ -40,7 +41,8 @@
       "carrier": "GLS",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "dk-dk-large",
@@ -52,7 +54,8 @@
       "carrier": "GLS",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "dk-dk-xl",
@@ -64,7 +67,8 @@
       "carrier": "PostNord",
       "serviceName": "Parcel",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "dk-it-small",
@@ -72,11 +76,12 @@
       "toCountry": "IT",
       "packageTier": "SMALL",
       "maxCards": 4,
-      "priceEURCents": 2011,
-      "carrier": "DAO",
-      "serviceName": "Tracked",
+      "priceEURCents": 600,
+      "carrier": "PostNord",
+      "serviceName": "EU tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "postnord-letter-band + seller check"
     },
     {
       "id": "dk-it-medium",
@@ -84,11 +89,12 @@
       "toCountry": "IT",
       "packageTier": "MEDIUM",
       "maxCards": 20,
-      "priceEURCents": 2011,
-      "carrier": "DAO",
-      "serviceName": "Tracked",
+      "priceEURCents": 900,
+      "carrier": "PostNord",
+      "serviceName": "EU tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "seller-paid PostNord DK→IT pack ≈€9 (2026)"
     },
     {
       "id": "dk-it-large",
@@ -96,11 +102,12 @@
       "toCountry": "IT",
       "packageTier": "LARGE",
       "maxCards": 200,
-      "priceEURCents": 2011,
-      "carrier": "DAO",
-      "serviceName": "Tracked",
+      "priceEURCents": 900,
+      "carrier": "PostNord",
+      "serviceName": "EU tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "same PostNord letter/pack band as medium (≤250 g)"
     },
     {
       "id": "dk-it-xl",
@@ -112,7 +119,8 @@
       "carrier": "UPS",
       "serviceName": "Parcel",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "it-dk-small",
@@ -160,7 +168,8 @@
       "carrier": "UPS",
       "serviceName": "Parcel",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-dk-small",
@@ -172,7 +181,8 @@
       "carrier": "DHL",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-dk-medium",
@@ -184,7 +194,8 @@
       "carrier": "DHL",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-dk-large",
@@ -196,7 +207,8 @@
       "carrier": "DHL",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-dk-xl",
@@ -208,7 +220,8 @@
       "carrier": "Hermes",
       "serviceName": "Parcel",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-it-small",
@@ -220,7 +233,8 @@
       "carrier": "DHL",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-it-medium",
@@ -232,7 +246,8 @@
       "carrier": "DHL",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-it-large",
@@ -244,7 +259,8 @@
       "carrier": "DHL",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-it-xl",
@@ -256,7 +272,8 @@
       "carrier": "Hermes",
       "serviceName": "Parcel",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "it-it-small",
@@ -268,7 +285,8 @@
       "carrier": "InPost",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "it-it-medium",
@@ -280,7 +298,8 @@
       "carrier": "InPost",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "it-it-large",
@@ -292,7 +311,8 @@
       "carrier": "InPost",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "it-it-xl",
@@ -304,7 +324,8 @@
       "carrier": "Poste Italiane",
       "serviceName": "Parcel",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-de-small",
@@ -316,7 +337,8 @@
       "carrier": "GLS",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-de-medium",
@@ -328,7 +350,8 @@
       "carrier": "GLS",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-de-large",
@@ -340,7 +363,8 @@
       "carrier": "GLS",
       "serviceName": "Tracked",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-de-xl",
@@ -352,7 +376,8 @@
       "carrier": "Hermes",
       "serviceName": "Parcel",
       "active": true,
-      "tracked": true
+      "tracked": true,
+      "rateSource": "packzoo"
     },
     {
       "id": "dk-dk-small-untracked",
@@ -364,7 +389,8 @@
       "carrier": "GLS",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "dk-dk-medium-untracked",
@@ -376,7 +402,8 @@
       "carrier": "GLS",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "dk-it-small-untracked",
@@ -384,11 +411,12 @@
       "toCountry": "IT",
       "packageTier": "SMALL",
       "maxCards": 4,
-      "priceEURCents": 2011,
-      "carrier": "DAO",
+      "priceEURCents": 442,
+      "carrier": "PostNord",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "PostNord Breve til Udlandet ≤100 g = 33 DKK"
     },
     {
       "id": "dk-it-medium-untracked",
@@ -396,11 +424,12 @@
       "toCountry": "IT",
       "packageTier": "MEDIUM",
       "maxCards": 20,
-      "priceEURCents": 2011,
-      "carrier": "DAO",
+      "priceEURCents": 442,
+      "carrier": "PostNord",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "PostNord Breve til Udlandet ≤100 g = 33 DKK"
     },
     {
       "id": "it-dk-small-untracked",
@@ -412,7 +441,8 @@
       "carrier": "Poste Italiane",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "it-dk-medium-untracked",
@@ -424,7 +454,8 @@
       "carrier": "Poste Italiane",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-dk-small-untracked",
@@ -436,7 +467,8 @@
       "carrier": "Deutsche Post",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-dk-medium-untracked",
@@ -448,7 +480,8 @@
       "carrier": "Deutsche Post",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-it-small-untracked",
@@ -460,7 +493,8 @@
       "carrier": "Deutsche Post",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-it-medium-untracked",
@@ -472,7 +506,8 @@
       "carrier": "Deutsche Post",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "it-it-small-untracked",
@@ -484,7 +519,8 @@
       "carrier": "Poste Italiane",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "it-it-medium-untracked",
@@ -496,7 +532,8 @@
       "carrier": "Poste Italiane",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-de-small-untracked",
@@ -508,7 +545,8 @@
       "carrier": "Deutsche Post",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     },
     {
       "id": "de-de-medium-untracked",
@@ -520,12 +558,15 @@
       "carrier": "Deutsche Post",
       "serviceName": "Untracked letter",
       "active": true,
-      "tracked": false
+      "tracked": false,
+      "rateSource": "packzoo"
     }
   ],
   "source": {
-    "provider": "packzoo",
+    "provider": "packzoo+overrides",
     "api": "https://packzoo.com/api/prices",
-    "note": "Indicative PackZoo compare; verify on carrier sites before live labels."
+    "overrides": "server/pokoin-api/shipping-rates.overrides.json",
+    "overridesApplied": 5,
+    "note": "PackZoo compare plus verified overrides. PackZoo omits some letter products (e.g. PostNord Breve til Udlandet); overrides win."
   }
 }

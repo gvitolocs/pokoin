@@ -153,5 +153,5 @@ test('address validation and encryption round-trip', () => {
 test('seed catalog is loaded', () => {
   assert.ok(DEFAULT_RATES.rates.length >= 20);
   assert.ok(DEFAULT_RATES.tiers.some((t) => t.id === 'SMALL'));
-  assert.equal(DEFAULT_RATES.source?.provider, 'packzoo');
+  assert.match(String(DEFAULT_RATES.source?.provider || ''), /packzoo/);
 });

@@ -16,7 +16,7 @@
 | Seller country | Profile `shipFromCountry` (ISO-2). Empty profiles are seeded from request IP (`CF-IPCountry` / Vercel / CloudFront) when that code is an allowed EU sell-from country; otherwise the seller must set it on Profile before listing. Native listing insert rejects `EU`. |
 | Saved addresses | `users/{uid}/shipping_addresses/{id}` with `countryCode` plaintext + AES-GCM `encryptedPayload`. |
 | Encryption | `ADDRESS_ENCRYPTION_KEY` (32 bytes) on API host; ops mirror on InPhysical — never Firebase. Pattern matches CardTrader token crypto. |
-| Shipping tables | `server/pokoin-api/shipping-rates.json` (+ SPA copy). Seeded from **PackZoo** via `scripts/sync-shipping-rates-from-packzoo.py` (indicative compare API). Quote **fails closed** when no row matches. `EXTRA_LARGE` is the ~20 kg Flex bag/trunk tier; seller packs up to 200 cards use `LARGE`. |
+| Shipping tables | `server/pokoin-api/shipping-rates.json` (+ SPA copy). Pulled from **PackZoo** via `scripts/sync-shipping-rates-from-packzoo.py`, then **verified overrides** in `shipping-rates.overrides.json` win (PackZoo omits PostNord international letters and quotes a flat DAO parcel ~€20 for every DK→IT letter size). Quote **fails closed** when no row matches. `EXTRA_LARGE` is the ~20 kg Flex bag/trunk tier; seller packs up to 200 cards use `LARGE`. |
 
 | Orders | Firestore `orders` with `shipments[]`, `totalEURCents`, encrypted immutable address snapshot. |
 | Connect | Sellers can finish Stripe Connect later. Buyer EUR pay only needs seller `shipFromCountry`. Connect Transfers run after delivery when the seller is `READY` (account resolved at payout time). |

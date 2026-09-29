@@ -27,11 +27,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 API_JSON = ROOT / "server" / "pokoin-api" / "shipping-rates.json"
 SPA_JSON = ROOT / "market" / "src" / "shipping-rates.json"
+OVERRIDES_JSON = ROOT / "server" / "pokoin-api" / "shipping-rates.overrides.json"
 CARDVAULT_JSON = Path.home() / "Projects" / "cardvault" / "pokemon_card_vault" / "api" / "shipping-rates.json"
 
 PACKZOO = "https://packzoo.com/api/prices"
 # ECB-ish mid; PackZoo returns DKK for many DK origins.
 DKK_PER_EUR = 7.46
+# PackZoo often returns only flat parcels for DK international (DAO 150 DKK for
+# every letter size). Refuse letter-tier quotes above this ceiling unless overridden.
+LETTER_TIER_MAX_CENTS = 1500
 
 # Tier → PackZoo package profile (card mailers + Flex trunk bag).
 TIER_PROFILES = {
@@ -155,6 +159,32 @@ def apply_pick(rate: dict, pick: dict) -> None:
         rate["serviceName"] = "Tracked"
 
 
+def apply_overrides(catalog: dict) -> int:
+    """Verified rows beat PackZoo (see shipping-rates.overrides.json)."""
+    if not OVERRIDES_JSON.is_file():
+        return 0
+    payload = json.loads(OVERRIDES_JSON.read_text(encoding="utf-8"))
+    by_id = {row["id"]: row for row in catalog.get("rates") or []}
+    applied = 0
+    for overlay in payload.get("rates") or []:
+        rate_id = overlay.get("id")
+        target = by_id.get(rate_id)
+        if not target:
+            print(f"warn: override id missing in catalog: {rate_id}", file=sys.stderr)
+            continue
+        before = target.get("priceEURCents")
+        for key in ("priceEURCents", "carrier", "serviceName", "tracked"):
+            if key in overlay:
+                target[key] = overlay[key]
+        target["rateSource"] = overlay.get("source") or "override"
+        applied += 1
+        print(
+            f"override {rate_id}: {before} → {target['priceEURCents']} "
+            f"({target.get('carrier')} {target.get('serviceName')})"
+        )
+    return applied
+
+
 def sync_catalog(catalog: dict, *, sleep_s: float = 0.15) -> dict:
     cache: dict[tuple, list[dict]] = {}
     rates = catalog.get("rates") or []
@@ -184,16 +214,32 @@ def sync_catalog(catalog: dict, *, sleep_s: float = 0.15) -> dict:
         if not pick:
             print(f"skip: no pick for {rate.get('id')}", file=sys.stderr)
             continue
+        cents = to_eur_cents(pick["price"], pick.get("currency") or "EUR")
+        # Letter tiers must not ingest flat international parcel floors (e.g. DAO 150 DKK).
+        if tier != "EXTRA_LARGE" and cents > LETTER_TIER_MAX_CENTS:
+            print(
+                f"skip: {rate.get('id')} PackZoo {cents}¢ looks like a parcel floor "
+                f"(>{LETTER_TIER_MAX_CENTS}¢ letter ceiling) — keep existing / use override",
+                file=sys.stderr,
+            )
+            continue
         before = rate.get("priceEURCents")
         apply_pick(rate, pick)
+        rate["rateSource"] = "packzoo"
         print(
             f"{rate['id']}: {before} → {rate['priceEURCents']} "
             f"({rate['carrier']} {rate['serviceName']})"
         )
+    applied = apply_overrides(catalog)
     catalog["source"] = {
-        "provider": "packzoo",
+        "provider": "packzoo+overrides",
         "api": PACKZOO,
-        "note": "Indicative PackZoo compare; verify on carrier sites before live labels.",
+        "overrides": str(OVERRIDES_JSON.relative_to(ROOT)),
+        "overridesApplied": applied,
+        "note": (
+            "PackZoo compare plus verified overrides. PackZoo omits some letter "
+            "products (e.g. PostNord Breve til Udlandet); overrides win."
+        ),
     }
     return catalog
 
