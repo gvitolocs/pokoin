@@ -83,8 +83,30 @@ test('poko history round-trips in localStorage', () => {
     getItem(key) { return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null; },
     setItem(key, value) { store[key] = String(value); },
   };
-  writePokoHistory(uid, [{ id: '1', text: 'hello', mine: true }]);
-  assert.equal(readPokoHistory(uid)[0].text, 'hello');
+  writePokoHistory(uid, [{ id: '1', text: 'hello', mine: true }], false);
+  assert.equal(readPokoHistory(uid).events[0].text, 'hello');
+  assert.equal(readPokoHistory(uid).hasMore, false);
+});
+
+test('poko history cache keeps the last page and remembers hasMore', () => {
+  const uid = 'test-poko-page';
+  const store = Object.create(null);
+  globalThis.localStorage = {
+    getItem(key) { return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null; },
+    setItem(key, value) { store[key] = String(value); },
+  };
+  const rows = Array.from({ length: 35 }, (_, i) => ({
+    id: String(i + 1),
+    text: `m${i + 1}`,
+    mine: i % 2 === 0,
+    createdAt: new Date(1_700_000_000_000 + i * 1000).toISOString(),
+  }));
+  writePokoHistory(uid, rows, true);
+  const cached = readPokoHistory(uid);
+  assert.equal(cached.events.length, 20);
+  assert.equal(cached.events[0].id, '16');
+  assert.equal(cached.events[19].id, '35');
+  assert.equal(cached.hasMore, true);
 });
 
 test('mergePokoEvents and reconcile keep unmatched local optimistic rows', () => {
