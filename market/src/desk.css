@@ -2742,3 +2742,62 @@
   .refund-form input { width: 100%; }
   .refund-form label { flex: 1 1 100%; }
 }
+
+/* Profile seller setup: "Get paid in PKN" switch. */
+.setup-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.25rem 0.1rem;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.setup-switch:disabled { cursor: default; opacity: 0.6; }
+
+.setup-switch-track {
+  position: relative;
+  width: 2.6rem;
+  height: 1.45rem;
+  border-radius: 999px;
+  background: var(--g4);
+  border: 1px solid var(--g5);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.setup-switch-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0.15rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  background: var(--muted);
+  transform: translateY(-50%);
+  transition: left 0.2s ease, background 0.2s ease;
+}
+
+.setup-switch.is-on .setup-switch-track {
+  background: rgb(255 211 61 / 0.25);
+  border-color: var(--yellow);
+}
+
+.setup-switch.is-on .setup-switch-thumb {
+  left: calc(100% - 1.2rem);
+  background: var(--yellow);
+}
+
+.setup-switch:focus-visible .setup-switch-track {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.setup-switch-label {
+  min-width: 1.6rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}

@@ -13,6 +13,7 @@ const {
   },
 } = require('./cardtrader-live-listings');
 const { decrementSellerOwnershipForSale } = require('./_user_card_collection');
+const { assertSellersAcceptPkn } = require('./_seller_pkn_policy');
 const {
   SALES_COLLECTION,
   orderIsSold,
@@ -721,6 +722,8 @@ async function createPaidOrder({ admin, firestore, decoded, body }) {
   if (fulfillmentMode !== 'nft_only') {
     assertCardTraderCheckoutCanProceed(requestedItems, body, process.env);
   }
+  // Sellers who opted out of PKN are paid by card only (Stripe checkout).
+  await assertSellersAcceptPkn(firestore, uniqueSellerUids(requestedItems));
   await verifyCardTraderLiveItems(requestedItems);
   const decremented = await verifyAndDecrementListings(requestedItems);
   const storedByListing = new Map(decremented.map((entry) => [entry.listingId, entry.unitPricePkn]));

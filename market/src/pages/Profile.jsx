@@ -8,7 +8,9 @@ import { accountHeading, accountLede } from '../auth-session.js';
 import { useWallet, shortAddress } from '../wallet.jsx';
 import { fetchCollectionSummary, fetchSellerListings } from '../api.js';
 import { DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
-import { ShipFromCountrySelect, StripeConnectButton } from '../components/SellerShippingSettings.jsx';
+import { PknPayoutToggle, ShipFromCountrySelect, StripeConnectButton } from '../components/SellerShippingSettings.jsx';
+import { publishSellerSettings, useSellerCurrency } from '../use-seller-currency.js';
+import { sellerListCurrency } from '../seller-currency.js';
 import CardTraderConnectPanel, { CT_TOKEN_DOCS } from '../components/CardTraderConnectPanel.jsx';
 import TelegramConnectPanel from '../components/TelegramConnectPanel.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
@@ -184,6 +186,8 @@ export default function Profile() {
   const [ctOpen, setCtOpen] = useState(false);
   const [dangerMessage, setDangerMessage] = useState('');
   const [dangerError, setDangerError] = useState('');
+  const { settings: loadedSellerSettings, failed: sellerSettingsFailed } = useSellerCurrency();
+  const [sellerSettingsPatch, setSellerSettingsPatch] = useState(null);
   const uid = profile?.uid || user?.uid || '';
   const tiles = usePortfolioTiles(signedIn ? uid : '');
   const orderRows = useOrderRows(signedIn ? uid : '');
@@ -210,12 +214,28 @@ export default function Profile() {
     : '';
   const shopHref = profile?.username ? sellerHref({ sellerUsername: profile.username }) : '';
 
+  const sellerSettings = loadedSellerSettings || sellerSettingsPatch
+    ? { ...(loadedSellerSettings || {}), ...(sellerSettingsPatch || {}) }
+    : null;
+  function onPknChoice(patch) {
+    const merged = { ...(sellerSettings || {}), ...patch };
+    setSellerSettingsPatch((current) => ({ ...(current || {}), ...patch }));
+    publishSellerSettings(merged);
+  }
   const setup = sellerSetupSteps({ shipFromCountry, stripe: stripeStatus, cardTrader });
   const step = Object.fromEntries(setup.steps.map((row) => [row.key, row]));
   const activity = orderRows ? orderActivity(orderRows, uid) : null;
   const listedCount = tiles.listed ? `${tiles.listed.listings}${tiles.listedCapped ? '+' : ''}` : '—';
   const ctUser = cardTrader?.metadata?.user?.username || cardTrader?.metadata?.seller?.name || '';
   const ctOneDayReady = cardTrader?.metadata?.oneDayReady === true || cardTrader?.syncSummary?.mode === 'one_day_ready';
+  // Unknown after a failed load = the default (PKN on); the switch still saves.
+  const acceptsPkn = sellerSettings ? sellerSettings.acceptsPkn !== false : (sellerSettingsFailed ? true : null);
+  const localCurrency = sellerListCurrency({ acceptsPkn: false, shipFromCountry });
+  const pknMeta = acceptsPkn == null
+    ? 'Checking…'
+    : acceptsPkn
+      ? 'Buyers can pay you with site PKN or by card.'
+      : `Card payments only — your prices show in ${localCurrency}.${stripeStatus?.ready ? '' : ' Connect Stripe to get paid.'}`;
   const stripeMeta = stripeStatus?.ready
     ? 'Payouts ready for EUR sales.'
     : step.stripe.started
@@ -310,7 +330,11 @@ export default function Profile() {
               action={(
                 <ShipFromCountrySelect
                   value={shipFromCountry || ''}
-                  onChange={setShipFromCountry}
+                  onChange={(next) => {
+                    setShipFromCountry(next);
+                    // Opted-out sellers price in this country's currency.
+                    if (sellerSettings && next) publishSellerSettings({ ...sellerSettings, shipFromCountry: next });
+                  }}
                   onLoaded={setShipFromCountry}
                   onError={setSetupError}
                 />
@@ -327,6 +351,18 @@ export default function Profile() {
                   onCountrySaved={setShipFromCountry}
                   onError={setSetupError}
                   onStatus={setStripeStatus}
+                />
+              )}
+            />
+            <SetupRow
+              step={{ done: acceptsPkn != null, loading: acceptsPkn == null }}
+              title="Get paid in PKN"
+              meta={pknMeta}
+              action={(
+                <PknPayoutToggle
+                  acceptsPkn={acceptsPkn}
+                  onChange={onPknChoice}
+                  onError={setSetupError}
                 />
               )}
             />

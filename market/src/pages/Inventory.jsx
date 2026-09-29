@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useMatch } from 'react-router-dom';
-import { exportStockCsv, fetchSellerListings, formatPkn, importStockCsv } from '../api.js';
+import { exportStockCsv, fetchSellerListings, importStockCsv } from '../api.js';
 import { useAuth } from '../auth.jsx';
+import { useSellerCurrency } from '../use-seller-currency.js';
+import { formatSellerPrice } from '../seller-currency.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
 import StockNav from '../components/StockNav.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
@@ -35,6 +37,9 @@ export default function Inventory() {
   const location = useLocation();
   const onImportTab = Boolean(useMatch({ path: '/mypokoin/import', end: true }));
   const { user, ready, signedIn, profile, getBearer } = useAuth();
+  // PKN opt-out sellers read their prices in local currency.
+  const { currency: priceCurrency } = useSellerCurrency();
+  const formatPrice = (pkn) => formatSellerPrice(pkn, priceCurrency);
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [format, setFormat] = useState('powertools');
@@ -211,7 +216,7 @@ export default function Inventory() {
                 <ul className="stock-csv-ok">
                   {preview.preview.slice(0, 6).map((p) => (
                     <li key={`${p.line}-${p.cardId}`}>
-                      {p.name} · {p.condition} {p.language} · {formatPkn(p.pricePkn)} · {p.location}
+                      {p.name} · {p.condition} {p.language} · {formatPrice(p.pricePkn)} · {p.location}
                     </li>
                   ))}
                   {preview.preview.length > 6 ? <li>…and {preview.preview.length - 6} more</li> : null}
@@ -255,7 +260,7 @@ export default function Inventory() {
                 key={row.id || `${row.cardId}-${row.pricePkn}`}
                 to={inventoryListingHref(row)}
                 title={row.cardName || row.name || 'Listing'}
-                meta={inventoryListingMeta(row, formatPkn)}
+                meta={inventoryListingMeta(row, formatPrice)}
               />
             ))}
           </div>

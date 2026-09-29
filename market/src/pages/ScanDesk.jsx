@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { fetchCardSales, fetchCheapestPricePknMap, fetchVersionSet, formatPkn, imageSrc } from '../api.js';
+import { fetchCardSales, fetchCheapestPricePknMap, fetchVersionSet, imageSrc } from '../api.js';
+import { useSellerCurrency } from '../use-seller-currency.js';
+import { formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
 import { cardReference, writeListingDrag } from '../chat-listing.js';
 import { useAuth } from '../auth.jsx';
 import { encodeQr, qrPath, qrLogoLayout } from '../qr.js';
@@ -151,6 +153,8 @@ export default function ScanDesk() {
   const location = useLocation();
   const { user, ready, signedIn, profile, getBearer } = useAuth();
   const uid = user?.uid || profile?.uid || '';
+  // Sellers who opted out of PKN payments price the queue in local currency.
+  const { currency: priceCurrency } = useSellerCurrency();
   const [session, setSession] = useState(null);
   const [batch, setBatch] = useState(null);
   const [pairing, setPairing] = useState(null);
@@ -1371,7 +1375,7 @@ export default function ScanDesk() {
           <span role="columnheader">Flags</span>
           <span role="columnheader">Location</span>
           <span role="columnheader">Qty</span>
-          {submitIntent === 'list' ? <span role="columnheader">Price</span> : null}
+          {submitIntent === 'list' ? <span role="columnheader">Price{priceCurrency !== 'PKN' ? ` · ${priceCurrency}` : ''}</span> : null}
           <span role="columnheader">State</span>
           <span role="columnheader" className="c-remove" aria-label="Remove" />
         </div>
@@ -1393,6 +1397,7 @@ export default function ScanDesk() {
             image={images[row.id]}
             closed={closed}
             hidePrice={submitIntent === 'collection'}
+            priceCurrency={priceCurrency}
             slot={slots.get(row.id)}
             replacing={replaceFor === row.id}
             preferredLanguage={defaults.language}
@@ -1831,7 +1836,7 @@ function CandidateAlts({ row, preferredLanguage, onPick }) {
 
 function QueueRow({
   row, index, focused, selected, problem, image, closed, slot, replacing,
-  preferredLanguage, hidePrice = false,
+  preferredLanguage, hidePrice = false, priceCurrency = 'PKN',
   onFocus, onPatch, onPriceFocus, onPriceEmptied, onPick, onRemove, onReplaceDone,
 }) {
   const stateLabel = row.status === 'submitted'
@@ -1972,15 +1977,15 @@ function QueueRow({
       <span className="c-qty">{row.quantity}</span>
       {hidePrice ? null : (
       <span className={`c-price${row.priceSuggested ? ' suggested' : ''}`}>
-        {closed ? formatPkn(row.pricePkn) : (
+        {closed ? formatSellerPrice(row.pricePkn, priceCurrency) : (
           <input
             inputMode="decimal"
             tabIndex={-1}
-            key={`${row.id}:${row.pricePkn}`}
-            defaultValue={row.pricePkn ?? ''}
+            key={`${row.id}:${row.pricePkn}:${priceCurrency}`}
+            defaultValue={priceInputFromPkn(row.pricePkn, priceCurrency)}
             // While a suggested price is cleared for typing, it stays visible
             // as the placeholder: leaving the field empty keeps it.
-            placeholder={row.priceSuggested && row.pricePkn != null ? String(row.pricePkn) : 'PKN'}
+            placeholder={row.priceSuggested && row.pricePkn != null ? priceInputFromPkn(row.pricePkn, priceCurrency) : priceCurrency}
             onFocus={(e) => {
               // Clicking in is the only thing that empties a suggested price;
               // switching versions re-suggests instead.
@@ -1988,13 +1993,13 @@ function QueueRow({
               if (row.priceSuggested) e.target.value = '';
             }}
             onBlur={(e) => {
-              const commit = priceFieldCommit(row, e.target.value);
+              const commit = priceFieldCommit(row, e.target.value, priceCurrency);
               if (commit.action === 'set') {
                 onPatch({ pricePkn: commit.pricePkn, ...(row.priceSuggested ? { priceSuggested: false } : {}) });
                 return;
               }
               if (commit.action === 'default') onPriceEmptied?.(row);
-              e.target.value = row.pricePkn ?? '';
+              e.target.value = priceInputFromPkn(row.pricePkn, priceCurrency);
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') e.currentTarget.blur();

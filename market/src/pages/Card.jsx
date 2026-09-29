@@ -96,6 +96,8 @@ import { clearActiveDeskCard, setActiveDeskCard } from '../poko-chat.js';
 import CardArt from '../components/CardArt.jsx';
 import RelatedCards from '../components/RelatedCards.jsx';
 import { ShipFromCountryGate } from '../components/SellerShippingSettings.jsx';
+import { useSellerCurrency } from '../use-seller-currency.js';
+import { priceInputFromPkn } from '../seller-currency.js';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
@@ -776,6 +778,11 @@ function ListingForm({
   const priceManual = useRef(Boolean(editing?.id));
   const priceFocused = useRef(false);
   const [currency, setCurrency] = useState(blank.currency);
+  // Sellers who opted out of PKN payments list in their local currency.
+  const { currency: sellerCurrency } = useSellerCurrency();
+  const sellerCurrencyRef = useRef(sellerCurrency);
+  sellerCurrencyRef.current = sellerCurrency;
+  const currencyManual = useRef(false);
   const [qty, setQty] = useState(blank.qty);
   const [condition, setCondition] = useState(blank.condition);
   const [language, setLanguage] = useState(blank.language);
@@ -806,8 +813,11 @@ function ListingForm({
   const isEditing = Boolean(editingId);
 
   function applyFields(next) {
-    setPrice(next.price);
-    setCurrency(next.currency);
+    const listIn = currencyManual.current ? next.currency : sellerCurrencyRef.current;
+    setPrice(listIn === next.currency || !next.price
+      ? next.price
+      : priceInputFromPkn(listingPriceToPkn(next.price, next.currency), listIn));
+    setCurrency(listIn);
     setQty(next.qty);
     setCondition(next.condition);
     setLanguage(next.language);
@@ -868,6 +878,15 @@ function ListingForm({
     if (editingId || priceManual.current || priceFocused.current || !graphPrice) return;
     setPrice(graphPrice);
   }, [graphPrice, editingId, card.id, currency]);
+
+  useEffect(() => {
+    // Settings arrive after first paint: switch the untouched form over.
+    if (currencyManual.current || currency === sellerCurrency) return;
+    if (price && priceManual.current) {
+      setPrice(priceInputFromPkn(listingPriceToPkn(price, currency), sellerCurrency));
+    }
+    setCurrency(sellerCurrency);
+  }, [sellerCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hint = !price && graphPrice ? graphPrice : '';
   const listedPkn = price
@@ -1040,7 +1059,13 @@ function ListingForm({
         </label>
         <label className="sell-field currency">
           Currency
-          <select value={currency} onChange={(event) => setCurrency(event.target.value)}>
+          <select
+            value={currency}
+            onChange={(event) => {
+              currencyManual.current = true;
+              setCurrency(event.target.value);
+            }}
+          >
             {LIST_CURRENCIES.map((code) => (
               <option key={code} value={code}>{code}</option>
             ))}
@@ -1086,7 +1111,9 @@ function ListingForm({
           />
         </div>
       ) : null}
-      {currency !== 'PKN' && listedPkn ? (
+      {sellerCurrency !== 'PKN' ? (
+        <p className="sell-pkn-eq">Buyers pay you by card · PKN payments are off in <Link to="/profile">Profile</Link></p>
+      ) : currency !== 'PKN' && listedPkn ? (
         <p className="sell-pkn-eq">Lists at {formatPkn(listedPkn)}</p>
       ) : null}
       <div className="sell-options-row">
