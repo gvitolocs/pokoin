@@ -177,7 +177,7 @@ function Hero({ data }) {
   );
 }
 
-function AssociatesOverview({ overview }) {
+function AssociatesOverview({ overview, onView }) {
   return (
     <DeskPanel flush title={`Associates overview · ${overview.length}`} className="associate-orders">
       {overview.length ? (
@@ -202,6 +202,15 @@ function AssociatesOverview({ overview }) {
                 <span>{row.earnings.qualifyingOrders} qualifying sale{row.earnings.qualifyingOrders === 1 ? '' : 's'}</span>
                 <strong>{moneyRange(row.earnings.earningPkn, row.earnings.earningEurCents)}</strong>
               </span>
+              {onView ? (
+                <button
+                  type="button"
+                  className="btn ghost associate-overview-view"
+                  onClick={() => onView(row.associate.email)}
+                >
+                  View desk
+                </button>
+              ) : null}
             </article>
           ))}
         </div>
@@ -212,17 +221,53 @@ function AssociatesOverview({ overview }) {
   );
 }
 
-function AdminOverviewView({ data }) {
+/** Admin "view as": the clicked associate's desk, exactly as they see it. */
+function AdminAssociateArea({ overview, onView, standalone = false }) {
+  return (
+    <>
+      {standalone ? (
+        <p className="page-lede">
+          Live royalty earnings across every associate desk — Italian sellers shipping to Italian buyers.
+          Open a desk to see exactly what that associate sees.
+        </p>
+      ) : null}
+      <AssociatesOverview overview={overview} onView={onView} />
+    </>
+  );
+}
+
+/** Full-page view-as: the associate's own desk under a read-only banner. */
+function AdminViewingView({ row, onBack }) {
+  const presentation = rolePresentation(row.associate.role);
   return (
     <div className="page desk associate-page">
-      <PageHead kicker="Pokoin Associates · Admin" title="Associates overview" />
-      <p className="page-lede">Live royalty earnings across every associate desk — Italian sellers shipping to Italian buyers, pool at {data.overview[0]?.associate.royaltyPct ?? 3}%.</p>
-      <AssociatesOverview overview={data.overview} />
+      <PageHead kicker="Pokoin Associates · Admin" title="Associates overview">
+        <button type="button" className="btn ghost" onClick={onBack}>Back to overview</button>
+      </PageHead>
+      <div className="associate-viewing-bar">
+        <span>
+          Viewing the desk <strong>{row.associate.displayName || row.associate.email}</strong> sees
+          {' · '}
+          {presentation.badge}
+          {' · read-only'}
+        </span>
+        <button type="button" className="btn ghost" onClick={onBack}>Back to overview</button>
+      </div>
+      <AssociateView data={row} />
     </div>
   );
 }
 
-function AssociateView({ data, overview = null }) {
+function AdminOverviewView({ data, onView }) {
+  return (
+    <div className="page desk associate-page">
+      <PageHead kicker="Pokoin Associates · Admin" title="Associates overview" />
+      <AdminAssociateArea overview={data.overview} onView={onView} standalone />
+    </div>
+  );
+}
+
+function AssociateView({ data, overview = null, onView = null }) {
   const presentation = rolePresentation(data.associate.role);
   return (
     <div className="page desk associate-page">
@@ -300,7 +345,7 @@ function AssociateView({ data, overview = null }) {
           </p>
         )}
       </DeskPanel>
-      {overview ? <AssociatesOverview overview={overview} /> : null}
+      {overview ? <AdminAssociateArea overview={overview} onView={onView} /> : null}
     </div>
   );
 }
@@ -320,6 +365,7 @@ export default function Associate() {
   const [data, setData] = useState(null);
   const [notAssociate, setNotAssociate] = useState(false);
   const [error, setError] = useState('');
+  const [viewingEmail, setViewingEmail] = useState('');
 
   useEffect(() => {
     document.title = 'Associate · Pokoin';
@@ -352,21 +398,19 @@ export default function Associate() {
 
   if (preview) {
     if (searchParams.get('role') === 'admin') {
-      return (
-        <AdminOverviewView
-          data={{
-            admin: true,
-            overview: [
-              { associate: PREVIEW_FIXTURE.associate, window: PREVIEW_FIXTURE.window, earnings: PREVIEW_FIXTURE.earnings },
-              {
-                associate: { ...PREVIEW_FIXTURE.associate, email: 'apciliberti@gmail.com', role: 'ambassador', displayName: 'Apciliberti' },
-                window: PREVIEW_FIXTURE.window,
-                earnings: { ...PREVIEW_FIXTURE.earnings, qualifyingOrders: 2, earningPkn: 21.3, earningEurCents: 612 },
-              },
-            ],
-          }}
-        />
-      );
+      const fixtureOverview = [
+        { associate: PREVIEW_FIXTURE.associate, window: PREVIEW_FIXTURE.window, earnings: PREVIEW_FIXTURE.earnings },
+        {
+          associate: { ...PREVIEW_FIXTURE.associate, email: 'apciliberti@gmail.com', role: 'ambassador', displayName: 'Apciliberti' },
+          window: PREVIEW_FIXTURE.window,
+          earnings: { ...PREVIEW_FIXTURE.earnings, qualifyingOrders: 2, earningPkn: 21.3, earningEurCents: 612 },
+        },
+      ];
+      const viewing = fixtureOverview.find((row) => row.associate.email === viewingEmail);
+      if (viewing) {
+        return <AdminViewingView row={viewing} onBack={() => setViewingEmail('')} />;
+      }
+      return <AdminOverviewView data={{ admin: true, overview: fixtureOverview }} onView={setViewingEmail} />;
     }
     const fixture = {
       ...PREVIEW_FIXTURE,
@@ -414,10 +458,16 @@ export default function Associate() {
     );
   }
   if (data.admin && data.overview) {
-    if (!data.associate) {
-      return <AdminOverviewView data={data} />;
+    const viewing = viewingEmail
+      ? data.overview.find((row) => row.associate.email === viewingEmail)
+      : null;
+    if (viewing) {
+      return <AdminViewingView row={viewing} onBack={() => setViewingEmail('')} />;
     }
-    return <AssociateView data={data} overview={data.overview} />;
+    if (!data.associate) {
+      return <AdminOverviewView data={data} onView={setViewingEmail} />;
+    }
+    return <AssociateView data={data} overview={data.overview} onView={setViewingEmail} />;
   }
   return <AssociateView data={data} />;
 }
