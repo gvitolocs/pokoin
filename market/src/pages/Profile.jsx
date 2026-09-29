@@ -45,6 +45,8 @@ const ICON = {
   admin: 'M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z',
   sold: 'M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z',
   bought: 'M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z',
+  invite: 'M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
+  ambassador: 'M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z',
   check: 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
 };
 
@@ -445,6 +447,8 @@ export default function Profile() {
           <QuickTile to="/collection" icon="collection" title="Collection" meta="Physical + NFT" />
           <QuickTile to="/messages" icon="messages" title="Messages" meta="Chats & Poko" />
           <QuickTile to="/forum" icon="forum" title="Forum" meta="Community" />
+          <QuickTile to="/invite" icon="invite" title="Invite & Earn" meta="20 PKN for you and a friend" />
+          <QuickTile to="/ambassadorprogram" icon="ambassador" title="Ambassador" meta="Missions, tiers, perks" />
           {admin ? <QuickTile to="/admin" icon="admin" title="Admin" meta="Expansion logos" /> : null}
         </nav>
       </DeskPanel>

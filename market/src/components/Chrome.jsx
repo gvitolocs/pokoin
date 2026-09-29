@@ -1420,6 +1420,8 @@ export default function Chrome({ children }) {
             <AppLink to={APP.emailPreferences}>Email preferences</AppLink>
             <AppLink to={APP.protection}>Buyer protection</AppLink>
             <AppLink to="/flex">Pokoin Flex</AppLink>
+            <AppLink to="/invite">Invite &amp; Earn</AppLink>
+            <AppLink to="/ambassadorprogram">Ambassador program</AppLink>
             <AppLink to={APP.scan}>Scan</AppLink>
           </div>
         </div>

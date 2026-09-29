@@ -1085,6 +1085,38 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/invite/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/invite",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ambassadorprogram/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ambassadorprogram",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ambassador/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ambassador",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/join/:code/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/join/:code",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/buy/",
       "destination": "/market/index.html"
     },

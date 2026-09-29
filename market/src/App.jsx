@@ -60,6 +60,10 @@ import Collection from './pages/Collection.jsx';
 import NftRedirect from './pages/Nft.jsx';
 import Protection from './pages/Protection.jsx';
 import Flex from './pages/Flex.jsx';
+import Invite from './pages/Invite.jsx';
+import Join from './pages/Join.jsx';
+import AmbassadorProgram from './pages/AmbassadorProgram.jsx';
+import ReferralClaimer from './components/ReferralClaimer.jsx';
 import EmailPreferences from './pages/EmailPreferences.jsx';
 import Site from './pages/Site.jsx';
 import About from './pages/About.jsx';
@@ -214,6 +218,10 @@ function AppShell() {
       {both('/email-preferences', <EmailPreferences />)}
       {both('/protection', <Protection />)}
       {both('/flex', <Flex />)}
+      {both('/invite', <Invite />)}
+      {both('/join/:code', <Join />)}
+      {both('/ambassadorprogram', <AmbassadorProgram />)}
+      {both('/ambassador', <Navigate to="/ambassadorprogram" replace />)}
       {both('/buy', <Buy />)}
       {both('/earn', <Site />)}
       {both('/whitepaper', <Site />)}
@@ -230,6 +238,7 @@ function AppShell() {
   return (
     <>
       <Chrome>{routes}</Chrome>
+      <ReferralClaimer />
       <CookieBanner />
       <ChatDock />
     </>

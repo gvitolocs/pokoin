@@ -436,6 +436,20 @@
     }
   },
   {
+    "path": "/api/marketplace-referral",
+    "file": "marketplace-referral.js",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "purpose": "Invite & Earn: the caller's invite code, invited collectors and 20 PKN rewards (settled on read), plus Ambassador mission progress and tier. POST action=claim attaches a new account to an inviter.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "POST {action:'claim', code:'<inviter username>'}"
+    }
+  },
+  {
     "path": "/api/marketplace-associate-suggest",
     "file": "marketplace-associate-suggest.js",
     "methods": [
