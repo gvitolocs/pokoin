@@ -197,7 +197,7 @@ export default function ScanDesk() {
   const remapTried = useRef(new Set());
   const queueRef = useRef(null);
   const locationInput = useRef(null);
-  const quantityInput = useRef(null);
+  const stackButton = useRef(null);
   const draftQtyRef = useRef(null);
   const addSearchRef = useRef(null);
   const submitKey = useRef(newSubmitKey());
@@ -622,6 +622,14 @@ export default function ScanDesk() {
     }
   }
 
+  // Quantity is never a batch default: each scan is one card (repeats merge
+  // when Merge repeats is on). Older batches saved another Qty — reset it so
+  // the phone stops stamping it on every capture.
+  useEffect(() => {
+    if (!batch?.id || closed) return;
+    if ((Math.trunc(Number(batch.defaults?.quantity)) || 1) !== 1) setDefaults({ quantity: 1 });
+  }, [batch?.id, batch?.defaults?.quantity, closed]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function setDefaults(patch) {
     if (!batch?.id) return;
     const merged = { ...(batch.defaults || {}), ...patch };
@@ -718,7 +726,7 @@ export default function ScanDesk() {
       signed: defaults.signed,
       altered: defaults.altered,
       location: defaults.location,
-      quantity: defaults.quantity,
+      quantity: 1,
     });
     void remapDraftArtwork(card.id, language);
   }
@@ -782,7 +790,7 @@ export default function ScanDesk() {
       }
       if (keep) {
         // Create & copy (PT `c`): stay on the same printing for another identity.
-        setDraft((current) => (current ? { ...current, quantity: defaults.quantity } : null));
+        setDraft((current) => (current ? { ...current, quantity: 1 } : null));
         requestAnimationFrame(() => {
           draftQtyRef.current?.focus();
           draftQtyRef.current?.select();
@@ -962,7 +970,12 @@ export default function ScanDesk() {
         if (!closed && focused && !draft) setReplaceFor(focused.id);
         return;
       case 'focusDefault':
-        (cmd.field === 'location' ? locationInput : quantityInput).current?.focus();
+        if (cmd.field === 'location') locationInput.current?.focus();
+        else {
+          // Alt Q opens the stack setup (cards per stack) behind the gear.
+          stackButton.current?.focus();
+          stackButton.current?.click();
+        }
         return;
       case 'pause':
         togglePause();
@@ -1297,7 +1310,7 @@ export default function ScanDesk() {
             stackFull={stackFull}
             onChange={setDefaults}
             locationRef={locationInput}
-            quantityRef={quantityInput}
+            stackButtonRef={stackButton}
           />
         </>
       )}
@@ -1505,14 +1518,14 @@ function QrBlock({ secret, pin }) {
   );
 }
 
-function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull = false }) {
+function DefaultsBar({ defaults, onChange, locationRef, stackButtonRef, stackFull = false }) {
   const [locationDraft, setLocationDraft] = useState(defaults.location);
   const [stackDraft, setStackDraft] = useState(String(defaults.stack ?? 1));
   const [posDraft, setPosDraft] = useState(String(defaults.startPosition ?? 1));
-  const [qtyDraft, setQtyDraft] = useState(String(defaults.quantity));
+  const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
+  const [sizeDraft, setSizeDraft] = useState(String(size));
   const [sizeOpen, setSizeOpen] = useState(false);
   const sizeMenuRef = useRef(null);
-  const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
   useEffect(() => {
     if (!sizeOpen) return undefined;
     const onDoc = (event) => {
@@ -1524,7 +1537,7 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull =
   useEffect(() => setLocationDraft(defaults.location), [defaults.location]);
   useEffect(() => setStackDraft(String(defaults.stack ?? 1)), [defaults.stack, defaults.location]);
   useEffect(() => setPosDraft(String(defaults.startPosition ?? 1)), [defaults.startPosition, defaults.location, defaults.stack]);
-  useEffect(() => setQtyDraft(String(defaults.quantity)), [defaults.quantity]);
+  useEffect(() => setSizeDraft(String(size)), [size]);
   const commitLocation = () => {
     if (locationDraft !== defaults.location) onChange({ location: locationDraft });
   };
@@ -1539,16 +1552,17 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull =
     if (n >= 1 && n <= size && n !== (defaults.startPosition ?? 1)) onChange({ startPosition: n });
     else setPosDraft(String(defaults.startPosition ?? 1));
   };
-  const commitQty = () => {
-    const n = Number.parseInt(qtyDraft, 10);
-    if (n >= 1 && n <= 99 && n !== defaults.quantity) onChange({ quantity: n });
-    else setQtyDraft(String(defaults.quantity));
+  const commitSize = () => {
+    const n = Number.parseInt(sizeDraft, 10);
+    if (n >= 1 && n <= 9999) pickSize(n, { keepOpen: true });
+    else setSizeDraft(String(size));
   };
   const blurOnEnter = (event) => {
     if (event.key === 'Enter') event.currentTarget.blur();
   };
-  const pickSize = (nextSize) => {
-    setSizeOpen(false);
+  const pickSize = (nextSize, { keepOpen = true } = {}) => {
+    if (!keepOpen) setSizeOpen(false);
+    setSizeDraft(String(nextSize));
     if (nextSize === size) return;
     const abs = stackPosToIndex(defaults.stack ?? 1, defaults.startPosition ?? 1, size);
     const mapped = indexToStackPos(abs, nextSize);
@@ -1608,78 +1622,92 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull =
           </button>
         ))}
       </div>
-      <label className="sd-field grow">
-        <span>Location</span>
-        <input
-          ref={locationRef}
-          value={locationDraft}
-          maxLength={64}
-          placeholder="Box A12"
-          onChange={(e) => setLocationDraft(e.target.value)}
-          onBlur={commitLocation}
-          onKeyDown={blurOnEnter}
-        />
-      </label>
-      <div ref={sizeMenuRef} className={`sd-field pos sd-stack${stackFull ? ' is-full' : ''}`}>
-        <button
-          type="button"
-          className="sd-stack-label"
-          title="Stack size — how many cards fit between box dividers"
-          aria-haspopup="listbox"
-          aria-expanded={sizeOpen}
-          onClick={() => setSizeOpen((open) => !open)}
-        >
-          Stack{size > 1 ? ` ·${size}` : ''}
-        </button>
-        <input
-          inputMode="numeric"
-          value={stackDraft}
-          aria-label="Stack number"
-          title="Divider stack inside the box"
-          onChange={(e) => setStackDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
-          onBlur={commitStack}
-          onKeyDown={blurOnEnter}
-        />
+      {/* Location + gear: the stack setup (cards per stack, stack, position)
+          lives behind the gear, not on the bar. Every scan is one card. */}
+      <div ref={sizeMenuRef} className={`sd-field grow sd-location${stackFull ? ' is-full' : ''}`}>
+        <label htmlFor="scan-default-location">Location</label>
+        <span className="sd-location-input">
+          <input
+            id="scan-default-location"
+            ref={locationRef}
+            value={locationDraft}
+            maxLength={64}
+            placeholder="Box A12"
+            onChange={(e) => setLocationDraft(e.target.value)}
+            onBlur={commitLocation}
+            onKeyDown={blurOnEnter}
+          />
+          <button
+            ref={stackButtonRef}
+            type="button"
+            className="sd-gear"
+            aria-haspopup="dialog"
+            aria-expanded={sizeOpen}
+            aria-label="Stack setup"
+            title={`Stack setup — ${size === 1 ? 'one card per stack' : `${size} cards per stack`}, stack ${defaults.stack ?? 1}${size > 1 ? `, next position ${defaults.startPosition ?? 1}` : ''}`}
+            onClick={() => setSizeOpen((open) => !open)}
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+              <path fill="currentColor" d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" />
+            </svg>
+            {size > 1 ? <b className="sd-gear-size">{size}</b> : null}
+          </button>
+        </span>
         {sizeOpen ? (
-          <div className="sd-stack-menu" role="listbox" aria-label="Stack size">
-            {STACK_SIZES.map((n) => (
-              <button
-                key={n}
-                type="button"
-                role="option"
-                aria-selected={n === size}
-                className={n === size ? 'on' : ''}
-                onClick={() => pickSize(n)}
-              >
-                {n === 1 ? '1 — one card per stack' : `${n} cards`}
-              </button>
-            ))}
+          <div className="sd-stack-menu" role="dialog" aria-label="Stack setup">
+            <p className="sd-stack-help">How many cards fit in one stack between two dividers. Each scan is one card; the slot counts up by itself.</p>
+            <label className="sd-stack-row">
+              <span>Cards per stack</span>
+              <input
+                inputMode="numeric"
+                value={sizeDraft}
+                aria-label="Cards per stack"
+                onChange={(e) => setSizeDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                onBlur={commitSize}
+                onKeyDown={blurOnEnter}
+              />
+            </label>
+            <div className="sd-stack-chips" role="group" aria-label="Common stack sizes">
+              {STACK_SIZES.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  aria-pressed={n === size}
+                  className={n === size ? 'on' : ''}
+                  onClick={() => pickSize(n)}
+                >
+                  {n === 1 ? '1 card' : n}
+                </button>
+              ))}
+            </div>
+            <label className="sd-stack-row">
+              <span>Current stack</span>
+              <input
+                inputMode="numeric"
+                value={stackDraft}
+                aria-label="Current stack"
+                onChange={(e) => setStackDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                onBlur={commitStack}
+                onKeyDown={blurOnEnter}
+              />
+            </label>
+            {size > 1 ? (
+              <label className="sd-stack-row">
+                <span>Next position</span>
+                <input
+                  inputMode="numeric"
+                  value={posDraft}
+                  aria-label="Next position in the stack"
+                  onChange={(e) => setPosDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  onBlur={commitPos}
+                  onKeyDown={blurOnEnter}
+                />
+              </label>
+            ) : null}
+            <button type="button" className="btn ghost sd-stack-done" onClick={() => setSizeOpen(false)}>Done</button>
           </div>
         ) : null}
       </div>
-      {size > 1 ? (
-        <label className="sd-field pos" title="Position inside the current stack">
-          <span>Position</span>
-          <input
-            inputMode="numeric"
-            value={posDraft}
-            onChange={(e) => setPosDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
-            onBlur={commitPos}
-            onKeyDown={blurOnEnter}
-          />
-        </label>
-      ) : null}
-      <label className="sd-field qty">
-        <span>Qty</span>
-        <input
-          ref={quantityRef}
-          inputMode="numeric"
-          value={qtyDraft}
-          onChange={(e) => setQtyDraft(e.target.value.replace(/\D/g, '').slice(0, 2))}
-          onBlur={commitQty}
-          onKeyDown={blurOnEnter}
-        />
-      </label>
       <label className="sd-check" title="Consecutive identical scans raise the quantity of one row">
         <input type="checkbox" checked={defaults.mergeRepeats} onChange={(e) => onChange({ mergeRepeats: e.target.checked })} />
         <span>Merge repeats</span>

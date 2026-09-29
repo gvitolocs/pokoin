@@ -167,12 +167,12 @@ test('session phase is recomputed locally with the server clock offset', () => {
 });
 
 test('defaults label, finish cycle, candidates, quantity typing', () => {
-  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'Box A12' }), 'IT · NM · Box A12·1 · Qty 1');
+  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'Box A12' }), 'IT · NM · Box A12·1');
   // stackSize 1: startPosition is the stack index (legacy flat counter).
-  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'box1', stack: 47, startPosition: 1 }), 'IT · NM · box1·47 · Qty 1');
-  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'box1', stackSize: 40, stack: 2, startPosition: 5 }), 'IT · NM · box1·2·5 · Qty 1');
+  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'box1', stack: 47, startPosition: 1 }), 'IT · NM · box1·47');
+  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: 'box1', stackSize: 40, stack: 2, startPosition: 5 }), 'IT · NM · box1·2·5');
   assert.equal(locationDefaultsText({ ...DEFAULTS, location: 'box1', stackSize: 1, stack: 3 }), 'box1·3');
-  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: '' }), 'IT · NM · Qty 1');
+  assert.equal(defaultsLabel({ ...DEFAULTS, language: 'IT', location: '' }), 'IT · NM');
   assert.equal(cycleFinish('standard'), 'holo');
   assert.equal(cycleFinish('other'), 'standard');
   assert.equal(cycleFinish('standard', -1), 'other');
