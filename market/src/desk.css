@@ -1433,7 +1433,7 @@
   flex: none;
   margin: 0.2rem 0 0;
 }
-.checkout-pay-option span {
+.checkout-pay-option > span {
   display: grid;
   gap: 0.15rem;
   min-width: 0;
@@ -1464,14 +1464,19 @@
   accent-color: var(--muted);
 }
 
-/* Pokoin Flex brand: the official wordmark plus a yellow "Flex" tag. */
+/* Pokoin Flex brand: official SVG logo + yellow "Flex" tag. */
 .pokoin-flex-mark {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
-.pokoin-flex-mark.is-inline .brand-word {
-  font-size: 1.2rem;
+.pokoin-flex-logo {
+  display: block;
+  width: auto;
+  height: 1.15rem;
+  flex: none;
 }
 .flex-tag {
   display: inline-flex;

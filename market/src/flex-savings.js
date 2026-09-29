@@ -1,7 +1,8 @@
 // Pokoin Flex savings from the real carrier table (shipping-rates.json, the
 // same rates checkout quotes). "Alone" is N sellers each posting their share.
 // "Flex" is N Flex boxes sharing one ~20 kg bag (EXTRA_LARGE trunk), plus —
-// for home delivery — last-mile of each Flex box inside the destination country.
+// for home delivery — one consolidated last-mile from the Pokoin warehouse
+// to the buyer (never N× last-mile).
 
 import ratesCatalog from './shipping-rates.json' with { type: 'json' };
 import { findShippingRate, packageTierForCount } from './shipping-quote.js';
@@ -107,8 +108,9 @@ export function perSellerCards(cards, sellers) {
 }
 
 /**
- * Card-count proxy for last-mile of one Flex box. EXTRA_LARGE is the ~20 kg
- * bag/trunk tier only — never quote that for a ~100–200 g padded box.
+ * Card-count proxy for last-mile of the consolidated home parcel (all sellers'
+ * cards after they meet at the Pokoin warehouse). EXTRA_LARGE is the ~20 kg
+ * bag/trunk tier only — never quote that for a padded letter/small parcel.
  */
 export function lastMileCardCount(grams) {
   const g = Math.max(1, Number(grams) || 1);
@@ -152,19 +154,26 @@ export function flexQuote({
   const gramsOne = packGrams(perSeller, assumptions);
   const totalGrams = gramsOne * sellerCount;
   const filledGrams = assumptions.bagGrams * fill;
-  let lastMileOne = null;
+  // Home: packs already met at the Pokoin warehouse → one domestic hop with
+  // every card, not one last-mile per seller.
+  let lastMile = null;
   if (delivery === 'home') {
-    lastMileOne = pickService(
-      routeServices({ from: toCode, to: toCode, cards: lastMileCardCount(gramsOne), catalog }),
+    lastMile = pickService(
+      routeServices({
+        from: toCode,
+        to: toCode,
+        cards: lastMileCardCount(totalGrams),
+        catalog,
+      }),
       aloneOne.tracked,
     );
-    if (!lastMileOne) return null;
+    if (!lastMile) return null;
   }
   const parts = {
     box: assumptions.boxCents * sellerCount,
     handling: assumptions.handlingCents * sellerCount,
     trunk: Math.round((trunk.cents * totalGrams) / filledGrams),
-    lastMile: lastMileOne ? lastMileOne.cents * sellerCount : 0,
+    lastMile: lastMile ? lastMile.cents : 0,
   };
   const flex = parts.box + parts.handling + parts.trunk + parts.lastMile;
   const aloneCents = aloneOne.cents * sellerCount;
@@ -193,7 +202,7 @@ export function flexQuote({
     totalGrams,
     packsPerBag: Math.floor(filledGrams / gramsOne),
     trunk,
-    lastMile: lastMileOne,
+    lastMile,
   };
 }
 

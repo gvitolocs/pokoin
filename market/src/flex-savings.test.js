@@ -63,6 +63,13 @@ test('three IT sellers make Flex cheaper than alone on pickup', () => {
   assert.ok(three.savedPct >= 50);
 });
 
+test('home delivery is one warehouse hop, not one per seller', () => {
+  const three = flexQuote({ from: 'IT', to: 'IT', cards: 20, sellers: 3, delivery: 'home' });
+  assert.ok(three?.lastMile);
+  assert.equal(three.flex.parts.lastMile, three.lastMile.cents);
+  assert.notEqual(three.flex.parts.lastMile, three.lastMile.cents * 3);
+});
+
 test('home delivery quotes Flex-box last-mile, never EXTRA_LARGE bag tier', () => {
   const tracked = flexQuote({ from: 'DK', to: 'IT', cards: 20, delivery: 'home', sellers: 1 });
   assert.ok(tracked.lastMile);

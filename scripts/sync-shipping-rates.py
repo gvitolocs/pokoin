@@ -4,6 +4,7 @@
 Providers (smoke-tested each run):
   - PackZoo GET https://packzoo.com/api/prices  (multi-carrier EU compare)
   - porto-data GitHub JSON (Deutsche Post + La Poste letter grids with effective_from)
+  - dao.as/brev/ public letter table (DK domestic + international, post-2026 letter operator)
 
 No manual price overrides. Cheapest non-express quote wins per lane/tier/tracked.
 EXTRA_LARGE is the ~20 kg Flex bag profile only.
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -34,6 +36,7 @@ CARDVAULT_JSON = (
 
 PACKZOO = "https://packzoo.com/api/prices"
 PORTO_RAW = "https://raw.githubusercontent.com/gruncellka/porto-data/main/porto_data/providers"
+DAO_BREV = "https://dao.as/brev/"
 DKK_PER_EUR = 7.46
 # Approximate mids for PackZoo currencies we have seen (update with sync).
 CURRENCY_PER_EUR = {
@@ -292,6 +295,77 @@ def pick_porto(provider: dict, to_cc: str, grams: int, *, tracked: bool) -> dict
     }
 
 
+# --- dao letters (DK letter operator since 2026) ------------------------------
+
+def smoke_dao_letters() -> bool:
+    try:
+        table = fetch_dao_letter_table()
+        ok = "intl_100" in table and "domestic_100" in table
+        print(f"smoke dao letters: {'ok' if ok else 'empty'} ({sorted(table)})")
+        return ok
+    except Exception as exc:
+        print(f"smoke dao letters: FAIL {exc}", file=sys.stderr)
+        return False
+
+
+def fetch_dao_letter_table() -> dict[str, int]:
+    """Parse https://dao.as/brev/ Alm. letter prices → EUR cents keyed by band."""
+    req = urllib.request.Request(DAO_BREV, headers={**UA, "Accept": "text/html"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        html = resp.read().decode("utf-8", "replace")
+    # Rows look like: <td>…Udland alm. 100g</td><td>…46,00</td>
+    rows = re.findall(
+        r"<td[^>]*>\s*([^<]+?)\s*</td>\s*<td[^>]*>\s*([\d]+[,.][\d]{2})\s*</td>",
+        html,
+        flags=re.I,
+    )
+    out: dict[str, int] = {}
+    for name, price in rows:
+        label = " ".join(str(name).lower().split())
+        if "plus" in label or "ekstra hurtig" in label:
+            continue  # skip express-ish PLUS
+        dkk = float(str(price).replace(",", "."))
+        cents = to_eur_cents(dkk, "DKK")
+        if cents is None:
+            continue
+        if "udland" in label and "100" in label:
+            out["intl_100"] = cents
+        elif "udland" in label and "250" in label:
+            out["intl_250"] = cents
+        elif "danmark" in label and "100" in label:
+            out["domestic_100"] = cents
+        elif "danmark" in label and "250" in label:
+            out["domestic_250"] = cents
+    if "intl_100" not in out or "intl_250" not in out:
+        raise RuntimeError(f"dao brev table missing intl bands: {out}")
+    if "domestic_100" not in out or "domestic_250" not in out:
+        raise RuntimeError(f"dao brev table missing domestic bands: {out}")
+    return out
+
+
+def pick_dao_letter(table: dict[str, int], frm: str, to: str, grams: int, *, tracked: bool) -> dict | None:
+    """dao Alm. letters are untracked mailbox post; skip when tracked is required."""
+    if tracked or frm.upper() != "DK":
+        return None
+    domestic = frm.upper() == to.upper()
+    if grams <= 100:
+        cents = table["domestic_100" if domestic else "intl_100"]
+        band = "100g"
+    elif grams <= 250:
+        cents = table["domestic_250" if domestic else "intl_250"]
+        band = "250g"
+    else:
+        return None  # over letter max — keep PackZoo parcel
+    return {
+        "priceEURCents": cents,
+        "carrier": "dao",
+        "serviceName": f"Untracked letter ({band})",
+        "tracked": False,
+        "rateSource": "dao-brev",
+        "productClass": "letter",
+    }
+
+
 # --- merge / write -----------------------------------------------------------
 
 def rate_id(frm: str, to: str, tier: str, tracked: bool) -> str:
@@ -336,7 +410,8 @@ def build_catalog(*, sleep_s: float = 0.12) -> dict:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     packzoo_ok = smoke_packzoo()
     porto_ok = smoke_porto()
-    if not packzoo_ok and not porto_ok:
+    dao_ok = smoke_dao_letters()
+    if not packzoo_ok and not porto_ok and not dao_ok:
         raise SystemExit("no providers passed smoke test")
 
     porto_providers = []
@@ -346,6 +421,8 @@ def build_catalog(*, sleep_s: float = 0.12) -> dict:
             if prov:
                 porto_providers.append(prov)
                 print(f"loaded porto-data {slug} ({len(prov['product_prices'])} price rows)")
+
+    dao_table = fetch_dao_letter_table() if dao_ok else {}
 
     # Cache PackZoo: (from,to,tier) -> rows
     pz_cache: dict[tuple, list] = {}
@@ -379,6 +456,11 @@ def build_catalog(*, sleep_s: float = 0.12) -> dict:
                     best = merge_quote(
                         best,
                         pick_porto(prov, to, profile["grams"], tracked=tracked),
+                    )
+                if dao_table:
+                    best = merge_quote(
+                        best,
+                        pick_dao_letter(dao_table, frm, to, profile["grams"], tracked=tracked),
                     )
                 if not best:
                     continue
@@ -420,15 +502,26 @@ def build_catalog(*, sleep_s: float = 0.12) -> dict:
 
     rates.sort(key=lambda r: (r["fromCountry"], r["toCountry"], r["packageTier"], not r["tracked"]))
     print(f"built {len(rates)} rate rows across {len(lanes)} lanes")
+    providers = [
+        p for p, ok in (
+            ("packzoo", packzoo_ok),
+            ("porto-data", porto_ok),
+            ("dao-brev", dao_ok),
+        ) if ok
+    ]
     return {
         "tiers": TIERS,
         "rates": rates,
         "source": {
-            "providers": [p for p, ok in (("packzoo", packzoo_ok), ("porto-data", porto_ok)) if ok],
+            "providers": providers,
             "fetchedAt": now,
-            "api": {"packzoo": PACKZOO, "portoData": PORTO_RAW},
+            "api": {
+                "packzoo": PACKZOO,
+                "portoData": PORTO_RAW,
+                "daoBrev": DAO_BREV,
+            },
             "note": (
-                "Live PackZoo compare merged with porto-data letter grids. "
+                "Live PackZoo compare merged with porto-data + dao letter grids. "
                 "Cheapest non-express wins. No manual overrides."
             ),
         },
