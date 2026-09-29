@@ -2133,43 +2133,6 @@ h1, h2 { margin: 0 0 0.85rem; }
   margin-top: 0.55rem;
 }
 
-.protection-guarantee,
-.protection-escrow {
-  margin: 0 0 1rem;
-  font-size: 1.15rem;
-  font-weight: 700;
-}
-.protection-escrow { color: var(--yellow); }
-.protection-pillars {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
-  margin: 1.5rem 0;
-}
-.protection-pillars article {
-  background: var(--g3);
-  border-radius: 14px;
-  padding: 1.1rem 1.2rem;
-}
-.protection-pillars h2 {
-  font-size: 1.05rem;
-  margin-bottom: 0.4rem;
-}
-.protection-pillars p,
-.protection-steps p {
-  color: var(--muted);
-  margin: 0;
-}
-.protection-steps {
-  margin: 1.75rem 0;
-}
-.protection-steps ol {
-  margin: 0.6rem 0 0;
-  padding-left: 1.2rem;
-  color: var(--muted);
-}
-.protection-steps li { margin: 0.35rem 0; }
-
 .carousel { margin-bottom: 2rem; position: relative; }
 .carousel-head {
   display: flex;
