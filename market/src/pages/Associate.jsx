@@ -222,18 +222,8 @@ function AssociatesOverview({ overview, onView }) {
 }
 
 /** Admin "view as": the clicked associate's desk, exactly as they see it. */
-function AdminAssociateArea({ overview, onView, standalone = false }) {
-  return (
-    <>
-      {standalone ? (
-        <p className="page-lede">
-          Live royalty earnings across every associate desk — Italian sellers shipping to Italian buyers.
-          Open a desk to see exactly what that associate sees.
-        </p>
-      ) : null}
-      <AssociatesOverview overview={overview} onView={onView} />
-    </>
-  );
+function AdminAssociateArea({ overview, onView }) {
+  return <AssociatesOverview overview={overview} onView={onView} />;
 }
 
 /** Full-page view-as: the associate's own desk under a read-only banner. */
@@ -262,7 +252,7 @@ function AdminOverviewView({ data, onView }) {
   return (
     <div className="page desk associate-page">
       <PageHead kicker="Pokoin Associates · Admin" title="Associates overview" />
-      <AdminAssociateArea overview={data.overview} onView={onView} standalone />
+      <AdminAssociateArea overview={data.overview} onView={onView} />
     </div>
   );
 }
