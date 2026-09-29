@@ -292,6 +292,16 @@ export function batchCounts(rows, { intent = 'list' } = {}) {
   return counts;
 }
 
+/** Validate an editable queue-row quantity without silently rounding/clamping it. */
+export function quantityFieldCommit(row, raw) {
+  const text = String(raw ?? '').trim();
+  if (!/^\d{1,2}$/.test(text)) return { action: 'restore' };
+  const quantity = Number(text);
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) return { action: 'restore' };
+  if (quantity === Number(row?.quantity)) return { action: 'keep', quantity };
+  return { action: 'set', quantity };
+}
+
 export function submitLabel(counts, { intent = 'list', targets } = {}) {
   const n = counts.cards;
   if (intent === 'collection') {
