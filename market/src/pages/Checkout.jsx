@@ -18,9 +18,9 @@ import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
 import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
 import { SHIP_FROM_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
+import { brandSrc } from '../brand-assets.js';
 import { pknFromEurCents, previewShipmentCents, shippingServiceOptions } from '../shipping-quote.js';
 import CardArt from '../components/CardArt.jsx';
-import PokoinWordmark from '../components/PokoinWordmark.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 
 function FeeTip({ label, children }) {
@@ -516,7 +516,13 @@ export default function Checkout() {
                           <span>
                             {option.brand === 'pokoin-flex' ? (
                               <strong className="pokoin-flex-mark is-inline" aria-label="Pokoin Flex">
-                                <PokoinWordmark />
+                                <img
+                                  className="pokoin-flex-logo"
+                                  src={brandSrc('pokoin-logo-flat.svg')}
+                                  alt=""
+                                  width="96"
+                                  height="31"
+                                />
                                 <span className="flex-tag" aria-hidden="true">Flex</span>
                               </strong>
                             ) : (

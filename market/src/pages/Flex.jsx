@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import PokoinWordmark from '../components/PokoinWordmark.jsx';
 import mascotUrl from '../assets/pokoin-mascot@8x.png';
+import { useAuth } from '../auth.jsx';
+import { fetchSellerSettings } from '../api.js';
 import {
   FLEX_ASSUMPTIONS,
   flexAverageSaving,
@@ -11,6 +13,7 @@ import {
   formatEur,
   routeServices,
 } from '../flex-savings.js';
+import { resolveFlexDefaultCountries } from '../flex-user-country.js';
 import { shipFromCountryName } from '../ship-countries.js';
 import '../flex.css';
 import { brandSrc } from '../brand-assets.js';
@@ -42,22 +45,75 @@ function Money({ cents }) {
 }
 
 function Calculator() {
+  const { ready, signedIn, getBearer } = useAuth();
   const countries = useMemo(() => flexCountries(), []);
-  const [from, setFrom] = useState('DK');
-  const [to, setTo] = useState('IT');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [routeReady, setRouteReady] = useState(false);
   const [cards, setCards] = useState(20);
   const [sellers, setSellers] = useState(3);
-  const [tracked, setTracked] = useState(true);
+  const [tracked, setTracked] = useState(null);
   const [delivery, setDelivery] = useState('pickup');
   const [fill, setFill] = useState(Math.round(FLEX_ASSUMPTIONS.defaultBagFill * 100));
-  const quote = flexQuote({ from, to, cards, sellers, tracked, delivery, bagFill: fill / 100 });
-  const pickup = delivery === 'home'
-    ? flexQuote({ from, to, cards, sellers, tracked, bagFill: fill / 100 })
-    : null;
-  const services = quote?.services || routeServices({ from, to, cards: Math.ceil(cards / sellers) });
+
+  useEffect(() => {
+    if (!ready || routeReady) return undefined;
+    let cancelled = false;
+    (async () => {
+      const defaults = await resolveFlexDefaultCountries({
+        allowedFrom: countries.from,
+        allowedTo: countries.to,
+        signedIn,
+        loadProfileCountry: signedIn
+          ? async () => {
+            const token = await getBearer();
+            if (!token) return '';
+            const settings = await fetchSellerSettings(token);
+            return String(settings?.shipFromCountry || '').trim().toUpperCase();
+          }
+          : null,
+      });
+      if (cancelled) return;
+      setFrom(defaults.from);
+      setTo(defaults.to);
+      setRouteReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, [ready, signedIn, getBearer, countries, routeReady]);
+
+  const perSeller = Math.max(1, Math.ceil(cards / Math.max(1, sellers)));
+  const services = routeReady
+    ? routeServices({ from, to, cards: perSeller })
+    : [];
   const serviceChoices = [true, false]
     .map((wantTracked) => services.find((row) => row.tracked === wantTracked))
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort((a, b) => a.cents - b.cents);
+  const effectiveTracked = tracked != null
+    ? tracked
+    : (serviceChoices[0]?.tracked ?? true);
+
+  const quote = routeReady
+    ? flexQuote({
+      from,
+      to,
+      cards,
+      sellers,
+      tracked: effectiveTracked,
+      delivery,
+      bagFill: fill / 100,
+    })
+    : null;
+  const pickup = routeReady && delivery === 'home'
+    ? flexQuote({
+      from,
+      to,
+      cards,
+      sellers,
+      tracked: effectiveTracked,
+      bagFill: fill / 100,
+    })
+    : null;
   const parts = quote?.flex.parts;
   const alone = quote?.alone.cents || 0;
   const bar = (value) => `${Math.max(0, Math.min(100, (value / Math.max(1, alone)) * 100))}%`;
@@ -115,7 +171,7 @@ function Calculator() {
                   type="radio"
                   name="flex-service"
                   value={row.tracked ? 'tracked' : 'untracked'}
-                  checked={quote?.alone.id === row.id}
+                  checked={(tracked ?? effectiveTracked) === row.tracked}
                   onChange={() => setTracked(row.tracked)}
                 />
                 <span>{row.tracked ? 'Tracked' : 'Untracked letter'}</span>
@@ -208,8 +264,10 @@ function Calculator() {
                 {quote.lastMile ? (
                   <li>
                     <i className="p-last" />
-                    Home delivery{quote.sellers > 1 ? ` ×${quote.sellers}` : ''} <Money cents={parts.lastMile} />
-                    <small>{quote.lastMile.carrier} · {quote.lastMile.service} inside {country(to)}</small>
+                    Home delivery (one parcel from the Pokoin warehouse) <Money cents={parts.lastMile} />
+                    <small>
+                      {quote.lastMile.carrier} · {quote.lastMile.service} · {quote.totalGrams} g inside {country(to)}
+                    </small>
                   </li>
                 ) : null}
               </ul>
@@ -393,7 +451,7 @@ export default function Flex() {
           <li><strong>Shipping alone</strong> is the rate Pokoin checkout uses today for that route and pack size (4 / 20 / 50 / more cards) — tracked or untracked letter, as you pick.</li>
           <li><strong>The bag</strong> travels as one parcel on the same route at the carrier’s largest parcel rate. A route with no direct rate borrows the reverse direction.</li>
           <li><strong>Your share</strong> is your pack’s weight ({FLEX_ASSUMPTIONS.boxGrams} g box + {FLEX_ASSUMPTIONS.gramsPerCard} g per sleeved card) out of a {FLEX_ASSUMPTIONS.bagGrams / 1000} kg bag at the fill level you choose.</li>
-          <li><strong>Fixed costs</strong>: Flex box {formatEur(FLEX_ASSUMPTIONS.boxCents)}, partner handling {formatEur(FLEX_ASSUMPTIONS.handlingCents)} per pack. Home delivery adds the same kind of service (tracked or untracked) inside the destination country.</li>
+          <li><strong>Fixed costs</strong>: Flex box {formatEur(FLEX_ASSUMPTIONS.boxCents)}, partner handling {formatEur(FLEX_ASSUMPTIONS.handlingCents)} per pack. Home delivery adds <em>one</em> hop from the Pokoin warehouse to the buyer (all packs already consolidated — not one delivery per seller).</li>
           <li>These are planning numbers — the final Flex price is set when partner shops open.</li>
         </ul>
       </details>
