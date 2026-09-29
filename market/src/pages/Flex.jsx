@@ -124,7 +124,7 @@ function Calculator() {
         <h2 id="flex-calc-title">What you’d save</h2>
         <p>
           “Alone” is what checkout charges when each seller posts their own pack. Flex is the same
-          cards as Flex boxes sharing one ~20 kg bag — how it’s worked out is at the bottom of the page.
+          cards as Flex boxes sharing one ~20 kg bag.
         </p>
       </header>
       <div className="flex-calc-grid">
