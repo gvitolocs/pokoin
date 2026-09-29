@@ -24,6 +24,9 @@ export function sellerCacheKey(username, opts = {}) {
   const language = String(opts.language || '').trim().toLowerCase();
   const sort = String(opts.sort || '').trim().toLowerCase();
   const game = String(opts.game || '').trim().toLowerCase();
+  const rarity = String(opts.rarity || '').trim().toLowerCase();
+  const reverse = opts.reverse === true || opts.reverse === 1 || opts.reverse === '1' ? '1' : '';
+  const firstEdition = opts.firstEdition === true || opts.firstEdition === 1 || opts.firstEdition === '1' ? '1' : '';
   // Bare username key remains valid for legacy fetchSellerByUsername callers.
   if (
     !Number.isFinite(limit) &&
@@ -32,7 +35,10 @@ export function sellerCacheKey(username, opts = {}) {
     !condition &&
     !language &&
     !sort &&
-    !game
+    !game &&
+    !rarity &&
+    !reverse &&
+    !firstEdition
   ) {
     return handle;
   }
@@ -45,6 +51,9 @@ export function sellerCacheKey(username, opts = {}) {
     `lang${language}`,
     `s${sort}`,
     `g${game}`,
+    `r${rarity}`,
+    `rev${reverse}`,
+    `fe${firstEdition}`,
   ].join('::');
 }
 

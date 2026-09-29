@@ -9976,6 +9976,13 @@ html:has(.wallet-page) .brand span {
 .seller-shop-tools select{
   background:var(--g3);border:1px solid var(--g5);border-radius:8px;padding:.4rem .55rem;color:var(--text);
 }
+.seller-shop-tools .shop-toggle{
+  background:var(--g3);border:1px solid var(--g5);border-radius:8px;padding:.4rem .65rem;
+  color:var(--muted);font:inherit;font-size:.85rem;font-weight:700;cursor:pointer;white-space:nowrap;
+}
+.seller-shop-tools .shop-toggle.on{
+  background:var(--yellow,#ffcc03);color:#111;border-color:var(--yellow,#ffcc03);
+}
 .seller-result-count{margin:0 0 .75rem;color:var(--muted);font-size:.88rem}
 .seller-result-count strong{color:var(--text);font-weight:750}
 .seller-shop-list .shop-row.is-profile{
