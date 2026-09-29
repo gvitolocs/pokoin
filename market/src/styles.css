@@ -3656,25 +3656,13 @@ a.era-link:focus-visible {
   text-decoration: underline;
 }
 
+/* Best Deal filters: the same condition chip + flag picker as List your card. */
 .deal-selects {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
   margin: 0 0 0.85rem;
-}
-
-.deal-select {
-  display: block;
-  width: 100%;
-}
-
-.deal-select,
-.deal-select select {
-  width: 100%;
-}
-
-.deal-select select {
-  margin-left: 0;
-  box-sizing: border-box;
 }
 
 .own-k {
@@ -6806,16 +6794,13 @@ dialog.zoom:not([open]) {
     text-align: center;
   }
 
-  .hero-deal .deal-selects,
-  .hero-deal .deal-select,
-  .hero-deal .deal-select select,
+  .hero-deal .deal-selects {
+    justify-content: center;
+  }
+
   .hero-deal .buy-btn {
     width: 100%;
     max-width: 100%;
-  }
-
-  .hero-deal .deal-select select {
-    margin-left: 0;
   }
 
   .sell-options-row,

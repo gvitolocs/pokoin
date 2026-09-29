@@ -170,16 +170,6 @@ function sortOffers(rows, key) {
   return list;
 }
 
-function conditionKey(value) {
-  const text = String(value || '').toUpperCase();
-  if (text.includes('NEAR') || text === 'NM') return 'NM';
-  if (text.includes('SLIGHT') || text === 'SP') return 'SP';
-  if (text.includes('MODERATE') || text === 'MP') return 'MP';
-  if (text.includes('PLAYED') || text === 'PL') return 'PL';
-  if (text.includes('POOR')) return 'Poor';
-  return text;
-}
-
 function offerLang(offer) {
   if (!offer) {
     return '';
@@ -591,7 +581,8 @@ function matchDeal(rows, language, condition) {
     if (language && offerLang(offer) !== language) {
       return false;
     }
-    if (condition && conditionKey(offer.condition) !== condition) {
+    // Same grades as the condition chips: LP / Lightly Played is SP.
+    if (condition && moodCondition(offer) !== condition) {
       return false;
     }
     return true;
@@ -604,10 +595,6 @@ function preferredDeal(rows, nationality) {
     || matchDeal(rows, null, 'NM')
     || matchDeal(rows, lang, null)
     || matchDeal(rows);
-}
-
-function conditionLabel(code) {
-  return CONDITIONS.find((row) => row.value === code)?.label || code;
 }
 
 function defaultFoil(card) {
@@ -1886,7 +1873,8 @@ export default function Card() {
     const allowed = languagesForNationality(nationality, language ? [language] : []);
     const shopLanguage = allowed.length ? language : '';
     const filtered = (payload?.offers || []).filter((offer) => {
-      if (condition && conditionKey(offer.condition) !== condition) {
+      // Same grades as the condition chips: LP / Lightly Played is SP.
+    if (condition && moodCondition(offer) !== condition) {
         return false;
       }
       if (shopLanguage && String(offer.language || '').toUpperCase() !== shopLanguage) {
@@ -2029,10 +2017,11 @@ export default function Card() {
     setName: identity.set || card.set,
     releaseLanguages: card.releaseLanguages,
   });
-  const dealConds = CONDITIONS.map((row) => row.value).filter(Boolean);
   const shownLangRaw = dealLang || offerLang(dealPick) || '';
-  const shownLang = !shownLangRaw || dealLangs.includes(shownLangRaw) ? shownLangRaw : '';
-  const shownCond = dealCond || (dealPick ? conditionKey(dealPick.condition) : '');
+  const shownLang = dealLangs.includes(shownLangRaw)
+    ? shownLangRaw
+    : (dealLangs.includes(defaultCardLanguage(card.nationality)) ? defaultCardLanguage(card.nationality) : dealLangs[0] || '');
+  const shownCond = dealCond || (dealPick ? moodCondition(dealPick) : 'NM');
   const languages = languagesForNationality(
     card.nationality,
     [...new Set((payload?.offers || []).map((row) => String(row.language || '').toUpperCase()).filter(Boolean))],
@@ -2459,37 +2448,17 @@ export default function Card() {
             {canBuy && offersReady ? null : (
               <p className="muted own-k">{dealCopy || '\u00a0'}</p>
             )}
-            <div className="deal-selects">
-              <label className="sort deal-select">
-                <span className="sr-only">Language</span>
-                <select
-                  value={shownLang}
-                  onChange={(event) => setDealLang(event.target.value)}
-                >
-                  <option value="">Select language</option>
-                  {shownLang && !dealLangs.includes(shownLang) ? (
-                    <option value={shownLang}>{shownLang}</option>
-                  ) : null}
-                  {dealLangs.map((code) => (
-                    <option key={code} value={code}>{code}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="sort deal-select">
+            <div className="deal-selects sell-options-row">
+              <div className="sell-field sell-pick condition-pick">
                 <span className="sr-only">Condition</span>
-                <select
-                  value={shownCond}
-                  onChange={(event) => setDealCond(event.target.value)}
-                >
-                  <option value="">Select condition</option>
-                  {shownCond && !dealConds.includes(shownCond) ? (
-                    <option value={shownCond}>{conditionLabel(shownCond)}</option>
-                  ) : null}
-                  {dealConds.map((code) => (
-                    <option key={code} value={code}>{conditionLabel(code)}</option>
-                  ))}
-                </select>
-              </label>
+                <ConditionPick value={shownCond} onChange={setDealCond} />
+              </div>
+              {shownLang ? (
+                <div className="sell-field sell-pick language-pick">
+                  <span className="sr-only">Language</span>
+                  <ListingLangPick value={shownLang} listed={dealLangs} onChange={setDealLang} />
+                </div>
+              ) : null}
             </div>
             {canBuy ? (
               <button
