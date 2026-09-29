@@ -12,7 +12,7 @@ import { useLocation } from 'react-router-dom';
 import { applyCardSelect, bandHits, cardsForDragFromCatalog, selectionFromBand } from './card-select.js';
 import {
   clearShopSelectionOnPointer,
-  marqueeRect,
+  marqueeRectForScroll,
   marqueeStartAllowed,
   mixedDeskDragReference,
   rectsIntersect,
@@ -76,6 +76,7 @@ export function SelectBandProvider({ children }) {
   cardAnchorRef.current = cardAnchor;
   const originRef = useRef(null);
   const armedRef = useRef(false);
+  const pointerRef = useRef({ x: 0, y: 0 });
   const gridCardsRef = useRef(new Map());
   const catalogRef = useRef(new Map());
   const shopRef = useRef({ offers: [], deskCard: null });
@@ -171,10 +172,13 @@ export function SelectBandProvider({ children }) {
       originRef.current = {
         x: event.clientX,
         y: event.clientY,
+        scrollX: window.scrollX || 0,
+        scrollY: window.scrollY || 0,
         additive: event.ctrlKey || event.metaKey,
         cardBase: event.ctrlKey || event.metaKey ? new Set(cardSelectedRef.current) : new Set(),
         listingBase: event.ctrlKey || event.metaKey ? new Set(listingSelectedRef.current) : new Set(),
       };
+      pointerRef.current = { x: event.clientX, y: event.clientY };
       armedRef.current = false;
     }
 
@@ -186,10 +190,24 @@ export function SelectBandProvider({ children }) {
       event.preventDefault();
     }
 
+    function bandFromPointer(clientX, clientY) {
+      const origin = originRef.current;
+      if (!origin) return null;
+      return marqueeRectForScroll(
+        origin,
+        clientX,
+        clientY,
+        window.scrollX || 0,
+        window.scrollY || 0,
+      );
+    }
+
     function onMove(event) {
       const origin = originRef.current;
       if (!origin) return;
-      const rect = marqueeRect(origin.x, origin.y, event.clientX, event.clientY);
+      pointerRef.current = { x: event.clientX, y: event.clientY };
+      const rect = bandFromPointer(event.clientX, event.clientY);
+      if (!rect) return;
       if (!armedRef.current && Math.hypot(rect.width, rect.height) < DRAG_THRESHOLD) return;
       if (!armedRef.current) {
         armedRef.current = true;
@@ -201,6 +219,16 @@ export function SelectBandProvider({ children }) {
         }
       }
       document.documentElement.classList.add('is-card-banding', 'is-shop-marquee');
+      setBand(rect);
+      paint(rect);
+    }
+
+    /** Page/window scroll while the button is held — recompute the band so it tracks content. */
+    function onScroll() {
+      if (!originRef.current || !armedRef.current) return;
+      const { x, y } = pointerRef.current;
+      const rect = bandFromPointer(x, y);
+      if (!rect) return;
       setBand(rect);
       paint(rect);
     }
@@ -279,6 +307,7 @@ export function SelectBandProvider({ children }) {
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('pointerdown', onDown);
@@ -288,6 +317,7 @@ export function SelectBandProvider({ children }) {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('keydown', onKey);
       restoreListingDrag();
       document.documentElement.classList.remove('is-card-banding', 'is-shop-marquee');
