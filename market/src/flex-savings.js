@@ -98,6 +98,17 @@ export function packGrams(cardCount, assumptions = FLEX_ASSUMPTIONS) {
 }
 
 /**
+ * Card-count proxy for last-mile of one Flex box. EXTRA_LARGE is the ~20 kg
+ * bag/trunk tier only — never quote that for a ~100–200 g padded box.
+ */
+export function lastMileCardCount(grams) {
+  const g = Math.max(1, Number(grams) || 1);
+  if (g <= 100) return 4; // SMALL
+  if (g <= 250) return 20; // MEDIUM
+  return 50; // LARGE — still a letter/small parcel, not the bag
+}
+
+/**
  * Alone vs Flex for one pack. `tracked` picks the service the seller would
  * use alone (and, for home delivery, inside the destination country).
  * `delivery` is 'pickup' (partner shop, no last mile) or 'home'.
@@ -127,7 +138,10 @@ export function flexQuote({
   const filledGrams = assumptions.bagGrams * fill;
   let lastMile = null;
   if (delivery === 'home') {
-    lastMile = pickService(routeServices({ from: toCode, to: toCode, cards: count, catalog }), alone.tracked);
+    lastMile = pickService(
+      routeServices({ from: toCode, to: toCode, cards: lastMileCardCount(grams), catalog }),
+      alone.tracked,
+    );
     if (!lastMile) return null;
   }
   const parts = {

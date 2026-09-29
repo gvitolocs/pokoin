@@ -16,7 +16,8 @@
 | Seller country | Profile `shipFromCountry` (ISO-2). Empty profiles are seeded from request IP (`CF-IPCountry` / Vercel / CloudFront) when that code is an allowed EU sell-from country; otherwise the seller must set it on Profile before listing. Native listing insert rejects `EU`. |
 | Saved addresses | `users/{uid}/shipping_addresses/{id}` with `countryCode` plaintext + AES-GCM `encryptedPayload`. |
 | Encryption | `ADDRESS_ENCRYPTION_KEY` (32 bytes) on API host; ops mirror on InPhysical — never Firebase. Pattern matches CardTrader token crypto. |
-| Shipping tables | Seeded in-repo `server/pokoin-api/shipping-rates.json` (+ SQL stub `scripts/sql/080_shipping_rates.sql`). Quote **fails closed** when no row matches. |
+| Shipping tables | `server/pokoin-api/shipping-rates.json` (+ SPA copy). Seeded from **PackZoo** via `scripts/sync-shipping-rates-from-packzoo.py` (indicative compare API). Quote **fails closed** when no row matches. `EXTRA_LARGE` is the ~20 kg Flex bag/trunk tier; seller packs up to 200 cards use `LARGE`. |
+
 | Orders | Firestore `orders` with `shipments[]`, `totalEURCents`, encrypted immutable address snapshot. |
 | Connect | Sellers can finish Stripe Connect later. Buyer EUR pay only needs seller `shipFromCountry`. Connect Transfers run after delivery when the seller is `READY` (account resolved at payout time). |
 
@@ -71,8 +72,8 @@ covers them if it doesn't).
 | --- | --- |
 | SMALL | 4 |
 | MEDIUM | 20 |
-| LARGE | 50 |
-| EXTRA_LARGE | 9999 |
+| LARGE | 200 |
+| EXTRA_LARGE | 9999 (Flex bag / trunk only when looked up by tier id) |
 
 ## Deploy
 
@@ -81,4 +82,4 @@ covers them if it doesn't).
 - Sweep timer: `scripts/deploy-eur-orders-sweep-timer.sh` after the API deploy (runs a `--dry-run` first).
 - Ensure `ADDRESS_ENCRYPTION_KEY` is set on `pokoin-oracle-api` before first address write.
 
-Replace `server/pokoin-api/shipping-rates.json` (and CardVault copy) when the real matrix arrives.
+Replace rates with `scripts/sync-shipping-rates-from-packzoo.py` (writes API + SPA JSON from PackZoo). Then redeploy checkout API + web.

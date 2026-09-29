@@ -28,13 +28,14 @@ test('package tier boundaries match seed table', () => {
   assert.equal(packageTierForCount(20), 'MEDIUM');
   assert.equal(packageTierForCount(21), 'LARGE');
   assert.equal(packageTierForCount(50), 'LARGE');
-  assert.equal(packageTierForCount(51), 'EXTRA_LARGE');
+  assert.equal(packageTierForCount(60), 'LARGE');
+  assert.equal(packageTierForCount(201), 'EXTRA_LARGE');
 });
 
-test('Italy to Denmark one-card SMALL is seeded at 650 EUR cents tracked', () => {
+test('Italy to Denmark one-card SMALL quotes the live PackZoo row', () => {
   const itDk = findRate({ fromCountry: 'IT', toCountry: 'DK', packageTier: 'SMALL', tracked: true });
   assert.equal(itDk.id, 'it-dk-small');
-  assert.equal(itDk.priceEURCents, 650);
+  assert.ok(itDk.priceEURCents > 0);
   const shipment = quoteShipment({
     sellerId: 'redshakkio',
     fromCountry: 'IT',
@@ -42,7 +43,7 @@ test('Italy to Denmark one-card SMALL is seeded at 650 EUR cents tracked', () =>
     items: [{ qty: 1 }],
     tracked: true,
   });
-  assert.equal(shipment.amountCents, 650);
+  assert.equal(shipment.amountCents, itDk.priceEURCents);
   assert.equal(shipment.packageTier, 'SMALL');
   assert.equal(shipment.tracked, true);
   const cheap = quoteShipment({
@@ -52,7 +53,7 @@ test('Italy to Denmark one-card SMALL is seeded at 650 EUR cents tracked', () =>
     items: [{ qty: 1 }],
     tracked: false,
   });
-  assert.ok(cheap.amountCents < shipment.amountCents);
+  assert.ok(cheap.amountCents <= shipment.amountCents);
   assert.equal(cheap.tracked, false);
 });
 
@@ -60,9 +61,9 @@ test('country routing differs by origin/destination for same tier', () => {
   const dkIt = findRate({ fromCountry: 'DK', toCountry: 'IT', packageTier: 'SMALL' });
   const dkDk = findRate({ fromCountry: 'DK', toCountry: 'DK', packageTier: 'SMALL' });
   const deIt = findRate({ fromCountry: 'DE', toCountry: 'IT', packageTier: 'MEDIUM' });
-  assert.equal(dkIt.priceEURCents, 600);
-  assert.equal(dkDk.priceEURCents, 350);
-  assert.equal(deIt.priceEURCents, 800);
+  assert.ok(dkIt.priceEURCents > 0);
+  assert.ok(dkDk.priceEURCents > 0);
+  assert.ok(deIt.priceEURCents > 0);
   assert.notEqual(dkIt.priceEURCents, dkDk.priceEURCents);
 });
 
@@ -83,7 +84,7 @@ test('multi-seller cart becomes two shipments', () => {
   assert.equal(groups.find((g) => g.sellerId === 'B').cardCount, 12);
 });
 
-test('quoteCheckout sums per-seller shipping', () => {
+test('quoteCheckout sums per-seller shipping from the rate table', () => {
   const quote = quoteCheckout({
     toCountry: 'IT',
     sellerOrigins: { A: 'DK', B: 'DE' },
@@ -96,11 +97,13 @@ test('quoteCheckout sums per-seller shipping', () => {
   const a = quote.shipments.find((s) => s.sellerId === 'A');
   const b = quote.shipments.find((s) => s.sellerId === 'B');
   assert.equal(a.packageTier, 'SMALL');
-  assert.equal(a.amountCents, 600);
   assert.equal(b.packageTier, 'MEDIUM');
-  assert.equal(b.amountCents, 800);
-  assert.equal(quote.shippingTotalCents, 1400);
-  assert.equal(quote.grandTotalCents, quote.itemsSubtotalCents + 1400);
+  const aRate = findRate({ fromCountry: 'DK', toCountry: 'IT', packageTier: 'SMALL' });
+  const bRate = findRate({ fromCountry: 'DE', toCountry: 'IT', packageTier: 'MEDIUM' });
+  assert.equal(a.amountCents, aRate.priceEURCents);
+  assert.equal(b.amountCents, bRate.priceEURCents);
+  assert.equal(quote.shippingTotalCents, a.amountCents + b.amountCents);
+  assert.equal(quote.grandTotalCents, quote.itemsSubtotalCents + quote.shippingTotalCents);
 });
 
 test('adding a fifth card bumps DK→IT tier', () => {
@@ -118,7 +121,8 @@ test('adding a fifth card bumps DK→IT tier', () => {
   });
   assert.equal(four.packageTier, 'SMALL');
   assert.equal(five.packageTier, 'MEDIUM');
-  assert.ok(five.amountCents > four.amountCents);
+  // PackZoo often flat-prices letter tiers; tier still changes.
+  assert.ok(five.amountCents >= four.amountCents);
 });
 
 test('address validation and encryption round-trip', () => {
@@ -149,4 +153,5 @@ test('address validation and encryption round-trip', () => {
 test('seed catalog is loaded', () => {
   assert.ok(DEFAULT_RATES.rates.length >= 20);
   assert.ok(DEFAULT_RATES.tiers.some((t) => t.id === 'SMALL'));
+  assert.equal(DEFAULT_RATES.source?.provider, 'packzoo');
 });
