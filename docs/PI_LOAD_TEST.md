@@ -42,7 +42,25 @@ Fixes:
 3. `scripts/pokoin-docker-logrotate.conf`: 50 MB × 3 compressed per container
    log, copytruncate, logrotate hourly. Deploy: `scripts/deploy-pi-logrotate.sh`.
 
+## After (same test, through the live edge, 2026-09-29)
+
+| Endpoint, 8 concurrent | Before | After |
+| --- | --- | --- |
+| home feed | 1.3 req/s, p50 6.9 s | **284 req/s, p50 26 ms** |
+| artist summaries | 2 req/s, p50 7 s | **251 req/s, p50 20 ms** |
+| set index | 4.7 req/s, p50 2 s | **178 req/s, p50 35 ms** |
+| search page | 29 req/s, p50 273 ms | **283 req/s, p50 20 ms** |
+| card page, 32 concurrent, 400 random cards | ~7 req/s | **107 req/s** (cache + nezopt overflow) |
+
+- An API restart during a deploy: 24/24 requests through the edge answered 200.
+- `marketplace-event`: first web event since 2026-09-11 recorded on the writer;
+  0 read-only failures after the deploy.
+- Docker logs rotated (replica 454 MB → compressed archives), logrotate hourly.
+- Edge RSS ~100 MB; Pi still 2.5 GB available.
+
 Still open (not traffic-critical once the edge cache sits in front):
 `artist-cards?summaries=1` costs ~1.9 s of Postgres per build — worth a
 precomputed table if it ever misses often; card pages are long-tail and rely
-on overflow to nezopt rather than cache.
+on overflow to nezopt rather than cache. Cold misses of never-seen card /
+set / artist URLs still cost 0.3–1.5 s each on the Pi below the overflow
+threshold (16 in flight).
