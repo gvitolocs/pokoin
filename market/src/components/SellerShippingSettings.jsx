@@ -8,28 +8,31 @@ import {
 import { useAuth } from '../auth.jsx';
 import { SHIP_FROM_COUNTRIES, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { Alert } from './Desk.jsx';
+import { friendlyStripeError, stripeDashboardUrlForError } from '../stripe-connect.js';
 
-/** Platform owner must enable Connect once; sellers then get Express Account Links. */
-const STRIPE_CONNECT_GET_STARTED = 'https://dashboard.stripe.com/connect/accounts/overview';
-
-function isPlatformConnectDisabled(message) {
-  return /signed up for Connect|Connect is not enabled/i.test(String(message || ''));
-}
-
-function friendlyStripeError(message) {
-  const text = String(message || '');
-  if (isPlatformConnectDisabled(text)) {
-    return 'Stripe Connect is not enabled on the Pokoin platform account yet. Finish Connect setup in the Stripe Dashboard (Connect → Get started), then try again.';
+/**
+ * Opens a blank tab inside the click so the browser does not block it as a
+ * popup once the onboarding request comes back; `go` points it at Stripe,
+ * `close` drops it. Without a tab (blocked anyway) `go` navigates this one.
+ */
+function reserveStripeTab() {
+  let win = null;
+  try {
+    win = window.open('', '_blank');
+    if (win) win.opener = null;
+  } catch (_) {
+    win = null;
   }
-  return text || 'Connect failed.';
-}
-
-function openStripeUrl(url) {
-  if (!url) return false;
-  const win = window.open(url, '_blank', 'noopener,noreferrer');
-  if (win) return true;
-  window.location.assign(url);
-  return true;
+  return {
+    go(url) {
+      if (!url) return;
+      if (win && !win.closed) win.location.href = url;
+      else window.location.assign(url);
+    },
+    close() {
+      if (win && !win.closed) win.close();
+    },
+  };
 }
 
 /** Brand purple Connect button — the Stripe row of the Profile seller setup. */
@@ -59,6 +62,7 @@ export function StripeConnectButton({ className = '', disabled = false, shipFrom
   if (!signedIn) return null;
 
   async function connectStripe() {
+    const tab = reserveStripeTab();
     setBusy(true);
     onError?.('');
     try {
@@ -70,15 +74,13 @@ export function StripeConnectButton({ className = '', disabled = false, shipFrom
       onCountrySaved?.(saved.shipFromCountry || shipFromCountry);
       const data = await startStripeConnectOnboard({}, token);
       if (!data.url) throw new Error('Stripe did not return an onboarding URL.');
-      openStripeUrl(data.url);
+      tab.go(data.url);
       setBusy(false);
     } catch (err) {
-      const msg = friendlyStripeError(err.message);
-      onError?.(msg);
-      const dashboardUrl = err.body?.dashboardUrl || (
-        isPlatformConnectDisabled(err.message) ? STRIPE_CONNECT_GET_STARTED : null
-      );
-      if (dashboardUrl) openStripeUrl(dashboardUrl);
+      onError?.(friendlyStripeError(err.message));
+      const dashboardUrl = stripeDashboardUrlForError(err.message, err.body);
+      if (dashboardUrl) tab.go(dashboardUrl);
+      else tab.close();
       setBusy(false);
     }
   }

@@ -15,7 +15,8 @@ import {
 import WipeAllInventory from './WipeAllInventory.jsx';
 import CardTraderPowerToolsModal from './CardTraderPowerToolsModal.jsx';
 
-const CT_TOKEN_DOCS = 'https://www.cardtrader.com/en/docs/api/full/reference';
+/** Where a seller copies their CardTrader API token. */
+export const CT_TOKEN_DOCS = 'https://www.cardtrader.com/en/docs/api/full/reference';
 
 /** One line under the token field: which CardTrader app it belongs to, or what is wrong. */
 function tokenHint(pasted) {
