@@ -9,9 +9,10 @@
  *                                               attach this new account to an inviter
  *
  * Both need a Firebase bearer. Rewards (20 PKN each side) are paid by
- * _referral_core.settleReferral — on every GET for the caller's own
- * referrals, and every 10 minutes for everyone by referral-reconcile.js
- * (pokoin-referral-reconcile.timer on the Pi).
+ * _referral_core.settleReferral — only when something is pending: the
+ * caller's own reward inline, their invites in the background, and everyone
+ * every 10 minutes by referral-reconcile.js (pokoin-referral-reconcile.timer
+ * on the Pi). Usernames are cached in process for 10 minutes.
  *
  * Canonical source for the Pi overlay; deploy with scripts/deploy-referral-api.sh.
  * Sibling requires (_firebase, _marketplace_db, _marketplace_react_card) come
@@ -56,17 +57,24 @@ async function rosterAndContributions(email) {
 
 async function payload(firestore, FieldValue, decoded) {
   const uid = decoded.uid;
-  // Pay anything the caller is owed before showing it.
-  await core.settleReferral({ firestore, FieldValue, referredUid: uid }).catch((error) => {
-    console.error('referral settle (self) failed', error.message);
-  });
-  await core.settlePending({ firestore, FieldValue, onlyReferrerUid: uid, limit: 50 }).catch((error) => {
-    console.error('referral settle (invited) failed', error.message);
-  });
-  const [summary, { roster, contributions }] = await Promise.all([
-    core.referralSummary({ firestore, uid }),
-    rosterAndContributions(decoded.email),
-  ]);
+  const rosterPromise = rosterAndContributions(decoded.email);
+  let summary = await core.referralSummary({ firestore, uid });
+  // Settle only what is actually pending. The caller's own reward is awaited
+  // (they may have just made their first deal); their invites settle in the
+  // background and every 10 minutes from referral-reconcile.js.
+  if (summary.stats.pending > 0) {
+    core.settlePending({ firestore, FieldValue, onlyReferrerUid: uid, limit: 50 }).catch((error) => {
+      console.error('referral settle (invited) failed', error.message);
+    });
+  }
+  if (summary.referredBy?.status === 'pending') {
+    const own = await core.settleReferral({ firestore, FieldValue, referredUid: uid }).catch((error) => {
+      console.error('referral settle (self) failed', error.message);
+      return null;
+    });
+    if (own?.status === 'rewarded') summary = await core.referralSummary({ firestore, uid });
+  }
+  const { roster, contributions } = await rosterPromise;
   return {
     ok: true,
     ...summary,

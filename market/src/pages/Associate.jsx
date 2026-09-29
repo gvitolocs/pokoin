@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
-import { fetchAssociateSummary, fetchReferral, formatPknNumber } from '../api.js';
+import { fetchAssociateSummary, formatPknNumber } from '../api.js';
+import { useReferral } from '../use-referral.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
@@ -307,19 +308,9 @@ function missionTitle(key) {
  * (/api/marketplace-referral); admin view-as shows the roster record only.
  */
 function AmbassadorDesk({ data, overview = null, onView = null, viewingAs = false, preview = false }) {
-  const { getBearer } = useAuth();
-  const [referral, setReferral] = useState(preview ? PREVIEW_AMBASSADOR : null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (viewingAs || preview) return undefined;
-    let cancelled = false;
-    getBearer()
-      .then((token) => fetchReferral(token))
-      .then((payload) => { if (!cancelled) setReferral(payload); })
-      .catch((err) => { if (!cancelled) setError(err?.message || 'Your mission progress is unreachable right now.'); });
-    return () => { cancelled = true; };
-  }, [viewingAs, preview, getBearer]);
+  const live = useReferral({ enabled: !viewingAs && !preview });
+  const referral = preview ? PREVIEW_AMBASSADOR : live.data;
+  const error = preview || live.data ? '' : live.error;
 
   const founder = isFounderRole(data.associate.role);
   const fallback = {

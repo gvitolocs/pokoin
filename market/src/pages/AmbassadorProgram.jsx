@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchReferral } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import {
   AMBASSADOR_CONTACT,
@@ -9,31 +8,23 @@ import {
   PERKS,
   applyMailto,
 } from '../ambassador-program.js';
-import { REFERRAL_REWARD_PKN } from '../referral.js';
+import { COLLECTOR_PROGRESS, REFERRAL_REWARD_PKN } from '../referral.js';
+import { useReferral } from '../use-referral.js';
 import { MissionGrid, TierLadder, TrainerCard } from '../components/AmbassadorProgress.jsx';
 import { brandSrc } from '../brand-assets.js';
 import '../referral.css';
 
 /** pokoin.com/ambassadorprogram — public; signed-in visitors see their progress. */
 export default function AmbassadorProgram() {
-  const { signedIn, getBearer } = useAuth();
-  const [data, setData] = useState(null);
+  const { signedIn } = useAuth();
+  const { data, code } = useReferral({ enabled: signedIn });
 
   useEffect(() => {
     document.title = 'Ambassador program · Pokoin';
   }, []);
 
-  useEffect(() => {
-    if (!signedIn) return undefined;
-    let cancelled = false;
-    getBearer()
-      .then((token) => fetchReferral(token))
-      .then((payload) => { if (!cancelled) setData(payload); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [signedIn, getBearer]);
-
-  const progress = data?.ambassador || null;
+  // Signed in: the trainer card paints at once (cached or Collector), then refreshes.
+  const progress = data?.ambassador || (signedIn ? COLLECTOR_PROGRESS : null);
 
   return (
     <div className="page referral-page amb-page">
@@ -46,14 +37,14 @@ export default function AmbassadorProgram() {
             report what is broken, help sellers start and run events. Complete {AMBASSADOR_MISSIONS_TO_UNLOCK} missions to unlock the badge.
           </p>
           <div className="referral-cta-row">
-            <a className="btn" href={applyMailto(data?.code)}>Apply to be an Ambassador</a>
+            <a className="btn" href={applyMailto(code)}>Apply to be an Ambassador</a>
             {signedIn ? <Link className="btn ghost" to="/invite">Your invite link</Link> : <Link className="btn ghost" to="/auth?from=%2Fambassadorprogram">Sign in to track progress</Link>}
           </div>
         </div>
         <img className="referral-hero-art" src={brandSrc('pokoin-mascot.svg')} alt="" aria-hidden="true" />
       </section>
 
-      {progress ? <TrainerCard progress={progress} username={data?.code} /> : null}
+      {progress ? <TrainerCard progress={progress} username={code} /> : null}
 
       <section className="amb-section">
         <h2>Three ways to grow with Pokoin</h2>
@@ -113,7 +104,7 @@ export default function AmbassadorProgram() {
           <strong>Done a mission already?</strong>
           <span>Send the link or details to {AMBASSADOR_CONTACT} and we will verify it on your progress.</span>
         </div>
-        <a className="btn" href={applyMailto(data?.code)}>Contact {AMBASSADOR_CONTACT}</a>
+        <a className="btn" href={applyMailto(code)}>Contact {AMBASSADOR_CONTACT}</a>
       </section>
     </div>
   );

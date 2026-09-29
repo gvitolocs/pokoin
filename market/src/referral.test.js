@@ -59,3 +59,13 @@ test('ambassador next-step line', () => {
   assert.equal(nextStepLine({ tier: 'ambassador', next: { tier: 'senior', missionsLeft: 2, referralsLeft: 0 } }), '2 more missions to Senior Ambassador.');
   assert.equal(nextStepLine({ tier: 'city', city: 'Milano', next: null }), 'You lead Milano.');
 });
+
+test('the referral cache only answers the same account, within a week', async () => {
+  const { readReferralCache, writeReferralCache } = await import('./referral.js');
+  const store = memoryStore();
+  writeReferralCache('alice', { code: 'peppev' }, 1000, store);
+  assert.deepEqual(readReferralCache('alice', 2000, store), { code: 'peppev' });
+  assert.equal(readReferralCache('bob', 2000, store), null);
+  assert.equal(readReferralCache('alice', 1000 + 8 * 86400e3, store), null);
+  assert.equal(readReferralCache('', 2000, store), null);
+});
