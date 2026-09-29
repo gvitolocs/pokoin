@@ -32,11 +32,13 @@ when needed) instead of inventing lore.
 |---|---|
 | Website Messages / dock | Firebase → `/api/poko-chat` → Hermes |
 | Telegram `@pokoinpos_bot` | Hermes Telegram polling |
-| Discord `Poko#1220` | Hermes Discord (chat only) |
+| Discord `Poko#1220` | Hermes Discord |
 
-**Connect** (`/api/poko-connect`) links a Pokoin account to **Telegram only**
-(`telegram_user_id`). Discord chat works without that link; there is no
-Discord account-link flow yet — do not tell users to “Connect Discord”.
+**Connect** (`/api/poko-connect`) links a Pokoin account to **Telegram and/or
+Discord** with the same one-time profile code (`/connect CODE` on either
+channel). Linked chats resolve to Honcho peer `poko_user_<firebaseUid>` — the
+same persona as website Messages — without merging strangers' memories.
+`unlink_me` accepts `channel=telegram|discord|all`.
 
 Hermes (`/opt/hermes-poko` on oracle-peer1, `hermes-poko.service` :8789)
 loads `docs/poko-knowledge.md` + `docs/poko-behavior-seed.jsonl`, plans with

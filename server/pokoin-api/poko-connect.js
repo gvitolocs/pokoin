@@ -1,12 +1,12 @@
 'use strict';
 
 /**
- * Poko Telegram ↔ Pokoin profile linking.
+ * Poko Telegram/Discord ↔ Pokoin profile linking.
  *
  * A signed-in user generates a short-lived code on the website
- * (action: create_code, Firebase bearer) and redeems it from Telegram with
- * `/connect <code>` (action: redeem, service bearer — called by Hermes).
- * One Pokoin account maps to one Telegram user, in both directions.
+ * (action: create_code, Firebase bearer) and redeems it from Telegram or
+ * Discord with `/connect <code>` (action: redeem, service bearer — Hermes).
+ * One Pokoin account maps to at most one Telegram user and one Discord user.
  *
  * Raw codes are never stored: the DB keeps SHA-256 hashes with a 15-minute
  * expiry, single redemption. status/unlink are service-authenticated lookups
@@ -94,8 +94,10 @@ async function createCode(uid) {
 async function redeem(params = {}) {
   const code = normalizeCode(params.code);
   const telegramUserId = cleanText(params.telegramUserId, 40).replace(/[^0-9]/g, '');
-  if (!code || code.length < 6 || !telegramUserId) {
-    return { action: 'redeem', linked: false, error: 'code and telegramUserId required' };
+  const discordUserId = cleanText(params.discordUserId, 40).replace(/[^0-9]/g, '');
+  const channel = discordUserId ? 'discord' : (telegramUserId ? 'telegram' : '');
+  if (!code || code.length < 6 || !channel) {
+    return { action: 'redeem', linked: false, error: 'code and telegramUserId or discordUserId required' };
   }
   const redeemed = await marketplaceWriteQuery(
     `update poko_telegram_link_codes
@@ -110,31 +112,73 @@ async function redeem(params = {}) {
   if (!uid) {
     return { action: 'redeem', linked: false, error: 'code invalid, expired, or already used' };
   }
-  const telegramUsername = cleanText(params.telegramUsername, 60).replace(/^@/, '');
-  const telegramDisplayName = cleanText(params.telegramDisplayName, 80);
-  await marketplaceWriteQuery(
-    `delete from poko_telegram_links
-      where firebase_uid = $1 and telegram_user_id <> $2`,
-    [uid, telegramUserId],
-  );
-  await marketplaceWriteQuery(
-    `insert into poko_telegram_links (firebase_uid, telegram_user_id, telegram_username, telegram_display_name)
-     values ($1, $2, $3, $4)
-     on conflict (telegram_user_id) do update
-        set firebase_uid = excluded.firebase_uid,
-            telegram_username = excluded.telegram_username,
-            telegram_display_name = excluded.telegram_display_name,
-            linked_at = now(),
-            unlinked_at = null`,
-    [uid, telegramUserId, telegramUsername, telegramDisplayName],
-  );
-  return { action: 'redeem', linked: true, firebaseUid: uid };
+  if (channel === 'telegram') {
+    const telegramUsername = cleanText(params.telegramUsername, 60).replace(/^@/, '');
+    const telegramDisplayName = cleanText(params.telegramDisplayName, 80);
+    await marketplaceWriteQuery(
+      `delete from poko_telegram_links
+        where firebase_uid = $1 and telegram_user_id <> $2`,
+      [uid, telegramUserId],
+    );
+    await marketplaceWriteQuery(
+      `insert into poko_telegram_links (firebase_uid, telegram_user_id, telegram_username, telegram_display_name)
+       values ($1, $2, $3, $4)
+       on conflict (telegram_user_id) do update
+          set firebase_uid = excluded.firebase_uid,
+              telegram_username = excluded.telegram_username,
+              telegram_display_name = excluded.telegram_display_name,
+              linked_at = now(),
+              unlinked_at = null`,
+      [uid, telegramUserId, telegramUsername, telegramDisplayName],
+    );
+  } else {
+    const discordUsername = cleanText(params.discordUsername, 60).replace(/^@/, '');
+    const discordDisplayName = cleanText(params.discordDisplayName, 80);
+    await marketplaceWriteQuery(
+      `delete from poko_discord_links
+        where firebase_uid = $1 and discord_user_id <> $2`,
+      [uid, discordUserId],
+    );
+    await marketplaceWriteQuery(
+      `insert into poko_discord_links (firebase_uid, discord_user_id, discord_username, discord_display_name)
+       values ($1, $2, $3, $4)
+       on conflict (discord_user_id) do update
+          set firebase_uid = excluded.firebase_uid,
+              discord_username = excluded.discord_username,
+              discord_display_name = excluded.discord_display_name,
+              linked_at = now(),
+              unlinked_at = null`,
+      [uid, discordUserId, discordUsername, discordDisplayName],
+    );
+  }
+  return { action: 'redeem', linked: true, firebaseUid: uid, channel };
 }
 
 async function status(params = {}) {
   const telegramUserId = cleanText(params.telegramUserId, 40).replace(/[^0-9]/g, '');
+  const discordUserId = cleanText(params.discordUserId, 40).replace(/[^0-9]/g, '');
+  if (discordUserId) {
+    const rows = await marketplaceQuery(
+      `select firebase_uid, discord_username, discord_display_name, linked_at
+         from poko_discord_links
+        where discord_user_id = $1 and unlinked_at is null
+        limit 1`,
+      [discordUserId],
+    );
+    const row = rows.rows?.[0];
+    if (!row) return { action: 'status', linked: false, channel: 'discord' };
+    return {
+      action: 'status',
+      linked: true,
+      channel: 'discord',
+      firebaseUid: row.firebase_uid,
+      discordUsername: row.discord_username || '',
+      displayName: row.discord_display_name || '',
+      linkedAt: row.linked_at,
+    };
+  }
   if (!telegramUserId) {
-    return { action: 'status', linked: false, error: 'telegramUserId required' };
+    return { action: 'status', linked: false, error: 'telegramUserId or discordUserId required' };
   }
   const rows = await marketplaceQuery(
     `select firebase_uid, telegram_username, telegram_display_name, linked_at
@@ -144,10 +188,11 @@ async function status(params = {}) {
     [telegramUserId],
   );
   const row = rows.rows?.[0];
-  if (!row) return { action: 'status', linked: false };
+  if (!row) return { action: 'status', linked: false, channel: 'telegram' };
   return {
     action: 'status',
     linked: true,
+    channel: 'telegram',
     firebaseUid: row.firebase_uid,
     telegramUsername: row.telegram_username || '',
     displayName: row.telegram_display_name || '',
@@ -156,37 +201,78 @@ async function status(params = {}) {
 }
 
 async function myStatus(uid) {
-  const rows = await marketplaceQuery(
-    `select telegram_username, linked_at
-       from poko_telegram_links
-      where firebase_uid = $1 and unlinked_at is null
-      limit 1`,
-    [uid],
-  );
-  const row = rows.rows?.[0];
-  if (!row) return { action: 'my_status', linked: false };
+  const [tg, dc] = await Promise.all([
+    marketplaceQuery(
+      `select telegram_username, linked_at
+         from poko_telegram_links
+        where firebase_uid = $1 and unlinked_at is null
+        limit 1`,
+      [uid],
+    ),
+    marketplaceQuery(
+      `select discord_username, linked_at
+         from poko_discord_links
+        where firebase_uid = $1 and unlinked_at is null
+        limit 1`,
+      [uid],
+    ),
+  ]);
+  const telegram = tg.rows?.[0]
+    ? { linked: true, username: tg.rows[0].telegram_username || '', linkedAt: tg.rows[0].linked_at }
+    : { linked: false };
+  const discord = dc.rows?.[0]
+    ? { linked: true, username: dc.rows[0].discord_username || '', linkedAt: dc.rows[0].linked_at }
+    : { linked: false };
   return {
     action: 'my_status',
-    linked: true,
-    telegramUsername: row.telegram_username || '',
-    linkedAt: row.linked_at,
+    // Back-compat: top-level fields still mean Telegram.
+    linked: Boolean(telegram.linked),
+    telegramUsername: telegram.username || '',
+    linkedAt: telegram.linkedAt || null,
+    telegram,
+    discord,
   };
 }
 
-async function unlinkMe(uid) {
-  await marketplaceWriteQuery(
-    `update poko_telegram_links
-        set unlinked_at = now()
-      where firebase_uid = $1 and unlinked_at is null`,
-    [uid],
-  );
-  return { action: 'unlink_me', linked: false };
+async function unlinkMe(uid, params = {}) {
+  const channel = cleanText(params.channel, 20).toLowerCase();
+  if (!channel || channel === 'telegram' || channel === 'all') {
+    await marketplaceWriteQuery(
+      `update poko_telegram_links
+          set unlinked_at = now()
+        where firebase_uid = $1 and unlinked_at is null`,
+      [uid],
+    );
+  }
+  if (channel === 'discord' || channel === 'all' || !channel) {
+    // Default unlink_me (no channel) clears Telegram only for back-compat;
+    // pass channel=discord|all for Discord.
+    if (channel === 'discord' || channel === 'all') {
+      await marketplaceWriteQuery(
+        `update poko_discord_links
+            set unlinked_at = now()
+          where firebase_uid = $1 and unlinked_at is null`,
+        [uid],
+      );
+    }
+  }
+  return { action: 'unlink_me', linked: false, channel: channel || 'telegram' };
 }
 
 async function unlink(params = {}) {
   const telegramUserId = cleanText(params.telegramUserId, 40).replace(/[^0-9]/g, '');
+  const discordUserId = cleanText(params.discordUserId, 40).replace(/[^0-9]/g, '');
+  if (discordUserId) {
+    await marketplaceWriteQuery(
+      `update poko_discord_links
+          set unlinked_at = now()
+        where discord_user_id = $1 and unlinked_at is null`,
+      [discordUserId],
+    );
+    return { action: 'unlink', linked: false, channel: 'discord' };
+  }
   if (!telegramUserId) {
-    return { action: 'unlink', linked: false, error: 'telegramUserId required' };
+    return { action: 'unlink', linked: false, error: 'telegramUserId or discordUserId required' };
   }
   await marketplaceWriteQuery(
     `update poko_telegram_links
@@ -194,7 +280,7 @@ async function unlink(params = {}) {
       where telegram_user_id = $1 and unlinked_at is null`,
     [telegramUserId],
   );
-  return { action: 'unlink', linked: false };
+  return { action: 'unlink', linked: false, channel: 'telegram' };
 }
 
 const FIREBASE_ACTIONS = { create_code: createCode, my_status: myStatus, unlink_me: unlinkMe };
@@ -229,7 +315,14 @@ module.exports = async function handler(req, res) {
       return;
     }
     try {
-      const result = action === 'create_code' ? await createCode(uid) : await FIREBASE_ACTIONS[action](uid);
+      let result;
+      if (action === 'create_code') {
+        result = await createCode(uid);
+      } else if (action === 'unlink_me') {
+        result = await unlinkMe(uid, req.body || {});
+      } else {
+        result = await FIREBASE_ACTIONS[action](uid);
+      }
       sendJson(res, 200, { ok: true, ...result });
     } catch (error) {
       console.error('poko-connect firebase action failed', { action, error: String(error?.message || error).slice(0, 300) });
@@ -238,7 +331,7 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // Service-authenticated actions (Telegram-side).
+  // Service-authenticated actions (Telegram / Discord side).
   if (!serviceToken()) {
     sendJson(res, 503, { error: 'poko-connect not configured: service token missing' });
     return;

@@ -218,3 +218,54 @@ test('status and unlink report linked state without leaking other users', async 
   assert.equal(unlinkRes.body.linked, false);
   assert.ok(writes.some((w) => /update poko_telegram_links/.test(w.sql) && /unlinked_at = now\(\)/.test(w.sql)));
 });
+
+test('discord redeem/status/unlink mirror telegram without cross-channel bleed', async () => {
+  process.env.POKONTACT_SERVICE_TOKEN = 'svc';
+  const writes = [];
+  let statusRows = [];
+  const handler = loadHandler({
+    verifyBearerToken: async () => 'fb-dc',
+    marketplaceQuery: async (sql) => {
+      if (/from poko_discord_links/.test(sql)) return WRITER_RESULT(statusRows);
+      return WRITER_RESULT([]);
+    },
+    marketplaceWriteQuery: async (sql, params) => {
+      writes.push({ sql, params });
+      if (/update poko_telegram_link_codes/.test(sql)) {
+        return WRITER_RESULT([{ firebase_uid: 'fb-dc' }]);
+      }
+      return WRITER_RESULT([]);
+    },
+  });
+
+  const redeemRes = makeRes();
+  await handler(serviceReq({
+    action: 'redeem',
+    code: 'ABCD2345',
+    discordUserId: '999888777',
+    discordUsername: 'steelix_fan',
+    discordDisplayName: 'Steelix Fan',
+  }), redeemRes);
+  assert.equal(redeemRes.body.linked, true);
+  assert.equal(redeemRes.body.channel, 'discord');
+  assert.equal(redeemRes.body.firebaseUid, 'fb-dc');
+  assert.ok(writes.some((w) => /insert into poko_discord_links/.test(w.sql)));
+  assert.ok(!writes.some((w) => /insert into poko_telegram_links/.test(w.sql)));
+
+  statusRows = [{
+    firebase_uid: 'fb-dc',
+    discord_username: 'steelix_fan',
+    discord_display_name: 'Steelix Fan',
+    linked_at: '2026-09-29',
+  }];
+  const statusRes = makeRes();
+  await handler(serviceReq({ action: 'status', discordUserId: '999888777' }), statusRes);
+  assert.equal(statusRes.body.linked, true);
+  assert.equal(statusRes.body.channel, 'discord');
+  assert.equal(statusRes.body.firebaseUid, 'fb-dc');
+
+  const unlinkRes = makeRes();
+  await handler(serviceReq({ action: 'unlink', discordUserId: '999888777' }), unlinkRes);
+  assert.equal(unlinkRes.body.linked, false);
+  assert.ok(writes.some((w) => /update poko_discord_links/.test(w.sql) && /unlinked_at = now\(\)/.test(w.sql)));
+});
