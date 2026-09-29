@@ -408,7 +408,6 @@ export function defaultsLabel(d = DEFAULTS) {
     d.signed ? 'Signed' : '',
     d.altered ? 'Altered' : '',
     d.location ? locationDefaultsText(d) : '',
-    `Qty ${d.quantity}`,
   ].filter(Boolean).join(' · ');
 }
 
