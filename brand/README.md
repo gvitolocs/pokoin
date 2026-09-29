@@ -25,7 +25,9 @@ a yellow coin dot on the **i**, navy drop shadow. In React use
 | `logo/bimi.svg` | Email BIMI mark. |
 
 The SVGs are also served at `https://pokoin.com/brand/pokoin-logo.svg` (and
-`-flat`, `-navy`, `pokoin-mascot.svg`). They contain paths and pixel squares
+`-flat`, `-navy`, `pokoin-mascot.svg`) — a Vercel rewrite to `/market/brand/`, where
+the production build puts `market/public/brand/`. In pages use `brandSrc()` from
+`market/src/brand-assets.js`, never a hard-coded `/brand/…`. They contain paths and pixel squares
 only, no font or bitmap, so they render the same in any browser, email client
 or design tool. Colours: white `#ffffff`, navy `#23376e`, coin `#ffd23f`, UI
 yellow `#ffd33d`.

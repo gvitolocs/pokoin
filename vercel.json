@@ -665,6 +665,10 @@
   ],
   "rewrites": [
     {
+      "source": "/brand/:path*",
+      "destination": "/market/brand/:path*"
+    },
+    {
       "source": "/__/auth/:path*",
       "destination": "https://pokoin.firebaseapp.com/__/auth/:path*"
     },

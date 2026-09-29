@@ -12,6 +12,7 @@ import {
 } from '../flex-savings.js';
 import { shipFromCountryName } from '../ship-countries.js';
 import '../flex.css';
+import { brandSrc } from '../brand-assets.js';
 
 /** Fallback until GET /api/pokoin-partner?action=directory is live with real shops. */
 const PLACEHOLDER_STORES = [
@@ -247,7 +248,7 @@ export default function Flex() {
           </div>
         </div>
         <figure className="flex-hero-art">
-          <img src="/brand/flex/flex-hero.svg" alt="Small padded packs ride into one 20 kg Pokoin bag, then the sorting center, then a partner shop." width="960" height="290" />
+          <img src={brandSrc('flex/flex-hero.svg')} alt="Small padded packs ride into one 20 kg Pokoin bag, then the sorting center, then a partner shop." width="960" height="290" />
           <img className="flex-hero-mascot" src={mascotUrl} alt="" width="26" height="24" />
         </figure>
       </section>
@@ -263,7 +264,7 @@ export default function Flex() {
         <ol>
           {STEPS.map((step, index) => (
             <li key={step.art}>
-              <img src={`/brand/flex/${step.art}.svg`} alt="" width="120" height="120" />
+              <img src={brandSrc(`flex/${step.art}.svg`)} alt="" width="120" height="120" />
               <span className="flex-step-n">{index + 1}</span>
               <h3>{step.title}</h3>
               <p>{step.text}</p>
@@ -276,7 +277,7 @@ export default function Flex() {
 
       <section className="flex-split">
         <article className="flex-panel flex-boxcard">
-          <img src="/brand/flex/flex-box.svg" alt="" width="120" height="120" />
+          <img src={brandSrc('flex/flex-box.svg')} alt="" width="120" height="120" />
           <div>
             <h2>The Flex box</h2>
             <p>
@@ -304,7 +305,7 @@ export default function Flex() {
         <ul className="flex-stores">
           {stores.map((store) => (
             <li key={store.id || `${store.name}-${store.city}`}>
-              <img src="/brand/flex/step-drop.svg" alt="" width="44" height="44" />
+              <img src={brandSrc('flex/step-drop.svg')} alt="" width="44" height="44" />
               <span>
                 <strong>{store.name}</strong>
                 <em>{store.city}{store.country ? `, ${store.country}` : ''}</em>
