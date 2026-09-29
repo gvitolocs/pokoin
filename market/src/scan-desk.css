@@ -219,6 +219,7 @@
 .sd-field.grow input { width: 100%; min-width: 0; }
 .sd-field.pos input { width: 3.1rem; text-align: center; }
 .sd-field.qty input { width: 2.6rem; text-align: center; }
+.sd-field.stack-size select { width: 4.5rem; text-align: center; }
 
 .sd-stack {
   position: relative;
@@ -784,6 +785,13 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 .c-flags button.on { background: var(--yellow); color: #111; border-color: var(--yellow); }
 
 .c-qty { font-weight: 800; font-variant-numeric: tabular-nums; text-align: center; }
+.c-qty input { text-align: center; font-weight: 800; font-variant-numeric: tabular-nums; }
+.scan-row-head .c-lang,
+.scan-row-head .c-cond,
+.scan-row-head .c-finish,
+.scan-row-head .c-flags,
+.scan-row-head .c-qty { justify-content: center; text-align: center; }
+.scan-row-head .c-price { text-align: right; }
 /* Location cell: box name input + the position inside the box (box1·47). */
 .c-loc { min-width: 0; display: flex; align-items: center; gap: 0.15rem; }
 .c-loc input { min-width: 0; flex: 1; }

@@ -42,6 +42,7 @@ import {
   PROBLEM_LABEL,
   phaseText,
   queueRows,
+  quantityFieldCommit,
   rowProblem,
   sessionPhase,
   slotText,
@@ -1360,17 +1361,17 @@ export default function ScanDesk() {
         }}
       >
         <div className="scan-row scan-row-head" role="row">
-          <span role="columnheader">#</span>
-          <span role="columnheader" />
-          <span role="columnheader">Card</span>
-          <span role="columnheader">Lang</span>
-          <span role="columnheader">Cond</span>
-          <span role="columnheader">Finish</span>
-          <span role="columnheader">Flags</span>
-          <span role="columnheader">Location</span>
-          <span role="columnheader">Qty</span>
-          {submitIntent === 'list' ? <span role="columnheader">Price</span> : null}
-          <span role="columnheader">State</span>
+          <span role="columnheader" className="c-num">#</span>
+          <span role="columnheader" className="c-art" />
+          <span role="columnheader" className="c-card">Card</span>
+          <span role="columnheader" className="c-lang">Lang</span>
+          <span role="columnheader" className="c-cond">Cond</span>
+          <span role="columnheader" className="c-finish">Finish</span>
+          <span role="columnheader" className="c-flags">Flags</span>
+          <span role="columnheader" className="c-loc">Location</span>
+          <span role="columnheader" className="c-qty">Qty</span>
+          {submitIntent === 'list' ? <span role="columnheader" className="c-price">Price</span> : null}
+          <span role="columnheader" className="c-state">State</span>
           <span role="columnheader" className="c-remove" aria-label="Remove" />
         </div>
         {list.length === 0 ? (
@@ -1503,17 +1504,7 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull =
   const [stackDraft, setStackDraft] = useState(String(defaults.stack ?? 1));
   const [posDraft, setPosDraft] = useState(String(defaults.startPosition ?? 1));
   const [qtyDraft, setQtyDraft] = useState(String(defaults.quantity));
-  const [sizeOpen, setSizeOpen] = useState(false);
-  const sizeMenuRef = useRef(null);
   const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
-  useEffect(() => {
-    if (!sizeOpen) return undefined;
-    const onDoc = (event) => {
-      if (sizeMenuRef.current && !sizeMenuRef.current.contains(event.target)) setSizeOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [sizeOpen]);
   useEffect(() => setLocationDraft(defaults.location), [defaults.location]);
   useEffect(() => setStackDraft(String(defaults.stack ?? 1)), [defaults.stack, defaults.location]);
   useEffect(() => setPosDraft(String(defaults.startPosition ?? 1)), [defaults.startPosition, defaults.location, defaults.stack]);
@@ -1541,7 +1532,6 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull =
     if (event.key === 'Enter') event.currentTarget.blur();
   };
   const pickSize = (nextSize) => {
-    setSizeOpen(false);
     if (nextSize === size) return;
     const abs = stackPosToIndex(defaults.stack ?? 1, defaults.startPosition ?? 1, size);
     const mapped = indexToStackPos(abs, nextSize);
@@ -1613,43 +1603,23 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull =
           onKeyDown={blurOnEnter}
         />
       </label>
-      <div ref={sizeMenuRef} className={`sd-field pos sd-stack${stackFull ? ' is-full' : ''}`}>
-        <button
-          type="button"
-          className="sd-stack-label"
-          title="Stack size — how many cards fit between box dividers"
-          aria-haspopup="listbox"
-          aria-expanded={sizeOpen}
-          onClick={() => setSizeOpen((open) => !open)}
-        >
-          Stack{size > 1 ? ` ·${size}` : ''}
-        </button>
+      <label className="sd-field stack-size" title="How many physical cards fit between two box dividers">
+        <span>Cards/stack</span>
+        <select value={size} onChange={(e) => pickSize(Number(e.target.value))}>
+          {STACK_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </label>
+      <label className={`sd-field pos sd-stack${stackFull ? ' is-full' : ''}`} title="Current divider stack number inside the box">
+        <span>Stack #</span>
         <input
           inputMode="numeric"
           value={stackDraft}
           aria-label="Stack number"
-          title="Divider stack inside the box"
           onChange={(e) => setStackDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
           onBlur={commitStack}
           onKeyDown={blurOnEnter}
         />
-        {sizeOpen ? (
-          <div className="sd-stack-menu" role="listbox" aria-label="Stack size">
-            {STACK_SIZES.map((n) => (
-              <button
-                key={n}
-                type="button"
-                role="option"
-                aria-selected={n === size}
-                className={n === size ? 'on' : ''}
-                onClick={() => pickSize(n)}
-              >
-                {n === 1 ? '1 — one card per stack' : `${n} cards`}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      </label>
       {size > 1 ? (
         <label className="sd-field pos" title="Position inside the current stack">
           <span>Position</span>
@@ -1663,7 +1633,7 @@ function DefaultsBar({ defaults, onChange, locationRef, quantityRef, stackFull =
         </label>
       ) : null}
       <label className="sd-field qty">
-        <span>Qty</span>
+        <span>Row qty</span>
         <input
           ref={quantityRef}
           inputMode="numeric"
@@ -1967,7 +1937,28 @@ function QueueRow({
           </>
         )}
       </span>
-      <span className="c-qty">{row.quantity}</span>
+      <span className="c-qty">
+        {closed ? row.quantity : (
+          <input
+            inputMode="numeric"
+            aria-label={`Quantity for ${row.cardName || `row ${index + 1}`}`}
+            title="Cards in this row (1–99)"
+            tabIndex={-1}
+            maxLength={2}
+            key={`${row.id}:${row.quantity}`}
+            defaultValue={row.quantity}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={(e) => {
+              const commit = quantityFieldCommit(row, e.currentTarget.value);
+              if (commit.action === 'set') onPatch({ quantity: commit.quantity });
+              else e.currentTarget.value = String(row.quantity);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
+          />
+        )}
+      </span>
       {hidePrice ? null : (
       <span className={`c-price${row.priceSuggested ? ' suggested' : ''}`}>
         {closed ? formatPkn(row.pricePkn) : (
