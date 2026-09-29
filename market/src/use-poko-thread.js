@@ -109,7 +109,7 @@ export function usePokoThread({
     busyRef.current = true;
     setError('');
     pinBottom.current = true;
-    const localId = `local-${Date.now()}`;
+    const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const mine = {
       id: localId,
       role: 'user',
@@ -137,6 +137,7 @@ export function usePokoThread({
         images: attachedImages,
         pageContext,
         sessionId: uid,
+        clientTurnId: localId,
       }, token);
       const serverEvents = Array.isArray(result?.events) ? result.events : [];
       setEvents((current) => {
@@ -146,7 +147,8 @@ export function usePokoThread({
           const next = reconcilePokoEvents(current, serverEvents);
           const key = pokoUserTurnKey(mine);
           const hasUser = next.some((row) => (
-            row.role === 'user' && (row.id === localId || pokoUserTurnKey(row) === key)
+            row.role === 'user'
+              && (row.id === localId || row.clientTurnId === localId || pokoUserTurnKey(row) === key)
           ));
           if (hasUser) return next;
           return mergePokoEvents(next, [{ ...mine, id: `user-${Date.now()}` }]);
@@ -156,6 +158,7 @@ export function usePokoThread({
           role: 'assistant',
           mine: false,
           text: result?.reply || '…',
+          cards: Array.isArray(result?.cards) ? result.cards : [],
           source: result?.source || '',
           createdAt: new Date().toISOString(),
         };
