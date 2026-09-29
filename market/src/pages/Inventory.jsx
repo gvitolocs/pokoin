@@ -238,7 +238,7 @@ export default function Inventory() {
       ) : null}
 
       {!onImportTab && rows == null && !error ? (
-        <DeskPanel title="MyPokoin"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
+        <DeskPanel title="Listings"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       ) : null}
       {!onImportTab && rows && !rows.length ? (
         <EmptyDesk title="No live listings" lede="Scan a pile with your phone, import a CSV, or open a card and use List your card.">

@@ -58,6 +58,7 @@ import SyncReview from './pages/SyncReview.jsx';
 import Collection from './pages/Collection.jsx';
 import NftRedirect from './pages/Nft.jsx';
 import Protection from './pages/Protection.jsx';
+import Flex from './pages/Flex.jsx';
 import EmailPreferences from './pages/EmailPreferences.jsx';
 import Site from './pages/Site.jsx';
 import About from './pages/About.jsx';
@@ -210,6 +211,7 @@ function AppShell() {
       {both('/privacy', <Site />)}
       {both('/email-preferences', <EmailPreferences />)}
       {both('/protection', <Protection />)}
+      {both('/flex', <Flex />)}
       {both('/buy', <Buy />)}
       {both('/earn', <Site />)}
       {both('/whitepaper', <Site />)}

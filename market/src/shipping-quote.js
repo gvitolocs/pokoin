@@ -69,7 +69,24 @@ export function shippingServiceOptions({ fromCountry, toCountry, cardCount }) {
   if (untracked && (!tracked || untracked.rateId !== tracked.rateId)) {
     options.push({ id: 'untracked', label: 'Untracked', ...untracked });
   }
+  // Always offer Pokoin Flex in the chooser, disabled until partner stores launch.
+  options.push(pokoinFlexOption());
   return options;
+}
+
+/** Checkout-only placeholder: partner-store pick-up / drop-off, not selectable yet. */
+export function pokoinFlexOption() {
+  return {
+    id: 'pokoin_flex',
+    label: 'Pokoin Flex',
+    brand: 'pokoin-flex',
+    unavailable: true,
+    unavailableReason: 'Coming soon — Flex boxes (sturdy + padded), drop at a partner, fill a ~20 kg bag.',
+    href: '/flex',
+    amountCents: null,
+    serviceName: 'Partner store',
+    carrier: 'Pokoin Flex',
+  };
 }
 
 /** 1 PKN = 0.005 EUR → PKN from EUR cents. */

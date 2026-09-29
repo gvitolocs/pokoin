@@ -1075,6 +1075,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/flex/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/flex",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/buy/",
       "destination": "/market/index.html"
     },

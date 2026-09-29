@@ -395,7 +395,7 @@
     "auth": "create_code: Firebase bearer token. redeem/status/unlink: service bearer token (POKO_MARKET_SERVICE_TOKEN or POKONTACT_SERVICE_TOKEN).",
     "params": {
       "query": "none",
-      "body": "{ action: create_code|redeem|status|unlink, ... } — create_code takes no params; redeem takes code + telegram { userId, username, displayName }; status/unlink take telegramUserId."
+      "body": "{ action: create_code|redeem|status|unlink, ... } \u2014 create_code takes no params; redeem takes code + telegram { userId, username, displayName }; status/unlink take telegramUserId."
     },
     "dependencies": {
       "env": [
@@ -429,6 +429,26 @@
       ],
       "services": [
         "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/pokoin-partner",
+    "file": "pokoin-partner.js",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "purpose": "Pokoin Flex partner-store directory (public) and Partner app intake/bag/handoff contract (mutations coming_soon).",
+    "auth": "directory/contract public; intake/bag/receive-hub/handoff/pending will require partner auth when live.",
+    "params": {
+      "query": "action=directory|contract|pending (storeId when partner auth exists).",
+      "body": "action plus storeId, parcelQr/bagQr/pickupQr as documented by action=contract."
+    },
+    "dependencies": {
+      "env": [],
+      "services": [
+        "Partner store directory (placeholder until Flex launch)"
       ]
     }
   }

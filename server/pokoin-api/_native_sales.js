@@ -319,6 +319,7 @@ function sellerHistoryRow(orderId, order = {}, sellerUid) {
     disputeStatus: cleanText(order.disputeStatus, 40),
     soldAt: toIso(order.paidAt || order.createdAt),
     shippedAt: toIso(order.shippedAt),
+    trackingCode: cleanText(order.trackingCode, 80),
     items: share.items.map((item) => ({
       listingId: cleanText(item.listingId, 160),
       cardId: itemCardId(item),

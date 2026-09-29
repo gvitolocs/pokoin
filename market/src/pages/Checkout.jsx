@@ -211,8 +211,9 @@ export default function Checkout() {
 
   useEffect(() => {
     if (!shipOptions.length) return;
-    if (!shipOptions.some((row) => row.id === shippingService)) {
-      setShippingService(shipOptions[0].id);
+    const selectable = shipOptions.filter((row) => !row.unavailable);
+    if (!selectable.some((row) => row.id === shippingService)) {
+      setShippingService(selectable[0]?.id || shipOptions[0].id);
     }
   }, [shipOptions, shippingService]);
 
@@ -495,29 +496,56 @@ export default function Checkout() {
                 {shipOptions.length ? (
                   <div className="checkout-pay" role="radiogroup" aria-label="Shipping service">
                     <span className="checkout-pay-label">Shipping</span>
-                    {shipOptions.map((option) => (
-                      <label
-                        key={option.id}
-                        className={`checkout-pay-option${shippingService === option.id ? ' is-on' : ''}`}
-                      >
-                        <input
-                          type="radio"
-                          name="shippingService"
-                          checked={shippingService === option.id}
-                          onChange={() => setShippingService(option.id)}
-                        />
-                        <span>
-                          <strong>{option.label}</strong>
-                          <em>
-                            {moneyFromEurCents(option.amountCents)}
-                            {option.serviceName ? ` · ${option.serviceName}` : ''}
-                            {option.fromCountry && option.toCountry
-                              ? ` · ${option.fromCountry} → ${option.toCountry}`
-                              : ''}
-                          </em>
-                        </span>
-                      </label>
-                    ))}
+                    {shipOptions.map((option) => {
+                      const unavailable = Boolean(option.unavailable);
+                      return (
+                        <label
+                          key={option.id}
+                          className={`checkout-pay-option${shippingService === option.id ? ' is-on' : ''}${unavailable ? ' is-unavailable' : ''}${option.brand === 'pokoin-flex' ? ' is-pokoin-flex' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="shippingService"
+                            checked={!unavailable && shippingService === option.id}
+                            disabled={unavailable}
+                            onChange={() => {
+                              if (!unavailable) setShippingService(option.id);
+                            }}
+                          />
+                          <span>
+                            {option.brand === 'pokoin-flex' ? (
+                              <strong className="pokoin-flex-mark is-inline" aria-label="Pokoin Flex">
+                                <img className="pokoin-flex-logo" src="/home/logo.png" alt="" width="22" height="22" />
+                                <span className="pokoin-flex-word">
+                                  <span className="pokoin-flex-pokoin">Pokoin</span>
+                                  {' '}
+                                  <span className="pokoin-flex-flex">Flex</span>
+                                </span>
+                              </strong>
+                            ) : (
+                              <strong>{option.label}</strong>
+                            )}
+                            <em>
+                              {unavailable
+                                ? (option.unavailableReason || 'Unavailable')
+                                : [
+                                  moneyFromEurCents(option.amountCents),
+                                  option.serviceName,
+                                  option.fromCountry && option.toCountry
+                                    ? `${option.fromCountry} → ${option.toCountry}`
+                                    : '',
+                                ].filter(Boolean).join(' · ')}
+                              {unavailable ? (
+                                <>
+                                  {' · '}
+                                  <Link to={option.href || '/flex'}>How Flex works</Link>
+                                </>
+                              ) : null}
+                            </em>
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                 ) : quoteError ? (
                   <Alert>{quoteError}</Alert>

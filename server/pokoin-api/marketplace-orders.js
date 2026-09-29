@@ -96,6 +96,7 @@ function orderPayload(orderId, data) {
     sellerUids: Array.isArray(data.sellerUids) ? data.sellerUids : [],
     disputeStatus: data.disputeStatus || '',
     shippedAt: timestampToIso(data.shippedAt),
+    trackingCode: data.trackingCode || '',
     escrowReleasedAt: timestampToIso(data.escrowReleasedAt),
     createdAt: timestampToIso(data.createdAt),
     updatedAt: timestampToIso(data.updatedAt),
@@ -1214,7 +1215,7 @@ async function revealShippingAddress({ firestore, decoded, orderId }) {
   return { shippingAddress };
 }
 
-async function markShipped({ admin, firestore, decoded, orderId }) {
+async function markShipped({ admin, firestore, decoded, orderId, trackingCode }) {
   const { orderRef, data } = await loadOrderOrThrow(firestore, orderId);
   if (!sellerOnOrder(data, decoded.uid)) {
     const error = new Error('You cannot mark this order shipped.');
@@ -1226,10 +1227,17 @@ async function markShipped({ admin, firestore, decoded, orderId }) {
     error.statusCode = 400;
     throw error;
   }
+  const tracking = cleanText(trackingCode, 80);
+  if (!tracking) {
+    const error = new Error('Add the shipping tracking code before marking shipped.');
+    error.statusCode = 400;
+    throw error;
+  }
   const now = admin.firestore.FieldValue.serverTimestamp();
   await orderRef.set({
     fulfillmentStatus: 'shipped',
     shippedAt: now,
+    trackingCode: tracking,
     updatedAt: now,
   }, { merge: true });
   const next = await orderRef.get();
@@ -1434,7 +1442,13 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ ok: true, ...result });
       }
       if (action === 'mark-shipped') {
-        const result = await markShipped({ admin, firestore, decoded, orderId });
+        const result = await markShipped({
+          admin,
+          firestore,
+          decoded,
+          orderId,
+          trackingCode: req.body?.trackingCode,
+        });
         return res.status(200).json({ ok: true, ...result });
       }
       if (action === 'reveal-shipping') {

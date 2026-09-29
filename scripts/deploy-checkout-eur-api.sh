@@ -39,6 +39,8 @@ FILES=(
   marketplace-native-sales.js
   stripe-webhook.js
   marketplace-orders.js
+  pokoin-partner.js
+  pokoin-partner.test.js
   marketplace-listings.js
   route-definitions.json
   patch-route-manifest.js
@@ -64,6 +66,7 @@ ADDRESS_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
     "$SRC/_eur_order_inventory.test.js" \
     "$SRC/_native_sales.test.js" \
     "$SRC/_order_refund.test.js" \
+    "$SRC/pokoin-partner.test.js" \
     "$SRC/patch-route-manifest.test.js"
 for file in account-addresses.js marketplace-checkout-quote.js marketplace-seller-settings.js \
   stripe-connect-onboard.js create-order-checkout-session.js stripe-webhook.js marketplace-orders.js \

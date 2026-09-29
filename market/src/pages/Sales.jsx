@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { fetchSoldHistory, refundMarketplaceOrder } from '../api.js';
+import { fetchSoldHistory, markMarketplaceShipped, refundMarketplaceOrder } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { inventoryListingHref } from '../inventory-listings.js';
@@ -126,6 +126,9 @@ export default function Sales() {
   const [notice, setNotice] = useState('');
   const [source, setSource] = useState('all');
   const [openId, setOpenId] = useState(() => decodeURIComponent(String(location.hash || '').replace(/^#/, '')));
+  const [shipId, setShipId] = useState('');
+  const [trackingDraft, setTrackingDraft] = useState({});
+  const [shipBusy, setShipBusy] = useState('');
 
   useEffect(() => {
     document.title = 'Sold history · Pokoin';
@@ -172,6 +175,36 @@ export default function Sales() {
       setSales((current) => (current || []).map((row) => (
         row.orderId === orderId && row.source !== 'cardtrader' ? { ...result.sale, source: 'pokoin' } : row
       )));
+    }
+  }
+
+  async function shipOrder(orderId) {
+    const trackingCode = String(trackingDraft[orderId] || '').trim();
+    if (!trackingCode) {
+      setError('Add the shipping tracking code before marking shipped.');
+      return;
+    }
+    setShipBusy(orderId);
+    setError('');
+    try {
+      const token = await getBearer();
+      const result = await markMarketplaceShipped(orderId, token, { trackingCode });
+      setSales((current) => (current || []).map((row) => (
+        row.orderId === orderId && row.source !== 'cardtrader'
+          ? {
+            ...row,
+            fulfillmentStatus: result.order?.fulfillmentStatus || 'shipped',
+            shippedAt: result.order?.shippedAt || new Date().toISOString(),
+            trackingCode: result.order?.trackingCode || trackingCode,
+          }
+          : row
+      )));
+      setShipId('');
+      setNotice(`Marked ${orderId} shipped · ${trackingCode}`);
+    } catch (err) {
+      setError(err.message || 'Could not mark shipped.');
+    } finally {
+      setShipBusy('');
     }
   }
 
@@ -238,9 +271,15 @@ export default function Sales() {
                 ? { label: row.paymentStatus === 'cancelled' ? 'Cancelled' : 'CardTrader', tone: row.paymentStatus === 'cancelled' ? 'muted' : 'ct' }
                 : orderStatus(row);
               const open = openId === row.orderId && !ct;
+              const shipping = shipId === row.orderId && !ct;
+              const needsShip = !ct
+                && ['paid', 'escrow'].includes(row.paymentStatus)
+                && row.fulfillmentStatus !== 'shipped'
+                && row.fulfillmentStatus !== 'delivered'
+                && !row.shippedAt;
               return (
                 <article
-                  className={`thread sale-row${open ? ' is-focus' : ''}`}
+                  className={`thread sale-row${open || shipping ? ' is-focus' : ''}`}
                   key={`${row.source}-${row.orderId}-${row.items?.[0]?.listingId || ''}`}
                   id={`sale-${row.orderId}`}
                 >
@@ -258,6 +297,7 @@ export default function Sales() {
                       {formatOrderMoney(row.gross, row.currency)}
                       {row.refunded ? ` · ${formatOrderMoney(row.refunded, row.currency)} refunded` : ''}
                       {ct && row.ctOrderCode ? ` · CT ${row.ctOrderCode}` : ''}
+                      {row.trackingCode ? ` · Tracking ${row.trackingCode}` : ''}
                     </span>
                     <span className="sale-lines">
                       {(row.items || []).map((item) => (
@@ -284,6 +324,31 @@ export default function Sales() {
                         {refund.status === 'pending' ? ' (processing)' : ''}
                       </span>
                     ))}
+                    {shipping ? (
+                      <label className="order-tracking-field">
+                        Tracking code
+                        <input
+                          value={trackingDraft[row.orderId] || ''}
+                          onChange={(event) => setTrackingDraft((current) => ({
+                            ...current,
+                            [row.orderId]: event.target.value,
+                          }))}
+                          placeholder="Carrier tracking number"
+                          autoComplete="off"
+                        />
+                        <span className="order-actions">
+                          <button
+                            className="btn"
+                            type="button"
+                            disabled={shipBusy === row.orderId || !String(trackingDraft[row.orderId] || '').trim()}
+                            onClick={() => shipOrder(row.orderId)}
+                          >
+                            {shipBusy === row.orderId ? 'Saving…' : 'Mark shipped'}
+                          </button>
+                          <button className="btn ghost" type="button" onClick={() => setShipId('')}>Cancel</button>
+                        </span>
+                      </label>
+                    ) : null}
                     {open ? (
                       <RefundForm
                         row={row}
@@ -292,11 +357,18 @@ export default function Sales() {
                       />
                     ) : null}
                   </span>
-                  {!ct && row.refundable > 0 && !open ? (
+                  {!ct && !open && !shipping ? (
                     <span className="order-actions">
-                      <button className="btn ghost" type="button" onClick={() => setOpenId(row.orderId)}>
-                        Refund
-                      </button>
+                      {needsShip ? (
+                        <button className="btn ghost" type="button" onClick={() => { setOpenId(''); setShipId(row.orderId); }}>
+                          Add tracking
+                        </button>
+                      ) : null}
+                      {row.refundable > 0 ? (
+                        <button className="btn ghost" type="button" onClick={() => { setShipId(''); setOpenId(row.orderId); }}>
+                          Refund
+                        </button>
+                      ) : null}
                     </span>
                   ) : null}
                 </article>
