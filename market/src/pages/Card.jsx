@@ -87,6 +87,7 @@ import { cardDocumentTitle, displayName, printingIdentity } from '../identity.js
 import { defaultCardLanguage, getSearchLang, languagesForNationality, rewriteCatalogLang, searchLangFromPath } from '../locale.js';
 import { sellLanguages, versionRedirects } from '../listing-languages.js';
 import ListingLangPick from '../components/ListingLangPick.jsx';
+import { SILVER_PRICE_PKN } from '../silver.js';
 import ExpansionMark from '../components/ExpansionMark.jsx';
 import { Action, track } from '../track.js';
 import { LIST_CURRENCIES, fiatFromPkn, listingPriceToPkn } from '../pkn.js';
@@ -1348,7 +1349,7 @@ function SilverHead({ card, fromPath }) {
     <div className="silver-tools">
       {signedIn ? (
         <button className="silver-link" type="button" disabled={busy} onClick={unlock}>
-          {busy ? 'Unlocking…' : `Unlock Silver · 20 PKN`}
+          {busy ? 'Unlocking…' : `Unlock Silver · ${SILVER_PRICE_PKN} PKN`}
         </button>
       ) : (
         <Link className="silver-link" to={authFrom(fromPath)}>Sign in to unlock</Link>
