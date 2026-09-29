@@ -223,3 +223,30 @@ test('Pi API down: GETs are answered by nezopt, writes still fail fast', async (
     nezopt.close();
   }
 });
+
+test('a 404 on one URL does not switch caching off for the whole endpoint', async () => {
+  const srv = http.createServer((req, res) => {
+    srv.hits = (srv.hits || 0) + 1;
+    const missing = req.url.includes('slug=nope');
+    res.writeHead(missing ? 404 : 200, {
+      'content-type': 'application/json',
+      'cache-control': missing ? 'public, max-age=30' : 'public, s-maxage=300',
+    });
+    res.end(JSON.stringify({ n: srv.hits }));
+  });
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve));
+  const { port, child } = await startEdge({ POKOIN_API_ORIGIN: `http://127.0.0.1:${srv.address().port}` });
+  try {
+    assert.equal((await request(port, 'GET', '/api/marketplace-expansion-page?slug=nope')).status, 404);
+    const path = '/api/marketplace-expansion-page?limit=500';
+    assert.equal((await request(port, 'GET', path)).cache, 'MISS');
+    assert.equal((await request(port, 'GET', path)).cache, 'HIT');
+    const before = srv.hits;
+    const burst = await Promise.all(Array.from({ length: 5 }, () => request(port, 'GET', '/api/marketplace-expansion-page?slug=new')));
+    assert.ok(burst.every((row) => row.status === 200 && ['MISS', 'COALESCED', 'HIT'].includes(row.cache)));
+    assert.equal(srv.hits - before, 1);
+  } finally {
+    child.kill();
+    srv.close();
+  }
+});
