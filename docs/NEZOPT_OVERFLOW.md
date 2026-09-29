@@ -22,6 +22,26 @@ Cloudflare tunnel → Pi pokoin-api-edge :18079 ─┬─ Pi API :18080 (always 
   marked unhealthy until the next good probe.
 - Every response carries `x-pokoin-origin: pi` or `nezopt`.
 - If nezopt is off, the Pi behaves exactly as before the overflow existed.
+- If the **Pi API refuses the connection** (restart, crash), GET/HEAD requests
+  go to nezopt when it is healthy instead of answering 502.
+
+## Edge micro-cache
+
+The edge also caches public GET responses in memory (64 MB LRU,
+`POKOIN_API_CACHE_MB`), for the API's own `s-maxage` (else `max-age`, capped
+at 300 s) plus `stale-while-revalidate`:
+
+- Only GETs without `Authorization`/`Cookie`; only `200`, `public`, no
+  `private`/`no-store`/`no-cache`/`Set-Cookie`, not `text/event-stream`, ≤ 2 MB.
+- Key: path + query + `x-pokoin-game` + `x-pokoin-host`. API responses carry
+  `Access-Control-Allow-Origin: *`, no `Vary` and no compression.
+- **Coalescing**: concurrent misses for one key make one upstream request;
+  the rest get `COALESCED`. Expired entries inside the SWR window are served
+  `STALE` while one refresh runs. This removes the home-feed stampede.
+- Responses that must not be stored are streamed straight through
+  (`BYPASS`), and their path skips coalescing for 5 min.
+- Header `x-pokoin-edge-cache: HIT | MISS | STALE | COALESCED | BYPASS`;
+  a per-minute summary line goes to `journalctl -u pokoin-api-edge`.
 
 ## What runs on nezopt
 

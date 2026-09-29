@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process');
 const http = require('node:http');
 const path = require('node:path');
 const test = require('node:test');
-const { chooseApiOrigin, isApiPath } = require('./pokoin-api-edge.js');
+const { cacheKey, cachePolicy, chooseApiOrigin, isApiPath, ResponseCache } = require('./pokoin-api-edge.js');
 
 const base = { inFlight: 24, localMax: 24, overflowHealthy: true, overflowOrigin: 'http://nezopt:30880' };
 
@@ -20,27 +20,38 @@ test('only saturated GET/HEAD API calls overflow, and only to a healthy nezopt',
   assert.equal(isApiPath('/some-image.webp'), false);
 });
 
-function server(name, delayMs) {
+function server(name, delayMs, cacheControl = '') {
   const srv = http.createServer((req, res) => {
+    srv.hits = (srv.hits || 0) + 1;
     setTimeout(() => {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ served: name, method: req.method }));
+      const headers = { 'content-type': 'application/json' };
+      if (cacheControl) headers['cache-control'] = cacheControl;
+      res.writeHead(200, headers);
+      res.end(JSON.stringify({ served: name, method: req.method, n: srv.hits }));
     }, delayMs);
   });
   return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve(srv)));
 }
 
-function request(port, method = 'GET', pathname = '/api/marketplace-suggest?q=pika') {
+let seq = 0;
+function request(port, method = 'GET', pathname = `/api/marketplace-suggest?q=pika${seq += 1}`, headers = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port, method, path: pathname }, (res) => {
+    const req = http.request({ host: '127.0.0.1', port, method, path: pathname, headers }, (res) => {
       let body = '';
       res.on('data', (chunk) => { body += chunk; });
-      res.on('end', () => resolve({ origin: res.headers['x-pokoin-origin'], body: JSON.parse(body || '{}') }));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        origin: res.headers['x-pokoin-origin'],
+        cache: res.headers['x-pokoin-edge-cache'],
+        body: (() => { try { return JSON.parse(body || '{}'); } catch { return { text: body }; } })(),
+      }));
     });
     req.on('error', reject);
     req.end(method === 'POST' ? '{}' : undefined);
   });
 }
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Start the real edge; a taken random port makes it exit, so try another. */
 async function startEdge(env) {
@@ -103,5 +114,112 @@ test('nezopt down: everything stays on the Pi', async () => {
   } finally {
     child.kill();
     pi.close();
+  }
+});
+
+test('cache policy stores only public, sized, non-personal 200s', () => {
+  assert.deepEqual(cachePolicy(200, { 'cache-control': 'public, max-age=10, s-maxage=30, stale-while-revalidate=60' }), { ttl: 30, swr: 60 });
+  assert.deepEqual(cachePolicy(200, { 'cache-control': 'public, max-age=60' }), { ttl: 60, swr: 0 });
+  assert.deepEqual(cachePolicy(200, { 'cache-control': 'public, s-maxage=86400' }), { ttl: 300, swr: 0 });
+  assert.equal(cachePolicy(200, { 'cache-control': 'private, no-store' }), null);
+  assert.equal(cachePolicy(200, { 'cache-control': 'public, no-cache, max-age=5' }), null);
+  assert.equal(cachePolicy(200, {}), null);
+  assert.equal(cachePolicy(404, { 'cache-control': 'public, max-age=60' }), null);
+  assert.equal(cachePolicy(200, { 'cache-control': 'public, max-age=60', 'set-cookie': ['a=b'] }), null);
+  assert.equal(cachePolicy(200, { 'cache-control': 'public, max-age=60', 'content-type': 'text/event-stream' }), null);
+
+  const anon = { method: 'GET', headers: { 'x-pokoin-game': 'one_piece' } };
+  assert.equal(cacheKey(anon, '/api/x', '?a=1'), '/api/x?a=1\none_piece\n');
+  assert.equal(cacheKey({ method: 'GET', headers: { authorization: 'Bearer t' } }, '/api/x', ''), null);
+  assert.equal(cacheKey({ method: 'GET', headers: { cookie: 'c=1' } }, '/api/x', ''), null);
+  assert.equal(cacheKey({ method: 'POST', headers: {} }, '/api/x', ''), null);
+
+  const lru = new ResponseCache(10);
+  lru.set('a', { body: Buffer.alloc(4) });
+  lru.set('b', { body: Buffer.alloc(4) });
+  lru.get('a');
+  lru.set('c', { body: Buffer.alloc(4) });
+  assert.equal(lru.get('b'), null);
+  assert.ok(lru.get('a') && lru.get('c'));
+  assert.equal(lru.bytes, 8);
+});
+
+test('identical public GETs are built once, then served from the edge', async () => {
+  const pi = await server('pi', 150, 'public, max-age=10, s-maxage=30, stale-while-revalidate=60');
+  const { port, child } = await startEdge({ POKOIN_API_ORIGIN: `http://127.0.0.1:${pi.address().port}` });
+  try {
+    const path = '/api/marketplace-home?v=rising-month';
+    const burst = await Promise.all(Array.from({ length: 10 }, () => request(port, 'GET', path)));
+    assert.equal(pi.hits, 1);
+    assert.equal(burst.filter((row) => row.cache === 'MISS').length, 1);
+    assert.equal(burst.filter((row) => row.cache === 'COALESCED').length, 9);
+    assert.ok(burst.every((row) => row.status === 200 && row.body.n === 1));
+    const again = await request(port, 'GET', path);
+    assert.equal(again.cache, 'HIT');
+    assert.equal(pi.hits, 1);
+    const personal = await request(port, 'GET', path, { authorization: 'Bearer user' });
+    assert.equal(personal.body.n, 2);
+    assert.equal(personal.cache, undefined);
+  } finally {
+    child.kill();
+    pi.close();
+  }
+});
+
+test('expired entries are served stale while one refresh runs', async () => {
+  const pi = await server('pi', 50, 'public, s-maxage=1, stale-while-revalidate=30');
+  const { port, child } = await startEdge({ POKOIN_API_ORIGIN: `http://127.0.0.1:${pi.address().port}` });
+  try {
+    const path = '/api/marketplace-artist-cards?summaries=1';
+    assert.equal((await request(port, 'GET', path)).cache, 'MISS');
+    await wait(1100);
+    const stale = await Promise.all(Array.from({ length: 5 }, () => request(port, 'GET', path)));
+    assert.ok(stale.every((row) => row.cache === 'STALE' && row.body.n === 1));
+    await wait(150);
+    assert.equal(pi.hits, 2);
+    const fresh = await request(port, 'GET', path);
+    assert.equal(fresh.cache, 'HIT');
+    assert.equal(fresh.body.n, 2);
+  } finally {
+    child.kill();
+    pi.close();
+  }
+});
+
+test('no-store responses are streamed and never cached', async () => {
+  const pi = await server('pi', 20, 'private, no-store');
+  const { port, child } = await startEdge({ POKOIN_API_ORIGIN: `http://127.0.0.1:${pi.address().port}` });
+  try {
+    const path = '/api/marketplace-listings?cardId=1&nativeOnly=1';
+    const first = await request(port, 'GET', path);
+    const second = await request(port, 'GET', path);
+    assert.equal(first.cache, 'BYPASS');
+    assert.equal(second.body.n, 2);
+  } finally {
+    child.kill();
+    pi.close();
+  }
+});
+
+test('Pi API down: GETs are answered by nezopt, writes still fail fast', async () => {
+  const nezopt = await server('nezopt', 5, 'public, max-age=10');
+  const { port, child } = await startEdge({
+    POKOIN_API_ORIGIN: 'http://127.0.0.1:1',
+    POKOIN_API_OVERFLOW_ORIGIN: `http://127.0.0.1:${nezopt.address().port}`,
+    POKOIN_API_OVERFLOW_PROBE_MS: '100',
+  });
+  try {
+    await wait(250);
+    const cached = await request(port, 'GET', '/api/marketplace-card-page?cardId=1');
+    assert.equal(cached.status, 200);
+    assert.equal(cached.origin, 'nezopt');
+    const personal = await request(port, 'GET', '/api/marketplace-orders', { authorization: 'Bearer user' });
+    assert.equal(personal.status, 200);
+    assert.equal(personal.origin, 'nezopt');
+    const write = await request(port, 'POST', '/api/marketplace-event');
+    assert.equal(write.status, 502);
+  } finally {
+    child.kill();
+    nezopt.close();
   }
 });
