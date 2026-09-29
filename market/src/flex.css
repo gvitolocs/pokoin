@@ -257,6 +257,21 @@
   color: var(--yellow);
 }
 
+.flex-services label {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.flex-services small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.flex-services label.is-on small {
+  color: var(--text);
+}
+
 .flex-seg input {
   position: absolute;
   opacity: 0;
