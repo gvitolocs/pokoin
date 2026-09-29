@@ -311,7 +311,6 @@ export default function Auth() {
         <PageHead
           kicker="Account"
           title={mode === 'signup' ? 'Create account' : 'Sign in'}
-          lede="Same Firebase project as Android/iOS. Returns to the page you left."
         />
         <form className="desk-panel" onSubmit={onEmail}>
           <div className="desk-body">
