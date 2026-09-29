@@ -539,7 +539,7 @@ function marketPricePkn(row = {}) {
   return Math.round(market * 100) / 100;
 }
 
-/** Sold price for today, keyed by CardTrader blueprint. Own asks stay off the row. */
+/** Last sold price, keyed by CardTrader blueprint. Own asks stay off the row. */
 function applyDumpMinimums(rows, priceRows) {
   const byId = new Map();
   for (const price of priceRows || []) {

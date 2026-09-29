@@ -3,6 +3,7 @@ const { marketplaceQuery } = require('../server/_marketplace_db');
 const { readIntegrationDoc } = require('./_cardtrader_integration');
 const { readOneDayReadyAssets, readSellerSync } = require('./_cardtrader_inventory_sync');
 const { applyDumpMinimums, marketPricePkn, oneDayReadyTotals } = require('./_cardtrader_inventory_sync_core');
+const { lastSoldPrices, utcDayKey } = require('./_portfolio_history_core');
 
 /**
  * GET /api/cardtrader-assets — the signed-in seller's CardTrader 1-Day Ready
@@ -10,28 +11,36 @@ const { applyDumpMinimums, marketPricePkn, oneDayReadyTotals } = require('./_car
  * never a Pokoin listing; the dashboard shows it as "CardTrader 1-DR".
  */
 
-const SOLD_TODAY_SQL = `
-  select blueprint_id::text as blueprint_id,
-         sum(median_pkn * sold_qty) / nullif(sum(sold_qty), 0) as pkn
+/** Sold facet rows behind each card's last sold price (same basis as the chart). */
+const SOLD_ROWS_SQL = `
+  select observed_day::text as day,
+         blueprint_id::text as blueprint_id,
+         reverse,
+         first_edition,
+         graded,
+         median_pkn::float8 as median_pkn,
+         sold_qty
   from public.cardtrader_sold_daily
-  where blueprint_id::text = any($1::text[])
-    and observed_day = (timezone('utc', now()))::date
+  where blueprint_id = any($1::bigint[])
+    and observed_day >= (timezone('utc', now()))::date - 180
     and median_pkn > 0
     and sold_qty > 0
-  group by blueprint_id
 `;
 
-async function withSoldToday(rows) {
+async function withLastSold(rows) {
   const ids = [...new Set((rows || []).map((row) => String(row.blueprint_id || '')).filter((id) => /^\d+$/.test(id)))];
   if (!ids.length) return applyDumpMinimums(rows, []);
-  let prices = [];
+  let priceOf = () => null;
   try {
-    const result = await marketplaceQuery(SOLD_TODAY_SQL, [ids]);
-    prices = result?.rows || [];
+    const result = await marketplaceQuery(SOLD_ROWS_SQL, [ids]);
+    priceOf = lastSoldPrices(result?.rows || [], utcDayKey(new Date()));
   } catch (error) {
-    console.error('1dr sold today failed', { message: error.message });
+    console.error('1dr last sold failed', { message: error.message });
   }
-  return applyDumpMinimums(rows, prices);
+  return (rows || []).map((row) => {
+    const pkn = priceOf(row.blueprint_id, row);
+    return { ...row, market_pkn: pkn > 0 ? pkn : null };
+  });
 }
 
 function assetItem(row = {}) {
@@ -74,9 +83,9 @@ async function readAssetsPayload(firestore, uid) {
   }
   let priced = rows;
   try {
-    priced = await withSoldToday(rows);
+    priced = await withLastSold(rows);
   } catch (error) {
-    console.error('1dr sold today failed', { message: error.message });
+    console.error('1dr last sold failed', { message: error.message });
     priced = applyDumpMinimums(rows, []);
   }
   const items = priced.map(assetItem).sort((a, b) => (

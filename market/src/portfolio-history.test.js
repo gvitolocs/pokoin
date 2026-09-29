@@ -229,18 +229,25 @@ test('today stops at two thirds and the rest of the plot is a projection', () =>
   assert.equal(known.day.date, '2026-09-01');
 });
 
-test('card projection is a one-step regression of sold days', () => {
-  const rising = [
-    normalizeHistoryDay({ date: '2026-09-24', currencyPkn: 0, cardsKnown: true, cardsValuePkn: 100 }),
-    normalizeHistoryDay({ date: '2026-09-25', currencyPkn: 0, cardsKnown: true, cardsValuePkn: 200 }),
-  ];
-  assert.deepEqual(projectCardValue(rising), { value: 300, slope: 100, days: 2 });
-  const tip = formatHistoryTip(rising[1], { projection: true, forecast: projectCardValue(rising) });
-  assert.ok(tip.rows.some((row) => row.label === 'Projection' && row.value === '300 PKN'));
+test('card projection is one day along the median daily slope', () => {
+  const rising = [100, 200, 300, 400, 500].map((value, index) => normalizeHistoryDay({
+    date: `2026-09-2${index}`, currencyPkn: 0, cardsKnown: true, cardsValuePkn: value,
+  }));
+  assert.deepEqual(projectCardValue(rising), { value: 600, slope: 100, days: 5 });
+  const tip = formatHistoryTip(rising[4], { projection: true, forecast: projectCardValue(rising) });
+  assert.ok(tip.rows.some((row) => row.label === 'Projection' && row.value === '600 PKN'));
   const walletOnly = [
     normalizeHistoryDay({ date: '2026-09-25', currencyPkn: 15 }),
     normalizeHistoryDay({ date: '2026-09-26', currencyPkn: 15 }),
   ];
   assert.equal(projectCardValue(walletOnly), null);
-  assert.equal(projectCardValue([rising[0]]), null);
+  assert.equal(projectCardValue(rising.slice(0, 4)), null);
+});
+
+test('one spike does not bend the projection', () => {
+  const values = [1500, 1500, 3250000, 1500, 1500, 1500, 1500];
+  const days = values.map((value, index) => normalizeHistoryDay({
+    date: `2026-09-2${index}`, currencyPkn: 0, cardsKnown: true, cardsValuePkn: value,
+  }));
+  assert.deepEqual(projectCardValue(days), { value: 1500, slope: 0, days: 7 });
 });

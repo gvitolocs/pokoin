@@ -92,7 +92,7 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(homeSrc, /marketUrl\(APP\.collection\)/);
   assert.match(viewSrc, /Cards owned|Card owned/);
   assert.match(viewSrc, /Number\(ownedCards\) \|\| 0\) \+ oneDayReadyCards/);
-  assert.match(viewSrc, /title="Sold today"/);
+  assert.match(viewSrc, /title="Each card at its last CardTrader sold price"/);
   assert.doesNotMatch(viewSrc, /Dump minimum/);
   assert.match(viewSrc, /collection-history-hatch/);
   assert.match(viewSrc, /Listed for sale/);
