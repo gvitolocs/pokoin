@@ -81,3 +81,42 @@ export const INVITE_STATUS_LABEL = {
   pending: 'Joined · waiting for a first purchase or sale',
   rewarded: 'Activated',
 };
+
+// Last /api/marketplace-referral answer per account, so /invite, the
+// ambassador trainer card and the ambassador desk paint instantly and then
+// refresh. Only ever shown back to the same uid.
+export const REFERRAL_CACHE_KEY = 'pokoin.referral.cache.v1';
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function readReferralCache(uid, nowMs = Date.now(), store = storage()) {
+  if (!uid || !store) return null;
+  try {
+    const row = JSON.parse(store.getItem(REFERRAL_CACHE_KEY) || 'null');
+    if (!row || row.uid !== uid || nowMs - Number(row.at || 0) > CACHE_TTL_MS) return null;
+    return row.payload && typeof row.payload === 'object' ? row.payload : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function writeReferralCache(uid, payload, nowMs = Date.now(), store = storage()) {
+  if (!uid || !store || !payload) return;
+  try {
+    store.setItem(REFERRAL_CACHE_KEY, JSON.stringify({ uid, at: nowMs, payload }));
+  } catch (_) {
+    // Quota or private mode: the page just fetches.
+  }
+}
+
+/** A signed-in visitor with no answer yet starts as a Collector. */
+export const COLLECTOR_PROGRESS = {
+  tier: 'collector',
+  city: '',
+  completed: [],
+  activatedReferrals: 0,
+  referralTarget: 3,
+  onRoster: false,
+  founder: false,
+  next: { tier: 'ambassador', missionsLeft: 3 },
+  contributions: [],
+};

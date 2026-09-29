@@ -45,10 +45,37 @@ function toMillis(value) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+// Usernames barely change: keep uid ↔ username in process memory on the Pi so
+// /invite does not pay a Firestore round trip per name. Keyed per Firestore
+// instance (tests use fresh fakes).
+const NAME_TTL_MS = 10 * 60 * 1000;
+const NAME_CACHE_MAX = 5000;
+const nameCaches = new WeakMap();
+
+function nameCache(firestore, kind) {
+  let caches = nameCaches.get(firestore);
+  if (!caches) {
+    caches = { uid: new Map(), username: new Map() };
+    nameCaches.set(firestore, caches);
+  }
+  return caches[kind];
+}
+
+async function cachedLookup(cache, key, load) {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < NAME_TTL_MS) return hit.value;
+  const value = await load();
+  if (cache.size >= NAME_CACHE_MAX) cache.delete(cache.keys().next().value);
+  cache.set(key, { value, at: Date.now() });
+  return value;
+}
+
 async function uidForUsername(firestore, username) {
   if (!username) return '';
-  const doc = await firestore.collection('usernames').doc(username).get();
-  return String(doc.data()?.uid || '').trim();
+  return cachedLookup(nameCache(firestore, 'username'), username, async () => {
+    const doc = await firestore.collection('usernames').doc(username).get();
+    return String(doc.data()?.uid || '').trim();
+  });
 }
 
 function orderQualifies(data, { afterMs, counterpartyUid, role }) {
@@ -240,8 +267,10 @@ async function settlePending({ firestore, FieldValue, nowMs = Date.now(), limit 
 
 async function usernameOf(firestore, uid) {
   if (!uid) return '';
-  const doc = await firestore.collection('users').doc(uid).get();
-  return String(doc.data()?.username || '').trim();
+  return cachedLookup(nameCache(firestore, 'uid'), uid, async () => {
+    const doc = await firestore.collection('users').doc(uid).get();
+    return String(doc.data()?.username || '').trim();
+  });
 }
 
 function publicRow(row, username) {
@@ -263,18 +292,21 @@ async function referralSummary({ firestore, uid }) {
     firestore.collection('referrals').doc(uid).get(),
   ]);
   const invitedRows = invitedSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
-  const names = await Promise.all(invitedRows.map((row) => usernameOf(firestore, row.id)));
+  const mineData = mine.exists ? mine.data() || {} : null;
+  const [inviterName, ...names] = await Promise.all([
+    mineData ? usernameOf(firestore, mineData.referrerUid) : '',
+    ...invitedRows.map((row) => usernameOf(firestore, row.id)),
+  ]);
   const invited = invitedRows
     .map((row, index) => publicRow(row, names[index]))
     .sort((a, b) => String(b.claimedAt || '').localeCompare(String(a.claimedAt || '')));
   const activated = invited.filter((row) => row.status === 'rewarded').length;
   let referredBy = null;
-  if (mine.exists) {
-    const data = mine.data() || {};
+  if (mineData) {
     referredBy = {
-      username: await usernameOf(firestore, data.referrerUid),
-      status: data.status,
-      earnedPkn: data.status === 'rewarded' ? Number(data.referredRewardPkn) || 0 : 0,
+      username: inviterName,
+      status: mineData.status,
+      earnedPkn: mineData.status === 'rewarded' ? Number(mineData.referredRewardPkn) || 0 : 0,
     };
   }
   return {

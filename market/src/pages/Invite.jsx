@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { fetchReferral, formatPknNumber } from '../api.js';
+import { formatPknNumber } from '../api.js';
+import { useReferral } from '../use-referral.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { Alert, DeskPanel, SessionWait } from '../components/Desk.jsx';
@@ -55,28 +56,18 @@ function ShareLink({ link }) {
 
 export default function Invite() {
   const location = useLocation();
-  const { ready, signedIn, getBearer } = useAuth();
-  const [data, setData] = useState(null);
-  const [error, setError] = useState('');
+  const { ready, signedIn } = useAuth();
+  const { data, error, code } = useReferral({ enabled: signedIn });
 
   useEffect(() => {
     document.title = 'Invite & Earn · Pokoin';
   }, []);
 
-  useEffect(() => {
-    if (!signedIn) return undefined;
-    let cancelled = false;
-    getBearer()
-      .then((token) => fetchReferral(token))
-      .then((payload) => { if (!cancelled) setData(payload); })
-      .catch((err) => { if (!cancelled) setError(err?.message || 'Invite & Earn is unreachable right now.'); });
-    return () => { cancelled = true; };
-  }, [signedIn, getBearer]);
-
-  if (!ready) return <SessionWait />;
+  // The session hint says signed in before Firebase is ready: paint now.
+  if (!ready && !signedIn) return <SessionWait />;
   if (!signedIn) return <Navigate to={authFrom(location.pathname || '/invite')} replace />;
 
-  const link = inviteLink(data?.code);
+  const link = inviteLink(code);
   const stats = data?.stats || { invited: 0, pending: 0, activated: 0, earnedPkn: 0 };
 
   return (
@@ -89,9 +80,9 @@ export default function Invite() {
             When someone joins with your link and completes a first purchase or a first sale,
             Pokoin pays {REFERRAL_REWARD_PKN} PKN to each of you.
           </p>
-          {error ? <Alert>{error}</Alert> : null}
-          {!data && !error ? <div className="referral-link is-loading"><div className="skeleton-line" /></div> : null}
-          {data && link ? <ShareLink link={link} /> : null}
+          {error && !data ? <Alert>{error}</Alert> : null}
+          {!link && !data && !error ? <div className="referral-link is-loading"><div className="skeleton-line" /></div> : null}
+          {link ? <ShareLink link={link} /> : null}
           {data && !link ? (
             <Alert>
               Your invite link is your Pokoin username. <Link to="/profile">Pick a username on your profile</Link> to get one.
