@@ -81,8 +81,12 @@ function progressPercent(processed, total) {
   return Math.max(2, Math.min(100, Math.round((100 * p) / t)));
 }
 
-/** CardTrader connect / disconnect / sync panel for Profile. */
-export default function CardTraderConnectPanel({ stripeAction = null }) {
+/**
+ * CardTrader connect / disconnect / sync panel for Profile. `onStatus` hears
+ * every status load so the setup checklist can reflect it; `showWipe` false
+ * leaves Delete all inventory to the page's danger zone.
+ */
+export default function CardTraderConnectPanel({ stripeAction = null, onStatus = null, showWipe = true }) {
   const [status, setStatus] = useState(null);
   const [token, setToken] = useState('');
   const [tokenVisible, setTokenVisible] = useState(false);
@@ -183,6 +187,10 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
     refresh();
     return () => stopPolling();
   }, []);
+
+  useEffect(() => {
+    if (status) onStatus?.({ ...status, syncSummary });
+  }, [status, syncSummary]);
 
   async function onConnect(event) {
     event.preventDefault();
@@ -389,18 +397,20 @@ export default function CardTraderConnectPanel({ stripeAction = null }) {
               {busy ? 'Working…' : 'Disconnect'}
             </button>
           </div>
-          <WipeAllInventory
-            disabled={busy || syncing}
-            onError={(text) => {
-              setError(text || '');
-              if (text) setMessage('');
-            }}
-            onMessage={(text) => {
-              setMessage(text || '');
-              setError('');
-              setSyncSummary(null);
-            }}
-          />
+          {showWipe ? (
+            <WipeAllInventory
+              disabled={busy || syncing}
+              onError={(text) => {
+                setError(text || '');
+                if (text) setMessage('');
+              }}
+              onMessage={(text) => {
+                setMessage(text || '');
+                setError('');
+                setSyncSummary(null);
+              }}
+            />
+          ) : null}
         </>
       ) : null}
       {!loading && !connected ? (

@@ -79,6 +79,8 @@ export function normalizePokoEvent(row = {}) {
     listings: cards,
     images: Array.isArray(row.images) ? row.images : [],
     source: String(row.source || ''),
+    turnId: String(row.turnId || ''),
+    clientTurnId: String(row.clientTurnId || ''),
     createdAt: row.createdAt || null,
   };
 }
@@ -86,6 +88,23 @@ export function normalizePokoEvent(row = {}) {
 export const POKO_CHAT_PAGE = 20;
 /** Soft cap for an open thread after scroll-up loads (not the initial page). */
 const POKO_CHAT_MEMORY = 200;
+
+const ROLE_ORDER = { user: 0, assistant: 1 };
+
+/**
+ * Chat order: time, then a question always before its answer. Old turns were
+ * stored with one shared timestamp, so a tie must never fall to the random id.
+ */
+export function comparePokoEvents(a, b) {
+  const at = Date.parse(a.createdAt) || 0;
+  const bt = Date.parse(b.createdAt) || 0;
+  if (a.turnId && a.turnId === b.turnId && a.role !== b.role) {
+    return ROLE_ORDER[a.role] - ROLE_ORDER[b.role];
+  }
+  if (at !== bt) return at - bt;
+  if (a.role !== b.role) return ROLE_ORDER[a.role] - ROLE_ORDER[b.role];
+  return String(a.id).localeCompare(String(b.id));
+}
 
 export function mergePokoEvents(...pages) {
   const byId = new Map();
@@ -96,12 +115,7 @@ export function mergePokoEvents(...pages) {
       byId.set(event.id, event);
     }
   }
-  return [...byId.values()].sort((a, b) => {
-    const at = Date.parse(a.createdAt) || 0;
-    const bt = Date.parse(b.createdAt) || 0;
-    if (at !== bt) return at - bt;
-    return String(a.id).localeCompare(String(b.id));
-  }).slice(-POKO_CHAT_MEMORY);
+  return [...byId.values()].sort(comparePokoEvents).slice(-POKO_CHAT_MEMORY);
 }
 
 /** Fingerprint a user turn so optimistic local-* rows survive until the server twin arrives. */
@@ -136,15 +150,15 @@ export function pokoEventsSignature(events = []) {
 /** Keep optimistic local-* rows until a matching server user turn arrives. */
 export function reconcilePokoEvents(current, serverEvents) {
   const server = mergePokoEvents(serverEvents);
-  const serverUserKeys = new Set(
-    server
-      .filter((row) => row.role === 'user')
-      .map((row) => pokoUserTurnKey(row)),
-  );
+  const serverUsers = server.filter((row) => row.role === 'user');
+  // The server echoes our optimistic id; the text fingerprint is the fallback
+  // for turns stored before clientTurnId existed.
+  const serverClientIds = new Set(serverUsers.map((row) => row.clientTurnId).filter(Boolean));
+  const serverUserKeys = new Set(serverUsers.map((row) => pokoUserTurnKey(row)));
   const pendingLocal = (current || []).filter((row) => {
     const id = String(row?.id || '');
     if (!id.startsWith('local-')) return false;
-    return !serverUserKeys.has(pokoUserTurnKey(row));
+    return !serverClientIds.has(id) && !serverUserKeys.has(pokoUserTurnKey(row));
   });
   return mergePokoEvents(
     (current || []).filter((row) => !String(row?.id || '').startsWith('local-')),
