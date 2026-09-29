@@ -89,6 +89,10 @@ async function associateRowForEmail(email) {
   );
   const row = result.rows[0];
   if (!row) return null;
+  return serializeAssociateRow(row);
+}
+
+function serializeAssociateRow(row) {
   return {
     email: cleanEmail(row.email),
     role: String(row.role || 'associate').trim().toLowerCase(),
@@ -99,6 +103,40 @@ async function associateRowForEmail(email) {
     windowEnd: row.window_end instanceof Date ? row.window_end.toISOString() : String(row.window_end || ''),
     active: row.active === true,
   };
+}
+
+async function associateRowsAll() {
+  const result = await marketplaceQuery(
+    `
+      select email, role, display_name, share_pct, royalty_pct,
+             window_start, window_end, active
+      from public.marketplace_associates
+      order by active desc, lower(coalesce(display_name, email)), email
+    `,
+  );
+  return result.rows.map(serializeAssociateRow);
+}
+
+/** Same admin signal the SPA derives from the users/{uid} profile (auth.jsx). */
+async function callerIsAdmin(firestore, decoded) {
+  if (decoded?.admin === true) return true;
+  const uid = String(decoded?.uid || '').trim();
+  if (!uid) return false;
+  try {
+    const doc = await firestore.collection('users').doc(uid).get();
+    const profile = doc.data() || {};
+    if (profile.admin === true || profile.isAdmin === true) return true;
+    if (String(profile.role || '').trim().toLowerCase() === 'admin') return true;
+    const roles = Array.isArray(profile.roles)
+      ? profile.roles
+      : typeof profile.roles === 'string'
+        ? profile.roles.split(',')
+        : [];
+    return roles.map((role) => String(role || '').trim().toLowerCase()).includes('admin');
+  } catch (error) {
+    console.warn('marketplace-associate admin lookup failed', error.message);
+    return false;
+  }
 }
 
 /** True when the order's money actually moved (paid, escrowed, or released). */
@@ -373,19 +411,7 @@ function windowProgress(windowStartIso, windowEndIso, nowMs) {
   return { start: windowStartIso, end: windowEndIso, daysTotal, daysElapsed, daysRemaining, live: now >= start && now <= end };
 }
 
-async function readAssociateForClient(firestore, decoded, options = {}) {
-  const email = cleanEmail(decoded?.email);
-  if (!email) {
-    const error = new Error('Your Pokoin account has no email to match against the associates roster.');
-    error.statusCode = 403;
-    throw error;
-  }
-  const associate = await associateRowForEmail(email);
-  if (!associate) {
-    const error = new Error('Not a Pokoin associate.');
-    error.statusCode = 403;
-    throw error;
-  }
+async function readAssociateForClient(firestore, associate, options = {}) {
   const now = options.nowMs || Date.now();
   const progress = windowProgress(associate.windowStart, associate.windowEnd, now);
   let earnings = emptyEarnings();
@@ -394,6 +420,66 @@ async function readAssociateForClient(firestore, decoded, options = {}) {
     earnings = summarizeOrders(entries, { royaltyPct: associate.royaltyPct, sharePct: associate.sharePct });
   }
   return { associate, window: progress, earnings };
+}
+
+/**
+ * Admin overview: every roster row with its live earnings. Orders are loaded
+ * once per distinct campaign window and summarized per associate terms.
+ */
+async function overviewForAdmin(firestore, { nowMs } = {}) {
+  const rows = await associateRowsAll();
+  const now = nowMs || Date.now();
+  const entriesByWindow = new Map();
+  const overview = [];
+  for (const associate of rows) {
+    const windowKey = `${associate.windowStart}|${associate.windowEnd}`;
+    if (!entriesByWindow.has(windowKey)) {
+      entriesByWindow.set(windowKey, associate.active
+        ? await loadWindowOrders(firestore, associate.windowStart, associate.windowEnd, { nowMs: now })
+        : []);
+    }
+    let earnings = emptyEarnings();
+    if (associate.active) {
+      earnings = summarizeOrders(entriesByWindow.get(windowKey), {
+        royaltyPct: associate.royaltyPct,
+        sharePct: associate.sharePct,
+      });
+    }
+    overview.push({
+      associate,
+      window: windowProgress(associate.windowStart, associate.windowEnd, now),
+      earnings,
+    });
+  }
+  return overview;
+}
+
+/**
+ * Handler payload: the caller's own desk when they are on the roster, plus the
+ * full associates overview for admins. Admin-only callers get overview alone.
+ */
+async function readAssociatePayload(firestore, decoded, options = {}) {
+  const now = options.nowMs || Date.now();
+  const admin = await callerIsAdmin(firestore, decoded);
+  const email = cleanEmail(decoded?.email);
+  const associate = email ? await associateRowForEmail(email) : null;
+  if (!associate && !admin) {
+    const error = new Error('Not a Pokoin associate.');
+    error.statusCode = 403;
+    throw error;
+  }
+  const payload = { associate: null, window: null, earnings: emptyEarnings() };
+  if (associate) {
+    const own = await readAssociateForClient(firestore, associate, { nowMs: now });
+    payload.associate = own.associate;
+    payload.window = own.window;
+    payload.earnings = own.earnings;
+  }
+  if (admin) {
+    payload.admin = true;
+    payload.overview = await overviewForAdmin(firestore, { nowMs: now });
+  }
+  return payload;
 }
 
 module.exports = async function handler(req, res) {
@@ -408,7 +494,7 @@ module.exports = async function handler(req, res) {
   try {
     const decoded = await verifyBearerToken(req);
     const firestore = getFirebaseAdmin().firestore();
-    const payload = await readAssociateForClient(firestore, decoded);
+    const payload = await readAssociatePayload(firestore, decoded);
     return jsonPrivate(res, payload);
   } catch (error) {
     if (error.statusCode === 403) {
@@ -428,8 +514,11 @@ module.exports = async function handler(req, res) {
 };
 
 module.exports.readAssociateForClient = readAssociateForClient;
+module.exports.readAssociatePayload = readAssociatePayload;
 module.exports._test = {
   associateRowForEmail,
+  associateRowsAll,
+  callerIsAdmin,
   classifyOrder,
   orderIsPaidish,
   orderSubtotal,
@@ -439,4 +528,5 @@ module.exports._test = {
   tsToMillis,
   listingSellerCountries,
   loadWindowOrders,
+  overviewForAdmin,
 };

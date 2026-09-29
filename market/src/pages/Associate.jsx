@@ -177,7 +177,52 @@ function Hero({ data }) {
   );
 }
 
-function AssociateView({ data }) {
+function AssociatesOverview({ overview }) {
+  return (
+    <DeskPanel flush title={`Associates overview · ${overview.length}`} className="associate-orders">
+      {overview.length ? (
+        <div className="associate-overview">
+          {overview.map((row) => (
+            <article className="associate-overview-row" key={row.associate.email}>
+              <span className="associate-overview-who">
+                <strong>{row.associate.displayName || row.associate.email}</strong>
+                <span>
+                  {row.associate.email}
+                  {' · '}
+                  {row.associate.sharePct}% share
+                  {' · '}
+                  {row.associate.active ? 'active' : 'paused'}
+                  {row.earnings.unverifiedOrders > 0 ? ` · ${row.earnings.unverifiedOrders} pending country check` : ''}
+                </span>
+              </span>
+              <span className={`associate-badge ${rolePresentation(row.associate.role).accent}`}>
+                {rolePresentation(row.associate.role).badge}
+              </span>
+              <span className="associate-overview-money">
+                <span>{row.earnings.qualifyingOrders} qualifying sale{row.earnings.qualifyingOrders === 1 ? '' : 's'}</span>
+                <strong>{moneyRange(row.earnings.earningPkn, row.earnings.earningEurCents)}</strong>
+              </span>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="page-lede associate-empty-orders">No associates on the roster yet.</p>
+      )}
+    </DeskPanel>
+  );
+}
+
+function AdminOverviewView({ data }) {
+  return (
+    <div className="page desk associate-page">
+      <PageHead kicker="Pokoin Associates · Admin" title="Associates overview" />
+      <p className="page-lede">Live royalty earnings across every associate desk — Italian sellers shipping to Italian buyers, pool at {data.overview[0]?.associate.royaltyPct ?? 3}%.</p>
+      <AssociatesOverview overview={data.overview} />
+    </div>
+  );
+}
+
+function AssociateView({ data, overview = null }) {
   const presentation = rolePresentation(data.associate.role);
   return (
     <div className="page desk associate-page">
@@ -255,6 +300,7 @@ function AssociateView({ data }) {
           </p>
         )}
       </DeskPanel>
+      {overview ? <AssociatesOverview overview={overview} /> : null}
     </div>
   );
 }
@@ -305,6 +351,23 @@ export default function Associate() {
   }, [signedIn, getBearer]);
 
   if (preview) {
+    if (searchParams.get('role') === 'admin') {
+      return (
+        <AdminOverviewView
+          data={{
+            admin: true,
+            overview: [
+              { associate: PREVIEW_FIXTURE.associate, window: PREVIEW_FIXTURE.window, earnings: PREVIEW_FIXTURE.earnings },
+              {
+                associate: { ...PREVIEW_FIXTURE.associate, email: 'apciliberti@gmail.com', role: 'ambassador', displayName: 'Apciliberti' },
+                window: PREVIEW_FIXTURE.window,
+                earnings: { ...PREVIEW_FIXTURE.earnings, qualifyingOrders: 2, earningPkn: 21.3, earningEurCents: 612 },
+              },
+            ],
+          }}
+        />
+      );
+    }
     const fixture = {
       ...PREVIEW_FIXTURE,
       associate: {
@@ -349,6 +412,12 @@ export default function Associate() {
         <DeskPanel title="Loading your desk"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       </div>
     );
+  }
+  if (data.admin && data.overview) {
+    if (!data.associate) {
+      return <AdminOverviewView data={data} />;
+    }
+    return <AssociateView data={data} overview={data.overview} />;
   }
   return <AssociateView data={data} />;
 }
