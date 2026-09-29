@@ -1636,6 +1636,14 @@ export function fetchSellerSettings(token) {
   });
 }
 
+/** Checkout: which cart sellers opted out of PKN payments (card only). */
+export function fetchPknRefusingSellers(sellerUids, token) {
+  const sellers = [...new Set((sellerUids || []).filter(Boolean))].join(',');
+  return getJson(`/api/marketplace-seller-settings?sellers=${encodeURIComponent(sellers)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 export function saveSellerSettings(body, token) {
   return getJson('/api/marketplace-seller-settings', {
     method: 'POST',

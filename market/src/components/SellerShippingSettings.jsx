@@ -211,3 +211,45 @@ export function ShipFromCountryGate({ open, value, onChange, onSave, onClose, bu
     </div>
   );
 }
+
+/**
+ * "Get paid in PKN" switch for the Profile seller setup. Off = card payments
+ * only (Stripe, EUR) and listing forms default to local currency.
+ */
+export function PknPayoutToggle({ acceptsPkn, onChange, onError }) {
+  const { getBearer } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const loading = acceptsPkn == null;
+
+  async function flip() {
+    const next = !acceptsPkn;
+    setBusy(true);
+    onError?.('');
+    onChange?.({ acceptsPkn: next });
+    try {
+      const token = await getBearer();
+      const saved = await saveSellerSettings({ acceptsPkn: next }, token);
+      onChange?.(saved);
+    } catch (err) {
+      onChange?.({ acceptsPkn: !next });
+      onError?.(err.message || 'Could not save your PKN payment choice.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={Boolean(acceptsPkn)}
+      aria-label="Get paid in PKN"
+      className={`setup-switch${acceptsPkn ? ' is-on' : ''}`}
+      disabled={busy || loading}
+      onClick={flip}
+    >
+      <span className="setup-switch-track" aria-hidden="true"><span className="setup-switch-thumb" /></span>
+      <span className="setup-switch-label">{loading ? '…' : acceptsPkn ? 'On' : 'Off'}</span>
+    </button>
+  );
+}

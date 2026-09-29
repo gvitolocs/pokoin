@@ -3,7 +3,11 @@
 /**
  * Seller ship-from country + Stripe Connect readiness on users/{uid}.
  * GET  /api/marketplace-seller-settings
- * POST /api/marketplace-seller-settings  { shipFromCountry?, stripeConnectReturn? }
+ * GET  /api/marketplace-seller-settings?sellers=uid1,uid2  → { pknRefused: [{uid,name}] }
+ *      (checkout: which sellers in the cart take card payments only)
+ * POST /api/marketplace-seller-settings  { shipFromCountry?, acceptsPkn?, stripeConnectReturn? }
+ *
+ * acceptsPkn=false opts the seller out of PKN payments (_seller_pkn_policy.js).
  *
  * When shipFromCountry is empty, GET seeds it from the request IP country
  * (CF-IPCountry / Vercel / CloudFront) if that ISO code is an allowed sell-from
@@ -26,6 +30,7 @@ const { getFirebaseAdmin, verifyBearerToken } = requireHelper('_firebase');
 const { assertShipFromCountry, normalizeCountry } = require('./_checkout_core');
 const { shipFromCountryFromRequest } = require('./_client_country');
 const { marketplaceWriteQuery } = require('./_marketplace_db');
+const { acceptsPknFrom, sellersRefusingPkn } = require('./_seller_pkn_policy');
 
 function profileRef(firestore, uid) {
   return firestore.collection('users').doc(uid);
@@ -62,6 +67,7 @@ async function readSettings(firestore, uid) {
       : '',
     stripeConnectAccountId: String(data.stripeConnectAccountId || ''),
     stripeConnectStatus: String(data.stripeConnectStatus || 'not_started'),
+    acceptsPkn: acceptsPknFrom(data),
   };
 }
 
@@ -97,6 +103,13 @@ module.exports = async function handler(req, res) {
     const admin = getFirebaseAdmin();
     const firestore = admin.firestore();
 
+    const sellersParam = req.query?.sellers
+      || new URL(req.url || '/', 'http://local').searchParams.get('sellers');
+    if (req.method === 'GET' && sellersParam) {
+      const uids = String(sellersParam).split(',');
+      return res.status(200).json({ pknRefused: await sellersRefusingPkn(firestore, uids) });
+    }
+
     if (req.method === 'GET') {
       const settings = await seedFromIpIfNeeded(firestore, admin, decoded.uid, req.headers);
       return res.status(200).json(settings);
@@ -107,6 +120,9 @@ module.exports = async function handler(req, res) {
     if (body.shipFromCountry != null) {
       patch.shipFromCountry = assertShipFromCountry(body.shipFromCountry);
       patch.shipFromCountrySource = 'user';
+    }
+    if (typeof body.acceptsPkn === 'boolean') {
+      patch.acceptsPkn = body.acceptsPkn;
     }
     await profileRef(firestore, decoded.uid).set(patch, { merge: true });
     let listingsStamped = 0;

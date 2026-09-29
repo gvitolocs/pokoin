@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react
 import {
   cancelEurOrder,
   createMarketplaceOrder,
+  fetchPknRefusingSellers,
   createOrderCheckoutSession,
   fetchAccountAddresses,
   formatPkn,
@@ -108,6 +109,7 @@ export default function Checkout() {
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState('');
   const [shippingService, setShippingService] = useState('tracked'); // tracked | untracked
+  const [pknRefused, setPknRefused] = useState([]); // sellers who take card payments only
   const stripeCancelled = searchParams.get('cancelled') === '1';
   const cancelledOrderId = String(searchParams.get('order') || '').trim();
 
@@ -187,7 +189,9 @@ export default function Checkout() {
   const { commissionPkn, insurancePkn, taxPkn, totalPkn, coveragePkn } = fees;
   const missingListing = items.some((row) => !row.listingId);
   const canPayWithPkn = Number(availablePkn) >= Number(totalPkn);
-  const preferFiat = !nft && !canPayWithPkn;
+  const pknBlocked = pknRefused.length > 0;
+  const pknRefusedNames = pknRefused.map((row) => row.name).join(', ');
+  const preferFiat = !nft && (!canPayWithPkn || pknBlocked);
   const displayCurrency = currencyForCountry(buyerCountry) || currencyFromLocale();
   const eurSubtotal = useMemo(
     () => Math.round((Number(fiatFromPkn(subtotalPkn, 'EUR')) || 0) * 100),
@@ -276,6 +280,20 @@ export default function Checkout() {
     return () => { cancelled = true; };
   }, [signedIn, nft, getBearer]);
 
+  const sellerKey = [...new Set(items.map((row) => String(row.sellerUid || '')).filter(Boolean))].sort().join(',');
+  useEffect(() => {
+    if (!signedIn || !sellerKey) {
+      setPknRefused([]);
+      return undefined;
+    }
+    let cancelled = false;
+    getBearer()
+      .then((token) => fetchPknRefusingSellers(sellerKey.split(','), token))
+      .then((data) => { if (!cancelled) setPknRefused(Array.isArray(data?.pknRefused) ? data.pknRefused : []); })
+      .catch(() => { if (!cancelled) setPknRefused([]); });
+    return () => { cancelled = true; };
+  }, [signedIn, sellerKey, getBearer]);
+
   useEffect(() => {
     if (nft || payMethod !== 'stripe' || !items.length || missingListing || !buyerCountry) {
       setQuote(null);
@@ -357,6 +375,10 @@ export default function Checkout() {
       setConfirm(false);
     } catch (err) {
       setError(err.message || 'Checkout failed.');
+      if (err?.body?.code === 'seller_no_pkn') {
+        setConfirm(false);
+        setPayMethod('stripe');
+      }
     } finally {
       setBusy(false);
     }
@@ -582,7 +604,11 @@ export default function Checkout() {
                   />
                   <span>
                     <strong>Site PKN</strong>
-                    <em>{preferFiat ? 'Not enough balance' : 'Pay from your Pokoin balance'}</em>
+                    <em>
+                      {pknBlocked
+                        ? `${pknRefusedNames} ${pknRefused.length === 1 ? 'accepts' : 'accept'} card payments only`
+                        : preferFiat ? 'Not enough balance' : 'Pay from your Pokoin balance'}
+                    </em>
                   </span>
                 </label>
               </div>
@@ -813,6 +839,9 @@ export default function Checkout() {
               <p className="page-lede">Save a shipping address to pay with Stripe.</p>
             ) : null}
             {missingListing ? <Alert>A cart row is missing listingId. Add the offer from Shop again.</Alert> : null}
+            {nft && pknBlocked ? (
+              <Alert>{pknRefusedNames} {pknRefused.length === 1 ? 'accepts' : 'accept'} card payments only, and NFT checkout is paid in PKN. Remove their cards or check out the physical cards by card.</Alert>
+            ) : null}
           </DeskPanel>
         </div>
       ) : null}
