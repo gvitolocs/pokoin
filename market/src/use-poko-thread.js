@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { fetchPokoChatHistory, sendPokoChat } from './api.js';
+import { nearChatTop } from './chat-history.js';
 import {
   buildPokoPageContext,
   defaultPokoDeskPrompt,
   mergePokoEvents,
   pokoEventsSignature,
+  pokoHistoryHasMore,
   pokoUserTurnKey,
   readPokoHistory,
   reconcilePokoEvents,
@@ -22,32 +24,47 @@ export function usePokoThread({
   pathname = '',
 } = {}) {
   const active = Boolean(enabled && signedIn && uid);
-  const cached = uid ? readPokoHistory(uid) : [];
+  const cached = uid ? readPokoHistory(uid) : { events: [], hasMore: false };
   const [cacheUid, setCacheUid] = useState(uid);
-  const [events, setEvents] = useState(cached);
+  const [events, setEvents] = useState(cached.events);
+  const [hasMore, setHasMore] = useState(cached.hasMore);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const logRef = useRef(null);
   const pinBottom = useRef(true);
+  const olderLock = useRef(false);
   const eventsRef = useRef(events);
   eventsRef.current = events;
+  const hasMoreRef = useRef(hasMore);
+  hasMoreRef.current = hasMore;
   const busyRef = useRef(false);
   busyRef.current = busy;
   const refreshRef = useRef(async () => {});
   const getBearerRef = useRef(getBearer);
   getBearerRef.current = getBearer;
+  const wasActive = useRef(active);
 
   if (uid !== cacheUid) {
     setCacheUid(uid);
-    setEvents(uid ? readPokoHistory(uid) : []);
+    const next = uid ? readPokoHistory(uid) : { events: [], hasMore: false };
+    setEvents(next.events);
+    setHasMore(next.hasMore);
     setError('');
     pinBottom.current = true;
   }
 
   useEffect(() => {
     if (!uid) return;
-    writePokoHistory(uid, events);
-  }, [uid, events]);
+    writePokoHistory(uid, events, hasMore);
+  }, [uid, events, hasMore]);
+
+  // Opening the dock remounts the log without changing events — re-pin once.
+  useEffect(() => {
+    if (active && !wasActive.current) {
+      pinBottom.current = true;
+    }
+    wasActive.current = active;
+  }, [active]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -62,6 +79,8 @@ export function usePokoThread({
         const result = await fetchPokoChatHistory(token);
         if (!live || busyRef.current) return;
         const page = result?.events || [];
+        const more = pokoHistoryHasMore(result);
+        setHasMore(more);
         setEvents((current) => {
           const next = reconcilePokoEvents(current, page);
           // Idle polls must not rebuild state — that re-rendered the thread and
@@ -88,13 +107,43 @@ export function usePokoThread({
   }, [active, uid]);
 
   useLayoutEffect(() => {
+    if (!active) return;
     const el = logRef.current;
     if (el && pinBottom.current) el.scrollTop = el.scrollHeight;
-  }, [events, busy]);
+  }, [events, busy, active]);
+
+  async function loadOlder() {
+    if (!active || olderLock.current || !hasMoreRef.current) return;
+    const oldest = eventsRef.current[0];
+    if (!oldest?.id || String(oldest.id).startsWith('local-')) return;
+    olderLock.current = true;
+    const el = logRef.current;
+    const prevHeight = el?.scrollHeight || 0;
+    const prevTop = el?.scrollTop || 0;
+    pinBottom.current = false;
+    try {
+      const token = await getBearerRef.current?.();
+      if (!token) return;
+      const result = await fetchPokoChatHistory(token, { before: oldest.id });
+      const page = result?.events || [];
+      setHasMore(pokoHistoryHasMore(result));
+      if (!page.length) return;
+      setEvents((current) => mergePokoEvents(page, current));
+      requestAnimationFrame(() => {
+        if (!el) return;
+        el.scrollTop = el.scrollHeight - prevHeight + prevTop;
+      });
+    } catch (err) {
+      setError(err.message || 'Older messages could not be loaded.');
+    } finally {
+      olderLock.current = false;
+    }
+  }
 
   function onScroll(event) {
     const el = event.currentTarget;
     pinBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (nearChatTop(el.scrollTop)) loadOlder();
   }
 
   async function send({
@@ -192,6 +241,7 @@ export function usePokoThread({
 
   return {
     events,
+    hasMore,
     error,
     busy,
     logRef,

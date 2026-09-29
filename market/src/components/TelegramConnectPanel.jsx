@@ -78,7 +78,7 @@ export default function TelegramConnectPanel({ onStatus = null }) {
     <div className="tg-connect">
       <p className="tg-connect-note">
         Keep your Poko conversation going on Telegram or Discord. Linked chats share the
-        private memory of your website Messages — never another user&apos;s.
+        private memory of your website Messages.
       </p>
 
       {telegram.linked ? (

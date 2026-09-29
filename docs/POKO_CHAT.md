@@ -12,7 +12,7 @@ cache (localStorage) + poll. Local storage alone is not the source of truth.
 ```
 Browser (Messages / chat dock)
   → Firebase bearer
-  → GET  /api/poko-chat?action=history   (sync transcript)
+  → GET  /api/poko-chat?action=history&before=   (last 20 events; scroll-up loads older)
   → POST /api/poko-chat   { message, cards?, images?, sessionId?, pageContext? }
   → Pi BFF server/pokoin-api/poko-chat.js
        1) POST Hermes peer1  {POKONTACT_SERVICE_URL}/chat

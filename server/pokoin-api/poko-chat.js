@@ -12,7 +12,7 @@
 
 const path = require('path');
 
-const EVENT_PAGE = 80;
+const EVENT_PAGE = 20;
 const { REPLY_CARDS_DIRECTIVE, attachReplyCards } = require('./_poko_reply_cards');
 
 function requireHelper(name) {

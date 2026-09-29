@@ -103,7 +103,7 @@ export default function Messages() {
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const uid = user?.uid || '';
-  const pokoEvents = readPokoHistory(uid);
+  const pokoEvents = readPokoHistory(uid).events;
 
   const refresh = useCallback(async () => {
     if (!signedIn) return;
