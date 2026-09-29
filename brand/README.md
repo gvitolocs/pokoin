@@ -56,3 +56,8 @@ yellow `#ffd33d`.
 `flex/` — hero (packs → 20 kg bag → sorting center → partner shop), the four
 how-it-works steps and the padded Flex box. Served from `/brand/flex/` on the
 site. Same palette as the logo.
+
+## Buyer protection illustration
+
+`protection/shield.svg` — shield with a card and a locked PKN coin, used on
+`/protection`. Served from `/brand/protection/`.

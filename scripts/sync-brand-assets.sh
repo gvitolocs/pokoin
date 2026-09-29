@@ -8,7 +8,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/brand"
-mkdir -p "$OUT"/{logo,mascot,favicon,fonts,flex,conditions,flags,games,misc}
+mkdir -p "$OUT"/{logo,mascot,favicon,fonts,flex,protection,conditions,flags,games,misc}
 
 cp "$ROOT"/home/logo.png "$ROOT"/home/pokoin-192.png "$ROOT"/home/bimi.svg "$OUT/logo/"
 cp "$ROOT"/home/pokoin-mascot.png "$ROOT"/market/src/assets/pokoin-mascot@8x.png "$OUT/mascot/"
@@ -16,6 +16,7 @@ cp "$ROOT"/market/public/brand/pokoin-mascot.svg "$OUT/mascot/"
 cp "$ROOT"/home/favicon.ico "$ROOT"/home/favicon-*.png "$ROOT"/home/apple-touch-icon.png "$OUT/favicon/"
 cp "$ROOT"/home/satoshi.woff2 "$ROOT"/home/fredoka-wordmark.ttf "$OUT/fonts/"
 cp "$ROOT"/market/public/brand/flex/*.svg "$OUT/flex/"
+cp "$ROOT"/market/public/brand/protection/*.svg "$OUT/protection/"
 cp "$ROOT"/market/public/conditions/*.svg "$OUT/conditions/"
 cp "$ROOT"/market/public/flags/* "$OUT/flags/"
 cp "$ROOT"/market/public/games/* "$OUT/games/"

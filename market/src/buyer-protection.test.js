@@ -6,8 +6,10 @@ import {
   DISPUTE_REPLY,
   ESCROW_LINE,
   NO_SHIP_GUARANTEE,
+  CONTACT_EMAIL,
   PROTECTION_PILLARS,
   SHIP_DAYS,
+  contactMailto,
 } from './buyer-protection.js';
 
 test('homepage protection states escrow, no-ship refund, and dispute times', () => {
@@ -20,4 +22,12 @@ test('homepage protection states escrow, no-ship refund, and dispute times', () 
   assert.equal(DISPUTE_DECISION, '5 business days');
   assert.equal(PROTECTION_PILLARS.length, 3);
   assert.doesNotMatch(PROTECTION_PILLARS.map((row) => row.body).join(' '), /livechat|24\/7|quality control/i);
+});
+
+test('the dispute contact is a clickable mailto, not plain text', () => {
+  assert.equal(CONTACT_EMAIL, 'contact@pokoin.com');
+  assert.equal(contactMailto(), 'mailto:contact@pokoin.com?subject=Order%20problem');
+  const disputes = PROTECTION_PILLARS.find((row) => row.title === 'Disputes');
+  assert.equal(disputes.link.href.startsWith('mailto:contact@pokoin.com'), true);
+  assert.equal(disputes.body.includes('@'), false);
 });
