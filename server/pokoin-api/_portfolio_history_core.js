@@ -38,8 +38,15 @@ function movementFromLedger(row = {}) {
   return { date, amountPkn: signed };
 }
 
-const PRICE_BASIS = 'ct-sold-day';
-const SERIES_REVISION = 3;
+const PRICE_BASIS = 'ct-last-sold';
+const SERIES_REVISION = 4;
+
+/**
+ * A sold price this many times the card's other sold prices is a withdrawn
+ * joke listing that looked like a sale (3,243,020 PKN for a 22 PKN Energy
+ * Retrieval on 2026-09-22), not a market print.
+ */
+const SOLD_OUTLIER_RATIO = 20;
 
 function compactDay(row = {}) {
   const date = utcDayKey(row.date);
@@ -186,10 +193,141 @@ function applyDumpValues(walletDays, dumps, { ownershipDate, today } = {}) {
   return points.filter(Boolean);
 }
 
+function median(values) {
+  const sorted = values.slice().sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function flag(value) {
+  return value === true || value === 't' || value === 'true' || value === 1 ? '1' : '0';
+}
+
 /**
- * Wallet days stay on the ledger. Card value is only that day's sold median
- * times quantity still held. A card with no sale that day is left out, and
- * yesterday's sale is not reused.
+ * Card + printing variant: reverse, 1st edition and graded copies sell for
+ * many times the plain card, so each is priced (and checked) on its own.
+ */
+function variantKey(blueprintId, row = {}) {
+  const id = String(blueprintId || '');
+  if (!id) return '';
+  return `${id}|${flag(row.reverse)}${flag(row.first_edition ?? row.firstEdition)}${flag(row.graded)}`;
+}
+
+/**
+ * cardtrader_sold_daily facet rows ({ day, blueprint_id, median_pkn, sold_qty,
+ * reverse, first_edition, graded }) without prices far above the same
+ * variant's other sold rows. A variant with a single sold row keeps it.
+ */
+function withoutSoldOutliers(rows) {
+  const byVariant = new Map();
+  const clean = [];
+  for (const row of rows || []) {
+    const id = String(row?.blueprint_id || '');
+    const day = utcDayKey(row?.day || row?.observed_day || row?.date);
+    const price = Number(row?.median_pkn);
+    const qty = Math.max(0, Number(row?.sold_qty) || 0);
+    if (!id || !day || !(price > 0) || !qty) continue;
+    const entry = { id, variant: variantKey(id, row), day, price, qty };
+    clean.push(entry);
+    if (!byVariant.has(entry.variant)) byVariant.set(entry.variant, []);
+    byVariant.get(entry.variant).push(entry);
+  }
+  return clean.filter((entry) => {
+    const others = byVariant.get(entry.variant).filter((row) => row !== entry).map((row) => row.price);
+    if (!others.length) return true;
+    return entry.price <= median(others) * SOLD_OUTLIER_RATIO;
+  });
+}
+
+/** Quantity-weighted sold price per variant per day, outliers dropped. */
+function soldPricesByDay(rows) {
+  const sums = new Map();
+  for (const row of withoutSoldOutliers(rows)) {
+    const key = `${row.variant}\t${row.day}`;
+    const sum = sums.get(key) || { id: row.id, variant: row.variant, day: row.day, pkn: 0, qty: 0 };
+    sum.pkn += row.price * row.qty;
+    sum.qty += row.qty;
+    sums.set(key, sum);
+  }
+  return [...sums.values()]
+    .map((sum) => ({ id: sum.id, variant: sum.variant, day: sum.day, pkn: sum.pkn / sum.qty }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+}
+
+/** Remember a sale under its variant, and under the card for variants that never sold. */
+function rememberSale(last, sale) {
+  last.set(sale.variant, sale.pkn);
+  last.set(`${sale.id}|${sale.variant.endsWith('|000') ? 'plain' : 'other'}`, sale.pkn);
+}
+
+/** Last sold price for a held variant: its own sales, else the plain card's, else any variant's. */
+function priceForVariant(last, variant) {
+  const id = String(variant || '').split('|')[0];
+  for (const key of [variant, `${id}|plain`, `${id}|other`]) {
+    if (last.has(key)) return last.get(key);
+  }
+  return null;
+}
+
+/**
+ * Last sold prices on or before `todayKey`. Returns a lookup
+ * (blueprintId, row with reverse/first_edition/graded) → pkn or null.
+ */
+function lastSoldPrices(rows, todayKey = utcDayKey(new Date())) {
+  const last = new Map();
+  for (const sale of soldPricesByDay(rows)) {
+    if (sale.day <= todayKey) rememberSale(last, sale);
+  }
+  return (blueprintId, row = {}) => {
+    const pkn = priceForVariant(last, variantKey(blueprintId, row));
+    return pkn == null ? null : Math.round(pkn * 100) / 100;
+  };
+}
+
+/**
+ * Card value for every day from `fromDay` to `todayKey`: quantity held of each
+ * variant times its last sold price so far (sales before `fromDay` seed it).
+ * `holdings` maps variantKey → quantity. A card that has never sold is left
+ * out; a day with no priced card is skipped.
+ * Returns [{ day, market_pkn, priced }] for applySoldDayValues.
+ */
+function lastSoldCardValues(rows, holdings, { fromDay, todayKey } = {}) {
+  const end = utcDayKey(todayKey);
+  const start = utcDayKey(fromDay) || end;
+  if (!end || start > end) return [];
+  const held = holdings instanceof Map ? holdings : new Map(Object.entries(holdings || {}));
+  const heldIds = new Set([...held.keys()].map((key) => key.split('|')[0]));
+  const sales = soldPricesByDay(rows).filter((sale) => sale.day <= end && heldIds.has(sale.id));
+  const last = new Map();
+  let index = 0;
+  while (index < sales.length && sales[index].day < start) {
+    rememberSale(last, sales[index]);
+    index += 1;
+  }
+  const out = [];
+  for (let day = start; day && day <= end; day = addUtcDays(day, 1)) {
+    while (index < sales.length && sales[index].day === day) {
+      rememberSale(last, sales[index]);
+      index += 1;
+    }
+    let value = 0;
+    let priced = 0;
+    for (const [variant, qty] of held) {
+      const pkn = priceForVariant(last, variant);
+      if (pkn == null || !(qty > 0)) continue;
+      value += pkn * qty;
+      priced += 1;
+    }
+    if (!priced) continue;
+    out.push({ day, market_pkn: Math.round(value * 100) / 100, priced });
+  }
+  return out;
+}
+
+/**
+ * Wallet days stay on the ledger. Card value comes from sold rows only (never
+ * asks or dump minimums): lastSoldCardValues gives one row per day.
  */
 function applySoldDayValues(walletDays, soldRows, { ownershipDate, today } = {}) {
   const todayKey = utcDayKey(today);
@@ -244,4 +382,9 @@ module.exports = {
   compactDay,
   applyDumpValues,
   applySoldDayValues,
+  variantKey,
+  withoutSoldOutliers,
+  lastSoldPrices,
+  lastSoldCardValues,
+  SOLD_OUTLIER_RATIO,
 };

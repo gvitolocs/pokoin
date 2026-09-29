@@ -480,11 +480,6 @@ export function formatHistoryDelta(change) {
   return `${signed} (${pctSigned}) ${change.phrase}`;
 }
 
-/**
- * One step ahead of the sold-day totals, the same idea as a stock regression
- * trend / forecast overlay. Uses the last priced days only. A wallet-only
- * series has nothing to project.
- */
 /** Last day that actually priced owned cards. Wallet-only days are not a start. */
 export function lastPricedTotal(points) {
   const priced = (points || []).filter((day) => (
@@ -494,30 +489,39 @@ export function lastPricedTotal(points) {
   return Number(priced[priced.length - 1].totalPkn);
 }
 
+/** Fewer priced days than this is not a trend worth drawing. */
+export const MIN_PROJECTION_DAYS = 5;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * One day past the last priced total, along the median of the pairwise daily
+ * slopes of the last two weeks (Theil–Sen), so a single spike cannot flip the
+ * trend. Null when there are fewer than MIN_PROJECTION_DAYS priced days.
+ */
 export function projectCardValue(points) {
   const priced = (points || []).filter((day) => (
     day?.assets?.cardsKnown === true && Number(day.totalPkn) > 0
   ));
-  if (priced.length < 2) return null;
-  const sample = priced.slice(-8);
-  const n = sample.length;
-  let sumX = 0;
-  let sumY = 0;
-  let sumXX = 0;
-  let sumXY = 0;
-  sample.forEach((day, index) => {
-    const y = Number(day.totalPkn) || 0;
-    sumX += index;
-    sumY += y;
-    sumXX += index * index;
-    sumXY += index * y;
-  });
-  const denom = n * sumXX - sumX * sumX;
-  if (!denom) return null;
-  const slope = (n * sumXY - sumX * sumY) / denom;
-  const intercept = (sumY - slope * sumX) / n;
-  const value = Math.max(0, Math.round((intercept + slope * n) * 100) / 100);
-  return { value, slope: Math.round(slope * 100) / 100, days: n };
+  if (priced.length < MIN_PROJECTION_DAYS) return null;
+  const sample = priced.slice(-14).map((day) => ({
+    x: Date.parse(`${day.date}T00:00:00Z`) / DAY_MS,
+    y: Number(day.totalPkn) || 0,
+  })).filter((row) => Number.isFinite(row.x));
+  const slopes = [];
+  for (let i = 0; i < sample.length; i += 1) {
+    for (let j = i + 1; j < sample.length; j += 1) {
+      const dx = sample[j].x - sample[i].x;
+      if (dx > 0) slopes.push((sample[j].y - sample[i].y) / dx);
+    }
+  }
+  if (!slopes.length) return null;
+  slopes.sort((a, b) => a - b);
+  const mid = Math.floor(slopes.length / 2);
+  const slope = slopes.length % 2 ? slopes[mid] : (slopes[mid - 1] + slopes[mid]) / 2;
+  const last = sample[sample.length - 1].y;
+  const value = Math.max(0, Math.round((last + slope) * 100) / 100);
+  return { value, slope: Math.round(slope * 100) / 100, days: sample.length };
 }
 
 /** Hold the last value, then jump vertically on the day it changes. */

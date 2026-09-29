@@ -102,7 +102,8 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
   const forecast = historyWindowSplit(points) < 1 ? projectCardValue(points) : null;
   const axis = historyAxis(points, forecast ? [forecast.value] : []);
   const change = historyWindowChange(points, custom ? 'custom' : presetId);
-  const split = historyWindowSplit(points);
+  // Too little priced history for a trend: today runs to the right edge.
+  const split = forecast ? historyWindowSplit(points) : 1;
   const withYear = points.length > 1
     && String(points[0]?.date || '').slice(0, 4) !== String(points[points.length - 1]?.date || '').slice(0, 4);
   const xLabels = points.length
@@ -686,7 +687,7 @@ export function SellerDashboardView({
               {oneDayReadyCards > 0 ? (
                 <p className="seller-asking" data-testid="cardtrader-1dr-value">
                   <span>CardTrader 1-DR assets · {oneDayReadyCards.toLocaleString('en-US')} cards</span>
-                  <strong title="Sold today">
+                  <strong title="Each card at its last CardTrader sold price">
                     {(Number(cardTraderAssets.totals?.valuePkn) || 0) > 0
                       ? formatPkn(cardTraderAssets.totals.valuePkn)
                       : '—'}

@@ -2,10 +2,12 @@
 
 /**
  * GET /api/marketplace-portfolio-history
- * One stored series per seller. Card value is quantity times that day's sold
- * median (cardtrader_sold_daily). A card with no sale that day is left out.
- * Asks and dump minimums are not used. A visit that already stored today's
- * basis reads the document and does not price the pile again.
+ * One stored series per seller. Card value is quantity times each card's last
+ * CardTrader sold price (cardtrader_sold_daily), carried forward until it
+ * sells again; a sold price far above the card's other sales is dropped. A
+ * card that has never sold is left out. Asks and dump minimums are not used.
+ * A visit that already stored today's basis reads the document and does not
+ * price the pile again.
  */
 
 const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
@@ -19,36 +21,37 @@ const {
   storedIsFresh,
   compactDay,
   applySoldDayValues,
+  lastSoldCardValues,
+  variantKey,
 } = require('./_portfolio_history_core');
 
 const HISTORY = 'portfolio_history';
 
-const SOLD_SQL = `
-  with held as (
-    select blueprint_id, sum(quantity)::numeric as qty
-    from public.marketplace_cardtrader_1dr_assets
-    where seller_uid = $1
-      and quantity > 0
-      and blueprint_id ~ '^[0-9]+$'
-    group by blueprint_id
-  ),
-  sold as (
-    select observed_day,
-           blueprint_id::text as blueprint_id,
-           sum(median_pkn * sold_qty) / nullif(sum(sold_qty), 0) as sold_pkn
-    from public.cardtrader_sold_daily
-    where observed_day >= $2::date
-      and median_pkn > 0
-      and sold_qty > 0
-    group by observed_day, blueprint_id
-  )
-  select sold.observed_day::text as day,
-         round(sum(sold.sold_pkn * held.qty)::numeric, 2) as market_pkn,
-         count(*)::int as priced
-  from held
-  join sold on sold.blueprint_id = held.blueprint_id
-  group by sold.observed_day
-  order by sold.observed_day
+/** Sales this long before ownership seed each card's first price. */
+const SEED_DAYS = 180;
+
+const HELD_SQL = `
+  select blueprint_id, reverse, first_edition, graded, sum(quantity)::float8 as qty
+  from public.marketplace_cardtrader_1dr_assets
+  where seller_uid = $1
+    and quantity > 0
+    and blueprint_id ~ '^[0-9]+$'
+  group by blueprint_id, reverse, first_edition, graded
+`;
+
+const SOLD_ROWS_SQL = `
+  select observed_day::text as day,
+         blueprint_id::text as blueprint_id,
+         reverse,
+         first_edition,
+         graded,
+         median_pkn::float8 as median_pkn,
+         sold_qty
+  from public.cardtrader_sold_daily
+  where blueprint_id = any($1::bigint[])
+    and observed_day >= $2::date
+    and median_pkn > 0
+    and sold_qty > 0
 `;
 
 const OWNED_SINCE_SQL = `
@@ -118,10 +121,26 @@ async function readOwnership(firestore, uid) {
   return day;
 }
 
-async function readSoldSeries(uid, sinceDay) {
+function seedDay(dayKey) {
+  const at = Date.parse(`${dayKey}T00:00:00Z`);
+  return Number.isFinite(at) ? utcDayKey(new Date(at - SEED_DAYS * 86400000)) : dayKey;
+}
+
+async function readSoldSeries(uid, sinceDay, todayKey) {
   try {
-    const result = await marketplaceQuery(SOLD_SQL, [uid, sinceDay]);
-    return { ok: true, rows: result?.rows || [] };
+    const held = await marketplaceQuery(HELD_SQL, [uid]);
+    const holdings = new Map();
+    for (const row of held?.rows || []) {
+      const key = variantKey(row.blueprint_id, row);
+      if (key) holdings.set(key, (holdings.get(key) || 0) + (Number(row.qty) || 0));
+    }
+    if (!holdings.size) return { ok: true, rows: [] };
+    const ids = [...new Set((held?.rows || []).map((row) => String(row.blueprint_id)))];
+    const sold = await marketplaceQuery(SOLD_ROWS_SQL, [ids, seedDay(sinceDay)]);
+    return {
+      ok: true,
+      rows: lastSoldCardValues(sold?.rows || [], holdings, { fromDay: sinceDay, todayKey }),
+    };
   } catch (error) {
     console.error('portfolio sold history failed', { message: error.message });
     return { ok: false, rows: [] };
@@ -145,7 +164,7 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, days: cleanDays(data.days) });
     }
     const ownershipDate = await readOwnership(firestore, uid);
-    const sold = await readSoldSeries(uid, ownershipDate);
+    const sold = await readSoldSeries(uid, ownershipDate, todayKey);
     if (!sold.ok) {
       return res.status(200).json({ ok: true, days: cleanDays(data.days) });
     }
