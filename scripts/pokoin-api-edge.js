@@ -17,7 +17,7 @@ const CDN = process.env.POKOIN_CDN_ORIGIN || 'http://127.0.0.1:18081';
 // requests in flight, GET/HEAD API calls go to the k3s copy on nezopt — only
 // while its probe answers. Writes, webhooks and uploads always stay here.
 const OVERFLOW = process.env.POKOIN_API_OVERFLOW_ORIGIN || '';
-const LOCAL_MAX = Number(process.env.POKOIN_API_LOCAL_MAX || 24);
+const LOCAL_MAX = Number(process.env.POKOIN_API_LOCAL_MAX || 16);
 const PROBE_MS = Number(process.env.POKOIN_API_OVERFLOW_PROBE_MS || 5000);
 const PROBE_PATH = process.env.POKOIN_API_OVERFLOW_PROBE_PATH || '/api/marketplace-suggest?q=pika&limit=1';
 const SEO_DIR = process.env.POKOIN_SEO_DIR || '/srv/pokoin/seo';

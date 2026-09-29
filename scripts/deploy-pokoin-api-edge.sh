@@ -16,7 +16,7 @@ COMMIT="$(git -C "$REPO" rev-parse "${1:-HEAD}^{commit}")"
 PI="${PI_HOST:-pi-home}"
 EDGE=/srv/pokoin/card-images/tools/pokoin-api-edge.js
 OVERFLOW="${POKOIN_API_OVERFLOW_ORIGIN-http://192.168.178.55:30880}"
-LOCAL_MAX="${POKOIN_API_LOCAL_MAX:-24}"
+LOCAL_MAX="${POKOIN_API_LOCAL_MAX:-16}"
 
 git -C "$REPO" fetch -q origin || die "git fetch origin failed"
 git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
