@@ -10134,7 +10134,7 @@ html:has(.wallet-page) .brand span {
 
 /* Associates roster badge — seller profiles and users search rows. */
 .seller-associate-badge,
-.suggest-user .suggest-user-associate-badge {
+.suggest-user-associate-badge {
   display: inline-flex;
   align-items: center;
   vertical-align: middle;
@@ -10157,7 +10157,7 @@ html:has(.wallet-page) .brand span {
 }
 
 .seller-associate-badge.is-ambassador,
-.suggest-user .suggest-user-associate-badge.is-ambassador {
+.suggest-user-associate-badge.is-ambassador {
   color: #c9b8ff;
   background: rgb(150 120 255 / 0.1);
   border-color: rgb(150 120 255 / 0.4);
