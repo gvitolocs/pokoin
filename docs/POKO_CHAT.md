@@ -23,7 +23,20 @@ Browser (Messages / chat dock)
 
 On a card desk the SPA always includes the open printing in `cards[]` /
 `pageContext.deskCardId` (even with no drag-attach). The BFF prepends a
-market-first directive so Hermes runs `card_quote` instead of inventing lore.
+market-first multipath directive so Hermes runs `card_quote` (+ `card_ocr`
+when needed) instead of inventing lore.
+
+## Channels
+
+| Surface | Role |
+|---|---|
+| Website Messages / dock | Firebase → `/api/poko-chat` → Hermes |
+| Telegram `@pokoinpos_bot` | Hermes Telegram polling |
+| Discord `Poko#1220` | Hermes Discord (chat only) |
+
+**Connect** (`/api/poko-connect`) links a Pokoin account to **Telegram only**
+(`telegram_user_id`). Discord chat works without that link; there is no
+Discord account-link flow yet — do not tell users to “Connect Discord”.
 
 Hermes (`/opt/hermes-poko` on oracle-peer1, `hermes-poko.service` :8789)
 loads `docs/poko-knowledge.md` + `docs/poko-behavior-seed.jsonl`, plans with
