@@ -2235,6 +2235,9 @@ export function fetchSellerShop(username, {
   q = '',
   condition = '',
   language = '',
+  rarity = '',
+  reverse = false,
+  firstEdition = false,
   sort = 'price-asc',
   game: marketplaceGame = game().apiGame,
   signal,
@@ -2243,7 +2246,18 @@ export function fetchSellerShop(username, {
   if (!handle) {
     return Promise.resolve({ listings: [], total: 0, unique: 0, limit, offset: 0 });
   }
-  const opts = { limit, offset, q, condition, language, sort, game: marketplaceGame };
+  const opts = {
+    limit,
+    offset,
+    q,
+    condition,
+    language,
+    rarity,
+    reverse: Boolean(reverse),
+    firstEdition: Boolean(firstEdition),
+    sort,
+    game: marketplaceGame,
+  };
   // Always hit the network so refresh picks up name/tag changes. Seller.jsx
   // paints the in-memory shop cache first via seedSellerListings.
   const params = new URLSearchParams({
@@ -2254,6 +2268,9 @@ export function fetchSellerShop(username, {
   if (q) params.set('q', String(q));
   if (condition) params.set('condition', String(condition));
   if (language) params.set('language', String(language));
+  if (rarity) params.set('rarity', String(rarity));
+  if (reverse) params.set('reverse', '1');
+  if (firstEdition) params.set('firstEdition', '1');
   if (sort) params.set('sort', String(sort));
   if (marketplaceGame) params.set('game', String(marketplaceGame));
   return getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) =>

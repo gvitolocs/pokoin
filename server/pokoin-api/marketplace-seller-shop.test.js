@@ -42,6 +42,28 @@ test('conditionSql maps CT codes', () => {
   assert.equal(conditionSql(''), null);
 });
 
+test('truthyFlag and raritySql build shop filters', () => {
+  const { truthyFlag, raritySql } = require('./marketplace-seller-shop.js')._test;
+  assert.equal(truthyFlag('1'), true);
+  assert.equal(truthyFlag('true'), true);
+  assert.equal(truthyFlag(''), false);
+  assert.equal(raritySql(''), null);
+  const holo = raritySql('holo');
+  const where = [];
+  const values = [];
+  holo.apply(where, values);
+  assert.match(where[0], /foil_state/);
+  assert.match(where[0], /marketplace_search_candidates/);
+  assert.deepEqual(values, ['%holo%', '%holofoil%']);
+  const common = raritySql('common');
+  const where2 = [];
+  const values2 = [];
+  common.apply(where2, values2);
+  assert.match(where2[0], /not like/);
+  assert.ok(values2.includes('%common%'));
+  assert.ok(values2.includes('%uncommon%'));
+});
+
 test('a nickname or email change keeps the listing on the Firebase user', () => {
   const current = shopSellerFromProfile({
     uid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2',
