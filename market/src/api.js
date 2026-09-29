@@ -1726,14 +1726,14 @@ export function confirmMarketplaceDelivery(orderId, token) {
   });
 }
 
-export function markMarketplaceShipped(orderId, token) {
+export function markMarketplaceShipped(orderId, token, { trackingCode } = {}) {
   return getJson('/api/marketplace-orders?action=mark-shipped', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ orderId }),
+    body: JSON.stringify({ orderId, trackingCode }),
   });
 }
 

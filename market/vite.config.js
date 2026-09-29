@@ -123,6 +123,7 @@ function rewriteMarketplace(server) {
       || url === '/contact' || url.startsWith('/contact/')
       || url === '/privacy' || url.startsWith('/privacy/')
       || url === '/protection' || url.startsWith('/protection/')
+      || url === '/flex' || url.startsWith('/flex/')
       || url === '/buy' || url.startsWith('/buy/')
       || url === '/admin' || url.startsWith('/admin/')
       || url === '/earn' || url.startsWith('/earn/')

@@ -3,6 +3,7 @@
 
 const UNPAID = new Set(['pending_stripe', 'processing', 'expired', 'cancelled', 'failed']);
 const SOLD = new Set(['paid', 'escrow', 'released', 'partially_refunded']);
+const ARCHIVED = new Set(['expired', 'cancelled', 'failed', 'refunded']);
 
 export function isEurOrder(row = {}) {
   return row.currency === 'EUR' || row.paymentMethod === 'stripe';
@@ -14,6 +15,19 @@ export function isUnpaidOrder(row = {}) {
 
 export function isSoldOrder(row = {}) {
   return SOLD.has(String(row.paymentStatus || ''));
+}
+
+/** Expired / cancelled / nulled / fully refunded — hide behind the Archived toggle. */
+export function isArchivedOrder(row = {}) {
+  if (ARCHIVED.has(String(row.paymentStatus || ''))) return true;
+  if (row.fulfillmentStatus === 'cancelled_not_shipped') return true;
+  if (row.disputeStatus === 'refunded_not_shipped') return true;
+  return false;
+}
+
+/** Live = active purchases/sales; archived = expired, cancelled, failed, refunded. */
+export function filterOrdersByArchive(rows = [], archived = false) {
+  return rows.filter((row) => isArchivedOrder(row) === Boolean(archived));
 }
 
 function msFrom(value) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
@@ -15,6 +15,7 @@ import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { authFrom } from '../punchouts.js';
 import {
   canResumePayment,
+  filterOrdersByArchive,
   formatOrderMoney,
   fulfillmentLabel,
   holdMinutesLeft,
@@ -74,7 +75,9 @@ export default function Orders() {
   const [notice, setNotice] = useState('');
   const [busyId, setBusyId] = useState('');
   const [addresses, setAddresses] = useState({});
+  const [trackingDraft, setTrackingDraft] = useState({});
   const [now, setNow] = useState(() => Date.now());
+  const [archived, setArchived] = useState(false);
   const eurSession = String(searchParams.get('eur_session') || '').trim();
   const returnedOrder = String(searchParams.get('order') || '').trim();
   const [focusOrder, setFocusOrder] = useState('');
@@ -130,7 +133,11 @@ export default function Orders() {
   }
 
   const uid = user?.uid || profile?.uid || '';
-  const rows = visibleOrders(mergeOrders(bought, sold), uid);
+  const allRows = visibleOrders(mergeOrders(bought, sold), uid);
+  const rows = useMemo(
+    () => filterOrdersByArchive(allRows, archived),
+    [allRows, archived],
+  );
 
   async function run(orderId, fn) {
     setBusyId(orderId);
@@ -140,6 +147,13 @@ export default function Orders() {
       const result = await fn(token);
       if (result?.shippingAddress) {
         setAddresses((current) => ({ ...current, [orderId]: result.shippingAddress }));
+      }
+      if (result?.order?.trackingCode) {
+        setTrackingDraft((current) => {
+          const next = { ...current };
+          delete next[orderId];
+          return next;
+        });
       }
     } catch (err) {
       setError(err.message || 'Order update failed.');
@@ -156,20 +170,30 @@ export default function Orders() {
         <Link className="btn ghost" to="/sales">Sold history</Link>
         <Link className="btn ghost" to="/cart">Cart</Link>
       </PageHead>
+      <StockNav />
       <Alert>{error}</Alert>
       {notice ? <p className="desk-ok">{notice}</p> : null}
       {bought == null && sold == null && !error ? (
         <DeskPanel title="History"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       ) : null}
-      {rows && !rows.length ? (
+      {allRows && !allRows.length ? (
         <EmptyDesk title="No orders yet" lede="Checkout a native listing with site PKN or Stripe.">
           <Link className="btn" to="/marketplace">Shop</Link>
         </EmptyDesk>
       ) : null}
-      {rows?.length ? (
-        <DeskPanel flush title={`${rows.length} order${rows.length === 1 ? '' : 's'}`}>
+      {allRows?.length ? (
+        <DeskPanel
+          flush
+          title={`${rows.length} ${archived ? 'archived ' : ''}order${rows.length === 1 ? '' : 's'}`}
+          extra={(
+            <div className="order-archive-toggle" role="group" aria-label="Order list">
+              <button type="button" className={!archived ? 'on' : undefined} aria-pressed={!archived} onClick={() => setArchived(false)}>Live</button>
+              <button type="button" className={archived ? 'on' : undefined} aria-pressed={archived} onClick={() => setArchived(true)}>Archived</button>
+            </div>
+          )}
+        >
           <div className="thread-list">
-            {rows.map((row) => {
+            {rows.length ? rows.map((row) => {
               const buyer = row.uid === uid || row.buyerUid === uid;
               const seller = Array.isArray(row.sellerUids) && row.sellerUids.includes(uid);
               const eur = isEurOrder(row);
@@ -182,6 +206,7 @@ export default function Orders() {
               const step = fulfillmentLabel(row);
               const resumable = buyer && canResumePayment(row, now);
               const refunded = Number(row.refundedTotal) || 0;
+              const tracking = trackingDraft[row.id] ?? row.trackingCode ?? '';
               return (
                 <article className={`thread order-row${focusOrder === row.id ? ' is-focus' : ''}`} key={row.id}>
                   <span className="thread-main">
@@ -201,6 +226,9 @@ export default function Orders() {
                       {' · '}
                       <span className="order-id">{row.id}</span>
                     </span>
+                    {row.trackingCode ? (
+                      <span className="thread-meta">Tracking {row.trackingCode}</span>
+                    ) : null}
                     {resumable ? (
                       <span className="thread-meta">
                         Cards held for you for {holdMinutesLeft(row, now)} more min. Not charged until you pay.
@@ -213,6 +241,20 @@ export default function Orders() {
                       <span className="thread-meta">
                         Ship to {address.fullName}, {address.addressLine1}, {address.postalCode} {address.city}, {address.countryCode}
                       </span>
+                    ) : null}
+                    {seller && (escrow || (eur && paid)) && !shipped ? (
+                      <label className="order-tracking-field">
+                        Tracking code
+                        <input
+                          value={tracking}
+                          onChange={(event) => setTrackingDraft((current) => ({
+                            ...current,
+                            [row.id]: event.target.value,
+                          }))}
+                          placeholder="Carrier tracking number"
+                          autoComplete="off"
+                        />
+                      </label>
                     ) : null}
                   </span>
                   <span className="order-actions">
@@ -246,8 +288,10 @@ export default function Orders() {
                       <button
                         className="btn ghost"
                         type="button"
-                        disabled={busyId === row.id}
-                        onClick={() => run(row.id, (token) => markMarketplaceShipped(row.id, token))}
+                        disabled={busyId === row.id || !String(tracking).trim()}
+                        onClick={() => run(row.id, (token) => markMarketplaceShipped(row.id, token, {
+                          trackingCode: String(tracking).trim(),
+                        }))}
                       >
                         Mark shipped
                       </button>
@@ -278,7 +322,13 @@ export default function Orders() {
                   </span>
                 </article>
               );
-            })}
+            }) : (
+              <p className="page-lede" style={{ padding: '1rem' }}>
+                {archived
+                  ? 'No archived orders — expired or cancelled checkouts land here.'
+                  : 'No live orders right now.'}
+              </p>
+            )}
           </div>
         </DeskPanel>
       ) : null}

@@ -619,7 +619,13 @@ export function SellerDashboardView({
           Layout preview — fixture data, not your live collection.
         </p>
       ) : null}
-      <PageHead title="Dashboard" />
+      <PageHead title="Dashboard">
+        {inventoryHref ? (
+          <DeskLink className="btn" href={inventoryHref} data-testid="dashboard-mypokoin">
+            MyPokoin
+          </DeskLink>
+        ) : null}
+      </PageHead>
 
       <div className="seller-home-grid">
         <section className="seller-tile seller-tile-portfolio" aria-labelledby="seller-portfolio-title">

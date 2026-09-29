@@ -1452,9 +1452,117 @@
   border-color: var(--yellow);
   box-shadow: inset 0 0 0 1px var(--yellow);
 }
-.checkout-pay-option.is-disabled {
-  opacity: 0.55;
+.checkout-pay-option.is-disabled,
+.checkout-pay-option.is-unavailable {
+  opacity: 0.72;
   cursor: not-allowed;
+}
+.checkout-pay-option.is-pokoin-flex {
+  border-style: dashed;
+}
+.checkout-pay-option.is-unavailable input {
+  accent-color: var(--muted);
+}
+
+.pokoin-flex-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.pokoin-flex-mark.is-inline {
+  gap: 0.35rem;
+}
+.pokoin-flex-logo {
+  display: block;
+  border-radius: 50%;
+  flex: none;
+}
+.pokoin-flex-word {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2em;
+  line-height: 1;
+}
+.pokoin-flex-pokoin {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.pokoin-flex-flex {
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  font-style: italic;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--yellow);
+}
+
+.flex-page .page-title .pokoin-flex-mark {
+  gap: 0.65rem;
+}
+.flex-soon {
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 0.95rem;
+  border: 1px solid rgb(255 211 61 / 0.35);
+  border-radius: 12px;
+  background: rgb(255 211 61 / 0.08);
+  color: var(--text);
+  font-size: 0.92rem;
+}
+.flex-section {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0 0 1.75rem;
+  max-width: 48rem;
+}
+.flex-section h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.flex-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  color: var(--yellow);
+}
+.flex-section p,
+.flex-section li {
+  color: var(--text);
+  line-height: 1.55;
+}
+.flex-columns {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+.flex-columns article {
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--g5);
+  border-radius: 14px;
+  background: var(--g2);
+}
+.flex-columns ol,
+.flex-bullets {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+.flex-stores {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+.flex-stores li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: var(--g2);
+}
+.flex-stores span {
+  color: var(--muted);
+  font-size: 0.88rem;
 }
 
 .bag-row.summary .bag-price {
@@ -2592,6 +2700,52 @@
   color: var(--text);
   font: inherit;
   font-size: 0.82rem;
+}
+
+.order-archive-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.15rem;
+  border: 1px solid var(--g5);
+  border-radius: 999px;
+  background: var(--g2);
+}
+.order-archive-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.order-archive-toggle button.on {
+  background: var(--g4);
+  color: var(--text);
+}
+.order-tracking-field {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+  max-width: 22rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.order-tracking-field input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--g5);
+  border-radius: 0.55rem;
+  background: var(--g2);
+  color: var(--text);
+  font: inherit;
+}
+.order-tracking-field .order-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 .refund-form {
   display: flex;

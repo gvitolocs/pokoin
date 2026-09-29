@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
@@ -12,6 +12,7 @@ import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { authFrom } from '../punchouts.js';
 import {
   canResumePayment,
+  filterOrdersByArchive,
   formatOrderMoney,
   fulfillmentLabel,
   holdMinutesLeft,
@@ -54,6 +55,7 @@ export default function Bought() {
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
   const [now, setNow] = useState(() => Date.now());
+  const [archived, setArchived] = useState(false);
 
   useEffect(() => {
     document.title = 'Buy history · Pokoin';
@@ -96,6 +98,11 @@ export default function Bought() {
     }
   }
 
+  const shown = useMemo(
+    () => filterOrdersByArchive(rows || [], archived),
+    [rows, archived],
+  );
+
   return (
     <div className="page desk">
       <PageHead
@@ -117,9 +124,32 @@ export default function Bought() {
         </EmptyDesk>
       ) : null}
       {rows?.length ? (
-        <DeskPanel flush title={`${rows.length} purchase${rows.length === 1 ? '' : 's'}`}>
+        <DeskPanel
+          flush
+          title={`${shown.length} ${archived ? 'archived' : 'purchase'}${shown.length === 1 ? '' : 's'}`}
+          extra={(
+            <div className="order-archive-toggle" role="group" aria-label="Purchase list">
+              <button
+                type="button"
+                className={!archived ? 'on' : undefined}
+                aria-pressed={!archived}
+                onClick={() => setArchived(false)}
+              >
+                Live
+              </button>
+              <button
+                type="button"
+                className={archived ? 'on' : undefined}
+                aria-pressed={archived}
+                onClick={() => setArchived(true)}
+              >
+                Archived
+              </button>
+            </div>
+          )}
+        >
           <div className="thread-list">
-            {rows.map((row) => {
+            {shown.length ? shown.map((row) => {
               const eur = isEurOrder(row);
               const escrow = row.paymentStatus === 'escrow';
               const paid = row.paymentStatus === 'paid' || row.paymentStatus === 'released';
@@ -150,6 +180,9 @@ export default function Bought() {
                       {' · '}
                       <span className="order-id">{row.id}</span>
                     </span>
+                    {row.trackingCode ? (
+                      <span className="thread-meta">Tracking {row.trackingCode}</span>
+                    ) : null}
                     {resumable ? (
                       <span className="thread-meta">
                         Cards held for you for {holdMinutesLeft(row, now)} more min. Not charged until you pay.
@@ -199,7 +232,13 @@ export default function Bought() {
                   </span>
                 </article>
               );
-            })}
+            }) : (
+              <p className="page-lede" style={{ padding: '1rem' }}>
+                {archived
+                  ? 'No archived purchases — expired or cancelled checkouts land here.'
+                  : 'No live purchases right now.'}
+              </p>
+            )}
           </div>
         </DeskPanel>
       ) : null}

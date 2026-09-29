@@ -5,8 +5,10 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   canResumePayment,
+  filterOrdersByArchive,
   formatOrderMoney,
   holdMinutesLeft,
+  isArchivedOrder,
   newRefundToken,
   orderStatus,
   refundAmountFromInput,
@@ -22,6 +24,24 @@ test('unpaid EUR orders say not charged, never sold', () => {
   assert.equal(orderStatus({ paymentStatus: 'cancelled' }).label, 'Cancelled · not charged');
   assert.equal(orderStatus({ paymentStatus: 'paid' }).tone, 'ok');
   assert.equal(orderStatus({ paymentStatus: 'paid', fulfillmentStatus: 'needs_refund' }).tone, 'warn');
+});
+
+test('archived hides expired cancelled failed and refunded orders', () => {
+  assert.equal(isArchivedOrder({ paymentStatus: 'expired' }), true);
+  assert.equal(isArchivedOrder({ paymentStatus: 'cancelled' }), true);
+  assert.equal(isArchivedOrder({ paymentStatus: 'failed' }), true);
+  assert.equal(isArchivedOrder({ paymentStatus: 'refunded' }), true);
+  assert.equal(isArchivedOrder({ paymentStatus: 'escrow' }), false);
+  assert.equal(isArchivedOrder({ paymentStatus: 'paid' }), false);
+  assert.equal(isArchivedOrder({ paymentStatus: 'pending_stripe' }), false);
+  assert.equal(isArchivedOrder({ paymentStatus: 'paid', fulfillmentStatus: 'cancelled_not_shipped' }), true);
+  const rows = [
+    { id: 'live', paymentStatus: 'escrow' },
+    { id: 'dead', paymentStatus: 'expired' },
+    { id: 'pay', paymentStatus: 'pending_stripe' },
+  ];
+  assert.deepEqual(filterOrdersByArchive(rows, false).map((r) => r.id), ['live', 'pay']);
+  assert.deepEqual(filterOrdersByArchive(rows, true).map((r) => r.id), ['dead']);
 });
 
 test('seller never sees an abandoned Stripe checkout as an order', () => {
