@@ -17,6 +17,25 @@ export function marqueeRect(x1, y1, x2, y2) {
   };
 }
 
+/**
+ * Rubber-band in viewport space after the page has scrolled since pointer-down.
+ * Origin is remembered in client coords + scroll; as the document moves, the
+ * origin point drifts on screen so the box covers rows that scrolled under it
+ * (Windows Explorer / Finder behaviour). Without this, a fixed client-space
+ * box stays glued to the viewport and only hits currently-visible rows.
+ */
+export function marqueeRectForScroll(origin, clientX, clientY, scrollX = 0, scrollY = 0) {
+  if (!origin) return marqueeRect(clientX, clientY, clientX, clientY);
+  const dx = Number(scrollX) - Number(origin.scrollX || 0);
+  const dy = Number(scrollY) - Number(origin.scrollY || 0);
+  return marqueeRect(
+    Number(origin.x) - dx,
+    Number(origin.y) - dy,
+    Number(clientX),
+    Number(clientY),
+  );
+}
+
 export function rectsIntersect(a, b) {
   if (!a || !b) return false;
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;

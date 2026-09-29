@@ -6,6 +6,7 @@ import {
   listingSelectId,
   marqueeBlocked,
   marqueeRect,
+  marqueeRectForScroll,
   marqueeStartAllowed,
   mixedDeskDragReference,
   rectsIntersect,
@@ -34,6 +35,22 @@ test('a rubber band starts on the card scan, not on a button', () => {
   assert.equal(rectsIntersect(rect, { left: 0, top: 0, right: 5, bottom: 10 }), true);
   assert.equal(rectsIntersect(rect, { left: 20, top: 0, right: 30, bottom: 10 }), false);
   assert.equal(listingSelectId({ id: 'lst-1' }), 'lst-1');
+});
+
+test('marquee follows document scroll so off-screen rows can enter the band', () => {
+  const origin = { x: 100, y: 200, scrollX: 0, scrollY: 0 };
+  // Pointer held still; page scrolled down 400px → origin drifts up, box grows.
+  const afterScroll = marqueeRectForScroll(origin, 100, 200, 0, 400);
+  assert.equal(afterScroll.left, 100);
+  assert.equal(afterScroll.top, -200);
+  assert.equal(afterScroll.height, 400);
+  assert.equal(afterScroll.width, 0);
+  // No scroll → same as a plain client-space rect.
+  const steady = marqueeRectForScroll(origin, 180, 260, 0, 0);
+  assert.deepEqual(
+    { left: steady.left, top: steady.top, width: steady.width, height: steady.height },
+    { left: 100, top: 200, width: 80, height: 60 },
+  );
 });
 
 test('empty page background may start a shop marquee; shop rows and art may not', () => {
