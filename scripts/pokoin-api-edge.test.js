@@ -42,14 +42,21 @@ function request(port, method = 'GET', pathname = '/api/marketplace-suggest?q=pi
   });
 }
 
+/** Start the real edge; a taken random port makes it exit, so try another. */
 async function startEdge(env) {
-  const port = 20000 + Math.floor(Math.random() * 20000);
-  const child = spawn(process.execPath, [path.join(__dirname, 'pokoin-api-edge.js')], {
-    env: { ...process.env, POKOIN_API_EDGE_PORT: String(port), ...env },
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-  await new Promise((resolve) => child.stdout.once('data', resolve));
-  return { port, child };
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const port = 20000 + Math.floor(Math.random() * 20000);
+    const child = spawn(process.execPath, [path.join(__dirname, 'pokoin-api-edge.js')], {
+      env: { ...process.env, POKOIN_API_EDGE_PORT: String(port), ...env },
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const started = await new Promise((resolve) => {
+      child.stdout.once('data', () => resolve(true));
+      child.once('exit', () => resolve(false));
+    });
+    if (started) return { port, child };
+  }
+  throw new Error('edge did not start');
 }
 
 test('under load the edge spills GETs to nezopt and keeps POSTs on the Pi', async () => {

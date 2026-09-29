@@ -14,7 +14,7 @@ Cloudflare tunnel → Pi pokoin-api-edge :18079 ─┬─ Pi API :18080 (always 
 
 `scripts/pokoin-api-edge.js` on the Pi counts requests in flight to the Pi API.
 
-- Below `POKOIN_API_LOCAL_MAX` (24): everything goes to the Pi, as before.
+- Below `POKOIN_API_LOCAL_MAX` (16 — the Pi's p95 stays ≈ 400 ms there): everything goes to the Pi, as before.
 - At or above it: **GET/HEAD** API requests go to nezopt, but only while nezopt
   answers a real suggest probe every 5 s (2 s timeout).
 - **Writes, webhooks, uploads, checkout** (any other method) always stay on the Pi.
@@ -73,5 +73,8 @@ POKOIN_API_OVERFLOW_ORIGIN= scripts/deploy-pokoin-api-edge.sh   # overflow off
 
 - Same query on both origins: identical groups, count and first printings;
   nezopt 11 ms vs Pi 36 ms (suggest).
+- Production, from the Pi through the live edge, 40 concurrent distinct searches
+  for 10 s: **186 req/s** (Pi alone ~65), 1318 served by nezopt / 538 by the Pi,
+  0 errors (localMax 24); 157 req/s, 1137 / 434, 0 errors at localMax 16.
 - nezopt alone, 32 concurrent suggest for 60 s: HPA 1 → 4 pods in ~40 s,
   **532 req/s**, p50 60 ms, p95 89 ms, 0 errors (Pi alone: ~65 req/s).
