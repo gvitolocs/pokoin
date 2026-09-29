@@ -4,6 +4,7 @@ import {
   buildPokoPageContext,
   defaultPokoDeskPrompt,
   mergePokoEvents,
+  pokoEventsSignature,
   pokoUserTurnKey,
   readPokoHistory,
   reconcilePokoEvents,
@@ -33,6 +34,8 @@ export function usePokoThread({
   const busyRef = useRef(false);
   busyRef.current = busy;
   const refreshRef = useRef(async () => {});
+  const getBearerRef = useRef(getBearer);
+  getBearerRef.current = getBearer;
 
   if (uid !== cacheUid) {
     setCacheUid(uid);
@@ -54,12 +57,20 @@ export function usePokoThread({
       // optimistic user bubble until a full page refresh.
       if (busyRef.current) return;
       try {
-        const token = await getBearer();
+        const token = await getBearerRef.current?.();
         if (!token || !live || busyRef.current) return;
         const result = await fetchPokoChatHistory(token);
         if (!live || busyRef.current) return;
         const page = result?.events || [];
-        setEvents((current) => reconcilePokoEvents(current, page));
+        setEvents((current) => {
+          const next = reconcilePokoEvents(current, page);
+          // Idle polls must not rebuild state — that re-rendered the thread and
+          // yanked scroll to the bottom every 4s while pinBottom stayed true.
+          if (pokoEventsSignature(current) === pokoEventsSignature(next)) {
+            return current;
+          }
+          return next;
+        });
         setError('');
       } catch (err) {
         if (live && !eventsRef.current.length) {
@@ -74,12 +85,17 @@ export function usePokoThread({
       live = false;
       clearInterval(timer);
     };
-  }, [active, uid, getBearer]);
+  }, [active, uid]);
 
   useLayoutEffect(() => {
     const el = logRef.current;
     if (el && pinBottom.current) el.scrollTop = el.scrollHeight;
   }, [events, busy]);
+
+  function onScroll(event) {
+    const el = event.currentTarget;
+    pinBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
 
   async function send({
     message = '',
@@ -106,7 +122,7 @@ export function usePokoThread({
     };
     setEvents((current) => mergePokoEvents(current, [mine]));
     try {
-      const token = await getBearer();
+      const token = await getBearerRef.current?.();
       if (!token) throw new Error('Sign in to message Poko.');
       const pageContext = buildPokoPageContext({
         pathname,
@@ -176,6 +192,7 @@ export function usePokoThread({
     error,
     busy,
     logRef,
+    onScroll,
     refresh: () => refreshRef.current(),
     send,
     setError,
