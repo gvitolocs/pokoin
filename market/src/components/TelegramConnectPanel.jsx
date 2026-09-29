@@ -4,7 +4,8 @@ import { useAuth } from '../auth.jsx';
 
 const BOT_USERNAME = 'pokoinpos_bot';
 
-export default function TelegramConnectPanel() {
+/** Poko chat links: one profile code connects Telegram or Discord. `onStatus` hears each load. */
+export default function TelegramConnectPanel({ onStatus = null }) {
   const { getBearer } = useAuth();
   const [status, setStatus] = useState(null);
   const [codeInfo, setCodeInfo] = useState(null);
@@ -28,6 +29,11 @@ export default function TelegramConnectPanel() {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (status) onStatus?.(status);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   async function getCode(event) {
     event.preventDefault();
@@ -71,8 +77,8 @@ export default function TelegramConnectPanel() {
   return (
     <div className="tg-connect">
       <p className="tg-connect-note">
-        Link Poko on Telegram and/or Discord with one profile code. Linked chats share the same
-        private memory as website Messages — never another user&apos;s. ✨
+        Keep your Poko conversation going on Telegram or Discord. Linked chats share the
+        private memory of your website Messages — never another user&apos;s.
       </p>
 
       {telegram.linked ? (
@@ -102,7 +108,7 @@ export default function TelegramConnectPanel() {
           <p className="tg-code-label">Your link code (expires in {codeInfo.expiresAtMinutes} minutes, works once):</p>
           <p className="tg-code">{codeInfo.code}</p>
           <p>
-            <a className="btn" href={`https://t.me/${BOT_USERNAME}?start=connect_${codeInfo.code}`} target="_blank" rel="noreferrer">
+            <a className="btn btn-telegram" href={`https://t.me/${BOT_USERNAME}?start=connect_${codeInfo.code}`} target="_blank" rel="noreferrer">
               Open Telegram &amp; link
             </a>
           </p>
@@ -116,7 +122,9 @@ export default function TelegramConnectPanel() {
         </div>
       ) : (
         <form className="tg-connect-actions" onSubmit={getCode}>
-          <button type="submit" className="btn" disabled={busy}>Get link code</button>
+          <button type="submit" className="btn btn-telegram" disabled={busy}>
+            {busy ? 'Creating…' : 'Get link code'}
+          </button>
         </form>
       )}
 
