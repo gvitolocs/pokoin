@@ -123,28 +123,29 @@ async function queryRows(text, values = []) {
 
 /**
  * Resolve CT website username → snapshot seller_account_id.
- * CT display name often differs from the URL handle.
+ * Prefer CardTrader user id (indexed); avoid ILIKE on the full snapshot table.
  */
 async function resolveSellerAccount(username) {
-  const byName = await queryRows(
+  // Exact display-name hit (rare when URL handle == snapshot name).
+  const byExact = await queryRows(
     `select seller_account_id::text as account_id,
             seller_account_name as snapshot_name,
             count(*)::int as listing_count,
             coalesce(sum(quantity), 0)::int as quantity_sum
        from cardtrader_market_listing_snapshots
-      where seller_account_name ilike $1
+      where seller_account_name = $1
       group by 1, 2
       order by listing_count desc
       limit 1`,
     [username],
   );
-  if (byName[0]) {
+  if (byExact[0]) {
     return {
       username,
-      accountId: byName[0].account_id,
-      snapshotName: byName[0].snapshot_name,
-      listingCount: byName[0].listing_count,
-      quantitySum: byName[0].quantity_sum,
+      accountId: byExact[0].account_id,
+      snapshotName: byExact[0].snapshot_name,
+      listingCount: byExact[0].listing_count,
+      quantitySum: byExact[0].quantity_sum,
       resolvedVia: 'snapshot_name',
     };
   }
@@ -206,79 +207,75 @@ async function fetchCardTraderUserId(username) {
 }
 
 /**
- * Facet-perfect scan SQL. Condition/language normalized to sold_daily codes.
- * Outlier sold days clipped against the live book median.
+ * Facet-perfect scan in indexed steps (seller listings → live book → sold facets).
+ * Avoids a single mega-join that times out on large sellers (~30s statement_timeout).
  */
 async function scanSellerDeals(accountId) {
-  const rows = await queryRows(
-    `with seller as (
-       select
-         s.blueprint_id::text as blueprint_id,
-         s.price::numeric as ask_eur,
-         s.quantity::int as quantity,
-         coalesce(nullif(s.condition, ''), 'Near Mint') as condition_raw,
-         lower(coalesce(nullif(s.language, ''), 'en')) as language_raw,
-         coalesce((s.properties->>'pokemon_reverse')::boolean, false) as reverse,
-         coalesce((s.properties->>'first_edition')::boolean, false) as first_edition,
-         false as graded,
-         case
-           when lower(coalesce(s.condition, '')) ~ '^(nm|near[ -]?mint|mint)$' then 'NM'
-           when lower(coalesce(s.condition, '')) ~ '^(sp|slightly[ -]?played|lightly[ -]?played)$' then 'SP'
-           when lower(coalesce(s.condition, '')) ~ '^(mp|played|moderately[ -]?played)$' then 'MP'
-           when lower(coalesce(s.condition, '')) ~ '^(pl|heavily[ -]?played|well[ -]?played|hp)$' then 'PL'
-           when lower(coalesce(s.condition, '')) ~ '^(poor|damaged)$' then 'Poor'
-           else 'NM'
-         end as condition_code,
-         case
-           when lower(coalesce(s.language, '')) in ('it', 'italian') then 'IT'
-           when lower(coalesce(s.language, '')) in ('fr', 'french') then 'FR'
-           when lower(coalesce(s.language, '')) in ('de', 'german') then 'DE'
-           when lower(coalesce(s.language, '')) in ('es', 'spanish') then 'ES'
-           when lower(coalesce(s.language, '')) in ('jp', 'ja', 'japanese') then 'JP'
-           when lower(coalesce(s.language, '')) in ('pt', 'portuguese') then 'PT'
-           when lower(coalesce(s.language, '')) in ('nl', 'dutch') then 'NL'
-           when lower(coalesce(s.language, '')) in ('pl', 'polish') then 'PL'
-           when lower(coalesce(s.language, '')) in ('ru', 'russian') then 'RU'
-           when lower(coalesce(s.language, '')) in ('ko', 'kr', 'korean') then 'KO'
-           when lower(coalesce(s.language, '')) in ('zh', 'zh-cn', 'chinese') then 'ZH'
-           when lower(coalesce(s.language, '')) in ('zht', 'zh-tw') then 'ZHT'
-           when lower(coalesce(s.language, '')) in ('id', 'indonesian') then 'ID'
-           when coalesce(s.language, '') = '' then 'EN'
-           when lower(coalesce(s.language, '')) in ('en', 'english') then 'EN'
-           else 'EN'
-         end as language_code
-       from cardtrader_market_listing_snapshots s
-       where s.seller_account_id = $1
-     ),
-     named as (
-       select distinct on (
-         seller.blueprint_id, seller.condition_code, seller.language_code,
-         seller.reverse, seller.first_edition, seller.ask_eur
-       )
-         seller.*,
-         c.name as card_name,
-         c.expansion_name,
-         c.card_number,
-         c.card_id
-       from seller
-       left join marketplace_search_candidates c
-         on c.ct_id::text = seller.blueprint_id
-       order by
-         seller.blueprint_id, seller.condition_code, seller.language_code,
-         seller.reverse, seller.first_edition, seller.ask_eur, c.card_id
-     ),
-     live as (
-       select
-         blueprint_id::text as blueprint_id,
-         min(price::numeric) filter (where price::numeric > 0) as live_cheapest_eur,
-         percentile_cont(0.5) within group (order by price::numeric)
-           filter (where price::numeric > 0) as live_median_eur,
-         count(*) filter (where price::numeric > 0)::int as live_listing_count
+  const listings = await queryRows(
+    `select distinct on (
+        s.blueprint_id::text,
+        coalesce(nullif(s.condition, ''), 'Near Mint'),
+        lower(coalesce(nullif(s.language, ''), 'en')),
+        coalesce((s.properties->>'pokemon_reverse')::boolean, false),
+        coalesce((s.properties->>'first_edition')::boolean, false),
+        s.price::numeric
+      )
+        s.blueprint_id::text as blueprint_id,
+        s.price::numeric as ask_eur,
+        s.quantity::int as quantity,
+        coalesce(nullif(s.condition, ''), 'Near Mint') as condition_raw,
+        lower(coalesce(nullif(s.language, ''), 'en')) as language_raw,
+        coalesce((s.properties->>'pokemon_reverse')::boolean, false) as reverse,
+        coalesce((s.properties->>'first_edition')::boolean, false) as first_edition,
+        false as graded,
+        c.name as card_name,
+        c.expansion_name,
+        c.card_number,
+        c.card_id
+      from cardtrader_market_listing_snapshots s
+      left join marketplace_search_candidates c
+        on c.ct_id::text = s.blueprint_id::text
+     where s.seller_account_id = $1
+       and s.price::numeric > 0
+     order by
+        s.blueprint_id::text,
+        coalesce(nullif(s.condition, ''), 'Near Mint'),
+        lower(coalesce(nullif(s.language, ''), 'en')),
+        coalesce((s.properties->>'pokemon_reverse')::boolean, false),
+        coalesce((s.properties->>'first_edition')::boolean, false),
+        s.price::numeric,
+        c.card_id`,
+    [String(accountId)],
+  );
+
+  if (!listings.length) return [];
+
+  const blueprintIds = [...new Set(listings.map((row) => String(row.blueprint_id)))];
+
+  // Live book from snapshots (indexed ANY; ~1s for ~2.5k blueprints).
+  const liveRows = await queryRows(
+    `select blueprint_id::text as blueprint_id,
+            min(price::numeric) as live_cheapest_eur,
+            percentile_cont(0.5) within group (order by price::numeric) as live_median_eur,
+            count(*)::int as live_listing_count
        from cardtrader_market_listing_snapshots
-       where blueprint_id::text in (select distinct blueprint_id from seller)
-       group by 1
-     ),
-     sold_days as (
+      where blueprint_id = any($1::bigint[])
+        and price::numeric > 0
+      group by 1`,
+    [blueprintIds],
+  );
+
+  const liveByBp = new Map();
+  for (const row of liveRows) {
+    liveByBp.set(String(row.blueprint_id), {
+      live_cheapest_eur: row.live_cheapest_eur != null ? Number(row.live_cheapest_eur) : null,
+      live_median_eur: row.live_median_eur != null ? Number(row.live_median_eur) : null,
+      live_listing_count: Number(row.live_listing_count) || 0,
+    });
+  }
+
+  const soldRows = await queryRows(
+    `with sold_days as (
        select
          d.blueprint_id::text as blueprint_id,
          d.condition as condition_code,
@@ -290,118 +287,123 @@ async function scanSellerDeals(accountId) {
          d.median_pkn * 0.005 as day_eur,
          d.sold_qty
        from cardtrader_sold_daily d
-       where d.observed_day >= (current_date - ($2::int || ' days')::interval)
-         and d.blueprint_id::text in (select distinct blueprint_id from seller)
-         and d.sold_qty > 0
-     ),
-     sold_clean as (
-       select sd.*
-       from sold_days sd
-       join live l on l.blueprint_id = sd.blueprint_id
-       where sd.day_eur > 0
-         and sd.day_eur <= 500
-         and (l.live_median_eur is null or sd.day_eur <= greatest(l.live_median_eur * 25, 5))
-     ),
-     sold_facet as (
-       select
-         blueprint_id,
-         condition_code,
-         language_code,
-         reverse,
-         first_edition,
-         graded,
-         percentile_cont(0.5) within group (order by day_eur) as sold_median_eur,
-         sum(sold_qty)::int as sold_qty_90d,
-         count(*)::int as sold_day_rows,
-         max(observed_day) as last_sold_day
-       from sold_clean
-       group by 1, 2, 3, 4, 5, 6
-     ),
-     joined as (
-       select
-         n.*,
-         l.live_cheapest_eur,
-         l.live_median_eur,
-         l.live_listing_count,
-         sf.sold_median_eur,
-         sf.sold_qty_90d,
-         sf.sold_day_rows,
-         sf.last_sold_day
-       from named n
-       left join live l on l.blueprint_id = n.blueprint_id
-       left join sold_facet sf
-         on sf.blueprint_id = n.blueprint_id
-        and sf.condition_code = n.condition_code
-        and sf.language_code = n.language_code
-        and sf.reverse = n.reverse
-        and sf.first_edition = n.first_edition
-        and sf.graded = n.graded
+      where d.observed_day >= (current_date - ($2::int || ' days')::interval)
+        and d.blueprint_id = any($1::bigint[])
+        and d.sold_qty > 0
+        and d.median_pkn * 0.005 > 0
+        and d.median_pkn * 0.005 <= 500
      )
      select
        blueprint_id,
-       card_id,
-       coalesce(card_name, '(unknown)') as card_name,
-       coalesce(expansion_name, '') as expansion_name,
-       coalesce(card_number, '') as card_number,
-       condition_raw,
        condition_code,
-       language_raw,
        language_code,
        reverse,
        first_edition,
        graded,
-       round(ask_eur, 2) as ask_eur,
-       quantity,
-       round(sold_median_eur::numeric, 2) as sold_median_eur,
-       round(live_cheapest_eur::numeric, 2) as live_cheapest_eur,
-       round(live_median_eur::numeric, 2) as live_median_eur,
-       coalesce(live_listing_count, 0) as live_listing_count,
-       coalesce(sold_qty_90d, 0) as sold_qty_90d,
-       last_sold_day,
-       case
-         when sold_median_eur is null then 'no_sold_match'
-         when sold_qty_90d < $3 then 'thin_sold'
-         when ask_eur > 0
-           and sold_median_eur / ask_eur >= $4
-           and live_median_eur is not null
-           and live_median_eur / ask_eur >= $5
-           then 'cheap_vs_sold'
-         when ask_eur > 0
-           and sold_median_eur > 0
-           and ask_eur / sold_median_eur >= $6
-           and live_median_eur is not null
-           and ask_eur / live_median_eur >= $7
-           then 'expensive_vs_sold'
-         else 'ok'
-       end as flag,
-       case
-         when sold_median_eur is null or ask_eur <= 0 then null
-         else round((sold_median_eur / ask_eur)::numeric, 2)
-       end as sold_over_ask,
-       case
-         when sold_median_eur is null or sold_median_eur <= 0 then null
-         else round((ask_eur / sold_median_eur)::numeric, 2)
-       end as ask_over_sold
-     from joined
-     order by
-       case
-         when sold_median_eur is not null and ask_eur > 0 and sold_median_eur / ask_eur >= $4
-           then sold_median_eur / ask_eur
-         when sold_median_eur is not null and sold_median_eur > 0 and ask_eur / sold_median_eur >= $6
-           then ask_eur / sold_median_eur
-         else 0
-       end desc`,
-    [
-      String(accountId),
-      SOLD_WINDOW_DAYS,
-      MIN_SOLD_QTY,
-      CHEAP_SOLD_RATIO,
-      CHEAP_LIVE_RATIO,
-      EXPENSIVE_SOLD_RATIO,
-      EXPENSIVE_LIVE_RATIO,
-    ],
+       percentile_cont(0.5) within group (order by day_eur) as sold_median_eur,
+       sum(sold_qty)::int as sold_qty_90d,
+       count(*)::int as sold_day_rows,
+       max(observed_day) as last_sold_day
+     from sold_days
+     group by 1, 2, 3, 4, 5, 6`,
+    [blueprintIds, SOLD_WINDOW_DAYS],
   );
-  return rows;
+
+  const soldByFacet = new Map();
+  for (const row of soldRows) {
+    const key = [
+      String(row.blueprint_id),
+      row.condition_code,
+      row.language_code,
+      row.reverse ? '1' : '0',
+      row.first_edition ? '1' : '0',
+      row.graded ? '1' : '0',
+    ].join('|');
+    soldByFacet.set(key, row);
+  }
+
+  const out = [];
+  for (const listing of listings) {
+    const condition_code = normalizeCondition(listing.condition_raw);
+    const language_code = normalizeLanguage(listing.language_raw);
+    const ask = Number(listing.ask_eur);
+    const live = liveByBp.get(String(listing.blueprint_id)) || {};
+    let liveMedian = live.live_median_eur ?? null;
+    let liveCheapest = live.live_cheapest_eur ?? null;
+
+    const facetKey = [
+      String(listing.blueprint_id),
+      condition_code,
+      language_code,
+      listing.reverse ? '1' : '0',
+      listing.first_edition ? '1' : '0',
+      '0',
+    ].join('|');
+    const sold = soldByFacet.get(facetKey);
+
+    let soldMedian = sold?.sold_median_eur != null ? Number(sold.sold_median_eur) : null;
+    const soldQty = sold?.sold_qty_90d != null ? Number(sold.sold_qty_90d) : 0;
+    // Drop absurd sold medians vs live book (same clip idea as the olive scan).
+    if (soldMedian != null && liveMedian != null && soldMedian > Math.max(liveMedian * 25, 5)) {
+      soldMedian = null;
+    }
+
+    let flag = 'ok';
+    if (soldMedian == null) flag = 'no_sold_match';
+    else if (soldQty < MIN_SOLD_QTY) flag = 'thin_sold';
+    else if (
+      ask > 0
+      && soldMedian / ask >= CHEAP_SOLD_RATIO
+      && liveMedian != null
+      && liveMedian / ask >= CHEAP_LIVE_RATIO
+    ) {
+      flag = 'cheap_vs_sold';
+    } else if (
+      ask > 0
+      && soldMedian > 0
+      && ask / soldMedian >= EXPENSIVE_SOLD_RATIO
+      && liveMedian != null
+      && ask / liveMedian >= EXPENSIVE_LIVE_RATIO
+    ) {
+      flag = 'expensive_vs_sold';
+    }
+
+    out.push({
+      blueprint_id: listing.blueprint_id,
+      card_id: listing.card_id,
+      card_name: listing.card_name || '(unknown)',
+      expansion_name: listing.expansion_name || '',
+      card_number: listing.card_number || '',
+      condition_raw: listing.condition_raw,
+      condition_code,
+      language_raw: listing.language_raw,
+      language_code,
+      reverse: Boolean(listing.reverse),
+      first_edition: Boolean(listing.first_edition),
+      graded: false,
+      ask_eur: Math.round(ask * 100) / 100,
+      quantity: Number(listing.quantity) || 0,
+      sold_median_eur: soldMedian != null ? Math.round(soldMedian * 100) / 100 : null,
+      live_cheapest_eur: liveCheapest != null ? Math.round(liveCheapest * 100) / 100 : null,
+      live_median_eur: liveMedian != null ? Math.round(liveMedian * 100) / 100 : null,
+      live_listing_count: live.live_listing_count || 0,
+      sold_qty_90d: soldQty,
+      last_sold_day: sold?.last_sold_day || null,
+      flag,
+      sold_over_ask: soldMedian != null && ask > 0 ? Math.round((soldMedian / ask) * 100) / 100 : null,
+      ask_over_sold: soldMedian != null && soldMedian > 0 ? Math.round((ask / soldMedian) * 100) / 100 : null,
+    });
+  }
+
+  out.sort((a, b) => {
+    const score = (row) => {
+      if (row.flag === 'cheap_vs_sold') return row.sold_over_ask || 0;
+      if (row.flag === 'expensive_vs_sold') return row.ask_over_sold || 0;
+      return 0;
+    };
+    return score(b) - score(a);
+  });
+  return out;
 }
 
 function dealDto(row) {
