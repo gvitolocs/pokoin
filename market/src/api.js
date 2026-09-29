@@ -678,6 +678,16 @@ export function fetchPortfolioHistory(token) {
   });
 }
 
+/** Associate desk: role, campaign window, and live royalty earnings. */
+export function fetchAssociateSummary(token) {
+  return getJson('/api/marketplace-associate', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
 export function fetchCardTraderStatus(token) {
   return getJson('/api/cardtrader-sync', {
     headers: {

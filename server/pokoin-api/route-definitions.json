@@ -412,6 +412,30 @@
     }
   },
   {
+    "path": "/api/marketplace-associate",
+    "file": "marketplace-associate.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Associate desk: role (distributor, ambassador, …), campaign window, and live royalty earnings on sales made by Italian sellers to Italian buyers.",
+    "auth": "Required Firebase bearer token; caller email must exist in public.marketplace_associates, else 403.",
+    "params": {
+      "query": "none",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres",
+        "Firestore orders"
+      ]
+    }
+  },
+  {
     "path": "/api/marketplace-native-sales",
     "file": "marketplace-native-sales.js",
     "methods": [
