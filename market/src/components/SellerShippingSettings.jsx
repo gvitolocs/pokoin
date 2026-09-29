@@ -7,7 +7,7 @@ import {
 } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { SHIP_FROM_COUNTRIES, shipFromCountryOptionLabel } from '../ship-countries.js';
-import { Alert, DeskPanel } from './Desk.jsx';
+import { Alert } from './Desk.jsx';
 
 /** Platform owner must enable Connect once; sellers then get Express Account Links. */
 const STRIPE_CONNECT_GET_STARTED = 'https://dashboard.stripe.com/connect/accounts/overview';
@@ -32,8 +32,8 @@ function openStripeUrl(url) {
   return true;
 }
 
-/** Brand purple Connect button — sits next to CardTrader actions on Profile. */
-export function StripeConnectButton({ className = '', shipFromCountry = '', onCountrySaved, onError }) {
+/** Brand purple Connect button — the Stripe row of the Profile seller setup. */
+export function StripeConnectButton({ className = '', disabled = false, shipFromCountry = '', onCountrySaved, onError, onStatus }) {
   const { getBearer, signedIn } = useAuth();
   const [connect, setConnect] = useState({ stripeConnectStatus: 'not_started', ready: false });
   const [busy, setBusy] = useState(false);
@@ -45,9 +45,12 @@ export function StripeConnectButton({ className = '', shipFromCountry = '', onCo
       try {
         const token = await getBearer();
         const status = await fetchStripeConnectStatus(token);
-        if (!cancelled) setConnect(status);
+        if (cancelled) return;
+        setConnect(status);
+        onStatus?.(status);
       } catch (_) {
         /* status is best-effort */
+        if (!cancelled) onStatus?.({ stripeConnectStatus: 'not_started', ready: false });
       }
     })();
     return () => { cancelled = true; };
@@ -90,7 +93,7 @@ export function StripeConnectButton({ className = '', shipFromCountry = '', onCo
     <button
       type="button"
       className={`btn btn-stripe ${className}`.trim()}
-      disabled={busy}
+      disabled={busy || disabled}
       onClick={connectStripe}
       title={connect.ready ? 'Stripe Connect ready' : `Stripe Connect: ${connect.stripeConnectStatus || 'not_started'}`}
     >
@@ -99,24 +102,14 @@ export function StripeConnectButton({ className = '', shipFromCountry = '', onCo
   );
 }
 
-export default function SellerShippingSettings({
-  shipFromCountry: controlledCountry,
-  onCountryChange,
-  stripeError,
-  onStripeError,
-  hideStripeButton = false,
-}) {
+/**
+ * Ship-from country for the Profile seller setup. Loads the saved (or
+ * IP-detected) country and saves on change — no separate Save button.
+ */
+export function ShipFromCountrySelect({ value, onChange, onLoaded, onError }) {
   const { getBearer, signedIn } = useAuth();
-  const [shipFromCountry, setShipFromCountry] = useState(controlledCountry || '');
-  const [countrySource, setCountrySource] = useState('');
-  const [connect, setConnect] = useState({ stripeConnectStatus: 'not_started', ready: false });
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (controlledCountry != null) setShipFromCountry(controlledCountry);
-  }, [controlledCountry]);
+  const [source, setSource] = useState('');
+  const [state, setState] = useState('idle');
 
   useEffect(() => {
     if (!signedIn) return undefined;
@@ -124,101 +117,64 @@ export default function SellerShippingSettings({
     (async () => {
       try {
         const token = await getBearer();
-        const [settings, status] = await Promise.all([
-          fetchSellerSettings(token),
-          fetchStripeConnectStatus(token),
-        ]);
+        const settings = await fetchSellerSettings(token);
         if (cancelled) return;
-        const next = settings.shipFromCountry || '';
-        setShipFromCountry(next);
-        setCountrySource(settings.shipFromCountrySource || '');
-        onCountryChange?.(next);
-        setConnect(status);
+        setSource(settings.shipFromCountrySource || '');
+        onLoaded?.(settings.shipFromCountry || '');
       } catch (err) {
-        if (!cancelled) setError(err.message || 'Could not load seller settings.');
+        if (cancelled) return;
+        onLoaded?.('');
+        onError?.(err.message || 'Could not load seller settings.');
       }
     })();
     return () => { cancelled = true; };
   }, [signedIn, getBearer]);
 
-  if (!signedIn) return null;
-
-  function setCountry(next) {
-    setShipFromCountry(next);
-    setCountrySource('user');
-    onCountryChange?.(next);
-  }
-
-  async function saveCountry(event) {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    setMessage('');
-    onStripeError?.('');
+  async function save(next) {
+    const prev = value || '';
+    onChange?.(next);
+    if (!next) return;
+    setState('saving');
+    onError?.('');
     try {
       const token = await getBearer();
-      const data = await saveSellerSettings({ shipFromCountry }, token);
-      const next = data.shipFromCountry || '';
-      setShipFromCountry(next);
-      setCountrySource(data.shipFromCountrySource || 'user');
-      onCountryChange?.(next);
-      setMessage('Shipping country saved.');
+      const data = await saveSellerSettings({ shipFromCountry: next }, token);
+      onChange?.(data.shipFromCountry || next);
+      setSource(data.shipFromCountrySource || 'user');
+      setState('saved');
     } catch (err) {
-      setError(err.message || 'Could not save country.');
-    } finally {
-      setBusy(false);
+      onChange?.(prev);
+      setState('idle');
+      onError?.(err.message || 'Could not save country.');
     }
   }
 
+  const note = state === 'saving'
+    ? 'Saving…'
+    : state === 'saved'
+      ? 'Saved.'
+      : source === 'ip' && value
+        ? 'Detected from your connection.'
+        : '';
+
   return (
-    <DeskPanel title="Seller shipping & payouts" className="profile-shipping">
-      <Alert>{error || stripeError}</Alert>
-      {message ? <p className="desk-ok">{message}</p> : null}
-      <form className="sell-form" onSubmit={saveCountry}>
-        <label className="sell-field">
-          Ship from country
-          <select
-            value={shipFromCountry}
-            onChange={(event) => setCountry(event.target.value)}
-            required
-          >
-            <option value="">Select country</option>
-            {SHIP_FROM_COUNTRIES.map((row) => (
-              <option key={row.code} value={row.code}>
-                {shipFromCountryOptionLabel(row.code)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="page-lede">
-          {countrySource === 'ip' && shipFromCountry
-            ? 'Detected from your connection — change it anytime before you sell.'
-            : shipFromCountry
-              ? 'Used on your listings and for EUR shipping rates. Change anytime.'
-              : 'Required before your first physical listing. We try your IP country first; if that is missing, set it here.'}
-        </p>
-        <button className="btn" type="submit" disabled={busy || !shipFromCountry}>
-          {busy ? 'Saving…' : 'Save country'}
-        </button>
-      </form>
-      <p className="page-lede" style={{ marginTop: '1rem' }}>
-        Stripe Connect: <strong>{connect.stripeConnectStatus || 'not_started'}</strong>
-        {connect.ready ? ' (READY)' : ''}
-      </p>
-      {hideStripeButton ? null : (
-        <StripeConnectButton
-          shipFromCountry={shipFromCountry}
-          onCountrySaved={(code) => {
-            setShipFromCountry(code);
-            onCountryChange?.(code);
-          }}
-          onError={(msg) => {
-            setError(msg);
-            onStripeError?.(msg);
-          }}
-        />
-      )}
-    </DeskPanel>
+    <span className="ship-from-select">
+      <label className="sr-only" htmlFor="ship-from-country">Ship-from country</label>
+      <select
+        id="ship-from-country"
+        value={value || ''}
+        disabled={state === 'saving'}
+        onChange={(event) => save(event.target.value)}
+      >
+        <option value="">Select country</option>
+        {SHIP_FROM_COUNTRIES.map((row) => (
+          <option key={row.code} value={row.code}>
+            {shipFromCountryOptionLabel(row.code)}
+          </option>
+        ))}
+      </select>
+      {note ? <span className="ship-from-note" role="status">{note}</span> : null}
+    </span>
   );
 }
 
