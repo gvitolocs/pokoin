@@ -187,7 +187,7 @@ button, input, select { font: inherit; color: inherit; }
   transform: translateX(-50%);
 }
 .brand .brand-badge { display: none; }
-.brand .brand-coin {
+.brand-word .brand-coin {
   width: 0.98em;
   height: auto;
   margin: 0.06em 0.02em 0 0.01em;

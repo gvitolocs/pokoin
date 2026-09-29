@@ -20,6 +20,7 @@ import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale,
 import { SHIP_FROM_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { pknFromEurCents, previewShipmentCents, shippingServiceOptions } from '../shipping-quote.js';
 import CardArt from '../components/CardArt.jsx';
+import PokoinWordmark from '../components/PokoinWordmark.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 
 function FeeTip({ label, children }) {
@@ -515,12 +516,8 @@ export default function Checkout() {
                           <span>
                             {option.brand === 'pokoin-flex' ? (
                               <strong className="pokoin-flex-mark is-inline" aria-label="Pokoin Flex">
-                                <img className="pokoin-flex-logo" src="/home/logo.png" alt="" width="22" height="22" />
-                                <span className="pokoin-flex-word">
-                                  <span className="pokoin-flex-pokoin">Pokoin</span>
-                                  {' '}
-                                  <span className="pokoin-flex-flex">Flex</span>
-                                </span>
+                                <PokoinWordmark />
+                                <span className="flex-tag" aria-hidden="true">Flex</span>
                               </strong>
                             ) : (
                               <strong>{option.label}</strong>
