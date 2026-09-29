@@ -122,6 +122,31 @@ test('frame events: merge toast carries from → to and the merged row for undo'
   assert.deepEqual(frameEvents({ n: row('n') }, [row('n', { seq: 10 })]), [], 'edits are not new rows');
 });
 
+test('a reload replays old merges without toasts; a fresh repeat still toasts', () => {
+  const now = Date.parse('2026-09-29T16:00:00Z');
+  const replay = [
+    row('a', { quantity: 3, seq: 1, receivedAt: '2026-09-29T15:40:00Z' }),
+    row('m1', { status: 'merged', mergedInto: 'a', seq: 2, receivedAt: '2026-09-29T15:41:00Z' }),
+    row('m2', { status: 'merged', mergedInto: 'a', seq: 3, receivedAt: '2026-09-29T15:42:00Z' }),
+  ];
+  const events = frameEvents({}, replay, { serverNowMs: now });
+  assert.equal(events.filter((e) => e.type === 'merged').length, 0);
+  const fresh = frameEvents({ a: replay[0] }, [
+    row('m3', { status: 'merged', mergedInto: 'a', seq: 4, receivedAt: '2026-09-29T15:59:55Z' }),
+    row('a', { quantity: 4, seq: 5 }),
+  ], { serverNowMs: now });
+  assert.deepEqual(fresh, [{ type: 'merged', mergedId: 'm3', headId: 'a', from: 3, to: 4 }]);
+});
+
+test('repeats of a row that left the batch are not counted', () => {
+  const rows = {
+    a: row('a', { status: 'submitted', quantity: 3 }),
+    m1: row('m1', { status: 'merged', mergedInto: 'a' }),
+    m2: row('m2', { status: 'merged', mergedInto: 'gone' }),
+  };
+  assert.deepEqual(batchCounts(rows), { rows: 0, cards: 0, needsReview: 0, noPrinting: 0, noPrice: 0, blocked: 0, merged: 0, ready: false });
+});
+
 test('session phase is recomputed locally with the server clock offset', () => {
   const now = Date.parse('2026-09-17T12:00:00Z');
   const connected = { status: 'connected', phase: 'connected', phoneLabel: 'iPhone', phoneLastSeenAt: '2026-09-17T11:59:58Z' };

@@ -277,8 +277,10 @@ export const PROBLEM_LABEL = {
 
 export function batchCounts(rows, { intent = 'list' } = {}) {
   const counts = { rows: 0, cards: 0, needsReview: 0, noPrinting: 0, noPrice: 0, blocked: 0, merged: 0 };
-  for (const row of Object.values(rows || {})) {
-    if (row.status === 'merged') counts.merged += 1;
+  const all = rows || {};
+  for (const row of Object.values(all)) {
+    // A repeat only counts while the row it was merged into is still in the batch.
+    if (row.status === 'merged' && all[row.mergedInto]?.status === 'active') counts.merged += 1;
     if (row.status !== 'active') continue;
     counts.rows += 1;
     counts.cards += Number(row.quantity) || 0;
@@ -318,15 +320,28 @@ export function nextAttentionIndex(list, from = -1, { intent = 'list' } = {}) {
   return -1;
 }
 
+/** A merge toast is for a repeat that just arrived, not one replayed on reload. */
+export const MERGE_TOAST_WINDOW_MS = 30_000;
+
+function arrivedRecently(item, serverNowMs) {
+  if (serverNowMs == null) return true;
+  const at = Date.parse(item.receivedAt || item.createdAt || '');
+  if (!Number.isFinite(at)) return true;
+  return serverNowMs - at <= MERGE_TOAST_WINDOW_MS;
+}
+
 /**
  * What changed for the seller when a stream frame lands: new rows (scroll),
- * merges (the "Qty 1 → 2 · Undo" toast).
+ * merges (the "Qty 1 → 2 · Undo" toast). The stream replays the whole batch
+ * after a reload or reconnect, so a merge only toasts when the repeat reached
+ * the server within MERGE_TOAST_WINDOW_MS of `serverNowMs`.
  */
-export function frameEvents(before, items) {
+export function frameEvents(before, items, { serverNowMs = null } = {}) {
   const events = [];
   for (const item of items || []) {
     const previous = before[item.id];
     if (!previous && item.status === 'merged' && item.mergedInto) {
+      if (!arrivedRecently(item, serverNowMs)) continue;
       const head = items.find((row) => row.id === item.mergedInto) || before[item.mergedInto];
       const to = Number(head?.quantity) || 0;
       events.push({ type: 'merged', mergedId: item.id, headId: item.mergedInto, from: to - Number(item.quantity || 1), to });
