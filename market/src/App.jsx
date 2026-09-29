@@ -51,6 +51,7 @@ import Buy from './pages/Buy.jsx';
 import Admin from './pages/Admin.jsx';
 import Checkout from './pages/Checkout.jsx';
 import Orders from './pages/Orders.jsx';
+import Associate from './pages/Associate.jsx';
 import Sales from './pages/Sales.jsx';
 import Bought from './pages/Bought.jsx';
 import Stock from './pages/Stock.jsx';
@@ -187,6 +188,7 @@ function AppShell() {
       {both('/swap', <Navigate to="/exchange" replace />)}
       {both('/checkout', <Checkout />)}
       {both('/orders', <Orders />)}
+      {both('/associate', <Associate />)}
       {both('/sales', <Sales />)}
       {both('/bought', <Bought />)}
       {both('/stock', <Stock />)}
