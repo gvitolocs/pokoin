@@ -33,7 +33,7 @@ function makeDb(stubs) {
     if (/marketplace_card_ocr/.test(sql)) return { rows: rows('ocrRows') };
     if (/cardtrader_sold_daily/.test(sql)) return { rows: rows('soldRows') };
     if (/cardtrader_blueprint_daily_analytics/.test(sql)) return { rows: rows('askRows') };
-    if (/limit 7/.test(sql) || (/limit 1/.test(sql) && /card_id = \$1/.test(sql))) {
+    if (/limit 24/.test(sql) || /limit 7/.test(sql) || (/limit 1/.test(sql) && /card_id = \$1/.test(sql))) {
       return { rows: [stubs.cardRow || FIXTURE_CARD_ROW] };
     }
     return { rows: [] };
@@ -220,7 +220,7 @@ test('resolve_card returns catalog candidates only and marks ambiguity', async (
   assert.equal(res.body.candidates[0].name, 'Raichu ex');
 
   // Fuzzy user text travels as a parameter, wildcards escaped, never inline SQL.
-  const resolveQuery = queries.find((q) => /limit 7/.test(q.sql));
+  const resolveQuery = queries.find((q) => /limit 24/.test(q.sql));
   assert.ok(resolveQuery, 'resolve query captured');
   const patterns = resolveQuery.params.filter((pt) => typeof pt === 'string');
   if (!patterns.some((pt) => pt.includes('raichu'))) {
@@ -230,11 +230,13 @@ test('resolve_card returns catalog candidates only and marks ambiguity', async (
   assert.ok(!resolveQuery.sql.includes('Raichu'));
 
   const handler3 = loadHandler(async (sql, params = []) => {
-    if (/limit 7/.test(sql)) {
+    if (/limit 24/.test(sql)) {
       return { rows: [
-        FIXTURE_CARD_ROW,
-        { ...FIXTURE_CARD_ROW, card_id: '246914', name: 'Raichu', set_name: 'Base Set' },
-        { ...FIXTURE_CARD_ROW, card_id: '246916', name: 'Raichu ex', set_name: 'Deoxys' },
+        { ...FIXTURE_CARD_ROW, version: 'v1' },
+        { ...FIXTURE_CARD_ROW, card_id: '246914', name: 'Raichu', set_name: 'Base Set', version: 'v2' },
+        { ...FIXTURE_CARD_ROW, card_id: '246916', name: 'Raichu ex', set_name: 'Deoxys', version: 'v3' },
+        // Same artwork as first — collapsed.
+        { ...FIXTURE_CARD_ROW, card_id: '999999', name: 'Raichu ex', set_name: 'Half Deck', version: 'v1' },
       ] };
     }
     return { rows: [] };
@@ -243,6 +245,7 @@ test('resolve_card returns catalog candidates only and marks ambiguity', async (
   await handler3(makeReq({ body: { tool: 'resolve_card', params: { query: 'Raichu' } } }), res3);
   assert.equal(res3.body.status, 'ambiguous');
   assert.equal(res3.body.candidates.length, 3);
+  assert.equal(res3.body.sameArtworkCollapsed, 1);
   assert.match(res3.body.note, /which one they mean/i);
 });
 
@@ -516,4 +519,20 @@ test('top_movers supports falling direction and answers empty windows with 200',
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body.movers, []);
   assert.match(res.body.note, /raikou/i);
+});
+
+test('dedupeArtworkVersions keeps one printing per CLIP version key', () => {
+  const { dedupeArtworkVersions, candidateFromRow } = require('./poko-market')._test;
+  const rows = [
+    { card_id: '245802', name: "Mom's Kindness", set_name: 'Majestic Dawn', version: 'v245802' },
+    { card_id: '624102', name: "Mom's Kindness", set_name: 'Arceus LV.X Deck', version: 'v245802' },
+    { card_id: '999001', name: "Mom's Kindness", set_name: 'Alt Art Set', version: 'v999001' },
+  ];
+  const kept = dedupeArtworkVersions(rows);
+  assert.equal(kept.length, 2);
+  assert.equal(String(kept[0].card_id), '245802');
+  assert.equal(String(kept[1].card_id), '999001');
+  const cand = candidateFromRow(rows[0]);
+  assert.equal(cand.path, '/marketplace/en/cards/245802');
+  assert.equal(cand.version, 'v245802');
 });

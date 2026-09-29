@@ -16,6 +16,7 @@ import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
 import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import ChatListingTag from '../components/ChatListingTag.jsx';
+import ChatText from '../components/ChatText.jsx';
 import ChatPhotos from '../components/ChatPhotos.jsx';
 import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
 import { createMoneyRequest, payMoneyRequest, requestStatusLabel, respondMoneyRequest } from '../money-requests.js';
@@ -214,7 +215,7 @@ function EventCard({ event, busy, onAction, peer, me }) {
   );
   return (
     <div className={`chat-bubble ${event.mine ? ' mine' : ''}`} aria-label={eventAriaLabel(event)}>
-      {event.text ? <p>{event.text}</p> : null}
+      {event.text ? <ChatText text={event.text} /> : null}
       <ChatPhotos urls={event.images || []} />
       {(event.listings || []).length ? (
         <span className="chat-tags">
@@ -368,7 +369,7 @@ function PokoConversation() {
           </div>
         ) : events.map((event) => (
           <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ' is-poko'}${event.source === 'unavailable' ? ' is-unavailable' : ''}`}>
-            {event.text ? <p>{event.text}</p> : null}
+            {event.text ? <ChatText text={event.text} /> : null}
             {event.source === 'unavailable' ? (
               <p className="chat-muted">Assistant unreachable — try again.</p>
             ) : null}
