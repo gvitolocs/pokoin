@@ -57,15 +57,25 @@ function cleanText(value, max = 2000) {
 
 function cleanCards(raw) {
   const list = Array.isArray(raw) ? raw : [];
-  return list.slice(0, 8).map((row) => ({
-    cardId: cleanText(row?.cardId || row?.id, 40),
-    name: cleanText(row?.cardName || row?.name, 120),
-    setName: cleanText(row?.setName || row?.set, 120),
-    condition: cleanText(row?.condition, 20),
-    language: cleanText(row?.language, 12),
-    canonicalPath: cleanText(row?.canonicalPath || row?.href, 200),
-    imageUrl: cleanText(row?.imageUrl || row?.cardImageUrl, 500),
-  })).filter((row) => row.cardId || row.name);
+  return list.slice(0, 12).map((row) => {
+    const cardId = cleanText(row?.cardId || row?.id, 40);
+    const path = cleanText(row?.path || row?.canonicalPath || row?.href, 200)
+      || (cardId ? `/marketplace/en/cards/${cardId}` : '');
+    const name = cleanText(row?.cardName || row?.name, 120);
+    return {
+      kind: 'card',
+      cardId,
+      name,
+      cardName: name,
+      setName: cleanText(row?.setName || row?.set, 120),
+      condition: cleanText(row?.condition, 20),
+      language: cleanText(row?.language, 12),
+      canonicalPath: path,
+      path,
+      imageUrl: cleanText(row?.imageUrl || row?.cardImageUrl, 500),
+      pricePkn: Number(row?.pricePkn || row?.minAsk) || 0,
+    };
+  }).filter((row) => row.cardId || row.name);
 }
 
 function cleanImages(raw) {
@@ -242,7 +252,10 @@ async function hermesReply({
     error.statusCode = 502;
     throw error;
   }
-  return reply;
+  return {
+    reply,
+    cards: cleanCards(data?.cards),
+  };
 }
 
 // Per-IP rate limit, same shape as the legacy assistant (20 msgs / minute).
@@ -312,7 +325,7 @@ async function readEventPage(ref, beforeId) {
   return { docs: hasMore ? docs.slice(1) : docs, hasMore };
 }
 
-async function appendTurn({ firestore, uid, userText, cards, images, reply, source }) {
+async function appendTurn({ firestore, uid, userText, cards, images, reply, replyCards = [], source }) {
   const admin = getFirebaseAdmin();
   const stamp = admin.firestore.FieldValue.serverTimestamp();
   const iso = new Date().toISOString();
@@ -320,6 +333,7 @@ async function appendTurn({ firestore, uid, userText, cards, images, reply, sour
   const userRef = ref.collection('events').doc();
   const assistantRef = ref.collection('events').doc();
   const batch = firestore.batch();
+  const assistantCards = cleanCards(replyCards);
   batch.set(ref, { uid, updatedAt: stamp }, { merge: true });
   batch.set(userRef, {
     role: 'user',
@@ -331,7 +345,7 @@ async function appendTurn({ firestore, uid, userText, cards, images, reply, sour
   batch.set(assistantRef, {
     role: 'assistant',
     text: reply || '',
-    cards: [],
+    cards: assistantCards,
     images: [],
     source: source || 'hermes',
     createdAt: stamp,
@@ -354,8 +368,8 @@ async function appendTurn({ firestore, uid, userText, cards, images, reply, sour
       role: 'assistant',
       mine: false,
       text: reply || '',
-      cards: [],
-      listings: [],
+      cards: assistantCards,
+      listings: assistantCards,
       images: [],
       source: source || 'hermes',
       createdAt: iso,
@@ -399,10 +413,11 @@ async function handleChat(req, res, decoded) {
   const { personal, intent: personalIntent } = await loadPersonalForChat(decoded.uid, pageContext);
 
   let reply = '';
+  let replyCards = [];
   let source = 'hermes';
   let hermesError = '';
   try {
-    reply = await hermesReply({
+    const hermes = await hermesReply({
       message: prompt,
       cards,
       images,
@@ -413,6 +428,8 @@ async function handleChat(req, res, decoded) {
       sessionId,
       displayName: cleanText(decoded.name || decoded.email, 80),
     });
+    reply = hermes.reply;
+    replyCards = hermes.cards || [];
   } catch (error) {
     hermesError = String(error?.message || error).slice(0, 200);
     console.warn('poko-chat hermes failed', hermesError);
@@ -429,6 +446,7 @@ async function handleChat(req, res, decoded) {
       cards,
       images,
       reply,
+      replyCards,
       source,
     });
   } catch (error) {

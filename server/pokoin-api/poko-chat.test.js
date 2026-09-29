@@ -15,14 +15,15 @@ const {
   hermesToken,
 } = require('./poko-chat')._test;
 
-test('cleanCards keeps id/name and caps at 8', () => {
+test('cleanCards keeps id/name and caps at 12', () => {
   const rows = cleanCards([
     { cardId: '123', name: 'Pikachu', setName: 'Base' },
     { id: '456', cardName: 'Raichu' },
-    ...Array.from({ length: 10 }, (_, i) => ({ cardId: String(i), name: `C${i}` })),
+    ...Array.from({ length: 14 }, (_, i) => ({ cardId: String(i), name: `C${i}` })),
   ]);
-  assert.equal(rows.length, 8);
+  assert.equal(rows.length, 12);
   assert.equal(rows[0].name, 'Pikachu');
+  assert.equal(rows[0].path, '/marketplace/en/cards/123');
   assert.equal(rows[1].name, 'Raichu');
 });
 

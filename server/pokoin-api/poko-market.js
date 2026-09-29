@@ -221,15 +221,36 @@ function priceStrategies(summary, asks) {
 }
 
 function candidateFromRow(row) {
+  const cardId = String(row.card_id);
   return {
-    cardId: String(row.card_id),
+    cardId,
     blueprintId: blueprintIdFromCardId(row.card_id),
     name: row.name || '',
     setName: row.set_name || '',
     cardNumber: row.card_number || '',
     artist: row.artist || '',
     itemKind: row.item_kind || '',
+    version: row.version ? String(row.version) : '',
+    path: cardId ? `/marketplace/en/cards/${cardId}` : '',
+    canonicalPath: cardId ? `/marketplace/en/cards/${cardId}` : '',
   };
+}
+
+/**
+ * One printing per CLIP same-artwork group. Same painting reprinted across
+ * half-decks/products collapses; different artworks of the same name stay.
+ */
+function dedupeArtworkVersions(rows = []) {
+  const out = [];
+  const seen = new Set();
+  for (const row of rows || []) {
+    const version = String(row?.version || '').trim();
+    const key = version || `id:${row?.card_id || row?.cardId || out.length}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,23 +305,28 @@ async function resolveCard(params = {}) {
       params2.push(artistPattern);
     }
     const rows = await queryRows(
-      `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
+      `select s.card_id, s.name, s.set_name, s.artist, s.item_kind, s.version,
               coalesce(nullif(c.card_number, ''), '') as card_number
          from marketplace_search_candidates s
          left join marketplace_cards c on c.card_id = s.card_id
         where s.item_kind <> 'product'
           and ${conditions.join(' and ')}
         order by s.search_weight desc nulls last, s.name
-        limit 7`,
+        limit 24`,
       params2,
     );
     if (rows.length) {
+      const deduped = dedupeArtworkVersions(rows).slice(0, 7);
+      const collapsed = rows.length - deduped.length;
       return {
-        status: rows.length === 1 ? 'ok' : 'ambiguous',
-        candidates: rows.map(candidateFromRow),
-        note: rows.length > 1
-          ? 'Multiple printings match; ask the user which one they mean.'
-          : undefined,
+        status: deduped.length === 1 ? 'ok' : 'ambiguous',
+        candidates: deduped.map(candidateFromRow),
+        sameArtworkCollapsed: collapsed > 0 ? collapsed : undefined,
+        note: deduped.length > 1
+          ? 'Multiple different artworks match; ask which one they mean. Same-artwork reprints across products were collapsed.'
+          : (collapsed > 0
+            ? 'Other catalog rows are the same artwork in other products/half-decks; only one printing is returned.'
+            : undefined),
       };
     }
   }
@@ -708,7 +734,7 @@ async function suggestCards(params = {}) {
   const conditions = tokens.map((_, i) => `s.search_text ilike $${i + 1}`);
   const values = tokens.map((t) => `%${escapeLike(t)}%`);
   const rows = await queryRows(
-    `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
+    `select s.card_id, s.name, s.set_name, s.artist, s.item_kind, s.version,
             coalesce(nullif(c.card_number, ''), '') as card_number,
             ask.min_price_pkn
        from marketplace_search_candidates s
@@ -720,15 +746,17 @@ async function suggestCards(params = {}) {
         and ${conditions.join(' and ')}
         and ($${values.length + 1}::text is null or s.card_id::text <> $${values.length + 1}::text)
       order by s.search_weight desc nulls last, s.name
-      limit ${limit + 1}`,
+      limit ${Math.max(limit * 4, 24)}`,
     [...values, excludeCardId || null],
   );
-  const candidates = rows
-    .filter((r) => String(r.card_id) !== excludeCardId)
+  const candidates = dedupeArtworkVersions(
+    rows.filter((r) => String(r.card_id) !== excludeCardId),
+  )
     .slice(0, limit)
     .map((r) => ({
       ...candidateFromRow(r),
       minAsk: r.min_price_pkn != null ? round2(r.min_price_pkn) : null,
+      pricePkn: r.min_price_pkn != null ? round2(r.min_price_pkn) : null,
     }));
   if (!candidates.length) return { status: 'not_found', error: 'no catalog cards match that subject' };
   return {
@@ -737,7 +765,7 @@ async function suggestCards(params = {}) {
     priceUnit: 'PKN',
     pknEurRate: PKN_EUR_RATE,
     cards: candidates,
-    note: 'Real cards from the Pokoin catalog with current lowest ask in PKN (1 PKN = €0.005).',
+    note: 'Real Pokoin catalog cards with current lowest ask in PKN. Same-artwork reprints are collapsed; different artworks of the same name may appear. Convert to other currencies only when the user asks.',
   };
 }
 
@@ -978,6 +1006,7 @@ module.exports._test = {
   buildSoldSummary,
   priceStrategies,
   candidateFromRow,
+  dedupeArtworkVersions,
   isAuthorized,
   TOOLS,
 };
