@@ -23,7 +23,6 @@ import { createMoneyRequest, payMoneyRequest, requestStatusLabel, respondMoneyRe
 import {
   isPokoPeer,
   POKO_DISPLAY,
-  POKO_LEDE,
   POKO_PEER,
   pokoPreview,
   readPokoHistory,
@@ -359,7 +358,7 @@ function PokoConversation() {
           <PokoAvatar className="messages-avatar is-poko" />
           <span>
             <strong>{POKO_DISPLAY}</strong>
-            <span>{POKO_LEDE}</span>
+            <span>Pokoin conversation</span>
           </span>
         </span>
       </header>
@@ -367,15 +366,14 @@ function PokoConversation() {
       <section className="chat-timeline" ref={pokoThread.logRef} onScroll={pokoThread.onScroll} aria-live="polite">
         {!events.length ? (
           <div className="chat-first">
-            <PokoAvatar className="messages-avatar is-poko is-large" />
-            <h2>Chat with Poko</h2>
-            <p>Same as any chat — drop a card, add a photo, or ask about prices and liquidity. I use Pokoin’s public market tools.</p>
+            <h2>Say hello to {POKO_DISPLAY}</h2>
+            <p>Messages appear here in chronological order. Drop a card or add a photo anytime.</p>
           </div>
         ) : events.map((event) => (
-          <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ' is-poko'}${event.source === 'unavailable' ? ' is-unavailable' : ''}`}>
+          <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}${event.source === 'unavailable' ? ' is-unavailable' : ''}`}>
             {event.text ? <ChatText text={event.text} /> : null}
             {event.source === 'unavailable' ? (
-              <p className="chat-muted">Assistant unreachable — try again.</p>
+              <p className="chat-muted">Could not reply — try again.</p>
             ) : null}
             <ChatPhotos urls={event.images || []} />
             {(event.listings || event.cards || []).length ? (
@@ -388,7 +386,7 @@ function PokoConversation() {
             <time>{chatTime(event.createdAt)}</time>
           </div>
         ))}
-        {pokoThread.busy ? <p className="chat-muted">Poko is checking the market…</p> : null}
+        {pokoThread.busy ? <p className="chat-muted">…</p> : null}
       </section>
       {cards.length ? (
         <div className="chat-photo-draft poko-card-draft">

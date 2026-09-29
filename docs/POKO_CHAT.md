@@ -92,10 +92,24 @@ Hermes answer:
 
 It does **not** invent market quotes or run local FAQ scripts.
 
+## Website map
+
+Hermes loads `docs/poko-knowledge.md` (includes a **top-50 site actions**
+map with real `/…` routes) plus `docs/poko-behavior-seed.jsonl` as few-shot
+style examples — not canned FAQ replies. Hermes still reasons per turn.
+
+After editing knowledge/seed on peer1:
+
+```bash
+scp docs/poko-knowledge.md docs/poko-behavior-seed.jsonl oracle-peer1:/opt/hermes-poko/docs/
+ssh oracle-peer1 'systemctl restart hermes-poko.service'
+```
+
 ## UI
 
 - Dock and `/messages/poko` use the **same composer** as people chats
   (↑ send, + photos, drag-drop card tags, mascot avatar).
+- Conversation title stays pinned at the top; Poko is otherwise a normal peer thread.
 - Attached cards → `cards[]`; photos → `images[]` (https URLs only).
 
 ## Deploy
@@ -103,12 +117,6 @@ It does **not** invent market quotes or run local FAQ scripts.
 ```bash
 scripts/deploy-poko-market-api.sh   # ships poko-chat.js + route + poko-market
 scripts/deploy-web.sh               # Messages / ChatDock SPA
-```
-
-After Hermes knowledge edits on peer1, restart:
-
-```bash
-ssh oracle-peer1 'systemctl restart hermes-poko.service'
 ```
 
 ## Related

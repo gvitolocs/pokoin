@@ -81,6 +81,11 @@
   gap: 0.5rem;
   padding: 0.7rem 0.75rem;
   border-bottom: 1px solid var(--g5);
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: inherit;
 }
 
 .chat-dock-head strong {
