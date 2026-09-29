@@ -1,10 +1,12 @@
 [Unit]
-Description=Refresh Pokoin shipping-rates.json from PackZoo
-After=network-online.target
-Wants=network-online.target
+Description=Refresh Pokoin shipping-rates.json from PackZoo + porto-data
+Documentation=https://packzoo.com/openapi.json
 
 [Service]
 Type=oneshot
 WorkingDirectory=/home/nez/Projects/pokoin-web
-ExecStart=/home/nez/Projects/pokoin-web/scripts/sync-shipping-rates-from-packzoo.py --also-cardvault
+ExecStart=/usr/bin/python3 /home/nez/Projects/pokoin-web/scripts/sync-shipping-rates.py
 Nice=10
+
+[Install]
+WantedBy=default.target
