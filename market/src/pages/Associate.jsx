@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
-import { fetchAssociateSummary, formatPknNumber } from '../api.js';
+import { fetchAssociateSummary, fetchReferral, formatPknNumber } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
+import { MissionGrid, TrainerCard } from '../components/AmbassadorProgress.jsx';
+import { MISSIONS, PERKS, applyMailto } from '../ambassador-program.js';
+import { REFERRAL_REWARD_PKN, inviteLink } from '../referral.js';
 import '../associate.css';
+import '../referral.css';
 
 const CAMPAIGN_START = '2026-09-29T00:00:00Z';
 const CAMPAIGN_END = '2026-10-31T23:59:59Z';
@@ -80,16 +84,14 @@ const ROLES = {
       'Your share of the pool: 100%, paid on every qualifying order in the window.',
     ],
   },
+  // Ambassadors are mission-based (AmbassadorDesk), not a royalty deal.
   ambassador: {
     badge: 'Ambassador',
     kicker: 'Pokoin Associates · Ambassador',
-    tagline: 'Your desk tracks the royalties your community generates. Every Italian domestic sale feeds your share of the pool through the end of October.',
+    tagline: 'Your desk tracks your missions, tier and perks in the Pokoin Ambassador program.',
     accent: 'is-violet',
-    how: [
-      'A sale qualifies when the seller ships from Italy and the buyer ships to Italy.',
-      'The pool is the 3% Pokoin checkout royalty on the cards subtotal.',
-      'Your share of the pool is set on your associate record and lands here live.',
-    ],
+    missions: true,
+    how: [],
   },
   associate: {
     badge: 'Associate',
@@ -189,7 +191,7 @@ function AssociatesOverview({ overview, onView }) {
                 <span>
                   {row.associate.email}
                   {' · '}
-                  {row.associate.sharePct}% share
+                  {rolePresentation(row.associate.role).missions ? 'missions program' : `${row.associate.sharePct}% share`}
                   {' · '}
                   {row.associate.active ? 'active' : 'paused'}
                   {row.earnings.unverifiedOrders > 0 ? ` · ${row.earnings.unverifiedOrders} pending country check` : ''}
@@ -198,10 +200,17 @@ function AssociatesOverview({ overview, onView }) {
               <span className={`associate-badge ${rolePresentation(row.associate.role).accent}`}>
                 {rolePresentation(row.associate.role).badge}
               </span>
-              <span className="associate-overview-money">
-                <span>{row.earnings.qualifyingOrders} qualifying sale{row.earnings.qualifyingOrders === 1 ? '' : 's'}</span>
-                <strong>{moneyRange(row.earnings.earningPkn, row.earnings.earningEurCents)}</strong>
-              </span>
+              {rolePresentation(row.associate.role).missions ? (
+                <span className="associate-overview-money">
+                  <span>Ambassador program</span>
+                  <strong>{row.associate.city ? `City · ${row.associate.city}` : 'Missions & tiers'}</strong>
+                </span>
+              ) : (
+                <span className="associate-overview-money">
+                  <span>{row.earnings.qualifyingOrders} qualifying sale{row.earnings.qualifyingOrders === 1 ? '' : 's'}</span>
+                  <strong>{moneyRange(row.earnings.earningPkn, row.earnings.earningEurCents)}</strong>
+                </span>
+              )}
               {onView ? (
                 <button
                   type="button"
@@ -243,7 +252,7 @@ function AdminViewingView({ row, onBack }) {
         </span>
         <button type="button" className="btn ghost" onClick={onBack}>Back to overview</button>
       </div>
-      <AssociateView data={row} />
+      <AssociateView data={row} viewingAs />
     </div>
   );
 }
@@ -257,8 +266,123 @@ function AdminOverviewView({ data, onView }) {
   );
 }
 
-function AssociateView({ data, overview = null, onView = null }) {
+const PREVIEW_AMBASSADOR = {
+  code: 'apciliberti',
+  stats: { invited: 4, pending: 2, activated: 2, earnedPkn: 40 },
+  ambassador: {
+    tier: 'ambassador',
+    city: '',
+    completed: ['content', 'bug_report', 'feedback'],
+    activatedReferrals: 2,
+    referralTarget: 3,
+    onRoster: true,
+    next: { tier: 'senior', missionsLeft: 2, referralsLeft: 8 },
+    contributions: [
+      { mission: 'content', note: 'Pull video on TikTok', link: '', verifiedAt: '2026-09-30T10:00:00Z' },
+      { mission: 'bug_report', note: 'Wrong Japanese set name on a card desk', link: '', verifiedAt: '2026-10-01T10:00:00Z' },
+      { mission: 'feedback', note: 'Checkout shipping choices write-up', link: '', verifiedAt: '2026-10-02T10:00:00Z' },
+    ],
+  },
+};
+
+function missionTitle(key) {
+  return MISSIONS.find((row) => row.key === key)?.title || key;
+}
+
+/**
+ * Ambassador desk: the Ambassador program (missions → tiers → perks), not a
+ * royalty desk. Progress is the signed-in ambassador's own
+ * (/api/marketplace-referral); admin view-as shows the roster record only.
+ */
+function AmbassadorDesk({ data, overview = null, onView = null, viewingAs = false, preview = false }) {
+  const { getBearer } = useAuth();
+  const [referral, setReferral] = useState(preview ? PREVIEW_AMBASSADOR : null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (viewingAs || preview) return undefined;
+    let cancelled = false;
+    getBearer()
+      .then((token) => fetchReferral(token))
+      .then((payload) => { if (!cancelled) setReferral(payload); })
+      .catch((err) => { if (!cancelled) setError(err?.message || 'Your mission progress is unreachable right now.'); });
+    return () => { cancelled = true; };
+  }, [viewingAs, preview, getBearer]);
+
+  const fallback = {
+    tier: data.associate.city ? 'city' : 'ambassador',
+    city: data.associate.city || '',
+    completed: [],
+    activatedReferrals: 0,
+    referralTarget: 3,
+    next: data.associate.city ? null : { tier: 'senior', missionsLeft: 5, referralsLeft: 10 },
+    contributions: [],
+  };
+  const progress = referral?.ambassador || fallback;
+  const link = inviteLink(referral?.code);
+  return (
+    <div className="page desk associate-page amb-desk">
+      <PageHead kicker="Pokoin Associates · Ambassador" title="Your missions">
+        <span className="associate-badge is-violet">Ambassador</span>
+      </PageHead>
+      {!data.associate.active ? <Alert>Your ambassador record is paused. Contact the Pokoin team to reactivate it.</Alert> : null}
+      {viewingAs ? <Alert>Mission progress is personal: the ambassador sees their own tier, missions and invites here.</Alert> : null}
+      {error ? <Alert>{error}</Alert> : null}
+      <TrainerCard progress={progress} username={referral?.code || data.associate.displayName} />
+      <DeskPanel title="Missions" className="associate-tile">
+        <MissionGrid
+          completed={progress.completed}
+          activatedReferrals={progress.activatedReferrals}
+          referralTarget={progress.referralTarget}
+        />
+      </DeskPanel>
+      <div className="associate-grid">
+        <DeskPanel title="Verified contributions" className="associate-tile">
+          {progress.contributions?.length ? (
+            <ul className="associate-how">
+              {progress.contributions.map((row) => (
+                <li key={`${row.mission}-${row.verifiedAt}`}>
+                  <strong>{missionTitle(row.mission)}</strong>
+                  {row.note ? ` · ${row.note}` : ''}
+                  {row.verifiedAt ? ` · ${shortDate(row.verifiedAt)}` : ''}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="page-lede">Nothing verified yet. Send links and details of what you did and the Pokoin team adds it here.</p>
+          )}
+          <a className="btn ghost" href={applyMailto(referral?.code)}>Submit a mission</a>
+        </DeskPanel>
+        <DeskPanel title="Invite & Earn" className="associate-tile">
+          <dl className="associate-facts">
+            <div><dt>Invited</dt><dd>{referral?.stats?.invited ?? '—'}</dd></div>
+            <div><dt>Activated</dt><dd>{referral?.stats?.activated ?? '—'}</dd></div>
+            <div><dt>Earned</dt><dd>{referral ? pkn(referral.stats.earnedPkn) : '—'}</dd></div>
+          </dl>
+          <p className="page-lede">
+            {REFERRAL_REWARD_PKN} PKN for you and every collector you bring, after their first purchase or sale.
+            {link ? <> Your link: <strong>{link.replace('https://', '')}</strong></> : null}
+          </p>
+          {viewingAs ? null : <Link className="btn ghost" to="/invite">Open Invite &amp; Earn</Link>}
+        </DeskPanel>
+      </div>
+      <DeskPanel title="Your perks" className="associate-tile">
+        <ul className="amb-perks">
+          {PERKS.map((perk) => (
+            <li key={perk.title}><strong>{perk.title}</strong><span>{perk.text}</span></li>
+          ))}
+        </ul>
+      </DeskPanel>
+      {overview ? <AdminAssociateArea overview={overview} onView={onView} /> : null}
+    </div>
+  );
+}
+
+function AssociateView({ data, overview = null, onView = null, viewingAs = false, preview = false }) {
   const presentation = rolePresentation(data.associate.role);
+  if (presentation.missions) {
+    return <AmbassadorDesk data={data} overview={overview} onView={onView} viewingAs={viewingAs} preview={preview} />;
+  }
   return (
     <div className="page desk associate-page">
       <PageHead kicker={presentation.kicker} title="Your earnings">
@@ -409,7 +533,7 @@ export default function Associate() {
         role: searchParams.get('role') === 'ambassador' ? 'ambassador' : PREVIEW_FIXTURE.associate.role,
       },
     };
-    return <AssociateView data={fixture} />;
+    return <AssociateView data={fixture} preview />;
   }
 
   if (!ready) return <SessionWait />;

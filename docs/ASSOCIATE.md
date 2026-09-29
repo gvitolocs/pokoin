@@ -4,6 +4,12 @@ Role-scoped revenue-share partners (distributor, ambassador, …) get a live
 earnings desk at **pokoin.com/associate**. Each signed-in associate sees their
 own role-flavored page; everyone else sees an invite-only notice.
 
+Ambassadors are **not** a royalty deal: their `/associate` desk is the
+Ambassador program (missions → tiers → perks) — see
+[REFERRALS.md](REFERRALS.md#ambassador-program). The royalty rules below apply
+to distributors (and the generic associate role). Legacy `share_pct` values
+on ambassador rows are kept in the table but no longer shown.
+
 ## The deal the desk tracks
 
 A sale qualifies when **the seller ships from Italy and the buyer ships to
@@ -25,7 +31,7 @@ inside their campaign window.
 
 | Piece | Where |
 | --- | --- |
-| Roster + deal terms | `public.marketplace_associates` on the nezopt NVMe writer — `scripts/sql/092_marketplace_associates.sql` (email PK, role, share_pct, royalty_pct, window_start/end, active) |
+| Roster + deal terms | `public.marketplace_associates` on the nezopt NVMe writer — `scripts/sql/092_marketplace_associates.sql` (email PK, role, share_pct, royalty_pct, window_start/end, active); `city` from `096_ambassador_program.sql`) |
 | API | `server/pokoin-api/marketplace-associate.js` — `GET /api/marketplace-associate`, Firebase bearer; 403 for non-associates |
 | Page | `market/src/pages/Associate.jsx` + `market/src/associate.css`, route `/associate` (`market/src/App.jsx`) |
 | Deploy | `scripts/deploy-associate-api.sh <commit>` after the commit is on origin/main |

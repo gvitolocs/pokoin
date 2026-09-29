@@ -80,7 +80,7 @@ async function associateRowForEmail(email) {
   const result = await marketplaceQuery(
     `
       select email, role, display_name, share_pct, royalty_pct,
-             window_start, window_end, active
+             window_start, window_end, active, city
       from public.marketplace_associates
       where lower(btrim(email)) = $1
       limit 1
@@ -102,6 +102,7 @@ function serializeAssociateRow(row) {
     windowStart: row.window_start instanceof Date ? row.window_start.toISOString() : String(row.window_start || ''),
     windowEnd: row.window_end instanceof Date ? row.window_end.toISOString() : String(row.window_end || ''),
     active: row.active === true,
+    city: String(row.city || '').trim(),
   };
 }
 
@@ -109,7 +110,7 @@ async function associateRowsAll() {
   const result = await marketplaceQuery(
     `
       select email, role, display_name, share_pct, royalty_pct,
-             window_start, window_end, active
+             window_start, window_end, active, city
       from public.marketplace_associates
       order by active desc, lower(coalesce(display_name, email)), email
     `,

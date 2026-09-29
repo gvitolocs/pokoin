@@ -688,6 +688,28 @@ export function fetchAssociateSummary(token) {
   });
 }
 
+/** Invite & Earn + Ambassador progress for the signed-in user (settles owed rewards). */
+export function fetchReferral(token) {
+  return getJson('/api/marketplace-referral', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/** Attach this new account to the collector who invited it. */
+export function claimReferral(token, code) {
+  return getJson('/api/marketplace-referral', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action: 'claim', code }),
+  });
+}
+
 export function fetchCardTraderStatus(token) {
   return getJson('/api/cardtrader-sync', {
     headers: {

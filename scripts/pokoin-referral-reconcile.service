@@ -1,0 +1,13 @@
+[Unit]
+Description=Pokoin Invite & Earn reconcile (pay referrals after a first purchase or sale)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flock -n /run/lock/pokoin-referral-reconcile.lock /usr/bin/docker exec -w /app pokoin-oracle-api node /app/api/referral-reconcile.js
+TimeoutStartSec=10min
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

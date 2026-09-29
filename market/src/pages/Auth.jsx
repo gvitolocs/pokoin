@@ -44,7 +44,8 @@ export default function Auth() {
   const safeFrom = from.startsWith('/') ? from : '/profile';
   const signupToken = signupTokenFromSearch(location.search);
   const verifiedReturn = isNativeVerifiedReturn(location.search);
-  const [mode, setMode] = useState('login');
+  // /join/<code> sends new collectors straight to Create account.
+  const [mode, setMode] = useState(() => (new URLSearchParams(location.search).get('mode') === 'signup' ? 'signup' : 'login'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
