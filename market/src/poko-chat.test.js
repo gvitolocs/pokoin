@@ -55,10 +55,22 @@ test('deskCardFromPath and resolvePokoCards prefer live desk then URL', () => {
 });
 
 test('buildPokoPageContext and defaultPokoDeskPrompt lead with analytics', () => {
+  const store = Object.create(null);
+  globalThis.localStorage = {
+    getItem(key) { return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null; },
+    setItem(key, value) { store[key] = String(value); },
+  };
+  store['pokoin.watchlistIds'] = JSON.stringify(['111', '222']);
+  store['pokoin.cartItems'] = JSON.stringify([
+    { id: 'c1', cardId: '333', name: 'Cart Card', qty: 2, pricePkn: 50 },
+  ]);
   const cards = tagsToPokoCards([{ id: '246912', name: 'Noivern V', setName: 'Evolving Skies' }]);
   const ctx = buildPokoPageContext({ pathname: '/marketplace/en/cards/246912', cards });
   assert.equal(ctx.deskCardId, '246912');
   assert.equal(ctx.channel, 'website-messages');
+  assert.deepEqual(ctx.watchlistIds, ['111', '222']);
+  assert.equal(ctx.cart[0].cardId, '333');
+  assert.equal(ctx.cart[0].qty, 2);
   assert.match(defaultPokoDeskPrompt(cards[0]), /sold median/i);
   assert.match(defaultPokoDeskPrompt(cards[0]), /246912/);
 });

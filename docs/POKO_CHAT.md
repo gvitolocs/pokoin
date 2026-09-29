@@ -40,6 +40,13 @@ channel). Linked chats resolve to Honcho peer `poko_user_<firebaseUid>` — the
 same persona as website Messages — without merging strangers' memories.
 `unlink_me` accepts `channel=telegram|discord|all`.
 
+**Personal context** (`/api/poko-personal-context`) loads desk, recently seen,
+watchlist, cart, seller inventory, and collection for that Firebase uid and
+injects a compact intent block into Hermes. Website chat syncs browser
+cart/watchlist/desk into `poko_user_personal_snapshot` so linked Telegram/
+Discord turns see the same personal facts (recents/inventory/collection are
+always live). Requires SQL `scripts/sql/095_poko_personal_snapshot.sql`.
+
 Hermes (`/opt/hermes-poko` on oracle-peer1, `hermes-poko.service` :8789)
 loads `docs/poko-knowledge.md` + `docs/poko-behavior-seed.jsonl`, plans with
 the LLM, and may call `POST /api/poko-market` for sold/ask/liquidity tools

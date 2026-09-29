@@ -214,6 +214,31 @@
     }
   },
   {
+    "path": "/api/poko-personal-context",
+    "file": "poko-personal-context.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Authenticated personal marketplace snapshot for Poko intent: desk, recents, watchlist, cart, inventory, collection. Firebase users sync browser cart/watchlist; Hermes service token loads by firebaseUid for linked Telegram/Discord.",
+    "auth": "Firebase bearer (user) or POKO_MARKET_SERVICE_TOKEN / POKONTACT_SERVICE_TOKEN (service + firebaseUid).",
+    "params": {
+      "query": "none",
+      "body": "{ action: get|sync, watchlistIds?, cart?, desk?, firebaseUid? }"
+    },
+    "dependencies": {
+      "env": [
+        "MARKETPLACE_DATABASE_URL",
+        "MARKETPLACE_WRITER_DATABASE_URL",
+        "POKO_MARKET_SERVICE_TOKEN",
+        "POKONTACT_SERVICE_TOKEN"
+      ],
+      "services": [
+        "Postgres",
+        "Firebase Admin (collection summary)"
+      ]
+    }
+  },
+  {
     "path": "/api/poko-chat",
     "file": "poko-chat.js",
     "methods": [
