@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { fetchArtist, fetchExpansionCards, fetchSellerShop, imageSrc } from '../api.js';
 import { fetchSpeciesCards } from '../species-cards.js';
 import { bundleOf, tagKey } from '../chat-listing.js';
+import { endTrayDrag, startTrayDrag } from '../tray-drag.js';
 
 function cardId(card) {
   return String(card?.id || card?.card_id || '');
@@ -38,7 +39,7 @@ async function sellerCardIds(username) {
   return ids;
 }
 
-export default function ChatBundle({ row, peer, onRemove }) {
+export default function ChatBundle({ row, peer, onRemove, trayId }) {
   const bundle = bundleOf(row);
   const [cards, setCards] = useState([]);
   const [listed, setListed] = useState(() => new Set());
@@ -72,8 +73,21 @@ export default function ChatBundle({ row, peer, onRemove }) {
 
   if (!bundle) return null;
   const label = row?.cardName || (bundle.kind === 'artist' ? 'Artist' : bundle.kind === 'species' ? 'Pokémon' : 'Set');
+  const canDragOut = Boolean(onRemove && trayId);
   return (
-    <span className="chat-bundle">
+    <span
+      className="chat-bundle"
+      draggable={canDragOut}
+      onDragStart={canDragOut ? (event) => {
+        event.stopPropagation();
+        startTrayDrag(event, {
+          tray: trayId,
+          reference: row,
+          remove: () => onRemove(tagKey(row)),
+        });
+      } : undefined}
+      onDragEnd={canDragOut ? () => endTrayDrag() : undefined}
+    >
       <span className="chat-bundle-head">
         <strong>{label}</strong>
         {onRemove ? (
@@ -87,8 +101,8 @@ export default function ChatBundle({ row, peer, onRemove }) {
           const src = cardImage(card);
           const href = card.canonicalPath || card.canonical_path || (id ? `/marketplace/en/cards/${id}` : row?.path || '/marketplace');
           return (
-            <Link key={id || card.name} to={href} className={missing ? 'is-missing' : ''} title={card.name || ''}>
-              {src ? <img src={src} alt="" /> : <span />}
+            <Link key={id || card.name} to={href} className={missing ? 'is-missing' : ''} title={card.name || ''} draggable={false}>
+              {src ? <img src={src} alt="" draggable={false} /> : <span />}
             </Link>
           );
         })}

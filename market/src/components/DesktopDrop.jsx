@@ -13,6 +13,13 @@ import {
 import { downloadDesktopHoldPdf } from '../desktop-hold-pdf.js';
 import { bundleOf, LISTING_DRAG_TYPE, readListingDrag } from '../chat-listing.js';
 import { fetchSpeciesCards } from '../species-cards.js';
+import {
+  acceptTrayDrop,
+  desktopItemReference,
+  endTrayDrag,
+  startTrayDrag,
+  TRAY_DESKTOP,
+} from '../tray-drag.js';
 import CardArt from './CardArt.jsx';
 import QtyStepper from './QtyStepper.jsx';
 
@@ -140,6 +147,7 @@ export default function DesktopDrop({ onAddToCart }) {
         event.preventDefault();
         event.stopPropagation();
         setOver(false);
+        acceptTrayDrop(TRAY_DESKTOP);
         void acceptDrop(readListingDrag(event));
       }}
     >
@@ -181,8 +189,23 @@ export default function DesktopDrop({ onAddToCart }) {
               key={row.id}
               className="cart-drop-card desktop-drop-card"
               style={{ width: thumb, height: Math.round(thumb * 88 / 63) }}
+              draggable
+              onDragStart={(event) => {
+                const reference = desktopItemReference(row);
+                if (!reference) {
+                  event.preventDefault();
+                  return;
+                }
+                event.stopPropagation();
+                startTrayDrag(event, {
+                  tray: TRAY_DESKTOP,
+                  reference,
+                  remove: () => removeDesktopCard(row.id),
+                });
+              }}
+              onDragEnd={() => endTrayDrag()}
             >
-              <Link to={row.path || '/marketplace'} title={row.name}>
+              <Link to={row.path || '/marketplace'} title={row.name} draggable={false}>
                 {row.imageUrl ? <CardArt src={row.imageUrl} alt="" card={row} full /> : <span className="suggest-ph" />}
               </Link>
               <QtyStepper

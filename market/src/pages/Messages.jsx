@@ -28,6 +28,7 @@ import {
   pokoPreview,
   readPokoHistory,
 } from '../poko-chat.js';
+import { acceptTrayDrop, messagesTrayId } from '../tray-drag.js';
 import mascotUrl from '../assets/pokoin-mascot@8x.png';
 
 function PokoAvatar({ className = 'messages-avatar is-poko' }) {
@@ -346,7 +347,10 @@ function PokoConversation() {
         event.preventDefault();
         setOver(false);
         const reference = readListingDrag(event);
-        if (reference) addCard(reference);
+        if (reference) {
+          acceptTrayDrop(messagesTrayId(POKO_PEER));
+          addCard(reference);
+        }
       }}
     >
       <header className="conversation-head">
@@ -393,6 +397,7 @@ function PokoConversation() {
               <ChatListingTag
                 key={`${tagKey(row)}:${index}`}
                 row={row}
+                trayId={messagesTrayId(POKO_PEER)}
                 peer={{ username: POKO_PEER }}
                 me={{ uid, username: profile?.username }}
                 onRemove={() => setCards((current) => current.filter((_, i) => i !== index))}
