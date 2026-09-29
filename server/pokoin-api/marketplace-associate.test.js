@@ -35,7 +35,7 @@ function orderDoc(id, data) {
   };
 }
 
-function firestoreStub(docs) {
+function firestoreStub(docs, userProfile = {}) {
   const builder = {
     collection() {
       return builder;
@@ -49,6 +49,13 @@ function firestoreStub(docs) {
     limit() {
       return builder;
     },
+    doc() {
+      return {
+        async get() {
+          return { exists: true, data: () => userProfile };
+        },
+      };
+    },
     async get() {
       return { docs };
     },
@@ -56,7 +63,7 @@ function firestoreStub(docs) {
   return builder;
 }
 
-function loadHandler({ rows = [], docs = [], listingRows = [], decoded } = {}) {
+function loadHandler({ rows = [], docs = [], listingRows = [], decoded, userProfile = {} } = {}) {
   const originalLoad = Module._load;
   delete require.cache[TARGET];
   Module._load = function load(request, parent, isMain) {
@@ -64,7 +71,10 @@ function loadHandler({ rows = [], docs = [], listingRows = [], decoded } = {}) {
       return {
         marketplaceQuery: async (sql, params) => {
           if (/marketplace_associates/.test(sql)) {
-            return { rows: rows.filter((row) => row.email === params[0]) };
+            if (/where lower/.test(sql)) {
+              return { rows: rows.filter((row) => row.email === params[0]) };
+            }
+            return { rows };
           }
           return { rows: listingRows };
         },
@@ -73,7 +83,7 @@ function loadHandler({ rows = [], docs = [], listingRows = [], decoded } = {}) {
     if (request === './_firebase') {
       return {
         verifyBearerToken: async () => decoded,
-        getFirebaseAdmin: () => ({ firestore: () => firestoreStub(docs) }),
+        getFirebaseAdmin: () => ({ firestore: () => firestoreStub(docs, userProfile) }),
         authErrorResponse: (error) => ({
           statusCode: error.statusCode || 401,
           body: { error: error.message },
@@ -349,4 +359,44 @@ test('maskEmail keeps the first letter and hides the rest', () => {
   assert.equal(maskEmail('mario.rossi@gmail.com'), 'm*****@gmail.com');
   assert.equal(maskEmail('a@b.co'), 'a**@b.co');
   assert.equal(maskEmail(''), 'hidden');
+});
+
+test('admin without a roster row gets the overview of every associate desk', async () => {
+  const handler = loadHandler({
+    rows: [DISTRIBUTOR_ROW, AMBASSADOR_ROW],
+    decoded: { uid: 'admin_uid', email: 'vitologiuseppe17@gmail.com' },
+    userProfile: { roles: ['admin'] },
+    docs: [IT_TO_IT_EUR],
+  });
+  const res = mockRes();
+  await handler(mockReq(), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.admin, true);
+  assert.equal(res.body.associate, null);
+  assert.equal(res.body.overview.length, 2);
+  const gianlonji = res.body.overview.find((row) => row.associate.email === 'gianlonji@gmail.com');
+  const apciliberti = res.body.overview.find((row) => row.associate.email === 'apciliberti@gmail.com');
+  assert.equal(gianlonji.associate.role, 'distributor');
+  assert.equal(gianlonji.earnings.earningEurCents, 600);
+  assert.equal(apciliberti.associate.role, 'ambassador');
+  assert.equal(apciliberti.earnings.earningEurCents, 600);
+});
+
+test('associates do not receive the admin overview payload', async () => {
+  const handler = loadHandler({
+    rows: [DISTRIBUTOR_ROW, AMBASSADOR_ROW],
+    decoded: { uid: 'u1', email: 'gianlonji@gmail.com' },
+    docs: [IT_TO_IT_EUR],
+  });
+  const res = mockRes();
+  await handler(mockReq(), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.associate.role, 'distributor');
+  assert.equal(res.body.admin, undefined);
+  assert.equal(res.body.overview, undefined);
+});
+
+test('admin check also honors an explicit admin profile flag', async () => {
+  const { callerIsAdmin } = loadHandler({ userProfile: { admin: true } })._test;
+  assert.equal(await callerIsAdmin({ collection: () => ({ doc: () => ({ get: async () => ({ data: () => ({ admin: true }) }) }) }) }, { uid: 'u9' }), true);
 });
