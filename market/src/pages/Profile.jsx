@@ -9,7 +9,7 @@ import { useWallet, shortAddress } from '../wallet.jsx';
 import { fetchCollectionSummary, fetchSellerListings } from '../api.js';
 import { DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 import { ShipFromCountrySelect, StripeConnectButton } from '../components/SellerShippingSettings.jsx';
-import CardTraderConnectPanel from '../components/CardTraderConnectPanel.jsx';
+import CardTraderConnectPanel, { CT_TOKEN_DOCS } from '../components/CardTraderConnectPanel.jsx';
 import TelegramConnectPanel from '../components/TelegramConnectPanel.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
 import { formatPknNumber } from '../pkn.js';
@@ -340,7 +340,14 @@ export default function Profile() {
                   type="button"
                   className={cardTrader?.connected || ctOpen ? 'btn ghost' : 'btn btn-cardtrader'}
                   aria-expanded={ctOpen}
-                  onClick={() => setCtOpen((open) => !open)}
+                  onClick={() => {
+                    // Connect sends the seller to CardTrader for their API token
+                    // and opens the paste field here for when they come back.
+                    if (!ctOpen && !cardTrader?.connected) {
+                      window.open(CT_TOKEN_DOCS, '_blank', 'noopener,noreferrer');
+                    }
+                    setCtOpen((open) => !open);
+                  }}
                 >
                   {ctOpen ? 'Close' : cardTrader?.connected ? 'Manage' : 'Connect'}
                 </button>
