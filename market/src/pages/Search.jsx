@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router-dom';
-import { fetchSearch, fetchSellerByUsername, fetchSuggest } from '../api.js';
+import { fetchSearch, fetchSellerSearchWithAssociates, fetchSuggest } from '../api.js';
 import { isPokemonGame } from '../game.js';
 import { takeHotSearchPage } from '../search-hot.js';
 import {
@@ -195,7 +195,7 @@ export default function Search() {
       setLoading(true);
       setCards([]);
       setTotal(0);
-      fetchSellerByUsername(typedQuery, { limit: 48 })
+      fetchSellerSearchWithAssociates(typedQuery, { limit: 48 })
         .then((data) => {
           if (cancelled) {
             return;
@@ -461,6 +461,9 @@ export default function Search() {
                   </span>
                   <span>
                     <strong>{seller.name}</strong>
+                    {seller.associateRole ? (
+                      <span className={`suggest-user-associate-badge is-${seller.associateRole}`}>{seller.associateRole}</span>
+                    ) : null}
                     {seller.count ? (
                       <em>{seller.count} listing{seller.count === 1 ? '' : 's'}</em>
                     ) : null}

@@ -9,6 +9,7 @@ import {
   fetchExpansion,
   fetchSearch,
   fetchSellerByUsername,
+  fetchSellerSearchWithAssociates,
   fetchSuggest,
   formatPknNumber,
   imageSrc,
@@ -514,7 +515,7 @@ export default function Chrome({ children }) {
     const handle = query.trim();
     let cancelled = false;
     const timer = setTimeout(() => {
-      fetchSellerByUsername(handle, { limit: 20 })
+      fetchSellerSearchWithAssociates(handle, { limit: 20 })
         .then((data) => {
           if (!cancelled) {
             setSellerHits(Array.isArray(data?.listings) ? data.listings : []);
@@ -1126,6 +1127,9 @@ export default function Chrome({ children }) {
                             </span>
                             <span className="suggest-copy">
                               <strong>{seller.name}</strong>
+                              {seller.associateRole ? (
+                                <span className={`suggest-user-associate-badge is-${seller.associateRole}`}>{seller.associateRole}</span>
+                              ) : null}
                               {seller.count ? (
                                 <em>{seller.count} listing{seller.count === 1 ? '' : 's'}</em>
                               ) : null}

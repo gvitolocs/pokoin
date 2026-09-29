@@ -189,6 +189,39 @@ async function sellerUidFromListingName(username) {
   return cleanText(result.rows[0]?.seller_uid, 160);
 }
 
+/**
+ * Associates roster membership for the profile badge: seller uid → auth email
+ * → roster row. Never exposes the email — the caller gets role + name only.
+ */
+async function associateBadgeForUid(uid) {
+  const id = cleanText(uid, 160);
+  if (!id) return null;
+  try {
+    const user = await getFirebaseAdmin().auth().getUser(id);
+    const email = cleanText(user.email, 320).toLowerCase();
+    if (!email) return null;
+    const result = await marketplaceQuery(
+      `
+        select role, display_name
+        from public.marketplace_associates
+        where lower(btrim(email)) = $1
+          and active
+        limit 1
+      `,
+      [email],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      role: String(row.role || 'associate').trim().toLowerCase(),
+      displayName: String(row.display_name || '').trim(),
+    };
+  } catch (error) {
+    console.warn('seller shop associate lookup failed', error.message);
+    return null;
+  }
+}
+
 function shopSellerFromProfile({ uid, profile = {}, queried = '', via = '' }) {
   const handle = currentHandle(profile.username);
   const asked = currentHandle(queried);
@@ -417,6 +450,7 @@ async function readSellerShopData(url, game) {
       uid: seller.uid,
       username: seller.username,
       displayName: seller.displayName || seller.username,
+      associate: await associateBadgeForUid(seller.uid),
     },
     listings: result.rows.map((row) => listingRow(row, seller)),
     total,

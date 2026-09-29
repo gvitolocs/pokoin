@@ -10131,3 +10131,34 @@ html:has(.wallet-page) .brand span {
 .listing-photo-add{display:grid;place-items:center;width:2rem;height:2rem;margin:0;border:1px solid var(--g5);border-radius:999px;background:var(--g2);color:var(--muted);cursor:pointer}
 .listing-photo{padding:0;border:0;background:transparent;cursor:pointer;line-height:0}
 .listing-photo img{width:1.7rem;height:2.2rem;object-fit:cover;border-radius:.25rem}
+
+/* Associates roster badge — seller profiles and users search rows. */
+.seller-associate-badge,
+.suggest-user .suggest-user-associate-badge {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 10px;
+  padding: 0.22rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--yellow);
+  background: rgb(255 211 61 / 0.08);
+  border: 1px solid rgb(255 211 61 / 0.35);
+  white-space: nowrap;
+}
+
+.suggest-user .suggest-user-associate-badge {
+  margin-left: 8px;
+  font-size: 0.56rem;
+}
+
+.seller-associate-badge.is-ambassador,
+.suggest-user .suggest-user-associate-badge.is-ambassador {
+  color: #c9b8ff;
+  background: rgb(150 120 255 / 0.1);
+  border-color: rgb(150 120 255 / 0.4);
+}
