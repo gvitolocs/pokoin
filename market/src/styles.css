@@ -9791,18 +9791,11 @@ html:has(.wallet-page) .brand span {
   width: 100%;
   height: 100%;
 }
-.messages-row.is-poko {
-  background: linear-gradient(90deg, rgba(255, 211, 61, 0.08), transparent 55%);
-}
 .messages-hint {
   margin: 1rem 0 0;
   color: var(--muted);
   font-size: 0.88rem;
   text-align: center;
-}
-.chat-bubble.is-poko {
-  border: 1px solid rgba(255, 211, 61, 0.22);
-  background: linear-gradient(160deg, rgba(255, 211, 61, 0.12), var(--g3));
 }
 .poko-drop-hint {
   margin: 0.35rem 0 0.15rem;
@@ -9832,7 +9825,15 @@ html:has(.wallet-page) .brand span {
 @keyframes chat-shimmer { to { background-position: -200% 0; } }
 
 .conversation-page { display: flex; flex-direction: column; height: calc(100vh - 72px); padding-bottom: 0.75rem; }
-.conversation-head { gap: 0.7rem; padding: 0.5rem 0 1rem; border-bottom: 1px solid var(--g4); }
+.conversation-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  gap: 0.7rem;
+  padding: 0.5rem 0 1rem;
+  border-bottom: 1px solid var(--g4);
+  background: var(--bg, #07060b);
+}
 .conversation-head > button { width: 36px; height: 36px; border: 0; background: transparent; color: var(--text); font-size: 2rem; cursor: pointer; }
 .conversation-head .messages-avatar { width: 38px; height: 38px; }
 .conversation-head .messages-avatar.is-poko img {

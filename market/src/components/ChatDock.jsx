@@ -399,9 +399,9 @@ export default function ChatDock() {
         <>
           <div className="chat-dock-log" ref={activeLogRef} onScroll={poko ? pokoThread.onScroll : thread.onScroll}>
             {events.map((event) => (
-              <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}${!event.mine && poko ? ' is-poko' : ''}${event.source === 'unavailable' || event.source === 'send_failed' ? ' is-unavailable' : ''}`}>
+              <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}${event.source === 'unavailable' || event.source === 'send_failed' ? ' is-unavailable' : ''}`}>
                 {event.text ? <ChatText text={event.text} /> : null}
-                {event.source === 'unavailable' ? <p className="chat-dock-hint">Assistant unreachable — try again.</p> : null}
+                {event.source === 'unavailable' ? <p className="chat-dock-hint">Could not reply — try again.</p> : null}
                 {event.source === 'send_failed' ? <p className="chat-dock-hint">Not delivered — try again.</p> : null}
                 <ChatPhotos urls={event.images || []} />
                 {(event.listings || event.cards || []).length ? (
@@ -419,7 +419,7 @@ export default function ChatDock() {
                 {!event.text && !(event.listings || event.cards || []).length && !(event.images || []).length ? <p>…</p> : null}
               </div>
             ))}
-            {poko && pokoThread.busy ? <p className="chat-dock-hint">Poko is checking the market…</p> : null}
+            {poko && pokoThread.busy ? <p className="chat-dock-hint">…</p> : null}
           </div>
           {threadError ? <p className="chat-dock-error" role="alert">{threadError}</p> : null}
           {signedIn && dock.peer ? (
