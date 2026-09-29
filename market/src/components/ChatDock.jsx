@@ -36,6 +36,7 @@ import { useChatThread } from '../use-chat-thread.js';
 import { usePokoThread } from '../use-poko-thread.js';
 import ChatListingTag from './ChatListingTag.jsx';
 import ChatPhotos from './ChatPhotos.jsx';
+import ChatText from './ChatText.jsx';
 import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
 import mascotUrl from '../assets/pokoin-mascot@8x.png';
 import '../chat-dock.css';
@@ -386,7 +387,7 @@ export default function ChatDock() {
           <div className="chat-dock-log" ref={activeLogRef} onScroll={poko ? pokoThread.onScroll : thread.onScroll}>
             {events.map((event) => (
               <div key={event.id} className={`chat-bubble${event.mine ? ' mine' : ''}${!event.mine && poko ? ' is-poko' : ''}${event.source === 'unavailable' || event.source === 'send_failed' ? ' is-unavailable' : ''}`}>
-                {event.text ? <p>{event.text}</p> : null}
+                {event.text ? <ChatText text={event.text} /> : null}
                 {event.source === 'unavailable' ? <p className="chat-dock-hint">Assistant unreachable — try again.</p> : null}
                 {event.source === 'send_failed' ? <p className="chat-dock-hint">Not delivered — try again.</p> : null}
                 <ChatPhotos urls={event.images || []} />

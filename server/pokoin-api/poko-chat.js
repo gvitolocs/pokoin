@@ -58,15 +58,25 @@ function cleanText(value, max = 2000) {
 
 function cleanCards(raw) {
   const list = Array.isArray(raw) ? raw : [];
-  return list.slice(0, 8).map((row) => ({
-    cardId: cleanText(row?.cardId || row?.id, 40),
-    name: cleanText(row?.cardName || row?.name, 120),
-    setName: cleanText(row?.setName || row?.set, 120),
-    condition: cleanText(row?.condition, 20),
-    language: cleanText(row?.language, 12),
-    canonicalPath: cleanText(row?.canonicalPath || row?.href, 200),
-    imageUrl: cleanText(row?.imageUrl || row?.cardImageUrl, 500),
-  })).filter((row) => row.cardId || row.name);
+  return list.slice(0, 12).map((row) => {
+    const cardId = cleanText(row?.cardId || row?.id, 40);
+    const path = cleanText(row?.path || row?.canonicalPath || row?.href, 200)
+      || (cardId ? `/marketplace/en/cards/${cardId}` : '');
+    const name = cleanText(row?.cardName || row?.name, 120);
+    return {
+      kind: 'card',
+      cardId,
+      name,
+      cardName: name,
+      setName: cleanText(row?.setName || row?.set, 120),
+      condition: cleanText(row?.condition, 20),
+      language: cleanText(row?.language, 12),
+      canonicalPath: path,
+      path,
+      imageUrl: cleanText(row?.imageUrl || row?.cardImageUrl, 500),
+      pricePkn: Number(row?.pricePkn || row?.minAsk) || 0,
+    };
+  }).filter((row) => row.cardId || row.name);
 }
 
 function cleanImages(raw) {
@@ -244,10 +254,10 @@ async function hermesReply({
     error.statusCode = 502;
     throw error;
   }
-  // Structured cards win when Hermes sends them; otherwise names in the text.
-  const hermesCards = Array.isArray(data?.cards) ? data.cards
-    : (Array.isArray(data?.cardIds) ? data.cardIds : []);
-  return { reply, hermesCards };
+  return {
+    reply,
+    cards: cleanCards(data?.cards),
+  };
 }
 
 // Per-IP rate limit, same shape as the legacy assistant (20 msgs / minute).
@@ -348,6 +358,7 @@ async function appendTurn({
   const assistantRef = ref.collection('events').doc();
   const turnId = userRef.id;
   const batch = firestore.batch();
+  const assistantCards = cleanCards(replyCards);
   batch.set(ref, { uid, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
   batch.set(userRef, {
     role: 'user',
@@ -361,7 +372,7 @@ async function appendTurn({
   batch.set(assistantRef, {
     role: 'assistant',
     text: reply || '',
-    cards: replyCards,
+    cards: assistantCards,
     images: [],
     source: source || 'hermes',
     turnId,
@@ -387,8 +398,8 @@ async function appendTurn({
       role: 'assistant',
       mine: false,
       text: reply || '',
-      cards: replyCards,
-      listings: replyCards,
+      cards: assistantCards,
+      listings: assistantCards,
       images: [],
       source: source || 'hermes',
       turnId,
@@ -445,7 +456,7 @@ async function handleChat(req, res, decoded) {
   let source = 'hermes';
   let hermesError = '';
   try {
-    const answer = await hermesReply({
+    const hermes = await hermesReply({
       message: prompt,
       cards,
       images,
@@ -456,13 +467,14 @@ async function handleChat(req, res, decoded) {
       sessionId,
       displayName: cleanText(decoded.name || decoded.email, 80),
     });
-    // Cards Poko names come back as real catalog cards (images in the chat).
-    const attachedReply = await attachReplyCards(answer.reply, {
-      hermesCards: answer.hermesCards,
-      query: marketplaceQuery,
+    // Hermes' own tool cards win; otherwise resolve the cards Poko names
+    // (hidden [[cards: …]] line, lists, bold) against the catalog.
+    const hermesCards = Array.isArray(hermes.cards) ? hermes.cards : [];
+    const attached = await attachReplyCards(hermes.reply, {
+      query: hermesCards.length ? null : marketplaceQuery,
     });
-    reply = attachedReply.text || answer.reply;
-    replyCards = attachedReply.cards;
+    reply = attached.text || hermes.reply;
+    replyCards = hermesCards.length ? hermesCards : attached.cards;
   } catch (error) {
     hermesError = String(error?.message || error).slice(0, 200);
     console.warn('poko-chat hermes failed', hermesError);
