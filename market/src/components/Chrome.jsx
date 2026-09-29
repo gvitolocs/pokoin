@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useWindowScrollRestore } from '../scroll-restore.js';
-import mascotUrl from '../assets/pokoin-mascot@8x.png';
 import {
   cardFromAutocomplete,
   cardHref,
@@ -45,6 +44,7 @@ import { printingIdentity, clipSuggestCollector, suggestCardName, suggestTransla
 import { sellerHref } from '../listing-meta.js';
 import CatalogMenu from './CatalogHubs.jsx';
 import MobileMenu from './MobileMenu.jsx';
+import PokoinWordmark from './PokoinWordmark.jsx';
 import ExpansionMark from './ExpansionMark.jsx';
 import SearchTabs from './SearchTabs.jsx';
 import { Action, track } from '../track.js';
@@ -1043,11 +1043,7 @@ export default function Chrome({ children }) {
           <AppLink className="brand" to="/marketplace" aria-label={site.title}>
             {/* Flyer wordmark: the coin mascot is the "o" in Pokoin. Phone keeps the round badge. */}
             <img className="brand-badge" src="/home/logo.png" alt="" width="40" height="40" />
-            <span className="brand-word" aria-hidden="true">
-              <span className="brand-letters">P</span>
-              <img className="brand-coin" src={mascotUrl} alt="" width="26" height="24" />
-              <span className="brand-letters">ko<span className="brand-i">ı</span>n</span>
-            </span>
+            <PokoinWordmark />
           </AppLink>
           <span
             className="desktop-anchor"

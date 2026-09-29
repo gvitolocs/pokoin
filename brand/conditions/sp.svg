@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pokoin condition chip: Slightly Played (SP). See conditions/README.md. Size 40×28. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="28" viewBox="0 0 40 28" role="img" aria-label="SP">
+  <title>Slightly Played</title>
+  <rect width="40" height="28" rx="6" ry="6" fill="#9bb84a"/>
+  <text x="20" y="19" text-anchor="middle" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" letter-spacing="0.4">SP</text>
+</svg>
