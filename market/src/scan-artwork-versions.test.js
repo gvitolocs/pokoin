@@ -135,3 +135,27 @@ test('preferDraftArtwork switches western → JP sibling; ZH leaves null', () =>
   assert.equal(preferDraftArtwork([JP, EN], '2', 'JP').id, '1');
   assert.equal(preferDraftArtwork([JP, EN], '1', 'JP'), null);
 });
+
+// Phone printing choice (docs/SCAN_CONNECT.md#printing-choice): the desk must
+// keep whatever printing the phone resolved for the batch language.
+const TOT = { id: '448040', name: 'Pumpkaboo', set_name: 'Trick or Trade', card_number: '076/203', nationality: 'american' };
+const EVS = { id: '332628', name: 'Pumpkaboo', set_name: 'Evolving Skies', card_number: '076/203', nationality: 'western' };
+const TP = { id: '270600', name: 'Pumpkaboo', set_name: 'Towering Perfection', card_number: '016/067', nationality: 'japanese' };
+
+test('american / french / german prints are western: a Trick or Trade pick is never remapped', () => {
+  assert.equal(shouldRemapArtwork([TP, EVS, TOT], '448040', 'EN'), false);
+  assert.equal(preferArtworkPrinting([TP, EVS, TOT], '448040', 'IT').id, '448040');
+  assert.deepEqual(languagesForPrint('american', ['EN', 'IT', 'JP', 'ZH']), ['EN', 'IT']);
+  assert.equal(listingLanguageForPrint('american', 'IT'), 'IT');
+  assert.deepEqual(sortArtworkVersions([TP, TOT], 'EN').map((r) => r.id), ['448040', '270600']);
+});
+
+test('Indonesian / Thai / Vietnamese batches never fall back to a western print', () => {
+  assert.equal(preferredPrintBucket('ID'), 'indonesian');
+  assert.equal(preferredPrintBucket('TH'), 'thai');
+  assert.equal(preferredPrintBucket('VI'), 'vietnamese');
+  assert.equal(shouldRemapArtwork([JP, EN], '1', 'ID'), false, 'JP identify hit kept, not remapped to western');
+  const ID_PRINT = { ...JP, id: '9', nationality: 'indonesian' };
+  assert.equal(preferArtworkPrinting([EN, ID_PRINT], '2', 'ID').id, '9');
+  assert.equal(shouldRemapArtwork([EN, ID_PRINT], '9', 'TH'), false);
+});

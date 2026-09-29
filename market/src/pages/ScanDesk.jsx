@@ -1564,6 +1564,7 @@ function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick, onLangua
   onLanguageRef.current = onLanguage;
   // Batch defaults language is the region intent (EN → western sibling).
   const listingLanguage = preferredLanguage || row.language || 'EN';
+  const needsReview = (row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed;
 
   useEffect(() => {
     let cancelled = false;
@@ -1576,7 +1577,9 @@ function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick, onLangua
       if (cancelled) return;
       const rows = sortArtworkVersions(data?.printings || [], listingLanguage);
       setPrintings(rows);
-      if (closed) return;
+      // A row waiting for review is the seller's call: an automatic region
+      // remap would patch cardId and confirm it without anyone looking.
+      if (closed || needsReview) return;
       const tryKey = `${row.id}\0${listingLanguage}\0${cardId}`;
       if (remapTried.current.has(tryKey)) return;
       remapTried.current.add(tryKey);
@@ -1591,11 +1594,14 @@ function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick, onLangua
       const current = rows.find((p) => String(p.id || p.card_id) === cardId);
       const nationality = String(current?.nationality || row.nationality || '').toLowerCase();
       if (!nationality) return;
+      // Coerce LANG only when this print cannot carry it (D000064); a valid
+      // language — the capture snapshot or a seller edit — is never rewritten.
+      if (languagesForPrint(nationality, LANGUAGES).includes(row.language)) return;
       const nextLang = listingLanguageForPrint(nationality, listingLanguage);
       if (nextLang !== row.language) onLanguageRef.current?.(nextLang);
     });
     return () => { cancelled = true; };
-  }, [row.cardId, row.id, row.nationality, row.language, closed, listingLanguage]);
+  }, [row.cardId, row.id, row.nationality, row.language, closed, listingLanguage, needsReview]);
 
   const fallback = [row.setName, row.collectorNumber].filter(Boolean).join(' · ');
   if (closed || !row.cardId) {
@@ -1710,7 +1716,10 @@ function QueueRow({
   const thumbArt = thumbFor(row.cardId, row.cardName, row.imageUrl);
   const thumb = thumbArt.thumb;
   const zoomSrc = thumbArt.hero || thumbArt.thumb;
-  const remapLang = preferredLanguage || row.language || 'EN';
+  // Region intent is the batch language in force when this card was captured
+  // (immutable snapshot, the same one the phone's printing choice used), not
+  // today's Batch Defaults: switching defaults never rewrites existing rows.
+  const remapLang = row.defaultsSnapshot?.language || preferredLanguage || row.language || 'EN';
   return (
     <div
       className={`scan-row${focused ? ' focused' : ''}${selected ? ' selected' : ''}${row.status === 'submitted' ? ' done' : ''}`}

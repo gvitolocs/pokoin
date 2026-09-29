@@ -70,11 +70,11 @@ async function waitHttp(url, timeoutMs = 60_000) {
 // ---------------------------------------------------------------- phone host + fake identify
 
 const box = { xyxy: [180, 90, 780, 930], score: 0.97 };
-let scene = null; // null = empty table, else { hits: [[id, score], ...] }
+let scene = null; // null = empty table, else { hits: [[id, score, name?], ...] }
 const identifyLatencyMs = Number(process.env.E2E_IDENTIFY_MS || 60);
 
 function sceneResponse(catalog) {
-  const hits = scene ? scene.hits.map(([public_id, score]) => ({ public_id, score, name: `card ${public_id}` })) : [];
+  const hits = scene ? scene.hits.map(([public_id, score, name]) => ({ public_id, score, name: name || `card ${public_id}` })) : [];
   return {
     ok: true,
     identity: 'public_id',
@@ -134,13 +134,14 @@ async function showCard(hits, holdMs = 900) {
 
 async function rows(page) {
   return page.$$eval('.scan-queue .scan-row:not(.scan-row-head)', (els) => els.map((el) => {
-    const selects = el.querySelectorAll('select');
+    // Per-cell: the Card cell also holds the artwork-version <select>.
+    const cell = (name) => el.querySelector(`.${name} select`)?.value || el.querySelector(`.${name}`)?.textContent;
     return {
       id: el.getAttribute('data-row'),
       card: el.querySelector('.c-card strong')?.textContent || '',
-      language: selects[0]?.value || el.querySelector('.c-lang')?.textContent,
-      condition: selects[1]?.value || el.querySelector('.c-cond')?.textContent,
-      finish: selects[2]?.value || el.querySelector('.c-finish')?.textContent,
+      language: cell('c-lang'),
+      condition: cell('c-cond'),
+      finish: cell('c-finish'),
       qty: Number(el.querySelector('.c-qty')?.textContent),
       location: el.querySelector('.c-loc input')?.value ?? el.querySelector('.c-loc')?.textContent,
       price: el.querySelector('.c-price input')?.value ?? '',
@@ -194,9 +195,13 @@ async function main() {
     cwd: CARDVAULT,
     env: { ...process.env, SCAN_DEV_FAKE_AUTH: '1', PORT: String(API_PORT), NODE_ENV: 'development' },
   });
+  // Empty HOME: Vite's /__dev/bearer must not hand the desk a developer's
+  // ~/.config/pokoin/dev-bearer.json; the desk signs in with the scripted
+  // `seller:<uid>` session below, the only one the dev API accepts.
+  const viteHome = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'scan-e2e-home-'));
   const vite = start('vite', process.execPath, [path.join(repo, 'market', 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(VITE_PORT), '--strictPort', '--host', '127.0.0.1'], {
     cwd: path.join(repo, 'market'),
-    env: { ...process.env, POKOIN_API_PROXY: `http://127.0.0.1:${API_PORT}` },
+    env: { ...process.env, HOME: viteHome, POKOIN_API_PROXY: `http://127.0.0.1:${API_PORT}` },
   });
   await new Promise((r) => phoneServer.listen(PHONE_PORT, '127.0.0.1', r));
   await waitHttp(`http://127.0.0.1:${API_PORT}/api/scan-session?sessionId=x`);
@@ -239,7 +244,10 @@ async function main() {
     await desktop.goto(`http://127.0.0.1:${VITE_PORT}/inventory/scan`);
     await desktop.waitForTimeout(400);
     await injectSession();
-    await desktop.waitForSelector('.scan-pin span', { timeout: 15_000 });
+    // The slots render empty while the code is prepared; wait for the digits.
+    await desktop.waitForFunction(() => /^[0-9]{4}$/.test(
+      [...document.querySelectorAll('.scan-pin span')].map((e) => e.textContent).join(''),
+    ), null, { timeout: 15_000 });
     pin = (await desktop.$$eval('.scan-pin span', (els) => els.map((e) => e.textContent).join('')));
     assert.match(pin, /^[0-9]{4}$/);
     assert.ok(await desktop.$('.scan-qr svg path'), 'QR rendered');
@@ -296,7 +304,8 @@ async function main() {
     await desktop.keyboard.press('Shift+KeyA');
     await desktop.waitForFunction(() => document.querySelector('.scan-defaults select')?.value === 'EN');
     await desktop.waitForTimeout(250);
-    await showCard([['504600', 0.78], ['233564', 0.74]], 1700); // ambiguous
+    // Ambiguous: the phone sends the best frame after 1.2 s in view; frames are ~0.5 s apart.
+    await showCard([['504600', 0.78], ['233564', 0.74]], 2400);
     const list = await waitRows(desktop, 4);
     assert.deepEqual(list.map((r) => r.language), ['IT', 'IT', 'IT', 'EN']);
     assert.deepEqual(list.map((r) => r.location), ['', '', '', 'Box A12'], 'location snapshots too');
@@ -314,9 +323,16 @@ async function main() {
   });
 
   await step('two identical copies in a row become one row with Qty 2 and an Undo toast', async () => {
-    await showCard([['241092', 0.96]]);
-    await showCard([['241092', 0.96]]);
-    const list = await waitRows(desktop, 5);
+    await showCard([['241092', 0.96]], 1200);
+    await showCard([['241092', 0.96]], 1200);
+    const deadline = Date.now() + 12_000;
+    let list = [];
+    while (Date.now() < deadline) {
+      list = await rows(desktop);
+      if (list.length >= 5 && Number(list[4]?.qty) === 2) break;
+      await sleep(100);
+    }
+    assert.equal(list.length, 5, `expected 5 rows after merge, saw ${list.length}`);
     assert.equal(list[4].qty, 2);
     await desktop.waitForSelector('.scan-toast:has-text("Qty 1 → 2")', { timeout: 5000 });
     await shot(desktop, '04-desktop-queue');
@@ -337,7 +353,7 @@ async function main() {
     await desktop.keyboard.press('Equal');
     await desktop.waitForFunction(() => {
       const row = document.querySelectorAll('.scan-queue .scan-row:not(.scan-row-head)')[1];
-      return row.querySelectorAll('select')[2].value === 'reverse' && row.querySelector('.c-qty').textContent === '2';
+      return row.querySelector('.c-finish select').value === 'reverse' && row.querySelector('.c-qty').textContent === '2';
     }, null, { timeout: 5000 });
   });
 
@@ -360,7 +376,7 @@ async function main() {
     }
     await desktop.waitForFunction(() => !document.querySelector('.scan-submit')?.disabled, null, { timeout: 8000 });
     const label = await desktop.textContent('.scan-submit');
-    assert.equal(label, 'Add 7 cards to Inventory');
+    assert.equal(label, 'Add 7 cards to Pokoin');
     await desktop.locator('.scan-queue').focus();
     await desktop.keyboard.press('Control+Enter');
     await desktop.waitForSelector('.scan-modal-box');
@@ -383,8 +399,8 @@ async function main() {
       { card_id: '220962', language: 'IT', condition: 'NM', foil_state: 'standard', reverse: false, qty: 1, location: '', source: 'pokoin_scan_batch' },
       { card_id: '233564', language: 'IT', condition: 'NM', foil_state: 'reverse', reverse: true, qty: 2, location: '', source: 'pokoin_scan_batch' },
       { card_id: '240808', language: 'IT', condition: 'NM', foil_state: 'standard', reverse: false, qty: 1, location: '', source: 'pokoin_scan_batch' },
-      { card_id: '233564', language: 'EN', condition: 'NM', foil_state: 'standard', reverse: false, qty: 1, location: 'Box A12', source: 'pokoin_scan_batch' },
-      { card_id: '241092', language: 'EN', condition: 'NM', foil_state: 'standard', reverse: false, qty: 2, location: 'Box A12', source: 'pokoin_scan_batch' },
+      { card_id: '233564', language: 'EN', condition: 'NM', foil_state: 'standard', reverse: false, qty: 1, location: 'Box A12·1', source: 'pokoin_scan_batch' },
+      { card_id: '241092', language: 'EN', condition: 'NM', foil_state: 'standard', reverse: false, qty: 2, location: 'Box A12·2-3', source: 'pokoin_scan_batch' },
     ]);
   });
 
@@ -422,6 +438,84 @@ async function main() {
     await qrPhoneRef.unroute('**/api/scan-phone?action=scan');
     const list = await waitRows(desktop, before + 1, 15_000);
     assert.equal(list.at(-1).card, 'Pikachu δ');
+  });
+
+  // HGSS-era Grass Energy: HGSS 115/123 and Call of Legends 88/95 are the same
+  // painting (gallery cosine 0.999); the JP HeartGold Collection print is close.
+  // Dev-server fixtures: CardVault scripts/scan-connect-dev-server.js FIXTURE_PRINTINGS.
+  const ENERGY = [['242396', 0.95, 'Grass Energy'], ['224950', 0.949, 'Grass Energy'], ['279166', 0.935, 'Grass Energy']];
+  const tray = () => qrPhoneRef.locator('.sc-pick');
+  const tileLabels = () => qrPhoneRef.$$eval('.sc-pick .sc-tile', (els) => els.map((el) => el.getAttribute('aria-label')));
+  const lastRow = () => desktop.$$eval('.scan-queue .scan-row:not(.scan-row-head)', (els) => {
+    const el = els.at(-1);
+    return {
+      card: el.querySelector('.c-card strong')?.textContent || '',
+      printing: el.querySelector('.c-version')?.value || '',
+      state: el.querySelector('.c-state')?.textContent || '',
+      candidates: [...el.querySelectorAll('.c-cands button')].map((b) => b.textContent),
+    };
+  });
+
+  await step('printing choice: same artwork, two western printings → the phone asks with set-mark tiles; one tap lists Call of Legends', async () => {
+    const before = (await rows(desktop)).length;
+    scene = { hits: ENERGY };
+    await tray().waitFor({ state: 'visible', timeout: 6000 });
+    assert.deepEqual(await tileLabels(), [
+      'Call of Legends, card 88/95',
+      'HeartGold & SoulSilver, card 115/123',
+      'League Promos, card 88/95, Play! Pokemon · Holo Promo',
+    ], 'western printings only, stamped promo included, JP HeartGold Collection excluded');
+    await shot(qrPhoneRef, '12-phone-printing-tiles');
+    // The card stays in view: frames keep coming, the tiles stay put, nothing is sent yet.
+    scene = { hits: [ENERGY[1], ENERGY[0], ENERGY[2]] };
+    await sleep(1200);
+    assert.equal((await rows(desktop)).length, before, 'no row until the printing is chosen');
+    assert.equal((await tileLabels())[0], 'Call of Legends, card 88/95', 'tiles did not reshuffle');
+    const col = qrPhoneRef.locator('.sc-tile').first();
+    await col.click();
+    await col.click({ force: true }).catch(() => {}); // rapid second tap
+    await tray().waitFor({ state: 'hidden', timeout: 3000 });
+    scene = null;
+    await sleep(900);
+    await waitRows(desktop, before + 1);
+    await sleep(600);
+    assert.equal((await rows(desktop)).length, before + 1, 'one row for one card and two taps');
+    const row = await lastRow();
+    assert.equal(row.card, 'Grass Energy');
+    assert.equal(row.printing, '224950', 'Call of Legends 88/95, as tapped');
+    assert.doesNotMatch(row.state, /Check/);
+    await shot(desktop, '13-desktop-printing-chosen');
+  });
+
+  await step('printing choice skipped: the row waits on the desk with only the offered printings', async () => {
+    const before = (await rows(desktop)).length;
+    scene = { hits: ENERGY };
+    await tray().waitFor({ state: 'visible', timeout: 6000 });
+    await qrPhoneRef.click('.sc-pick-skip');
+    await tray().waitFor({ state: 'hidden', timeout: 3000 });
+    scene = null;
+    await sleep(900);
+    await waitRows(desktop, before + 1);
+    await desktop.waitForFunction(() => {
+      const el = [...document.querySelectorAll('.scan-queue .scan-row:not(.scan-row-head)')].at(-1);
+      return el && el.querySelectorAll('.c-cands button').length === 3;
+    }, null, { timeout: 8000 });
+    const row = await lastRow();
+    assert.match(row.state, /Check/);
+    assert.ok(row.candidates.some((c) => /Call of Legends/.test(c)));
+    assert.ok(row.candidates.some((c) => /HeartGold & SoulSilver/.test(c)));
+    assert.ok(!row.candidates.some((c) => /HeartGold Collection/.test(c)), 'no Japanese print in a western batch');
+  });
+
+  await step('one printing in the batch language: no tiles, the western print is matched directly', async () => {
+    const before = (await rows(desktop)).length;
+    // The camera saw the Japanese print best; the batch is western and only HGSS 115/123 tied.
+    await showCard([['279166', 0.97, 'Grass Energy'], ['242396', 0.9, 'Grass Energy']], 1200);
+    assert.equal(await tray().isHidden(), true);
+    await waitRows(desktop, before + 1);
+    const row = await lastRow();
+    assert.equal(row.printing, '242396');
+    assert.doesNotMatch(row.state, /Check/);
   });
 
   await step('reused, tampered and expired QR links are refused and fall back to the keypad', async () => {

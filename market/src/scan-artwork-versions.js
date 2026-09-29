@@ -3,7 +3,12 @@
  * Source: GET /api/marketplace-version-set (pokoin_version_sets).
  *
  * Batch Defaults / row language drives the default printing:
- * western langs → western, JP/KO → japanese|korean, ZH/ZHT → chinese.
+ * western langs → western, JP/KO → japanese|korean, ZH/ZHT → chinese,
+ * ID/TH → their own print (never western). Same families as the phone's
+ * printing choice (CardVault api/_scan_connect.js printFamily), so the desk
+ * never remaps a printing the seller picked on the phone.
+ * Nationality goes through the canonical print bucket: american / french /
+ * german prints (e.g. Trick or Trade) are western.
  *
  * Listing language must match the printing region:
  * western print → western langs only; JP/KO/CN print → no EN/IT/….
@@ -11,51 +16,51 @@
 
 import { ASIAN_CARD_LANGS } from './locale.js';
 import { printLangBadge } from './card-versions.js';
+import { printBucket } from './print-bucket.js';
 
 function printingId(row) {
   return String(row?.id || row?.card_id || row?.cardId || '').trim();
 }
 
+/** Print region of a printing (`print-bucket.js`: american → western, …). */
 function nationalityOf(row) {
-  return String(row?.nationality || '').trim().toLowerCase();
+  return printBucket(row?.nationality);
 }
 
 const ASIAN = new Set(ASIAN_CARD_LANGS.map((c) => String(c).toUpperCase()));
 
-/** @returns {'western'|'jpko'|'chinese'} */
+// Print regions each preferred bucket accepts.
+const BUCKET_REGIONS = {
+  western: ['western'],
+  jpko: ['japanese', 'korean'],
+  chinese: ['chinese'],
+  indonesian: ['indonesian', 'idth'],
+  thai: ['thai', 'idth'],
+  vietnamese: [],
+};
+
+/** @returns {'western'|'jpko'|'chinese'|'indonesian'|'thai'|'vietnamese'} */
 export function preferredPrintBucket(listingLanguage = '') {
   const lang = String(listingLanguage || '').trim().toUpperCase();
   if (lang === 'JP' || lang === 'KO') return 'jpko';
   if (lang === 'ZH' || lang === 'ZHT') return 'chinese';
+  if (lang === 'ID') return 'indonesian';
+  if (lang === 'TH') return 'thai';
+  if (lang === 'VI') return 'vietnamese';
   return 'western';
 }
 
 export function matchesPrintBucket(row, bucket) {
-  const n = nationalityOf(row);
-  if (bucket === 'western') return n === 'western';
-  if (bucket === 'jpko') return n === 'japanese' || n === 'korean';
-  if (bucket === 'chinese') return n === 'chinese';
-  return false;
+  return (BUCKET_REGIONS[bucket] || []).includes(nationalityOf(row));
 }
 
+// Preferred region first, then western, Japanese/Korean, Chinese, the rest.
+const FALLBACK_ORDER = ['western', 'jpko', 'chinese'];
+
 function bucketRank(row, preferred) {
-  const n = nationalityOf(row);
-  if (preferred === 'western') {
-    if (n === 'western') return 0;
-    if (n === 'japanese' || n === 'korean') return 1;
-    if (n === 'chinese') return 2;
-    return 3;
-  }
-  if (preferred === 'jpko') {
-    if (n === 'japanese' || n === 'korean') return 0;
-    if (n === 'western') return 1;
-    if (n === 'chinese') return 2;
-    return 3;
-  }
-  if (n === 'chinese') return 0;
-  if (n === 'western') return 1;
-  if (n === 'japanese' || n === 'korean') return 2;
-  return 3;
+  if (matchesPrintBucket(row, preferred)) return 0;
+  const i = FALLBACK_ORDER.filter((b) => b !== preferred).findIndex((b) => matchesPrintBucket(row, b));
+  return i < 0 ? FALLBACK_ORDER.length : i + 1;
 }
 
 /**
@@ -63,7 +68,7 @@ function bucketRank(row, preferred) {
  * JP Abyss Eye → JP (never EN). Western Pitch Black → EN/IT/… (never JP).
  */
 export function listingLanguageForPrint(nationality = '', preferred = 'EN') {
-  const n = String(nationality || '').trim().toLowerCase();
+  const n = printBucket(nationality);
   const want = String(preferred || 'EN').trim().toUpperCase() || 'EN';
   if (n === 'japanese') return 'JP';
   if (n === 'korean') return 'KO';
@@ -77,11 +82,12 @@ export function languagesForPrint(nationality = '', languages = []) {
   const list = [...new Set(
     (languages || []).map((code) => String(code || '').trim().toUpperCase()).filter(Boolean),
   )];
-  const n = String(nationality || '').trim().toLowerCase();
+  const raw = String(nationality || '').trim();
+  const n = printBucket(raw);
   if (n === 'japanese') return ['JP'];
   if (n === 'korean') return ['KO'];
   if (n === 'chinese') return list.filter((code) => code === 'ZH' || code === 'ZHT');
-  if (n === 'western' || !n) return list.filter((code) => !ASIAN.has(code));
+  if (n === 'western' || !raw) return list.filter((code) => !ASIAN.has(code));
   return list;
 }
 
