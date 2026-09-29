@@ -70,10 +70,13 @@ function sellerFromPayload(data, handle, sample) {
   const rawName = String(row?.displayName || publicListingSellerName(sample, username || handle) || '')
     .trim();
   const displayName = rawName && !rawName.includes('@') ? rawName : (username || handle);
+  const associateRow = row?.associate && typeof row.associate === 'object' ? row.associate : null;
+  const associateRole = String(associateRow?.role || '').trim().toLowerCase();
   return {
     uid: row?.uid || sample?.sellerUid || '',
     username,
     displayName,
+    associate: associateRole ? { role: associateRole, displayName: String(associateRow.displayName || '').trim() } : null,
   };
 }
 
@@ -193,7 +196,12 @@ export default function Seller() {
         </span>
         <div className="seller-id">
           <p className="page-kicker">Seller</p>
-          <h1 className="page-title">{display}</h1>
+          <h1 className="page-title">
+            {display}
+            {seller.associate?.role ? (
+              <span className={`seller-associate-badge is-${seller.associate.role}`}>{seller.associate.role}</span>
+            ) : null}
+          </h1>
           {showTag ? <p className="seller-handle">@{tag}</p> : null}
           <div className="seller-hero-meta">
             {country && countryShort ? (

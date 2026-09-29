@@ -2238,6 +2238,36 @@ export function fetchSellerByUsername(username, { limit = 20, signal } = {}) {
 }
 
 
+/** Associates roster matches for the Users search (public facts only). */
+export function fetchAssociateSuggestions(username, { signal } = {}) {
+  const handle = String(username || '').trim();
+  if (handle.length < 2) {
+    return Promise.resolve({ associates: [] });
+  }
+  return getJson(`/api/marketplace-associate-suggest?q=${encodeURIComponent(handle)}`, {
+    signal,
+    cache: 'no-store',
+  });
+}
+
+/** Users search = listing sellers + associates roster hits (roster rows first). */
+export async function fetchSellerSearchWithAssociates(username, { limit = 20, signal } = {}) {
+  const [data, associates] = await Promise.all([
+    fetchSellerByUsername(username, { limit, signal }).catch(() => ({ listings: [] })),
+    fetchAssociateSuggestions(username, { signal }).catch(() => ({ associates: [] })),
+  ]);
+  const rows = Array.isArray(data?.listings) ? data.listings : [];
+  const roster = Array.isArray(associates?.associates) ? associates.associates : [];
+  const associateRows = roster.map((row) => ({
+    sellerUid: `associate:${row.username}`,
+    sellerUsername: row.username,
+    sellerName: row.username,
+    sellerDisplayName: row.name,
+    associateRole: row.role,
+  }));
+  return { listings: [...associateRows, ...rows] };
+}
+
 /** Public seller shop with server total + offset pagination (100/page UI). */
 export function fetchSellerShop(username, {
   limit = 100,

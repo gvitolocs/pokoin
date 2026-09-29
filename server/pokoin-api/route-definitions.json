@@ -436,6 +436,29 @@
     }
   },
   {
+    "path": "/api/marketplace-associate-suggest",
+    "file": "marketplace-associate-suggest.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Users-search supplement: active associates roster matches by display name or email prefix (public name, username, role only).",
+    "auth": "Public. q (min 2 chars) optional.",
+    "params": {
+      "query": "q prefix to match.",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres"
+      ]
+    }
+  },
+  {
     "path": "/api/marketplace-native-sales",
     "file": "marketplace-native-sales.js",
     "methods": [
