@@ -121,6 +121,9 @@ module.exports = async function handler(req, res) {
     let orderWritten = false;
     let quote;
     let session;
+    // Read by the success response after this try block: declaring it inside
+    // the block threw "pknDiscount is not defined" once Stripe had a session.
+    let pknDiscount = { discountPkn: 0, discountEurCents: 0 };
     try {
       quote = quoteCheckout({ items: reserved.items, sellerOrigins: origins, toCountry, tracked });
       const now = admin.firestore.FieldValue.serverTimestamp();
@@ -179,7 +182,6 @@ module.exports = async function handler(req, res) {
       const refusing = await sellersRefusingPkn(firestore, sellerIds);
       const refusedUids = new Set(refusing.map((row) => row.uid));
       const balanceRef = firestore.collection('balances').doc(decoded.uid);
-      let pknDiscount = { discountPkn: 0, discountEurCents: 0 };
       await firestore.runTransaction(async (tx) => {
         const balSnap = await tx.get(balanceRef);
         pknDiscount = pknBalanceDiscount({
