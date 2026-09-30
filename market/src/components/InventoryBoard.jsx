@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchPriceCheck } from '../api.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
+import { listingBox } from '../inventory-listings.js';
 import { groupInventoryStacks } from '../inventory-listings.js';
 import { useAuth } from '../auth.jsx';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '../listing-meta.js';
@@ -397,9 +398,9 @@ export default function InventoryBoard({ rows, formatPrice, defaultSource = '', 
                     {loc ? (
                       <Link
                         className="inv-loc"
-                        to={`/mypokoin/location/${encodeURIComponent(loc)}`}
+                        to={`/mypokoin/location/${encodeURIComponent(listingBox(loc) || loc)}`}
                         onClick={(event) => event.stopPropagation()}
-                        title={`Everything stored in ${loc}`}
+                        title={`Everything stored in ${listingBox(loc) || loc}`}
                       >
                         {loc}
                       </Link>

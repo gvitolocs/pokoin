@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { fetchCardSales, fetchCheapestPricePknMap, fetchVersionSet, imageSrc } from '../api.js';
+import { fetchCardSales, fetchCheapestPricePknMap, fetchSellerListings, fetchVersionSet, imageSrc } from '../api.js';
+import {
+  listingBox,
+  liveInventoryListings,
+  maxOccupiedStack,
+} from '../inventory-listings.js';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
 import { cardReference, writeListingDrag } from '../chat-listing.js';
@@ -582,6 +587,35 @@ export default function ScanDesk() {
         language: listingLanguageForPrint(nationality, preferredLang),
         reviewed: true,
       });
+
+  // A batch never starts on top of stock already in the box: seed the stack
+  // past every listing already stored there (scan sessions, desk listings and
+  // PowerTools CSV imports all write `box·stack` locations).
+  const inventoryHintRef = useRef('');
+  useEffect(() => {
+    const loc = String(defaults.location || '').trim();
+    const uid = user?.uid || profile?.uid;
+    if (closed || !loc || !uid) return undefined;
+    const box = listingBox(loc);
+    if (inventoryHintRef.current === box) return undefined;
+    inventoryHintRef.current = box;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getBearer();
+        const data = await fetchSellerListings(uid, token, { limit: 1000 });
+        if (cancelled) return;
+        const rows = liveInventoryListings(data.listings || data.items || []);
+        const occupied = maxOccupiedStack(rows, box);
+        if (occupied >= (defaults.stack ?? 1)) {
+          setDefaults({ stack: Math.min(9999, occupied + 1) });
+        }
+      } catch (_) {
+        // Best effort — the stored cursor still applies.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [defaults.location, defaults.stack, closed, user?.uid, profile?.uid, getBearer]);
       if (!Object.prototype.hasOwnProperty.call(changes, 'language')) {
         changes.language = optimistic.language;
       }

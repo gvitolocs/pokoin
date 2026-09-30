@@ -747,16 +747,35 @@ Fixture from this pipeline: Theme Deck & Blisters Exclusives Gengar
 `794206` / CT `397103` (Night Stiker Theme Deck) — CT page + image 404,
 CDN leftover absent, removed 2026-09-14.
 
-### MyPokoin inventory: location + stacks
+### MyPokoin inventory: locations, stacks, scan start
 
-`marketplace_user_listings.location` is the seller's free-text bin — convention
-`container·slot` (`megaevoluzionietb·1`, `box1·3` = binder/box then slot). Set
-from the list form / CSV import; not validated. The MyPokoin board shows it as
-a chip on each row; clicking it opens `/mypokoin/location/{location}`, where
-every listing in that bin is grouped into **stacks** — same printing +
-condition + language + foil facets (`inventoryStackKey`) — ordered by posting
-count desc, then copies, then name. Each stack lists its postings (date, qty,
-price, status). The API map documents the board's
+`marketplace_user_listings.location` is the seller's shelf address. Grammar
+(scan slotText + PowerTools CSV import agree):
+
+| Location | Meaning |
+| --- | --- |
+| `megaevoluzionietb` | box only — no divider |
+| `box1·47` | box + stack (divider) 47 |
+| `megaevoluzionietb·2-4` | stacks 2..4 (a qty spanning dividers) |
+| `box·3·5` | stack 3, position 5 inside it |
+| `box·3·5-9` | stack 3, positions 5..9 |
+| `box·3·5–9·2` | spanning stacks 3..9, ended at position 2 (en dash) |
+
+The **box** is everything before the first `·`/`•` (`listingBox`). The
+MyPokoin board shows the full location as a chip; clicking it opens
+`/mypokoin/location/{name}`, which resolves the **box** (a full slot string in
+the URL still lands on its box) and lists every listing stored there, grouped
+per stack **ordered by stack number asc** — unnumbered rows under "In the box"
+last — each stack's postings ordered by position (when the location carries
+one), then listed date. Summary tiles: stacks / postings / copies.
+
+**Scan start position** (scan desk stack setup): the popover's Current stack /
+Next position select where a batch begins, and the default continues after
+both (a) where the seller stopped in a previous scan session
+(`localStorage scan:box-positions` per box) and (b) whatever is already listed
+in that box — scan batches, desk listings and PowerTools CSV imports all write
+`box·stack` locations, and the desk seeds the first stack past the highest
+occupied one (`maxOccupiedStack`). The API map documents the board's
 `/api/marketplace-price-check` pricer.
 
 ### MyPokoin pricing strategies + settings (PowerTools parity)

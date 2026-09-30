@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   filterInventoryRows,
+  groupBoxStacks,
   groupInventoryStacks,
   inventoryStackKey,
   inventoryFacets,
@@ -9,6 +10,9 @@ import {
   inventoryListingMeta,
   inventoryRowDate,
   isLiveInventoryListing,
+  listingBox,
+  maxOccupiedStack,
+  parseListingLocation,
   liveInventoryListings,
   sortInventoryRows,
   summarizeLiveInventory,
@@ -165,4 +169,37 @@ test('inventory stack key separates foil facets', () => {
     inventoryStackKey(base),
     inventoryStackKey({ ...base, graded: true }),
   );
+});
+
+test('listing location grammar parses box, stack and position', () => {
+  assert.deepEqual(parseListingLocation('megaevoluzionietb'), { box: 'megaevoluzionietb', stack: null, position: null, structured: false });
+  assert.deepEqual(parseListingLocation('box1·47'), { box: 'box1', stack: 47, position: null, structured: true });
+  assert.deepEqual(parseListingLocation('megaevoluzionietb·2-4'), { box: 'megaevoluzionietb', stack: 2, position: 4, structured: true });
+  assert.deepEqual(parseListingLocation('box·3·5'), { box: 'box', stack: 3, position: 5, structured: true });
+  assert.deepEqual(parseListingLocation('box·3·5-9'), { box: 'box', stack: 3, position: 5, structured: true });
+  assert.deepEqual(parseListingLocation('box·3·5–9·2'), { box: 'box', stack: 3, position: 5, structured: true });
+  assert.equal(listingBox('box·3·5'), 'box');
+  assert.equal(listingBox('PlainBox'), 'PlainBox');
+  assert.equal(listingBox(''), '');
+});
+
+test('box stacks order by stack number then position, unnumbered last', () => {
+  const rows = [
+    { id: 'p1', location: 'box·3·5', quantityAvailable: 1, createdAt: '2026-09-30' },
+    { id: 'p2', location: 'box·1', quantityAvailable: 2, createdAt: '2026-09-29' },
+    { id: 'p3', location: 'box·1-2', quantityAvailable: 1, createdAt: '2026-09-28' },
+    { id: 'p4', location: 'box·3·2', quantityAvailable: 1, createdAt: '2026-09-27' },
+    { id: 'p5', location: 'box', quantityAvailable: 1, createdAt: '2026-09-26' },
+    { id: 'p6', location: 'other·9', quantityAvailable: 1 },
+  ];
+  const stacks = groupBoxStacks(rows, 'box');
+  assert.deepEqual(stacks.map((s) => s.stack), [1, 3, 0]);
+  // Stack 1: neither posting has an intra-stack position — date order wins
+  // (p3 ·1-2 is older than p2 ·1).
+  assert.deepEqual(stacks[0].postings.map((p) => p.id), ['p3', 'p2']);
+  // Stack 3: position 2 before position 5.
+  assert.deepEqual(stacks[1].postings.map((p) => p.id), ['p4', 'p1']);
+  assert.equal(stacks[2].postings.length, 1);
+  assert.equal(maxOccupiedStack(rows, 'box'), 3);
+  assert.equal(maxOccupiedStack(rows, 'other'), 9);
 });

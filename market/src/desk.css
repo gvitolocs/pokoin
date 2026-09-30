@@ -3515,3 +3515,37 @@
     display: none;
   }
 }
+
+.loc-box-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.loc-box-line strong {
+  color: var(--text);
+}
+
+.loc-stack-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--g3);
+}
+
+.loc-stack-no {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.loc-posting .inv-card-txt {
+  flex: 1;
+  min-width: 0;
+}
+
+.loc-posting .inv-thumb {
+  width: 32px;
+  height: 45px;
+}

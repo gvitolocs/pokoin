@@ -206,3 +206,82 @@ export function strategyMatchesListing(strategy, row) {
   if (strategy.language && String(row?.language || '').toUpperCase() !== strategy.language) return false;
   return true;
 }
+
+/**
+ * Parse a listing location into { box, stack, position, structured }.
+ * Grammar (scan slotText + PowerTools CSV):
+ *   `box`                → bare box, no slot
+ *   `box·7`              → stack 7
+ *   `box·7-9`            → stacks 7..9 (qty spanning dividers)
+ *   `box·3·5`            → stack 3, position 5
+ *   `box·3·5-9`          → stack 3, positions 5..9
+ *   `box·3·5–9·2`        → spanning stacks 3..9 (en dash), ended at position 2
+ * `·`/`•` are separators; the box is everything before the first one.
+ */
+export function parseListingLocation(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return { box: '', stack: null, position: null, structured: false };
+  const sepIndex = text.search(/[·•]/);
+  if (sepIndex === -1) {
+    return { box: text, stack: null, position: null, structured: false };
+  }
+  const box = text.slice(0, sepIndex).trim();
+  const tail = text.slice(sepIndex + 1);
+  const numbers = tail.split(/[·•–—-]/).map((part) => parseInt(part, 10)).filter((n) => Number.isFinite(n) && n > 0);
+  const stack = numbers.length ? numbers[0] : null;
+  const position = numbers.length > 1 ? numbers[1] : null;
+  return { box, stack, position, structured: stack != null };
+}
+
+/** The box a listing belongs to (everything before the first slot separator). */
+export function listingBox(raw) {
+  return parseListingLocation(raw).box;
+}
+
+/**
+ * Stacks for one box, ordered by stack number asc (unnumbered rows last),
+ * each stack's postings ordered by position asc, then date, then id.
+ */
+export function groupBoxStacks(rows, box) {
+  const wanted = String(box || '').trim();
+  const list = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({ row, parsed: parseListingLocation(row?.location) }))
+    .filter((entry) => entry.parsed.box && entry.parsed.box === wanted);
+  const stacks = new Map();
+  for (const { row, parsed } of list) {
+    const stackNo = parsed.stack ?? 0; // 0 = box-level, no divider number
+    const stack = stacks.get(stackNo) || { stack: stackNo, postings: [] };
+    stack.postings.push({ ...row, slotPosition: parsed.position });
+    stacks.set(stackNo, stack);
+  }
+  const order = (a, b) => {
+    if ((a.slotPosition ?? 9999) !== (b.slotPosition ?? 9999)) {
+      return (a.slotPosition ?? 9999) - (b.slotPosition ?? 9999);
+    }
+    return String(a.createdAt || a.created_at || '').localeCompare(String(b.createdAt || b.created_at || ''))
+      || String(a.id || '').localeCompare(String(b.id || ''));
+  };
+  return [...stacks.values()]
+    .map((stack) => {
+      stack.postings.sort(order);
+      stack.postingCount = stack.postings.length;
+      stack.copies = stack.postings.reduce(
+        (sum, row) => sum + Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0),
+        0,
+      );
+      return stack;
+    })
+    .sort((a, b) => (a.stack === 0 ? 1 : b.stack === 0 ? -1 : a.stack - b.stack));
+}
+
+/** Highest stack number a seller already occupies in a box (inventory hint). */
+export function maxOccupiedStack(rows, box) {
+  const wanted = String(box || '').trim();
+  let max = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const parsed = parseListingLocation(row?.location);
+    if (wanted && parsed.box !== wanted) continue;
+    if (parsed.stack != null && parsed.stack > max) max = parsed.stack;
+  }
+  return max;
+}
