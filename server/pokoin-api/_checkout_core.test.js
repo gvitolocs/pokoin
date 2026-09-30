@@ -173,3 +173,12 @@ test('pknBalanceDiscount discounts only PKN-accepting lines with a card floor', 
     { discountPkn: 0, discountEurCents: 0, eligiblePkn: 1700 },
   );
 });
+
+test('checkout keeps the PKN discount in scope for the success response', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'create-order-checkout-session.js'), 'utf8');
+  const declared = src.indexOf('let pknDiscount');
+  const tryStart = src.indexOf('let orderWritten = false;');
+  // Declared once, with orderWritten, before the try block the response follows.
+  assert.equal(src.split('let pknDiscount').length, 2);
+  assert.ok(declared > tryStart && declared < src.indexOf('try {', tryStart), 'pknDiscount must be declared outside the try block');
+});
