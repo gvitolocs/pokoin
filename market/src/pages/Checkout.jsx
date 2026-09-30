@@ -193,6 +193,20 @@ export default function Checkout() {
   const pknRefusedNames = pknRefused.map((row) => row.name).join(', ');
   const preferFiat = !nft && (!canPayWithPkn || pknBlocked);
   const displayCurrency = currencyForCountry(buyerCountry) || currencyFromLocale();
+  // PKN balance as a discount: only lines from sellers who accept PKN count,
+  // the card charge keeps a 50-cent floor. The session create applies the
+  // authoritative number server-side; this is the same math for the preview.
+  const pknEligiblePkn = items.reduce((sum, row) => (
+    pknRefused.some((row2) => row2.uid === row.sellerUid)
+      ? sum
+      : sum + Math.max(0, Number(row.pricePkn) || 0) * Math.max(0, Number(row.qty) || 0)
+  ), 0);
+  const pknDiscountPkn = Math.max(0, Math.min(
+    Number(availablePkn) || 0,
+    Math.trunc(pknEligiblePkn),
+    Math.max(0, Math.round(Number(fiatFromPkn(totalPkn, 'EUR')) * 100) - 50) / 50,
+  ));
+  const pknDiscountEurCents = Math.round(pknDiscountPkn * 50);
   const eurSubtotal = useMemo(
     () => Math.round((Number(fiatFromPkn(subtotalPkn, 'EUR')) || 0) * 100),
     [subtotalPkn],
@@ -783,6 +797,22 @@ export default function Checkout() {
                       : moneyFromPkn(subtotalPkn)}
                   </dd>
                 </div>
+                {pknDiscountPkn >= 1 ? (
+                  <>
+                    <div>
+                      <dt>PKN balance discount</dt>
+                      <dd>−{pknDiscountPkn} PKN ({moneyFromEurCents(pknDiscountEurCents)})</dd>
+                    </div>
+                    <div>
+                      <dt>Card charge</dt>
+                      <dd>
+                        {shippingPreviewCents != null
+                          ? moneyFromEurCents(Math.max(50, eurSubtotal + shippingPreviewCents - pknDiscountEurCents))
+                          : moneyFromPkn(Math.max(1, subtotalPkn - pknDiscountPkn))}
+                      </dd>
+                    </div>
+                  </>
+                ) : null}
               </dl>
             ) : (
               <dl className="fee-lines">

@@ -53,7 +53,9 @@ async function handleMarketplaceOrderPaid({ admin, stripe, session, fulfill, dep
     return { orderId, duplicate: true, fulfillment };
   }
 
-  const expected = Number(order.totalEURCents);
+  // The PKN balance discount lowers the Stripe charge below totalEURCents.
+  const discountCents = Number(order.pknDiscount?.eurCents) || 0;
+  const expected = Number(order.totalEURCents) - discountCents;
   const paid = Number(session.amount_total);
   if (Number.isFinite(expected) && Number.isFinite(paid) && expected !== paid) {
     const error = new Error(`Stripe amount ${paid} does not match order ${expected}.`);
@@ -88,6 +90,10 @@ async function handleMarketplaceOrderPaid({ admin, stripe, session, fulfill, dep
     stripePaidSessionId: session.id,
     stripePaymentIntentId: paymentIntentId || '',
     ...(stripeChargeId ? { stripeChargeId } : {}),
+    // Balance was already debited at session create — record consumption.
+    ...(order.pknDiscount && order.pknDiscount.state === 'held'
+      ? { pknDiscount: { ...order.pknDiscount, state: 'consumed', consumedAt: now } }
+      : {}),
   }, { merge: true });
 
   // Commit the stock hold + PKN-path fulfilment (ownership, linked CardTrader,

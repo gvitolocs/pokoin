@@ -205,6 +205,43 @@ function validateAddressFields(address) {
   return row;
 }
 
+
+/**
+ * PKN balance discount for an EUR (Stripe) checkout — PowerTools-style
+ * "pay with your balance as a discount". Only lines from sellers who accept
+ * PKN are eligible (PKN-refusing sellers are card-only); shipping, commission
+ * and tax stay on the card. The card charge never drops below 50 cents
+ * (Stripe minimum). 1 PKN = €0.005 → 50 euro-cents per PKN.
+ */
+function pknBalanceDiscount({ availablePkn, items, refusedSellerUids = [], grandTotalCents = Infinity } = {}) {
+  const refused = refusedSellerUids instanceof Set
+    ? refusedSellerUids
+    : new Set((refusedSellerUids || []).map((uid) => String(uid || '').trim()).filter(Boolean));
+  const balance = Math.max(0, Math.trunc(Number(availablePkn) || 0));
+  let eligiblePkn = 0;
+  for (const row of items || []) {
+    const seller = String(row?.sellerUid || '').trim();
+    if (seller && refused.has(seller)) continue;
+    const qty = Math.max(1, Math.trunc(Number(row?.quantity ?? row?.quantityAvailable ?? 1)) || 1);
+    eligiblePkn += qty * Math.max(0, Number(row?.unitPricePkn ?? row?.pricePkn ?? 0) || 0);
+  }
+  eligiblePkn = Math.trunc(eligiblePkn);
+  let discountPkn = Math.min(balance, eligiblePkn);
+  if (discountPkn < 1) {
+    return { discountPkn: 0, discountEurCents: 0, eligiblePkn };
+  }
+  let discountEurCents = Math.round(discountPkn * 50);
+  const cardFloor = Math.max(0, Math.trunc(Number(grandTotalCents)) - 50);
+  if (discountEurCents > cardFloor) {
+    discountEurCents = cardFloor;
+    discountPkn = Math.floor(discountEurCents / 50);
+  }
+  if (discountPkn < 1 || discountEurCents < 1) {
+    return { discountPkn: 0, discountEurCents: 0, eligiblePkn };
+  }
+  return { discountPkn, discountEurCents, eligiblePkn };
+}
+
 module.exports = {
   DEFAULT_RATES,
   assertShipFromCountry,
@@ -220,4 +257,5 @@ module.exports = {
   validateAddressFields,
   eurCentsFromPkn,
   httpError,
+  pknBalanceDiscount,
 };

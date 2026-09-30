@@ -134,6 +134,8 @@ async function releaseEurReservation({
   const stamp = admin.firestore.FieldValue.serverTimestamp();
   let lines = null;
   let outcome = 'noop';
+  let heldPkn = 0;
+  let buyerUid = '';
   await firestore.runTransaction(async (transaction) => {
     const snap = await transaction.get(ref);
     if (!snap.exists) {
@@ -163,9 +165,34 @@ async function releaseEurReservation({
         releaseReason: cleanText(reason, 80),
       };
     }
+    // A held PKN balance discount goes back to the buyer's balance.
+    if (order.pknDiscount && order.pknDiscount.state === 'held' && Number(order.pknDiscount.pkn) > 0) {
+      next.pknDiscount = {
+        ...order.pknDiscount,
+        state: 'released',
+        releasedAt: nowIso(now),
+      };
+      heldPkn = Math.trunc(Number(order.pknDiscount.pkn)) || 0;
+      buyerUid = cleanText(order.buyerUid, 160);
+    }
     outcome = lines ? 'released' : 'closed';
     transaction.set(ref, next, { merge: true });
   });
+  if (heldPkn > 0 && buyerUid) {
+    try {
+      await firestore.collection('balances').doc(buyerUid).update({
+        availablePkn: admin.firestore.FieldValue.increment(heldPkn),
+        updatedAt: stamp,
+      });
+    } catch (error) {
+      // The order already says released — ops can re-credit from pknDiscount.pkn.
+      await ref.set({
+        pknDiscount: { restoreError: cleanText(error.message, 500) },
+        updatedAt: stamp,
+      }, { merge: true }).catch(() => {});
+      console.error('pkn discount release failed', { orderId, heldPkn, message: error.message });
+    }
+  }
   if (lines && lines.length) {
     const d = withDeps(deps);
     try {

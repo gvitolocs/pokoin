@@ -75,7 +75,7 @@ covers them if it doesn't).
 | LARGE | 200 |
 | EXTRA_LARGE | 9999 (Flex bag / trunk only when looked up by tier id) |
 
-## PKN balance as a discount (design, not built yet)
+## PKN balance as a discount (implemented 2026-09-30)
 
 Buyers keep their PKN even when paying by card: on an EUR checkout, a buyer's
 `balances/{uid}.availablePkn` applies as a discount against the card charge —
@@ -88,7 +88,7 @@ lines and their shipping share are card-only, `_seller_pkn_policy.js`).
 | Display | Cart + checkout show the split: card charge after the PKN discount, and how much PKN is consumed |
 | Settlement | Session create records the discount + freezes the PKN; the verified webhook debits `availablePkn` in the same Firestore transaction that marks the order paid; expiry/cancel releases it exactly once (same lifecycle as the stock hold) |
 | Refunds | A refund returns the card share first; the PKN share is credited back to the buyer's balance |
-| Status | **Not implemented** — `create-order-checkout-session` / `_checkout_core.js` have no discount term yet. The buyer display threshold (`buyerPrefersFiat`) is live; the settlement discount needs the Stripe + Firestore transaction work above. |
+| Status | **Implemented.** `create-order-checkout-session` runs the discount inside the order-write Firestore transaction (balance debit + `pknDiscount: { pkn, eurCents, state: 'held' }`), applies it to the Checkout Session as a one-off coupon, and the paid webhook consumes it. Expiry / cancel / payment-failed release it through `releaseEurReservation` (balance credited, exactly once). The sweep's release path covers webhook misses. Refunds: the card share refunds as today; the PKN discount share is credited back only when the whole order is refunded (partial-refund interplay is a follow-up). The math lives in `_checkout_core.pknBalanceDiscount` (tested). |
 
 ## Deploy## Deploy
 

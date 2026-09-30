@@ -11,6 +11,7 @@ const {
   validateAddressFields,
   findRate,
   DEFAULT_RATES,
+  pknBalanceDiscount,
 } = require('./_checkout_core');
 const { encryptAddressPayload, decryptAddressPayload } = require('./_address_crypto');
 
@@ -139,4 +140,36 @@ test('seed catalog is loaded from live sync', () => {
   assert.ok(DEFAULT_RATES.rates.length >= 50);
   assert.ok(DEFAULT_RATES.tiers.some((t) => t.id === 'SMALL'));
   assert.ok(DEFAULT_RATES.source?.providers?.includes('packzoo'));
+});
+
+test('pknBalanceDiscount discounts only PKN-accepting lines with a card floor', () => {
+  const items = [
+    { sellerUid: 'pkn-seller', unitPricePkn: 400, quantity: 2 }, // 800 PKN eligible
+    { sellerUid: 'card-only', unitPricePkn: 900, quantity: 1 }, // refused
+  ];
+  // 40 PKN balance against 800 eligible PKN → full balance, €20.00.
+  assert.deepEqual(
+    pknBalanceDiscount({ availablePkn: 40, items, refusedSellerUids: ['card-only'], grandTotalCents: 100000 }),
+    { discountPkn: 40, discountEurCents: 2000, eligiblePkn: 800 },
+  );
+  // Balance above the eligible base → capped at the eligible items only.
+  assert.deepEqual(
+    pknBalanceDiscount({ availablePkn: 5000, items, refusedSellerUids: ['card-only'], grandTotalCents: 100000 }),
+    { discountPkn: 800, discountEurCents: 40000, eligiblePkn: 800 },
+  );
+  // Card charge keeps the 50-cent Stripe floor: eligible 800 PKN (€40) against
+  // a €16 total discounts to €15.50 (31 PKN), never to zero.
+  assert.deepEqual(
+    pknBalanceDiscount({ availablePkn: 999999, items: [{ sellerUid: 'pkn-seller', unitPricePkn: 400, quantity: 2 }], refusedSellerUids: [], grandTotalCents: 1600 }),
+    { discountPkn: 31, discountEurCents: 1550, eligiblePkn: 800 },
+  );
+  // All sellers refuse, or no balance → no discount.
+  assert.deepEqual(
+    pknBalanceDiscount({ availablePkn: 40, items, refusedSellerUids: ['pkn-seller', 'card-only'], grandTotalCents: 100000 }),
+    { discountPkn: 0, discountEurCents: 0, eligiblePkn: 0 },
+  );
+  assert.deepEqual(
+    pknBalanceDiscount({ availablePkn: 0, items, refusedSellerUids: [], grandTotalCents: 100000 }),
+    { discountPkn: 0, discountEurCents: 0, eligiblePkn: 1700 },
+  );
 });

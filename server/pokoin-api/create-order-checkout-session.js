@@ -11,7 +11,8 @@
 const Stripe = require('stripe');
 const path = require('path');
 const crypto = require('node:crypto');
-const { quoteCheckout, normalizeCountry, httpError, eurCentsFromPkn } = require('./_checkout_core');
+const { pknBalanceDiscount, quoteCheckout, normalizeCountry, httpError, eurCentsFromPkn } = require('./_checkout_core');
+const { sellersRefusingPkn } = require('./_seller_pkn_policy');
 const { encryptAddressPayload, decryptAddressPayload } = require('./_address_crypto');
 const {
   CHECKOUT_HOLD_SECONDS,
@@ -172,7 +173,30 @@ module.exports = async function handler(req, res) {
         throw httpError(500, 'Shipment line items do not sum to checkout total.', 'checkout_line_mismatch');
       }
 
-      await orderRef.set({
+      // PKN balance as a discount: only lines from sellers who accept PKN are
+      // eligible; the card charge keeps a 50-cent floor. Balance debit + order
+      // write happen in one transaction — session-create failure releases it.
+      const refusing = await sellersRefusingPkn(firestore, sellerIds);
+      const refusedUids = new Set(refusing.map((row) => row.uid));
+      const balanceRef = firestore.collection('balances').doc(decoded.uid);
+      let pknDiscount = { discountPkn: 0, discountEurCents: 0 };
+      await firestore.runTransaction(async (tx) => {
+        const balSnap = await tx.get(balanceRef);
+        pknDiscount = pknBalanceDiscount({
+          availablePkn: balSnap.exists ? balSnap.data()?.availablePkn : 0,
+          items: reserved.items,
+          refusedSellerUids: refusedUids,
+          grandTotalCents: quote.grandTotalCents,
+        });
+        const held = pknDiscount.discountPkn > 0
+          ? {
+            pkn: pknDiscount.discountPkn,
+            eurCents: pknDiscount.discountEurCents,
+            state: 'held',
+            heldAt: new Date().toISOString(),
+          }
+          : null;
+        tx.set(orderRef, {
         uid: decoded.uid,
         buyerUid: decoded.uid,
         buyerEmail: String(body.buyerEmail || decoded.email || '').slice(0, 240),
@@ -215,9 +239,30 @@ module.exports = async function handler(req, res) {
         },
         createdAt: now,
         updatedAt: now,
+        pknDiscount: held,
+        });
+        if (held) {
+          tx.update(balanceRef, {
+            availablePkn: pknDiscount.discountPkn
+              ? Math.max(0, Number(balSnap.data()?.availablePkn) || 0) - pknDiscount.discountPkn
+              : 0,
+            updatedAt: now,
+          });
+        }
       });
       orderWritten = true;
 
+      let discounts;
+      if (pknDiscount.discountEurCents > 0) {
+        // One-off coupon: the session shows the PKN discount as its own line.
+        const coupon = await stripe.coupons.create({
+          amount_off: pknDiscount.discountEurCents,
+          currency: 'eur',
+          duration: 'once',
+          name: `PKN balance −${pknDiscount.discountPkn} PKN`,
+        });
+        discounts = [{ coupon: coupon.id }];
+      }
       session = await stripe.checkout.sessions.create({
         mode: 'payment',
         customer_email: decoded.email || undefined,
@@ -225,6 +270,7 @@ module.exports = async function handler(req, res) {
         success_url: `${siteUrl()}/orders?eur_session={CHECKOUT_SESSION_ID}&order=${orderId}`,
         cancel_url: `${siteUrl()}/checkout?cancelled=1&order=${orderId}`,
         line_items: lineItems,
+        ...(discounts ? { discounts } : {}),
         payment_intent_data: {
           transfer_group: orderId,
           metadata: {
@@ -238,7 +284,9 @@ module.exports = async function handler(req, res) {
           pokoinOrderId: orderId,
           pokoinUid: decoded.uid,
           kind: 'marketplace_order_eur',
-          amountCents: String(quote.grandTotalCents),
+          amountCents: String(quote.grandTotalCents - pknDiscount.discountEurCents),
+          pknDiscountPkn: String(pknDiscount.discountPkn || 0),
+          pknDiscountEurCents: String(pknDiscount.discountEurCents || 0),
           sellerCount: String(shipments.length),
         },
       });
@@ -270,7 +318,8 @@ module.exports = async function handler(req, res) {
       orderId,
       checkoutUrl: session.url,
       sessionId: session.id,
-      amountTotalCents: quote.grandTotalCents,
+      amountTotalCents: quote.grandTotalCents - pknDiscount.discountEurCents,
+      pknDiscount,
       currency: 'EUR',
       quote,
     });
