@@ -110,3 +110,16 @@ test('health reports both workers without falling back', async () => {
   assert.equal(res.body.workers.pi.ok, true);
   pi.server.close();
 });
+
+test('the Pi server hands rawBody routes the request stream: it is read and forwarded', async () => {
+  const { Readable } = require('node:stream');
+  const gpu = await worker('nezopt');
+  const mod = load({ SCAN_PRIMARY_URL: gpu.url, SCAN_FALLBACK_URL: 'http://127.0.0.1:2' });
+  const req = Readable.from([Buffer.from('--x\r\nstreamed photo\r\n--x--')]);
+  Object.assign(req, { method: 'POST', headers: { 'content-type': 'multipart/form-data; boundary=x' }, query: {} });
+  const res = response();
+  await mod(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.match(gpu.seen[0].body, /streamed photo/);
+  gpu.server.close();
+});

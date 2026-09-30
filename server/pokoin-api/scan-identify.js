@@ -97,6 +97,23 @@ async function viaWorkers(path, options, now = Date.now()) {
   throw lastError || new Error('No recognition worker answered.');
 }
 
+const MAX_UPLOAD_BYTES = 12 * 1024 * 1024; // album uploads carry several photos
+
+/** Upload bytes: the server hands rawBody routes the untouched stream. */
+async function uploadBody(req) {
+  if (Buffer.isBuffer(req.rawBody)) return req.rawBody;
+  if (Buffer.isBuffer(req.body)) return req.body;
+  if (typeof req.on !== 'function') return null;
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_UPLOAD_BYTES) throw Object.assign(new Error('Photo too large.'), { statusCode: 413 });
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
 function send(res, out) {
   res.statusCode = out.status;
   res.setHeader('Content-Type', out.headers['content-type'] || 'application/json');
@@ -120,7 +137,13 @@ function makeHandler(route, { method }) {
     const headers = { 'X-Forwarded-For': clientIp(req) };
     let body = null;
     if (method === 'POST') {
-      body = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.isBuffer(req.body) ? req.body : null;
+      try {
+        body = await uploadBody(req);
+      } catch (error) {
+        res.statusCode = error.statusCode || 400;
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify({ error: error.message || 'Upload failed.' }));
+      }
       if (!body || !body.length) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'application/json');
