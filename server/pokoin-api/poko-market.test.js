@@ -173,6 +173,18 @@ test('confidence and price strategies degrade honestly with sample size', () => 
   assert.equal(strategies.market.price, 34);
   assert.equal(strategies.patient.price, 37);
 
+  assert.equal(strategies.market.expectedTime, '1-3w');
+  assert.match(strategies.expectedTimeBasis, /generic/);
+
+  // Raikou ex regression: liquidity 1 / 3 / 8 days must not read as weeks.
+  const banded = T.priceStrategies(summary, null, { lowDays: 1, typicalDays: 3, highDays: 8 });
+  assert.equal(banded.quickSale.expectedTime, '1-3d');
+  assert.equal(banded.market.expectedTime, '3-8d');
+  assert.equal(banded.patient.expectedTime, '8-16d');
+  assert.equal(banded.expectedTimeBasis, 'card liquidity bands');
+  const slow = T.priceStrategies(summary, null, { lowDays: 10, typicalDays: 30, highDays: 75 });
+  assert.equal(slow.market.expectedTime, '4-11w');
+
   assert.equal(T.priceStrategies({ ...summary, confidence: 'low' }, null), null);
   assert.equal(T.priceStrategies(null, null), null);
 });

@@ -223,14 +223,31 @@ function buildSoldSummary(row) {
   };
 }
 
-function priceStrategies(summary, asks) {
+function timeRange(fromDays, toDays) {
+  const from = Math.max(1, Math.round(fromDays));
+  const to = Math.max(from, Math.round(toDays));
+  if (to <= 21) return `${from}-${to}d`;
+  return `${Math.max(1, Math.round(from / 7))}-${Math.max(1, Math.round(to / 7))}w`;
+}
+
+/**
+ * Sell-price ladder. Times come from the card's own liquidity bands when
+ * known: fixed 1-3 week labels told users a Raikou ex that typically sells in
+ * 3 days (1-8) would take weeks at the median.
+ */
+function priceStrategies(summary, asks, liquidity = null) {
   if (!summary || summary.confidence === 'none' || summary.confidence === 'low') return null;
   const minAsk = asks && asks.min != null ? asks.min : null;
   const quick = minAsk != null ? Math.min(summary.p25 ?? summary.median, minAsk * 0.95) : summary.p25 ?? summary.median;
+  const low = Number(liquidity?.lowDays);
+  const typical = Number(liquidity?.typicalDays);
+  const high = Number(liquidity?.highDays);
+  const banded = low > 0 && typical > 0 && high > 0;
   return {
-    quickSale: { price: round2(quick), expectedTime: '1-7d' },
-    market: { price: summary.median, expectedTime: '1-3w' },
-    patient: { price: summary.p75 ?? summary.median, expectedTime: '2-8w' },
+    quickSale: { price: round2(quick), expectedTime: banded ? timeRange(low, typical) : '1-7d' },
+    market: { price: summary.median, expectedTime: banded ? timeRange(typical, high) : '1-3w' },
+    patient: { price: summary.p75 ?? summary.median, expectedTime: banded ? timeRange(high, high * 2) : '2-8w' },
+    expectedTimeBasis: banded ? 'card liquidity bands' : 'generic estimate (no liquidity data for this card)',
   };
 }
 
@@ -866,7 +883,7 @@ async function cardQuote(params = {}) {
       currentAsk,
       askVsSold: exactSlice && currentAsk && estimate ? dealVerdict(currentAsk.min, estimate.median) : null,
       liquidity: liquidity.liquidity || undefined,
-      strategies: priceStrategies(estimate, exactSlice ? currentAsk : null),
+      strategies: priceStrategies(estimate, exactSlice ? currentAsk : null, liquidity.liquidity),
       askingPriceOnly: !estimate,
     };
   });
