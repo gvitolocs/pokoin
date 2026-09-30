@@ -1760,13 +1760,23 @@ async function recentSales(params = {}) {
 async function artistCards(params = {}) {
   let artistInput = cleanText(params.artist, 80);
   const cardId = cleanText(params.cardId, 20);
+  let fromCard = null;
   if (!artistInput && /^\d+$/.test(cardId)) {
     const rows = await queryRows(
-      `select artist from marketplace_search_candidates where card_id = $1 limit 1`,
+      `select artist, name, set_name from marketplace_search_candidates where card_id = $1 limit 1`,
       [cardId],
     );
     artistInput = cleanText(rows[0]?.artist, 80);
     if (!artistInput) return { status: 'not_found', error: 'no artist recorded for that card', cardId };
+    // Stated outright: with only "cards by <artist>" a model still told the
+    // user it had no confirmed illustrator for the open card.
+    fromCard = {
+      cardId,
+      name: rows[0]?.name || '',
+      setName: rows[0]?.set_name || '',
+      illustrator: artistInput,
+      note: `${rows[0]?.name || 'This card'}${rows[0]?.set_name ? ` (${rows[0].set_name})` : ''} is illustrated by ${artistInput} (Pokoin catalog).`,
+    };
   }
   if (!artistInput) return { status: 'invalid', error: 'artist or cardId required' };
 
@@ -1863,6 +1873,7 @@ async function artistCards(params = {}) {
   return {
     status: 'ok',
     artist,
+    ...(fromCard ? { fromCard } : {}),
     artistCardCount,
     pricedCards: rows.length,
     sort,

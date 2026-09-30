@@ -618,6 +618,13 @@ test('artist_cards resolves the artist from the desk cardId and ranks by price',
   await loadHandler(makeDb(stubs))(makeReq({ body: { tool: 'artist_cards', params: { cardId: '246912' } } }), res);
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.artist, 'Ken Sugimori');
+  assert.deepEqual(res.body.fromCard, {
+    cardId: '246912',
+    name: 'Raichu ex',
+    setName: 'EX Team Rocket Returns',
+    illustrator: 'Ken Sugimori',
+    note: 'Raichu ex (EX Team Rocket Returns) is illustrated by Ken Sugimori (Pokoin catalog).',
+  });
   assert.equal(res.body.artistCardCount, 521);
   assert.equal(res.body.sort, 'expensive');
   assert.deepEqual(res.body.cards.map((c) => [c.name, c.priceBasis]), [
@@ -627,7 +634,7 @@ test('artist_cards resolves the artist from the desk cardId and ranks by price',
   ]);
   assert.equal(res.body.cards[2].pricePkn, 822);
   assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
-  const lookup = stubs.queries.find((q) => /select artist from marketplace_search_candidates/.test(q.sql));
+  const lookup = stubs.queries.find((q) => /select artist, name, set_name from marketplace_search_candidates/.test(q.sql));
   assert.deepEqual(lookup.params, ['246912']);
   const sql = stubs.queries.find((q) => /with art as/.test(q.sql));
   assert.deepEqual(sql.params, ['Ken Sugimori', null, 20]);
