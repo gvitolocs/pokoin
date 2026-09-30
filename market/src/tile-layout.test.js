@@ -133,6 +133,11 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   const pile = readFileSync(join(root, 'components/ArtworkPile.jsx'), 'utf8');
   assert.match(pile, /tile-pile-wrap\$\{tall \? " tile-pile-tall" : ""\}/);
   assert.match(css, /\.tile-pile-wrap\.tile-pile-tall \{[^}]*grid-row:\s*span 2/);
+  // Shift/ctrl/meta on a pile extends the selection; only plain clicks open the overlay.
+  assert.match(pile, /event\.metaKey \|\| event\.ctrlKey \|\| event\.shiftKey/);
+  assert.match(pile, /select\.click\(rep\.id, event\)/);
+  // Fast flings that skip past the sentinel must still load more tiles.
+  assert.match(artist, /rect\.top <= window\.innerHeight \+ 800/);
   assert.match(artist, /fetchArtist\(artistSlug, \{ limit: 5000 \}\)/);
   assert.match(artist, /peekArtist\(artistSlug, 5000\)/);
   assert.match(artist, /restoredPageView/);

@@ -8,6 +8,7 @@ import { tilePricePkn } from '../pkn.js';
 import { cardImageAlt } from '../seo.js';
 import { Action, track } from '../track.js';
 import { groupArtworkRows } from '../search-filters.js';
+import { useCardSelect } from './CardSelectGrid.jsx';
 import CardArt from './CardArt.jsx';
 
 export { groupArtworkRows };
@@ -15,6 +16,8 @@ export { groupArtworkRows };
 /** Artist album tile for a same-artwork group: stacked sheets + count chip. */
 export function ArtistPileTile({ group, rank, onOpen }) {
   const rep = group.cards[0];
+  const select = useCardSelect();
+  const picked = Boolean(select?.selected?.has(String(rep.id)));
   if (!rep?.id) {
     return null;
   }
@@ -32,6 +35,18 @@ export function ArtistPileTile({ group, rank, onOpen }) {
     }
   }
 
+  function onTileClick(event) {
+    // Shift/ctrl/meta extend the band selection like CardTile; plain click
+    // opens the same-artwork overlay.
+    if (select && (event.metaKey || event.ctrlKey || event.shiftKey)) {
+      event.preventDefault();
+      select.click(rep.id, event);
+      return;
+    }
+    event.preventDefault();
+    onOpen(group);
+  }
+
   return (
     <div className={`tile-pile-wrap${tall ? " tile-pile-tall" : ""}`}>
       <span className="tile-pile-sheet s2" aria-hidden="true" />
@@ -43,15 +58,14 @@ export function ArtistPileTile({ group, rank, onOpen }) {
           tall ? 'tile-tall' : '',
           item ? 'tile-item' : '',
           landscape ? 'is-landscape' : '',
+          picked ? 'is-selected' : '',
         ].filter(Boolean).join(' ')}
         to={cardHref(rep)}
         state={{ card: rep }}
         data-card-id={rep.id}
+        aria-selected={picked || undefined}
         aria-label={`${rep.name}, ${group.cards.length} printings of the same artwork`}
-        onClick={(event) => {
-          event.preventDefault();
-          onOpen(group);
-        }}
+        onClick={onTileClick}
         onPointerEnter={prefetch}
         style={albumShadeStyle(rep)}
       >
