@@ -997,6 +997,22 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/mypokoin/settings/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/settings",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/location/:loc/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/location/:loc",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/mypokoin/",
       "destination": "/market/index.html"
     },
