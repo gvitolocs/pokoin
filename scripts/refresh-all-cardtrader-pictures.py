@@ -14,7 +14,7 @@ def oracle_fetch(jobs):
     remote="/tmp/pokoin-catalog-scans-"+uuid.uuid4().hex
     source=pathlib.Path(__file__).with_name("cardtrader-scan-fetch.py").read_text()
     proc=subprocess.run(["ssh","-o","BatchMode=yes","-o","ConnectTimeout=20","pokoin-marketplace","python3 -u -c "+shlex.quote(source)],
-        input=json.dumps({"out":remote,"jobs":jobs}),text=True,capture_output=True,timeout=900)
+        input=json.dumps({"out":remote,"jobs":jobs}),text=True,capture_output=True,timeout=3600)
     if proc.returncode:raise RuntimeError("Oracle scan worker failed: "+proc.stderr[-500:])
     report=json.loads(proc.stdout);FETCH_RESULTS=report["results"];FETCH_BLOCKED=report["blocked"]
     RAW=ROOT/"raw-scans";RAW.mkdir(parents=True,exist_ok=True)
