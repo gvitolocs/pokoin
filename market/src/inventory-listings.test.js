@@ -11,7 +11,11 @@ import {
   inventoryRowDate,
   isLiveInventoryListing,
   listingBox,
+  lastOccupiedIndex,
+  listingSlotEnd,
   maxOccupiedStack,
+  nextFreeSlot,
+  nextPositionInStack,
   parseListingLocation,
   liveInventoryListings,
   sortInventoryRows,
@@ -202,4 +206,39 @@ test('box stacks order by stack number then position, unnumbered last', () => {
   assert.equal(stacks[2].postings.length, 1);
   assert.equal(maxOccupiedStack(rows, 'box'), 3);
   assert.equal(maxOccupiedStack(rows, 'other'), 9);
+});
+
+test('listingSlotEnd reads where a slot string ends', () => {
+  assert.deepEqual(listingSlotEnd('box·7'), { box: 'box', stack: 7, position: null });
+  assert.deepEqual(listingSlotEnd('box·7-9'), { box: 'box', stack: 9, position: null });
+  assert.deepEqual(listingSlotEnd('box·3·5'), { box: 'box', stack: 3, position: 5 });
+  assert.deepEqual(listingSlotEnd('box·3·5-9'), { box: 'box', stack: 3, position: 9 });
+  assert.deepEqual(listingSlotEnd('box·3·5–9·2'), { box: 'box', stack: 9, position: 2 });
+  assert.deepEqual(listingSlotEnd('box'), { box: 'box', stack: null, position: null });
+});
+
+test('a box continues after its stock: position inside a half-full stack, not stack + 1', () => {
+  const rows = [
+    { location: 'megaevoluzionietb·1·1-20' },
+    { location: 'megaevoluzionietb·2·1-7' },
+    { location: 'other·9·3' },
+    { location: 'megaevoluzionietb' },
+  ];
+  assert.equal(lastOccupiedIndex(rows, 'megaevoluzionietb', 20), 27);
+  assert.deepEqual(nextFreeSlot(rows, 'megaevoluzionietb', 20), { stack: 2, startPosition: 8, abs: 28 });
+  // A full stack rolls over to the next divider.
+  assert.deepEqual(nextFreeSlot([{ location: 'b·2·1-20' }], 'b', 20), { stack: 3, startPosition: 1, abs: 41 });
+  // One card per stack: the stack number is the running slot.
+  assert.deepEqual(nextFreeSlot([{ location: 'b·1-41' }, { location: 'b·7' }], 'b', 1), { stack: 42, startPosition: 1, abs: 42 });
+  assert.equal(nextFreeSlot(rows, 'empty-box', 20), null);
+});
+
+test('typing a stack continues after the cards already in it', () => {
+  const rows = [{ location: 'b·3·1-12' }, { location: 'b·4·1–5·2' }, { location: 'b·6' }];
+  assert.equal(nextPositionInStack(rows, 'b', 3, 20), 13);
+  assert.equal(nextPositionInStack(rows, 'b', 4, 20), 21); // spilled over: full
+  assert.equal(nextPositionInStack(rows, 'b', 5, 20), 3);
+  assert.equal(nextPositionInStack(rows, 'b', 6, 20), 21); // whole-stack location
+  assert.equal(nextPositionInStack(rows, 'b', 7, 20), null);
+  assert.equal(nextPositionInStack(rows, 'b', 3, 1), null);
 });

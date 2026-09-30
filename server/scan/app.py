@@ -793,19 +793,28 @@ _identify_hits = {}
 _identify_hits_lock = threading.Lock()
 
 
-def _limit_identify(request: Request, limit: int = 30) -> None:
+# Per client IP, per minute. A phone's live camera loop sends ~2 frames/s
+# (~120/min) for as long as it is open; at the old shared 30/min two of every
+# three frames were refused and the phone's scan froze. Live frames get their
+# own bucket so they never starve a photo/Add-card identify (live=0).
+IDENTIFY_LIMIT_PER_MIN = 30
+LIVE_IDENTIFY_LIMIT_PER_MIN = 240
+
+
+def _limit_identify(request: Request, limit: int = IDENTIFY_LIMIT_PER_MIN, bucket: str = "photo") -> None:
     forwarded = request.headers.get("x-forwarded-for", "")
     ip = forwarded.split(",")[0].strip() if forwarded else ""
     if not ip:
         ip = request.client.host if request.client else "unknown"
+    key = (ip, bucket)
     now = time.time()
     with _identify_hits_lock:
-        hits = [stamp for stamp in _identify_hits.get(ip, []) if now - stamp < 60]
+        hits = [stamp for stamp in _identify_hits.get(key, []) if now - stamp < 60]
         if len(hits) >= limit:
-            _identify_hits[ip] = hits
+            _identify_hits[key] = hits
             raise HTTPException(status_code=429, detail="Too many identify requests.")
         hits.append(now)
-        _identify_hits[ip] = hits
+        _identify_hits[key] = hits
 
 
 @app.post("/identify")
@@ -818,7 +827,10 @@ async def identify(
     multi: bool = Query(False),
     album: bool = Query(False),
 ):
-    _limit_identify(request)
+    if live and not album:
+        _limit_identify(request, LIVE_IDENTIFY_LIMIT_PER_MIN, "live")
+    else:
+        _limit_identify(request)
     blob = await file.read(MAX_BYTES + 1)
     if album:
         return await run_in_threadpool(_identify_album_images, [blob], top_k, live)

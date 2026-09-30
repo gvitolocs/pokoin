@@ -4,6 +4,8 @@
  * not look like live inventory links.
  */
 
+import { indexToStackPos, stackPosToIndex } from './scan-model.js';
+
 export function isLiveInventoryListing(row) {
   if (!row || typeof row !== 'object') return false;
   const status = String(row.status || 'active').toLowerCase();
@@ -272,6 +274,78 @@ export function groupBoxStacks(rows, box) {
       return stack;
     })
     .sort((a, b) => (a.stack === 0 ? 1 : b.stack === 0 ? -1 : a.stack - b.stack));
+}
+
+/**
+ * Where a listing's slot ends: { box, stack, position } (position null when
+ * the location names a whole stack). `box·3·5-9` ends at 3·9, `box·3·5–9·2`
+ * at 9·2, `box·7-9` at stack 9.
+ */
+export function listingSlotEnd(raw) {
+  const parsed = parseListingLocation(raw);
+  if (!parsed.structured) return { box: parsed.box, stack: null, position: null };
+  const text = String(raw || '').trim();
+  const tail = text.slice(text.search(/[·•]/) + 1).replace(/\s+/g, '');
+  let m = tail.match(/^(\d+)[·•](\d+)[–—](\d+)[·•](\d+)$/);
+  if (m) return { box: parsed.box, stack: Number(m[3]), position: Number(m[4]) };
+  m = tail.match(/^(\d+)[·•](\d+)-(\d+)$/);
+  if (m) return { box: parsed.box, stack: Number(m[1]), position: Number(m[3]) };
+  m = tail.match(/^(\d+)[-–—](\d+)$/);
+  if (m) return { box: parsed.box, stack: Number(m[2]), position: null };
+  return { box: parsed.box, stack: parsed.stack, position: parsed.position };
+}
+
+/**
+ * Last slot a box already holds, as an absolute card index for `stackSize`
+ * (0 = empty box). A whole-stack location (`box·4`) fills stack 4 when stacks
+ * hold more than one card.
+ */
+export function lastOccupiedIndex(rows, box, stackSize = 1) {
+  const wanted = String(box || '').trim();
+  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  let max = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const end = listingSlotEnd(row?.location);
+    if (!end.box || end.box !== wanted || end.stack == null) continue;
+    const abs = size === 1
+      ? end.stack
+      : end.position == null
+        ? end.stack * size
+        : stackPosToIndex(end.stack, Math.min(size, end.position), size);
+    if (abs > max) max = abs;
+  }
+  return max;
+}
+
+/** First free { stack, startPosition } after the stock already in a box, or null. */
+export function nextFreeSlot(rows, box, stackSize = 1) {
+  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  const last = lastOccupiedIndex(rows, box, size);
+  if (!last) return null;
+  const next = indexToStackPos(Math.min(9999 * size, last + 1), size);
+  return { stack: next.stack, startPosition: next.position, abs: last + 1 };
+}
+
+/**
+ * Next free position inside one stack (the seller typed that stack), or null
+ * when nothing is stored there yet. Returns size + 1 when the stack is full.
+ */
+export function nextPositionInStack(rows, box, stack, stackSize = 1) {
+  const wanted = String(box || '').trim();
+  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  const s = Math.trunc(Number(stack)) || 0;
+  if (size === 1 || s < 1) return null;
+  let max = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const start = parseListingLocation(row?.location);
+    const end = listingSlotEnd(row?.location);
+    if (!end.box || end.box !== wanted || end.stack == null) continue;
+    if (s < (start.stack ?? end.stack) || s > end.stack) continue;
+    // Spanning into a later stack fills this one; a whole-stack location fills it too.
+    const pos = end.stack > s || end.position == null ? size : Math.min(size, end.position);
+    if (pos > max) max = pos;
+  }
+  return max ? max + 1 : null;
 }
 
 /** Highest stack number a seller already occupies in a box (inventory hint). */
