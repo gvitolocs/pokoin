@@ -120,6 +120,9 @@ function quoteShipment({
 }
 
 /** 1 PKN = 0.005 EUR → EUR cents from PKN. */
+// 1 PKN = €0.005, so one euro-cent is 2 PKN.
+const PKN_PER_EUR_CENT = 2;
+
 function eurCentsFromPkn(pkn) {
   const amount = Number(pkn);
   if (!Number.isFinite(amount) || amount <= 0) return 0;
@@ -211,7 +214,9 @@ function validateAddressFields(address) {
  * "pay with your balance as a discount". Only lines from sellers who accept
  * PKN are eligible (PKN-refusing sellers are card-only); shipping, commission
  * and tax stay on the card. The card charge never drops below 50 cents
- * (Stripe minimum). 1 PKN = €0.005 → 50 euro-cents per PKN.
+ * (Stripe minimum). 1 PKN = €0.005 = half a euro-cent: 2 PKN per cent,
+ * rounded down so the discount never exceeds the PKN debited (an odd
+ * leftover PKN stays on the balance).
  */
 function pknBalanceDiscount({ availablePkn, items, refusedSellerUids = [], grandTotalCents = Infinity } = {}) {
   const refused = refusedSellerUids instanceof Set
@@ -230,12 +235,12 @@ function pknBalanceDiscount({ availablePkn, items, refusedSellerUids = [], grand
   if (discountPkn < 1) {
     return { discountPkn: 0, discountEurCents: 0, eligiblePkn };
   }
-  let discountEurCents = Math.round(discountPkn * 50);
+  let discountEurCents = Math.floor(discountPkn / PKN_PER_EUR_CENT);
   const cardFloor = Math.max(0, Math.trunc(Number(grandTotalCents)) - 50);
   if (discountEurCents > cardFloor) {
     discountEurCents = cardFloor;
-    discountPkn = Math.floor(discountEurCents / 50);
   }
+  discountPkn = discountEurCents * PKN_PER_EUR_CENT;
   if (discountPkn < 1 || discountEurCents < 1) {
     return { discountPkn: 0, discountEurCents: 0, eligiblePkn };
   }

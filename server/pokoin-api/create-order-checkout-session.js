@@ -184,8 +184,9 @@ module.exports = async function handler(req, res) {
       const balanceRef = firestore.collection('balances').doc(decoded.uid);
       await firestore.runTransaction(async (tx) => {
         const balSnap = await tx.get(balanceRef);
+        // Opt-in only: the buyer ticks "use my PKN balance as a discount".
         pknDiscount = pknBalanceDiscount({
-          availablePkn: balSnap.exists ? balSnap.data()?.availablePkn : 0,
+          availablePkn: body.usePknDiscount === true && balSnap.exists ? balSnap.data()?.availablePkn : 0,
           items: reserved.items,
           refusedSellerUids: refusedUids,
           grandTotalCents: quote.grandTotalCents,

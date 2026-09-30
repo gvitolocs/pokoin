@@ -147,21 +147,37 @@ test('pknBalanceDiscount discounts only PKN-accepting lines with a card floor', 
     { sellerUid: 'pkn-seller', unitPricePkn: 400, quantity: 2 }, // 800 PKN eligible
     { sellerUid: 'card-only', unitPricePkn: 900, quantity: 1 }, // refused
   ];
-  // 40 PKN balance against 800 eligible PKN → full balance, €20.00.
+  // 1 PKN = €0.005: 40 PKN against 800 eligible PKN → full balance, €0.20.
   assert.deepEqual(
     pknBalanceDiscount({ availablePkn: 40, items, refusedSellerUids: ['card-only'], grandTotalCents: 100000 }),
-    { discountPkn: 40, discountEurCents: 2000, eligiblePkn: 800 },
+    { discountPkn: 40, discountEurCents: 20, eligiblePkn: 800 },
+  );
+  // 8 PKN is 4 cents, never €4 (2026-09-30: the old 50-cents-per-PKN factor
+  // gave 8 PKN a €4.28 discount on a €4.78 shipment).
+  assert.deepEqual(
+    pknBalanceDiscount({ availablePkn: 8, items: [{ sellerUid: 'pkn-seller', unitPricePkn: 9, quantity: 1 }], refusedSellerUids: [], grandTotalCents: 478 }),
+    { discountPkn: 8, discountEurCents: 4, eligiblePkn: 9 },
+  );
+  // An odd balance rounds down; the leftover PKN is not debited.
+  assert.deepEqual(
+    pknBalanceDiscount({ availablePkn: 41, items, refusedSellerUids: ['card-only'], grandTotalCents: 100000 }),
+    { discountPkn: 40, discountEurCents: 20, eligiblePkn: 800 },
+  );
+  // 1 PKN is worth less than a cent → no discount.
+  assert.deepEqual(
+    pknBalanceDiscount({ availablePkn: 1, items, refusedSellerUids: ['card-only'], grandTotalCents: 100000 }),
+    { discountPkn: 0, discountEurCents: 0, eligiblePkn: 800 },
   );
   // Balance above the eligible base → capped at the eligible items only.
   assert.deepEqual(
     pknBalanceDiscount({ availablePkn: 5000, items, refusedSellerUids: ['card-only'], grandTotalCents: 100000 }),
-    { discountPkn: 800, discountEurCents: 40000, eligiblePkn: 800 },
+    { discountPkn: 800, discountEurCents: 400, eligiblePkn: 800 },
   );
-  // Card charge keeps the 50-cent Stripe floor: eligible 800 PKN (€40) against
-  // a €16 total discounts to €15.50 (31 PKN), never to zero.
+  // Card charge keeps the 50-cent Stripe floor: 800 PKN (€4.00) against a
+  // €1.60 total discounts to €1.10 (220 PKN), never to zero.
   assert.deepEqual(
-    pknBalanceDiscount({ availablePkn: 999999, items: [{ sellerUid: 'pkn-seller', unitPricePkn: 400, quantity: 2 }], refusedSellerUids: [], grandTotalCents: 1600 }),
-    { discountPkn: 31, discountEurCents: 1550, eligiblePkn: 800 },
+    pknBalanceDiscount({ availablePkn: 999999, items: [{ sellerUid: 'pkn-seller', unitPricePkn: 400, quantity: 2 }], refusedSellerUids: [], grandTotalCents: 160 }),
+    { discountPkn: 220, discountEurCents: 110, eligiblePkn: 800 },
   );
   // All sellers refuse, or no balance → no discount.
   assert.deepEqual(
@@ -181,4 +197,9 @@ test('checkout keeps the PKN discount in scope for the success response', () => 
   // Declared once, with orderWritten, before the try block the response follows.
   assert.equal(src.split('let pknDiscount').length, 2);
   assert.ok(declared > tryStart && declared < src.indexOf('try {', tryStart), 'pknDiscount must be declared outside the try block');
+});
+
+test('checkout applies the PKN balance discount only when the buyer opts in', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'create-order-checkout-session.js'), 'utf8');
+  assert.match(src, /availablePkn: body\.usePknDiscount === true && balSnap\.exists/);
 });

@@ -110,6 +110,7 @@ export default function Checkout() {
   const [quoteError, setQuoteError] = useState('');
   const [shippingService, setShippingService] = useState('tracked'); // tracked | untracked
   const [pknRefused, setPknRefused] = useState([]); // sellers who take card payments only
+  const [usePknDiscount, setUsePknDiscount] = useState(false); // opt-in PKN balance voucher
   const stripeCancelled = searchParams.get('cancelled') === '1';
   const cancelledOrderId = String(searchParams.get('order') || '').trim();
 
@@ -201,12 +202,15 @@ export default function Checkout() {
       ? sum
       : sum + Math.max(0, Number(row.pricePkn) || 0) * Math.max(0, Number(row.qty) || 0)
   ), 0);
-  const pknDiscountPkn = Math.max(0, Math.min(
-    Number(availablePkn) || 0,
-    Math.trunc(pknEligiblePkn),
-    Math.max(0, Math.round(Number(fiatFromPkn(totalPkn, 'EUR')) * 100) - 50) / 50,
+  // 1 PKN = €0.005 → 2 PKN per euro-cent, rounded down (server: _checkout_core).
+  // Opt-in: nothing is discounted until the buyer ticks the voucher box.
+  const pknVoucherEurCents = Math.max(0, Math.min(
+    Math.floor(Math.min(Number(availablePkn) || 0, Math.trunc(pknEligiblePkn)) / 2),
+    Math.round(Number(fiatFromPkn(totalPkn, 'EUR')) * 100) - 50,
   ));
-  const pknDiscountEurCents = Math.round(pknDiscountPkn * 50);
+  const pknVoucherPkn = pknVoucherEurCents * 2;
+  const pknDiscountEurCents = usePknDiscount ? pknVoucherEurCents : 0;
+  const pknDiscountPkn = pknDiscountEurCents * 2;
   const eurSubtotal = useMemo(
     () => Math.round((Number(fiatFromPkn(subtotalPkn, 'EUR')) || 0) * 100),
     [subtotalPkn],
@@ -422,6 +426,7 @@ export default function Checkout() {
         shippingAddressId: addressId,
         shippingService,
         tracked: shippingTracked,
+        usePknDiscount: pknDiscountPkn >= 1,
       }, token);
       if (!data.checkoutUrl) {
         throw new Error('Stripe did not return a checkout URL.');
@@ -447,7 +452,7 @@ export default function Checkout() {
         lede={nft
           ? 'You pay with your site balance and the cards go into your collection. Nothing is mailed.'
           : payMethod === 'stripe'
-            ? `Prices in ${displayCurrency}. Stripe charges EUR; shipping is quoted from your address.`
+            ? `Prices in ${displayCurrency}. Shipping is quoted from your address.`
             : `${ESCROW_LINE} ${NO_SHIP_GUARANTEE}`}
       >
         <Link className="btn ghost" to="/cart">Cart</Link>
@@ -605,7 +610,6 @@ export default function Checkout() {
                   />
                   <span>
                     <strong>Card (Stripe)</strong>
-                    <em>Shown in {displayCurrency} · charged in EUR</em>
                   </span>
                 </label>
                 <label className={`checkout-pay-option${payMethod === 'pkn' ? ' is-on' : ''}${preferFiat ? ' is-disabled' : ''}`}>
@@ -797,6 +801,21 @@ export default function Checkout() {
                       : moneyFromPkn(subtotalPkn)}
                   </dd>
                 </div>
+                {pknVoucherPkn >= 1 ? (
+                  <div>
+                    <dt>
+                      <label className="checkout-pkn-voucher">
+                        <input
+                          type="checkbox"
+                          checked={usePknDiscount}
+                          onChange={(event) => setUsePknDiscount(event.target.checked)}
+                        />
+                        {' '}Use my PKN balance as a discount
+                      </label>
+                    </dt>
+                    <dd>{pknVoucherPkn} PKN = {moneyFromEurCents(pknVoucherEurCents)}</dd>
+                  </div>
+                ) : null}
                 {pknDiscountPkn >= 1 ? (
                   <>
                     <div>
