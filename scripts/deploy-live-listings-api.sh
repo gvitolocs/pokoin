@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Deploy the CardTrader live-offers handler (server/pokoin-api/cardtrader-live-listings.js)
+# Deploy the CardTrader live-offers handler (server/pokoin-api/cardtrader-live-listings.js +
+# marketplace-listings.js)
 # from an exact origin/main commit. It replaces the legacy CardVault copy on the Pi so
 # every game resolves its CardTrader blueprint (One Piece etc. read the catalog ct_id).
 set -euo pipefail
@@ -22,16 +23,19 @@ git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
 say "stage exact origin/main commit $COMMIT"
 git -C "$REPO" archive "$COMMIT" server/pokoin-api | tar -C "$STAGE" -xf -
 SRC="$STAGE/server/pokoin-api"
-[[ -f "$SRC/cardtrader-live-listings.js" ]] || die "commit is missing server/pokoin-api/cardtrader-live-listings.js"
+for file in cardtrader-live-listings.js marketplace-listings.js; do
+  [[ -f "$SRC/$file" ]] || die "commit is missing server/pokoin-api/$file"
+done
 
 say "live listings unit tests"
 node --test "$SRC/cardtrader-live-listings.test.js"
 node --check "$SRC/cardtrader-live-listings.js"
+node --check "$SRC/marketplace-listings.js"
 
 release="releases/live-listings-$SHORT-$STAMP"
 say "Pi release $release"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .live-listings-previous; cp -a \$prev '$release'"
-tar -C "$SRC" -cf - cardtrader-live-listings.js | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
+tar -C "$SRC" -cf - cardtrader-live-listings.js marketplace-listings.js | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-live-listings-commit'"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
@@ -46,7 +50,7 @@ for _ in $(seq 1 45); do
 import json, sys
 op, pk = [json.loads(line) for line in sys.stdin if line.strip()]
 assert len(op.get("listings") or []) > 0, "one piece has no offers"
-assert isinstance(pk.get("listings"), list), pk
+assert len(pk.get("listings") or []) > 1, "pokemon has no CardTrader offers"
 '; then
     healthy=1
     break

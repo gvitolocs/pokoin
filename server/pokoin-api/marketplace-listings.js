@@ -342,18 +342,27 @@ async function enrichListingRowsWithCardUrls(rows = []) {
   }
 }
 
-async function readLiveCardTraderListingsForCard(cardId, limit) {
+async function readLiveCardTraderListingsForCard(cardId, limit, game = 'pokemon') {
   const cleanCard = cleanText(cardId, 80);
   if (!cleanCard) return [];
   let seller;
   try {
     seller = await sellerProfileForUsername(PKNRESERVE_SELLER_USERNAME, { listingsFirst: false });
   } catch (error) {
-    console.error('pknreserve seller profile lookup failed', {
-      statusCode: error.statusCode || 500,
-      message: error.message,
-    });
-    return [];
+    // The CardTrader offers only need a seller id. Without a Firestore
+    // pknreserve account every game's card page lost all CardTrader offers
+    // (2026-09-30), so keep them under a fixed reserve profile instead.
+    if (error.statusCode !== 404) {
+      console.error('pknreserve seller profile lookup failed', {
+        statusCode: error.statusCode || 500,
+        message: error.message,
+      });
+    }
+    seller = {
+      uid: PKNRESERVE_SELLER_USERNAME,
+      username: PKNRESERVE_SELLER_USERNAME,
+      displayName: PKNRESERVE_SELLER_USERNAME,
+    };
   }
   try {
     const payload = await readLiveCardTraderListings({
@@ -363,6 +372,7 @@ async function readLiveCardTraderListingsForCard(cardId, limit) {
       requestedParam: 'cardId',
       language: '',
       limit: cleanLimit(limit),
+      game: normalizeMarketplaceGame(game),
     });
     return (payload.listings || [])
       .map((listing) => syntheticCardTraderListingRow({ listing, seller, fallbackCardId: cleanCard }))
@@ -687,7 +697,7 @@ async function readListings(url, decoded, { marketplaceGame = 'pokemon' } = {}) 
   if (!isPublicCardPageListingRead({ cardId, sellerUid, sellerUsername }) || skipLive) {
     return nativeListings;
   }
-  const cardTraderListings = await readLiveCardTraderListingsForCard(cardId, cleanLimit(url.searchParams.get('limit')));
+  const cardTraderListings = await readLiveCardTraderListingsForCard(cardId, cleanLimit(url.searchParams.get('limit')), game);
   return [...nativeListings, ...cardTraderListings]
     .sort((a, b) => a.pricePkn - b.pricePkn);
 }
