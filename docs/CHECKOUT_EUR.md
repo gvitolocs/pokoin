@@ -75,7 +75,22 @@ covers them if it doesn't).
 | LARGE | 200 |
 | EXTRA_LARGE | 9999 (Flex bag / trunk only when looked up by tier id) |
 
-## Deploy
+## PKN balance as a discount (design, not built yet)
+
+Buyers keep their PKN even when paying by card: on an EUR checkout, a buyer's
+`balances/{uid}.availablePkn` applies as a discount against the card charge —
+but only against lines from sellers who accept PKN (PKN-refusing sellers'
+lines and their shipping share are card-only, `_seller_pkn_policy.js`).
+
+| | |
+| --- | --- |
+| Discount value | `min(availablePkn, pkn-eligible totalPkn) × €0.005`, capped so the card charge never goes negative |
+| Display | Cart + checkout show the split: card charge after the PKN discount, and how much PKN is consumed |
+| Settlement | Session create records the discount + freezes the PKN; the verified webhook debits `availablePkn` in the same Firestore transaction that marks the order paid; expiry/cancel releases it exactly once (same lifecycle as the stock hold) |
+| Refunds | A refund returns the card share first; the PKN share is credited back to the buyer's balance |
+| Status | **Not implemented** — `create-order-checkout-session` / `_checkout_core.js` have no discount term yet. The buyer display threshold (`buyerPrefersFiat`) is live; the settlement discount needs the Stripe + Firestore transaction work above. |
+
+## Deploy## Deploy
 
 - SPA: normal `scripts/deploy-web.sh` after merge to `origin/main`.
 - API: `scripts/deploy-checkout-eur-api.sh` (addresses, quote, Connect, order session, webhook/orders overlay + route manifest patch).

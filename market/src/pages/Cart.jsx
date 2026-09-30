@@ -5,6 +5,7 @@ import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { useAuth } from '../auth.jsx';
 import { useCart } from '../cart.jsx';
 import { currencyFromLocale, formatLocalFromPkn } from '../pkn.js';
+import { useBuyerCurrency } from '../use-buyer-currency.js';
 import CardArt from '../components/CardArt.jsx';
 import { DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
@@ -12,8 +13,10 @@ export default function Cart() {
   const { items, count, totalPkn, setQty, removeItem, clear } = useCart();
   const { signedIn, availablePkn } = useAuth();
   const canPayWithPkn = Number(availablePkn) >= Number(totalPkn);
+  const buyer = useBuyerCurrency();
   const showFiat = signedIn && !canPayWithPkn && totalPkn > 0;
-  const displayCurrency = currencyFromLocale();
+  // Profile country currency (DK → DKK); the browser locale is only a fallback.
+  const displayCurrency = buyer.currency || currencyFromLocale();
 
   useEffect(() => {
     document.title = 'Cart · Pokoin';
@@ -67,7 +70,7 @@ export default function Cart() {
                   <input inputMode="numeric" max={row.stock || 1} value={row.qty} onChange={(event) => setQty(row.id, event.target.value)} />
                 </label>
                 <strong className="bag-price">
-                  {showFiat || row.sellerAcceptsPkn === false
+                  {showFiat || buyer.fiat(row.pricePkn * row.qty, row.sellerAcceptsPkn)
                     ? formatLocalFromPkn(row.pricePkn * row.qty, displayCurrency)
                     : formatPkn(row.pricePkn * row.qty)}
                 </strong>

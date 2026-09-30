@@ -40,3 +40,17 @@ export function pknFromPriceInput(raw, currency = 'PKN') {
   if (pkn == null) return null;
   return currency === 'PKN' ? pkn : Math.round(pkn);
 }
+
+/**
+ * Buyer display rule: a price renders local-currency-first (DKK for a Danish
+ * buyer) when the buyer cannot afford it with their PKN balance — the
+ * affordability threshold is the price itself. Affordable prices stay PKN:
+ * the currency they would actually pay with. Card-only sellers always show
+ * local first. Stored prices stay PKN either way.
+ */
+export function buyerPrefersFiat(balancePkn, pricePkn, sellerAcceptsPkn = true) {
+  if (sellerAcceptsPkn === false) return true;
+  const balance = Number(balancePkn);
+  if (!Number.isFinite(balance) || balance < 0) return false;
+  return balance < (Number(pricePkn) || 0);
+}

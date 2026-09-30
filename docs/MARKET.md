@@ -793,6 +793,18 @@ three view modes — Table / Stacks / Titles — persisted in
 `localStorage pokoin.invView`; Settings lives on `/mypokoin/settings`
 (pricer defaults + strategy manager).
 
+### Buyer display currency (affordability threshold)
+
+Buyers see prices in PKN while their balance can afford them, and
+local-currency-first (DKK for a Danish buyer, from the profile country;
+browser locale only as fallback) once it cannot: `buyerPrefersFiat` — the
+affordability threshold is the price itself, so a 15 PKN balance renders
+almost every market price in DKK while a cheap 12 PKN card stays PKN.
+Applies to the desk shop rows, Best Deal, the cart rows and the checkout
+(fiat checkout already switches on `preferFiat`). Card-only sellers always
+render local first. Settlement stays PKN; the cart/checkout display keeps
+the PKN value in brackets (`formatLocalFromPkn`).
+
 ### Listing pipeline (Oracle GET → nezopt NVMe ingest → Pi replica)
 
 ```
