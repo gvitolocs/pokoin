@@ -718,7 +718,7 @@
     },
     {
       "source": "/cardscan/identify",
-      "destination": "https://cardscan.pokoin.com/identify"
+      "destination": "https://api.pokoin.com/api/scan/identify"
     },
     {
       "source": "/chain/:path*",
