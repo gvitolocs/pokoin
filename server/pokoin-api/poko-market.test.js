@@ -24,6 +24,8 @@ function makeDb(stubs) {
     stubs.queries.push({ sql, params });
     // Order matters: tool-specific tables first, generic card-row lookup last.
     const rows = (table) => stubs[table] ?? [];
+    if (/with art as/.test(sql)) return { rows: rows('artistCardRows') };
+    if (/pokoin_pokemon_expansions/.test(sql)) return { rows: rows('expansionRows') };
     if (/with cands as/.test(sql)) return { rows: rows('moverRows') };
     if (/with cards as/.test(sql)) return { rows: rows('setRows') };
     if (/with recent as/.test(sql)) return { rows: rows('recentRows') };
@@ -587,6 +589,86 @@ test('normalizeRarity maps SIR / SAR / AR shorthands to catalog labels', () => {
   assert.equal(normalizeRarity('special art rare'), 'Special Illustration Rare');
   assert.equal(normalizeRarity('AR'), 'Illustration Rare');
   assert.equal(normalizeRarity(''), '');
+});
+
+test('artist_cards resolves the artist from the desk cardId and ranks by price', async () => {
+  const stubs = {
+    queries: [],
+    artistRows: [{ artist: 'Ken Sugimori', cards: 521 }],
+    artistCardRows: [
+      { card_id: '10', name: "Koga's Ninja Trick", set_name: 'Gym Booster 2', median_pkn: 70128, sold_qty: 2, current_ask_pkn: 80126, sold_ok: true },
+      { card_id: '20', name: 'Minun', set_name: 'PLAY Promos', median_pkn: null, current_ask_pkn: 70126, sold_ok: false },
+      { card_id: '30', name: 'Drowzee', set_name: 'Rising Fist', median_pkn: null, current_ask_pkn: 1402700, sold_ok: false },
+      { card_id: '40', name: 'Magikarp', set_name: 'Expansion Pack', median_pkn: 2000328, sold_qty: 2, current_ask_pkn: 822, sold_ok: false, seller_uid: 'X' },
+    ],
+  };
+  const res = makeRes();
+  await loadHandler(makeDb(stubs))(makeReq({ body: { tool: 'artist_cards', params: { cardId: '246912' } } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.artist, 'Ken Sugimori');
+  assert.equal(res.body.artistCardCount, 521);
+  assert.equal(res.body.sort, 'expensive');
+  assert.deepEqual(res.body.cards.map((c) => [c.name, c.priceBasis]), [
+    ["Koga's Ninja Trick", 'sold_median_90d'],
+    ['Minun', 'lowest_ask'],
+    ['Magikarp', 'lowest_ask'],
+  ]);
+  assert.equal(res.body.cards[2].pricePkn, 822);
+  assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
+  const lookup = stubs.queries.find((q) => /select artist from marketplace_search_candidates/.test(q.sql));
+  assert.deepEqual(lookup.params, ['246912']);
+  const sql = stubs.queries.find((q) => /with art as/.test(q.sql));
+  assert.deepEqual(sql.params, ['Ken Sugimori', null, 20]);
+  assert.match(sql.sql, /asks\.ask_pkn \* 3/);
+});
+
+test('artist_cards asks for clarification when several artists fit', async () => {
+  const stubs = { queries: [], artistRows: [{ artist: 'Ken Sugimori', cards: 500 }, { artist: 'Kent Kanda', cards: 10 }] };
+  const res = makeRes();
+  await loadHandler(makeDb(stubs))(makeReq({ body: { tool: 'artist_cards', params: { artist: 'ken' } } }), res);
+  assert.equal(res.body.status, 'ambiguous');
+  assert.equal(res.body.artists.length, 2);
+});
+
+test('set_info returns era, nationality, release languages and localized names', async () => {
+  const stubs = {
+    queries: [],
+    expansionRows: [
+      { name: 'Mysterious Treasures', official_id: 'dp2', official_name: 'Mysterious Treasures', nationality: 'western', kind: 'official', listed: true, catalog_card_count: 124, release_languages: ['DE', 'EN', 'IT'], localized_names: { it: 'Tesori Misteriosi' } },
+      { name: 'MEGA Dream ex', official_id: 'M2a', official_name: 'MEGAドリームex', nationality: 'japanese', kind: 'official', listed: true, catalog_card_count: 250, release_languages: ['JP'], localized_names: {} },
+    ],
+  };
+  const res = makeRes();
+  await loadHandler(makeDb(stubs))(makeReq({ body: { tool: 'set_info', params: { setName: 'Tesori Misteriosi' } } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.sets.map((set) => [set.name, set.era, set.nationality]), [
+    ['Mysterious Treasures', 'Diamond & Pearl', 'western'],
+    ['MEGA Dream ex', 'Mega Evolution', 'japanese'],
+  ]);
+  assert.deepEqual(res.body.sets[0].releaseLanguages, ['DE', 'EN', 'IT']);
+  assert.equal(res.body.sets[0].localizedNames.it, 'Tesori Misteriosi');
+  const sql = stubs.queries.find((q) => /pokoin_pokemon_expansions/.test(q.sql));
+  assert.deepEqual(sql.params, [null, 'Tesori Misteriosi', '%Tesori Misteriosi%']);
+
+  const jp = makeRes();
+  await loadHandler(makeDb(stubs))(makeReq({ body: { tool: 'set_info', params: { language: 'JP', era: 'mega' } } }), jp);
+  assert.deepEqual(jp.body.sets.map((set) => set.name), ['MEGA Dream ex']);
+  assert.equal(stubs.queries.at(-1).params[0], 'japanese');
+
+  const bad = makeRes();
+  await loadHandler(makeDb({ queries: [] }))(makeReq({ body: { tool: 'set_info', params: {} } }), bad);
+  assert.equal(bad.statusCode, 400);
+});
+
+test('eraForCode maps western, Japanese and Chinese series codes', () => {
+  const { eraForCode } = require('./poko-market')._test;
+  assert.equal(eraForCode('neo2'), 'Wizards of the Coast');
+  assert.equal(eraForCode('SV8a'), 'Scarlet & Violet');
+  assert.equal(eraForCode('CSV4C'), 'Scarlet & Violet');
+  assert.equal(eraForCode('swsh9tg'), 'Sword & Shield');
+  assert.equal(eraForCode('tk-xy-latia'), 'XY');
+  assert.equal(eraForCode('m6'), 'Mega Evolution');
+  assert.equal(eraForCode(''), null);
 });
 
 test('dedupeArtworkVersions keeps one printing per CLIP version key', () => {
