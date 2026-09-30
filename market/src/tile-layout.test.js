@@ -127,7 +127,8 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   assert.match(tile, /identity\.tileLine/);
   assert.doesNotMatch(tile, /cut \? displayName/);
   assert.match(artist, /albumShadeStyle\(row\)/);
-  assert.match(artist, /<CardTile key=\{albumTileKey\(card\)\} card=\{card\} rank=\{index\} cut \/>/);
+  assert.match(artist, /<CardTile key=\{albumTileKey\(group\.cards\[0\]\)\} card=\{group\.cards\[0\]\} rank=\{index\} cut \/>/);
+  assert.match(artist, /<ArtistPileTile key=\{group\.key\} group=\{group\} rank=\{index\} onOpen=\{setPile\} \/>/);
   assert.match(artist, /fetchArtist\(artistSlug, \{ limit: 5000 \}\)/);
   assert.match(artist, /peekArtist\(artistSlug, 5000\)/);
   assert.match(artist, /restoredPageView/);

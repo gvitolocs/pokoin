@@ -10170,3 +10170,223 @@ html:has(.wallet-page) .brand span {
   background: linear-gradient(90deg, #ffd33d, #f5b7ff 55%, #c9b8ff);
   border-color: transparent;
 }
+
+/* Artist desk same-artwork pile: stacked card sheets under the album tile. */
+.tile-pile-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+/* :hover must out-rank `.tile.tile-album:hover { z-index: 0 }` or the
+ * sheets paint above the art while hovered. */
+.tile-pile-wrap > .tile,
+.tile-pile-wrap > .tile:hover {
+  position: relative;
+  z-index: 2;
+  transition: transform 0.18s ease;
+}
+
+.tile-pile-wrap:hover > .tile,
+.tile-pile-wrap:focus-within > .tile {
+  transform: translateY(-3px);
+}
+
+.tile-pile-sheet {
+  position: absolute;
+  left: 3%;
+  right: 3%;
+  bottom: -7px;
+  height: 36px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #413d49, #26242e 62%, #1b1a21);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  box-shadow: 0 12px 26px rgb(0 0 0 / 0.5);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.tile-pile-sheet.s1 {
+  transform: rotate(0.5deg);
+}
+
+.tile-pile-sheet.s2 {
+  left: 6.5%;
+  right: 6.5%;
+  bottom: -13px;
+  background: linear-gradient(180deg, #312e39, #1a191f 70%);
+  border-color: rgb(255 255 255 / 0.1);
+  transform: rotate(-0.6deg);
+}
+
+.tile-pile-count {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  background: rgb(8 9 14 / 0.72);
+  border: 1px solid rgb(255 255 255 / 0.16);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-style: normal;
+  line-height: 1.4;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+/* Pile popup: every printing of the artwork as a full card. */
+.artwork-pile-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(3 4 8 / 0.8);
+  backdrop-filter: blur(10px);
+  animation: pile-backdrop-in 0.22s ease both;
+}
+
+@keyframes pile-backdrop-in {
+  from { opacity: 0; }
+}
+
+.artwork-pile-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1080px, 100%);
+  max-height: min(86vh, 780px);
+  perspective: 1200px;
+  animation: pile-panel-in 0.32s cubic-bezier(0.2, 0.85, 0.3, 1.08) both;
+}
+
+@keyframes pile-panel-in {
+  from { opacity: 0; transform: translateY(28px) scale(0.95) rotateX(8deg); }
+}
+
+.artwork-pile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 0.35rem 0.9rem;
+}
+
+.artwork-pile-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.artwork-pile-title strong {
+  font-size: 1.3rem;
+}
+
+.artwork-pile-title span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.artwork-pile-close {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  background: rgb(255 255 255 / 0.06);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.artwork-pile-close:hover {
+  background: rgb(255 255 255 / 0.14);
+}
+
+.artwork-pile-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.15rem 1rem;
+  overflow-y: auto;
+  padding: 0.5rem 0.35rem 1.1rem;
+}
+
+.artwork-pile-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  width: clamp(150px, 21vw, 225px);
+  animation: pile-card-in 0.42s cubic-bezier(0.2, 0.8, 0.3, 1.12) both;
+  animation-delay: calc(var(--pile-i, 0) * 55ms + 70ms);
+}
+
+@keyframes pile-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.82) rotate(var(--pile-tilt, 0deg));
+  }
+}
+
+.artwork-pile-frame {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.55), 0 2px 10px rgb(0 0 0 / 0.4);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.artwork-pile-frame:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 24px 54px rgb(0 0 0 / 0.6), 0 3px 12px rgb(0 0 0 / 0.45);
+}
+
+.artwork-pile-frame img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 63 / 88;
+  object-fit: cover;
+}
+
+.artwork-pile-line {
+  font-style: normal;
+  font-size: 0.76rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.35;
+}
+
+.artwork-pile-price {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--yellow);
+  margin-top: -0.25rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artwork-pile-backdrop,
+  .artwork-pile-panel,
+  .artwork-pile-card {
+    animation: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .artwork-pile-backdrop {
+    padding: 0.9rem;
+  }
+
+  .artwork-pile-card {
+    width: clamp(120px, 38vw, 170px);
+  }
+
+  .artwork-pile-title strong {
+    font-size: 1.1rem;
+  }
+}

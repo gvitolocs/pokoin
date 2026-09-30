@@ -96,6 +96,29 @@ export function artworkVersionKey(card) {
   return `id:${card?.id || card?.card_id || ''}`;
 }
 
+/**
+ * Artist desk: collapse same-artwork printings (shared CLIP version key) into
+ * one pile row, in sort order. LEGEND halves keep their own rows — the
+ * landscape pair forms the full art side by side. Tag Team Pokédex clones
+ * (same card twice) dedupe by card id.
+ */
+export function groupArtworkRows(cards) {
+  const map = new Map();
+  for (const card of cards || []) {
+    const id = String(card?.id || card?.card_id || '');
+    const key = isLegendCard(card) ? `id:${id}` : artworkVersionKey(card);
+    let group = map.get(key);
+    if (!group) {
+      group = { key, cards: [], seen: new Set() };
+      map.set(key, group);
+    }
+    if (id && group.seen.has(id)) continue;
+    if (id) group.seen.add(id);
+    group.cards.push(card);
+  }
+  return [...map.values()];
+}
+
 /** HGSS LEGEND name (not Call of Legends / Shining Legends set titles). */
 export function isLegendCard(card) {
   const name = String(card?.name || '').replace(/\s+/g, ' ').trim();
