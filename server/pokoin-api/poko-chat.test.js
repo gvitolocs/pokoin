@@ -14,6 +14,7 @@ const {
   resolveHermesChatUrl,
   hermesToken,
   hermesReply,
+  withoutOpenCards,
 } = require('./poko-chat')._test;
 
 test('cleanCards keeps id/name and caps at 12', () => {
@@ -106,6 +107,22 @@ test('hermesReply sends the raw question beside the enriched prompt', async () =
     process.env.POKONTACT_SERVICE_URL = saved.url ?? '';
     process.env.POKONTACT_SERVICE_TOKEN = saved.token ?? '';
   }
+});
+
+test('withoutOpenCards drops the open / attached card from reply cards', () => {
+  const pageContext = { deskCardId: '806382', deskCardName: 'Raikou ex' };
+  const replyCards = [
+    { cardId: '806382', name: 'Raikou ex' },
+    { cardId: '900000', name: 'Raikou ex' },
+    { cardId: '123', name: 'Kyogre' },
+  ];
+  assert.deepEqual(withoutOpenCards(replyCards, { pageContext, byName: true }).map((c) => c.cardId), ['123']);
+  // Hermes tool cards may be other printings of the same name.
+  assert.deepEqual(withoutOpenCards(replyCards, { pageContext }).map((c) => c.cardId), ['900000', '123']);
+  assert.deepEqual(
+    withoutOpenCards(replyCards, { cards: [{ cardId: '123', name: 'Kyogre' }] }).map((c) => c.cardId),
+    ['806382', '900000'],
+  );
 });
 
 test('hammering the endpoint from one IP hits the 20/min rate limit', async () => {

@@ -431,6 +431,23 @@ async function handleHistory(req, res, uid) {
   });
 }
 
+/**
+ * Never echo the card the user already has open or attached under Poko's reply.
+ * Name matching applies to catalog lookups by name only, which can return a
+ * different printing of the same open card; Hermes tool cards keep other
+ * printings of the same name ("other Raikou ex printings").
+ */
+function withoutOpenCards(replyCards, { pageContext = {}, cards = [], byName = false } = {}) {
+  const ids = new Set([pageContext.deskCardId, ...cards.map((card) => card.cardId)]
+    .filter(Boolean).map(String));
+  const names = new Set([pageContext.deskCardName, ...cards.map((card) => card.name)]
+    .filter(Boolean).map((name) => String(name).toLowerCase()));
+  return (Array.isArray(replyCards) ? replyCards : []).filter((card) => (
+    !ids.has(String(card?.cardId || ''))
+    && !(byName && names.has(String(card?.name || card?.cardName || '').toLowerCase()))
+  ));
+}
+
 async function handleChat(req, res, decoded) {
   if (chatRateLimited(req)) {
     return res.status(429).json({ error: 'Too many messages, please slow down.' });
@@ -477,7 +494,10 @@ async function handleChat(req, res, decoded) {
       query: hermesCards.length ? null : marketplaceQuery,
     });
     reply = attached.text || hermes.reply;
-    replyCards = hermesCards.length ? hermesCards : attached.cards;
+    replyCards = withoutOpenCards(
+      hermesCards.length ? hermesCards : attached.cards,
+      { pageContext, cards, byName: !hermesCards.length },
+    );
   } catch (error) {
     hermesError = String(error?.message || error).slice(0, 200);
     console.warn('poko-chat hermes failed', hermesError);
@@ -560,6 +580,7 @@ module.exports._test = {
   resolveHermesChatUrl,
   hermesToken,
   hermesReply,
+  withoutOpenCards,
   serializeEvent,
   appendTurn,
   cleanClientTurnId,
