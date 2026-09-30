@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigationType, useParams } from 'react-router-dom';
 import { albumShadeStyle } from '../art-shade.js';
 import { fetchArtist, fetchArtistSummaries, imageSrc, peekArtist } from '../api.js';
@@ -175,6 +175,7 @@ function ArtistDesk() {
   const [cartBusy, setCartBusy] = useState(false);
   const [cartNote, setCartNote] = useState('');
   const [pile, setPile] = useState(null);
+  const closePile = useCallback(() => setPile(null), []);
   const [shown, setShown] = useState(() => {
     const count = Number(restoredHere?.shown);
     return count > ALBUM_PAGE ? count : ALBUM_PAGE;
@@ -298,13 +299,32 @@ function ArtistDesk() {
   useEffect(() => {
     const node = sentinel.current;
     if (!node || shown >= groups.length) return undefined;
+    let last = 0;
+    const grow = () => setShown((current) => Math.min(current + ALBUM_PAGE, groups.length));
+    // A fast fling can land past the sentinel so it never intersects; the
+    // scroll check also fires when the sentinel is above the viewport. Time-
+    // throttled (not rAF) so it still runs in throttled renderers.
+    const check = () => {
+      const rect = sentinel.current?.getBoundingClientRect();
+      if (rect && rect.top <= window.innerHeight + 800) grow();
+    };
+    const onScroll = () => {
+      const now = Date.now();
+      if (now - last < 150) return;
+      last = now;
+      check();
+    };
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setShown((current) => Math.min(current + ALBUM_PAGE, groups.length));
-      }
+      if (entries.some((entry) => entry.isIntersecting)) grow();
     }, { rootMargin: '800px 0px' });
     observer.observe(node);
-    return () => observer.disconnect();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
   }, [shown, groups.length]);
 
   useEffect(() => {
@@ -510,7 +530,7 @@ function ArtistDesk() {
         <ArtworkPileOverlay
           group={pile}
           artistName={name}
-          onClose={() => setPile(null)}
+          onClose={closePile}
         />
       ) : null}
     </div>
