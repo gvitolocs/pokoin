@@ -18,6 +18,9 @@
  *   market_snapshot  — top sold_qty_7d cards (public aggregates only).
  *   top_movers       — biggest dated ask-price moves for a subject ("which
  *                      Raikou card rose the most?").
+ *   top_sellers      — most-sold singles over a window, filterable by
+ *                      language / rarity / price ("most liquid JP cards
+ *                      over €10").
  *   card_ocr         — approximate western leftover OCR (attacks/rules/HP)
  *                      from marketplace_card_ocr; never invent card text.
  *
@@ -913,6 +916,133 @@ async function topMovers(params = {}) {
   return { status: 'ok', ...base, movers };
 }
 
+// Rarity labels live in the catalog card_number prefix ("Special Illustration
+// Rare | 233/193"). JP "Special Art Rare" / "Art Rare" are catalogued under the
+// same SIR / IR labels.
+const RARITY_ALIASES = [
+  [/^(sir|sar|special (illustration|art) rare)s?$/i, 'Special Illustration Rare'],
+  [/^(ir|ar|illustration rare|art rare)s?$/i, 'Illustration Rare'],
+  [/^(ur|ultra rare)s?$/i, 'Ultra Rare'],
+  [/^(hr|hyper rare)s?$/i, 'Hyper Rare'],
+  [/^(sr|secret rare)s?$/i, 'Secret Rare'],
+];
+// A sold median more than 20× the recent ask is a bulk lot or a placeholder
+// price (one JP Arctibax "sold" 15× at 2,000,328 PKN against a 218 PKN ask).
+const TOP_SELLERS_MAX_SOLD_TO_ASK = 20;
+
+function normalizeRarity(value) {
+  const text = cleanText(value, 60);
+  if (!text) return '';
+  for (const [re, label] of RARITY_ALIASES) {
+    if (re.test(text)) return label;
+  }
+  return text;
+}
+
+/**
+ * Most-sold singles over a window ("most liquid Japanese cards over €10",
+ * "top 10 most sold JP Special Illustration Rares"). Ranks confirmed
+ * CardTrader sales, not asks, with optional language / rarity / price /
+ * subject filters. Graded slabs are excluded.
+ */
+async function topSellers(params = {}) {
+  const days = Math.min(Math.max(Number(params.days) || 7, 1), 30);
+  const limit = Math.min(Math.max(Number(params.limit) || 10, 1), 20);
+  const language = cleanText(params.language, 40) ? normalizeLanguage(params.language).code : null;
+  const rarity = normalizeRarity(params.rarity);
+  const minEur = Number(params.minPriceEur);
+  const maxEur = Number(params.maxPriceEur);
+  const minPricePkn = Number(params.minPricePkn) > 0 ? Number(params.minPricePkn)
+    : minEur > 0 ? minEur / PKN_EUR_RATE : 0;
+  const maxPricePkn = Number(params.maxPricePkn) > 0 ? Number(params.maxPricePkn)
+    : maxEur > 0 ? maxEur / PKN_EUR_RATE : null;
+  const subject = cleanText(params.subject || params.query, 80);
+  const tokens = subject
+    .toLowerCase()
+    .replace(/[,.!?;:()]+/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+
+  const values = [days, language, minPricePkn, maxPricePkn, limit, rarity || null, TOP_SELLERS_MAX_SOLD_TO_ASK];
+  const subjectConditions = tokens.map((t) => {
+    values.push(`%${escapeLike(t)}%`);
+    return `s.search_text ilike $${values.length}`;
+  });
+  const rows = await queryRows(
+    `with sold as (
+       select blueprint_id,
+              sum(sold_qty)::int as sold_qty,
+              count(distinct observed_day)::int as sale_days,
+              percentile_cont(0.5) within group (order by median_pkn) as median_pkn,
+              max(observed_day) as last_sale_day
+         from cardtrader_sold_daily
+        where observed_day >= current_date - ($1::int || ' days')::interval
+          and sold_qty > 0
+          and not graded
+          and ($2::text is null or language = $2)
+        group by blueprint_id
+     ), asks as (
+       select blueprint_id,
+              percentile_cont(0.5) within group (order by coalesce(median_price_pkn, min_price_pkn)) as ask_pkn
+         from cardtrader_blueprint_daily_analytics
+        where observed_day >= current_date - interval '14 days'
+          and coalesce(median_price_pkn, min_price_pkn) > 0
+          and blueprint_id in (select blueprint_id from sold)
+        group by blueprint_id
+     )
+     select s.card_id, s.name, s.set_name, s.artist, s.item_kind, s.card_number,
+            sold.sold_qty, sold.sale_days, sold.median_pkn, sold.last_sale_day, asks.ask_pkn
+       from sold
+       join marketplace_search_candidates s
+         on s.card_id = sold.blueprint_id * 2 and s.item_kind = 'single'
+       left join asks on asks.blueprint_id = sold.blueprint_id
+      where sold.median_pkn >= $3
+        and ($4::numeric is null or sold.median_pkn <= $4)
+        and (asks.ask_pkn is null or sold.median_pkn <= asks.ask_pkn * $7)
+        and ($6::text is null
+             or lower(split_part(s.card_number, ' | ', 1)) = lower($6)
+             or lower(s.rarity) = lower($6))
+        ${subjectConditions.length ? `and ${subjectConditions.join(' and ')}` : ''}
+      order by sold.sold_qty desc, sold.sale_days desc
+      limit $5`,
+    values,
+  );
+
+  const cards = rows.map((row) => ({
+    ...candidateFromRow(row),
+    soldQty: Number(row.sold_qty) || 0,
+    saleDays: Number(row.sale_days) || 0,
+    medianSoldPkn: round2(row.median_pkn),
+    medianSoldEur: round2(Number(row.median_pkn) * PKN_EUR_RATE),
+    currentAskPkn: round2(row.ask_pkn),
+    lastSaleDay: row.last_sale_day ? String(row.last_sale_day).slice(0, 10) : null,
+  }));
+
+  const filters = {
+    language: language || 'all',
+    rarity: rarity || undefined,
+    subject: subject || undefined,
+    minPricePkn: minPricePkn || undefined,
+    maxPricePkn: maxPricePkn || undefined,
+  };
+  const base = {
+    window: { days, from: daysAgoIso(days), to: daysAgoIso(0) },
+    basis: 'confirmed CardTrader sales (ungraded), ranked by units sold; saleDays = days with at least one sale',
+    priceUnit: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
+    filters,
+  };
+  if (!cards.length) {
+    return {
+      status: 'ok',
+      ...base,
+      cards: [],
+      note: `No ungraded single matching these filters sold in the last ${days} days.`,
+    };
+  }
+  return { status: 'ok', ...base, cards };
+}
+
 const TOOLS = {
   resolve_card: resolveCard,
   card_quote: cardQuote,
@@ -922,6 +1052,7 @@ const TOOLS = {
   suggest_cards: suggestCards,
   market_snapshot: marketSnapshot,
   top_movers: topMovers,
+  top_sellers: topSellers,
 };
 
 // ---------------------------------------------------------------------------
@@ -1003,6 +1134,7 @@ module.exports._test = {
   blueprintIdFromCardId,
   confidenceForSample,
   liquidityBands,
+  normalizeRarity,
   buildSoldSummary,
   priceStrategies,
   candidateFromRow,

@@ -25,6 +25,7 @@ function makeDb(stubs) {
     // Order matters: tool-specific tables first, generic card-row lookup last.
     const rows = (table) => stubs[table] ?? [];
     if (/with cands as/.test(sql)) return { rows: rows('moverRows') };
+    if (/with sold as/.test(sql)) return { rows: rows('sellerRows') };
     if (/marketplace_card_weights/.test(sql)) return { rows: rows('weightRows') };
     if (/group by artist/.test(sql)) return { rows: stubs.artistRows ?? [{ artist: 'Yuka Morii', cards: 42 }] };
     if (/order by s\.name\s+limit \$2/.test(sql)) return { rows: rows('collectionCards') };
@@ -519,6 +520,58 @@ test('top_movers supports falling direction and answers empty windows with 200',
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body.movers, []);
   assert.match(res.body.note, /raikou/i);
+});
+
+test('top_sellers ranks confirmed sales with language, rarity and price filters', async () => {
+  const stubs = {
+    queries: [],
+    sellerRows: [
+      { card_id: '1000', name: 'Mega Froslass ex', set_name: 'MEGA Dream ex', card_number: 'Special Illustration Rare | 233/193', sold_qty: 24, sale_days: 13, median_pkn: 3188, ask_pkn: 3174, last_sale_day: '2026-09-29', seller_uid: 'X' },
+      { card_id: '2000', name: "Giovanni's Charisma", set_name: 'Pokémon Card 151', card_number: 'Special Illustration Rare | 207/165', sold_qty: 19, sale_days: 5, median_pkn: 5066, ask_pkn: 3654, last_sale_day: '2026-09-28' },
+    ],
+  };
+  const res = makeRes();
+  await loadHandler(makeDb(stubs))(makeReq({
+    body: { tool: 'top_sellers', params: { language: 'giapponese', rarity: 'SIR', minPriceEur: 10, days: 30, limit: 10 } },
+  }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'ok');
+  assert.deepEqual(res.body.cards.map((c) => c.name), ['Mega Froslass ex', "Giovanni's Charisma"]);
+  assert.equal(res.body.cards[0].soldQty, 24);
+  assert.equal(res.body.cards[0].saleDays, 13);
+  assert.equal(res.body.cards[0].medianSoldPkn, 3188);
+  assert.equal(res.body.cards[0].medianSoldEur, 15.94);
+  assert.equal(res.body.cards[0].currentAskPkn, 3174);
+  assert.equal(res.body.filters.language, 'JP');
+  assert.equal(res.body.filters.rarity, 'Special Illustration Rare');
+  assert.equal(res.body.filters.minPricePkn, 2000);
+  assert.equal(res.body.window.days, 30);
+  assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
+  const sql = stubs.queries.find((q) => /with sold as/.test(q.sql));
+  assert.deepEqual(sql.params, [30, 'JP', 2000, null, 10, 'Special Illustration Rare', 20]);
+  assert.match(sql.sql, /not graded/);
+  assert.match(sql.sql, /ask_pkn \* \$7/);
+});
+
+test('top_sellers defaults to all languages over 7 days and answers empty with 200', async () => {
+  const stubs = { queries: [] };
+  const res = makeRes();
+  await loadHandler(makeDb(stubs))(makeReq({ body: { tool: 'top_sellers', params: { subject: 'Charizard' } } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.cards, []);
+  assert.match(res.body.note, /7 days/);
+  assert.equal(res.body.filters.language, 'all');
+  const sql = stubs.queries.find((q) => /with sold as/.test(q.sql));
+  assert.deepEqual(sql.params, [7, null, 0, null, 10, null, 20, '%charizard%']);
+  assert.match(sql.sql, /s\.search_text ilike \$8/);
+});
+
+test('normalizeRarity maps SIR / SAR / AR shorthands to catalog labels', () => {
+  const { normalizeRarity } = require('./poko-market')._test;
+  assert.equal(normalizeRarity('SIR'), 'Special Illustration Rare');
+  assert.equal(normalizeRarity('special art rare'), 'Special Illustration Rare');
+  assert.equal(normalizeRarity('AR'), 'Illustration Rare');
+  assert.equal(normalizeRarity(''), '');
 });
 
 test('dedupeArtworkVersions keeps one printing per CLIP version key', () => {

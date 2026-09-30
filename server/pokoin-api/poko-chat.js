@@ -234,6 +234,9 @@ async function hermesReply({
     },
     body: JSON.stringify({
       message: enriched,
+      // Raw question for Hermes intent routing: `enriched` leads with desk /
+      // personal context, so keyword gates on it matched the context instead.
+      userMessage: message,
       userId,
       sessionId,
       user: { id: userId, displayName: displayName || '' },
@@ -556,6 +559,7 @@ module.exports._test = {
   marketFirstDirective,
   resolveHermesChatUrl,
   hermesToken,
+  hermesReply,
   serializeEvent,
   appendTurn,
   cleanClientTurnId,
