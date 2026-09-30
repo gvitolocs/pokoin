@@ -34,6 +34,8 @@ const GAME_SLUGS = {
   'union-arena': 'union_arena',
   gundam: 'gundam',
   sorcery: 'sorcery',
+  palworld: 'palworld',
+  cyberpunk: 'cyberpunk',
 };
 
 export function siteOriginFromHost(hostname) {

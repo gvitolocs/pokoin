@@ -1,0 +1,373 @@
+/* /protection — buyer protection (pages/Protection.jsx). */
+.protection-page {
+  padding-bottom: 3.5rem;
+}
+
+.protection-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  align-items: center;
+  gap: 1.5rem;
+  margin: 0.5rem 0 1.25rem;
+  padding: 2rem 2rem 1.75rem;
+  overflow: hidden;
+  border: 1px solid rgb(255 211 61 / 0.18);
+  border-radius: 24px;
+  background:
+    radial-gradient(34rem 18rem at 85% 50%, rgb(255 211 61 / 0.12), transparent 65%),
+    radial-gradient(30rem 18rem at 0% 0%, rgb(35 55 110 / 0.45), transparent 70%),
+    #0c0b10;
+}
+
+.protection-kicker {
+  margin: 0 0 0.6rem;
+  color: var(--yellow);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.protection-hero h1 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(2.3rem, 5vw, 3.4rem);
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.protection-lede {
+  max-width: 34rem;
+  margin: 0 0 1.4rem;
+  color: #d9d6e0;
+  font-size: 1.12rem;
+  line-height: 1.55;
+}
+
+.protection-badges {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.protection-badges li {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.03);
+}
+
+.protection-badges strong {
+  color: var(--yellow);
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.protection-badges span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.protection-hero-art {
+  justify-self: center;
+  width: min(100%, 17rem);
+  height: auto;
+}
+
+.protection-pillars {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0 0 1.5rem;
+}
+
+.protection-pillars article {
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+  padding: 1.2rem 1.25rem 1.3rem;
+  border: 1px solid var(--g5);
+  border-radius: 18px;
+  background: var(--surface);
+}
+
+.protection-pillar-icon {
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  margin-bottom: 0.3rem;
+  border-radius: 12px;
+  background: rgb(255 211 61 / 0.12);
+  color: var(--yellow);
+}
+
+.protection-pillars h2 {
+  margin: 0;
+  border: 0;
+  font-size: 1.1rem;
+}
+
+.protection-pillars p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.protection-mail-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  justify-self: start;
+  margin-top: 0.25rem;
+  color: var(--yellow);
+  font-weight: 750;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.protection-mail-link:hover,
+.protection-mail-link:focus-visible {
+  color: #ffe27a;
+}
+
+.protection-panel {
+  margin: 0 0 1.5rem;
+  padding: 1.4rem 1.4rem 1.5rem;
+  border: 1px solid var(--g5);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+.protection-panel h2 {
+  margin: 0 0 1rem;
+  border: 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+}
+
+.protection-flow {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Dashed rail behind the numbers. */
+.protection-flow::before {
+  content: '';
+  position: absolute;
+  top: 1.1rem;
+  left: 1.1rem;
+  right: 1.1rem;
+  border-top: 2px dashed rgb(255 211 61 / 0.35);
+}
+
+.protection-flow li {
+  position: relative;
+}
+
+.protection-flow-n {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  margin-bottom: 0.7rem;
+  border-radius: 50%;
+  background: var(--yellow);
+  color: #111;
+  font-weight: 850;
+  box-shadow: 0 0 0 6px var(--surface);
+}
+
+.protection-flow li:last-child .protection-flow-n {
+  background: #7dcea0;
+}
+
+.protection-flow h3 {
+  margin: 0 0 0.3rem;
+  font-size: 1rem;
+}
+
+.protection-flow p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.protection-branch {
+  display: flex;
+  gap: 0.6rem;
+  margin: 1.2rem 0 0;
+  padding: 0.8rem 1rem;
+  border: 1px dashed rgb(125 206 160 / 0.45);
+  border-radius: 12px;
+  color: #cfe9da;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.protection-branch span {
+  color: #7dcea0;
+  font-weight: 800;
+}
+
+.protection-disputes {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.protection-disputes p {
+  margin: 0;
+  color: #d9d6e0;
+  line-height: 1.6;
+}
+
+.protection-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.protection-times div {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.04);
+}
+
+.protection-times strong {
+  color: var(--yellow);
+  font-size: 1.1rem;
+}
+
+.protection-times span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.protection-contact {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1.1rem;
+  border: 1px solid rgb(255 211 61 / 0.3);
+  border-radius: 16px;
+  background: rgb(255 211 61 / 0.06);
+}
+
+.protection-contact p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.protection-contact-mail {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.8rem 0.95rem;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  background: var(--g2);
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 750;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.protection-contact-mail svg {
+  flex: 0 0 auto;
+  color: var(--yellow);
+}
+
+.protection-contact-mail:hover,
+.protection-contact-mail:focus-visible {
+  border-color: var(--yellow);
+  color: var(--yellow);
+  text-decoration: none;
+}
+
+.protection-contact .btn {
+  justify-content: center;
+}
+
+.protection-note {
+  margin: 0 0 1.5rem;
+  padding: 0.9rem 1.1rem;
+  border-left: 3px solid var(--g5);
+  border-radius: 0 12px 12px 0;
+  background: rgb(255 255 255 / 0.03);
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.protection-note strong {
+  color: var(--text);
+}
+
+.protection-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+@media (max-width: 900px) {
+  .protection-hero,
+  .protection-disputes {
+    grid-template-columns: 1fr;
+  }
+  .protection-hero-art {
+    grid-row: 1;
+    width: 11rem;
+  }
+  .protection-pillars {
+    grid-template-columns: 1fr;
+  }
+  .protection-flow {
+    grid-template-columns: 1fr 1fr;
+  }
+  .protection-flow::before {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .protection-hero {
+    padding: 1.3rem 1.1rem 1.2rem;
+    border-radius: 18px;
+  }
+  .protection-badges {
+    grid-template-columns: 1fr;
+  }
+  .protection-badges li {
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .protection-panel {
+    padding: 1.1rem 1rem 1.2rem;
+  }
+  .protection-flow {
+    grid-template-columns: 1fr;
+  }
+}

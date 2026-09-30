@@ -57,6 +57,12 @@ const GAMES = {
   sorcery: {
     id: 'sorcery', apiGame: 'sorcery', slug: 'sorcery', name: 'Sorcery', brand: 'Pokoin', title: 'Sorcery marketplace', ...SATELLITE,
   },
+  palworld: {
+    id: 'palworld', apiGame: 'palworld', slug: 'palworld', name: 'Palworld', brand: 'Pokoin', title: 'Palworld marketplace', ...SATELLITE,
+  },
+  cyberpunk: {
+    id: 'cyberpunk', apiGame: 'cyberpunk', slug: 'cyberpunk', name: 'Cyberpunk', brand: 'Pokoin', title: 'Cyberpunk marketplace', ...SATELLITE,
+  },
 };
 
 const SLUG_TO_ID = Object.fromEntries(
@@ -219,6 +225,16 @@ export function gameRequestHeaders(hostname = hostName()) {
     'x-pokoin-game': apiGame,
     'x-pokoin-host': String(hostname || hostName() || '').toLowerCase(),
   };
+}
+
+export function gameIconSrc(gameOrId) {
+  const row = typeof gameOrId === 'string'
+    ? (GAMES[gameOrId] || null)
+    : (gameOrId || null);
+  const slug = row?.slug || (row?.id === 'pokemon' ? 'pokemon' : '');
+  if (!slug && row?.id !== 'pokemon') return '';
+  const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) || '/';
+  return `${base}games/${slug || 'pokemon'}.svg`;
 }
 
 export { GAMES };

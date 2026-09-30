@@ -1,231 +1,31 @@
-/** Daily portfolio snapshot points for the Dashboard history chart. */
+/**
+ * Collection value history for the Dashboard chart.
+ *
+ * The API stores one point per UTC day: wallet PKN (liquidity) plus the
+ * seller's cards marked at each printing slice's last sold median, carried
+ * forward on days without a sale (server/pokoin-api/_portfolio_history_core.js).
+ * This module slices that series into a window, lays the window out on a
+ * day scale with a projection third, and fits the projection.
+ */
 
 import { formatPknNumber } from './pkn.js';
 
-export function asNonNeg(value) {
-  const n = Math.max(0, Number(value) || 0);
-  return Number.isFinite(n) ? n : 0;
+const DAY_MS = 86400000;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function nonNeg(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** Round up to a clean axis max (never zero). */
-export function niceScaleMax(value) {
-  const n = asNonNeg(value);
-  if (n <= 0) return 20;
-  const exp = Math.floor(Math.log10(n));
-  const base = 10 ** exp;
-  const f = n / base;
-  const nice = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10;
-  return nice * base;
-}
-
-export function yTickValues(max, count = 4) {
-  const top = niceScaleMax(max);
-  return Array.from({ length: count + 1 }, (_, i) => Math.round((top * i) / count));
+function round2(value) {
+  return Math.round(value * 100) / 100;
 }
 
 export function utcDayKey(date = new Date()) {
   const d = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(d.getTime())) return '';
   return d.toISOString().slice(0, 10);
-}
-
-export function formatDayLabel(dayKey) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dayKey || ''));
-  if (!m) return '';
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[Number(m[2]) - 1]} ${Number(m[3])}`;
-}
-
-/**
- * One day of portfolio value.
- * totalPkn is the wallet that day plus the market value of cards we could
- * price. A missing card price is left out — it is not zero and not an ask.
- * Idempotent: already-normalized rows keep assets.* (desk may re-normalize).
- */
-export function normalizeHistoryDay(row = {}) {
-  const prior = row && typeof row.assets === 'object' && row.assets ? row.assets : null;
-  const currencyPkn = asNonNeg(
-    row.currencyPkn ?? row.currency ?? prior?.currencyPkn,
-  );
-  const listedPkn = asNonNeg(
-    row.listedPkn ?? row.listed ?? prior?.listedPkn,
-  );
-  const cardsKnown = row.cardsKnown === true || prior?.cardsKnown === true;
-  const rawCards = row.cardsValuePkn != null ? row.cardsValuePkn : prior?.cardsValuePkn;
-  const cardsValuePkn = cardsKnown && rawCards != null && rawCards !== ''
-    ? asNonNeg(rawCards)
-    : null;
-  const nftValuePkn = asNonNeg(
-    row.nftValuePkn ?? prior?.nftValuePkn,
-  );
-  const cardsOwned = asNonNeg(
-    row.cardsOwned ?? row.ownedCards ?? prior?.cardsOwned,
-  );
-  const nftOwned = asNonNeg(row.nftOwned ?? prior?.nftOwned);
-  const totalPkn = currencyPkn + (cardsValuePkn || 0);
-  const date = utcDayKey(row.date || row.day || new Date());
-  if (!date) return null;
-  return {
-    date,
-    totalPkn,
-    assets: {
-      currencyPkn,
-      listedPkn,
-      cardsValuePkn,
-      cardsKnown: cardsValuePkn != null,
-      nftValuePkn,
-      cardsOwned,
-      nftOwned,
-    },
-  };
-}
-
-/** Build today's live point from Dashboard metrics. */
-export function todayHistoryDay({
-  currencyPkn = 0,
-  listedPkn = 0,
-  cardsValuePkn = 0,
-  nftValuePkn = 0,
-  cardsOwned = 0,
-  nftOwned = 0,
-  date = new Date(),
-} = {}) {
-  return normalizeHistoryDay({
-    date,
-    currencyPkn,
-    listedPkn,
-    cardsValuePkn,
-    nftValuePkn,
-    cardsOwned,
-    nftOwned,
-  });
-}
-
-const HISTORY_KEY = 'pokoin.portfolioHistory';
-const HISTORY_DAYS = 400;
-
-function historyStore() {
-  try {
-    const local = globalThis.localStorage;
-    if (local && typeof local.getItem === 'function') return local;
-  } catch {
-    /* private mode */
-  }
-  return null;
-}
-
-function readHistoryBook() {
-  const store = historyStore();
-  if (!store) return {};
-  try {
-    const raw = JSON.parse(store.getItem(HISTORY_KEY) || '{}');
-    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-  } catch {
-    return {};
-  }
-}
-
-/** Days already saved for this Firebase uid, oldest first. */
-export function readPortfolioHistory(uid) {
-  const id = String(uid || '').trim();
-  if (!id) return [];
-  const rows = readHistoryBook()[id];
-  if (!Array.isArray(rows)) return [];
-  return rows.map((row) => normalizeHistoryDay(row)).filter(Boolean).slice(-HISTORY_DAYS);
-}
-
-/**
- * Remember one snapshot per UTC day. A later visit the same day replaces
- * that point; it does not invent earlier days.
- */
-export function writePortfolioHistory(uid, day) {
-  const id = String(uid || '').trim();
-  const point = normalizeHistoryDay(day);
-  const prior = readPortfolioHistory(id);
-  if (!id || !point) return prior;
-  const next = prior.filter((row) => row.date !== point.date);
-  next.push(point);
-  next.sort((a, b) => a.date.localeCompare(b.date));
-  const kept = next.slice(-HISTORY_DAYS);
-  const store = historyStore();
-  if (store) {
-    const book = readHistoryBook();
-    book[id] = kept;
-    try {
-      store.setItem(HISTORY_KEY, JSON.stringify(book));
-    } catch {
-      /* quota */
-    }
-  }
-  return kept;
-}
-
-/** Stored days, with today's live totals winning that date. */
-export function withLiveHistoryDay(series, today) {
-  const days = (Array.isArray(series) ? series : [])
-    .map((row) => normalizeHistoryDay(row))
-    .filter(Boolean);
-  const live = today ? normalizeHistoryDay(today) : null;
-  if (!live) return days;
-  const next = days.filter((row) => row.date !== live.date);
-  next.push(live);
-  next.sort((a, b) => a.date.localeCompare(b.date));
-  return next;
-}
-
-export function historySeriesMax(days = []) {
-  let max = 0;
-  for (const day of days || []) {
-    max = Math.max(max, asNonNeg(day?.totalPkn));
-  }
-  return max;
-}
-
-/** Realized history ends here when the window includes today. The rest is a projection. */
-export const HISTORY_REALIZED_SPLIT = 2 / 3;
-
-export function historyWindowSplit(points, today = new Date()) {
-  const last = points?.[points.length - 1]?.date || '';
-  return last && last === utcDayKey(today) ? HISTORY_REALIZED_SPLIT : 1;
-}
-
-/** Map a day onto the plot. Today's window uses only the first two thirds. */
-export function historyPlotX(date, { from, to, width, split = 1 } = {}) {
-  const start = Date.parse(`${from || ''}T00:00:00Z`);
-  const end = Date.parse(`${to || ''}T00:00:00Z`);
-  const span = end - start;
-  if (!Number.isFinite(span) || span <= 0) return split < 1 ? width * split : width / 2;
-  const at = Date.parse(`${date}T00:00:00Z`);
-  const t = (at - start) / span;
-  return Math.min(1, Math.max(0, t)) * width * split;
-}
-
-/** Pointer ratio across the plot. Past the split, the day is today and the rest is a projection. */
-export function historyPointerDay(days, ratio, { split = 1 } = {}) {
-  const t = Math.min(1, Math.max(0, Number(ratio) || 0));
-  const projection = split < 1 && t > split;
-  const day = nearestHistoryDay(days, projection || split >= 1 ? (projection ? 1 : t) : t / split);
-  return { day, projection, xPct: t * 100 };
-}
-
-export function nearestHistoryDay(days, ratio) {
-  const list = Array.isArray(days) ? days.filter(Boolean) : [];
-  if (!list.length) return null;
-  if (list.length === 1) return list[0];
-  const t = Math.min(1, Math.max(0, Number(ratio) || 0));
-  const start = Date.parse(`${list[0].date}T00:00:00Z`);
-  const end = Date.parse(`${list[list.length - 1].date}T00:00:00Z`);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-    const index = Math.round(t * (list.length - 1));
-    return list[index] || list[list.length - 1];
-  }
-  const targetKey = new Date(start + t * (end - start)).toISOString().slice(0, 10);
-  let held = list[0];
-  for (const day of list) {
-    if (day.date <= targetKey) held = day;
-    else break;
-  }
-  return held;
 }
 
 export function addUtcDays(dayKey, delta) {
@@ -236,105 +36,92 @@ export function addUtcDays(dayKey, delta) {
   return date.toISOString().slice(0, 10);
 }
 
-/** A ledger row becomes a signed wallet movement. Spends stored as positive amounts flip. */
-export function movementFromLedger(row = {}) {
-  const amount = Number(row.amountPkn);
-  if (!Number.isFinite(amount) || amount === 0) return null;
-  const type = String(row.type || '');
-  const outbound = amount < 0 || type.includes('sent') || type.includes('withdraw');
-  const signed = outbound && amount > 0 ? -Math.abs(amount) : amount;
-  const date = utcDayKey(row.createdAt || row.at || row.date);
+/** Whole days from one day key to another (negative when to is earlier). */
+export function daySpan(from, to) {
+  const start = Date.parse(`${from || ''}T00:00:00Z`);
+  const end = Date.parse(`${to || ''}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.round((end - start) / DAY_MS);
+}
+
+export function formatDayLabel(dayKey) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dayKey || ''));
+  if (!m) return '';
+  return `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}`;
+}
+
+export function formatHistoryAxisLabel(dayKey, withYear = false) {
+  const label = formatDayLabel(dayKey);
+  if (!withYear || !label) return label;
+  return `${label} ${String(dayKey || '').slice(0, 4)}`;
+}
+
+/**
+ * One day of portfolio value. Cards are null before any stock was held; a
+ * held pile with no sold price yet is 0, never an ask. Idempotent, so an
+ * already-normalized row keeps its assets.
+ */
+export function normalizeHistoryDay(row = {}) {
+  const prior = row && typeof row.assets === 'object' && row.assets ? row.assets : null;
+  const date = utcDayKey(row?.date || row?.day || new Date());
   if (!date) return null;
-  return { date, amountPkn: signed };
-}
-
-/**
- * Homepage cheapest × quantity. A card with no market price is skipped,
- * so it never contributes a number.
- */
-export function marketValueFromHoldings(items, prices) {
-  let total = 0;
-  let copies = 0;
-  for (const item of items || []) {
-    const id = String(item?.cardId || item?.card_id || '').trim();
-    const qty = Math.max(0, Math.trunc(Number(item?.quantity) || 0));
-    const price = Number(prices?.[id]);
-    if (!/^\d+$/.test(id) || qty < 1 || !(price > 0)) continue;
-    total += qty * price;
-    copies += qty;
-  }
-  if (!copies) return null;
-  return { cardsValuePkn: Math.round(total * 100) / 100, copies };
-}
-
-/**
- * Wallet on the days it changed, a zero the day before the first movement,
- * and today's homepage market only on today. Asks and unpriced cards stay out.
- */
-export function buildCollectionHistory({
-  movements = [],
-  balance = 0,
-  marketCardsPkn = null,
-  today = new Date(),
-} = {}) {
-  const todayKey = utcDayKey(today);
-  if (!todayKey) return [];
-  const events = (movements || [])
-    .map((row) => (row?.amountPkn != null && row?.date && !row.type ? row : movementFromLedger(row)))
-    .filter((row) => row?.date && row.date <= todayKey && Number.isFinite(row.amountPkn) && row.amountPkn !== 0)
-    .sort((a, b) => a.date.localeCompare(b.date));
-  const byDay = new Map();
-  let running = 0;
-  for (const event of events) {
-    running += event.amountPkn;
-    byDay.set(event.date, Math.max(0, running));
-  }
-  const live = Math.max(0, Number(balance) || 0);
-  const market = marketCardsPkn == null ? null : Math.max(0, Number(marketCardsPkn) || 0);
-  if (!events.length && live === 0 && !(market > 0)) return [];
-  const first = [...byDay.keys()].sort()[0] || todayKey;
-  const points = [];
-  const zeroDate = addUtcDays(first, -1);
-  if (zeroDate && zeroDate < first) {
-    points.push({ date: zeroDate, currencyPkn: 0 });
-  }
-  for (const date of [...byDay.keys()].sort()) {
-    points.push({ date, currencyPkn: byDay.get(date) });
-  }
-  let todayPoint = points.find((row) => row.date === todayKey);
-  if (!todayPoint) {
-    todayPoint = { date: todayKey, currencyPkn: live };
-    points.push(todayPoint);
-    points.sort((a, b) => a.date.localeCompare(b.date));
-  } else {
-    todayPoint.currencyPkn = live;
-  }
-  if (market > 0) {
-    todayPoint.cardsValuePkn = market;
-    todayPoint.cardsKnown = true;
-  }
-  return points.map((row) => normalizeHistoryDay(row)).filter(Boolean);
-}
-
-export function formatHistoryTip(day, { projection = false, forecast = null } = {}) {
-  if (!day) return null;
-  const assets = day.assets || {};
-  const rows = [
-    { label: 'Currency', value: `${formatPknNumber(assets.currencyPkn)} PKN` },
-  ];
-  if (assets.cardsValuePkn != null) {
-    rows.push({ label: 'Cards', value: `${formatPknNumber(assets.cardsValuePkn)} PKN` });
-  }
-  if (projection && forecast?.value != null) {
-    rows.push({ label: 'Projection', value: `${formatPknNumber(forecast.value)} PKN` });
-  } else if (projection) {
-    rows.push({ label: 'Projection', value: 'Rest of today' });
-  }
+  const currencyPkn = round2(nonNeg(row.currencyPkn ?? row.currency ?? prior?.currencyPkn));
+  const rawCards = row.cardsValuePkn !== undefined ? row.cardsValuePkn : prior?.cardsValuePkn;
+  const known = (row.cardsKnown ?? prior?.cardsKnown) === true;
+  const cardsValuePkn = known && rawCards != null && rawCards !== '' ? round2(nonNeg(rawCards)) : null;
+  const cardsHeld = cardsValuePkn == null ? 0 : Math.trunc(nonNeg(row.cardsHeld ?? prior?.cardsHeld));
+  const pricedRaw = Math.trunc(nonNeg(row.cardsPriced ?? prior?.cardsPriced));
+  const move = Number(row.cardsMove ?? prior?.cardsMove);
   return {
-    dateLabel: formatDayLabel(day.date),
-    totalLabel: `${formatPknNumber(day.totalPkn)} PKN`,
-    rows,
+    date,
+    totalPkn: round2(currencyPkn + (cardsValuePkn || 0)),
+    assets: {
+      currencyPkn,
+      cardsValuePkn,
+      cardsKnown: cardsValuePkn != null,
+      cardsHeld,
+      cardsPriced: cardsValuePkn == null ? 0 : (cardsHeld ? Math.min(cardsHeld, pricedRaw) : pricedRaw),
+      cardsMove: cardsValuePkn != null && (row.cardsMove ?? prior?.cardsMove) != null && Number.isFinite(move)
+        ? move
+        : null,
+    },
   };
+}
+
+function normalizedSeries(series) {
+  return (Array.isArray(series) ? series : [])
+    .map((row) => normalizeHistoryDay(row))
+    .filter(Boolean)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Today's live numbers win that date, so the chart ends on the wallet and the
+ * 1-DR value the dashboard shows above it. cards is { valuePkn, pricedCards,
+ * cards } from /api/cardtrader-assets; leave it undefined when unknown.
+ */
+export function withLiveToday(series, { currencyPkn, cards } = {}, today = new Date()) {
+  const days = normalizedSeries(series);
+  const todayKey = utcDayKey(today);
+  const hasCurrency = currencyPkn != null && Number.isFinite(Number(currencyPkn));
+  if (!todayKey || (!hasCurrency && cards === undefined)) return days;
+  const held = cards && Number(cards.cards) > 0;
+  if (!days.length && !(nonNeg(currencyPkn) > 0) && !held) return days;
+  const base = days.find((day) => day.date === todayKey)
+    || [...days].reverse().find((day) => day.date < todayKey)
+    || normalizeHistoryDay({ date: todayKey });
+  const assets = { ...base.assets };
+  if (hasCurrency) assets.currencyPkn = nonNeg(currencyPkn);
+  if (cards !== undefined) {
+    assets.cardsKnown = Boolean(held);
+    assets.cardsValuePkn = held ? nonNeg(cards.valuePkn) : null;
+    assets.cardsHeld = held ? Math.trunc(nonNeg(cards.cards)) : 0;
+    assets.cardsPriced = held ? Math.trunc(nonNeg(cards.pricedCards)) : 0;
+  }
+  if (base.date !== todayKey) assets.cardsMove = null;
+  const point = normalizeHistoryDay({ date: todayKey, ...assets });
+  return [...days.filter((day) => day.date !== todayKey), point]
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** Collectr-style windows. Longer ones appear only when history reaches that far. */
@@ -356,9 +143,9 @@ export function historyPresetWindow(presetId, today = new Date()) {
   return { from: addUtcDays(todayKey, -preset.days), to: todayKey, preset: preset.id };
 }
 
-/** 1M and MAX always. 1Y and 2Y only when the first stored day is at least that old. */
+/** 1M and MAX always; a longer window only when the first stored day is that old. */
 export function availableHistoryPresets(series, today = new Date()) {
-  const days = withLiveHistoryDay(series, null);
+  const days = normalizedSeries(series);
   if (!days.length) return [];
   const earliest = days[0].date;
   const todayKey = utcDayKey(today);
@@ -373,90 +160,30 @@ export function availableHistoryPresets(series, today = new Date()) {
  * observation, so a quiet month still draws instead of going blank.
  */
 export function sliceHistorySeries(series, { from = '', to = '' } = {}) {
-  const days = withLiveHistoryDay(series, null);
+  const days = normalizedSeries(series);
   if (!days.length) return [];
   let start = from || days[0].date;
   let end = to || days[days.length - 1].date;
-  if (start && end && start > end) {
-    const swap = start;
-    start = end;
-    end = swap;
-  }
+  if (start > end) [start, end] = [end, start];
   const inside = days.filter((day) => day.date >= start && day.date <= end);
   const prior = [...days].reverse().find((day) => day.date < start);
   const points = [];
-  if (prior && start && (!inside.length || inside[0].date !== start)) {
+  if (prior && (!inside.length || inside[0].date !== start)) {
     points.push({ ...prior, date: start, carried: true });
   }
   points.push(...inside);
-  if (points.length && end && points[points.length - 1].date < end) {
+  if (points.length && points[points.length - 1].date < end) {
     points.push({ ...points[points.length - 1], date: end, carried: true });
   }
   return points;
 }
 
-/**
- * Axis hugs the visible values. A wallet line under a priced pile does not
- * stretch the scale back to zero — that hides the dump's day-to-day move.
- * A series that actually starts near zero still includes zero.
- */
-export function historyAxis(points, extraTotals = []) {
-  const rows = points || [];
-  const extras = (extraTotals || []).map((value) => asNonNeg(value)).filter((value) => value > 0);
-  const totals = rows.map((day) => asNonNeg(day?.totalPkn));
-  if (!totals.length) {
-    const yMax = niceScaleMax(0);
-    return { yMin: 0, yMax, ticks: yTickValues(yMax, 4) };
-  }
-  const cardTotals = rows
-    .filter((day) => day?.assets?.cardsKnown)
-    .map((day) => asNonNeg(day?.totalPkn))
-    .concat(extras);
-  const floor = Math.max(0, ...totals.filter((_, index) => !rows[index]?.assets?.cardsKnown), 0);
-  const cardMin = cardTotals.length ? Math.min(...cardTotals) : 0;
-  const cardMax = cardTotals.length ? Math.max(...cardTotals) : 0;
-  const piled = cardTotals.length > 0
-    && cardMax > cardMin
-    && cardMin > Math.max(floor, 1) * 20
-    && (cardMax - cardMin) < cardMin * 0.25;
-  const values = piled ? cardTotals : totals.concat(extras);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (!piled) {
-    const span = Math.max(max - min, max * 0.08, 1);
-    const yMax = niceScaleMax(max + span * 0.16);
-    const rawMin = Math.max(0, min - span * 0.22);
-    const step = yMax / 4;
-    const yMin = rawMin <= 0 || min === 0 ? 0 : Math.max(0, Math.floor(rawMin / step) * step);
-    const ticks = [];
-    for (let i = 0; i <= 4; i += 1) {
-      ticks.push(Math.round(yMin + ((yMax - yMin) * i) / 4));
-    }
-    return { yMin, yMax: Math.max(yMax, yMin + 1), ticks, zoomed: false };
-  }
-  const pad = Math.max((max - min) * 0.45, max * 0.008, 1);
-  const yMin = Math.max(0, min - pad);
-  const yMax = max + pad;
-  const rough = Math.max((yMax - yMin) / 4, 1);
-  const exp = Math.floor(Math.log10(rough));
-  const base = 10 ** Math.max(exp, 0);
-  const fraction = rough / base;
-  const nice = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
-  const step = nice * base;
-  const ticks = [];
-  for (let value = Math.ceil(yMin / step) * step; value <= yMax + step * 0.01; value += step) {
-    ticks.push(Math.round(value));
-  }
-  if (ticks.length < 2) ticks.push(Math.round(yMin), Math.round(yMax));
-  return { yMin, yMax, ticks, zoomed: true };
-}
-
 export function historyWindowChange(points, presetId = 'custom') {
   if (!points?.length) return null;
-  const first = asNonNeg(points[0].totalPkn);
-  const last = asNonNeg(points[points.length - 1].totalPkn);
-  const delta = Math.round((last - first) * 100) / 100;
-  // A window that starts before any card was priced is not a return on the wallet.
+  const first = nonNeg(points[0].totalPkn);
+  const last = nonNeg(points[points.length - 1].totalPkn);
+  const delta = round2(last - first);
+  // Cards that arrived inside the window are not a return on what was there.
   const gainedCards = points[0]?.assets?.cardsKnown !== true
     && points.some((day) => day?.assets?.cardsKnown === true);
   const pct = first > 0 && !gainedCards ? ((last - first) / first) * 100 : null;
@@ -480,44 +207,151 @@ export function formatHistoryDelta(change) {
   return `${signed} (${pctSigned}) ${change.phrase}`;
 }
 
+/** The share of the realized plot when the window ends today. The rest is the projection. */
+export const HISTORY_REALIZED_SPLIT = 2 / 3;
+
 /**
- * One step ahead of the sold-day totals, the same idea as a stock regression
- * trend / forecast overlay. Uses the last priced days only. A wallet-only
- * series has nothing to project.
+ * Day scale of the chart. A window that ends today gets a projection of half
+ * its length, so the realized days fill two thirds and the projection one
+ * third on the same scale; any other window is realized end to end.
  */
-/** Last day that actually priced owned cards. Wallet-only days are not a start. */
-export function lastPricedTotal(points) {
-  const priced = (points || []).filter((day) => (
-    day?.assets?.cardsKnown === true && Number(day.totalPkn) > 0
-  ));
-  if (!priced.length) return null;
-  return Number(priced[priced.length - 1].totalPkn);
+export function historyTimeline(points, today = new Date()) {
+  const to = points?.[points.length - 1]?.date || '';
+  let from = points?.[0]?.date || '';
+  if (!from || !to) return null;
+  if (daySpan(from, to) < 1) from = addUtcDays(to, -1);
+  const span = daySpan(from, to);
+  const live = to === utcDayKey(today);
+  const horizonDays = live ? Math.max(1, Math.round(span * (1 / HISTORY_REALIZED_SPLIT - 1))) : 0;
+  const total = span + horizonDays;
+  return {
+    from,
+    to,
+    end: addUtcDays(to, horizonDays),
+    span,
+    horizonDays,
+    total,
+    split: span / total,
+  };
 }
 
-export function projectCardValue(points) {
-  const priced = (points || []).filter((day) => (
-    day?.assets?.cardsKnown === true && Number(day.totalPkn) > 0
-  ));
-  if (priced.length < 2) return null;
-  const sample = priced.slice(-8);
-  const n = sample.length;
-  let sumX = 0;
-  let sumY = 0;
-  let sumXX = 0;
-  let sumXY = 0;
-  sample.forEach((day, index) => {
-    const y = Number(day.totalPkn) || 0;
-    sumX += index;
-    sumY += y;
-    sumXX += index * index;
-    sumXY += index * y;
-  });
-  const denom = n * sumXX - sumX * sumX;
-  if (!denom) return null;
-  const slope = (n * sumXY - sumX * sumY) / denom;
-  const intercept = (sumY - slope * sumX) / n;
-  const value = Math.max(0, Math.round((intercept + slope * n) * 100) / 100);
-  return { value, slope: Math.round(slope * 100) / 100, days: n };
+/** 0..1 across the plot. */
+export function timelineRatio(timeline, date) {
+  if (!timeline?.total) return 0;
+  return Math.min(1, Math.max(0, daySpan(timeline.from, date) / timeline.total));
+}
+
+/** Day under a 0..1 pointer ratio. */
+export function timelineDay(timeline, ratio) {
+  if (!timeline) return '';
+  const t = Math.min(1, Math.max(0, Number(ratio) || 0));
+  return addUtcDays(timeline.from, Math.round(t * timeline.total));
+}
+
+/** The value in force on a day: the last point on or before it. */
+export function historyDayAt(points, dayKey) {
+  let held = null;
+  for (const day of points || []) {
+    if (day.date <= dayKey) held = day;
+    else break;
+  }
+  return held || points?.[0] || null;
+}
+
+const TICK_DAY_STEPS = [1, 2, 7, 14];
+const TICK_MONTH_STEPS = [1, 2, 3, 6, 12];
+
+function monthTicks(from, end, months) {
+  const ticks = [];
+  const [y, m] = from.split('-').map(Number);
+  let year = y;
+  let month = m - 1;
+  for (let guard = 0; guard < 400; guard += 1) {
+    if (month % months === 0) {
+      const day = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+      if (day > end) break;
+      if (day >= from) ticks.push(day);
+    }
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return ticks;
+}
+
+/**
+ * Round-date ticks across the whole scale (realized and projected): days,
+ * Mondays, then month starts. Ticks crowding the Today mark are left to it.
+ */
+export function historyDateTicks(timeline, maxTicks = 7) {
+  if (!timeline?.total) return [];
+  const { from, end, total } = timeline;
+  let dates = [];
+  const dayStep = TICK_DAY_STEPS.find((step) => total / step <= maxTicks);
+  if (dayStep) {
+    const epoch = '1970-01-05'; // a Monday
+    for (let day = from; day <= end; day = addUtcDays(day, 1)) {
+      const offset = daySpan(epoch, day);
+      if (((offset % dayStep) + dayStep) % dayStep === 0) dates.push(day);
+    }
+  } else {
+    const months = TICK_MONTH_STEPS.find((step) => total / (step * 30.44) <= maxTicks) || 12;
+    dates = monthTicks(from, end, months);
+  }
+  const todayRatio = timeline.horizonDays ? timeline.split : null;
+  const withYear = from.slice(0, 4) !== end.slice(0, 4);
+  return dates
+    .map((date) => ({ date, ratio: timelineRatio(timeline, date) }))
+    .filter((tick) => tick.ratio > 0.04 && tick.ratio < 0.96)
+    .filter((tick) => todayRatio == null || Math.abs(tick.ratio - todayRatio) > 0.08)
+    .map((tick, index) => ({
+      ...tick,
+      label: formatHistoryAxisLabel(tick.date, withYear && tick.date.slice(5, 7) === '01'),
+      // Every other tick steps aside on a phone.
+      minor: index % 2 === 1,
+    }));
+}
+
+function niceStep(raw) {
+  if (!(raw > 0)) return 1;
+  const base = 10 ** Math.floor(Math.log10(raw));
+  const fraction = raw / base;
+  const nice = [1, 2, 2.5, 5, 10].find((step) => fraction <= step) || 10;
+  return nice * base;
+}
+
+/**
+ * Y scale in the Wealthfolio manner: a window whose values span a fifth or
+ * more of their top starts at zero with headroom; a steadier window hugs its
+ * range so a few percent still shows. Ticks are round numbers.
+ */
+export function historyAxis(values) {
+  const list = (values || []).map(Number).filter((value) => Number.isFinite(value) && value >= 0);
+  const max = list.length ? Math.max(...list) : 0;
+  const min = list.length ? Math.min(...list) : 0;
+  if (!(max > 0)) return { yMin: 0, yMax: 20, ticks: [0, 5, 10, 15, 20], zeroBased: true };
+  const zeroBased = (max - min) / max >= 0.2;
+  let lo = 0;
+  let hi = max * 1.06;
+  if (!zeroBased) {
+    const pad = Math.max((max - min) * 0.35, max * 0.02);
+    lo = Math.max(0, min - pad);
+    hi = max + pad;
+  }
+  let best = null;
+  for (const intervals of [4, 5]) {
+    const step = niceStep((hi - lo) / intervals);
+    const yMin = zeroBased ? 0 : Math.floor(lo / step) * step;
+    const yMax = Math.max(yMin + step, Math.ceil(hi / step) * step);
+    if (!best || yMax - yMin < best.yMax - best.yMin) best = { step, yMin, yMax };
+  }
+  const ticks = [];
+  for (let value = best.yMin; value <= best.yMax + best.step / 2; value += best.step) {
+    ticks.push(Math.round(value * 100) / 100);
+  }
+  return { yMin: best.yMin, yMax: best.yMax, ticks, zeroBased: best.yMin === 0 };
 }
 
 /** Hold the last value, then jump vertically on the day it changes. */
@@ -531,8 +365,112 @@ export function stepHistoryPoints(coords) {
   return out;
 }
 
-export function formatHistoryAxisLabel(dayKey, withYear = false) {
-  const label = formatDayLabel(dayKey);
-  if (!withYear || !label) return label;
-  return `${label} ${String(dayKey || '').slice(0, 4)}`;
+const PROJECTION_Z = 1.2816; // 10th to 90th percentile
+const PROJECTION_MIN_MOVES = 7;
+const PROJECTION_MOVE_CAP = 0.25; // log move a day
+const PROJECTION_SHRINK_DAYS = 30;
+
+/** Daily log price moves of the held basket inside the window (first sales excluded server-side). */
+export function cardMoves(points) {
+  const moves = [];
+  for (const day of (points || []).slice(1)) {
+    if (day?.carried) continue;
+    const move = day?.assets?.cardsMove;
+    if (move == null || !Number.isFinite(move) || move <= -1) continue;
+    const log = Math.log1p(move);
+    moves.push(Math.min(PROJECTION_MOVE_CAP, Math.max(-PROJECTION_MOVE_CAP, log)));
+  }
+  return moves;
+}
+
+/**
+ * The hatched third: a stock-style projection of the window's own price moves.
+ * Cards follow a random walk fitted to their daily moves; liquidity stays
+ * flat. The center grows at the mean move shrunk toward zero by
+ * n / (n + 30), so one lucky sale cannot draw a trend; the band is the 10th
+ * to 90th percentile of that walk, widening with the square root of the days.
+ * Under a week of moves it holds today's value with no band.
+ */
+export function projectPortfolio(points, timeline) {
+  const horizon = timeline?.horizonDays || 0;
+  const last = points?.[points.length - 1];
+  if (!horizon || !last) return null;
+  const liquidity = nonNeg(last.assets?.currencyPkn);
+  const cards = nonNeg(last.assets?.cardsValuePkn);
+  const moves = cards > 0 ? cardMoves(points) : [];
+  const n = moves.length;
+  const enough = n >= PROJECTION_MIN_MOVES;
+  const mean = n ? moves.reduce((sum, move) => sum + move, 0) / n : 0;
+  const drift = enough ? mean * (n / (n + PROJECTION_SHRINK_DAYS)) : 0;
+  const vol = enough
+    ? Math.sqrt(moves.reduce((sum, move) => sum + (move - mean) ** 2, 0) / (n - 1))
+    : null;
+  const days = [];
+  for (let h = 0; h <= horizon; h += 1) {
+    const spread = vol ? PROJECTION_Z * vol * Math.sqrt(h) : 0;
+    const center = cards * Math.exp(drift * h);
+    days.push({
+      date: addUtcDays(timeline.to, h),
+      value: round2(liquidity + center),
+      low: round2(liquidity + cards * Math.exp(drift * h - spread)),
+      high: round2(liquidity + cards * Math.exp(drift * h + spread)),
+      cards: round2(center),
+      liquidity,
+    });
+  }
+  return {
+    days,
+    moves: n,
+    drift,
+    vol,
+    band: Boolean(vol),
+    end: days[days.length - 1],
+  };
+}
+
+export const HISTORY_LAYERS = [
+  { key: 'liquidity', label: 'Liquidity' },
+  { key: 'cards', label: 'Cards' },
+];
+
+function pricedNote(assets) {
+  if (!assets?.cardsHeld) return '';
+  return `${assets.cardsPriced.toLocaleString('en-US')} of ${assets.cardsHeld.toLocaleString('en-US')} with a sale`;
+}
+
+/** Tip for a realized day: total first, then every layer at that day. */
+export function formatHistoryTip(day) {
+  if (!day) return null;
+  const assets = day.assets || {};
+  const rows = [];
+  if (assets.cardsValuePkn != null) {
+    rows.push({
+      key: 'cards',
+      label: 'Cards',
+      value: `${formatPknNumber(assets.cardsValuePkn)} PKN`,
+      note: pricedNote(assets),
+    });
+  }
+  rows.push({ key: 'liquidity', label: 'Liquidity', value: `${formatPknNumber(assets.currencyPkn)} PKN` });
+  return {
+    dateLabel: formatDayLabel(day.date),
+    totalLabel: `${formatPknNumber(day.totalPkn)} PKN`,
+    rows,
+  };
+}
+
+/** Tip for a projected day. Projections are whole PKN; they are not prices. */
+export function formatProjectionTip(point, projection) {
+  if (!point || !projection) return null;
+  const whole = (value) => formatPknNumber(Math.round(value));
+  return {
+    dateLabel: `${formatDayLabel(point.date)} · Projection`,
+    totalLabel: `${whole(point.value)} PKN`,
+    rows: projection.band
+      ? [{ key: 'range', label: 'Likely range', value: `${whole(point.low)}–${whole(point.high)} PKN` }]
+      : [],
+    footnote: projection.band
+      ? `8 in 10 outcomes · from ${projection.moves} days of sold prices`
+      : 'Holds today’s value until a week of sold prices exists',
+  };
 }

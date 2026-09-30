@@ -123,3 +123,18 @@ test('jumbo is a Product subtype, never a fourth top-level search entity', () =>
   assert.equal(printingMatchesSearchTab(normalRow, 'jumbo'), false);
   assert.equal(printingMatchesSearchTab(normalRow, 'product'), false);
 });
+
+test('uniqueSellers keeps the associate roster row and folds that person listings in', () => {
+  const sellers = uniqueSellers([
+    { sellerUid: 'associate:gianlonji', sellerUsername: 'gianlonji', sellerName: 'gianlonji', sellerDisplayName: 'Gianlonji', associateRole: 'distributor' },
+    { sellerUid: 'uid_1', sellerUsername: 'gianlonji', sellerName: 'gianlonji', sellerDisplayName: 'Gianlonji' },
+    { sellerUid: 'uid_2', sellerUsername: 'gianlonji', sellerName: 'gianlonji', sellerDisplayName: 'Gianlonji' },
+    { sellerUid: 'uid_9', sellerUsername: 'redshakkio', sellerName: 'redshakkio', sellerDisplayName: 'Red' },
+  ]);
+  assert.equal(sellers.length, 2);
+  const gian = sellers.find((row) => row.username === 'gianlonji');
+  assert.equal(gian.id, 'associate:gianlonji');
+  assert.equal(gian.associateRole, 'distributor');
+  assert.equal(gian.count, 2);
+  assert.equal(sellers.find((row) => row.username === 'redshakkio').associateRole, undefined);
+});

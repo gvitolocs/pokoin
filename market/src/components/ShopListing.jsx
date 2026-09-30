@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { formatPkn } from '../api.js';
+import { useBuyerCurrency } from '../use-buyer-currency.js';
 import { artCutVars } from '../art-cut.js';
 import { listingReference, listingsReference, writeListingDrag } from '../chat-listing.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
 import ThumbZoom from './ThumbZoom.jsx';
 import { openListingChat } from '../chat-dock-store.js';
 import {
+  conditionChipSrc,
   conditionShort,
   conditionTone,
   listingExtraTags,
@@ -42,6 +43,14 @@ function ShopScan({ image, name, setName = '' }) {
 
 function Flag({ flag, className }) {
   if (!flag) return null;
+  if (flag.emoji) {
+    return (
+      <span className={className} title={flag.label || flag.short} aria-label={flag.label || flag.short}>
+        {flag.emoji}
+      </span>
+    );
+  }
+  if (!flag.src) return null;
   return (
     <img
       className={className}
@@ -83,6 +92,7 @@ export default function ShopListingRow({
   const sellerUid = reference.sellerUid;
   const href = sellerHref(offer);
   const country = sellerCountryFlag(offer?.sellerCountry);
+  const buyer = useBuyerCurrency();
   const language = listingLanguageFlag(offer?.language);
   const tone = conditionTone(offer?.condition) || 'nm';
   const cond = conditionShort(offer?.condition);
@@ -182,11 +192,13 @@ export default function ShopListingRow({
       ) : href ? (
         <Link className="shop-seller" to={href} state={{ listing: offer }} onClick={(event) => event.stopPropagation()}>
           <Flag flag={country} className="shop-flag shop-flag-country" />
+          {country?.short ? <span className="shop-country-code">{country.short}</span> : null}
           <span className="shop-brand">{name}</span>
         </Link>
       ) : (
         <span className="shop-seller">
           <Flag flag={country} className="shop-flag shop-flag-country" />
+          {country?.short ? <span className="shop-country-code">{country.short}</span> : null}
           <span className="shop-brand">{name}</span>
         </span>
       )}
@@ -196,10 +208,18 @@ export default function ShopListingRow({
             <em key={tag} className={tag === 'Reverse' ? 'meta-chip is-reverse' : 'meta-chip'}>{tag}</em>
           ))}
         </span>
-        <span className={`shop-cond is-${tone}`}>{cond}</span>
+        <img
+          className={`shop-cond is-${tone}`}
+          src={conditionChipSrc(offer?.condition)}
+          alt={cond}
+          title={cond}
+          width="40"
+          height="28"
+          draggable={false}
+        />
         <Flag flag={language} className="shop-flag shop-flag-lang" />
       </span>
-      <span className="shop-px">{formatPkn(offer.pricePkn) || '—'}</span>
+      <span className="shop-px">{buyer.format(offer.pricePkn, offer.sellerAcceptsPkn) || '—'}</span>
       {!mine ? (
         <span className="shop-row-actions">
           {sellerUid ? (

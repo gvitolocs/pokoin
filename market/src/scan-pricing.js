@@ -4,6 +4,8 @@
 // then the language (English preferred) when a facet has no sold data, with
 // the cheapest listed PKN as the floor. Spec: docs/SCAN_LISTING_WORKFLOW.md.
 
+import { pknFromPriceInput } from './seller-currency.js';
+
 export const SCAN_CONDITIONS = ['NM', 'SP', 'MP', 'PL', 'Poor'];
 
 /** Identity of everything a suggestion depends on (version + facets). */
@@ -92,10 +94,11 @@ export function suggestPriceFromSlices(slices, facets = {}) {
  *   keep    → same manual price, nothing to save
  *   set     → save pricePkn as a manual price
  */
-export function priceFieldCommit(row = {}, raw = '') {
+export function priceFieldCommit(row = {}, raw = '', currency = 'PKN') {
   const value = String(raw ?? '').trim();
   if (value === '') return { action: 'default' };
-  const pricePkn = Number(value);
+  // Sellers who opted out of PKN type their local currency; rows store PKN.
+  const pricePkn = currency === 'PKN' ? Number(value) : pknFromPriceInput(value, currency);
   if (!Number.isFinite(pricePkn) || pricePkn <= 0) return { action: 'restore' };
   if (pricePkn === Number(row.pricePkn) && !row.priceSuggested) return { action: 'keep' };
   return { action: 'set', pricePkn };

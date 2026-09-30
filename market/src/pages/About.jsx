@@ -45,7 +45,7 @@ export default function About() {
           <p className="about-lede">A global peer-to-peer marketplace built for everyone.</p>
           <div className="about-actions">
             <Link className="btn" to="/marketplace">Explore cards</Link>
-            <Link className="btn ghost" to="/inventory">Start selling</Link>
+            <Link className="btn ghost" to="/mypokoin">Start selling</Link>
           </div>
         </div>
         <img className="about-mark" src="/home/logo.png" width="168" height="168" alt="" />
@@ -159,7 +159,7 @@ export default function About() {
         <p>Cards, wallet, and chain in the browser. No App Store or Play listing yet.</p>
         <div className="about-actions">
           <Link className="btn" to="/marketplace">Marketplace</Link>
-          <Link className="btn ghost" to="/inventory">Start selling</Link>
+          <Link className="btn ghost" to="/mypokoin">Start selling</Link>
         </div>
       </section>
     </div>

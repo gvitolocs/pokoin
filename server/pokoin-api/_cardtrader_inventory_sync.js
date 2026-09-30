@@ -7,12 +7,15 @@
 
 'use strict';
 
-const { fetchProductsExport, validateCardTraderToken } = require('./_cardtrader_client');
+const { fetchProductsExport, fetchSellerOrders, validateCardTraderToken } = require('./_cardtrader_client');
+const { eventDocId, orderItemId } = require('./_cardtrader_webhook_core');
+const { recordCardTraderSale } = require('./_native_sales');
 const { decryptIntegrationToken, markOneDayReady } = require('./_cardtrader_integration');
 const { marketplaceWriteQuery, marketplaceQuery } = require('../server/_marketplace_db');
 const {
   CT_PREFIX,
   SOURCE_IMPORT,
+  classifyVanishedProduct,
   cleanText,
   ctSourceListingId,
   destructiveReconcileGate,
@@ -28,7 +31,15 @@ const {
   publicCardIdFromBlueprint,
   productLinkNeedsRefresh,
   resolveProductAttachment,
+  saleItemsByProduct,
 } = require('./_cardtrader_inventory_sync_core');
+const {
+  gamesFromCardTraderProducts,
+  reconcilePowerToolsWithCardTrader,
+} = require('./_powertools_ct_match');
+
+// Sale evidence window for products that left the export between reconciles.
+const SALE_EVIDENCE_DAYS = 30;
 
 function runWithMarketplaceGame(game, fn) {
   if (!game || game === 'pokemon') return fn();
@@ -52,7 +63,7 @@ async function loadSellerListings(sellerUid) {
       select id, card_id, seller_uid, condition, language, price_pkn, quantity_available,
              signed, reverse, first_edition, foil_state, sealed, graded, altered,
              status, source, source_listing_id, card_name, set_name, collector_number,
-             seller_comment, shipping_available
+             seller_comment, shipping_available, created_at
       from public.marketplace_user_listings
       where seller_uid = $1
         and status in ('active', 'paused', 'sold_out')
@@ -284,6 +295,60 @@ async function applyCtQuantity(listingId, quantity) {
   return result.rows[0] || null;
 }
 
+/**
+ * The seller removed this product on CardTrader: take it off Pokoin as
+ * inactive (not sold_out — nothing sold). CardTrader itself is never touched.
+ */
+async function delistCtListing(listingId) {
+  const result = await marketplaceWriteQuery(
+    `
+      update public.marketplace_user_listings
+      set quantity_available = 0, status = 'inactive', updated_at = now()
+      where id = $1
+        and source_listing_id like 'ct:%'
+        and status in ('active', 'paused', 'sold_out')
+      returning id, quantity_available, status, card_id, source_listing_id
+    `,
+    [listingId],
+  );
+  return result.rows[0] || null;
+}
+
+/** Claim + record a CardTrader sale the webhook did not deliver (idempotent). */
+async function recordMissedCardTraderSales({ firestore, sellerUid, listing, sales }) {
+  const { getFirebaseAdmin } = require('../server/_firebase');
+  const admin = getFirebaseAdmin();
+  let recorded = 0;
+  for (const { order, item } of sales) {
+    const id = eventDocId(sellerUid, order.id, orderItemId(item));
+    try {
+      await firestore.collection('cardtrader_webhook_events').doc(id).create({
+        uid: sellerUid,
+        orderId: String(order.id),
+        orderItemId: orderItemId(item),
+        cause: 'reconcile',
+        listingId: listing.id,
+        quantity: Math.max(1, Math.trunc(Number(item.quantity) || 1)),
+        productId: cleanText(item.product_id, 80),
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      if (error.code === 6 || /already exists/i.test(String(error.message || ''))) continue;
+      throw error;
+    }
+    await recordCardTraderSale({
+      admin,
+      firestore,
+      sellerUid,
+      order,
+      item,
+      listing: { id: listing.id, card_id: listing.card_id },
+    });
+    recorded += 1;
+  }
+  return recorded;
+}
+
 async function linkExistingListing(listingId, product) {
   const sourceListingId = ctSourceListingId(product.id);
   const qty = Math.max(0, Math.min(999999, product.quantity));
@@ -310,7 +375,17 @@ async function linkExistingListing(listingId, product) {
   return result.rows[0] || null;
 }
 
-async function createImportedListing({ sellerUid, sellerName, product, cardId, marketplaceGame = 'pokemon', reactivateHidden = false, meta: metaIn = null }) {
+async function createImportedListing({
+  sellerUid,
+  sellerName,
+  sellerCountry = '',
+  product,
+  cardId,
+  marketplaceGame = 'pokemon',
+  reactivateHidden = false,
+  meta: metaIn = null,
+  location = '',
+}) {
   const meta = metaIn && typeof metaIn === 'object' ? metaIn : await cardMetadata(cardId, marketplaceGame);
   const qty = Math.max(0, Math.min(999999, product.quantity));
   const pricePkn = product.pricePkn;
@@ -325,10 +400,13 @@ async function createImportedListing({ sellerUid, sellerName, product, cardId, m
     throw error;
   }
   const sourceListingId = ctSourceListingId(product.id);
+  const country = cleanText(sellerCountry, 2).toUpperCase();
+  const countryCode = /^[A-Z]{2}$/.test(country) && country !== 'EU' ? country : '';
+  const stockLocation = cleanText(location, 120);
 
   const existing = await marketplaceQuery(
     `
-      select id, source_listing_id, quantity_available, status, card_id
+      select id, source_listing_id, quantity_available, status, card_id, location
       from public.marketplace_user_listings
       where seller_uid = $1 and source_listing_id = $2
       limit 1
@@ -342,15 +420,34 @@ async function createImportedListing({ sellerUid, sellerName, product, cardId, m
     const reactivated = await marketplaceWriteQuery(
       `
         update public.marketplace_user_listings
-        set status = 'active', quantity_available = $2, price_pkn = $3, updated_at = now()
+        set status = 'active', quantity_available = $2, price_pkn = $3,
+            location = case
+              when $4 <> '' then $4
+              else coalesce(location, '')
+            end,
+            updated_at = now()
         where id = $1
-        returning id, source_listing_id, quantity_available, status, card_id
+        returning id, source_listing_id, quantity_available, status, card_id, location
       `,
-      [found.id, qty, pricePkn],
+      [found.id, qty, pricePkn, stockLocation],
     );
     return reactivated.rows[0] || found;
   }
-  if (found) return found;
+  if (found) {
+    if (stockLocation && !cleanText(found.location, 120)) {
+      const patched = await marketplaceWriteQuery(
+        `
+          update public.marketplace_user_listings
+          set location = $2, updated_at = now()
+          where id = $1
+          returning id, source_listing_id, quantity_available, status, card_id, location
+        `,
+        [found.id, stockLocation],
+      );
+      return patched.rows[0] || found;
+    }
+    return found;
+  }
 
   const result = await marketplaceWriteQuery(
     `
@@ -360,22 +457,23 @@ async function createImportedListing({ sellerUid, sellerName, product, cardId, m
         first_edition, foil_state, variant_state, sealed, graded,
         shipping_available, reserve_available, nft_available, seller_comment,
         source, source_listing_id, status, card_name, card_image_url,
-        set_name, collector_number, altered
+        set_name, collector_number, altered, marketplace_game, location
       )
       values (
-        $1,$2,$3,'EU','New',
-        $4,$5,$6,$7,$8,$9,
-        $10,$11,'',false,$12,
-        true,false,false,$13,
-        $14,$15,'active',$16,$17,
-        $18,$19,$20
+        $1,$2,$3,$4,'New',
+        $5,$6,$7,$8,$9,$10,
+        $11,$12,'',false,$13,
+        true,false,false,$14,
+        $15,$16,'active',$17,$18,
+        $19,$20,$21,$22,$23
       )
-      returning id, source_listing_id, quantity_available, status, card_id
+      returning id, source_listing_id, quantity_available, status, card_id, marketplace_game, location
     `,
     [
       cardId,
       sellerUid,
       cleanText(sellerName, 120) || 'Pokoin seller',
+      countryCode,
       product.condition,
       product.language,
       pricePkn,
@@ -393,6 +491,8 @@ async function createImportedListing({ sellerUid, sellerName, product, cardId, m
       meta.set_name || (marketplaceGame === 'pokemon' ? 'Pokemon' : marketplaceGame),
       meta.collector_number || '',
       product.altered === true,
+      marketplaceGame || 'pokemon',
+      stockLocation,
     ],
   );
   return result.rows[0] || null;
@@ -454,7 +554,13 @@ async function removeMissingOneDayReadyAssets(sellerUid, keepProductIds) {
  * earlier listing-mode sync imported, and drop their product links so order
  * webhooks leave them alone. Pokoin-only and pushed listings are untouched.
  */
-async function hideImportedCardTraderListings(sellerUid) {
+/**
+ * Take CardTrader-imported listings off Pokoin (inactive, never deleted) and
+ * drop their import links, so a later sync re-imports them fresh. CardTrader
+ * itself and the seller's own Pokoin listings are never touched.
+ * keepSoldOut leaves sold_out rows labelled as they are (disconnect).
+ */
+async function hideImportedCardTraderListings(sellerUid, { keepSoldOut = false } = {}) {
   const hidden = await marketplaceWriteQuery(
     `
       update public.marketplace_user_listings
@@ -463,9 +569,10 @@ async function hideImportedCardTraderListings(sellerUid) {
         and source = $2
         and source_listing_id like 'ct:%'
         and status <> 'inactive'
+        and ($3::boolean is false or status <> 'sold_out')
       returning id, card_id
     `,
-    [sellerUid, SOURCE_IMPORT],
+    [sellerUid, SOURCE_IMPORT, keepSoldOut === true],
   );
   const rows = hidden.rows || [];
   await marketplaceWriteQuery(
@@ -612,6 +719,8 @@ async function reconcileCardTraderInventory({
   oneDayReady: providedOneDayReady,
   onProgress = null,
   writeConcurrency = 8,
+  powerToolsByGame = null,
+  previewGamesOnly = false,
 } = {}) {
   const emitProgress = async (partial) => {
     if (typeof onProgress !== 'function') return;
@@ -648,6 +757,17 @@ async function reconcileCardTraderInventory({
       error: error.message || 'CardTrader is not connected.',
       summary,
     };
+  }
+
+  let sellerCountry = '';
+  try {
+    const profile = await firestore.collection('users').doc(sellerUid).get();
+    const raw = String(profile.exists ? profile.data()?.shipFromCountry || '' : '')
+      .trim()
+      .toUpperCase();
+    if (/^[A-Z]{2}$/.test(raw) && raw !== 'EU') sellerCountry = raw;
+  } catch (_) {
+    sellerCountry = '';
   }
 
   // Account type decides where the stock goes: 1-Day Ready → dashboard assets.
@@ -704,6 +824,129 @@ async function reconcileCardTraderInventory({
   const gate = destructiveReconcileGate(exportResult);
   const products = (exportResult.products || []).map(normalizeProduct).filter((p) => p.id);
   summary.inventory = products.length;
+
+  if (previewGamesOnly) {
+    const games = gamesFromCardTraderProducts(products, marketplaceGameForProduct);
+    const preview = {
+      ...summary,
+      running: false,
+      phase: 'preview_games',
+      games,
+      previewGamesOnly: true,
+    };
+    return {
+      ok: true,
+      connected: true,
+      previewGamesOnly: true,
+      games,
+      summary: preview,
+    };
+  }
+
+  // Power Tools CSV → location by CT product id (matched per marketplace game).
+  const locationByCtProductId = new Map();
+  const powerToolsReconcile = {
+    matched: 0,
+    locationsApplied: 0,
+    ctOnly: [],
+    ptOnly: [],
+    games: [],
+  };
+  if (powerToolsByGame && typeof powerToolsByGame === 'object') {
+    const byGameProducts = new Map();
+    for (const product of products) {
+      const game = marketplaceGameForProduct(product);
+      if (!game) continue;
+      const bucket = byGameProducts.get(game) || [];
+      bucket.push(product);
+      byGameProducts.set(game, bucket);
+    }
+    for (const [game, gameProducts] of byGameProducts.entries()) {
+      const ptRows = Array.isArray(powerToolsByGame[game]) ? powerToolsByGame[game] : [];
+      if (!ptRows.length) {
+        for (const product of gameProducts) {
+          powerToolsReconcile.ctOnly.push({
+            game,
+            ctProductId: product.id,
+            cardId: publicCardIdFromBlueprint(product.blueprintId) || '',
+            name: product.name || '',
+            condition: product.condition,
+            language: product.language,
+            reverse: product.reverse === true,
+            quantity: product.quantity,
+            pricePkn: product.pricePkn,
+          });
+        }
+        continue;
+      }
+      const paired = reconcilePowerToolsWithCardTrader(gameProducts, ptRows, game);
+      powerToolsReconcile.games.push({
+        id: game,
+        ct: gameProducts.length,
+        pt: ptRows.length,
+        matched: paired.matched.length,
+        ctOnly: paired.ctOnly.length,
+        ptOnly: paired.ptOnly.length,
+      });
+      for (const row of paired.matched) {
+        powerToolsReconcile.matched += 1;
+        if (row.location) {
+          locationByCtProductId.set(String(row.product.id), row.location);
+          powerToolsReconcile.locationsApplied += 1;
+        }
+      }
+      for (const row of paired.ctOnly) {
+        powerToolsReconcile.ctOnly.push({
+          game,
+          ctProductId: row.product.id,
+          cardId: publicCardIdFromBlueprint(row.product.blueprintId) || '',
+          name: row.product.name || '',
+          condition: row.product.condition,
+          language: row.product.language,
+          reverse: row.product.reverse === true,
+          quantity: row.product.quantity,
+          pricePkn: row.product.pricePkn,
+        });
+      }
+      for (const entry of paired.ptOnly) {
+        powerToolsReconcile.ptOnly.push({
+          game,
+          name: entry.name,
+          setName: entry.setName,
+          collectorNumber: entry.collectorNumber,
+          condition: entry.condition,
+          language: entry.language,
+          reverse: entry.reverse,
+          firstEdition: entry.firstEdition === true,
+          quantity: entry.quantity,
+          location: entry.location,
+          pricePkn: entry.pricePkn || 0,
+        });
+      }
+    }
+    for (const [game, ptRows] of Object.entries(powerToolsByGame)) {
+      if (byGameProducts.has(game) || !Array.isArray(ptRows) || !ptRows.length) continue;
+      for (const entry of ptRows) {
+        powerToolsReconcile.ptOnly.push({
+          game,
+          name: cleanText(entry.name, 240),
+          setName: cleanText(entry.setName || entry.set, 240),
+          collectorNumber: cleanText(entry.collectorNumber || entry.cn, 40),
+          condition: cleanText(entry.condition, 20) || 'NM',
+          language: cleanText(entry.language, 10).toUpperCase() || 'EN',
+          reverse: entry.reverse === true,
+          firstEdition: entry.firstEdition === true || entry.first_edition === true,
+          quantity: Math.max(0, Math.trunc(Number(entry.quantity) || 0)),
+          location: cleanText(entry.location, 120),
+          pricePkn: Math.max(0, Math.trunc(Number(entry.pricePkn) || 0)),
+        });
+      }
+    }
+    // Cap review payload size.
+    powerToolsReconcile.ctOnly = powerToolsReconcile.ctOnly.slice(0, 500);
+    powerToolsReconcile.ptOnly = powerToolsReconcile.ptOnly.slice(0, 500);
+    summary.powerToolsReconcile = powerToolsReconcile;
+  }
 
   if (oneDayReady) {
     return reconcileOneDayReadyAssets({
@@ -856,6 +1099,18 @@ async function reconcileCardTraderInventory({
           await applyCtQuantity(listing.id, product.quantity);
           summary.updated += 1;
         }
+        const ptLocation = locationByCtProductId.get(String(product.id)) || '';
+        if (ptLocation) {
+          await marketplaceWriteQuery(
+            `
+              update public.marketplace_user_listings
+              set location = $2, updated_at = now()
+              where id = $1
+                and (location is null or btrim(location) = '')
+            `,
+            [listing.id, ptLocation],
+          ).catch(() => null);
+        }
         const existingLink = linkByProduct.get(product.id);
         if (productLinkNeedsRefresh(existingLink, {
           listingId: listing.id,
@@ -887,6 +1142,18 @@ async function reconcileCardTraderInventory({
         }
         summary.matchedExisting += 1;
         bySourceId.set(decision.sourceId, { ...decision.listing, ...updated });
+        const ptLocation = locationByCtProductId.get(String(product.id)) || '';
+        if (ptLocation) {
+          await marketplaceWriteQuery(
+            `
+              update public.marketplace_user_listings
+              set location = $2, updated_at = now()
+              where id = $1
+                and (location is null or btrim(location) = '')
+            `,
+            [updated.id, ptLocation],
+          ).catch(() => null);
+        }
         await upsertProductLink({
           sellerUid,
           ctProductId: product.id,
@@ -905,11 +1172,17 @@ async function reconcileCardTraderInventory({
         const created = await createImportedListing({
           sellerUid,
           sellerName,
+          sellerCountry,
           product,
           cardId,
           marketplaceGame,
-          reactivateHidden: !linkByProduct.has(product.id),
+          // Relisted on CardTrader after it left the export → public again.
+          // A listing the seller hid on Pokoin (link still present) stays hidden.
+          reactivateHidden: !linkByProduct.has(product.id)
+            || linkByProduct.get(product.id)?.missing_from_ct === true
+            || linkByProduct.get(product.id)?.missing_from_ct === 't',
           meta: metaByCard.get(String(cardId || '')) || {},
+          location: locationByCtProductId.get(String(product.id)) || '',
         });
         if (!created) {
           summary.errors += 1;
@@ -941,6 +1214,7 @@ async function reconcileCardTraderInventory({
   });
 
   if (gate.allowDestructive) {
+    const vanished = [];
     for (const [sourceId, listing] of bySourceId.entries()) {
       const productId = parseCtProductId(sourceId);
       if (!productId || seenProductIds.has(productId)) continue;
@@ -965,7 +1239,36 @@ async function reconcileCardTraderInventory({
         }
         continue;
       }
-      const updated = await applyCtQuantity(listing.id, 0);
+      vanished.push({ productId, listing });
+    }
+
+    // Sale evidence comes from CardTrader's own seller orders, never from
+    // "it vanished from the export".
+    let sales = null;
+    if (vanished.length) {
+      try {
+        const from = new Date(Date.now() - SALE_EVIDENCE_DAYS * 86400000).toISOString().slice(0, 10);
+        sales = saleItemsByProduct(await fetchSellerOrders(token, { from }));
+      } catch (error) {
+        console.error('cardtrader reconcile: seller orders unavailable', { sellerUid, message: error.message });
+      }
+    }
+
+    for (const { productId, listing } of vanished) {
+      const verdict = classifyVanishedProduct({ productId, listing, sales });
+      let updated = null;
+      if (verdict.kind === 'sold') {
+        updated = await applyCtQuantity(listing.id, 0);
+        summary.soldOnCardTrader = (summary.soldOnCardTrader || 0) + 1;
+        await recordMissedCardTraderSales({ firestore, sellerUid, listing, sales: verdict.sales })
+          .catch((error) => {
+            console.error('cardtrader reconcile: sale record failed', { sellerUid, listingId: listing.id, message: error.message });
+          });
+      } else {
+        // Removed by the seller on CardTrader (or unverifiable): off sale, not sold.
+        updated = await delistCtListing(listing.id);
+        summary.delisted = (summary.delisted || 0) + 1;
+      }
       if (updated) summary.removed += 1;
       await upsertProductLink({
         sellerUid,
@@ -998,6 +1301,11 @@ async function reconcileCardTraderInventory({
     total: planned.length,
     unresolvedItems: summary.unresolvedItems.slice(0, 25),
     errorItems: summary.errorItems.slice(0, 25),
+    needsPowerToolsReview: Boolean(
+      summary.powerToolsReconcile
+      && ((summary.powerToolsReconcile.ctOnly || []).length
+        || (summary.powerToolsReconcile.ptOnly || []).length),
+    ),
   };
 
   await recordSellerSync(sellerUid, {
@@ -1021,6 +1329,7 @@ async function reconcileCardTraderInventory({
 
 module.exports = {
   applyCtQuantity,
+  hideImportedCardTraderListings,
   fetchCompleteSellerInventory,
   readOneDayReadyAssets,
   readSellerSync,

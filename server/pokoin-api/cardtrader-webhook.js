@@ -10,26 +10,19 @@ const {
 } = require('./_cardtrader_seller_listings');
 const { decrementSellerOwnershipForSale } = require('./_user_card_collection');
 const { enqueueCardTraderInventorySync } = require('./_cardtrader_inventory_async');
+const { SALES_COLLECTION, recordCardTraderSale } = require('./_native_sales');
 const {
   cleanText,
   eventDocId,
   itemProductId,
   itemUserDataField,
   orderItemId,
+  rawBodyBuffer,
   shouldDecrementStock,
   verifyWebhookSignature,
 } = require('./_cardtrader_webhook_core');
 
 const EVENTS_COLLECTION = 'cardtrader_webhook_events';
-
-function rawBodyBuffer(req) {
-  if (Buffer.isBuffer(req.rawBody)) return req.rawBody;
-  if (typeof req.rawBody === 'string') return Buffer.from(req.rawBody, 'utf8');
-  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
-    return Buffer.from(JSON.stringify(req.body), 'utf8');
-  }
-  return Buffer.alloc(0);
-}
 
 async function claimWebhookEvent(firestore, { uid, orderId, orderItemId, cause }) {
   const id = eventDocId(uid, orderId, orderItemId);
@@ -126,12 +119,55 @@ async function decrementPokoinListing(listing, quantity) {
   return result.rows[0] || null;
 }
 
-async function handleOrderPayload({ admin, firestore, uid, cause, order }) {
-  if (!shouldDecrementStock(order)) {
-    // Still need per-item check for pre-sale hub_pending_order_id.
+const CANCELLED_ORDER_STATES = new Set(['canceled', 'cancelled', 'request_for_cancel_accepted']);
+
+function isCancelledOrder(order = {}) {
+  return CANCELLED_ORDER_STATES.has(cleanText(order.state, 40).toLowerCase());
+}
+
+async function restoreCancelledItem({ admin, firestore, uid, order, item }) {
+  const currentOrderItemId = orderItemId(item);
+  const ref = firestore.collection(EVENTS_COLLECTION).doc(eventDocId(uid, order.id, currentOrderItemId));
+  let restore = null;
+  await firestore.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref);
+    const data = snap.exists ? snap.data() || {} : {};
+    if (!snap.exists || data.restoredAt || !data.listingId) return;
+    restore = data;
+    transaction.set(ref, { restoredAt: new Date().toISOString(), cancelledState: cleanText(order.state, 40) }, { merge: true });
+  });
+  if (!restore) {
+    return { orderItemId: currentOrderItemId, skipped: true, reason: 'nothing_to_restore' };
   }
+  const qty = Math.max(1, Math.trunc(Number(restore.quantity || item.quantity) || 1));
+  await marketplaceWriteQuery(
+    `
+      update public.marketplace_user_listings
+      set
+        quantity_available = quantity_available + $2,
+        status = case when status = 'sold_out' then 'active' else status end,
+        updated_at = now()
+      where id = $1 and seller_uid = $3
+    `,
+    [restore.listingId, qty, uid],
+  );
+  await firestore.collection(SALES_COLLECTION).doc(`ct_${cleanText(order.id, 40)}__${currentOrderItemId}`).set({
+    voided: true,
+    voidReason: 'cardtrader_order_cancelled',
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true }).catch(() => {});
+  return { orderItemId: currentOrderItemId, ok: true, restored: qty, listingId: restore.listingId };
+}
+
+async function handleOrderPayload({ admin, firestore, uid, cause, order }) {
   const items = Array.isArray(order.order_items) ? order.order_items : [];
   const results = [];
+  if (isCancelledOrder(order)) {
+    for (const item of items) {
+      results.push(await restoreCancelledItem({ admin, firestore, uid, order, item }));
+    }
+    return results;
+  }
   for (const item of items) {
     const currentOrderItemId = orderItemId(item);
     if (!shouldDecrementStock(order, item)) {
@@ -166,6 +202,22 @@ async function handleOrderPayload({ admin, firestore, uid, cause, order }) {
       results.push({ orderItemId: currentOrderItemId, ok: false, reason: 'decrement_failed', listingId: listing.id });
       continue;
     }
+    await firestore.collection(EVENTS_COLLECTION).doc(claim.id).set({
+      listingId: updated.id,
+      quantity: qty,
+      productId: itemProductId(item),
+    }, { merge: true }).catch(() => {});
+    // A CardTrader sale of a linked card is a real sale: seller sold history.
+    await recordCardTraderSale({
+      admin,
+      firestore,
+      sellerUid: uid,
+      order,
+      item,
+      listing: { id: updated.id, card_id: updated.card_id },
+    }).catch((error) => {
+      console.error('cardtrader webhook sale record failed', { uid, listingId: updated.id, message: error.message });
+    });
     await marketplaceQuery(
       'select public.refresh_marketplace_blueprint_price_summary($1)',
       [updated.card_id],
@@ -216,9 +268,16 @@ module.exports = async function handler(req, res) {
     const admin = getFirebaseAdmin();
     const firestore = admin.firestore();
     const sharedSecret = await decryptIntegrationSharedSecret(firestore, uid);
-    const raw = rawBodyBuffer(req);
+    const raw = await rawBodyBuffer(req);
     const signature = req.headers.signature || req.headers.Signature;
     if (!verifyWebhookSignature(raw, signature, sharedSecret)) {
+      // Log rejections: a silent 401 hid that no delivery had ever verified.
+      console.warn('cardtrader-webhook rejected', {
+        uid,
+        reason: 'invalid_signature',
+        bodyBytes: raw.length,
+        hasSignature: Boolean(signature),
+      });
       return res.status(401).json({ error: 'Invalid webhook signature.' });
     }
 
@@ -227,10 +286,12 @@ module.exports = async function handler(req, res) {
       payload = raw.length ? JSON.parse(raw.toString('utf8')) : {};
     }
     const cause = cleanText(payload.cause, 40).toLowerCase();
-    if (cause !== 'order.create' && cause !== 'order.update') {
+    if (cause !== 'order.create' && cause !== 'order.update' && cause !== 'order.destroy') {
       return res.status(200).json({ ok: true, skipped: true, reason: 'ignored_cause' });
     }
-    const order = payload.data && typeof payload.data === 'object' ? payload.data : {};
+    const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+    // A destroyed order never completed: same as a cancellation (restock once).
+    const order = cause === 'order.destroy' ? { ...data, state: 'canceled' } : data;
     if (cleanText(order.order_as, 20).toLowerCase() === 'buyer') {
       return res.status(200).json({ ok: true, skipped: true, reason: 'buyer_order' });
     }
@@ -271,7 +332,10 @@ module.exports._test = {
   eventDocId,
   findLinkedListing,
   handleOrderPayload,
+  isCancelledOrder,
   itemProductId,
+  rawBodyBuffer,
+  restoreCancelledItem,
   itemUserDataField,
   orderItemId,
   releaseWebhookEvent,

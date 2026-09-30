@@ -678,6 +678,38 @@ export function fetchPortfolioHistory(token) {
   });
 }
 
+/** Associate desk: role, campaign window, and live royalty earnings. */
+export function fetchAssociateSummary(token) {
+  return getJson('/api/marketplace-associate', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/** Invite & Earn + Ambassador progress for the signed-in user (settles owed rewards). */
+export function fetchReferral(token) {
+  return getJson('/api/marketplace-referral', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/** Attach this new account to the collector who invited it. */
+export function claimReferral(token, code) {
+  return getJson('/api/marketplace-referral', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action: 'claim', code }),
+  });
+}
+
 export function fetchCardTraderStatus(token) {
   return getJson('/api/cardtrader-sync', {
     headers: {
@@ -703,6 +735,28 @@ export function connectCardTrader(token, cardTraderToken) {
   });
 }
 
+export function askPoko(bearer, message, sessionId) {
+  return getJson('/api/pokoin-assistant', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearer}`,
+    },
+    body: JSON.stringify({ message: String(message || '').slice(0, 2000), sessionId: String(sessionId || '') }),
+  });
+}
+
+export function pokoConnectAction(bearer, body) {
+  return getJson('/api/poko-connect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearer}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 export function disconnectCardTrader(token) {
   return getJson('/api/cardtrader-disconnect', {
     method: 'POST',
@@ -714,14 +768,39 @@ export function disconnectCardTrader(token) {
   });
 }
 
-export function syncCardTraderInventory(token) {
+export function syncCardTraderInventory(token, options = {}) {
+  const body = {};
+  if (options.previewGames) body.previewGames = true;
+  if (options.powerToolsCsv && typeof options.powerToolsCsv === 'object') {
+    body.powerToolsCsv = options.powerToolsCsv;
+  }
+  if (options.stackSize != null) body.stackSize = options.stackSize;
+  if (options.numberedInStack === true) body.numberedInStack = true;
+  if (options.locationParse) body.locationParse = options.locationParse;
+  if (options.previewPowerTools) body.previewPowerTools = true;
+  if (options.priceMode) body.priceMode = options.priceMode;
   return getJson('/api/cardtrader-sync', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: '{}',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Wipe every Pokoin listing for the signed-in seller (all TCGs). Requires confirm phrase. */
+export function wipeSellerInventory(token, { confirm } = {}) {
+  return getJson('/api/cardtrader-clean-listings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      scope: 'all',
+      confirm: String(confirm || ''),
+    }),
   });
 }
 
@@ -1261,8 +1340,8 @@ export function rememberNeighbors(center, neighbors) {
     const nid = neighborCardId(next[0]);
     if (nid) {
       neighborCache.set(nid, {
-        prev: [center, ...prev].filter((row) => neighborCardId(row) && neighborCardId(row) !== nid).slice(0, 3),
-        next: next.slice(1).filter((row) => neighborCardId(row) !== nid).slice(0, 3),
+        prev: [center, ...prev].filter((row) => neighborCardId(row) && neighborCardId(row) !== nid).slice(0, 6),
+        next: next.slice(1).filter((row) => neighborCardId(row) !== nid).slice(0, 6),
       });
     }
   }
@@ -1270,8 +1349,8 @@ export function rememberNeighbors(center, neighbors) {
     const pid = neighborCardId(prev[0]);
     if (pid) {
       neighborCache.set(pid, {
-        prev: prev.slice(1).filter((row) => neighborCardId(row) !== pid).slice(0, 3),
-        next: [center, ...next].filter((row) => neighborCardId(row) && neighborCardId(row) !== pid).slice(0, 3),
+        prev: prev.slice(1).filter((row) => neighborCardId(row) !== pid).slice(0, 6),
+        next: [center, ...next].filter((row) => neighborCardId(row) && neighborCardId(row) !== pid).slice(0, 6),
       });
     }
   }
@@ -1551,6 +1630,120 @@ export function createPknCheckout(body, token) {
   });
 }
 
+export function fetchSellerSettings(token) {
+  return getJson('/api/marketplace-seller-settings', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+/** Checkout: which cart sellers opted out of PKN payments (card only). */
+export function fetchPknRefusingSellers(sellerUids, token) {
+  const sellers = [...new Set((sellerUids || []).filter(Boolean))].join(',');
+  return getJson(`/api/marketplace-seller-settings?sellers=${encodeURIComponent(sellers)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function saveSellerSettings(body, token) {
+  return getJson('/api/marketplace-seller-settings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Website Poko assistant — Firebase-authed BFF; never calls poko-market from the browser. */
+export function sendPokoChat({
+  message = '',
+  cards = [],
+  images = [],
+  sessionId = '',
+  pageContext = null,
+  clientTurnId = '',
+} = {}, token) {
+  const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+    ? AbortSignal.timeout(95_000)
+    : undefined;
+  return getJson('/api/poko-chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ message, cards, images, sessionId, pageContext, clientTurnId }),
+    signal,
+  });
+}
+
+/** Server-backed Poko transcript (Firestore via BFF). */
+export function fetchPokoChatHistory(token, { before = '' } = {}) {
+  const params = new URLSearchParams({ action: 'history' });
+  if (before) params.set('before', before);
+  return getJson(`/api/poko-chat?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function fetchAccountAddresses(token, { reveal = true } = {}) {
+  const q = reveal ? '?reveal=1' : '';
+  return getJson(`/api/account-addresses${q}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function saveAccountAddress(body, token) {
+  return getJson('/api/account-addresses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export function quoteMarketplaceCheckout(body, token) {
+  return getJson('/api/marketplace-checkout-quote', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export function createOrderCheckoutSession(body, token) {
+  return getJson('/api/create-order-checkout-session', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export function startStripeConnectOnboard(body, token) {
+  return getJson('/api/stripe-connect-onboard', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export function fetchStripeConnectStatus(token) {
+  return getJson('/api/stripe-connect-onboard', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 export function createMarketplaceOrder(body, token) {
   return getJson('/api/marketplace-orders', {
     method: 'POST',
@@ -1573,8 +1766,19 @@ export function confirmMarketplaceDelivery(orderId, token) {
   });
 }
 
-export function markMarketplaceShipped(orderId, token) {
+export function markMarketplaceShipped(orderId, token, { trackingCode } = {}) {
   return getJson('/api/marketplace-orders?action=mark-shipped', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ orderId, trackingCode }),
+  });
+}
+
+export function revealMarketplaceShipping(orderId, token) {
+  return getJson('/api/marketplace-orders?action=reveal-shipping', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1582,6 +1786,44 @@ export function markMarketplaceShipped(orderId, token) {
     },
     body: JSON.stringify({ orderId }),
   });
+}
+
+/** Buyer backs out of an unpaid EUR checkout: Stripe session expires, cards go back on Shop. */
+export function cancelEurOrder(orderId, token) {
+  return getJson('/api/marketplace-orders?action=cancel-eur', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ orderId }),
+  });
+}
+
+/** Seller partial refund: amount is EUR cents on EUR orders, whole PKN on PKN orders. */
+export function refundMarketplaceOrder({ orderId, amount, reason, clientToken }, token) {
+  return getJson('/api/marketplace-orders?action=refund', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ orderId, amount, reason, clientToken }),
+  });
+}
+
+/** Seller sold history: native Pokoin orders plus linked CardTrader sales. */
+export function fetchSoldHistory(token) {
+  return getJson('/api/marketplace-orders?action=sold-history', {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+}
+
+/** Public "Sold on Pokoin" rows for one card desk (no buyer identity). */
+export function fetchNativeSales(cardId, { signal } = {}) {
+  const params = new URLSearchParams({ cardId: String(cardId || '') });
+  return getJson(`/api/marketplace-native-sales?${params}`, { signal });
 }
 
 export function reportMarketplaceProblem({ orderId, reason, notes }, token) {
@@ -1809,11 +2051,17 @@ export function saveExpansionSymbol(body, token) {
   });
 }
 
+/**
+ * Card recognition API on the Pi (docs/SCAN_API.md): nezopt GPU with a Pi
+ * CPU fallback. Called directly so the per-IP limit sees the visitor.
+ */
+export const SCAN_API_BASE = 'https://api.pokoin.com/api/scan';
+
 export async function identifyScan(file) {
   const body = new FormData();
   body.append('file', file, file.name || 'card.jpg');
   const params = new URLSearchParams({ catalog: scanCatalogId() });
-  const response = await fetch(`/cardscan/identify?${params}`, { method: 'POST', body });
+  const response = await fetch(`${SCAN_API_BASE}/identify?${params}`, { method: 'POST', body });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.detail || data.error || `Scan failed (${response.status})`);
@@ -2026,6 +2274,36 @@ export function fetchSellerByUsername(username, { limit = 20, signal } = {}) {
 }
 
 
+/** Associates roster matches for the Users search (public facts only). */
+export function fetchAssociateSuggestions(username, { signal } = {}) {
+  const handle = String(username || '').trim();
+  if (handle.length < 2) {
+    return Promise.resolve({ associates: [] });
+  }
+  return getJson(`/api/marketplace-associate-suggest?q=${encodeURIComponent(handle)}`, {
+    signal,
+    cache: 'no-store',
+  });
+}
+
+/** Users search = listing sellers + associates roster hits (roster rows first). */
+export async function fetchSellerSearchWithAssociates(username, { limit = 20, signal } = {}) {
+  const [data, associates] = await Promise.all([
+    fetchSellerByUsername(username, { limit, signal }).catch(() => ({ listings: [] })),
+    fetchAssociateSuggestions(username, { signal }).catch(() => ({ associates: [] })),
+  ]);
+  const rows = Array.isArray(data?.listings) ? data.listings : [];
+  const roster = Array.isArray(associates?.associates) ? associates.associates : [];
+  const associateRows = roster.map((row) => ({
+    sellerUid: `associate:${row.username}`,
+    sellerUsername: row.username,
+    sellerName: row.username,
+    sellerDisplayName: row.name,
+    associateRole: row.role,
+  }));
+  return { listings: [...associateRows, ...rows] };
+}
+
 /** Public seller shop with server total + offset pagination (100/page UI). */
 export function fetchSellerShop(username, {
   limit = 100,
@@ -2033,6 +2311,9 @@ export function fetchSellerShop(username, {
   q = '',
   condition = '',
   language = '',
+  rarity = '',
+  reverse = false,
+  firstEdition = false,
   sort = 'price-asc',
   game: marketplaceGame = game().apiGame,
   signal,
@@ -2041,7 +2322,18 @@ export function fetchSellerShop(username, {
   if (!handle) {
     return Promise.resolve({ listings: [], total: 0, unique: 0, limit, offset: 0 });
   }
-  const opts = { limit, offset, q, condition, language, sort, game: marketplaceGame };
+  const opts = {
+    limit,
+    offset,
+    q,
+    condition,
+    language,
+    rarity,
+    reverse: Boolean(reverse),
+    firstEdition: Boolean(firstEdition),
+    sort,
+    game: marketplaceGame,
+  };
   // Always hit the network so refresh picks up name/tag changes. Seller.jsx
   // paints the in-memory shop cache first via seedSellerListings.
   const params = new URLSearchParams({
@@ -2052,11 +2344,54 @@ export function fetchSellerShop(username, {
   if (q) params.set('q', String(q));
   if (condition) params.set('condition', String(condition));
   if (language) params.set('language', String(language));
+  if (rarity) params.set('rarity', String(rarity));
+  if (reverse) params.set('reverse', '1');
+  if (firstEdition) params.set('firstEdition', '1');
   if (sort) params.set('sort', String(sort));
   if (marketplaceGame) params.set('game', String(marketplaceGame));
   return getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) =>
     rememberSellerListings(handle, data, opts),
   );
+}
+
+/** PowerTools pricing strategies + pricer defaults (users/{uid}). */
+export function fetchPricingStrategies(token) {
+  return getJson('/api/marketplace-pricing-strategies', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+export function savePricingStrategies(body, token) {
+  return getJson('/api/marketplace-pricing-strategies', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export function deletePricingStrategy(id, token) {
+  const params = new URLSearchParams({ id });
+  return getJson(`/api/marketplace-pricing-strategies?${params}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+/** PowerTools-style pricer: batch market comps for the MyPokoin listings board. */
+export async function fetchPriceCheck(items, token) {
+  const params = new URLSearchParams({
+    items: (items || []).slice(0, 100).map((item) => (
+      item.condition || item.language
+        ? `${item.cardId}:${item.condition || ''}:${item.language || ''}`
+        : String(item.cardId || item)
+    )).join(','),
+  });
+  return getJson(`/api/marketplace-price-check?${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
 }
 
 export function fetchSellerListings(sellerUid, token, { limit = 40 } = {}) {

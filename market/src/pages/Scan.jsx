@@ -83,7 +83,7 @@ export default function Scan() {
       <PageHead
         kicker="Identify"
         title="Card scan"
-        lede="Photo posts to /cardscan/identify on leftover JPEG singles (pokemon_generic). TCGPlayer product ids are not desk URLs."
+        lede="Photo posts to api.pokoin.com/api/scan/identify on leftover JPEG singles (pokemon_generic). TCGPlayer product ids are not desk URLs."
       >
         <Link className="btn ghost" to="/marketplace">Shop</Link>
       </PageHead>

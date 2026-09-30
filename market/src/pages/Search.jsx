@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router-dom';
-import { fetchSearch, fetchSellerByUsername, fetchSuggest } from '../api.js';
+import { fetchSearch, fetchSellerSearchWithAssociates, fetchSuggest } from '../api.js';
 import { isPokemonGame } from '../game.js';
 import { takeHotSearchPage } from '../search-hot.js';
 import {
@@ -32,6 +32,7 @@ import { normalizeSearchTab, searchFetchOptions, searchHref, uniqueSellers } fro
 import { parseResolutionParam, resolveSuggestQuery } from '../suggest-resolve.js';
 import { sellerHref } from '../listing-meta.js';
 import { rememberPageView, restoredPageView } from '../scroll-restore.js';
+import { associateRoleLabel } from '../associate-roles.js';
 
 /** Artist rows carry display names; the resolved param carries slugs. */
 function normalizeArtistName(value) {
@@ -195,7 +196,7 @@ export default function Search() {
       setLoading(true);
       setCards([]);
       setTotal(0);
-      fetchSellerByUsername(typedQuery, { limit: 48 })
+      fetchSellerSearchWithAssociates(typedQuery, { limit: 48 })
         .then((data) => {
           if (cancelled) {
             return;
@@ -461,6 +462,9 @@ export default function Search() {
                   </span>
                   <span>
                     <strong>{seller.name}</strong>
+                    {seller.associateRole ? (
+                      <span className={`suggest-user-associate-badge is-${seller.associateRole}`}>{associateRoleLabel(seller.associateRole)}</span>
+                    ) : null}
                     {seller.count ? (
                       <em>{seller.count} listing{seller.count === 1 ? '' : 's'}</em>
                     ) : null}

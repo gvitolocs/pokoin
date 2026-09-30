@@ -61,6 +61,8 @@ dbs = {
     "RIFTBOUND_MARKETPLACE_DATABASE_URL": "pokoin_riftbound",
     "GUNDAM_MARKETPLACE_DATABASE_URL": "pokoin_gundam",
     "SORCERY_MARKETPLACE_DATABASE_URL": "pokoin_sorcery",
+    "PALWORLD_MARKETPLACE_DATABASE_URL": "pokoin_palworld",
+    "CYBERPUNK_MARKETPLACE_DATABASE_URL": "pokoin_cyberpunk",
 }
 for key, db in dbs.items():
     derived = urlunsplit((parsed.scheme, parsed.netloc, "/" + db, parsed.query, parsed.fragment))

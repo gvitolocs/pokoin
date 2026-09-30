@@ -14,14 +14,32 @@ API (CardVault): `GET/POST /api/marketplace-listings-csv` (bearer required).
 
 PowerTools stores the physical slot in the **`location`** string (no separate Position column).
 
-On import, Pokoin applies **stack size** (default 1):
+### CardTrader sync popup
 
-- **Size 1** — each row in a box becomes `box·N` (N = order in file). Position UI stays hidden; no stack-full flash.
+1. Upload Power Tools CSV(s) per TCG — no location guesses yet.
+2. **Analyze CSV** — the API reads the seller’s location column, detects the style
+   (`as_is` / trailing stack index / already `box·stack`), and proposes cards-per-stack
+   from how many rows share each box·stack.
+3. Confirm mapping using **examples from that CSV**, then full import.
+
+| Mode | Behaviour |
+| --- | --- |
+| **Location is the box name** | Keep the CSV string as the box label |
+| **Last number is the stack index** | e.g. trailing ` - 16` → stack **#16** (which divider). Not card count. |
+| **Already box·stack** | Parse existing `·` / `#` structured slots |
+
+**Cards per stack (capacity)** is proposed from the fullest box·stack in the uploaded file.
+
+### Inventory CSV import (legacy)
+
+On `/inventory` import, Pokoin still applies **stack size** (default 1):
+
+- **Size 1** — each row in a box becomes `box·N` (N = order in file).
 - **Size &gt; 1** — rows fill `box·stack·pos`, spilling to the next stack when full.
 
 Structured strings already using `·` (`box·2·5`) are kept.
 
-Bare names like `FUOCOBOMBA 006 - 16` stay the box name (not parsed as stack/position).
+Bare names like `FUOCOBOMBA 006 - 16` stay the box name (not parsed as stack/position) unless the sync popup uses “Last number is the stack index”.
 
 ## Price
 

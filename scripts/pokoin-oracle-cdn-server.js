@@ -39,10 +39,12 @@ const SKIP_INDEX_PREFIXES = [
   'union-arena/',
   'gundam/',
   'sorcery/',
+  'palworld/',
+  'cyberpunk/',
 ];
 
 const GAME_PREFIX_RE =
-  /^(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery)\//i;
+  /^(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk)\//i;
 
 function leftoverCdnObjectKey(requestedKey) {
   const key = String(requestedKey || '').replace(/^\/+/, '');

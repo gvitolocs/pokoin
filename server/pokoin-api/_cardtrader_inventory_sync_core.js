@@ -21,6 +21,8 @@ const MARKETPLACE_GAME_BY_CARDTRADER_ID = Object.freeze({
   22: 'riftbound',
   23: 'gundam',
   24: 'sorcery',
+  26: 'palworld',
+  27: 'cyberpunk',
 });
 const SOURCE_IMPORT = 'cardtrader_seller_import';
 const CT_PREFIX = 'ct:';
@@ -29,12 +31,21 @@ const PKN_USDT_PRICE = 0.005;
 const CONDITION_FROM_CT = {
   mint: 'NM',
   'near mint': 'NM',
-  'slightly played': 'LP',
+  // Pokoin desk grades: NM / SP / MP / PL / Poor (same as PowerTools CSV map).
+  'slightly played': 'SP',
+  'lightly played': 'MP',
   'moderately played': 'MP',
-  played: 'HP',
-  'heavily played': 'HP',
-  poor: 'PO',
-  'lightly played': 'LP',
+  played: 'PL',
+  'heavily played': 'PL',
+  poor: 'Poor',
+  // Already-normalized shorts (and legacy LP/HP stored on older imports).
+  nm: 'NM',
+  sp: 'SP',
+  lp: 'SP',
+  mp: 'MP',
+  hp: 'PL',
+  pl: 'PL',
+  po: 'Poor',
 };
 
 const LANG_FROM_CT = {
@@ -441,6 +452,46 @@ function planInventoryReconcile({
   };
 }
 
+// CardTrader order states that are not a completed sale.
+const NOT_SOLD_ORDER_STATES = new Set(['pending', 'canceled', 'cancelled', 'request_for_cancel_accepted']);
+
+function orderIsSale(order = {}) {
+  return !NOT_SOLD_ORDER_STATES.has(cleanText(order.state, 40).toLowerCase());
+}
+
+/** productId → [{ order, item }] for every real CardTrader seller sale. */
+function saleItemsByProduct(orders = []) {
+  const byProduct = new Map();
+  for (const order of orders || []) {
+    if (!orderIsSale(order)) continue;
+    for (const item of Array.isArray(order.order_items) ? order.order_items : []) {
+      const productId = cleanText(item.product_id ?? item.productId ?? item.product?.id, 80);
+      if (!productId) continue;
+      const list = byProduct.get(productId) || [];
+      list.push({ order, item });
+      byProduct.set(productId, list);
+    }
+  }
+  return byProduct;
+}
+
+/**
+ * A linked product left the seller's complete CardTrader export. It is SOLD
+ * only when a CardTrader seller order for it exists after the listing was
+ * linked; otherwise the seller removed it on CardTrader (delisted) and Pokoin
+ * only takes it down — no sale, no write back to CardTrader.
+ * Without order data (API failure) it is 'unknown': take it down, claim nothing.
+ */
+function classifyVanishedProduct({ productId, listing = {}, sales = null } = {}) {
+  if (!sales) return { kind: 'unknown', sales: [] };
+  const listedAt = new Date(listing.created_at || 0).getTime();
+  const matches = (sales.get(cleanText(productId, 80)) || []).filter(({ item }) => {
+    const soldAt = new Date(item.created_at || 0).getTime();
+    return !Number.isFinite(listedAt) || !Number.isFinite(soldAt) || soldAt >= listedAt;
+  });
+  return matches.length ? { kind: 'sold', sales: matches } : { kind: 'delisted', sales: [] };
+}
+
 /**
  * Sale webhook idempotency: same order item must not decrement twice.
  * Pure claim map simulation (Firestore create semantics).
@@ -479,8 +530,9 @@ function oneDayReadyAssetRow(product = {}, { cardId = '', meta = {} } = {}) {
 }
 
 /**
- * Dashboard price for a 1-Day Ready row. Today's sold median only.
- * A CardTrader ask or EUR conversion stored on the row is not shown.
+ * Dashboard price for a 1-Day Ready row: the last sold median of its printing
+ * slice (cardtrader-assets.js). A CardTrader ask or EUR conversion stored on
+ * the row is never shown, and a slice that never sold has no price.
  */
 function marketPricePkn(row = {}) {
   const market = Number(row.market_pkn ?? row.marketPkn);
@@ -488,33 +540,22 @@ function marketPricePkn(row = {}) {
   return Math.round(market * 100) / 100;
 }
 
-/** Sold price for today, keyed by CardTrader blueprint. Own asks stay off the row. */
-function applyDumpMinimums(rows, priceRows) {
-  const byId = new Map();
-  for (const price of priceRows || []) {
-    const id = String(price.blueprint_id || '');
-    const pkn = Number(price.pkn);
-    if (id && pkn > 0) byId.set(id, pkn);
-  }
-  return (rows || []).map((row) => {
-    const market = byId.get(String(row.blueprint_id || ''));
-    return { ...row, market_pkn: market > 0 ? market : null };
-  });
-}
-
 /** Quantity-weighted totals of 1-Day Ready assets; empty stacks do not count. */
 function oneDayReadyTotals(rows = []) {
   let products = 0;
   let cards = 0;
+  let pricedCards = 0;
   let valuePkn = 0;
   for (const row of rows) {
     const qty = Math.max(0, Math.trunc(Number(row.quantity) || 0));
     if (!qty) continue;
     products += 1;
     cards += qty;
-    valuePkn += qty * Math.max(0, Number(row.pricePkn ?? row.price_pkn) || 0);
+    const price = Math.max(0, Number(row.pricePkn ?? row.price_pkn) || 0);
+    if (price > 0) pricedCards += qty;
+    valuePkn += qty * price;
   }
-  return { products, cards, valuePkn: Math.round(valuePkn * 100) / 100 };
+  return { products, cards, pricedCards, valuePkn: Math.round(valuePkn * 100) / 100 };
 }
 
 module.exports = {
@@ -523,6 +564,7 @@ module.exports = {
   PKN_USDT_PRICE,
   SOURCE_IMPORT,
   claimSaleEventOnce,
+  classifyVanishedProduct,
   cleanText,
   ctConditionToPokoin,
   ctLanguageToPokoin,
@@ -535,7 +577,8 @@ module.exports = {
   isPokemonProduct,
   marketplaceGameForProduct,
   normalizeProduct,
-  applyDumpMinimums,
+  orderIsSale,
+  saleItemsByProduct,
   marketPricePkn,
   oneDayReadyAssetRow,
   oneDayReadyTotals,

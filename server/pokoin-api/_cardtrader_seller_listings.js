@@ -2,6 +2,7 @@ const { marketplaceWriteQuery } = require('../server/_marketplace_db');
 const {
   createProduct,
   destroyProduct,
+  incrementProduct,
   updateProduct,
 } = require('./_cardtrader_client');
 const {
@@ -14,10 +15,13 @@ const PKN_USDT_PRICE = 0.005;
 
 const CONDITION_TO_CT = {
   NM: 'Near Mint',
-  LP: 'Slightly Played',
+  SP: 'Slightly Played',
+  LP: 'Slightly Played', // legacy Pokoin grade
   MP: 'Moderately Played',
-  HP: 'Heavily Played',
+  PL: 'Heavily Played',
+  HP: 'Heavily Played', // legacy
   PO: 'Poor',
+  Poor: 'Poor',
 };
 
 const LANG_TO_CT = {
@@ -264,33 +268,41 @@ async function destroyLinkedCardTraderProduct({ firestore, uid, sourceListingId,
   }
 }
 
+/**
+ * A linked card sold on Pokoin: take exactly the sold quantity off the
+ * seller's CardTrader product with a relative delta. Never an absolute
+ * quantity — the seller may have sold or removed stock on CardTrader since
+ * Pokoin last looked, and that must not be overwritten. If CardTrader refuses
+ * (product already gone / not enough stock), CardTrader is left as it is.
+ */
 async function decrementLinkedCardTraderProduct({
   firestore,
   uid,
   sourceListingId,
   quantity,
-  remainingQuantity,
+  incrementFn = incrementProduct,
+  destroyFn = destroyProduct,
+  tokenFn = decryptIntegrationToken,
+  readDocFn = readIntegrationDoc,
 }) {
   const productId = parseCtProductId(sourceListingId);
   if (!productId) return { skipped: true, reason: 'not_linked' };
-  const doc = await readIntegrationDoc(firestore, uid);
+  const doc = await readDocFn(firestore, uid);
   if (!doc.exists || doc.data()?.enabled !== true) {
     return { skipped: true, reason: 'not_connected' };
   }
-  const token = await decryptIntegrationToken(firestore, uid);
-  const remaining = Number(remainingQuantity);
+  const sold = Math.max(1, Math.trunc(Number(quantity) || 1));
+  const token = await tokenFn(firestore, uid);
   try {
-    if (Number.isFinite(remaining) && remaining > 0) {
-      await updateProduct(token, productId, { quantity: Math.trunc(remaining) });
-      return { ok: true, productId, remaining: Math.trunc(remaining) };
+    const payload = await incrementFn(token, productId, -sold);
+    const resource = payload?.resource || payload?.product || payload || {};
+    const left = Number(resource.quantity);
+    // A product at zero on CardTrader is the same card sold out: remove it.
+    if (Number.isFinite(left) && left <= 0) {
+      await destroyFn(token, productId).catch(() => {});
+      return { ok: true, productId, sold, destroyed: true };
     }
-    await destroyProduct(token, productId);
-    return {
-      ok: true,
-      productId,
-      destroyed: true,
-      quantity: Math.max(1, Math.trunc(Number(quantity) || 1)),
-    };
+    return { ok: true, productId, sold, remaining: Number.isFinite(left) ? left : null };
   } catch (error) {
     console.error('cardtrader decrement linked product failed', {
       uid,

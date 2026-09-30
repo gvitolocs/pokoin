@@ -57,6 +57,7 @@ const EXTENSION_ACCOUNT_PATHS = new Set([
   '/checkout',
   '/orders',
   '/inventory',
+  '/mypokoin',
   '/nft',
   '/buy',
 ]);
@@ -68,6 +69,9 @@ export function isExtensionFramePath(pathname = '') {
     return true;
   }
   const stripped = path.replace(/\/$/, '') || '/';
+  if (stripped === '/mypokoin' || stripped.startsWith('/mypokoin/')) {
+    return true;
+  }
   return EXTENSION_ACCOUNT_PATHS.has(stripped);
 }
 

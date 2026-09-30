@@ -55,7 +55,7 @@ for (const [name, exports] of [
 }
 
 const { isOneDayReadyName, normalizeInfo, safeInfoMetadata } = require('./_cardtrader_client');
-const { reconcileCardTraderInventory } = require('./_cardtrader_inventory_sync');
+const { hideImportedCardTraderListings, reconcileCardTraderInventory } = require('./_cardtrader_inventory_sync');
 const { pushListingToCardTrader } = require('./_cardtrader_seller_listings');
 const { assetItem, readAssetsPayload } = require('./cardtrader-assets')._test;
 Module.prototype.require = origRequire;
@@ -143,7 +143,8 @@ test('a 1-Day Ready sync stores assets and hides imported listings — it never 
   assert.deepEqual(remove.params, ['u1', ['111']]);
   const hide = dbCalls.find((c) => c.text.startsWith('update public.marketplace_user_listings'));
   assert.match(hide.text, /set status = 'inactive'/);
-  assert.deepEqual(hide.params, ['u1', 'cardtrader_seller_import']);
+  // 1-Day Ready hides every imported row, sold_out included (keepSoldOut false).
+  assert.deepEqual(hide.params, ['u1', 'cardtrader_seller_import', false]);
   assert.ok(texts.some((x) => x.startsWith('delete from public.marketplace_cardtrader_product_links')));
   const refreshed = dbCalls.filter((c) => c.text.includes('refresh_marketplace_blueprint_price_summary')).map((c) => c.params[0]);
   assert.deepEqual(refreshed, ['244', '300']);
@@ -196,13 +197,28 @@ test('assets payload: disconnected sellers get no assets; rows map to camelCase'
     connected: false,
     oneDayReady: false,
     lastSyncAt: null,
-    totals: { products: 0, cards: 0, valuePkn: 0 },
+    totals: { products: 0, cards: 0, pricedCards: 0, valuePkn: 0 },
     items: [],
   });
   assert.deepEqual(assetItem({ ct_product_id: '1', card_id: '2', card_name: 'Doduo', quantity: '2', price_pkn: '12.5', reverse: true }), {
     ctProductId: '1', cardId: '2', cardName: 'Doduo', setName: '', collectorNumber: '', imageUrl: '',
     condition: '', language: '', reverse: true, firstEdition: false, signed: false, altered: false, graded: false,
-    quantity: 2, pricePkn: null,
+    quantity: 2, pricePkn: null, priceDay: null,
   });
 });
 
+
+test('disconnect hides imported CardTrader stock on Pokoin only, keeping sold_out labels', async () => {
+  dbCalls.length = 0;
+  listingsToHide = [{ id: 'l1', card_id: '713650' }];
+  const hidden = await hideImportedCardTraderListings('seller', { keepSoldOut: true });
+  assert.equal(hidden, 1);
+  const hide = dbCalls.find((c) => c.text.startsWith('update public.marketplace_user_listings'));
+  assert.match(hide.text, /set status = 'inactive'/);
+  assert.match(hide.text, /status <> 'sold_out'/);
+  assert.deepEqual(hide.params, ['seller', 'cardtrader_seller_import', true]);
+  // Import links go so a reconnect re-imports fresh; nothing is deleted from listings.
+  assert.ok(dbCalls.some((c) => c.text.startsWith('delete from public.marketplace_cardtrader_product_links') && c.text.includes("origin = 'import'")));
+  assert.equal(dbCalls.some((c) => c.text.startsWith('delete from public.marketplace_user_listings')), false);
+  listingsToHide = [];
+});

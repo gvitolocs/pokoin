@@ -19,6 +19,7 @@ import {
 import ChatBundle from './ChatBundle.jsx';
 import QtyStepper from './QtyStepper.jsx';
 import ThumbZoom from './ThumbZoom.jsx';
+import { endTrayDrag, startTrayDrag } from '../tray-drag.js';
 
 function unique(list) {
   const out = [];
@@ -75,11 +76,13 @@ function CardQuantity({ row, draft, onQty }) {
 }
 
 export default function ChatListingTag(props) {
-  if (bundleOf(props.row)) return <ChatBundle row={props.row} peer={props.peer} onRemove={props.onRemove} />;
+  if (bundleOf(props.row)) {
+    return <ChatBundle row={props.row} peer={props.peer} onRemove={props.onRemove} trayId={props.trayId} />;
+  }
   return <CardTag {...props} />;
 }
 
-function CardTag({ row, onRemove, onQty, peer, me }) {
+function CardTag({ row, onRemove, onQty, peer, me, trayId }) {
   const label = row.cardName || 'Card';
   const id = cardIdOf(row);
   const identity = `${row.imageUrl || ''}|${id}|${row.sellerUid || ''}|${row.seller || ''}`;
@@ -156,6 +159,7 @@ function CardTag({ row, onRemove, onQty, peer, me }) {
       <img
         src={src}
         alt=""
+        draggable={false}
         onError={onError}
         onLoad={(event) => {
           const img = event.currentTarget;
@@ -167,10 +171,23 @@ function CardTag({ row, onRemove, onQty, peer, me }) {
   ) : <span className="chat-tag-ph" />;
   const trade = owned === 'no';
   const over = overListingStock(row.qty, row.stock);
+  const canDragOut = draft && Boolean(trayId);
   return (
-    <span className={`chat-tag${trade ? ' is-trade' : ''}${over ? ' is-overstock' : ''}`}>
+    <span
+      className={`chat-tag${trade ? ' is-trade' : ''}${over ? ' is-overstock' : ''}`}
+      draggable={canDragOut}
+      onDragStart={canDragOut ? (event) => {
+        event.stopPropagation();
+        startTrayDrag(event, {
+          tray: trayId,
+          reference: row,
+          remove: () => onRemove(tagKey(row)),
+        });
+      } : undefined}
+      onDragEnd={canDragOut ? () => endTrayDrag() : undefined}
+    >
       {row.path ? (
-        <Link to={row.path} aria-label={label} onClick={(event) => event.stopPropagation()}>{image}</Link>
+        <Link to={row.path} aria-label={label} draggable={false} onClick={(event) => event.stopPropagation()}>{image}</Link>
       ) : (
         <span className="chat-tag-body" role="img" aria-label={label}>{image}</span>
       )}

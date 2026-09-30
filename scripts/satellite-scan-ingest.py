@@ -65,6 +65,8 @@ GAMES = {
     "riftbound": ("pokoin_riftbound", "marketplace_riftbound", "riftbound/"),
     "yugioh": ("pokoin_yugioh", "marketplace_yugioh", "yugioh/"),
     "magic": ("pokoin_magic", "marketplace_magic", "magic/"),
+    "palworld": ("pokoin_palworld", "marketplace_palworld", "palworld/"),
+    "cyberpunk": ("pokoin_cyberpunk", "marketplace_cyberpunk", "cyberpunk/"),
 }
 
 _HELPER = None

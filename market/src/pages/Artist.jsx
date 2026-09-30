@@ -10,6 +10,7 @@ import { isEnglishFlavorName } from '../ocr-artists.js';
 import CardArt from '../components/CardArt.jsx';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
+import { ArtistPileTile, ArtworkPileOverlay, groupArtworkRows } from '../components/ArtworkPile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
@@ -173,6 +174,7 @@ function ArtistDesk() {
   const [print, setPrint] = useState(() => restoredHere?.print || 'western');
   const [cartBusy, setCartBusy] = useState(false);
   const [cartNote, setCartNote] = useState('');
+  const [pile, setPile] = useState(null);
   const [shown, setShown] = useState(() => {
     const count = Number(restoredHere?.shown);
     return count > ALBUM_PAGE ? count : ALBUM_PAGE;
@@ -277,7 +279,13 @@ function ArtistDesk() {
     () => new Set(cards.map((card) => card.id || card.card_id)).size,
     [cards],
   );
-  const visibleCards = cards.slice(0, shown);
+  // Same-artwork printings pile into one tile; pagination counts tiles.
+  const groups = useMemo(() => groupArtworkRows(cards), [cards]);
+  const visibleGroups = groups.slice(0, shown);
+  const visibleCards = useMemo(
+    () => visibleGroups.flatMap((group) => group.cards),
+    [visibleGroups],
+  );
 
   useEffect(() => {
     if (suppressShownReset.current) {
@@ -289,29 +297,29 @@ function ArtistDesk() {
 
   useEffect(() => {
     const node = sentinel.current;
-    if (!node || shown >= cards.length) return undefined;
+    if (!node || shown >= groups.length) return undefined;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
-        setShown((current) => Math.min(current + ALBUM_PAGE, cards.length));
+        setShown((current) => Math.min(current + ALBUM_PAGE, groups.length));
       }
     }, { rootMargin: '800px 0px' });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [shown, cards.length]);
+  }, [shown, groups.length]);
 
   useEffect(() => {
-    if (!cards.length) return undefined;
-    const next = visibleCards.length;
-    const upcoming = cards.slice(next, next + PRELOAD_AHEAD);
-    for (const card of upcoming) {
-      const src = imageSrc(card, 'hero');
+    if (!groups.length) return undefined;
+    const next = visibleGroups.length;
+    const upcoming = groups.slice(next, next + PRELOAD_AHEAD);
+    for (const group of upcoming) {
+      const src = imageSrc(group.cards[0], 'hero');
       if (!src) continue;
       const img = new Image();
       img.decoding = 'async';
       img.src = src;
     }
     return undefined;
-  }, [cards, visibleCards.length]);
+  }, [groups, visibleGroups.length]);
 
   const unknown = artistDeskIsUnknown(payload);
   const name = unknown ? '' : (payload?.artist?.name || payload?.name || firstPaint);
@@ -486,13 +494,24 @@ function ArtistDesk() {
         <CardSelectGrid className="grid album-grid" cards={payload ? visibleCards : []}>
           {!payload && !error
             ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} album />)
-            : visibleCards.map((card, index) => (
-                <CardTile key={albumTileKey(card)} card={card} rank={index} cut />
-              ))}
+            : visibleGroups.map((group, index) => (
+              group.cards.length > 1 ? (
+                <ArtistPileTile key={group.key} group={group} rank={index} onOpen={setPile} />
+              ) : (
+                <CardTile key={albumTileKey(group.cards[0])} card={group.cards[0]} rank={index} cut />
+              )
+            ))}
         </CardSelectGrid>
       )}
-      {payload && shown < cards.length ? (
+      {payload && shown < groups.length ? (
         <div ref={sentinel} className="album-scroll-sentinel" aria-hidden="true" />
+      ) : null}
+      {pile ? (
+        <ArtworkPileOverlay
+          group={pile}
+          artistName={name}
+          onClose={() => setPile(null)}
+        />
       ) : null}
     </div>
   );

@@ -198,10 +198,14 @@ test('Chrome mounts Desktop on the left, opposite the cart', () => {
   const iconNavAt = chrome.indexOf('className="nav icon-nav"');
   assert.ok(brandAt > 0 && desktopAt > brandAt && searchAt > desktopAt);
   assert.ok(iconNavAt > searchAt && cartAt > iconNavAt);
-  assert.match(css, /\.desktop-drop\s*\{[^}]*left:\s*0/s);
-  assert.match(css, /\.desktop-drop\s*\{[^}]*width:\s*min\(26rem/s);
+  assert.match(css, /\.desktop-drop\s*\{[^}]*left:\s*-4rem/s);
+  assert.match(css, /\.desktop-drop\s*\{[^}]*width:\s*max-content/s);
+  assert.match(css, /\.desktop-drop\s*\{[^}]*min-width:\s*23rem/s);
+  assert.match(css, /\.desktop-drop\s*\{[^}]*overflow-x:\s*clip/s);
+  assert.match(css, /\.desktop-drop \.cart-drop-empty p\s*\{[^}]*white-space:\s*nowrap/s);
   assert.doesNotMatch(css, /\.desktop-drop\s*\{[^}]*right:\s*0/s);
-  assert.match(css, /\.desktop-drop-actions\s*\{[^}]*flex-wrap:\s*nowrap/s);
+  assert.doesNotMatch(css, /\.desktop-drop\s*\{[^}]*transform:\s*translateX\(-50%\)/s);
+  assert.match(css, /\.desktop-drop-actions\s*\{[^}]*flex-wrap:\s*wrap/s);
   assert.match(css, /\.cart-drop-card \.chat-qty/);
   assert.match(drop, /Clear desktop/);
   assert.match(drop, /Add to cart/);
@@ -214,6 +218,9 @@ test('Chrome mounts Desktop on the left, opposite the cart', () => {
   assert.match(drop, /Draw the shape of your next collection/);
   assert.doesNotMatch(drop, /Drop cards you are unsure about/);
   assert.doesNotMatch(drop, /downloadDesktopHoldCsv/);
+  // Phone ≤720px hides the Desktop chip; cart stays in the topbar.
+  const phone = css.slice(css.indexOf('@media (max-width: 720px)'));
+  assert.match(phone, /\.desktop-anchor \{ display: none; \}/);
 });
 
 test('Desktop hold merges qty and setDesktopQty caps at stock', () => {
@@ -231,4 +238,26 @@ test('Desktop hold merges qty and setDesktopQty caps at stock', () => {
   assert.equal(readDesktopHold()[0].qty, 1);
   setDesktopQty('7', 0);
   assert.equal(readDesktopHold().length, 0);
+});
+
+test('Desktop parks an expansion as its logo tile, not every card', () => {
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)); },
+  };
+  clearDesktopHold();
+  const logo = '/card-images/expansions/logos/aquapolis.png';
+  assert.equal(addDesktopCards([{
+    id: 'expansion:aquapolis',
+    name: 'Aquapolis',
+    imageUrl: logo,
+    path: '/marketplace/sets/aquapolis',
+    setName: 'Aquapolis',
+  }]), 1);
+  const row = readDesktopHold()[0];
+  assert.equal(row.id, 'expansion:aquapolis');
+  assert.equal(row.name, 'Aquapolis');
+  assert.equal(row.imageUrl, logo);
+  clearDesktopHold();
 });

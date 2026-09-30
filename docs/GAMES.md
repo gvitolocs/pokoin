@@ -23,6 +23,8 @@ API calls append `?game=` and send `x-pokoin-game`.
 | `pokoin.com/union-arena` | `union_arena` | `pokoin_union_arena` | `ct_id * 2` |
 | `pokoin.com/gundam` | `gundam` | `pokoin_gundam` | `ct_id * 2` |
 | `pokoin.com/sorcery` | `sorcery` | `pokoin_sorcery` | `ct_id * 2` |
+| `pokoin.com/palworld` | `palworld` | `pokoin_palworld` | `ct_id * 2` |
+| `pokoin.com/cyberpunk` | `cyberpunk` | `pokoin_cyberpunk` | `ct_id * 2` |
 
 `onepiece.pokoin.com` and `riftbound.pokoin.com` redirect to
 `pokoin.com/one-piece` and `pokoin.com/riftbound`. Do not add new game subdomains.

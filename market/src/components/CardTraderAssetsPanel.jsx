@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { formatPkn } from '../api.js';
+import { formatDayLabel } from '../portfolio-history.js';
 import { marketUrl } from '../punchouts.js';
 import MiniCardTile from './MiniCardTile.jsx';
 
@@ -18,7 +19,9 @@ function assetTitle(item) {
     item.condition,
     item.language,
     ...flags,
-    item.pricePkn > 0 ? formatPkn(item.pricePkn) : '',
+    item.pricePkn > 0
+      ? `last sold ${formatPkn(item.pricePkn)}${item.priceDay ? ` on ${formatDayLabel(item.priceDay)}` : ''}`
+      : 'never sold',
   ].filter(Boolean).join(' · ');
   return item.quantity > 1 ? `${details} · Qty ${item.quantity}` : details;
 }
@@ -40,7 +43,7 @@ export default function CardTraderAssetsPanel({ assets }) {
         <h2 id="ct1dr-title">CardTrader 1-DR</h2>
         {items.length ? (
           <span className="ct1dr-totals" title="Stocked and sold by CardTrader 1-Day Ready — not listed on Pokoin">
-            {Number(totals.cards || 0).toLocaleString('en-US')} cards · {formatPkn(totals.valuePkn || 0) || 'no dump minimum'}
+            {Number(totals.cards || 0).toLocaleString('en-US')} cards · {formatPkn(totals.valuePkn || 0) || '0 PKN'}
           </span>
         ) : null}
       </header>

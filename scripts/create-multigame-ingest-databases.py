@@ -26,6 +26,8 @@ DATABASES = (
     "pokoin_riftbound",
     "pokoin_gundam",
     "pokoin_sorcery",
+    "pokoin_palworld",
+    "pokoin_cyberpunk",
 )
 
 

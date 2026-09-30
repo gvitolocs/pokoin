@@ -41,7 +41,7 @@ const PREVIEW_FIXTURE = {
   pknBalance: 15,
   cardTraderAssets: {
     oneDayReady: true,
-    totals: { products: 3, cards: 5, valuePkn: 1840 },
+    totals: { products: 186, cards: 227, pricedCards: 106, valuePkn: 16740.15 },
     items: [
       { ctProductId: 'p1', cardId: '968186', cardName: 'Snorlax', setName: 'Pokémon Card 151', condition: 'NM', language: 'EN', quantity: 2, pricePkn: 620, imageUrl: '/card-images/502874_snorlax-181-165-pokemon-card-151.jpg' },
       { ctProductId: 'p2', cardId: '968172', cardName: 'Psyduck', setName: 'Pokémon Card 151', condition: 'NM', language: 'IT', reverse: true, quantity: 1, pricePkn: 260, imageUrl: '/card-images/502862_psyduck-175-165-pokemon-card-151.jpg' },
@@ -100,14 +100,45 @@ const PREVIEW_FIXTURE = {
   ].map(cardFromCatalogRow),
 };
 
+/**
+ * One point per day like the API: wallet 15 PKN for months, then 227 1-DR
+ * cards from the sync day, carried between sales with small basket moves.
+ */
 function previewHistorySeries(now = new Date()) {
   const today = utcDayKey(now);
-  return [
-    { date: addUtcDays(today, -120), currencyPkn: 0, cardsKnown: false },
-    { date: addUtcDays(today, -100), currencyPkn: 15, cardsKnown: false },
-    { date: addUtcDays(today, -20), currencyPkn: 15, cardsKnown: true, cardsValuePkn: 3900 },
-    { date: today, currencyPkn: 15, cardsKnown: true, cardsValuePkn: 4200 },
-  ];
+  const moves = { 20: 0.012, 15: -0.008, 10: 0.021, 6: 0.005, 3: -0.011, 1: 0.009 };
+  const days = [{ date: addUtcDays(today, -121), currencyPkn: 0 }];
+  let cards = 13135;
+  let priced = 86;
+  for (let back = 120; back >= 0; back -= 1) {
+    const date = addUtcDays(today, -back);
+    if (back > 26) {
+      days.push({ date, currencyPkn: 15 });
+      continue;
+    }
+    let move = back === 26 ? null : 0;
+    if (back === 25) {
+      priced = 87;
+      cards = 13163;
+    } else if (back === 24) {
+      priced = 106;
+      cards = 16285;
+      move = -0.002127;
+    } else if (moves[back] != null) {
+      move = moves[back];
+      cards = Math.round(cards * (1 + move) * 100) / 100;
+    }
+    days.push({
+      date,
+      currencyPkn: 15,
+      cardsKnown: true,
+      cardsValuePkn: cards,
+      cardsPriced: priced,
+      cardsHeld: 227,
+      cardsMove: move,
+    });
+  }
+  return days;
 }
 
 function moversFromRail(rail) {
@@ -144,6 +175,7 @@ export default function SellerHome() {
 
   const collectionHref = marketUrl(APP.collection);
   const inventoryHref = marketUrl(APP.inventory);
+  const salesHref = marketUrl('/sales');
   const marketplaceHref = marketUrl('/marketplace');
 
   useEffect(() => {
@@ -343,12 +375,13 @@ export default function SellerHome() {
         error=""
         collectionHref={collectionHref}
         inventoryHref={inventoryHref}
+        salesHref={salesHref}
         marketplaceHref={marketplaceHref}
         onRetry={() => {}}
         listingHrefFor={() => inventoryHref}
       />
     );
-  }, [preview, collectionHref, inventoryHref, marketplaceHref]);
+  }, [preview, collectionHref, inventoryHref, salesHref, marketplaceHref]);
 
   if (preview) {
     return previewView;
@@ -379,6 +412,7 @@ export default function SellerHome() {
       error={error}
       collectionHref={collectionHref}
       inventoryHref={inventoryHref}
+      salesHref={salesHref}
       marketplaceHref={marketplaceHref}
       onRetry={retryCollection}
       listingHrefFor={(row) => {

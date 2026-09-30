@@ -151,8 +151,10 @@ test('game and title language sit on the left of the search pill', () => {
   assert.match(desktopCss, /--topbar-flag:\s*32px/);
   const phoneBar = phone720First.match(/\.topbar-row \{[^}]+\}/);
   assert.ok(phoneBar, 'phone .topbar-row');
-  assert.match(phoneBar[0], /grid-template-columns:\s*auto auto auto minmax\(0,\s*1fr\) auto/);
+  // Phone: burger | brand | search | cart — no Desktop chip.
+  assert.match(phoneBar[0], /grid-template-columns:\s*auto auto minmax\(0,\s*1fr\) auto/);
   assert.match(phoneBar[0], /--topbar-flag:\s*32px/);
+  assert.match(phone720First, /\.desktop-anchor \{ display: none; \}/);
   assert.equal(phone720First.includes('.topbar-row > .lang-toggle {'), false);
   const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
   const toolbar = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/SearchToolbar.jsx'), 'utf8');
@@ -162,6 +164,7 @@ test('game and title language sit on the left of the search pill', () => {
   assert.match(chrome, /className="sr-only" type="submit"/);
   assert.equal(chrome.includes('search-submit'), false);
   assert.equal(/<\/form>\s*<LangToggle \/>/.test(chrome), false);
+  assert.match(css, /\.search-pill > input:nth-last-child\(2\)\s*\{[^}]*border-radius:\s*0 999px 999px 0/s);
   assert.match(toolbar, /aria-label="Card print"/);
   assert.equal(chrome.includes('variant="drawer"'), false);
 });

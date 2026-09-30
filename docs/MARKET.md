@@ -499,6 +499,7 @@ those contradict the live contract. Page BFFs are **GET**.
 | `GET /api/marketplace-expansion-page?slug=` | Set browse walk, 48-row pages, leftover `card_id` desc. SPA does not paint until the walk finishes. `expansion.nationality` drives the JP/CN title flag ([PRINT_FLAGS.md](PRINT_FLAGS.md)). English `expansion.name` for slugs, official lists, and the desk title. [Set desk first paint](#set-desk-first-paint). |
 | `GET /api/marketplace-suggest?q=` | Header typeahead (grouped printings). Meili from 1 character in the background; popup from 3 compact characters, instant local rank + **cached printings** (not a 120ms blank dump, not `live:` name stubs). One Meili index, English-identity rows for every title language; after grouping the API stamps `localized_name` / `localized_set` / `localized_rarity` so the popup can show a CardTrader-style English title plus translation subtitle. SPA `suggest-rank.js` scores the compact English name against unique blueprint names (`marketplace_card_names`). Popularity is 2 log-capped points, never 428×; a perfect typed `gx`/`ex`/`v` match is 4. `oin` ranks Oinkologne; `pikahc gx` ranks Pikachu GX; `dawe` expands to Dawn; `miikyu ex` scores `Mimikyu ex`, not a peeled EX layer. `sylveon ex il` peels `il` as illustration/full-art and ranks SIR/FA printings first. `061 shieldon` peels the collector token and ranks Shieldon printings (061 first); Meili is not queried for every 061. `Sh1` is the SH1/SH10 collector prefix first, then real name-pool printings (Shinx, Shuppet) fill toward 20; the print-language chip keeps western rows in that 20. Set-code tokens: `hgss energy` peels HeartGold & SoulSilver and ranks elemental energies from that era; `palkai sl` peels Call of Legends (SL secrets) and ranks that set’s Palkia, not LV.X. Set-title phrases with a typo (`flareon call of legendsd`) peel to a name lookup on the search page, then filter printings by TCG era — expansion short codes stay off suggest `attributesToSearchOn`. A bare `expedition` browses Expedition Base Set and fills 20 singles; it is not Expedition Uniform from Chilling Reign. Jumbo / oversized leftovers are Product, not Singles. Not Flutter `marketplace-autocomplete` / token-predict. UI flattens groups into CardTrader-style rows. The “View all N results” number prefers the search-page payload’s `total` (same query object as its rows, same-WHERE window count), so `pikachu gx 30th` no longer reports the broad `pikachu` pool where that total exists; suggest `count` stays the baseline for universes without one. Popup cap 20 is the top real ranked matches; **western is a visual tie-break** on equal Meili points, not a `search_weight` change. After suggest, the SPA prefetches search-page so Enter is hot (`search-hot.js`). **2pikabench** (10 two-insert + keyboard typos, `seed=2`) recovered 10/10 on 2026-09-13: pool rank 2.7 ms avg, `fetchSuggestRanked` search **105 ms avg** (1053 ms / 10). Table: [CHROME.md](CHROME.md). |
 | `GET /api/marketplace-card-sales?cardId=` | Desk header last-day PKN (`series.lastMedianPkn`) + daily median series. Tile/versions last-median uses this thin response (no `slices`). Desk graph uses `?slices=1` once per card: every `cardtrader_sold_daily` combination as camelCase `slices` (day, condition, language, reverse, firstEdition, graded, medianPkn, sampleCount, …). SPA filters locally and caches 15 days. `series.soldQty` is copies sold in the current slice (shown as **n units**); `series.sampleCount` is listing-disappearance events. Each `series.days[]` has `sampleCount` / `soldQty`. Optional `condition` / `language` (`cond` / `lang`), `reverse`, `firstEdition`, `graded` (`0`/`1`) still apply on the series path. `filters` lists keys that exist for the printing on that path. Default has no observation rows (`includeRows=1` for a capped sample). |
+| `GET /api/marketplace-price-check?items=` | MyPokoin pricer (PowerTools-style). Bearer required. `items` = comma list of `cardId[:COND:LANG]` (≤100). Per card: cheapest live native listing (caller's own excluded), cheapest CardTrader ask in the complete book + condition/language-matched ask, and the 30-day sold median. eBay / TCGPlayer comps have no source yet; the SPA shows those pricer sources disabled. |
 | `GET /api/marketplace-version-set?cardId=` | CLIP group for `/versions` era grids. Same English name + same illustration key. SPA splits those rows by TCG era (`tcgEra`). Rarity versions are SPA-side. [VERSIONS.md](VERSIONS.md). |
 | `GET /api/marketplace-expansion-page?limit=` | Sets index (SPA asks 2000). `?slug=` is one set desk. |
 | `POST /api/marketplace-event` | Actions above |
@@ -746,6 +747,64 @@ Fixture from this pipeline: Theme Deck & Blisters Exclusives Gengar
 `794206` / CT `397103` (Night Stiker Theme Deck) — CT page + image 404,
 CDN leftover absent, removed 2026-09-14.
 
+### MyPokoin inventory: locations, stacks, scan start
+
+`marketplace_user_listings.location` is the seller's shelf address. Grammar
+(scan slotText + PowerTools CSV import agree):
+
+| Location | Meaning |
+| --- | --- |
+| `megaevoluzionietb` | box only — no divider |
+| `box1·47` | box + stack (divider) 47 |
+| `megaevoluzionietb·2-4` | stacks 2..4 (a qty spanning dividers) |
+| `box·3·5` | stack 3, position 5 inside it |
+| `box·3·5-9` | stack 3, positions 5..9 |
+| `box·3·5–9·2` | spanning stacks 3..9, ended at position 2 (en dash) |
+
+The **box** is everything before the first `·`/`•` (`listingBox`). The
+MyPokoin board shows the full location as a chip; clicking it opens
+`/mypokoin/location/{name}`, which resolves the **box** (a full slot string in
+the URL still lands on its box) and lists every listing stored there, grouped
+per stack **ordered by stack number asc** — unnumbered rows under "In the box"
+last — each stack's postings ordered by position (when the location carries
+one), then listed date. Summary tiles: stacks / postings / copies.
+
+**Scan start position** (scan desk stack setup): the popover's Current stack /
+Next position select where a batch begins, and the default continues after
+both (a) where the seller stopped in a previous scan session
+(`localStorage scan:box-positions` per box) and (b) whatever is already listed
+in that box — scan batches, desk listings and PowerTools CSV imports all write
+`box·stack` locations, and the desk seeds the first stack past the highest
+occupied one (`maxOccupiedStack`). The API map documents the board's
+`/api/marketplace-price-check` pricer.
+
+### MyPokoin pricing strategies + settings (PowerTools parity)
+
+Pricing strategies live on `users/{uid}.pricingStrategies` (Firestore) via
+`/api/marketplace-pricing-strategies` (GET / POST upsert / DELETE ?id=).
+A strategy = comp source (pokoin | cardtrader) + action (match | undercut |
+premium) + amount % + flat PKN + floor + rounding (none | integer) + optional
+condition/language scope. Evaluation is client-side against
+`/api/marketplace-price-check` comps; **Apply** shows a dry-run table
+(current → new, Δ) and reprices through `PATCH /api/marketplace-listings?id=`
+one listing at a time (≤100 per run). Pricer defaults
+(`defaultSource`, `autoMarketColumn`) ride the same endpoint. The board has
+three view modes — Table / Stacks / Titles — persisted in
+`localStorage pokoin.invView`; Settings lives on `/mypokoin/settings`
+(pricer defaults + strategy manager).
+
+### Buyer display currency (affordability threshold)
+
+Buyers see prices in PKN while their balance can afford them, and
+local-currency-first (DKK for a Danish buyer, from the profile country;
+browser locale only as fallback) once it cannot: `buyerPrefersFiat` — the
+affordability threshold is the price itself, so a 15 PKN balance renders
+almost every market price in DKK while a cheap 12 PKN card stays PKN.
+Applies to the desk shop rows, Best Deal, the cart rows and the checkout
+(fiat checkout already switches on `preferFiat`). Card-only sellers always
+render local first. Settlement stays PKN; the cart/checkout display keeps
+the PKN value in brackets (`formatLocalFromPkn`).
+
 ### Listing pipeline (Oracle GET → nezopt NVMe ingest → Pi replica)
 
 ```
@@ -822,9 +881,10 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
 
   | Reason | Meaning | Sold graph? |
   | --- | --- | --- |
-  | `quantity_decreased` | Same product id still in the book; qty went down. Stack drip. | **Yes** |
+  | `quantity_decreased` | Same product id still in the book; qty went down. Stack drip. | **Yes**, only when the listing is ≥3 days old |
   | `listing_id_rotated` | Old product id gone, but the **same seller stack** is still listed (any sibling id, **any qty**). Insertion-id / split-stack churn, not a sale. | **No** |
-  | `inferred_sale` | That **seller stack** is gone from the complete book (seller + language + condition + reverse/1st/graded). Not “product id missing.” Still not a receipt — dump miss and delist look the same. | **Yes** |
+  | `young_listing_removed` | Listing (or drip) left the book **less than 3 days** after `first_seen_at`. Fresh lowball posts and price-edit churn, not a market price. History kept; the 093 three-dump ceremony still runs, but the reason never becomes sale-eligible. | **No** |
+  | `inferred_sale` | That **seller stack** is gone from the complete book (seller + language + condition + reverse/1st/graded). Not “product id missing.” Still not a receipt — dump miss and delist look the same. | **Yes**, only when the listing is ≥3 days old |
   | `seller_on_vacation` | Seller hid the shop (`on_vacation`) or the whole snapshot book vanished in one day. Not sold. Snapshots stay frozen. | **No** |
   | `dump_miss` | Listing id still on CardTrader `GET ?blueprint_id=`. Expansion dump / 25-wide window omitted it. | **No** |
   | `dropped_from_cheapest_25` | Left our old 25-wide window. **Wrong as a sale.** Unused on the complete-book path. | **No** |
@@ -915,6 +975,15 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
   `marketplace_price_observations`):
 
   - Source ids only: `cardtrader:{listing}:{day}:{inferred_sale|quantity_decreased}`.
+  - The listing must have been in the book at least **3 days**
+    (`first_seen_at::date <= removed_day - 3`): younger vanishes and drips
+    archive as `young_listing_removed` and never project an observation.
+    Giuseppe's lowball guard — fresh posts vanish at fire-sale prices
+    (2026-09-15..28 dumps: young-episode median 156 PKN vs 330 PKN for
+    mature stacks; Mega Diancie ex 356824 on 23 Sep plotted 222 blended off
+    213 young of 216 episodes). Cardvault `101_listing_min_age_three_days.sql`
+    on top of the 093 three-dump confirmation; the one-time backfill
+    invalidated ~189k young episodes and rebuilt the graph.
   - Same listing_id on many days is snapshot flicker — keep `inferred_sale`
     only when that listing appears on a single day (`047_…`).
   - `inferred_sale` while that listing_id is still in

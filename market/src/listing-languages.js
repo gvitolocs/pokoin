@@ -3,6 +3,13 @@ import releases from './set-release-languages.json' with { type: 'json' };
 /** Western listing codes. Asian printings are other cards, not languages of this set. */
 export const WESTERN_SELL_LANGS = ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL', 'PL', 'RU'];
 
+/**
+ * Every western printing can be listed in these. TCGdex release rows only say
+ * which languages TCGdex has data for — Plasma Blast has no ES there, yet
+ * CardTrader sellers list Spanish copies — so they only add NL/PL/RU.
+ */
+const WESTERN_CORE_LANGS = ['EN', 'IT', 'FR', 'DE', 'ES', 'PT'];
+
 const SELL_ORDER = ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL', 'PL', 'RU', 'JP', 'KO', 'ZH', 'ZHT', 'ID', 'TH', 'VI'];
 
 /** Japanese and Korean printings list every other Asian language except Chinese. */
@@ -52,17 +59,19 @@ export function releaseLanguagesForSet(setName) {
 }
 
 /**
- * Languages a seller can list this printing in.
- * TCGdex release rows win, then the printing nationality.
+ * Languages a seller can list this printing in. Asian printings follow their
+ * nationality; western ones get EN/IT/FR/DE/ES/PT plus any NL/PL/RU release.
  */
 export function sellLanguages({ nationality, setName, releaseLanguages } = {}) {
   const printed = PRINT_LANG[String(nationality || '').toLowerCase()];
   if (printed) return rank(printed);
   const fromCard = cleanCodes(releaseLanguages);
-  if (fromCard.length) return rank(fromCard);
-  const fromSet = releaseLanguagesForSet(setName);
-  if (fromSet) return rank(fromSet);
-  return WESTERN_SELL_LANGS.slice();
+  const released = fromCard.length ? fromCard : cleanCodes(releaseLanguagesForSet(setName));
+  if (!released.length) return WESTERN_SELL_LANGS.slice();
+  // A release row of only Asian codes is not a western printing's languages.
+  const western = released.filter((code) => WESTERN_SELL_LANGS.includes(code));
+  if (!western.length) return rank(released);
+  return rank([...WESTERN_CORE_LANGS, ...western]);
 }
 
 /**

@@ -47,8 +47,8 @@ test('marketUrl keeps relative paths on pokoin.com and abs on dashboard', () => 
     `${MARKET_ORIGIN}/wallet`,
   );
   assert.equal(
-    marketUrl('/inventory', 'dashboard.pokoin.com'),
-    `${MARKET_ORIGIN}/inventory`,
+    marketUrl('/mypokoin', 'dashboard.pokoin.com'),
+    `${MARKET_ORIGIN}/mypokoin`,
   );
 });
 

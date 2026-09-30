@@ -94,6 +94,72 @@ The card itself remains in the catalog and can still show global CardTrader
 market availability from other sellers; catalog presence is not this seller's
 stock.
 
+## 2026-09-28 webhook never verified a delivery
+
+Every real CardTrader delivery was rejected with a silent `401`. The Pi API
+server hands `rawBody: true` routes the untouched request stream — it sets
+neither `req.rawBody` nor `req.body` — and `cardtrader-webhook.js` only read
+those two, so it signed an empty buffer. A correctly signed self-test through
+`https://api.pokoin.com` reproduced the `401`; the stored shared secrets matched
+CardTrader's `GET /info` for all three connected sellers. Firestore had zero
+`cardtrader_webhook_events`, and every CardTrader sale since the import
+(redshakkio: 235 order items over 141 orders) was removed from Pokoin only by
+the 5-minute complete-export reconcile.
+
+Fix: `rawBodyBuffer` (in `_cardtrader_webhook_core.js`) reads the exact bytes
+from the stream when nothing buffered them, and rejections now log
+`cardtrader-webhook rejected` with the reason and body size.
+
+A CardTrader sale of a linked listing is now a **real sale**: the webhook
+writes `marketplace_sales/ct_{order}__{item}` (`source: cardtrader`, seller
+price, condition, language, CardTrader order code) next to the stock decrement,
+and it shows in the seller's Sold history. A cancelled CardTrader order puts
+the quantity back and voids that row, once, via the claimed event.
+
+Historic sales are backfilled from CardTrader's seller orders — never from
+"vanished from the export":
+
+```bash
+# dry run (read-only), then --apply
+docker exec -w /app pokoin-oracle-api node /app/api/cardtrader-sales-backfill.js --uid <firebaseUid>
+docker exec -w /app pokoin-oracle-api node /app/api/cardtrader-sales-backfill.js --uid <firebaseUid> --apply
+```
+
+Only items sold after the listing was imported count. Linked listings that left
+CardTrader with no seller order are delistings, not sales: `--apply` sets them
+`inactive`, not `sold_out`.
+
+## Sold vs delisted (2026-09-28)
+
+The seller's CardTrader account is theirs; Pokoin only mirrors it with the API
+token they gave us.
+
+- **Sold** = a CardTrader seller order (`GET /orders?order_as=seller`) for that
+  product, not `pending`/cancelled, placed after the listing was linked. The
+  webhook records it immediately; when a product leaves the complete export,
+  the reconcile looks at the last 30 days of seller orders and records any sale
+  the webhook missed (same `cardtrader_webhook_events` claim, same
+  `marketplace_sales` row id). Listing → `sold_out`.
+- **Delisted** = gone from the export with no such order: the seller removed it
+  on CardTrader. Listing → `inactive`, quantity 0, **no sale**. If the seller
+  relists that product on CardTrader it comes back; a listing the seller hid on
+  Pokoin stays hidden.
+- Order data unavailable → treated as delisted (off sale, nothing claimed).
+- **Never written back:** reconcile only reads CardTrader. A Pokoin sale takes
+  exactly the sold quantity off CardTrader with `POST /products/:id/increment`
+  (`delta_quantity: -n`), never an absolute quantity, so stock the seller
+  changed on CardTrader is not overwritten; if CardTrader refuses (already
+  gone), nothing else is touched. Other marketplaces are never touched.
+- Webhook `order.destroy` restocks like a cancellation.
+- **Disconnect** wipes the token and secret, so Pokoin can no longer see
+  CardTrader sales. `cardtrader-disconnect` therefore takes the
+  CardTrader-imported listings off Pokoin (`inactive`, never deleted; `sold_out`
+  rows keep their label) and drops their import links. Nothing changes on
+  CardTrader, and the seller's own Pokoin listings stay live. Reconnecting
+  re-imports them with fresh quantities and prices. 2026-09-28: redshakkio
+  disconnected at 13:01 UTC with 12,028 imported listings still live; they were
+  taken off the same way.
+
 ## PlusCal / TLC
 
 [`../specs/CardTraderSellerInventory.tla`](../specs/CardTraderSellerInventory.tla)

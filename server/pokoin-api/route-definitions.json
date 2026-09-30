@@ -2,7 +2,9 @@
   {
     "path": "/api/marketplace-seller-shop",
     "file": "marketplace-seller-shop.js",
-    "methods": ["GET"],
+    "methods": [
+      "GET"
+    ],
     "purpose": "Public seller shop with server total/unique + offset pagination and CT-like filters.",
     "auth": "Public. sellerUsername required.",
     "params": {
@@ -10,14 +12,25 @@
       "body": "none"
     },
     "dependencies": {
-      "env": ["FIREBASE_*", "MARKETPLACE_DATABASE_URL", "ONE_PIECE_MARKETPLACE_DATABASE_URL", "RIFTBOUND_MARKETPLACE_DATABASE_URL"],
-      "services": ["Firebase Admin", "Postgres"]
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL",
+        "ONE_PIECE_MARKETPLACE_DATABASE_URL",
+        "RIFTBOUND_MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres"
+      ]
     }
   },
   {
     "path": "/api/chat",
     "file": "chat.js",
-    "methods": ["GET", "POST"],
+    "methods": [
+      "GET",
+      "POST"
+    ],
     "purpose": "List and append typed events in a canonical private conversation, including atomic direct PKN payments.",
     "auth": "Required Firebase bearer token; conversation membership is enforced server-side.",
     "params": {
@@ -25,14 +38,21 @@
       "body": "peer plus text, or a positive whole amountPkn and clientToken for payment."
     },
     "dependencies": {
-      "env": ["FIREBASE_*"],
-      "services": ["Firebase Admin"]
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
     }
   },
   {
     "path": "/api/money-request",
     "file": "money-request.js",
-    "methods": ["GET", "POST"],
+    "methods": [
+      "GET",
+      "POST"
+    ],
     "purpose": "Create, pay, decline, or cancel PKN requests represented as typed conversation events.",
     "auth": "Required Firebase bearer token; request parties and transitions are enforced server-side.",
     "params": {
@@ -40,14 +60,21 @@
       "body": "recipientUsername, amountPkn, note, and clientToken for create; requestId for transitions."
     },
     "dependencies": {
-      "env": ["FIREBASE_*"],
-      "services": ["Firebase Admin"]
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
     }
   },
   {
     "path": "/api/cardtrader-sync",
     "file": "cardtrader-sync.js",
-    "methods": ["GET", "POST"],
+    "methods": [
+      "GET",
+      "POST"
+    ],
     "purpose": "Reconcile the seller's complete CardTrader inventory into Pokoin (import/link/update/remove linked stock only).",
     "auth": "Required Firebase bearer token; seller must have CardTrader connected.",
     "params": {
@@ -55,14 +82,46 @@
       "body": "none"
     },
     "dependencies": {
-      "env": ["FIREBASE_*", "CARDTRADER_TOKEN_ENCRYPTION_KEY", "MARKETPLACE_WRITER_DATABASE_URL"],
-      "services": ["Firebase Admin", "CardTrader API", "Postgres writer"]
+      "env": [
+        "FIREBASE_*",
+        "CARDTRADER_TOKEN_ENCRYPTION_KEY",
+        "MARKETPLACE_WRITER_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "CardTrader API",
+        "Postgres writer"
+      ]
+    }
+  },
+  {
+    "path": "/api/cardtrader-clean-listings",
+    "file": "cardtrader-clean-listings.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Hide CardTrader-linked listings, or wipe the seller's entire inventory across TCGs (confirm required) so Sync can re-import.",
+    "auth": "Required Firebase bearer token; seller uid from token only.",
+    "params": {
+      "body": "scope=linked|all; when scope=all, confirm must be DELETE ALL LISTINGS"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_WRITER_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres writer"
+      ]
     }
   },
   {
     "path": "/api/cardtrader-assets",
     "file": "cardtrader-assets.js",
-    "methods": ["GET"],
+    "methods": [
+      "GET"
+    ],
     "purpose": "Signed-in seller's CardTrader 1-Day Ready inventory as dashboard assets (never Pokoin listings).",
     "auth": "Required Firebase bearer token; uid from verified token only.",
     "params": {
@@ -70,14 +129,22 @@
       "body": "none"
     },
     "dependencies": {
-      "env": ["FIREBASE_*", "MARKETPLACE_DATABASE_URL"],
-      "services": ["Firebase Admin", "Postgres"]
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres"
+      ]
     }
   },
   {
     "path": "/api/marketplace-portfolio-history",
     "file": "marketplace-portfolio-history.js",
-    "methods": ["GET"],
+    "methods": [
+      "GET"
+    ],
     "purpose": "Stored daily collection value: wallet on the days it moved, plus the homepage minimum of 1-Day Ready cards summed once per UTC day.",
     "auth": "Required Firebase bearer token; uid from verified token only.",
     "params": {
@@ -85,14 +152,24 @@
       "body": "none"
     },
     "dependencies": {
-      "env": ["FIREBASE_*", "MARKETPLACE_DATABASE_URL"],
-      "services": ["Firebase Admin", "Postgres"]
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres"
+      ]
     }
   },
   {
     "path": "/api/marketplace-recents",
     "file": "marketplace-recents.js",
-    "methods": ["GET", "PUT", "POST"],
+    "methods": [
+      "GET",
+      "PUT",
+      "POST"
+    ],
     "purpose": "Signed-in recently seen public card ids, scoped by game at storage/query. Writer is the nezopt marketplace primary. Tile JSON is not stored.",
     "auth": "Required Firebase bearer token; uid from verified token only.",
     "params": {
@@ -100,8 +177,485 @@
       "body": "POST { game, cardId } records one view; PUT { game, cardIds } replaces that game list. Cards must exist in the game catalog."
     },
     "dependencies": {
-      "env": ["FIREBASE_*", "MARKETPLACE_WRITER_DATABASE_URL", "MARKETPLACE_DATABASE_URL", "ONE_PIECE_MARKETPLACE_DATABASE_URL", "RIFTBOUND_MARKETPLACE_DATABASE_URL"],
-      "services": ["Firebase Admin", "Postgres writer + per-game catalog DBs"]
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_WRITER_DATABASE_URL",
+        "MARKETPLACE_DATABASE_URL",
+        "ONE_PIECE_MARKETPLACE_DATABASE_URL",
+        "RIFTBOUND_MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres writer + per-game catalog DBs"
+      ]
+    }
+  },
+  {
+    "path": "/api/poko-market",
+    "file": "poko-market.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Poko market intelligence: read-only card resolution, sold-market quotes, liquidity, artist collection quotes, snapshot. One shared tool surface for every Poko channel.",
+    "auth": "Required service bearer token: POKO_MARKET_SERVICE_TOKEN, or POKONTACT_SERVICE_TOKEN (same secret, already in the Pi container env). Server-to-server only; browsers never receive it.",
+    "params": {
+      "query": "none",
+      "body": "{ tool: resolve_card|card_quote|card_ocr|card_liquidity|collection_quote|suggest_cards|market_snapshot|top_movers, params } with tool-specific fields (query, cardId, condition, language, artist, subject, excludeCardId, limit, days, direction)."
+    },
+    "dependencies": {
+      "env": [
+        "MARKETPLACE_DATABASE_URL",
+        "POKO_MARKET_SERVICE_TOKEN",
+        "POKONTACT_SERVICE_TOKEN"
+      ],
+      "services": [
+        "Postgres read-only replica"
+      ]
+    }
+  },
+  {
+    "path": "/api/poko-personal-context",
+    "file": "poko-personal-context.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Authenticated personal marketplace snapshot for Poko intent: desk, recents, watchlist, cart, inventory, collection. Firebase users sync browser cart/watchlist; Hermes service token loads by firebaseUid for linked Telegram/Discord.",
+    "auth": "Firebase bearer (user) or POKO_MARKET_SERVICE_TOKEN / POKONTACT_SERVICE_TOKEN (service + firebaseUid).",
+    "params": {
+      "query": "none",
+      "body": "{ action: get|sync, watchlistIds?, cart?, desk?, firebaseUid? }"
+    },
+    "dependencies": {
+      "env": [
+        "MARKETPLACE_DATABASE_URL",
+        "MARKETPLACE_WRITER_DATABASE_URL",
+        "POKO_MARKET_SERVICE_TOKEN",
+        "POKONTACT_SERVICE_TOKEN"
+      ],
+      "services": [
+        "Postgres",
+        "Firebase Admin (collection summary)"
+      ]
+    }
+  },
+  {
+    "path": "/api/poko-chat",
+    "file": "poko-chat.js",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "purpose": "Website Poko assistant chat (Messages + dock). Firebase-authed Hermes proxy; persists transcript to Firestore poko_conversations/{uid}/events for cross-device sync. No local FAQ or market-tool fallback.",
+    "auth": "Required Firebase bearer token. Browser never receives the Hermes service token.",
+    "params": {
+      "query": "action=history&before? (GET)",
+      "body": "{ message, cards?: [{ cardId, name, setName, condition, language }], images?: string[], sessionId?, pageContext? } (POST)"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "POKONTACT_SERVICE_URL",
+        "POKO_CHAT_URL",
+        "POKO_API_TOKEN",
+        "POKONTACT_SERVICE_TOKEN",
+        "POKO_CHAT_TIMEOUT_MS"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Hermes Poko (peer1 :8789)"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-seller-settings",
+    "file": "marketplace-seller-settings.js",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "purpose": "Seller ship-from country (ISO-2) and Stripe Connect readiness.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "POST { shipFromCountry }"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/account-addresses",
+    "file": "account-addresses.js",
+    "methods": [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE"
+    ],
+    "purpose": "Encrypted buyer shipping addresses; countryCode stays queryable outside ciphertext.",
+    "auth": "Required Firebase bearer token; owner only.",
+    "params": {
+      "query": "id for PUT/DELETE; reveal=1 to decrypt for owner",
+      "body": "Address fields + optional isDefault/label"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "ADDRESS_ENCRYPTION_KEY"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-checkout-quote",
+    "file": "marketplace-checkout-quote.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Per-seller shipment quotes from seeded rate tables. Fail closed when route missing.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "{ items, shippingAddressId }"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "ADDRESS_ENCRYPTION_KEY"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/stripe-connect-onboard",
+    "file": "stripe-connect-onboard.js",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "purpose": "Stripe Connect Express onboarding and READY status sync.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "Optional returnUrl/refreshUrl"
+    },
+    "dependencies": {
+      "env": [
+        "STRIPE_SECRET_KEY",
+        "FIREBASE_*",
+        "PUBLIC_SITE_URL"
+      ],
+      "services": [
+        "Stripe",
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/create-order-checkout-session",
+    "file": "create-order-checkout-session.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Freeze EUR order + encrypted address snapshot, open Stripe Checkout Session.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "{ items, shippingAddressId, buyerEmail? }"
+    },
+    "dependencies": {
+      "env": [
+        "STRIPE_SECRET_KEY",
+        "ADDRESS_ENCRYPTION_KEY",
+        "FIREBASE_*",
+        "PUBLIC_SITE_URL"
+      ],
+      "services": [
+        "Stripe",
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/poko-connect",
+    "file": "poko-connect.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Link a signed-in Pokoin account to a Telegram user for the Poko assistant: create link code (Firebase user), redeem/status/unlink (service token via Hermes).",
+    "auth": "create_code: Firebase bearer token. redeem/status/unlink: service bearer token (POKO_MARKET_SERVICE_TOKEN or POKONTACT_SERVICE_TOKEN).",
+    "params": {
+      "query": "none",
+      "body": "{ action: create_code|redeem|status|unlink, ... } — create_code takes no params; redeem takes code + telegram { userId, username, displayName }; status/unlink take telegramUserId."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_WRITER_DATABASE_URL",
+        "MARKETPLACE_DATABASE_URL",
+        "POKO_MARKET_SERVICE_TOKEN",
+        "POKONTACT_SERVICE_TOKEN"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres writer (link writes) + read replica (status)"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-associate",
+    "file": "marketplace-associate.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Associate desk: role (distributor, ambassador, …), campaign window, and live royalty earnings on sales made by Italian sellers to Italian buyers.",
+    "auth": "Required Firebase bearer token; caller email must exist in public.marketplace_associates, else 403.",
+    "params": {
+      "query": "none",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres",
+        "Firestore orders"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-referral",
+    "file": "marketplace-referral.js",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "purpose": "Invite & Earn: the caller's invite code, invited collectors and 20 PKN rewards (settled on read), plus Ambassador mission progress and tier. POST action=claim attaches a new account to an inviter.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "POST {action:'claim', code:'<inviter username>'}"
+    }
+  },
+  {
+    "path": "/api/marketplace-associate-suggest",
+    "file": "marketplace-associate-suggest.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Users-search supplement: active associates roster matches by display name or email prefix (public name, username, role only).",
+    "auth": "Public. q (min 2 chars) optional.",
+    "params": {
+      "query": "q prefix to match.",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-native-sales",
+    "file": "marketplace-native-sales.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Public Sold on Pokoin rows for a card desk: paid native PKN/EUR orders, no buyer identity.",
+    "auth": "Public. cardId required.",
+    "params": {
+      "query": "cardId required; limit (max 50).",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/pokoin-partner",
+    "file": "pokoin-partner.js",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "purpose": "Pokoin Flex partner-store directory (public) and Partner app intake/bag/handoff contract (mutations coming_soon).",
+    "auth": "directory/contract public; intake/bag/receive-hub/handoff/pending will require partner auth when live.",
+    "params": {
+      "query": "action=directory|contract|pending (storeId when partner auth exists).",
+      "body": "action plus storeId, parcelQr/bagQr/pickupQr as documented by action=contract."
+    },
+    "dependencies": {
+      "env": [],
+      "services": [
+        "Partner store directory (placeholder until Flex launch)"
+      ]
+    }
+  },
+  {
+    "path": "/api/cardtrader-deal-scan",
+    "file": "cardtrader-deal-scan.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Scan a CardTrader seller (username or profile URL) for crazy asks vs facet-perfect sold comps (blueprint + condition + language + reverse/1st/graded).",
+    "auth": "Required Bearer DEAL_SCAN_TOKEN. Intended for the pokoin-ct-deals Vercel proxy; not a public browser endpoint.",
+    "params": {
+      "query": "seller={ctUsername} or url={cardtrader profile URL}.",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "MARKETPLACE_DATABASE_URL",
+        "DEAL_SCAN_TOKEN"
+      ],
+      "services": [
+        "Postgres marketplace (snapshots + cardtrader_sold_daily)",
+        "CardTrader public user JSON (username → account id)"
+      ]
+    }
+  },
+  {
+    "path": "/api/scan/identify",
+    "file": "scan-identify.js",
+    "methods": [
+      "POST",
+      "OPTIONS"
+    ],
+    "purpose": "Card recognition (YOLO detect + Milo embed) for the website, Scan Connect and the app. nezopt GPU first, Pi CPU fallback.",
+    "params": {
+      "query": "catalog, top_k (1-8), live, multi, album",
+      "body": "multipart/form-data field `file` (≤4 MB image)"
+    },
+    "rawBody": true,
+    "auth": "Public; per-IP limit in the recognition worker.",
+    "dependencies": {
+      "services": [
+        "nezopt GPU recognition worker via SSH tunnel 127.0.0.1:18151",
+        "Pi CPU recognition container pokoin-scan 127.0.0.1:18150"
+      ]
+    }
+  },
+  {
+    "path": "/api/scan/identify-album",
+    "file": "scan-identify-album.js",
+    "methods": [
+      "POST",
+      "OPTIONS"
+    ],
+    "purpose": "Recognize several photos of one album page at once.",
+    "params": {
+      "query": "top_k, live",
+      "body": "multipart/form-data field `file` repeated"
+    },
+    "rawBody": true,
+    "auth": "Public; per-IP limit in the recognition worker.",
+    "dependencies": {
+      "services": [
+        "nezopt GPU recognition worker via SSH tunnel 127.0.0.1:18151",
+        "Pi CPU recognition container pokoin-scan 127.0.0.1:18150"
+      ]
+    }
+  },
+  {
+    "path": "/api/scan/catalogs",
+    "file": "scan-catalogs.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Recognition catalogs (game × language) the scanner can switch between.",
+    "params": {
+      "query": "none"
+    },
+    "auth": "Public; per-IP limit in the recognition worker.",
+    "dependencies": {
+      "services": [
+        "nezopt GPU recognition worker via SSH tunnel 127.0.0.1:18151",
+        "Pi CPU recognition container pokoin-scan 127.0.0.1:18150"
+      ]
+    }
+  },
+  {
+    "path": "/api/scan/health",
+    "file": "scan-health.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Which recognition workers answer (nezopt GPU, Pi CPU).",
+    "params": {
+      "query": "none"
+    },
+    "auth": "Public; per-IP limit in the recognition worker.",
+    "dependencies": {
+      "services": [
+        "nezopt GPU recognition worker via SSH tunnel 127.0.0.1:18151",
+        "Pi CPU recognition container pokoin-scan 127.0.0.1:18150"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-price-check",
+    "file": "marketplace-price-check.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "PowerTools-style pricer for the MyPokoin listings board: per-listing market comps.",
+    "auth": "Bearer required. Caller's own listings are excluded from the Pokoin cheapest.",
+    "params": {
+      "query": "items required: comma list of cardId[:COND:LANG], max 100; excludeSellerUid optional (defaults to the bearer uid).",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Postgres (replica)"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-pricing-strategies",
+    "file": "marketplace-pricing-strategies.js",
+    "methods": [
+      "GET",
+      "POST",
+      "DELETE"
+    ],
+    "purpose": "PowerTools-style pricing strategies + pricer defaults stored on users/{uid}.",
+    "auth": "Bearer required; strategies belong to the bearer uid.",
+    "params": {
+      "query": "DELETE requires id.",
+      "body": "POST: {strategy} upserts one strategy (empty id mints one); {pricerSettings} saves the pricer defaults; both allowed."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
     }
   }
 ]

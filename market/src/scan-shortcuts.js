@@ -144,7 +144,7 @@ export function shortcutFor(event, context = {}) {
     if (k === 'ArrowDown') return { command: 'nextAttention' };
     if (/^[1-9]$/.test(k)) return { command: 'pickCandidate', index: Number(k) - 1 };
     if (k === 'l') return { command: 'focusDefault', field: 'location' };
-    if (k === 'q') return { command: 'focusDefault', field: 'quantity' };
+    if (k === 'q') return { command: 'focusDefault', field: 'stack' };
     if (k === 'p') return { command: 'pause' };
     return null;
   }
@@ -289,7 +289,7 @@ export const HELP_SECTIONS = [
     title: 'Pokoin',
     rows: [
       ['Alt ↓', 'Next row that needs attention'],
-      ['Alt L / Alt Q', 'Default location / quantity'],
+      ['Alt L / Alt Q', 'Default location / stack setup'],
       ['Alt P', 'Pause / resume phone'],
       ['⌘Z / ⇧⌘Z', 'Undo / redo'],
       ['⌘Enter', 'Add to Inventory'],

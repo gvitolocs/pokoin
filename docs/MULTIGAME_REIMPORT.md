@@ -54,11 +54,13 @@ not on the Pi replica of the writer.
 | 21 | Union Arena | `pokoin_union_arena` | `union-arena/` | Ingest API live; discover-only: 92 expansions. |
 | 23 | Gundam | `pokoin_gundam` | `gundam/` | Ingest API live; discover-only: 37 expansions. |
 | 24 | Sorcery: Contested Realm | `pokoin_sorcery` | `sorcery/` | Ingest API live; discover-only: 9 expansions. |
+| 26 | Palworld | `pokoin_palworld` | `palworld/` | Wired in SPA + ingest targets (CT game id 26). |
+| 27 | Cyberpunk | `pokoin_cyberpunk` | `cyberpunk/` | Wired in SPA + ingest targets (CT game id 27). |
 
 SPA routes: `pokoin.com` (Pokémon) and `pokoin.com/{slug}` for every other
 CardTrader game (`one-piece`, `riftbound`, `magic`, `yugioh`, `lorcana`,
 `flesh-and-blood`, `digimon`, `dragon-ball-super`, `vanguard`, `star-wars`,
-`union-arena`, `gundam`, `sorcery`). `onepiece.pokoin.com` and
+`union-arena`, `gundam`, `sorcery`, `palworld`, `cyberpunk`). `onepiece.pokoin.com` and
 `riftbound.pokoin.com` redirect onto those paths. Do not add
 `magic.pokoin.com` or any other game subdomain.
 
@@ -125,6 +127,8 @@ the Pi.
 | `GET/POST /api/ingest/union-arena` | `pokoin_union_arena` |
 | `GET/POST /api/ingest/gundam` | `pokoin_gundam` |
 | `GET/POST /api/ingest/sorcery` | `pokoin_sorcery` |
+| `GET/POST /api/ingest/palworld` | `pokoin_palworld` |
+| `GET/POST /api/ingest/cyberpunk` | `pokoin_cyberpunk` |
 | `GET/POST /api/ingest/pokemon` | **404** — stays on the Pi |
 
 ```bash

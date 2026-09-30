@@ -9,6 +9,11 @@ export const ASSET_COVERAGE_LINE = '100% coverage on your assets';
 export const DISPUTE_REPLY = '48 hours';
 export const DISPUTE_DECISION = '5 business days';
 export const SHIP_DAYS = 7;
+export const CONTACT_EMAIL = 'contact@pokoin.com';
+/** mailto with a subject so disputes land in one thread; add the order id. */
+export function contactMailto(subject = 'Order problem') {
+  return `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}`;
+}
 
 export const PROTECTION_PILLARS = [
   {
@@ -21,6 +26,7 @@ export const PROTECTION_PILLARS = [
   },
   {
     title: 'Disputes',
-    body: `Report a problem from Orders. First reply within ${DISPUTE_REPLY}. Decision within ${DISPUTE_DECISION}. contact@pokoin.com.`,
+    body: `Report a problem from Orders. First reply within ${DISPUTE_REPLY}. Decision within ${DISPUTE_DECISION}.`,
+    link: { href: contactMailto(), label: CONTACT_EMAIL },
   },
 ];

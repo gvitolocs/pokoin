@@ -13,11 +13,20 @@ test('a western set does not offer Japanese as a listing language', () => {
   assert.equal(langs.includes('EN'), true);
 });
 
-test('database release languages override the set name', () => {
+test('database release languages only add NL/PL/RU to the western core', () => {
   assert.deepEqual(
     sellLanguages({ nationality: 'western', setName: '151', releaseLanguages: ['EN', 'FR'] }),
-    ['EN', 'FR'],
+    ['EN', 'IT', 'FR', 'DE', 'ES', 'PT'],
   );
+  assert.deepEqual(
+    sellLanguages({ nationality: 'western', setName: 'Base Set' }),
+    ['EN', 'IT', 'FR', 'DE', 'ES', 'PT', 'NL'],
+  );
+});
+
+test('Plasma Blast lists Spanish and Portuguese though TCGdex lacks them', () => {
+  const langs = sellLanguages({ nationality: 'western', setName: 'Plasma Blast' });
+  assert.deepEqual(langs, ['EN', 'IT', 'FR', 'DE', 'ES', 'PT']);
 });
 
 test('a Japanese printing lists the other Asian languages except Chinese', () => {

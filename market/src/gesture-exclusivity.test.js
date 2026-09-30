@@ -38,19 +38,26 @@ test('desk title / set / artist stay out of shop marquee', () => {
 
 test('Chrome defers Cart/Desktop mount so title/set/artist HTML5 drag is not aborted', () => {
   const chrome = fs.readFileSync(path.join(market, 'components/Chrome.jsx'), 'utf8');
-  // Sync setCardDrag inside dragstart remounts trays and Chrome cancels text-link drags.
+  const listing = fs.readFileSync(path.join(market, 'chat-listing.js'), 'utf8');
+  // Desk title/set/artist stopPropagation — trays open via pokoin-card-drag, deferred one frame.
+  assert.match(listing, /pokoin-card-drag/);
+  assert.match(chrome, /pokoin-card-drag/);
   assert.match(chrome, /requestAnimationFrame/);
-  assert.match(chrome, /setCardDrag\(document\.documentElement\.classList\.contains\('is-card-dragging'\)\)/);
-  const dragStartAt = chrome.indexOf('function onDragStart');
-  const rAFAt = chrome.indexOf('requestAnimationFrame', dragStartAt);
-  const setCardAt = chrome.indexOf("setCardDrag(document.documentElement.classList.contains('is-card-dragging'))", dragStartAt);
-  assert.ok(dragStartAt > 0 && rAFAt > dragStartAt && setCardAt > rAFAt);
+  assert.match(chrome, /setCardDrag\(true\)/);
+  const dragAt = chrome.indexOf("addEventListener('pokoin-card-drag'");
+  const rAFAt = chrome.indexOf('requestAnimationFrame', chrome.indexOf('function openDragTrays'));
+  const setCardAt = chrome.indexOf('setCardDrag(true)', chrome.indexOf('function openDragTrays'));
+  assert.ok(dragAt > 0 && rAFAt > 0 && setCardAt > rAFAt);
   const page = fs.readFileSync(path.join(market, 'pages/Card.jsx'), 'utf8');
   assert.match(page, /className="species-drag"/);
   assert.match(page, /kind: 'species'/);
   assert.match(page, /kind: 'expansion'/);
   assert.match(page, /kind: 'artist'/);
   assert.match(page, /event\.stopPropagation\(\)/);
+  const desk = fs.readFileSync(path.join(market, 'components/DesktopDrop.jsx'), 'utf8');
+  assert.match(desk, /bundle\.kind === 'expansion'/);
+  assert.match(desk, /expansion:\$\{bundle\.slug\}/);
+  assert.doesNotMatch(desk, /fetchExpansionCards/);
 });
 
 test('CardSelectGrid bands desk+related via main-scoped data-card-id', () => {

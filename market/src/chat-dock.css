@@ -6,13 +6,68 @@
   display: flex;
   flex-direction: column;
   width: min(20.5rem, calc(100vw - 1.5rem));
-  height: min(28.5rem, calc(100vh - 5.5rem));
+  /* ~392px on desktop; leave ~11.5rem for nav + cart so the pair share the column. */
+  height: min(24.5rem, calc(100vh - 11.5rem));
+  max-height: calc(100vh - 10rem);
   border: 1px solid var(--g5);
   border-bottom: 0;
   border-radius: 16px 16px 0 0;
   background: #14121a;
   box-shadow: 0 12px 40px rgb(0 0 0 / 0.45);
   color: var(--text);
+}
+
+.chat-fab {
+  position: fixed;
+  z-index: 200;
+  right: 1.1rem;
+  bottom: 1.1rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  background: #4b4b4b;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.45);
+}
+
+.chat-fab:hover {
+  background: #5a5a5a;
+}
+
+.chat-fab:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 3px;
+}
+
+.chat-fab-badge {
+  position: absolute;
+  top: -0.15rem;
+  right: -0.15rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  background: #e53935;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.15rem;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .chat-fab {
+    right: 0.85rem;
+    bottom: 0.85rem;
+    width: 3.15rem;
+    height: 3.15rem;
+  }
 }
 
 .chat-dock.is-over {
@@ -26,6 +81,11 @@
   gap: 0.5rem;
   padding: 0.7rem 0.75rem;
   border-bottom: 1px solid var(--g5);
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: inherit;
 }
 
 .chat-dock-head strong {
@@ -76,6 +136,37 @@
   font-weight: 800;
 }
 
+.chat-dock-avatar.is-poko {
+  overflow: hidden;
+  padding: 0;
+  background: radial-gradient(circle at 32% 28%, #ffe9a0, #c98912 70%);
+}
+
+.chat-dock-avatar.is-poko img {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  object-position: center 42%;
+  image-rendering: pixelated;
+}
+
+.chat-dock-row.is-poko {
+  border-bottom: 1px solid var(--g5);
+  background: rgba(255, 211, 61, 0.06);
+}
+
+.chat-dock-row.is-poko a {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.7rem 0.75rem;
+  color: inherit;
+  text-decoration: none;
+}
+
 .chat-dock-row-copy { min-width: 0; }
 
 .chat-dock-row-copy strong,
@@ -99,10 +190,24 @@
   font-size: 0.68rem;
 }
 
-.chat-dock-head strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.chat-dock-head strong.chat-dock-person.is-poko {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  overflow: visible;
+}
+
+.chat-dock-head strong.chat-dock-person.is-poko .chat-dock-avatar {
+  width: 1.9rem;
+  height: 1.9rem;
+}
+
+.chat-dock-head strong.chat-dock-person.is-poko .chat-dock-avatar img {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  object-position: center 42%;
 }
 
 .chat-dock-head button {
@@ -424,3 +529,27 @@
 .chat-photos img{width:7.5rem;height:7.5rem;object-fit:cover;border-radius:.4rem}
 .chat-photo-add{display:grid;place-items:center;width:2rem;height:2rem;border-radius:50%;cursor:pointer}
 .chat-photo-draft{display:flex;align-items:center;gap:.5rem}
+
+/* Poko assistant row + panel */
+.chat-dock-row.poko-row { border-bottom: 1px solid rgba(0, 0, 0, 0.06); }
+.chat-dock-row.poko-row .poko-avatar,
+.chat-dock-row.poko-row .chat-dock-avatar.is-poko {
+  overflow: hidden;
+  padding: 0;
+  background: radial-gradient(circle at 32% 28%, #ffe9a0, #c98912 70%);
+  color: #5b4200;
+  font-weight: 700;
+}
+.chat-dock-row.poko-row .chat-dock-avatar.is-poko img {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  object-position: center 42%;
+  image-rendering: pixelated;
+}
+.chat-dock-row.poko-row .chat-dock-row-copy em { color: #7a6a2f; }
+.poko-panel { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.poko-log { flex: 1; }
+.poko-input-row { display: flex; gap: 0.5rem; padding: 0.5rem; border-top: 1px solid rgba(0, 0, 0, 0.08); }
+.poko-input-row input { flex: 1; min-width: 0; }

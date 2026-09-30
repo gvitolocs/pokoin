@@ -40,9 +40,9 @@ export function MetricGrid({ children }) {
   return <div className="metric-grid">{children}</div>;
 }
 
-export function DeskPanel({ title, extra, children, actions, flush }) {
+export function DeskPanel({ title, extra, children, actions, flush, className = '' }) {
   return (
-    <section className={`desk-panel${flush ? ' flush' : ''}`}>
+    <section className={`desk-panel${flush ? ' flush' : ''}${className ? ` ${className}` : ''}`}>
       {title || extra ? (
         <div className="desk-panel-head">
           {title ? <h2>{title}</h2> : <span />}
