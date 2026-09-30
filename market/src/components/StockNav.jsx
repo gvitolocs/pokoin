@@ -9,7 +9,7 @@ const TABS = [
 ];
 
 /** Shared Listings / Sold / Bought / import strip under the MyPokoin desk. */
-export default function StockNav() {
+export default function StockNav({ forceActive = '' } = {}) {
   return (
     <nav className="stock-nav" aria-label="MyPokoin">
       {TABS.map((tab) => (
@@ -17,7 +17,7 @@ export default function StockNav() {
           key={tab.to}
           to={tab.to}
           end={tab.end === true}
-          className={({ isActive }) => (isActive ? 'on' : undefined)}
+          className={({ isActive }) => (isActive || (forceActive && tab.label === forceActive) ? 'on' : undefined)}
         >
           {tab.label}
         </NavLink>

@@ -6,6 +6,7 @@ import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice } from '../seller-currency.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
 import InventoryBoard from '../components/InventoryBoard.jsx';
+import LocationBoard from '../components/LocationBoard.jsx';
 import StockNav from '../components/StockNav.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
 import { liveInventoryListings } from '../inventory-listings.js';
@@ -33,6 +34,8 @@ function downloadText(text, filename) {
 export default function Inventory() {
   const location = useLocation();
   const onImportTab = Boolean(useMatch({ path: '/mypokoin/import', end: true }));
+  const locationMatch = useMatch({ path: '/mypokoin/location/:location', end: false });
+  const locationName = locationMatch ? decodeURIComponent(locationMatch.params.location || '') : '';
   const { user, ready, signedIn, profile, getBearer } = useAuth();
   // PKN opt-out sellers read their prices in local currency.
   const { currency: priceCurrency } = useSellerCurrency();
@@ -57,7 +60,9 @@ export default function Inventory() {
   }
 
   useEffect(() => {
-    document.title = onImportTab ? 'Import / export · MyPokoin' : 'MyPokoin · Pokoin';
+    document.title = locationName
+      ? `${locationName} · MyPokoin`
+      : (onImportTab ? 'Import / export · MyPokoin' : 'MyPokoin · Pokoin');
     const uid = user?.uid || profile?.uid;
     if (!signedIn || !uid) return undefined;
     let cancelled = false;
@@ -72,7 +77,7 @@ export default function Inventory() {
     return () => {
       cancelled = true;
     };
-  }, [signedIn, user?.uid, profile?.uid, getBearer, onImportTab]);
+  }, [signedIn, user?.uid, profile?.uid, getBearer, onImportTab, locationName]);
 
   async function onExport() {
     setError('');
@@ -137,7 +142,7 @@ export default function Inventory() {
         <Link className="btn" to="/inventory/scan">Scan cards</Link>
         <Link className="btn ghost" to="/marketplace">List a card</Link>
       </PageHead>
-      <StockNav />
+      <StockNav forceActive={locationName ? 'Listings' : ''} />
       <Alert>{error}</Alert>
       {message ? <p className="ct-connect-ok" role="status">{message}</p> : null}
 
@@ -243,13 +248,22 @@ export default function Inventory() {
         <DeskPanel title="Listings"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       ) : null}
       {!onImportTab && rows && !rows.length ? (
-        <EmptyDesk title="No live listings" lede="Scan a pile with your phone, import a CSV, or open a card and use List your card.">
+        <EmptyDesk
+          title={locationName ? `Nothing stored in ${locationName}` : 'No live listings'}
+          lede={locationName ? 'Move a listing into this location from its card desk, or scan a new pile.' : 'Scan a pile with your phone, import a CSV, or open a card and use List your card.'}>
           <Link className="btn" to="/inventory/scan">Scan cards</Link>
           <Link className="btn ghost" to="/mypokoin/import">Import CSV</Link>
           <Link className="btn ghost" to="/marketplace">Find a card</Link>
         </EmptyDesk>
       ) : null}
-      {!onImportTab && rows?.length ? (
+      {!onImportTab && locationName && rows?.length ? (
+        <LocationBoard
+          rows={rows.filter((row) => String(row?.location || '').trim() === locationName)}
+          location={locationName}
+          formatPrice={formatPrice}
+        />
+      ) : null}
+      {!onImportTab && !locationName && rows?.length ? (
         <InventoryBoard rows={rows} formatPrice={formatPrice} />
       ) : null}
     </div>

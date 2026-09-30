@@ -146,3 +146,55 @@ export function inventoryFacets(rows) {
     languages: [...languages].sort(),
   };
 }
+
+/** Stack key: identical printing in the same grade + foil facets. */
+export function inventoryStackKey(row) {
+  const facets = [
+    row?.cardId || row?.card_id,
+    String(row?.condition || 'NM').toUpperCase(),
+    String(row?.language || '').toUpperCase(),
+    row?.reverse === true ? 'rev' : '',
+    (row?.firstEdition ?? row?.first_edition) === true ? '1st' : '',
+    row?.graded === true ? 'graded' : '',
+  ];
+  return facets.map((part) => String(part ?? '')).join('|');
+}
+
+/**
+ * Group location rows into stacks — same printing, grade and foil facets —
+ * with the posting count and summed copies per stack. Ordered by posting
+ * count desc (the busiest stack first), then copies, then name.
+ */
+export function groupInventoryStacks(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const stacks = new Map();
+  for (const row of list) {
+    const key = inventoryStackKey(row);
+    const stack = stacks.get(key) || {
+      key,
+      cardId: row?.cardId || row?.card_id,
+      cardName: row?.cardName || row?.name || 'Listing',
+      setName: row?.setName || row?.set_name || '',
+      collectorNumber: row?.collectorNumber || row?.collector_number || '',
+      cardImageUrl: row?.cardImageUrl || row?.card_image_url || '',
+      condition: row?.condition || 'NM',
+      language: row?.language || '',
+      location: row?.location || '',
+      postings: [],
+    };
+    stack.postings.push(row);
+    stacks.set(key, stack);
+  }
+  const grouped = [...stacks.values()];
+  for (const stack of grouped) {
+    stack.postingCount = stack.postings.length;
+    stack.copies = stack.postings.reduce(
+      (sum, row) => sum + Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0),
+      0,
+    );
+  }
+  return grouped.sort((a, b) =>
+    b.postingCount - a.postingCount
+    || b.copies - a.copies
+    || a.cardName.localeCompare(b.cardName));
+}

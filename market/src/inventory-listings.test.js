@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   filterInventoryRows,
+  groupInventoryStacks,
+  inventoryStackKey,
   inventoryFacets,
   inventoryListingHref,
   inventoryListingMeta,
@@ -127,4 +129,40 @@ test('inventory row date formats to day/month', () => {
   assert.equal(inventoryRowDate({ createdAt: '2026-09-30T10:00:00Z' }), '30/09');
   assert.equal(inventoryRowDate({ created_at: '2026-09-09T10:00:00Z' }), '09/09');
   assert.equal(inventoryRowDate({}), '');
+});
+
+test('inventory stacks group identical printings and sort by posting count', () => {
+  const rows = [
+    { id: '1', cardId: '633380', cardName: 'Hoothoot', setName: 'Prismatic Evolutions', collectorNumber: '077/131', condition: 'NM', language: 'IT', quantityAvailable: 1, location: 'box1·1', createdAt: '2026-09-30' },
+    { id: '2', cardId: '633380', cardName: 'Hoothoot', setName: 'Prismatic Evolutions', collectorNumber: '077/131', condition: 'NM', language: 'IT', quantityAvailable: 2, location: 'box1·1', createdAt: '2026-09-29' },
+    { id: '3', cardId: '633380', cardName: 'Hoothoot', setName: 'Prismatic Evolutions', collectorNumber: '077/131', condition: 'SP', language: 'IT', quantityAvailable: 1, location: 'box1·1', createdAt: '2026-09-28' },
+    { id: '4', cardId: '713832', cardName: 'Gambler', setName: 'Fossil', collectorNumber: '060/062', condition: 'NM', language: 'EN', quantityAvailable: 5, location: 'box1·1', createdAt: '2026-09-27' },
+  ];
+  const stacks = groupInventoryStacks(rows);
+  // Hoothoot NM IT has 2 postings — busiest stack first.
+  assert.deepEqual(stacks.map((s) => [s.cardName, s.postingCount]), [
+    ['Hoothoot', 2],
+    ['Gambler', 1],
+    ['Hoothoot', 1],
+  ]);
+  assert.equal(stacks[0].copies, 3);
+  assert.equal(stacks[0].postings.length, 2);
+  // Different condition = a different stack.
+  assert.notEqual(stacks[0].key, stacks[2].key);
+});
+
+test('inventory stack key separates foil facets', () => {
+  const base = { cardId: '1', condition: 'NM', language: 'EN' };
+  assert.equal(
+    inventoryStackKey(base),
+    inventoryStackKey({ ...base }),
+  );
+  assert.notEqual(
+    inventoryStackKey(base),
+    inventoryStackKey({ ...base, reverse: true }),
+  );
+  assert.notEqual(
+    inventoryStackKey(base),
+    inventoryStackKey({ ...base, graded: true }),
+  );
 });

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchPriceCheck } from '../api.js';
+import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
 import { useAuth } from '../auth.jsx';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '../listing-meta.js';
 import {
@@ -62,7 +63,12 @@ function StatTile({ value, label, tone = '' }) {
 }
 
 function RowThumb({ row }) {
-  const src = String(row?.cardImageUrl || row?.card_image_url || '').trim();
+  // Listing rows may carry a stale or missing scan — resolve the catalog
+  // leftover image for the printing instead of showing a broken tile.
+  const src = homepageDerivativeUrl(ownCatalogImage(
+    { id: row?.cardId || row?.card_id },
+    preferFullImage(row?.cardImageUrl || row?.card_image_url || ''),
+  ));
   const name = row?.cardName || row?.name || 'Listing';
   if (src) {
     return <img className="inv-thumb" src={src} alt="" loading="lazy" width="40" height="56" />;
@@ -234,6 +240,7 @@ export default function InventoryBoard({ rows, formatPrice }) {
           const href = inventoryListingHref(row);
           const setName = String(row?.setName || row?.set_name || '').trim();
           const collector = String(row?.collectorNumber || row?.collector_number || '').trim();
+          const loc = String(row?.location || '').trim();
           const language = listingLanguageFlag(row?.language);
           return (
             <Link key={row.id || `${row.cardId}-${row.pricePkn}`} className="inv-row" to={href}>
@@ -243,6 +250,16 @@ export default function InventoryBoard({ rows, formatPrice }) {
                   <strong>{row?.cardName || row?.name || 'Listing'}</strong>
                   <span className="inv-card-sub">
                     {setName}{collector ? `${setName ? ' · ' : ''}#${collector}` : ''}
+                    {loc ? (
+                      <Link
+                        className="inv-loc"
+                        to={`/mypokoin/location/${encodeURIComponent(loc)}`}
+                        onClick={(event) => event.stopPropagation()}
+                        title={`Everything stored in ${loc}`}
+                      >
+                        {loc}
+                      </Link>
+                    ) : null}
                   </span>
                 </span>
               </span>
