@@ -230,157 +230,182 @@ export default function Seller() {
         </div>
       </header>
 
-      {listings || total != null ? (
-        <MetricGrid>
-          <Metric value={totalItems} label="Total items" />
-          <Metric value={uniqueItems} label="Unique items" />
-        </MetricGrid>
-      ) : (
-        <p className="status">Loading listings…</p>
-      )}
+      <MetricGrid>
+        <Metric value={listings == null ? '…' : totalItems} label="Total items" />
+        <Metric value={listings == null ? '…' : uniqueItems} label="Unique items" />
+      </MetricGrid>
 
       <Alert>{error && listings?.length ? error : ''}</Alert>
 
-      {listings != null ? (
-        <section className="panel shop-panel shop-terminal seller-shop-panel">
-          <header className="panel-head shop-head">
-            <h2>Shop</h2>
-          </header>
+      <section className="panel shop-panel shop-terminal seller-shop-panel">
+        <header className="panel-head shop-head">
+          <h2>Shop</h2>
+        </header>
 
-          <div className="shop-toolbar seller-shop-tools" role="search">
-            <input
-              className="shop-search"
-              type="search"
-              placeholder="Type an item name"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              aria-label="Search listings"
-            />
-            <div className="shop-find">
-              <select
-                aria-label="Condition"
-                value={condition}
-                onChange={(e) => setCondition(e.target.value)}
-              >
-                {CONDITION_FILTERS.map((opt) => (
-                  <option key={opt.value || 'any'} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="Language"
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-              >
-                {LANG_FILTERS.map((code) => (
-                  <option key={code || 'any'} value={code}>
-                    {code || 'Any language'}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="Rarity"
-                value={rarity}
-                onChange={(e) => setRarity(e.target.value)}
-              >
-                {RARITY_FILTERS.map((opt) => (
-                  <option key={opt.value || 'any-rarity'} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <ShopToggle label="Reverse" pressed={reverse} onToggle={setReverse} />
-              <ShopToggle label="1st Ed." pressed={firstEdition} onToggle={setFirstEdition} />
-              <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value)}>
-                <option value="price-asc">Price ↑</option>
-                <option value="price-desc">Price ↓</option>
-                <option value="name">Name</option>
-                <option value="qty">Quantity</option>
-              </select>
-            </div>
+        <div className="shop-toolbar seller-shop-tools" role="search">
+          <input
+            className="shop-search"
+            type="search"
+            placeholder="Type an item name"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Search listings"
+            disabled={listings == null}
+          />
+          <div className="shop-find">
+            <select
+              aria-label="Condition"
+              value={condition}
+              onChange={(e) => setCondition(e.target.value)}
+              disabled={listings == null}
+            >
+              {CONDITION_FILTERS.map((opt) => (
+                <option key={opt.value || 'any'} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              disabled={listings == null}
+            >
+              {LANG_FILTERS.map((code) => (
+                <option key={code || 'any'} value={code}>
+                  {code || 'Any language'}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Rarity"
+              value={rarity}
+              onChange={(e) => setRarity(e.target.value)}
+              disabled={listings == null}
+            >
+              {RARITY_FILTERS.map((opt) => (
+                <option key={opt.value || 'any-rarity'} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <ShopToggle label="Reverse" pressed={reverse} onToggle={setReverse} />
+            <ShopToggle label="1st Ed." pressed={firstEdition} onToggle={setFirstEdition} />
+            <select
+              aria-label="Sort"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              disabled={listings == null}
+            >
+              <option value="price-asc">Price ↑</option>
+              <option value="price-desc">Price ↓</option>
+              <option value="name">Name</option>
+              <option value="qty">Quantity</option>
+            </select>
           </div>
+        </div>
 
-          <p className="seller-result-count">
-            {loading ? (
-              'Loading…'
-            ) : totalItems ? (
-              <>
-                Showing <strong>{startIdx}</strong>–<strong>{endIdx}</strong> of{' '}
-                <strong>{totalItems}</strong>
-              </>
-            ) : (
-              'No matching listings'
-            )}
-          </p>
+        <p className="seller-result-count">
+          {listings == null || loading ? (
+            'Loading…'
+          ) : totalItems ? (
+            <>
+              Showing <strong>{startIdx}</strong>–<strong>{endIdx}</strong> of{' '}
+              <strong>{totalItems}</strong>
+            </>
+          ) : (
+            'No matching listings'
+          )}
+        </p>
 
-          {listings.length ? (
-            <ShopList className="seller-shop-list" offers={listings}>
-              {(selected) => listings.map((offer, index) => {
-                const cardId = String(offer.cardId || offer.card_id || '');
-                const path = rewriteCanonicalCardPath(
-                  offer.canonicalPath || offer.canonical_path || '',
-                  cardId,
-                  lang,
-                );
-                const enriched = {
-                  ...offer,
-                  canonicalPath: path || offer.canonicalPath || '',
-                };
-                const cardStub = {
-                  id: cardId,
-                  name: offer.cardName || offer.name || 'Card',
-                  canonicalPath: path || `/marketplace/${lang || 'en'}/cards/${cardId}`,
-                  imageUrl: offer.cardImageUrl || offer.imageUrl || offer.image_url || '',
-                  homepageImageUrl: offer.homepageImageUrl || offer.homepage_image_url || '',
-                  gridImageUrl: offer.gridImageUrl || offer.grid_image_url || '',
-                };
-                return (
-                  <ShopListingRow
-                    key={offer.id || `${cardId}-${index}`}
-                    offer={enriched}
-                    card={cardStub}
-                    showCard
-                    selected={selected.has(listingSelectId(enriched))}
-                    dragOffers={shopDragOffers(listings, selected, enriched)}
-                    onCart={(qty) => {
-                      if (!cardId || !offer.id) return;
-                      const item = cartItemFromOffer(cardStub, enriched);
-                      addItem(qty ? { ...item, qty } : item);
-                    }}
-                  />
-                );
-              })}
-            </ShopList>
-          ) : !loading ? (
-            <EmptyDesk title="No listings" lede={`${display} has no live asks for these filters.`} />
-          ) : null}
+        {listings == null ? (
+          <div
+            className="shop-list seller-shop-list"
+            aria-busy="true"
+            aria-label="Loading listings"
+          >
+            {Array.from({ length: 8 }, (_, index) => (
+              <div className="shop-row is-profile shop-row-skel" key={index} aria-hidden="true">
+                <span className="shop-card">
+                  <span className="shop-art shop-skel-art" />
+                  <span className="shop-skel-copy">
+                    <span className="skeleton-line" />
+                    <span className="skeleton-line short" />
+                  </span>
+                </span>
+                <span className="shop-facets">
+                  <span className="skeleton-line shop-skel-facet" />
+                  <span className="skeleton-line shop-skel-price" />
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : listings.length ? (
+          <ShopList className="seller-shop-list" offers={listings}>
+            {(selected) => listings.map((offer, index) => {
+              const cardId = String(offer.cardId || offer.card_id || '');
+              const path = rewriteCanonicalCardPath(
+                offer.canonicalPath || offer.canonical_path || '',
+                cardId,
+                lang,
+              );
+              const enriched = {
+                ...offer,
+                canonicalPath: path || offer.canonicalPath || '',
+              };
+              const cardStub = {
+                id: cardId,
+                name: offer.cardName || offer.name || 'Card',
+                canonicalPath: path || `/marketplace/${lang || 'en'}/cards/${cardId}`,
+                imageUrl: offer.cardImageUrl || offer.imageUrl || offer.image_url || '',
+                homepageImageUrl: offer.homepageImageUrl || offer.homepage_image_url || '',
+                gridImageUrl: offer.gridImageUrl || offer.grid_image_url || '',
+              };
+              return (
+                <ShopListingRow
+                  key={offer.id || `${cardId}-${index}`}
+                  offer={enriched}
+                  card={cardStub}
+                  showCard
+                  selected={selected.has(listingSelectId(enriched))}
+                  dragOffers={shopDragOffers(listings, selected, enriched)}
+                  onCart={(qty) => {
+                    if (!cardId || !offer.id) return;
+                    const item = cartItemFromOffer(cardStub, enriched);
+                    addItem(qty ? { ...item, qty } : item);
+                  }}
+                />
+              );
+            })}
+          </ShopList>
+        ) : !loading ? (
+          <EmptyDesk title="No listings" lede={`${display} has no live asks for these filters.`} />
+        ) : null}
 
-          {totalItems > PAGE_SIZE ? (
-            <div className="seller-pager">
-              <button
-                type="button"
-                className="btn ghost"
-                disabled={safePage <= 1 || loading}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                Previous
-              </button>
-              <span className="seller-pager-status">
-                Page {safePage} / {totalPages}
-              </span>
-              <button
-                type="button"
-                className="btn ghost"
-                disabled={safePage >= totalPages || loading}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Next
-              </button>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+        {totalItems > PAGE_SIZE ? (
+          <div className="seller-pager">
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={safePage <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </button>
+            <span className="seller-pager-status">
+              Page {safePage} / {totalPages}
+            </span>
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={safePage >= totalPages || loading}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </button>
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }

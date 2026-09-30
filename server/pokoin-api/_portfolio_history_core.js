@@ -332,7 +332,8 @@ function compactDay(row = {}) {
 }
 
 /**
- * Card values of days that had already ended when the series was stored. The
+ * Card values of days that had already ended when the series was stored (days
+ * stored without cards are re-priced). The
  * 1-DR table only knows today's stock, so re-pricing those days would erase
  * cards that have since sold. Another basis or revision is discarded.
  */
@@ -342,14 +343,16 @@ function frozenCardDays(doc, todayKey) {
   for (const row of Array.isArray(doc.days) ? doc.days : []) {
     const day = compactDay(row);
     if (!day || !(day.date < todayKey)) continue;
-    frozen.set(day.date, day.cardsValuePkn == null
-      ? null
-      : {
-        cardsValuePkn: day.cardsValuePkn,
-        cardsPriced: day.cardsPriced,
-        cardsHeld: day.cardsHeld,
-        cardsMove: day.cardsMove,
-      });
+    // A day stored without cards has nothing to protect: re-price it from the
+    // holdings' since dates. Freezing it kept a 1-DR account connected on
+    // 21 Sep at 0 PKN until "today" forever.
+    if (day.cardsValuePkn == null) continue;
+    frozen.set(day.date, {
+      cardsValuePkn: day.cardsValuePkn,
+      cardsPriced: day.cardsPriced,
+      cardsHeld: day.cardsHeld,
+      cardsMove: day.cardsMove,
+    });
   }
   return frozen;
 }

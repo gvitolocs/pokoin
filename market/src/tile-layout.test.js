@@ -105,7 +105,7 @@ test('set browse list view is one column with compact row tiles', () => {
 test('unpriced CardTile copy is Out of stock, not an em dash', () => {
   const root = dirname(fileURLToPath(import.meta.url));
   const tile = readFileSync(join(root, 'components/CardTile.jsx'), 'utf8');
-  assert.match(tile, /price \|\| 'Out of stock'/);
+  assert.match(tile, /price \? <PriceStack[^;]*: 'Out of stock'/);
   assert.doesNotMatch(tile, /price \|\| '—'/);
   assert.match(css, /\.tile-meta \.oos \{[^}]*font-size:\s*0\.72rem/);
   const related = readFileSync(join(root, 'components/RelatedCards.jsx'), 'utf8');

@@ -157,6 +157,25 @@ test('a stored day keeps the cards it had, so a card sold since does not vanish 
   assert.equal(core.frozenCardDays({ ...doc, priceBasis: 'ct-sold-day' }, '2026-09-27').size, 0);
 });
 
+test('a day stored without cards is re-priced once holdings reach back to it', () => {
+  const book = core.soldPriceBook([sold(1, '2026-09-01', 'NM', 'EN', 100)]);
+  // Stored while the stock looked brand new: 21-26 Sep have no card value.
+  const doc = {
+    days: ['2026-09-21', '2026-09-22', '2026-09-26'].map((date) => ({ date, currencyPkn: 15 })),
+    priceBasis: core.PRICE_BASIS,
+    seriesRevision: core.SERIES_REVISION,
+  };
+  const frozen = core.frozenCardDays(doc, '2026-09-27');
+  assert.equal(frozen.size, 0);
+  const days = core.buildDailySeries({
+    holdings: core.holdingSlices([{ ...stock(1, 'NM', 'EN', 2), since: '2026-09-21 17:52:48+00' }]),
+    book,
+    frozen,
+    today: TODAY,
+  });
+  assert.equal(days.find((row) => row.date === '2026-09-22').cardsValuePkn, 200);
+});
+
 test('the series keeps at most 400 days and starts empty without wallet or stock', () => {
   assert.deepEqual(core.buildDailySeries({ today: TODAY }), []);
   const days = core.buildDailySeries({

@@ -380,8 +380,18 @@ async function readSellerShopData(url, game) {
     'quantity_available > 0',
   ];
 
-  const gameCardIds = await sellerCardIdsForGame(seller.uid, game);
-  if (gameCardIds) {
+  // Pokemon listings + catalog share one DB. Prefer an EXISTS filter so large
+  // shops (thousands of SKUs) do not round-trip every distinct card_id through
+  // Node just to page 100 rows. Satellite TCGs still need the id intersect.
+  const catalogGame = game || 'pokemon';
+  if (catalogGame === 'pokemon') {
+    where.push(`exists (
+      select 1
+      from public.marketplace_search_candidates c
+      where c.card_id::text = marketplace_user_listings.card_id
+    )`);
+  } else {
+    const gameCardIds = await sellerCardIdsForGame(seller.uid, catalogGame);
     values.push(gameCardIds);
     where.push(`card_id = any($${values.length}::text[])`);
   }
