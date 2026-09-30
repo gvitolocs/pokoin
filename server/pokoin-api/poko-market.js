@@ -28,6 +28,10 @@
  *   top_sellers      — most-sold singles over a window, filterable by
  *                      language / rarity / price ("most liquid JP cards
  *                      over €10").
+ *   artist_cards     — an artist's singles ranked by price or sales; the
+ *                      artist can come from a cardId ("this artist").
+ *   set_info         — expansion era / nationality / release languages /
+ *                      localized names / card counts.
  *   card_ocr         — approximate western leftover OCR (attacks/rules/HP)
  *                      from marketplace_card_ocr; never invent card text.
  *
@@ -1407,6 +1411,24 @@ const RARITY_ALIASES = [
 // A sold median more than 20× the recent ask is a bulk lot or a placeholder
 // price (one JP Arctibax "sold" 15× at 2,000,328 PKN against a 218 PKN ask).
 const TOP_SELLERS_MAX_SOLD_TO_ASK = 20;
+// Placeholder listings (€2,000 / €5,000 / €10,000 + fee) that a seller pulls
+// get recorded as sales: a JP Magikarp that asks 822 PKN "sold" twice at
+// 2,000,328 PKN. Reference = 180-day median of the daily *lowest* ask (the
+// placeholder itself inflates the median ask). With no ask history at all,
+// a sale above €1,000 is unverified and kept out of rankings.
+// Above €500 the same fee-suffixed placeholders sit only 3–5× over the ask
+// (a JP Umbreon VMAX SIR "sold" at 1,000,128 PKN against ~240,000), so
+// high-value sales get a tight 3× bound; cheap cards keep the loose one.
+const SOLD_REFERENCE_ASK_DAYS = 180;
+const SOLD_UNVERIFIED_MAX_PKN = 200000;
+const SOLD_HIGH_VALUE_PKN = 100000;
+const SOLD_HIGH_VALUE_MAX_TO_ASK = 3;
+
+function plausibleSold(soldExpr, ratioParam) {
+  return `((${soldExpr} <= asks.ask_pkn * ${ratioParam}`
+    + ` and (${soldExpr} < ${SOLD_HIGH_VALUE_PKN} or ${soldExpr} <= asks.ask_pkn * ${SOLD_HIGH_VALUE_MAX_TO_ASK}))`
+    + ` or (asks.ask_pkn is null and ${soldExpr} < ${SOLD_UNVERIFIED_MAX_PKN}))`;
+}
 
 function normalizeRarity(value) {
   const text = cleanText(value, 60);
@@ -1461,10 +1483,10 @@ async function topSellers(params = {}) {
         group by blueprint_id
      ), asks as (
        select blueprint_id,
-              percentile_cont(0.5) within group (order by coalesce(median_price_pkn, min_price_pkn)) as ask_pkn
+              percentile_cont(0.5) within group (order by coalesce(min_price_pkn, median_price_pkn)) as ask_pkn
          from cardtrader_blueprint_daily_analytics
-        where observed_day >= current_date - interval '14 days'
-          and coalesce(median_price_pkn, min_price_pkn) > 0
+        where observed_day >= current_date - interval '${SOLD_REFERENCE_ASK_DAYS} days'
+          and coalesce(min_price_pkn, median_price_pkn) > 0
           and blueprint_id in (select blueprint_id from sold)
         group by blueprint_id
      )
@@ -1476,7 +1498,7 @@ async function topSellers(params = {}) {
        left join asks on asks.blueprint_id = sold.blueprint_id
       where sold.median_pkn >= $3
         and ($4::numeric is null or sold.median_pkn <= $4)
-        and (asks.ask_pkn is null or sold.median_pkn <= asks.ask_pkn * $7)
+        and ${plausibleSold('sold.median_pkn', '$7')}
         and ($6::text is null
              or lower(split_part(s.card_number, ' | ', 1)) = lower($6)
              or lower(s.rarity) = lower($6))
@@ -1568,10 +1590,10 @@ async function setSales(params = {}) {
         group by d.blueprint_id
      ), asks as (
        select a.blueprint_id,
-              percentile_cont(0.5) within group (order by coalesce(a.median_price_pkn, a.min_price_pkn)) as ask_pkn
+              percentile_cont(0.5) within group (order by coalesce(a.min_price_pkn, a.median_price_pkn)) as ask_pkn
          from cardtrader_blueprint_daily_analytics a
-        where a.observed_day >= current_date - interval '14 days'
-          and coalesce(a.median_price_pkn, a.min_price_pkn) > 0
+        where a.observed_day >= current_date - interval '${SOLD_REFERENCE_ASK_DAYS} days'
+          and coalesce(a.min_price_pkn, a.median_price_pkn) > 0
           and a.blueprint_id in (select blueprint_id from set_sold)
         group by a.blueprint_id
      )
@@ -1580,7 +1602,7 @@ async function setSales(params = {}) {
        from set_sold
        join cards on cards.card_id = set_sold.blueprint_id * 2
        left join asks on asks.blueprint_id = set_sold.blueprint_id
-      where asks.ask_pkn is null or set_sold.median_pkn <= asks.ask_pkn * $3`,
+      where ${plausibleSold('set_sold.median_pkn', '$3')}`,
     values,
   );
 
@@ -1655,10 +1677,10 @@ async function recentSales(params = {}) {
           and d.median_pkn >= $4
      ), asks as (
        select a.blueprint_id,
-              percentile_cont(0.5) within group (order by coalesce(a.median_price_pkn, a.min_price_pkn)) as ask_pkn
+              percentile_cont(0.5) within group (order by coalesce(a.min_price_pkn, a.median_price_pkn)) as ask_pkn
          from cardtrader_blueprint_daily_analytics a
-        where a.observed_day >= current_date - interval '14 days'
-          and coalesce(a.median_price_pkn, a.min_price_pkn) > 0
+        where a.observed_day >= current_date - interval '${SOLD_REFERENCE_ASK_DAYS} days'
+          and coalesce(a.min_price_pkn, a.median_price_pkn) > 0
           and a.blueprint_id in (select blueprint_id from recent)
         group by a.blueprint_id
      )
@@ -1669,7 +1691,7 @@ async function recentSales(params = {}) {
        join marketplace_search_candidates s
          on s.card_id = recent.blueprint_id * 2 and s.item_kind = 'single'
        left join asks on asks.blueprint_id = recent.blueprint_id
-      where (asks.ask_pkn is null or recent.median_pkn <= asks.ask_pkn * $5)
+      where ${plausibleSold('recent.median_pkn', '$5')}
         ${subjectConditions.length ? `and ${subjectConditions.join(' and ')}` : ''}
       order by ${sort === 'recent' ? 'recent.observed_day desc, recent.median_pkn desc' : 'recent.median_pkn desc, recent.observed_day desc'}
       limit $6`,
@@ -1712,6 +1734,234 @@ async function recentSales(params = {}) {
   };
 }
 
+/**
+ * An artist's cards ranked by price or sales ("the most expensive cards by
+ * this artist" on a card desk). The artist comes from params.artist or from
+ * the catalog row of params.cardId, so Poko never has to ask who drew it.
+ * Price = 90-day ungraded sold median when it is sane, else the median ask.
+ */
+async function artistCards(params = {}) {
+  let artistInput = cleanText(params.artist, 80);
+  const cardId = cleanText(params.cardId, 20);
+  if (!artistInput && /^\d+$/.test(cardId)) {
+    const rows = await queryRows(
+      `select artist from marketplace_search_candidates where card_id = $1 limit 1`,
+      [cardId],
+    );
+    artistInput = cleanText(rows[0]?.artist, 80);
+    if (!artistInput) return { status: 'not_found', error: 'no artist recorded for that card', cardId };
+  }
+  if (!artistInput) return { status: 'invalid', error: 'artist or cardId required' };
+
+  const artistRows = await queryRows(
+    `select artist, count(*)::int as cards
+       from marketplace_search_candidates
+      where item_kind <> 'product' and artist <> ''
+        and (artist = $1 or artist ilike $2)
+      group by artist
+      order by (artist = $1) desc, cards desc
+      limit 5`,
+    [artistInput, fuzzyArtistPattern(artistInput)],
+  );
+  if (!artistRows.length) return { status: 'not_found', error: 'no artist matches that name' };
+  const exact = artistRows.find((r) => r.artist.toLowerCase() === artistInput.toLowerCase());
+  if (!exact && artistRows.length > 1) {
+    return {
+      status: 'ambiguous',
+      artists: artistRows.map((r) => ({ artist: r.artist, cards: r.cards })),
+      note: 'Ask one concise clarification question; do not silently resolve.',
+    };
+  }
+  const artist = (exact || artistRows[0]).artist;
+  const artistCardCount = Number((exact || artistRows[0]).cards) || 0;
+  const sort = /^(cheap|cheapest|asc|low)/i.test(cleanText(params.sort, 20)) ? 'cheapest'
+    : /^(sold|sales|popular|volume)/i.test(cleanText(params.sort, 20)) ? 'sold'
+      : 'expensive';
+  const limit = Math.min(Math.max(Number(params.limit) || 10, 1), 20);
+  const language = cleanText(params.language, 40) ? normalizeLanguage(params.language).code : null;
+
+  const rows = await queryRows(
+    `with art as (
+       select s.card_id, s.name, s.set_name, s.artist, s.item_kind, s.card_number,
+              s.card_id / 2 as blueprint_id
+         from marketplace_search_candidates s
+        where s.artist = $1 and s.item_kind = 'single' and s.card_id % 2 = 0
+     ), sold as (
+       select d.blueprint_id,
+              sum(d.sold_qty)::int as sold_qty,
+              percentile_cont(0.5) within group (order by d.median_pkn) as median_pkn,
+              max(d.observed_day) as last_sale_day
+         from cardtrader_sold_daily d
+         join art on art.blueprint_id = d.blueprint_id
+        where d.observed_day >= current_date - interval '90 days'
+          and d.sold_qty > 0
+          and not d.graded
+          and ($2::text is null or d.language = $2)
+        group by d.blueprint_id
+     ), asks as (
+       select a.blueprint_id,
+              percentile_cont(0.5) within group (order by coalesce(a.min_price_pkn, a.median_price_pkn)) as ask_pkn,
+              (array_agg(coalesce(a.min_price_pkn, a.median_price_pkn) order by a.observed_day desc))[1] as current_ask_pkn
+         from cardtrader_blueprint_daily_analytics a
+         join art on art.blueprint_id = a.blueprint_id
+        where a.observed_day >= current_date - interval '${SOLD_REFERENCE_ASK_DAYS} days'
+          and coalesce(a.min_price_pkn, a.median_price_pkn) > 0
+        group by a.blueprint_id
+     )
+     select art.card_id, art.name, art.set_name, art.artist, art.item_kind, art.card_number,
+            sold.sold_qty, sold.median_pkn, sold.last_sale_day, asks.current_ask_pkn,
+            (sold.median_pkn is not null and ${plausibleSold('sold.median_pkn', '$3')}) as sold_ok
+       from art
+       left join sold on sold.blueprint_id = art.blueprint_id
+       left join asks on asks.blueprint_id = art.blueprint_id
+      where sold.median_pkn is not null or ($2::text is null and asks.current_ask_pkn > 0)`,
+    [artist, language, TOP_SELLERS_MAX_SOLD_TO_ASK],
+  );
+
+  const cards = rows
+    .map((row) => {
+      const soldOk = row.sold_ok === true && Number(row.median_pkn) > 0;
+      const ask = Number(row.current_ask_pkn);
+      // A lone placeholder listing can be the lowest ask (a common Drowzee at
+      // 1,402,700 PKN), so an unsold card only counts below the unverified cap.
+      const askOk = !language && ask > 0 && ask < SOLD_UNVERIFIED_MAX_PKN;
+      const pricePkn = soldOk ? Number(row.median_pkn) : askOk ? ask : null;
+      if (pricePkn == null) return null;
+      return {
+        ...candidateFromRow(row),
+        pricePkn: round2(pricePkn),
+        priceEur: round2(pricePkn * PKN_EUR_RATE),
+        priceBasis: soldOk ? 'sold_median_90d' : 'lowest_ask',
+        soldQty90d: soldOk ? Number(row.sold_qty) || 0 : 0,
+        lowestAskPkn: round2(row.current_ask_pkn),
+        lastSaleDay: soldOk && row.last_sale_day ? String(row.last_sale_day).slice(0, 10) : null,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (sort === 'cheapest' ? a.pricePkn - b.pricePkn
+      : sort === 'sold' ? b.soldQty90d - a.soldQty90d || b.pricePkn - a.pricePkn
+        : b.pricePkn - a.pricePkn))
+    .slice(0, limit);
+
+  return {
+    status: 'ok',
+    artist,
+    artistCardCount,
+    pricedCards: rows.length,
+    sort,
+    language: language || 'all',
+    basis: 'price = 90-day ungraded sold median (CardTrader) when plausible against the ask history, else the latest lowest ask; priceBasis says which',
+    priceUnit: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
+    cards,
+    ...(cards.length ? {} : { note: `No priced ${artist} singles${language ? ` in ${language}` : ''} right now.` }),
+  };
+}
+
+// Series prefix of an expansion code (official_id) → era. Western and JP
+// codes share most prefixes; CS* are simplified-Chinese releases.
+const ERA_BY_CODE = [
+  [/^tk-bw/, 'Black & White'],
+  [/^tk-dp/, 'Diamond & Pearl'],
+  [/^tk-hs/, 'HeartGold & SoulSilver'],
+  [/^tk-xy/, 'XY'],
+  [/^(base|gym|neo|ecard|si|web|vs|e)$/, 'Wizards of the Coast'],
+  [/^(ex|pop|tk|pcg|adv)$/, 'EX'],
+  [/^(dp|pt|pl|dpbp)$/, 'Diamond & Pearl'],
+  [/^(hgss|col|l|ll|hsp)$/, 'HeartGold & SoulSilver'],
+  [/^(bw|dv)$/, 'Black & White'],
+  [/^(xy|xya|g|dc|cp)$/, 'XY'],
+  [/^(sm|sma|smp|det|csm)$/, 'Sun & Moon'],
+  [/^(swsh|cel|pgo|ru|s|sh|sp|sj|sld|sll|sn|spz|spd|cs|cbb)$/, 'Sword & Shield'],
+  [/^(sv|sve|zsv|rsv|csv)/, 'Scarlet & Violet'],
+  [/^(me|mee|m|mc)$/, 'Mega Evolution'],
+];
+
+function eraForCode(code) {
+  const prefix = String(code || '').toLowerCase().replace(/[0-9].*$/, '');
+  if (!prefix) return null;
+  for (const [re, era] of ERA_BY_CODE) {
+    if (re.test(prefix)) return era;
+  }
+  return null;
+}
+
+const NATIONALITY_BY_LANGUAGE = { JP: 'japanese', ZH: 'chinese', ZHT: 'chinese', KO: 'korean' };
+
+/**
+ * Expansion catalog facts: era, nationality (japanese / western / chinese…),
+ * release languages, localized names and card counts. Lookup by set name,
+ * localized name, alias or code, or list sets by nationality / era.
+ */
+async function setInfo(params = {}) {
+  const query = cleanText(params.setName || params.set || params.query || params.subject, 80);
+  const era = cleanText(params.era, 40);
+  const languageCode = cleanText(params.language, 40) ? normalizeLanguage(params.language).code : null;
+  const nationality = cleanText(params.nationality, 20).toLowerCase()
+    || (languageCode && NATIONALITY_BY_LANGUAGE[languageCode]) || '';
+  const limit = Math.min(Math.max(Number(params.limit) || (query ? 5 : 20), 1), 40);
+  if (!query && !era && !nationality) return { status: 'invalid', error: 'setName, era or nationality required' };
+
+  const values = [nationality || null];
+  let queryCondition = '';
+  if (query) {
+    values.push(query, `%${escapeLike(query)}%`);
+    queryCondition = `and (lower(e.name) = lower($2) or lower(e.official_id) = lower($2)
+          or e.name ilike $3 or e.official_name ilike $3
+          or exists (select 1 from expansion_languages l where l.expansion_id = e.expansion_id and l.localized_name ilike $3)
+          or exists (select 1 from marketplace_expansion_aliases a
+                      where a.expansion_name = e.name and a.alias ilike $3))`;
+  }
+  const rows = await queryRows(
+    `select e.expansion_id, e.name, e.official_id, e.official_name, e.nationality, e.kind, e.listed,
+            e.catalog_card_count,
+            (select array_agg(distinct upper(r.language) order by upper(r.language))
+               from expansion_release_languages r where r.expansion_id = e.expansion_id) as release_languages,
+            (select jsonb_object_agg(l.language, l.localized_name)
+               from expansion_languages l where l.expansion_id = e.expansion_id) as localized_names
+       from pokoin_pokemon_expansions e
+      where e.kind in ('official', 'promo', 'subset')
+        and ($1::text is null or e.nationality = $1)
+        ${queryCondition}
+      order by ${query ? '(lower(e.name) = lower($2)) desc,' : ''} e.catalog_card_count desc nulls last, e.name
+      limit 400`,
+    values,
+  );
+
+  const sets = rows
+    .map((row) => ({
+      name: row.name || '',
+      officialName: row.official_name || '',
+      code: row.official_id || '',
+      era: eraForCode(row.official_id),
+      nationality: row.nationality || '',
+      kind: row.kind || '',
+      onMarketplace: Boolean(row.listed),
+      cardCount: Number(row.catalog_card_count) || 0,
+      releaseLanguages: Array.isArray(row.release_languages) ? row.release_languages : [],
+      localizedNames: row.localized_names && typeof row.localized_names === 'object' ? row.localized_names : {},
+    }))
+    .filter((set) => !era || (set.era && set.era.toLowerCase().includes(era.toLowerCase())))
+    // Western sets list their release languages; JP / CN nationality is filtered in SQL.
+    .filter((set) => !languageCode || NATIONALITY_BY_LANGUAGE[languageCode]
+      || set.releaseLanguages.includes(languageCode))
+    .slice(0, limit);
+
+  if (!sets.length) {
+    return {
+      status: 'not_found',
+      error: 'no expansion matches',
+      note: 'Ask for the exact set name (English, Japanese or localized) or its code.',
+    };
+  }
+  return {
+    status: 'ok',
+    filters: { query: query || undefined, era: era || undefined, nationality: nationality || undefined },
+    eras: ERA_BY_CODE.map(([, label]) => label).filter((label, i, all) => all.indexOf(label) === i),
+    sets,
+  };
+}
+
 const TOOLS = {
   resolve_card: resolveCard,
   card_quote: cardQuote,
@@ -1726,6 +1976,8 @@ const TOOLS = {
   deal_check: dealCheck,
   set_sales: setSales,
   recent_sales: recentSales,
+  artist_cards: artistCards,
+  set_info: setInfo,
 };
 
 // ---------------------------------------------------------------------------
@@ -1808,6 +2060,7 @@ module.exports._test = {
   confidenceForSample,
   liquidityBands,
   normalizeRarity,
+  eraForCode,
   buildSoldSummary,
   soldFlag,
   soldFacetFromParams,
