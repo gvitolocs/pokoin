@@ -1310,6 +1310,11 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   margin-top: 0.75rem;
 }
 
+/* "+N more · Show all" under a tray that holds more than TRAY_VISIBLE cards. */
+.cart-drop-grid .desktop-drop-more {
+  flex-basis: 100%;
+}
+
 .cart-drop-card {
   position: relative;
   display: block;

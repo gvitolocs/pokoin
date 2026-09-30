@@ -3,6 +3,9 @@
 const PREFIX = 'pokoin.cardPage.v1.';
 export const CARD_PAGE_TTL_MS = 12 * 60 * 60 * 1000;
 const MEMORY_CAP = 24;
+/** localStorage copies (~20–40 KB each). Uncapped they filled the 5 MB quota,
+ * after which every setItem on the site threw — the cart's crashed the app. */
+export const CARD_PAGE_STORE_CAP = 40;
 const memory = new Map();
 
 function store() {
@@ -85,9 +88,51 @@ export function rememberStoredCardPage(cardId, data, { lang = 'en' } = {}) {
   if (!storage) {
     return;
   }
+  const raw = JSON.stringify(page);
   try {
-    storage.setItem(key, JSON.stringify(page));
+    storage.setItem(key, raw);
   } catch {
-    /* quota */
+    // Quota: drop every stored card page, then try once more.
+    pruneStoredCardPages(0);
+    try {
+      storage.setItem(key, raw);
+    } catch {
+      return;
+    }
+  }
+  pruneStoredCardPages(CARD_PAGE_STORE_CAP);
+}
+
+function savedAtOf(raw) {
+  // slimPage puts savedAt last, so it sits at the end of the JSON.
+  const match = String(raw || '').slice(-40).match(/"savedAt":(\d+)\}$/);
+  return match ? Number(match[1]) : 0;
+}
+
+/** Keep only the newest `keep` card pages in localStorage (0 clears them all). */
+export function pruneStoredCardPages(keep = CARD_PAGE_STORE_CAP) {
+  const storage = store();
+  if (!storage) {
+    return 0;
+  }
+  try {
+    const rows = [];
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (key && key.startsWith(PREFIX)) {
+        rows.push([key, savedAtOf(storage.getItem(key))]);
+      }
+    }
+    if (rows.length <= keep) {
+      return 0;
+    }
+    rows.sort((a, b) => b[1] - a[1]);
+    const drop = rows.slice(Math.max(0, keep));
+    for (const [key] of drop) {
+      storage.removeItem(key);
+    }
+    return drop.length;
+  } catch {
+    return 0;
   }
 }

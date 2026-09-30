@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { pruneStoredCardPages } from './card-page-cache.js';
 import { cartImageFor, repairCartImage } from './cart-image.js';
 import { listingStock, nextCartQty } from './cart-qty.js';
 
@@ -19,8 +20,19 @@ function readCart() {
   }
 }
 
+/** Never throws: an uncaught quota error here unmounted the app (black screen). */
 function writeCart(items) {
-  localStorage.setItem(CART_KEY, JSON.stringify(items.slice(0, CART_MAX)));
+  const raw = JSON.stringify(items.slice(0, CART_MAX));
+  try {
+    localStorage.setItem(CART_KEY, raw);
+  } catch (_) {
+    pruneStoredCardPages(0);
+    try {
+      localStorage.setItem(CART_KEY, raw);
+    } catch (__) {
+      /* storage full or private mode: the cart lives in memory this session */
+    }
+  }
 }
 
 /** Snapshot for Poko personal context (no React). Caps at 24 lines. */

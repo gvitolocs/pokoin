@@ -14,13 +14,20 @@ import {
   startTrayDrag,
   TRAY_CART,
 } from '../tray-drag.js';
+import { TRAY_FULL_ART_MAX, TRAY_VISIBLE } from '../tray-render.js';
 import CardArt from './CardArt.jsx';
 import QtyStepper from './QtyStepper.jsx';
+
+const BUNDLE_MAX = 400;
 
 export default function CartDrop({ onAdd }) {
   const { items, setQty, removeItem } = useCart();
   const [over, setOver] = useState(false);
-  const thumb = cartDropThumb(items.length);
+  const [showAll, setShowAll] = useState(false);
+  // A dropped artist can fill the cart: mount small thumbs, not hundreds of scans.
+  const shown = showAll ? items : items.slice(0, TRAY_VISIBLE);
+  const thumb = cartDropThumb(shown.length);
+  const fullArt = items.length <= TRAY_FULL_ART_MAX;
 
   return (
     <div
@@ -61,7 +68,7 @@ export default function CartDrop({ onAdd }) {
       <p>Drop a card, a Pokémon, an artist, or a set.</p>
       {items.length ? (
         <div className="cart-drop-grid">
-          {items.map((row) => (
+          {shown.map((row) => (
             <span
               key={row.id}
               className="cart-drop-card"
@@ -83,7 +90,7 @@ export default function CartDrop({ onAdd }) {
               onDragEnd={() => endTrayDrag()}
             >
               <Link to={row.href || '/cart'} title={row.name} draggable={false}>
-                {row.image ? <CardArt src={row.image} alt="" full /> : <span className="suggest-ph" />}
+                {row.image ? <CardArt src={row.image} alt="" full={fullArt} /> : <span className="suggest-ph" />}
               </Link>
               <QtyStepper
                 qty={row.qty}
@@ -92,6 +99,15 @@ export default function CartDrop({ onAdd }) {
               />
             </span>
           ))}
+          {items.length > TRAY_VISIBLE ? (
+            <button
+              type="button"
+              className="btn ghost desktop-drop-more"
+              onClick={() => setShowAll((value) => !value)}
+            >
+              {showAll ? 'Show fewer' : `+${items.length - TRAY_VISIBLE} more · Show all`}
+            </button>
+          ) : null}
         </div>
       ) : (
         <div className="cart-drop-empty">
@@ -136,11 +152,15 @@ async function addBundle(reference, onAdd) {
   const bundle = bundleOf(reference);
   if (!bundle?.slug) return;
   const cards = bundle.kind === 'artist'
-    ? (await fetchArtist(bundle.slug, { limit: 400 }).catch(() => null))?.cards || []
+    ? (await fetchArtist(bundle.slug, { limit: 6000 }).catch(() => null))?.cards || []
     : bundle.kind === 'species'
       ? await fetchSpeciesCards(decodeURIComponent(bundle.slug)).catch(() => [])
       : (await fetchExpansionCards({ slug: bundle.slug }).catch(() => null))?.cards || [];
-  const queue = cards.slice(0, 400);
+  // Listed printings first; the cart holds BUNDLE_MAX lines anyway.
+  const queue = [...cards]
+    .sort((a, b) => Number(hasListingSignal(b)) - Number(hasListingSignal(a)))
+    .slice(0, BUNDLE_MAX);
+  const found = [];
   let cursor = 0;
   async function worker() {
     while (cursor < queue.length) {
@@ -150,11 +170,19 @@ async function addBundle(reference, onAdd) {
       if (!shaped.id) continue;
       const listed = await fetchListings(shaped.id, { limit: 40 }).catch(() => null);
       const offer = pickCartOffer(listed?.listings || []);
-      if (offer) onAdd(cartItemFromOffer(shaped, offer));
+      if (offer) found.push(cartItemFromOffer(shaped, offer));
     }
   }
   const width = Math.min(6, queue.length);
   await Promise.all(Array.from({ length: width }, () => worker()));
+  // One synchronous burst: React batches it into a single cart render + write
+  // instead of hundreds of re-renders while the requests trickle in.
+  for (const item of found) onAdd(item);
+}
+
+function hasListingSignal(card) {
+  return Number(card?.listed_quantity || card?.listedQuantity || 0) > 0
+    || Number(card?.lowest_price_pkn || card?.pricePkn || 0) > 0;
 }
 
 async function addDraggedCard(reference, onAdd) {

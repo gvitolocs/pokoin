@@ -6,6 +6,9 @@ import { cartDropThumb } from '../cart-drop-size.js';
 import {
   addDesktopCards,
   clearDesktopHold,
+  DESKTOP_MAX,
+  desktopHoldMemoryOnly,
+  readDesktopHold,
   removeDesktopCard,
   setDesktopQty,
   useDesktopHold,
@@ -20,6 +23,7 @@ import {
   startTrayDrag,
   TRAY_DESKTOP,
 } from '../tray-drag.js';
+import { TRAY_FULL_ART_MAX, TRAY_VISIBLE } from '../tray-render.js';
 import CardArt from './CardArt.jsx';
 import QtyStepper from './QtyStepper.jsx';
 
@@ -29,9 +33,26 @@ export default function DesktopDrop({ onAddToCart }) {
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [note, setNote] = useState('');
-  const thumb = cartDropThumb(items.length);
+  const [showAll, setShowAll] = useState(false);
+  // Thousands of cards (a whole artist) must not mount thousands of scans.
+  const shown = showAll ? items : items.slice(0, TRAY_VISIBLE);
+  const thumb = cartDropThumb(shown.length);
+  const fullArt = items.length <= TRAY_FULL_ART_MAX;
+
+  function reportCapacity() {
+    if (desktopHoldMemoryOnly()) {
+      setNote('Browser storage is full: the desktop is kept until you close this tab.');
+    } else if (readDesktopHold().length >= DESKTOP_MAX) {
+      setNote(`Desktop is full (${DESKTOP_MAX} cards).`);
+    }
+  }
 
   async function acceptDrop(reference) {
+    await addDropped(reference);
+    reportCapacity();
+  }
+
+  async function addDropped(reference) {
     if (!reference) return;
     if (reference.kind === 'cards') {
       addDesktopCards((reference.cards || []).map((row) => ({
@@ -65,7 +86,7 @@ export default function DesktopDrop({ onAddToCart }) {
         return;
       }
       const cards = bundle.kind === 'artist'
-        ? (await fetchArtist(bundle.slug, { limit: 400 }).catch(() => null))?.cards || []
+        ? (await fetchArtist(bundle.slug, { limit: DESKTOP_MAX }).catch(() => null))?.cards || []
         : await fetchSpeciesCards(decodeURIComponent(bundle.slug)).catch(() => []);
       addDesktopCards(cards);
       return;
@@ -116,7 +137,9 @@ export default function DesktopDrop({ onAddToCart }) {
     setExporting(true);
     setNote('Building PDF…');
     try {
-      const ok = await downloadDesktopHoldPdf(items);
+      const ok = await downloadDesktopHoldPdf(items, {
+        onProgress: (done, total) => setNote(`Building PDF… ${done}/${total}`),
+      });
       setNote(ok
         ? `Exported ${items.length} card${items.length === 1 ? '' : 's'} as PDF`
         : 'Could not export PDF');
@@ -160,6 +183,7 @@ export default function DesktopDrop({ onAddToCart }) {
           onClick={() => {
             clearDesktopHold();
             setNote('');
+            setShowAll(false);
           }}
         >
           Clear desktop
@@ -184,7 +208,7 @@ export default function DesktopDrop({ onAddToCart }) {
       {note ? <p className="desktop-drop-note" role="status">{note}</p> : null}
       {items.length ? (
         <div className="cart-drop-grid">
-          {items.map((row) => (
+          {shown.map((row) => (
             <span
               key={row.id}
               className="cart-drop-card desktop-drop-card"
@@ -206,7 +230,7 @@ export default function DesktopDrop({ onAddToCart }) {
               onDragEnd={() => endTrayDrag()}
             >
               <Link to={row.path || '/marketplace'} title={row.name} draggable={false}>
-                {row.imageUrl ? <CardArt src={row.imageUrl} alt="" card={row} full /> : <span className="suggest-ph" />}
+                {row.imageUrl ? <CardArt src={row.imageUrl} alt="" card={row} full={fullArt} /> : <span className="suggest-ph" />}
               </Link>
               <QtyStepper
                 qty={row.qty || 1}
@@ -224,6 +248,15 @@ export default function DesktopDrop({ onAddToCart }) {
               </button>
             </span>
           ))}
+          {items.length > TRAY_VISIBLE ? (
+            <button
+              type="button"
+              className="btn ghost desktop-drop-more"
+              onClick={() => setShowAll((value) => !value)}
+            >
+              {showAll ? 'Show fewer' : `+${items.length - TRAY_VISIBLE} more · Show all`}
+            </button>
+          ) : null}
         </div>
       ) : (
         <div className="cart-drop-empty">

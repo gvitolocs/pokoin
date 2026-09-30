@@ -8,6 +8,7 @@ export async function addCatalogCards(cards, onAdd) {
   if (!queue.length || typeof onAdd !== 'function') return 0;
   let cursor = 0;
   let added = 0;
+  const found = [];
   async function worker() {
     while (cursor < queue.length) {
       const card = queue[cursor];
@@ -25,11 +26,13 @@ export async function addCatalogCards(cards, onAdd) {
       const listed = await fetchListings(id, { limit: 80 }).catch(() => null);
       const offer = pickCartOffer(listed?.listings || []);
       if (!offer) continue;
-      onAdd(cartItemFromOffer(shaped, offer));
+      found.push(cartItemFromOffer(shaped, offer));
       added += 1;
     }
   }
   const width = Math.min(6, queue.length);
   await Promise.all(Array.from({ length: width }, () => worker()));
+  // One synchronous burst so React renders and persists the cart once.
+  for (const item of found) onAdd(item);
   return added;
 }

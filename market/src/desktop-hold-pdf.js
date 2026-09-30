@@ -1,4 +1,4 @@
-/** Single-page A4 PDF of Desktop hold cards — full leftover scans, equal size. */
+/** A4 PDF of Desktop hold cards (80 per page) — full leftover scans, equal size. */
 
 import { ownCatalogImage, preferFullImage } from './image-urls.js';
 
@@ -19,7 +19,8 @@ const LABEL_FONT_PT = 7;
 const BRAND_STRIP_PT = 20;
 const BRAND_ICON_PT = 11;
 const BRAND_FONT_PT = 8;
-const MAX_EXPORT = 80;
+/** Cards per A4 page; bigger desktops run to more pages. */
+export const PDF_PER_PAGE = 80;
 
 /**
  * Pick cols/rows so every card shares the same box and the grid fills one A4.
@@ -179,24 +180,16 @@ function jpegXObject(jpeg, pxW, pxH) {
 
 /** Minimal PDF 1.4: one A4 page, JPEG XObjects + Helvetica captions + brand. */
 export function buildDesktopPdfBytes(cells, { brand = null, layout = null } = {}) {
+  return buildDesktopPdfPagesBytes([{ cells, layout }], { brand });
+}
+
+/** One PDF, one A4 page per `{ cells, layout }`; the brand mark repeats per page. */
+export function buildDesktopPdfPagesBytes(pages, { brand = null } = {}) {
   const objects = [];
   const add = (body) => {
     objects.push(body);
     return objects.length;
   };
-
-  const imageIds = [];
-  for (const cell of cells) {
-    const jpeg = cell.jpeg;
-    if (!jpeg?.byteLength) {
-      imageIds.push(0);
-      continue;
-    }
-    const pxW = cell.pxW;
-    const pxH = cell.pxH;
-    const bytes = jpeg;
-    imageIds.push(add(() => jpegXObject(bytes, pxW, pxH)));
-  }
 
   let brandId = 0;
   if (brand?.jpeg?.byteLength) {
@@ -205,90 +198,111 @@ export function buildDesktopPdfBytes(cells, { brand = null, layout = null } = {}
     const bytes = brand.jpeg;
     brandId = add(() => jpegXObject(bytes, pxW, pxH));
   }
-
   const fontId = add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  const pageIds = [];
+  const pageBodies = [];
 
-  const contentLines = ['q'];
-  cells.forEach((cell, i) => {
-    const imgId = imageIds[i];
-    const { imageX, imageY, labelX, labelY, cardW, cardH } = cell.box;
-    if (imgId) {
+  for (const { cells = [], layout = null } of pages || []) {
+    const imageIds = [];
+    for (const cell of cells) {
+      const jpeg = cell.jpeg;
+      if (!jpeg?.byteLength) {
+        imageIds.push(0);
+        continue;
+      }
+      const pxW = cell.pxW;
+      const pxH = cell.pxH;
+      imageIds.push(add(() => jpegXObject(jpeg, pxW, pxH)));
+    }
+
+    const contentLines = ['q'];
+    cells.forEach((cell, i) => {
+      const imgId = imageIds[i];
+      const { imageX, imageY, labelX, labelY, cardW, cardH } = cell.box;
+      if (imgId) {
+        contentLines.push(
+          'q',
+          `${cardW.toFixed(2)} 0 0 ${cardH.toFixed(2)} ${imageX.toFixed(2)} ${imageY.toFixed(2)} cm`,
+          `/Im${i} Do`,
+          'Q',
+        );
+      } else {
+        contentLines.push(
+          '0.85 g',
+          `${imageX.toFixed(2)} ${imageY.toFixed(2)} ${cardW.toFixed(2)} ${cardH.toFixed(2)} re f`,
+          '0.5 G 0.5 w',
+          `${imageX.toFixed(2)} ${imageY.toFixed(2)} ${cardW.toFixed(2)} ${cardH.toFixed(2)} re S`,
+        );
+      }
+      const caption = pdfEscape(cell.caption);
+      if (caption) {
+        const maxChars = Math.max(8, Math.floor(cardW / (LABEL_FONT_PT * 0.42)));
+        const shown = caption.length > maxChars
+          ? `${caption.slice(0, Math.max(0, maxChars - 3))}...`
+          : caption;
+        const textW = shown.length * LABEL_FONT_PT * 0.42;
+        const textX = labelX - textW / 2;
+        contentLines.push(
+          'BT',
+          `/F1 ${LABEL_FONT_PT} Tf`,
+          '0.15 g',
+          `${textX.toFixed(2)} ${labelY.toFixed(2)} Td`,
+          `(${shown}) Tj`,
+          'ET',
+        );
+      }
+    });
+
+    const brandBox = desktopPdfBrandOrigin(layout || {});
+    if (brandId) {
       contentLines.push(
         'q',
-        `${cardW.toFixed(2)} 0 0 ${cardH.toFixed(2)} ${imageX.toFixed(2)} ${imageY.toFixed(2)} cm`,
-        `/Im${i} Do`,
+        `${brandBox.iconSize.toFixed(2)} 0 0 ${brandBox.iconSize.toFixed(2)} `
+        + `${brandBox.iconX.toFixed(2)} ${brandBox.iconY.toFixed(2)} cm`,
+        '/ImBrand Do',
         'Q',
       );
-    } else {
-      contentLines.push(
-        '0.85 g',
-        `${imageX.toFixed(2)} ${imageY.toFixed(2)} ${cardW.toFixed(2)} ${cardH.toFixed(2)} re f`,
-        '0.5 G 0.5 w',
-        `${imageX.toFixed(2)} ${imageY.toFixed(2)} ${cardW.toFixed(2)} ${cardH.toFixed(2)} re S`,
-      );
     }
-    const caption = pdfEscape(cell.caption);
-    if (caption) {
-      const maxChars = Math.max(8, Math.floor(cardW / (LABEL_FONT_PT * 0.42)));
-      const shown = caption.length > maxChars
-        ? `${caption.slice(0, Math.max(0, maxChars - 3))}...`
-        : caption;
-      const textW = shown.length * LABEL_FONT_PT * 0.42;
-      const textX = labelX - textW / 2;
-      contentLines.push(
-        'BT',
-        `/F1 ${LABEL_FONT_PT} Tf`,
-        '0.15 g',
-        `${textX.toFixed(2)} ${labelY.toFixed(2)} Td`,
-        `(${shown}) Tj`,
-        'ET',
-      );
-    }
-  });
-
-  const brandBox = desktopPdfBrandOrigin(layout || {});
-  if (brandId) {
     contentLines.push(
-      'q',
-      `${brandBox.iconSize.toFixed(2)} 0 0 ${brandBox.iconSize.toFixed(2)} `
-      + `${brandBox.iconX.toFixed(2)} ${brandBox.iconY.toFixed(2)} cm`,
-      '/ImBrand Do',
-      'Q',
+      'BT',
+      `/F1 ${brandBox.fontSize} Tf`,
+      '0.25 g',
+      `${brandBox.textX.toFixed(2)} ${brandBox.textY.toFixed(2)} Td`,
+      `(${pdfEscape(brandBox.label)}) Tj`,
+      'ET',
     );
-  }
-  contentLines.push(
-    'BT',
-    `/F1 ${brandBox.fontSize} Tf`,
-    '0.25 g',
-    `${brandBox.textX.toFixed(2)} ${brandBox.textY.toFixed(2)} Td`,
-    `(${pdfEscape(brandBox.label)}) Tj`,
-    'ET',
-  );
-  contentLines.push('Q');
-  const contentStream = contentLines.join('\n');
-  const contentId = add(
-    `<< /Length ${bytesOf(contentStream).byteLength} >>\nstream\n${contentStream}\nendstream`,
-  );
+    contentLines.push('Q');
+    const contentStream = contentLines.join('\n');
+    const contentId = add(
+      `<< /Length ${bytesOf(contentStream).byteLength} >>\nstream\n${contentStream}\nendstream`,
+    );
 
-  const [llx, lly, urx, ury] = brandBox.linkRect;
-  const linkId = add(
-    `<< /Type /Annot /Subtype /Link /Rect [${llx.toFixed(2)} ${lly.toFixed(2)} `
-    + `${urx.toFixed(2)} ${ury.toFixed(2)}] /Border [0 0 0] `
-    + `/A << /S /URI /URI (${pdfEscape(brandBox.href)}) >> >>`,
-  );
+    const [llx, lly, urx, ury] = brandBox.linkRect;
+    const linkId = add(
+      `<< /Type /Annot /Subtype /Link /Rect [${llx.toFixed(2)} ${lly.toFixed(2)} `
+      + `${urx.toFixed(2)} ${ury.toFixed(2)}] /Border [0 0 0] `
+      + `/A << /S /URI /URI (${pdfEscape(brandBox.href)}) >> >>`,
+    );
 
-  const xObjectParts = imageIds
-    .map((id, i) => (id ? `/Im${i} ${id} 0 R` : ''))
-    .filter(Boolean);
-  if (brandId) {
-    xObjectParts.push(`/ImBrand ${brandId} 0 R`);
+    const xObjectParts = imageIds
+      .map((id, i) => (id ? `/Im${i} ${id} 0 R` : ''))
+      .filter(Boolean);
+    if (brandId) {
+      xObjectParts.push(`/ImBrand ${brandId} 0 R`);
+    }
+    const pageId = add('page-placeholder');
+    pageIds.push(pageId);
+    pageBodies.push({ pageId, contentId, linkId, xObjects: xObjectParts.join(' ') });
   }
-  const xObjects = xObjectParts.join(' ');
-  const pageId = add('page-placeholder');
-  const pagesId = add(`<< /Type /Pages /Kids [${pageId} 0 R] /Count 1 >>`);
-  objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${A4_WIDTH_PT} ${A4_HEIGHT_PT}] `
-    + `/Resources << /Font << /F1 ${fontId} 0 R >> /XObject << ${xObjects} >> >> `
-    + `/Contents ${contentId} 0 R /Annots [${linkId} 0 R] >>`;
+
+  const pagesId = add(
+    `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`,
+  );
+  for (const { pageId, contentId, linkId, xObjects } of pageBodies) {
+    objects[pageId - 1] = `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${A4_WIDTH_PT} ${A4_HEIGHT_PT}] `
+      + `/Resources << /Font << /F1 ${fontId} 0 R >> /XObject << ${xObjects} >> >> `
+      + `/Contents ${contentId} 0 R /Annots [${linkId} 0 R] >>`;
+  }
   const catalogId = add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
 
   const chunks = [bytesOf('%PDF-1.4\n')];
@@ -373,35 +387,59 @@ async function loadBrandJpeg() {
   return rasterToJpeg(POKOIN_BRAND_ICON, 96, 96, { contain: true, fill: '#ffffff' });
 }
 
-export async function buildDesktopHoldPdf(items = []) {
-  const list = (items || []).filter((row) => row?.id).slice(0, MAX_EXPORT);
-  if (!list.length) return null;
-  const layout = desktopPdfLayout(list.length);
-  if (!layout) return null;
-
-  const cells = [];
-  for (let i = 0; i < list.length; i += 1) {
-    const row = list[i];
-    const box = desktopPdfCellOrigin(layout, i);
-    const full = desktopHoldFullImage(row);
-    const loaded = await loadCardJpeg(full, layout.cardW, layout.cardH);
-    cells.push({
-      box,
-      caption: desktopHoldCaption(row),
-      jpeg: loaded?.jpeg || null,
-      pxW: loaded?.pxW || Math.round(layout.cardW),
-      pxH: loaded?.pxH || Math.round(layout.cardH),
-    });
-  }
-  const brand = await loadBrandJpeg();
-  return buildDesktopPdfBytes(cells, { brand, layout });
+/** Split `count` cards into A4 pages of at most PDF_PER_PAGE, equal size per card. */
+export function desktopPdfPagination(count, perPageMax = PDF_PER_PAGE) {
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  if (n < 1) return { pages: 0, perPage: 0 };
+  const pages = Math.ceil(n / perPageMax);
+  return { pages, perPage: Math.ceil(n / pages) };
 }
 
-export async function downloadDesktopHoldPdf(items = []) {
+export async function buildDesktopHoldPdf(items = [], { onProgress } = {}) {
+  const list = (items || []).filter((row) => row?.id);
+  if (!list.length) return null;
+  const { perPage } = desktopPdfPagination(list.length);
+  // One layout for every page so all cards print the same size.
+  const layout = desktopPdfLayout(perPage);
+  if (!layout) return null;
+
+  const cells = new Array(list.length);
+  let cursor = 0;
+  let done = 0;
+  async function worker() {
+    while (cursor < list.length) {
+      const i = cursor;
+      cursor += 1;
+      const row = list[i];
+      const box = desktopPdfCellOrigin(layout, i % perPage);
+      const loaded = await loadCardJpeg(desktopHoldFullImage(row), layout.cardW, layout.cardH);
+      cells[i] = {
+        box,
+        caption: desktopHoldCaption(row),
+        jpeg: loaded?.jpeg || null,
+        pxW: loaded?.pxW || Math.round(layout.cardW),
+        pxH: loaded?.pxH || Math.round(layout.cardH),
+      };
+      done += 1;
+      if (typeof onProgress === 'function' && (done % 20 === 0 || done === list.length)) {
+        onProgress(done, list.length);
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, list.length) }, () => worker()));
+  const pages = [];
+  for (let i = 0; i < cells.length; i += perPage) {
+    pages.push({ cells: cells.slice(i, i + perPage), layout });
+  }
+  const brand = await loadBrandJpeg();
+  return buildDesktopPdfPagesBytes(pages, { brand });
+}
+
+export async function downloadDesktopHoldPdf(items = [], { onProgress } = {}) {
   if (typeof document === 'undefined') return false;
   const list = items || [];
   if (!list.length) return false;
-  const bytes = await buildDesktopHoldPdf(list);
+  const bytes = await buildDesktopHoldPdf(list, { onProgress });
   if (!bytes?.byteLength) return false;
   const stamp = new Date().toISOString().slice(0, 10);
   const blob = new Blob([bytes], { type: 'application/pdf' });

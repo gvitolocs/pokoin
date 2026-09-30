@@ -1,6 +1,7 @@
 /** Cards parked on the Desktop hold tray (not the cart). */
 
 import { useSyncExternalStore } from 'react';
+import { pruneStoredCardPages } from './card-page-cache.js';
 import { gameBasename } from './game.js';
 import { printingIdentity } from './identity.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from './image-urls.js';
@@ -8,7 +9,12 @@ import { tilePricePkn } from './pkn.js';
 import { tcgEra } from './set-logos.js';
 
 const KEY = 'pokoin.desktopHold';
-const MAX = 200;
+/** Room for the largest artist (5ban Graphics ~5.1k printings; Ken Sugimori ~3k). */
+export const DESKTOP_MAX = 6000;
+const MAX = DESKTOP_MAX;
+/** True after localStorage refused a write: the tray then lives in memory for
+ * this tab instead of silently snapping back to the last stored copy. */
+let memoryOnly = false;
 const EMPTY = [];
 const listeners = new Set();
 
@@ -54,7 +60,7 @@ function holdImageUrl(card = {}) {
 
 export function readDesktopHold() {
   try {
-    if (typeof localStorage === 'undefined') return cachedItems;
+    if (typeof localStorage === 'undefined' || memoryOnly) return cachedItems;
     const raw = localStorage.getItem(KEY) || '[]';
     if (raw === cachedRaw) return cachedItems;
     const parsed = JSON.parse(raw);
@@ -92,14 +98,26 @@ function writeDesktopHold(items) {
   const next = (items || []).slice(0, MAX);
   cachedItems = next.length ? next : EMPTY;
   cachedRaw = JSON.stringify(cachedItems);
-  try {
-    if (typeof localStorage !== 'undefined') {
+  if (typeof localStorage !== 'undefined') {
+    try {
       localStorage.setItem(KEY, cachedRaw);
+      memoryOnly = false;
+    } catch (_) {
+      pruneStoredCardPages(0);
+      try {
+        localStorage.setItem(KEY, cachedRaw);
+        memoryOnly = false;
+      } catch (__) {
+        memoryOnly = true;
+      }
     }
-  } catch (_) {
-    /* private mode */
   }
   notify();
+}
+
+/** The browser refused to store the tray; it is kept until the tab closes. */
+export function desktopHoldMemoryOnly() {
+  return memoryOnly;
 }
 
 function defaultCardPath(id) {
