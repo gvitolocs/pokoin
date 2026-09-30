@@ -37,7 +37,11 @@ export default function Inventory() {
   const onImportTab = Boolean(useMatch({ path: '/mypokoin/import', end: true }));
   const onSettingsTab = Boolean(useMatch({ path: '/mypokoin/settings', end: true }));
   const locationMatch = useMatch({ path: '/mypokoin/location/:location', end: false });
-  const locationName = locationMatch ? decodeURIComponent(locationMatch.params.location || '') : '';
+  let locationName = locationMatch ? decodeURIComponent(locationMatch.params.location || '') : '';
+  // The auth bounce can double-encode the · separator — decode until stable.
+  if (locationName.includes('%')) {
+    try { locationName = decodeURIComponent(locationName); } catch (_) { /* keep */ }
+  }
   const { user, ready, signedIn, profile, getBearer } = useAuth();
   // PKN opt-out sellers read their prices in local currency.
   const { currency: priceCurrency } = useSellerCurrency();
