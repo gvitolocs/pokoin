@@ -1,5 +1,5 @@
 import { useAuth } from './auth.jsx';
-import { currencyForCountry, currencyFromLocale, formatLocalFromPkn, formatPkn } from './pkn.js';
+import { currencyForCountry, currencyFromLocale, formatLocalFromPkn, formatPkn, localAndPknFromPkn } from './pkn.js';
 import { buyerPrefersFiat } from './seller-currency.js';
 import { useSellerCurrency } from './use-seller-currency.js';
 
@@ -20,5 +20,11 @@ export function useBuyerCurrency() {
       ? formatLocalFromPkn(pricePkn, currency)
       : formatPkn(pricePkn)
   );
-  return { currency, balancePkn, fiat, format };
+  /** { local, pkn } for <PriceStack>: local is '' while the price stays PKN-only. */
+  const parts = (pricePkn, sellerAcceptsPkn = true) => (
+    fiat(pricePkn, sellerAcceptsPkn)
+      ? localAndPknFromPkn(pricePkn, currency)
+      : { local: '', pkn: formatPkn(pricePkn) || '' }
+  );
+  return { currency, balancePkn, fiat, format, parts };
 }

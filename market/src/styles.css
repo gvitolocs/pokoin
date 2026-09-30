@@ -3554,6 +3554,20 @@ a.era-link:focus-visible {
 }
 
 .prod-px.oos { color: var(--muted); }
+
+/* Local-currency price on its own white line above the yellow PKN price
+   (PriceStack). One "3.23 DKK (86 PKN)" string wrapped the Best Deal box. */
+.px-stack {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.05;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.px-local { color: var(--text); font-size: 0.62em; font-weight: 700; letter-spacing: 0; }
+.px-pkn { color: var(--yellow); }
+.shop-px .px-stack { align-items: flex-end; text-align: right; }
+.shop-px .px-local { font-size: 0.82em; }
 .prod-stock { margin: 0.2rem 0 0.7rem; font-size: 0.85rem; }
 
 .watch-btn {

@@ -95,6 +95,14 @@ export function formatLocalFromPkn(pkn, currency = 'EUR') {
   return pknLabel ? `${fiat} (${pknLabel})` : fiat;
 }
 
+/**
+ * The same price as two labels for a stacked display: local currency on its
+ * own line above the PKN amount. local is '' when there is no fiat rate.
+ */
+export function localAndPknFromPkn(pkn, currency = 'EUR') {
+  return { local: formatFiatFromPkn(pkn, currency) || '', pkn: formatPkn(pkn) || '' };
+}
+
 /** EUR Checkout Session line (cents) → buyer local display. */
 export function formatLocalFromEurCents(cents, currency = 'EUR') {
   const eur = (Number(cents) || 0) / 100;

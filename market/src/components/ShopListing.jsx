@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
+import PriceStack from './PriceStack.jsx';
 import { artCutVars } from '../art-cut.js';
 import { listingReference, listingsReference, writeListingDrag } from '../chat-listing.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
@@ -219,7 +220,7 @@ export default function ShopListingRow({
         />
         <Flag flag={language} className="shop-flag shop-flag-lang" />
       </span>
-      <span className="shop-px">{buyer.format(offer.pricePkn, offer.sellerAcceptsPkn) || '—'}</span>
+      <span className="shop-px"><PriceStack parts={buyer.parts(offer.pricePkn, offer.sellerAcceptsPkn)} /></span>
       {!mine ? (
         <span className="shop-row-actions">
           {sellerUid ? (

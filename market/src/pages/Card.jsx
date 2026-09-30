@@ -99,6 +99,7 @@ import { ShipFromCountryGate } from '../components/SellerShippingSettings.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatListingPrice, formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
+import PriceStack from '../components/PriceStack.jsx';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
@@ -2476,7 +2477,7 @@ export default function Card() {
               <SilverHead card={card} fromPath={fromPath} />
             </div>
             <div className={canBuy ? 'prod-px' : 'prod-px oos'}>
-              {offersReady ? (canBuy ? buyer.format(dealPick.pricePkn, dealPick.sellerAcceptsPkn) : '—') : '—'}
+              {offersReady && canBuy ? <PriceStack parts={buyer.parts(dealPick.pricePkn, dealPick.sellerAcceptsPkn)} /> : '—'}
             </div>
             {canBuy && offersReady ? null : (
               <p className="muted own-k">{dealCopy || '\u00a0'}</p>

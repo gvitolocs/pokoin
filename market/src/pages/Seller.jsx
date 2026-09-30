@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
+import { useAuth } from '../auth.jsx';
 import { fetchSellerShop } from '../api.js';
 import { rewriteCanonicalCardPath } from '../card-stub.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
@@ -84,6 +85,7 @@ function sellerFromPayload(data, handle, sample) {
 export default function Seller() {
   const { username = '', lang: routeLang } = useParams();
   const { addItem } = useCart();
+  const { user, profile } = useAuth();
   const lang = routeLang || getSearchLang();
   const handle = decodeURIComponent(String(username || '').trim());
   const selectedGame = game().apiGame;
@@ -188,6 +190,14 @@ export default function Seller() {
       </EmptyDesk>
     );
   }
+
+  // Your own shop is managed in MyPokoin, not bought from.
+  const ownHandle = String(profile?.username || '').trim().toLowerCase();
+  const isOwnShop = Boolean(
+    (ownHandle && ownHandle === handle.replace(/^@/, '').toLowerCase())
+    || (user?.uid && seller.uid && seller.uid === user.uid),
+  );
+  if (isOwnShop) return <Navigate to="/mypokoin" replace />;
 
   return (
     <div className="page desk seller-page seller-shop-ct">
