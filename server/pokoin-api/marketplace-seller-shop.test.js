@@ -152,3 +152,13 @@ test('shop listings carry the seller PKN payment choice', () => {
   assert.equal(listingRow(base, { uid: 'u1', username: 'marco' }).sellerAcceptsPkn, true);
   assert.equal(listingRow(base, { uid: 'u1', username: 'marco', acceptsPkn: false }).sellerAcceptsPkn, false);
 });
+
+test('pokemon shop filter stays in SQL instead of materializing every card id', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'marketplace-seller-shop.js'), 'utf8');
+  assert.match(src, /catalogGame === 'pokemon'/);
+  assert.match(src, /exists \(/);
+  assert.match(src, /marketplace_search_candidates c/);
+  // Satellite TCGs still go through sellerCardIdsForGame + any().
+  assert.match(src, /sellerCardIdsForGame\(seller\.uid, catalogGame\)/);
+  assert.match(src, /card_id = any\(/);
+});
