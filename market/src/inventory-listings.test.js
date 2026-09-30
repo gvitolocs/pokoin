@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  filterInventoryRows,
+  inventoryFacets,
   inventoryListingHref,
   inventoryListingMeta,
+  inventoryRowDate,
   isLiveInventoryListing,
   liveInventoryListings,
+  sortInventoryRows,
   summarizeLiveInventory,
 } from './inventory-listings.js';
 
@@ -78,4 +82,49 @@ test('summarizeLiveInventory counts qty and asking value for live rows only', ()
 test('summarizeLiveInventory empty input is zeroes', () => {
   assert.deepEqual(summarizeLiveInventory([]), { listings: 0, cards: 0, listedPkn: 0 });
   assert.deepEqual(summarizeLiveInventory(null), { listings: 0, cards: 0, listedPkn: 0 });
+});
+
+test('inventory filters by query, status, condition and language', () => {
+  const rows = [
+    { id: '1', cardName: 'Hoothoot', setName: 'Prismatic Evolutions', collectorNumber: '077/131', status: 'active', condition: 'NM', language: 'IT', pricePkn: 33, quantityAvailable: 1, createdAt: '2026-09-30T10:00:00Z' },
+    { id: '2', cardName: 'Hoothoot', setName: 'Prismatic Evolutions', collectorNumber: '132-4', status: 'paused', condition: 'NM', language: 'IT', pricePkn: 300, quantityAvailable: 3, createdAt: '2026-09-29T10:00:00Z' },
+    { id: '3', cardName: 'Gambler', setName: 'Fossil', collectorNumber: '060/062', status: 'active', condition: 'SP', language: 'EN', pricePkn: 12, quantityAvailable: 1, createdAt: '2026-09-28T10:00:00Z' },
+  ];
+  assert.deepEqual(filterInventoryRows(rows, { query: 'hoothoot' }).map((r) => r.id), ['1', '2']);
+  assert.deepEqual(filterInventoryRows(rows, { query: 'fossil' }).map((r) => r.id), ['3']);
+  assert.deepEqual(filterInventoryRows(rows, { status: 'paused' }).map((r) => r.id), ['2']);
+  assert.deepEqual(filterInventoryRows(rows, { condition: 'sp' }).map((r) => r.id), ['3']);
+  assert.deepEqual(filterInventoryRows(rows, { language: 'it' }).map((r) => r.id), ['1', '2']);
+  assert.deepEqual(filterInventoryRows(rows, { query: '077' }).map((r) => r.id), ['1']);
+  assert.equal(filterInventoryRows(rows, {}).length, 3);
+});
+
+test('inventory sorts by date, price, qty and name', () => {
+  const rows = [
+    { id: 'a', cardName: 'Hoothoot', pricePkn: 300, quantityAvailable: 3, createdAt: '2026-09-29' },
+    { id: 'b', cardName: 'Gambler', pricePkn: 12, quantityAvailable: 1, createdAt: '2026-09-30' },
+    { id: 'c', cardName: 'Abra', pricePkn: 100, quantityAvailable: 2, createdAt: '2026-09-28' },
+  ];
+  assert.deepEqual(sortInventoryRows(rows, 'newest').map((r) => r.id), ['b', 'a', 'c']);
+  assert.deepEqual(sortInventoryRows(rows, 'oldest').map((r) => r.id), ['c', 'a', 'b']);
+  assert.deepEqual(sortInventoryRows(rows, 'price-up').map((r) => r.id), ['b', 'c', 'a']);
+  assert.deepEqual(sortInventoryRows(rows, 'price-down').map((r) => r.id), ['a', 'c', 'b']);
+  assert.deepEqual(sortInventoryRows(rows, 'qty-down').map((r) => r.id), ['a', 'c', 'b']);
+  assert.deepEqual(sortInventoryRows(rows, 'name').map((r) => r.id), ['c', 'b', 'a']);
+});
+
+test('inventory facets list distinct conditions and languages', () => {
+  const facets = inventoryFacets([
+    { condition: 'NM', language: 'IT' },
+    { condition: 'nm', language: 'it' },
+    { condition: 'SP', language: 'EN' },
+  ]);
+  assert.deepEqual(facets.conditions, ['NM', 'SP']);
+  assert.deepEqual(facets.languages, ['EN', 'IT']);
+});
+
+test('inventory row date formats to day/month', () => {
+  assert.equal(inventoryRowDate({ createdAt: '2026-09-30T10:00:00Z' }), '30/09');
+  assert.equal(inventoryRowDate({ created_at: '2026-09-09T10:00:00Z' }), '09/09');
+  assert.equal(inventoryRowDate({}), '');
 });

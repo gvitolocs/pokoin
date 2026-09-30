@@ -4,14 +4,11 @@ import { exportStockCsv, fetchSellerListings, importStockCsv } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice } from '../seller-currency.js';
-import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait, Thread } from '../components/Desk.jsx';
+import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
+import InventoryBoard from '../components/InventoryBoard.jsx';
 import StockNav from '../components/StockNav.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
-import {
-  inventoryListingHref,
-  inventoryListingMeta,
-  liveInventoryListings,
-} from '../inventory-listings.js';
+import { liveInventoryListings } from '../inventory-listings.js';
 
 const FORMATS = [
   { id: 'powertools', label: 'PowerTools' },
@@ -253,18 +250,7 @@ export default function Inventory() {
         </EmptyDesk>
       ) : null}
       {!onImportTab && rows?.length ? (
-        <DeskPanel flush title={`${rows.length} listing${rows.length === 1 ? '' : 's'}`}>
-          <div className="thread-list">
-            {rows.map((row) => (
-              <Thread
-                key={row.id || `${row.cardId}-${row.pricePkn}`}
-                to={inventoryListingHref(row)}
-                title={row.cardName || row.name || 'Listing'}
-                meta={inventoryListingMeta(row, formatPrice)}
-              />
-            ))}
-          </div>
-        </DeskPanel>
+        <InventoryBoard rows={rows} formatPrice={formatPrice} />
       ) : null}
     </div>
   );

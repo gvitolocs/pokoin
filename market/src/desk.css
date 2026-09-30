@@ -2801,3 +2801,352 @@
   color: var(--muted);
   font-size: 0.85rem;
 }
+
+/* --- MyPokoin listings: PowerTools-style board (candyext shop chrome) --- */
+
+.inv-board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.inv-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.inv-stat {
+  background: var(--g3);
+  border: 1px solid var(--g4);
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inv-stat strong {
+  font-size: 22px;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-stat.is-gold strong {
+  color: var(--yellow);
+}
+
+.inv-stat span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inv-rail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.inv-search {
+  flex: 1 1 240px;
+  min-width: 180px;
+  background: var(--g2);
+  border: 1px solid var(--g4);
+  border-radius: 999px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 16px;
+  outline: none;
+}
+
+.inv-search:focus {
+  border-color: var(--yellow);
+}
+
+.inv-search::placeholder {
+  color: var(--muted);
+}
+
+.inv-chips {
+  display: flex;
+  gap: 6px;
+}
+
+.inv-chip {
+  background: var(--g2);
+  border: 1px solid var(--g4);
+  border-radius: 999px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.inv-chip:hover {
+  border-color: var(--g5);
+}
+
+.inv-chip.on {
+  background: var(--yellow);
+  border-color: var(--yellow);
+  color: #14121c;
+  font-weight: 700;
+}
+
+.inv-select {
+  background: var(--g2);
+  border: 1px solid var(--g4);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.inv-select:focus {
+  border-color: var(--yellow);
+}
+
+.inv-table {
+  border: 1px solid var(--g4);
+  border-radius: 14px;
+  background: var(--g2);
+  overflow: hidden;
+}
+
+.inv-head,
+.inv-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) 56px 72px 52px 110px 84px 64px 18px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 16px;
+}
+
+.inv-head {
+  background: var(--g3);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inv-head span.num,
+.inv-row .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-row {
+  border-top: 1px solid var(--g4);
+  min-height: 64px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.inv-row:hover {
+  background: var(--g3);
+}
+
+.inv-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.inv-thumb {
+  width: 40px;
+  height: 56px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--g4);
+  flex: none;
+}
+
+.inv-thumb.is-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.inv-card-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.inv-card-txt strong {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inv-card-sub {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inv-cond {
+  display: flex;
+  align-items: center;
+}
+
+.inv-cond .shop-cond {
+  width: 34px;
+  height: 24px;
+}
+
+.inv-lang {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inv-flag {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.inv-flag.is-empty {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--g4);
+}
+
+.inv-lang-code {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.inv-qty {
+  font-weight: 700;
+}
+
+.inv-price {
+  font-weight: 700;
+  color: var(--yellow);
+}
+
+.inv-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.inv-status.is-live {
+  color: #7ed957;
+}
+
+.inv-status.is-live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7ed957;
+}
+
+.inv-status.is-paused::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+
+.inv-date {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-chev {
+  color: var(--muted);
+  font-size: 18px;
+  text-align: right;
+}
+
+.inv-empty {
+  margin: 0;
+  padding: 18px 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 860px) {
+  .inv-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inv-head {
+    display: none;
+  }
+
+  .inv-head span.num,
+  .inv-row .num {
+    text-align: left;
+  }
+
+  .inv-row {
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    grid-template-areas:
+      'card  card  status status'
+      'cond  lang  qty    price';
+    padding: 12px 14px;
+    row-gap: 8px;
+  }
+
+  .inv-card {
+    grid-area: card;
+  }
+
+  .inv-cond {
+    grid-area: cond;
+  }
+
+  .inv-lang {
+    grid-area: lang;
+  }
+
+  .inv-qty {
+    grid-area: qty;
+  }
+
+  .inv-price {
+    grid-area: price;
+    justify-self: end;
+  }
+
+  .inv-status {
+    grid-area: status;
+    justify-self: end;
+  }
+
+  .inv-date,
+  .inv-chev {
+    display: none;
+  }
+}
