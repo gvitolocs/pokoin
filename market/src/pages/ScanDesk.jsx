@@ -5,7 +5,8 @@ import { fetchCardSales, fetchCheapestPricePknMap, fetchSellerListings, fetchVer
 import {
   listingBox,
   liveInventoryListings,
-  maxOccupiedStack,
+  nextFreeSlot,
+  nextPositionInStack,
 } from '../inventory-listings.js';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
@@ -417,25 +418,13 @@ export default function ScanDesk() {
   }, [focusId]);
 
   // Keep where the seller stopped per box (stack + position) so the next
-  // session can resume at the same divider.
+  // session can resume at the same divider. An empty batch has not placed a
+  // card yet: writing its pristine 1·1 here erased the stop before the resume
+  // effect below could read it. Explicit Stack/Position edits are remembered
+  // in setDefaults.
   useEffect(() => {
-    const loc = String(defaults.location || '').trim();
     const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
-    if (!list.length) {
-      if (!loc) return;
-      const cursor = {
-        stack: Math.max(1, Math.trunc(Number(defaults.stack)) || 1),
-        startPosition: size === 1 ? 1 : Math.max(1, Math.trunc(Number(defaults.startPosition)) || 1),
-        stackSize: size,
-      };
-      const store = loadStoppedPositions();
-      const prev = store[loc];
-      if (!prev || prev.stack !== cursor.stack || prev.startPosition !== cursor.startPosition) {
-        store[loc] = cursor;
-        rememberStoppedPositions(store);
-      }
-      return;
-    }
+    if (!list.length) return;
     const next = nextBoxPositions(list);
     const store = loadStoppedPositions();
     let dirty = false;
@@ -506,6 +495,61 @@ export default function ScanDesk() {
     });
     if (suggested) setDefaults(suggested);
   }, [batch?.id, defaults.location, closed]);
+
+  // A batch never starts on top of stock already in the box: continue after
+  // the last slot the seller's live listings hold there (scan sessions, desk
+  // listings and PowerTools CSV imports all write `box·stack[·position]`).
+  // With stacks of N cards a half-full stack continues at its next position.
+  const defaultsRef = useRef(defaults);
+  defaultsRef.current = defaults;
+  const boxStockRef = useRef({ key: '', box: '', rows: [] });
+  const stockUid = user?.uid || profile?.uid || '';
+  useEffect(() => {
+    const loc = String(defaults.location || '').trim();
+    if (closed || !batch?.id || !loc || !stockUid) return undefined;
+    const box = listingBox(loc);
+    const key = `${batch.id}|${box}`;
+    if (boxStockRef.current.key === key) return undefined;
+    boxStockRef.current = { key, box, rows: [] };
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchSellerListings(stockUid, await getBearer(), { limit: 1000 });
+        if (cancelled) return;
+        const rows = liveInventoryListings(data.listings || data.items || []);
+        boxStockRef.current = { key, box, rows };
+        const d = defaultsRef.current;
+        if (listingBox(String(d.location || '').trim()) !== box) return;
+        const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
+        const next = nextFreeSlot(rows, box, size);
+        if (!next) return;
+        if (next.abs > stackPosToIndex(d.stack ?? 1, d.startPosition ?? 1, size)) {
+          setDefaults({ stack: Math.min(9999, next.stack), startPosition: size === 1 ? 1 : next.startPosition });
+        }
+      } catch (_) {
+        boxStockRef.current = { key: '', box: '', rows: [] }; // retry on the next location change
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [batch?.id, defaults.location, closed, stockUid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Next free position when the seller types a stack: stock in the box plus this batch. */
+  function positionForStack(stack) {
+    const loc = String(defaults.location || '').trim();
+    const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
+    if (!loc || size === 1) return null;
+    const box = listingBox(loc);
+    const stock = boxStockRef.current.box === box ? boxStockRef.current.rows : [];
+    let next = nextPositionInStack(stock, box, stack, size) || 1;
+    for (const row of list) {
+      if (listingBox(String(row.location || '').trim()) !== box) continue;
+      const slot = slots.get(row.id);
+      if (!slot || stack < slot.stack || stack > (slot.endStack || slot.stack)) continue;
+      const end = (slot.endStack || slot.stack) > stack ? size : slot.end;
+      next = Math.max(next, end + 1);
+    }
+    return next;
+  }
 
   // ---------------------------------------------------------------- toasts / undo
 
@@ -587,35 +631,6 @@ export default function ScanDesk() {
         language: listingLanguageForPrint(nationality, preferredLang),
         reviewed: true,
       });
-
-  // A batch never starts on top of stock already in the box: seed the stack
-  // past every listing already stored there (scan sessions, desk listings and
-  // PowerTools CSV imports all write `box·stack` locations).
-  const inventoryHintRef = useRef('');
-  useEffect(() => {
-    const loc = String(defaults.location || '').trim();
-    const uid = user?.uid || profile?.uid;
-    if (closed || !loc || !uid) return undefined;
-    const box = listingBox(loc);
-    if (inventoryHintRef.current === box) return undefined;
-    inventoryHintRef.current = box;
-    let cancelled = false;
-    (async () => {
-      try {
-        const token = await getBearer();
-        const data = await fetchSellerListings(uid, token, { limit: 1000 });
-        if (cancelled) return;
-        const rows = liveInventoryListings(data.listings || data.items || []);
-        const occupied = maxOccupiedStack(rows, box);
-        if (occupied >= (defaults.stack ?? 1)) {
-          setDefaults({ stack: Math.min(9999, occupied + 1) });
-        }
-      } catch (_) {
-        // Best effort — the stored cursor still applies.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [defaults.location, defaults.stack, closed, user?.uid, profile?.uid, getBearer]);
       if (!Object.prototype.hasOwnProperty.call(changes, 'language')) {
         changes.language = optimistic.language;
       }
@@ -1343,6 +1358,7 @@ export default function ScanDesk() {
             defaults={defaults}
             stackFull={stackFull}
             onChange={setDefaults}
+            positionForStack={positionForStack}
             locationRef={locationInput}
             stackButtonRef={stackButton}
           />
@@ -1552,7 +1568,7 @@ function QrBlock({ secret, pin }) {
   );
 }
 
-function DefaultsBar({ defaults, onChange, locationRef, stackButtonRef, stackFull = false }) {
+function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackButtonRef, stackFull = false }) {
   const [locationDraft, setLocationDraft] = useState(defaults.location);
   const [stackDraft, setStackDraft] = useState(String(defaults.stack ?? 1));
   const [posDraft, setPosDraft] = useState(String(defaults.startPosition ?? 1));
@@ -1577,9 +1593,20 @@ function DefaultsBar({ defaults, onChange, locationRef, stackButtonRef, stackFul
   };
   const commitStack = () => {
     const n = Number.parseInt(stackDraft, 10);
-    if (n >= 1 && n <= 9999 && n !== (defaults.stack ?? 1)) {
-      onChange({ stack: n, ...(size === 1 ? { startPosition: 1 } : {}) });
-    } else setStackDraft(String(defaults.stack ?? 1));
+    if (!(n >= 1 && n <= 9999)) {
+      setStackDraft(String(defaults.stack ?? 1));
+      return;
+    }
+    if (size === 1) {
+      if (n !== (defaults.stack ?? 1)) onChange({ stack: n, startPosition: 1 });
+      return;
+    }
+    // Typing a stack that already holds cards (even the current one) continues
+    // after them instead of restarting at position 1.
+    const pos = (positionForStack && positionForStack(n)) || 1;
+    const next = pos > size ? { stack: Math.min(9999, n + 1), startPosition: 1 } : { stack: n, startPosition: pos };
+    if (next.stack !== (defaults.stack ?? 1) || next.startPosition !== (defaults.startPosition ?? 1)) onChange(next);
+    else setStackDraft(String(defaults.stack ?? 1));
   };
   const commitPos = () => {
     const n = Number.parseInt(posDraft, 10);
