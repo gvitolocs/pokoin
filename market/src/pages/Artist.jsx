@@ -430,6 +430,11 @@ function ArtistDesk() {
             >{name}</span>
           </>
         )}
+      />
+      <form
+        className="set-browse artist-browse"
+        onSubmit={(event) => event.preventDefault()}
+        aria-label="Search and filter this artist"
       >
         <div className="set-browse-bar">
           <div className="artist-print-flags" role="group" aria-label="Print region">
@@ -489,12 +494,6 @@ function ArtistDesk() {
             onClear={clearFilters}
           />
         </div>
-      </PageHead>
-      <form
-        className="set-browse artist-browse"
-        onSubmit={(event) => event.preventDefault()}
-        aria-label="Search and filter this artist"
-      >
         <p className="result-count">
           {payload
             ? (allCards?.length
