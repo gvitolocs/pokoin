@@ -2,44 +2,38 @@ const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
 const { marketplaceQuery } = require('../server/_marketplace_db');
 const { readIntegrationDoc } = require('./_cardtrader_integration');
 const { readOneDayReadyAssets, readSellerSync } = require('./_cardtrader_inventory_sync');
-const { applyDumpMinimums, marketPricePkn, oneDayReadyTotals } = require('./_cardtrader_inventory_sync_core');
-const { lastSoldPrices, utcDayKey } = require('./_portfolio_history_core');
+const { marketPricePkn, oneDayReadyTotals } = require('./_cardtrader_inventory_sync_core');
+const {
+  SOLD_BY_BLUEPRINT_SQL,
+  lastSoldFor,
+  soldPriceBook,
+  utcDayKey,
+} = require('./_portfolio_history_core');
 
 /**
  * GET /api/cardtrader-assets — the signed-in seller's CardTrader 1-Day Ready
  * inventory as dashboard assets. That stock is CardTrader's to sell, so it is
  * never a Pokoin listing; the dashboard shows it as "CardTrader 1-DR".
+ * Each row is priced like the Portfolio chart: its printing slice's last sold
+ * median (condition + language + finish), or no price when it never sold.
  */
 
-/** Sold facet rows behind each card's last sold price (same basis as the chart). */
-const SOLD_ROWS_SQL = `
-  select observed_day::text as day,
-         blueprint_id::text as blueprint_id,
-         reverse,
-         first_edition,
-         graded,
-         median_pkn::float8 as median_pkn,
-         sold_qty
-  from public.cardtrader_sold_daily
-  where blueprint_id = any($1::bigint[])
-    and observed_day >= (timezone('utc', now()))::date - 180
-    and median_pkn > 0
-    and sold_qty > 0
-`;
-
-async function withLastSold(rows) {
+/** Rows with market_pkn / market_day from the last sale of their slice. */
+async function withLastSold(rows, today = new Date()) {
   const ids = [...new Set((rows || []).map((row) => String(row.blueprint_id || '')).filter((id) => /^\d+$/.test(id)))];
-  if (!ids.length) return applyDumpMinimums(rows, []);
-  let priceOf = () => null;
-  try {
-    const result = await marketplaceQuery(SOLD_ROWS_SQL, [ids]);
-    priceOf = lastSoldPrices(result?.rows || [], utcDayKey(new Date()));
-  } catch (error) {
-    console.error('1dr last sold failed', { message: error.message });
+  let book = new Map();
+  if (ids.length) {
+    try {
+      const result = await marketplaceQuery(SOLD_BY_BLUEPRINT_SQL, [ids]);
+      book = soldPriceBook(result?.rows || []);
+    } catch (error) {
+      console.error('1dr last sold failed', { message: error.message });
+    }
   }
+  const day = utcDayKey(today);
   return (rows || []).map((row) => {
-    const pkn = priceOf(row.blueprint_id, row);
-    return { ...row, market_pkn: pkn > 0 ? pkn : null };
+    const sold = lastSoldFor(row, book, day);
+    return { ...row, market_pkn: sold ? sold.pkn : null, market_day: sold ? sold.day : null };
   });
 }
 
@@ -60,6 +54,7 @@ function assetItem(row = {}) {
     graded: row.graded === true,
     quantity: Math.max(0, Math.trunc(Number(row.quantity) || 0)),
     pricePkn: marketPricePkn(row),
+    priceDay: row.market_day ? String(row.market_day) : null,
   };
 }
 
@@ -77,17 +72,11 @@ async function readAssetsPayload(firestore, uid) {
   }
   let rows = [];
   try {
-    rows = await readOneDayReadyAssets(uid);
+    rows = await readOneDayReadyAssets(uid, { limit: 2000 });
   } catch (error) {
     if (!/does not exist/i.test(String(error.message || ''))) throw error;
   }
-  let priced = rows;
-  try {
-    priced = await withLastSold(rows);
-  } catch (error) {
-    console.error('1dr last sold failed', { message: error.message });
-    priced = applyDumpMinimums(rows, []);
-  }
+  const priced = await withLastSold(rows);
   const items = priced.map(assetItem).sort((a, b) => (
     ((b.pricePkn || 0) * b.quantity) - ((a.pricePkn || 0) * a.quantity)
     || String(a.cardName).localeCompare(String(b.cardName))
@@ -125,4 +114,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { assetItem, readAssetsPayload };
+module.exports._test = { assetItem, readAssetsPayload, withLastSold };

@@ -1,4 +1,4 @@
-import { Component, useLayoutEffect, useRef, useState } from 'react';
+import { Component, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc } from '../api.js';
 import { cardReference, writeListingDrag } from '../chat-listing.js';
@@ -10,24 +10,31 @@ import { formatPknNumber, tilePricePkn } from '../pkn.js';
 import {
   DEFAULT_HISTORY_PRESET,
   availableHistoryPresets,
-  formatHistoryAxisLabel,
+  daySpan,
+  formatDayLabel,
   formatHistoryDelta,
   formatHistoryTip,
+  formatProjectionTip,
   historyAxis,
+  historyDateTicks,
+  historyDayAt,
   historyPresetWindow,
-  historyPlotX,
-  historyPointerDay,
+  historyTimeline,
   historyWindowChange,
-  historyWindowSplit,
-  lastPricedTotal,
-  projectCardValue,
+  projectPortfolio,
   sliceHistorySeries,
   stepHistoryPoints,
+  timelineDay,
+  timelineRatio,
+  withLiveToday,
 } from '../portfolio-history.js';
 import { DASHBOARD_SCAN, marketUrl, goMarket } from '../punchouts.js';
 
 const CHART_W = 640;
-const CHART_H = 200;
+const CHART_H = 220;
+// Inner padding so a line at the top or on zero never sits on the frame edge.
+const PLOT_TOP = 12;
+const PLOT_BOTTOM = 8;
 
 export class DashboardBoundary extends Component {
   constructor(props) {
@@ -77,131 +84,146 @@ class HistoryBoundary extends Component {
   }
 }
 
+function pointsAttr(coords) {
+  return coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+}
+
 /**
- * Collection value chart. Opens on the last month. Longer windows appear only
- * when stored history reaches them; a calendar picks any other period.
- * Draws real observations only — never a fake flat from a single balance.
+ * Collection value chart, laid out like a multi-asset portfolio tracker:
+ * cards stacked on liquidity (wallet PKN), one point per day. Cards are worth
+ * each printing slice's last sold median, carried across days without a sale
+ * (server/pokoin-api/_portfolio_history_core.js). A window that ends today
+ * fills two thirds with realized days; the hatched last third is the
+ * projection (projectPortfolio) on the same day scale. Opens on the last
+ * month; longer windows appear when stored history reaches them.
  */
-export function CollectionHistoryPanel({ series = null, pending = false }) {
+export function CollectionHistoryPanel({ series = null, pending = false, live = undefined }) {
   const [hover, setHover] = useState(null);
   const [preset, setPreset] = useState(DEFAULT_HISTORY_PRESET);
   const [custom, setCustom] = useState(null);
   const frameRef = useRef(null);
   const tipRef = useRef(null);
-  const presets = availableHistoryPresets(series);
+  const days = useMemo(() => withLiveToday(series, live || {}), [series, live]);
+  const presets = availableHistoryPresets(days);
   const presetId = custom
     ? ''
     : (presets.some((row) => row.id === preset) ? preset : DEFAULT_HISTORY_PRESET);
   const bounds = custom
     ? { from: custom.from, to: custom.to, preset: 'custom' }
     : historyPresetWindow(presetId || 'MAX');
-  const points = sliceHistorySeries(series, bounds);
+  const points = sliceHistorySeries(days, bounds);
   const hasLine = points.length >= 2;
   const hasPoint = points.length === 1;
   const hasData = points.length > 0;
-  const forecast = historyWindowSplit(points) < 1 ? projectCardValue(points) : null;
-  const axis = historyAxis(points, forecast ? [forecast.value] : []);
+  const timeline = historyTimeline(points);
+  const projection = projectPortfolio(points, timeline);
+  const axis = historyAxis([
+    ...points.map((day) => day.totalPkn),
+    ...(projection ? projection.days.flatMap((day) => [day.low, day.high]) : []),
+  ]);
   const change = historyWindowChange(points, custom ? 'custom' : presetId);
-  // Too little priced history for a trend: today runs to the right edge.
-  const split = forecast ? historyWindowSplit(points) : 1;
-  const withYear = points.length > 1
-    && String(points[0]?.date || '').slice(0, 4) !== String(points[points.length - 1]?.date || '').slice(0, 4);
-  const xLabels = points.length
-    ? (points[0].date === points[points.length - 1].date ? [points[0]] : [points[0], points[points.length - 1]])
-    : [];
+  const ticks = historyDateTicks(timeline);
+  const split = timeline ? timeline.split : 1;
 
   function xOf(date) {
-    return historyPlotX(date, {
-      from: points[0]?.date,
-      to: points[points.length - 1]?.date,
-      width: CHART_W,
-      split,
-    });
+    return timelineRatio(timeline, date) * CHART_W;
   }
 
-  function yOf(total, day) {
-    if (axis.zoomed && !day?.assets?.cardsKnown) return CHART_H + 12;
-    const span = Math.max(1, axis.yMax - axis.yMin);
-    const clamped = Math.min(axis.yMax, Math.max(axis.yMin, Number(total) || 0));
+  function yOf(value) {
+    const span = Math.max(1e-9, axis.yMax - axis.yMin);
+    const clamped = Math.min(axis.yMax, Math.max(axis.yMin, Number(value) || 0));
     const t = (clamped - axis.yMin) / span;
-    return CHART_H - t * (CHART_H - 28) - 14;
+    return CHART_H - PLOT_BOTTOM - t * (CHART_H - PLOT_TOP - PLOT_BOTTOM);
   }
 
-  let polyline = '';
-  let area = '';
+  const baseY = CHART_H - PLOT_BOTTOM;
+  let totalLine = '';
+  let cardsArea = '';
+  let liquidityArea = '';
   let endDot = null;
-  if (hasLine) {
-    const coords = points.map((day) => ({
-      x: xOf(day.date),
-      y: yOf(day.totalPkn, day),
-      day,
-    }));
-    const drawn = axis.zoomed ? coords.filter((point) => point.day?.assets?.cardsKnown) : coords;
-    const line = drawn.length > 1 ? drawn : coords;
-    const stepped = stepHistoryPoints(line);
-    polyline = stepped.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
-    const originX = line[0].x.toFixed(1);
-    const endX = line[line.length - 1].x.toFixed(1);
-    area = `${originX},${CHART_H} ${polyline} ${endX},${CHART_H}`;
-    endDot = line[line.length - 1];
-  } else if (hasPoint) {
-    const day = points[0];
-    endDot = { x: xOf(day.date), y: yOf(day.totalPkn, day), day };
+  if (hasData) {
+    const coords = points.map((day) => ({ x: xOf(day.date), day }));
+    const totalTop = stepHistoryPoints(coords.map((c) => ({ x: c.x, y: yOf(c.day.totalPkn) })));
+    const liquidityTop = stepHistoryPoints(coords.map((c) => ({ x: c.x, y: yOf(c.day.assets.currencyPkn) })));
+    if (hasLine) {
+      totalLine = pointsAttr(totalTop);
+      cardsArea = pointsAttr([...liquidityTop, ...[...totalTop].reverse()]);
+      const firstX = liquidityTop[0].x;
+      const lastX = liquidityTop[liquidityTop.length - 1].x;
+      liquidityArea = pointsAttr([{ x: firstX, y: baseY }, ...liquidityTop, { x: lastX, y: baseY }]);
+    }
+    const last = coords[coords.length - 1];
+    endDot = { x: last.x, y: yOf(last.day.totalPkn) };
   }
-  const pricedTotal = lastPricedTotal(points);
-  const anchorY = endDot
-    ? (pricedTotal != null ? yOf(pricedTotal, { assets: { cardsKnown: true } }) : endDot.y)
-    : null;
-  const forecastY = endDot
-    ? (forecast ? yOf(forecast.value, { assets: { cardsKnown: true } }) : anchorY)
-    : null;
-  const projection = endDot && anchorY != null && forecastY != null && split < 1
-    ? `${endDot.x.toFixed(1)},${anchorY.toFixed(1)} ${CHART_W},${forecastY.toFixed(1)} ${CHART_W},${CHART_H} ${endDot.x.toFixed(1)},${CHART_H}`
-    : '';
-  const forecastLine = endDot && forecast && anchorY != null
-    ? `${endDot.x.toFixed(1)},${anchorY.toFixed(1)} ${CHART_W},${forecastY.toFixed(1)}`
-    : '';
 
-  const tipDay = hover?.day || null;
-  const tip = formatHistoryTip(tipDay, {
-    projection: Boolean(hover?.projection),
-    forecast: hover?.projection ? forecast : null,
-  });
-  const tipLeftPct = hover?.xPct
-    ?? (endDot ? (endDot.x / CHART_W) * 100 : 50);
+  let projectionLine = '';
+  let projectionHatch = '';
+  let projectionBand = '';
+  let projectionLow = '';
+  let projectionHigh = '';
+  if (projection && endDot) {
+    const center = projection.days.map((day) => ({ x: xOf(day.date), y: yOf(day.value) }));
+    projectionLine = pointsAttr(center);
+    projectionHatch = pointsAttr([
+      { x: center[0].x, y: baseY },
+      ...center,
+      { x: center[center.length - 1].x, y: baseY },
+    ]);
+    if (projection.band) {
+      const high = projection.days.map((day) => ({ x: xOf(day.date), y: yOf(day.high) }));
+      const low = projection.days.map((day) => ({ x: xOf(day.date), y: yOf(day.low) }));
+      projectionBand = pointsAttr([...high, ...[...low].reverse()]);
+      projectionHigh = pointsAttr(high);
+      projectionLow = pointsAttr(low);
+    }
+  }
 
-  function onMove(event) {
-    if (!hasData) {
+  // Hover: the day under the pointer, realized or projected.
+  let tip = null;
+  let hoverDot = null;
+  let legendDay = points[points.length - 1] || null;
+  if (hover && timeline && hasData) {
+    const date = timelineDay(timeline, hover.ratio);
+    if (projection && date > timeline.to) {
+      const point = projection.days[Math.min(projection.days.length - 1, daySpan(timeline.to, date))];
+      tip = formatProjectionTip(point, projection);
+      hoverDot = { x: xOf(point.date), y: yOf(point.value), projected: true };
+    } else {
+      const day = historyDayAt(points, date);
+      legendDay = day;
+      tip = formatHistoryTip(day);
+      if (tip) tip.dateLabel = formatDayLabel(date);
+      hoverDot = { x: xOf(date), y: yOf(day?.totalPkn) };
+    }
+  }
+  const tipLeftPct = hoverDot ? (hoverDot.x / CHART_W) * 100 : 50;
+  // The tip sits beside the crosshair so it never covers the point it describes.
+  const tipOnRight = tipLeftPct < 55;
+  const legendCards = legendDay?.assets?.cardsValuePkn;
+
+  function onPointer(event) {
+    if (!hasData || !timeline) {
       setHover(null);
       return;
     }
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
-    const hit = historyPointerDay(points, ratio, { split });
-    if (hit.projection) {
-      setHover(null);
-      return;
-    }
-    const xPct = hasPoint && endDot
-      ? (endDot.x / CHART_W) * 100
-      : Math.min(96, Math.max(4, hit.xPct));
-    setHover({ day: hit.day, xPct, projection: false });
+    setHover({ ratio: Math.min(1, Math.max(0, ratio)) });
   }
 
+  // Keep the tip inside the plot on a narrow screen.
   useLayoutEffect(() => {
     const frame = frameRef.current;
     const node = tipRef.current;
     if (!frame || !node) return;
-    node.style.transform = 'translateX(-50%)';
+    node.style.transform = '';
     const frameBox = frame.getBoundingClientRect();
     const tipBox = node.getBoundingClientRect();
-    const pad = 8;
-    const room = frameBox.width - pad * 2;
+    const pad = 6;
     let nudge = 0;
-    if (tipBox.width > room && room > 0) nudge = (frameBox.left + pad) - tipBox.left;
-    else if (tipBox.left < frameBox.left + pad) nudge = (frameBox.left + pad) - tipBox.left;
+    if (tipBox.left < frameBox.left + pad) nudge = (frameBox.left + pad) - tipBox.left;
     else if (tipBox.right > frameBox.right - pad) nudge = (frameBox.right - pad) - tipBox.right;
-    if (nudge) node.style.transform = `translateX(calc(-50% + ${nudge}px))`;
+    if (nudge) node.style.transform = `translateX(${nudge}px)`;
   });
 
   function pickDates(nextFrom, nextTo) {
@@ -211,6 +233,16 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
     }
     setCustom({ from: nextFrom, to: nextTo });
   }
+
+  const widestTick = axis.ticks.reduce((wide, tick) => {
+    const text = formatPknNumber(tick);
+    return text.length > wide.length ? text : wide;
+  }, '0');
+  const summary = hasData
+    ? `Collection value from ${formatDayLabel(points[0].date)} to ${formatDayLabel(points[points.length - 1].date)}: `
+      + `${formatPknNumber(points[0].totalPkn)} PKN to ${formatPknNumber(points[points.length - 1].totalPkn)} PKN`
+      + (projection ? `, projected ${formatPknNumber(projection.end.value)} PKN by ${formatDayLabel(projection.end.date)}` : '')
+    : 'Collection value history chart';
 
   return (
     <div
@@ -249,7 +281,7 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
               <input
                 type="date"
                 aria-label="From"
-                value={bounds.from || ''}
+                value={bounds.from || points[0]?.date || ''}
                 max={bounds.to || undefined}
                 onChange={(event) => pickDates(event.target.value, bounds.to)}
               />
@@ -259,124 +291,214 @@ export function CollectionHistoryPanel({ series = null, pending = false }) {
                 aria-label="To"
                 value={bounds.to || ''}
                 min={bounds.from || undefined}
-                onChange={(event) => pickDates(bounds.from, event.target.value)}
+                onChange={(event) => pickDates(bounds.from || points[0]?.date || '', event.target.value)}
               />
             </div>
           </div>
         ) : null}
+        {hasData ? (
+          <ul className="seller-history-legend" aria-label="Chart layers">
+            <li className="is-cards">
+              <span className="seller-history-key" aria-hidden="true" />
+              <span>Cards</span>
+              <strong>{legendCards != null ? `${formatPknNumber(legendCards)} PKN` : '—'}</strong>
+              {legendDay?.assets?.cardsHeld ? (
+                <em>
+                  {legendDay.assets.cardsPriced.toLocaleString('en-US')} of {legendDay.assets.cardsHeld.toLocaleString('en-US')} with a sale
+                </em>
+              ) : null}
+            </li>
+            <li className="is-liquidity">
+              <span className="seller-history-key" aria-hidden="true" />
+              <span>Liquidity</span>
+              <strong>{formatPknNumber(legendDay?.assets?.currencyPkn || 0)} PKN</strong>
+            </li>
+            {projection ? (
+              <li className="is-projection">
+                <span className="seller-history-key" aria-hidden="true" />
+                <span>Projection</span>
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
       </div>
       <div className="seller-history-chart">
         <div className="seller-history-y" aria-hidden="true">
-          {[...axis.ticks].reverse().map((tick) => (
-            <span key={tick}>{formatPknNumber(tick)}</span>
-          ))}
+          <span className="seller-history-y-sizer">{widestTick}</span>
+          <div className="seller-history-y-ticks">
+            {axis.ticks.map((tick) => (
+              <span key={tick} style={{ top: `${(yOf(tick) / CHART_H) * 100}%` }}>
+                {formatPknNumber(tick)}
+              </span>
+            ))}
+          </div>
         </div>
-        <div className="seller-history-plot">
-          <div
-            ref={frameRef}
-            className="seller-history-frame"
-            onMouseMove={onMove}
-            onMouseLeave={() => setHover(null)}
-            role="img"
-            aria-label="Collection value history chart"
+        <div
+          ref={frameRef}
+          className="seller-history-frame"
+          onPointerMove={onPointer}
+          onPointerDown={onPointer}
+          onPointerLeave={() => setHover(null)}
+          role="img"
+          aria-label={summary}
+        >
+          <svg
+            className={`seller-history-grid${hasData ? '' : ' is-empty'}`}
+            viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
           >
-            <svg
-              className={`seller-history-grid${hasLine || hasPoint ? '' : ' is-empty'}`}
-              viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-              preserveAspectRatio="none"
-              aria-hidden="true"
-            >
-              <defs>
-                <linearGradient id="collection-history-fill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#ffd33d" stopOpacity="0.28" />
-                  <stop offset="100%" stopColor="#ffd33d" stopOpacity="0" />
-                </linearGradient>
-                <pattern id="collection-history-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(32)">
-                  <line x1="0" y1="0" x2="0" y2="7" stroke="#ffd33d" strokeOpacity="0.55" strokeWidth="1.6" />
-                </pattern>
-              </defs>
-              {axis.ticks.map((tick) => (
-                <line
-                  key={`rule-${tick}`}
-                  className="seller-history-rule"
-                  x1="0"
-                  x2={CHART_W}
-                  y1={yOf(tick)}
-                  y2={yOf(tick)}
-                />
-              ))}
-              {projection ? <polygon className="seller-history-projection" points={projection} /> : null}
-              {forecastLine ? (
-                <polyline className="seller-history-forecast" points={forecastLine} fill="none" />
-              ) : null}
-              {hasLine ? (
-                <>
-                  <polygon className="seller-history-fill" points={area} />
-                  <polyline className="seller-history-line" points={polyline} fill="none" />
-                </>
-              ) : null}
-              {hover && (hasLine || hasPoint) ? (
-                <line
-                  className="seller-history-crosshair"
-                  x1={(hover.xPct / 100) * CHART_W}
-                  x2={(hover.xPct / 100) * CHART_W}
-                  y1="0"
-                  y2={CHART_H}
-                />
-              ) : null}
-            </svg>
-            {/* CSS circle — SVG circle stretches under preserveAspectRatio=none. */}
-            {endDot ? (
-              <span
-                className="seller-history-point"
-                data-testid="collection-history-point"
-                style={{
-                  left: `${(endDot.x / CHART_W) * 100}%`,
-                  top: `${(endDot.y / CHART_H) * 100}%`,
-                }}
+            <defs>
+              <linearGradient id="collection-history-fill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ffd33d" stopOpacity="0.24" />
+                <stop offset="100%" stopColor="#ffd33d" stopOpacity="0.03" />
+              </linearGradient>
+              <pattern id="collection-history-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="7" stroke="#ffd33d" strokeOpacity="0.32" strokeWidth="1.4" />
+              </pattern>
+            </defs>
+            {axis.ticks.map((tick) => (
+              <line
+                key={`rule-${tick}`}
+                className="seller-history-rule"
+                x1="0"
+                x2={CHART_W}
+                y1={yOf(tick)}
+                y2={yOf(tick)}
+              />
+            ))}
+            {hasLine ? (
+              <>
+                <polygon className="seller-history-liquidity" points={liquidityArea} />
+                <polygon className="seller-history-fill" points={cardsArea} />
+              </>
+            ) : null}
+            {projectionHatch ? <polygon className="seller-history-projection" points={projectionHatch} /> : null}
+            {projectionBand ? <polygon className="seller-history-band" points={projectionBand} /> : null}
+            {projectionHigh ? <polyline className="seller-history-band-edge" points={projectionHigh} fill="none" /> : null}
+            {projectionLow ? <polyline className="seller-history-band-edge" points={projectionLow} fill="none" /> : null}
+            {split < 1 ? (
+              <line className="seller-history-today" x1={split * CHART_W} x2={split * CHART_W} y1="0" y2={CHART_H} />
+            ) : null}
+            {projectionLine ? (
+              <polyline className="seller-history-forecast" points={projectionLine} fill="none" />
+            ) : null}
+            {hasLine ? <polyline className="seller-history-line" points={totalLine} fill="none" /> : null}
+            {hoverDot ? (
+              <line
+                className="seller-history-crosshair"
+                x1={hoverDot.x}
+                x2={hoverDot.x}
+                y1="0"
+                y2={CHART_H}
               />
             ) : null}
-            {!hasData && !pending ? (
-              <div className="seller-history-empty">
-                <p className="seller-history-title">Collection history will appear here</p>
-                <p className="seller-history-lede">
-                  Scan cards to start building your portfolio.
-                </p>
-              </div>
-            ) : null}
-            {tip ? (
-              <div
-                ref={tipRef}
-                className="seller-history-tip"
-                data-testid="collection-history-tip"
-                style={{ left: `${tipLeftPct}%`, transform: 'translateX(-50%)' }}
-              >
-                <p className="seller-history-tip-day">{tip.dateLabel}</p>
-                <p className="seller-history-tip-total">{tip.totalLabel}</p>
+          </svg>
+          {!hasData && !pending ? (
+            <div className="seller-history-empty">
+              <p className="seller-history-title">Collection history will appear here</p>
+              <p className="seller-history-lede">
+                Scan cards to start building your portfolio.
+              </p>
+            </div>
+          ) : null}
+        </div>
+        {/* Dots and the tip sit over the frame without its clipping. CSS
+            circles, because an SVG circle stretches under preserveAspectRatio=none. */}
+        <div className="seller-history-overlay" aria-hidden="true">
+          {endDot ? (
+            <span
+              className="seller-history-point"
+              data-testid="collection-history-point"
+              style={{
+                left: `${(endDot.x / CHART_W) * 100}%`,
+                top: `${(endDot.y / CHART_H) * 100}%`,
+              }}
+            />
+          ) : null}
+          {hoverDot ? (
+            <span
+              className={`seller-history-point is-hover${hoverDot.projected ? ' is-projected' : ''}`}
+              style={{
+                left: `${(hoverDot.x / CHART_W) * 100}%`,
+                top: `${(hoverDot.y / CHART_H) * 100}%`,
+              }}
+            />
+          ) : null}
+          {tip ? (
+            <div
+              ref={tipRef}
+              className="seller-history-tip"
+              data-testid="collection-history-tip"
+              style={tipOnRight
+                ? { left: `calc(${tipLeftPct}% + 14px)` }
+                : { right: `calc(${100 - tipLeftPct}% + 14px)` }}
+            >
+              <p className="seller-history-tip-day">{tip.dateLabel}</p>
+              <p className="seller-history-tip-total">{tip.totalLabel}</p>
+              {tip.rows.length ? (
                 <ul>
                   {tip.rows.map((row) => (
-                    <li key={row.label}>
+                    <li key={row.key} className={`is-${row.key}`}>
                       <span>{row.label}</span>
                       <strong>{row.value}</strong>
+                      {row.note ? <em>{row.note}</em> : null}
                     </li>
                   ))}
                 </ul>
-              </div>
-            ) : null}
-          </div>
-          <div className={`seller-history-x${split < 1 ? ' has-projection' : ''}`} aria-hidden="true">
-            {xLabels.map((day, index) => (
-              <span
-                key={day.date}
-                className={split < 1 && index === xLabels.length - 1 && xLabels.length > 1 ? 'is-today' : undefined}
-              >
-                {formatHistoryAxisLabel(day.date, withYear)}
-              </span>
-            ))}
-            {!xLabels.length ? <span> </span> : null}
-          </div>
+              ) : null}
+              {tip.footnote ? <p className="seller-history-tip-note">{tip.footnote}</p> : null}
+            </div>
+          ) : null}
+        </div>
+        <div className="seller-history-x" aria-hidden="true">
+          {ticks.map((tick) => (
+            <span key={tick.date} className={tick.minor ? 'is-minor' : undefined} style={{ left: `${tick.ratio * 100}%` }}>
+              {tick.label}
+            </span>
+          ))}
+          {hasData && split < 1 ? (
+            <span className="is-today" style={{ left: `${split * 100}%` }}>Today</span>
+          ) : null}
+          {hasData && split >= 1 ? (
+            <span className="is-end" style={{ left: '100%' }}>{formatDayLabel(points[points.length - 1].date)}</span>
+          ) : null}
         </div>
       </div>
+      {hasData ? (
+        <table className="sr-only">
+          <caption>Collection value by day</caption>
+          <thead>
+            <tr>
+              <th scope="col">Day</th>
+              <th scope="col">Cards</th>
+              <th scope="col">Liquidity</th>
+              <th scope="col">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {points.filter((day) => !day.carried).map((day) => (
+              <tr key={day.date}>
+                <th scope="row">{day.date}</th>
+                <td>{day.assets.cardsValuePkn != null ? `${formatPknNumber(day.assets.cardsValuePkn)} PKN` : '—'}</td>
+                <td>{formatPknNumber(day.assets.currencyPkn)} PKN</td>
+                <td>{formatPknNumber(day.totalPkn)} PKN</td>
+              </tr>
+            ))}
+            {projection ? (
+              <tr>
+                <th scope="row">{projection.end.date} (projection)</th>
+                <td>{formatPknNumber(projection.end.cards)} PKN</td>
+                <td>{formatPknNumber(projection.end.liquidity)} PKN</td>
+                <td>
+                  {formatPknNumber(projection.end.value)} PKN
+                  {projection.band ? ` (${formatPknNumber(projection.end.low)}–${formatPknNumber(projection.end.high)})` : ''}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      ) : null}
     </div>
   );
 }
@@ -611,6 +733,14 @@ export function SellerDashboardView({
   const nftPct = mixBase > 0 ? (nftQty / mixBase) * 100 : 0;
   const listedPct = owned > 0 ? Math.min(100, (listedCards / owned) * 100) : 0;
   const unique = Math.max(0, Number(uniqueItems) || 0);
+  const oneDayReadyTotals = cardTraderAssets?.oneDayReady ? cardTraderAssets.totals || null : null;
+  const oneDayReadyValue = Math.max(0, Number(oneDayReadyTotals?.valuePkn) || 0);
+  const oneDayReadyPriced = Math.max(0, Number(oneDayReadyTotals?.pricedCards) || 0);
+  // Today's chart point is the wallet and 1-DR value shown on this tile.
+  const historyLive = useMemo(() => ({
+    currencyPkn: balance,
+    cards: oneDayReadyTotals || undefined,
+  }), [balance, oneDayReadyTotals]);
 
   return (
     <div className="page desk seller-home" data-testid="seller-home">
@@ -692,17 +822,19 @@ export function SellerDashboardView({
 
               {oneDayReadyCards > 0 ? (
                 <p className="seller-asking" data-testid="cardtrader-1dr-value">
-                  <span>CardTrader 1-DR assets · {oneDayReadyCards.toLocaleString('en-US')} cards</span>
-                  <strong title="Each card at its last CardTrader sold price">
-                    {(Number(cardTraderAssets.totals?.valuePkn) || 0) > 0
-                      ? formatPkn(cardTraderAssets.totals.valuePkn)
-                      : '—'}
+                  <span>
+                    CardTrader 1-DR assets · {oneDayReadyCards.toLocaleString('en-US')} cards
+                    {' · '}
+                    {oneDayReadyPriced.toLocaleString('en-US')} with a sale
+                  </span>
+                  <strong title="Each card at the last sold median of its condition and language. A card that never sold counts 0 PKN.">
+                    {oneDayReadyValue > 0 ? formatPkn(oneDayReadyValue) : '0 PKN'}
                   </strong>
                 </p>
               ) : null}
 
               <HistoryBoundary>
-                <CollectionHistoryPanel series={historySeries} pending={historyPending} />
+                <CollectionHistoryPanel series={historySeries} pending={historyPending} live={historyLive} />
               </HistoryBoundary>
 
               <div className="seller-tile-actions">

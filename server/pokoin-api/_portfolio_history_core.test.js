@@ -4,164 +4,203 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const core = require('./_portfolio_history_core.js');
 
-test('a stored today with the last-sold basis is not calculated again', () => {
-  assert.equal(core.storedIsFresh({
-    priceBasis: 'ct-last-sold',
-    seriesRevision: 4,
-    updatedAt: '2026-09-25T12:00:00.000Z',
-  }, '2026-09-25'), true);
-  assert.equal(core.storedIsFresh({
-    priceBasis: 'ct-sold-day',
-    seriesRevision: 3,
-    updatedAt: '2026-09-25T12:00:00.000Z',
-  }, '2026-09-25'), false);
-  assert.equal(core.storedIsFresh({
-    priceBasis: 'ct-dump-min',
-    seriesRevision: 2,
-    updatedAt: '2026-09-25T12:00:00.000Z',
-  }, '2026-09-25'), false);
-  assert.equal(core.storedIsFresh({
-    priceBasis: 'ct-last-sold',
-    seriesRevision: 4,
+const TODAY = '2026-09-27T10:00:00.000Z';
+
+function sold(blueprint, day, condition, language, median, extra = {}) {
+  return {
+    blueprint_id: String(blueprint),
+    day,
+    condition,
+    language,
+    reverse: false,
+    first_edition: false,
+    graded: false,
+    median_pkn: median,
+    ...extra,
+  };
+}
+
+function stock(blueprint, condition, language, quantity, since = '2026-09-21 17:52:48+00', extra = {}) {
+  return {
+    blueprint_id: String(blueprint),
+    condition,
+    language,
+    reverse: false,
+    first_edition: false,
+    graded: false,
+    quantity,
+    since,
+    ...extra,
+  };
+}
+
+test('1-DR LP / HP / PO stock meets the sold table SP / PL / Poor slices', () => {
+  assert.equal(core.soldSliceKey(stock(10, 'LP', 'IT', 1)), core.soldSliceKey(sold(10, '2026-09-01', 'SP', 'IT', 5)));
+  assert.equal(core.soldSliceKey(stock(10, 'HP', 'IT', 1)), core.soldSliceKey(sold(10, '2026-09-01', 'PL', 'IT', 5)));
+  assert.equal(core.soldSliceKey(stock(10, 'PO', 'JP', 1)), core.soldSliceKey(sold(10, '2026-09-01', 'Poor', 'JP', 5)));
+  assert.notEqual(core.soldSliceKey(stock(10, 'MP', 'IT', 1)), core.soldSliceKey(sold(10, '2026-09-01', 'MP', 'EN', 5)));
+  assert.notEqual(
+    core.soldSliceKey(stock(10, 'NM', 'IT', 1, undefined, { reverse: true })),
+    core.soldSliceKey(sold(10, '2026-09-01', 'NM', 'IT', 5)),
+  );
+  assert.equal(core.soldSliceKey({ blueprint_id: 'ct-abc', condition: 'NM' }), '');
+});
+
+test('a slice keeps its last sold median until it sells again', () => {
+  const book = core.soldPriceBook([
+    sold(10, '2026-09-23', 'NM', 'EN', 300),
+    sold(10, '2026-09-05', 'NM', 'EN', 200),
+    sold(10, '2026-09-10', 'NM', 'EN', 0),
+  ]);
+  const entries = book.get(core.soldSliceKey(sold(10, '', 'NM', 'EN', 1)));
+  assert.equal(entries.length, 2);
+  assert.equal(core.priceAsOf(entries, '2026-09-04'), null);
+  assert.equal(core.priceAsOf(entries, '2026-09-05').pkn, 200);
+  assert.equal(core.priceAsOf(entries, '2026-09-22').pkn, 200);
+  assert.equal(core.priceAsOf(entries, '2026-09-27').pkn, 300);
+  assert.deepEqual(core.lastSoldFor(stock(10, 'NM', 'EN', 1), book, '2026-09-24'), { pkn: 300, day: '2026-09-23' });
+});
+
+test('quiet days carry the pile, other slices never price a card, and a never-sold card adds 0', () => {
+  // The seller in the dashboard screenshot: sales printed on 21, 22, 23 and 26
+  // September; nothing on 24, 25 or so far today. The old chart dropped to the
+  // wallet on every quiet day.
+  const holdings = core.holdingSlices([
+    stock(118858, 'HP', 'IT', 1), // Potion: only an MP English sale exists
+    stock(139076, 'MP', 'JP', 1), // Darkness Energy: only a 2,000,328 PKN PL print exists
+    stock(137964, 'MP', 'JP', 2), // Energy Retrieval 275928: never sold
+    stock(243540, 'NM', 'IT', 1),
+    stock(111585, 'PO', 'IT', 8),
+  ]);
+  const book = core.soldPriceBook([
+    sold(118858, '2026-09-23', 'MP', 'EN', 2300),
+    sold(139076, '2026-09-08', 'PL', 'JP', 2000328),
+    sold(243540, '2026-09-10', 'NM', 'IT', 4480),
+    sold(243540, '2026-09-26', 'NM', 'IT', 4400),
+    sold(111585, '2026-09-21', 'Poor', 'IT', 10),
+    sold(111585, '2026-09-23', 'Poor', 'IT', 12),
+  ]);
+  const days = core.buildDailySeries({
+    wallet: [{ date: '2026-05-20', currencyPkn: 0 }, { date: '2026-05-21', currencyPkn: 15 }, { date: '2026-09-27', currencyPkn: 15 }],
+    holdings,
+    book,
+    today: TODAY,
+  });
+  const on = (date) => days.find((row) => row.date === date);
+  assert.equal(days[0].date, '2026-05-20');
+  assert.equal(days[days.length - 1].date, '2026-09-27');
+  // One point per day, no gaps.
+  for (let i = 1; i < days.length; i += 1) {
+    assert.equal(days[i].date, core.addUtcDays(days[i - 1].date, 1));
+  }
+  assert.equal(on('2026-09-20').cardsValuePkn, null);
+  assert.equal(on('2026-09-20').totalPkn, 15);
+  assert.deepEqual(
+    [on('2026-09-21').cardsValuePkn, on('2026-09-21').cardsPriced, on('2026-09-21').cardsHeld],
+    [4480 + 80, 9, 13],
+  );
+  assert.equal(on('2026-09-23').cardsValuePkn, 4480 + 96);
+  assert.equal(on('2026-09-24').cardsValuePkn, 4480 + 96);
+  assert.equal(on('2026-09-25').cardsValuePkn, 4480 + 96);
+  assert.equal(on('2026-09-26').cardsValuePkn, 4400 + 96);
+  const today = on('2026-09-27');
+  assert.equal(today.cardsValuePkn, 4400 + 96);
+  assert.equal(today.totalPkn, 15 + 4400 + 96);
+  assert.equal(today.cardsPriced, 9);
+  assert.equal(today.cardsHeld, 13);
+});
+
+test('stock counts from the day it was first synced', () => {
+  const holdings = core.holdingSlices([
+    stock(1, 'NM', 'EN', 1, '2026-09-21T08:00:00Z'),
+    stock(2, 'NM', 'EN', 2, '2026-09-25T08:00:00Z'),
+  ]);
+  const book = core.soldPriceBook([
+    sold(1, '2026-09-01', 'NM', 'EN', 100),
+    sold(2, '2026-09-01', 'NM', 'EN', 50),
+  ]);
+  const days = core.buildDailySeries({ holdings, book, today: TODAY });
+  assert.equal(days[0].date, '2026-09-21');
+  assert.equal(days.find((row) => row.date === '2026-09-24').cardsValuePkn, 100);
+  assert.equal(days.find((row) => row.date === '2026-09-25').cardsValuePkn, 200);
+  assert.equal(days.find((row) => row.date === '2026-09-25').cardsHeld, 3);
+});
+
+test('a stored day keeps the cards it had, so a card sold since does not vanish from the past', () => {
+  const book = core.soldPriceBook([sold(1, '2026-09-01', 'NM', 'EN', 100), sold(2, '2026-09-01', 'NM', 'EN', 900)]);
+  const before = core.buildDailySeries({
+    holdings: core.holdingSlices([stock(1, 'NM', 'EN', 1), stock(2, 'NM', 'EN', 1)]),
+    book,
+    today: '2026-09-24T12:00:00.000Z',
+  });
+  const doc = {
+    days: before,
+    priceBasis: core.PRICE_BASIS,
+    seriesRevision: core.SERIES_REVISION,
     updatedAt: '2026-09-24T12:00:00.000Z',
-  }, '2026-09-25'), false);
-  assert.equal(core.storedIsFresh({
-    updatedAt: '2026-09-25T20:33:25.586Z',
-    days: [{ date: '2026-09-25', cardsKnown: true, cardsValuePkn: 4026552 }],
-  }, '2026-09-25'), false);
+  };
+  // Blueprint 2 sold on the 25th, so the 1-DR table no longer has it.
+  const after = core.buildDailySeries({
+    holdings: core.holdingSlices([stock(1, 'NM', 'EN', 1)]),
+    book,
+    frozen: core.frozenCardDays(doc, '2026-09-27'),
+    today: TODAY,
+  });
+  const on = (date) => after.find((row) => row.date === date);
+  assert.equal(on('2026-09-21').cardsValuePkn, 1000);
+  assert.equal(on('2026-09-24').cardsValuePkn, 1000);
+  assert.equal(on('2026-09-25').cardsValuePkn, 100);
+  assert.equal(on('2026-09-27').cardsValuePkn, 100);
+  // Today is always re-priced, and an older basis is never frozen.
+  assert.equal(core.frozenCardDays(doc, '2026-09-24').has('2026-09-24'), false);
+  assert.equal(core.frozenCardDays({ ...doc, seriesRevision: 3 }, '2026-09-27').size, 0);
+  assert.equal(core.frozenCardDays({ ...doc, priceBasis: 'ct-sold-day' }, '2026-09-27').size, 0);
 });
 
-test('applySoldDayValues only prices the days it is given', () => {
-  const wallet = core.buildSeries({
-    movements: [
-      { type: 'account_transfer_received', amountPkn: 15, createdAt: '2026-05-21T12:00:00.000Z' },
-    ],
-    balance: 15,
-    marketChecked: false,
-    today: '2026-09-26T18:00:00.000Z',
+test('the series keeps at most 400 days and starts empty without wallet or stock', () => {
+  assert.deepEqual(core.buildDailySeries({ today: TODAY }), []);
+  const days = core.buildDailySeries({
+    wallet: [{ date: '2024-01-01', currencyPkn: 15 }],
+    today: TODAY,
   });
-  const series = core.applySoldDayValues(wallet, [
-    { day: '2026-09-22', market_pkn: 900 },
-    { day: '2026-09-25', market_pkn: 1100 },
-  ], {
-    ownershipDate: '2026-09-01T08:00:00.000Z',
-    today: '2026-09-26T18:00:00.000Z',
-  });
-  const may = series.find((row) => row.date === '2026-05-21');
-  assert.equal(may.cardsKnown, false);
-  assert.equal(may.totalPkn, 15);
-  assert.equal(series.find((row) => row.date === '2026-09-22').cardsValuePkn, 900);
-  assert.equal(series.find((row) => row.date === '2026-09-22').priceBasis, 'ct-last-sold');
-  assert.equal(series.find((row) => row.date === '2026-09-23'), undefined);
-  const sold = series.find((row) => row.date === '2026-09-25');
-  assert.equal(sold.cardsValuePkn, 1100);
-  assert.equal(sold.totalPkn, 1115);
-  const today = series.find((row) => row.date === '2026-09-26');
-  assert.equal(today.cardsKnown, false);
-  assert.equal(today.cardsValuePkn, null);
-  assert.equal(today.totalPkn, 15);
+  assert.equal(days.length, core.HISTORY_DAYS);
+  assert.equal(days[0].totalPkn, 15);
+  assert.equal(days[days.length - 1].date, '2026-09-27');
 });
 
-test('dump minimums start on the sync day and step when the dump changes', () => {
-  const wallet = core.buildSeries({
-    movements: [
-      { type: 'account_transfer_received', amountPkn: 15, createdAt: '2026-05-21T12:00:00.000Z' },
-    ],
-    balance: 15,
-    marketChecked: false,
-    today: '2026-09-25T18:00:00.000Z',
-  });
-  const series = core.applyDumpValues(wallet, [
-    { day: '2026-09-20', market_pkn: 1000 },
-    { day: '2026-09-22', market_pkn: 900 },
-    { day: '2026-09-25', market_pkn: 1100 },
-  ], {
-    ownershipDate: '2026-09-01T08:00:00.000Z',
-    today: '2026-09-25T18:00:00.000Z',
-  });
-  const may = series.find((row) => row.date === '2026-05-21');
-  assert.equal(may.cardsKnown, false);
-  assert.equal(may.totalPkn, 15);
-  const synced = series.find((row) => row.date === '2026-09-01');
-  assert.equal(synced.cardsValuePkn, 1000);
-  assert.equal(synced.priceBasis, 'ct-last-sold');
-  assert.equal(series.find((row) => row.date === '2026-09-22').cardsValuePkn, 900);
-  const today = series.find((row) => row.date === '2026-09-25');
-  assert.equal(today.cardsValuePkn, 1100);
-  assert.equal(today.currencyPkn, 15);
-  assert.equal(today.totalPkn, 1115);
+test('a stored series is reused for fifteen minutes of the same UTC day', () => {
+  const doc = {
+    priceBasis: core.PRICE_BASIS,
+    seriesRevision: core.SERIES_REVISION,
+    updatedAt: '2026-09-27T10:00:00.000Z',
+  };
+  assert.equal(core.storedIsFresh(doc, new Date('2026-09-27T10:14:00.000Z')), true);
+  assert.equal(core.storedIsFresh(doc, new Date('2026-09-27T10:16:00.000Z')), false);
+  assert.equal(core.storedIsFresh({ ...doc, updatedAt: '2026-09-26T23:59:00.000Z' }, new Date('2026-09-27T00:01:00.000Z')), false);
+  assert.equal(core.storedIsFresh({ ...doc, seriesRevision: 3 }, new Date('2026-09-27T10:01:00.000Z')), false);
+  assert.equal(core.storedIsFresh({ ...doc, priceBasis: 'ct-sold-day' }, new Date('2026-09-27T10:01:00.000Z')), false);
 });
 
-test('a dump already in force on the sync day is not replaced by the next print', () => {
-  const wallet = core.buildSeries({
-    movements: [
-      { type: 'account_transfer_received', amountPkn: 15, createdAt: '2026-05-21T12:00:00.000Z' },
-    ],
-    balance: 15,
-    marketChecked: false,
-    today: '2026-09-26T08:00:00.000Z',
-  });
-  const series = core.applyDumpValues(wallet, [
-    { day: '2026-08-31', market_pkn: 2760, priced: 2 },
-    { day: '2026-09-19', market_pkn: 4073702, priced: 164 },
-    { day: '2026-09-23', market_pkn: 4026552, priced: 164 },
-    { day: '2026-09-25', market_pkn: 4026530, priced: 164 },
-  ], {
-    ownershipDate: '2026-09-21T17:52:48.000Z',
-    today: '2026-09-26T08:00:00.000Z',
-  });
-  assert.equal(series.some((row) => row.date === '2026-08-31'), false);
-  const synced = series.find((row) => row.date === '2026-09-21');
-  assert.equal(synced.cardsValuePkn, 4073702);
-  assert.equal(series.find((row) => row.date === '2026-09-23').cardsValuePkn, 4026552);
-  assert.equal(series.find((row) => row.date === '2026-09-25').cardsValuePkn, 4026530);
-  assert.equal(series.find((row) => row.date === '2026-09-26').cardsValuePkn, 4026530);
-  assert.equal(series.find((row) => row.date === '2026-05-21').cardsKnown, false);
-});
-
-test('the first series keeps the wallet day and prices cards only on today', () => {
-  const series = core.buildSeries({
+test('the wallet starts at zero the day before its first movement and ends on the live balance', () => {
+  const wallet = core.walletSeries({
     movements: [
       { type: 'account_transfer_received', amountPkn: 15, createdAt: '2026-09-01T12:00:00.000Z' },
       { type: 'account_transfer_sent', amountPkn: 5, createdAt: '2026-09-10T12:00:00.000Z' },
     ],
     balance: 10,
-    marketCardsPkn: 20,
-    marketChecked: true,
     today: '2026-09-25T18:00:00.000Z',
   });
-  assert.equal(series[0].date, '2026-08-31');
-  assert.equal(series[0].totalPkn, 0);
-  assert.equal(series[0].cardsKnown, false);
-  assert.equal(series.find((row) => row.date === '2026-09-01').totalPkn, 15);
-  const today = series.find((row) => row.date === '2026-09-25');
-  assert.equal(today.currencyPkn, 10);
-  assert.equal(today.cardsValuePkn, 20);
-  assert.equal(today.cardsKnown, true);
-  assert.equal(today.totalPkn, 30);
-});
-
-test('a later day is appended and the earlier market value stays', () => {
-  const stored = core.buildSeries({
-    movements: [{ type: 'account_transfer_received', amountPkn: 15, createdAt: '2026-09-01T12:00:00.000Z' }],
-    balance: 15,
-    marketCardsPkn: 100,
-    marketChecked: true,
-    today: '2026-09-25T12:00:00.000Z',
-  });
-  const next = core.upsertDay(stored, {
-    date: '2026-09-26',
-    currencyPkn: 15,
-    cardsValuePkn: 80,
-    cardsKnown: true,
-  });
-  assert.equal(next.find((row) => row.date === '2026-09-25').cardsValuePkn, 100);
-  assert.equal(next.find((row) => row.date === '2026-09-26').cardsValuePkn, 80);
-  assert.equal(core.storedIsFresh({
-    priceBasis: core.PRICE_BASIS,
-    seriesRevision: core.SERIES_REVISION,
-    updatedAt: '2026-09-26T01:00:00.000Z',
-  }, '2026-09-26'), true);
+  assert.deepEqual(wallet, [
+    { date: '2026-08-31', currencyPkn: 0 },
+    { date: '2026-09-01', currencyPkn: 15 },
+    { date: '2026-09-10', currencyPkn: 10 },
+    { date: '2026-09-25', currencyPkn: 10 },
+  ]);
+  const days = core.buildDailySeries({ wallet, today: '2026-09-25T18:00:00.000Z' });
+  assert.equal(days.find((row) => row.date === '2026-09-05').currencyPkn, 15);
+  assert.equal(days.find((row) => row.date === '2026-09-05').cardsKnown, false);
+  assert.deepEqual(core.walletSeries({ balance: 0, today: TODAY }), []);
+  assert.deepEqual(core.walletSeries({ balance: 15, today: TODAY }), [{ date: '2026-09-27', currencyPkn: 15 }]);
 });
 
 test('firestore timestamps become a ledger day', () => {
@@ -176,67 +215,20 @@ test('firestore timestamps become a ledger day', () => {
 
 test('a withdrawn joke listing is not a sold price; reverse copies are their own market', () => {
   const rows = [
-    { day: '2026-09-18', blueprint_id: '111585', median_pkn: 40, sold_qty: 1 },
-    { day: '2026-09-18', blueprint_id: '111585', median_pkn: 190, sold_qty: 1, reverse: true },
-    { day: '2026-09-22', blueprint_id: '111585', median_pkn: 22, sold_qty: 2 },
-    { day: '2026-09-22', blueprint_id: '111585', median_pkn: 3243020, sold_qty: 1, reverse: true },
-    { day: '2026-09-23', blueprint_id: '111585', median_pkn: 194, sold_qty: 1, reverse: true },
-    { day: '2026-09-23', blueprint_id: '111585', median_pkn: 86, sold_qty: 10 },
-    { day: '2026-09-23', blueprint_id: '117179', median_pkn: 1162, sold_qty: 1, reverse: true },
-    { day: '2026-09-23', blueprint_id: '117179', median_pkn: 131, sold_qty: 22 },
-    { day: '2026-09-25', blueprint_id: '117179', median_pkn: 22, sold_qty: 2 },
+    { day: '2026-09-18', blueprint_id: '111585', condition: 'NM', language: 'EN', median_pkn: 40 },
+    { day: '2026-09-18', blueprint_id: '111585', condition: 'NM', language: 'EN', median_pkn: 190, reverse: true },
+    { day: '2026-09-22', blueprint_id: '111585', condition: 'NM', language: 'EN', median_pkn: 22 },
+    { day: '2026-09-22', blueprint_id: '111585', condition: 'NM', language: 'EN', median_pkn: 3243020, reverse: true },
+    { day: '2026-09-23', blueprint_id: '111585', condition: 'MP', language: 'IT', median_pkn: 194, reverse: true },
+    { day: '2026-09-23', blueprint_id: '117179', condition: 'NM', language: 'EN', median_pkn: 1162, reverse: true },
+    { day: '2026-09-23', blueprint_id: '117179', condition: 'NM', language: 'EN', median_pkn: 131 },
   ];
-  const kept = core.withoutSoldOutliers(rows);
-  assert.equal(kept.some((row) => row.price === 3243020), false);
-  assert.equal(kept.some((row) => row.price === 1162), true);
-  assert.equal(kept.length, 8);
-  const at22 = core.lastSoldPrices(rows, '2026-09-22');
-  assert.equal(at22('111585', {}), 22);
-  assert.equal(at22('111585', { reverse: true }), 190);
-  const now = core.lastSoldPrices(rows, '2026-09-29');
-  assert.equal(now('111585', { reverse: 't' }), 194);
-  assert.equal(now('117179', { reverse: true }), 1162);
-  assert.equal(now('117179', {}), 22);
-  // A graded copy that never sold falls back to the plain card.
-  assert.equal(now('117179', { graded: true }), 22);
-  assert.equal(now('999', {}), null);
-});
-
-test('card value carries each last sold price forward to today', () => {
-  const holdings = new Map([
-    [core.variantKey('1', {}), 2],
-    [core.variantKey('2', {}), 1],
-    [core.variantKey('2', { reverse: true }), 1],
-    [core.variantKey('3', {}), 5],
-  ]);
-  const rows = [
-    { day: '2026-09-10', blueprint_id: '1', median_pkn: 100, sold_qty: 1 },
-    { day: '2026-09-22', blueprint_id: '2', median_pkn: 50, sold_qty: 1 },
-    { day: '2026-09-23', blueprint_id: '2', median_pkn: 400, sold_qty: 1, reverse: true },
-    { day: '2026-09-24', blueprint_id: '1', median_pkn: 120, sold_qty: 3 },
-    { day: '2026-09-24', blueprint_id: '1', median_pkn: 80, sold_qty: 1 },
-    { day: '2026-09-24', blueprint_id: '4', median_pkn: 999, sold_qty: 1 },
-  ];
-  const days = core.lastSoldCardValues(rows, holdings, { fromDay: '2026-09-21', todayKey: '2026-09-26' });
-  assert.deepEqual(days.map((row) => row.day), [
-    '2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25', '2026-09-26',
-  ]);
-  assert.equal(days[0].market_pkn, 200);
-  assert.equal(days[0].priced, 1);
-  // Reverse copy of card 2 borrows the plain price until a reverse sells.
-  assert.equal(days[1].market_pkn, 300);
-  assert.equal(days[1].priced, 3);
-  assert.equal(days[2].market_pkn, 650);
-  assert.equal(days[3].market_pkn, 670);
-  assert.equal(days[5].market_pkn, 670);
-
-  const wallet = core.buildSeries({ movements: [], balance: 15, today: '2026-09-26T18:00:00.000Z' });
-  const series = core.applySoldDayValues(wallet, days, {
-    ownershipDate: '2026-09-21T08:00:00.000Z',
-    today: '2026-09-26T18:00:00.000Z',
-  });
-  const today = series.find((row) => row.date === '2026-09-26');
-  assert.equal(today.cardsKnown, true);
-  assert.equal(today.totalPkn, 685);
-  assert.deepEqual(core.lastSoldCardValues([], holdings, { fromDay: '2026-09-21', todayKey: '2026-09-26' }), []);
+  const kept = core.withoutSoldOutliers(rows).map((row) => row.median_pkn);
+  assert.equal(kept.includes(3243020), false);
+  assert.equal(kept.includes(1162), true);
+  assert.equal(kept.length, 6);
+  const book = core.soldPriceBook(rows);
+  const reverse = stock(111585, 'NM', 'EN', 1, undefined, { reverse: true });
+  // The joke print is gone, so the reverse copy keeps its real 190 PKN sale.
+  assert.deepEqual(core.lastSoldFor(reverse, book, '2026-09-27'), { pkn: 190, day: '2026-09-18' });
 });

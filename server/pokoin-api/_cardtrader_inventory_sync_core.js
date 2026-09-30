@@ -530,8 +530,9 @@ function oneDayReadyAssetRow(product = {}, { cardId = '', meta = {} } = {}) {
 }
 
 /**
- * Dashboard price for a 1-Day Ready row. Today's sold median only.
- * A CardTrader ask or EUR conversion stored on the row is not shown.
+ * Dashboard price for a 1-Day Ready row: the last sold median of its printing
+ * slice (cardtrader-assets.js). A CardTrader ask or EUR conversion stored on
+ * the row is never shown, and a slice that never sold has no price.
  */
 function marketPricePkn(row = {}) {
   const market = Number(row.market_pkn ?? row.marketPkn);
@@ -539,33 +540,22 @@ function marketPricePkn(row = {}) {
   return Math.round(market * 100) / 100;
 }
 
-/** Last sold price, keyed by CardTrader blueprint. Own asks stay off the row. */
-function applyDumpMinimums(rows, priceRows) {
-  const byId = new Map();
-  for (const price of priceRows || []) {
-    const id = String(price.blueprint_id || '');
-    const pkn = Number(price.pkn);
-    if (id && pkn > 0) byId.set(id, pkn);
-  }
-  return (rows || []).map((row) => {
-    const market = byId.get(String(row.blueprint_id || ''));
-    return { ...row, market_pkn: market > 0 ? market : null };
-  });
-}
-
 /** Quantity-weighted totals of 1-Day Ready assets; empty stacks do not count. */
 function oneDayReadyTotals(rows = []) {
   let products = 0;
   let cards = 0;
+  let pricedCards = 0;
   let valuePkn = 0;
   for (const row of rows) {
     const qty = Math.max(0, Math.trunc(Number(row.quantity) || 0));
     if (!qty) continue;
     products += 1;
     cards += qty;
-    valuePkn += qty * Math.max(0, Number(row.pricePkn ?? row.price_pkn) || 0);
+    const price = Math.max(0, Number(row.pricePkn ?? row.price_pkn) || 0);
+    if (price > 0) pricedCards += qty;
+    valuePkn += qty * price;
   }
-  return { products, cards, valuePkn: Math.round(valuePkn * 100) / 100 };
+  return { products, cards, pricedCards, valuePkn: Math.round(valuePkn * 100) / 100 };
 }
 
 module.exports = {
@@ -589,7 +579,6 @@ module.exports = {
   normalizeProduct,
   orderIsSale,
   saleItemsByProduct,
-  applyDumpMinimums,
   marketPricePkn,
   oneDayReadyAssetRow,
   oneDayReadyTotals,
