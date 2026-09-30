@@ -886,6 +886,7 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
   | `young_listing_removed` | Listing (or drip) left the book **less than 3 days** after `first_seen_at`. Fresh lowball posts and price-edit churn, not a market price. History kept; the 093 three-dump ceremony still runs, but the reason never becomes sale-eligible. | **No** |
   | `inferred_sale` | That **seller stack** is gone from the complete book (seller + language + condition + reverse/1st/graded). Not “product id missing.” Still not a receipt — dump miss and delist look the same. | **Yes**, only when the listing is ≥3 days old |
   | `seller_on_vacation` | Seller hid the shop (`on_vacation`) or the whole snapshot book vanished in one day. Not sold. Snapshots stay frozen. | **No** |
+  | `seller_store_withdrawn` | The seller's book held **≥500 listings** and **≥80%** of it left within a **7-day window** `[D-6, D]` — a store taken down (often re-uploaded later under new ids), not buyers. Reclassified from `inferred_sale` / `young_listing_removed` (`archive_metadata.reclassifiedFrom`). | **No** |
   | `dump_miss` | Listing id still on CardTrader `GET ?blueprint_id=`. Expansion dump / 25-wide window omitted it. | **No** |
   | `dropped_from_cheapest_25` | Left our old 25-wide window. **Wrong as a sale.** Unused on the complete-book path. | **No** |
   | `complete_book_cutover` | Sanitized cutover lump (11–12 Sep), not that day's market. | **No** |
@@ -984,6 +985,17 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
     213 young of 216 episodes). Cardvault `101_listing_min_age_three_days.sql`
     on top of the 093 three-dump confirmation; the one-time backfill
     invalidated ~189k young episodes and rebuilt the graph.
+  - A store withdrawal is not a sale: a seller whose book held ≥500
+    listings and who lost ≥80% of it within 7 days has those vanishings
+    archived as `seller_store_withdrawn` (both thresholds required; the
+    window catches stores that wind down over several dumps, and already
+    withdrawn rows keep counting so later tails are caught). From 18 Sep,
+    60–85% of daily sold units were such stores (The Wasteland Gaming,
+    ParadoxTCG, Monkey_Milano, Hamanito …; 21 Sep 232,741 → 44,310 units).
+    Runs in `finalize_cardtrader_daily_market_refresh` after the vacation
+    pass. Cardvault `103_seller_store_withdrawal_not_sale.sql` +
+    `104_store_withdrawal_set_based_survivors.sql` (~6 s per night);
+    backfilled from 1 Sep (111 sellers, ~332k listings).
   - Same listing_id on many days is snapshot flicker — keep `inferred_sale`
     only when that listing appears on a single day (`047_…`).
   - `inferred_sale` while that listing_id is still in
