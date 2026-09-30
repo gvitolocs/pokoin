@@ -464,17 +464,23 @@ async function resolveCardTraderBlueprintId(request, query = marketplaceQuery) {
     throw error;
   }
 
-  const game = requestGame();
-  if (game && game !== 'pokemon') {
-    // Every other game DB has only the catalog: card_id is the Pokoin id and
-    // ct_id the CardTrader blueprint (card_id = 2 × ct_id). The Pokemon join
-    // below fails there, and the numeric fallback asked CardTrader for the
-    // wrong blueprint, so One Piece cards showed no listings.
+  const game = cleanText(request.game, 40) || requestGame() || 'pokemon';
+  {
+    // Every game's catalog (Pokemon included) keys the Pokoin card_id to its
+    // CardTrader blueprint in ct_id (card_id = 2 × ct_id). The blueprint join
+    // below matched card_id itself: no offers, or another card's for the ids
+    // that collide with a blueprint (6,219 Pokemon cards), and it does not
+    // exist outside the Pokemon DB, so One Piece cards showed no listings.
     try {
-      const result = await query(
+      // The listings handler runs in the Pokemon DB context and passes the
+      // game explicitly, so the catalog read switches to that game's DB.
+      const read = () => query(
         'select card_id as pokoin_card_id, ct_id as cardtrader_blueprint_id from public.marketplace_search_candidates where card_id = $1::bigint limit 1',
         [numericCardId],
       );
+      const result = marketplaceGames && typeof marketplaceGames.runWithGame === 'function'
+        ? await marketplaceGames.runWithGame(game, read)
+        : await read();
       const row = result.rows?.[0] || {};
       const cardtraderBlueprintId = cleanNumericId(row.cardtrader_blueprint_id);
       if (cardtraderBlueprintId) {
