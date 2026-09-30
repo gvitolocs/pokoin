@@ -2354,6 +2354,20 @@ export function fetchSellerShop(username, {
   );
 }
 
+/** PowerTools-style pricer: batch market comps for the MyPokoin listings board. */
+export async function fetchPriceCheck(items, token) {
+  const params = new URLSearchParams({
+    items: (items || []).slice(0, 100).map((item) => (
+      item.condition || item.language
+        ? `${item.cardId}:${item.condition || ''}:${item.language || ''}`
+        : String(item.cardId || item)
+    )).join(','),
+  });
+  return getJson(`/api/marketplace-price-check?${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
 export function fetchSellerListings(sellerUid, token, { limit = 40 } = {}) {
   const params = new URLSearchParams({
     sellerUid: String(sellerUid || ''),

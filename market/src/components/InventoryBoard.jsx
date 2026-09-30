@@ -1,5 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { fetchPriceCheck } from '../api.js';
+import { useAuth } from '../auth.jsx';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '../listing-meta.js';
 import {
   filterInventoryRows,
@@ -17,6 +19,15 @@ const STATUS_CHIPS = [
   { id: 'paused', label: 'Paused' },
 ];
 
+// PowerTools pricer sources. eBay and TCGPlayer comps have no Pokoin source
+// yet — the buttons render disabled until a feed lands.
+const PRICER_SOURCES = [
+  { id: 'pokoin', label: 'Pokoin', enabled: true },
+  { id: 'cardtrader', label: 'CardTrader', enabled: true },
+  { id: 'ebay', label: 'eBay', enabled: false },
+  { id: 'tcgplayer', label: 'TCGPlayer', enabled: false },
+];
+
 const SORT_LABELS = {
   newest: 'Newest first',
   oldest: 'Oldest first',
@@ -25,6 +36,21 @@ const SORT_LABELS = {
   'qty-down': 'Qty high → low',
   name: 'Name A → Z',
 };
+
+function marketValueFor(prices, row, source) {
+  const entry = prices[String(row?.cardId || row?.card_id || '')];
+  if (!entry) return null;
+  if (source === 'cardtrader') {
+    return entry.ctMatchedPkn ?? entry.ctCheapestPkn ?? null;
+  }
+  return entry.pokoinCheapestPkn ?? entry.soldMedianPkn ?? null;
+}
+
+function MarketCell({ value, pending }) {
+  if (pending) return <span className="inv-mkt is-pending">…</span>;
+  if (value == null) return <span className="inv-mkt is-none">—</span>;
+  return <span className="inv-mkt">{value.toLocaleString('en-US', { maximumFractionDigits: 0 })} PKN</span>;
+}
 
 function StatTile({ value, label, tone = '' }) {
   return (
@@ -63,6 +89,11 @@ export default function InventoryBoard({ rows, formatPrice }) {
   const [condition, setCondition] = useState('');
   const [language, setLanguage] = useState('');
   const [sort, setSort] = useState('newest');
+  const [pricerSource, setPricerSource] = useState('');
+  const [prices, setPrices] = useState({});
+  const [pricesPending, setPricesPending] = useState(false);
+  const pricesKeyRef = useRef('');
+  const { getBearer } = useAuth();
 
   const facets = useMemo(() => inventoryFacets(rows), [rows]);
   const summary = useMemo(() => summarizeLiveInventory(rows), [rows]);
@@ -71,6 +102,42 @@ export default function InventoryBoard({ rows, formatPrice }) {
     [rows, query, status, condition, language, sort],
   );
   const paused = rows.filter((row) => String(row?.status || '').toLowerCase() === 'paused').length;
+  // Load market comps for the current filtered rows when a pricer source is
+  // on. Re-fetches when the row set changes; eBay / TCGPlayer never fetch.
+  useEffect(() => {
+    if (!pricerSource) {
+      pricesKeyRef.current = '';
+      return undefined;
+    }
+    const items = view.slice(0, 100).map((row) => ({
+      cardId: String(row?.cardId || row?.card_id || ''),
+      condition: String(row?.condition || 'NM').toUpperCase(),
+      language: String(row?.language || '').toUpperCase(),
+    })).filter((item) => /^\d+$/.test(item.cardId));
+    if (!items.length) return undefined;
+    const key = `${pricerSource}|${items.map((item) => item.cardId).join(',')}`;
+    if (pricesKeyRef.current === key) return undefined;
+    let cancelled = false;
+    setPricesPending(true);
+    (async () => {
+      try {
+        const token = await getBearer();
+        const data = await fetchPriceCheck(items, token);
+        if (!cancelled) {
+          pricesKeyRef.current = key;
+          setPrices(data.prices || {});
+        }
+      } catch {
+        if (!cancelled) pricesKeyRef.current = '';
+      } finally {
+        if (!cancelled) setPricesPending(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pricerSource, view, getBearer]);
+
 
   return (
     <section className="inv-board" aria-label="My listings">
@@ -128,15 +195,37 @@ export default function InventoryBoard({ rows, formatPrice }) {
             <option key={key} value={key}>{SORT_LABELS[key] || key}</option>
           ))}
         </select>
+        <span className="inv-pricer" role="group" aria-label="Pricer source">
+          <span className="inv-pricer-label">Pricer</span>
+          {PRICER_SOURCES.map((source) => (
+            <button
+              key={source.id}
+              type="button"
+              className={`inv-chip inv-src${pricerSource === source.id ? ' on' : ''}`}
+              disabled={!source.enabled}
+              title={source.enabled ? `Market ${source.label} prices` : `${source.label} prices are not connected yet`}
+              onClick={() => setPricerSource(pricerSource === source.id ? '' : source.id)}
+            >
+              {source.label}
+            </button>
+          ))}
+        </span>
       </div>
 
-      <div className="inv-table">
+      <div className={`inv-table${pricerSource ? ' has-mkt' : ''}`}>
         <div className="inv-head" aria-hidden="true">
           <span>Card</span>
           <span>Cond</span>
           <span>Lang</span>
           <span className="num">Qty</span>
           <span className="num">Price</span>
+          {pricerSource ? (
+            <span className="num inv-mkt-head">
+              {PRICER_SOURCES.find((source) => source.id === pricerSource)?.label}
+              {' '}
+              market
+            </span>
+          ) : null}
           <span>Status</span>
           <span>Listed</span>
           <span />
@@ -174,6 +263,12 @@ export default function InventoryBoard({ rows, formatPrice }) {
               </span>
               <span className="inv-qty num">{Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0)}</span>
               <span className="inv-price num">{formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
+              {pricerSource ? (
+                <MarketCell
+                  value={marketValueFor(prices, row, pricerSource)}
+                  pending={pricesPending}
+                />
+              ) : null}
               <span><RowStatus status={row?.status} /></span>
               <span className="inv-date">{inventoryRowDate(row) || '—'}</span>
               <span className="inv-chev" aria-hidden="true">›</span>

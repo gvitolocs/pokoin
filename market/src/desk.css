@@ -3150,3 +3150,67 @@
     display: none;
   }
 }
+
+/* Pricer source selector + market column (PowerTools-style comps) */
+
+.inv-pricer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.inv-pricer-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inv-src:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.inv-src:disabled:hover {
+  border-color: var(--g4);
+}
+
+.inv-table.has-mkt .inv-head,
+.inv-table.has-mkt .inv-row {
+  grid-template-columns: minmax(180px, 1fr) 56px 72px 52px 100px 104px 84px 64px 18px;
+}
+
+.inv-mkt {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-mkt.is-none,
+.inv-mkt.is-pending {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.inv-mkt-head {
+  color: var(--yellow);
+}
+
+@media (max-width: 860px) {
+  .inv-pricer {
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+
+  .inv-table.has-mkt .inv-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'card  card   status'
+      'mkt   qty    price';
+  }
+
+  .inv-mkt {
+    grid-area: mkt;
+  }
+}

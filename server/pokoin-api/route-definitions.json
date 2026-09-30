@@ -395,7 +395,7 @@
     "auth": "create_code: Firebase bearer token. redeem/status/unlink: service bearer token (POKO_MARKET_SERVICE_TOKEN or POKONTACT_SERVICE_TOKEN).",
     "params": {
       "query": "none",
-      "body": "{ action: create_code|redeem|status|unlink, ... } \u2014 create_code takes no params; redeem takes code + telegram { userId, username, displayName }; status/unlink take telegramUserId."
+      "body": "{ action: create_code|redeem|status|unlink, ... } — create_code takes no params; redeem takes code + telegram { userId, username, displayName }; status/unlink take telegramUserId."
     },
     "dependencies": {
       "env": [
@@ -611,6 +611,27 @@
       "services": [
         "nezopt GPU recognition worker via SSH tunnel 127.0.0.1:18151",
         "Pi CPU recognition container pokoin-scan 127.0.0.1:18150"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-price-check",
+    "file": "marketplace-price-check.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "PowerTools-style pricer for the MyPokoin listings board: per-listing market comps.",
+    "auth": "Bearer required. Caller's own listings are excluded from the Pokoin cheapest.",
+    "params": {
+      "query": "items required: comma list of cardId[:COND:LANG], max 100; excludeSellerUid optional (defaults to the bearer uid).",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Postgres (replica)"
       ]
     }
   }
