@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  applyDumpMinimums,
   marketPricePkn,
   claimSaleEventOnce,
   oneDayReadyAssetRow,
@@ -448,36 +447,30 @@ test('1-Day Ready totals weight value by quantity and skip empty stacks', () => 
     oneDayReadyTotals([
       { quantity: 2, pricePkn: 100 },
       { quantity: 1, price_pkn: '50.5' },
+      { quantity: 4, pricePkn: null },
       { quantity: 0, pricePkn: 999 },
     ]),
-    { products: 2, cards: 3, valuePkn: 250.5 },
+    { products: 3, cards: 7, pricedCards: 3, valuePkn: 250.5 },
   );
-  assert.deepEqual(oneDayReadyTotals([]), { products: 0, cards: 0, valuePkn: 0 });
+  assert.deepEqual(oneDayReadyTotals([]), { products: 0, cards: 0, pricedCards: 0, valuePkn: 0 });
 });
 
-test('dashboard 1-DR price is today\'s sold median, not an ask', () => {
+test('dashboard 1-DR price is the last sold median of the slice, never an ask', () => {
   assert.equal(marketPricePkn({ price_pkn: 4043, market_pkn: null }), null);
   assert.equal(marketPricePkn({ price_pkn: 4043, market_pkn: '120.5' }), 120.5);
-  const priced = applyDumpMinimums(
-    [
-      { blueprint_id: '10', price_pkn: '999', quantity: 2 },
-      { blueprint_id: '275928', price_pkn: '50', quantity: 1 },
-    ],
-    [{ blueprint_id: '10', pkn: '40' }],
-  );
-  assert.equal(priced[0].market_pkn, 40);
-  assert.equal(priced[1].market_pkn, null);
-  assert.equal(oneDayReadyTotals([
-    { quantity: 2, pricePkn: marketPricePkn(priced[0]) },
-    { quantity: 1, pricePkn: marketPricePkn(priced[1]) },
-  ]).valuePkn, 80);
-  const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'cardtrader-assets.js'), 'utf8');
-  const historySrc = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'marketplace-portfolio-history.js'), 'utf8');
-  assert.match(src, /cardtrader_sold_daily/);
-  assert.match(src, /median_pkn/);
-  assert.doesNotMatch(src, /min_price_pkn/);
-  assert.doesNotMatch(src, /cheapest_price_pkn/);
-  assert.match(historySrc, /cardtrader_sold_daily/);
-  assert.doesNotMatch(historySrc, /min_price_pkn/);
-  assert.doesNotMatch(historySrc, /cheapest_homepage_cache_blueprint/);
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(path.join(here, 'cardtrader-assets.js'), 'utf8');
+  const historySrc = readFileSync(path.join(here, 'marketplace-portfolio-history.js'), 'utf8');
+  const coreSrc = readFileSync(path.join(here, '_portfolio_history_core.js'), 'utf8');
+  // One sold query and one slice match serve the 1-DR line and the chart.
+  assert.match(coreSrc, /from public\.cardtrader_sold_daily/);
+  assert.match(coreSrc, /median_pkn/);
+  for (const handler of [src, historySrc]) {
+    assert.match(handler, /SOLD_BY_BLUEPRINT_SQL/);
+    assert.match(handler, /soldPriceBook/);
+    assert.doesNotMatch(handler, /min_price_pkn|min_pkn/);
+    assert.doesNotMatch(handler, /cheapest_price_pkn|cheapest_homepage_cache_blueprint/);
+  }
+  assert.match(src, /lastSoldFor/);
+  assert.doesNotMatch(coreSrc, /min_pkn|cheapest/);
 });

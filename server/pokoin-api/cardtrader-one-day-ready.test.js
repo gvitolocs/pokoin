@@ -196,13 +196,13 @@ test('assets payload: disconnected sellers get no assets; rows map to camelCase'
     connected: false,
     oneDayReady: false,
     lastSyncAt: null,
-    totals: { products: 0, cards: 0, valuePkn: 0 },
+    totals: { products: 0, cards: 0, pricedCards: 0, valuePkn: 0 },
     items: [],
   });
   assert.deepEqual(assetItem({ ct_product_id: '1', card_id: '2', card_name: 'Doduo', quantity: '2', price_pkn: '12.5', reverse: true }), {
     ctProductId: '1', cardId: '2', cardName: 'Doduo', setName: '', collectorNumber: '', imageUrl: '',
     condition: '', language: '', reverse: true, firstEdition: false, signed: false, altered: false, graded: false,
-    quantity: 2, pricePkn: null,
+    quantity: 2, pricePkn: null, priceDay: null,
   });
 });
 

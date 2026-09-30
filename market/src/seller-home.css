@@ -124,15 +124,24 @@
   color: var(--yellow);
   font-size: 1.05rem;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 /* Chart frame — axis labels on the borders, plot area stays clean */
 .seller-history {
+  --history-cards: #ffd33d;
+  --history-liquidity: #9085e9;
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 14rem;
+}
+
+.seller-history-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .seller-history-head h3 {
@@ -223,44 +232,106 @@
   color-scheme: dark;
 }
 
+.seller-history-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 18px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.seller-history-legend li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.seller-history-legend strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.seller-history-legend em {
+  font-style: normal;
+  font-size: 0.7rem;
+}
+
+.seller-history-key {
+  align-self: center;
+  width: 12px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--history-cards);
+}
+
+.seller-history-legend .is-liquidity .seller-history-key {
+  background: var(--history-liquidity);
+}
+
+.seller-history-legend .is-projection .seller-history-key {
+  height: 0;
+  border-radius: 0;
+  background: none;
+  border-top: 2px dashed var(--history-cards);
+}
+
+/* Axis labels sit in their own grid cells, positioned by the same y/x math as the SVG. */
 .seller-history-chart {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 6px 8px;
+  grid-template-rows: minmax(11rem, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 6px;
   flex: 1;
   min-height: 12.5rem;
 }
 
 .seller-history-y {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: flex-end;
-  padding: 4px 0 1.4rem;
+  grid-row: 1;
+  grid-column: 1;
+  position: relative;
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
   color: var(--muted);
   line-height: 1;
 }
 
-.seller-history-plot {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
+.seller-history-y-sizer {
+  display: block;
+  visibility: hidden;
+  height: 0;
+  overflow: hidden;
+}
+
+.seller-history-y-ticks {
+  position: absolute;
+  inset: 1px 0;
+}
+
+.seller-history-y-ticks span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
 }
 
 .seller-history-frame {
+  grid-row: 1;
+  grid-column: 2;
   position: relative;
-  flex: 1;
   min-height: 11rem;
   border-radius: 12px;
   border: 1px solid var(--g5);
   background:
-    radial-gradient(120% 80% at 50% 100%, rgb(255 211 61 / 0.07), transparent 55%),
+    radial-gradient(120% 80% at 50% 100%, rgb(255 211 61 / 0.05), transparent 55%),
     linear-gradient(180deg, #14121c, #0c0b10);
   overflow: hidden;
   cursor: crosshair;
+  touch-action: pan-y;
 }
 
 .seller-history-grid {
@@ -274,30 +345,64 @@
   fill: url(#collection-history-fill);
 }
 
+.seller-history-grid .seller-history-liquidity {
+  fill: var(--history-liquidity);
+  fill-opacity: 0.3;
+}
+
 .seller-history-grid .seller-history-projection {
   fill: url(#collection-history-hatch);
 }
 
+.seller-history-grid .seller-history-band {
+  fill: var(--history-cards);
+  fill-opacity: 0.12;
+}
+
+.seller-history-grid .seller-history-band-edge {
+  stroke: var(--history-cards);
+  stroke-opacity: 0.6;
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+  vector-effect: non-scaling-stroke;
+}
+
 .seller-history-grid .seller-history-forecast {
-  stroke: var(--yellow);
+  stroke: var(--history-cards);
   stroke-width: 2;
-  stroke-dasharray: 5 4;
+  stroke-dasharray: 6 5;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
 }
 
+.seller-history-grid .seller-history-today {
+  stroke: rgb(255 255 255 / 0.22);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
 .seller-history-grid .seller-history-rule {
-  stroke: rgb(255 255 255 / 0.08);
+  stroke: rgb(255 255 255 / 0.07);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
 .seller-history-grid .seller-history-line {
-  stroke: var(--yellow);
-  stroke-width: 2.5;
+  stroke: var(--history-cards);
+  stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
+}
+
+/* Same grid cell as the frame, inset by its 1px border so % matches the SVG. */
+.seller-history-overlay {
+  grid-row: 1;
+  grid-column: 2;
+  position: relative;
+  z-index: 2;
+  margin: 1px;
+  pointer-events: none;
 }
 
 .seller-history-point {
@@ -307,33 +412,54 @@
   height: 10px;
   margin: -5px 0 0 -5px;
   border-radius: 50%;
-  background: var(--yellow);
+  background: var(--history-cards);
   border: 2px solid #0c0b10;
   box-sizing: border-box;
   pointer-events: none;
 }
 
+.seller-history-point.is-hover {
+  z-index: 2;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+}
+
+.seller-history-point.is-projected {
+  background: #0c0b10;
+  border-color: var(--history-cards);
+}
+
 .seller-history-grid .seller-history-crosshair {
-  stroke: rgb(255 255 255 / 0.28);
+  stroke: rgb(255 255 255 / 0.3);
   stroke-width: 1;
-  stroke-dasharray: 3 4;
+  vector-effect: non-scaling-stroke;
 }
 
 .seller-history-x {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 1rem;
+  grid-row: 2;
+  grid-column: 2;
+  position: relative;
+  min-height: 0.9rem;
   font-size: 0.68rem;
   color: var(--muted);
   line-height: 1;
-  position: relative;
 }
 
-.seller-history-x.has-projection .is-today {
+.seller-history-x span {
   position: absolute;
-  left: 66.666%;
+  top: 0;
   transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.seller-history-x .is-today {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.seller-history-x .is-end {
+  transform: translateX(-100%);
 }
 
 .seller-history-empty {
@@ -368,10 +494,11 @@
 
 .seller-history-tip {
   position: absolute;
-  top: 10px;
-  z-index: 2;
+  top: 8px;
+  z-index: 3;
+  width: max-content;
   min-width: 11rem;
-  max-width: 16rem;
+  max-width: min(17rem, 100%);
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--g5);
@@ -395,6 +522,13 @@
   color: var(--text);
 }
 
+.seller-history-tip-note {
+  margin: 8px 0 0;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 .seller-history-tip ul {
   margin: 0;
   padding: 0;
@@ -411,10 +545,40 @@
   color: var(--muted);
 }
 
+.seller-history-tip li {
+  flex-wrap: wrap;
+}
+
+.seller-history-tip li > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.seller-history-tip li.is-cards > span::before,
+.seller-history-tip li.is-liquidity > span::before {
+  content: '';
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--history-cards);
+}
+
+.seller-history-tip li.is-liquidity > span::before {
+  background: var(--history-liquidity);
+}
+
 .seller-history-tip li strong {
   color: var(--text);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+}
+
+.seller-history-tip li em {
+  flex-basis: 100%;
+  font-style: normal;
+  font-size: 0.7rem;
+  text-align: right;
 }
 
 .seller-history-skel {
@@ -812,4 +976,5 @@
 
   .seller-history-value strong { font-size: 1.35rem; }
   .seller-history-dates input { max-width: 8.5rem; }
+  .seller-history-x .is-minor { display: none; }
 }

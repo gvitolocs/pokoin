@@ -2,36 +2,39 @@ const { getFirebaseAdmin, verifyBearerToken } = require('../server/_firebase');
 const { marketplaceQuery } = require('../server/_marketplace_db');
 const { readIntegrationDoc } = require('./_cardtrader_integration');
 const { readOneDayReadyAssets, readSellerSync } = require('./_cardtrader_inventory_sync');
-const { applyDumpMinimums, marketPricePkn, oneDayReadyTotals } = require('./_cardtrader_inventory_sync_core');
+const { marketPricePkn, oneDayReadyTotals } = require('./_cardtrader_inventory_sync_core');
+const {
+  SOLD_BY_BLUEPRINT_SQL,
+  lastSoldFor,
+  soldPriceBook,
+  utcDayKey,
+} = require('./_portfolio_history_core');
 
 /**
  * GET /api/cardtrader-assets — the signed-in seller's CardTrader 1-Day Ready
  * inventory as dashboard assets. That stock is CardTrader's to sell, so it is
  * never a Pokoin listing; the dashboard shows it as "CardTrader 1-DR".
+ * Each row is priced like the Portfolio chart: its printing slice's last sold
+ * median (condition + language + finish), or no price when it never sold.
  */
 
-const SOLD_TODAY_SQL = `
-  select blueprint_id::text as blueprint_id,
-         sum(median_pkn * sold_qty) / nullif(sum(sold_qty), 0) as pkn
-  from public.cardtrader_sold_daily
-  where blueprint_id::text = any($1::text[])
-    and observed_day = (timezone('utc', now()))::date
-    and median_pkn > 0
-    and sold_qty > 0
-  group by blueprint_id
-`;
-
-async function withSoldToday(rows) {
+/** Rows with market_pkn / market_day from the last sale of their slice. */
+async function withLastSold(rows, today = new Date()) {
   const ids = [...new Set((rows || []).map((row) => String(row.blueprint_id || '')).filter((id) => /^\d+$/.test(id)))];
-  if (!ids.length) return applyDumpMinimums(rows, []);
-  let prices = [];
-  try {
-    const result = await marketplaceQuery(SOLD_TODAY_SQL, [ids]);
-    prices = result?.rows || [];
-  } catch (error) {
-    console.error('1dr sold today failed', { message: error.message });
+  let book = new Map();
+  if (ids.length) {
+    try {
+      const result = await marketplaceQuery(SOLD_BY_BLUEPRINT_SQL, [ids]);
+      book = soldPriceBook(result?.rows || []);
+    } catch (error) {
+      console.error('1dr last sold failed', { message: error.message });
+    }
   }
-  return applyDumpMinimums(rows, prices);
+  const day = utcDayKey(today);
+  return (rows || []).map((row) => {
+    const sold = lastSoldFor(row, book, day);
+    return { ...row, market_pkn: sold ? sold.pkn : null, market_day: sold ? sold.day : null };
+  });
 }
 
 function assetItem(row = {}) {
@@ -51,6 +54,7 @@ function assetItem(row = {}) {
     graded: row.graded === true,
     quantity: Math.max(0, Math.trunc(Number(row.quantity) || 0)),
     pricePkn: marketPricePkn(row),
+    priceDay: row.market_day ? String(row.market_day) : null,
   };
 }
 
@@ -68,17 +72,11 @@ async function readAssetsPayload(firestore, uid) {
   }
   let rows = [];
   try {
-    rows = await readOneDayReadyAssets(uid);
+    rows = await readOneDayReadyAssets(uid, { limit: 2000 });
   } catch (error) {
     if (!/does not exist/i.test(String(error.message || ''))) throw error;
   }
-  let priced = rows;
-  try {
-    priced = await withSoldToday(rows);
-  } catch (error) {
-    console.error('1dr sold today failed', { message: error.message });
-    priced = applyDumpMinimums(rows, []);
-  }
+  const priced = await withLastSold(rows);
   const items = priced.map(assetItem).sort((a, b) => (
     ((b.pricePkn || 0) * b.quantity) - ((a.pricePkn || 0) * a.quantity)
     || String(a.cardName).localeCompare(String(b.cardName))
@@ -116,4 +114,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { assetItem, readAssetsPayload };
+module.exports._test = { assetItem, readAssetsPayload, withLastSold };

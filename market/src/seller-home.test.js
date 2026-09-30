@@ -92,7 +92,8 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(homeSrc, /marketUrl\(APP\.collection\)/);
   assert.match(viewSrc, /Cards owned|Card owned/);
   assert.match(viewSrc, /Number\(ownedCards\) \|\| 0\) \+ oneDayReadyCards/);
-  assert.match(viewSrc, /title="Sold today"/);
+  assert.match(viewSrc, /last sold median of its condition and language/);
+  assert.doesNotMatch(viewSrc, /Sold today/);
   assert.doesNotMatch(viewSrc, /Dump minimum/);
   assert.match(viewSrc, /collection-history-hatch/);
   assert.match(viewSrc, /Listed for sale/);
@@ -111,13 +112,15 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(viewSrc, /Scan cards to add them to your collection or list them for sale/);
   assert.doesNotMatch(viewSrc, /<h3>Collection value history<\/h3>/);
   const historyImport = viewSrc.match(/import \{[^}]+\} from '\.\.\/portfolio-history\.js'/)?.[0] || '';
-  assert.match(historyImport, /\bformatHistoryAxisLabel\b/);
+  assert.match(historyImport, /\bwithLiveToday\b/);
+  assert.match(historyImport, /\bhistoryDateTicks\b/);
   assert.match(viewSrc, /useState\(DEFAULT_HISTORY_PRESET\)|useState\('1M'\)/);
   assert.match(viewSrc, /type="date"/);
   assert.match(viewSrc, /availableHistoryPresets/);
   assert.match(viewSrc, /Collection history will appear here/);
   assert.match(viewSrc, /Scan cards to start building your portfolio/);
   assert.match(viewSrc, /data-history=\{hasLine \? 'series' : \(hasPoint \? 'point' : 'empty'\)\}/);
+  assert.match(viewSrc, /live=\{historyLive\}/);
   assert.doesNotMatch(viewSrc, /seller-history-ghost-line/);
   assert.doesNotMatch(viewSrc, /currency-availability-graph/);
   assert.doesNotMatch(viewSrc, /Site balance available to spend/);
@@ -162,10 +165,14 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
 
 test('Dashboard history panel keeps chart frame; never draws a real fake series', () => {
   // Multi-day polyline only; a single live day is a point — no flat underline.
-  assert.match(viewSrc, /hasLine \? \([\s\S]*<polyline/);
+  assert.match(viewSrc, /hasLine \? <polyline className="seller-history-line"/);
+  assert.match(viewSrc, /seller-history-liquidity/);
+  assert.match(viewSrc, /seller-history-legend/);
   assert.match(viewSrc, /seller-history-point/);
-  assert.match(viewSrc, /historyPlotX/);
-  assert.match(viewSrc, /projectCardValue/);
+  assert.match(viewSrc, /historyTimeline/);
+  assert.match(viewSrc, /timelineRatio/);
+  assert.match(viewSrc, /projectPortfolio/);
+  assert.match(viewSrc, /seller-history-band/);
   assert.match(viewSrc, /seller-history-forecast/);
   assert.doesNotMatch(viewSrc, /CHART_W \* 0\.85/);
   assert.doesNotMatch(viewSrc, /<circle[\s\S]*seller-history-point/);
