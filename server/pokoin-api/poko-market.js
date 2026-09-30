@@ -11,8 +11,15 @@
  * Tools (POST /api/poko-market with { tool, params }):
  *   resolve_card     — fuzzy card resolution; returns candidates from the
  *                      catalog only, never an invented card id.
- *   card_quote       — sold-market estimate from sanitized cardtrader_sold_daily
- *                      aggregates plus current ask signals.
+ *   card_quote       — sold-market estimate from sanitized cardtrader_sold_daily,
+ *                      per variant (standard / 1st Ed. / reverse / graded never
+ *                      mixed), all conditions+languages unless stated, plus
+ *                      live asks from the same slice.
+ *   card_sales       — dated sold history + 7/30/90-day totals for a card.
+ *   deal_check       — cheapest live asks vs same-slice sold medians
+ *                      ("should I buy it?").
+ *   set_sales        — expansion-level sold totals and top cards.
+ *   recent_sales     — latest / priciest sales market-wide, filterable.
  *   card_liquidity   — deterministic sell-time range from marketplace_card_weights.
  *   collection_quote — artist-level collection estimate with explicit coverage.
  *   market_snapshot  — top sold_qty_7d cards (public aggregates only).
@@ -340,22 +347,311 @@ async function resolveCard(params = {}) {
   };
 }
 
-async function soldSummaryForBlueprint(blueprintId, condition, language, days) {
-  const rows = await queryRows(
-    `select sum(sold_qty)::int as sold_qty,
-            percentile_cont(0.25) within group (order by median_pkn) as p25_daily,
-            percentile_cont(0.5) within group (order by median_pkn) as median_daily,
-            percentile_cont(0.75) within group (order by median_pkn) as p75_daily,
-            max(observed_day) as last_sale_day
+// ---------------------------------------------------------------------------
+// Sold slices — the same slice key the card-page sold graph uses
+// (condition, language, reverse, first_edition, graded). A Neo Discovery
+// 1st Edition sale is not a comp for an Unlimited copy, and a graded slab is
+// not a comp for a raw card, so every sold figure below is computed per
+// variant, standard copies by default (mirrors the graph's default chips).
+// ---------------------------------------------------------------------------
+
+const SOLD_ROWS_LIMIT = 3000;
+// One day-slice row carries a daily median and its unit count; cap the weight
+// so one bulk lot cannot drown every other sale.
+const MAX_UNITS_PER_ROW = 50;
+const DEAL_MIN_COMPS = 2;
+
+function soldFlag(value) {
+  if (value === true || value === false) return value;
+  const text = cleanText(value, 40).toLowerCase();
+  if (!text) return null;
+  if (['1', 'true', 'yes', 'y', 'si', 'sì', 'on', 'reverse', 'reverse holo', 'graded', 'slab', 'first', '1st', '1st edition', 'first edition', 'prima edizione'].includes(text)) return true;
+  if (['0', 'false', 'no', 'n', 'off', 'standard', 'unlimited', 'raw', 'ungraded', 'normal'].includes(text)) return false;
+  return null;
+}
+
+/** Variant slice asked for; unstated flags mean "standard copy" (flag false). */
+function soldFacetFromParams(params = {}) {
+  const reverse = soldFlag(params.reverse);
+  const firstEdition = soldFlag(params.firstEdition ?? params.first_edition ?? params.edition);
+  const graded = soldFlag(params.graded);
+  return {
+    reverse: reverse ?? false,
+    firstEdition: firstEdition ?? false,
+    graded: graded ?? false,
+    explicit: reverse !== null || firstEdition !== null || graded !== null,
+  };
+}
+
+function facetKey(row) {
+  return [Boolean(row.reverse), Boolean(row.first_edition ?? row.firstEdition), Boolean(row.graded)].join('|');
+}
+
+function facetLabel(facet) {
+  const parts = [];
+  if (facet.firstEdition) parts.push('1st Edition');
+  if (facet.reverse) parts.push('Reverse Holo');
+  if (facet.graded) parts.push('Graded');
+  return parts.length ? parts.join(' + ') : 'Standard (unlimited, non-reverse, ungraded)';
+}
+
+function rowMatchesFacet(row, facet) {
+  return Boolean(row.reverse) === facet.reverse
+    && Boolean(row.first_edition ?? row.firstEdition) === facet.firstEdition
+    && Boolean(row.graded) === facet.graded;
+}
+
+function rowMatchesSlice(row, { facet, condition, language } = {}) {
+  if (facet && !rowMatchesFacet(row, facet)) return false;
+  if (condition && String(row.condition) !== condition) return false;
+  if (language && String(row.language || '').toUpperCase() !== language) return false;
+  return true;
+}
+
+function dayOf(value) {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
+function percentileOf(sorted, p) {
+  if (!sorted.length) return null;
+  const pos = (sorted.length - 1) * p;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+
+/** Unit-weighted sold stats over day-slice rows (each daily median counted once per unit sold). */
+function soldStats(rows = []) {
+  const prices = [];
+  let soldQty = 0;
+  let minPkn = Infinity;
+  let maxPkn = 0;
+  let lastSaleDay = null;
+  const days = new Set();
+  for (const row of rows) {
+    const qty = Math.max(0, Math.trunc(Number(row.sold_qty) || 0));
+    const median = Number(row.median_pkn);
+    if (!(qty > 0) || !(median > 0)) continue;
+    soldQty += qty;
+    for (let i = 0; i < Math.min(qty, MAX_UNITS_PER_ROW); i += 1) prices.push(median);
+    minPkn = Math.min(minPkn, Number(row.min_pkn) > 0 ? Number(row.min_pkn) : median);
+    maxPkn = Math.max(maxPkn, Number(row.max_pkn) > 0 ? Number(row.max_pkn) : median);
+    const day = dayOf(row.observed_day);
+    if (day) {
+      days.add(day);
+      if (!lastSaleDay || day > lastSaleDay) lastSaleDay = day;
+    }
+  }
+  if (!soldQty) return null;
+  prices.sort((a, b) => a - b);
+  return {
+    soldQty,
+    saleDays: days.size,
+    median: round2(percentileOf(prices, 0.5)),
+    p25: round2(percentileOf(prices, 0.25)),
+    p75: round2(percentileOf(prices, 0.75)),
+    min: round2(minPkn),
+    max: round2(maxPkn),
+    lastSaleDay,
+  };
+}
+
+function soldEstimateFromStats(stats, basis) {
+  if (!stats) return null;
+  return {
+    currency: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
+    median: stats.median,
+    medianEur: round2(stats.median * PKN_EUR_RATE),
+    p25: stats.p25,
+    p75: stats.p75,
+    low: stats.min,
+    high: stats.max,
+    sampleSize: stats.soldQty,
+    saleDays: stats.saleDays,
+    lastSaleDay: stats.lastSaleDay,
+    basis,
+    methodology: 'unit-weighted median of CardTrader inferred sales (cardtrader_sold_daily), same variant only',
+    confidence: confidenceForSample(stats.soldQty),
+  };
+}
+
+async function soldRowsForBlueprint(blueprintId, days) {
+  return queryRows(
+    `select observed_day, condition, language, reverse, first_edition, graded,
+            sold_qty, median_pkn, min_pkn, max_pkn
        from cardtrader_sold_daily
       where blueprint_id = $1::bigint
-        and observed_day >= current_date - ($4::int || ' days')::interval
-        and ($2::text is null or condition = $2)
-        and ($3::text is null or language = $3)
-        and sold_qty > 0`,
-    [String(blueprintId), condition, language, days],
+        and observed_day >= current_date - ($2::int || ' days')::interval
+        and sold_qty > 0
+      order by observed_day desc
+      limit ${SOLD_ROWS_LIMIT}`,
+    [String(blueprintId), days],
   );
-  return buildSoldSummary(rows[0]);
+}
+
+/**
+ * Pick the variant slice. Unstated flags quote standard copies; when a printing
+ * never sold a standard copy (reverse-only promos, 1st-Ed-only prints) snap to
+ * its most-sold variant instead of answering "no data" — same rule as the
+ * card-page graph's chip snap-back.
+ */
+function resolveFacet(rows, params = {}) {
+  const facet = soldFacetFromParams(params);
+  const matched = rows.some((row) => rowMatchesFacet(row, facet));
+  if (matched || facet.explicit || !rows.length) {
+    return { facet, snapped: false };
+  }
+  const units = new Map();
+  for (const row of rows) {
+    const key = facetKey(row);
+    units.set(key, (units.get(key) || 0) + (Number(row.sold_qty) || 0));
+  }
+  const [bestKey] = [...units.entries()].sort((a, b) => b[1] - a[1])[0];
+  const [reverse, firstEdition, graded] = bestKey.split('|').map((v) => v === 'true');
+  return { facet: { reverse, firstEdition, graded, explicit: false }, snapped: true };
+}
+
+function variantsSold(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = facetKey(row);
+    const list = groups.get(key) || [];
+    list.push(row);
+    groups.set(key, list);
+  }
+  return [...groups.entries()].map(([key, list]) => {
+    const [reverse, firstEdition, graded] = key.split('|').map((v) => v === 'true');
+    const stats = soldStats(list);
+    return {
+      variant: facetLabel({ reverse, firstEdition, graded }),
+      reverse,
+      firstEdition,
+      graded,
+      soldQty: stats ? stats.soldQty : 0,
+      medianPkn: stats ? stats.median : null,
+      lastSaleDay: stats ? stats.lastSaleDay : null,
+    };
+  }).sort((a, b) => b.soldQty - a.soldQty);
+}
+
+function soldByConditionLanguage(rows, limit = 10) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = `${row.condition}|${String(row.language || '').toUpperCase()}`;
+    const list = groups.get(key) || [];
+    list.push(row);
+    groups.set(key, list);
+  }
+  return [...groups.entries()].map(([key, list]) => {
+    const [condition, language] = key.split('|');
+    const stats = soldStats(list);
+    return {
+      condition,
+      language,
+      soldQty: stats ? stats.soldQty : 0,
+      medianPkn: stats ? stats.median : null,
+      lowPkn: stats ? stats.min : null,
+      highPkn: stats ? stats.max : null,
+      lastSaleDay: stats ? stats.lastSaleDay : null,
+    };
+  }).sort((a, b) => b.soldQty - a.soldQty).slice(0, limit);
+}
+
+/** Standard-variant sold summary (with snap-back) — used by liquidity fallbacks. */
+async function soldSummaryForBlueprint(blueprintId, condition, language, days) {
+  const rows = await soldRowsForBlueprint(blueprintId, days);
+  const { facet } = resolveFacet(rows, {});
+  const stats = soldStats(rows.filter((row) => rowMatchesSlice(row, { facet, condition, language })));
+  return soldEstimateFromStats(stats, facetLabel(facet));
+}
+
+/**
+ * Live CardTrader book for one printing, grouped by the sold slice key so asks
+ * compare like-for-like with sales. Only listings from the printing's latest
+ * dump are live; older last_seen_at rows are gone from the book.
+ */
+async function liveAsksForBlueprint(blueprintId) {
+  const rows = await queryRows(
+    `with book as (
+       select s.condition, s.language, s.properties, s.price, s.quantity, s.last_seen_at
+         from cardtrader_market_listing_snapshots s
+        where coalesce(s.blueprint_id, s.cardtrader_blueprint_id) = $1::bigint
+          and s.price::numeric > 0
+          and s.quantity > 0
+     ), live as (
+       select * from book
+        where last_seen_at >= (select max(last_seen_at) from book) - interval '20 hours'
+     )
+     select cardtrader_sold_condition(condition) as condition,
+            nullif(cardtrader_sold_language(language), '') as language,
+            coalesce((properties->>'pokemon_reverse')::boolean, false) as reverse,
+            coalesce((properties->>'first_edition')::boolean, false) as first_edition,
+            false as graded,
+            count(*)::int as listings,
+            sum(quantity)::int as copies,
+            min(price::numeric) as min_eur,
+            percentile_cont(0.5) within group (order by price::numeric) as median_eur
+       from live
+      group by 1, 2, 3, 4`,
+    [String(blueprintId)],
+  );
+  return rows.map((row) => ({
+    condition: row.condition,
+    language: row.language ? String(row.language).toUpperCase() : null,
+    reverse: Boolean(row.reverse),
+    first_edition: Boolean(row.first_edition),
+    graded: false,
+    listings: Number(row.listings) || 0,
+    copies: Number(row.copies) || 0,
+    minPkn: round2(Number(row.min_eur) / PKN_EUR_RATE),
+    medianPkn: round2(Number(row.median_eur) / PKN_EUR_RATE),
+  }));
+}
+
+function summarizeLiveAsks(groups) {
+  if (!groups.length) return null;
+  let min = Infinity;
+  let listings = 0;
+  let copies = 0;
+  const medians = [];
+  for (const group of groups) {
+    min = Math.min(min, group.minPkn);
+    listings += group.listings;
+    copies += group.copies;
+    for (let i = 0; i < Math.min(group.listings, MAX_UNITS_PER_ROW); i += 1) medians.push(group.medianPkn);
+  }
+  medians.sort((a, b) => a - b);
+  return {
+    min: round2(min),
+    minEur: round2(min * PKN_EUR_RATE),
+    median: round2(percentileOf(medians, 0.5)),
+    listings,
+    copies,
+    currency: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
+    basis: 'live CardTrader listings, same variant (and condition/language when given)',
+    note: 'asking price, not a confirmed sale',
+  };
+}
+
+function dealVerdict(ask, soldMedian) {
+  if (!(ask > 0) || !(soldMedian > 0)) return null;
+  const ratio = ask / soldMedian;
+  // Far under the sold median usually means the "sales" were pricier listings
+  // that were delisted, not a real bargain — say so instead of cheering.
+  if (ratio < 0.35) {
+    return {
+      verdict: 'far_below_sold_median',
+      ratio: round2(ratio),
+      caution: 'Ask is far below recorded sales; those comps may be delisted high asks. Check the listing before calling it a bargain.',
+    };
+  }
+  if (ratio <= 0.8) return { verdict: 'below_sold_median', ratio: round2(ratio) };
+  if (ratio <= 1.2) return { verdict: 'in_line_with_sales', ratio: round2(ratio) };
+  return { verdict: 'above_sold_median', ratio: round2(ratio) };
 }
 
 const FLUCTUATION_PCT = 15;
@@ -512,34 +808,64 @@ async function cardQuote(params = {}) {
     return { status: 'unsupported', error: 'card_quote needs a single card (public even card id)', card };
   }
 
+  // Unstated condition / language mean "every copy of this variant", not NM/EN:
+  // defaulting to NM English hid real sales of SP or Italian copies and made
+  // Poko say "no confirmed sale" on cards that sell every week.
   const cond = normalizeCondition(params.condition);
   const lang = normalizeLanguage(params.language);
+  const conditionGiven = cond.matched;
+  const languageGiven = lang.matched;
 
-  const variants = [{ condition: cond.primary, language: lang.code, vague: false }];
+  const variants = [{ condition: conditionGiven ? cond.primary : null, language: languageGiven ? lang.code : null, vague: false }];
   if (cond.vague && cond.alternatives.length) {
     variants[0].vague = true;
-    variants.push({ condition: cond.alternatives[0], language: lang.code, vague: true });
+    variants.push({ condition: cond.alternatives[0], language: variants[0].language, vague: true });
   }
 
-  const askHistory = await askHistoryForBlueprint(blueprintId, 14);
-  const quotes = [];
-  for (const variant of variants) {
-    const [summary, asks] = await Promise.all([
-      soldSummaryForBlueprint(blueprintId, variant.condition, variant.language, 90),
-      askSignalForBlueprint(blueprintId),
-    ]);
-    const liquidity = await cardLiquidity({ cardId: card.cardId });
-    quotes.push({
-      condition: variant.condition,
-      language: variant.language,
+  const [rows, liveGroups, askHistory, liquidity, blueprintAsk] = await Promise.all([
+    soldRowsForBlueprint(blueprintId, 90),
+    liveAsksForBlueprint(blueprintId),
+    askHistoryForBlueprint(blueprintId, 14),
+    cardLiquidity({ cardId: card.cardId }),
+    askSignalForBlueprint(blueprintId),
+  ]);
+  const { facet, snapped } = resolveFacet(rows, params);
+  const facetRows = rows.filter((row) => rowMatchesFacet(row, facet));
+  const variantLabel = facetLabel(facet);
+
+  const quotes = variants.map((variant) => {
+    const slice = { facet, condition: variant.condition, language: variant.language };
+    let stats = soldStats(rows.filter((row) => rowMatchesSlice(row, slice)));
+    let fallback;
+    if (!stats && (variant.condition || variant.language) && facetRows.length) {
+      stats = soldStats(facetRows);
+      fallback = `No ${[variant.condition, variant.language].filter(Boolean).join(' ')} sale of this variant in 90 days; estimate uses every condition and language of the same variant.`;
+    }
+    const estimate = soldEstimateFromStats(stats, [
+      variantLabel,
+      fallback ? 'all conditions, all languages' : (variant.condition || 'all conditions'),
+      fallback ? null : (variant.language || 'all languages'),
+    ].filter(Boolean).join(' · '));
+    const liveMatch = liveGroups.filter((group) => rowMatchesSlice(group, slice));
+    const currentAsk = summarizeLiveAsks(liveMatch)
+      || (blueprintAsk ? { ...blueprintAsk, basis: 'lowest ask across all conditions/languages/variants (no same-slice live listing)' } : null);
+    // Cheapest ask vs sold median only means something inside one exact
+    // condition × language slice; a Poor Italian ask against an all-condition
+    // median is noise (deal_check does the per-slice comparison).
+    const exactSlice = Boolean(variant.condition && variant.language && !fallback);
+    return {
+      condition: variant.condition || 'all',
+      language: variant.language || 'all',
       vagueWording: variant.vague || undefined,
-      estimate: summary,
-      currentAsk: asks,
+      estimate,
+      estimateFallback: fallback,
+      currentAsk,
+      askVsSold: exactSlice && currentAsk && estimate ? dealVerdict(currentAsk.min, estimate.median) : null,
       liquidity: liquidity.liquidity || undefined,
-      strategies: priceStrategies(summary, asks),
-      askingPriceOnly: !summary,
-    });
-  }
+      strategies: priceStrategies(estimate, exactSlice ? currentAsk : null),
+      askingPriceOnly: !estimate,
+    };
+  });
 
   return {
     status: 'ok',
@@ -547,13 +873,164 @@ async function cardQuote(params = {}) {
     priceUnit: 'PKN',
     pknEurRate: PKN_EUR_RATE,
     card,
-    filters: { condition: cond.primary, language: lang.code, conditionVague: cond.vague },
+    filters: {
+      condition: conditionGiven ? cond.primary : 'all',
+      language: languageGiven ? lang.code : 'all',
+      conditionVague: cond.vague,
+      variant: variantLabel,
+    },
+    variantNote: snapped
+      ? `This printing never sold a standard copy in 90 days; quoting its most-sold variant (${variantLabel}).`
+      : undefined,
     window: { soldDays: 90, from: daysAgoIso(90), to: daysAgoIso(0) },
     askHistory,
     conditionNote: cond.vague
       ? `Vague condition wording: showing ${cond.primary} and ${cond.alternatives[0]} ranges instead of claiming a grade.`
       : undefined,
     quotes,
+    variantsSold: variantsSold(rows),
+    soldByConditionLanguage: soldByConditionLanguage(facetRows, 8),
+    dataNote: 'Sold = CardTrader listings that left the book (inferred sales, sanitized). 1st Edition, reverse and graded sales are separate variants and never mixed into the standard price.',
+  };
+}
+
+/**
+ * Sold history for one printing: dated day-slices ("how many sold?", "last
+ * sale?", "vendite recenti") plus 7/30/90-day totals for the variant.
+ */
+async function cardSales(params = {}) {
+  const owned = await requireCard(params);
+  if (owned.error) return owned.error;
+  const card = owned.card;
+  const blueprintId = blueprintIdFromCardId(card.cardId);
+  if (blueprintId == null) {
+    return { status: 'unsupported', error: 'card_sales needs a single card (public even card id)', card };
+  }
+  const days = Math.min(Math.max(Number(params.days) || 30, 1), 90);
+  const limit = Math.min(Math.max(Number(params.limit) || 25, 1), 60);
+  const cond = normalizeCondition(params.condition);
+  const lang = normalizeLanguage(params.language);
+  const condition = cond.matched && !cond.vague ? cond.primary : null;
+  const language = lang.matched ? lang.code : null;
+
+  const rows = await soldRowsForBlueprint(blueprintId, 90);
+  const { facet, snapped } = resolveFacet(rows, params);
+  const slice = { facet, condition, language };
+  const sliceRows = rows.filter((row) => rowMatchesSlice(row, slice));
+  const windowStart = daysAgoIso(days);
+  const inWindow = sliceRows.filter((row) => dayOf(row.observed_day) >= windowStart);
+  const since = (n) => {
+    const from = daysAgoIso(n);
+    const stats = soldStats(sliceRows.filter((row) => dayOf(row.observed_day) >= from));
+    return stats
+      ? { units: stats.soldQty, saleDays: stats.saleDays, medianPkn: stats.median, lowPkn: stats.min, highPkn: stats.max }
+      : { units: 0, saleDays: 0, medianPkn: null };
+  };
+
+  const sales = inWindow
+    .slice()
+    .sort((a, b) => String(dayOf(b.observed_day)).localeCompare(String(dayOf(a.observed_day))))
+    .slice(0, limit)
+    .map((row) => ({
+      day: dayOf(row.observed_day),
+      condition: row.condition,
+      language: String(row.language || '').toUpperCase(),
+      units: Number(row.sold_qty) || 0,
+      medianPkn: round2(row.median_pkn),
+      lowPkn: round2(row.min_pkn),
+      highPkn: round2(row.max_pkn),
+    }));
+
+  return {
+    status: 'ok',
+    today: todayIso(),
+    priceUnit: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
+    card,
+    filters: { variant: facetLabel(facet), condition: condition || 'all', language: language || 'all' },
+    variantNote: snapped ? `No standard-copy sales; showing the most-sold variant (${facetLabel(facet)}).` : undefined,
+    window: { days, from: windowStart, to: daysAgoIso(0) },
+    totals: { last7d: since(7), last30d: since(30), last90d: since(90) },
+    lastSale: sales[0] || null,
+    sales,
+    otherVariants: variantsSold(rows).filter((v) => v.variant !== facetLabel(facet)),
+    note: sales.length
+      ? 'Each row is one day × condition × language: units that left the CardTrader book and their median price that day.'
+      : `No sale of this variant in the last ${days} days.`,
+  };
+}
+
+/**
+ * "Should I buy it / is it a good deal?" — cheapest live listings per
+ * condition × language, each compared with sold comps of the exact same
+ * slice (variant + condition + language). No cross-slice comps.
+ */
+async function dealCheck(params = {}) {
+  const owned = await requireCard(params);
+  if (owned.error) return owned.error;
+  const card = owned.card;
+  const blueprintId = blueprintIdFromCardId(card.cardId);
+  if (blueprintId == null) {
+    return { status: 'unsupported', error: 'deal_check needs a single card (public even card id)', card };
+  }
+  const cond = normalizeCondition(params.condition);
+  const lang = normalizeLanguage(params.language);
+  const condition = cond.matched && !cond.vague ? cond.primary : null;
+  const language = lang.matched ? lang.code : null;
+
+  const [rows, liveGroups] = await Promise.all([
+    soldRowsForBlueprint(blueprintId, 90),
+    liveAsksForBlueprint(blueprintId),
+  ]);
+  const facet = soldFacetFromParams(params);
+  const offers = liveGroups
+    .filter((group) => rowMatchesSlice(group, {
+      facet: facet.explicit ? facet : null,
+      condition,
+      language,
+    }))
+    .map((group) => {
+      const groupFacet = { reverse: group.reverse, firstEdition: group.first_edition, graded: false };
+      const comps = soldStats(rows.filter((row) => rowMatchesSlice(row, {
+        facet: groupFacet,
+        condition: group.condition,
+        language: group.language,
+      })));
+      const hasComps = comps && comps.soldQty >= DEAL_MIN_COMPS;
+      return {
+        variant: facetLabel(groupFacet),
+        condition: group.condition,
+        language: group.language || 'print language',
+        cheapestAskPkn: group.minPkn,
+        cheapestAskEur: round2(group.minPkn * PKN_EUR_RATE),
+        listings: group.listings,
+        soldMedianPkn: hasComps ? comps.median : null,
+        soldUnits90d: comps ? comps.soldQty : 0,
+        lastSaleDay: comps ? comps.lastSaleDay : null,
+        ...(hasComps ? dealVerdict(group.minPkn, comps.median) : { verdict: 'no_same_slice_sales', ratio: null }),
+      };
+    })
+    .sort((a, b) => a.cheapestAskPkn - b.cheapestAskPkn);
+
+  const compared = offers.filter((offer) => offer.ratio != null);
+  const bestValue = compared.slice().sort((a, b) => a.ratio - b.ratio)[0] || null;
+  return {
+    status: 'ok',
+    today: todayIso(),
+    priceUnit: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
+    card,
+    filters: {
+      variant: facet.explicit ? facetLabel(facet) : 'all live variants',
+      condition: condition || 'all',
+      language: language || 'all',
+    },
+    bestValue,
+    offers: offers.slice(0, 10),
+    liveListingGroups: offers.length,
+    note: offers.length
+      ? 'ratio = cheapest ask ÷ 90-day sold median of the exact same variant/condition/language. below_sold_median ≤ 0.8, in_line ≤ 1.2. Market data, not financial advice.'
+      : 'No live CardTrader listing for this printing with these filters.',
   };
 }
 
@@ -1043,6 +1520,197 @@ async function topSellers(params = {}) {
   return { status: 'ok', ...base, cards };
 }
 
+function setTokens(value) {
+  return cleanText(value, 80)
+    .toLowerCase()
+    .replace(/[,.!?;:()]+/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 2 && !STOPWORDS.has(t) && !/^(set|expansion|espansione|sales|vendite|sold|venduto|venduti)$/.test(t));
+}
+
+/**
+ * Sales for one expansion ("how is Neo Discovery selling?", "carte più
+ * vendute di 151"): unit and value totals plus top cards by units and by
+ * value. Ungraded only; outlier lots above 20× the recent ask are dropped.
+ */
+async function setSales(params = {}) {
+  const tokens = setTokens(params.setName || params.set || params.query || params.subject);
+  if (!tokens.length) return { status: 'invalid', error: 'setName required' };
+  const days = Math.min(Math.max(Number(params.days) || 30, 1), 90);
+  const limit = Math.min(Math.max(Number(params.limit) || 10, 1), 20);
+  const language = cleanText(params.language, 40) ? normalizeLanguage(params.language).code : null;
+
+  const values = [days, language, TOP_SELLERS_MAX_SOLD_TO_ASK];
+  const setConditions = tokens.map((t) => {
+    values.push(`%${escapeLike(t)}%`);
+    return `c.set_name ilike $${values.length}`;
+  });
+  const rows = await queryRows(
+    `with cards as (
+       select c.card_id, c.name, c.set_name, c.artist, c.item_kind, c.card_number
+         from marketplace_search_candidates c
+        where c.item_kind = 'single'
+          and ${setConditions.join(' and ')}
+        limit 4000
+     ), set_sold as (
+       select d.blueprint_id,
+              sum(d.sold_qty)::int as sold_qty,
+              sum(d.sold_qty * d.median_pkn) as value_pkn,
+              percentile_cont(0.5) within group (order by d.median_pkn) as median_pkn,
+              max(d.observed_day) as last_sale_day
+         from cardtrader_sold_daily d
+        where d.blueprint_id in (select card_id / 2 from cards where card_id % 2 = 0)
+          and d.observed_day >= current_date - ($1::int || ' days')::interval
+          and d.sold_qty > 0
+          and not d.graded
+          and ($2::text is null or d.language = $2)
+        group by d.blueprint_id
+     ), asks as (
+       select a.blueprint_id,
+              percentile_cont(0.5) within group (order by coalesce(a.median_price_pkn, a.min_price_pkn)) as ask_pkn
+         from cardtrader_blueprint_daily_analytics a
+        where a.observed_day >= current_date - interval '14 days'
+          and coalesce(a.median_price_pkn, a.min_price_pkn) > 0
+          and a.blueprint_id in (select blueprint_id from set_sold)
+        group by a.blueprint_id
+     )
+     select cards.card_id, cards.name, cards.set_name, cards.artist, cards.item_kind, cards.card_number,
+            set_sold.sold_qty, set_sold.value_pkn, set_sold.median_pkn, set_sold.last_sale_day
+       from set_sold
+       join cards on cards.card_id = set_sold.blueprint_id * 2
+       left join asks on asks.blueprint_id = set_sold.blueprint_id
+      where asks.ask_pkn is null or set_sold.median_pkn <= asks.ask_pkn * $3`,
+    values,
+  );
+
+  const cards = rows.map((row) => ({
+    ...candidateFromRow(row),
+    soldQty: Number(row.sold_qty) || 0,
+    medianSoldPkn: round2(row.median_pkn),
+    soldValuePkn: round2(row.value_pkn),
+    lastSaleDay: dayOf(row.last_sale_day),
+  }));
+  const sets = [...new Set(cards.map((c) => c.setName).filter(Boolean))];
+  const totalUnits = cards.reduce((sum, c) => sum + c.soldQty, 0);
+  const totalValue = cards.reduce((sum, c) => sum + (c.soldValuePkn || 0), 0);
+  return {
+    status: 'ok',
+    today: todayIso(),
+    priceUnit: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
+    window: { days, from: daysAgoIso(days), to: daysAgoIso(0) },
+    filters: { set: tokens.join(' '), language: language || 'all' },
+    matchedSets: sets.slice(0, 8),
+    totals: {
+      unitsSold: totalUnits,
+      soldValuePkn: round2(totalValue),
+      soldValueEur: round2(totalValue * PKN_EUR_RATE),
+      distinctCardsSold: cards.length,
+    },
+    topByUnits: cards.slice().sort((a, b) => b.soldQty - a.soldQty).slice(0, limit),
+    topByValue: cards.slice().sort((a, b) => (b.medianSoldPkn || 0) - (a.medianSoldPkn || 0)).slice(0, limit),
+    note: cards.length
+      ? (sets.length > 1 ? 'Several expansions matched; ask which one if the user meant a single set.' : undefined)
+      : `No ungraded sale in a set matching "${tokens.join(' ')}" in the last ${days} days.`,
+    basis: 'CardTrader inferred sales (cardtrader_sold_daily), ungraded, all variants; value = units × daily median',
+  };
+}
+
+const RECENT_SALE_VERIFY_RATIO = 3;
+
+/**
+ * Latest or most expensive recent sales market-wide ("biggest sales this
+ * week", "what sold today over €50", "ultime vendite di Charizard").
+ */
+async function recentSales(params = {}) {
+  const days = Math.min(Math.max(Number(params.days) || 3, 1), 30);
+  const limit = Math.min(Math.max(Number(params.limit) || 10, 1), 25);
+  const sort = /^(recent|latest|date|ultime|recenti)$/i.test(cleanText(params.sort, 20)) ? 'recent' : 'price';
+  const language = cleanText(params.language, 40) ? normalizeLanguage(params.language).code : null;
+  const graded = soldFlag(params.graded) === true;
+  const minEur = Number(params.minPriceEur);
+  const minPricePkn = Number(params.minPricePkn) > 0 ? Number(params.minPricePkn)
+    : minEur > 0 ? minEur / PKN_EUR_RATE : 0;
+  const tokens = cleanText(params.subject || params.query, 80)
+    .toLowerCase()
+    .replace(/[,.!?;:()]+/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+
+  const values = [days, language, graded, minPricePkn, TOP_SELLERS_MAX_SOLD_TO_ASK, limit];
+  const subjectConditions = tokens.map((t) => {
+    values.push(`%${escapeLike(t)}%`);
+    return `s.search_text ilike $${values.length}`;
+  });
+  const rows = await queryRows(
+    `with recent as (
+       select d.blueprint_id, d.observed_day, d.condition, d.language, d.reverse, d.first_edition, d.graded,
+              d.sold_qty, d.median_pkn, d.max_pkn
+         from cardtrader_sold_daily d
+        where d.observed_day >= current_date - ($1::int || ' days')::interval
+          and d.sold_qty > 0
+          and d.graded = $3
+          and ($2::text is null or d.language = $2)
+          and d.median_pkn >= $4
+     ), asks as (
+       select a.blueprint_id,
+              percentile_cont(0.5) within group (order by coalesce(a.median_price_pkn, a.min_price_pkn)) as ask_pkn
+         from cardtrader_blueprint_daily_analytics a
+        where a.observed_day >= current_date - interval '14 days'
+          and coalesce(a.median_price_pkn, a.min_price_pkn) > 0
+          and a.blueprint_id in (select blueprint_id from recent)
+        group by a.blueprint_id
+     )
+     select s.card_id, s.name, s.set_name, s.artist, s.item_kind, s.card_number,
+            recent.observed_day, recent.condition, recent.language, recent.reverse, recent.first_edition,
+            recent.graded, recent.sold_qty, recent.median_pkn, asks.ask_pkn
+       from recent
+       join marketplace_search_candidates s
+         on s.card_id = recent.blueprint_id * 2 and s.item_kind = 'single'
+       left join asks on asks.blueprint_id = recent.blueprint_id
+      where (asks.ask_pkn is null or recent.median_pkn <= asks.ask_pkn * $5)
+        ${subjectConditions.length ? `and ${subjectConditions.join(' and ')}` : ''}
+      order by ${sort === 'recent' ? 'recent.observed_day desc, recent.median_pkn desc' : 'recent.median_pkn desc, recent.observed_day desc'}
+      limit $6`,
+    values,
+  );
+  const sales = rows.map((row) => ({
+    ...candidateFromRow(row),
+    day: dayOf(row.observed_day),
+    condition: row.condition,
+    language: String(row.language || '').toUpperCase(),
+    variant: facetLabel({ reverse: Boolean(row.reverse), firstEdition: Boolean(row.first_edition), graded: Boolean(row.graded) }),
+    units: Number(row.sold_qty) || 0,
+    pricePkn: round2(row.median_pkn),
+    priceEur: round2(Number(row.median_pkn) * PKN_EUR_RATE),
+    typicalAskPkn: round2(row.ask_pkn),
+    // High-end inferred "sales" are often a pricey listing that was pulled;
+    // anything above 3× the printing's typical ask gets a caveat.
+    unverified: Number(row.ask_pkn) > 0 && Number(row.median_pkn) > Number(row.ask_pkn) * RECENT_SALE_VERIFY_RATIO
+      ? true
+      : undefined,
+  }));
+  return {
+    status: 'ok',
+    today: todayIso(),
+    priceUnit: 'PKN',
+    pknEurRate: PKN_EUR_RATE,
+    window: { days, from: daysAgoIso(days), to: daysAgoIso(0) },
+    filters: {
+      sort,
+      language: language || 'all',
+      graded,
+      subject: tokens.join(' ') || undefined,
+      minPricePkn: minPricePkn || undefined,
+    },
+    sales,
+    note: sales.length
+      ? 'Each row is one day × condition × language slice; price = that day\'s median sale price. unverified = more than 3× the printing\'s typical 14-day ask (may be a pulled listing, not a sale) — caveat it.'
+      : `No sale matching these filters in the last ${days} days.`,
+    basis: 'CardTrader inferred sales (cardtrader_sold_daily); outlier lots above 20× the recent ask dropped',
+  };
+}
+
 const TOOLS = {
   resolve_card: resolveCard,
   card_quote: cardQuote,
@@ -1053,6 +1721,10 @@ const TOOLS = {
   market_snapshot: marketSnapshot,
   top_movers: topMovers,
   top_sellers: topSellers,
+  card_sales: cardSales,
+  deal_check: dealCheck,
+  set_sales: setSales,
+  recent_sales: recentSales,
 };
 
 // ---------------------------------------------------------------------------
@@ -1136,6 +1808,11 @@ module.exports._test = {
   liquidityBands,
   normalizeRarity,
   buildSoldSummary,
+  soldFlag,
+  soldFacetFromParams,
+  soldStats,
+  resolveFacet,
+  dealVerdict,
   priceStrategies,
   candidateFromRow,
   dedupeArtworkVersions,
