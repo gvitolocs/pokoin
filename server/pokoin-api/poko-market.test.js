@@ -732,6 +732,7 @@ test('deal_check compares each live slice with its own sold comps and cautions o
   assert.match(byCond['MP/EN'].caution, /delisted/);
   assert.equal(byCond['Poor/IT'].verdict, 'no_same_slice_sales');
   assert.equal(res.body.offers[0].condition, 'Poor', 'offers sorted cheapest first');
+  assert.equal(res.body.bestValue.condition, 'NM', 'suspicious far-below slices never headline');
 });
 
 test('set_sales totals an expansion and ranks by units and by price', async () => {

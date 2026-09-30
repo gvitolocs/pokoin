@@ -1012,7 +1012,8 @@ async function dealCheck(params = {}) {
     })
     .sort((a, b) => a.cheapestAskPkn - b.cheapestAskPkn);
 
-  const compared = offers.filter((offer) => offer.ratio != null);
+  // far_below comps are usually pulled high asks, so never headline them.
+  const compared = offers.filter((offer) => offer.ratio != null && offer.verdict !== 'far_below_sold_median');
   const bestValue = compared.slice().sort((a, b) => a.ratio - b.ratio)[0] || null;
   return {
     status: 'ok',
