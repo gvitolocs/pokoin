@@ -37,6 +37,13 @@ ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev 
 tar -C "$SRC" -cf - marketplace-price-check.js \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-price-check-commit'"
+# The Pi API mounts routes from server/api-route-manifest.js — keep the entry
+# in the NEW release (copy of the previous current) in sync with this repo's
+# route-definitions.json.
+scp -q "$SRC/route-definitions.json" pi-home:/tmp/price-check-routes.json
+scp -q "$SRC/../../server/pokoin-api/patch-route-manifest.js" pi-home:/tmp/patch-route-manifest.js 2>/dev/null \
+  || git -C "$REPO" show "$COMMIT":server/pokoin-api/patch-route-manifest.js | ssh pi-home 'cat > /tmp/patch-route-manifest.js'
+ssh pi-home "node /tmp/patch-route-manifest.js /srv/pokoin/api/$release/server/api-route-manifest.js /tmp/price-check-routes.json && rm -f /tmp/patch-route-manifest.js /tmp/price-check-routes.json"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
 say "verify health + recents auth guard (missing game → 400, missing auth → 401)"
