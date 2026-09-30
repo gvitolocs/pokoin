@@ -989,6 +989,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/inventory/sync-review/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/inventory/sync-review",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/mypokoin/import/",
       "destination": "/market/index.html"
     },
@@ -1205,6 +1213,22 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/bought/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/bought",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/stock/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/stock",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/collection/",
       "destination": "/market/index.html"
     },
@@ -1234,6 +1258,14 @@
     },
     {
       "source": "/favorites",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/product/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/product",
       "destination": "/market/index.html"
     },
     {
