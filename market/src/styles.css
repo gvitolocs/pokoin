@@ -1195,7 +1195,8 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 }
 
 .cart-drop {
-  width: 18rem;
+  /* Two 136px thumbs + gap side by side, even with the scrollbar showing. */
+  width: min(20.5rem, calc(100vw - 1.25rem));
   min-height: 0;
   /* ~200px thumb + header ≈ 340px; allow scroll before eating the Messages dock. */
   max-height: min(48vh, 22rem);
