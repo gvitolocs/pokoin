@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily PackZoo refresh of shipping-rates.json
+
+[Timer]
+OnCalendar=*-*-* 06:15:00
+Persistent=true
+RandomizedDelaySec=15min
+Unit=pokoin-shipping-rates-sync.service
+
+[Install]
+WantedBy=timers.target

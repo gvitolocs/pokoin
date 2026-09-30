@@ -12,6 +12,8 @@ import {
   createListing,
   updateListing,
   dropListing,
+  fetchSellerSettings,
+  saveSellerSettings,
   cardFromCatalogRow,
   fetchCard,
   fetchCardSales,
@@ -72,6 +74,7 @@ import {
   SOLD_GRAPH_PAD,
 } from '../sold-graph.js';
 import { soldGraphView, soldTraitsForGraphDay } from '../sold-sales.js';
+import NativeSales from '../components/NativeSales.jsx';
 import { albumShade, cardShadeStyle } from '../art-shade.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '../sold-sales-cache.js';
 import { authFrom } from '../punchouts.js';
@@ -84,12 +87,17 @@ import { cardDocumentTitle, displayName, printingIdentity } from '../identity.js
 import { defaultCardLanguage, getSearchLang, languagesForNationality, rewriteCatalogLang, searchLangFromPath } from '../locale.js';
 import { sellLanguages, versionRedirects } from '../listing-languages.js';
 import ListingLangPick from '../components/ListingLangPick.jsx';
+import { SILVER_PRICE_PKN } from '../silver.js';
 import ExpansionMark from '../components/ExpansionMark.jsx';
 import { Action, track } from '../track.js';
 import { LIST_CURRENCIES, fiatFromPkn, listingPriceToPkn } from '../pkn.js';
 import { cardStubFromRoute, mergeDeskCard, realPublicCardId } from '../card-stub.js';
+import { clearActiveDeskCard, setActiveDeskCard } from '../poko-chat.js';
 import CardArt from '../components/CardArt.jsx';
 import RelatedCards from '../components/RelatedCards.jsx';
+import { ShipFromCountryGate } from '../components/SellerShippingSettings.jsx';
+import { useSellerCurrency } from '../use-seller-currency.js';
+import { formatListingPrice, formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
@@ -98,7 +106,7 @@ import { speciesFromCard, pokemonHref } from '../pokemon-hubs.js';
 import ShopList from '../components/ShopList.jsx';
 import ShopListingRow from '../components/ShopListing.jsx';
 import { listingSelectId, shopDragOffers } from '../shop-marquee.js';
-import { conditionShort } from '../listing-meta.js';
+import { conditionChipSrc, conditionShort } from '../listing-meta.js';
 import {
   breadcrumbJsonLd,
   cardImageAlt,
@@ -131,12 +139,13 @@ const FOILS = [
   { value: 'other', label: 'Other' },
 ];
 
+/** Listing form condition grades — display is the /conditions/*.svg chip, not emoji. */
 const MOOD_CONDS = [
-  { value: 'NM', label: '😄 NM' },
-  { value: 'SP', label: '🙂 SP' },
-  { value: 'MP', label: '😐 MP' },
-  { value: 'PL', label: '🙁 PL' },
-  { value: 'Poor', label: '😭 Poor' },
+  { value: 'NM', label: 'Near Mint' },
+  { value: 'SP', label: 'Slightly Played' },
+  { value: 'MP', label: 'Moderately Played' },
+  { value: 'PL', label: 'Played' },
+  { value: 'Poor', label: 'Poor' },
 ];
 
 const LIST_CHIPS = [
@@ -162,16 +171,6 @@ function sortOffers(rows, key) {
     list.sort((a, b) => Number(a.pricePkn || 0) - Number(b.pricePkn || 0));
   }
   return list;
-}
-
-function conditionKey(value) {
-  const text = String(value || '').toUpperCase();
-  if (text.includes('NEAR') || text === 'NM') return 'NM';
-  if (text.includes('SLIGHT') || text === 'SP') return 'SP';
-  if (text.includes('MODERATE') || text === 'MP') return 'MP';
-  if (text.includes('PLAYED') || text === 'PL') return 'PL';
-  if (text.includes('POOR')) return 'Poor';
-  return text;
 }
 
 function offerLang(offer) {
@@ -297,20 +296,20 @@ function SoldGraphFilters({
         />
       ) : null}
       <SoldGraphFilter
-        label="Sold language"
-        allLabel="All languages"
-        options={languages}
-        value={language}
-        onChange={onLanguage}
-        optionLabel={soldLanguageLabel}
-      />
-      <SoldGraphFilter
         label="Sold condition"
         allLabel="All conditions"
         options={conditions}
         value={condition}
         onChange={onCondition}
         optionLabel={soldConditionLabel}
+      />
+      <SoldGraphFilter
+        label="Sold language"
+        allLabel="All languages"
+        options={languages}
+        value={language}
+        onChange={onLanguage}
+        optionLabel={soldLanguageLabel}
       />
       {unitsLabel ? <p className="sold-graph-units">{unitsLabel}</p> : null}
     </div>
@@ -585,7 +584,8 @@ function matchDeal(rows, language, condition) {
     if (language && offerLang(offer) !== language) {
       return false;
     }
-    if (condition && conditionKey(offer.condition) !== condition) {
+    // Same grades as the condition chips: LP / Lightly Played is SP.
+    if (condition && moodCondition(offer) !== condition) {
       return false;
     }
     return true;
@@ -598,10 +598,6 @@ function preferredDeal(rows, nationality) {
     || matchDeal(rows, null, 'NM')
     || matchDeal(rows, lang, null)
     || matchDeal(rows);
-}
-
-function conditionLabel(code) {
-  return CONDITIONS.find((row) => row.value === code)?.label || code;
 }
 
 function defaultFoil(card) {
@@ -624,6 +620,8 @@ function foilFromOffer(offer, card) {
 
 function moodCondition(offer) {
   const short = conditionShort(offer?.condition) || 'NM';
+  // conditionShort maps Poor → PO; the form still stores Pokoin value "Poor".
+  if (short === 'PO') return 'Poor';
   return MOOD_CONDS.some((row) => row.value === short) ? short : 'NM';
 }
 
@@ -708,27 +706,40 @@ function ConditionPick({ value, onChange }) {
         className="lang-pick-btn"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`Condition ${current.value}`}
+        aria-label={`Condition ${current.label}`}
         onClick={() => setOpen((next) => !next)}
       >
-        <span aria-hidden="true">{current.label.split(' ')[0]}</span>
-        <span>{current.value}</span>
+        <img
+          className="shop-cond"
+          src={conditionChipSrc(current.value)}
+          alt=""
+          width="40"
+          height="28"
+          draggable={false}
+        />
       </button>
       {open ? (
-        <ul className="lang-pick-menu" role="listbox">
+        <ul className="lang-pick-menu" role="listbox" aria-label="Condition">
           {MOOD_CONDS.map((row) => (
             <li key={row.value}>
               <button
                 type="button"
                 role="option"
                 aria-selected={row.value === value}
+                aria-label={row.label}
                 onClick={() => {
                   setOpen(false);
                   onChange(row.value);
                 }}
               >
-                <span aria-hidden="true">{row.label.split(' ')[0]}</span>
-                <span>{row.value}</span>
+                <img
+                  className="shop-cond"
+                  src={conditionChipSrc(row.value)}
+                  alt=""
+                  width="40"
+                  height="28"
+                  draggable={false}
+                />
                 {row.value === value ? <em aria-hidden="true">✓</em> : null}
               </button>
             </li>
@@ -767,6 +778,11 @@ function ListingForm({
   const priceManual = useRef(Boolean(editing?.id));
   const priceFocused = useRef(false);
   const [currency, setCurrency] = useState(blank.currency);
+  // Sellers who opted out of PKN payments list in their local currency.
+  const { currency: sellerCurrency } = useSellerCurrency();
+  const sellerCurrencyRef = useRef(sellerCurrency);
+  sellerCurrencyRef.current = sellerCurrency;
+  const currencyManual = useRef(false);
   const [qty, setQty] = useState(blank.qty);
   const [condition, setCondition] = useState(blank.condition);
   const [language, setLanguage] = useState(blank.language);
@@ -781,6 +797,9 @@ function ListingForm({
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
   const [jump, setJump] = useState(null);
+  const [shipFromCountry, setShipFromCountry] = useState('');
+  const [shipGateOpen, setShipGateOpen] = useState(false);
+  const [shipGateDraft, setShipGateDraft] = useState('');
   const listLangs = sellLanguages({
     nationality: card.nationality,
     setName: identity?.set || card.set,
@@ -794,8 +813,11 @@ function ListingForm({
   const isEditing = Boolean(editingId);
 
   function applyFields(next) {
-    setPrice(next.price);
-    setCurrency(next.currency);
+    const listIn = currencyManual.current ? next.currency : sellerCurrencyRef.current;
+    setPrice(listIn === next.currency || !next.price
+      ? next.price
+      : priceInputFromPkn(listingPriceToPkn(next.price, next.currency), listIn));
+    setCurrency(listIn);
     setQty(next.qty);
     setCondition(next.condition);
     setLanguage(next.language);
@@ -857,6 +879,15 @@ function ListingForm({
     setPrice(graphPrice);
   }, [graphPrice, editingId, card.id, currency]);
 
+  useEffect(() => {
+    // Settings arrive after first paint: switch the untouched form over.
+    if (currencyManual.current || currency === sellerCurrency) return;
+    if (price && priceManual.current) {
+      setPrice(priceInputFromPkn(listingPriceToPkn(price, currency), sellerCurrency));
+    }
+    setCurrency(sellerCurrency);
+  }, [sellerCurrency]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const hint = !price && graphPrice ? graphPrice : '';
   const listedPkn = price
     ? listingPriceToPkn(price, currency)
@@ -866,9 +897,29 @@ function ListingForm({
     setChips((current) => ({ ...current, [key]: !current[key] }));
   }
 
+  useEffect(() => {
+    if (!signedIn) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getBearer();
+        const settings = await fetchSellerSettings(token);
+        if (!cancelled) setShipFromCountry(String(settings.shipFromCountry || '').toUpperCase());
+      } catch (_) {
+        // First listing opens the ship-from gate.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [signedIn, getBearer]);
+
   async function submit(targets = { pokoin: true, cardtrader: false }) {
     if (!signedIn) {
       navigate(authFrom(fromPath));
+      return;
+    }
+    if (!isEditing && chips.shipping && !shipFromCountry) {
+      setShipGateDraft('');
+      setShipGateOpen(true);
       return;
     }
     const amount = price
@@ -925,7 +976,8 @@ function ListingForm({
         : await createListing({
           cardId: publicCardId(card),
           sellerName,
-          sellerCountry: 'EU',
+          sellerCountry: shipFromCountry,
+          shipFromCountry,
           sellerReputationLabel: 'New',
           targets: {
             pokoin: targets?.pokoin !== false,
@@ -1007,7 +1059,13 @@ function ListingForm({
         </label>
         <label className="sell-field currency">
           Currency
-          <select value={currency} onChange={(event) => setCurrency(event.target.value)}>
+          <select
+            value={currency}
+            onChange={(event) => {
+              currencyManual.current = true;
+              setCurrency(event.target.value);
+            }}
+          >
             {LIST_CURRENCIES.map((code) => (
               <option key={code} value={code}>{code}</option>
             ))}
@@ -1053,7 +1111,12 @@ function ListingForm({
           />
         </div>
       ) : null}
-      {currency !== 'PKN' && listedPkn ? (
+      {sellerCurrency !== 'PKN' ? (
+        <p className="sell-pkn-eq">
+          {listedPkn ? `Lists at ${formatSellerPrice(listedPkn, sellerCurrency)} · ` : ''}
+          Buyers pay you by card · PKN payments are off in <Link to="/profile">Profile</Link>
+        </p>
+      ) : currency !== 'PKN' && listedPkn ? (
         <p className="sell-pkn-eq">Lists at {formatPkn(listedPkn)}</p>
       ) : null}
       <div className="sell-options-row">
@@ -1190,6 +1253,29 @@ function ListingForm({
         </div>,
         document.body,
       ) : null}
+      <ShipFromCountryGate
+        open={shipGateOpen}
+        value={shipGateDraft}
+        onChange={setShipGateDraft}
+        busy={saving}
+        error={error}
+        onClose={() => setShipGateOpen(false)}
+        onSave={async () => {
+          setSaving(true);
+          setError('');
+          try {
+            const token = await getBearer();
+            const data = await saveSellerSettings({ shipFromCountry: shipGateDraft }, token);
+            setShipFromCountry(data.shipFromCountry || shipGateDraft);
+            setShipGateOpen(false);
+            setSaving(false);
+            await submit({ pokoin: true, cardtrader: false });
+          } catch (err) {
+            setError(err.message || 'Could not save ship-from country.');
+            setSaving(false);
+          }
+        }}
+      />
     </section>
   );
 }
@@ -1293,7 +1379,7 @@ function SilverHead({ card, fromPath }) {
     <div className="silver-tools">
       {signedIn ? (
         <button className="silver-link" type="button" disabled={busy} onClick={unlock}>
-          {busy ? 'Unlocking…' : `Unlock Silver · 20 PKN`}
+          {busy ? 'Unlocking…' : `Unlock Silver · ${SILVER_PRICE_PKN} PKN`}
         </button>
       ) : (
         <Link className="silver-link" to={authFrom(fromPath)}>Sign in to unlock</Link>
@@ -1754,6 +1840,14 @@ export default function Card() {
   }, [cardId]);
 
   useEffect(() => {
+    const card = payload?.card || stubCard;
+    if (card?.id || card?.name) {
+      setActiveDeskCard(card);
+    }
+    return () => clearActiveDeskCard();
+  }, [payload?.card, stubCard]);
+
+  useEffect(() => {
     const name = String(payload?.card?.name || stubCard?.name || '').trim();
     if (!name) {
       return undefined;
@@ -1810,7 +1904,8 @@ export default function Card() {
     const allowed = languagesForNationality(nationality, language ? [language] : []);
     const shopLanguage = allowed.length ? language : '';
     const filtered = (payload?.offers || []).filter((offer) => {
-      if (condition && conditionKey(offer.condition) !== condition) {
+      // Same grades as the condition chips: LP / Lightly Played is SP.
+    if (condition && moodCondition(offer) !== condition) {
         return false;
       }
       if (shopLanguage && String(offer.language || '').toUpperCase() !== shopLanguage) {
@@ -1953,10 +2048,11 @@ export default function Card() {
     setName: identity.set || card.set,
     releaseLanguages: card.releaseLanguages,
   });
-  const dealConds = CONDITIONS.map((row) => row.value).filter(Boolean);
   const shownLangRaw = dealLang || offerLang(dealPick) || '';
-  const shownLang = !shownLangRaw || dealLangs.includes(shownLangRaw) ? shownLangRaw : '';
-  const shownCond = dealCond || (dealPick ? conditionKey(dealPick.condition) : '');
+  const shownLang = dealLangs.includes(shownLangRaw)
+    ? shownLangRaw
+    : (dealLangs.includes(defaultCardLanguage(card.nationality)) ? defaultCardLanguage(card.nationality) : dealLangs[0] || '');
+  const shownCond = dealCond || (dealPick ? moodCondition(dealPick) : 'NM');
   const languages = languagesForNationality(
     card.nationality,
     [...new Set((payload?.offers || []).map((row) => String(row.language || '').toUpperCase()).filter(Boolean))],
@@ -2333,6 +2429,7 @@ export default function Card() {
               setSalesGraded(Boolean(traits.graded));
             }}
           />
+          <NativeSales cardId={card.id} />
           <ListingForm
             card={card}
             identity={identity}
@@ -2377,42 +2474,22 @@ export default function Card() {
               <SilverHead card={card} fromPath={fromPath} />
             </div>
             <div className={canBuy ? 'prod-px' : 'prod-px oos'}>
-              {offersReady ? (canBuy ? formatPkn(dealPick.pricePkn) : '—') : '—'}
+              {offersReady ? (canBuy ? formatListingPrice(dealPick.pricePkn, dealPick.sellerAcceptsPkn) : '—') : '—'}
             </div>
             {canBuy && offersReady ? null : (
               <p className="muted own-k">{dealCopy || '\u00a0'}</p>
             )}
-            <div className="deal-selects">
-              <label className="sort deal-select">
-                <span className="sr-only">Language</span>
-                <select
-                  value={shownLang}
-                  onChange={(event) => setDealLang(event.target.value)}
-                >
-                  <option value="">Select language</option>
-                  {shownLang && !dealLangs.includes(shownLang) ? (
-                    <option value={shownLang}>{shownLang}</option>
-                  ) : null}
-                  {dealLangs.map((code) => (
-                    <option key={code} value={code}>{code}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="sort deal-select">
+            <div className="deal-selects sell-options-row">
+              <div className="sell-field sell-pick condition-pick">
                 <span className="sr-only">Condition</span>
-                <select
-                  value={shownCond}
-                  onChange={(event) => setDealCond(event.target.value)}
-                >
-                  <option value="">Select condition</option>
-                  {shownCond && !dealConds.includes(shownCond) ? (
-                    <option value={shownCond}>{conditionLabel(shownCond)}</option>
-                  ) : null}
-                  {dealConds.map((code) => (
-                    <option key={code} value={code}>{conditionLabel(code)}</option>
-                  ))}
-                </select>
-              </label>
+                <ConditionPick value={shownCond} onChange={setDealCond} />
+              </div>
+              {shownLang ? (
+                <div className="sell-field sell-pick language-pick">
+                  <span className="sr-only">Language</span>
+                  <ListingLangPick value={shownLang} listed={dealLangs} onChange={setDealLang} />
+                </div>
+              ) : null}
             </div>
             {canBuy ? (
               <button

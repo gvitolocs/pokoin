@@ -11,11 +11,12 @@ import { Alert, EmptyDesk, Metric, MetricGrid } from '../components/Desk.jsx';
 import {
   publicListingSellerName,
   sellerCountryFlag,
-  sellerCountryLabel,
+  sellerCountryShort,
   sellerHandle,
 } from '../listing-meta.js';
 import { seedSellerListings } from '../seller-seed.js';
 import { game } from '../game.js';
+import { associateRoleLabel } from '../associate-roles.js';
 
 const PAGE_SIZE = 100;
 
@@ -30,6 +31,29 @@ const CONDITION_FILTERS = [
 
 const LANG_FILTERS = ['', 'EN', 'IT', 'JP', 'DE', 'FR', 'ES', 'KR', 'PT', 'NL', 'PL', 'RU', 'ZH'];
 
+const RARITY_FILTERS = [
+  { value: '', label: 'Any rarity' },
+  { value: 'holo', label: 'Holo' },
+  { value: 'common', label: 'Common' },
+  { value: 'uncommon', label: 'Uncommon' },
+  { value: 'rare', label: 'Rare' },
+  { value: 'ultra', label: 'Ultra Rare' },
+  { value: 'illustration', label: 'Illustration Rare' },
+  { value: 'secret', label: 'Secret Rare' },
+];
+
+function ShopToggle({ label, pressed, onToggle }) {
+  return (
+    <button
+      type="button"
+      className={`shop-toggle${pressed ? ' on' : ''}`}
+      aria-pressed={pressed}
+      onClick={() => onToggle(!pressed)}
+    >
+      {label}
+    </button>
+  );
+}
 function isOneDayReady(offer) {
   return Boolean(
     offer?.oneDayReady ||
@@ -47,10 +71,13 @@ function sellerFromPayload(data, handle, sample) {
   const rawName = String(row?.displayName || publicListingSellerName(sample, username || handle) || '')
     .trim();
   const displayName = rawName && !rawName.includes('@') ? rawName : (username || handle);
+  const associateRow = row?.associate && typeof row.associate === 'object' ? row.associate : null;
+  const associateRole = String(associateRow?.role || '').trim().toLowerCase();
   return {
     uid: row?.uid || sample?.sellerUid || '',
     username,
     displayName,
+    associate: associateRole ? { role: associateRole, displayName: String(associateRow.displayName || '').trim() } : null,
   };
 }
 
@@ -78,13 +105,16 @@ export default function Seller() {
   const [query, setQuery] = useState('');
   const [condition, setCondition] = useState('');
   const [language, setLanguage] = useState('');
+  const [rarity, setRarity] = useState('');
+  const [reverse, setReverse] = useState(false);
+  const [firstEdition, setFirstEdition] = useState(false);
   const [sort, setSort] = useState('price-asc');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(!seeded);
 
   useEffect(() => {
     setPage(1);
-  }, [query, condition, language, sort, handle, selectedGame]);
+  }, [query, condition, language, rarity, reverse, firstEdition, sort, handle, selectedGame]);
 
   useEffect(() => {
     document.title = `${seller.displayName || handle} · Pokoin`;
@@ -101,6 +131,9 @@ export default function Seller() {
       q: query.trim(),
       condition,
       language,
+      rarity,
+      reverse,
+      firstEdition,
       sort,
       game: selectedGame,
     })
@@ -131,14 +164,14 @@ export default function Seller() {
     return () => {
       cancelled = true;
     };
-  }, [handle, page, query, condition, language, sort, selectedGame]);
+  }, [handle, page, query, condition, language, rarity, reverse, firstEdition, sort, selectedGame]);
 
   const sample = listings?.[0];
   const display = seller.displayName || publicListingSellerName(sample, handle);
   const tag = seller.username || sellerHandle(sample) || handle;
   const showTag = tag && tag.toLowerCase() !== String(display || '').toLowerCase();
   const country = sellerCountryFlag(sample?.sellerCountry);
-  const countryLine = sellerCountryLabel(sample?.sellerCountry);
+  const countryShort = sellerCountryShort(sample?.sellerCountry);
   const ready = useMemo(() => Boolean((listings || []).some(isOneDayReady)), [listings]);
 
   const totalItems = total ?? 0;
@@ -164,13 +197,22 @@ export default function Seller() {
         </span>
         <div className="seller-id">
           <p className="page-kicker">Seller</p>
-          <h1 className="page-title">{display}</h1>
+          <h1 className="page-title">
+            {display}
+            {seller.associate?.role ? (
+              <span className={`seller-associate-badge is-${seller.associate.role}`}>{associateRoleLabel(seller.associate.role)}</span>
+            ) : null}
+          </h1>
           {showTag ? <p className="seller-handle">@{tag}</p> : null}
           <div className="seller-hero-meta">
-            {country ? (
+            {country && countryShort ? (
               <p className="seller-country">
-                <img src={country.src} alt="" width="22" height="22" />
-                <span>({(countryLine || country.label).toUpperCase()})</span>
+                {country.emoji ? (
+                  <span aria-hidden="true">{country.emoji}</span>
+                ) : country.src ? (
+                  <img src={country.src} alt="" width="22" height="22" />
+                ) : null}
+                <span>({countryShort})</span>
               </p>
             ) : null}
             {ready ? <span className="seller-badge seller-badge-ready">1-Day Ready</span> : null}
@@ -227,6 +269,19 @@ export default function Seller() {
                   </option>
                 ))}
               </select>
+              <select
+                aria-label="Rarity"
+                value={rarity}
+                onChange={(e) => setRarity(e.target.value)}
+              >
+                {RARITY_FILTERS.map((opt) => (
+                  <option key={opt.value || 'any-rarity'} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <ShopToggle label="Reverse" pressed={reverse} onToggle={setReverse} />
+              <ShopToggle label="1st Ed." pressed={firstEdition} onToggle={setFirstEdition} />
               <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value)}>
                 <option value="price-asc">Price ↑</option>
                 <option value="price-desc">Price ↓</option>

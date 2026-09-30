@@ -54,5 +54,7 @@ export function inventoryListingMeta(row, formatPkn) {
   if (status === 'paused') parts.push('paused');
   const language = String(row?.language || '').trim().toUpperCase();
   if (language && language !== 'EN') parts.push(language);
+  const loc = String(row?.location || '').trim();
+  if (loc) parts.push(loc);
   return parts.join(' · ');
 }

@@ -1,0 +1,6255 @@
+{
+  "tiers": [
+    {
+      "id": "SMALL",
+      "maxCards": 4
+    },
+    {
+      "id": "MEDIUM",
+      "maxCards": 20
+    },
+    {
+      "id": "LARGE",
+      "maxCards": 200
+    },
+    {
+      "id": "EXTRA_LARGE",
+      "maxCards": 9999
+    }
+  ],
+  "rates": [
+    {
+      "id": "de-de-extra-large",
+      "fromCountry": "DE",
+      "toCountry": "DE",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 990,
+      "carrier": "Hermes",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-de-large",
+      "fromCountry": "DE",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 329,
+      "carrier": "GLS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-de-large-untracked",
+      "fromCountry": "DE",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 180,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "porto-data:grossbrief",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-de-medium",
+      "fromCountry": "DE",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 329,
+      "carrier": "GLS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-de-medium-untracked",
+      "fromCountry": "DE",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 180,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-de-small",
+      "fromCountry": "DE",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 329,
+      "carrier": "GLS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-de-small-untracked",
+      "fromCountry": "DE",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 180,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-dk-extra-large",
+      "fromCountry": "DE",
+      "toCountry": "DK",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2050,
+      "carrier": "Hermes",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-dk-large",
+      "fromCountry": "DE",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-dk-large-untracked",
+      "fromCountry": "DE",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "porto-data:grossbrief",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-dk-medium",
+      "fromCountry": "DE",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-dk-medium-untracked",
+      "fromCountry": "DE",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-dk-small",
+      "fromCountry": "DE",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-dk-small-untracked",
+      "fromCountry": "DE",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-es-extra-large",
+      "fromCountry": "DE",
+      "toCountry": "ES",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2099,
+      "carrier": "Hermes",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-es-large",
+      "fromCountry": "DE",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-es-large-untracked",
+      "fromCountry": "DE",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "porto-data:grossbrief",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-es-medium",
+      "fromCountry": "DE",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-es-medium-untracked",
+      "fromCountry": "DE",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-es-small",
+      "fromCountry": "DE",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-es-small-untracked",
+      "fromCountry": "DE",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-fr-extra-large",
+      "fromCountry": "DE",
+      "toCountry": "FR",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2049,
+      "carrier": "Hermes",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-fr-large",
+      "fromCountry": "DE",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-fr-large-untracked",
+      "fromCountry": "DE",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "porto-data:grossbrief",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-fr-medium",
+      "fromCountry": "DE",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-fr-medium-untracked",
+      "fromCountry": "DE",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-fr-small",
+      "fromCountry": "DE",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-fr-small-untracked",
+      "fromCountry": "DE",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-it-extra-large",
+      "fromCountry": "DE",
+      "toCountry": "IT",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2049,
+      "carrier": "Hermes",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-it-large",
+      "fromCountry": "DE",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-it-large-untracked",
+      "fromCountry": "DE",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "porto-data:grossbrief",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-it-medium",
+      "fromCountry": "DE",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-it-medium-untracked",
+      "fromCountry": "DE",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-it-small",
+      "fromCountry": "DE",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-it-small-untracked",
+      "fromCountry": "DE",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-nl-extra-large",
+      "fromCountry": "DE",
+      "toCountry": "NL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2049,
+      "carrier": "Hermes",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-nl-large",
+      "fromCountry": "DE",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-nl-large-untracked",
+      "fromCountry": "DE",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "porto-data:grossbrief",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-nl-medium",
+      "fromCountry": "DE",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-nl-medium-untracked",
+      "fromCountry": "DE",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-nl-small",
+      "fromCountry": "DE",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-nl-small-untracked",
+      "fromCountry": "DE",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-pl-extra-large",
+      "fromCountry": "DE",
+      "toCountry": "PL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2049,
+      "carrier": "Hermes",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-pl-large",
+      "fromCountry": "DE",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-pl-large-untracked",
+      "fromCountry": "DE",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "porto-data:grossbrief",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-pl-medium",
+      "fromCountry": "DE",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-pl-medium-untracked",
+      "fromCountry": "DE",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "de-pl-small",
+      "fromCountry": "DE",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 699,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "de-pl-small-untracked",
+      "fromCountry": "DE",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 330,
+      "carrier": "Deutsche Post",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:grossbrief"
+      ]
+    },
+    {
+      "id": "dk-de-extra-large",
+      "fromCountry": "DK",
+      "toCountry": "DE",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2547,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-de-large",
+      "fromCountry": "DK",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1206,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-de-large-untracked",
+      "fromCountry": "DK",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1206,
+      "carrier": "DAO",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-de-medium",
+      "fromCountry": "DK",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1206,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-de-medium-untracked",
+      "fromCountry": "DK",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-de-small",
+      "fromCountry": "DK",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1206,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-de-small-untracked",
+      "fromCountry": "DK",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-dk-extra-large",
+      "fromCountry": "DK",
+      "toCountry": "DK",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 1743,
+      "carrier": "PostNord",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-dk-large",
+      "fromCountry": "DK",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 576,
+      "carrier": "GLS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-dk-large-untracked",
+      "fromCountry": "DK",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 576,
+      "carrier": "GLS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-dk-medium",
+      "fromCountry": "DK",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 576,
+      "carrier": "GLS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-dk-medium-untracked",
+      "fromCountry": "DK",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 308,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-dk-small",
+      "fromCountry": "DK",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 576,
+      "carrier": "GLS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-dk-small-untracked",
+      "fromCountry": "DK",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 308,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-es-extra-large",
+      "fromCountry": "DK",
+      "toCountry": "ES",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 3686,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-es-large",
+      "fromCountry": "DK",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 2011,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-es-large-untracked",
+      "fromCountry": "DK",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1233,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (250g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-es-medium",
+      "fromCountry": "DK",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 2011,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-es-medium-untracked",
+      "fromCountry": "DK",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-es-small",
+      "fromCountry": "DK",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 2011,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-es-small-untracked",
+      "fromCountry": "DK",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-fr-extra-large",
+      "fromCountry": "DK",
+      "toCountry": "FR",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 3686,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-fr-large",
+      "fromCountry": "DK",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1743,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-fr-large-untracked",
+      "fromCountry": "DK",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1233,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (250g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-fr-medium",
+      "fromCountry": "DK",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1743,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-fr-medium-untracked",
+      "fromCountry": "DK",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-fr-small",
+      "fromCountry": "DK",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1743,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-fr-small-untracked",
+      "fromCountry": "DK",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-it-extra-large",
+      "fromCountry": "DK",
+      "toCountry": "IT",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 3686,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-it-large",
+      "fromCountry": "DK",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 2011,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-it-large-untracked",
+      "fromCountry": "DK",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1233,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (250g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-it-medium",
+      "fromCountry": "DK",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 2011,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-it-medium-untracked",
+      "fromCountry": "DK",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-it-small",
+      "fromCountry": "DK",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 2011,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-it-small-untracked",
+      "fromCountry": "DK",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-nl-extra-large",
+      "fromCountry": "DK",
+      "toCountry": "NL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2547,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-nl-large",
+      "fromCountry": "DK",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1408,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-nl-large-untracked",
+      "fromCountry": "DK",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1233,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (250g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-nl-medium",
+      "fromCountry": "DK",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1408,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-nl-medium-untracked",
+      "fromCountry": "DK",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-nl-small",
+      "fromCountry": "DK",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1408,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-nl-small-untracked",
+      "fromCountry": "DK",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-pl-extra-large",
+      "fromCountry": "DK",
+      "toCountry": "PL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2547,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-pl-large",
+      "fromCountry": "DK",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1408,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-pl-large-untracked",
+      "fromCountry": "DK",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1233,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (250g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-pl-medium",
+      "fromCountry": "DK",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1408,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-pl-medium-untracked",
+      "fromCountry": "DK",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-pl-small",
+      "fromCountry": "DK",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1408,
+      "carrier": "DAO",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "dk-pl-small-untracked",
+      "fromCountry": "DK",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 617,
+      "carrier": "dao",
+      "serviceName": "Untracked letter (100g)",
+      "active": true,
+      "tracked": false,
+      "rateSource": "dao-brev",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "dao-brev",
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-de-extra-large",
+      "fromCountry": "ES",
+      "toCountry": "DE",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2995,
+      "carrier": "SEUR",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-de-large",
+      "fromCountry": "ES",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-de-large-untracked",
+      "fromCountry": "ES",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-de-medium",
+      "fromCountry": "ES",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-de-medium-untracked",
+      "fromCountry": "ES",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-de-small",
+      "fromCountry": "ES",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-de-small-untracked",
+      "fromCountry": "ES",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-dk-extra-large",
+      "fromCountry": "ES",
+      "toCountry": "DK",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 3963,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-dk-large",
+      "fromCountry": "ES",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-dk-large-untracked",
+      "fromCountry": "ES",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-dk-medium",
+      "fromCountry": "ES",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-dk-medium-untracked",
+      "fromCountry": "ES",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-dk-small",
+      "fromCountry": "ES",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-dk-small-untracked",
+      "fromCountry": "ES",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-es-extra-large",
+      "fromCountry": "ES",
+      "toCountry": "ES",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 1729,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-es-large",
+      "fromCountry": "ES",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 703,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-es-large-untracked",
+      "fromCountry": "ES",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 580,
+      "carrier": "Correos",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-es-medium",
+      "fromCountry": "ES",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 703,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-es-medium-untracked",
+      "fromCountry": "ES",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 580,
+      "carrier": "Correos",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-es-small",
+      "fromCountry": "ES",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 703,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-es-small-untracked",
+      "fromCountry": "ES",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 580,
+      "carrier": "Correos",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-fr-extra-large",
+      "fromCountry": "ES",
+      "toCountry": "FR",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2995,
+      "carrier": "SEUR",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-fr-large",
+      "fromCountry": "ES",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-fr-large-untracked",
+      "fromCountry": "ES",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-fr-medium",
+      "fromCountry": "ES",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-fr-medium-untracked",
+      "fromCountry": "ES",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-fr-small",
+      "fromCountry": "ES",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-fr-small-untracked",
+      "fromCountry": "ES",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-it-extra-large",
+      "fromCountry": "ES",
+      "toCountry": "IT",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2995,
+      "carrier": "SEUR",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-it-large",
+      "fromCountry": "ES",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-it-large-untracked",
+      "fromCountry": "ES",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-it-medium",
+      "fromCountry": "ES",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-it-medium-untracked",
+      "fromCountry": "ES",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-it-small",
+      "fromCountry": "ES",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-it-small-untracked",
+      "fromCountry": "ES",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-nl-extra-large",
+      "fromCountry": "ES",
+      "toCountry": "NL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 3019,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-nl-large",
+      "fromCountry": "ES",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-nl-large-untracked",
+      "fromCountry": "ES",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-nl-medium",
+      "fromCountry": "ES",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-nl-medium-untracked",
+      "fromCountry": "ES",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-nl-small",
+      "fromCountry": "ES",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-nl-small-untracked",
+      "fromCountry": "ES",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1271,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-pl-extra-large",
+      "fromCountry": "ES",
+      "toCountry": "PL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 3963,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-pl-large",
+      "fromCountry": "ES",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-pl-large-untracked",
+      "fromCountry": "ES",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-pl-medium",
+      "fromCountry": "ES",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-pl-medium-untracked",
+      "fromCountry": "ES",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-pl-small",
+      "fromCountry": "ES",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "es-pl-small-untracked",
+      "fromCountry": "ES",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1543,
+      "carrier": "UPS",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-de-extra-large",
+      "fromCountry": "FR",
+      "toCountry": "DE",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 3996,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-de-large",
+      "fromCountry": "FR",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-de-large-untracked",
+      "fromCountry": "FR",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1499,
+      "carrier": "Colissimo",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-de-medium",
+      "fromCountry": "FR",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-de-medium-untracked",
+      "fromCountry": "FR",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1499,
+      "carrier": "Colissimo",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-de-small",
+      "fromCountry": "FR",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-de-small-untracked",
+      "fromCountry": "FR",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1499,
+      "carrier": "Colissimo",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-dk-extra-large",
+      "fromCountry": "FR",
+      "toCountry": "DK",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 3996,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-dk-large",
+      "fromCountry": "FR",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-dk-large-untracked",
+      "fromCountry": "FR",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1499,
+      "carrier": "Colissimo",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-dk-medium",
+      "fromCountry": "FR",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-dk-medium-untracked",
+      "fromCountry": "FR",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1499,
+      "carrier": "Colissimo",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-dk-small",
+      "fromCountry": "FR",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-dk-small-untracked",
+      "fromCountry": "FR",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1499,
+      "carrier": "Colissimo",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-es-extra-large",
+      "fromCountry": "FR",
+      "toCountry": "ES",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2880,
+      "carrier": "Mondial Relay",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-es-large",
+      "fromCountry": "FR",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-es-large-untracked",
+      "fromCountry": "FR",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 660,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-es-medium",
+      "fromCountry": "FR",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-es-medium-untracked",
+      "fromCountry": "FR",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 660,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-es-small",
+      "fromCountry": "FR",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-es-small-untracked",
+      "fromCountry": "FR",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 660,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-fr-extra-large",
+      "fromCountry": "FR",
+      "toCountry": "FR",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 1990,
+      "carrier": "Shop2Shop by Chronopost",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-fr-large",
+      "fromCountry": "FR",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1338,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-fr-large-untracked",
+      "fromCountry": "FR",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 415,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:lettre_verte"
+      ]
+    },
+    {
+      "id": "fr-fr-medium",
+      "fromCountry": "FR",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1338,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-fr-medium-untracked",
+      "fromCountry": "FR",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 310,
+      "carrier": "La Poste",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "porto-data:lettre_verte",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:lettre_verte"
+      ]
+    },
+    {
+      "id": "fr-fr-small",
+      "fromCountry": "FR",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1338,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-fr-small-untracked",
+      "fromCountry": "FR",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 310,
+      "carrier": "La Poste",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "porto-data:lettre_verte",
+      "productClass": "letter",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo",
+        "porto-data:lettre_verte"
+      ]
+    },
+    {
+      "id": "fr-it-extra-large",
+      "fromCountry": "FR",
+      "toCountry": "IT",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2880,
+      "carrier": "Mondial Relay",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-it-large",
+      "fromCountry": "FR",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-it-large-untracked",
+      "fromCountry": "FR",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 660,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-it-medium",
+      "fromCountry": "FR",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-it-medium-untracked",
+      "fromCountry": "FR",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 660,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-it-small",
+      "fromCountry": "FR",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-it-small-untracked",
+      "fromCountry": "FR",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 660,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-nl-extra-large",
+      "fromCountry": "FR",
+      "toCountry": "NL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2600,
+      "carrier": "Mondial Relay",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-nl-large",
+      "fromCountry": "FR",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-nl-large-untracked",
+      "fromCountry": "FR",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 460,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-nl-medium",
+      "fromCountry": "FR",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-nl-medium-untracked",
+      "fromCountry": "FR",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 460,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-nl-small",
+      "fromCountry": "FR",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 2064,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-nl-small-untracked",
+      "fromCountry": "FR",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 460,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-pl-extra-large",
+      "fromCountry": "FR",
+      "toCountry": "PL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2950,
+      "carrier": "Mondial Relay",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-pl-large",
+      "fromCountry": "FR",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 2184,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-pl-large-untracked",
+      "fromCountry": "FR",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 720,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-pl-medium",
+      "fromCountry": "FR",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 2184,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-pl-medium-untracked",
+      "fromCountry": "FR",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 720,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-pl-small",
+      "fromCountry": "FR",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 2184,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "fr-pl-small-untracked",
+      "fromCountry": "FR",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 720,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-de-extra-large",
+      "fromCountry": "IT",
+      "toCountry": "DE",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2607,
+      "carrier": "BRT",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-de-large",
+      "fromCountry": "IT",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1499,
+      "carrier": "BRT",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-de-large-untracked",
+      "fromCountry": "IT",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 755,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-de-medium",
+      "fromCountry": "IT",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1499,
+      "carrier": "BRT",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-de-medium-untracked",
+      "fromCountry": "IT",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-de-small",
+      "fromCountry": "IT",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1499,
+      "carrier": "BRT",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-de-small-untracked",
+      "fromCountry": "IT",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-dk-extra-large",
+      "fromCountry": "IT",
+      "toCountry": "DK",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 4575,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-dk-large",
+      "fromCountry": "IT",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1684,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-dk-large-untracked",
+      "fromCountry": "IT",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 755,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-dk-medium",
+      "fromCountry": "IT",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1684,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-dk-medium-untracked",
+      "fromCountry": "IT",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-dk-small",
+      "fromCountry": "IT",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1684,
+      "carrier": "UPS",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-dk-small-untracked",
+      "fromCountry": "IT",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-es-extra-large",
+      "fromCountry": "IT",
+      "toCountry": "ES",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2855,
+      "carrier": "BRT",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-es-large",
+      "fromCountry": "IT",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 849,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-es-large-untracked",
+      "fromCountry": "IT",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 755,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-es-medium",
+      "fromCountry": "IT",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 849,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-es-medium-untracked",
+      "fromCountry": "IT",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-es-small",
+      "fromCountry": "IT",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 849,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-es-small-untracked",
+      "fromCountry": "IT",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-fr-extra-large",
+      "fromCountry": "IT",
+      "toCountry": "FR",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2607,
+      "carrier": "BRT",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-fr-large",
+      "fromCountry": "IT",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 799,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-fr-large-untracked",
+      "fromCountry": "IT",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 755,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-fr-medium",
+      "fromCountry": "IT",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 799,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-fr-medium-untracked",
+      "fromCountry": "IT",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-fr-small",
+      "fromCountry": "IT",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 799,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-fr-small-untracked",
+      "fromCountry": "IT",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-it-extra-large",
+      "fromCountry": "IT",
+      "toCountry": "IT",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 1230,
+      "carrier": "Poste Italiane",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-it-large",
+      "fromCountry": "IT",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 499,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-it-large-untracked",
+      "fromCountry": "IT",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 425,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-it-medium",
+      "fromCountry": "IT",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 499,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-it-medium-untracked",
+      "fromCountry": "IT",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 295,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-it-small",
+      "fromCountry": "IT",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 499,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-it-small-untracked",
+      "fromCountry": "IT",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 295,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-nl-extra-large",
+      "fromCountry": "IT",
+      "toCountry": "NL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2855,
+      "carrier": "BRT",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-nl-large",
+      "fromCountry": "IT",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 849,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-nl-large-untracked",
+      "fromCountry": "IT",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 755,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-nl-medium",
+      "fromCountry": "IT",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 849,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-nl-medium-untracked",
+      "fromCountry": "IT",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-nl-small",
+      "fromCountry": "IT",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 849,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-nl-small-untracked",
+      "fromCountry": "IT",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-pl-extra-large",
+      "fromCountry": "IT",
+      "toCountry": "PL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2855,
+      "carrier": "BRT",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-pl-large",
+      "fromCountry": "IT",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 899,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-pl-large-untracked",
+      "fromCountry": "IT",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 755,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-pl-medium",
+      "fromCountry": "IT",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 899,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-pl-medium-untracked",
+      "fromCountry": "IT",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-pl-small",
+      "fromCountry": "IT",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 899,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "it-pl-small-untracked",
+      "fromCountry": "IT",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 435,
+      "carrier": "Poste Italiane",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-de-extra-large",
+      "fromCountry": "NL",
+      "toCountry": "DE",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2325,
+      "carrier": "DPD",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-de-large",
+      "fromCountry": "NL",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 800,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-de-large-untracked",
+      "fromCountry": "NL",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 800,
+      "carrier": "DPD",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-de-medium",
+      "fromCountry": "NL",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 800,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-de-medium-untracked",
+      "fromCountry": "NL",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 633,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-de-small",
+      "fromCountry": "NL",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 800,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-de-small-untracked",
+      "fromCountry": "NL",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 633,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-dk-extra-large",
+      "fromCountry": "NL",
+      "toCountry": "DK",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2250,
+      "carrier": "GLS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-dk-large",
+      "fromCountry": "NL",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 855,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-dk-large-untracked",
+      "fromCountry": "NL",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 844,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-dk-medium",
+      "fromCountry": "NL",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 855,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-dk-medium-untracked",
+      "fromCountry": "NL",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 633,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-dk-small",
+      "fromCountry": "NL",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 855,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-dk-small-untracked",
+      "fromCountry": "NL",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 633,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-es-extra-large",
+      "fromCountry": "NL",
+      "toCountry": "ES",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2590,
+      "carrier": "Mondial Relay",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-es-large",
+      "fromCountry": "NL",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1215,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-es-large-untracked",
+      "fromCountry": "NL",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 670,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-es-medium",
+      "fromCountry": "NL",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1215,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-es-medium-untracked",
+      "fromCountry": "NL",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 633,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-es-small",
+      "fromCountry": "NL",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1215,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-es-small-untracked",
+      "fromCountry": "NL",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 633,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-fr-extra-large",
+      "fromCountry": "NL",
+      "toCountry": "FR",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2200,
+      "carrier": "Mondial Relay",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-fr-large",
+      "fromCountry": "NL",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 760,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-fr-large-untracked",
+      "fromCountry": "NL",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 460,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-fr-medium",
+      "fromCountry": "NL",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 760,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-fr-medium-untracked",
+      "fromCountry": "NL",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 460,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-fr-small",
+      "fromCountry": "NL",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 760,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-fr-small-untracked",
+      "fromCountry": "NL",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 460,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-it-extra-large",
+      "fromCountry": "NL",
+      "toCountry": "IT",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2590,
+      "carrier": "Mondial Relay",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-it-large",
+      "fromCountry": "NL",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1215,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-it-large-untracked",
+      "fromCountry": "NL",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 670,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-it-medium",
+      "fromCountry": "NL",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1215,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-it-medium-untracked",
+      "fromCountry": "NL",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 633,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-it-small",
+      "fromCountry": "NL",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1215,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-it-small-untracked",
+      "fromCountry": "NL",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 633,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-nl-extra-large",
+      "fromCountry": "NL",
+      "toCountry": "NL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 849,
+      "carrier": "DPD",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-nl-large",
+      "fromCountry": "NL",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 370,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-nl-large-untracked",
+      "fromCountry": "NL",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 370,
+      "carrier": "DHL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-nl-medium",
+      "fromCountry": "NL",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 370,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-nl-medium-untracked",
+      "fromCountry": "NL",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 370,
+      "carrier": "DHL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-nl-small",
+      "fromCountry": "NL",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 370,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-nl-small-untracked",
+      "fromCountry": "NL",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 370,
+      "carrier": "DHL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-pl-extra-large",
+      "fromCountry": "NL",
+      "toCountry": "PL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2375,
+      "carrier": "DPD",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-pl-large",
+      "fromCountry": "NL",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 855,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-pl-large-untracked",
+      "fromCountry": "NL",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 730,
+      "carrier": "Mondial Relay",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-pl-medium",
+      "fromCountry": "NL",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 855,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-pl-medium-untracked",
+      "fromCountry": "NL",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 633,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-pl-small",
+      "fromCountry": "NL",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 855,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "nl-pl-small-untracked",
+      "fromCountry": "NL",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 633,
+      "carrier": "PostNL",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-de-extra-large",
+      "fromCountry": "PL",
+      "toCountry": "DE",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2319,
+      "carrier": "DPD",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-de-large",
+      "fromCountry": "PL",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 820,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-de-large-untracked",
+      "fromCountry": "PL",
+      "toCountry": "DE",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 351,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-de-medium",
+      "fromCountry": "PL",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 820,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-de-medium-untracked",
+      "fromCountry": "PL",
+      "toCountry": "DE",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-de-small",
+      "fromCountry": "PL",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 820,
+      "carrier": "DHL",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-de-small-untracked",
+      "fromCountry": "PL",
+      "toCountry": "DE",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-dk-extra-large",
+      "fromCountry": "PL",
+      "toCountry": "DK",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2553,
+      "carrier": "DPD",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-dk-large",
+      "fromCountry": "PL",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 1616,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-dk-large-untracked",
+      "fromCountry": "PL",
+      "toCountry": "DK",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 351,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-dk-medium",
+      "fromCountry": "PL",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 1616,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-dk-medium-untracked",
+      "fromCountry": "PL",
+      "toCountry": "DK",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-dk-small",
+      "fromCountry": "PL",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 1616,
+      "carrier": "DPD",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-dk-small-untracked",
+      "fromCountry": "PL",
+      "toCountry": "DK",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-es-extra-large",
+      "fromCountry": "PL",
+      "toCountry": "ES",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 3348,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-es-large",
+      "fromCountry": "PL",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-es-large-untracked",
+      "fromCountry": "PL",
+      "toCountry": "ES",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 351,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-es-medium",
+      "fromCountry": "PL",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-es-medium-untracked",
+      "fromCountry": "PL",
+      "toCountry": "ES",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-es-small",
+      "fromCountry": "PL",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-es-small-untracked",
+      "fromCountry": "PL",
+      "toCountry": "ES",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-fr-extra-large",
+      "fromCountry": "PL",
+      "toCountry": "FR",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2553,
+      "carrier": "DPD",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-fr-large",
+      "fromCountry": "PL",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-fr-large-untracked",
+      "fromCountry": "PL",
+      "toCountry": "FR",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 351,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-fr-medium",
+      "fromCountry": "PL",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-fr-medium-untracked",
+      "fromCountry": "PL",
+      "toCountry": "FR",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-fr-small",
+      "fromCountry": "PL",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-fr-small-untracked",
+      "fromCountry": "PL",
+      "toCountry": "FR",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-it-extra-large",
+      "fromCountry": "PL",
+      "toCountry": "IT",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 3348,
+      "carrier": "UPS",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-it-large",
+      "fromCountry": "PL",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-it-large-untracked",
+      "fromCountry": "PL",
+      "toCountry": "IT",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 351,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-it-medium",
+      "fromCountry": "PL",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-it-medium-untracked",
+      "fromCountry": "PL",
+      "toCountry": "IT",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-it-small",
+      "fromCountry": "PL",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-it-small-untracked",
+      "fromCountry": "PL",
+      "toCountry": "IT",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-nl-extra-large",
+      "fromCountry": "PL",
+      "toCountry": "NL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 2553,
+      "carrier": "DPD",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-nl-large",
+      "fromCountry": "PL",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-nl-large-untracked",
+      "fromCountry": "PL",
+      "toCountry": "NL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 351,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-nl-medium",
+      "fromCountry": "PL",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-nl-medium-untracked",
+      "fromCountry": "PL",
+      "toCountry": "NL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-nl-small",
+      "fromCountry": "PL",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 679,
+      "carrier": "InPost International",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-nl-small-untracked",
+      "fromCountry": "PL",
+      "toCountry": "NL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 316,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-pl-extra-large",
+      "fromCountry": "PL",
+      "toCountry": "PL",
+      "packageTier": "EXTRA_LARGE",
+      "maxCards": 9999,
+      "priceEURCents": 410,
+      "carrier": "Pocztex",
+      "serviceName": "Parcel",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-pl-large",
+      "fromCountry": "PL",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 269,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-pl-large-untracked",
+      "fromCountry": "PL",
+      "toCountry": "PL",
+      "packageTier": "LARGE",
+      "maxCards": 200,
+      "priceEURCents": 192,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-pl-medium",
+      "fromCountry": "PL",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 269,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-pl-medium-untracked",
+      "fromCountry": "PL",
+      "toCountry": "PL",
+      "packageTier": "MEDIUM",
+      "maxCards": 20,
+      "priceEURCents": 115,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-pl-small",
+      "fromCountry": "PL",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 269,
+      "carrier": "InPost",
+      "serviceName": "Tracked",
+      "active": true,
+      "tracked": true,
+      "rateSource": "packzoo",
+      "productClass": "parcel",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    },
+    {
+      "id": "pl-pl-small-untracked",
+      "fromCountry": "PL",
+      "toCountry": "PL",
+      "packageTier": "SMALL",
+      "maxCards": 4,
+      "priceEURCents": 115,
+      "carrier": "Poczta Polska",
+      "serviceName": "Untracked letter",
+      "active": true,
+      "tracked": false,
+      "rateSource": "packzoo",
+      "productClass": "mixed",
+      "fetchedAt": "2026-09-29T13:43:59Z",
+      "providersCompared": [
+        "packzoo"
+      ]
+    }
+  ],
+  "source": {
+    "providers": [
+      "packzoo",
+      "porto-data",
+      "dao-brev"
+    ],
+    "fetchedAt": "2026-09-29T13:43:59Z",
+    "api": {
+      "packzoo": "https://packzoo.com/api/prices",
+      "portoData": "https://raw.githubusercontent.com/gruncellka/porto-data/main/porto_data/providers",
+      "daoBrev": "https://dao.as/brev/"
+    },
+    "note": "Live PackZoo compare merged with porto-data + dao letter grids. Cheapest non-express wins. No manual overrides."
+  }
+}

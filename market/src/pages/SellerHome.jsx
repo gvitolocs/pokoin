@@ -175,6 +175,7 @@ export default function SellerHome() {
 
   const collectionHref = marketUrl(APP.collection);
   const inventoryHref = marketUrl(APP.inventory);
+  const salesHref = marketUrl('/sales');
   const marketplaceHref = marketUrl('/marketplace');
 
   useEffect(() => {
@@ -374,12 +375,13 @@ export default function SellerHome() {
         error=""
         collectionHref={collectionHref}
         inventoryHref={inventoryHref}
+        salesHref={salesHref}
         marketplaceHref={marketplaceHref}
         onRetry={() => {}}
         listingHrefFor={() => inventoryHref}
       />
     );
-  }, [preview, collectionHref, inventoryHref, marketplaceHref]);
+  }, [preview, collectionHref, inventoryHref, salesHref, marketplaceHref]);
 
   if (preview) {
     return previewView;
@@ -410,6 +412,7 @@ export default function SellerHome() {
       error={error}
       collectionHref={collectionHref}
       inventoryHref={inventoryHref}
+      salesHref={salesHref}
       marketplaceHref={marketplaceHref}
       onRetry={retryCollection}
       listingHrefFor={(row) => {

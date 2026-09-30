@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Flex box: sturdy shell, padded inside"><title>Flex box: sturdy shell, padded inside</title><defs>
+  <linearGradient id="bx" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe27a"/><stop offset="1" stop-color="#f5b814"/></linearGradient>
+</defs>
+  <path d="M20 44 L60 26 L100 44 L60 62 Z" fill="#ffe89a"/>
+  <path d="M20 44 V90 L60 108 V62 Z" fill="url(#bx)"/>
+  <path d="M100 44 V90 L60 108 V62 Z" fill="#e0a40c"/>
+  <path d="M60 62 L100 44 V90 L60 108 Z" fill="#1f2130" opacity=".0"/>
+  <path d="M68 60 L94 49 V86 L68 98 Z" fill="#fff" opacity=".92"/>
+  <path d="M68 60 L94 49 V86 L68 98 Z" fill="none" stroke="#c9ced8" stroke-width="2" stroke-dasharray="3 3"/>
+  <path d="M74 64 L88 58 V84 L74 90 Z" fill="#6aa3ff" stroke="#23376e" stroke-width="2"/>
+  <path d="M30 50 L46 43 M30 58 L46 51" stroke="#23376e" stroke-width="3" stroke-linecap="round"/>
+</svg>

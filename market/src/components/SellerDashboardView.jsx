@@ -707,6 +707,7 @@ export function SellerDashboardView({
   error,
   collectionHref,
   inventoryHref,
+  salesHref,
   marketplaceHref,
   onRetry,
   listingHrefFor,
@@ -748,7 +749,13 @@ export function SellerDashboardView({
           Layout preview — fixture data, not your live collection.
         </p>
       ) : null}
-      <PageHead title="Dashboard" />
+      <PageHead title="Dashboard">
+        {inventoryHref ? (
+          <DeskLink className="btn" href={inventoryHref} data-testid="dashboard-mypokoin">
+            MyPokoin
+          </DeskLink>
+        ) : null}
+      </PageHead>
 
       <div className="seller-home-grid">
         <section className="seller-tile seller-tile-portfolio" aria-labelledby="seller-portfolio-title">
@@ -880,7 +887,10 @@ export function SellerDashboardView({
         <section className="seller-panel" aria-labelledby="seller-listings-title">
           <header className="seller-panel-head">
             <h2 id="seller-listings-title">Your listings</h2>
-            <DeskLink className="seller-panel-link" href={inventoryHref}>View inventory →</DeskLink>
+            <span className="seller-panel-links">
+              {salesHref ? <DeskLink className="seller-panel-link" href={salesHref}>Sold history →</DeskLink> : null}
+              <DeskLink className="seller-panel-link" href={inventoryHref}>View MyPokoin →</DeskLink>
+            </span>
           </header>
           {listed?.failed ? (
             <p className="seller-panel-empty">Listings unavailable.</p>

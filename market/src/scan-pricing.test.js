@@ -123,3 +123,9 @@ test('priceFieldCommit: typed prices save as manual, invalid text restores', () 
   assert.deepEqual(priceFieldCommit({ pricePkn: 40 }, '0'), { action: 'restore' });
   assert.deepEqual(priceFieldCommit({ pricePkn: 40 }, '-5'), { action: 'restore' });
 });
+
+test('priceFieldCommit: opted-out sellers type their local currency', () => {
+  assert.deepEqual(priceFieldCommit({ pricePkn: null }, '13.21', 'EUR'), { action: 'set', pricePkn: 2642 });
+  assert.deepEqual(priceFieldCommit({ pricePkn: 2642, priceSuggested: false }, '13.21', 'EUR'), { action: 'keep' });
+  assert.deepEqual(priceFieldCommit({ pricePkn: null }, 'x', 'DKK'), { action: 'restore' });
+});

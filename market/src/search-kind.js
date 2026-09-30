@@ -66,6 +66,9 @@ export function searchFetchOptions(tab) {
 export function uniqueSellers(listings, fallbackUsername = '') {
   const byId = new Map();
   const fallback = String(fallbackUsername || '').trim();
+  // Associate roster rows come first and own the username: later listing rows
+  // for the same person fold into the associate entry instead of duplicating it.
+  const associateIdByUsername = new Map();
   for (const row of listings || []) {
     const username = String(
       row.sellerUsername || row.sellerName || row.sellerDisplayName || fallback,
@@ -73,6 +76,20 @@ export function uniqueSellers(listings, fallbackUsername = '') {
     const id = String(row.sellerUid || username);
     if (!id || !username) {
       continue;
+    }
+    const associateRole = String(row.associateRole || '').trim();
+    const usernameKey = username.toLowerCase();
+    if (associateRole) {
+      associateIdByUsername.set(usernameKey, id);
+    } else {
+      const ownedByAssociate = associateIdByUsername.get(usernameKey);
+      if (ownedByAssociate) {
+        const current = byId.get(ownedByAssociate);
+        if (current) {
+          current.count += 1;
+          continue;
+        }
+      }
     }
     const current = byId.get(id);
     if (current) {
@@ -83,7 +100,8 @@ export function uniqueSellers(listings, fallbackUsername = '') {
       id,
       username,
       name: String(row.sellerDisplayName || row.sellerName || username).trim() || username,
-      count: 1,
+      count: associateRole ? 0 : 1,
+      ...(associateRole ? { associateRole } : {}),
     });
   }
   return [...byId.values()];

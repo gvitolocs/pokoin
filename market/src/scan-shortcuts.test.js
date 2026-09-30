@@ -64,7 +64,7 @@ test('Pokoin gap keys', () => {
   // macOS Alt+3 types '£'; the physical code still picks candidate 3.
   assert.deepEqual(shortcutFor(key('£', { altKey: true, code: 'Digit3' })), { command: 'pickCandidate', index: 2 });
   assert.deepEqual(shortcutFor(key('¬', { altKey: true, code: 'KeyL' })), { command: 'focusDefault', field: 'location' });
-  assert.deepEqual(shortcutFor(key('œ', { altKey: true, code: 'KeyQ' })), { command: 'focusDefault', field: 'quantity' });
+  assert.deepEqual(shortcutFor(key('œ', { altKey: true, code: 'KeyQ' })), { command: 'focusDefault', field: 'stack' });
   assert.deepEqual(shortcutFor(key('π', { altKey: true, code: 'KeyP' })), { command: 'pause' });
   assert.deepEqual(shortcutFor(key('.', { code: 'Period' })), { command: 'cycleFinish', target: 'row' });
   assert.deepEqual(shortcutFor(key('/', { code: 'Slash' })), { command: 'replace' });

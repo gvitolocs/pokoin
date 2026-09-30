@@ -183,10 +183,47 @@ function soldSliceKey(row = {}) {
   ].join('|');
 }
 
-/** Sold daily medians per slice, oldest first. */
+/**
+ * A sold price this many times the same card's other sold prices is a
+ * withdrawn joke listing that looked like a sale (3,243,020 PKN for a 22 PKN
+ * Energy Retrieval on 2026-09-22), not a market print.
+ */
+const SOLD_OUTLIER_RATIO = 20;
+
+function median(values) {
+  const sorted = values.slice().sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** Card + finish, any condition or language: the pool a joke price is checked against. */
+function finishKey(row = {}) {
+  return soldSliceKey(row).split('|').filter((_, index) => index !== 1 && index !== 2).join('|');
+}
+
+/** Sold rows without prices far above the same card and finish's other prints. */
+function withoutSoldOutliers(rows) {
+  const prints = (rows || [])
+    .map((row) => ({ row, finish: finishKey(row), pkn: Number(row.median_pkn ?? row.medianPkn) }))
+    .filter((entry) => entry.finish && entry.pkn > 0);
+  const byFinish = new Map();
+  for (const entry of prints) {
+    if (!byFinish.has(entry.finish)) byFinish.set(entry.finish, []);
+    byFinish.get(entry.finish).push(entry);
+  }
+  return prints
+    .filter((entry) => {
+      const others = byFinish.get(entry.finish).filter((other) => other !== entry).map((other) => other.pkn);
+      return !others.length || entry.pkn <= median(others) * SOLD_OUTLIER_RATIO;
+    })
+    .map((entry) => entry.row);
+}
+
+/** Sold daily medians per slice, oldest first. Joke prices are dropped first. */
 function soldPriceBook(rows) {
   const book = new Map();
-  for (const row of rows || []) {
+  for (const row of withoutSoldOutliers(rows)) {
     const key = soldSliceKey(row);
     const day = dayOf(row.day ?? row.observed_day);
     const pkn = Number(row.median_pkn ?? row.medianPkn);
@@ -376,6 +413,7 @@ module.exports = {
   PRICE_BASIS,
   SERIES_REVISION,
   SOLD_BY_BLUEPRINT_SQL,
+  SOLD_OUTLIER_RATIO,
   addUtcDays,
   basketMove,
   buildDailySeries,
@@ -393,4 +431,5 @@ module.exports = {
   utcDayKey,
   valueHoldingsOn,
   walletSeries,
+  withoutSoldOutliers,
 };

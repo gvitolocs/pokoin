@@ -27,8 +27,12 @@ same deployment (that alias can otherwise lag and serve an old review board). A 
 without a SHA must be compared by hand and accepted with
 `ALLOW_UNTRACKED_PRODUCTION=<deployment id>`.
 
-`vercel.json` sets `git.deploymentEnabled.main = false`: pushes to `main` do
-not deploy by themselves. Other branches still get preview deployments.
+`vercel.json` sets `git.deploymentEnabled = false`: no push builds on Vercel —
+not `main`, not PR branches. Since 2026-09-29 preview builds of every PR
+(projects `web` and `pokoin-web-seller-blackpage`) kept exhausting the free
+plan's 100 deployments / 24 h and blocked production deploys. Production goes
+only through `scripts/deploy-web.sh` (Vercel CLI, unaffected by this setting);
+preview a branch locally with `paseo script start web` instead.
 
 ## Why (2026-09-17)
 

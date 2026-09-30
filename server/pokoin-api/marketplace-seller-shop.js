@@ -58,20 +58,105 @@ function cleanOffset(value) {
 function conditionSql(code) {
   // Listings store short codes (NM/LP/MP/HP/PO). UI filters use Pokoin chips
   // (NM/SP/MP/PL/Poor); LP displays as SP and HP as PL.
-  const c = String(code || '').toUpperCase().replace(/\s+/g, '');
-  if (!c) return null;
-  if (c === 'NM' || c === 'M' || c.includes('NEAR')) return { codes: ['NM', 'M'] };
-  if (c === 'SP' || c === 'LP' || c.includes('SLIGHT') || c.includes('LIGHT')) {
-    return { codes: ['SP', 'LP'] };
+  const raw = cleanText(code, 40).toUpperCase();
+  if (!raw) return null;
+  const map = {
+    NM: ['NM', 'M'],
+    M: ['NM', 'M'],
+    SP: ['SP', 'LP'],
+    LP: ['SP', 'LP'],
+    MP: ['MP'],
+    PL: ['PL', 'HP'],
+    HP: ['PL', 'HP'],
+    POOR: ['PO', 'POOR', 'D', 'DMG'],
+    PO: ['PO', 'POOR', 'D', 'DMG'],
+    D: ['PO', 'POOR', 'D', 'DMG'],
+    DMG: ['PO', 'POOR', 'D', 'DMG'],
+  };
+  const codes = map[raw === 'POOR' ? 'POOR' : raw] || map[raw];
+  return codes ? { codes } : null;
+}
+
+/** Query flag: reverse=1 / firstEdition=1 means require that trait. */
+function truthyFlag(value) {
+  const raw = String(value ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+/**
+ * Rarity filter against listing foil_state and catalog rarity on
+ * marketplace_search_candidates (listings do not store rarity text).
+ * Returns { sql, push(values) } or null.
+ */
+function raritySql(key) {
+  const rarity = cleanText(key, 40).toLowerCase();
+  if (!rarity) return null;
+
+  function catalogMatch(likePatterns, { exclude = [] } = {}) {
+    return {
+      apply(where, values) {
+        const likes = [];
+        for (const pattern of likePatterns) {
+          values.push(pattern);
+          likes.push(`lower(coalesce(c.rarity, '')) like $${values.length}`);
+        }
+        const nots = [];
+        for (const pattern of exclude) {
+          values.push(pattern);
+          nots.push(`lower(coalesce(c.rarity, '')) not like $${values.length}`);
+        }
+        const body = [...likes, ...nots].join(' and ');
+        where.push(`exists (
+          select 1
+          from public.marketplace_search_candidates c
+          where c.card_id::text = marketplace_user_listings.card_id
+            and (${body})
+        )`);
+      },
+    };
   }
-  if (c === 'MP' || c.includes('MODERATE')) return { codes: ['MP'] };
-  if (c === 'PL' || c === 'HP' || c === 'PLAYED' || c.includes('HEAVY')) {
-    return { codes: ['PL', 'HP'] };
+
+  if (rarity === 'holo') {
+    return {
+      apply(where, values) {
+        values.push('%holo%');
+        values.push('%holofoil%');
+        where.push(`(
+          lower(coalesce(foil_state, '')) in ('holo', 'holofoil')
+          or exists (
+            select 1
+            from public.marketplace_search_candidates c
+            where c.card_id::text = marketplace_user_listings.card_id
+              and (
+                lower(coalesce(c.rarity, '')) like $${values.length - 1}
+                or lower(coalesce(c.rarity, '')) like $${values.length}
+              )
+          )
+        )`);
+      },
+    };
   }
-  if (c === 'PO' || c.includes('POOR') || c === 'D' || c === 'DMG' || c.includes('DAMAGE')) {
-    return { codes: ['PO', 'POOR', 'D', 'DMG'] };
+  if (rarity === 'common') {
+    return catalogMatch(['%common%'], { exclude: ['%uncommon%'] });
   }
-  return { codes: [c] };
+  if (rarity === 'uncommon') {
+    return catalogMatch(['%uncommon%']);
+  }
+  if (rarity === 'rare') {
+    return catalogMatch(['%rare%'], {
+      exclude: ['%ultra%', '%secret%', '%illustration%', '%amazing%', '%uncommon%'],
+    });
+  }
+  if (rarity === 'ultra') {
+    return catalogMatch(['%ultra%']);
+  }
+  if (rarity === 'illustration') {
+    return catalogMatch(['%illustration%']);
+  }
+  if (rarity === 'secret') {
+    return catalogMatch(['%secret%']);
+  }
+  return null;
 }
 
 function sortSql(sort) {
@@ -102,6 +187,39 @@ async function sellerUidFromListingName(username) {
     [username],
   ).catch(() => ({ rows: [] }));
   return cleanText(result.rows[0]?.seller_uid, 160);
+}
+
+/**
+ * Associates roster membership for the profile badge: seller uid → auth email
+ * → roster row. Never exposes the email — the caller gets role + name only.
+ */
+async function associateBadgeForUid(uid) {
+  const id = cleanText(uid, 160);
+  if (!id) return null;
+  try {
+    const user = await getFirebaseAdmin().auth().getUser(id);
+    const email = cleanText(user.email, 320).toLowerCase();
+    if (!email) return null;
+    const result = await marketplaceQuery(
+      `
+        select role, display_name
+        from public.marketplace_associates
+        where lower(btrim(email)) = $1
+          and active
+        limit 1
+      `,
+      [email],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      role: String(row.role || 'associate').trim().toLowerCase(),
+      displayName: String(row.display_name || '').trim(),
+    };
+  } catch (error) {
+    console.warn('seller shop associate lookup failed', error.message);
+    return null;
+  }
 }
 
 function shopSellerFromProfile({ uid, profile = {}, queried = '', via = '' }) {
@@ -161,7 +279,8 @@ async function sellerProfileForUsername(username) {
     error.statusCode = 404;
     throw error;
   }
-  return seller;
+  // false = card payments only (Profile → "Get paid in PKN" off).
+  return { ...seller, acceptsPkn: data.acceptsPkn !== false };
 }
 
 function listingRow(row, seller = {}) {
@@ -180,6 +299,7 @@ function listingRow(row, seller = {}) {
     condition: row.condition,
     language: row.language,
     pricePkn: Number(row.price_pkn || 0),
+    sellerAcceptsPkn: seller.acceptsPkn !== false,
     quantityAvailable: Number(row.quantity_available || 0),
     signed: row.signed === true,
     reverse: row.reverse === true,
@@ -249,6 +369,9 @@ async function readSellerShopData(url, game) {
   const condition = cleanText(url.searchParams.get('condition'), 40);
   const language = cleanText(url.searchParams.get('language'), 10).toUpperCase();
   const sort = cleanText(url.searchParams.get('sort'), 40);
+  const rarity = cleanText(url.searchParams.get('rarity'), 40);
+  const reverseOnly = truthyFlag(url.searchParams.get('reverse'));
+  const firstEditionOnly = truthyFlag(url.searchParams.get('firstEdition'));
 
   const values = [seller.uid];
   const where = [
@@ -281,6 +404,18 @@ async function readSellerShopData(url, game) {
   if (language) {
     values.push(`${language}%`);
     where.push(`upper(coalesce(language, '')) like $${values.length}`);
+  }
+
+  if (reverseOnly) {
+    where.push('reverse = true');
+  }
+  if (firstEditionOnly) {
+    where.push('first_edition = true');
+  }
+
+  const rarityFilter = raritySql(rarity);
+  if (rarityFilter) {
+    rarityFilter.apply(where, values);
   }
 
   const whereSql = where.join(' and ');
@@ -317,6 +452,8 @@ async function readSellerShopData(url, game) {
       uid: seller.uid,
       username: seller.username,
       displayName: seller.displayName || seller.username,
+      associate: await associateBadgeForUid(seller.uid),
+      acceptsPkn: seller.acceptsPkn !== false,
     },
     listings: result.rows.map((row) => listingRow(row, seller)),
     total,
@@ -359,6 +496,8 @@ module.exports._test = {
   cleanOffset,
   cleanUsername,
   conditionSql,
+  raritySql,
+  truthyFlag,
   sortSql,
   shopSellerFromProfile,
   listingRow,

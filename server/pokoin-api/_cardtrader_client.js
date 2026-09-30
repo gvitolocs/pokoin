@@ -207,6 +207,44 @@ async function updateProduct(token, productId, payload = {}) {
   });
 }
 
+/**
+ * Relative stock change on the seller's CardTrader product. Never an absolute
+ * quantity: the seller may have changed stock on CardTrader in the meantime.
+ */
+async function incrementProduct(token, productId, deltaQuantity) {
+  const id = cleanText(productId, 80);
+  return cardTraderRequest(`/products/${encodeURIComponent(id)}/increment`, cleanToken(token), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ delta_quantity: Math.trunc(Number(deltaQuantity) || 0) }),
+  });
+}
+
+/** Seller orders (sale evidence), newest first, paged until exhausted. */
+async function fetchSellerOrders(token, { from = '', pageSize = 100, maxPages = 50 } = {}) {
+  const orders = [];
+  for (let page = 1; page <= maxPages; page += 1) {
+    const params = new URLSearchParams({
+      order_as: 'seller',
+      sort: 'date.desc',
+      limit: String(pageSize),
+      page: String(page),
+    });
+    if (from) params.set('from', from);
+    const payload = await cardTraderRequest(`/orders?${params}`, cleanToken(token));
+    if (!Array.isArray(payload)) {
+      const error = new Error('CardTrader orders did not return an array.');
+      error.statusCode = 502;
+      throw error;
+    }
+    orders.push(...payload);
+    if (payload.length < pageSize) break;
+  }
+  return orders;
+}
+
 async function destroyProduct(token, productId) {
   const id = cleanText(productId, 80);
   return cardTraderRequest(`/products/${encodeURIComponent(id)}`, cleanToken(token), {
@@ -301,7 +339,9 @@ module.exports = {
   fetchCart,
   fetchMarketplaceProducts,
   fetchProductsExport,
+  fetchSellerOrders,
   importDryRunSummary,
+  incrementProduct,
   isOneDayReadyName,
   normalizeInfo,
   purchaseCart,

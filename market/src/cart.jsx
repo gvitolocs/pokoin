@@ -23,6 +23,20 @@ function writeCart(items) {
   localStorage.setItem(CART_KEY, JSON.stringify(items.slice(0, CART_MAX)));
 }
 
+/** Snapshot for Poko personal context (no React). Caps at 24 lines. */
+export function peekCartItems(limit = 24) {
+  if (typeof window === 'undefined') return [];
+  return readCart().slice(0, Math.max(1, Math.min(48, Number(limit) || 24))).map((row) => ({
+    cardId: String(row.cardId || row.card?.id || ''),
+    name: String(row.name || row.card?.name || ''),
+    qty: Number(row.qty) || 0,
+    pricePkn: Number(row.pricePkn) || 0,
+    sellerName: String(row.sellerName || ''),
+    condition: String(row.condition || ''),
+    language: String(row.language || ''),
+  })).filter((row) => row.cardId && row.qty > 0);
+}
+
 const CartContext = createContext({
   items: [],
   count: 0,
@@ -45,11 +59,14 @@ export function cartItemFromOffer(card, offer) {
     name: card.name || 'Card',
     image: cartImageFor(card, offer),
     pricePkn: Number(offer?.pricePkn) || 0,
+    // false = seller takes card payments only (local currency first in the bag).
+    sellerAcceptsPkn: offer?.sellerAcceptsPkn !== false,
     qty: Math.min(stock, Math.max(1, Math.trunc(Number(offer?.qty) || 1))),
     stock,
     condition: offer?.condition || 'NM',
     language: offer?.language || '',
     sellerName: offer?.sellerName || offer?.sellerDisplayName || 'Pokoin',
+    sellerCountry: String(offer?.sellerCountry || offer?.seller_country || offer?.shipFromCountry || '').trim().toUpperCase(),
     nftAvailable: Boolean(offer?.nftAvailable || offer?.isNftEligible),
     reserveAvailable: Boolean(offer?.reserveAvailable),
     href: card.canonicalPath || `/marketplace/en/cards/${card.id}`,

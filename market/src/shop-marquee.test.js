@@ -6,9 +6,11 @@ import {
   listingSelectId,
   marqueeBlocked,
   marqueeRect,
+  marqueeRectForScroll,
   marqueeStartAllowed,
   mixedDeskDragReference,
   rectsIntersect,
+  selectBandAllowed,
   shopDragOffers,
 } from './shop-marquee.js';
 
@@ -35,6 +37,22 @@ test('a rubber band starts on the card scan, not on a button', () => {
   assert.equal(listingSelectId({ id: 'lst-1' }), 'lst-1');
 });
 
+test('marquee follows document scroll so off-screen rows can enter the band', () => {
+  const origin = { x: 100, y: 200, scrollX: 0, scrollY: 0 };
+  // Pointer held still; page scrolled down 400px → origin drifts up, box grows.
+  const afterScroll = marqueeRectForScroll(origin, 100, 200, 0, 400);
+  assert.equal(afterScroll.left, 100);
+  assert.equal(afterScroll.top, -200);
+  assert.equal(afterScroll.height, 400);
+  assert.equal(afterScroll.width, 0);
+  // No scroll → same as a plain client-space rect.
+  const steady = marqueeRectForScroll(origin, 180, 260, 0, 0);
+  assert.deepEqual(
+    { left: steady.left, top: steady.top, width: steady.width, height: steady.height },
+    { left: 100, top: 200, width: 80, height: 60 },
+  );
+});
+
 test('empty page background may start a shop marquee; shop rows and art may not', () => {
   function mock(hits) {
     return {
@@ -58,6 +76,39 @@ test('empty page background may start a shop marquee; shop rows and art may not'
   assert.equal(marqueeStartAllowed(panel), false);
   assert.equal(marqueeStartAllowed(species), false);
   assert.equal(marqueeStartAllowed(setLink), false);
+});
+
+test('select band stays off on touch, phone widths, and account pages', () => {
+  const marketWin = {
+    location: { pathname: '/marketplace/en/cards/1' },
+    matchMedia: () => ({ matches: false }),
+  };
+  assert.equal(selectBandAllowed({ pointerType: 'mouse' }, marketWin), true);
+  assert.equal(selectBandAllowed({ pointerType: 'touch' }, marketWin), false);
+  assert.equal(selectBandAllowed({ pointerType: 'pen' }, marketWin), false);
+  assert.equal(
+    selectBandAllowed({ pointerType: 'mouse' }, {
+      location: { pathname: '/marketplace' },
+      matchMedia: (query) => ({ matches: String(query).includes('max-width: 720px') }),
+    }),
+    false,
+  );
+  assert.equal(
+    selectBandAllowed({ button: 0 }, {
+      location: { pathname: '/marketplace' },
+      matchMedia: (query) => ({ matches: String(query).includes('pointer: coarse') }),
+    }),
+    false,
+  );
+  assert.equal(
+    selectBandAllowed({ pointerType: 'mouse' }, {
+      location: { pathname: '/profile' },
+      matchMedia: () => ({ matches: false }),
+    }),
+    false,
+  );
+  const host = readFileSync(new URL('./select-band.jsx', import.meta.url), 'utf8');
+  assert.match(host, /selectBandAllowed/);
 });
 
 test('ShopList listens on main so a band from empty background can hit listings', () => {

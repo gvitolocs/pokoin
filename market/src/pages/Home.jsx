@@ -356,7 +356,7 @@ export default function Home() {
         <span>Buyer protection →</span>
       </Link>
 
-      <Link className="callout" to="/inventory" onClick={() => track(Action.sell, mega || { id: '703382', name: 'sell' })}>
+      <Link className="callout" to="/mypokoin" onClick={() => track(Action.sell, mega || { id: '703382', name: 'sell' })}>
         Sell your cards for PKN
         <span>Get started →</span>
       </Link>

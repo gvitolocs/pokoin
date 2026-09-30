@@ -51,9 +51,19 @@ import Buy from './pages/Buy.jsx';
 import Admin from './pages/Admin.jsx';
 import Checkout from './pages/Checkout.jsx';
 import Orders from './pages/Orders.jsx';
+import Associate from './pages/Associate.jsx';
+import Sales from './pages/Sales.jsx';
+import Bought from './pages/Bought.jsx';
+import Stock from './pages/Stock.jsx';
+import SyncReview from './pages/SyncReview.jsx';
 import Collection from './pages/Collection.jsx';
 import NftRedirect from './pages/Nft.jsx';
 import Protection from './pages/Protection.jsx';
+import Flex from './pages/Flex.jsx';
+import Invite from './pages/Invite.jsx';
+import Join from './pages/Join.jsx';
+import AmbassadorProgram from './pages/AmbassadorProgram.jsx';
+import ReferralClaimer from './components/ReferralClaimer.jsx';
 import EmailPreferences from './pages/EmailPreferences.jsx';
 import Site from './pages/Site.jsx';
 import About from './pages/About.jsx';
@@ -182,6 +192,11 @@ function AppShell() {
       {both('/swap', <Navigate to="/exchange" replace />)}
       {both('/checkout', <Checkout />)}
       {both('/orders', <Orders />)}
+      {both('/associate', <Associate />)}
+      {both('/sales', <Sales />)}
+      {both('/bought', <Bought />)}
+      {both('/stock', <Stock />)}
+      {both('/inventory/sync-review', <SyncReview />)}
       {both('/collection', <Collection />)}
       {both('/forum', <Forum />)}
       {both('/forum/category/:categoryId', <Forum />)}
@@ -190,7 +205,9 @@ function AppShell() {
       {both('/cardscan', <Scan />)}
       {both('/scancard', <Scan />)}
       {both('/dashboard/scan', <ScanDesk />)}
-      {both('/inventory', <Inventory />)}
+      {both('/mypokoin/import', <Inventory />)}
+      {both('/mypokoin', <Inventory />)}
+      {both('/inventory', <Navigate to="/mypokoin" replace />)}
       {both('/inventory/scan', <ScanDesk />)}
       {both('/docs', <Site />)}
       {both('/about', <About />)}
@@ -200,6 +217,11 @@ function AppShell() {
       {both('/privacy', <Site />)}
       {both('/email-preferences', <EmailPreferences />)}
       {both('/protection', <Protection />)}
+      {both('/flex', <Flex />)}
+      {both('/invite', <Invite />)}
+      {both('/join/:code', <Join />)}
+      {both('/ambassadorprogram', <AmbassadorProgram />)}
+      {both('/ambassador', <Navigate to="/ambassadorprogram" replace />)}
       {both('/buy', <Buy />)}
       {both('/earn', <Site />)}
       {both('/whitepaper', <Site />)}
@@ -216,6 +238,7 @@ function AppShell() {
   return (
     <>
       <Chrome>{routes}</Chrome>
+      <ReferralClaimer />
       <CookieBanner />
       <ChatDock />
     </>

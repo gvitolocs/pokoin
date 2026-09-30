@@ -1,0 +1,12 @@
+[Unit]
+Description=Pay Pokoin referral rewards every ten minutes
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=10min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=pokoin-referral-reconcile.service
+
+[Install]
+WantedBy=timers.target

@@ -212,3 +212,23 @@ test('firestore timestamps become a ledger day', () => {
   assert.equal(row.date, '2026-09-01');
   assert.equal(row.amountPkn, 15);
 });
+
+test('a withdrawn joke listing is not a sold price; reverse copies are their own market', () => {
+  const rows = [
+    { day: '2026-09-18', blueprint_id: '111585', condition: 'NM', language: 'EN', median_pkn: 40 },
+    { day: '2026-09-18', blueprint_id: '111585', condition: 'NM', language: 'EN', median_pkn: 190, reverse: true },
+    { day: '2026-09-22', blueprint_id: '111585', condition: 'NM', language: 'EN', median_pkn: 22 },
+    { day: '2026-09-22', blueprint_id: '111585', condition: 'NM', language: 'EN', median_pkn: 3243020, reverse: true },
+    { day: '2026-09-23', blueprint_id: '111585', condition: 'MP', language: 'IT', median_pkn: 194, reverse: true },
+    { day: '2026-09-23', blueprint_id: '117179', condition: 'NM', language: 'EN', median_pkn: 1162, reverse: true },
+    { day: '2026-09-23', blueprint_id: '117179', condition: 'NM', language: 'EN', median_pkn: 131 },
+  ];
+  const kept = core.withoutSoldOutliers(rows).map((row) => row.median_pkn);
+  assert.equal(kept.includes(3243020), false);
+  assert.equal(kept.includes(1162), true);
+  assert.equal(kept.length, 6);
+  const book = core.soldPriceBook(rows);
+  const reverse = stock(111585, 'NM', 'EN', 1, undefined, { reverse: true });
+  // The joke print is gone, so the reverse copy keeps its real 190 PKN sale.
+  assert.deepEqual(core.lastSoldFor(reverse, book, '2026-09-27'), { pkn: 190, day: '2026-09-18' });
+});

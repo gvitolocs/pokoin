@@ -1,8 +1,6 @@
 {
   "git": {
-    "deploymentEnabled": {
-      "main": false
-    }
+    "deploymentEnabled": false
   },
   "installCommand": "true",
   "buildCommand": "bash scripts/build-web.sh",
@@ -26,7 +24,12 @@
         {
           "key": "X-Frame-Options",
           "value": "SAMEORIGIN"
-        },
+        }
+      ]
+    },
+    {
+      "source": "/((?!__/).*)",
+      "headers": [
         {
           "key": "Content-Security-Policy",
           "value": "base-uri 'self'; object-src 'none'; frame-ancestors 'self'; script-src 'self' https://apis.google.com https://www.gstatic.com https://www.google.com https://accounts.google.com https://pokoin.firebaseapp.com"
@@ -662,6 +665,10 @@
   ],
   "rewrites": [
     {
+      "source": "/brand/:path*",
+      "destination": "/market/brand/:path*"
+    },
+    {
       "source": "/__/auth/:path*",
       "destination": "https://pokoin.firebaseapp.com/__/auth/:path*"
     },
@@ -711,7 +718,7 @@
     },
     {
       "source": "/cardscan/identify",
-      "destination": "https://cardscan.pokoin.com/identify"
+      "destination": "https://api.pokoin.com/api/scan/identify"
     },
     {
       "source": "/chain/:path*",
@@ -982,6 +989,22 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/mypokoin/import/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/import",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/inventory/",
       "destination": "/market/index.html"
     },
@@ -1054,6 +1077,46 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/flex/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/flex",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/invite/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/invite",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ambassadorprogram/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ambassadorprogram",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ambassador/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/ambassador",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/join/:code/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/join/:code",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/buy/",
       "destination": "/market/index.html"
     },
@@ -1107,6 +1170,22 @@
     },
     {
       "source": "/orders",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/associate/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/associate",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/sales/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/sales",
       "destination": "/market/index.html"
     },
     {

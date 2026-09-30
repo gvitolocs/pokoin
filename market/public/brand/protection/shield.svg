@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 300" role="img" aria-labelledby="t d">
+  <title id="t">Pokoin buyer protection</title>
+  <desc id="d">A shield holding a card and a locked PKN coin: your payment is held until the card arrives.</desc>
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffd33d" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#ffd33d" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34529f"/>
+      <stop offset="1" stop-color="#1a2a57"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe27a"/>
+      <stop offset="1" stop-color="#f5b814"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="160" cy="150" rx="150" ry="140" fill="url(#glow)"/>
+  <ellipse cx="160" cy="276" rx="92" ry="12" fill="#000" opacity=".35"/>
+  <path d="M160 22 L262 58 V140 C262 206 218 248 160 270 C102 248 58 206 58 140 V58 Z" fill="url(#rim)"/>
+  <path d="M160 38 L248 69 V141 C248 196 211 232 160 252 C109 232 72 196 72 141 V69 Z" fill="url(#shield)"/>
+  <path d="M160 38 L248 69 V100 C200 84 120 84 72 100 V69 Z" fill="#fff" opacity=".07"/>
+  <!-- card -->
+  <g transform="translate(138 92) rotate(-8)">
+    <rect x="-34" y="-46" width="68" height="94" rx="7" fill="#fff" stroke="#23376e" stroke-width="3"/>
+    <rect x="-27" y="-38" width="54" height="38" rx="3" fill="#6aa3ff"/>
+    <path d="M-27 -12 l14 -14 l10 10 l8 -8 l22 22 v2 h-54 z" fill="#3a6fd8" opacity=".7"/>
+    <rect x="-27" y="6" width="54" height="5" rx="2" fill="#23376e" opacity=".5"/>
+    <rect x="-27" y="15" width="38" height="5" rx="2" fill="#23376e" opacity=".3"/>
+    <rect x="-27" y="24" width="46" height="5" rx="2" fill="#23376e" opacity=".3"/>
+  </g>
+  <!-- locked PKN coin -->
+  <g transform="translate(192 168)">
+    <circle r="36" fill="#ffd33d" stroke="#23376e" stroke-width="5"/>
+    <circle r="27" fill="none" stroke="#23376e" stroke-width="2" opacity=".35"/>
+    <text y="7" text-anchor="middle" font-family="Satoshi, system-ui, sans-serif" font-size="19" font-weight="900" fill="#23376e">PKN</text>
+    <g transform="translate(24 -28)">
+      <path d="M-9 0 V-7 A9 9 0 0 1 9 -7 V0" fill="none" stroke="#fff" stroke-width="4"/>
+      <rect x="-13" y="-1" width="26" height="20" rx="4" fill="#fff"/>
+      <circle cy="8" r="3" fill="#23376e"/>
+    </g>
+  </g>
+  <!-- check -->
+  <g transform="translate(106 196)">
+    <circle r="20" fill="#7dcea0"/>
+    <path d="M-9 0 l6 6 l12 -13" fill="none" stroke="#0f2a1c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

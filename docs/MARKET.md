@@ -822,9 +822,10 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
 
   | Reason | Meaning | Sold graph? |
   | --- | --- | --- |
-  | `quantity_decreased` | Same product id still in the book; qty went down. Stack drip. | **Yes** |
+  | `quantity_decreased` | Same product id still in the book; qty went down. Stack drip. | **Yes**, only when the listing is ≥3 days old |
   | `listing_id_rotated` | Old product id gone, but the **same seller stack** is still listed (any sibling id, **any qty**). Insertion-id / split-stack churn, not a sale. | **No** |
-  | `inferred_sale` | That **seller stack** is gone from the complete book (seller + language + condition + reverse/1st/graded). Not “product id missing.” Still not a receipt — dump miss and delist look the same. | **Yes** |
+  | `young_listing_removed` | Listing (or drip) left the book **less than 3 days** after `first_seen_at`. Fresh lowball posts and price-edit churn, not a market price. History kept; the 093 three-dump ceremony still runs, but the reason never becomes sale-eligible. | **No** |
+  | `inferred_sale` | That **seller stack** is gone from the complete book (seller + language + condition + reverse/1st/graded). Not “product id missing.” Still not a receipt — dump miss and delist look the same. | **Yes**, only when the listing is ≥3 days old |
   | `seller_on_vacation` | Seller hid the shop (`on_vacation`) or the whole snapshot book vanished in one day. Not sold. Snapshots stay frozen. | **No** |
   | `dump_miss` | Listing id still on CardTrader `GET ?blueprint_id=`. Expansion dump / 25-wide window omitted it. | **No** |
   | `dropped_from_cheapest_25` | Left our old 25-wide window. **Wrong as a sale.** Unused on the complete-book path. | **No** |
@@ -915,6 +916,15 @@ CardTrader daily (Oracle GET, nezopt NVMe persist, flock)
   `marketplace_price_observations`):
 
   - Source ids only: `cardtrader:{listing}:{day}:{inferred_sale|quantity_decreased}`.
+  - The listing must have been in the book at least **3 days**
+    (`first_seen_at::date <= removed_day - 3`): younger vanishes and drips
+    archive as `young_listing_removed` and never project an observation.
+    Giuseppe's lowball guard — fresh posts vanish at fire-sale prices
+    (2026-09-15..28 dumps: young-episode median 156 PKN vs 330 PKN for
+    mature stacks; Mega Diancie ex 356824 on 23 Sep plotted 222 blended off
+    213 young of 216 episodes). Cardvault `101_listing_min_age_three_days.sql`
+    on top of the 093 three-dump confirmation; the one-time backfill
+    invalidated ~189k young episodes and rebuilt the graph.
   - Same listing_id on many days is snapshot flicker — keep `inferred_sale`
     only when that listing appears on a single day (`047_…`).
   - `inferred_sale` while that listing_id is still in

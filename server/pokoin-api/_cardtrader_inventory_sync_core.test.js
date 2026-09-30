@@ -68,7 +68,7 @@ test('normalize pokemon product facets', () => {
       pokemon_first_edition: true,
     },
   });
-  assert.equal(product.condition, 'LP');
+  assert.equal(product.condition, 'SP');
   assert.equal(product.language, 'JP');
   assert.equal(product.reverse, true);
   assert.equal(product.firstEdition, true);

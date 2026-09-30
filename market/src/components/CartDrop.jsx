@@ -7,11 +7,18 @@ import { pickCartOffer } from '../cart-offer.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { bundleOf, LISTING_DRAG_TYPE, readListingDrag } from '../chat-listing.js';
 import { fetchSpeciesCards } from '../species-cards.js';
+import {
+  acceptTrayDrop,
+  cartItemReference,
+  endTrayDrag,
+  startTrayDrag,
+  TRAY_CART,
+} from '../tray-drag.js';
 import CardArt from './CardArt.jsx';
 import QtyStepper from './QtyStepper.jsx';
 
 export default function CartDrop({ onAdd }) {
-  const { items, setQty } = useCart();
+  const { items, setQty, removeItem } = useCart();
   const [over, setOver] = useState(false);
   const thumb = cartDropThumb(items.length);
 
@@ -35,6 +42,7 @@ export default function CartDrop({ onAdd }) {
         event.preventDefault();
         event.stopPropagation();
         setOver(false);
+        acceptTrayDrop(TRAY_CART);
         const reference = readListingDrag(event);
         if (!reference) return;
         if (reference.kind === 'cards') {
@@ -58,8 +66,23 @@ export default function CartDrop({ onAdd }) {
               key={row.id}
               className="cart-drop-card"
               style={{ width: thumb, height: Math.round(thumb * 88 / 63) }}
+              draggable
+              onDragStart={(event) => {
+                const reference = cartItemReference(row);
+                if (!reference) {
+                  event.preventDefault();
+                  return;
+                }
+                event.stopPropagation();
+                startTrayDrag(event, {
+                  tray: TRAY_CART,
+                  reference,
+                  remove: () => removeItem(row.id),
+                });
+              }}
+              onDragEnd={() => endTrayDrag()}
             >
-              <Link to={row.href || '/cart'} title={row.name}>
+              <Link to={row.href || '/cart'} title={row.name} draggable={false}>
                 {row.image ? <CardArt src={row.image} alt="" full /> : <span className="suggest-ph" />}
               </Link>
               <QtyStepper
@@ -143,6 +166,7 @@ async function addDraggedCard(reference, onAdd) {
         pricePkn: reference.pricePkn,
         sellerUid: reference.sellerUid,
         sellerName: reference.sellerName || reference.seller,
+        sellerCountry: reference.sellerCountry || '',
         cardImageUrl: reference.imageUrl,
         condition: reference.condition || 'NM',
         language: reference.language || '',
