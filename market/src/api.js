@@ -2354,6 +2354,32 @@ export function fetchSellerShop(username, {
   );
 }
 
+/** PowerTools pricing strategies + pricer defaults (users/{uid}). */
+export function fetchPricingStrategies(token) {
+  return getJson('/api/marketplace-pricing-strategies', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
+export function savePricingStrategies(body, token) {
+  return getJson('/api/marketplace-pricing-strategies', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export function deletePricingStrategy(id, token) {
+  const params = new URLSearchParams({ id });
+  return getJson(`/api/marketplace-pricing-strategies?${params}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+}
+
 /** PowerTools-style pricer: batch market comps for the MyPokoin listings board. */
 export async function fetchPriceCheck(items, token) {
   const params = new URLSearchParams({

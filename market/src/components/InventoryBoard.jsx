@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchPriceCheck } from '../api.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
+import { groupInventoryStacks } from '../inventory-listings.js';
 import { useAuth } from '../auth.jsx';
 import { conditionChipSrc, conditionShort, conditionTone, listingLanguageFlag } from '../listing-meta.js';
 import {
@@ -53,6 +54,33 @@ function MarketCell({ value, pending }) {
   return <span className="inv-mkt">{value.toLocaleString('en-US', { maximumFractionDigits: 0 })} PKN</span>;
 }
 
+function titleGroups(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const title = String(row?.cardName || row?.name || 'Listing');
+    const group = groups.get(title) || {
+      title,
+      printings: new Set(),
+      postingCount: 0,
+      copies: 0,
+      askingPkn: 0,
+      postings: [],
+    };
+    const id = String(row?.cardId || row?.card_id || '');
+    if (id) group.printings.add(id);
+    const qty = Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0);
+    const price = Number(row?.pricePkn ?? row?.price_pkn ?? 0) || 0;
+    group.postingCount += 1;
+    group.copies += qty;
+    group.askingPkn += qty * price;
+    group.postings.push(row);
+    groups.set(title, group);
+  }
+  return [...groups.values()]
+    .map((group) => ({ ...group, printings: group.printings.size }))
+    .sort((a, b) => b.postingCount - a.postingCount || a.title.localeCompare(b.title));
+}
+
 function StatTile({ value, label, tone = '' }) {
   return (
     <div className={`inv-stat${tone ? ` is-${tone}` : ''}`}>
@@ -89,13 +117,16 @@ function RowStatus({ status }) {
  * a filter rail (search / status / condition / language / sort) and a dense
  * thumbnail table — candyext shop chrome on the seller's own stock.
  */
-export default function InventoryBoard({ rows, formatPrice }) {
+export default function InventoryBoard({ rows, formatPrice, defaultSource = '', autoMarketColumn = false }) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
   const [condition, setCondition] = useState('');
   const [language, setLanguage] = useState('');
   const [sort, setSort] = useState('newest');
-  const [pricerSource, setPricerSource] = useState('');
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('pokoin.invView') || 'table');
+  const [openTitle, setOpenTitle] = useState('');
+  const [pricerSource, setPricerSource] = useState(defaultSource);
+  const pricerOn = Boolean(pricerSource) || autoMarketColumn;
   const [prices, setPrices] = useState({});
   const [pricesPending, setPricesPending] = useState(false);
   const pricesKeyRef = useRef('');
@@ -111,7 +142,7 @@ export default function InventoryBoard({ rows, formatPrice }) {
   // Load market comps for the current filtered rows when a pricer source is
   // on. Re-fetches when the row set changes; eBay / TCGPlayer never fetch.
   useEffect(() => {
-    if (!pricerSource) {
+    if (!pricerOn) {
       pricesKeyRef.current = '';
       return undefined;
     }
@@ -142,7 +173,7 @@ export default function InventoryBoard({ rows, formatPrice }) {
     return () => {
       cancelled = true;
     };
-  }, [pricerSource, view, getBearer]);
+  }, [pricerOn, pricerSource, view, getBearer]);
 
 
   return (
@@ -218,14 +249,127 @@ export default function InventoryBoard({ rows, formatPrice }) {
         </span>
       </div>
 
-      <div className={`inv-table${pricerSource ? ' has-mkt' : ''}`}>
+      <div className="inv-views" role="group" aria-label="View">
+        {[['table', 'Table'], ['stacks', 'Stacks'], ['titles', 'Titles']].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={`inv-chip${viewMode === id ? ' on' : ''}`}
+            onClick={() => {
+              setViewMode(id);
+              localStorage.setItem('pokoin.invView', id);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {viewMode === 'stacks' ? (
+        <div className="loc-list">
+          {groupInventoryStacks(view).map((stack) => (
+            <div key={stack.key} className="loc-stack">
+              <div className="loc-stack-head">
+                <Link className="inv-card" to={inventoryListingHref(stack)}>
+                  <RowThumb row={stack} />
+                  <span className="inv-card-txt">
+                    <strong>{stack.cardName}</strong>
+                    <span className="inv-card-sub">
+                      {stack.setName}{stack.collectorNumber ? `${stack.setName ? ' · ' : ''}#${stack.collectorNumber}` : ''}
+                    </span>
+                  </span>
+                </Link>
+                <span className="loc-stack-meta">
+                  <img
+                    className={`shop-cond is-${conditionTone(stack.condition)}`}
+                    src={conditionChipSrc(stack.condition)}
+                    alt={conditionShort(stack.condition) || 'NM'}
+                    width="34"
+                    height="24"
+                    loading="lazy"
+                  />
+                  <span className="loc-count">
+                    <strong>{stack.postingCount}</strong>
+                    {' '}
+                    {stack.postingCount === 1 ? 'posting' : 'postings'}
+                    {' · '}
+                    {stack.copies} {stack.copies === 1 ? 'copy' : 'copies'}
+                  </span>
+                </span>
+              </div>
+              <div className="loc-postings">
+                {stack.postings.map((row) => (
+                  <Link key={row.id} className="loc-posting" to={inventoryListingHref(row)}>
+                    <span className="loc-posting-date">{inventoryRowDate(row) || '—'}</span>
+                    <span className="inv-qty num">{Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0)}×</span>
+                    <span className="inv-price num">{formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
+                    {pricerOn ? (
+                      <MarketCell value={marketValueFor(prices, row, pricerSource)} pending={pricesPending} />
+                    ) : null}
+                    <span className={`inv-status ${String(row?.status || '').toLowerCase() === 'paused' ? 'is-paused' : 'is-live'}`}>
+                      {String(row?.status || '').toLowerCase() === 'paused' ? 'Paused' : 'Live'}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : viewMode === 'titles' ? (
+        <div className="loc-list">
+          {titleGroups(view).map((group) => (
+            <div key={group.title} className="loc-stack">
+              <button
+                type="button"
+                className="loc-stack-head loc-title-head"
+                onClick={() => setOpenTitle(openTitle === group.title ? '' : group.title)}
+              >
+                <span className="inv-card-txt">
+                  <strong>{group.title}</strong>
+                  <span className="inv-card-sub">
+                    {group.printings} {group.printings === 1 ? 'printing' : 'printings'}
+                    {' · '}
+                    {group.postingCount} {group.postingCount === 1 ? 'posting' : 'postings'}
+                    {' · '}
+                    {group.copies} {group.copies === 1 ? 'copy' : 'copies'}
+                    {' · '}
+                    asking {formatPrice(group.askingPkn)}
+                  </span>
+                </span>
+                <span className="loc-count">{openTitle === group.title ? '−' : '+'}</span>
+              </button>
+              {openTitle === group.title ? (
+                <div className="loc-postings">
+                  {group.postings.map((row) => (
+                    <Link key={row.id} className="loc-posting" to={inventoryListingHref(row)}>
+                      <span className="loc-posting-date">{inventoryRowDate(row) || '—'}</span>
+                      <span className="inv-card-sub">
+                        {row?.setName || ''}{row?.collectorNumber ? `${row?.setName ? ' · ' : ''}#${row.collectorNumber}` : ''}
+                      </span>
+                      <span className="inv-qty num">{Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0)}×</span>
+                      <span className="inv-price num">{formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
+                      {pricerOn ? (
+                        <MarketCell value={marketValueFor(prices, row, pricerSource)} pending={pricesPending} />
+                      ) : null}
+                      <span className={`inv-status ${String(row?.status || '').toLowerCase() === 'paused' ? 'is-paused' : 'is-live'}`}>
+                        {String(row?.status || '').toLowerCase() === 'paused' ? 'Paused' : 'Live'}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+      <div className={`inv-table${pricerOn ? ' has-mkt' : ''}`}>
         <div className="inv-head" aria-hidden="true">
           <span>Card</span>
           <span>Cond</span>
           <span>Lang</span>
           <span className="num">Qty</span>
           <span className="num">Price</span>
-          {pricerSource ? (
+          {pricerOn ? (
             <span className="num inv-mkt-head">
               {PRICER_SOURCES.find((source) => source.id === pricerSource)?.label}
               {' '}
@@ -280,7 +424,7 @@ export default function InventoryBoard({ rows, formatPrice }) {
               </span>
               <span className="inv-qty num">{Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0)}</span>
               <span className="inv-price num">{formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
-              {pricerSource ? (
+              {pricerOn ? (
                 <MarketCell
                   value={marketValueFor(prices, row, pricerSource)}
                   pending={pricesPending}
@@ -296,6 +440,7 @@ export default function InventoryBoard({ rows, formatPrice }) {
           <p className="inv-empty">No listings match the current filters.</p>
         ) : null}
       </div>
+      )}
     </section>
   );
 }

@@ -6,6 +6,7 @@ const TABS = [
   { to: '/sales', label: 'Sold history' },
   { to: '/bought', label: 'Buy history' },
   { to: '/inventory/sync-review', label: 'CT ↔ Power Tools' },
+  { to: '/mypokoin/settings', label: 'Settings' },
 ];
 
 /** Shared Listings / Sold / Bought / import strip under the MyPokoin desk. */

@@ -198,3 +198,11 @@ export function groupInventoryStacks(rows) {
     || b.copies - a.copies
     || a.cardName.localeCompare(b.cardName));
 }
+
+/** Scope check for a pricing strategy against a listing row (SPA twin of the handler's rule). */
+export function strategyMatchesListing(strategy, row) {
+  if (!strategy || strategy.enabled === false) return false;
+  if (strategy.condition && String(row?.condition || 'NM').toUpperCase() !== strategy.condition) return false;
+  if (strategy.language && String(row?.language || '').toUpperCase() !== strategy.language) return false;
+  return true;
+}

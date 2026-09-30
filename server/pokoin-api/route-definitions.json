@@ -634,5 +634,28 @@
         "Postgres (replica)"
       ]
     }
+  },
+  {
+    "path": "/api/marketplace-pricing-strategies",
+    "file": "marketplace-pricing-strategies.js",
+    "methods": [
+      "GET",
+      "POST",
+      "DELETE"
+    ],
+    "purpose": "PowerTools-style pricing strategies + pricer defaults stored on users/{uid}.",
+    "auth": "Bearer required; strategies belong to the bearer uid.",
+    "params": {
+      "query": "DELETE requires id.",
+      "body": "POST: {strategy} upserts one strategy (empty id mints one); {pricerSettings} saves the pricer defaults; both allowed."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
   }
 ]

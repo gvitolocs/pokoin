@@ -759,6 +759,21 @@ count desc, then copies, then name. Each stack lists its postings (date, qty,
 price, status). The API map documents the board's
 `/api/marketplace-price-check` pricer.
 
+### MyPokoin pricing strategies + settings (PowerTools parity)
+
+Pricing strategies live on `users/{uid}.pricingStrategies` (Firestore) via
+`/api/marketplace-pricing-strategies` (GET / POST upsert / DELETE ?id=).
+A strategy = comp source (pokoin | cardtrader) + action (match | undercut |
+premium) + amount % + flat PKN + floor + rounding (none | integer) + optional
+condition/language scope. Evaluation is client-side against
+`/api/marketplace-price-check` comps; **Apply** shows a dry-run table
+(current → new, Δ) and reprices through `PATCH /api/marketplace-listings?id=`
+one listing at a time (≤100 per run). Pricer defaults
+(`defaultSource`, `autoMarketColumn`) ride the same endpoint. The board has
+three view modes — Table / Stacks / Titles — persisted in
+`localStorage pokoin.invView`; Settings lives on `/mypokoin/settings`
+(pricer defaults + strategy manager).
+
 ### Listing pipeline (Oracle GET → nezopt NVMe ingest → Pi replica)
 
 ```

@@ -207,6 +207,7 @@ function AppShell() {
       {both('/dashboard/scan', <ScanDesk />)}
       {both('/mypokoin/import', <Inventory />)}
       {both('/mypokoin/location/:location', <Inventory />)}
+      {both('/mypokoin/settings', <Inventory />)}
       {both('/mypokoin', <Inventory />)}
       {both('/inventory', <Navigate to="/mypokoin" replace />)}
       {both('/inventory/scan', <ScanDesk />)}

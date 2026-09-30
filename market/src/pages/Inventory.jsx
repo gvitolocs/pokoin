@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useMatch } from 'react-router-dom';
-import { exportStockCsv, fetchSellerListings, importStockCsv } from '../api.js';
+import { exportStockCsv, fetchPricingStrategies, fetchSellerListings, importStockCsv } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice } from '../seller-currency.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
 import InventoryBoard from '../components/InventoryBoard.jsx';
 import LocationBoard from '../components/LocationBoard.jsx';
+import PricingStrategies, { PricerDefaults } from '../components/PricingStrategies.jsx';
 import StockNav from '../components/StockNav.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
 import { liveInventoryListings } from '../inventory-listings.js';
@@ -34,6 +35,7 @@ function downloadText(text, filename) {
 export default function Inventory() {
   const location = useLocation();
   const onImportTab = Boolean(useMatch({ path: '/mypokoin/import', end: true }));
+  const onSettingsTab = Boolean(useMatch({ path: '/mypokoin/settings', end: true }));
   const locationMatch = useMatch({ path: '/mypokoin/location/:location', end: false });
   const locationName = locationMatch ? decodeURIComponent(locationMatch.params.location || '') : '';
   const { user, ready, signedIn, profile, getBearer } = useAuth();
@@ -60,7 +62,9 @@ export default function Inventory() {
   }
 
   useEffect(() => {
-    document.title = locationName
+    document.title = onSettingsTab
+      ? 'Settings · MyPokoin'
+      : locationName
       ? `${locationName} · MyPokoin`
       : (onImportTab ? 'Import / export · MyPokoin' : 'MyPokoin · Pokoin');
     const uid = user?.uid || profile?.uid;
@@ -77,7 +81,21 @@ export default function Inventory() {
     return () => {
       cancelled = true;
     };
-  }, [signedIn, user?.uid, profile?.uid, getBearer, onImportTab, locationName]);
+  }, [signedIn, user?.uid, profile?.uid, getBearer, onImportTab, locationName, onSettingsTab]);
+
+  // Pricer defaults feed the board's market column and source preselect.
+  const [pricerDefaults, setPricerDefaults] = useState(null);
+  useEffect(() => {
+    if (!signedIn || onImportTab) return undefined;
+    let cancelled = false;
+    getBearer()
+      .then((token) => fetchPricingStrategies(token))
+      .then((data) => {
+        if (!cancelled) setPricerDefaults(data.pricerSettings || {});
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [signedIn, getBearer, onImportTab, onSettingsTab]);
 
   async function onExport() {
     setError('');
@@ -247,7 +265,20 @@ export default function Inventory() {
       {!onImportTab && rows == null && !error ? (
         <DeskPanel title="Listings"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       ) : null}
-      {!onImportTab && rows && !rows.length ? (
+      {onSettingsTab ? (
+        <>
+          <DeskPanel title="Pricer defaults">
+            <PricerDefaults
+              settings={pricerDefaults}
+              onSaved={(next) => setPricerDefaults(next)}
+            />
+          </DeskPanel>
+          <DeskPanel title="Pricing strategies">
+            <PricingStrategies onApplied={() => reload().catch(() => {})} />
+          </DeskPanel>
+        </>
+      ) : null}
+      {!onImportTab && !onSettingsTab && rows && !rows.length ? (
         <EmptyDesk
           title={locationName ? `Nothing stored in ${locationName}` : 'No live listings'}
           lede={locationName ? 'Move a listing into this location from its card desk, or scan a new pile.' : 'Scan a pile with your phone, import a CSV, or open a card and use List your card.'}>
@@ -256,15 +287,20 @@ export default function Inventory() {
           <Link className="btn ghost" to="/marketplace">Find a card</Link>
         </EmptyDesk>
       ) : null}
-      {!onImportTab && locationName && rows?.length ? (
+      {!onImportTab && !onSettingsTab && locationName && rows?.length ? (
         <LocationBoard
           rows={rows.filter((row) => String(row?.location || '').trim() === locationName)}
           location={locationName}
           formatPrice={formatPrice}
         />
       ) : null}
-      {!onImportTab && !locationName && rows?.length ? (
-        <InventoryBoard rows={rows} formatPrice={formatPrice} />
+      {!onImportTab && !onSettingsTab && !locationName && rows?.length ? (
+        <InventoryBoard
+          rows={rows}
+          formatPrice={formatPrice}
+          defaultSource={pricerDefaults?.defaultSource || ''}
+          autoMarketColumn={pricerDefaults?.autoMarketColumn === true}
+        />
       ) : null}
     </div>
   );
