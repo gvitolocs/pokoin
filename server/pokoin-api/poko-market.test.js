@@ -25,6 +25,10 @@ function makeDb(stubs) {
     // Order matters: tool-specific tables first, generic card-row lookup last.
     const rows = (table) => stubs[table] ?? [];
     if (/with cands as/.test(sql)) return { rows: rows('moverRows') };
+    if (/with cards as/.test(sql)) return { rows: rows('setRows') };
+    if (/with recent as/.test(sql)) return { rows: rows('recentRows') };
+    if (/cardtrader_market_listing_snapshots/.test(sql)) return { rows: rows('liveRows') };
+    if (/with sold as/.test(sql)) return { rows: rows('sellerRows') };
     if (/marketplace_card_weights/.test(sql)) return { rows: rows('weightRows') };
     if (/group by artist/.test(sql)) return { rows: stubs.artistRows ?? [{ artist: 'Yuka Morii', cards: 42 }] };
     if (/order by s\.name\s+limit \$2/.test(sql)) return { rows: rows('collectionCards') };
@@ -70,6 +74,24 @@ function makeReq(overrides = {}) {
     method: 'POST',
     headers: { authorization: `Bearer ${process.env.POKO_MARKET_SERVICE_TOKEN || 'tok'}` },
     body: {},
+    ...overrides,
+  };
+}
+
+// One cardtrader_sold_daily day-slice row (standard NM English by default).
+function soldDay(overrides = {}) {
+  const median = overrides.median_pkn ?? 100;
+  return {
+    observed_day: '2026-09-20',
+    condition: 'NM',
+    language: 'EN',
+    reverse: false,
+    first_edition: false,
+    graded: false,
+    sold_qty: 1,
+    median_pkn: median,
+    min_pkn: median,
+    max_pkn: median,
     ...overrides,
   };
 }
@@ -253,13 +275,7 @@ test('card_quote reports sold estimate, asks and strategies without inventing da
   const queries = [];
   const handler = loadHandler(makeDb({
     queries,
-    soldRows: [{
-      sold_qty: 14,
-      p25_daily: 30,
-      median_daily: 34,
-      p75_daily: 37,
-      last_sale_day: '2026-09-20',
-    }],
+    soldRows: [soldDay({ sold_qty: 14, median_pkn: 34, min_pkn: 30, max_pkn: 37 })],
     askRows: [{ min_price_pkn: 36, median_price_pkn: 41, observed_day: '2026-09-26' }],
     weightRows: [{ sold_qty_7d: 2, listed_now: 5, sell_through: 0.4, days_of_supply: 12, demand_score: 3, updated_at: new Date(Date.now() - 3_600_000).toISOString() }],
   }));
@@ -373,7 +389,7 @@ test('stale weights fall back to fresh sold data instead of quoting old bands', 
     queries: [],
     // 2026-09-13-style stale snapshot: must NOT be used for days_of_supply.
     weightRows: [{ sold_qty_7d: 2, listed_now: 5, sell_through: 0.4, days_of_supply: 12, updated_at: '2026-09-13T11:37:51Z' }],
-    soldRows: [{ sold_qty: 28, p25_daily: 30, median_daily: 34, p75_daily: 37, last_sale_day: '2026-09-25' }],
+    soldRows: [soldDay({ sold_qty: 28, median_pkn: 34, observed_day: '2026-09-25' })],
   }));
   const res = makeRes();
   await handler(makeReq({ body: { tool: 'card_liquidity', params: { cardId: '246912' } } }), res);
@@ -521,6 +537,58 @@ test('top_movers supports falling direction and answers empty windows with 200',
   assert.match(res.body.note, /raikou/i);
 });
 
+test('top_sellers ranks confirmed sales with language, rarity and price filters', async () => {
+  const stubs = {
+    queries: [],
+    sellerRows: [
+      { card_id: '1000', name: 'Mega Froslass ex', set_name: 'MEGA Dream ex', card_number: 'Special Illustration Rare | 233/193', sold_qty: 24, sale_days: 13, median_pkn: 3188, ask_pkn: 3174, last_sale_day: '2026-09-29', seller_uid: 'X' },
+      { card_id: '2000', name: "Giovanni's Charisma", set_name: 'Pokémon Card 151', card_number: 'Special Illustration Rare | 207/165', sold_qty: 19, sale_days: 5, median_pkn: 5066, ask_pkn: 3654, last_sale_day: '2026-09-28' },
+    ],
+  };
+  const res = makeRes();
+  await loadHandler(makeDb(stubs))(makeReq({
+    body: { tool: 'top_sellers', params: { language: 'giapponese', rarity: 'SIR', minPriceEur: 10, days: 30, limit: 10 } },
+  }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'ok');
+  assert.deepEqual(res.body.cards.map((c) => c.name), ['Mega Froslass ex', "Giovanni's Charisma"]);
+  assert.equal(res.body.cards[0].soldQty, 24);
+  assert.equal(res.body.cards[0].saleDays, 13);
+  assert.equal(res.body.cards[0].medianSoldPkn, 3188);
+  assert.equal(res.body.cards[0].medianSoldEur, 15.94);
+  assert.equal(res.body.cards[0].currentAskPkn, 3174);
+  assert.equal(res.body.filters.language, 'JP');
+  assert.equal(res.body.filters.rarity, 'Special Illustration Rare');
+  assert.equal(res.body.filters.minPricePkn, 2000);
+  assert.equal(res.body.window.days, 30);
+  assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
+  const sql = stubs.queries.find((q) => /with sold as/.test(q.sql));
+  assert.deepEqual(sql.params, [30, 'JP', 2000, null, 10, 'Special Illustration Rare', 20]);
+  assert.match(sql.sql, /not graded/);
+  assert.match(sql.sql, /ask_pkn \* \$7/);
+});
+
+test('top_sellers defaults to all languages over 7 days and answers empty with 200', async () => {
+  const stubs = { queries: [] };
+  const res = makeRes();
+  await loadHandler(makeDb(stubs))(makeReq({ body: { tool: 'top_sellers', params: { subject: 'Charizard' } } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.cards, []);
+  assert.match(res.body.note, /7 days/);
+  assert.equal(res.body.filters.language, 'all');
+  const sql = stubs.queries.find((q) => /with sold as/.test(q.sql));
+  assert.deepEqual(sql.params, [7, null, 0, null, 10, null, 20, '%charizard%']);
+  assert.match(sql.sql, /s\.search_text ilike \$8/);
+});
+
+test('normalizeRarity maps SIR / SAR / AR shorthands to catalog labels', () => {
+  const { normalizeRarity } = require('./poko-market')._test;
+  assert.equal(normalizeRarity('SIR'), 'Special Illustration Rare');
+  assert.equal(normalizeRarity('special art rare'), 'Special Illustration Rare');
+  assert.equal(normalizeRarity('AR'), 'Illustration Rare');
+  assert.equal(normalizeRarity(''), '');
+});
+
 test('dedupeArtworkVersions keeps one printing per CLIP version key', () => {
   const { dedupeArtworkVersions, candidateFromRow } = require('./poko-market')._test;
   const rows = [
@@ -535,4 +603,189 @@ test('dedupeArtworkVersions keeps one printing per CLIP version key', () => {
   const cand = candidateFromRow(rows[0]);
   assert.equal(cand.path, '/marketplace/en/cards/245802');
   assert.equal(cand.version, 'v245802');
+});
+
+// Neo Discovery Caterpie, 2026-09-30: 1st Edition NM sold at 668 and 2404
+// while Unlimited NM sold at 216–644. The old quote blended them into 643.
+const CATERPIE_SOLD = [
+  soldDay({ observed_day: '2026-09-27', sold_qty: 1, median_pkn: 216 }),
+  soldDay({ observed_day: '2026-09-22', sold_qty: 4, median_pkn: 320 }),
+  soldDay({ observed_day: '2026-09-23', sold_qty: 1, median_pkn: 644 }),
+  soldDay({ observed_day: '2026-09-27', sold_qty: 1, median_pkn: 668, first_edition: true }),
+  soldDay({ observed_day: '2026-09-22', sold_qty: 1, median_pkn: 2404, first_edition: true }),
+  soldDay({ observed_day: '2026-09-29', condition: 'SP', language: 'IT', sold_qty: 2, median_pkn: 68 }),
+  soldDay({ observed_day: '2026-09-20', sold_qty: 1, median_pkn: 9000, graded: true }),
+];
+
+test('card_quote never mixes 1st Edition, reverse or graded sales into the standard price', async () => {
+  const handler = loadHandler(makeDb({ queries: [], soldRows: CATERPIE_SOLD }));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '247128', condition: 'NM', language: 'EN' } } }), res);
+  assert.equal(res.statusCode, 200);
+  const est = res.body.quotes[0].estimate;
+  assert.equal(est.sampleSize, 6);
+  assert.equal(est.median, 320, 'unit-weighted: four 320 sales outweigh one 216 and one 644');
+  assert.ok(est.high < 668, 'no 1st Edition or graded price leaks into the standard slice');
+  assert.equal(res.body.filters.variant, 'Standard (unlimited, non-reverse, ungraded)');
+  const variants = res.body.variantsSold.map((v) => v.variant);
+  assert.ok(variants.includes('1st Edition'));
+  assert.ok(variants.includes('Graded'));
+
+  const res1st = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '247128', firstEdition: '1st edition' } } }), res1st);
+  assert.equal(res1st.body.filters.variant, '1st Edition');
+  assert.equal(res1st.body.quotes[0].estimate.sampleSize, 2);
+  assert.equal(res1st.body.quotes[0].estimate.low, 668);
+});
+
+test('card_quote without condition/language quotes every copy instead of hiding non-NM/EN sales', async () => {
+  const handler = loadHandler(makeDb({
+    queries: [],
+    soldRows: [
+      soldDay({ condition: 'SP', language: 'EN', sold_qty: 1, median_pkn: 30128 }),
+      soldDay({ condition: 'SP', language: 'IT', sold_qty: 1, median_pkn: 36148, observed_day: '2026-09-22' }),
+    ],
+  }));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '259710' } } }), res);
+  const quote = res.body.quotes[0];
+  assert.equal(res.body.filters.condition, 'all');
+  assert.equal(res.body.filters.language, 'all');
+  assert.equal(quote.estimate.sampleSize, 2);
+  assert.equal(quote.askingPriceOnly, false);
+  assert.equal(quote.askVsSold, null, 'no cheapest-ask verdict across mixed conditions');
+
+  const resNm = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '259710', condition: 'NM', language: 'EN' } } }), resNm);
+  assert.equal(resNm.body.quotes[0].estimate.sampleSize, 2);
+  assert.match(resNm.body.quotes[0].estimateFallback, /No NM EN sale/);
+});
+
+test('card_quote snaps to the most-sold variant when a printing never sold a standard copy', async () => {
+  const handler = loadHandler(makeDb({
+    queries: [],
+    soldRows: [soldDay({ reverse: true, sold_qty: 3, median_pkn: 80 })],
+  }));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '247128' } } }), res);
+  assert.equal(res.body.filters.variant, 'Reverse Holo');
+  assert.match(res.body.variantNote, /most-sold variant/);
+  assert.equal(res.body.quotes[0].estimate.median, 80);
+});
+
+test('card_quote compares live asks from the same slice only', async () => {
+  const handler = loadHandler(makeDb({
+    queries: [],
+    soldRows: CATERPIE_SOLD,
+    liveRows: [
+      { condition: 'NM', language: 'EN', reverse: false, first_edition: false, listings: 14, copies: 20, min_eur: 1.6, median_eur: 1.8 },
+      { condition: 'NM', language: 'EN', reverse: false, first_edition: true, listings: 1, copies: 1, min_eur: 10.22, median_eur: 10.22 },
+      { condition: 'Poor', language: 'IT', reverse: false, first_edition: false, listings: 16, copies: 16, min_eur: 0.11, median_eur: 0.2 },
+    ],
+  }));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '247128', condition: 'NM', language: 'EN' } } }), res);
+  const quote = res.body.quotes[0];
+  assert.equal(quote.currentAsk.min, 320);
+  assert.equal(quote.currentAsk.listings, 14);
+  assert.equal(quote.askVsSold.verdict, 'in_line_with_sales');
+});
+
+test('card_sales lists dated slices and 7/30/90-day totals for the standard variant', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const handler = loadHandler(makeDb({
+    queries: [],
+    soldRows: [
+      soldDay({ observed_day: today, sold_qty: 2, median_pkn: 300 }),
+      soldDay({ observed_day: today, sold_qty: 1, median_pkn: 900, first_edition: true }),
+    ],
+  }));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'card_sales', params: { cardId: '247128', days: 7 } } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.totals.last7d.units, 2);
+  assert.equal(res.body.lastSale.medianPkn, 300);
+  assert.equal(res.body.sales.length, 1);
+  assert.equal(res.body.otherVariants[0].variant, '1st Edition');
+  assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
+});
+
+test('deal_check compares each live slice with its own sold comps and cautions on outliers', async () => {
+  const handler = loadHandler(makeDb({
+    queries: [],
+    soldRows: [
+      soldDay({ sold_qty: 4, median_pkn: 320 }),
+      soldDay({ condition: 'MP', sold_qty: 3, median_pkn: 400 }),
+    ],
+    liveRows: [
+      { condition: 'NM', language: 'EN', reverse: false, first_edition: false, listings: 5, copies: 5, min_eur: 1.5, median_eur: 2 },
+      { condition: 'MP', language: 'EN', reverse: false, first_edition: false, listings: 9, copies: 9, min_eur: 0.24, median_eur: 0.5 },
+      { condition: 'Poor', language: 'IT', reverse: false, first_edition: false, listings: 2, copies: 2, min_eur: 0.11, median_eur: 0.11 },
+    ],
+  }));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'deal_check', params: { cardId: '247128' } } }), res);
+  assert.equal(res.statusCode, 200);
+  const byCond = Object.fromEntries(res.body.offers.map((o) => [`${o.condition}/${o.language}`, o]));
+  assert.equal(byCond['NM/EN'].verdict, 'in_line_with_sales');
+  assert.equal(byCond['MP/EN'].verdict, 'far_below_sold_median');
+  assert.match(byCond['MP/EN'].caution, /delisted/);
+  assert.equal(byCond['Poor/IT'].verdict, 'no_same_slice_sales');
+  assert.equal(res.body.offers[0].condition, 'Poor', 'offers sorted cheapest first');
+  assert.equal(res.body.bestValue.condition, 'NM', 'suspicious far-below slices never headline');
+});
+
+test('set_sales totals an expansion and ranks by units and by price', async () => {
+  const stubs = {
+    queries: [],
+    setRows: [
+      { card_id: 247154, name: 'Tyrogue', set_name: 'Neo Discovery', item_kind: 'single', card_number: '66/75', sold_qty: 89, value_pkn: 37166, median_pkn: 218, last_sale_day: '2026-09-27' },
+      { card_id: 247048, name: 'Umbreon', set_name: 'Neo Discovery', item_kind: 'single', card_number: '13/75', sold_qty: 4, value_pkn: 80000, median_pkn: 20000, last_sale_day: '2026-09-26' },
+    ],
+  };
+  const handler = loadHandler(makeDb(stubs));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'set_sales', params: { setName: 'Neo Discovery set', days: 30 } } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.totals.unitsSold, 93);
+  assert.equal(res.body.topByUnits[0].name, 'Tyrogue');
+  assert.equal(res.body.topByValue[0].name, 'Umbreon');
+  const sql = stubs.queries.find((q) => /with cards as/.test(q.sql));
+  assert.deepEqual(sql.params, [30, null, 20, '%neo%', '%discovery%']);
+
+  const bad = makeRes();
+  await handler(makeReq({ body: { tool: 'set_sales', params: {} } }), bad);
+  assert.equal(bad.statusCode, 400);
+});
+
+test('recent_sales sorts by price or date and flags sales far above the typical ask', async () => {
+  const stubs = {
+    queries: [],
+    recentRows: [
+      { card_id: 469492, name: 'Umbreon VMAX', set_name: 'Eevee Heroes', item_kind: 'single', card_number: '095/069', observed_day: '2026-09-27', condition: 'NM', language: 'JP', reverse: false, first_edition: false, graded: false, sold_qty: 1, median_pkn: 1000128, ask_pkn: 240118 },
+      { card_id: 713886, name: 'Mega Charizard X ex', set_name: 'MEP Black Star Promos', item_kind: 'single', card_number: 'MEP 023', observed_day: '2026-09-29', condition: 'NM', language: 'EN', reverse: false, first_edition: false, graded: false, sold_qty: 1, median_pkn: 7742, ask_pkn: 7000 },
+    ],
+  };
+  const handler = loadHandler(makeDb(stubs));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'recent_sales', params: { language: 'japanese', minPriceEur: 10, days: 7 } } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.sales[0].unverified, true);
+  assert.equal(res.body.sales[1].unverified, undefined);
+  const sql = stubs.queries.find((q) => /with recent as/.test(q.sql));
+  assert.deepEqual(sql.params.slice(0, 4), [7, 'JP', false, 2000]);
+  assert.match(sql.sql, /order by recent\.median_pkn desc/);
+
+  await handler(makeReq({ body: { tool: 'recent_sales', params: { sort: 'recent', subject: 'Charizard' } } }), makeRes());
+  const sql2 = stubs.queries.filter((q) => /with recent as/.test(q.sql))[1];
+  assert.match(sql2.sql, /order by recent\.observed_day desc/);
+  assert.match(sql2.sql, /s\.search_text ilike \$7/);
+});
+
+test('soldFlag reads casual variant words and leaves unknown text unset', () => {
+  assert.equal(T.soldFlag('1st edition'), true);
+  assert.equal(T.soldFlag('prima edizione'), true);
+  assert.equal(T.soldFlag('unlimited'), false);
+  assert.equal(T.soldFlag('banana'), null);
+  assert.deepEqual(T.soldFacetFromParams({}), { reverse: false, firstEdition: false, graded: false, explicit: false });
 });

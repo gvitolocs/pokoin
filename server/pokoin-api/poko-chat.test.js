@@ -13,6 +13,7 @@ const {
   marketFirstDirective,
   resolveHermesChatUrl,
   hermesToken,
+  hermesReply,
 } = require('./poko-chat')._test;
 
 test('cleanCards keeps id/name and caps at 12', () => {
@@ -77,6 +78,34 @@ test('resolveHermesChatUrl matches pokoin-assistant convention', () => {
 test('hermesToken prefers POKO_API_TOKEN then POKONTACT', () => {
   assert.equal(hermesToken({ POKO_API_TOKEN: 'a', POKONTACT_SERVICE_TOKEN: 'b' }), 'a');
   assert.equal(hermesToken({ POKONTACT_SERVICE_TOKEN: 'b' }), 'b');
+});
+
+test('hermesReply sends the raw question beside the enriched prompt', async () => {
+  const originalFetch = globalThis.fetch;
+  const saved = { url: process.env.POKONTACT_SERVICE_URL, token: process.env.POKONTACT_SERVICE_TOKEN };
+  process.env.POKONTACT_SERVICE_URL = 'http://127.0.0.1:18789/api/poko';
+  process.env.POKONTACT_SERVICE_TOKEN = 'svc';
+  let sent = null;
+  globalThis.fetch = async (_url, init) => {
+    sent = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ ok: true, reply: 'Ciao ✨' }) };
+  };
+  try {
+    await hermesReply({
+      message: 'Dammi delle carte giapponesi molto liquide',
+      cards: [],
+      images: [],
+      pageContext: {},
+      personalIntent: 'Personal marketplace context: - Recently seen (8): Hoothoot; - Cart (1 lines)',
+      userId: 'fb-1',
+    });
+    assert.equal(sent.userMessage, 'Dammi delle carte giapponesi molto liquide');
+    assert.match(sent.message, /^Personal marketplace context/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.POKONTACT_SERVICE_URL = saved.url ?? '';
+    process.env.POKONTACT_SERVICE_TOKEN = saved.token ?? '';
+  }
 });
 
 test('hammering the endpoint from one IP hits the 20/min rate limit', async () => {
