@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh every live CardTrader catalogue before the daily Pokemon price job
+[Timer]
+OnCalendar=*-*-* 23:00:00 UTC
+Persistent=true
+Unit=pokoin-all-cardtrader-daily.service
+[Install]
+WantedBy=timers.target
