@@ -535,5 +535,83 @@
         "CardTrader public user JSON (username → account id)"
       ]
     }
+  },
+  {
+    "path": "/api/scan/identify",
+    "file": "scan-identify.js",
+    "methods": [
+      "POST",
+      "OPTIONS"
+    ],
+    "purpose": "Card recognition (YOLO detect + Milo embed) for the website, Scan Connect and the app. nezopt GPU first, Pi CPU fallback.",
+    "params": {
+      "query": "catalog, top_k (1-8), live, multi, album",
+      "body": "multipart/form-data field `file` (≤4 MB image)"
+    },
+    "rawBody": true,
+    "auth": "Public; per-IP limit in the recognition worker.",
+    "dependencies": {
+      "services": [
+        "nezopt GPU recognition worker via SSH tunnel 127.0.0.1:18151",
+        "Pi CPU recognition container pokoin-scan 127.0.0.1:18150"
+      ]
+    }
+  },
+  {
+    "path": "/api/scan/identify-album",
+    "file": "scan-identify-album.js",
+    "methods": [
+      "POST",
+      "OPTIONS"
+    ],
+    "purpose": "Recognize several photos of one album page at once.",
+    "params": {
+      "query": "top_k, live",
+      "body": "multipart/form-data field `file` repeated"
+    },
+    "rawBody": true,
+    "auth": "Public; per-IP limit in the recognition worker.",
+    "dependencies": {
+      "services": [
+        "nezopt GPU recognition worker via SSH tunnel 127.0.0.1:18151",
+        "Pi CPU recognition container pokoin-scan 127.0.0.1:18150"
+      ]
+    }
+  },
+  {
+    "path": "/api/scan/catalogs",
+    "file": "scan-catalogs.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Recognition catalogs (game × language) the scanner can switch between.",
+    "params": {
+      "query": "none"
+    },
+    "auth": "Public; per-IP limit in the recognition worker.",
+    "dependencies": {
+      "services": [
+        "nezopt GPU recognition worker via SSH tunnel 127.0.0.1:18151",
+        "Pi CPU recognition container pokoin-scan 127.0.0.1:18150"
+      ]
+    }
+  },
+  {
+    "path": "/api/scan/health",
+    "file": "scan-health.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Which recognition workers answer (nezopt GPU, Pi CPU).",
+    "params": {
+      "query": "none"
+    },
+    "auth": "Public; per-IP limit in the recognition worker.",
+    "dependencies": {
+      "services": [
+        "nezopt GPU recognition worker via SSH tunnel 127.0.0.1:18151",
+        "Pi CPU recognition container pokoin-scan 127.0.0.1:18150"
+      ]
+    }
   }
 ]
