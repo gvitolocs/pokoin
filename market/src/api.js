@@ -2051,11 +2051,17 @@ export function saveExpansionSymbol(body, token) {
   });
 }
 
+/**
+ * Card recognition API on the Pi (docs/SCAN_API.md): nezopt GPU with a Pi
+ * CPU fallback. Called directly so the per-IP limit sees the visitor.
+ */
+export const SCAN_API_BASE = 'https://api.pokoin.com/api/scan';
+
 export async function identifyScan(file) {
   const body = new FormData();
   body.append('file', file, file.name || 'card.jpg');
   const params = new URLSearchParams({ catalog: scanCatalogId() });
-  const response = await fetch(`/cardscan/identify?${params}`, { method: 'POST', body });
+  const response = await fetch(`${SCAN_API_BASE}/identify?${params}`, { method: 'POST', body });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.detail || data.error || `Scan failed (${response.status})`);
