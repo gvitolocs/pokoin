@@ -33,7 +33,7 @@ export function ArtistPileTile({ group, rank, onOpen }) {
   }
 
   return (
-    <div className="tile-pile-wrap">
+    <div className={`tile-pile-wrap${tall ? " tile-pile-tall" : ""}`}>
       <span className="tile-pile-sheet s2" aria-hidden="true" />
       <span className="tile-pile-sheet s1" aria-hidden="true" />
       <Link

@@ -10177,6 +10177,21 @@ html:has(.wallet-page) .brand span {
   min-width: 0;
 }
 
+/* The wrapper is the grid item once a tile is piled, so two-row tall cards
+ * (SIR / full art) must span from here — grid-row on the inner Link is dead. */
+.tile-pile-wrap.tile-pile-tall {
+  grid-row: span 2;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  justify-self: stretch;
+  align-self: stretch;
+}
+
+.tile-pile-wrap.tile-pile-tall > .tile {
+  height: 100%;
+}
+
 /* :hover must out-rank `.tile.tile-album:hover { z-index: 0 }` or the
  * sheets paint above the art while hovered. */
 .tile-pile-wrap > .tile,
