@@ -201,6 +201,25 @@ empty gold-circle stubs to pad. The name pool ranks **once** per keystroke
 `liveSuggestGroups` in the Meili effect — it
 bumps a tick after cache fills. Suggest Meili stays name +
 number + nicknames so leftover `g` is still GX, not Guardians Rising.
+Name-only English popup queries use the same compact-name probability pool
+and accepted correction as retrieval and Enter. A second word-token coverage
+gate must not discard joined names such as `dwrknessener` → Darkness Energy.
+After `diagl` resolves to Dialga, its printing variants stay ahead of a
+competing typo species such as Diglett. Mixed name/metadata queries continue
+to rank individual printing evidence. Their candidate union also includes
+the scorer's name readings and accepted local-pool lexical anchors, so a
+reordered/repeated mechanic or a joined name typo cannot leave only a sealed
+SKU lookup when the raw full-text response is empty.
+
+The SPA's candidate request is `hydrate=1&limit=1000&print_language=all` for
+lookups of three or more compact characters; shorter prefetches stay small.
+The maintained `server/api/marketplace-suggest.js` returns this bounded Meili
+window before the popup cap. Its normal response remains twenty rows for
+other clients. Canonical expansion nationality hydrates before filtering;
+an incomplete indexed `effective_print_bucket` must not shrink the name
+bucket. The client applies its selected print universe before choosing the
+visible twenty. Twenty is a display cap, not the size of the card catalog.
+
 Not Flutter `POST /api/marketplace-autocomplete` and not
 `searchbar-token-predict` (prefix-only). Enter uses `resolveSearchQuery` (so
 `dawe` submits as Dawn, `talflamd` as Talonflame, `miikyu ex` as Mimikyu ex;

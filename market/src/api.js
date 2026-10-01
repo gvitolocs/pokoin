@@ -297,13 +297,18 @@ export const fetchNamePrintings = createNamePrintingsFetcher({
   mapCard: cardFromCatalogRow,
 });
 
-export function fetchSuggest(query, { limit = 20, signal, lang, printLang, match } = {}) {
+export function fetchSuggest(query, { limit = 20, signal, lang, printLang, match, hydrate = false } = {}) {
   const params = new URLSearchParams({
     q: query || '',
     limit: String(limit),
     search_language: lang || getSearchLang(),
-    print_language: printLang || 'all',
+    // Candidate hydration must precede the authoritative local print filter.
+    // Old Meili documents can lack the indexed bucket even when the expansion
+    // nationality is known, so filtering that index silently loses printings.
+    print_language: 'all',
   });
+  void printLang;
+  if (hydrate) params.set('hydrate', '1');
   // Corrected semantic lookups require every token to hit server-side so a
   // resolver anchor cannot silently vanish (default Meili "last" relaxes).
   if (match === 'all') {

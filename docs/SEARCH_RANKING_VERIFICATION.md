@@ -78,11 +78,16 @@ set expansion, and three literal-mechanic probes preserve exact EX/GX/V name
 evidence and rival-mechanic exclusions. Every pair of fixture rows also checks
 coverage priority.
 
-The Node bridge supplies an empty custom local name-ranking pool to
-`liveSuggestGroups`. This avoids repeating candidate-vocabulary retrieval for
-thousands of permutations while retaining the real cache, printing scorer,
-eligibility gates and result filling. Retrieval recall is covered by the
-JavaScript test suite, not this TLC model.
+The Node bridge now memoizes the actual `rankNames` results from the real
+local pool instead of substituting an empty ranking pool. Cold probes execute
+the actual API adapter with injected transport, followed by
+`fetchSuggestRanked`, cache hydration and popup selection. The browser's
+unrelated JSX authentication dependencies are excluded from that adapter
+execution, as in `expansion-api.test.js`.
+The cold bridge uses the existing four-way `rankNamesParallel` partition and
+merge path, with actual `rankNames` chunk results memoized by a fingerprint
+of the complete chunk. It caches deterministic scorer observations without
+skipping any cold retrieval or popup execution.
 
 ## Regression witnesses
 
@@ -145,11 +150,11 @@ initial 48-row response. No production code was pushed or deployed.
 
 This is exhaustive over the generated finite executions, not a proof over the
 entire catalog or every query. It does not model Unicode normalization, edit
-matrix correctness, Meili retrieval, localized hydration, asynchronous response
+matrix correctness, live Meili response correctness, localized hydration, asynchronous response
 content changes, network errors, cache expiration, or browser rendering.
 Fixtures hold hydrated fields constant while varying their insertion order.
 JavaScript unit and corpus tests remain necessary for those wider concerns.
-Scores are represented as integers at six-decimal precision; the selected
+Scores are represented as integers at five-decimal precision; the selected
 fixtures use score differences substantially larger than that precision.
 The hand-written TLA+ checks observed JavaScript outputs independently; it does
 not assert that a hand-translated selector is identical to arbitrary future
@@ -205,3 +210,101 @@ Mewtwo **51/108 first** for `mewtwo e`, `mewtwo ev` and `mewtwo evo`; the latter
 two retained Evolutions EX **52/108** and **103/108** immediately after it.
 `charizard e` also put regular Evolutions Charizard **11/108 first**.
 The page rendered without a Vite overlay. No push or deployment was performed.
+
+## Cold retrieval and three-component regression
+
+The Western `diagl` incident exposed two candidate losses: incomplete indexed
+print facets returned only three raw hits, and every suggest response was
+capped at twenty before the popup could select its print universe. A further
+popup word-token gate dropped six documented compact-name typo cases even
+when the local probability pool retrieved their correct identities.
+
+Candidate hydration now requests a bounded 1,000-hit Meili window with no
+indexed print restriction. Canonical nationality and title-language overlays
+hydrate before the cap. Name-only English popup queries use the established
+probability pool and accepted correction; mixed metadata queries retain
+individual printing relevance. Existing default suggest clients still
+receive twenty rows. The search handler and its helper closure now live in
+`server/api/` and are included in the existing deployment overlay.
+
+The expanded formal model adds **3,072 popup executions**: four typo names
+(transposed names, a compact multiword name and a sparse keyboard typo),
+every ordered pair of eight context tokens (`evol`, `base`, `ex`, `gx`, `holo`,
+`arita`, `51`, `ir`), all six component permutations including repeats, and
+both cache/printing directions. This is the full cross-product of that
+declared finite vocabulary, not every three-word query in the TCG catalog.
+It checks ranked output, eligibility, completeness, caps and stable order.
+
+Another **52 cold probes** cover thirteen documented typo identities, All and
+Western, and both response directions. Each controlled server payload holds
+thirty printings, including twenty-three Western printings. Independent
+invariants require the expanded unfiltered request, corrected canonical
+lookup, all thirty retrieved candidates, twenty unique correctly named popup
+rows, and the selected print universe. The old filter and old twenty-row
+response are explicit loss witnesses at the transport boundary.
+
+The same complete three-component vocabulary adds **3,072 cold retrieval
+executions**: four typo identities × eight first-context tokens × eight
+second-context tokens × six component permutations × All/Western. The raw
+full-text search is empty and only canonical name lookups return candidates.
+Each source has ninety real printings across plain/EX/GX names; nationality,
+set, artist, rarity and collector fields vary. Invariants require all ninety
+candidates to survive retrieval, the canonical lexical anchor to be requested,
+twenty unique eligible displayed rows, descending relevance and no weaker
+displayed row displacing a stronger omitted row. Western reverses source order.
+This tests the adapter → local pool → candidate hydration → cache → popup
+path, rather than assuming all relevant printings were already cached.
+The first cold run caught the legacy name lock shrinking `mewtow evol ex`
+to one name form before popup scoring. The returned structured result keeps
+its existing name focus, while `hydrated` now retains the full candidate union
+for the live cache. This preserves the Plasma/name-pool regression contract
+and keeps plain/compound readings available to printing evidence.
+The fixture print oracle also treats unknown nationality on the declared
+Western Base Set/Evolutions expansions as Western, while preserving explicit
+Japanese nationality. An earlier oracle incorrectly excluded those recovered
+rows; correcting that expectation required no application change.
+
+Compact-name pool evidence also survives metadata scoring: a known corrected
+identity contributes its matched name words, rather than being rejected by a
+stricter per-word ratio. Only the winning identity can supply that fallback;
+an unrelated fuzzy name cannot create coverage. Repeated or leading mechanic
+tokens retain token scoring so `ex ex mewtow` cannot become a sealed collection
+correction with an empty Singles popup.
+Mixed-query retrieval retains raw full-text and whole-name lookups while
+adding scorer readings and accepted lexical anchors from that same local
+pool. The supplemental lookup is bounded and leaves printing evidence in
+charge of the final order; it does not force a particular card or expansion.
+
+The other agent's `search-token-triples.test.js` and
+`search-token-matrix.test.js` are retained and run. They enumerate parsing and
+API-shape states across vocabulary/options; they are JavaScript sweeps rather
+than TLC ranking proofs, and the set vocabulary tier is sampled.
+
+The final JavaScript validation for this regression passed **1,124 frontend
+tests**, **84 maintained API/worker/script tests** and **313 shared API tests**
+(1,521 total, zero failed). The production build passed with
+bundle-size/mixed-import warnings. The standalone `market/index.test.js`
+baseline limitation recorded above remains outside these suites.
+
+For browser verification, the updated maintained API modules were loaded in
+a separate, read-only Node process inside the Pi container. They returned
+170 Dialga-bucket hits and 395 Mewtwo-bucket hits against the live database,
+including regular Evolutions Mewtwo 51/108. Those exact public responses were
+provided to the isolated preview's candidate requests. The preview showed
+twenty Western Dialga printings/variants for `diagl`, and regular Evolutions
+Mewtwo 51/108 first for `mewtwo e`, `mewtwo evo` and `mewtow evol`.
+`ex ex mewtow` showed twenty Singles instead of an empty popup. The separate
+search-page process also verified the other agent's missing-await fix against
+the live database (five cards, total seven for `mewtwo evo`) without the
+`next.filter is not a function` crash. These were preview/in-memory checks;
+no production module, branch or deployment was changed.
+
+Final results inspected on 2026-10-02: the expanded check observed **13,396
+executions** (10,272 warm popup executions, 52 cold name probes and 3,072 cold
+three-component executions). All cold probe invariants passed. TLC completed
+the current configuration with exit code 0: **53,040 states generated,
+42,768 distinct states explored, zero states left on the queue, depth 7**.
+Both old-behavior configurations failed with the required invariant
+counterexamples and exit code 12. The complete run is recorded on nezopt in
+`/tmp/search-regression-tlc-final9.log`. The finite vocabulary and exclusions
+above remain the scope of this result.

@@ -13,7 +13,15 @@ set -euo pipefail
 
 API_CONTAINER="${API_CONTAINER:-pokoin-oracle-api}"
 STAMP="$(date -u +%Y%m%d%H%M%S)"
-HERE="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(git rev-parse --show-toplevel)"
+git -C "$REPO" fetch -q origin
+COMMIT="$(git -C "$REPO" rev-parse "${1:-origin/main}^{commit}")"
+[[ "$COMMIT" == "$(git -C "$REPO" rev-parse origin/main)" ]] \
+  || { echo 'deploy-search-api: use the exact pushed origin/main commit' >&2; exit 1; }
+HERE="$(mktemp -d /tmp/pokoin-search-api-source-XXXXXX)"
+trap 'rm -rf "$HERE"' EXIT
+git -C "$REPO" archive "$COMMIT" server/api | tar -C "$HERE" -xf -
+export NODE_PATH="${REPO}/server/node_modules${NODE_PATH:+:$NODE_PATH}"
 
 # Files this repository owns, at their release-relative paths.
 # Multigame SQL is the satellite TCG search/suggest engine (Magic, OP, …) —
@@ -30,6 +38,12 @@ API_FILES=(
   api/marketplace-autocomplete.js
   api/_print_bucket.js
   api/_marketplace_multigame_sql.js
+  api/marketplace-suggest.js
+  api/_meili_suggest.js
+  api/_meili_document.js
+  api/_expansion_nationality.js
+  api/_suggest_western_priority.js
+  api/_suggest_hot_query.js
   api/_card_visual_theme.js
   api/_cardtrader_game_ingest.js
   api/_catalog_title_language.js

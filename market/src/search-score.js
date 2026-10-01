@@ -43,6 +43,7 @@ import {
   printingMatchesNumberFilter,
   printingMatchesRarityFilter,
   printingMatchesSetFilter,
+  rankNames,
 } from './suggest-rank.js';
 import { ARTIST_POOL, SET_POOL, expansionNationality } from './suggest-catalog.js';
 import { printBucket } from './print-bucket.js';
@@ -243,6 +244,7 @@ function makeNameDoc(row) {
 }
 
 const NAME_DOCS = NAME_POOL.map(makeNameDoc);
+const NAME_DOC_INDEX = new Map(NAME_DOCS.map((doc, index) => [doc.compact, index]));
 const SET_DOCS = SET_POOL.map((row) => ({
   kind: 'set',
   display: row.display,
@@ -390,6 +392,22 @@ const NAME_TIERS = { name: 'name', exact: Q_NAME_EXACT, prefix: Q_NAME_PREFIX, t
 const SET_TIERS = { name: 'set', exact: Q_SET_EXACT, prefix: Q_SET_PREFIX, typo: Q_SET_TYPO };
 const ARTIST_TIERS = { name: 'artist', exact: Q_ARTIST_EXACT, prefix: Q_ARTIST_PREFIX, typo: 0 };
 
+// Reuse the established compact-name pool for accepted lexical recoveries.
+// This is particularly important when spaces disappeared from a multiword
+// identity, or the word-token coverage ratio is tighter than the pool's cap.
+// Only its winning identity may provide this evidence; unrelated fuzzy names
+// cannot manufacture another covered token from a broad set/artist match.
+const recoveredNameCache = new Map();
+function recoveredName(token) {
+  if (token.compact.length <= SHORT_TOKEN_MAX || token.interps?.length) return null;
+  if (!recoveredNameCache.has(token.compact)) {
+    const best = rankNames(token.compact)[0];
+    recoveredNameCache.set(token.compact, best?.withinCap ? best : null);
+    if (recoveredNameCache.size > 256) recoveredNameCache.delete(recoveredNameCache.keys().next().value);
+  }
+  return recoveredNameCache.get(token.compact);
+}
+
 /**
  * Best evidence a single query token can draw from one doc, across the active
  * languages. Name tokens beat metadata; a selected-language hit earns a small
@@ -413,6 +431,7 @@ export function tokenEvidence(token, doc, langs = ['en'], { allowShortSetPrefix 
         via: evidence.via,
         canonical: evidence.canonical || '',
         matchedToken: evidence.matchedToken || '',
+        ...(evidence.matchedTokens ? { matchedTokens: evidence.matchedTokens } : {}),
         ...(allowShortSetPrefix && compact.length <= SHORT_TOKEN_MAX && evidence.via === 'set-prefix'
           ? { countsForCoverage: false } : {}),
         lang,
@@ -424,7 +443,22 @@ export function tokenEvidence(token, doc, langs = ['en'], { allowShortSetPrefix 
     if (!text) {
       continue;
     }
-    consider(fieldEvidence(compact, text.name, NAME_TIERS), lang);
+    const nameEvidence = fieldEvidence(compact, text.name, NAME_TIERS);
+    consider(nameEvidence, lang);
+    if (lang === 'en' && !nameEvidence && text.name?.length) {
+      const recovered = recoveredName(token);
+      const matchedTokens = recovered ? nameTokens(recovered.display) : [];
+      const matches = matchedTokens.length && text.name.some((_, index) => (
+        matchedTokens.every((word, offset) => text.name[index + offset] === word)
+      ));
+      if (matches) {
+        consider({ quality: recovered.compact === compact ? Q_NAME_EXACT
+          : recovered.compact.startsWith(compact) ? Q_NAME_PREFIX
+          : Q_NAME_TYPO * (1 - recovered.distance / compact.length),
+        distance: recovered.distance, via: 'name-pool', canonical: recovered.display,
+        matchedToken: matchedTokens[0], matchedTokens }, lang);
+      }
+    }
     if (!best || best.quality < Q_SET_EXACT) {
       consider(fieldEvidence(compact, text.set, SET_TIERS, { allowShortPrefix: allowShortSetPrefix }), lang);
     }
@@ -512,7 +546,9 @@ export function scoreEntry(tokens, doc, langs = ['en']) {
       if (!matchedNames.has(evidence.lang)) {
         matchedNames.set(evidence.lang, new Set());
       }
-      matchedNames.get(evidence.lang).add(evidence.matchedToken);
+      for (const name of evidence.matchedTokens || [evidence.matchedToken]) {
+        matchedNames.get(evidence.lang).add(name);
+      }
     }
   }
   let extraTokens = Infinity;
@@ -546,6 +582,9 @@ function candidateNameDocs(tokens) {
     if (!compact) {
       continue;
     }
+    const recovered = recoveredName(token);
+    const recoveredIndex = recovered ? NAME_DOC_INDEX.get(recovered.compact) : undefined;
+    if (recoveredIndex !== undefined) seen.add(recoveredIndex);
     for (const index of NAME_TOKEN_TO_DOCS.get(compact) || []) {
       seen.add(index);
     }
@@ -609,6 +648,19 @@ export function rankFreeText(query, { limit = 48, lang = 'en' } = {}) {
   }
   ranked.sort(compareScored);
   return ranked.slice(0, Math.max(1, Number(limit) || 48));
+}
+
+/** Supplemental name lookups for mixed queries. Keep raw/full-name retrieval
+ * and add both the scorer's readings and independent local-pool anchors, so
+ * reordered/repeated metadata cannot turn the only lookup into a sealed SKU. */
+export function hydrationNameCandidates(query, { lang = 'en' } = {}) {
+  const { tokens } = tokenizeQuery(query);
+  const selected = String(lang).toLowerCase();
+  const anchors = tokens.filter((token) => !isModifierWord(token.raw))
+    .map(recoveredName).filter((row) => row && (selected === 'en' || row.distance === 0));
+  const readings = rankFreeText(query, { lang, limit: 6 })
+    .filter((row) => selected === 'en' || row.distance === 0);
+  return [...readings, ...anchors];
 }
 
 /** A confident name anchor followed by an unfinished 1–3 letter set word.

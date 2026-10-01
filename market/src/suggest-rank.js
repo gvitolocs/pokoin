@@ -2165,10 +2165,13 @@ export async function fetchSuggestRanked(term, {
     : async () => ({ groups: [], count: 0 });
   function suggestLookup(lookup) {
     return suggestFn(lookup, {
-      limit,
+      // This is the candidate window, not the popup's twenty visible rows.
+      // Retrieve real printings before applying the print universe and cap.
+      limit: compactQuery(lookup).length >= 3 ? 1000 : limit,
+      hydrate: true,
       signal,
       lang,
-      printLang,
+      printLang: 'all',
       // Corrected primary lookups run strict server-side (match=all) so a
       // resolver anchor cannot silently vanish; challengers stay relaxed.
       match: corrected && compactQuery(lookup) === compactQuery(corrected) ? 'all' : undefined,
@@ -2257,7 +2260,12 @@ export async function fetchSuggestRanked(term, {
       peeled ? '' : query,
     ]);
   const immediatePayloadsPromise = Promise.all(immediateLookups.map(suggestLookup));
-  const ranked = await rankedPromise;
+  const [ranked, evidenceNames] = await Promise.all([
+    rankedPromise,
+    freeTextSearch && pool === NAME_POOL
+      ? import('./search-score.js').then(({ hydrationNameCandidates }) => hydrationNameCandidates(query, { lang }))
+      : Promise.resolve([]),
+  ]);
   const resolvedName = bareNumber ? query : (corrected || resolvedNameQuery(nameQuery, ranked));
   const resolvedParsed = { ...parsed, nameQuery: resolvedName };
   const firstWord = String(query).trim().split(/\s+/)[0] || '';
@@ -2279,6 +2287,7 @@ export async function fetchSuggestRanked(term, {
         tokenVariant: isArtAwareQuery(parsed) || isRarityAwareQuery(parsed),
       }),
       ...seedLookups,
+      ...rankedSuggestLookups(evidenceNames, SUGGEST_NAME_LOOKUPS + 3, kind),
     ]).filter((lookup) => (
       !immediateLookups.some((row) => compactQuery(row) === compactQuery(lookup))
     ));
@@ -2317,10 +2326,11 @@ export async function fetchSuggestRanked(term, {
     && !suggestLookups.some((lookup) => compactQuery(lookup) === compactQuery(anchorQuery))
   ) {
     const anchorPayload = await suggestFn(anchorQuery, {
-      limit,
+      limit: 1000,
+      hydrate: true,
       signal,
       lang,
-      printLang,
+      printLang: 'all',
       match: 'all',
     }).catch(() => null);
     if (anchorPayload) {
@@ -2333,12 +2343,13 @@ export async function fetchSuggestRanked(term, {
     groupsFromSearchCards(setCards),
     ...payloads.map((payload) => payload?.groups || []),
   ]);
+  // Chrome remembers the full union and scores each printing independently.
+  // Keep it before the legacy returned-group name lock: a mixed set/mechanic
+  // correction must not erase plain or compound readings from the live cache.
+  const hydrated = merged;
   if (!bareNumber && compactQuery(resolvedName).length >= 3) {
-    // Name-lock keeps set/number-aware queries focused on the typed name. It is
-    // safe with high-recall search: a compound like `Palkia & Dialga LEGEND`
-    // contains the name (`palkia`) so it survives, while unrelated set-mates
-    // (Flareon in the same Plasma set) are dropped. `pikachu gx` is not
-    // set/number-aware, so it is never locked and the Tag Team stays.
+    // Retain focused returned groups for structured callers; `hydrated` above
+    // supplies the uncapped candidate union to the live printing scorer.
     const nameLock = isNumberAwareQuery(parsed)
       || (isSetAwareQuery(parsed) && compactQuery(nameQuery) !== 'energy');
     if (nameLock) {
@@ -2374,7 +2385,10 @@ export async function fetchSuggestRanked(term, {
     || typedModifiers(query).mods.length
     ? limit
     : 4;
-  const groups = fillSuggestGroups(ordered, limit, perGroup, parsed, kind);
+  const visible = !printLang || printLang === 'all' ? ordered : ordered.map((group) => ({
+    ...group, printings: group.printings.filter((printing) => printingPrintRank(printing, printLang) === 0),
+  }));
+  const groups = fillSuggestGroups(visible, limit, perGroup, parsed, kind);
   const resolvedQuery = setAware || bareNumber
     ? query
     : (isNumberAwareQuery(parsed)
@@ -2409,6 +2423,6 @@ export async function fetchSuggestRanked(term, {
     ranked: reranked,
     resolvedQuery,
     cards: setCards,
-    hydrated: ordered,
+    hydrated,
   };
 }

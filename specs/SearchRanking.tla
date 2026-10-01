@@ -46,6 +46,21 @@ TypeOK ==
   /\ displayed \in Seq({row.id : row \in chosen.rows})
   /\ Len(displayed) = cursor
 
+ColdNamePoolRetrieval ==
+  \A probe \in ColdProbes :
+    /\ probe.retrieved = 30
+    /\ probe.shown = 20
+    /\ probe.firstCorrect /\ probe.onlyCorrect /\ probe.unique
+    /\ probe.printEligible /\ probe.correctedRequested /\ probe.wideUnfiltered
+
+ColdThreeComponentRetrieval ==
+  \A probe \in ColdTripleProbes :
+    /\ probe.retrieved = 90
+    /\ probe.shown = 20
+    /\ probe.unique /\ probe.nameCorrect /\ probe.eligible
+    /\ probe.descending /\ probe.topScores
+    /\ probe.canonicalRequested /\ probe.wideUnfiltered
+
 FullCoverageDominates ==
   cursor > 0 =>
     \A probe \in ScoreProbes : probe.fullCoverage > probe.partialCoverage

@@ -177,6 +177,35 @@ test('set aliases and compound names retain the coverage-first interpretation', 
   assert.equal(idsFor('pakia dialga legend')[0], 'palkia-legend');
 });
 
+test('documented compact and sparse name typos keep name evidence in metadata queries', () => {
+  for (const [typo, name] of [['dwrknessener', 'Darkness Energy'], ['bhlbsur', 'Bulbasaur']]) {
+    remember([
+      single('full', name, 'Evolutions', '51/108', { artist: 'Mitsuhiro Arita', rarity: 'Holo Rare' }),
+      single('partial', name, 'Base Set', '52/102', { artist: 'Ken Sugimori', rarity: 'Common' }),
+      single('metadata', 'Switch', 'Evolutions', '51/108', { artist: 'Mitsuhiro Arita', rarity: 'Holo Rare' }),
+    ]);
+    for (const query of [`${typo} evol`, `${typo} holo`, `${typo} arita 51`, `evol ${typo} holo`]) {
+      assert.equal(idsFor(query)[0], 'full', query);
+      assert.ok(score(query, rowsFor(query)[0]) > score(query, rowsFor(query).find((r) => r.id === 'metadata') || {
+        name: 'Switch', set: 'Evolutions', number: '51/108', artist: 'Mitsuhiro Arita', rarity: 'Holo Rare',
+      }), query + ' retains the probability-pool name anchor');
+    }
+  }
+});
+
+test('repeated or leading mechanic tokens retain the token interpretation', () => {
+  remember([
+    single('ex', 'Mewtwo EX', 'Evolutions', '52/108'),
+    single('base', 'Mewtwo', 'Evolutions', '51/108'),
+    single('gx', 'Mewtwo GX', 'Shining Legends', '39/73'),
+  ]);
+  for (const query of ['ex ex mewtow', 'ex mewtow ex', 'mewtow ex ex', 'ex mewtow']) {
+    assert.equal(idsFor(query)[0], 'ex', query);
+    assert.ok(idsFor(query).includes('base'), query);
+    assert.ok(!idsFor(query).includes('gx'), query);
+  }
+});
+
 test('a weaker sibling cannot jump ahead of a stronger printing in another group', () => {
   remember(mewtwo);
   const ids = idsFor('mewtow evol');
