@@ -628,12 +628,23 @@
     },
     "dependencies": {
       "env": [
-        "MARKETPLACE_DATABASE_URL"
+        "MARKETPLACE_DATABASE_URL",
+        "TCGCSV_DATABASE_URL",
+        "TCGCSV_DATABASE_SSL"
       ],
       "services": [
         "Postgres (replica)"
       ]
     }
+  },
+  {
+    "path": "/api/marketplace-tcgplayer-history",
+    "file": "marketplace-tcgplayer-history.js",
+    "methods": ["GET"],
+    "purpose": "Daily TCGplayer aggregate price history with all explicitly mapped products and printing subtypes; USD, no condition-specific inference.",
+    "auth": "Bearer required.",
+    "params": {"query": "cardId required; game context; from/to YYYY-MM-DD optional.", "body": "none"},
+    "dependencies": {"env": ["TCGCSV_DATABASE_URL", "TCGCSV_DATABASE_SSL"], "services": ["TCGCSV PostgreSQL on Nezopt 15TB"]}
   },
   {
     "path": "/api/marketplace-pricing-strategies",

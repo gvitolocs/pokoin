@@ -22,13 +22,12 @@ const STATUS_CHIPS = [
   { id: 'paused', label: 'Paused' },
 ];
 
-// PowerTools pricer sources. eBay and TCGPlayer comps have no Pokoin source
-// yet — the buttons render disabled until a feed lands.
+// TCGplayer retains its source USD quotes separately from PKN asks.
 const PRICER_SOURCES = [
   { id: 'pokoin', label: 'Pokoin', enabled: true },
   { id: 'cardtrader', label: 'CardTrader', enabled: true },
   { id: 'ebay', label: 'eBay', enabled: false },
-  { id: 'tcgplayer', label: 'TCGPlayer', enabled: false },
+  { id: 'tcgplayer', label: 'TCGPlayer · USD', enabled: true },
 ];
 
 const SORT_LABELS = {
@@ -43,6 +42,15 @@ const SORT_LABELS = {
 function marketValueFor(prices, row, source) {
   const entry = prices[String(row?.cardId || row?.card_id || '')];
   if (!entry) return null;
+  if (source === 'tcgplayer') {
+    const quotes = (entry.tcgplayer || []).filter((quote) => quote.marketPrice != null);
+    if (!quotes.length) return null;
+    const values = quotes.map((quote) => Number(quote.marketPrice));
+    const low = Math.min(...values), high = Math.max(...values);
+    return { currency: 'USD', low, high, title: quotes.map((quote) =>
+      `${quote.subtype}: $${quote.marketPrice} (${quote.sourceTimestamp})`).join('\n')
+      + '\nAggregate market price; no condition-specific quote.' };
+  }
   if (source === 'cardtrader') {
     return entry.ctMatchedPkn ?? entry.ctCheapestPkn ?? null;
   }
@@ -52,6 +60,12 @@ function marketValueFor(prices, row, source) {
 function MarketCell({ value, pending }) {
   if (pending) return <span className="inv-mkt is-pending">…</span>;
   if (value == null) return <span className="inv-mkt is-none">—</span>;
+  if (value.currency === 'USD') {
+    const format = (amount) => amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+    return <span className="inv-mkt" title={value.title}>
+      {format(value.low)}{value.high !== value.low ? `–${format(value.high)}` : ''} USD
+    </span>;
+  }
   return <span className="inv-mkt">{value.toLocaleString('en-US', { maximumFractionDigits: 0 })} PKN</span>;
 }
 
@@ -141,7 +155,7 @@ export default function InventoryBoard({ rows, formatPrice, defaultSource = '', 
   );
   const paused = rows.filter((row) => String(row?.status || '').toLowerCase() === 'paused').length;
   // Load market comps for the current filtered rows when a pricer source is
-  // on. Re-fetches when the row set changes; eBay / TCGPlayer never fetch.
+  // on. Re-fetches when the row set changes.
   useEffect(() => {
     if (!pricerOn) {
       pricesKeyRef.current = '';

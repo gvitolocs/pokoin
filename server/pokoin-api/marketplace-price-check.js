@@ -11,8 +11,8 @@
  *   ctMatchedPkn        — cheapest CardTrader ask matching the item's condition + language
  *   soldMedianPkn       — 30-day inferred-sale median for the blueprint
  *
- * eBay / TCGPlayer comps have no source yet; the SPA shows those pricer
- * sources disabled until one lands here.
+ * TCGplayer aggregate quotes come from the separate lossless TCGCSV store.
+ * They retain USD, all printing variants and their source timestamp.
  */
 
 // Sibling requires come from the live Pi release base (lazy so local unit
@@ -22,6 +22,7 @@ const verifyBearer = (...args) => require('./_firebase').verifyBearerToken(...ar
 const authError = (...args) => require('./_firebase').authErrorResponse(...args);
 
 const MAX_ITEMS = 100;
+const { readTcgplayerPrices } = require('./_tcgcsv_prices');
 
 const CT_CONDITION_SETS = {
   NM: ['nm', 'mint', 'near mint', 'near mint foil'],
@@ -188,6 +189,14 @@ async function readPrices(items, { excludeSellerUid = '' } = {}) {
     ctByCard.set(cardId, groups);
   }
 
+  const game = require('./_marketplace_game').currentGame();
+  let tcgplayer;
+  try {
+    tcgplayer = await readTcgplayerPrices(game, ids);
+  } catch (error) {
+    console.error('TCGCSV price feed unavailable', error.code || error.message);
+    tcgplayer = { status: 'unavailable', prices: {} };
+  }
   const prices = {};
   for (const item of items) {
     const { ctCheapestPkn, ctMatchedPkn } = pickMatchedCt(ctByCard.get(item.cardId) || [], item.condition, item.language);
@@ -196,6 +205,8 @@ async function readPrices(items, { excludeSellerUid = '' } = {}) {
       ctCheapestPkn,
       ctMatchedPkn,
       soldMedianPkn: soldByCard.get(item.cardId) ?? null,
+      tcgplayer: tcgplayer.prices[item.cardId] || [],
+      tcgplayerStatus: tcgplayer.status,
     };
   }
   return prices;

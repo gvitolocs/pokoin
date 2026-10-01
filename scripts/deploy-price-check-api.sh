@@ -23,18 +23,20 @@ git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
 say "stage exact origin/main commit $COMMIT"
 git -C "$REPO" archive "$COMMIT" server/pokoin-api | tar -C "$STAGE" -xf -
 SRC="$STAGE/server/pokoin-api"
-for file in marketplace-price-check.js; do
+for file in marketplace-price-check.js _tcgcsv_prices.js marketplace-tcgplayer-history.js; do
   [[ -f "$SRC/$file" ]] || die "commit is missing server/pokoin-api/$file"
 done
 
 say "price check unit tests"
 node --test "$SRC/marketplace-price-check.test.js"
+node --test "$SRC/_tcgcsv_prices.test.js"
+node --test "$SRC/marketplace-tcgplayer-history.test.js"
 node --check "$SRC/marketplace-price-check.js"
 
 release="releases/price-check-$SHORT-$STAMP"
 say "Pi release $release"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .price-check-previous; cp -a \$prev '$release'; mkdir -p '$release/api'"
-tar -C "$SRC" -cf - marketplace-price-check.js \
+tar -C "$SRC" -cf - marketplace-price-check.js _tcgcsv_prices.js marketplace-tcgplayer-history.js \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-price-check-commit'"
 # The Pi API mounts routes from server/api-route-manifest.js — keep the entry
