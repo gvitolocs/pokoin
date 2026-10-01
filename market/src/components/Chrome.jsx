@@ -6,7 +6,7 @@ import {
   cardFromAutocomplete,
   cardHref,
   fetchArtist,
-  fetchExpansion,
+  fetchExpansionCards,
   fetchSearch,
   fetchSellerByUsername,
   fetchSellerSearchWithAssociates,
@@ -678,7 +678,9 @@ export default function Chrome({ children }) {
               .catch(() => {});
             return;
           }
-          fetchExpansion({ slug: target.slug, limit: 48 })
+          // A matching name may sit beyond the first set page. Hydrate the
+          // complete catalog and let the same printing scorer choose rows.
+          fetchExpansionCards({ slug: target.slug })
             .then((data) => {
               const cards = data?.cards || [];
               rememberPrintings(target.key, cards);

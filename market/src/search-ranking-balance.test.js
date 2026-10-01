@@ -260,3 +260,28 @@ test('selected title language uses the same specificity rule and ignores stale t
   const stale = { ...regular, localized_name: 'Glurak', search_lang: 'it' };
   assert.equal(explainQuery('glurak', stale, { lang: 'de' }).coverage, 0);
 });
+
+test('a shorter translated title cannot erase unmatched English name words', () => {
+  const compound = single('mega', 'M Charizard EX', 'Evolutions', '13/108', {
+    localized_name: 'MリザードンEX', search_lang: 'jp',
+  });
+  const english = explainQuery('charizard', compound, { lang: 'en' });
+  const selected = explainQuery('charizard', compound, { lang: 'jp' });
+  assert.equal(english.extraTokens, 2);
+  assert.equal(selected.extraTokens, english.extraTokens);
+  assert.equal(selected.score, english.score);
+});
+
+test('a mixed set cache keeps each printing name and cannot bypass mechanic eligibility', () => {
+  resetSuggestLive();
+  rememberSuggestGroups([{ name: 'set:evolutions', printings: [
+    single('first', 'Pikachu ex', 'Evolutions', '1/108'),
+    single('rival', 'Mewtwo GX', 'Evolutions', '2/108'),
+    single('wanted', 'Mewtwo ex', 'Evolutions', '52/108'),
+  ] }]);
+  const result = liveSuggestGroups('mewtwo ex', { kind: 'singles', printLang: 'all' });
+  assert.equal(result.groups[0].name, 'Mewtwo ex');
+  assert.equal(result.groups[0].printings[0].id, 'wanted');
+  assert.ok(result.groups.every((group) => group.printings.every((row) => row.name === group.name)));
+  assert.ok(!result.groups.some((group) => group.printings.some((row) => row.id === 'rival')));
+});

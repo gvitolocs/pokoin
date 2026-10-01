@@ -1,4 +1,5 @@
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
+import { createExpansionCardsFetcher } from './expansion-cards.js';
 import { attachRecentsToHome, fetchCardTiles, fetchExpansionFromLists, fetchHomeFromLists, fetchSetIndexFromLists, isPublicRailsVector } from './lists.js';
 import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsMissingTilePrice, lastMedianFromSales, tilePricePkn } from './pkn.js';
 export { formatPkn, formatPknNumber };
@@ -1248,8 +1249,11 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
       });
       return pricedRail;
     }
-    const page = mapExpansionCards(await fromPage);
-    if (page?.cards?.length) {
+    const payload = await fromPage;
+    const page = mapExpansionCards(payload);
+    // A set with exactly a full page ends with a successful empty next page.
+    // Require the SQL payload's array so missing/failed responses still reject.
+    if (page?.cards?.length || (offset > 0 && Array.isArray(payload?.cards))) {
       return {
         ...page,
         cards: await fillMissingTilePrices(page.cards),
@@ -1274,35 +1278,11 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
   return pending;
 }
 
-export async function fetchExpansionCards({ slug = '', expansionName = '' } = {}) {
-  const cards = [];
-  const seen = new Set();
-  let offset = 0;
-  let expansion = null;
-  for (let page = 0; page < 40; page += 1) {
-    const data = await fetchExpansion({
-      slug,
-      expansionName,
-      limit: EXPANSION_PAGE,
-      offset,
-    });
-    expansion = data.expansion || expansion;
-    const chunk = data.cards || [];
-    for (const row of chunk) {
-      const id = String(row.id || row.card_id || '');
-      if (!id || seen.has(id)) {
-        continue;
-      }
-      seen.add(id);
-      cards.push(row);
-    }
-    if (chunk.length < EXPANSION_PAGE) {
-      return rememberCompleteExpansion({ slug, expansionName }, { cards, hasMore: false, expansion });
-    }
-    offset += chunk.length;
-  }
-  return { cards, hasMore: true, expansion };
-}
+export const fetchExpansionCards = createExpansionCardsFetcher({
+  fetchPage: fetchExpansion,
+  rememberComplete: rememberCompleteExpansion,
+  pageSize: EXPANSION_PAGE,
+});
 
 const neighborCache = new Map();
 

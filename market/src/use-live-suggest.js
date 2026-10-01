@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchArtist,
-  fetchExpansion,
+  fetchExpansionCards,
   fetchSearch,
   fetchSuggest,
   imageSrc,
@@ -143,7 +143,9 @@ export function useLiveSuggest(query, { kind = 'singles', enabled = true, limit 
             .catch(() => {});
           continue;
         }
-        fetchExpansion({ slug: target.slug, limit: 48 })
+        // Keep add-card search in parity with the header: later set pages
+        // contribute candidates to the same scorer, rather than disappearing.
+        fetchExpansionCards({ slug: target.slug })
           .then((data) => {
             const cards = data?.cards || [];
             rememberPrintings(target.key, cards);

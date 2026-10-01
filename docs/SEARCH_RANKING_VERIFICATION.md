@@ -1,5 +1,30 @@
 # Shared search ranking verification
 
+## Behavior covered by the fix
+
+The shared printing scorer retains confidence for an accepted spelling typo
+in proportion to the letters preserved, while keeping the existing edit and
+coverage limits. Name specificity counts distinct words actually matched in
+the name: set, artist, rarity and collector evidence cannot cancel an untyped
+name word. A shorter translation only contributes specificity when that
+language contributed name evidence.
+
+The popup selects individual printings in descending score order. Lower-score
+siblings no longer inherit their group's best score, and per-name quotas no
+longer displace stronger printings. Heterogeneous set and artist caches group
+each printing by its actual name before applying mechanic eligibility.
+
+Both header and add-card search hydrate recognized sets through the complete
+paginated catalog. A matching card beyond the first 48 rows can therefore
+reach the scorer. Concurrent requests for the same set share the entire
+pagination promise, including later pages; a failed request can be retried.
+Successful empty terminal pages complete exact 48/96-card sets, while missing
+or failed responses still reject.
+The existing 40-page bound remains, and a truncated catalog is not marked
+complete. These changes apply to every query using these shared paths.
+
+## Running the formal check
+
 Run `scripts/check-search-ranking-tlc.sh` from an isolated worktree on nezopt.
 The check imports the worktree's actual `search-score.js` and
 `suggest-live.js`; it generates its score fixtures and popup observations at
@@ -71,6 +96,36 @@ The whole-group witness emitted IDs `101, 102, 201`: a partial Mewtwo
 printing preceded the full-query Mewtwo ex printing. The corrected sequence
 was `101, 201, 102`. The name-specificity witness reproduced equal base
 and extra-word scores after restoring the previous penalty calculation.
+
+The final implementation also passed:
+
+| Check | Result |
+| --- | --- |
+| `node --test market/src/*.test.js` | 1,036 passed, zero failed |
+| `cd market && npm run build` | Passed; existing bundle-size and mixed-import warnings |
+| Python test files under `scripts/` | 12 files, 121 tests passed |
+| Existing gesture TLC safety/liveness checks | Passed; all five expected reachability witnesses produced counterexamples |
+| Existing CardTrader seller inventory TLC safety/liveness | Passed; 43 generated, 14 distinct states |
+| Broader API, worker and script JavaScript suites | 397 passed, two baseline failures |
+| `market/index.test.js` | One baseline failure |
+
+The two broader JavaScript failures are the CardTrader connect webhook test
+and seller-listings test loading the absent `server/_firebase` helper. The
+index test expects a card-bootstrap route matcher that is absent from the
+unchanged baseline. All three failures were reproduced in the separate
+formal-verification worktree without the implementation changes. They remain
+outside this search fix.
+
+Python tests used a temporary virtual environment with Pillow and NumPy; the
+artwork-layout classifier tests used the existing ROCm/PyTorch environment.
+No global dependency installation was required.
+
+Browser verification against the live catalog from the isolated development
+server showed `mewtow evol` starting with regular Mewtwo **51/108**, then
+Mewtwo ex **52/108** and **103/108**, followed by other Mewtwo printings.
+`charziard evol` likewise started with the Evolutions Charizard printings.
+The live Evolutions endpoint confirmed that regular Mewtwo is beyond the
+initial 48-row response. No production code was pushed or deployed.
 
 ## Limits
 

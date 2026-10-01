@@ -34,7 +34,6 @@ import {
   RARITY_ALIAS_COMPACT,
   RARITY_PHRASE_COMPACT,
   compactQuery,
-  emissionMultiplier,
   exactSetAlias,
   maxDistance,
   parseCollectorWord,
@@ -66,11 +65,11 @@ export const QUALITY_UNIT = 10;
 //               discriminative, so it sits just under an exact name
 //   artist/set  strong contextual evidence
 //   rarity/art  supporting evidence
-// Name evidence still always beats metadata, so `legend` as a NAME token
-// outscores `legend` as a set. Coverage (tokens matched) dominates all of it.
+// Exact name evidence beats metadata; accepted name typos retain confidence
+// proportional to the fraction of letters preserved. Coverage dominates.
 export const Q_NAME_EXACT = 1.0;
 export const Q_NAME_PREFIX = 0.7; // query token is a prefix of a name token (pika → Pikachu)
-export const Q_NAME_TYPO = 0.5; // scaled by emissionMultiplier(distance)
+export const Q_NAME_TYPO = 0.65; // scaled by 1 - edit distance / query length
 export const Q_COLLECTOR = 0.9; // exact printed collector number (n, n/m, SH1, 74a)
 export const Q_ARTIST_EXACT = 0.6;
 export const Q_ARTIST_PREFIX = 0.42;
@@ -97,6 +96,9 @@ export const SELECTED_LANG_BONUS = 0.03;
 // tie — never lift a weaker reading over a stronger one.
 export const PRIOR_BONUS_CAP = 0.9;
 const PRIOR_REF = 400;
+// Reuse the collator: equal-score cohorts can contain thousands of printings,
+// and constructing numeric collation options inside every comparison is slow.
+const PRINTING_ID_COLLATOR = new Intl.Collator('en', { numeric: true });
 
 // Tokens this short are meaningful exact lexical tokens (ex / gx / v) but must
 // NOT be prefix/typo-expanded — that is exactly how `pika` used to become a set.
@@ -326,14 +328,14 @@ function fieldEvidence(compact, fieldTokens, tiers) {
   }
   const short = compact.length <= SHORT_TOKEN_MAX;
   let best = null;
-  const consider = (quality, distance, via) => {
+  const consider = (quality, distance, via, matchedToken) => {
     if (!best || quality > best.quality || (quality === best.quality && distance < best.distance)) {
-      best = { quality, distance, via };
+      best = { quality, distance, via, matchedToken };
     }
   };
   for (const fieldToken of fieldTokens) {
     if (fieldToken === compact) {
-      consider(tiers.exact, 0, `${tiers.name}-exact`);
+      consider(tiers.exact, 0, `${tiers.name}-exact`, fieldToken);
     }
   }
   if (best && best.quality >= tiers.exact) {
@@ -346,7 +348,7 @@ function fieldEvidence(compact, fieldTokens, tiers) {
     for (const fieldToken of fieldTokens) {
       if (fieldToken.length > compact.length && fieldToken.startsWith(compact)) {
         const extra = fieldToken.length - compact.length;
-        consider(tiers.prefix / (1 + 0.03 * extra), extra, `${tiers.name}-prefix`);
+        consider(tiers.prefix / (1 + 0.03 * extra), extra, `${tiers.name}-prefix`, fieldToken);
       }
     }
   }
@@ -354,6 +356,7 @@ function fieldEvidence(compact, fieldTokens, tiers) {
     const cap = maxDistance(compact.length);
     if (cap > 0) {
       let bestDistance = Infinity;
+      let matchedToken = '';
       for (const fieldToken of fieldTokens) {
         if (Math.abs(fieldToken.length - compact.length) > Math.ceil(cap) + 1) {
           continue;
@@ -361,11 +364,17 @@ function fieldEvidence(compact, fieldTokens, tiers) {
         const distance = prefixEditDistance(compact, fieldToken);
         if (distance <= cap + 1e-9 && distance < bestDistance) {
           bestDistance = distance;
+          matchedToken = fieldToken;
         }
       }
       // Only a real typo (few edits per typed char) counts toward coverage.
       if (bestDistance !== Infinity && bestDistance <= compact.length * TYPO_COVER_RATIO + 1e-9) {
-        consider(tiers.typo * emissionMultiplier(bestDistance), bestDistance, `${tiers.name}-typo`);
+        // The compact-name ranker's exponential likelihood is much too steep
+        // for this bounded quality tiebreak: one transpose used to reduce a
+        // name to 0.06, below a broad set prefix. Keep the existing acceptance
+        // cap, then measure how much of this token's spelling is preserved.
+        consider(tiers.typo * (1 - bestDistance / compact.length), bestDistance,
+          `${tiers.name}-typo`, matchedToken);
       }
     }
   }
@@ -398,6 +407,7 @@ export function tokenEvidence(token, doc, langs = ['en']) {
         distance: evidence.distance,
         via: evidence.via,
         canonical: evidence.canonical || '',
+        matchedToken: evidence.matchedToken || '',
         lang,
       };
     }
@@ -477,17 +487,34 @@ export function scoreEntry(tokens, doc, langs = ['en']) {
   }
   // Tight-match preference: penalize leftover name tokens (per the tightest
   // active-language name), so a full-name match beats a longer partial one.
-  let minNameLen = Infinity;
-  for (const lang of langs) {
-    const names = doc.langText?.[lang]?.name;
-    if (names && names.length) {
-      minNameLen = Math.min(minNameLen, names.length);
+  const matchedNames = new Map();
+  for (const evidence of perToken) {
+    if (evidence.via.startsWith('name-') && evidence.matchedToken) {
+      if (!matchedNames.has(evidence.lang)) {
+        matchedNames.set(evidence.lang, new Set());
+      }
+      matchedNames.get(evidence.lang).add(evidence.matchedToken);
     }
   }
-  const extraTokens = Number.isFinite(minNameLen) ? Math.max(0, minNameLen - coverage) : 0;
+  let extraTokens = Infinity;
+  for (const lang of langs) {
+    const names = doc.langText?.[lang]?.name;
+    // An untranslated query's English name match must not borrow a shorter
+    // localized title that contributed no name evidence. Metadata-only rows
+    // may still use the tightest available title for their fallback penalty.
+    if (names && names.length && (!matchedNames.size || matchedNames.has(lang))) {
+      // Set/artist/rarity/number evidence cannot cover an untyped name word.
+      // Repeated query words also cannot cover the same name word twice.
+      const unmatched = new Set(names).size - (matchedNames.get(lang)?.size || 0);
+      extraTokens = Math.min(extraTokens, Math.max(0, unmatched));
+    }
+  }
+  if (!Number.isFinite(extraTokens)) {
+    extraTokens = 0;
+  }
   quality -= EXTRA_TOKEN_PENALTY * extraTokens;
   const score = coverage * COVERAGE_UNIT + quality * QUALITY_UNIT + priorBonus(doc.prior);
-  return { score, coverage, quality, distance, perToken };
+  return { score, coverage, quality, distance, perToken, extraTokens };
 }
 
 // --- Candidate generation + ranking ------------------------------------------
@@ -615,9 +642,10 @@ export function docFromPrinting(printing = {}, { lang = 'en' } = {}) {
 }
 
 /**
- * Score suggest groups (each { name, printings }) with the unified model under
- * the active languages, and return them ordered by best-printing score plus a
- * name->score map. This is where server-hydrated localized rows enter ranking,
+ * Score every printing with the unified model under active languages, then
+ * rebuild adjacent same-name groups without changing the global row order.
+ * A group's best printing never promotes weaker siblings ahead of another
+ * group's stronger printing. This is where localized rows enter ranking,
  * with the SAME token model — deterministically, independent of arrival order.
  */
 export function scoreGroups(query, groups, { lang = 'en', minCoverage = 1 } = {}) {
@@ -626,33 +654,43 @@ export function scoreGroups(query, groups, { lang = 'en', minCoverage = 1 } = {}
   const scoreByName = new Map();
   const scored = [];
   for (const group of groups || []) {
-    // Score every printing, then reorder the group's printings by their own
-    // evidence so the strongest reading leads (`eevee i` → the Illustration
-    // Rare first; `charizard sr` → the Secret Rare). One scorer owns both the
-    // group order and the within-group order — no separate art/number sort.
-    const rows = (group.printings || []).map((printing) => ({
-      printing,
-      result: scoreEntry(tokens, docFromPrinting(printing, { lang }), langs),
-    }));
-    rows.sort((a, b) => b.result.score - a.result.score);
-    let best = rows[0]?.result || null;
-    if (!best) {
-      // No printings yet (stub / cold cache): fall back to the group name as an
-      // English doc so instant paint still orders by coverage.
-      best = scoreEntry(tokens, makeNameDoc({ display: group.name, prior: 1 }), langs);
+    const key = compactQuery(group.name);
+    const printings = group.printings || [];
+    const rows = printings.length
+      ? printings.map((printing) => ({
+          group,
+          printing,
+          nameLength: key.length,
+          id: String(printing.id || printing.card_id || ''),
+          result: scoreEntry(tokens, docFromPrinting(printing, { lang }), langs),
+        }))
+      : [{ group, printing: null, nameLength: key.length, id: '',
+          result: scoreEntry(tokens, makeNameDoc({ display: group.name, prior: 1 }), langs) }];
+    for (const row of rows) {
+      if (row.result.coverage < minCoverage) {
+        continue;
+      }
+      scoreByName.set(key, Math.max(scoreByName.get(key) ?? -Infinity, row.result.score));
+      scored.push(row);
     }
-    if (best.coverage < minCoverage) {
-      continue;
-    }
-    const ordered = rows.length ? { ...group, printings: rows.map((row) => row.printing) } : group;
-    scoreByName.set(compactQuery(group.name), best.score);
-    scored.push({ group: ordered, score: best.score, coverage: best.coverage });
   }
   scored.sort((a, b) => (
-    b.score - a.score
+    b.result.score - a.result.score
+    || a.nameLength - b.nameLength
     || String(a.group.name || '').localeCompare(String(b.group.name || ''))
+    || PRINTING_ID_COLLATOR.compare(a.id, b.id)
+    || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
   ));
-  return { groups: scored.map((row) => row.group), scoreByName };
+  const ordered = [];
+  for (const row of scored) {
+    const last = ordered[ordered.length - 1];
+    if (row.printing && last && last.name === row.group.name) {
+      last.printings.push(row.printing);
+    } else {
+      ordered.push({ ...row.group, printings: row.printing ? [row.printing] : [] });
+    }
+  }
+  return { groups: ordered, scoreByName };
 }
 
 /**

@@ -133,17 +133,25 @@ export function cachedPrintings(name) {
  * (`Glurak` → Charizard while German is selected). Bounded by the cache cap.
  */
 function allCachedGroups(now = Date.now()) {
-  const groups = [];
+  const groups = new Map();
   for (const [key, row] of byCompact) {
     if (now - row.at > TTL_MS) {
       continue;
     }
-    const printings = (row.printings || []).filter((printing) => !isLiveStub(printing));
-    if (printings.length) {
-      groups.push({ name: printings[0].name || key, printings });
+    for (const printing of row.printings || []) {
+      if (isLiveStub(printing)) {
+        continue;
+      }
+      // Catalog cache keys can contain many names. Their first card must not
+      // label every sibling or supply its mechanic to another card's gate.
+      const name = printing.name || key;
+      if (!groups.has(name)) {
+        groups.set(name, { name, printings: [] });
+      }
+      groups.get(name).printings.push(printing);
     }
   }
-  return groups;
+  return [...groups.values()];
 }
 
 function cachedNumberPrintings(parsed) {
@@ -453,12 +461,6 @@ export function liveSuggestGroups(query, {
     const freeParsed = {
       ...parsed, setTokens: [], artTokens: [], rarityTokens: [], numberTokens: [], eras: [], nameQuery: query,
     };
-    // Show more printings per card when the query carries structure (a specific
-    // rarity/art/set/number/mechanic), one per card for a plain name browse.
-    const structured = typedModifiers(query).mods.length
-      || isArtAwareQuery(parsed) || isRarityAwareQuery(parsed)
-      || isNumberAwareQuery(parsed) || (parsed.setTokens || []).length
-      || Boolean(resolved && resolved.hasArtist);
     // Default popup (no tab): when a real card reading matches, sealed SKUs
     // never ride the set phrase into the results — they live on the Product
     // tab. A query with no card reading at all keeps its product groups.
@@ -467,7 +469,10 @@ export function liveSuggestGroups(query, {
       ? scored.groups
       : withoutSealedWhenCardsLead(scored.groups);
     return {
-      groups: fillSuggestGroups(groups, limit, structured ? limit : preferPerGroup, freeParsed, kind),
+      // The scorer already orders individual printings. Fill only applies
+      // eligibility, deduplication and the cap; per-name quotas would promote
+      // weaker rows ahead of higher-scoring printings.
+      groups: fillSuggestGroups(groups, limit, limit, freeParsed, kind),
       ranked,
       parsed: freeParsed,
       intent,
