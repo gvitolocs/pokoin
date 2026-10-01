@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { groupArtworkRows } from './search-filters.js';
+import { groupArtworkRows, pileCardTier } from './search-filters.js';
+
+test('pile popup tiers: normal, Poké Ball, Master Ball', () => {
+  const cards = [
+    { id: 'master', name: 'Ducklett', rarity: 'Master Ball Reverse Holo', expansion_name: 'White Flare - Master Ball Reverse Holo' },
+    { id: 'poke', name: 'Ducklett', rarity: 'Poké Ball Reverse Holo', expansion_name: 'White Flare - Poké Ball Reverse Holo' },
+    { id: 'normal', name: 'Ducklett', rarity: 'Common', expansion_name: 'White Flare' },
+  ];
+  const sorted = [...cards].sort((a, b) => pileCardTier(a) - pileCardTier(b));
+  assert.deepEqual(sorted.map((card) => card.id), ['normal', 'poke', 'master']);
+  assert.equal(pileCardTier({ id: 'x', name: 'Ducklett', rarity: 'Rare', expansion_name: 'Paldea Evolved' }), 0);
+});
 
 test('same-artwork printings pile by CLIP version key in sort order', () => {
   const groups = groupArtworkRows([

@@ -96,6 +96,17 @@ export function artworkVersionKey(card) {
   return `id:${card?.id || card?.card_id || ''}`;
 }
 
+/** Artist pile popup order: normal printing, Poké Ball, Master Ball, then the rest. */
+export function pileCardTier(card) {
+  const identity = printingIdentity(card);
+  const blob = `${identity.rarity || ''} ${identity.tileLine || ''} ${card.rarity || ''} ${card.expansion_name || card.expansionName || ''}`
+    .toLowerCase()
+    .replace(/é/g, 'e');
+  if (blob.includes('master ball')) return 2;
+  if (blob.includes('poke ball')) return 1;
+  return 0;
+}
+
 /**
  * Artist desk: collapse same-artwork printings (shared CLIP version key) into
  * one pile row, in sort order. LEGEND halves keep their own rows — the
