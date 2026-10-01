@@ -7,7 +7,7 @@ import { printingIdentity } from '../identity.js';
 import { tilePricePkn } from '../pkn.js';
 import { cardImageAlt } from '../seo.js';
 import { Action, track } from '../track.js';
-import { groupArtworkRows } from '../search-filters.js';
+import { groupArtworkRows, pileCardTier } from '../search-filters.js';
 import { useCardSelect } from './CardSelectGrid.jsx';
 import CardArt from './CardArt.jsx';
 
@@ -114,6 +114,9 @@ export function ArtworkPileOverlay({ group, artistName, onClose }) {
   }, [onClose]);
 
   const rep = group.cards[0];
+  // Normal printing first, then Poké Ball, then Master Ball, then the rest —
+  // stable within tiers so the desk order holds.
+  const orderedCards = [...group.cards].sort((a, b) => pileCardTier(a) - pileCardTier(b));
 
   return (
     <div className="artwork-pile-backdrop" onClick={onClose}>
@@ -144,7 +147,7 @@ export function ArtworkPileOverlay({ group, artistName, onClose }) {
           </button>
         </header>
         <div className="artwork-pile-row">
-          {group.cards.map((card, index) => {
+          {orderedCards.map((card, index) => {
             const price = formatPkn(tilePricePkn(card));
             const identity = printingIdentity(card);
             return (
