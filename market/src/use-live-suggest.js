@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchArtist,
   fetchExpansionCards,
+  fetchNamePrintings,
   fetchSearch,
   fetchSuggest,
   imageSrc,
@@ -30,6 +31,7 @@ import {
 import { fetchSuggestRanked, rankConcurrency } from './suggest-rank.js';
 import { rankChunkOnWorker, warmupSuggestRankWorkers } from './suggest-rank-runtime.js';
 import { resolveSuggestQuery } from './suggest-resolve.js';
+import { earlySetPrefixName } from './search-score.js';
 
 function suggestThumbSrc(card) {
   try {
@@ -113,6 +115,10 @@ export function useLiveSuggest(query, { kind = 'singles', enabled = true, limit 
 
     function hydrateCatalog(nextTerm, resolved) {
       const targets = [];
+      const prefixName = earlySetPrefixName(nextTerm, { lang });
+      if (prefixName) {
+        targets.push({ key: `prefix-name:${lang}:${prefixName}`, kind: 'name', name: prefixName });
+      }
       if (resolved?.best) {
         for (const entity of resolved.best.entities.artist) {
           if (entity.slug) targets.push({ key: `artist:${entity.slug}`, kind: 'artist', slug: entity.slug });
@@ -130,6 +136,18 @@ export function useLiveSuggest(query, { kind = 'singles', enabled = true, limit 
       for (const target of targets) {
         if (seen.has(target.key) || cachedPrintings(target.key).length) continue;
         seen.add(target.key);
+        if (target.kind === 'name') {
+          fetchNamePrintings(target.name, { lang })
+            .then((cards) => {
+              rememberPrintings(target.key, cards);
+              preloadSuggestThumbs(collectPrintingThumbUrls(groupsFromCards(cards), suggestThumbSrc));
+              if (suggestLiveReady(String(queryRef.current || '').trim())) {
+                setLiveTick((tick) => tick + 1);
+              }
+            })
+            .catch(() => {});
+          continue;
+        }
         if (target.kind === 'artist') {
           fetchArtist(target.slug, { limit: 80 })
             .then((data) => {

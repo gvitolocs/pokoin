@@ -173,3 +173,35 @@ Running the same expanded check against the previous `c131210` baseline
 failed `EarlySetPrefixProgression`: early `e`/`ev` provided no set quality,
 and `ev` was mistakenly read as V, hiding EX cards. This confirms the new
 checks distinguish the followup fix from the earlier balanced scorer.
+
+The early-prefix implementation adds a quality-only set bonus for trailing
+one/two-letter words after independent name evidence. These broad prefixes
+have equal strength across short and long set words, so `EX` and `Expansion`
+do not gain an arbitrary advantage over `Evolutions`. Exact mechanic words
+remain literal; separated `ev`/`sv` cannot be inferred as V. Known joined card
+mechanics remain recognized when other query words precede them, and the
+`lv x` phrase does not trigger set-prefix hydration.
+
+For one-to-three-letter set prefixes, both search callers retrieve a bounded
+name bucket from the existing SQL `/api/marketplace-card-versions` endpoint.
+The request uses the confident canonical name, a 1,000-row limit and selected
+title language. Concurrent callers share the same promise; identities are
+deduplicated and rows retain their fetch-language stamp. Completed rows enter
+the existing expiring suggestion cache. No particular ambiguous set or card
+is forced into the candidate pool. Non-English name spellings are left to
+server-authoritative retrieval rather than corrected against the English
+local pool; exact English names remain usable under another title language.
+
+The final followup passed **1,053 frontend tests**, **406 broader API/worker/
+script JavaScript tests**, the production build, and the expanded TLC check.
+The initial two missing-helper failures above were repaired independently on
+`origin/main` before this followup; its isolated branch starts from `c131210`.
+The standalone `market/index.test.js` still has its unchanged baseline
+card-bootstrap matcher assertion failure. The broader tests reused the
+matching server dependencies via `NODE_PATH` without changing source files.
+
+Fresh-browser verification with the live catalog put regular Evolutions
+Mewtwo **51/108 first** for `mewtwo e`, `mewtwo ev` and `mewtwo evo`; the latter
+two retained Evolutions EX **52/108** and **103/108** immediately after it.
+`charizard e` also put regular Evolutions Charizard **11/108 first**.
+The page rendered without a Vite overlay. No push or deployment was performed.

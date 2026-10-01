@@ -230,3 +230,25 @@ test('short prefix ranking stays stable when cached printings arrive in reverse 
     assert.deepEqual(popupRows(query).map((row) => row.id), expected.get(query), query);
   }
 });
+
+test('one-letter set context does not prefer shorter metadata words over longer set names', () => {
+  const row = { id: '1', name: 'Mewtwo', set: 'Evolutions' };
+  const evolutions = scoring.explainQuery('mewtwo e', row);
+  const expansion = scoring.explainQuery('mewtwo e', { ...row, set: 'Expansion Pack' });
+  const ex = scoring.explainQuery('mewtwo e', { ...row, set: 'EX Ruby & Sapphire' });
+  assert.equal(evolutions.quality, expansion.quality);
+  assert.equal(evolutions.quality, ex.quality);
+});
+
+test('localized names are not corrected against the English pool for early hydration', () => {
+  assert.equal(scoring.earlySetPrefixName('glurak e', { lang: 'de' }), '');
+  assert.equal(scoring.earlySetPrefixName('charizard e', { lang: 'de' }), 'Charizard');
+});
+
+test('joined canonical mechanics survive preceding set words without reading context as V', () => {
+  assert.deepEqual(typedModifiers('base set pikachugx').mods, ['gx']);
+  assert.deepEqual(typedModifiers('mewtwo evolv').mods, []);
+  assert.deepEqual(typedModifiers('pika tag team').mods, ['tagteam']);
+  assert.deepEqual(typedModifiers('pika lv x').mods, ['lvx']);
+  assert.equal(scoring.earlySetPrefixName('palkia lv x'), '');
+});

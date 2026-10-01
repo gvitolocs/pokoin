@@ -7,6 +7,7 @@ import {
   cardHref,
   fetchArtist,
   fetchExpansionCards,
+  fetchNamePrintings,
   fetchSearch,
   fetchSellerByUsername,
   fetchSellerSearchWithAssociates,
@@ -30,6 +31,7 @@ import {
 } from '../suggest-live.js';
 import { catalogCacheKey, catalogIntent, groupsFromCards } from '../suggest-catalog.js';
 import { resolveSuggestQuery, serializeResolution } from '../suggest-resolve.js';
+import { earlySetPrefixName } from '../search-score.js';
 import {
   SUGGEST_THUMB_EAGER,
   SUGGEST_THUMB_HIGH,
@@ -633,6 +635,10 @@ export default function Chrome({ children }) {
 
     function hydrateCatalog(nextTerm) {
       const targets = [];
+      const prefixName = earlySetPrefixName(nextTerm, { lang });
+      if (prefixName) {
+        targets.push({ key: `prefix-name:${lang}:${prefixName}`, kind: 'name', name: prefixName });
+      }
       const resolved = resolveSuggestQuery(nextTerm);
       if (resolved?.best) {
         for (const entity of resolved.best.entities.artist) {
@@ -659,6 +665,18 @@ export default function Chrome({ children }) {
         seen.add(target.key);
         const needsHydration = () => {
           if (cachedPrintings(target.key).length) {
+            return;
+          }
+          if (target.kind === 'name') {
+            fetchNamePrintings(target.name, { lang })
+              .then((cards) => {
+                rememberPrintings(target.key, cards);
+                preloadSuggestThumbs(collectPrintingThumbUrls(groupsFromCards(cards), suggestThumbSrc));
+                if (suggestLiveReady(String(queryRef.current || '').trim())) {
+                  setLiveTick((tick) => tick + 1);
+                }
+              })
+              .catch(() => {});
             return;
           }
           if (target.kind === 'artist') {

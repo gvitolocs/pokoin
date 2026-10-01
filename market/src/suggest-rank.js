@@ -270,11 +270,28 @@ export function typedModifiers(query) {
     }
   }
   if (!mods.length) {
-    const full = compactQuery(query);
-    for (const token of MODIFIER_COMPACT) {
-      if (full.length > token.length + 2 && full.endsWith(token)) {
-        mods.push(token);
-        break;
+    const phrase = compactQuery(words.slice(-2).join(' '));
+    if (words.length >= 2 && MODIFIER_WORD.has(phrase)) {
+      mods.push(phrase);
+    } else if (words.length === 1) {
+      // Joined names (`pikachugx`) retain their mechanic. A separate unfinished
+      // set word (`mewtwo ev`, `pikachu sv`) must not become a V suffix.
+      const full = compactQuery(words[0]);
+      for (const token of MODIFIER_COMPACT) {
+        if (full.length > token.length + 2 && full.endsWith(token)) {
+          mods.push(token);
+          break;
+        }
+      }
+    } else {
+      // A known joined card title remains a mechanic token even when set
+      // metadata precedes it (`base set pikachugx`). Unknown context words
+      // such as `ev`, `sv` or `evolv` cannot impose a mechanic constraint.
+      for (const word of words) {
+        const full = compactQuery(word);
+        if (!namePoolHasCompact(full)) continue;
+        const token = MODIFIER_COMPACT.find((mod) => full.length > mod.length + 2 && full.endsWith(mod));
+        if (token) mods.push(token);
       }
     }
   }

@@ -1,5 +1,6 @@
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 import { createExpansionCardsFetcher } from './expansion-cards.js';
+import { createNamePrintingsFetcher } from './name-printings.js';
 import { attachRecentsToHome, fetchCardTiles, fetchExpansionFromLists, fetchHomeFromLists, fetchSetIndexFromLists, isPublicRailsVector } from './lists.js';
 import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsMissingTilePrice, lastMedianFromSales, tilePricePkn } from './pkn.js';
 export { formatPkn, formatPknNumber };
@@ -284,6 +285,17 @@ export async function fetchExactNameCards(name, {
   }
   return collected;
 }
+
+/** SQL-backed candidate pool for ambiguous early set prefixes. The endpoint's
+ * 1,000-row bound keeps hydration finite; the shared scorer chooses the popup. */
+export const fetchNamePrintings = createNamePrintingsFetcher({
+  fetchRows: ({ name, lang, limit }) => {
+    const params = new URLSearchParams({ query: name, limit: String(limit),
+      productType: 'card', search_language: lang });
+    return getJson(`/api/marketplace-card-versions?${params}`);
+  },
+  mapCard: cardFromCatalogRow,
+});
 
 export function fetchSuggest(query, { limit = 20, signal, lang, printLang, match } = {}) {
   const params = new URLSearchParams({
