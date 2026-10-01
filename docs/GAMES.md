@@ -152,7 +152,7 @@ onto NVMe 2026-09-14 (`scripts/install-pokoin-postgres-nvme.sh`); host port
 
 | Host | Role |
 | --- | --- |
-| `api.pokoin.com` | Marketplace API + leftover image keys on **pi-home** (edge `:18079` → API `:18080` / CDN `:18081`). Tunnel 1033 is Worker `pokoin-working` → “We are working on a solution.” not the Cloudflare label. |
+| `api.pokoin.com` | Marketplace API + leftover image keys on **pi-home** (edge `:18079` → API `:18080` / CDN `:18081`). No Worker in front (2026-10-01): public GET reads are edge-cached by zone Cache Rules; tunnel 1033 reaches clients as Cloudflare's page and the SPA shows “We are working on a solution.” itself. |
 | `api2.pokoin.com` | Same origin as `api.pokoin.com`. Oracle api2 CDN is removed. |
 | `cdn.pokoin.com` | Card-image origin on **pi-home** (`:18081`, same tunnel, disk `/srv/pokoin/card-images/objects`) |
 

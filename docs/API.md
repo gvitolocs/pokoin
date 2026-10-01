@@ -184,7 +184,7 @@ the walk completes. [MARKET.md](MARKET.md#set-desk-first-paint). Schema:
 | Worker | Job |
 | --- | --- |
 | `pokoin-origin` | OG HTML for card paths, plus homepage rails Cache API (`marketplace-home.js`). Origin 530 / Cloudflare 1033 becomes the working page, not tunnel copy. |
-| `pokoin-working` | `api.pokoin.com` / `api2.pokoin.com`: same working page when the Pi tunnel is down. GIF is on Vercel (`/home/working.gif`). |
+| `pokoin-working` | **No routes since 2026-10-01** (it ran on every `api.pokoin.com` request, ~68% of the free 100k Worker requests/day, in front of the edge cache). During a Pi outage API clients get Cloudflare 530/1033; the SPA shows its own working page (`market/src/working-page.js`). API reads are edge-cached by zone Cache Rules (public `Cache-Control`, no `Authorization`). |
 | `pokoin-shortlink` | `/{digits}` → canonical card path |
 | `marketplace-home` | Edge rails vector + `marketplace-card-tiles`. Origin is `https://api.pokoin.com`. |
 | `marketplace-card-og` | OG **HTML** for link-preview bots (not an image file). Leftover image rewrite; `?og=1` / `?bot=1`; satellite hosts. |

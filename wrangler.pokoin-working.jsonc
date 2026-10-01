@@ -4,8 +4,13 @@
   "compatibility_date": "2026-09-01",
   "workers_dev": false,
   "observability": { "enabled": true },
-  "routes": [
-    { "pattern": "api.pokoin.com/*", "zone_name": "pokoin.com" },
-    { "pattern": "api2.pokoin.com/*", "zone_name": "pokoin.com" }
-  ]
+  // No routes (2026-10-01). On api.pokoin.com/* this Worker ran on every API
+  // request — ~68% of the free plan's 100k Worker requests/day, mostly crawler
+  // traffic — and sat in front of the edge cache, so cached reads still counted.
+  // API reads are now edge-cached by zone Cache Rules. The only loss: during a
+  // Pi outage non-web clients get Cloudflare's 530/1033 page instead of
+  // {"error":"We are working on a solution."}; the SPA detects both itself
+  // (market/src/working-page.js). Free plan has 0 Custom Error Rules to replace it.
+  // Re-adding a route: set request_limit_fail_open on it in Cloudflare.
+  "routes": []
 }
