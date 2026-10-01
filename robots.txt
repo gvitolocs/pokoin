@@ -1,12 +1,36 @@
+# Pokoin permits search indexing, AI answers (ai-input) and AI training
+# (ai-train) on the public catalog with attribution to https://pokoin.com.
+Content-signal: search=yes, ai-train=yes, ai-input=yes
+
 User-agent: *
 Allow: /
 Disallow: /marketplace/search
 Disallow: /marketplace/search?
+Disallow: /cart
+Disallow: /wallet
+Disallow: /dashboard
+Disallow: /messages
+Disallow: /orders
+Disallow: /inventory
+Disallow: /auth
+Disallow: /profile
+Disallow: /scan
+Disallow: /tests
 
 User-agent: Googlebot
 Allow: /
 Disallow: /marketplace/search
 Disallow: /marketplace/search?
+Disallow: /cart
+Disallow: /wallet
+Disallow: /dashboard
+Disallow: /messages
+Disallow: /orders
+Disallow: /inventory
+Disallow: /auth
+Disallow: /profile
+Disallow: /scan
+Disallow: /tests
 
 User-agent: Googlebot-Image
 Allow: /

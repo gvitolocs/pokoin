@@ -44,6 +44,7 @@ function request(port, method = 'GET', pathname = `/api/marketplace-suggest?q=pi
         origin: res.headers['x-pokoin-origin'],
         cache: res.headers['x-pokoin-edge-cache'],
         body: (() => { try { return JSON.parse(body || '{}'); } catch { return { text: body }; } })(),
+        robots: res.headers['x-robots-tag'],
       }));
     });
     req.on('error', reject);
@@ -248,5 +249,31 @@ test('a 404 on one URL does not switch caching off for the whole endpoint', asyn
   } finally {
     child.kill();
     srv.close();
+  }
+});
+
+test('API responses carry x-robots-tag noindex; CDN responses do not', async () => {
+  const pi = await server('pi', 5, 'public, max-age=10, s-maxage=30');
+  const cdn = await server('cdn', 5);
+  const { port, child } = await startEdge({
+    POKOIN_API_ORIGIN: `http://127.0.0.1:${pi.address().port}`,
+    POKOIN_CDN_ORIGIN: `http://127.0.0.1:${cdn.address().port}`,
+  });
+  try {
+    const path = '/api/marketplace-card-page?v=noindex-check';
+    const first = await request(port, 'GET', path);
+    assert.equal(first.cache, 'MISS');
+    assert.equal(first.robots, 'noindex');
+    const hit = await request(port, 'GET', path);
+    assert.equal(hit.cache, 'HIT');
+    assert.equal(hit.robots, 'noindex');
+    const personal = await request(port, 'GET', path, { authorization: 'Bearer user' });
+    assert.equal(personal.robots, 'noindex');
+    const image = await request(port, 'GET', '/card-images/x.webp');
+    assert.equal(image.robots, undefined);
+  } finally {
+    child.kill();
+    pi.close();
+    cdn.close();
   }
 });
