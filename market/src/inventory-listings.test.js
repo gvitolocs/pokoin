@@ -19,6 +19,7 @@ import {
   nextPositionInStack,
   parseListingLocation,
   liveInventoryListings,
+  sameListingBox,
   sortInventoryRows,
   summarizeLiveInventory,
 } from './inventory-listings.js';
@@ -186,6 +187,32 @@ test('listing location grammar parses box, stack and position', () => {
   assert.equal(listingBox('box·3·5'), 'box');
   assert.equal(listingBox('PlainBox'), 'PlainBox');
   assert.equal(listingBox(''), '');
+});
+
+test('a box URL surfaces every stacked row in that box, across casing', () => {
+  // /mypokoin/location/megaevoluzionietb — the URL names the box; rows stored
+  // with stack/position suffixes belong to it. This used to exact-match the
+  // full location string and the box desk painted "Nothing stored".
+  const rows = [
+    { id: 'p1', location: 'megaevoluzionietb·1·1-20', quantityAvailable: 1 },
+    { id: 'p2', location: 'megaevoluzionietb·2·1-7', quantityAvailable: 2 },
+    { id: 'p3', location: 'megaevoluzionietb', quantityAvailable: 1 },
+    { id: 'p4', location: 'other·9', quantityAvailable: 1 },
+    { id: 'p5', location: '', quantityAvailable: 1 },
+  ];
+  assert.equal(rows.filter((row) => sameListingBox(row.location, 'megaevoluzionietb')).length, 3);
+  // Same box, different casing in the URL.
+  assert.equal(rows.filter((row) => sameListingBox(row.location, 'MegaEvoluzioniETB')).length, 3);
+  // Full slot string in the URL still opens the box.
+  assert.equal(rows.filter((row) => sameListingBox(row.location, 'megaevoluzionietb·2-4')).length, 3);
+  assert.equal(sameListingBox('', 'megaevoluzionietb'), false);
+  assert.equal(sameListingBox(undefined, 'megaevoluzionietb'), false);
+  assert.equal(sameListingBox('other·9', 'megaevoluzionietb'), false);
+
+  const stacks = groupBoxStacks(rows, 'MegaEvoluzioniETB');
+  assert.deepEqual(stacks.map((s) => s.stack), [1, 2, 0]);
+  assert.equal(stacks[0].postings[0].id, 'p1');
+  assert.equal(stacks[2].postings[0].id, 'p3');
 });
 
 test('box stacks order by stack number then position, unnumbered last', () => {
