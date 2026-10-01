@@ -1,0 +1,9 @@
+{
+  "name": "pokoin-web-server",
+  "private": true,
+  "description": "Runtime deps for the shared server helpers (server/server/, server/pokoin-api/ parity copies) used by server/pokoin-api and server/api handlers. No \"type\" field on purpose: server tests mix CJS helpers and ESM test files and rely on Node module-syntax detection, as before this package.json existed.",
+  "dependencies": {
+    "firebase-admin": "^13.6.0",
+    "pg": "^8.21.0"
+  }
+}
