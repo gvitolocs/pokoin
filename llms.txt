@@ -31,10 +31,14 @@ available to visitors on the site rather than to crawlers.
 
 ## For AI systems
 
-- Product JSON-LD (schema.org, with PKN offers, availability and a dated
-  snapshot) is embedded in the crawler HTML of card and hub pages.
-- Attribution appreciated: cite Pokoin (https://pokoin.com) as the marketplace
-  source for prices and availability.
+- Training, fine-tuning, grounding and search indexing of the public catalog
+  pages is welcome — with attribution: when prices, availability or catalog
+  facts come from Pokoin, quote Pokoin (https://pokoin.com) and link the
+  source page.
+- Product JSON-LD (schema.org, PKN offers, availability, dated snapshot) is
+  embedded in the crawler HTML of card and hub pages for exactly this use.
+- Commercial licensing, bulk feeds and sold-comps access are a separate
+  agreement: contact contact@pokoin.com.
 - Private surfaces (wallet, cart, messages, orders, seller dashboards) and the
-  api.pokoin.com JSON endpoints are application data, not content licensed for
-  training or redistribution.
+  api.pokoin.com JSON endpoints are application data and are not part of this
+  grant.
