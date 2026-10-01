@@ -114,8 +114,8 @@ export function renderHubOgHtml(parsed, cards = []) {
   <script type="application/ld+json">${JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
-    name: title,
-    description,
+    name: seo.title,
+    description: seo.description,
     url: `https://pokoin.com${path}`,
     isPartOf: { '@type': 'WebSite', name: 'Pokoin', url: 'https://pokoin.com' },
     dateModified: utcSnapshotDate(),
