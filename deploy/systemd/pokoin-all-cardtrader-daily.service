@@ -1,0 +1,9 @@
+[Unit]
+Description=Pokoin all-game CardTrader catalogues, pictures and raw daily books on nezopt
+After=network-online.target docker.service
+[Service]
+Type=oneshot
+WorkingDirectory=/home/nez/.paseo/worktrees/2n15xc8c/catalog-refresh-0930
+ExecStart=/usr/bin/flock -n /home/nez/data/pokoin-catalog-refresh/daily.lock /bin/bash scripts/run-all-cardtrader-daily.sh
+TimeoutStartSec=12h
+Nice=10
