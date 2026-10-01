@@ -59,6 +59,12 @@ function pickOrigin(pathname) {
   return isApiPath(pathname) ? API : CDN;
 }
 
+/** AI/search robots: API responses are app data, never indexable pages. */
+function withNoindex(pathname, headers) {
+  if (!isApiPath(pathname)) return headers;
+  return { ...headers, 'x-robots-tag': 'noindex' };
+}
+
 function sitemapFile(pathname) {
   const name = String(pathname || '').replace(/^\//, '');
   return SITEMAP_FILES.has(name) ? name : '';
@@ -209,7 +215,7 @@ function forward(req, res, origin, pathname, search, { onDone, onConnectError, b
     if (onDone) onDone();
   };
   const upstream = upstreamRequest(req, origin, pathname, search, (up) => {
-    res.writeHead(up.statusCode || 502, up.headers);
+    res.writeHead(up.statusCode || 502, withNoindex(pathname, up.headers));
     up.pipe(res);
     up.on('end', done);
     up.on('error', done);
@@ -299,7 +305,7 @@ function fetchEntry(req, pathname, search, leaderRes) {
           if (leaderRes && !leaderRes.headersSent) {
             leaderRes.setHeader('x-pokoin-origin', local ? 'pi' : 'nezopt');
             leaderRes.setHeader('x-pokoin-edge-cache', 'BYPASS');
-            leaderRes.writeHead(up.statusCode || 502, up.headers);
+            leaderRes.writeHead(up.statusCode || 502, withNoindex(pathname, up.headers));
             up.pipe(leaderRes);
           } else {
             up.resume();
@@ -322,7 +328,7 @@ function fetchEntry(req, pathname, search, leaderRes) {
           }
           resolve({
             status: up.statusCode,
-            headers,
+            headers: withNoindex(pathname, headers),
             body: Buffer.concat(chunks, size),
             origin: local ? 'pi' : 'nezopt',
             storedAt: now,

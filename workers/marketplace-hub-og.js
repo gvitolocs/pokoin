@@ -7,6 +7,7 @@ import {
   isLinkPreviewBot,
   isSearchEngineBot,
   siteOriginFromHost,
+  utcSnapshotDate,
 } from './marketplace-card-og.js';
 
 const HUB_RE =
@@ -110,11 +111,21 @@ export function renderHubOgHtml(parsed, cards = []) {
   <link rel="canonical" href="https://pokoin.com${path}" />
   <meta property="og:title" content="${title}" />
   <meta property="og:url" content="https://pokoin.com${path}" />
+  <script type="application/ld+json">${JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: title,
+    description,
+    url: `https://pokoin.com${path}`,
+    isPartOf: { '@type': 'WebSite', name: 'Pokoin', url: 'https://pokoin.com' },
+    dateModified: utcSnapshotDate(),
+  }).replace(/</g, '\\u003c')}</script>
 </head>
 <body>
   <nav><a href="/marketplace">Marketplace</a> / <a href="${indexHref}">${escapeHtml(parsed.kind)}</a></nav>
   <h1>${heading}</h1>
   <p>${description}</p>
+  <p>Prices in PKN on <a href="https://pokoin.com">Pokoin</a>, the collectors' marketplace.</p>
   ${links ? `<ul>${links}</ul>` : ''}
 </body>
 </html>`;
