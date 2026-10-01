@@ -98,7 +98,7 @@ function setup(balances = { uidA: 1000, uidB: 500, uidC: 300 }, consents = ['uid
 }
 
 const bal = (firestore, uid) => firestore.docs.get(`balances/${uid}`)?.availablePkn;
-const stakeBody = (discordUserId, side, amountPkn) => ({ action: 'stake', guildId: GUILD, gameId: GAME, discordUserId, side, amountPkn });
+const stakeBody = (discordUserId, side, amountPkn) => ({ action: 'stake', guildId: GUILD, gameId: GAME, discordUserId, side, amountPkn, closesAt: Date.now() + 60_000 });
 
 test('requires the service token', async () => {
   const { handler } = setup();
@@ -198,4 +198,20 @@ test('rejects malformed amounts and sides', async () => {
     assert.equal((await call(handler, stakeBody('22222', 'win', amountPkn))).statusCode, 400);
   }
   assert.equal((await call(handler, stakeBody('22222', 'draw', 10))).statusCode, 400);
+});
+
+test('stakes after the round deadline are refused server-side', async () => {
+  const { handler, firestore } = setup();
+  const late = await call(handler, { ...stakeBody('22222', 'win', 10), closesAt: Date.now() - 1 });
+  assert.equal(late.body.error, 'round_closed');
+  assert.equal((await call(handler, { ...stakeBody('22222', 'win', 10), closesAt: undefined })).statusCode, 400);
+
+  // the first stake pins the deadline; a later stake cannot extend it
+  await call(handler, { ...stakeBody('22222', 'win', 10), closesAt: Date.now() + 30 });
+  const round = firestore.docs.get(`poko_bet_rounds/${GUILD}_${GAME}`);
+  assert.ok(round.closesAtMs <= Date.now() + 30);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const extended = await call(handler, { ...stakeBody('33333', 'win', 10), closesAt: Date.now() + 60_000 });
+  assert.equal(extended.body.error, 'round_closed');
+  assert.equal(bal(firestore, 'uidB'), 500);
 });

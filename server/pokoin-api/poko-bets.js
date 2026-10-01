@@ -25,6 +25,9 @@ const ROUNDS = 'poko_bet_rounds';
 const CONSENT = 'poko_bets_consent';
 const MAX_BALANCE_LOOKUPS = 25;
 const SIDES = new Set(['win', 'loss']);
+// Bets close at minute 5 of the game; the first stake pins the deadline and
+// the server refuses later stakes even if the bot's own close is late.
+const MAX_BET_WINDOW_MS = 10 * 60 * 1000;
 
 function serviceToken() {
   return String(process.env.POKO_MARKET_SERVICE_TOKEN || process.env.POKONTACT_SERVICE_TOKEN || '').trim();
@@ -59,6 +62,13 @@ function roundKey(guildId, gameId) {
 function wholePkn(value) {
   const amount = Number(value);
   return Number.isSafeInteger(amount) && amount > 0 ? amount : 0;
+}
+
+function clampClosesAt(value, nowMs) {
+  const closesAt = Number(value);
+  if (!Number.isSafeInteger(closesAt) || closesAt <= 0) return 0;
+  // never accept a deadline further out than one bet window from now
+  return Math.min(closesAt, nowMs + MAX_BET_WINDOW_MS);
 }
 
 function fail(message, statusCode = 400) {
@@ -168,6 +178,10 @@ async function stake(params, { firestore, admin }) {
     const balanceSnap = await tx.get(balanceRef);
     const round = roundSnap.exists ? roundSnap.data() : null;
     if (round && round.status !== 'open') throw fail('round_closed', 409);
+    const nowMs = Date.now();
+    const closesAt = round?.closesAtMs || clampClosesAt(params.closesAt, nowMs);
+    if (!closesAt) throw fail('closesAt required');
+    if (nowMs >= closesAt) throw fail('round_closed', 409);
     const previous = round?.stakes?.[uid]?.amountPkn || 0;
     const available = Math.trunc(Number(balanceSnap.data()?.availablePkn || 0));
     // The site balance check: a changed bet may use the previous stake back.
@@ -183,6 +197,7 @@ async function stake(params, { firestore, admin }) {
       gameId: String(params.gameId),
       label: String(params.label || '').slice(0, 80),
       status: 'open',
+      closesAtMs: closesAt,
       stakes,
       totalPkn,
       ...(round ? {} : { createdAt: now }),
