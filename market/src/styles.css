@@ -9261,6 +9261,9 @@ html:has(.wallet-page) .brand span {
   gap: 0.45rem;
 }
 
+.wallet-request-fields .wallet-suggestions { margin: 0; }
+.wallet-request-fields .wallet-suggestions-note { margin: 0; }
+
 .wallet-request-fields input {
   background: var(--g2);
   border: 1px solid var(--g5);
