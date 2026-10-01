@@ -329,9 +329,10 @@ phone baseline, including the printing picker and manual shutter. BattleScan
 continues to run the recognition worker; it is no longer the deploy source
 for this phone page. Existing unrelated production modules remain in place.
 
-A confident artwork offers **every** member in the batch's eligible print
-family. Per-printing scores and collector numbers never remove a reprint.
-Artwork uncertainty and language-family priorities still apply. Crispin's
+A confident artwork offers **every** member across every expansion and print
+language. Per-printing scores, collector numbers and batch language never hide
+a reprint. Artwork uncertainty still applies. Selecting a foreign printing sets
+a compatible listing language while preserving the captured batch defaults. Crispin's
 Stellar Crown 133/142 and Prismatic Evolutions 105/131 are both selectable
 from artwork `v589520`, along with the Poké Ball and Prize Pack prints.
 Ingest revalidates the selected printing with the same rule.

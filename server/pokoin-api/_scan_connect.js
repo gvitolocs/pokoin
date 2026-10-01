@@ -328,13 +328,9 @@ function classifyRecognition(hits) {
 // Layer A: the hits identify an *artwork*, the CLIP same-illustration key
 // (`marketplace_search_candidates.version`). The 0.80 / 0.08 rule is applied
 // between artworks, so two printings of one painting are not recognition doubt.
-// Layer B: the batch language picks the print family, and inside it the
-// printings the camera cannot tell apart are offered to the seller on the
-// phone. Nothing here knows a set or a program by name.
-
-// Siblings offered when the camera only saw another region's printing. Basic
-// energies share one painting across ~50 western sets: that is not a choice,
-// so it stays a desk review.
+// Layer B offers every catalog printing of that artwork across every expansion
+// and print language. Recognition scores never hide members of one painting.
+// Kept as a legacy export; the picker no longer caps same-artwork siblings.
 const MAX_SIBLING_PRINTINGS = 8;
 // Desk expansion marks (pokoin-web market/src/set-logos.js expansionSymbolSrc):
 // same CDN path and cache key, so phone tiles and desk circles are one asset.
@@ -459,17 +455,31 @@ function printingCandidate(row, score) {
  *
  * `rows`: catalog printings (card_id, name, set_name, card_number, version,
  * nationality, kind, code, symbol_image_url, image_url) for the hit ids plus
- * every member of the top hit's artwork. `language`: the batch language in
- * force at capture. `choice`: the printing the seller tapped on the phone.
+ * every member of the top hit's artwork. `language` is retained for caller
+ * compatibility but does not filter versions. `choice` is the seller's tap.
  *
  * Returns null when this layer has nothing to add, so the caller keeps
  * `classifyRecognition`: the artwork itself is not a confident match, the top
  * hit has no artwork key, or the batch's print family has no printing of it.
  *
- * Once the artwork is confident, offer every member in the batch print family.
+ * Once the artwork is confident, offer every member across all print languages.
  * Recognition scores distinguish artworks, not reprints of one illustration;
  * collector numbers and scan quality must never hide an eligible printing.
  */
+/** Set the selected printing's language without changing the batch defaults. */
+function listingLanguageForPrint(nationality, preferred = 'EN') {
+  const bucket = printBucket(nationality);
+  const want = String(preferred || 'EN').toUpperCase();
+  if (bucket === 'japanese') return 'JP';
+  if (bucket === 'korean') return 'KO';
+  if (bucket === 'chinese') return want === 'ZHT' ? 'ZHT' : 'ZH';
+  if (bucket === 'indonesian') return 'ID';
+  if (bucket === 'thai') return 'TH';
+  if (bucket === 'idth') return want === 'TH' ? 'TH' : 'ID';
+  if (bucket === 'western' && ['JP','KO','ZH','ZHT','ID','TH','VI'].includes(want)) return 'EN';
+  return want;
+}
+
 function resolvePrintings({ hits, rows, language, choice } = {}) {
   const scored = candidatesFromHits(hits, MAX_HITS);
   const top = scored[0];
@@ -486,15 +496,10 @@ function resolvePrintings({ hits, rows, language, choice } = {}) {
   const margin = rival ? Math.round((top.score - rival.score) * 10000) / 10000 : 1;
   if (margin < MATCH_MARGIN) return null;
 
-  const family = printFamily(language);
   const members = [...byId.values()].filter((row) => String(row.version || '') === art);
-  const tier = family.tiers.find((buckets) => members.some((row) => buckets.includes(printBucket(row.nationality))));
-  if (!tier) return null;
-  const inTier = (row) => Boolean(row) && tier.includes(printBucket(row.nationality));
-
   const scoreOf = new Map(scored.map((c) => [c.cardId, c.score]));
-  const seen = scored.filter((c) => artworkOf(c.cardId) === art && inTier(byId.get(c.cardId)));
-  const picked = members.filter(inTier);
+  const seen = scored.filter((c) => artworkOf(c.cardId) === art);
+  const picked = members;
   picked.sort((a, b) => kindRank(a) - kindRank(b) || Number(rowCardId(a)) - Number(rowCardId(b)));
 
   const ids = picked.map(rowCardId);
@@ -509,7 +514,7 @@ function resolvePrintings({ hits, rows, language, choice } = {}) {
     cardId: chosen || (choose ? provisional : ids[0]),
     choose,
     chosen,
-    family: family.id,
+    family: 'all',
     artwork: art,
     topScore: top.score,
     margin,
@@ -885,6 +890,7 @@ module.exports = {
   printedNumber,
   printingTile,
   resolvePrintings,
+  listingLanguageForPrint,
   provisionalCandidate,
   stackKey,
   shouldMerge,

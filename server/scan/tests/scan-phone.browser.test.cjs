@@ -9,6 +9,7 @@ const rules=require('../../pokoin-api/_scan_connect');
 const diagnostic=require('../../pokoin-api/_scan_diagnostics');
 const WEB=path.resolve(__dirname,'../web');
 const rows=[['596880','Stellar Crown','133/142'],['633460','Prismatic Evolutions','105/131'],['636054','Prismatic Evolutions - Poké Ball Reverse Holo','105/131'],['643614','Prize Pack non-holo','133/142'],['701786','Prize Pack cosmos','133/142']].map(([card_id,set_name,card_number])=>({card_id,set_name,card_number,name:'Crispin',version:'v589520',nationality:'western'}));
+rows.push({...rows[0],card_id:'900',set_name:'Japanese Starter',card_number:'018/022',nationality:'japanese'}, {...rows[0],card_id:'901',set_name:'Chinese Expansion',card_number:'196/208',nationality:'chinese'});
 const recognize={ok:true,catalog:'pokemon_generic',img_w:640,img_h:480,detect_ms:5,identify_ms:120,orientations:1,boxes:[{xyxy:[0,0,300,420],conf:.96}],hits:[{public_id:'596880',name:'Crispin',score:.91},{public_id:'633460',name:'Crispin',score:.7}]};
 recognize.top1=recognize.hits[0];
 test('phone captures Crispin, shows all printings, uploads the chosen Prismatic printing and delivers diagnostics after network loss/reload',async()=>{
@@ -57,7 +58,7 @@ test('phone captures Crispin, shows all printings, uploads the chosen Prismatic 
   const badge=await page.locator('#scanLogStatus').boundingBox();
   assert.ok(badge.x>=0 && badge.x+badge.width<=390,'logging badge stays inside phone viewport');
   recognizing=true;
-  await page.waitForFunction(()=>document.querySelectorAll('.sc-tile').length===5);
+  await page.waitForFunction(()=>document.querySelectorAll('.sc-tile').length===7);
   await page.getByRole('button',{name:'Prismatic Evolutions, card 105/131',exact:true}).click();
   await page.waitForFunction(()=>!document.body.classList.contains('sc-picking'));
   const until=Date.now()+5000;while(!uploads.length && Date.now()<until)await new Promise(r=>setTimeout(r,50));
@@ -74,7 +75,7 @@ test('phone captures Crispin, shows all printings, uploads the chosen Prismatic 
   await page.waitForFunction(()=>document.getElementById('scanLogStatus')?.textContent==='Logs active',{},{timeout:10000});
   assert.ok(logs.some(e=>e.kind==='test-before-reload'));
   assert.ok(logs.some(e=>e.kind==='gate' && e.hits.length===2 && e.gateAfter));
-  assert.ok(logs.some(e=>e.kind==='printing-response' && e.offered.length===5));
+  assert.ok(logs.some(e=>e.kind==='printing-response' && e.offered.length===7));
   assert.ok(logs.some(e=>e.kind==='printing-choice' && e.chosen==='633460'));
   assert.ok(logs.every(e=>e.sessionId==='browser-session'));
   assert.equal(new Set(logs.map(e=>`${e.runId}:${e.sequence}`)).size,logs.length);

@@ -20,12 +20,27 @@ for(const hits of [[hit('596880',.8947)], [hit('596880',.8947),hit('633460',.7)]
     assert.equal(chosen.cardId,'633460');assert.equal(chosen.state,'matched');
   });
 }
-test('language family remains enforced, even if the camera prefers Japanese',()=>{
- const jp={...crispin[0],card_id:'900',nationality:'japanese'};
- const answer=rules.resolvePrintings({hits:[hit('900',.95),hit('596880',.82)],rows:[...crispin,jp],language:'IT'});
- assert.equal(answer.printings.length,5);
- const japanese=rules.resolvePrintings({hits:[hit('900',.95)],rows:[...crispin,jp],language:'JP'});
- assert.deepEqual(japanese.printings.map(p=>p.card_id),['900']);
+test('every batch language sees all same-artwork expansions and print languages',()=>{
+ const extra=['japanese','korean','chinese','indonesian','thai'].map((nationality,i)=>({...crispin[0],card_id:String(900+i),nationality}));
+ const rows=[...crispin,...extra];
+ for(const language of ['IT','EN','JP','KO','ZH','TH']) {
+  const answer=rules.resolvePrintings({hits:[hit('900',.95),hit('596880',.82)],rows,language});
+  assert.equal(answer.printings.length,10);
+  for(const row of rows) {
+   const chosen=rules.resolvePrintings({hits:[hit('900',.95)],rows,language,choice:row.card_id});
+   assert.equal(chosen.cardId,row.card_id);assert.equal(chosen.state,'matched');
+  }
+ }
+});
+test('selected foreign printing gets a compatible listing language',()=>{
+ assert.equal(rules.listingLanguageForPrint('japanese','IT'),'JP');
+ assert.equal(rules.listingLanguageForPrint('korean','IT'),'KO');
+ assert.equal(rules.listingLanguageForPrint('chinese','IT'),'ZH');
+ assert.equal(rules.listingLanguageForPrint('chinese','ZHT'),'ZHT');
+ assert.equal(rules.listingLanguageForPrint('western','JP'),'EN');
+ assert.equal(rules.listingLanguageForPrint('western','IT'),'IT');
+ assert.equal(rules.listingLanguageForPrint('indonesian','IT'),'ID');
+ assert.equal(rules.listingLanguageForPrint('thai','IT'),'TH');
 });
 test('uncertain artwork stays uncertain and a choice from another artwork is rejected',()=>{
  const rival={...crispin[0],card_id:'901',version:'other'};

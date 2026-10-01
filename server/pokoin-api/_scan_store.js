@@ -634,7 +634,7 @@ function createStore({
       }
       const picked = rules.pickDefaults(batch.defaults_history, capturedMs);
       const snapshot = picked.defaults;
-      // Artwork + print family (the language in force at capture). A phone
+      // Complete artwork group across print languages. A phone
       // choice counts only if the server offers that printing too.
       const printing = printingRows.length
         ? rules.resolvePrintings({
@@ -651,6 +651,12 @@ function createStore({
       if (printing) top = { cardId: printing.cardId };
       else if (decided.state === 'ambiguous') top = rules.provisionalCandidate(candidates, snapshot.language);
       else if (decided.state === 'matched') top = candidates[0];
+
+      const selectedRow = printing && printingRows.find(row => String(row.card_id) === String(top?.cardId));
+      const listingLanguage = selectedRow
+        ? rules.listingLanguageForPrint(selectedRow.nationality, snapshot.language)
+        : snapshot.language;
+      const listingSnapshot = { ...snapshot, language: listingLanguage };
 
       const lastRow = (await client.query(
         `select * from public.scan_items where batch_id = $1 and status <> 'removed'
@@ -670,7 +676,7 @@ function createStore({
       const consecutive = head && lastEvent && (lastEvent.id === lastRow.id);
       const merge = consecutive
         && top
-        && rules.shouldMerge({ previous: head, recognition: decided, cardId: top.cardId, snapshot })
+        && rules.shouldMerge({ previous: head, recognition: decided, cardId: top.cardId, snapshot: listingSnapshot })
         && head.quantity + snapshot.quantity <= 99;
 
       const bump = await bumpBatch(client, batch.id, { positions: 1 });
@@ -705,7 +711,7 @@ function createStore({
           picked.version, snapshot, event.image, event.timings,
           bump.seq, bump.position, merge ? 'merged' : 'active', merge ? head.id : null,
           fields.card_id, fields.card_name, fields.set_name, fields.collector_number, fields.image_url,
-          fields.nationality, snapshot.condition, snapshot.language, snapshot.foilState,
+          fields.nationality, snapshot.condition, listingLanguage, snapshot.foilState,
           snapshot.firstEdition, snapshot.signed, snapshot.altered, snapshot.location, snapshot.quantity,
         ],
       );
@@ -804,8 +810,8 @@ function createStore({
   }
 
   /**
-   * Phone asks before sending a scan: which printings of this artwork does
-   * the batch language allow? Read-only; the scan event is still the only
+   * Phone asks before sending a scan: which catalog printings share
+   * this artwork? Read-only; the scan event is still the only
    * write, and ingest re-checks any choice made from this answer.
    */
   async function resolvePrintingsForPhone({ token, body }) {
@@ -1508,7 +1514,6 @@ const PRINTING_ROWS_SQL = `
       c.card_id = any($1::bigint[])
       or c.version = (select version from public.marketplace_search_candidates where card_id = $2::bigint)
     )
-  limit 400
 `;
 
 async function lookupPrintingsFromCatalog(cardIds, topId) {
