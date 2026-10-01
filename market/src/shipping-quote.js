@@ -74,6 +74,20 @@ export function shippingServiceOptions({ fromCountry, toCountry, cardCount }) {
   return options;
 }
 
+/** Tiers that still travel as a letter (up to 20 cards). */
+const LETTER_TIERS = new Set(['SMALL', 'MEDIUM']);
+
+/**
+ * Pre-selected service before the buyer picks one: a few cards go as the
+ * untracked letter (IT→DK 1–20 cards: €4.35 vs €16.84 tracked); bigger
+ * parcels default to tracked. The buyer can always switch.
+ */
+export function defaultShippingService(options = []) {
+  const selectable = (options || []).filter((row) => !row.unavailable);
+  const letter = selectable.find((row) => row.id === 'untracked' && LETTER_TIERS.has(row.packageTier));
+  return (letter || selectable[0] || options[0] || {}).id || 'tracked';
+}
+
 /** Checkout-only placeholder: partner-store pick-up / drop-off, not selectable yet. */
 export function pokoinFlexOption() {
   return {

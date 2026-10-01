@@ -20,7 +20,12 @@ import { authFrom } from '../punchouts.js';
 import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
 import { SHIP_FROM_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { brandSrc } from '../brand-assets.js';
-import { pknFromEurCents, previewShipmentCents, shippingServiceOptions } from '../shipping-quote.js';
+import {
+  defaultShippingService,
+  pknFromEurCents,
+  previewShipmentCents,
+  shippingServiceOptions,
+} from '../shipping-quote.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 
@@ -109,6 +114,7 @@ export default function Checkout() {
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState('');
   const [shippingService, setShippingService] = useState('tracked'); // tracked | untracked
+  const [shippingPicked, setShippingPicked] = useState(false); // buyer chose a service
   const [pknRefused, setPknRefused] = useState([]); // sellers who take card payments only
   const [usePknDiscount, setUsePknDiscount] = useState(false); // opt-in PKN balance voucher
   const stripeCancelled = searchParams.get('cancelled') === '1';
@@ -235,10 +241,12 @@ export default function Checkout() {
   useEffect(() => {
     if (!shipOptions.length) return;
     const selectable = shipOptions.filter((row) => !row.unavailable);
-    if (!selectable.some((row) => row.id === shippingService)) {
-      setShippingService(selectable[0]?.id || shipOptions[0].id);
+    // Until the buyer picks, a few cards default to the untracked letter.
+    if (!shippingPicked || !selectable.some((row) => row.id === shippingService)) {
+      const next = defaultShippingService(shipOptions);
+      if (next !== shippingService) setShippingService(next);
     }
-  }, [shipOptions, shippingService]);
+  }, [shipOptions, shippingService, shippingPicked]);
 
   useEffect(() => {
     if (preferFiat && payMethod === 'pkn') setPayMethod('stripe');
@@ -551,7 +559,10 @@ export default function Checkout() {
                             checked={!unavailable && shippingService === option.id}
                             disabled={unavailable}
                             onChange={() => {
-                              if (!unavailable) setShippingService(option.id);
+                              if (!unavailable) {
+                                setShippingPicked(true);
+                                setShippingService(option.id);
+                              }
                             }}
                           />
                           <span>
