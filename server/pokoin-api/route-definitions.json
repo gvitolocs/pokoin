@@ -716,11 +716,11 @@
     "methods": [
       "POST"
     ],
-    "purpose": "Poko Discord LoL bets in real PKN. Linked + opted-in users play with their site balance; unlinked users play with a Discord wallet merged once into the Pokoin account on link (capped per account, bonus never carried twice, wallet closed afterwards). Balance-checked stakes into a per-round escrow, server-computed pari-mutuel settle/refund, one-time 20 PKN bonus (aged Discord accounts only for wallets), ledger entries for every movement.",
+    "purpose": "Poko Discord LoL bets in real PKN. Linked + opted-in users play with their site balance; unlinked users play with a Discord wallet merged once into the Pokoin account on link (capped per account, bonus never carried twice, wallet closed afterwards). Balance-checked stakes into a per-round escrow, server-computed pari-mutuel settle/refund, one-time 20 PKN bonus (aged Discord accounts only for wallets), ledger entries for every movement. reward_game pays a per-game play reward to admin-allowlisted Discord users (poko_config/game_rewards: discordUserIds, amountPkn, dailyCap), once per game.",
     "auth": "Service bearer token only (POKO_MARKET_SERVICE_TOKEN or POKONTACT_SERVICE_TOKEN). Only Discord users linked via poko-connect and opted in can stake or reveal a balance.",
     "params": {
       "query": "none",
-      "body": "{ action: balances|set_consent|merge_wallet|stake|close|settle|refund|redeem_bonus, ... }"
+      "body": "{ action: balances|set_consent|merge_wallet|stake|close|settle|refund|redeem_bonus|reward_game, ... }"
     },
     "dependencies": {
       "env": [

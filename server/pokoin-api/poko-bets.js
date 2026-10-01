@@ -38,6 +38,12 @@ const DISCORD_BONUS_PKN = 20;
 // Discord-only players: a per-Discord-user wallet, merged once into the Pokoin
 // account on link. Caps make alt-account farming pointless.
 const WALLETS = 'poko_discord_wallets';
+// Per-game play rewards (e.g. 1 PKN to a streamer per game played in voice).
+// Who may be rewarded, how much and the daily cap live in Firestore
+// poko_config/game_rewards, editable by admins only (no API action writes it).
+const REWARD_CONFIG = ['poko_config', 'game_rewards'];
+const GAME_REWARDS = 'poko_game_rewards';
+const GAME_REWARD_DAYS = 'poko_game_reward_days';
 const WALLET_LEDGER = 'poko_discord_wallet_ledger';
 const MERGES = 'poko_wallet_merges';
 const WALLET_MERGE_CAP = Number(process.env.POKO_WALLET_MERGE_CAP || 200);
@@ -454,7 +460,46 @@ async function redeemBonus(params, deps) {
   });
 }
 
+async function rewardGame(params, deps) {
+  const { firestore, admin } = deps;
+  const discordUserId = discordId(params.discordUserId);
+  const gameId = String(params.gameId ?? '').replace(/[^0-9]/g, '').slice(0, 25);
+  if (!discordUserId || !gameId) throw fail('discordUserId and gameId required');
+  const config = (await firestore.collection(REWARD_CONFIG[0]).doc(REWARD_CONFIG[1]).get()).data() || {};
+  const allowed = Array.isArray(config.discordUserIds) ? config.discordUserIds.map(String) : [];
+  if (!allowed.includes(discordUserId)) throw fail('not_eligible', 403);
+  const amount = Math.max(0, Math.min(10, Math.trunc(Number(config.amountPkn ?? 1))));
+  const dailyCap = Math.max(0, Math.trunc(Number(config.dailyCap ?? 15)));
+  if (!amount) throw fail('rewards_disabled', 403);
+  const holder = await resolveHolder(discordUserId, deps);
+  const rewardRef = firestore.collection(GAME_REWARDS).doc(`${gameId}_${discordUserId}`);
+  const day = new Date().toISOString().slice(0, 10);
+  const dayRef = firestore.collection(GAME_REWARD_DAYS).doc(`${discordUserId}_${day}`);
+  return firestore.runTransaction(async (tx) => {
+    const reward = await tx.get(rewardRef);
+    const dayDoc = await tx.get(dayRef);
+    const holderSnap = await tx.get(holder.ref);
+    if (reward.exists) return { action: 'reward_game', rewarded: false, reason: 'already_rewarded', amountPkn: 0 };
+    if (num(dayDoc, 'count') >= dailyCap) return { action: 'reward_game', rewarded: false, reason: 'daily_cap', amountPkn: 0 };
+    if (holder.kind === 'wallet' && holderSnap.data()?.status === 'merged') throw fail('wallet_merged_relink', 409);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const available = num(holderSnap);
+    tx.set(rewardRef, { discordUserId, gameId, guildId: discordId(params.guildId), amountPkn: amount, holder: holder.kind, createdAt: now });
+    tx.set(dayRef, { discordUserId, day, count: num(dayDoc, 'count') + 1, updatedAt: now }, { merge: true });
+    tx.set(holder.ref, {
+      availablePkn: available + amount,
+      ...(holder.kind === 'wallet' ? { discordUserId, status: 'active' } : {}),
+      updatedAt: now,
+    }, { merge: true });
+    const entry = { type: 'poko_game_reward', amountPkn: amount, discordUserId, gameId, createdAt: now };
+    if (holder.kind === 'account') tx.set(firestore.collection('ledger_entries').doc(), { uid: holder.uid, ...entry });
+    else tx.set(firestore.collection(WALLET_LEDGER).doc(), entry);
+    return { action: 'reward_game', rewarded: true, amountPkn: amount, availablePkn: available + amount, holder: holder.kind };
+  });
+}
+
 const ACTIONS = {
+  reward_game: rewardGame,
   redeem_bonus: redeemBonus,
   balances,
   set_consent: setConsent,

@@ -345,3 +345,31 @@ test('linking mid-round: wallet stakes are paid to the Pokoin account', async ()
   assert.equal(bal(firestore, 'uidX'), 60);
   assert.equal(wallet(firestore, '99999').availablePkn, 0);
 });
+
+test('reward_game: only allowlisted users, once per game, daily cap, config-driven amount', async () => {
+  const links = { ...LINKS };
+  const firestore = fakeFirestore({
+    'poko_config/game_rewards': { discordUserIds: ['99999'], amountPkn: 1, dailyCap: 2 },
+  });
+  const handler = load({ firestore, links });
+  const reward = (gameId, discordUserId = '99999') => call(handler, { action: 'reward_game', guildId: GUILD, gameId, discordUserId });
+  assert.equal((await reward('1', '22222')).body.error, 'not_eligible', 'not in the admin allowlist');
+  const twice = await Promise.all([reward('1'), reward('1')]);
+  assert.deepEqual(twice.map((r) => r.body.rewarded).sort(), [false, true], 'one payment per game');
+  assert.equal(wallet(firestore, '99999').availablePkn, 1);
+  assert.equal((await reward('2')).body.rewarded, true);
+  const capped = await reward('3');
+  assert.equal(capped.body.reason, 'daily_cap');
+  assert.equal(wallet(firestore, '99999').availablePkn, 2);
+  links['99999'] = 'uidZ';
+  const linked = load({ firestore, links });
+  firestore.docs.set('poko_game_reward_days/99999_' + new Date().toISOString().slice(0, 10), { count: 0 });
+  const toAccount = await call(linked, { action: 'reward_game', guildId: GUILD, gameId: '4', discordUserId: '99999' });
+  assert.equal(toAccount.body.holder, 'account');
+  assert.equal(bal(firestore, 'uidZ'), 3, 'wallet (2) merged + reward (1)');
+});
+
+test('reward_game is off when no config exists', async () => {
+  const { handler } = setup();
+  assert.equal((await call(handler, { action: 'reward_game', guildId: GUILD, gameId: '1', discordUserId: '22222' })).body.error, 'not_eligible');
+});
