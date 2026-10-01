@@ -716,11 +716,11 @@
     "methods": [
       "POST"
     ],
-    "purpose": "Poko Discord LoL bets in real site PKN: consent, balance check + stake into a per-round escrow, server-computed pari-mutuel settle/refund with ledger entries.",
+    "purpose": "Poko Discord LoL bets in real site PKN: consent, balance check + stake into a per-round escrow, server-computed pari-mutuel settle/refund with ledger entries; one-time 20 PKN Discord bonus (once per Discord account and once per Pokoin account).",
     "auth": "Service bearer token only (POKO_MARKET_SERVICE_TOKEN or POKONTACT_SERVICE_TOKEN). Only Discord users linked via poko-connect and opted in can stake or reveal a balance.",
     "params": {
       "query": "none",
-      "body": "{ action: balances|set_consent|stake|close|settle|refund, ... } — stake takes guildId, gameId, discordUserId, side win|loss, whole amountPkn; settle takes outcome win|loss."
+      "body": "{ action: balances|set_consent|stake|close|settle|refund|redeem_bonus, ... } — stake takes guildId, gameId, discordUserId, side win|loss, whole amountPkn; settle takes outcome win|loss."
     },
     "dependencies": {
       "env": [
@@ -730,7 +730,7 @@
         "POKONTACT_SERVICE_TOKEN"
       ],
       "services": [
-        "Firebase Admin (balances, ledger_entries, poko_bet_rounds, poko_bets_consent)",
+        "Firebase Admin (balances, ledger_entries, poko_bet_rounds, poko_bets_consent, poko_bonus_claims)",
         "Postgres read replica (poko_discord_links)"
       ]
     }

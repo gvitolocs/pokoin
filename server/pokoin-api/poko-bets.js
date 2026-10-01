@@ -11,7 +11,9 @@
  * - the server computes the pari-mutuel payout from the stored stakes;
  * - the stake is checked against the site balance inside the Firestore
  *   transaction that debits it, so nobody can bet more than they have;
- * - settle/refund are idempotent and every movement writes a ledger entry.
+ * - settle/refund are idempotent and every movement writes a ledger entry;
+ * - redeem_bonus pays a one-time 20 PKN welcome bonus, at most once per
+ *   Discord account and once per Pokoin account.
  *
  * Deploy with `scripts/deploy-poko-market-api.sh` (ships the poko handlers).
  */
@@ -28,6 +30,9 @@ const SIDES = new Set(['win', 'loss']);
 // Bets close at minute 5 of the game; the first stake pins the deadline and
 // the server refuses later stakes even if the bot's own close is late.
 const MAX_BET_WINDOW_MS = 10 * 60 * 1000;
+// One-time Discord welcome bonus: once per Discord account AND once per Pokoin account.
+const BONUS_CLAIMS = 'poko_bonus_claims';
+const DISCORD_BONUS_PKN = 20;
 
 function serviceToken() {
   return String(process.env.POKO_MARKET_SERVICE_TOKEN || process.env.POKONTACT_SERVICE_TOKEN || '').trim();
@@ -282,7 +287,40 @@ async function finishRound(params, { firestore, admin }, mode) {
   });
 }
 
+async function redeemBonus(params, { firestore, admin }) {
+  const discordUserId = discordId(params.discordUserId);
+  const uid = await linkedUid(discordUserId);
+  const discordClaimRef = firestore.collection(BONUS_CLAIMS).doc(`discord_${discordUserId}`);
+  const accountClaimRef = firestore.collection(BONUS_CLAIMS).doc(`uid_${uid}`);
+  const balanceRef = firestore.collection('balances').doc(uid);
+  const ledger = firestore.collection('ledger_entries');
+  return firestore.runTransaction(async (tx) => {
+    const discordClaim = await tx.get(discordClaimRef);
+    const accountClaim = await tx.get(accountClaimRef);
+    const balanceSnap = await tx.get(balanceRef);
+    // Both keys are checked and written in one transaction, so relinking a
+    // Discord account to another Pokoin profile (or vice versa) never pays twice.
+    if (discordClaim.exists) throw fail('bonus_already_claimed_discord', 409);
+    if (accountClaim.exists) throw fail('bonus_already_claimed_account', 409);
+    const available = Math.trunc(Number(balanceSnap.data()?.availablePkn || 0));
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const claim = { uid, discordUserId, amountPkn: DISCORD_BONUS_PKN, type: 'discord_welcome', claimedAt: now };
+    tx.set(discordClaimRef, claim);
+    tx.set(accountClaimRef, claim);
+    tx.set(balanceRef, { availablePkn: available + DISCORD_BONUS_PKN, updatedAt: now }, { merge: true });
+    tx.set(ledger.doc(), {
+      uid,
+      type: 'poko_discord_bonus',
+      amountPkn: DISCORD_BONUS_PKN,
+      discordUserId,
+      createdAt: now,
+    });
+    return { action: 'redeem_bonus', amountPkn: DISCORD_BONUS_PKN, availablePkn: available + DISCORD_BONUS_PKN };
+  });
+}
+
 const ACTIONS = {
+  redeem_bonus: redeemBonus,
   balances,
   set_consent: setConsent,
   stake,

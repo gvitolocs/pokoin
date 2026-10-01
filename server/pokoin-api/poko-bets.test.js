@@ -215,3 +215,39 @@ test('stakes after the round deadline are refused server-side', async () => {
   assert.equal(extended.body.error, 'round_closed');
   assert.equal(bal(firestore, 'uidB'), 500);
 });
+
+test('redeem_bonus pays 20 PKN once per Discord account and once per Pokoin account', async () => {
+  const links = { ...LINKS };
+  const firestore = fakeFirestore({ 'balances/uidA': { availablePkn: 5 } });
+  let handler = load({ firestore, links });
+  const first = await call(handler, { action: 'redeem_bonus', discordUserId: '22222' });
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.body.amountPkn, 20);
+  assert.equal(bal(firestore, 'uidA'), 25);
+  const ledger = [...firestore.docs.entries()].filter(([key, doc]) => key.startsWith('ledger_entries/') && doc.type === 'poko_discord_bonus');
+  assert.equal(ledger.length, 1);
+
+  // same Discord account again
+  assert.equal((await call(handler, { action: 'redeem_bonus', discordUserId: '22222' })).body.error, 'bonus_already_claimed_discord');
+
+  // same Discord account relinked to another Pokoin profile
+  links['22222'] = 'uidB';
+  handler = load({ firestore, links });
+  assert.equal((await call(handler, { action: 'redeem_bonus', discordUserId: '22222' })).body.error, 'bonus_already_claimed_discord');
+
+  // same Pokoin profile linked from another Discord account
+  links['55555'] = 'uidA';
+  handler = load({ firestore, links });
+  assert.equal((await call(handler, { action: 'redeem_bonus', discordUserId: '55555' })).body.error, 'bonus_already_claimed_account');
+
+  assert.equal(bal(firestore, 'uidA'), 25);
+  assert.equal(bal(firestore, 'uidB'), undefined);
+});
+
+test('redeem_bonus needs a linked profile and survives concurrent double clicks', async () => {
+  const { handler, firestore } = setup({ uidA: 0 });
+  assert.equal((await call(handler, { action: 'redeem_bonus', discordUserId: '99999' })).body.error, 'not_linked');
+  const results = await Promise.all([1, 2, 3].map(() => call(handler, { action: 'redeem_bonus', discordUserId: '22222' })));
+  assert.deepEqual(results.map((r) => r.statusCode).sort(), [200, 409, 409]);
+  assert.equal(bal(firestore, 'uidA'), 20);
+});
