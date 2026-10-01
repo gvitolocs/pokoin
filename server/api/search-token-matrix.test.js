@@ -61,6 +61,10 @@ const QUERIES = [
   'water energy',
   'hgss energy',
   'jumbo spheal',
+  'ken sugimori pikachu 102/109',   // artist + name + collector number
+  'charizard secret rare evolutions', // name + rarity + expansion
+  'storm emeralda 102 spheal',      // expansion + collector + name
+  '102/109 mega lopunny & jigglypuff gx',
 ];
 
 const PRODUCT_TYPES = ['', 'card', 'sealed', 'jumbo'];

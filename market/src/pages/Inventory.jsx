@@ -10,7 +10,7 @@ import LocationBoard from '../components/LocationBoard.jsx';
 import PricingStrategies, { PricerDefaults } from '../components/PricingStrategies.jsx';
 import StockNav from '../components/StockNav.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
-import { liveInventoryListings } from '../inventory-listings.js';
+import { liveInventoryListings, sameListingBox } from '../inventory-listings.js';
 
 const FORMATS = [
   { id: 'powertools', label: 'PowerTools' },
@@ -293,7 +293,10 @@ export default function Inventory() {
       ) : null}
       {!onImportTab && !onSettingsTab && locationName && rows?.length ? (
         <LocationBoard
-          rows={rows.filter((row) => String(row?.location || '').trim() === locationName)}
+          // A box URL opens the whole box: rows stored as `box·2-4` belong to
+          // /mypokoin/location/box too — the URL param is the box, not the
+          // exact stored slot string (the board re-groups by stack itself).
+          rows={rows.filter((row) => sameListingBox(row?.location, locationName))}
           location={locationName}
           formatPrice={formatPrice}
         />

@@ -241,6 +241,18 @@ export function listingBox(raw) {
 }
 
 /**
+ * Case-insensitive box match: does a stored location (which may carry a
+ * ·stack-position suffix) belong to the box a URL names? Box URLs open the
+ * whole box — /mypokoin/location/megaevoluzionietb must surface every
+ * `megaevoluzionietb·2-4` row, and a hand-typed slug matches across casing.
+ */
+export function sameListingBox(raw, box) {
+  const left = listingBox(raw).trim().toLowerCase();
+  const right = listingBox(box).trim().toLowerCase();
+  return Boolean(left) && left === right;
+}
+
+/**
  * Stacks for one box, ordered by stack number asc (unnumbered rows last),
  * each stack's postings ordered by position asc, then date, then id.
  */
@@ -248,7 +260,8 @@ export function groupBoxStacks(rows, box) {
   const wanted = String(box || '').trim();
   const list = (Array.isArray(rows) ? rows : [])
     .map((row) => ({ row, parsed: parseListingLocation(row?.location) }))
-    .filter((entry) => entry.parsed.box && entry.parsed.box === wanted);
+    .filter((entry) => entry.parsed.box
+      && entry.parsed.box.toLowerCase() === wanted.toLowerCase());
   const stacks = new Map();
   for (const { row, parsed } of list) {
     const stackNo = parsed.stack ?? 0; // 0 = box-level, no divider number
