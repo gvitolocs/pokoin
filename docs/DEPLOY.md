@@ -73,6 +73,7 @@ dashboard/CLI, then fix `main` before the next deploy.
 | Shared Pokoin API (`api.pokoin.com`) | Pi, Docker `pokoin-oracle-api`, `/srv/pokoin/api/current` → release dir | Overlay scripts from **this repo** (`scripts/deploy-*-api.sh`) or a full release copy; restart container; auto-rollback on health failure. **Not** a CardVault app deploy. |
 | Marketplace Postgres **writer** | nezopt Docker `pokoin-marketplace-postgres-15t` (`192.168.178.55:25432`) | Schema migrations **here only**; Pi replica follows. Never migrate on the replica. |
 | Phone scanner (`scan.pokoin.com`) | Oracle peer1 Caddy `file_server` over `/opt/pokoin-cardscan/web` | back up, replace files; Caddy `/etc/caddy/Caddyfile` |
+| Extension download (`pokoin.com/download/extension.zip`) | Cloudflare Worker `pokoin-extension-download` in front of Vercel, R2 `cardvault-images/downloads/pokemon-card-extension-<version>.zip` | Upload the zip to R2, bump `OBJECT_KEY`/`VERSION` in `workers/pokoin-extension-download.js`, then `npx wrangler versions upload -c workers/wrangler.pokoin-extension-download.jsonc` + `npx wrangler versions deploy`. Keep `download/extension.zip` (Vercel fallback) and the `vercel.json` header version in step. 2026-10-01: the worker pointed at a deleted 12.0.21 object and served 503. |
 
 ### Recently Seen API (example shared overlay)
 

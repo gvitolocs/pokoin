@@ -5,6 +5,7 @@ const TABS = [
   { to: '/mypokoin/import', label: 'Import / export', end: true },
   { to: '/sales', label: 'Sold history' },
   { to: '/bought', label: 'Buy history' },
+  { to: '/mypokoin/zero', label: 'CardTrader Zero', end: true },
   { to: '/inventory/sync-review', label: 'CT ↔ Power Tools' },
   { to: '/mypokoin/settings', label: 'Settings' },
 ];

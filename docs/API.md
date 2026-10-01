@@ -60,6 +60,8 @@ databases. Pokemon stays on this Pi map. Plan: [MULTIGAME_REIMPORT.md](MULTIGAME
 | `POST /api/cardtrader-sync` | Full inventory reconcile (`GET /products/export`) |
 | `POST /api/cardtrader-webhook/:uid` | Order sale stock gate → linked Pokoin qty (idempotent) |
 | `GET /api/cardtrader-assets` | Signed-in seller's CardTrader 1-Day Ready inventory as dashboard assets |
+| `GET /api/cardtrader-zero` | CardTrader Zero picking list: weekly merged `paid` Zero order + `hub_pending` Zero sales, with MyPokoin locations ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
+| `GET/POST/DELETE /api/powertools-connect` | Optional Power Tools session (encrypted jwt only) for the Zero list's Power Tools overlay |
 
 Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings are
 never modified by reconcile. Incomplete/failed CT exports never trigger

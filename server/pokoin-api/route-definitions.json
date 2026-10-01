@@ -657,5 +657,57 @@
         "Firebase Admin"
       ]
     }
+  },
+  {
+    "path": "/api/cardtrader-zero",
+    "file": "cardtrader-zero.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "CardTrader Zero picking list: the weekly merged paid Zero order (the Thursday shipment) plus hub_pending Zero sales still waiting for the next merge, with MyPokoin locations and an optional Power Tools picking overlay.",
+    "auth": "Required Firebase bearer token; seller must have CardTrader connected (404 cardtrader_not_connected otherwise).",
+    "params": {
+      "query": "none",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDTRADER_TOKEN_ENCRYPTION_KEY",
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "CardTrader API",
+        "Postgres",
+        "Power Tools (optional)"
+      ]
+    }
+  },
+  {
+    "path": "/api/powertools-connect",
+    "file": "powertools-connect.js",
+    "methods": [
+      "GET",
+      "POST",
+      "DELETE"
+    ],
+    "purpose": "Power Tools session for the seller: GET status, POST signs in (email+password via Outseta, or a pasted jwt session) and stores only the encrypted session, DELETE forgets it.",
+    "auth": "Required Firebase bearer token; seller uid from token only. Failed password sign-ins are throttled per uid.",
+    "params": {
+      "query": "none",
+      "body": "POST: email + password, or session (jwt cookie value)."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDTRADER_TOKEN_ENCRYPTION_KEY"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Outseta (mtg-powertools)",
+        "Power Tools API"
+      ]
+    }
   }
 ]

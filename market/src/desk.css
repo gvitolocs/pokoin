@@ -2608,6 +2608,45 @@
 }
 .sale-line a { color: var(--text); font-weight: 700; }
 .sale-line a:hover { color: var(--yellow); }
+
+/* CardTrader Zero picking list: tick · location · card. */
+.zero-line { align-items: flex-start; }
+.zero-line.is-picked .zero-loc,
+.zero-line.is-picked .thread-main { opacity: 0.4; }
+.zero-tick {
+  flex: 0 0 auto;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.15rem;
+  accent-color: var(--yellow);
+}
+.zero-loc {
+  flex: 0 0 8.5rem;
+  min-width: 0;
+  color: var(--yellow);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.zero-loc.is-empty { color: var(--muted); font-weight: 400; }
+.zero-loc small { color: var(--muted); font-size: 0.7rem; font-weight: 400; }
+.zero-line .thread-title { white-space: normal; }
+.zero-line .thread-title a { color: var(--text); }
+.zero-line .thread-title a:hover { color: var(--yellow); }
+.zero-qty { color: var(--yellow); }
+.zero-pt { color: var(--muted); }
+.zero-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.zero-pt-status { display: grid; gap: 0.6rem; justify-items: start; }
+@media (max-width: 720px) {
+  .zero-loc { flex-basis: 5.5rem; }
+}
 .sales-source {
   padding: 0.3rem 0.5rem;
   border-radius: 0.4rem;

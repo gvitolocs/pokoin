@@ -223,7 +223,7 @@ async function incrementProduct(token, productId, deltaQuantity) {
 }
 
 /** Seller orders (sale evidence), newest first, paged until exhausted. */
-async function fetchSellerOrders(token, { from = '', pageSize = 100, maxPages = 50 } = {}) {
+async function fetchSellerOrders(token, { from = '', state = '', pageSize = 100, maxPages = 50 } = {}) {
   const orders = [];
   for (let page = 1; page <= maxPages; page += 1) {
     const params = new URLSearchParams({
@@ -233,6 +233,7 @@ async function fetchSellerOrders(token, { from = '', pageSize = 100, maxPages = 
       page: String(page),
     });
     if (from) params.set('from', from);
+    if (state) params.set('state', state);
     const payload = await cardTraderRequest(`/orders?${params}`, cleanToken(token));
     if (!Array.isArray(payload)) {
       const error = new Error('CardTrader orders did not return an array.');
