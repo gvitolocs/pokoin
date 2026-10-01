@@ -18,11 +18,39 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 # Files this repository owns, at their release-relative paths.
 # Multigame SQL is the satellite TCG search/suggest engine (Magic, OP, …) —
 # previously only on the Pi via CardVault copies; source of truth is here.
+# The candidate/autocomplete helper layer (marketplace-search-candidates,
+# marketplace-autocomplete and their ./ deps) is vendored from CardVault's
+# api/ and is pokoin-web-owned from now on; CardVault's api/ copies are
+# deprecated for the webpage. Overlay order still wins: these files replace
+# the CardVault release copies byte-for-byte except where fixed here.
 API_FILES=(
   api/marketplace-search-page.js
   api/marketplace-cards.js
+  api/marketplace-search-candidates.js
+  api/marketplace-autocomplete.js
   api/_print_bucket.js
   api/_marketplace_multigame_sql.js
+  api/_card_visual_theme.js
+  api/_cardtrader_game_ingest.js
+  api/_catalog_title_language.js
+  api/_firebase.js
+  api/_marketplace_canonical_path.js
+  api/_marketplace_card_emoji.js
+  api/_marketplace_card_rarity.js
+  api/_marketplace_cart_analytics.js
+  api/_marketplace_db.js
+  api/_marketplace_game.js
+  api/_marketplace_image_log.js
+  api/_marketplace_react_sql.js
+  api/_marketplace_row.js
+  api/_marketplace_search_engine.js
+  api/_marketplace_watchlist_analytics.js
+  api/_meili_client.js
+  api/_meili_marketplace.js
+  api/_search_debug_auth.js
+  api/_searchbar_session.js
+  api/_slug.js
+  api/_supabase.js
 )
 
 die() { echo "deploy-search-api: $*" >&2; exit 1; }
