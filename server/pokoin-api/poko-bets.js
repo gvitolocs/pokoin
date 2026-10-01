@@ -5,7 +5,9 @@
  *
  * Hermes (Poko's Discord bot) calls this with the shared Poko service token.
  * The token alone cannot move money freely:
- * - only Discord users linked via poko-connect AND opted in (set_consent) can stake;
+ * - linked users play with their Pokoin balance (after opting in); unlinked
+ *   users play with a Discord wallet that is merged ONCE into the Pokoin account
+ *   when they link (capped, bonus not carried twice, wallet closed afterwards);
  * - PKN only moves user -> round escrow (stake) and round escrow -> the same
  *   round's stakers (settle/refund); never user -> user or out of a round;
  * - the server computes the pari-mutuel payout from the stored stakes;
@@ -33,6 +35,13 @@ const MAX_BET_WINDOW_MS = 10 * 60 * 1000;
 // One-time Discord welcome bonus: once per Discord account AND once per Pokoin account.
 const BONUS_CLAIMS = 'poko_bonus_claims';
 const DISCORD_BONUS_PKN = 20;
+// Discord-only players: a per-Discord-user wallet, merged once into the Pokoin
+// account on link. Caps make alt-account farming pointless.
+const WALLETS = 'poko_discord_wallets';
+const WALLET_LEDGER = 'poko_discord_wallet_ledger';
+const MERGES = 'poko_wallet_merges';
+const WALLET_MERGE_CAP = Number(process.env.POKO_WALLET_MERGE_CAP || 200);
+const BONUS_MIN_DISCORD_AGE_MS = Number(process.env.POKO_BONUS_MIN_DISCORD_AGE_DAYS || 14) * 24 * 60 * 60 * 1000;
 
 function serviceToken() {
   return String(process.env.POKO_MARKET_SERVICE_TOKEN || process.env.POKONTACT_SERVICE_TOKEN || '').trim();
@@ -100,6 +109,95 @@ async function linkedUid(discordUserId) {
   return uid;
 }
 
+/** Discord snowflake -> account creation time (ms). Cannot be faked for a given id. */
+function discordCreatedAtMs(id) {
+  try {
+    return Number((BigInt(id) >> 22n) + 1420070400000n);
+  } catch {
+    return 0;
+  }
+}
+
+function num(snap, field = 'availablePkn') {
+  return Math.trunc(Number(snap?.data?.()?.[field] || 0));
+}
+
+/**
+ * One-time move of a Discord wallet into the linked Pokoin account.
+ * - once per Discord account (wallet becomes status 'merged', never refunded again);
+ * - a wallet bonus is not carried into an account that already got a bonus
+ *   through another Discord account (alt farming);
+ * - at most WALLET_MERGE_CAP PKN per Pokoin account across all merges, the
+ *   excess stays frozen on the wallet for manual review.
+ */
+async function mergeWallet(discordUserId, uid, { firestore, admin }) {
+  const id = discordId(discordUserId);
+  const walletRef = firestore.collection(WALLETS).doc(id);
+  const discordClaimRef = firestore.collection(BONUS_CLAIMS).doc(`discord_${id}`);
+  const accountClaimRef = firestore.collection(BONUS_CLAIMS).doc(`uid_${uid}`);
+  const mergesRef = firestore.collection(MERGES).doc(uid);
+  const balanceRef = firestore.collection('balances').doc(uid);
+  return firestore.runTransaction(async (tx) => {
+    const wallet = await tx.get(walletRef);
+    const discordClaim = await tx.get(discordClaimRef);
+    const accountClaim = await tx.get(accountClaimRef);
+    const merges = await tx.get(mergesRef);
+    const balance = await tx.get(balanceRef);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    if (wallet.exists && wallet.data()?.status === 'merged') {
+      return { merged: false, reason: 'already_merged', movedPkn: 0 };
+    }
+    const walletPkn = num(wallet);
+    const bonusFromWallet = discordClaim.exists && discordClaim.data()?.kind === 'wallet';
+    const accountHadBonus = accountClaim.exists && accountClaim.data()?.discordUserId !== id;
+    const forfeitedPkn = bonusFromWallet && accountHadBonus ? Math.min(walletPkn, DISCORD_BONUS_PKN) : 0;
+    const transferable = walletPkn - forfeitedPkn;
+    const room = Math.max(0, WALLET_MERGE_CAP - num(merges, 'totalPkn'));
+    const movedPkn = Math.min(transferable, room);
+    const frozenPkn = transferable - movedPkn;
+    tx.set(walletRef, {
+      discordUserId: id,
+      status: 'merged',
+      availablePkn: 0,
+      frozenPkn: num(wallet, 'frozenPkn') + frozenPkn,
+      forfeitedPkn: num(wallet, 'forfeitedPkn') + forfeitedPkn,
+      mergedInto: uid,
+      mergedAt: now,
+      updatedAt: now,
+    }, { merge: true });
+    if (bonusFromWallet && !accountClaim.exists) {
+      // the account now counts as bonused: no second bonus via another Discord
+      tx.set(accountClaimRef, { uid, discordUserId: id, amountPkn: DISCORD_BONUS_PKN, kind: 'wallet_merge', claimedAt: now });
+    }
+    if (movedPkn > 0) {
+      tx.set(balanceRef, { availablePkn: num(balance) + movedPkn, updatedAt: now }, { merge: true });
+      tx.set(mergesRef, { totalPkn: num(merges, 'totalPkn') + movedPkn, updatedAt: now }, { merge: true });
+      tx.set(firestore.collection('ledger_entries').doc(), {
+        uid, type: 'poko_discord_wallet_merge', amountPkn: movedPkn, discordUserId: id, createdAt: now,
+      });
+    }
+    tx.set(firestore.collection(WALLET_LEDGER).doc(), {
+      discordUserId: id, type: 'merge_out', amountPkn: -walletPkn, movedPkn, frozenPkn, forfeitedPkn, uid, createdAt: now,
+    });
+    return { merged: true, movedPkn, frozenPkn, forfeitedPkn };
+  });
+}
+
+/**
+ * Who holds a Discord user's PKN: the linked Pokoin account (after merging any
+ * Discord wallet into it), otherwise the user's Discord wallet.
+ */
+async function resolveHolder(discordUserId, deps) {
+  const id = discordId(discordUserId);
+  if (!id) throw fail('discordUserId required');
+  const uid = (await linkedUids([id])).get(id);
+  if (uid) {
+    const merge = await mergeWallet(id, uid, deps);
+    return { kind: 'account', key: uid, uid, discordUserId: id, ref: deps.firestore.collection('balances').doc(uid), merge };
+  }
+  return { kind: 'wallet', key: `discord_${id}`, discordUserId: id, ref: deps.firestore.collection(WALLETS).doc(id) };
+}
+
 /**
  * Pure pari-mutuel split. Losers' stakes go to winners pro rata (floor);
  * the rounding remainder goes to the largest winning stake so the escrow
@@ -129,26 +227,31 @@ function computePayouts(stakes, outcome) {
 // Actions (all service-token authenticated)
 // ---------------------------------------------------------------------------
 
-async function balances(params, { firestore }) {
+async function balances(params, deps) {
+  const { firestore } = deps;
   const ids = (Array.isArray(params.discordUserIds) ? params.discordUserIds : [])
     .map(discordId)
     .filter(Boolean)
     .slice(0, MAX_BALANCE_LOOKUPS);
-  const uids = await linkedUids(ids);
   const rows = await Promise.all(ids.map(async (id) => {
-    const uid = uids.get(id);
-    if (!uid) return { discordUserId: id, linked: false, consent: false };
-    const consent = await firestore.collection(CONSENT).doc(uid).get();
+    const holder = await resolveHolder(id, deps);
+    if (holder.kind === 'wallet') {
+      const wallet = await holder.ref.get();
+      return {
+        discordUserId: id,
+        linked: false,
+        consent: false,
+        wallet: true,
+        walletMerged: wallet.data()?.status === 'merged',
+        availablePkn: num(wallet),
+      };
+    }
+    const consent = await firestore.collection(CONSENT).doc(holder.uid).get();
     if (!consent.exists || consent.data()?.enabled !== true) {
       return { discordUserId: id, linked: true, consent: false };
     }
-    const balance = await firestore.collection('balances').doc(uid).get();
-    return {
-      discordUserId: id,
-      linked: true,
-      consent: true,
-      availablePkn: Math.trunc(Number(balance.data()?.availablePkn || 0)),
-    };
+    const balance = await holder.ref.get();
+    return { discordUserId: id, linked: true, consent: true, availablePkn: num(balance) };
   }));
   return { action: 'balances', balances: rows };
 }
@@ -164,39 +267,57 @@ async function setConsent(params, { firestore, admin }) {
   return { action: 'set_consent', enabled };
 }
 
-async function stake(params, { firestore, admin }) {
+async function mergeWalletAction(params, deps) {
+  const uid = await linkedUid(params.discordUserId);
+  const result = await mergeWallet(params.discordUserId, uid, deps);
+  return { action: 'merge_wallet', ...result };
+}
+
+async function stake(params, deps) {
+  const { firestore, admin } = deps;
   const key = roundKey(params.guildId, params.gameId);
   const side = String(params.side || '');
   const amount = wholePkn(params.amountPkn);
   if (!key) throw fail('guildId and gameId required');
   if (!SIDES.has(side)) throw fail('side must be win or loss');
   if (!amount) throw fail('amountPkn must be a whole number of PKN greater than zero');
-  const uid = await linkedUid(params.discordUserId);
-  const consent = await firestore.collection(CONSENT).doc(uid).get();
-  if (!consent.exists || consent.data()?.enabled !== true) throw fail('no_consent', 403);
+  const holder = await resolveHolder(params.discordUserId, deps);
+  if (holder.kind === 'account') {
+    const consent = await firestore.collection(CONSENT).doc(holder.uid).get();
+    if (!consent.exists || consent.data()?.enabled !== true) throw fail('no_consent', 403);
+  }
 
   const roundRef = firestore.collection(ROUNDS).doc(key);
-  const balanceRef = firestore.collection('balances').doc(uid);
-  const ledger = firestore.collection('ledger_entries');
   return firestore.runTransaction(async (tx) => {
     const roundSnap = await tx.get(roundRef);
-    const balanceSnap = await tx.get(balanceRef);
+    const holderSnap = await tx.get(holder.ref);
     const round = roundSnap.exists ? roundSnap.data() : null;
     if (round && round.status !== 'open') throw fail('round_closed', 409);
+    if (holder.kind === 'wallet' && holderSnap.data()?.status === 'merged') throw fail('wallet_merged_relink', 409);
     const nowMs = Date.now();
     const closesAt = round?.closesAtMs || clampClosesAt(params.closesAt, nowMs);
     if (!closesAt) throw fail('closesAt required');
     if (nowMs >= closesAt) throw fail('round_closed', 409);
-    const previous = round?.stakes?.[uid]?.amountPkn || 0;
-    const available = Math.trunc(Number(balanceSnap.data()?.availablePkn || 0));
-    // The site balance check: a changed bet may use the previous stake back.
+    const previous = round?.stakes?.[holder.key]?.amountPkn || 0;
+    const available = num(holderSnap);
+    // The balance check: a changed bet may use the previous stake back.
     if (available + previous < amount) throw fail(`insufficient_balance:${available + previous}`, 402);
     const delta = amount - previous;
     const now = admin.firestore.FieldValue.serverTimestamp();
     const stakes = { ...(round?.stakes || {}) };
-    stakes[uid] = { side, amountPkn: amount, discordUserId: discordId(params.discordUserId) };
+    stakes[holder.key] = {
+      side,
+      amountPkn: amount,
+      discordUserId: holder.discordUserId,
+      holder: holder.kind,
+      ...(holder.uid ? { uid: holder.uid } : {}),
+    };
     const totalPkn = Object.values(stakes).reduce((sum, entry) => sum + entry.amountPkn, 0);
-    tx.set(balanceRef, { availablePkn: available - delta, updatedAt: now }, { merge: true });
+    tx.set(holder.ref, {
+      availablePkn: available - delta,
+      ...(holder.kind === 'wallet' ? { discordUserId: holder.discordUserId, status: 'active' } : {}),
+      updatedAt: now,
+    }, { merge: true });
     tx.set(roundRef, {
       guildId: discordId(params.guildId),
       gameId: String(params.gameId),
@@ -209,16 +330,11 @@ async function stake(params, { firestore, admin }) {
       updatedAt: now,
     }, { merge: true });
     if (delta !== 0) {
-      tx.set(ledger.doc(), {
-        uid,
-        type: delta > 0 ? 'poko_bet_stake' : 'poko_bet_stake_reduced',
-        amountPkn: -delta,
-        roundId: key,
-        side,
-        createdAt: now,
-      });
+      const entry = { type: delta > 0 ? 'poko_bet_stake' : 'poko_bet_stake_reduced', amountPkn: -delta, roundId: key, side, createdAt: now };
+      if (holder.kind === 'account') tx.set(firestore.collection('ledger_entries').doc(), { uid: holder.uid, ...entry });
+      else tx.set(firestore.collection(WALLET_LEDGER).doc(), { discordUserId: holder.discordUserId, ...entry });
     }
-    return { action: 'stake', roundId: key, side, amountPkn: amount, availablePkn: available - delta, totalPkn };
+    return { action: 'stake', roundId: key, side, amountPkn: amount, availablePkn: available - delta, totalPkn, holder: holder.kind };
   });
 }
 
@@ -243,7 +359,6 @@ async function finishRound(params, { firestore, admin }, mode) {
   const outcome = String(params.outcome || '');
   if (mode === 'settle' && !SIDES.has(outcome)) throw fail('outcome must be win or loss');
   const roundRef = firestore.collection(ROUNDS).doc(key);
-  const ledger = firestore.collection('ledger_entries');
   return firestore.runTransaction(async (tx) => {
     const snap = await tx.get(roundRef);
     if (!snap.exists) return { action: mode, roundId: key, status: 'empty', payouts: {} };
@@ -254,26 +369,42 @@ async function finishRound(params, { firestore, admin }, mode) {
     const result = mode === 'refund'
       ? computePayouts(round.stakes, '__refund__')
       : computePayouts(round.stakes, outcome);
-    const uids = Object.keys(result.payouts).filter((uid) => result.payouts[uid] > 0);
-    const balanceRefs = uids.map((uid) => firestore.collection('balances').doc(uid));
-    const balanceSnaps = [];
-    for (const ref of balanceRefs) balanceSnaps.push(await tx.get(ref));
+    // Resolve every paid stake to where the money goes now (all reads first).
+    const targets = [];
+    for (const stakeKey of Object.keys(result.payouts).filter((k) => result.payouts[k] > 0)) {
+      const entry = round.stakes[stakeKey];
+      if (entry.holder === 'wallet') {
+        const walletRef = firestore.collection(WALLETS).doc(entry.discordUserId);
+        const walletSnap = await tx.get(walletRef);
+        const mergedInto = walletSnap.data()?.status === 'merged' ? walletSnap.data().mergedInto : '';
+        if (mergedInto) {
+          // linked mid-round: winnings follow the user to the Pokoin account
+          const ref = firestore.collection('balances').doc(mergedInto);
+          targets.push({ stakeKey, entry, kind: 'account', uid: mergedInto, ref, snap: await tx.get(ref) });
+        } else {
+          targets.push({ stakeKey, entry, kind: 'wallet', ref: walletRef, snap: walletSnap });
+        }
+      } else {
+        const uid = entry.uid || stakeKey;
+        const ref = firestore.collection('balances').doc(uid);
+        targets.push({ stakeKey, entry, kind: 'account', uid, ref, snap: await tx.get(ref) });
+      }
+    }
     const now = admin.firestore.FieldValue.serverTimestamp();
+    const credited = new Map();
+    for (const target of targets) {
+      const amount = result.payouts[target.stakeKey];
+      const refKey = target.ref.path || target.ref.key || `${target.kind}:${target.uid || target.entry.discordUserId}`;
+      const base = credited.has(refKey) ? credited.get(refKey) : num(target.snap);
+      credited.set(refKey, base + amount);
+      tx.set(target.ref, { availablePkn: base + amount, updatedAt: now }, { merge: true });
+      const entry = { type: result.refunded ? 'poko_bet_refund' : 'poko_bet_payout', amountPkn: amount, roundId: key, createdAt: now };
+      if (target.kind === 'account') tx.set(firestore.collection('ledger_entries').doc(), { uid: target.uid, ...entry });
+      else tx.set(firestore.collection(WALLET_LEDGER).doc(), { discordUserId: target.entry.discordUserId, ...entry });
+    }
     const payoutsByDiscord = {};
-    uids.forEach((uid, index) => {
-      const amount = result.payouts[uid];
-      const current = Math.trunc(Number(balanceSnaps[index].data()?.availablePkn || 0));
-      tx.set(balanceRefs[index], { availablePkn: current + amount, updatedAt: now }, { merge: true });
-      tx.set(ledger.doc(), {
-        uid,
-        type: result.refunded ? 'poko_bet_refund' : 'poko_bet_payout',
-        amountPkn: amount,
-        roundId: key,
-        createdAt: now,
-      });
-    });
-    for (const [uid, entry] of Object.entries(round.stakes || {})) {
-      payoutsByDiscord[entry.discordUserId] = result.payouts[uid] || 0;
+    for (const [stakeKey, entry] of Object.entries(round.stakes || {})) {
+      payoutsByDiscord[entry.discordUserId] = (payoutsByDiscord[entry.discordUserId] || 0) + (result.payouts[stakeKey] || 0);
     }
     const status = result.refunded ? 'refunded' : 'settled';
     tx.set(roundRef, {
@@ -287,35 +418,39 @@ async function finishRound(params, { firestore, admin }, mode) {
   });
 }
 
-async function redeemBonus(params, { firestore, admin }) {
-  const discordUserId = discordId(params.discordUserId);
-  const uid = await linkedUid(discordUserId);
+async function redeemBonus(params, deps) {
+  const { firestore, admin } = deps;
+  const holder = await resolveHolder(params.discordUserId, deps);
+  const discordUserId = holder.discordUserId;
   const discordClaimRef = firestore.collection(BONUS_CLAIMS).doc(`discord_${discordUserId}`);
-  const accountClaimRef = firestore.collection(BONUS_CLAIMS).doc(`uid_${uid}`);
-  const balanceRef = firestore.collection('balances').doc(uid);
-  const ledger = firestore.collection('ledger_entries');
+  const accountClaimRef = holder.uid ? firestore.collection(BONUS_CLAIMS).doc(`uid_${holder.uid}`) : null;
+  if (holder.kind === 'wallet' && Date.now() - discordCreatedAtMs(discordUserId) < BONUS_MIN_DISCORD_AGE_MS) {
+    // fresh alt accounts cannot mint wallet bonuses
+    throw fail('discord_account_too_new', 403);
+  }
   return firestore.runTransaction(async (tx) => {
     const discordClaim = await tx.get(discordClaimRef);
-    const accountClaim = await tx.get(accountClaimRef);
-    const balanceSnap = await tx.get(balanceRef);
+    const accountClaim = accountClaimRef ? await tx.get(accountClaimRef) : null;
+    const holderSnap = await tx.get(holder.ref);
     // Both keys are checked and written in one transaction, so relinking a
     // Discord account to another Pokoin profile (or vice versa) never pays twice.
     if (discordClaim.exists) throw fail('bonus_already_claimed_discord', 409);
-    if (accountClaim.exists) throw fail('bonus_already_claimed_account', 409);
-    const available = Math.trunc(Number(balanceSnap.data()?.availablePkn || 0));
+    if (accountClaim?.exists) throw fail('bonus_already_claimed_account', 409);
+    if (holder.kind === 'wallet' && holderSnap.data()?.status === 'merged') throw fail('wallet_merged_relink', 409);
+    const available = num(holderSnap);
     const now = admin.firestore.FieldValue.serverTimestamp();
-    const claim = { uid, discordUserId, amountPkn: DISCORD_BONUS_PKN, type: 'discord_welcome', claimedAt: now };
+    const claim = { discordUserId, amountPkn: DISCORD_BONUS_PKN, kind: holder.kind, type: 'discord_welcome', claimedAt: now, ...(holder.uid ? { uid: holder.uid } : {}) };
     tx.set(discordClaimRef, claim);
-    tx.set(accountClaimRef, claim);
-    tx.set(balanceRef, { availablePkn: available + DISCORD_BONUS_PKN, updatedAt: now }, { merge: true });
-    tx.set(ledger.doc(), {
-      uid,
-      type: 'poko_discord_bonus',
-      amountPkn: DISCORD_BONUS_PKN,
-      discordUserId,
-      createdAt: now,
-    });
-    return { action: 'redeem_bonus', amountPkn: DISCORD_BONUS_PKN, availablePkn: available + DISCORD_BONUS_PKN };
+    if (accountClaimRef) tx.set(accountClaimRef, claim);
+    tx.set(holder.ref, {
+      availablePkn: available + DISCORD_BONUS_PKN,
+      ...(holder.kind === 'wallet' ? { discordUserId, status: 'active' } : {}),
+      updatedAt: now,
+    }, { merge: true });
+    const entry = { type: 'poko_discord_bonus', amountPkn: DISCORD_BONUS_PKN, discordUserId, createdAt: now };
+    if (holder.kind === 'account') tx.set(firestore.collection('ledger_entries').doc(), { uid: holder.uid, ...entry });
+    else tx.set(firestore.collection(WALLET_LEDGER).doc(), entry);
+    return { action: 'redeem_bonus', amountPkn: DISCORD_BONUS_PKN, availablePkn: available + DISCORD_BONUS_PKN, holder: holder.kind };
   });
 }
 
@@ -323,6 +458,7 @@ const ACTIONS = {
   redeem_bonus: redeemBonus,
   balances,
   set_consent: setConsent,
+  merge_wallet: mergeWalletAction,
   stake,
   close: closeRound,
   settle: (params, deps) => finishRound(params, deps, 'settle'),
@@ -363,4 +499,4 @@ module.exports = async function handler(req, res) {
   }
 };
 
-module.exports._test = { computePayouts, roundKey, discordId, wholePkn, isServiceAuthorized, ACTIONS };
+module.exports._test = { computePayouts, roundKey, discordId, wholePkn, isServiceAuthorized, discordCreatedAtMs, ACTIONS, WALLET_MERGE_CAP };

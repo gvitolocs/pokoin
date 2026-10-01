@@ -130,22 +130,6 @@ test('changing a bet reuses the previous stake against the balance', async () =>
   assert.equal(firestore.docs.get(`poko_bet_rounds/${GUILD}_${GAME}`).totalPkn, 100);
 });
 
-test('unlinked or non-consenting users cannot stake', async () => {
-  const { handler } = setup(undefined, ['uidA']);
-  assert.equal((await call(handler, stakeBody('99999', 'win', 10))).body.error, 'not_linked');
-  assert.equal((await call(handler, stakeBody('33333', 'win', 10))).body.error, 'no_consent');
-});
-
-test('balances are only revealed for users who consented', async () => {
-  const { handler } = setup(undefined, ['uidA']);
-  const res = await call(handler, { action: 'balances', discordUserIds: ['22222', '33333', '99999'] });
-  assert.deepEqual(res.body.balances, [
-    { discordUserId: '22222', linked: true, consent: true, availablePkn: 1000 },
-    { discordUserId: '33333', linked: true, consent: false },
-    { discordUserId: '99999', linked: false, consent: false },
-  ]);
-});
-
 test('settle pays winners pari-mutuel from escrow, exactly, and only once', async () => {
   const { handler, firestore } = setup();
   await call(handler, stakeBody('22222', 'win', 100));
@@ -244,10 +228,120 @@ test('redeem_bonus pays 20 PKN once per Discord account and once per Pokoin acco
   assert.equal(bal(firestore, 'uidB'), undefined);
 });
 
-test('redeem_bonus needs a linked profile and survives concurrent double clicks', async () => {
-  const { handler, firestore } = setup({ uidA: 0 });
-  assert.equal((await call(handler, { action: 'redeem_bonus', discordUserId: '99999' })).body.error, 'not_linked');
-  const results = await Promise.all([1, 2, 3].map(() => call(handler, { action: 'redeem_bonus', discordUserId: '22222' })));
+
+// --- Discord wallets (unlinked players) -------------------------------------
+
+const wallet = (firestore, id) => firestore.docs.get(`poko_discord_wallets/${id}`);
+const youngDiscordId = () => String((BigInt(Date.now() - 2 * 86400000) - 1420070400000n) << 22n);
+
+test('linked users without consent cannot stake; unlinked users play from their wallet', async () => {
+  const { handler } = setup(undefined, ['uidA']);
+  assert.equal((await call(handler, stakeBody('33333', 'win', 10))).body.error, 'no_consent');
+  const empty = await call(handler, stakeBody('99999', 'win', 10));
+  assert.equal(empty.body.error, 'insufficient_balance:0');
+});
+
+test('balances: consenting accounts, private non-consenting accounts, wallets for the rest', async () => {
+  const { handler, firestore } = setup(undefined, ['uidA']);
+  firestore.docs.set('poko_discord_wallets/99999', { availablePkn: 7, status: 'active' });
+  const res = await call(handler, { action: 'balances', discordUserIds: ['22222', '33333', '99999'] });
+  assert.deepEqual(res.body.balances, [
+    { discordUserId: '22222', linked: true, consent: true, availablePkn: 1000 },
+    { discordUserId: '33333', linked: true, consent: false },
+    { discordUserId: '99999', linked: false, consent: false, wallet: true, walletMerged: false, availablePkn: 7 },
+  ]);
+});
+
+test('wallet bonus: once per Discord account, double clicks pay once, new accounts refused', async () => {
+  const { handler, firestore } = setup();
+  const results = await Promise.all([1, 2, 3].map(() => call(handler, { action: 'redeem_bonus', discordUserId: '99999' })));
   assert.deepEqual(results.map((r) => r.statusCode).sort(), [200, 409, 409]);
-  assert.equal(bal(firestore, 'uidA'), 20);
+  assert.equal(wallet(firestore, '99999').availablePkn, 20);
+  assert.equal((await call(handler, { action: 'redeem_bonus', discordUserId: youngDiscordId() })).body.error, 'discord_account_too_new');
+  assert.equal((await call(handler, { action: 'redeem_bonus', discordUserId: '88888' })).statusCode, 200, 'another old account is fine');
+});
+
+test('linking merges the wallet once into the Pokoin account, then the account is used', async () => {
+  const links = { ...LINKS };
+  const firestore = fakeFirestore({ 'balances/uidX': { availablePkn: 5 }, 'poko_bets_consent/uidX': { enabled: true } });
+  let handler = load({ firestore, links });
+  await call(handler, { action: 'redeem_bonus', discordUserId: '99999' });
+  links['99999'] = 'uidX';
+  handler = load({ firestore, links });
+  const results = await Promise.all([1, 2].map(() => call(handler, { action: 'merge_wallet', discordUserId: '99999' })));
+  assert.deepEqual(results.map((r) => r.body.merged).sort(), [false, true], 'double /connect moves once');
+  assert.equal(bal(firestore, 'uidX'), 25);
+  assert.equal(wallet(firestore, '99999').status, 'merged');
+  assert.equal(wallet(firestore, '99999').availablePkn, 0);
+  // bonus cannot be claimed again by the Discord user nor through the account
+  assert.equal((await call(handler, { action: 'redeem_bonus', discordUserId: '99999' })).body.error, 'bonus_already_claimed_discord');
+  links['77777'] = 'uidX';
+  handler = load({ firestore, links });
+  assert.equal((await call(handler, { action: 'redeem_bonus', discordUserId: '77777' })).body.error, 'bonus_already_claimed_account');
+  const st = await call(handler, stakeBody('99999', 'win', 25));
+  assert.equal(st.body.holder, 'account');
+  assert.equal(bal(firestore, 'uidX'), 0);
+});
+
+test('unlink + relink cannot re-merge, re-fund or re-bonus the wallet', async () => {
+  const links = { ...LINKS };
+  const firestore = fakeFirestore({ 'poko_bets_consent/uidX': { enabled: true }, 'poko_bets_consent/uidY': { enabled: true } });
+  let handler = load({ firestore, links });
+  await call(handler, { action: 'redeem_bonus', discordUserId: '99999' });
+  links['99999'] = 'uidX';
+  handler = load({ firestore, links });
+  await call(handler, { action: 'merge_wallet', discordUserId: '99999' });
+  delete links['99999'];
+  handler = load({ firestore, links });
+  assert.equal((await call(handler, stakeBody('99999', 'win', 1))).body.error, 'wallet_merged_relink');
+  assert.equal((await call(handler, { action: 'redeem_bonus', discordUserId: '99999' })).body.error, 'bonus_already_claimed_discord');
+  links['99999'] = 'uidY';
+  handler = load({ firestore, links });
+  const again = await call(handler, { action: 'merge_wallet', discordUserId: '99999' });
+  assert.equal(again.body.reason, 'already_merged');
+  assert.equal(bal(firestore, 'uidY') || 0, 0);
+  assert.equal(bal(firestore, 'uidX'), 20);
+});
+
+test('alt farming: a second wallet bonus is not carried into an already-bonused account', async () => {
+  const links = { ...LINKS };
+  const firestore = fakeFirestore({ 'poko_bets_consent/uidX': { enabled: true } });
+  let handler = load({ firestore, links });
+  await call(handler, { action: 'redeem_bonus', discordUserId: '99999' });
+  await call(handler, { action: 'redeem_bonus', discordUserId: '88888' });
+  links['99999'] = 'uidX';
+  links['88888'] = 'uidX';
+  handler = load({ firestore, links });
+  await call(handler, { action: 'merge_wallet', discordUserId: '99999' });
+  const second = await call(handler, { action: 'merge_wallet', discordUserId: '88888' });
+  assert.equal(second.body.forfeitedPkn, 20);
+  assert.equal(second.body.movedPkn, 0);
+  assert.equal(bal(firestore, 'uidX'), 20);
+});
+
+test('merges are capped per Pokoin account; the excess stays frozen on the wallet', async () => {
+  const links = { ...LINKS, 99999: 'uidX' };
+  const firestore = fakeFirestore({ 'poko_discord_wallets/99999': { availablePkn: 500, status: 'active' } });
+  const handler = load({ firestore, links });
+  const merged = await call(handler, { action: 'merge_wallet', discordUserId: '99999' });
+  const cap = handler._test.WALLET_MERGE_CAP;
+  assert.equal(merged.body.movedPkn, cap);
+  assert.equal(merged.body.frozenPkn, 500 - cap);
+  assert.equal(bal(firestore, 'uidX'), cap);
+  assert.equal(wallet(firestore, '99999').frozenPkn, 500 - cap);
+});
+
+test('linking mid-round: wallet stakes are paid to the Pokoin account', async () => {
+  const links = { ...LINKS };
+  const firestore = fakeFirestore({ 'poko_discord_wallets/99999': { availablePkn: 30, status: 'active' }, 'balances/uidA': { availablePkn: 100 }, 'poko_bets_consent/uidA': { enabled: true } });
+  let handler = load({ firestore, links });
+  await call(handler, stakeBody('99999', 'win', 30));
+  await call(handler, stakeBody('22222', 'loss', 30));
+  links['99999'] = 'uidX';
+  handler = load({ firestore, links });
+  await call(handler, { action: 'merge_wallet', discordUserId: '99999' });
+  const settled = await call(handler, { action: 'settle', guildId: GUILD, gameId: GAME, outcome: 'win' });
+  assert.deepEqual(settled.body.payouts, { 99999: 60, 22222: 0 });
+  assert.equal(bal(firestore, 'uidX'), 60);
+  assert.equal(wallet(firestore, '99999').availablePkn, 0);
 });

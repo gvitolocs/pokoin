@@ -716,21 +716,23 @@
     "methods": [
       "POST"
     ],
-    "purpose": "Poko Discord LoL bets in real site PKN: consent, balance check + stake into a per-round escrow, server-computed pari-mutuel settle/refund with ledger entries; one-time 20 PKN Discord bonus (once per Discord account and once per Pokoin account).",
+    "purpose": "Poko Discord LoL bets in real PKN. Linked + opted-in users play with their site balance; unlinked users play with a Discord wallet merged once into the Pokoin account on link (capped per account, bonus never carried twice, wallet closed afterwards). Balance-checked stakes into a per-round escrow, server-computed pari-mutuel settle/refund, one-time 20 PKN bonus (aged Discord accounts only for wallets), ledger entries for every movement.",
     "auth": "Service bearer token only (POKO_MARKET_SERVICE_TOKEN or POKONTACT_SERVICE_TOKEN). Only Discord users linked via poko-connect and opted in can stake or reveal a balance.",
     "params": {
       "query": "none",
-      "body": "{ action: balances|set_consent|stake|close|settle|refund|redeem_bonus, ... } — stake takes guildId, gameId, discordUserId, side win|loss, whole amountPkn; settle takes outcome win|loss."
+      "body": "{ action: balances|set_consent|merge_wallet|stake|close|settle|refund|redeem_bonus, ... }"
     },
     "dependencies": {
       "env": [
         "FIREBASE_*",
         "MARKETPLACE_DATABASE_URL",
         "POKO_MARKET_SERVICE_TOKEN",
-        "POKONTACT_SERVICE_TOKEN"
+        "POKONTACT_SERVICE_TOKEN",
+        "POKO_WALLET_MERGE_CAP",
+        "POKO_BONUS_MIN_DISCORD_AGE_DAYS"
       ],
       "services": [
-        "Firebase Admin (balances, ledger_entries, poko_bet_rounds, poko_bets_consent, poko_bonus_claims)",
+        "Firebase Admin (balances, ledger_entries, poko_bet_rounds, poko_bets_consent, poko_bonus_claims, poko_discord_wallets, poko_discord_wallet_ledger, poko_wallet_merges)",
         "Postgres read replica (poko_discord_links)"
       ]
     }
