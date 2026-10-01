@@ -10,7 +10,7 @@ import LocationBoard from '../components/LocationBoard.jsx';
 import PricingStrategies, { PricerDefaults } from '../components/PricingStrategies.jsx';
 import StockNav from '../components/StockNav.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
-import { liveInventoryListings } from '../inventory-listings.js';
+import { inventoryRowsForLocation, liveInventoryListings } from '../inventory-listings.js';
 
 const FORMATS = [
   { id: 'powertools', label: 'PowerTools' },
@@ -293,7 +293,7 @@ export default function Inventory() {
       ) : null}
       {!onImportTab && !onSettingsTab && locationName && rows?.length ? (
         <LocationBoard
-          rows={rows.filter((row) => String(row?.location || '').trim() === locationName)}
+          rows={inventoryRowsForLocation(rows, locationName)}
           location={locationName}
           formatPrice={formatPrice}
         />

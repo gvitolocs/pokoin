@@ -5,6 +5,7 @@ import {
   groupBoxStacks,
   groupInventoryStacks,
   inventoryStackKey,
+  inventoryRowsForLocation,
   inventoryFacets,
   inventoryListingHref,
   inventoryListingMeta,
@@ -241,4 +242,28 @@ test('typing a stack continues after the cards already in it', () => {
   assert.equal(nextPositionInStack(rows, 'b', 6, 20), 21); // whole-stack location
   assert.equal(nextPositionInStack(rows, 'b', 7, 20), null);
   assert.equal(nextPositionInStack(rows, 'b', 3, 1), null);
+});
+
+
+test('location pages include every slot in the linked box without matching neighboring boxes', () => {
+  const rows = [
+    { id: 'bare', location: 'megaevoluzionietb1', quantityAvailable: 1 },
+    { id: 'stack', location: 'megaevoluzionietb1·1', quantityAvailable: 2 },
+    { id: 'position', location: 'megaevoluzionietb1·2·3', quantityAvailable: 1 },
+    { id: 'range', location: ' megaevoluzionietb1•2•4-6 ', quantityAvailable: 3 },
+    { id: 'neighbor', location: 'megaevoluzionietb10·1', quantityAvailable: 1 },
+    { id: 'other', location: 'other·1', quantityAvailable: 1 },
+    { id: 'empty', location: '', quantityAvailable: 1 },
+  ];
+  const selected = inventoryRowsForLocation(rows, 'megaevoluzionietb1');
+  assert.deepEqual(selected.map((row) => row.id), ['bare', 'stack', 'position', 'range']);
+  // Legacy links containing a full slot still open the whole box.
+  assert.deepEqual(inventoryRowsForLocation(rows, 'megaevoluzionietb1·2·3'), selected);
+  const stacks = groupBoxStacks(selected, 'megaevoluzionietb1');
+  assert.deepEqual(stacks.map((stack) => stack.stack), [1, 2, 0]);
+  assert.equal(stacks.reduce((sum, stack) => sum + stack.postingCount, 0), 4);
+  assert.equal(stacks.reduce((sum, stack) => sum + stack.copies, 0), 7);
+  assert.deepEqual(inventoryRowsForLocation(rows, 'missing'), []);
+  assert.deepEqual(inventoryRowsForLocation(rows, ''), []);
+  assert.deepEqual(inventoryRowsForLocation(null, 'megaevoluzionietb1'), []);
 });
