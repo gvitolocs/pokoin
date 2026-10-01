@@ -240,6 +240,14 @@ export function listingBox(raw) {
   return parseListingLocation(raw).box;
 }
 
+/** Match a location page to its whole box, including numbered slots. */
+export function inventoryRowsForLocation(rows, location) {
+  const box = listingBox(location);
+  if (!box) return [];
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => listingBox(row?.location) === box);
+}
+
 /**
  * Stacks for one box, ordered by stack number asc (unnumbered rows last),
  * each stack's postings ordered by position asc, then date, then id.
