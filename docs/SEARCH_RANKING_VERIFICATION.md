@@ -41,7 +41,7 @@ per-configuration timeout (default 300 seconds).
 
 ## What TLC checks
 
-The bridge evaluates **5,940 finite popup executions** across six scenarios:
+The bridge evaluates **7,200 finite popup executions** across 17 scenarios:
 
 - A typo plus set prefix (`mewtow evol`), with six source groups, all 720
   cache insertion orders, normal and reversed printing order, and result
@@ -53,6 +53,13 @@ The bridge evaluates **5,940 finite popup executions** across six scenarios:
   artist (`sugimori pika`) and collector (`025 pikachu`) evidence. Each
   covers all six orders of three source groups, both printing orders,
   and caps 1, 4 and 20.
+- Progressive `e`, `ev`, `evo` and `evol` set suffixes after both typo Mewtwo
+  and typo Charizard names. Each of these eight scenarios covers all 24
+  insertion orders of four groups, both printing orders, and caps 1, 4 and
+  20. Plain, EX and GX name forms are present alongside a context-only card.
+- Literal EX, GX and V suffixes after a typo Mewtwo name. Each covers all six
+  insertion orders of three groups, both printing orders, and caps 1, 4 and
+  20, including a rival mechanic that must remain excluded.
 
 For every bounded execution, TLC replays the actual JavaScript result one row
 at a time. Independent invariants require descending relevance, a result cap,
@@ -62,7 +69,14 @@ An exact reference sequence also requires deterministic tie ordering across
 cache and within-group insertion orders. Score probes verify coverage priority,
 a small accepted name typo beating a metadata-only match with equal coverage,
 and a penalty for an unmatched extra name word even when another query word
-matches the set. Every pair of fixture rows also checks coverage priority.
+matches the set. Eight progressive-prefix probes require one/two-character
+set evidence to improve quality without adding coverage after an independent
+name match; three/four-character prefixes regain ordinary coverage. The same
+probes require EX cards to remain eligible and prohibit accidentally treating
+an unfinished `ev` set suffix as V. Two additional bare `e`/`ev` probes forbid
+set expansion, and three literal-mechanic probes preserve exact EX/GX/V name
+evidence and rival-mechanic exclusions. Every pair of fixture rows also checks
+coverage priority.
 
 The Node bridge supplies an empty custom local name-ranking pool to
 `liveSuggestGroups`. This avoids repeating candidate-vocabulary retrieval for
@@ -140,3 +154,22 @@ fixtures use score differences substantially larger than that precision.
 The hand-written TLA+ checks observed JavaScript outputs independently; it does
 not assert that a hand-translated selector is identical to arbitrary future
 JavaScript implementations.
+
+## Early-prefix followup validation
+
+The expanded check on 2026-10-01 passed all **7,200 executions** across
+17 scenarios: 33,552 states generated, 26,352 distinct states explored,
+zero states left on the queue, and complete search depth 7. Both existing
+regression configurations still produced their required exit-code-12
+counterexamples.
+
+The new probes verified `e` and `ev` contributing positive set quality while
+coverage remained 1 after a matching name; `evo` and `evol` raised coverage
+to 2. Context-only cards stayed at zero coverage for `e`/`ev`, and EX cards
+remained eligible through the `ev` transition. Literal EX/GX/V queries kept
+exact name evidence, matching forms and rival-mechanic exclusions.
+
+Running the same expanded check against the previous `c131210` baseline
+failed `EarlySetPrefixProgression`: early `e`/`ev` provided no set quality,
+and `ev` was mistakenly read as V, hiding EX cards. This confirms the new
+checks distinguish the followup fix from the earlier balanced scorer.

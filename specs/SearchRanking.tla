@@ -66,6 +66,39 @@ NameSpecificityUsesNameMatches ==
       THEN probe.oldBaseScore > probe.oldExtraScore
       ELSE probe.baseScore > probe.extraScore
 
+(* A one/two-character non-mechanic suffix may refine quality only after
+   independent name evidence. Longer prefixes regain ordinary token coverage. *)
+EarlySetPrefixProgression ==
+  cursor > 0 =>
+    \A probe \in EarlyPrefixProbes :
+      /\ probe.partialCoverage = 1
+      /\ probe.coverage = IF probe.prefixLength <= 2 THEN 1 ELSE 2
+      /\ probe.metadataCoverage = IF probe.prefixLength <= 2 THEN 0 ELSE 1
+      /\ probe.prefixIsSet
+      /\ probe.prefixQuality > 0
+      /\ probe.score > probe.partialScore
+      /\ probe.score > probe.extraScore
+
+UnfinishedSetKeepsMechanicEligibility ==
+  cursor > 0 =>
+    \A probe \in EarlyPrefixProbes : probe.mechanicCount = 0 /\ probe.exEligible
+
+BareShortPrefixesDoNotExpandSets ==
+  cursor > 0 =>
+    \A probe \in BarePrefixProbes : probe.coverage = 0 /\ probe.noSetEvidence
+
+ExactMechanicsStayLiteral ==
+  cursor > 0 =>
+    \A probe \in MechanicProbes :
+      /\ probe.ordinaryCoverage = 1
+      /\ probe.matchingCoverage = 2
+      /\ probe.rivalCoverage = 1
+      /\ probe.matchingScore > probe.ordinaryScore
+      /\ probe.literalEvidence
+      /\ probe.exactModifier
+      /\ probe.matchingEligible
+      /\ probe.rivalExcluded
+
 NonIncreasingScores ==
   \A i, j \in 1..Len(displayed) :
     i < j => Row(displayed[i]).score >= Row(displayed[j]).score

@@ -37,7 +37,8 @@ const scoredRow = (query, printing) => {
   return {
     id: String(printing.id), score: integerScore(result.score), coverage: result.coverage,
     eligible: result.coverage > 0 && !live.isLiveStub(printing)
-      && printing.product_type === 'card' && printing.item_kind === 'single',
+      && printing.product_type === 'card' && printing.item_kind === 'single'
+      && !ranking.hasRivalMechanic(printing.name, ranking.typedModifiers(query).mods),
   };
 };
 function* permutations(items) {
@@ -85,6 +86,34 @@ const scenarios = [
     group('Switch', [card('1004', 'Switch', 'Base Set', { number: '25/102' })]),
   ], caps: [1, 4, 20] },
 ];
+// Early set context is deliberately separate from literal EX/GX/V tokens.
+const earlyPrefixScenarios = [];
+for (const [speciesIndex, name, typed] of [[0, 'Mewtwo', 'mewtow'], [1, 'Charizard', 'charziard']]) {
+  for (const prefix of ['e', 'ev', 'evo', 'evol']) {
+    const id = (suffix) => `early-${speciesIndex}-${prefix}-${suffix}`;
+    const scenario = { label: `early-${speciesIndex}-${prefix}`, query: `${typed} ${prefix}`,
+      name, typed, prefix, caps: [1, 4, 20], groups: [
+        group(name, [card(id('base'), name, 'Evolutions'), card(id('other'), name, 'Base Set')]),
+        group(`${name} EX`, [card(id('ex'), `${name} EX`, 'Evolutions'), card(id('ex-other'), `${name} EX`, 'Scarlet & Violet')]),
+        group(`${name} GX`, [card(id('gx'), `${name} GX`, 'Evolutions')]),
+        group('Switch', [card(id('metadata'), 'Switch', 'Evolutions')]),
+      ] };
+    earlyPrefixScenarios.push(scenario);
+    scenarios.push(scenario);
+  }
+}
+const mechanicScenarios = [];
+for (const [mechanic, rival] of [['ex', 'GX'], ['gx', 'V'], ['v', 'EX']]) {
+  const suffix = mechanic.toUpperCase();
+  const scenario = { label: `literal-${mechanic}`, query: `mewtow ${mechanic}`,
+    mechanic, caps: [1, 4, 20], groups: [
+      group('Mewtwo', [card(`literal-${mechanic}-base`, 'Mewtwo', 'Evolutions')]),
+      group(`Mewtwo ${suffix}`, [card(`literal-${mechanic}-match`, `Mewtwo ${suffix}`, 'Scarlet & Violet')]),
+      group(`Mewtwo ${rival}`, [card(`literal-${mechanic}-rival`, `Mewtwo ${rival}`, 'Evolutions')]),
+    ] };
+  mechanicScenarios.push(scenario);
+  scenarios.push(scenario);
+}
 function mergedGroups(groups) {
   const map = new Map();
   for (const item of groups) {
@@ -171,6 +200,45 @@ const probes = probePairs.map(([query, name, extraName, set, otherSet], index) =
     baseScore: integerScore(evaluate(query, base).score), extraScore: integerScore(full.score),
     oldBaseScore: oldPenaltyScore(query, base), oldExtraScore: oldPenaltyScore(query, extra) };
 });
+const earlyProbes = earlyPrefixScenarios.map((scenario) => {
+  const base = scenario.groups[0].printings[0];
+  const partial = scenario.groups[0].printings[1];
+  const extra = scenario.groups[1].printings[0];
+  const metadata = scenario.groups[3].printings[0];
+  const fullResult = evaluate(scenario.query, base);
+  const partialResult = evaluate(scenario.query, partial);
+  const metadataResult = evaluate(scenario.query, metadata);
+  const evidence = fullResult.perToken[1];
+  const selected = observe(scenario.query, scenario.groups, 20);
+  return { label: scenario.query, prefixLength: scenario.prefix.length,
+    coverage: fullResult.coverage, partialCoverage: partialResult.coverage,
+    metadataCoverage: metadataResult.coverage,
+    score: integerScore(fullResult.score), partialScore: integerScore(partialResult.score),
+    extraScore: integerScore(evaluate(scenario.query, extra).score),
+    prefixQuality: integerScore(evidence.quality), prefixIsSet: evidence.via.startsWith('set-'),
+    mechanicCount: ranking.typedModifiers(scenario.query).mods.length,
+    exEligible: selected.includes(String(extra.id)),
+  };
+});
+const bareProbes = ['e', 'ev'].map((query) => {
+  const result = evaluate(query, card(`bare-${query}`, 'Switch', 'Evolutions'));
+  return { label: query, coverage: result.coverage, noSetEvidence: result.perToken[0].via === 'none' };
+});
+const mechanicProbes = mechanicScenarios.map((scenario) => {
+  const ordinary = evaluate(scenario.query, scenario.groups[0].printings[0]);
+  const match = evaluate(scenario.query, scenario.groups[1].printings[0]);
+  const rival = evaluate(scenario.query, scenario.groups[2].printings[0]);
+  const mods = ranking.typedModifiers(scenario.query).mods;
+  const selected = observe(scenario.query, scenario.groups, 20);
+  return { label: scenario.query, ordinaryCoverage: ordinary.coverage,
+    matchingCoverage: match.coverage, rivalCoverage: rival.coverage,
+    matchingScore: integerScore(match.score), ordinaryScore: integerScore(ordinary.score),
+    literalEvidence: match.perToken[1].via === 'name-exact',
+    exactModifier: mods.length === 1 && mods[0] === scenario.mechanic,
+    matchingEligible: selected.includes(String(scenario.groups[1].printings[0].id)),
+    rivalExcluded: !selected.includes(String(scenario.groups[2].printings[0].id)),
+  };
+});
 function tla(value) {
   if (typeof value === 'string') return JSON.stringify(value);
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
@@ -186,11 +254,17 @@ const fixtureText = [
   'EXTENDS Integers',
   `Cases == {\n${cases.map((item) => `  ${tla(item)}`).join(',\n')}\n}`,
   `ScoreProbes == {${probes.map(tla).join(', ')}}`,
+  `EarlyPrefixProbes == {${earlyProbes.map(tla).join(', ')}}`,
+  `BarePrefixProbes == {${bareProbes.map(tla).join(', ')}}`,
+  `MechanicProbes == {${mechanicProbes.map(tla).join(', ')}}`,
   '=============================================================================', '',
 ].join('\n');
 await writeFile(resolve(process.env.SEARCH_RANKING_RUN_DIR, 'SearchRankingFixtures.tla'), fixtureText);
-console.log(`SEARCH_RANKING_FIXTURES scenarios=${scenarios.length} executions=${cases.length} probes=${probes.length}`);
+console.log(`SEARCH_RANKING_FIXTURES scenarios=${scenarios.length} executions=${cases.length} probes=${probes.length} early_prefix_probes=${earlyProbes.length} bare_prefix_probes=${bareProbes.length} mechanic_probes=${mechanicProbes.length}`);
 for (const probe of probes) console.log(`SEARCH_RANKING_PROBE ${JSON.stringify(probe)}`);
+for (const probe of earlyProbes) console.log(`SEARCH_RANKING_EARLY_PREFIX_PROBE ${JSON.stringify(probe)}`);
+for (const probe of bareProbes) console.log(`SEARCH_RANKING_BARE_PREFIX_PROBE ${JSON.stringify(probe)}`);
+for (const probe of mechanicProbes) console.log(`SEARCH_RANKING_MECHANIC_PROBE ${JSON.stringify(probe)}`);
 JS
 
 run_check() {
