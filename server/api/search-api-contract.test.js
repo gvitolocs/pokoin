@@ -60,3 +60,14 @@ test('the SPA keeps exactly three top-level search tabs and routes jumbo into Pr
   assert.doesNotMatch(searchKindSource, /id: 'jumbo'/);
   assert.match(searchKindSource, /if \(id === 'jumbo'\) \{\s*return 'product';/);
 });
+
+test('Singles search awaits rows from the { rows, total } search helper answer', () => {
+  // The CardVault helper returns `rows` as an unawaited Promise; filtering it
+  // 500'd ("next.filter is not a function") then painted "No matches".
+  const body = cardsSource.slice(
+    cardsSource.indexOf('async function rowsForCards'),
+    cardsSource.indexOf('async function productFacetRows'),
+  );
+  assert.match(body, /await loaded\.rows/);
+  assert.match(body, /Array\.isArray\(rawRows\) \? rawRows : \[\]/);
+});
