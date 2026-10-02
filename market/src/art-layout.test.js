@@ -252,6 +252,22 @@ test('XY full-art EX secrets (n/m over the set) are two-row bleed tiles', () => 
     name: 'M Mewtwo ex',
     number: 'Ultra Rare | 159/162',
     set: 'BREAKthrough',
+  }), 'bleed');
+  assert.equal(catalogArtLayout({
+    name: 'M Venusaur ex',
+    number: 'Ultra Rare | 100/108',
+    set: 'Evolutions',
+  }), 'bleed');
+  assert.equal(resolveArtLayout({
+    name: 'M Venusaur ex',
+    number: 'Ultra Rare | 100/108',
+    set: 'Evolutions',
+    artLayout: 'window',
+  }), 'bleed');
+  assert.equal(catalogArtLayout({
+    name: 'M Venusaur ex',
+    number: 'Holo Rare | 2/108',
+    set: 'Evolutions',
   }), 'window');
   assert.equal(resolveArtLayout({
     name: 'M Charizard ex',

@@ -2559,9 +2559,9 @@ html.is-card-banding * {
     );
   }
 
-  /* ART_CUT_BLEED band only — not leftover HP/attacks (D00003G).
-   * contain + top: width-fit the painting in the two-row cell, no side
-   * zoom (D00003O). Shade under the painting is the caption blur. */
+  /* The two-row cell is a row-gap taller than the crop when the
+   * tracks are sized by the one-row tiles. cover fills that strip
+   * instead of leaving shade under the painting. */
   .tile.tile-album.tile-tall .tile-art .art-cut img,
   .tile.tile-album.tile-tall:hover .tile-art .art-cut img {
     left: 0;
@@ -2571,7 +2571,7 @@ html.is-card-banding * {
     max-width: none;
     margin-top: 0;
     aspect-ratio: auto;
-    object-fit: contain;
+    object-fit: cover;
     object-position: center top;
     object-view-box: xywh(
       calc(var(--art-left) * 100%)

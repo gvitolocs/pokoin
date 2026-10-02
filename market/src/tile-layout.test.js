@@ -205,7 +205,7 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   );
   assert.match(
     css,
-    /@supports \(object-view-box: none\) \{[\s\S]*?\.tile-album\.tile-tall[\s\S]*?object-fit:\s*contain;[\s\S]*?var\(--art-height\)/,
+    /@supports \(object-view-box: none\) \{[\s\S]*?\.tile-album\.tile-tall[\s\S]*?object-fit:\s*cover;[\s\S]*?var\(--art-height\)/,
   );
   assert.doesNotMatch(
     css,
