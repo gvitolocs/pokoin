@@ -15,7 +15,7 @@ const {
   pushListingToCardTrader,
 } = require('./_cardtrader_seller_listings');
 const {
-  getSellerPublicProfiles,
+  getPublicSellerProfiles,
   readSellerUidByName,
   rememberSellerUidByName,
 } = require('./_seller_profile_cache');
@@ -499,7 +499,7 @@ async function enrichListingRowsWithSellerProfiles(rows = []) {
   try {
     // Shared read-through cache: Valkey first, one Firestore users/{uid} read
     // per cache-miss only. Display enrichment — never used for authorization.
-    const profiles = await getSellerPublicProfiles(uids);
+    const profiles = await getPublicSellerProfiles(uids);
     return rows.map((row) => {
       const profile = profiles.get(cleanText(row.seller_uid, 160));
       return profile

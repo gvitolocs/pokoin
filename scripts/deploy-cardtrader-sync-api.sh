@@ -83,6 +83,7 @@ node --test \
   "$SRC/_powertools_ct_match.test.js" \
   "$SRC/_cardtrader_zero.test.js" \
   "$SRC/powertools-connect.test.js"
+node --test "$SRC/marketplace-listings.test.js" "$SRC/_seller_profile_cache.test.js"
 for file in "${CT_FILES[@]}"; do
   [[ "$file" == *.js ]] || continue
   [[ "$file" == *.test.js ]] && continue
