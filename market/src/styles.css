@@ -3058,6 +3058,31 @@ html.is-card-banding * {
   border-color: color-mix(in srgb, var(--card-shade) 34%, var(--g5));
 }
 
+/* Card desk painted from the artwork delta. The page is the darkest step,
+   panels sit one and two steps up, and the title bar keeps the most color. */
+html.desk-tinted,
+html.desk-tinted body {
+  background: var(--desk-bg);
+}
+
+html.desk-tinted .card-page .panel,
+html.desk-tinted .card-page .sell-form {
+  background: var(--desk-surface);
+  border-color: var(--desk-border);
+}
+
+html.desk-tinted .card-page .add-panel,
+html.desk-tinted .card-page .shop-panel,
+html.desk-tinted .card-page .reserve-blurb {
+  background: var(--desk-raised);
+  border-color: var(--desk-border);
+}
+
+html.desk-tinted .asset-header.shaded {
+  background: linear-gradient(100deg, var(--desk-hero), var(--desk-raised));
+  border-color: var(--desk-hero-border);
+}
+
 .asset-title-row,
 .asset-sub-row {
   display: flex;

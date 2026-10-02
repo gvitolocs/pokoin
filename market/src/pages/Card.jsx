@@ -75,7 +75,7 @@ import {
 } from '../sold-graph.js';
 import { soldGraphView, soldTraitsForGraphDay } from '../sold-sales.js';
 import NativeSales from '../components/NativeSales.jsx';
-import { albumShade, cardShadeStyle } from '../art-shade.js';
+import { albumShade, cardShadeStyle, deskTheme, deskThemeVars } from '../art-shade.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '../sold-sales-cache.js';
 import { authFrom } from '../punchouts.js';
 import { useAuth } from '../auth.jsx';
@@ -1998,6 +1998,27 @@ export default function Card() {
     }).catch(() => {});
     return () => { live = false; };
   }, [payload?.card]);
+
+  const pageTheme = useMemo(
+    () => deskTheme(payload?.card || stubCard, payload?.visualTheme),
+    [payload?.card, payload?.visualTheme, stubCard],
+  );
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const vars = deskThemeVars(pageTheme);
+    if (!vars) {
+      root.classList.remove('desk-tinted');
+      return undefined;
+    }
+    for (const [key, value] of Object.entries(vars)) {
+      root.style.setProperty(key, value);
+    }
+    root.classList.add('desk-tinted');
+    return () => {
+      root.classList.remove('desk-tinted');
+      for (const key of Object.keys(vars)) root.style.removeProperty(key);
+    };
+  }, [pageTheme]);
 
   if (error && !payload?.card) {
     return (
