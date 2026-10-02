@@ -2056,18 +2056,23 @@ export default function Card() {
     }
   }, [payload?.card, stubCard, cardId]);
   useLayoutEffect(() => {
-    const vars = deskThemeVars(pageTheme);
-    if (!vars) return undefined;
     const root = document.documentElement;
-    for (const [key, value] of Object.entries(vars)) {
-      root.style.setProperty(key, value);
+    const vars = deskThemeVars(pageTheme);
+    const kind = storedRarityKind(themeCard);
+    if (vars) {
+      for (const [key, value] of Object.entries(vars)) {
+        root.style.setProperty(key, value);
+      }
     }
-    root.classList.add('desk-tinted');
+    if (vars || kind) root.classList.add('desk-tinted');
+    root.classList.toggle('desk-rainbow', kind === 'rainbow');
+    root.classList.toggle('desk-gold', kind === 'gold');
+    root.classList.toggle('desk-ghost', kind === 'ghost');
     return undefined;
-  }, [pageTheme]);
+  }, [pageTheme, themeCard]);
   useEffect(() => () => {
     const root = document.documentElement;
-    root.classList.remove('desk-tinted');
+    root.classList.remove('desk-tinted', 'desk-rainbow', 'desk-gold', 'desk-ghost');
     for (const key of ['--desk-bg', '--desk-surface', '--desk-raised', '--desk-hero', '--desk-hero-border', '--desk-border', '--desk-tint']) {
       root.style.removeProperty(key);
     }

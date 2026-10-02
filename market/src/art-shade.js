@@ -297,22 +297,31 @@ export function subscribeShadeBuckets(listener) {
   return () => bucketListeners.delete(listener);
 }
 
-/** Artist and emoji for the first paint, kept beside the bucket index. */
+const RARITY_KINDS = new Set(['rainbow', 'gold', 'ghost']);
+
+function storedKind(card) {
+  const kind = String(card?.rarityKind || card?.rarity_kind || '').trim().toLowerCase();
+  return RARITY_KINDS.has(kind) ? kind : '';
+}
+
+/** Artist, emoji, and stored rarity type for the first paint. */
 export function rememberDeskIdentity(card) {
   const id = String(card?.id || card?.card_id || '').trim();
   if (!/^\d+$/.test(id)) return;
   const artist = String(card?.artist || card?.illustrator || '').trim();
   const emoji = String(card?.emoji || card?.cardIdentityEmoji || '').trim();
+  const rarityKind = storedKind(card);
   const shade = albumShade(card);
-  if (!artist && !emoji && !shade) return;
+  if (!artist && !emoji && !shade && !rarityKind) return;
   const map = loadIdentity();
   const prev = map[id] && typeof map[id] === 'object' ? map[id] : {};
   const next = {
     artist: artist || prev.artist || '',
     emoji: emoji || prev.emoji || '',
+    rarityKind: rarityKind || prev.rarityKind || '',
   };
   if (shade) rememberCardBucket(id, shade);
-  if (prev.artist === next.artist && prev.emoji === next.emoji) return;
+  if (prev.artist === next.artist && prev.emoji === next.emoji && prev.rarityKind === next.rarityKind) return;
   map[id] = next;
   writeMap(IDENTITY_KEY, map);
 }
@@ -324,7 +333,8 @@ export function peekDeskIdentity(cardId) {
   if (!row || typeof row !== 'object') return null;
   const artist = String(row.artist || '').trim();
   const emoji = String(row.emoji || '').trim();
-  if (!artist && !emoji) return null;
+  const rarityKind = storedKind(row);
+  if (!artist && !emoji && !rarityKind) return null;
   return {
     id,
     card_id: id,
@@ -332,6 +342,7 @@ export function peekDeskIdentity(cardId) {
     illustrator: artist,
     emoji,
     cardIdentityEmoji: emoji,
+    ...(rarityKind ? { rarityKind } : {}),
   };
 }
 
