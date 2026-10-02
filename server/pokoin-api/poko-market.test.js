@@ -51,6 +51,7 @@ function loadHandler(dbStub, priceHistoryStub) {
   const originalLoad = Module._load;
   delete require.cache[TARGET];
   Module._load = function load(request, parent, isMain) {
+    if (request === './_marketplace_game') return { currentGame: () => 'pokemon' };
     if (request === './_card_price_history') {
       const sources = originalLoad(request, parent, isMain);
       return { ...sources, readCardPriceHistory: priceHistoryStub || (async () => ({
@@ -118,6 +119,7 @@ const T = (function loadTestHelpers() {
   const originalLoad = Module._load;
   delete require.cache[TARGET];
   Module._load = function load(request, parent, isMain) {
+    if (request === './_marketplace_game') return { currentGame: () => 'pokemon' };
     if (request === './_marketplace_db') {
       return { marketplaceQuery: async () => [] };
     }
