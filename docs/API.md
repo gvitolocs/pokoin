@@ -60,6 +60,8 @@ databases. Pokemon stays on this Pi map. Plan: [MULTIGAME_REIMPORT.md](MULTIGAME
 | `POST /api/cardtrader-sync` | Full inventory reconcile (`GET /products/export`) |
 | `POST /api/cardtrader-webhook/:uid` | Order sale stock gate → linked Pokoin qty (idempotent) |
 | `GET /api/cardtrader-assets` | Signed-in seller's CardTrader 1-Day Ready inventory as dashboard assets |
+| `GET /api/cardtrader-zero` | CardTrader Zero picking list: weekly merged `paid` Zero order + `hub_pending` Zero sales, with MyPokoin locations ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
+| `GET/POST/DELETE /api/powertools-connect` | Optional Power Tools session (encrypted jwt only) for the Zero list's Power Tools overlay |
 
 Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings are
 never modified by reconcile. Incomplete/failed CT exports never trigger
@@ -184,7 +186,7 @@ the walk completes. [MARKET.md](MARKET.md#set-desk-first-paint). Schema:
 | Worker | Job |
 | --- | --- |
 | `pokoin-origin` | OG HTML for card paths, plus homepage rails Cache API (`marketplace-home.js`). Origin 530 / Cloudflare 1033 becomes the working page, not tunnel copy. |
-| `pokoin-working` | `api.pokoin.com` / `api2.pokoin.com`: same working page when the Pi tunnel is down. GIF is on Vercel (`/home/working.gif`). |
+| `pokoin-working` | **No routes since 2026-10-01** (it ran on every `api.pokoin.com` request, ~68% of the free 100k Worker requests/day, in front of the edge cache). During a Pi outage API clients get Cloudflare 530/1033; the SPA shows its own working page (`market/src/working-page.js`). API reads are edge-cached by zone Cache Rules (public `Cache-Control`, no `Authorization`). |
 | `pokoin-shortlink` | `/{digits}` → canonical card path |
 | `marketplace-home` | Edge rails vector + `marketplace-card-tiles`. Origin is `https://api.pokoin.com`. |
 | `marketplace-card-og` | OG **HTML** for link-preview bots (not an image file). Leftover image rewrite; `?og=1` / `?bot=1`; satellite hosts. |

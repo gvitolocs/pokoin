@@ -68,6 +68,11 @@ cmd_migrate() {
 }
 
 cmd_api() {
+  # Owned scan rules + phone now ship from an exact pushed pokoin-web commit.
+  if [[ -f "$HERE/server/pokoin-api/_scan_diagnostics.js" ]]; then
+    "$HERE/scripts/deploy-scan-printings-diagnostics.sh" api
+    return
+  fi
   for f in "${API_FILES[@]}"; do [[ -f "$CARDVAULT/$f" ]] || die "missing $f"; done
   say "CardVault unit tests"
   (cd "$CARDVAULT" && node --test \
@@ -124,6 +129,11 @@ cmd_rollback_api() {
 }
 
 cmd_scanner() {
+  # Owned scan rules + phone now ship from an exact pushed pokoin-web commit.
+  if [[ -f "$HERE/server/pokoin-api/_scan_diagnostics.js" ]]; then
+    "$HERE/scripts/deploy-scan-printings-diagnostics.sh" scanner
+    return
+  fi
   (cd "$BATTLESCAN" && node --test scripts/scan-connect.test.cjs >/dev/null \
     && node scripts/scan-connect-phone-layout.cjs >/dev/null \
     && node scripts/scanner-ui.test.cjs web/index.html >/dev/null) \

@@ -657,5 +657,84 @@
         "Firebase Admin"
       ]
     }
+  },
+  {
+    "path": "/api/cardtrader-zero",
+    "file": "cardtrader-zero.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "CardTrader Zero picking list: the weekly merged paid Zero order (the Thursday shipment) plus hub_pending Zero sales still waiting for the next merge, with MyPokoin locations and an optional Power Tools picking overlay.",
+    "auth": "Required Firebase bearer token; seller must have CardTrader connected (404 cardtrader_not_connected otherwise).",
+    "params": {
+      "query": "none",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDTRADER_TOKEN_ENCRYPTION_KEY",
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "CardTrader API",
+        "Postgres",
+        "Power Tools (optional)"
+      ]
+    }
+  },
+  {
+    "path": "/api/powertools-connect",
+    "file": "powertools-connect.js",
+    "methods": [
+      "GET",
+      "POST",
+      "DELETE"
+    ],
+    "purpose": "Power Tools session for the seller: GET status, POST signs in (email+password via Outseta, or a pasted jwt session) and stores only the encrypted session, DELETE forgets it.",
+    "auth": "Required Firebase bearer token; seller uid from token only. Failed password sign-ins are throttled per uid.",
+    "params": {
+      "query": "none",
+      "body": "POST: email + password, or session (jwt cookie value)."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDTRADER_TOKEN_ENCRYPTION_KEY"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Outseta (mtg-powertools)",
+        "Power Tools API"
+      ]
+    }
+  },
+  {
+    "path": "/api/poko-bets",
+    "file": "poko-bets.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Poko Discord LoL bets in real PKN. Linked + opted-in users play with their site balance; unlinked users play with a Discord wallet merged once into the Pokoin account on link (capped per account, bonus never carried twice, wallet closed afterwards). Balance-checked stakes into a per-round escrow, server-computed pari-mutuel settle/refund, one-time 20 PKN bonus (aged Discord accounts only for wallets), ledger entries for every movement. reward_game pays a per-game play reward to admin-allowlisted Discord users (poko_config/game_rewards: discordUserIds, amountPkn, dailyCap), once per game.",
+    "auth": "Service bearer token only (POKO_MARKET_SERVICE_TOKEN or POKONTACT_SERVICE_TOKEN). Only Discord users linked via poko-connect and opted in can stake or reveal a balance.",
+    "params": {
+      "query": "none",
+      "body": "{ action: balances|set_consent|merge_wallet|stake|close|settle|refund|redeem_bonus|reward_game, ... }"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL",
+        "POKO_MARKET_SERVICE_TOKEN",
+        "POKONTACT_SERVICE_TOKEN",
+        "POKO_WALLET_MERGE_CAP",
+        "POKO_BONUS_MIN_DISCORD_AGE_DAYS"
+      ],
+      "services": [
+        "Firebase Admin (balances, ledger_entries, poko_bet_rounds, poko_bets_consent, poko_bonus_claims, poko_discord_wallets, poko_discord_wallet_ledger, poko_wallet_merges)",
+        "Postgres read replica (poko_discord_links)"
+      ]
+    }
   }
 ]

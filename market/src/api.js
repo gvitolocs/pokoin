@@ -753,6 +753,46 @@ export function connectCardTrader(token, cardTraderToken) {
   });
 }
 
+/** CardTrader Zero picking list (weekly merged shipment + Zero sales waiting for the next merge). */
+export function fetchCardTraderZero(token) {
+  return getJson('/api/cardtrader-zero', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+export function fetchPowerToolsStatus(token) {
+  return getJson('/api/powertools-connect', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/** `{ email, password }` or `{ session }` (the Power Tools jwt cookie). Only the session is kept. */
+export function connectPowerTools(token, body) {
+  return getJson('/api/powertools-connect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export function disconnectPowerTools(token) {
+  return getJson('/api/powertools-connect', {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
 export function askPoko(bearer, message, sessionId) {
   return getJson('/api/pokoin-assistant', {
     method: 'POST',

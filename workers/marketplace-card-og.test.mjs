@@ -83,3 +83,33 @@ test('search-engine card HTML keeps description, Product JSON-LD, and crawlable 
   assert.match(html, /href="\/marketplace\/sets\/base-set"/);
   assert.match(html, /Venusaur/);
 });
+
+test('card HTML carries the dated price snapshot and Pokoin attribution', () => {
+  const payload = buildCardOgPayload(
+    {
+      seo: {
+        title: 'Charizard Base Set 4/102 Price & Cards for Sale | Pokoin',
+        canonicalPath: '/marketplace/en/cards/239000/charizard',
+      },
+      card: { id: '239000', name: 'Charizard', set: 'Base Set', number: '4/102' },
+      cheapest: [{ pricePkn: 2642 }],
+    },
+    { cardId: '239000', language: 'en' },
+  );
+  assert.match(payload.snapshotDate, /^\d{4}-\d{2}-\d{2}$/);
+  const html = renderCardOgHtml(payload);
+  assert.match(html, /Cheapest listing 2642 PKN · price snapshot \d{4}-\d{2}-\d{2}/);
+  assert.match(html, /live prices in PKN on <a href="https:\/\/pokoin\.com">Pokoin<\/a>/);
+  const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  assert.equal(jsonLd['@type'], 'Product');
+  assert.equal(jsonLd.dateModified, payload.snapshotDate);
+  assert.equal(jsonLd.offers.price, 2642);
+  assert.equal(jsonLd.offers.priceCurrency, 'PKN');
+  assert.equal(jsonLd.offers.priceValidUntil, payload.priceValidUntil);
+  assert.equal(jsonLd.offers.seller.name, 'Pokoin');
+  const bare = renderCardOgHtml(
+    buildCardOgPayload({ card: { name: 'Drifloon' } }, { cardId: '248768', language: 'en' }),
+  );
+  assert.match(bare, /Prices in PKN on <a href="https:\/\/pokoin\.com">Pokoin<\/a>/);
+  assert.match(bare, /"availability": ?"https:\/\/schema\.org\/OutOfStock"/);
+});

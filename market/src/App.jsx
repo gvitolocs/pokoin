@@ -56,6 +56,7 @@ import Sales from './pages/Sales.jsx';
 import Bought from './pages/Bought.jsx';
 import Stock from './pages/Stock.jsx';
 import SyncReview from './pages/SyncReview.jsx';
+import CardTraderZero from './pages/CardTraderZero.jsx';
 import Collection from './pages/Collection.jsx';
 import NftRedirect from './pages/Nft.jsx';
 import Protection from './pages/Protection.jsx';
@@ -208,6 +209,7 @@ function AppShell() {
       {both('/mypokoin/import', <Inventory />)}
       {both('/mypokoin/location/:location', <Inventory />)}
       {both('/mypokoin/settings', <Inventory />)}
+      {both('/mypokoin/zero', <CardTraderZero />)}
       {both('/mypokoin', <Inventory />)}
       {both('/inventory', <Navigate to="/mypokoin" replace />)}
       {both('/inventory/scan', <ScanDesk />)}

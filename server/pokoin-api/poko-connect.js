@@ -305,7 +305,9 @@ module.exports = async function handler(req, res) {
   if (FIREBASE_ACTIONS[action]) {
     let uid = '';
     try {
-      uid = await verifyBearerToken(req);
+      // verifyBearerToken returns the decoded Firebase token, not the uid.
+      const decoded = await verifyBearerToken(req);
+      uid = typeof decoded === 'string' ? decoded : String(decoded?.uid || '');
     } catch {
       uid = '';
     }

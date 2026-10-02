@@ -1,0 +1,12 @@
+// pokoin.com/download/extension.zip (+ /download/extention.zip) from R2.
+// Routes are managed in Cloudflare; ship code with `wrangler versions upload`
+// + `wrangler versions deploy` so routes are never touched (see docs/DEPLOY.md).
+{
+  "name": "pokoin-extension-download",
+  "main": "pokoin-extension-download.js",
+  "compatibility_date": "2026-09-08",
+  "workers_dev": false,
+  "r2_buckets": [
+    { "binding": "DOWNLOADS", "bucket_name": "cardvault-images" }
+  ]
+}

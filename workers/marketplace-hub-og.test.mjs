@@ -25,3 +25,10 @@ test('hub HTML has crawlable card links', () => {
   assert.match(html, /href="\/marketplace\/en\/cards\/239000\/charizard-base-set"/);
   assert.equal(hubSeo({ language: 'en', kind: 'pokemon', slug: 'charizard' }).path, '/marketplace/en/pokemon/charizard');
 });
+
+test('hub HTML carries CollectionPage JSON-LD and Pokoin attribution', () => {
+  const html = renderHubOgHtml({ language: 'en', kind: 'pokemon', slug: 'charizard' }, []);
+  assert.match(html, /"@type":"CollectionPage"/);
+  assert.match(html, /"dateModified":"\d{4}-\d{2}-\d{2}"/);
+  assert.match(html, /Prices in PKN on <a href="https:\/\/pokoin\.com">Pokoin<\/a>/);
+});

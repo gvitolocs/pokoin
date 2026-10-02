@@ -1,7 +1,7 @@
 /** Serves https://pokoin.com/download/extension.zip from R2. */
-const OBJECT_KEY = 'downloads/pokemon-card-extension-12.0.21.zip';
-const DOWNLOAD_NAME = 'pokemon-card-extension-12.0.21.zip';
-const VERSION = '12.0.21';
+const OBJECT_KEY = 'downloads/pokemon-card-extension-12.0.36.zip';
+const DOWNLOAD_NAME = 'pokemon-card-extension-12.0.36.zip';
+const VERSION = '12.0.36';
 
 export default {
   async fetch(request, env) {

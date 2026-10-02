@@ -318,3 +318,63 @@ The dev server's fake auth (`Bearer seller:<uid>`) only exists with
 | CardVault `scripts/scan-connect-dev-server.js` | Local scan API for E2E |
 | `scripts/deploy-scan-connect.sh`, `scripts/deploy-web.sh` | Production rollout |
 | `scripts/scan-connect-e2e.mjs` | Desk + phone E2E (Playwright, scripted identify) |
+
+
+## Complete artwork printing choices and acknowledged diagnostics
+
+The scan rules, persistence adapter and phone handler are now owned in
+`server/pokoin-api/{_scan_connect,_scan_store,_scan_http,_scan_diagnostics,scan-phone}.js`.
+The deployed phone source is `server/scan/web/`, imported from the deployed
+phone baseline, including the printing picker and manual shutter. BattleScan
+continues to run the recognition worker; it is no longer the deploy source
+for this phone page. Existing unrelated production modules remain in place.
+
+A confident artwork offers **every** member across every expansion and print
+language. Per-printing scores, collector numbers and batch language never hide
+a reprint. Artwork uncertainty still applies. Selecting a foreign printing sets
+a compatible listing language while preserving the captured batch defaults. Crispin's
+Stellar Crown 133/142 and Prismatic Evolutions 105/131 are both selectable
+from artwork `v589520`, along with the Poké Ball and Prize Pack prints.
+Ingest revalidates the selected printing with the same rule.
+
+Every live result logs candidates, scores, detection boxes, timings and capture
+gate state before/after acceptance. Additional records cover camera stalls,
+empty captures, identify errors, printing offers/choices and upload responses.
+The phone sends up to 32 records per existing authenticated heartbeat. The
+server authenticates first, derives the actual session/batch identity, sanitizes
+an explicit field allowlist, logs `scan-diagnostic` JSON and acknowledges record
+sequences. Retry batches are deduplicated by session + client run + sequence.
+No image bytes, credentials or request bodies are logged.
+
+Pending records survive reloads in `pokoin.scanDiagnostics.v2` (bounded to 2048
+pending records); heartbeat acknowledgment removes only received records.
+The connected phone shows **Logs active** after server confirmation,
+**Logs pending** during a network failure, or **Logs unavailable** if the server
+has not been upgraded. This is an ongoing diagnostic trace rather than the
+previous 30-minute image-log experiment. Reload the phone to load the versioned
+scripts. A canvas exception also logs the failure and schedules the next live
+scan instead of stopping the loop.
+
+After explicit push/deploy authorization, integrate the fix onto origin/main
+and run `scripts/deploy-scan-printings-diagnostics.sh all <commit>` on nezopt.
+It requires the exact pushed origin/main commit, stages its files from Git,
+ships only the owned scan API files into a copy of the live API release, and
+backs up the phone files before installing versioned scripts. API/scanner
+verification failures restore their respective previous release/files.
+`deploy-scan-connect.sh api|scanner` delegates to this guarded deployment.
+
+Validation:
+
+```bash
+node --test server/pokoin-api/_scan_connect.test.js \
+  server/pokoin-api/scan-printings-diagnostics.test.js \
+  server/pokoin-api/scan-phone.test.js \
+  server/scan/tests/scan-connect.test.cjs server/scan/tests/scanner-ui.test.cjs
+PLAYWRIGHT_CORE=/home/nez/Projects/pokemon-card-extension/node_modules/playwright-core \
+  node --test server/scan/tests/scan-phone.browser.test.cjs
+```
+
+The browser test serves an ephemeral test server and fake camera, exercises the
+real phone page and heartbeat handler, selects Prismatic Evolutions, and verifies
+that full diagnostics arrive once after network loss and reload. No production
+scan records are created by the test.

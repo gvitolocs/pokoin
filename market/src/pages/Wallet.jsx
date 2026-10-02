@@ -522,6 +522,8 @@ export default function Wallet() {
           address={address}
           chainId={chainId}
           getBearer={getBearer}
+          profile={profile}
+          recentActivity={activity}
           onConnect={() => run(connect)}
           onRequireSignIn={requireSignIn}
           onOpenConversation={(username) => navigate(`/messages/${encodeURIComponent(username)}`)}
@@ -567,21 +569,13 @@ export default function Wallet() {
   );
 }
 
-function SendSheet({
-  onClose, busy, signedIn, profile, address, balance, getBearer,
-  onConnect, onRequireSignIn, onTransfer, onChainSend,
-  initialRecipient = '', initialAmount = '', fromQr = false,
-  recentActivity = [],
-}) {
-  const [recipient, setRecipient] = useState(initialRecipient);
-  const [amount, setAmount] = useState(initialAmount);
+/**
+ * Username suggestions for a recipient field: recent counterparties first,
+ * then the server username search (debounced). Shared by Send and Request.
+ */
+function useRecipientSuggestions({ value, getBearer, recentActivity = [], selfUsername = '' }) {
   const [search, setSearch] = useState({ status: 'idle', rows: [] });
-  const [scanning, setScanning] = useState(false);
-  const [scanMsg, setScanMsg] = useState('');
-  const [scanned, setScanned] = useState(fromQr && initialRecipient ? initialRecipient : '');
-  const videoRef = useRef(null);
-  const toChain = IS_ADDRESS.test(recipient.trim());
-  const query = recipient.trim();
+  const query = String(value || '').trim();
   const compactQuery = compactRecipientQuery(query);
   const searchable = compactQuery.length >= 2 && !query.includes('@') && !IS_ADDRESS.test(query);
   const localNames = useMemo(
@@ -593,11 +587,118 @@ function SendSheet({
       query,
       local: localNames,
       remote: search.rows,
-      selfUsername: profile?.username,
+      selfUsername,
       limit: 6,
     }),
-    [query, localNames, search.rows, profile?.username],
+    [query, localNames, search.rows, selfUsername],
   );
+
+  useEffect(() => {
+    if (!searchable) {
+      setSearch({ status: 'idle', rows: [] });
+      return () => {};
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setSearch((prev) => ({ status: 'searching', rows: prev.rows }));
+      getBearer()
+        .then((token) => {
+          if (cancelled) {
+            return undefined;
+          }
+          if (!token) {
+            setSearch({ status: 'signedout', rows: [] });
+            return undefined;
+          }
+          return searchRecipientUsernames(compactQuery || query, token).then((data) => {
+            if (cancelled) {
+              return;
+            }
+            const fromResults = Array.isArray(data.results) ? data.results : [];
+            const rows = fromResults.length
+              ? fromResults.slice(0, 8)
+              : (data.usernames || []).slice(0, 8).map((username) => ({ username, displayName: '' }));
+            setSearch({ status: rows.length ? 'results' : 'none', rows });
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setSearch({ status: 'error', rows: [] });
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchable, compactQuery, query, getBearer]);
+
+  return {
+    suggestions,
+    searchable,
+    status: search.status,
+    clear: () => setSearch({ status: 'idle', rows: [] }),
+  };
+}
+
+function RecipientSuggestions({ suggest, onPick, noneNote }) {
+  const rows = suggest.suggestions;
+  if (rows.length) {
+    return (
+      <div className="wallet-suggestions" role="listbox" aria-label="Matching usernames">
+        {rows.map((row) => (
+          <button
+            key={row.username}
+            type="button"
+            role="option"
+            onClick={() => {
+              onPick(row.username);
+              suggest.clear();
+            }}
+          >
+            {row.displayName ? (
+              <>
+                <span className="wallet-suggest-name">{row.displayName}</span>
+                <span className="wallet-suggest-handle">@{row.username}</span>
+              </>
+            ) : (
+              <>@{row.username}</>
+            )}
+          </button>
+        ))}
+      </div>
+    );
+  }
+  if (!suggest.searchable) return null;
+  if (suggest.status === 'searching' && !rows.length) {
+    return <p className="wallet-suggestions-note">Searching usernames…</p>;
+  }
+  if (suggest.status === 'none') {
+    return <p className="wallet-suggestions-note">{noneNote}</p>;
+  }
+  if (suggest.status === 'signedout' || suggest.status === 'error') {
+    return <p className="wallet-suggestions-note">Sign in to search recipients.</p>;
+  }
+  return null;
+}
+
+function SendSheet({
+  onClose, busy, signedIn, profile, address, balance, getBearer,
+  onConnect, onRequireSignIn, onTransfer, onChainSend,
+  initialRecipient = '', initialAmount = '', fromQr = false,
+  recentActivity = [],
+}) {
+  const [recipient, setRecipient] = useState(initialRecipient);
+  const [amount, setAmount] = useState(initialAmount);
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState('');
+  const [scanned, setScanned] = useState(fromQr && initialRecipient ? initialRecipient : '');
+  const videoRef = useRef(null);
+  const toChain = IS_ADDRESS.test(recipient.trim());
+  const suggest = useRecipientSuggestions({
+    value: recipient,
+    getBearer,
+    recentActivity,
+    selfUsername: profile?.username,
+  });
 
   // Camera + decode loop while the scanner is open. A decoded code only
   // PREFILLS the form — the transfer itself always waits for Send.
@@ -674,44 +775,6 @@ function SendSheet({
       stream?.getTracks().forEach((track) => track.stop());
     };
   }, [scanning]);
-
-  useEffect(() => {
-    if (!searchable) {
-      setSearch({ status: 'idle', rows: [] });
-      return () => {};
-    }
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      setSearch((prev) => ({ status: 'searching', rows: prev.rows }));
-      getBearer()
-        .then((token) => {
-          if (cancelled) {
-            return undefined;
-          }
-          if (!token) {
-            setSearch({ status: 'signedout', rows: [] });
-            return undefined;
-          }
-          return searchRecipientUsernames(compactQuery || query, token).then((data) => {
-            if (cancelled) {
-              return;
-            }
-            const fromResults = Array.isArray(data.results) ? data.results : [];
-            const rows = fromResults.length
-              ? fromResults.slice(0, 8)
-              : (data.usernames || []).slice(0, 8).map((username) => ({ username, displayName: '' }));
-            setSearch({ status: rows.length ? 'results' : 'none', rows });
-          });
-        })
-        .catch(() => {
-          if (!cancelled) setSearch({ status: 'error', rows: [] });
-        });
-    }, 180);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [searchable, compactQuery, query, getBearer]);
 
   function submit() {
     const to = recipient.trim();
@@ -792,36 +855,11 @@ function SendSheet({
             : `Sending to ${scanned} — enter an amount, then Send.`}
         </p>
       ) : null}
-      {suggestions.length ? (
-        <div className="wallet-suggestions" role="listbox" aria-label="Matching usernames">
-          {suggestions.map((row) => (
-            <button
-              key={row.username}
-              type="button"
-              role="option"
-              onClick={() => {
-                setRecipient(row.username);
-                setSearch({ status: 'idle', rows: [] });
-              }}
-            >
-              {row.displayName ? (
-                <>
-                  <span className="wallet-suggest-name">{row.displayName}</span>
-                  <span className="wallet-suggest-handle">@{row.username}</span>
-                </>
-              ) : (
-                <>@{row.username}</>
-              )}
-            </button>
-          ))}
-        </div>
-      ) : searchable && search.status === 'searching' && !suggestions.length ? (
-        <p className="wallet-suggestions-note">Searching usernames…</p>
-      ) : searchable && search.status === 'none' ? (
-        <p className="wallet-suggestions-note">No matching usernames — you can still send if you know the exact handle.</p>
-      ) : searchable && (search.status === 'signedout' || search.status === 'error') ? (
-        <p className="wallet-suggestions-note">Sign in to search recipients.</p>
-      ) : null}
+      <RecipientSuggestions
+        suggest={suggest}
+        onPick={setRecipient}
+        noneNote="No matching usernames — you can still send if you know the exact handle."
+      />
       <label className="sell-field">
         Amount
         <input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" />
@@ -844,6 +882,7 @@ function SendSheet({
 
 function ReceiveSheet({
   onClose, signedIn, address, chainId, getBearer, onConnect, onRequireSignIn, onOpenConversation,
+  profile = null, recentActivity = [],
 }) {
   const onPokoin = chainId === 26062026;
   const { setProfileUsername } = useAuth();
@@ -880,6 +919,12 @@ function ReceiveSheet({
   const [amountOpen, setAmountOpen] = useState(false);
   const [amount, setAmount] = useState('');
   const [reqUser, setReqUser] = useState('');
+  const reqSuggest = useRecipientSuggestions({
+    value: reqUser,
+    getBearer,
+    recentActivity,
+    selfUsername: profile?.username,
+  });
   const [reqNote, setReqNote] = useState('');
   const [reqState, setReqState] = useState({ status: 'idle', message: '' });
   const cleanAmount = /^\d{1,9}$/.test(String(amount).trim()) ? String(Number(amount.trim())) : '';
@@ -990,6 +1035,12 @@ function ReceiveSheet({
               onChange={(event) => setReqUser(event.target.value)}
               placeholder="Username"
               spellCheck={false}
+              autoComplete="off"
+            />
+            <RecipientSuggestions
+              suggest={reqSuggest}
+              onPick={setReqUser}
+              noneNote="No matching usernames — check the handle."
             />
             <input
               value={reqNote}

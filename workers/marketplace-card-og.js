@@ -11,6 +11,11 @@ export const OG_CACHE_VERSION = 'v5';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
+/** UTC YYYY-MM-DD of the crawlable price snapshot (OG cache TTL is 1h). */
+export function utcSnapshotDate(daysAhead = 0) {
+  return new Date(Date.now() + daysAhead * 86_400_000).toISOString().slice(0, 10);
+}
+
 const BOT_RE =
   /Discordbot|Twitterbot|Slackbot|LinkedInBot|facebookexternalhit|Facebot|WhatsApp|TelegramBot|SkypeUriPreview|Pinterest|Applebot|Googlebot|Google-InspectionTool|bingbot|Baiduspider|DuckDuckBot|Slack-ImgProxy|Embedly|Quora Link Preview|Showyoubot|outbrain|vkShare|W3C_Validator|redditbot|Iframely/i;
 
@@ -174,6 +179,8 @@ export function buildCardOgPayload(cardPage, {
     artist,
     language,
     pricePkn: Number.isFinite(pricePkn) && pricePkn > 0 ? pricePkn : 0,
+    snapshotDate: utcSnapshotDate(),
+    priceValidUntil: utcSnapshotDate(7),
     setHref: setName ? `/marketplace/sets/${setSlug(setName)}` : '',
     artistHref: artist ? `/marketplace/${language}/artists/${artistSlug(artist)}` : '',
     neighbors,
@@ -181,17 +188,21 @@ export function buildCardOgPayload(cardPage, {
 }
 
 function productJsonLd(payload) {
+  const seller = { '@type': 'Organization', name: 'Pokoin', url: SITE };
   const offer = payload.pricePkn
     ? {
       '@type': 'Offer',
       priceCurrency: 'PKN',
       price: payload.pricePkn,
       availability: 'https://schema.org/InStock',
+      priceValidUntil: payload.priceValidUntil,
+      seller,
     }
     : {
       '@type': 'Offer',
       priceCurrency: 'PKN',
       availability: 'https://schema.org/OutOfStock',
+      seller,
     };
   return {
     '@context': 'https://schema.org',
@@ -202,6 +213,7 @@ function productJsonLd(payload) {
     sku: payload.cardId,
     brand: { '@type': 'Brand', name: 'Pokémon TCG' },
     url: payload.url,
+    dateModified: payload.snapshotDate,
     offers: offer,
   };
 }
@@ -237,9 +249,12 @@ export function renderCardOgHtml(payload) {
     ? `\n  <script type="application/ld+json">${JSON.stringify(productJsonLd(payload)).replace(/</g, '\\u003c')}</script>`
     : '';
   const descriptionBody = description ? `\n  <p>${description}</p>` : '';
+  const snapshotLine = payload.pricePkn
+    ? `\n  <p>Cheapest listing ${payload.pricePkn} PKN · price snapshot ${escapeHtml(payload.snapshotDate)} · live prices in PKN on <a href="${SITE}">Pokoin</a></p>`
+    : `\n  <p>Prices in PKN on <a href="${SITE}">Pokoin</a>, the collectors' marketplace.</p>`;
   const extra = payload.name
-    ? `\n  <h1>${h1}</h1>\n  <nav>${crumbs}</nav>${descriptionBody}${neighborLinks ? `\n  <ul>${neighborLinks}</ul>` : ''}`
-    : `\n  <p><a href="${path}">${title}</a></p>${descriptionBody}`;
+    ? `\n  <h1>${h1}</h1>\n  <nav>${crumbs}</nav>${descriptionBody}${snapshotLine}${neighborLinks ? `\n  <ul>${neighborLinks}</ul>` : ''}`
+    : `\n  <p><a href="${path}">${title}</a></p>${descriptionBody}${snapshotLine}`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
