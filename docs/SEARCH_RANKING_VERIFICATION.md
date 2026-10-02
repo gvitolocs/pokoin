@@ -308,3 +308,33 @@ Both old-behavior configurations failed with the required invariant
 counterexamples and exit code 12. The complete run is recorded on nezopt in
 `/tmp/search-regression-tlc-final9.log`. The finite vocabulary and exclusions
 above remain the scope of this result.
+
+## Unfinished name suffix correction (2026-10-02)
+
+Giuseppe corrected the intended `mewtwo e` order: EX name matches should lead,
+with regular Evolutions also near the top. The previous rule credited `e`
+only as a set prefix and penalized the untyped EX word. An anchored trailing
+one/two-letter suffix now also completes unmatched name words. It contributes
+bounded quality only; literal EX/GX/V remain exact, and bare `e`/`ev` gain no
+prefix evidence. Joint name/set readings beat either ambiguous reading alone.
+Short name-only completion stays weaker than short set context, so an entire
+EX cohort cannot displace every regular contextual printing.
+
+Already-covered name words are excluded independently in each title language;
+an English copy of a translated anchor cannot create another name match.
+A translated anchor retains English mechanic completion. Unit cases cover
+Mewtwo/Charizard/Pikachu, accepted typos, name-only/set-only/joint evidence,
+prefix-to-literal boundaries and translated/same-spelling anchors.
+
+The formal three-component vocabulary now also includes `e`: four typo names
+× nine first-context tokens × nine second-context tokens × six permutations
+× two directions/universes, giving **3,888 warm and 3,888 cold executions**.
+The earlier short-prefix probes now require EX to lead for `e`, and regular
+set matches to lead for `ev`, `evo` and `evol`.
+
+Deployment review compared all 33 owned overlay runtime files to the current
+Pi release. Two vendored helpers contained older behavior: search-debug
+authorization lacked the verified-email gate, and row normalization lacked
+the raw Palworld/Cyberpunk image-key exception. Both current live helpers
+were preserved byte-for-byte, with regression checks for authorization and
+satellite image keys, before publishing any overlay.

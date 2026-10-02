@@ -27,7 +27,7 @@ function remember(rows) {
 
 const popupRows = (query) => liveSuggestGroups(query, { kind: 'singles' })
   .groups.flatMap((group) => group.printings);
-const explain = (query, row) => scoring.explainQuery(query, row);
+const explain = (query, row, options) => scoring.explainQuery(query, row, options);
 
 const matrix = [
   {
@@ -83,7 +83,9 @@ test('trailing set prefixes rank the printing from the first contextual letter',
         const rows = popupRows(query);
         const ids = rows.map((row) => row.id);
         assert.ok(ids.includes('target'), query + ' keeps the regular printing');
-        assert.ok(ids.indexOf('target') < 2, query + ' brings it among the first results');
+        const completedNames = rows.filter((row) => explain(query, row).perToken.at(-1)?.via === 'name-prefix');
+        assert.ok(ids.indexOf('target') < completedNames.length + 2,
+          query + ' brings it among the first contextual results after name completions');
         assert.ok(explain(query, target).score > explain(query, base).score,
           query + ' uses set evidence rather than alphabetical cache tie-breaking');
         assert.ok(ids.indexOf('target') < ids.indexOf('base'), query);
@@ -120,7 +122,8 @@ test('ambiguous early prefixes keep competing sets and do not amplify metadata-o
   const entry = matrix[0];
   remember(entry.rows);
   for (const name of ['mewtwo', 'mewtow']) {
-    assert.deepEqual(new Set(popupRows(name + ' e').slice(0, 2).map((row) => row.id)),
+    assert.deepEqual(new Set(popupRows(name + ' e').filter((row) => row.name === 'Mewtwo')
+      .slice(0, 2).map((row) => row.id)),
       new Set(['target', 'ambiguous']), name + ' e matches Evolutions and Expedition');
     assert.equal(popupRows(name + ' ev')[0].id, 'target',
       name + ' ev narrows the prefix using the same score');
@@ -158,10 +161,58 @@ test('EX printings remain eligible while the trailing set prefix grows through e
       const ids = popupRows(name + ' ' + prefix).map((row) => row.id);
       assert.ok(ids.includes('mechanic'), name + ' ' + prefix + ' retains regular EX');
       assert.ok(ids.includes('full-art'), name + ' ' + prefix + ' retains full-art EX');
-      assert.ok(ids.indexOf('target') < ids.indexOf('mechanic'),
-        'the untyped mechanic still carries its normal specificity penalty');
+      assert.ok(prefix === 'e' ? ids.indexOf('mechanic') < ids.indexOf('target')
+        : ids.indexOf('target') < ids.indexOf('mechanic'),
+      prefix === 'e' ? 'unfinished EX name evidence beats unfinished set evidence'
+        : 'the untyped mechanic still carries its normal specificity penalty');
     }
   }
+});
+
+test('joint unfinished name and set words lead before either ambiguous reading alone', () => {
+  for (const [name, typo, suffix, mechanic] of [
+    ['Mewtwo', 'mewtow', 'e', 'ex'],
+    ['Charizard', 'charziard', 'e', 'ex'],
+    ['Pikachu', 'pikahcu', 'g', 'GX'],
+  ]) {
+    const rows = [
+      printing('base', name, 'Base Set'),
+      printing('context', name, suffix === 'e' ? 'Evolutions' : 'Gym Challenge'),
+      printing('name-completion', name + ' ' + mechanic, suffix === 'e' ? 'Evolutions' : 'Gym Challenge'),
+      printing('name-only', name + ' ' + mechanic, 'Next Destinies'),
+    ];
+    remember(rows);
+    for (const typed of [name, typo]) {
+      const query = typed + ' ' + suffix;
+      assert.deepEqual(popupRows(query).map((row) => row.id),
+        ['name-completion', 'context', 'name-only', 'base'], query);
+      const completed = explain(query, rows[2]);
+      assert.equal(completed.coverage, 1, query + ' has only anchored prefix quality');
+      assert.equal(completed.perToken.at(-1).via, 'name-prefix', query);
+      assert.equal(completed.extraTokens, 0, query + ' credits the completed name word');
+      assert.ok(completed.score > explain(query, rows[1]).score, query);
+    }
+  }
+  const alreadyNamed = printing('palkia', 'Palkia', 'Great Encounters');
+  assert.equal(explain('palkia p', alreadyNamed).score, explain('palkia', alreadyNamed).score,
+    'an unfinished suffix cannot reuse a name word covered by its anchor');
+});
+
+test('short name completions cannot reuse the translated or English anchor', () => {
+  const regular = { ...printing('regular', 'Charizard', 'Gym Challenge'), localizedName: 'Glurak' };
+  const gx = { ...printing('gx', 'Charizard GX', 'Gym Challenge'), localizedName: 'Glurak GX' };
+  for (const query of ['charizard g', 'glurak g']) {
+    const regularScore = explain(query, regular, { lang: 'de' });
+    const gxScore = scoring.explainQuery(query, gx, { lang: 'de' });
+    assert.ok(gxScore.score > regularScore.score, query);
+    assert.notEqual(regularScore.perToken.at(-1).via, 'name-prefix', query);
+  }
+  const sameName = { ...printing('p', 'Pikachu', 'Base Set'), localizedName: 'Pikachu' };
+  assert.equal(scoring.explainQuery('pikachu p', sameName, { lang: 'de' }).quality,
+    scoring.explainQuery('pikachu', sameName, { lang: 'de' }).quality);
+  const translatedAnchor = { ...printing('gx-en', 'Charizard GX', 'Base Set'), localizedName: 'Glurak' };
+  assert.equal(scoring.explainQuery('glurak g', translatedAnchor, { lang: 'de' }).perToken.at(-1).via,
+    'name-prefix', 'a translated anchor retains the English mechanic fallback');
 });
 
 test('short mechanic words remain exact and cannot become contextual prefixes', () => {

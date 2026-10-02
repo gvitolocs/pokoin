@@ -71,6 +71,9 @@ export const QUALITY_UNIT = 10;
 // proportional to the fraction of letters preserved. Coverage dominates.
 export const Q_NAME_EXACT = 1.0;
 export const Q_NAME_PREFIX = 0.7; // query token is a prefix of a name token (pika → Pikachu)
+// One/two letters are ambiguous. Joint name+set evidence should beat either
+// reading alone, while a long cohort of name completions cannot bury the set.
+export const Q_NAME_SHORT_PREFIX = 0.25;
 export const Q_NAME_TYPO = 0.65; // scaled by 1 - edit distance / query length
 export const Q_COLLECTOR = 0.9; // exact printed collector number (n, n/m, SH1, 74a)
 export const Q_ARTIST_EXACT = 0.6;
@@ -102,8 +105,8 @@ const PRIOR_REF = 400;
 // and constructing numeric collation options inside every comparison is slow.
 const PRINTING_ID_COLLATOR = new Intl.Collator('en', { numeric: true });
 
-// Short name/mechanic tokens (ex / gx / v) stay exact-only. An unfinished set
-// prefix can add quality after independent name evidence, never typo coverage.
+// Literal short mechanics (ex / gx / v) stay exact-only. An unfinished trailing
+// name/set word can add quality after independent name evidence, never coverage.
 export const SHORT_TOKEN_MAX = 2;
 
 // A typo may only COUNT toward coverage when it changes at most this fraction of
@@ -413,7 +416,9 @@ function recoveredName(token) {
  * languages. Name tokens beat metadata; a selected-language hit earns a small
  * bias over English. Returns `{ quality, distance, via, lang }` or null.
  */
-export function tokenEvidence(token, doc, langs = ['en'], { allowShortSetPrefix = false } = {}) {
+export function tokenEvidence(token, doc, langs = ['en'], {
+  allowShortSetPrefix = false, shortNamePrefixTokens = null,
+} = {}) {
   const compact = token.compact;
   if (!compact) {
     return null;
@@ -432,7 +437,8 @@ export function tokenEvidence(token, doc, langs = ['en'], { allowShortSetPrefix 
         canonical: evidence.canonical || '',
         matchedToken: evidence.matchedToken || '',
         ...(evidence.matchedTokens ? { matchedTokens: evidence.matchedTokens } : {}),
-        ...(allowShortSetPrefix && compact.length <= SHORT_TOKEN_MAX && evidence.via === 'set-prefix'
+        ...(allowShortSetPrefix && compact.length <= SHORT_TOKEN_MAX
+          && ['set-prefix', 'name-prefix'].includes(evidence.via)
           ? { countsForCoverage: false } : {}),
         lang,
       };
@@ -445,6 +451,16 @@ export function tokenEvidence(token, doc, langs = ['en'], { allowShortSetPrefix 
     }
     const nameEvidence = fieldEvidence(compact, text.name, NAME_TIERS);
     consider(nameEvidence, lang);
+    if (shortNamePrefixTokens) {
+      const namePrefix = fieldEvidence(compact, shortNamePrefixTokens.get(lang),
+        { ...NAME_TIERS, prefix: Q_NAME_SHORT_PREFIX }, { allowShortPrefix: true });
+      if (namePrefix?.via === 'name-prefix') {
+        const setPrefix = fieldEvidence(compact, text.set, SET_TIERS, { allowShortPrefix: true });
+        // Converging readings refine quality without counting the token twice.
+        consider({ ...namePrefix, quality: namePrefix.quality
+          + (setPrefix?.via === 'set-prefix' ? setPrefix.quality : 0) }, lang);
+      }
+    }
     if (lang === 'en' && !nameEvidence && text.name?.length) {
       const recovered = recoveredName(token);
       const matchedTokens = recovered ? nameTokens(recovered.display) : [];
@@ -521,10 +537,22 @@ export function scoreEntry(tokens, doc, langs = ['en']) {
   if (tail && tail.compact.length <= SHORT_TOKEN_MAX && !isModifierWord(tail.raw)
     && evidenceByToken.some((evidence, index) => index < tokens.length - 1
       && tokens[index].compact.length > SHORT_TOKEN_MAX && evidence?.via.startsWith('name-'))) {
-    // `mewtwo e` can mean Evolutions or Expedition before a set is unique.
-    // A broad 1–2 letter context nudges already-matched names, without earning
-    // a full coverage token that could promote an accidental weak name typo.
-    evidenceByToken[tokens.length - 1] = tokenEvidence(tail, doc, langs, { allowShortSetPrefix: true });
+    // A short suffix can complete both a name (`e` -> EX) and a set
+    // (`e` -> Evolutions). Exclude already-matched name words: `palkia p`
+    // must still distinguish Plasma rather than reusing Palkia as evidence.
+    // Neither broad prefix earns coverage or becomes a hard mechanic filter.
+    const shortNamePrefixTokens = new Map(langs.map((lang) => {
+      // Check each language independently: a selected-language winner must
+      // not leave the equivalent English anchor available to match again.
+      const matched = new Set(tokens.slice(0, -1)
+        .map((token) => tokenEvidence(token, doc, [lang]))
+        .filter((evidence) => evidence?.via.startsWith('name-'))
+        .flatMap((evidence) => evidence.matchedTokens || [evidence.matchedToken]));
+      return [lang, (doc.langText?.[lang]?.name || []).filter((word) => !matched.has(word)
+        && (matched.size > 0 || (lang === 'en' && isModifierWord(word))))];
+    }));
+    evidenceByToken[tokens.length - 1] = tokenEvidence(tail, doc, langs,
+      { allowShortSetPrefix: true, shortNamePrefixTokens });
   }
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];

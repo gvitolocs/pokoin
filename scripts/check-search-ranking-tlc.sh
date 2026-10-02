@@ -190,7 +190,7 @@ for (const scenario of scenarios) {
 // Exhaustive ordered three-component model: four typo names times EVERY
 // ordered pair from eight context tokens, including repeats and all six
 // permutations. These are actual popup executions, not parser shape checks.
-const tripleContexts = ['evol', 'base', 'ex', 'gx', 'holo', 'arita', '51', 'ir'];
+const tripleContexts = ['e', 'evol', 'base', 'ex', 'gx', 'holo', 'arita', '51', 'ir'];
 let tripleExecutions = 0;
 for (const [name, typo] of [['Mewtwo', 'mewtow'], ['Charizard', 'charziard'],
   ['Darkness Energy', 'dwrknessener'], ['Bulbasaur', 'bhlbsur']]) {
@@ -214,7 +214,7 @@ for (const [name, typo] of [['Mewtwo', 'mewtow'], ['Charizard', 'charziard'],
     }
   }
 }
-if (tripleExecutions !== 3072) throw new Error(`three-component model shrank: ${tripleExecutions}`);
+if (tripleExecutions !== 3888) throw new Error(`three-component model shrank: ${tripleExecutions}`);
 function oldPenaltyScore(query, printing) {
   const result = evaluate(query, printing);
   const words = scoring.nameTokens(printing.name);
@@ -253,12 +253,15 @@ const earlyProbes = earlyPrefixScenarios.map((scenario) => {
   const partialResult = evaluate(scenario.query, partial);
   const metadataResult = evaluate(scenario.query, metadata);
   const evidence = fullResult.perToken[1];
+  const extraResult = evaluate(scenario.query, extra);
   const selected = observe(scenario.query, scenario.groups, 20);
   return { label: scenario.query, prefixLength: scenario.prefix.length,
     coverage: fullResult.coverage, partialCoverage: partialResult.coverage,
     metadataCoverage: metadataResult.coverage,
     score: integerScore(fullResult.score), partialScore: integerScore(partialResult.score),
-    extraScore: integerScore(evaluate(scenario.query, extra).score),
+    extraScore: integerScore(extraResult.score),
+    nameCompletionExpected: scenario.prefix === 'e',
+    nameCompletion: extraResult.perToken[1].via === 'name-prefix',
     prefixQuality: integerScore(evidence.quality), prefixIsSet: evidence.via.startsWith('set-'),
     mechanicCount: ranking.typedModifiers(scenario.query).mods.length,
     exEligible: selected.includes(String(extra.id)),
@@ -412,7 +415,7 @@ for (const [name, typo] of [['Mewtwo', 'mewtow'], ['Charizard', 'charziard'],
   console.log(`SEARCH_RANKING_COLD_TRIPLE_PROGRESS name=${name} executions=${coldTripleProbes.length}`);
 }
 globalThis.fetch = originalFetch;
-if (coldTripleProbes.length !== 3072) throw new Error(`cold three-component model shrank: ${coldTripleProbes.length}`);
+if (coldTripleProbes.length !== 3888) throw new Error(`cold three-component model shrank: ${coldTripleProbes.length}`);
 const failedColdTriples = coldTripleProbes.filter((p) => p.retrieved !== 90 || p.shown !== 20
   || !p.unique || !p.nameCorrect || !p.eligible || !p.descending || !p.topScores
   || !p.canonicalRequested || !p.wideUnfiltered);

@@ -92,7 +92,9 @@ EarlySetPrefixProgression ==
       /\ probe.prefixIsSet
       /\ probe.prefixQuality > 0
       /\ probe.score > probe.partialScore
-      /\ probe.score > probe.extraScore
+      /\ probe.nameCompletion = probe.nameCompletionExpected
+      /\ IF probe.nameCompletionExpected THEN probe.extraScore > probe.score
+         ELSE probe.score > probe.extraScore
 
 UnfinishedSetKeepsMechanicEligibility ==
   cursor > 0 =>
