@@ -269,3 +269,19 @@ test('discord redeem/status/unlink mirror telegram without cross-channel bleed',
   assert.equal(unlinkRes.body.linked, false);
   assert.ok(writes.some((w) => /update poko_discord_links/.test(w.sql) && /unlinked_at = now\(\)/.test(w.sql)));
 });
+
+test('create_code stores the uid from the decoded Firebase token, not the token object', async () => {
+  const writes = [];
+  const handler = loadHandler({
+    verifyBearerToken: async () => ({ uid: 'decoded-uid-7', email: 'x@y.z', firebase: { sign_in_provider: 'google.com' } }),
+    marketplaceWriteQuery: async (sql, params = []) => {
+      writes.push({ sql, params });
+      return WRITER_RESULT([{ expires_at: '2026-10-01T20:00:00Z' }]);
+    },
+  });
+  const res = makeRes();
+  await handler({ method: 'POST', headers: { authorization: 'Bearer fb-token' }, body: { action: 'create_code' } }, res);
+  assert.equal(res.statusCode, 200);
+  const insert = writes.find((w) => /insert into poko_telegram_link_codes/.test(w.sql));
+  assert.equal(insert.params[1], 'decoded-uid-7');
+});
