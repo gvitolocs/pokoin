@@ -14,6 +14,7 @@ const path = require('path');
 
 const EVENT_PAGE = 20;
 const { REPLY_CARDS_DIRECTIVE, attachReplyCards } = require('./_poko_reply_cards');
+const { limitBestEffort } = require('./_rate_limit');
 
 function requireHelper(name) {
   try {
@@ -263,18 +264,14 @@ async function hermesReply({
   };
 }
 
-// Per-IP rate limit, same shape as the legacy assistant (20 msgs / minute).
-const chatHits = new Map();
-
-function chatRateLimited(req) {
+// Per-IP comfort limit shared across API instances through Valkey, with a
+// bounded local fallback when Valkey is down: 20 msgs / minute, same shape as
+// the legacy assistant. The IP is hashed before it reaches any key.
+async function chatRateLimited(req) {
   const forwarded = String(req.headers?.['x-forwarded-for'] || req.headers?.['X-Forwarded-For'] || '').split(',')[0].trim();
   const ip = forwarded || String(req.socket?.remoteAddress || 'unknown');
-  const now = Date.now();
-  const fresh = (chatHits.get(ip) || []).filter((stamp) => now - stamp < 60_000);
-  fresh.push(now);
-  chatHits.set(ip, fresh);
-  if (chatHits.size > 5000) chatHits.clear();
-  return fresh.length > 20;
+  const verdict = await limitBestEffort({ scope: 'poko-chat', identity: ip, limit: 20, windowSeconds: 60 });
+  return !verdict.allowed;
 }
 
 function conversationRef(firestore, uid) {
@@ -449,7 +446,7 @@ function withoutOpenCards(replyCards, { pageContext = {}, cards = [], byName = f
 }
 
 async function handleChat(req, res, decoded) {
-  if (chatRateLimited(req)) {
+  if (await chatRateLimited(req)) {
     return res.status(429).json({ error: 'Too many messages, please slow down.' });
   }
   const receivedAtMs = Date.now();
