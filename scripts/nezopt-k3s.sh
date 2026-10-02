@@ -28,6 +28,8 @@ NET=pokoin-overflow
 NET_SUBNET=172.31.250.0/24
 WRITER_CONTAINER="${WRITER_CONTAINER:-pokoin-marketplace-postgres-15t}"
 WRITER_NET_IP=172.31.250.10
+TCGCSV_CONTAINER="${TCGCSV_CONTAINER:-tcgprices-postgres-15t}"
+TCGCSV_NET_IP=172.31.250.11
 K3S_NET_IP=172.31.250.20
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST="$HERE/infra/k3s/pokoin-overflow.yaml"
@@ -63,6 +65,9 @@ network() {
   attached="$(docker network inspect "$NET" --format '{{range .Containers}}{{.Name}} {{end}}')"
   [[ " $attached " == *" $WRITER_CONTAINER "* ]] || docker network connect --ip "$WRITER_NET_IP" "$NET" "$WRITER_CONTAINER"
   [[ " $attached " == *" $CONTAINER "* ]] || docker network connect --ip "$K3S_NET_IP" "$NET" "$CONTAINER"
+  if docker inspect "$TCGCSV_CONTAINER" >/dev/null 2>&1; then
+    [[ " $attached " == *" $TCGCSV_CONTAINER "* ]] || docker network connect --ip "$TCGCSV_NET_IP" "$NET" "$TCGCSV_CONTAINER"
+  fi
 }
 
 # The Pi container's real environment (the .env file misses keys set at run time).
@@ -86,10 +91,20 @@ if writer:
     netloc = f"{netloc[0]}@{host}" if len(netloc) == 2 else host
     data["MARKETPLACE_OVERFLOW_DATABASE_URL"] = base64.b64encode(
         urlunsplit(parts._replace(netloc=netloc)).encode()).decode()
+# The Pi uses a localhost SSH tunnel; overflow pods reach the independent
+# quote database directly on the private Docker network instead.
+quotes = base64.b64decode(data.get("TCGCSV_DATABASE_URL", "")).decode()
+if quotes:
+    parts = urlsplit(quotes)
+    netloc = parts.netloc.rsplit("@", 1)
+    host = f"{sys.argv[2]}:5432"
+    netloc = f"{netloc[0]}@{host}" if len(netloc) == 2 else host
+    data["TCGCSV_DATABASE_URL"] = base64.b64encode(
+        urlunsplit(parts._replace(netloc=netloc)).encode()).decode()
 print(json.dumps({"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
                   "metadata": {"name": "pokoin-api-env", "namespace": "pokoin-overflow"},
                   "data": data}))
-' "$WRITER_NET_IP" | kc apply -f - >/dev/null
+' "$WRITER_NET_IP" "$TCGCSV_NET_IP" | kc apply -f - >/dev/null
   say "secret pokoin-api-env synced from the Pi container ($(kc -n "$NS" get secret pokoin-api-env -o jsonpath='{.data}' | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') keys)"
 }
 
@@ -115,6 +130,7 @@ sync_code() {
 }
 
 sync() {
+  network
   kc get ns "$NS" >/dev/null 2>&1 || kc create namespace "$NS" >/dev/null
   sync_secret
   if sync_code; then

@@ -34,8 +34,20 @@ matching, fabricated condition prices or synthetic sales are introduced.
 Validation: six API/helper tests, compiled inventory JSX, real read-only latest
 and historical database queries for Mew (2 variants, 1,858 observations), and
 rejected reader UPDATE. The deployment script includes the helper and history
-handler, and the route manifest declares the new endpoint. Deployment is pending
-explicit authorization under AGENTS.md; the live site's button is still disabled.
+handler, and the route manifest declares the new endpoint. Deploy the API with
+`scripts/deploy-price-check-api.sh` and the SPA with `scripts/deploy-web.sh`
+from the exact pushed `origin/main` commit.
+
+The card desk offers CardTrader listings, TCGplayer market and recorded sales
+as separate graph sources. It defaults to the first available quote source,
+then recorded sales when neither feed has priced observations. Source variants
+remain separate, an isolated quote renders as one point, and missing daily
+observations leave gaps. Listing asks never enter the sold-price calculations.
+
+Pi reads the separate price database through the private reader SSH tunnel.
+`scripts/nezopt-k3s.sh sync` rewrites that localhost connection to the private
+Docker address `172.31.250.11:5432` for overflow pods, preserving the restricted
+reader account. Both API paths need a live read-only quote query after deploy.
 
 ## Public card-desk price history
 

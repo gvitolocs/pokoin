@@ -3865,6 +3865,43 @@ a.era-link:focus-visible {
   line-height: 1.25;
 }
 
+.price-history-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
+.price-history-sources button,
+.price-history-day select {
+  color: var(--text);
+  background: var(--g2);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.55rem;
+}
+
+.price-history-sources button { cursor: pointer; }
+.price-history-sources button.on { color: var(--yellow); border-color: var(--yellow); }
+.price-history-sources button:focus-visible,
+.price-history-day select:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.price-history-panel { min-height: 12rem; padding: 0.8rem; }
+.price-history-value { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.45rem 0.8rem; }
+.price-history-value strong { color: var(--yellow); font-size: 1.25rem; }
+.price-history-value span,
+.price-history-detail,
+.price-history-note { color: var(--muted); font-size: 0.75rem; }
+.price-history-chart { display: block; width: 100%; height: auto; margin: 0.5rem 0; color: var(--yellow); }
+.price-history-chart .sold-graph-line { fill: none; stroke: var(--yellow); }
+.price-history-chart .sold-graph-dot { fill: var(--yellow); }
+.price-history-day { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; font-size: 0.78rem; }
+.price-history-day select { max-width: 100%; }
+.price-history-detail { margin: 0.55rem 0 0; overflow-wrap: anywhere; }
+.price-history-note { margin: 0.65rem 0 0; line-height: 1.4; }
+.price-history-empty { margin: 2rem 0; color: var(--muted); font-size: 0.88rem; }
+
 .sold-graph {
   position: relative;
   height: 12rem;
