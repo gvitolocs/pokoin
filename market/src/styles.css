@@ -3184,77 +3184,22 @@ html.desk-tinted .card-page .asset-header {
   transition: background-color 180ms ease, border-color 180ms ease;
 }
 
-/* Rainbow, gold, and Yu-Gi-Oh Ghost Rare paint the desk, not only the search row.
-   A Pokémon ghost emoji stays on the artwork delta. */
-html.desk-rainbow,
-html.desk-rainbow body,
-html.desk-rainbow #root {
-  --bg: #140818;
-  background-color: #140818;
-  background-image: linear-gradient(115deg, #2a1248 0%, #10243f 38%, #3a2a0c 72%, #3a1630 100%);
+.rarity-kind {
+  display: inline-block;
+  margin-left: 0.45rem;
+  padding: 0.02rem 0.42rem;
+  border-radius: 999px;
+  border: 1px solid var(--desk-border, var(--g5));
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 0.08em;
 }
 
-html.desk-rainbow .card-page {
-  --g2: #120818;
-  --g3: #120818;
-  --g5: #5a3058;
-}
-
-html.desk-rainbow .card-page .asset-header {
-  background-color: #4c1d86;
-  background-image: linear-gradient(100deg, #4c1d86 0%, #12386a 34%, #6e5210 68%, #6a2458 100%);
-  border-color: #6a2458;
-}
-
-html.desk-rainbow .card-page .panel,
-html.desk-rainbow .card-page .sell-form,
-html.desk-rainbow .card-page .add-panel,
-html.desk-rainbow .card-page .reserve-blurb,
-html.desk-rainbow .card-page .shop-panel {
-  background-color: #1a1030;
-  background-image: linear-gradient(160deg, rgb(42 18 72 / 0.94), rgb(16 28 48 / 0.94) 55%, rgb(42 32 12 / 0.9));
-  border-color: rgb(106 36 88 / 0.55);
-}
-
-html.desk-gold,
-html.desk-gold body,
-html.desk-gold #root {
-  --bg: #1a1204;
-  background-color: #1a1204;
-  background-image: none;
-}
-
-html.desk-gold .card-page {
-  --g2: #140e04;
-  --g3: #140e04;
-  --g5: #6e5210;
-}
-
-html.desk-gold .card-page .asset-header {
-  background-color: #6e5210;
-  background-image: linear-gradient(100deg, #6e5210, #8a6818);
-  border-color: #8a6818;
-}
-
-html.desk-ghost,
-html.desk-ghost body,
-html.desk-ghost #root {
-  --bg: #140818;
-  background-color: #140818;
-  background-image: none;
-}
-
-html.desk-ghost .card-page {
-  --g2: #100614;
-  --g3: #100614;
-  --g5: #4c1d86;
-}
-
-html.desk-ghost .card-page .asset-header {
-  background-color: #4c1d86;
-  background-image: linear-gradient(100deg, #4c1d86, #6328a8);
-  border-color: #6328a8;
-}
+.rarity-kind.is-rainbow { color: #e7d2ff; }
+.rarity-kind.is-gold { color: #f0d48a; }
+.rarity-kind.is-ghost { color: #d7c4ff; }
 
 .asset-title-row,
 .asset-sub-row {

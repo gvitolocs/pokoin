@@ -84,7 +84,7 @@ import {
   rememberCardBucket,
   rememberDeskIdentity,
 } from '../art-shade.js';
-import { rarityRowTheme } from '../rarity-theme.js';
+import { rarityKindLabel, storedRarityKind } from '../rarity-theme.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '../sold-sales-cache.js';
 import { authFrom } from '../punchouts.js';
 import { useAuth } from '../auth.jsx';
@@ -2047,7 +2047,6 @@ export default function Card() {
     () => deskTheme(themeCard),
     [themeCard],
   );
-  const rarityKind = rarityRowTheme(themeCard)?.kind || '';
   useLayoutEffect(() => {
     const card = payload?.card || stubCard;
     if (card) {
@@ -2057,23 +2056,18 @@ export default function Card() {
     }
   }, [payload?.card, stubCard, cardId]);
   useLayoutEffect(() => {
-    const root = document.documentElement;
-    root.classList.toggle('desk-rainbow', rarityKind === 'rainbow');
-    root.classList.toggle('desk-gold', rarityKind === 'gold');
-    root.classList.toggle('desk-ghost', rarityKind === 'ghost');
     const vars = deskThemeVars(pageTheme);
-    if (!vars && !rarityKind) return undefined;
-    if (vars) {
-      for (const [key, value] of Object.entries(vars)) {
-        root.style.setProperty(key, value);
-      }
+    if (!vars) return undefined;
+    const root = document.documentElement;
+    for (const [key, value] of Object.entries(vars)) {
+      root.style.setProperty(key, value);
     }
     root.classList.add('desk-tinted');
     return undefined;
-  }, [pageTheme, rarityKind]);
+  }, [pageTheme]);
   useEffect(() => () => {
     const root = document.documentElement;
-    root.classList.remove('desk-tinted', 'desk-rainbow', 'desk-gold', 'desk-ghost');
+    root.classList.remove('desk-tinted');
     for (const key of ['--desk-bg', '--desk-surface', '--desk-raised', '--desk-hero', '--desk-hero-border', '--desk-border', '--desk-tint']) {
       root.style.removeProperty(key);
     }
@@ -2334,6 +2328,9 @@ export default function Card() {
                 {setName ? ' ' : null}
                 {collector}
               </>
+            ) : null}
+            {storedRarityKind(card) ? (
+              <span className={`rarity-kind is-${storedRarityKind(card)}`}>{rarityKindLabel(card)}</span>
             ) : null}
             {artist ? (
               <>

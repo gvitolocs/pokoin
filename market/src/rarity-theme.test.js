@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { prefersArtworkDelta, rarityRowTheme } from './rarity-theme.js';
+import { prefersArtworkDelta, rarityKindLabel, rarityRowTheme, storedRarityKind } from './rarity-theme.js';
 
 test('gold, rainbow, and ghost rarities color the row; artwork and artist do not', () => {
   assert.equal(rarityRowTheme({
@@ -35,4 +35,11 @@ test('gold, rainbow, and ghost rarities color the row; artwork and artist do not
   const gold = rarityRowTheme({ number: 'Gold | 001/001' });
   assert.notEqual(gold.shade, ghost.shade);
   assert.equal(rarityRowTheme({ cardType: 'Ghost' }), null);
+  assert.equal(storedRarityKind({
+    rarity: 'Rainbow Secret Rare',
+    number: 'Rainbow Secret Rare | 226/214',
+  }), '');
+  assert.equal(storedRarityKind({ rarityKind: 'rainbow' }), 'rainbow');
+  assert.equal(rarityKindLabel({ rarity_kind: 'ghost' }), 'Ghost Rare');
+  assert.equal(rarityKindLabel({ rarityKind: 'from-the-url' }), '');
 });

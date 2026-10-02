@@ -73,7 +73,6 @@ const RARITY_TAILS = [
   'special-illustration-rare',
   'illustration-rare',
   'gold-secret-rare',
-  'rainbow-secret-rare',
   'secret-rare',
   'hyper-rare',
   'ultra-rare',

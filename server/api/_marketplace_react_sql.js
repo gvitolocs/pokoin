@@ -44,12 +44,14 @@ function candidateColumns() {
   if (isPokemonGame()) {
     return `${CANDIDATE_COLUMNS_BASE},
   c.version,
+  coalesce(c.rarity_kind, '') as rarity_kind,
   coalesce(c.art_layout, '') as art_layout,
   coalesce(c.artist, '') as artist,
   coalesce(c.illustrator, '') as illustrator`;
   }
   return `${CANDIDATE_COLUMNS_BASE},
   null::text as version,
+  null::text as rarity_kind,
   null::text as art_layout,
   null::text as artist,
   null::text as illustrator`;

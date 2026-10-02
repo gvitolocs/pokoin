@@ -31,6 +31,22 @@ export function rarityRowTheme(card) {
   return null;
 }
 
+const RARITY_KINDS = new Set(['rainbow', 'gold', 'ghost']);
+
+/** Stored card.rarity_kind. Never parsed from the page URL. */
+export function storedRarityKind(card) {
+  const kind = String(card?.rarityKind || card?.rarity_kind || '').trim().toLowerCase();
+  return RARITY_KINDS.has(kind) ? kind : '';
+}
+
+export function rarityKindLabel(card) {
+  const kind = storedRarityKind(card);
+  if (kind === 'rainbow') return 'Rainbow';
+  if (kind === 'gold') return 'Gold';
+  if (kind === 'ghost') return 'Ghost Rare';
+  return '';
+}
+
 /** Pokémon ghost/psychic marks are not the Yu-Gi-Oh Ghost Rare. */
 export function prefersArtworkDelta(card) {
   if (rarityRowTheme(card)) return false;

@@ -163,6 +163,11 @@ function toReactCard(row = {}) {
     number,
     card_number: number,
     rarity,
+    rarityKind: ['rainbow', 'gold', 'ghost'].includes(
+      cleanText(normalized.rarity_kind || normalized.rarityKind, 16).toLowerCase(),
+    )
+      ? cleanText(normalized.rarity_kind || normalized.rarityKind, 16).toLowerCase()
+      : '',
     ...(localizedName ? { localized_name: localizedName } : {}),
     ...(localizedSet ? { localized_set: localizedSet } : {}),
     ...(localizedRarity ? { localized_rarity: localizedRarity } : {}),

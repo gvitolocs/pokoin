@@ -970,6 +970,9 @@ export function cardFromCatalogRow(row = {}) {
     set_name: setName,
     number,
     rarity: row.rarity || '',
+    rarityKind: ['rainbow', 'gold', 'ghost'].includes(String(row.rarityKind || row.rarity_kind || '').toLowerCase())
+      ? String(row.rarityKind || row.rarity_kind || '').toLowerCase()
+      : '',
     productType: row.product_type || row.productType || 'card',
     itemKind: row.item_kind || row.itemKind || 'single',
     canonicalPath: path,
