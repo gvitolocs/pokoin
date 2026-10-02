@@ -1,6 +1,7 @@
 import { namesEqual } from './exact-name.js';
 import { printingIdentity } from './identity.js';
 import { tilePricePkn } from './pkn.js';
+import { pokedexNumber } from './pokedex.js';
 import { TCG_ERA_ORDER, tcgEra, tcgEraId } from './set-logos.js';
 import { expansionSortValue } from './tcg-eras.js';
 
@@ -319,12 +320,26 @@ export function groupPrintingsByEra(rows = [], current) {
     }));
 }
 
+/**
+ * Item, supporter, stadium, and energy printings that share a name are one
+ * card reprinted. A Pokémon with the same name is usually a different card;
+ * those stay on the CLIP painting.
+ */
+export function isNameReprintCard(card) {
+  const name = String(card?.name || '').trim();
+  return Boolean(name) && pokedexNumber(card) === 0;
+}
+
 export function splitVersionPage({ current, nameRows = [], artRows = [] } = {}) {
   const versions = rarityVersions(current, nameRows);
   const currentId = String(current?.id || current?.card_id || '');
-  const others = (artRows || []).filter((row) => {
+  const lineup = new Set(versions.map((row) => String(row?.id || row?.card_id || '')));
+  const reprints = isNameReprintCard(current)
+    ? (nameRows || []).filter((row) => namesEqual(row?.name, current?.name))
+    : [];
+  const others = mergePrintingRows(artRows, reprints).filter((row) => {
     const id = String(row?.id || row?.card_id || '');
-    if (!id || id === currentId) {
+    if (!id || id === currentId || lineup.has(id)) {
       return false;
     }
     // Same-set regular ↔ IR/FA/SIR belong in Rarity Lineup, not an era grid.

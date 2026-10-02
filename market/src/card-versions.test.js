@@ -12,6 +12,7 @@ import {
   rarityVersions,
   inheritEraFromArtwork,
   isPromoExpansion,
+  isNameReprintCard,
   splitVersionPage,
   versionOptionLabel,
 } from './card-versions.js';
@@ -348,6 +349,59 @@ test('same-set regular and full-art are versions, not the same illustration', ()
   });
   assert.deepEqual(split.versions.map((row) => row.id), ['798852', '798914']);
   assert.deepEqual(split.eras, []);
+});
+
+test('item reprints of the same name join the versions page across paintings', () => {
+  const explorers = {
+    id: '227762',
+    name: 'Ultra Ball',
+    set: 'Dark Explorers',
+    number: '102/108',
+    version: 'v227762',
+  };
+  const sunMoon = {
+    id: '257128',
+    name: 'Ultra Ball',
+    set: 'Sun & Moon',
+    number: '135/149',
+    version: 'v257128',
+  };
+  const gold = {
+    id: '257186',
+    name: 'Ultra Ball',
+    set: 'Sun & Moon',
+    number: 'Gold Secret Rare | 161/149',
+    version: 'v257128',
+  };
+  const pikachu = {
+    id: '1',
+    name: 'Pikachu',
+    set: 'Base Set',
+    number: '58/102',
+  };
+  const otherPikachu = {
+    id: '2',
+    name: 'Pikachu',
+    set: 'Jungle',
+    number: '60/64',
+  };
+  assert.equal(isNameReprintCard(explorers), true);
+  assert.equal(isNameReprintCard(pikachu), false);
+  const items = splitVersionPage({
+    current: explorers,
+    nameRows: [explorers, sunMoon, gold],
+    artRows: [explorers],
+  });
+  const shown = items.eras.flatMap((group) => group.rows).map((row) => row.id);
+  assert.ok(shown.includes('227762'));
+  assert.ok(shown.includes('257128'));
+  assert.ok(shown.includes('257186'));
+  const pokemon = splitVersionPage({
+    current: pikachu,
+    nameRows: [pikachu, otherPikachu],
+    artRows: [pikachu],
+  });
+  assert.deepEqual(pokemon.eras, []);
 });
 
 test('Storm Emeralda Mega Rayquaza secrets share one rarity lineup', () => {
