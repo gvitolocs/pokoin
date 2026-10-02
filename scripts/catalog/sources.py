@@ -136,9 +136,39 @@ def _lenient_json(text: str):
         return json.loads(re.sub(r",\s*([}\]])", r"\1", text))
 
 
+def _encoredecks_images(cache: Path) -> dict[tuple[str, str], str]:
+    """(lang, card code) -> EncoreDecks image URL (460x641, sharper than ws-tcg.com)."""
+    import concurrent.futures as cf
+
+    base = "https://www.encoredecks.com"
+    series = _cached_json(cache, "encoredecks-serieslist.json", lambda: _get(f"{base}/api/serieslist").json())
+
+    def load(entry):
+        try:
+            return _cached_json(
+                cache, f"encoredecks-series-{entry['_id']}.json",
+                lambda: _get(f"{base}/api/series/{entry['_id']}/cards").json(),
+            )
+        except Exception as error:
+            print(f"[weiss_schwarz] EncoreDecks series {entry.get('_id')} failed: {error}", flush=True)
+            return []
+
+    images: dict[tuple[str, str], str] = {}
+    with cf.ThreadPoolExecutor(max_workers=4) as pool:
+        for cards in pool.map(load, [e for e in series if e.get("_id")]):
+            for card in cards or []:
+                code = str(card.get("cardcode") or "").strip()
+                path = str(card.get("imagepath") or "").strip()
+                if code and path:
+                    images[(str(card.get("lang") or "").upper(), code.upper())] = f"{base}/images/{path}"
+    return images
+
+
 def weiss_schwarz(cache: Path):
     cards = []
     skipped: list[str] = []
+    encore = _encoredecks_images(cache)
+    print(f"[weiss_schwarz] EncoreDecks images for {len(encore)} card codes", flush=True)
     for lang, repo in WS_REPOS:
         listing = _cached_json(
             cache, f"ws-{lang}-index.json",
@@ -170,7 +200,10 @@ def weiss_schwarz(cache: Path):
                     "set_code": f"{raw.get('set') or ''}/{raw.get('release') or ''}".strip("/"),
                     "collector": code,
                     "rarity": rarity,
-                    "image_url": raw.get("image") or "",
+                    # Official ws-tcg.com art first; EncoreDecks (community site, 460x641)
+                    # only fills the official 404s so we don't bulk-pull from them.
+                    "image_url": raw.get("image") or encore.get((lang, code.upper())) or "",
+                    "image_fallback": encore.get((lang, code.upper())) or "",
                     "source": "ws-ccondeluci-db",
                     "source_url": f"https://github.com/{repo}",
                     "language": lang,

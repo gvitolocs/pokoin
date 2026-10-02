@@ -9,7 +9,7 @@ CDN prefix `<slug>/` under `/srv/pokoin/card-images/objects/` on the Pi.
 | --- | --- | --- | --- | --- | --- |
 | Final Fantasy TCG | `final_fantasy` | `/final-fantasy` | Square Enix card browser JSON (`fftcg.square-enix-games.com/en/get-cards`) | 4,260 | yes |
 | Star Wars Destiny | `star_wars_destiny` | `/star-wars-destiny` | SWD Renewed Hope public API (`db.swdrenewedhope.com/api/public/cards/`) | 2,883 | yes |
-| Weiss Schwarz | `weiss_schwarz` | `/weiss-schwarz` | `CCondeluci/WeissSchwarz-ENG-DB` + `-JP-DB` (official ws-tcg.com art) | 66,723 EN+JP | images importing |
+| Weiss Schwarz | `weiss_schwarz` | `/weiss-schwarz` | `CCondeluci/WeissSchwarz-ENG-DB` + `-JP-DB` (official ws-tcg.com art, EncoreDecks for gaps) | 66,723 EN+JP | images importing |
 | Force of Will | `force_of_will` | `/force-of-will` | FoWDB (scrape) | — | pending |
 | World of Warcraft TCG | `world_of_warcraft` | `/world-of-warcraft` | WoW TCG Reborn scans | — | pending |
 | Battle Spirits Saga | `battle_spirits_saga` | `/battle-spirits-saga` | official card database | — | pending |
@@ -37,8 +37,14 @@ catalogs from free public sources. Every Wayback row that matches a source card
 ~/.venvs/pokoin-catalog/bin/python scripts/catalog/import_catalog.py final_fantasy --images --apply
 ```
 
-- Ids: `10_000_000_000 + sha1(game:key)[:9]`. Stable across reruns, above every
-  Cardmarket idProduct; public card id = id × 2 (< 2^53).
+- Ids: sequential from `100_000_000` per game, kept per source key
+  (`blueprint.source_key`) so reruns never renumber. Public card id = id × 2
+  must stay **below 999,000,000**: larger ids are read as provisional Storm
+  Emeralda stamps (`workers/public-card-id.js`) and rewritten, which broke card
+  links on 2026-10-02 until the first import (hashed 10¹⁰ ids) was renumbered.
+- Weiss Schwarz images: official ws-tcg.com art; EncoreDecks
+  (`encoredecks.com/images/<imagepath>`, 460×641) only where the official URL
+  404s (≈5,000 JP cards), so we don't bulk-download a community site.
 - Images: the largest the source publishes (FF 429×600, Weiss 350×489, SWD
   298×418), capped at 1050 px tall, JPEG q90 + 240 px `_homepage.webp`, rsynced
   to the Pi CDN, then served by `cdn.pokoin.com` / `pokoin.com/card-images`.

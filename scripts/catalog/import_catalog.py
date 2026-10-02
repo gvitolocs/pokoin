@@ -49,7 +49,12 @@ PI_HOST = os.environ.get("POKOIN_CDN_HOST", "pi-home")
 PI_OBJECTS = os.environ.get("POKOIN_CDN_OBJECTS", "/srv/pokoin/card-images/objects")
 PI_OWNER = os.environ.get("POKOIN_CDN_OWNER", "nes:nes")
 CDN_BASE = "https://cdn.pokoin.com"
-ID_BASE = 10_000_000_000  # above every Cardmarket idProduct; id * 2 stays < 2**53
+# Ids are allocated sequentially from ID_FIRST and kept per source key (stored
+# on the row as blueprint.source_key). Public card id = id * 2 must stay below
+# 999_000_000: the site reads larger ids as provisional Storm Emeralda stamps
+# (workers/public-card-id.js PROVISIONAL_PUBLIC_OFFSET) and rewrites them.
+ID_FIRST = 100_000_000  # above every Cardmarket idProduct
+ID_LAST = 499_000_000
 FULL_MAX_HEIGHT = 1050
 HOMEPAGE_WIDTH = 240
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128 Safari/537.36 PokoinCatalog/1.0"
@@ -71,9 +76,42 @@ def log(*parts):
     print(*parts, flush=True)
 
 
-def stable_id(game: str, key: str) -> int:
-    digest = hashlib.sha1(f"{game}:{key}".encode("utf-8")).hexdigest()
-    return ID_BASE + int(digest[:9], 16)
+def existing_rows(db: str, schema: str) -> dict[str, dict]:
+    """source_key -> stored id, Cardmarket ids and image keys of imported rows."""
+    out = psql(db, f"""select coalesce(json_agg(json_build_object(
+        'key', blueprint->>'source_key', 'id', id, 'cm', card_market_ids,
+        'full', cdn_object_key, 'home', homepage_object_key)), '[]')
+      from {schema}.cardmarket_products where blueprint ? 'source_key'""")
+    rows: dict[str, dict] = {}
+    for row in json.loads(out.strip() or "[]"):
+        key = row.get("key")
+        if not key:
+            continue
+        current = rows.get(key)
+        # A rerun after a partial renumber sees both ids: keep the in-range one.
+        if current is None or not (ID_FIRST <= int(current["id"]) <= ID_LAST):
+            rows[key] = row
+    return rows
+
+
+def allocate_ids(cards: list[dict], existing: dict[str, dict]) -> dict[str, int]:
+    """Keep every in-range id already stored for a key; number new keys after the max."""
+    ids: dict[str, int] = {}
+    for card in cards:
+        old = existing.get(str(card["key"]))
+        if old and ID_FIRST <= int(old["id"]) <= ID_LAST:
+            ids[str(card["key"])] = int(old["id"])
+    next_id = max([ID_FIRST - 1, *ids.values()]) + 1
+    order = sorted(
+        (c for c in cards if str(c["key"]) not in ids),
+        key=lambda c: (str(c.get("set_name") or ""), str(c.get("collector") or ""), str(c["key"])),
+    )
+    for card in order:
+        if next_id > ID_LAST:
+            raise SystemExit("id range exhausted")
+        ids[str(card["key"])] = next_id
+        next_id += 1
+    return ids
 
 
 def slugify(value: str, limit: int = 80) -> str:
@@ -93,23 +131,21 @@ def wayback_name_key(name: str) -> str:
 
 
 def psql(db: str, sql: str, stdin: str | None = None) -> str:
-    cmd = ["docker", "exec", "-i", CONTAINER, "psql", "-U", PGUSER, "-d", db, "-v", "ON_ERROR_STOP=1", "-At"]
-    if stdin is None:
-        cmd += ["-c", sql]
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-    else:
-        proc = subprocess.run(cmd, input=sql + "\n" + stdin, capture_output=True, text=True)
+    # SQL goes over stdin: a 66k-id array overflows the argument list.
+    cmd = ["docker", "exec", "-i", CONTAINER, "psql", "-U", PGUSER, "-d", db, "-v", "ON_ERROR_STOP=1", "-At", "-q"]
+    script = sql.rstrip().rstrip(";") + ";\n" + (stdin or "")
+    proc = subprocess.run(cmd, input=script, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"psql {db} failed: {proc.stderr.strip()[:2000]}")
     return proc.stdout
 
 
-def build_rows(game: str, cards: list[dict]) -> list[dict]:
+def build_rows(game: str, cards: list[dict], ids: dict[str, int]) -> list[dict]:
     prefix = GAMES[game]
     rows, seen = [], {}
     for card in cards:
         key = str(card["key"])
-        row_id = stable_id(game, key)
+        row_id = ids[key]
         if row_id in seen:
             if seen[row_id] != key:
                 raise SystemExit(f"id collision {row_id}: {seen[row_id]} vs {key}")
@@ -125,6 +161,7 @@ def build_rows(game: str, cards: list[dict]) -> list[dict]:
             "version": card.get("version") or None,
             "category_id": 1,
             "image_url": card.get("image_url") or None,
+            "image_fallback": card.get("image_fallback") or None,
             "expansion": {"name": card.get("set_name") or "Unknown", "code": card.get("set_code") or ""},
             "blueprint": {
                 "source": card["source"],
@@ -228,18 +265,33 @@ def stage_images(game: str, rows: list[dict], concurrency: int) -> dict[int, str
     stage = CATALOG_DIR / game / "images"
     results: dict[int, str] = {}
 
+    manifest_path = stage / "sources.json"
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, ValueError):
+        manifest = {}
+
     def work(row):
         full = stage / row["cdn_object_key"]
         home = stage / row["homepage_object_key"]
-        if full.exists() and home.exists() and full.stat().st_size > 0:
+        urls = [u for u in (row.get("image_url"), row.get("image_fallback")) if u]
+        rendered = manifest.get(row["cdn_object_key"])
+        # Re-render when a better source appeared since (e.g. EncoreDecks over ws-tcg.com).
+        primary = urls[0] if urls else None
+        legacy_same_source = rendered is None
+        if full.exists() and home.exists() and full.stat().st_size > 0 and (rendered == primary or legacy_same_source):
             return row["id"], "cached"
-        if not row.get("image_url"):
+        if not urls:
             return row["id"], "no-source"
-        try:
-            render_image(fetch_bytes(row["image_url"]), full, home)
-            return row["id"], "ok"
-        except Exception as error:
-            return row["id"], f"failed: {error}"[:200]
+        last = None
+        for url in dict.fromkeys(urls):
+            try:
+                render_image(fetch_bytes(url), full, home)
+                manifest[row["cdn_object_key"]] = url
+                return row["id"], "ok"
+            except Exception as error:
+                last = error
+        return row["id"], f"failed: {last}"[:200]
 
     with cf.ThreadPoolExecutor(max_workers=concurrency) as pool:
         for done, (row_id, status) in enumerate(pool.map(work, rows), 1):
@@ -247,7 +299,27 @@ def stage_images(game: str, rows: list[dict], concurrency: int) -> dict[int, str
             if done % 250 == 0 or done == len(rows):
                 ok = sum(1 for s in results.values() if s in ("ok", "cached"))
                 log(f"[images] {game} {done}/{len(rows)} ok={ok}")
+                manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                manifest_path.write_text(json.dumps(manifest))
     return results
+
+
+def rename_local_images(game: str, renames: list[tuple[str, str]]) -> None:
+    stage = CATALOG_DIR / game / "images"
+    for old_key, new_key in renames:
+        src, dst = stage / old_key, stage / new_key
+        if src.exists() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            src.rename(dst)
+
+
+def rename_pi_images(renames: list[tuple[str, str]]) -> None:
+    script = "".join(
+        f"[ -e {PI_OBJECTS}/{old} ] && [ ! -e {PI_OBJECTS}/{new} ] && mv {PI_OBJECTS}/{old} {PI_OBJECTS}/{new}\n"
+        for old, new in renames
+        if re.fullmatch(r"[a-z0-9/_.-]+", old) and re.fullmatch(r"[a-z0-9/_.-]+", new)
+    )
+    subprocess.run(["ssh", PI_HOST, "bash -s"], input=script + "true\n", text=True, check=True)
 
 
 def push_images(game: str) -> None:
@@ -257,7 +329,7 @@ def push_images(game: str) -> None:
         return
     subprocess.run(["ssh", PI_HOST, f"mkdir -p {PI_OBJECTS}/{prefix}"], check=True)
     subprocess.run(
-        ["rsync", "-a", "--ignore-existing", f"{local}/", f"{PI_HOST}:{PI_OBJECTS}/{prefix}/"],
+        ["rsync", "-a", f"{local}/", f"{PI_HOST}:{PI_OBJECTS}/{prefix}/"],
         check=True,
     )
     subprocess.run(["ssh", PI_HOST, f"chown -R {PI_OWNER} {PI_OBJECTS}/{prefix}"], check=True)
@@ -329,7 +401,23 @@ def main() -> int:
     if args.limit:
         cards = cards[: args.limit]
         complete = False  # a sample never supersedes the Wayback rows
-    rows = build_rows(game, cards)
+    existing = existing_rows(db, schema)
+    ids = allocate_ids(cards, existing)
+    rows = build_rows(game, cards, ids)
+    renames: list[tuple[str, str]] = []
+    for row in rows:
+        old = existing.get(row["blueprint"]["source_key"])
+        if not old:
+            continue
+        for cm_id in old.get("cm") or []:
+            if cm_id not in row["card_market_ids"]:
+                row["card_market_ids"].append(cm_id)
+        for old_key, new_key in ((old.get("full"), row["cdn_object_key"]), (old.get("home"), row["homepage_object_key"])):
+            if old_key and old_key != new_key:
+                renames.append((old_key, new_key))
+    if renames:
+        log(f"{game}: {len(renames) // 2} cards change id; renaming their image files")
+        rename_local_images(game, renames)
     log(f"{game}: {len(rows)} cards from source ({'complete' if complete else 'partial'} catalog)")
     sets = sorted({r["expansion"]["name"] for r in rows})
     log(f"{game}: {len(sets)} sets, e.g. {sets[:5]}")
@@ -361,10 +449,19 @@ def main() -> int:
         log(f"dry run: wrote {cache / 'rows.jsonl'}; rerun with --apply")
         return 0
 
+    if renames:
+        rename_pi_images(renames)
     if args.images:
         push_images(game)
         log(f"{game}: images pushed to {PI_HOST}:{PI_OBJECTS}/{prefix}/")
     upsert(db, schema, rows)
+    if complete:
+        keep = ",".join(str(r["id"]) for r in rows)
+        gone = psql(db, f"""with d as (delete from {schema}.cardmarket_products
+          where blueprint ? 'source_key' and id <> all(array[{keep}]::bigint[]) returning 1)
+          select count(*) from d""")
+        if gone.strip() not in ("", "0"):
+            log(f"{game}: removed {gone.strip()} rows on retired ids")
     if complete and not args.keep_wayback and wayback:
         psql(db, f"delete from {schema}.cardmarket_products where blueprint->>'source' = 'cardmarket-wayback'")
         log(f"{game}: removed {len(wayback)} Wayback rows (superseded)")
