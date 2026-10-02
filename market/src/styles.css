@@ -519,6 +519,16 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--g3);
 }
 
+.suggest-row.is-shaded {
+  background: var(--suggest-shade);
+  transition: background-color 160ms ease;
+}
+
+.suggest-row.is-shaded:hover,
+.suggest-row.is-shaded.is-active {
+  background: var(--suggest-shade-raised, var(--g3));
+}
+
 .suggest-main {
   display: grid;
   /* Set | thumb | name/set + aligned number column. */
@@ -3105,9 +3115,11 @@ html.is-card-banding * {
 /* Card desk painted from the artwork delta. The page is the darkest step,
    panels sit one and two steps up, and the title bar keeps the most color. */
 html.desk-tinted,
-html.desk-tinted body {
+html.desk-tinted body,
+html.desk-tinted #root {
   --bg: var(--desk-bg);
   background: var(--desk-bg);
+  transition: background-color 180ms ease;
 }
 
 html.desk-tinted .card-page .panel,
@@ -3116,6 +3128,7 @@ html.desk-tinted .card-page .add-panel,
 html.desk-tinted .card-page .reserve-blurb {
   background: var(--desk-surface);
   border-color: var(--desk-border);
+  transition: background-color 180ms ease, border-color 180ms ease;
 }
 
 html.desk-tinted .card-page .shop-panel {

@@ -75,7 +75,15 @@ import {
 } from '../sold-graph.js';
 import { soldGraphView, soldTraitsForGraphDay } from '../sold-sales.js';
 import NativeSales from '../components/NativeSales.jsx';
-import { albumShade, cardShadeStyle, deskTheme, deskThemeVars } from '../art-shade.js';
+import {
+  albumShade,
+  cardShadeStyle,
+  deskTheme,
+  deskThemeVars,
+  peekDeskIdentity,
+  rememberCardBucket,
+  rememberDeskIdentity,
+} from '../art-shade.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '../sold-sales-cache.js';
 import { authFrom } from '../punchouts.js';
 import { useAuth } from '../auth.jsx';
@@ -1513,7 +1521,10 @@ export default function Card() {
     const stateCard = fromState && String(fromState.id || fromState.card_id) === String(cardId)
       ? fromState
       : null;
-    return mergeDeskCard(mergeDeskCard(route, peekRecentTile(cardId)), stateCard);
+    return mergeDeskCard(
+      mergeDeskCard(mergeDeskCard(route, peekRecentTile(cardId)), peekDeskIdentity(cardId)),
+      stateCard,
+    );
   }, [cardId, lang, slug, location.state]);
   const stubCardRef = useRef(stubCard);
   stubCardRef.current = stubCard;
@@ -1554,8 +1565,14 @@ export default function Card() {
   const [listingBusy, setListingBusy] = useState(false);
   const [shopError, setShopError] = useState('');
   const [editingOffer, setEditingOffer] = useState(null);
-  const [namePrintings, setNamePrintings] = useState([]);
-  const [artPrintings, setArtPrintings] = useState([]);
+  const [namePrintings, setNamePrintings] = useState(() => {
+    const cached = peekCard(cardId, { lang });
+    return catalogPrintings(cached?.rarities);
+  });
+  const [artPrintings, setArtPrintings] = useState(() => {
+    const cached = peekCard(cardId, { lang });
+    return (cached?.versions || []).map(cardFromCatalogRow).filter((row) => row.id);
+  });
   const [salesSlices, setSalesSlices] = useState(() => peekCardSales(cardId)?.slices ?? null);
   const [salesCondition, setSalesCondition] = useState('');
   const [salesLanguage, setSalesLanguage] = useState('');
@@ -1573,6 +1590,31 @@ export default function Card() {
     setSalesGraded(false);
     setSalesSlices(peekCardSales(cardId)?.slices ?? null);
     setSetNationality('');
+    const cached = peekCard(cardId, { lang });
+    const listed = peekListings(cardId);
+    const offers = peekHasListingRows(listed) ? listed.listings : [];
+    if (cached) {
+      setPayload({
+        ...cached,
+        neighbors: neighborsOrPeek(cardId, cached.neighbors),
+        ...(offers.length ? { offers } : {}),
+      });
+      setArtPrintings((cached.versions || []).map(cardFromCatalogRow).filter((row) => row.id));
+      setNamePrintings(catalogPrintings(cached.rarities));
+    } else if (stubCard) {
+      setPayload({
+        card: stubCard,
+        offers,
+        versions: [],
+        neighbors: neighborsOrPeek(cardId),
+      });
+      setArtPrintings([]);
+      setNamePrintings([]);
+    } else {
+      setPayload(null);
+      setArtPrintings([]);
+      setNamePrintings([]);
+    }
   }
   const zoomRef = useRef(null);
   const copiedTimer = useRef(0);
@@ -2000,25 +2042,34 @@ export default function Card() {
   }, [payload?.card]);
 
   const pageTheme = useMemo(
-    () => deskTheme(payload?.card || stubCard, payload?.visualTheme),
-    [payload?.card, payload?.visualTheme, stubCard],
+    () => deskTheme(payload?.card || stubCard || { id: cardId, card_id: cardId }),
+    [payload?.card, stubCard, cardId],
   );
   useLayoutEffect(() => {
-    const root = document.documentElement;
-    const vars = deskThemeVars(pageTheme);
-    if (!vars) {
-      root.classList.remove('desk-tinted');
-      return undefined;
+    const card = payload?.card || stubCard;
+    if (card) {
+      rememberDeskIdentity({ ...card, id: card.id || card.card_id || cardId });
+      const shade = albumShade(card);
+      if (shade) rememberCardBucket(card.id || card.card_id || cardId, shade);
     }
+  }, [payload?.card, stubCard, cardId]);
+  useLayoutEffect(() => {
+    const vars = deskThemeVars(pageTheme);
+    if (!vars) return undefined;
+    const root = document.documentElement;
     for (const [key, value] of Object.entries(vars)) {
       root.style.setProperty(key, value);
     }
     root.classList.add('desk-tinted');
-    return () => {
-      root.classList.remove('desk-tinted');
-      for (const key of Object.keys(vars)) root.style.removeProperty(key);
-    };
+    return undefined;
   }, [pageTheme]);
+  useEffect(() => () => {
+    const root = document.documentElement;
+    root.classList.remove('desk-tinted');
+    for (const key of ['--desk-bg', '--desk-surface', '--desk-raised', '--desk-hero', '--desk-hero-border', '--desk-border', '--desk-tint']) {
+      root.style.removeProperty(key);
+    }
+  }, []);
 
   if (error && !payload?.card) {
     return (
@@ -2051,7 +2102,7 @@ export default function Card() {
   }
 
   const card = (() => {
-    const row = payload?.card || stubCard;
+    const row = mergeDeskCard(stubCard, payload?.card || null);
     const nationality = String(row?.nationality || setNationality || '').trim();
     if (!row || !nationality || row.nationality === nationality) {
       return row;
@@ -2209,7 +2260,7 @@ export default function Card() {
         ]}
       />
       <header
-        className={heroShade ? 'asset-header shaded' : 'asset-header'}
+        className={pageTheme || heroShade ? 'asset-header shaded' : 'asset-header'}
         style={cardShadeStyle(card)}
       >
         <div className="asset-title-row">

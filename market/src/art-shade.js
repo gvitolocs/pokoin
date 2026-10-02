@@ -163,11 +163,235 @@ export function deskThemeFromShade(artShade) {
 
 const THEME_FIELDS = ['background', 'surface', 'surfaceRaised', 'hero', 'heroBorder', 'border', 'tint'];
 
-/** Derive the ladder from the leftover shade. A stored API theme is only the
- * fallback when the card has no shade hex of its own. */
+/** Thirty-two desk palettes. One is neutral; the rest are even hue steps.
+ * The page snaps every leftover shade onto one of these so a card switch
+ * is a local lookup, not a new color computed after the card request. */
+export const SHADE_BUCKETS = 32;
+
+const BUCKET_THEMES = (() => {
+  const themes = [deskThemeFromShade(oklchToHex({ l: 0.38, c: 0.012, h: 265 }))];
+  const chromatic = SHADE_BUCKETS - 1;
+  for (let i = 1; i < SHADE_BUCKETS; i += 1) {
+    const hue = ((i - 1) * 360) / chromatic;
+    // A small lightness step keeps neighboring hues from quantizing
+    // to the same desk hex (deep reds otherwise share #3a0000).
+    const l = 0.34 + ((i * 5) % 7) * 0.012;
+    themes.push(deskThemeFromShade(oklchToHex({ l, c: 0.08, h: hue })));
+  }
+  return themes;
+})();
+
+export function bucketIndex(hex) {
+  const raw = String(hex || '').trim().toLowerCase();
+  if (!HEX.test(raw)) return null;
+  const source = hexToOklch(raw);
+  if (source.c < 0.02) return 0;
+  const chromatic = SHADE_BUCKETS - 1;
+  let best = 1;
+  let bestDist = 360;
+  for (let i = 1; i < SHADE_BUCKETS; i += 1) {
+    const hue = ((i - 1) * 360) / chromatic;
+    const dist = Math.min(Math.abs(source.h - hue), 360 - Math.abs(source.h - hue));
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = i;
+    }
+  }
+  return best;
+}
+
+export function themeForBucket(index) {
+  const i = Number(index);
+  if (!Number.isInteger(i) || i < 0 || i >= SHADE_BUCKETS) return null;
+  return BUCKET_THEMES[i];
+}
+
+const BUCKET_KEY = 'pokoin.shadeBucket.v1';
+const IDENTITY_KEY = 'pokoin.deskIdentity.v1';
+const bucketListeners = new Set();
+let bucketMap = null;
+let identityMap = null;
+const warmingBuckets = new Set();
+
+function browserStore() {
+  try {
+    const local = globalThis.localStorage;
+    if (local && typeof local.getItem === 'function') return local;
+  } catch {
+    /* private mode or node */
+  }
+  return null;
+}
+
+function loadJsonMap(key, slot) {
+  if (slot.current) return slot.current;
+  slot.current = {};
+  try {
+    const parsed = JSON.parse(browserStore()?.getItem(key) || '{}');
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      slot.current = parsed;
+    }
+  } catch {
+    slot.current = {};
+  }
+  return slot.current;
+}
+
+const bucketSlot = { current: null };
+const identitySlot = { current: null };
+
+function loadBuckets() {
+  bucketMap = loadJsonMap(BUCKET_KEY, bucketSlot);
+  return bucketMap;
+}
+
+function loadIdentity() {
+  identityMap = loadJsonMap(IDENTITY_KEY, identitySlot);
+  return identityMap;
+}
+
+function writeMap(key, map) {
+  const keys = Object.keys(map);
+  if (keys.length > 4000) {
+    for (let i = 0; i < keys.length - 3000; i += 1) delete map[keys[i]];
+  }
+  try {
+    browserStore()?.setItem(key, JSON.stringify(map));
+  } catch {
+    /* quota */
+  }
+}
+
+function notifyBuckets() {
+  for (const fn of bucketListeners) fn();
+}
+
+export function peekCardBucket(cardId) {
+  const id = String(cardId || '').trim();
+  if (!/^\d+$/.test(id)) return null;
+  const index = Number(loadBuckets()[id]);
+  return Number.isInteger(index) && index >= 0 && index < SHADE_BUCKETS ? index : null;
+}
+
+export function themeForCardId(cardId) {
+  const index = peekCardBucket(cardId);
+  return index == null ? null : themeForBucket(index);
+}
+
+/** Remember which of the 32 palettes this printing uses. */
+export function rememberCardBucket(cardId, hexOrIndex) {
+  const id = String(cardId || '').trim();
+  if (!/^\d+$/.test(id)) return null;
+  const index = typeof hexOrIndex === 'number' ? hexOrIndex : bucketIndex(hexOrIndex);
+  if (index == null) return null;
+  const map = loadBuckets();
+  if (map[id] === index) return index;
+  map[id] = index;
+  writeMap(BUCKET_KEY, map);
+  notifyBuckets();
+  return index;
+}
+
+export function subscribeShadeBuckets(listener) {
+  bucketListeners.add(listener);
+  return () => bucketListeners.delete(listener);
+}
+
+/** Artist and emoji for the first paint, kept beside the bucket index. */
+export function rememberDeskIdentity(card) {
+  const id = String(card?.id || card?.card_id || '').trim();
+  if (!/^\d+$/.test(id)) return;
+  const artist = String(card?.artist || card?.illustrator || '').trim();
+  const emoji = String(card?.emoji || card?.cardIdentityEmoji || '').trim();
+  const shade = albumShade(card);
+  if (!artist && !emoji && !shade) return;
+  const map = loadIdentity();
+  const prev = map[id] && typeof map[id] === 'object' ? map[id] : {};
+  const next = {
+    artist: artist || prev.artist || '',
+    emoji: emoji || prev.emoji || '',
+  };
+  if (shade) rememberCardBucket(id, shade);
+  if (prev.artist === next.artist && prev.emoji === next.emoji) return;
+  map[id] = next;
+  writeMap(IDENTITY_KEY, map);
+}
+
+export function peekDeskIdentity(cardId) {
+  const id = String(cardId || '').trim();
+  if (!/^\d+$/.test(id)) return null;
+  const row = loadIdentity()[id];
+  if (!row || typeof row !== 'object') return null;
+  const artist = String(row.artist || '').trim();
+  const emoji = String(row.emoji || '').trim();
+  if (!artist && !emoji) return null;
+  return {
+    id,
+    card_id: id,
+    artist,
+    illustrator: artist,
+    emoji,
+    cardIdentityEmoji: emoji,
+  };
+}
+
+function averageArtHex(img) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 24;
+  canvas.height = 32;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return '';
+  ctx.drawImage(img, 0, 0, 24, 32);
+  const data = ctx.getImageData(2, 4, 20, 12).data;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let n = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    r += data[i];
+    g += data[i + 1];
+    b += data[i + 2];
+    n += 1;
+  }
+  if (!n) return '';
+  return rgbToHex([r / n, g / n, b / n]);
+}
+
+/** Sample a suggest thumb into the local 32 once. Later rows read the bucket. */
+export function warmCardBucket(cardId, imageUrl) {
+  const id = String(cardId || '').trim();
+  const url = String(imageUrl || '').trim();
+  if (!/^\d+$/.test(id) || !url || peekCardBucket(id) != null || warmingBuckets.has(id)) return;
+  if (typeof Image === 'undefined') return;
+  warmingBuckets.add(id);
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    warmingBuckets.delete(id);
+    try {
+      const hex = averageArtHex(img);
+      if (hex) rememberCardBucket(id, hex);
+    } catch {
+      /* canvas blocked */
+    }
+  };
+  img.onerror = () => {
+    warmingBuckets.delete(id);
+  };
+  img.src = url;
+}
+
+/** The desk color is one of the 32 local palettes. An API theme is not
+ * painted first: that was the baseline color flashing under the artwork. */
 export function deskTheme(card, visualTheme) {
-  const derived = deskThemeFromShade(albumShade(card));
-  if (derived) return derived;
+  const shade = albumShade(card);
+  const id = card?.id || card?.card_id;
+  if (shade) {
+    const theme = themeForBucket(bucketIndex(shade));
+    if (theme) return theme;
+  }
+  const remembered = themeForCardId(id);
+  if (remembered) return remembered;
   const fromPage = visualTheme && typeof visualTheme === 'object' ? visualTheme : null;
   if (fromPage && THEME_FIELDS.every((field) => HEX.test(String(fromPage[field] || '')))) {
     const theme = {};
