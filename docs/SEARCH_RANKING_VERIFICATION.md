@@ -338,3 +338,27 @@ authorization lacked the verified-email gate, and row normalization lacked
 the raw Palworld/Cyberpunk image-key exception. Both current live helpers
 were preserved byte-for-byte, with regression checks for authorization and
 satellite image keys, before publishing any overlay.
+
+The integrated release also retains the new Cardmarket game registry and nine
+image-key prefixes from current `main`. Overlay parity tests compare that
+registry to its maintained source. Deployment tests run from a clean archive
+of the entire commit (their contract checks read web sources); only the
+explicit 33-file API allowlist enters the live overlay.
+
+Final release validation passed **1,128 frontend tests**, **482 API/worker/
+script tests**, the updated game/image tests and the production build. The
+clean deployment archive separately passed all **35 API tests**. The expanded
+formal check observed **15,028 executions**: 11,088 warm popup executions,
+52 cold name probes and 3,888 cold three-component executions, with zero cold
+failures. TLC passed with exit code 0: **58,128 states generated, 47,040
+distinct states explored, zero queued states, depth 7**. Both old-behavior
+configurations returned their required invariant counterexamples (exit 12).
+Logs on nezopt: `/tmp/search-ranking-release-{market,api3,build2,tlc}.log`
+and `/tmp/search-api-archive-check2.log`.
+
+Against the captured live Mewtwo candidate bucket, `mewtwo e` and `mewtow e`
+now lead with Mewtwo ex (EX Ruby & Sapphire, then the two Evolutions EX
+printings). Regular Evolutions Mewtwo 51/108 remains fifth, following a
+Rocket's EX printing. `mewtwo ev` and `mewtwo evo` still lead with regular
+51/108; completed `mewtwo ex` uses literal name evidence rather than an
+unfinished set interpretation. No card-specific ranking rule was added.
