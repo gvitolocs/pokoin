@@ -1,6 +1,9 @@
 const { verifyBearerToken } = require('./_firebase');
 
-const ALLOWED_IDENTIFIERS = new Set([
+// Operator emails. Matched only against the verified email on the Firebase
+// ID token: display names and profile usernames are user-editable
+// (updateProfile / users doc), so they never grant access.
+const ALLOWED_EMAILS = new Set([
   'vitologiuseppe17@gmail.com',
   'pokoinpos@gmail.com',
 ]);
@@ -29,15 +32,18 @@ function hasAdminAccess(profile) {
     role === 'admin';
 }
 
+function verifiedEmail(decoded) {
+  return decoded?.email_verified === true ? normalize(decoded.email) : '';
+}
+
 async function authorizeSearchDebugRequest(req) {
   const decoded = await verifyBearerToken(req);
-  const email = normalize(decoded.email);
   const uid = decoded.uid;
-  let username = normalize(decoded.username || decoded.name);
-  const envIdentifiers = new Set(configuredIdentifiers());
+  const email = normalize(decoded.email);
+  const trustedEmail = verifiedEmail(decoded);
+  let username = normalize(decoded.name);
   if (
-    ALLOWED_IDENTIFIERS.has(email) ||
-    envIdentifiers.has(email) ||
+    (trustedEmail && (ALLOWED_EMAILS.has(trustedEmail) || configuredIdentifiers().includes(trustedEmail))) ||
     hasAdminAccess(decoded)
   ) {
     return { uid, email, username };
@@ -52,5 +58,6 @@ module.exports = {
   _test: {
     configuredIdentifiers,
     hasAdminAccess,
+    verifiedEmail,
   },
 };
