@@ -448,6 +448,10 @@ def main() -> int:
             row["homepage_image_url"] = None
             row["cdn_object_key"] = None
             row["homepage_object_key"] = None
+            # No picture we can serve: keep the source for a later retry, but
+            # leave image_url empty so the projection never lists a broken tile.
+            row["blueprint"]["source_image_url"] = row.get("image_url") or ""
+            row["image_url"] = None
 
     (cache / "rows.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
     if not args.apply:
@@ -470,8 +474,12 @@ def main() -> int:
     if complete and not args.keep_wayback and wayback:
         psql(db, f"delete from {schema}.cardmarket_products where blueprint->>'source' = 'cardmarket-wayback'")
         log(f"{game}: removed {len(wayback)} Wayback rows (superseded)")
+    # Candidates whose raw row is gone, or no longer has a picture to show.
     psql(db, f"""delete from public.marketplace_search_candidates c
-      where not exists (select 1 from {schema}.cardmarket_products p where p.id = c.ct_id)""")
+      where not exists (
+        select 1 from {schema}.cardmarket_products p
+        where p.id = c.ct_id
+          and coalesce(p.cdn_image_url, p.preview_image_url, p.image_url) is not null)""")
     refreshed = psql(db, f"select public.refresh_cardmarket_marketplace_projections('{schema}', array[1], array['cm_rarity'])")
     psql(db, "select public.refresh_marketplace_set_catalog_counts()")
     counts = psql(db, f"""select count(*), count(*) filter (where cdn_image_url is not null)

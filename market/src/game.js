@@ -63,6 +63,9 @@ const GAMES = {
   cyberpunk: {
     id: 'cyberpunk', apiGame: 'cyberpunk', slug: 'cyberpunk', name: 'Cyberpunk', brand: 'Pokoin', title: 'Cyberpunk marketplace', ...SATELLITE,
   },
+  weiss_schwarz: {
+    id: 'weiss_schwarz', apiGame: 'weiss_schwarz', slug: 'weiss-schwarz', name: 'Weiss Schwarz', brand: 'Pokoin', title: 'Weiss Schwarz marketplace', ...SATELLITE,
+  },
   final_fantasy: {
     id: 'final_fantasy', apiGame: 'final_fantasy', slug: 'final-fantasy', name: 'Final Fantasy TCG', brand: 'Pokoin', title: 'Final Fantasy TCG marketplace', ...SATELLITE,
   },

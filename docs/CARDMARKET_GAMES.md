@@ -9,7 +9,7 @@ CDN prefix `<slug>/` under `/srv/pokoin/card-images/objects/` on the Pi.
 | --- | --- | --- | --- | --- | --- |
 | Final Fantasy TCG | `final_fantasy` | `/final-fantasy` | Square Enix card browser JSON (`fftcg.square-enix-games.com/en/get-cards`) | 4,260 | yes |
 | Star Wars Destiny | `star_wars_destiny` | `/star-wars-destiny` | SWD Renewed Hope public API (`db.swdrenewedhope.com/api/public/cards/`) | 2,883 | yes |
-| Weiss Schwarz | `weiss_schwarz` | `/weiss-schwarz` | `CCondeluci/WeissSchwarz-ENG-DB` + `-JP-DB` (official ws-tcg.com art, EncoreDecks for gaps) | 66,723 EN+JP | images importing |
+| Weiss Schwarz | `weiss_schwarz` | `/weiss-schwarz` | `CCondeluci/WeissSchwarz-ENG-DB` + `-JP-DB` (official ws-tcg.com art, EncoreDecks for gaps) | 65,982 EN+JP with images (725 without art hidden) | yes |
 | Force of Will | `force_of_will` | `/force-of-will` | FoWDB (scrape) | — | pending |
 | World of Warcraft TCG | `world_of_warcraft` | `/world-of-warcraft` | WoW TCG Reborn scans | — | pending |
 | Battle Spirits Saga | `battle_spirits_saga` | `/battle-spirits-saga` | official card database | — | pending |
