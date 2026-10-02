@@ -1912,6 +1912,20 @@
   height: 1px;
 }
 
+.album-other-prints {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem 1rem;
+  margin: 1.25rem 0 0.5rem;
+}
+
+.album-other-prints p {
+  margin: 0;
+  color: var(--muted, rgb(255 255 255 / 0.72));
+}
+
 /* Artist desk: the name is the title; every filter sits on one line under it. */
 .artist-desk .page-head {
   gap: 0.75rem 0.9rem;
