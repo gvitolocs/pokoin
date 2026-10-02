@@ -747,5 +747,29 @@
         "Postgres read replica (poko_discord_links)"
       ]
     }
+  },
+  {
+    "path": "/api/marketplace-card-price-history",
+    "file": "marketplace-card-price-history.js",
+    "methods": [
+      "GET",
+      "OPTIONS"
+    ],
+    "purpose": "Daily CardTrader lowest listed asks and separately sourced TCGplayer market quotes for one exact public printing. Never synthetic sales.",
+    "auth": "Public read-only.",
+    "params": {
+      "query": "cardId required; game context; from/to YYYY-MM-DD optional, maximum 10 years.",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "TCGCSV_DATABASE_URL",
+        "TCGCSV_DATABASE_SSL"
+      ],
+      "services": [
+        "Marketplace replica PostgreSQL",
+        "Optional TCGCSV PostgreSQL on Nezopt 15TB"
+      ]
+    }
   }
 ]

@@ -36,3 +36,33 @@ and historical database queries for Mew (2 variants, 1,858 observations), and
 rejected reader UPDATE. The deployment script includes the helper and history
 handler, and the route manifest declares the new endpoint. Deployment is pending
 explicit authorization under AGENTS.md; the live site's button is still disabled.
+
+## Public card-desk price history
+
+`GET /api/marketplace-card-price-history?cardId=824942&from=2024-02-08&to=2026-10-02`
+is a public, bounded (maximum 10 years), read-only endpoint for one exact public
+printing. It resolves `marketplace_search_candidates.card_id` to `ct_id`; it
+never derives an identity with arithmetic or blends same-artwork languages.
+Each independent source has `available`, `empty`, `unavailable` or `unconfigured`
+status; a TCGCSV outage leaves CardTrader analytics available.
+
+`cardtrader.days` exposes only **lowest listed ask PKN**, with listing/copy/seller
+counts, from the existing `cardtrader_blueprint_daily_analytics` dump rollup.
+That legacy rollup copies the cheapest cache into all four price columns: its
+`median_price_pkn` is not a measured median and must not be displayed as one.
+Quote `day` is the actual `refreshed_at` UTC date. `dumpDay` preserves the rollup's
+previous-day pipeline bucket, and `sourceTimestamp` preserves its exact refresh.
+These are blueprint-wide asks, not condition/language-specific or transactions.
+No values are inserted into `marketplace_price_observations` or sold history.
+For CT 412471 / public 824942, actual refresh dates September 30, October 1 and
+October 2 contain lowest asks 13128, 12128 and 11128 PKN respectively.
+
+`tcgplayer.series` preserves separate product/category/subtype groups and exact
+USD decimal strings. It reuses the existing explicit product crosswalk and
+`all_daily_prices`; missing days remain missing and one observation stays one
+point. Existing `marketplace-card-sales` behavior is unchanged. The authenticated
+TCGplayer inventory history route remains available independently.
+
+Deploy through `scripts/deploy-price-check-api.sh` from the exact integrated
+`origin/main` commit; it includes both helpers, the public handler, route manifest
+and their tests. TCGCSV reader configuration is optional to the CardTrader feed.
