@@ -789,7 +789,7 @@ export default function ScanDesk() {
     void remapDraftArtwork(card.id, language);
   }
 
-  /** JP/KO/ID/TH/VI → matching asian expansion; western → western; ZH/ZHT leave the printing. */
+  /** JP/KO/ID/TH/VI → japanese|korean; ZH/ZHT → chinese; western langs → western. */
   async function remapDraftArtwork(fromCardId, language) {
     if (!draftArtworkBucket(language)) return;
     const data = await loadVersionSet(fromCardId);
@@ -1834,8 +1834,8 @@ function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick }) {
           onPickRef.current(nextId);
         }
       }
-      // Do not coerce row.language here — Scan Desk keeps the full LANG list;
-      // picking JP/KO remaps the expansion; ZH/ZHT leave the print (D000065).
+      // Do not coerce row.language here — Scan Desk keeps the full LANG list.
+      // JP/KO/ID/TH/VI and ZH/ZHT remap the expansion when a sibling exists.
     });
     return () => { cancelled = true; };
   }, [row.cardId, row.id, row.nationality, row.language, closed, listingLanguage]);
