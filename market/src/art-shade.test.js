@@ -40,6 +40,15 @@ test('desk theme keeps the page darker than the tiles', () => {
   }
   assert.equal(deskTheme({ artShade: 'nope' }, null), null);
   assert.equal(deskTheme({ art_shade: '#3a5c8a' }).background, theme.background);
+  const sand = deskThemeFromShade('#453d2d');
+  const sandRgb = sand.background.slice(1);
+  const sandRed = Number.parseInt(sandRgb.slice(0, 2), 16);
+  const sandBlue = Number.parseInt(sandRgb.slice(4, 6), 16);
+  assert.ok(sandRed > sandBlue, sand.background);
+  assert.equal(
+    deskTheme({ art_shade: '#453d2d' }, { background: '#050b0f', surface: '#0f171b', surfaceRaised: '#1d262a', hero: '#273b46', heroBorder: '#4a585f', border: '#32393d', tint: '#3b4a52' }).background,
+    sand.background,
+  );
   const vars = deskThemeVars(theme);
   assert.equal(vars['--desk-bg'], theme.background);
   assert.equal(vars['--desk-raised'], theme.surfaceRaised);

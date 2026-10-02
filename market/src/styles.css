@@ -3106,18 +3106,19 @@ html.is-card-banding * {
    panels sit one and two steps up, and the title bar keeps the most color. */
 html.desk-tinted,
 html.desk-tinted body {
+  --bg: var(--desk-bg);
   background: var(--desk-bg);
 }
 
 html.desk-tinted .card-page .panel,
-html.desk-tinted .card-page .sell-form {
+html.desk-tinted .card-page .sell-form,
+html.desk-tinted .card-page .add-panel,
+html.desk-tinted .card-page .reserve-blurb {
   background: var(--desk-surface);
   border-color: var(--desk-border);
 }
 
-html.desk-tinted .card-page .add-panel,
-html.desk-tinted .card-page .shop-panel,
-html.desk-tinted .card-page .reserve-blurb {
+html.desk-tinted .card-page .shop-panel {
   background: var(--desk-raised);
   border-color: var(--desk-border);
 }

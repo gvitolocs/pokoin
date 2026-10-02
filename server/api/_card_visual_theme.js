@@ -138,19 +138,22 @@ function buildVisualTheme(artShade, artworkIdentity = '') {
   }
   const hue = source.c < 0.02 ? 265 : source.h;
   const chroma = source.c;
+  // Keep enough chroma that a dark step still reads as the artwork hue.
+  // A 0.03 cap on a yellow scan collapsed to the same blue-black as the old page.
+  const kept = Math.min(Math.max(chroma * 2.2, 0.055), 0.11);
   const background = {
-    l: clamp(source.l * 0.42, 0.145, 0.19),
-    c: Math.min(chroma * 0.55, 0.03),
+    l: clamp(source.l * 0.5, 0.15, 0.2),
+    c: kept,
     h: hue,
   };
   const surface = {
-    l: clamp(background.l + 0.055, 0.2, 0.245),
-    c: Math.min(chroma * 0.6, 0.034),
+    l: clamp(background.l + 0.04, 0.19, 0.24),
+    c: Math.min(kept * 1.15, 0.12),
     h: hue,
   };
   const surfaceRaised = {
-    l: clamp(surface.l + 0.05, 0.26, 0.31),
-    c: Math.min(chroma * 0.65, 0.04),
+    l: clamp(surface.l + 0.018, 0.21, 0.255),
+    c: Math.min(kept * 1.2, 0.125),
     h: hue,
   };
   let hero = {
