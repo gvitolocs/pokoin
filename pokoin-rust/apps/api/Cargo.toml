@@ -1,0 +1,31 @@
+[package]
+name = "pokoin-api"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "pokoin-api"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+pokoin-auth = { path = "../../crates/auth" }
+pokoin-cache = { path = "../../crates/cache" }
+pokoin-config = { path = "../../crates/config" }
+pokoin-db = { path = "../../crates/db" }
+pokoin-integrations = { path = "../../crates/integrations" }
+pokoin-listings = { path = "../../crates/listings" }
+pokoin-marketplace = { path = "../../crates/marketplace" }
+pokoin-observability = { path = "../../crates/observability" }
+pokoin-search = { path = "../../crates/search" }
+redis = { workspace = true }
+serde = { workspace = true }
+serde_urlencoded = "0.7"
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+sqlx = { workspace = true }
+reqwest = { workspace = true }

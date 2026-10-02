@@ -1,0 +1,6 @@
+[package]
+name = "pokoin-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

@@ -1,0 +1,10 @@
+{
+  "rustOrigin": "http://127.0.0.1:18082",
+  "shadow": ["suggest"],
+  "routes": {
+    "suggest": 0,
+    "card_page": 0,
+    "search": 0,
+    "listings_write": 0
+  }
+}

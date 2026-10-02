@@ -1,0 +1,8 @@
+[package]
+name = "pokoin-marketplace"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pokoin-cache = { path = "../cache" }
+serde_json = { workspace = true }

@@ -1,0 +1,11 @@
+[package]
+name = "pokoin-search"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+icu_collator = "2"
+icu_locale_core = "2"
+regex = "1"
+serde_json = { workspace = true }
+unicode-normalization = "0.1"
