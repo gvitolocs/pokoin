@@ -159,7 +159,8 @@ test('desk theme transition is a direct color fade, not a class reset', () => {
   const untilUnmount = themeEffect.slice(0, themeEffect.indexOf('useEffect(() => () =>'));
   assert.doesNotMatch(untilUnmount, /classList\.remove\('desk-tinted'\)/);
   assert.match(jsx, /deskTheme\(themeCard\)/);
-  assert.match(jsx, /storedRarityKind\(themeCard\)/);
+  assert.match(jsx, /rarityDeskVars\(kind\) \|\| deskThemeVars\(pageTheme\)/);
   assert.match(jsx, /classList\.toggle\('desk-rainbow', kind === 'rainbow'\)/);
-  assert.match(css, /html\.desk-tinted\.desk-rainbow \.card-page \.asset-header \{[^}]*#4c1d86 0%, #12386a/s);
+  assert.match(css, /html\.desk-tinted\.desk-rainbow \.card-page \.asset-header[^}]*#4c1d86 0%, #12386a/s);
+  assert.match(css, /html\.desk-tinted\.desk-rainbow \.card-page \.panel[^}]*background: #1a1030;/s);
 });

@@ -80,6 +80,7 @@ import {
   cardShadeStyle,
   deskTheme,
   deskThemeVars,
+  rarityDeskVars,
   peekDeskIdentity,
   rememberCardBucket,
   rememberDeskIdentity,
@@ -2057,8 +2058,8 @@ export default function Card() {
   }, [payload?.card, stubCard, cardId]);
   useLayoutEffect(() => {
     const root = document.documentElement;
-    const vars = deskThemeVars(pageTheme);
     const kind = storedRarityKind(themeCard);
+    const vars = rarityDeskVars(kind) || deskThemeVars(pageTheme);
     if (vars) {
       for (const [key, value] of Object.entries(vars)) {
         root.style.setProperty(key, value);
@@ -2121,6 +2122,7 @@ export default function Card() {
   const art = imageSrc(card, 'hero');
   // The header tile takes the printing's leftover illustration shade.
   const heroShade = albumShade(card);
+  const rarityKind = storedRarityKind(card);
   const setName = identity.set || '';
   const setHref = setName ? `/marketplace/sets/${setSlug(setName)}` : '';
   const artist = identity.artist || payload?.artist?.name || payload?.artist?.illustrator || '';
@@ -2267,8 +2269,8 @@ export default function Card() {
         ]}
       />
       <header
-        className={pageTheme || heroShade ? 'asset-header shaded' : 'asset-header'}
-        style={cardShadeStyle(card)}
+        className={!rarityKind && (pageTheme || heroShade) ? 'asset-header shaded' : 'asset-header'}
+        style={rarityKind ? undefined : cardShadeStyle(card)}
       >
         <div className="asset-title-row">
           <h1>
@@ -2334,8 +2336,8 @@ export default function Card() {
                 {collector}
               </>
             ) : null}
-            {storedRarityKind(card) ? (
-              <span className={`rarity-kind is-${storedRarityKind(card)}`}>{rarityKindLabel(card)}</span>
+            {rarityKind ? (
+              <span className={`rarity-kind is-${rarityKind}`}>{rarityKindLabel(card)}</span>
             ) : null}
             {artist ? (
               <>

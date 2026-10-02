@@ -424,3 +424,38 @@ export function deskThemeVars(theme) {
     '--desk-tint': theme.tint,
   };
 }
+
+/** Rainbow, gold, and Ghost Rare replace the artwork delta. */
+const RARITY_DESK = {
+  rainbow: {
+    '--desk-bg': '#120818',
+    '--desk-surface': '#1a1030',
+    '--desk-raised': '#241438',
+    '--desk-hero': '#4c1d86',
+    '--desk-hero-border': '#6a2458',
+    '--desk-border': '#5a3058',
+    '--desk-tint': '#6a2458',
+  },
+  gold: {
+    '--desk-bg': '#140e04',
+    '--desk-surface': '#241806',
+    '--desk-raised': '#2e2010',
+    '--desk-hero': '#6e5210',
+    '--desk-hero-border': '#8a6818',
+    '--desk-border': '#6e5210',
+    '--desk-tint': '#8a6818',
+  },
+  ghost: {
+    '--desk-bg': '#100614',
+    '--desk-surface': '#1a0c28',
+    '--desk-raised': '#241438',
+    '--desk-hero': '#4c1d86',
+    '--desk-hero-border': '#6328a8',
+    '--desk-border': '#4c1d86',
+    '--desk-tint': '#6328a8',
+  },
+};
+
+export function rarityDeskVars(kind) {
+  return RARITY_DESK[kind] || null;
+}

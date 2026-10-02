@@ -3184,13 +3184,14 @@ html.desk-tinted .card-page .asset-header {
   transition: background-color 180ms ease, border-color 180ms ease;
 }
 
-/* Stored rarity_kind replaces the artwork delta. The URL slug never sets these. */
+/* Stored rarity_kind replaces the artwork delta. These backgrounds are the
+   desk color, not a wash painted over --desk-hero from the leftover. */
 html.desk-tinted.desk-rainbow,
 html.desk-tinted.desk-rainbow body,
 html.desk-tinted.desk-rainbow #root {
-  --bg: #140818;
-  background-color: #140818;
-  background-image: linear-gradient(115deg, #2a1248 0%, #10243f 38%, #3a2a0c 72%, #3a1630 100%);
+  --bg: #120818;
+  background: #120818 linear-gradient(100deg, #2a1248 0%, #12386a 34%, #6e5210 68%, #3a1630 100%);
+  transition: none;
 }
 
 html.desk-tinted.desk-rainbow .card-page {
@@ -3199,16 +3200,13 @@ html.desk-tinted.desk-rainbow .card-page {
   --g4: #241430;
   --g5: #5a3058;
   --surface: #120818;
-  --desk-bg: #120818;
-  --desk-surface: #1c1234;
-  --desk-raised: #261838;
-  --desk-border: #5a3058;
 }
 
-html.desk-tinted.desk-rainbow .card-page .asset-header {
-  background-color: #4c1d86;
-  background-image: linear-gradient(100deg, #4c1d86 0%, #12386a 34%, #6e5210 68%, #6a2458 100%);
+html.desk-tinted.desk-rainbow .card-page .asset-header,
+html.desk-tinted.desk-rainbow .card-page .asset-header.shaded {
+  background: linear-gradient(100deg, #4c1d86 0%, #12386a 34%, #6e5210 68%, #6a2458 100%);
   border-color: #6a2458;
+  transition: none;
 }
 
 html.desk-tinted.desk-rainbow .card-page .panel,
@@ -3216,57 +3214,53 @@ html.desk-tinted.desk-rainbow .card-page .sell-form,
 html.desk-tinted.desk-rainbow .card-page .add-panel,
 html.desk-tinted.desk-rainbow .card-page .reserve-blurb,
 html.desk-tinted.desk-rainbow .card-page .shop-panel {
-  background-color: #1a1030;
-  background-image: linear-gradient(160deg, rgb(42 18 72 / 0.94), rgb(16 28 48 / 0.94) 55%, rgb(42 32 12 / 0.9));
-  border-color: rgb(106 36 88 / 0.55);
+  background: #1a1030;
+  border-color: #5a3058;
+  transition: none;
 }
 
 html.desk-tinted.desk-gold,
 html.desk-tinted.desk-gold body,
 html.desk-tinted.desk-gold #root {
-  --bg: #1a1204;
-  background-color: #1a1204;
-  background-image: none;
+  --bg: #140e04;
+  background: #140e04;
+  transition: none;
 }
 
 html.desk-tinted.desk-gold .card-page {
   --g2: #140e04;
   --g3: #140e04;
   --g5: #6e5210;
-  --desk-bg: #140e04;
-  --desk-surface: #241806;
-  --desk-raised: #2e2010;
-  --desk-border: #6e5210;
+  --surface: #140e04;
 }
 
-html.desk-tinted.desk-gold .card-page .asset-header {
-  background-color: #6e5210;
-  background-image: linear-gradient(100deg, #6e5210, #8a6818);
+html.desk-tinted.desk-gold .card-page .asset-header,
+html.desk-tinted.desk-gold .card-page .asset-header.shaded {
+  background: linear-gradient(100deg, #6e5210, #8a6818);
   border-color: #8a6818;
+  transition: none;
 }
 
 html.desk-tinted.desk-ghost,
 html.desk-tinted.desk-ghost body,
 html.desk-tinted.desk-ghost #root {
-  --bg: #140818;
-  background-color: #140818;
-  background-image: none;
+  --bg: #100614;
+  background: #100614;
+  transition: none;
 }
 
 html.desk-tinted.desk-ghost .card-page {
   --g2: #100614;
   --g3: #100614;
   --g5: #4c1d86;
-  --desk-bg: #100614;
-  --desk-surface: #1a0c28;
-  --desk-raised: #241438;
-  --desk-border: #4c1d86;
+  --surface: #100614;
 }
 
-html.desk-tinted.desk-ghost .card-page .asset-header {
-  background-color: #4c1d86;
-  background-image: linear-gradient(100deg, #4c1d86, #6328a8);
+html.desk-tinted.desk-ghost .card-page .asset-header,
+html.desk-tinted.desk-ghost .card-page .asset-header.shaded {
+  background: linear-gradient(100deg, #4c1d86, #6328a8);
   border-color: #6328a8;
+  transition: none;
 }
 
 .rarity-kind {
