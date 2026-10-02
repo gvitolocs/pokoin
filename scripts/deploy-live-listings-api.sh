@@ -23,7 +23,7 @@ git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
 say "stage exact origin/main commit $COMMIT"
 git -C "$REPO" archive "$COMMIT" server/pokoin-api | tar -C "$STAGE" -xf -
 SRC="$STAGE/server/pokoin-api"
-for file in cardtrader-live-listings.js marketplace-listings.js; do
+for file in cardtrader-live-listings.js marketplace-listings.js _valkey.js _seller_profile_cache.js; do
   [[ -f "$SRC/$file" ]] || die "commit is missing server/pokoin-api/$file"
 done
 
@@ -31,11 +31,14 @@ say "live listings unit tests"
 node --test "$SRC/cardtrader-live-listings.test.js"
 node --check "$SRC/cardtrader-live-listings.js"
 node --check "$SRC/marketplace-listings.js"
+node --check "$SRC/_valkey.js"
+node --check "$SRC/_seller_profile_cache.js"
 
 release="releases/live-listings-$SHORT-$STAMP"
 say "Pi release $release"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .live-listings-previous; cp -a \$prev '$release'"
-tar -C "$SRC" -cf - cardtrader-live-listings.js marketplace-listings.js | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
+tar -C "$SRC" -cf - cardtrader-live-listings.js marketplace-listings.js _valkey.js _seller_profile_cache.js \
+  | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-live-listings-commit'"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 

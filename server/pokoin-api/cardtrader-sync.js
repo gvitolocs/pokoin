@@ -306,7 +306,7 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const job = enqueueCardTraderInventorySync({
+    const job = await enqueueCardTraderInventorySync({
       firestore,
       uid: decoded.uid,
       sellerName: String(sellerName),

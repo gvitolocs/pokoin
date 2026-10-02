@@ -14,6 +14,11 @@ const {
   pushAndLinkListing,
   pushListingToCardTrader,
 } = require('./_cardtrader_seller_listings');
+const {
+  getSellerPublicProfiles,
+  readSellerUidByName,
+  rememberSellerUidByName,
+} = require('./_seller_profile_cache');
 
 function parseGameFromRequest(...args) {
   return require('./_marketplace_game').parseGameFromRequest(...args);
@@ -33,6 +38,13 @@ function cleanLimit(value, fallback = 500) {
   const limit = Number(value);
   if (!Number.isFinite(limit)) return fallback;
   return Math.min(Math.max(Math.trunc(limit), 1), 1000);
+}
+
+/** Offset pagination for seller inventory top-up pages (0..50k guard). */
+function cleanOffset(value) {
+  const offset = Number(value);
+  if (!Number.isFinite(offset) || offset <= 0) return 0;
+  return Math.min(Math.trunc(offset), 50000);
 }
 
 function cleanText(value, maxLength = 240) {
@@ -404,6 +416,18 @@ async function sellerProfileForUsername(username, { listingsFirst = true } = {})
     throw error;
   }
 
+  // Shared slug cache first: a resolved seller name → uid pair is stable and
+  // public. Unknown names are never negatively cached (new sellers can
+  // appear any time).
+  const cachedUid = await readSellerUidByName(clean);
+  if (cachedUid?.uid) {
+    return {
+      uid: cachedUid.uid,
+      username: clean,
+      displayName: cachedUid.displayName || '',
+    };
+  }
+
   let uid = '';
   let displayName = '';
   if (listingsFirst) {
@@ -437,6 +461,7 @@ async function sellerProfileForUsername(username, { listingsFirst = true } = {})
     throw error;
   }
 
+  await rememberSellerUidByName(clean, { uid, displayName });
   return {
     uid,
     username: clean,
@@ -472,19 +497,9 @@ async function enrichListingRowsWithSellerProfiles(rows = []) {
   const uids = [...uidSet];
   if (uids.length === 0) return rows;
   try {
-    const firestore = getFirebaseAdmin().firestore();
-    const docs = await Promise.all(
-      uids.map((uid) => firestore.collection('users').doc(uid).get()),
-    );
-    const profiles = new Map();
-    docs.forEach((doc, index) => {
-      const data = doc.data?.() || {};
-      profiles.set(uids[index], {
-        displayName: cleanText(data.displayName, 120),
-        username: cleanText(data.username || data.usernameLower, 120),
-        acceptsPkn: data.acceptsPkn !== false,
-      });
-    });
+    // Shared read-through cache: Valkey first, one Firestore users/{uid} read
+    // per cache-miss only. Display enrichment — never used for authorization.
+    const profiles = await getSellerPublicProfiles(uids);
     return rows.map((row) => {
       const profile = profiles.get(cleanText(row.seller_uid, 160));
       return profile
@@ -676,6 +691,11 @@ async function readListings(url, decoded, { marketplaceGame = 'pokemon' } = {}) 
   }
   values.push(cleanLimit(url.searchParams.get('limit')));
   const qualifiedWhere = addListingTableAlias(where);
+  const offset = cleanOffset(url.searchParams.get('offset'));
+  const offsetSql = offset > 0 ? `\n      offset $${values.length + 1}` : '';
+  if (offset > 0) {
+    values.push(offset);
+  }
   const result = await marketplaceQuery(
     `
       select
@@ -683,11 +703,14 @@ async function readListings(url, decoded, { marketplaceGame = 'pokemon' } = {}) 
       from public.marketplace_user_listings listings
       ${qualifiedWhere.length ? `where ${qualifiedWhere.join(' and ')}` : ''}
       order by price_pkn asc, updated_at desc, created_at desc
-      limit $${values.length}
+      limit $${values.length - (offset > 0 ? 1 : 0)}${offsetSql}
     `,
     values,
   );
-  const enrichedRows = sellerUsername
+  // Owner reads (MyPokoin / stock) skip the Firestore profile enrich: the
+  // seller is the caller, rows fall back to their native username columns,
+  // and the extra Google round trip dominated the desk's time to first row.
+  const enrichedRows = sellerUsername || sellerUid
     ? result.rows
     : await enrichListingRowsWithSellerProfiles(result.rows);
   const urlEnrichedRows = await enrichListingRowsWithCardUrls(enrichedRows);

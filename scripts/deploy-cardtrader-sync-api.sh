@@ -30,6 +30,8 @@ CT_FILES=(
   _cardtrader_inventory_sync_core.js
   _cardtrader_inventory_sync.js
   _cardtrader_inventory_async.js
+  _valkey.js
+  _seller_profile_cache.js
   _cardtrader_webhook_core.js
   _cardtrader_webhook_registration.js
   cardtrader-connect.js
@@ -115,11 +117,12 @@ ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' \
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-cardtrader-sync-commit'"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
-say "verify health + CardTrader routes"
+say "verify health + CardTrader routes + shared marketplace listings"
 healthy=0
 health=""; status=""; sync=""; assets=""; history=""; webhook=""; zero=""; ptconnect=""
 for _ in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
+  listings="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-listings?cardId=633380&limit=5'" || true)"
   status="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/cardtrader-status" || true)"
   sync="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/cardtrader-sync" || true)"
   assets="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/cardtrader-assets" || true)"
@@ -128,7 +131,7 @@ for _ in $(seq 1 45); do
   zero="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/cardtrader-zero" || true)"
   ptconnect="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/powertools-connect" || true)"
   # status/sync/assets/history/zero/powertools-connect require auth → 401/403; webhook missing secret → 401/404/400; health 200
-  if [[ "$health" == "200" && "$status" =~ ^(401|403)$ && "$sync" =~ ^(401|403)$ && "$assets" =~ ^(401|403)$ && "$history" =~ ^(401|403)$ && "$webhook" =~ ^(400|401|404)$ && "$zero" =~ ^(401|403)$ && "$ptconnect" =~ ^(401|403)$ ]]; then
+  if [[ "$health" == "200" && "$listings" == "200" && "$status" =~ ^(401|403)$ && "$sync" =~ ^(401|403)$ && "$assets" =~ ^(401|403)$ && "$history" =~ ^(401|403)$ && "$webhook" =~ ^(400|401|404)$ && "$zero" =~ ^(401|403)$ && "$ptconnect" =~ ^(401|403)$ ]]; then
     healthy=1
     break
   fi

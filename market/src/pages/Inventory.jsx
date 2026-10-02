@@ -18,6 +18,11 @@ const FORMATS = [
   { id: 'cardtrader', label: 'CardTrader' },
 ];
 
+// Paint the board off the first raw page, then top up the rest in the
+// background — one round trip to first row instead of the full inventory.
+const INVENTORY_FIRST_PAGE = 200;
+const INVENTORY_PAGE_LIMIT = 1000;
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -56,11 +61,38 @@ export default function Inventory() {
   const [pendingCsv, setPendingCsv] = useState();
   const [message, setMessage] = useState('');
   const fileRef = useRef(null);
+  // Bumped by reload() so a stale background top-up stops writing rows.
+  const inventorySeq = useRef(0);
+
+  async function topUpInventory(uid, token, gen) {
+    let offset = INVENTORY_FIRST_PAGE;
+    for (;;) {
+      let data;
+      try {
+        data = await fetchSellerListings(uid, token, { limit: INVENTORY_PAGE_LIMIT, offset });
+      } catch (_) {
+        return;
+      }
+      if (gen !== inventorySeq.current) return;
+      const raw = data.listings || data.items || [];
+      if (!raw.length) return;
+      const filtered = liveInventoryListings(raw);
+      setRows((current) => {
+        const base = Array.isArray(current) ? current : [];
+        const known = new Set(base.map((row) => String(row.id || row.listingId || '')));
+        const fresh = filtered.filter((row) => !known.has(String(row.id || row.listingId || '')));
+        return fresh.length ? [...base, ...fresh] : current;
+      });
+      if (raw.length < INVENTORY_PAGE_LIMIT) return;
+      offset += raw.length;
+    }
+  }
 
   async function reload() {
     const uid = user?.uid || profile?.uid;
     if (!signedIn || !uid) return;
     const token = await getBearer();
+    inventorySeq.current += 1;
     const data = await fetchSellerListings(uid, token, { limit: 1000 });
     setRows(liveInventoryListings(data.listings || data.items || []));
   }
@@ -74,10 +106,13 @@ export default function Inventory() {
     const uid = user?.uid || profile?.uid;
     if (!signedIn || !uid) return undefined;
     let cancelled = false;
+    const gen = ++inventorySeq.current;
     getBearer()
-      .then((token) => fetchSellerListings(uid, token, { limit: 1000 }))
+      .then((token) => fetchSellerListings(uid, token, { limit: INVENTORY_FIRST_PAGE }))
       .then((data) => {
-        if (!cancelled) setRows(liveInventoryListings(data.listings || data.items || []));
+        if (cancelled) return;
+        setRows(liveInventoryListings(data.listings || data.items || []));
+        topUpInventory(uid, token, gen).catch(() => {});
       })
       .catch((err) => {
         if (!cancelled) setError(err.message || 'Listings failed.');

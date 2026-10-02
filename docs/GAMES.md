@@ -133,13 +133,35 @@ Pi.
 | `api.pokoin.com` | **pi-home** CF tunnel (edge `:18079` → API `:18080`) | Public marketplace API. Reads local Postgres replica `127.0.0.1:5432`. Listing/order writes use `MARKETPLACE_WRITER_DATABASE_URL` → nezopt LAN `192.168.178.55:25432`. Card desk sold graph: `GET /api/marketplace-card-sales` → replica `cardtrader_sold_daily`. |
 | `cdn.pokoin.com` | **pi-home** `:18081` | Leftover JPEG origin (`/srv/pokoin/card-images/objects`). |
 | Meili + Valkey | **pi-home** | English suggest + cache next to the API. Docker `pokoin-meili` is `getmeili/meilisearch:v1.53.1`, data `/srv/pokoin/meili`. |
+
+### API handler ownership (2026-10-02): CardVault api/ copies are deprecated
+
+The Pi runtime (`/srv/pokoin/api/current/api/`) started as a CardVault
+release, but the **source of truth for shared marketplace handlers is this
+repository**: `server/api/` and `server/pokoin-api/`. CardVault's
+`pokemon_card_vault/api/` copies are **deprecated for the marketplace
+webpage/API** — never edit them for API behavior; vendor the handler into
+`server/api/` and ship it with a `scripts/deploy-*-api.sh` overlay instead.
+The CardVault **app (Flutter) is a separate product and not covered by this
+deprecation.**
+
+Pokoin-web-owned so far: the search/suggest family (`marketplace-cards`,
+`marketplace-search-page`, `marketplace-suggest`, candidates/autocomplete,
+`deploy-search-api.sh`), `marketplace-listings` (via
+`deploy-live-listings-api.sh`; `offset` pagination + owner reads skip the
+Firestore profile enrich), and `marketplace-artist-cards` (via
+`deploy-artist-cards-api.sh`; `tiles=1` serves the artist/profile identity
+once instead of repeating it on every card row — [ARTISTS.md](ARTISTS.md)).
+Still served by legacy CardVault copies (transitional until vendored):
+`marketplace-card-page`, `marketplace-expansion-page`,
+`marketplace-home-page`, and the remaining read handlers.
 | CardTrader **GET** + API | Oracle `pokoin-marketplace` `130.61.251.250` | Docker **`cardtrader-oracle-api`** (`:18080`, `/home/ubuntu/cardtrader-oracle-api/current`). Full `oracle-api-server` plus the daily GET dump. Not `api.pokoin.com`. [CARDTRADER_ORACLE_API.md](CARDTRADER_ORACLE_API.md). |
 | Dump **JSON** | nezopt **NVMe** (`/`, ~1.2T free) | Raw CardTrader expansion GET bodies / crawl artifacts. Not the 15T. Not the Pi. |
 | Leftover **JPEGs** (edge) | nezopt **NVMe** `/home/nez/data/pokoin-leftovers` | Classify, OCR, CLIP artcut, ingest write. One-time `scripts/sync-nvme-leftovers-from-15t.sh`. |
 | Postgres **writer** / historicization | **nezopt NVMe** `pokoin-marketplace-postgres-15t` (`127.0.0.1:25432`, LAN `192.168.178.55:25432`) | Snapshot book, `archiveMissing`, `sold_daily`, observations. Data dir `/home/nez/data/pokoin-marketplace-postgres/`. Always on (no 22:00 HDD night-off). HDD copy kept for rollback. |
 | Dump persist tunnel | nezopt user unit `pokoin-oracle-dump-pg-tunnel` | Oracle `127.0.0.1:15543` → nezopt `127.0.0.1:25432`. `MARKETPLACE_DATABASE_SSL=0`. |
 | Postgres on Pi | Docker `pokoin-marketplace-postgres-replica` | Streaming **replica of nezopt writer** (`primary_conninfo` `192.168.178.55:25432`, slot `pokoin_pi_replica`, `sslmode=disable`). `max_connections` must be ≥ primary (120). Never dump-write or migrate here. Oracle SSH tunnel `:15432` is disabled. |
-| SPA | Vercel project `web` → `pokoin.com` | `/api/*` rewrites to `api.pokoin.com`. |
+| SPA | Vercel project `web` → `pokoin.com` | `/api/*` rewrites to `api.pokoin.com`. Route-level lazy chunks (`App.jsx` — every page except `Home` is `React.lazy`; main bundle 1.75 MB raw / ~487 KB gzip since 2026-10-02), and `/market/assets/*` hashed files are `immutable` 1y via `vercel.json`. |
 
 Install the persist tunnel on nezopt:
 `scripts/install-oracle-dump-nezopt-tunnel.sh`. Recreate the Oracle CardTrader

@@ -1,82 +1,96 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider } from './auth.jsx';
 import { CartProvider } from './cart.jsx';
 import { WalletProvider } from './wallet.jsx';
 import Chrome from './components/Chrome.jsx';
 import Home from './pages/Home.jsx';
-import Sanitize from './pages/Sanitize.jsx';
-import Espurr from './pages/Espurr.jsx';
-import Ocr from './pages/Ocr.jsx';
-import OcrArtists from './pages/OcrArtists.jsx';
-import ArtworkHover from './pages/ArtworkHover.jsx';
-import TestsDashboard from './pages/TestsDashboard.jsx';
-import JumbosBoard from './pages/JumbosBoard.jsx';
-import Search from './pages/Search.jsx';
-import Card from './pages/Card.jsx';
-import Expansion from './pages/Expansion.jsx';
-import Competitive from './pages/Competitive.jsx';
-import CompetitiveTournaments from './pages/CompetitiveTournaments.jsx';
-import CompetitiveDecks from './pages/CompetitiveDecks.jsx';
-import CompetitiveDecklist from './pages/CompetitiveDecklist.jsx';
-import CompetitivePlayers from './pages/CompetitivePlayers.jsx';
-import CompetitiveCards from './pages/CompetitiveCards.jsx';
-import Portfolio from './pages/Portfolio.jsx';
-import Explore from './pages/Explore.jsx';
-import Watchlist from './pages/Watchlist.jsx';
-import Sets from './pages/Sets.jsx';
-import Era from './pages/Era.jsx';
-import Versions from './pages/Versions.jsx';
-import Artist from './pages/Artist.jsx';
-import PokemonHub from './pages/PokemonHub.jsx';
-import RarityHub from './pages/RarityHub.jsx';
-import LanguageHub from './pages/LanguageHub.jsx';
-import Guides from './pages/Guides.jsx';
-import Products from './pages/Products.jsx';
-import Auth from './pages/Auth.jsx';
-import ExtensionAuthBridge from './pages/ExtensionAuthBridge.jsx';
-import Profile from './pages/Profile.jsx';
-import Seller from './pages/Seller.jsx';
-import Cart from './pages/Cart.jsx';
-import Wallet from './pages/Wallet.jsx';
-import Exchange from './pages/Exchange.jsx';
-import Messages, { Conversation } from './pages/Messages.jsx';
-import Forum from './pages/Forum.jsx';
-import Signal from './pages/Signal.jsx';
-import Scan from './pages/Scan.jsx';
-import Inventory from './pages/Inventory.jsx';
-import ScanDesk from './pages/ScanDesk.jsx';
-import SellerHome from './pages/SellerHome.jsx';
-import Buy from './pages/Buy.jsx';
-import Admin from './pages/Admin.jsx';
-import Checkout from './pages/Checkout.jsx';
-import Orders from './pages/Orders.jsx';
-import Associate from './pages/Associate.jsx';
-import Sales from './pages/Sales.jsx';
-import Bought from './pages/Bought.jsx';
-import Stock from './pages/Stock.jsx';
-import SyncReview from './pages/SyncReview.jsx';
-import CardTraderZero from './pages/CardTraderZero.jsx';
-import Collection from './pages/Collection.jsx';
-import NftRedirect from './pages/Nft.jsx';
-import Protection from './pages/Protection.jsx';
-import Flex from './pages/Flex.jsx';
-import Invite from './pages/Invite.jsx';
-import Join from './pages/Join.jsx';
-import AmbassadorProgram from './pages/AmbassadorProgram.jsx';
-import ReferralClaimer from './components/ReferralClaimer.jsx';
-import EmailPreferences from './pages/EmailPreferences.jsx';
-import Site from './pages/Site.jsx';
-import About from './pages/About.jsx';
-import SiteMap from './pages/SiteMap.jsx';
-import Careers from './pages/Careers.jsx';
-import WorkingOnIt from './components/WorkingOnIt.jsx';
 import CookieBanner from './components/CookieBanner.jsx';
+import WorkingOnIt from './components/WorkingOnIt.jsx';
 import { framedByChromeExtension } from './extension-auth-bridge.js';
-import ChatDock from './components/ChatDock.jsx';
 import { isDashboardHost } from './scan-api.js';
 import { legacyDashboardHref } from './punchouts.js';
 import { subscribeOriginDown } from './working-page.js';
+
+// Route-level code splitting: one chunk per page so the first marketplace
+// paint does not download every desk, board, and admin surface (plus the
+// Firestore SDK its pages pull in). Home stays eager — it is the SPA landing.
+const Sanitize = lazy(() => import('./pages/Sanitize.jsx'));
+const Espurr = lazy(() => import('./pages/Espurr.jsx'));
+const Ocr = lazy(() => import('./pages/Ocr.jsx'));
+const OcrArtists = lazy(() => import('./pages/OcrArtists.jsx'));
+const ArtworkHover = lazy(() => import('./pages/ArtworkHover.jsx'));
+const TestsDashboard = lazy(() => import('./pages/TestsDashboard.jsx'));
+const JumbosBoard = lazy(() => import('./pages/JumbosBoard.jsx'));
+const Search = lazy(() => import('./pages/Search.jsx'));
+const Card = lazy(() => import('./pages/Card.jsx'));
+const Expansion = lazy(() => import('./pages/Expansion.jsx'));
+const Competitive = lazy(() => import('./pages/Competitive.jsx'));
+const CompetitiveTournaments = lazy(() => import('./pages/CompetitiveTournaments.jsx'));
+const CompetitiveDecks = lazy(() => import('./pages/CompetitiveDecks.jsx'));
+const CompetitiveDecklist = lazy(() => import('./pages/CompetitiveDecklist.jsx'));
+const CompetitivePlayers = lazy(() => import('./pages/CompetitivePlayers.jsx'));
+const CompetitiveCards = lazy(() => import('./pages/CompetitiveCards.jsx'));
+const Portfolio = lazy(() => import('./pages/Portfolio.jsx'));
+const Explore = lazy(() => import('./pages/Explore.jsx'));
+const Watchlist = lazy(() => import('./pages/Watchlist.jsx'));
+const Sets = lazy(() => import('./pages/Sets.jsx'));
+const Era = lazy(() => import('./pages/Era.jsx'));
+const Versions = lazy(() => import('./pages/Versions.jsx'));
+const Artist = lazy(() => import('./pages/Artist.jsx'));
+const PokemonHub = lazy(() => import('./pages/PokemonHub.jsx'));
+const RarityHub = lazy(() => import('./pages/RarityHub.jsx'));
+const LanguageHub = lazy(() => import('./pages/LanguageHub.jsx'));
+const Guides = lazy(() => import('./pages/Guides.jsx'));
+const Products = lazy(() => import('./pages/Products.jsx'));
+const Auth = lazy(() => import('./pages/Auth.jsx'));
+const ExtensionAuthBridge = lazy(() => import('./pages/ExtensionAuthBridge.jsx'));
+const Profile = lazy(() => import('./pages/Profile.jsx'));
+const Seller = lazy(() => import('./pages/Seller.jsx'));
+const Cart = lazy(() => import('./pages/Cart.jsx'));
+const Wallet = lazy(() => import('./pages/Wallet.jsx'));
+const Exchange = lazy(() => import('./pages/Exchange.jsx'));
+const Messages = lazy(() => import('./pages/Messages.jsx'));
+const Conversation = lazy(() => import('./pages/Messages.jsx').then((m) => ({ default: m.Conversation })));
+const Forum = lazy(() => import('./pages/Forum.jsx'));
+const Signal = lazy(() => import('./pages/Signal.jsx'));
+const Scan = lazy(() => import('./pages/Scan.jsx'));
+const Inventory = lazy(() => import('./pages/Inventory.jsx'));
+const ScanDesk = lazy(() => import('./pages/ScanDesk.jsx'));
+const SellerHome = lazy(() => import('./pages/SellerHome.jsx'));
+const Buy = lazy(() => import('./pages/Buy.jsx'));
+const Admin = lazy(() => import('./pages/Admin.jsx'));
+const Checkout = lazy(() => import('./pages/Checkout.jsx'));
+const Orders = lazy(() => import('./pages/Orders.jsx'));
+const Associate = lazy(() => import('./pages/Associate.jsx'));
+const Sales = lazy(() => import('./pages/Sales.jsx'));
+const Bought = lazy(() => import('./pages/Bought.jsx'));
+const Stock = lazy(() => import('./pages/Stock.jsx'));
+const SyncReview = lazy(() => import('./pages/SyncReview.jsx'));
+const CardTraderZero = lazy(() => import('./pages/CardTraderZero.jsx'));
+const Collection = lazy(() => import('./pages/Collection.jsx'));
+const NftRedirect = lazy(() => import('./pages/Nft.jsx'));
+const Protection = lazy(() => import('./pages/Protection.jsx'));
+const Flex = lazy(() => import('./pages/Flex.jsx'));
+const Invite = lazy(() => import('./pages/Invite.jsx'));
+const Join = lazy(() => import('./pages/Join.jsx'));
+const AmbassadorProgram = lazy(() => import('./pages/AmbassadorProgram.jsx'));
+const ReferralClaimer = lazy(() => import('./components/ReferralClaimer.jsx'));
+const EmailPreferences = lazy(() => import('./pages/EmailPreferences.jsx'));
+const Site = lazy(() => import('./pages/Site.jsx'));
+const About = lazy(() => import('./pages/About.jsx'));
+const SiteMap = lazy(() => import('./pages/SiteMap.jsx'));
+const Careers = lazy(() => import('./pages/Careers.jsx'));
+const ChatDock = lazy(() => import('./components/ChatDock.jsx'));
+
+/** Route chunk placeholder — keeps the desk shell mounted, no CLS. */
+function RouteSuspense({ children }) {
+  return (
+    <Suspense fallback={<div className="page desk" style={{ minHeight: '55vh' }} role="status" aria-busy="true" />}>
+      {children}
+    </Suspense>
+  );
+}
 
 function both(path, element) {
   return [
@@ -132,7 +146,8 @@ function AppShell() {
     return <WorkingOnIt />;
   }
   const routes = (
-    <Routes>
+    <RouteSuspense>
+      <Routes>
       {both('/tests', <TestsDashboard />)}
       {both('/sanitize', <Sanitize />)}
       {both('/espurr', <Espurr />)}
@@ -234,7 +249,8 @@ function AppShell() {
       {both('/', <Navigate to="/marketplace" replace />)}
       {import.meta.env.DEV ? both('/dash-preview', <SellerHome />) : null}
       <Route path="*" element={<Navigate to="/marketplace" replace />} />
-    </Routes>
+      </Routes>
+    </RouteSuspense>
   );
   if (board) {
     return routes;
@@ -244,7 +260,9 @@ function AppShell() {
       <Chrome>{routes}</Chrome>
       <ReferralClaimer />
       <CookieBanner />
-      <ChatDock />
+      <Suspense fallback={null}>
+        <ChatDock />
+      </Suspense>
     </>
   );
 }

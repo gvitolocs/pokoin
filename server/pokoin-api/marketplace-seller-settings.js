@@ -31,6 +31,7 @@ const { assertShipFromCountry, normalizeCountry } = require('./_checkout_core');
 const { shipFromCountryFromRequest } = require('./_client_country');
 const { marketplaceWriteQuery } = require('./_marketplace_db');
 const { acceptsPknFrom, sellersRefusingPkn } = require('./_seller_pkn_policy');
+const { invalidateSellerProfile } = require('./_seller_profile_cache');
 
 function profileRef(firestore, uid) {
   return firestore.collection('users').doc(uid);
@@ -125,6 +126,9 @@ module.exports = async function handler(req, res) {
       patch.acceptsPkn = body.acceptsPkn;
     }
     await profileRef(firestore, decoded.uid).set(patch, { merge: true });
+    // acceptsPkn feeds the shared public-profile cache used by listing
+    // enrichment — drop the cached copy so the change shows immediately.
+    await invalidateSellerProfile(decoded.uid);
     let listingsStamped = 0;
     if (patch.shipFromCountry) {
       listingsStamped = await stampSellerCountryOnListings(decoded.uid, patch.shipFromCountry);

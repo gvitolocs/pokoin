@@ -11,7 +11,10 @@ const PKN_USDT_REFERENCE_PRICE = 0.005;
 const CARDTRADER_MARKUP_PKN = 0; // market reference PKN matches dump (EUR/0.005); no shipping pad
 const CARDTRADER_MARKETPLACE_PRODUCTS_PATH = '/api/v2/marketplace/products';
 const MAX_EXPLICIT_LIMIT = 1000;
-const CACHE_TTL_MS = 45_000;
+// L1 (this process) and L2 (shared Valkey `ct:live:*`) MUST use one TTL so
+// the layers never disagree about freshness.
+const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_SEC = CACHE_TTL_MS / 1000;
 const MAX_CACHE_ENTRIES = 100;
 const SENSITIVE_METADATA_KEY = /(token|secret|password|authorization|credential|cookie|api[_-]?key|private[_-]?key|email|phone)/i;
 
@@ -558,6 +561,26 @@ function pruneCache(nowMs) {
   }
 }
 
+/** L2 shared cache (Valkey). Injectable for tests; fail-open via _valkey. */
+function defaultSharedCache() {
+  return require('./_valkey');
+}
+
+function sharedCacheKeyFor(cacheKey) {
+  return `ct:live:${cacheKey}`;
+}
+
+function hitPayload(cached, nowMs) {
+  return {
+    ...cached.payload,
+    cache: {
+      ...cached.payload.cache,
+      hit: true,
+      expiresAt: new Date(Math.min(cached.expiresAtMs, nowMs + CACHE_TTL_MS)).toISOString(),
+    },
+  };
+}
+
 async function readLiveCardTraderListings(
   request,
   {
@@ -565,6 +588,7 @@ async function readLiveCardTraderListings(
     fetchProducts = fetchMarketplaceProducts,
     query = marketplaceQuery,
     now = () => Date.now(),
+    sharedCache = defaultSharedCache,
   } = {},
 ) {
   const token = requireCardTraderApiToken(env);
@@ -574,14 +598,21 @@ async function readLiveCardTraderListings(
   const cacheKey = cacheKeyForRequest(request, mapping);
   const cached = liveListingsCache.get(cacheKey);
   if (cached && cached.expiresAtMs > nowMs) {
-    return {
-      ...cached.payload,
-      cache: {
-        ...cached.payload.cache,
-        hit: true,
-        expiresAt: new Date(cached.expiresAtMs).toISOString(),
-      },
-    };
+    return hitPayload(cached, nowMs);
+  }
+
+  // L2: another API instance may have fetched this CT request within the TTL.
+  // A shared hit is promoted into L1 so both layers expire together.
+  const sharedKey = sharedCacheKeyFor(cacheKey);
+  let shared = null;
+  try {
+    shared = await sharedCache().getJson(sharedKey);
+  } catch (_) {
+    shared = null;
+  }
+  if (shared && shared.payload && Number(shared.expiresAtMs) > nowMs) {
+    liveListingsCache.set(cacheKey, { payload: shared.payload, expiresAtMs: Number(shared.expiresAtMs) });
+    return hitPayload(shared, nowMs);
   }
 
   const params = { blueprint_id: mapping.cardtraderBlueprintId };
@@ -613,7 +644,7 @@ async function readLiveCardTraderListings(
     },
     cache: {
       hit: false,
-      ttlSeconds: CACHE_TTL_MS / 1000,
+      ttlSeconds: CACHE_TTL_SEC,
       expiresAt: new Date(expiresAtMs).toISOString(),
     },
     pagination: {
@@ -626,6 +657,12 @@ async function readLiveCardTraderListings(
   };
   liveListingsCache.set(cacheKey, { payload: responsePayload, expiresAtMs });
   pruneCache(nowMs);
+  // Only successful payloads are shared, never thrown CT errors.
+  try {
+    await sharedCache().setJson(sharedKey, { payload: responsePayload, expiresAtMs }, CACHE_TTL_SEC);
+  } catch (_) {
+    /* cache write is best-effort */
+  }
   return responsePayload;
 }
 

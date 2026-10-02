@@ -74,3 +74,101 @@ test('an explicit request game wins over the Pokemon request context', async () 
   assert.equal(mapping.cardtraderBlueprintId, '355401');
   assert.match(calls[0], /ct_id/);
 });
+
+// --- Shared L2 cache (Valkey ct:live:*) ---
+
+function liveRequest() {
+  return { blueprintId: '355401', limit: 20 };
+}
+
+function fakeSharedCache({ down = false } = {}) {
+  const fake = { sets: [], store: new Map(), down };
+  fake.getJson = async (key) => {
+    if (fake.down) return null;
+    return fake.store.has(key) ? fake.store.get(key) : null;
+  };
+  fake.setJson = async (key, value, ttlSeconds) => {
+    if (fake.down) return false;
+    fake.sets.push({ key, value, ttlSeconds });
+    fake.store.set(key, value);
+    return true;
+  };
+  return fake;
+}
+
+test('the first live-listings read fetches CardTrader and shares the payload with the 60s TTL', async () => {
+  const live = loadFor('pokemon');
+  const fetchCalls = [];
+  const shared = fakeSharedCache();
+  const payload = await live.readLiveCardTraderListings(liveRequest(), {
+    env: { CARDTRADER_AUTH_TOKEN: 'test-token' },
+    fetchProducts: async () => { fetchCalls.push(1); return []; },
+    query: async () => ({ rows: [] }),
+    sharedCache: () => shared,
+    now: () => 1_000_000,
+  });
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(payload.cache.ttlSeconds, 60, 'L2 TTL must match the payload TTL');
+  assert.equal(shared.sets.length, 1);
+  assert.match(shared.sets[0].key, /^ct:live:cardtrader:355401:/);
+  assert.equal(shared.sets[0].ttlSeconds, 60);
+  assert.equal(shared.sets[0].value.payload.ok, true);
+  assert.equal(shared.sets[0].value.expiresAtMs, 1_060_000);
+});
+
+test('a second simulated instance reuses the shared payload without a second CardTrader call', async () => {
+  const live = loadFor('pokemon');
+  const fetchCalls = [];
+  const shared = fakeSharedCache();
+  const options = () => ({
+    env: { CARDTRADER_AUTH_TOKEN: 'test-token' },
+    fetchProducts: async () => { fetchCalls.push(1); return []; },
+    query: async () => ({ rows: [] }),
+    sharedCache: () => shared,
+    now: () => 1_000_000,
+  });
+  await live.readLiveCardTraderListings(liveRequest(), options());
+  live._test.clearLiveListingsCache(); // simulate a different API process (empty L1)
+  const second = await live.readLiveCardTraderListings(liveRequest(), options());
+  assert.equal(fetchCalls.length, 1, 'the shared L2 hit must prevent a second CardTrader call');
+  assert.equal(second.cache.hit, true);
+  assert.equal(second.ok, true);
+});
+
+test('an in-process L1 hit does not touch the shared cache and keeps one TTL regime', async () => {
+  const live = loadFor('pokemon');
+  const fetchCalls = [];
+  const shared = fakeSharedCache();
+  const options = () => ({
+    env: { CARDTRADER_AUTH_TOKEN: 'test-token' },
+    fetchProducts: async () => { fetchCalls.push(1); return []; },
+    query: async () => ({ rows: [] }),
+    sharedCache: () => shared,
+    now: () => 1_000_000,
+  });
+  await live.readLiveCardTraderListings(liveRequest(), options());
+  const setsAfterFirst = shared.sets.length;
+  const l1Hit = await live.readLiveCardTraderListings(liveRequest(), options());
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(shared.sets.length, setsAfterFirst, 'L1 hit must not rewrite the shared key');
+  assert.equal(l1Hit.cache.hit, true);
+});
+
+test('valkey down: every instance falls back to CardTrader without failing', async () => {
+  const live = loadFor('pokemon');
+  const fetchCalls = [];
+  const shared = fakeSharedCache({ down: true });
+  const options = () => ({
+    env: { CARDTRADER_AUTH_TOKEN: 'test-token' },
+    fetchProducts: async () => { fetchCalls.push(1); return []; },
+    query: async () => ({ rows: [] }),
+    sharedCache: () => shared,
+    now: () => 1_000_000,
+  });
+  await live.readLiveCardTraderListings(liveRequest(), options());
+  live._test.clearLiveListingsCache();
+  const second = await live.readLiveCardTraderListings(liveRequest(), options());
+  assert.equal(fetchCalls.length, 2, 'with the shared cache down both instances fetch for themselves');
+  assert.equal(second.cache.hit, false);
+  assert.equal(second.ok, true);
+});
