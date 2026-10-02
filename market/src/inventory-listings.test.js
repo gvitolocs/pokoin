@@ -179,7 +179,7 @@ test('inventory stack key separates foil facets', () => {
 test('listing location grammar parses box, stack and position', () => {
   assert.deepEqual(parseListingLocation('megaevoluzionietb'), { box: 'megaevoluzionietb', stack: null, position: null, structured: false });
   assert.deepEqual(parseListingLocation('box1·47'), { box: 'box1', stack: 47, position: null, structured: true });
-  assert.deepEqual(parseListingLocation('megaevoluzionietb·2-4'), { box: 'megaevoluzionietb', stack: 2, position: 4, structured: true });
+  assert.deepEqual(parseListingLocation('megaevoluzionietb·2-4'), { box: 'megaevoluzionietb', stack: 2, position: null, structured: true });
   assert.deepEqual(parseListingLocation('box·3·5'), { box: 'box', stack: 3, position: 5, structured: true });
   assert.deepEqual(parseListingLocation('box·3·5-9'), { box: 'box', stack: 3, position: 5, structured: true });
   assert.deepEqual(parseListingLocation('box·3·5–9·2'), { box: 'box', stack: 3, position: 5, structured: true });
@@ -198,13 +198,9 @@ test('box stacks order by stack number then position, unnumbered last', () => {
     { id: 'p6', location: 'other·9', quantityAvailable: 1 },
   ];
   const stacks = groupBoxStacks(rows, 'box');
-  assert.deepEqual(stacks.map((s) => s.stack), [1, 3, 0]);
-  // Stack 1: neither posting has an intra-stack position — date order wins
-  // (p3 ·1-2 is older than p2 ·1).
-  assert.deepEqual(stacks[0].postings.map((p) => p.id), ['p3', 'p2']);
-  // Stack 3: position 2 before position 5.
-  assert.deepEqual(stacks[1].postings.map((p) => p.id), ['p4', 'p1']);
-  assert.equal(stacks[2].postings.length, 1);
+  assert.deepEqual(stacks.map((s) => s.stack), [3, 0]);
+  assert.deepEqual(stacks[0].postings.map((p) => p.id), ['p4', 'p1']);
+  assert.deepEqual(stacks[1].postings.map((p) => p.id), ['p3', 'p2', 'p5']);
   assert.equal(maxOccupiedStack(rows, 'box'), 3);
   assert.equal(maxOccupiedStack(rows, 'other'), 9);
 });
@@ -260,10 +256,24 @@ test('location pages include every slot in the linked box without matching neigh
   // Legacy links containing a full slot still open the whole box.
   assert.deepEqual(inventoryRowsForLocation(rows, 'megaevoluzionietb1·2·3'), selected);
   const stacks = groupBoxStacks(selected, 'megaevoluzionietb1');
-  assert.deepEqual(stacks.map((stack) => stack.stack), [1, 2, 0]);
+  assert.deepEqual(stacks.map((stack) => stack.stack), [2, 0]);
   assert.equal(stacks.reduce((sum, stack) => sum + stack.postingCount, 0), 4);
   assert.equal(stacks.reduce((sum, stack) => sum + stack.copies, 0), 7);
   assert.deepEqual(inventoryRowsForLocation(rows, 'missing'), []);
   assert.deepEqual(inventoryRowsForLocation(rows, ''), []);
   assert.deepEqual(inventoryRowsForLocation(null, 'megaevoluzionietb1'), []);
+});
+
+test('flat scan batch stays in one box group with eight postings and nine copies', () => {
+  const rows = Array.from({ length: 8 }, (_, n) => ({
+    id: String(n + 1), location: `megaevoluzionietb1·${n === 7 ? '8-9' : n + 1}`,
+    quantityAvailable: n === 7 ? 2 : 1,
+  }));
+  const groups = groupBoxStacks(rows.reverse(), 'megaevoluzionietb1');
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].stack, 0);
+  assert.equal(groups[0].postingCount, 8);
+  assert.equal(groups[0].copies, 9);
+  assert.deepEqual(groups[0].postings.map(row => row.slotPosition), [1,2,3,4,5,6,7,8]);
+  assert.equal(groups[0].postings[7].slotPositionText, '8-9');
 });

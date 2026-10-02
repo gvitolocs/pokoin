@@ -21,7 +21,7 @@ function StackThumb({ row }) {
 }
 
 function stackLabel(stack) {
-  return stack === 0 ? 'In the box' : `Stack ${stack}`;
+  return stack === 0 ? 'Cards in the box' : `Stack ${stack}`;
 }
 
 function stackHref(stack) {
@@ -39,13 +39,14 @@ export default function LocationBoard({ rows, location, formatPrice }) {
   // the box is the part before the first separator.
   const box = listingBox(location) || location;
   const stacks = groupBoxStacks(rows, box);
-  const postings = rows.length;
+  const dividerCount = stacks.filter((stack) => stack.stack > 0).length;
+  const postings = stacks.reduce((sum, stack) => sum + stack.postingCount, 0);
   const copies = stacks.reduce((sum, stack) => sum + stack.copies, 0);
 
   return (
     <section className="inv-board" aria-label={`Cards in ${box}`}>
       <div className="inv-summary">
-        <div className="inv-stat"><strong>{stacks.length}</strong><span>Stacks</span></div>
+        {dividerCount > 0 ? <div className="inv-stat"><strong>{dividerCount}</strong><span>Stacks</span></div> : null}
         <div className="inv-stat"><strong>{postings}</strong><span>Postings</span></div>
         <div className="inv-stat is-gold"><strong>{copies}</strong><span>Copies</span></div>
       </div>
@@ -75,7 +76,7 @@ export default function LocationBoard({ rows, location, formatPrice }) {
                 {stack.postings.map((row) => {
                   const href = stackHref(row);
                   const language = row?.language ? listingLanguageFlag(row.language) : null;
-                  const slotPosition = row.slotPosition ? ` · pos ${row.slotPosition}` : '';
+                  const slotPosition = row.slotPosition ? ` · pos ${row.slotPositionText || row.slotPosition}` : '';
                   return (
                     <Link key={row.id || `${row.cardId}-${row.pricePkn}`} className="loc-posting" to={href}>
                       <StackThumb row={row} />
