@@ -137,7 +137,9 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   assert.match(pile, /event\.metaKey \|\| event\.ctrlKey \|\| event\.shiftKey/);
   assert.match(pile, /select\.click\(rep\.id, event\)/);
   // Fast flings that skip past the sentinel must still load more tiles.
+  // Scrolling back up must not append: that inserts rows above the user.
   assert.match(artist, /rect\.top <= window\.innerHeight \+ 800/);
+  assert.match(artist, /if \(upward\) return/);
   assert.match(artist, /fetchArtist\(artistSlug, \{ limit: ARTIST_FIRST \}\)/);
   assert.match(artist, /fetchArtist\(artistSlug, \{ limit: 5000 \}\)/);
   assert.match(artist, /peekArtist\(artistSlug, 5000\)/);
