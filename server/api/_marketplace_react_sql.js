@@ -132,9 +132,8 @@ async function readExpansionBySlug(slug) {
       };
     }
   }
-  // Satellite DBs have marketplace_set_card_counts (+ optional pokoin_expansions).
-  // Never join pokoin_pokemon_expansions there — the relation is Pokemon-only and
-  // a missing table 500s the set desk after the expansions index already worked.
+  // Every satellite DB has pokoin_pokemon_expansions (logo rows are optional).
+  // Wordmarks stamped there are the set-guide art; an empty logo stays the letter mark.
   const fallback = await marketplaceQuery(
     isPokemonGame()
       ? `
@@ -142,7 +141,9 @@ async function readExpansionBySlug(slug) {
         c.set_name as name,
         c.slug,
         c.catalog_card_count,
-        e.nationality
+        e.nationality,
+        coalesce(e.logo_image_url, '') as logo_image_url,
+        coalesce(e.symbol_image_url, '') as symbol_image_url
       from public.marketplace_set_card_counts c
       left join public.pokoin_pokemon_expansions e
         on e.name = c.set_name
@@ -156,10 +157,14 @@ async function readExpansionBySlug(slug) {
         c.set_name as name,
         c.slug,
         c.catalog_card_count,
-        coalesce(nullif(nullif(trim(e.nationality), ''), 'unknown'), '') as nationality
+        coalesce(nullif(nullif(trim(e.nationality), ''), 'unknown'), '') as nationality,
+        coalesce(logos.logo_image_url, '') as logo_image_url,
+        coalesce(logos.symbol_image_url, '') as symbol_image_url
       from public.marketplace_set_card_counts c
       left join public.pokoin_expansions e
         on e.name = c.set_name
+      left join public.pokoin_pokemon_expansions logos
+        on logos.name = c.set_name
       where c.slug = $1
          or ${expansionSlugSql('c.set_name')} = $1
       order by c.catalog_card_count desc
@@ -187,8 +192,8 @@ function expansionFromSetCount(row, slugFallback = '') {
   return {
     name,
     slug,
-    symbolImageUrl: '',
-    logoImageUrl: '',
+    symbolImageUrl: String(row?.symbol_image_url || '').trim(),
+    logoImageUrl: String(row?.logo_image_url || '').trim(),
     defaultSymbolUrl: '',
     cardCount: Number(row?.catalog_card_count) || 0,
     nationality: String(row?.nationality || '').trim().toLowerCase(),
@@ -200,12 +205,16 @@ async function readExpansionsFromSetCounts(limit = 500) {
   const result = await marketplaceQuery(
     `
       select
-        set_name as name,
-        slug,
-        catalog_card_count
-      from public.marketplace_set_card_counts
-      where catalog_card_count > 0
-      order by catalog_card_count desc, set_name
+        c.set_name as name,
+        c.slug,
+        c.catalog_card_count,
+        coalesce(logos.logo_image_url, '') as logo_image_url,
+        coalesce(logos.symbol_image_url, '') as symbol_image_url
+      from public.marketplace_set_card_counts c
+      left join public.pokoin_pokemon_expansions logos
+        on logos.name = c.set_name
+      where c.catalog_card_count > 0
+      order by c.catalog_card_count desc, c.set_name
       limit $1
     `,
     [cap],

@@ -249,6 +249,89 @@ def _safe_name(value: str) -> str:
 BSS_BASE = "https://www.battlespirits-saga.com"
 
 
+# Product pages publish parallel treatments the card database does not list.
+BSS_TREATMENT = {
+    "sgr": "Saga Rare",
+    "spr": "Special Rare",
+    "holo": "Holographic",
+    "p": "Promo",
+    "p1": "Promo",
+    "corr": "Corrected",
+    "mis": "Misprint",
+    "miss": "Misprint",
+}
+
+
+def _bss_set_name(label: str) -> str:
+    import re
+
+    name = re.sub(r"^\[[^\]]+\]\s*", "", label).strip()
+    return name.title() if name else label.strip()
+
+
+def _bss_product_assets(cache: Path, known: dict, set_names: set):
+    """Parallel / promo / token scans and set wordmarks from /products/."""
+    import re
+
+    index = _cached_text(cache, "bss-products.html", f"{BSS_BASE}/products/", 0.2)
+    rels = sorted(set(re.findall(r'href="((?:booster|starter|other)/[a-z0-9-]+)"', index)))
+    # Multi-card lineup sheets and unreleased placeholders, not single scans.
+    skip_art = re.compile(r"^(?:comingsoon|card-lineup\d*|evaorecard_\d+)$", re.I)
+    extras: dict[str, dict] = {}
+    logos: dict[str, dict] = {}
+    for rel in rels:
+        page = _cached_text(cache, f"bss-product-{rel.replace('/', '-')}.html", f"{BSS_BASE}/products/{rel}/", 0.2)
+        titled = re.search(r"<title>[^<]*\[([A-Z0-9]+)\]\s*([^−<]+)", page)
+        set_code = titled.group(1) if titled else ""
+        set_name = _bss_set_name(titled.group(2)) if titled else ""
+        logo = re.search(r'src="((?:\.\./)+images/products/[^"]+?/logo\.png)', page)
+        if logo and set_name in set_names and set_name not in logos:
+            path = re.sub(r"^(?:\.\./)+", "", logo.group(1))
+            logos[set_name] = {
+                "set_name": set_name,
+                "set_code": set_code,
+                "url": f"{BSS_BASE}/{path}",
+            }
+        for stem in dict.fromkeys(re.findall(r"/cards/([A-Za-z0-9_-]+)\.(?:png|jpg|webp)", page)):
+            if stem in known or stem in extras or skip_art.match(stem):
+                continue
+            base, _, suffix = stem.rpartition("_")
+            treatment = BSS_TREATMENT.get(suffix.lower(), "")
+            parent = known.get(base) if treatment else None
+            if parent:
+                name, rarity = parent["name"], treatment
+                card_set, card_code = parent["set_name"], parent["set_code"]
+            elif "corecard" in stem.lower():
+                color = stem.rsplit("_", 1)[-1].replace("-", " ").title()
+                name, rarity = f"EVA Core {color}".strip(), "Core"
+                card_set, card_code = set_name or "Unknown", set_code
+            elif "token" in stem.lower():
+                name, rarity = "Token", "Token"
+                card_set, card_code = set_name or "Unknown", set_code
+            elif stem.lower().startswith("gamegrumps"):
+                name, rarity = "Game Grumps", "Promo"
+                card_set, card_code = set_name or "Unknown", set_code
+            else:
+                name = stem.replace("_", " ")
+                rarity = treatment
+                card_set, card_code = set_name or "Unknown", set_code
+            extras[stem] = {
+                "key": stem,
+                "name": name,
+                "set_name": card_set or "Unknown",
+                "set_code": card_code,
+                "collector": stem,
+                "rarity": rarity,
+                "image_url": f"{BSS_BASE}/images/products/{rel}/cards/{stem}.png",
+                "source": "battlespirits-saga-products",
+                "source_url": f"{BSS_BASE}/products/{rel}/",
+                "language": "EN",
+            }
+    (cache / "raw").mkdir(parents=True, exist_ok=True)
+    (cache / "raw" / "bss-logos.json").write_text(json.dumps(list(logos.values()), ensure_ascii=False))
+    return list(extras.values())
+
+
 def battle_spirits_saga(cache: Path):
     import re
 
@@ -258,7 +341,7 @@ def battle_spirits_saga(cache: Path):
     for category, label in categories:
         page = _cached_text(cache, f"bss-cards-{category}.html", f"{BSS_BASE}/cards/?search=true&category={category}")
         set_code = (re.match(r"\[([^\]]+)\]", label) or [None, ""])[1]
-        set_name = re.sub(r"^\[[^\]]+\]\s*", "", label).strip().title() or label
+        set_name = _bss_set_name(label) or label
         for card_no in dict.fromkeys(re.findall(r'detail\.php\?card_no=([A-Za-z0-9_-]+)', page)):
             detail = _cached_text(cache, f"bss-detail-{_safe_name(card_no)}.html", f"{BSS_BASE}/cards/detail.php?card_no={card_no}", 0.25)
             head = re.search(r"<span>([^<]+)</span>\s*\|\s*<span>([^<]*)</span>", detail)
@@ -276,7 +359,9 @@ def battle_spirits_saga(cache: Path):
                 "source_url": f"{BSS_BASE}/cards/detail.php?card_no={card_no}",
                 "language": "EN",
             })
-    return cards, True
+    known = {card["key"]: card for card in cards}
+    extras = _bss_product_assets(cache, known, {card["set_name"] for card in cards})
+    return cards + extras, True
 
 
 # --- The Spoils: the-spoils-cardgame.vercel.app (Cloudinary art) --------------

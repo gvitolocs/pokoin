@@ -327,6 +327,72 @@ def rename_pi_images(renames: list[tuple[str, str]]) -> None:
     subprocess.run(["ssh", PI_HOST, "bash -s"], input=script + "true\n", text=True, check=True)
 
 
+def push_bss_logos(db: str) -> None:
+    """Official product wordmarks → CDN + pokoin_pokemon_expansions.logo_image_url."""
+    raw = CATALOG_DIR / "battle_spirits_saga" / "raw" / "bss-logos.json"
+    if not raw.exists():
+        log("battle_spirits_saga: no product logos to import")
+        return
+    logos = json.loads(raw.read_text())
+    stage = CATALOG_DIR / "battle_spirits_saga" / "images" / "battle-spirits-saga" / "expansions" / "logos"
+    stage.mkdir(parents=True, exist_ok=True)
+    ready = []
+    for logo in logos:
+        slug = slugify(logo.get("set_name") or "")
+        url = str(logo.get("url") or "")
+        if not slug or not url:
+            continue
+        dest = stage / f"{slug}.png"
+        if not dest.exists() or dest.stat().st_size < 64:
+            data = fetch_bytes(url)
+            if not data.startswith(b"\x89PNG"):
+                log(f"battle_spirits_saga: skip {slug} logo (not a PNG)")
+                continue
+            dest.write_bytes(data)
+        ready.append({
+            "name": logo["set_name"],
+            "url": f"{CDN_BASE}/battle-spirits-saga/expansions/logos/{slug}.png",
+        })
+    if not ready:
+        return
+    remote = f"{PI_OBJECTS}/battle-spirits-saga/expansions/logos"
+    subprocess.run(["ssh", PI_HOST, f"mkdir -p {remote}"], check=True)
+    subprocess.run(["rsync", "-a", f"{stage}/", f"{PI_HOST}:{remote}/"], check=True)
+    subprocess.run(
+        ["ssh", PI_HOST, f"chown -R {PI_OWNER} {PI_OBJECTS}/battle-spirits-saga/expansions"],
+        check=True,
+    )
+    payload = "".join(json.dumps(row).replace("\\", "\\\\") + "\n" for row in ready)
+    script = (
+        "begin;\n"
+        "create temp table incoming_logos (doc jsonb) on commit drop;\n"
+        "copy incoming_logos (doc) from stdin;\n"
+        + payload
+        + "\\.\n"
+        + """
+insert into public.pokoin_pokemon_expansions as e
+  (name, logo_image_url, catalog_card_count, nationality)
+select c.set_name, doc->>'url', c.catalog_card_count, ''
+from incoming_logos
+join public.marketplace_set_card_counts c on c.set_name = doc->>'name'
+on conflict (name) do update set
+  logo_image_url = excluded.logo_image_url,
+  catalog_card_count = excluded.catalog_card_count,
+  updated_at = now();
+commit;
+"""
+    )
+    proc = subprocess.run(
+        ["docker", "exec", "-i", CONTAINER, "psql", "-U", PGUSER, "-d", db, "-v", "ON_ERROR_STOP=1", "-q"],
+        input=script,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"logo upsert failed: {proc.stderr.strip()[:2000]}")
+    log(f"battle_spirits_saga: {len(ready)} set wordmarks on {PI_HOST}:{remote}/")
+
+
 def push_images(game: str) -> None:
     prefix = GAMES[game]
     local = CATALOG_DIR / game / "images" / prefix
@@ -482,6 +548,8 @@ def main() -> int:
           and coalesce(p.cdn_image_url, p.preview_image_url, p.image_url) is not null)""")
     refreshed = psql(db, f"select public.refresh_cardmarket_marketplace_projections('{schema}', array[1], array['cm_rarity'])")
     psql(db, "select public.refresh_marketplace_set_catalog_counts()")
+    if game == "battle_spirits_saga":
+        push_bss_logos(db)
     counts = psql(db, f"""select count(*), count(*) filter (where cdn_image_url is not null)
       from public.marketplace_search_candidates""")
     log(f"{game}: projections refreshed ({refreshed.strip()}); candidates,imaged = {counts.strip()}")
