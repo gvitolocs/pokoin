@@ -108,8 +108,8 @@ export default function Inventory() {
     let cancelled = false;
     const gen = ++inventorySeq.current;
     getBearer()
-      .then((token) => fetchSellerListings(uid, token, { limit: INVENTORY_FIRST_PAGE }))
-      .then((data) => {
+      .then(async (token) => {
+        const data = await fetchSellerListings(uid, token, { limit: INVENTORY_FIRST_PAGE });
         if (cancelled) return;
         setRows(liveInventoryListings(data.listings || data.items || []));
         topUpInventory(uid, token, gen).catch(() => {});

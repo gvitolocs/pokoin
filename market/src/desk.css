@@ -2304,6 +2304,10 @@
 
 @media (max-width: 480px) {
   .page-head { flex-direction: column; align-items: flex-start; }
+  .set-wordmark {
+    width: 100%;
+    object-position: left center;
+  }
   .metric-grid { grid-template-columns: 1fr; }
   .bag-row {
     grid-template-columns: auto minmax(0, 1fr);

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { cardHref, fetchExpansion, fetchPromoFanPool, imageSrc, peekPromoFanPool } from '../api.js';
+import { cardHref, fetchExpansion, fetchPromoFanPool, getJson, imageSrc, peekPromoFanPool } from '../api.js';
+import { game, isPokemonGame } from '../game.js';
 import { FAN_POOL, fillFan, pickFan } from '../promo-fan.js';
+import { promoLogoSrc, satellitePromoBanners } from '../promo-banners.js';
 import { Action, track } from '../track.js';
 import CardArt from './CardArt.jsx';
 
@@ -153,17 +155,45 @@ function loadFanPool(slug) {
   return fetchPromoFanPool(slug);
 }
 
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && isPokemonGame()) {
   loadFanPool(PROMO_BANNERS[0].slug).catch(() => {});
 }
 
+function PromoWordmark({ banner, pokemon }) {
+  const src = promoLogoSrc(banner, { pokemon });
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+  if (!src || failed) {
+    return null;
+  }
+  return (
+    <img
+      className="promo-wordmark"
+      src={src}
+      alt=""
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export default function PromoCarousel() {
+  const pokemon = isPokemonGame();
+  const site = game();
+  const [banners, setBanners] = useState(() => (isPokemonGame() ? PROMO_BANNERS : []));
   const [index, setIndex] = useState(0);
   const [cardsBySlug, setCardsBySlug] = useState(() => {
+    if (!isPokemonGame()) {
+      return {};
+    }
     const first = peekPromoFanPool(PROMO_BANNERS[0].slug);
     return first?.length ? { [PROMO_BANNERS[0].slug]: first } : {};
   });
   const [fanCards, setFanCards] = useState(() => {
+    if (!isPokemonGame()) {
+      return [];
+    }
     const first = peekPromoFanPool(PROMO_BANNERS[0].slug);
     return first?.length ? pickFan(first, FAN_POOL) : [];
   });
@@ -187,9 +217,34 @@ export default function PromoCarousel() {
   }, []);
 
   useEffect(() => {
-    const count = PROMO_BANNERS.length;
+    if (pokemon) {
+      return undefined;
+    }
+    let cancel = false;
+    getJson('/api/marketplace-expansion-page?limit=12')
+      .then((data) => {
+        if (cancel) {
+          return;
+        }
+        const slides = satellitePromoBanners(data?.expansions, site.name);
+        setBanners(slides);
+        if (slides[0]?.slug) {
+          loadFanPool(slides[0].slug).catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancel = true;
+    };
+  }, [pokemon, site.name]);
+
+  useEffect(() => {
+    if (!banners.length) {
+      return undefined;
+    }
+    const count = banners.length;
     neighborIndexes(index, count).forEach((slot) => {
-      const slug = PROMO_BANNERS[slot].slug;
+      const slug = banners[slot].slug;
       const peeked = peekPromoFanPool(slug);
       if (peeked?.length) {
         setCardsBySlug((current) => (
@@ -202,31 +257,32 @@ export default function PromoCarousel() {
         })
         .catch(() => {});
     });
-  }, [index]);
+    return undefined;
+  }, [index, banners]);
 
   useEffect(() => {
-    if (reduceMotion || paused || hidden) {
+    if (!banners.length || reduceMotion || paused || hidden) {
       return undefined;
     }
     const timer = window.setInterval(() => {
-      setIndex((current) => (current + 1) % PROMO_BANNERS.length);
+      setIndex((current) => (current + 1) % banners.length);
     }, PROMO_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [reduceMotion, paused, hidden, index]);
+  }, [reduceMotion, paused, hidden, index, banners.length]);
 
-  const count = PROMO_BANNERS.length;
-  const banner = PROMO_BANNERS[index];
-  const pool = cardsBySlug[banner.slug];
-  const href = `/marketplace/sets/${banner.slug}`;
+  const count = banners.length;
+  const banner = count ? banners[index % count] : null;
+  const pool = banner ? cardsBySlug[banner.slug] : null;
+  const href = banner ? `/marketplace/sets/${banner.slug}` : '';
 
   useEffect(() => {
-    if (!pool?.length) {
+    if (!banner || !pool?.length) {
       setFanCards([]);
       return undefined;
     }
     setFanCards(pickFan(pool, FAN_POOL));
     return undefined;
-  }, [banner.slug, pool, index]);
+  }, [banner, pool, index]);
 
   function go(delta) {
     setIndex((current) => (current + delta + count) % count);
@@ -240,6 +296,10 @@ export default function PromoCarousel() {
       event.preventDefault();
       go(1);
     }
+  }
+
+  if (!banner) {
+    return <section className="promo-stage" aria-hidden="true" />;
   }
 
   return (
@@ -281,6 +341,7 @@ export default function PromoCarousel() {
         <div className="promo-slide" key={banner.slug}>
           <div className="promo-copy">
             <p className="eyebrow">{banner.series}</p>
+            <PromoWordmark banner={banner} pokemon={pokemon} />
             <h1>{banner.title}</h1>
             <p className="promo-lede">{banner.lede}</p>
             <Link
@@ -296,7 +357,7 @@ export default function PromoCarousel() {
         </div>
       </div>
       <div className="promo-dots" role="tablist" aria-label="Choose expansion">
-        {PROMO_BANNERS.map((item, slot) => (
+        {banners.map((item, slot) => (
           <button
             key={item.slug}
             type="button"

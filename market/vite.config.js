@@ -3,6 +3,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { GAMES } from './src/game.js';
+
+const gameSlugs = new Set(
+  Object.values(GAMES).map((item) => item.slug).filter(Boolean),
+);
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const homeDir = path.resolve(rootDir, '../home');
@@ -94,6 +99,12 @@ function marketplaceSpa() {
 function rewriteMarketplace(server) {
   server.middlewares.use((req, res, next) => {
     const url = req.url?.split('?')[0] || '';
+    const gameSlug = url.split('/').filter(Boolean)[0] || '';
+    if (gameSlugs.has(gameSlug)) {
+      req.url = '/index.html';
+      next();
+      return;
+    }
     if (url === '/cardscan/identify' || url.startsWith('/chain')) {
       next();
       return;

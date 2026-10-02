@@ -1,7 +1,7 @@
 /** Path prefix → marketplace game. Pokemon stays at pokoin.com with no prefix. */
 
 const SATELLITE = {
-  features: { competitive: false, promoCarousel: false },
+  features: { competitive: false, promoCarousel: true },
   promoBanners: [],
   homeHref: '/marketplace',
 };

@@ -1830,9 +1830,20 @@ h1, h2 { margin: 0 0 0.85rem; }
 }
 
 .promo-copy > .eyebrow { animation-delay: 0s; }
+.promo-copy > .promo-wordmark { animation-delay: 0.21s; }
 .promo-copy > h1 { animation-delay: 0.42s; }
 .promo-copy > .promo-lede { animation-delay: 0.84s; }
 .promo-copy > .btn { animation-delay: 1.26s; }
+
+.promo-wordmark {
+  display: block;
+  width: auto;
+  max-width: min(100%, 26rem);
+  max-height: 4.8rem;
+  margin: 0 0 0.55rem;
+  object-fit: contain;
+  object-position: left center;
+}
 
 .promo h1 {
   font-size: clamp(1.8rem, 4vw, 3rem);
@@ -4768,9 +4779,11 @@ span.shop-flag {
 
 .set-wordmark {
   display: block;
-  width: 9rem;
-  height: 3.2rem;
+  flex: none;
+  width: min(70vw, 56rem);
+  height: auto;
   object-fit: contain;
+  object-position: right center;
   cursor: grab;
 }
 
@@ -7054,6 +7067,12 @@ dialog.zoom:not([open]) {
     text-align: center;
   }
 
+  .promo-wordmark {
+    object-position: center;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
   .promo-lede {
     margin-left: auto;
     margin-right: auto;
@@ -7296,6 +7315,13 @@ dialog.zoom:not([open]) {
     flex-direction: column;
     align-items: center;
     text-align: center;
+  }
+
+  .promo-wordmark {
+    max-height: 3.4rem;
+    object-position: center;
+    margin-left: auto;
+    margin-right: auto;
   }
 
   .promo h1 {
