@@ -25,6 +25,8 @@ API calls append `?game=` and send `x-pokoin-game`.
 | `pokoin.com/sorcery` | `sorcery` | `pokoin_sorcery` | `ct_id * 2` |
 | `pokoin.com/palworld` | `palworld` | `pokoin_palworld` | `ct_id * 2` |
 | `pokoin.com/cyberpunk` | `cyberpunk` | `pokoin_cyberpunk` | `ct_id * 2` |
+| `pokoin.com/final-fantasy` | `final_fantasy` | `pokoin_final_fantasy` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
+| `pokoin.com/star-wars-destiny` | `star_wars_destiny` | `pokoin_star_wars_destiny` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
 
 `onepiece.pokoin.com` and `riftbound.pokoin.com` redirect to
 `pokoin.com/one-piece` and `pokoin.com/riftbound`. Do not add new game subdomains.

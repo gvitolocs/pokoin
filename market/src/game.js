@@ -63,6 +63,12 @@ const GAMES = {
   cyberpunk: {
     id: 'cyberpunk', apiGame: 'cyberpunk', slug: 'cyberpunk', name: 'Cyberpunk', brand: 'Pokoin', title: 'Cyberpunk marketplace', ...SATELLITE,
   },
+  final_fantasy: {
+    id: 'final_fantasy', apiGame: 'final_fantasy', slug: 'final-fantasy', name: 'Final Fantasy TCG', brand: 'Pokoin', title: 'Final Fantasy TCG marketplace', ...SATELLITE,
+  },
+  star_wars_destiny: {
+    id: 'star_wars_destiny', apiGame: 'star_wars_destiny', slug: 'star-wars-destiny', name: 'Star Wars Destiny', brand: 'Pokoin', title: 'Star Wars Destiny marketplace', ...SATELLITE,
+  },
 };
 
 const SLUG_TO_ID = Object.fromEntries(
