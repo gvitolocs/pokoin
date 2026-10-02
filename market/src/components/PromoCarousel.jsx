@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { cardHref, fetchExpansion, fetchPromoFanPool, getJson, imageSrc, peekPromoFanPool } from '../api.js';
 import { game, isPokemonGame } from '../game.js';
 import { FAN_POOL, fillFan, pickFan } from '../promo-fan.js';
-import { promoLogoSrc, satellitePromoBanners } from '../promo-banners.js';
+import { promoLogoIsName, promoLogoSrc, satellitePromoBanners } from '../promo-banners.js';
 import { Action, track } from '../track.js';
 import CardArt from './CardArt.jsx';
 
@@ -24,6 +24,7 @@ export const PROMO_BANNERS = [
     title: 'Mega Evolution',
     lede: 'The first Mega Evolution set is on the floor. Chase Mega Lucario ex.',
     cta: 'Explore cards from this expansion',
+    western: true,
   },
   {
     slug: 'phantasmal-flames',
@@ -31,6 +32,7 @@ export const PROMO_BANNERS = [
     title: 'Phantasmal Flames',
     lede: 'The second Mega Evolution set is on the floor. Chase Mega Charizard X ex.',
     cta: 'Explore cards from this expansion',
+    western: true,
   },
   {
     slug: 'black-bolt',
@@ -38,6 +40,7 @@ export const PROMO_BANNERS = [
     title: 'Black Bolt',
     lede: 'Unova returns in black. Zekrom ex and the chase holos.',
     cta: 'Explore cards from this expansion',
+    western: true,
   },
   {
     slug: 'white-flare',
@@ -45,6 +48,7 @@ export const PROMO_BANNERS = [
     title: 'White Flare',
     lede: 'Unova in white. Reshiram ex and the set’s secret rares.',
     cta: 'Explore cards from this expansion',
+    western: true,
   },
 ];
 
@@ -159,22 +163,20 @@ if (typeof window !== 'undefined' && isPokemonGame()) {
   loadFanPool(PROMO_BANNERS[0].slug).catch(() => {});
 }
 
-function PromoWordmark({ banner, pokemon }) {
+function PromoWordmark({ banner, pokemon, onFail }) {
   const src = promoLogoSrc(banner, { pokemon });
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    setFailed(false);
-  }, [src]);
-  if (!src || failed) {
+  if (!src) {
     return null;
   }
   return (
-    <img
-      className="promo-wordmark"
-      src={src}
-      alt=""
-      onError={() => setFailed(true)}
-    />
+    <span className="promo-wordmark-slot">
+      <img
+        className="promo-wordmark"
+        src={src}
+        alt=""
+        onError={onFail}
+      />
+    </span>
   );
 }
 
@@ -197,6 +199,7 @@ export default function PromoCarousel() {
     const first = peekPromoFanPool(PROMO_BANNERS[0].slug);
     return first?.length ? pickFan(first, FAN_POOL) : [];
   });
+  const [logoFailed, setLogoFailed] = useState('');
   const [paused, setPaused] = useState(false);
   const [hidden, setHidden] = useState(() => typeof document !== 'undefined' && document.hidden);
   const [reduceMotion, setReduceMotion] = useState(() => (
@@ -339,10 +342,16 @@ export default function PromoCarousel() {
           </svg>
         </button>
         <div className="promo-slide" key={banner.slug}>
-          <div className="promo-copy">
+          <div className={`promo-copy${promoLogoIsName(banner) && logoFailed !== banner.slug ? ' is-logo-name' : ''}`}>
             <p className="eyebrow">{banner.series}</p>
-            <PromoWordmark banner={banner} pokemon={pokemon} />
-            <h1>{banner.title}</h1>
+            {logoFailed === banner.slug ? null : (
+              <PromoWordmark
+                banner={banner}
+                pokemon={pokemon}
+                onFail={() => setLogoFailed(banner.slug)}
+              />
+            )}
+            <h1 className={promoLogoIsName(banner) && logoFailed !== banner.slug ? 'sr-only' : undefined}>{banner.title}</h1>
             <p className="promo-lede">{banner.lede}</p>
             <Link
               className="btn"

@@ -200,6 +200,15 @@
   color: var(--text);
   font-size: 0.95rem;
   letter-spacing: 0;
+  text-transform: none;
+}
+
+.flex-range.is-off {
+  opacity: 0.45;
+}
+
+.flex-range.is-off input {
+  pointer-events: none;
 }
 
 .flex-range-hint {
