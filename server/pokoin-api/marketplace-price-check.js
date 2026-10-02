@@ -23,6 +23,9 @@ const authError = (...args) => require('./_firebase').authErrorResponse(...args)
 
 const MAX_ITEMS = 100;
 const { readTcgplayerPrices } = require('./_tcgcsv_prices');
+const { cardtraderSource, LISTED_SQL } = require('./_card_price_history');
+const LISTED_BULK_SQL = LISTED_SQL.replace('select observed_day', 'select blueprint_id, observed_day')
+  .replace('where blueprint_id=$1::bigint', 'where blueprint_id=any($1::bigint[])');
 
 const CT_CONDITION_SETS = {
   NM: ['nm', 'mint', 'near mint', 'near mint foil'],
@@ -133,7 +136,9 @@ async function readPrices(items, { excludeSellerUid = '' } = {}, dependencies = 
     .map((row) => [String(row.card_id), String(row.ct_id)]));
   const ctIds = [...new Set(blueprintByCard.values())];
 
-  const [pokoinRows, ctRows, soldRows] = await Promise.all([
+  const to = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+  const [pokoinRows, ctRows, soldRows, listedRows] = await Promise.all([
     query(
       `
         select card_id, min(price_pkn) as min_pkn
@@ -175,6 +180,9 @@ async function readPrices(items, { excludeSellerUid = '' } = {}, dependencies = 
       `,
       [ctIds],
     ),
+    // One bounded bulk history query, independent of current ask/sold sources.
+    query(LISTED_BULK_SQL, [ctIds, from, to])
+      .catch(() => ({ rows: [], unavailable: true })),
   ]).catch((error) => {
     error.statusCode = error.statusCode || 502;
     throw error;
@@ -204,6 +212,13 @@ async function readPrices(items, { excludeSellerUid = '' } = {}, dependencies = 
     console.error('TCGCSV price feed unavailable', error.code || error.message);
     tcgplayer = { status: 'unavailable', prices: {} };
   }
+  const listedByBlueprint = new Map();
+  for (const row of listedRows.rows) {
+    const ctId = String(row.blueprint_id);
+    const days = listedByBlueprint.get(ctId) || [];
+    days.push(row);
+    listedByBlueprint.set(ctId, days);
+  }
   const prices = {};
   for (const item of items) {
     const ctId = blueprintByCard.get(item.cardId);
@@ -213,6 +228,8 @@ async function readPrices(items, { excludeSellerUid = '' } = {}, dependencies = 
       ctCheapestPkn,
       ctMatchedPkn,
       soldMedianPkn: soldByBlueprint.get(ctId) ?? null,
+      cardtraderListed: cardtraderSource(listedByBlueprint.get(ctId) || [],
+        listedRows.unavailable ? 'unavailable' : undefined),
       tcgplayer: tcgplayer.prices[item.cardId] || [],
       tcgplayerStatus: tcgplayer.status,
     };

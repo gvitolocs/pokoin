@@ -48,6 +48,10 @@ function pricingQuery(mappings, seen = []) {
       // A public-number collision should never become the requested card's CT quote.
       { ct_id: '777', condition_key: 'NM', language_key: 'EN', min_pkn: '1' },
     ] };
+    if (sql.includes('cardtrader_blueprint_daily_analytics')) return { rows: [
+      { blueprint_id: '88', day: '2026-10-02', dump_day: '2026-10-01', lowest_ask_pkn: '1200',
+        listing_count: 2, listed_quantity: 3, seller_count: 2, refreshed_at: '2026-10-02T02:00:00Z' },
+    ] };
     if (sql.includes('cardtrader_sold_daily')) return { rows: [
       { blueprint_id: '88', sold_median_pkn: '1300' },
       { blueprint_id: '99', sold_median_pkn: '2500' },
@@ -97,4 +101,36 @@ test('different public IDs explicitly linked to one blueprint retain separate na
   });
   assert.equal(result['777'].soldMedianPkn, 1300); assert.equal(result['888'].soldMedianPkn, 1300);
   assert.equal(result['777'].pokoinCheapestPkn, 900); assert.equal(result['888'].pokoinCheapestPkn, null);
+});
+
+
+test('pricer receives bounded daily dump asks in one bulk query with distinct source semantics', async () => {
+  const seen = [];
+  const result = await readPrices(parseItems('777:SP:IT,888:NM:EN'), {}, {
+    marketplaceQuery: pricingQuery([{ card_id: '777', ct_id: '88' }, { card_id: '888', ct_id: '99' }], seen),
+    currentGame: () => 'pokemon', readTcgplayerPrices: noTcg,
+  });
+  const queries = seen.filter((q) => q.sql.includes('cardtrader_blueprint_daily_analytics'));
+  assert.equal(queries.length, 1); assert.deepEqual(queries[0].values[0], ['88', '99']);
+  assert.equal((Date.parse(queries[0].values[2])-Date.parse(queries[0].values[1]))/86400000, 29);
+  assert.doesNotMatch(queries[0].sql, /median_price_pkn|sold_quantity|sold_count/);
+  const listed = result['777'].cardtraderListed;
+  assert.equal(listed.source, 'cardtrader_listed'); assert.equal(listed.currency, 'PKN');
+  assert.equal(listed.conditionSpecific, false); assert.equal(listed.languageSpecific, false);
+  assert.equal(listed.days[0].lowestAskPkn, 1200); assert.equal(listed.days[0].day, '2026-10-02');
+  assert.equal(listed.days[0].dumpDay, '2026-10-01'); assert.equal(listed.days[0].sourceTimestamp, '2026-10-02T02:00:00Z');
+  assert.equal(result['888'].cardtraderListed.status, 'empty');
+});
+
+test('daily analytics outage leaves live CardTrader asks and sold comp fields unchanged', async () => {
+  const base = pricingQuery([{ card_id: '777', ct_id: '88' }]);
+  const result = await readPrices(parseItems('777:NM:JP'), {}, {
+    marketplaceQuery: (sql, values) => {
+      if (sql.includes('cardtrader_blueprint_daily_analytics')) return Promise.reject(new Error('feed offline'));
+      return base(sql, values);
+    }, currentGame: () => 'pokemon', readTcgplayerPrices: noTcg,
+  });
+  assert.equal(result['777'].ctCheapestPkn, 1200); assert.equal(result['777'].ctMatchedPkn, 1200);
+  assert.equal(result['777'].soldMedianPkn, 1300); assert.equal(result['777'].cardtraderListed.status, 'unavailable');
+  assert.doesNotMatch(JSON.stringify(result), /feed offline/);
 });

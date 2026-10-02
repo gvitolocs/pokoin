@@ -84,3 +84,11 @@ candidate mapping. Its listed-ask and sold-median queries use mapped blueprint
 IDs, then re-key their outputs by the requested public ID; numeric division and
 raw public-ID/blueprint collisions never choose a different printing. Native
 listings and TCGplayer links retain their own public-card identities.
+
+The inventory pricer adds `cardtraderListed` for each item: up to 30 observed
+UTC days of the existing dump's lowest asks, source refresh timestamp, assigned
+dump day and listing/copy/seller counts. One bulk mapped-blueprint query supplies
+all requested cards. These are aggregate asks across facets, not a replacement
+for condition-matched live offers or sold medians. Missing analytics leave those
+existing comps unchanged; automated pricing must never silently use USD quotes
+or treat aggregate dump asks as condition-specific realized sales.
