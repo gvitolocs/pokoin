@@ -33,7 +33,9 @@ test('search overlay preserves verified operator email authorization', async () 
 
 test('search overlay preserves raw CardTrader image keys for satellite games', () => {
   const row = { card_id: 246, ct_id: 123 };
-  for (const game of ['palworld', 'cyberpunk', 'magic']) {
+  for (const game of ['palworld', 'cyberpunk', 'magic', 'weiss-schwarz', 'final-fantasy',
+    'force-of-will', 'world-of-warcraft', 'battle-spirits-saga', 'star-wars-destiny',
+    'dragon-born', 'my-little-pony', 'the-spoils']) {
     for (const suffix of ['123_card.jpg', 'previews/123_homepage.webp']) {
       const url = `https://cdn.pokoin.com/${game}/${suffix}`;
       assert.equal(rewriteCdnPokoinPrefix(url, row), url);
@@ -41,4 +43,19 @@ test('search overlay preserves raw CardTrader image keys for satellite games', (
   }
   assert.equal(rewriteCdnPokoinPrefix('https://cdn.pokoin.com/123_card.jpg', row),
     'https://cdn.pokoin.com/246_card.jpg');
+});
+
+test('search overlay keeps the maintained game registry and Cardmarket aliases', () => {
+  const owned = require('./_cardtrader_game_ingest');
+  const maintained = require('../pokoin-api/_cardtrader_game_ingest');
+  assert.deepEqual(owned.INGEST_GAMES, maintained.INGEST_GAMES);
+  for (const [alias, id] of [['fftcg', 'final_fantasy'], ['swd', 'star_wars_destiny'],
+    ['ws', 'weiss_schwarz'], ['mlp', 'my_little_pony']]) {
+    assert.equal(owned.normalizeIngestGame(alias), id);
+    assert.equal(owned.INGEST_GAMES[id].cardtraderGameId, null);
+  }
+  const list = owned.ingestGameList();
+  const firstCardmarket = list.findIndex((game) => game.cardtraderGameId == null);
+  assert.ok(firstCardmarket > 0);
+  assert.ok(list.slice(firstCardmarket).every((game) => game.cardtraderGameId == null));
 });

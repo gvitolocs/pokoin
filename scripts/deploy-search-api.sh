@@ -20,7 +20,8 @@ COMMIT="$(git -C "$REPO" rev-parse "${1:-origin/main}^{commit}")"
   || { echo 'deploy-search-api: use the exact pushed origin/main commit' >&2; exit 1; }
 HERE="$(mktemp -d /tmp/pokoin-search-api-source-XXXXXX)"
 trap 'rm -rf "$HERE"' EXIT
-git -C "$REPO" archive "$COMMIT" server/api | tar -C "$HERE" -xf -
+# The maintained registry is also needed by the overlay's parity regression.
+git -C "$REPO" archive "$COMMIT" server/api server/pokoin-api/_cardtrader_game_ingest.js | tar -C "$HERE" -xf -
 export NODE_PATH="${REPO}/server/node_modules${NODE_PATH:+:$NODE_PATH}"
 
 # Files this repository owns, at their release-relative paths.
