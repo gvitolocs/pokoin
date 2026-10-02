@@ -100,6 +100,23 @@ export const ART_CUT_HALFART = {
   cardRatio: ART_CUT_CARD_RATIO,
 };
 
+/** Two-row bleed cell aspect: one 88-wide cell spanning two 63-high rows. */
+export const ART_CUT_TALL_ASPECT = 88 / (2 * 63);
+
+/** Album tall-cell window: the bleed band extended down through the
+ * painting until the window aspect matches the two-row box, so `contain`
+ * fills the cell instead of letterboxing a flat shade band under the art.
+ * Full arts wear HP/attacks as overlays on the painting, so the extension
+ * stays artwork (2026-10-02: fills the cell; supersedes the band-only
+ * sizing that left the blank space under the full arts). */
+export function albumBleedCut() {
+  const height = Number(Math.min(
+    ART_CUT_BLEED.width * (ART_CUT_CARD_RATIO / ART_CUT_TALL_ASPECT),
+    0.985 - ART_CUT_BLEED.top,
+  ).toFixed(4));
+  return { ...ART_CUT_BLEED, height };
+}
+
 const ERA_LAYOUT = {
   Original: 'wotc',
   Neo: 'neo',
@@ -132,7 +149,7 @@ export function artCutFor(card, surface) {
     return ART_CUT_HALFART;
   }
   if (surface === 'album' && layout === 'bleed') {
-    return ART_CUT_BLEED;
+    return albumBleedCut();
   }
   return ART_CUT_LAYOUTS[artCutLayoutName(card)] || POKEMON_ART_CUT;
 }

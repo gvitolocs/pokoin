@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   ART_CUT_BLEED,
+  ART_CUT_CARD_RATIO,
   ART_CUT_HALFART,
   ART_CUT_LAYOUTS,
   POKEMON_ART_CUT,
@@ -144,19 +145,25 @@ test('LEGEND and BREAK names are landscape prints; set titles are not', () => {
   assert.equal(isLandscapePrintName('Pikachu'), false);
 });
 
-test('album full-art uses a taller painting crop, not the whole card', () => {
+test('album full-art fills the two-row cell: bleed band extended down the painting', () => {
   const sir = {
     rarity: 'Special Illustration Rare',
     number: '274/217',
     set: 'Ascended Heroes',
   };
+  const album = artCutFor(sir, 'album');
   assert.equal(artCutFor(sir), POKEMON_ART_CUT);
-  assert.equal(artCutFor(sir, 'album'), ART_CUT_BLEED);
-  assert.ok(ART_CUT_BLEED.height > POKEMON_ART_CUT.height);
-  assert.ok(ART_CUT_BLEED.top + ART_CUT_BLEED.height < 0.78);
+  assert.equal(album.left, ART_CUT_BLEED.left);
+  assert.equal(album.top, ART_CUT_BLEED.top);
+  assert.equal(album.width, ART_CUT_BLEED.width);
+  assert.ok(album.height > ART_CUT_BLEED.height, 'the window extends past the band');
+  // window aspect matches the two-row cell so contain leaves no shade band
+  const windowAspect = (album.width / album.height) * ART_CUT_CARD_RATIO;
+  assert.ok(Math.abs(windowAspect - 88 / (2 * 63)) < 0.005, `window aspect ${windowAspect} fills the tall cell`);
+  assert.ok(ART_CUT_BLEED.top + ART_CUT_BLEED.height < 0.78, 'the stored band cut still stops above HP');
   assert.deepEqual(
     artCutPixels(660, 920, sir, 'album'),
-    { x: 32, y: 26, width: 597, height: 569 },
+    { x: 32, y: 26, width: 597, height: 852 },
   );
 });
 
@@ -206,7 +213,10 @@ test('SM gold trainer Gold Secret album uses the bleed cut; stored window keeps 
     number: 'Gold Secret Rare | 145/131',
     set: 'Forbidden Light',
   };
-  assert.equal(artCutFor({ ...gold, artLayout: 'bleed' }, 'album'), ART_CUT_BLEED);
+  const albumGold = artCutFor({ ...gold, artLayout: 'bleed' }, 'album');
+  assert.equal(albumGold.left, ART_CUT_BLEED.left);
+  assert.equal(albumGold.width, ART_CUT_BLEED.width);
+  assert.ok(albumGold.height > ART_CUT_BLEED.height, 'gold bleed fills the tall cell too');
   assert.equal(artCutFor({ ...gold, artLayout: 'window' }, 'album'), POKEMON_ART_CUT);
   assert.equal(artCutFor({
     name: 'M Charizard ex',
