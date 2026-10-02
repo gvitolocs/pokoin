@@ -124,3 +124,27 @@ test('unclassified DB failures return safe generic response', async () => {
   await handlerWith(async () => { throw new Error('postgres://secret'); })({ method: 'GET', url: '/?cardId=42', headers: {} }, res);
   assert.equal(res.statusCode, 503); assert.equal(res.body.error, 'Card price history unavailable.');
 });
+
+
+test('healthy partial response is not cached when either source is unavailable or unconfigured', async () => {
+  for (const source of ['cardtrader', 'tcgplayer']) {
+    for (const status of ['unavailable', 'unconfigured']) {
+      const res = response();
+      await handlerWith(async () => ({ cardtrader: { status: 'available', days: [ask] },
+        tcgplayer: { status: 'available', series: [quote] }, [source]: { status } }))({
+        method: 'GET', url: '/?cardId=824942', headers: {},
+      }, res);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['Cache-Control'], 'no-store');
+      assert.equal(res.body[source].status, status);
+    }
+  }
+});
+
+test('healthy available and empty feeds retain public cache headers', async () => {
+  const res = response();
+  await handlerWith(async () => ({ cardtrader: { status: 'available', days: [ask] },
+    tcgplayer: { status: 'empty', series: [] } }))({ method: 'GET', url: '/?cardId=824942', headers: {} }, res);
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers['Cache-Control'], /^public/);
+});

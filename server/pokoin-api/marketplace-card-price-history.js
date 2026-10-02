@@ -17,7 +17,9 @@ function createHandler(dependencies = {}) {
       const game = dependencies.currentGame ? dependencies.currentGame()
         : require('./_marketplace_game').currentGame();
       const result = await (dependencies.readCardPriceHistory || readCardPriceHistory)({ game, ...range });
-      res.setHeader('Cache-Control', 'public, max-age=20, s-maxage=120');
+      const degraded = [result.cardtrader, result.tcgplayer]
+        .some((feed) => ['unavailable', 'unconfigured'].includes(feed?.status));
+      res.setHeader('Cache-Control', degraded ? 'no-store' : 'public, max-age=20, s-maxage=120');
       return res.status(200).json(result);
     } catch (error) {
       return res.status(error.statusCode || 503).json({
