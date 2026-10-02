@@ -65,6 +65,14 @@ test('truthyFlag and raritySql build shop filters', () => {
   assert.ok(values2.includes('%uncommon%'));
 });
 
+test('freshness accepts a firebase uid and stamps dates', () => {
+  const { cleanSellerUid, isoStamp } = require('./marketplace-seller-shop.js')._test;
+  assert.equal(cleanSellerUid('PUH1ygG9mOOyQRPXaY5Fa1W6DKd2'), 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2');
+  assert.equal(cleanSellerUid('no'), '');
+  assert.equal(isoStamp('2026-10-02T15:30:39.334Z'), '2026-10-02T15:30:39.334Z');
+  assert.equal(isoStamp(''), '');
+});
+
 test('public shop photo is an https URL only', () => {
   const photo = 'https://pub-example.r2.dev/profile-pictures/u1/a.jpg';
   assert.equal(publicPhotoUrl(photo), photo);

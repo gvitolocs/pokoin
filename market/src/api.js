@@ -2379,10 +2379,13 @@ export function fetchSellerShop(username, {
   firstEdition = false,
   sort = 'price-asc',
   game: marketplaceGame = game().apiGame,
+  book = false,
+  fresh = false,
+  sellerUid = '',
   signal,
 } = {}) {
   const handle = String(username || '').trim();
-  if (!handle) {
+  if (!handle && !fresh) {
     return Promise.resolve({ listings: [], total: 0, unique: 0, limit, offset: 0 });
   }
   const opts = {
@@ -2399,22 +2402,29 @@ export function fetchSellerShop(username, {
   };
   // Always hit the network so refresh picks up name/tag changes. Seller.jsx
   // paints the in-memory shop cache first via seedSellerListings.
-  const params = new URLSearchParams({
-    sellerUsername: handle,
-    limit: String(limit),
-    offset: String(offset || 0),
-  });
-  if (q) params.set('q', String(q));
-  if (condition) params.set('condition', String(condition));
-  if (language) params.set('language', String(language));
-  if (rarity) params.set('rarity', String(rarity));
-  if (reverse) params.set('reverse', '1');
-  if (firstEdition) params.set('firstEdition', '1');
-  if (sort) params.set('sort', String(sort));
+  // The full shop book and the freshness stamp stay out of that page cache.
+  const params = new URLSearchParams();
+  if (handle) params.set('sellerUsername', handle);
+  if (fresh) {
+    params.set('fresh', '1');
+    if (sellerUid) params.set('sellerUid', String(sellerUid));
+  } else if (book) {
+    params.set('book', '1');
+  } else {
+    params.set('limit', String(limit));
+    params.set('offset', String(offset || 0));
+    if (q) params.set('q', String(q));
+    if (condition) params.set('condition', String(condition));
+    if (language) params.set('language', String(language));
+    if (rarity) params.set('rarity', String(rarity));
+    if (reverse) params.set('reverse', '1');
+    if (firstEdition) params.set('firstEdition', '1');
+    if (sort) params.set('sort', String(sort));
+  }
   if (marketplaceGame) params.set('game', String(marketplaceGame));
-  return getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) =>
-    rememberSellerListings(handle, data, opts),
-  );
+  return getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) => (
+    book || fresh ? data : rememberSellerListings(handle, data, opts)
+  ));
 }
 
 /** PowerTools pricing strategies + pricer defaults (users/{uid}). */

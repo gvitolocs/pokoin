@@ -20,6 +20,7 @@ import { game } from '../game.js';
 import { associateRoleLabel } from '../associate-roles.js';
 import Avatar from '../components/Avatar.jsx';
 import { safeAvatarUrl } from '../avatar.js';
+import { filterSellerBook } from '../seller-shop-filter.js';
 
 const PAGE_SIZE = 100;
 
@@ -116,6 +117,8 @@ export default function Seller() {
   const [sort, setSort] = useState('price-asc');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(!seeded);
+  const [book, setBook] = useState(null);
+  const [bookPhase, setBookPhase] = useState('loading');
 
   useEffect(() => {
     setPage(1);
@@ -127,6 +130,66 @@ export default function Seller() {
 
   useEffect(() => {
     if (!handle) return undefined;
+    let cancelled = false;
+    setBook(null);
+    setBookPhase('loading');
+    fetchSellerShop(handle, { book: true, game: selectedGame })
+      .then((data) => {
+        if (cancelled) return;
+        if (!data?.book || !Array.isArray(data.listings)) {
+          setBookPhase('server');
+          return;
+        }
+        setBook(data);
+        setBookPhase('ready');
+        setSeller(sellerFromPayload(data, handle, data.listings[0]));
+      })
+      .catch(() => {
+        if (!cancelled) setBookPhase('server');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [handle, selectedGame]);
+
+  useEffect(() => {
+    if (!book?.seller?.uid) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetchSellerShop(handle, { fresh: true, sellerUid: book.seller.uid, game: selectedGame })
+        .then((stamp) => {
+          const next = String(stamp?.maxUpdatedAt || '');
+          const prev = String(book.maxUpdatedAt || '');
+          if (cancelled || !next || next === prev) return null;
+          return fetchSellerShop(handle, { book: true, game: selectedGame });
+        })
+        .then((data) => {
+          if (cancelled || !data?.book || !Array.isArray(data.listings)) return;
+          setBook(data);
+          setSeller(sellerFromPayload(data, handle, data.listings[0]));
+        })
+        .catch(() => {});
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [book, handle, selectedGame, query, condition, language, rarity, reverse, firstEdition, sort]);
+
+  useEffect(() => {
+    const filtersNarrow = Boolean(
+      query.trim()
+      || condition
+      || language
+      || rarity
+      || reverse
+      || firstEdition
+      || (sort && sort !== 'price-asc')
+      || page > 1
+    );
+    // First page still comes from the small query. A filter click while the
+    // full shop is downloading waits for that book instead of asking again.
+    if (!handle || book || (bookPhase === 'loading' && filtersNarrow)) return undefined;
     let cancelled = false;
     setLoading(true);
     const offset = (Math.max(1, page) - 1) * PAGE_SIZE;
@@ -169,24 +232,53 @@ export default function Seller() {
     return () => {
       cancelled = true;
     };
-  }, [handle, page, query, condition, language, rarity, reverse, firstEdition, sort, selectedGame]);
+  }, [book, bookPhase, handle, page, query, condition, language, rarity, reverse, firstEdition, sort, selectedGame]);
 
-  const sample = listings?.[0];
+  const filtersNarrow = Boolean(
+    query.trim()
+    || condition
+    || language
+    || rarity
+    || reverse
+    || firstEdition
+    || (sort && sort !== 'price-asc')
+    || page > 1
+  );
+  const bookView = useMemo(() => (
+    book?.listings
+      ? filterSellerBook(book.listings, {
+        q: query.trim(),
+        condition,
+        language,
+        rarity,
+        reverse,
+        firstEdition,
+        sort,
+      })
+      : null
+  ), [book, query, condition, language, rarity, reverse, firstEdition, sort]);
+  const shownOffset = (Math.max(1, page) - 1) * PAGE_SIZE;
+  const shown = bookView ? bookView.rows.slice(shownOffset, shownOffset + PAGE_SIZE) : listings;
+  const shownTotal = bookView ? bookView.rows.length : total;
+  const shownUnique = bookView ? bookView.unique : unique;
+  const busy = bookView ? false : (loading || (bookPhase === 'loading' && filtersNarrow));
+
+  const sample = shown?.[0];
   const display = seller.displayName || publicListingSellerName(sample, handle);
   const tag = seller.username || sellerHandle(sample) || handle;
   const showTag = tag && tag.toLowerCase() !== String(display || '').toLowerCase();
   const country = sellerCountryFlag(sample?.sellerCountry);
   const countryShort = sellerCountryShort(sample?.sellerCountry);
-  const ready = useMemo(() => Boolean((listings || []).some(isOneDayReady)), [listings]);
+  const ready = useMemo(() => Boolean((shown || []).some(isOneDayReady)), [shown]);
 
-  const totalItems = total ?? 0;
-  const uniqueItems = unique ?? 0;
+  const totalItems = shownTotal ?? 0;
+  const uniqueItems = shownUnique ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE) || 1);
   const safePage = Math.min(Math.max(1, page), totalPages);
   const startIdx = totalItems ? (safePage - 1) * PAGE_SIZE + 1 : 0;
   const endIdx = Math.min(safePage * PAGE_SIZE, totalItems);
 
-  if (listings && !listings.length && error && totalItems === 0 && !loading) {
+  if (shown && !shown.length && error && totalItems === 0 && !busy) {
     return (
       <EmptyDesk title="Seller not found" lede={error}>
         <p className="status">Usernames match live native listings.</p>
@@ -244,11 +336,11 @@ export default function Seller() {
       </header>
 
       <MetricGrid>
-        <Metric value={listings == null ? '…' : totalItems} label="Total items" />
-        <Metric value={listings == null ? '…' : uniqueItems} label="Unique items" />
+        <Metric value={shown == null ? '…' : totalItems} label="Total items" />
+        <Metric value={shown == null ? '…' : uniqueItems} label="Unique items" />
       </MetricGrid>
 
-      <Alert>{error && listings?.length ? error : ''}</Alert>
+      <Alert>{error && shown?.length ? error : ''}</Alert>
 
       <section className="panel shop-panel shop-terminal seller-shop-panel">
         <header className="panel-head shop-head">
@@ -263,14 +355,14 @@ export default function Seller() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Search listings"
-            disabled={listings == null}
+            disabled={shown == null}
           />
           <div className="shop-find">
             <select
               aria-label="Condition"
               value={condition}
               onChange={(e) => setCondition(e.target.value)}
-              disabled={listings == null}
+              disabled={shown == null}
             >
               {CONDITION_FILTERS.map((opt) => (
                 <option key={opt.value || 'any'} value={opt.value}>
@@ -282,7 +374,7 @@ export default function Seller() {
               aria-label="Language"
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
-              disabled={listings == null}
+              disabled={shown == null}
             >
               {LANG_FILTERS.map((code) => (
                 <option key={code || 'any'} value={code}>
@@ -294,7 +386,7 @@ export default function Seller() {
               aria-label="Rarity"
               value={rarity}
               onChange={(e) => setRarity(e.target.value)}
-              disabled={listings == null}
+              disabled={shown == null}
             >
               {RARITY_FILTERS.map((opt) => (
                 <option key={opt.value || 'any-rarity'} value={opt.value}>
@@ -308,7 +400,7 @@ export default function Seller() {
               aria-label="Sort"
               value={sort}
               onChange={(e) => setSort(e.target.value)}
-              disabled={listings == null}
+              disabled={shown == null}
             >
               <option value="price-asc">Price ↑</option>
               <option value="price-desc">Price ↓</option>
@@ -319,7 +411,7 @@ export default function Seller() {
         </div>
 
         <p className="seller-result-count">
-          {listings == null || loading ? (
+          {shown == null || busy ? (
             'Loading…'
           ) : totalItems ? (
             <>
@@ -331,7 +423,7 @@ export default function Seller() {
           )}
         </p>
 
-        {listings == null ? (
+        {shown == null ? (
           <div
             className="shop-list seller-shop-list"
             aria-busy="true"
@@ -353,9 +445,9 @@ export default function Seller() {
               </div>
             ))}
           </div>
-        ) : listings.length ? (
-          <ShopList className="seller-shop-list" offers={listings}>
-            {(selected) => listings.map((offer, index) => {
+        ) : shown.length ? (
+          <ShopList className="seller-shop-list" offers={shown}>
+            {(selected) => shown.map((offer, index) => {
               const cardId = String(offer.cardId || offer.card_id || '');
               const path = rewriteCanonicalCardPath(
                 offer.canonicalPath || offer.canonical_path || '',
@@ -381,7 +473,7 @@ export default function Seller() {
                   card={cardStub}
                   showCard
                   selected={selected.has(listingSelectId(enriched))}
-                  dragOffers={shopDragOffers(listings, selected, enriched)}
+                  dragOffers={shopDragOffers(shown, selected, enriched)}
                   onCart={(qty) => {
                     if (!cardId || !offer.id) return;
                     const item = cartItemFromOffer(cardStub, enriched);
@@ -391,7 +483,7 @@ export default function Seller() {
               );
             })}
           </ShopList>
-        ) : !loading ? (
+        ) : !busy ? (
           <EmptyDesk title="No listings" lede={`${display} has no live asks for these filters.`} />
         ) : null}
 
@@ -400,7 +492,7 @@ export default function Seller() {
             <button
               type="button"
               className="btn ghost"
-              disabled={safePage <= 1 || loading}
+              disabled={safePage <= 1 || busy}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
               Previous
@@ -411,7 +503,7 @@ export default function Seller() {
             <button
               type="button"
               className="btn ghost"
-              disabled={safePage >= totalPages || loading}
+              disabled={safePage >= totalPages || busy}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             >
               Next
