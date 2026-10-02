@@ -127,3 +127,30 @@ language + foil facets), not CardTrader product id. Cheap-25 “left the 25”
 was wrong and is off the live path. Full map:
 [MARKET.md](MARKET.md) → Listing pipeline → **Sold comps**.
 Host map: [GAMES.md](GAMES.md).
+
+## Daily completion notification
+
+Nezopt's `pokoin-all-cardtrader-daily.timer` starts the all-game catalogue,
+picture and raw-book wrapper at **23:00 UTC**. Its wrapper sends one Flareon
+Telegram summary after all stages finish. The summary distinguishes raw
+listing-book completeness, failed catalogue/picture/artwork/search stages,
+and the independent Pokémon price writer's freshness. A bounded read-only
+probe checks the newest `cardtrader_blueprint_daily_analytics` bucket and
+its actual `refreshed_at`; a failed probe reports unknown, and a raw book
+alone does not establish a successful price refresh.
+
+`scripts/cardtrader-daily-notify.py` calls the shared notifier at
+`/home/nez/Projects/tcgprices/notify_flareon.py` (override with
+`POKOIN_PRICE_NOTIFIER`). Delivery failures never change the import exit
+code. The shared notifier retains pending delivery on NVMe and retries it
+through its hourly flush. Each run also retains the exact message and
+event key under `notification-outbox/` plus `notification-status.json` in
+`POKOIN_CATALOG_RUN_ROOT`. If the notifier executable itself was unavailable,
+replay that payload using the same `--source`, `--status`, `--message` and
+`--event-key`; notifier deduplication prevents duplicate delivery.
+
+`cardtrader_blueprint_daily_analytics` records lowest listing asks, separately
+from inferred sold-price observations. The legacy daily bucket can be the
+previous UTC day, so notifications include both bucket and source refresh
+timestamp. A different game's failed catalogue import must not hide a
+successfully collected Pokémon price book.
