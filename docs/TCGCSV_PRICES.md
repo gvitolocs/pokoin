@@ -78,3 +78,9 @@ TCGplayer inventory history route remains available independently.
 Deploy through `scripts/deploy-price-check-api.sh` from the exact integrated
 `origin/main` commit; it includes both helpers, the public handler, route manifest
 and their tests. TCGCSV reader configuration is optional to the CardTrader feed.
+
+The inventory pricer also resolves CardTrader identities through the exact public
+candidate mapping. Its listed-ask and sold-median queries use mapped blueprint
+IDs, then re-key their outputs by the requested public ID; numeric division and
+raw public-ID/blueprint collisions never choose a different printing. Native
+listings and TCGplayer links retain their own public-card identities.

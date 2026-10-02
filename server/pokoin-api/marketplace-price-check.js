@@ -56,8 +56,8 @@ function parseItems(raw) {
     const piece = chunk.trim();
     if (!piece) continue;
     const [rawId, rawCondition = '', rawLanguage = ''] = piece.split(':');
-    const cardId = String(parseInt(rawId, 10) || '');
-    if (!cardId || seen.has(piece.toUpperCase())) continue;
+    const cardId = rawId.trim().replace(/^0+/, '');
+    if (!/^[1-9]\d{0,17}$/.test(cardId) || seen.has(piece.toUpperCase())) continue;
     seen.add(piece.toUpperCase());
     items.push({
       cardId,
@@ -121,17 +121,24 @@ const LANGUAGE_KEY_SQL = `
     else nullif(upper(btrim(language)), '')
   end`;
 
-async function readPrices(items, { excludeSellerUid = '' } = {}) {
+async function readPrices(items, { excludeSellerUid = '' } = {}, dependencies = {}) {
+  const query = dependencies.marketplaceQuery || queryDb;
   const ids = [...new Set(items.map((item) => item.cardId))];
   if (!ids.length) return {};
-  const ctIds = ids.map((id) => Math.floor(Number(id) / 2)).filter((id) => id > 0);
+  // The public ID may collide with another blueprint and is not necessarily ct_id × 2.
+  const mapping = await query(`select card_id, ct_id
+    from public.marketplace_search_candidates where card_id = any($1::bigint[])`, [ids]);
+  const blueprintByCard = new Map(mapping.rows
+    .filter((row) => row.ct_id != null)
+    .map((row) => [String(row.card_id), String(row.ct_id)]));
+  const ctIds = [...new Set(blueprintByCard.values())];
 
   const [pokoinRows, ctRows, soldRows] = await Promise.all([
-    queryDb(
+    query(
       `
         select card_id, min(price_pkn) as min_pkn
         from public.marketplace_user_listings
-        where card_id = any($1::bigint[])
+        where card_id = any($1::text[])
           and status = 'active'
           and quantity_available > 0
           and price_pkn > 0
@@ -140,7 +147,7 @@ async function readPrices(items, { excludeSellerUid = '' } = {}) {
       `,
       [ids, excludeSellerUid],
     ),
-    queryDb(
+    query(
       `
         select
           coalesce(blueprint_id, cardtrader_blueprint_id) as ct_id,
@@ -155,7 +162,7 @@ async function readPrices(items, { excludeSellerUid = '' } = {}) {
       `,
       [ctIds],
     ),
-    queryDb(
+    query(
       `
         select blueprint_id,
                percentile_cont(0.5) within group (order by median_pkn) as sold_median_pkn
@@ -166,7 +173,7 @@ async function readPrices(items, { excludeSellerUid = '' } = {}) {
           and median_pkn > 0
         group by blueprint_id
       `,
-      [ids],
+      [ctIds],
     ),
   ]).catch((error) => {
     error.statusCode = error.statusCode || 502;
@@ -174,37 +181,38 @@ async function readPrices(items, { excludeSellerUid = '' } = {}) {
   });
 
   const pokoinByCard = new Map(pokoinRows.rows.map((row) => [String(row.card_id), Number(row.min_pkn)]));
-  const soldByCard = new Map(
+  const soldByBlueprint = new Map(
     soldRows.rows.map((row) => [String(row.blueprint_id), Number(row.sold_median_pkn)]),
   );
-  const ctByCard = new Map();
+  const ctByBlueprint = new Map();
   for (const row of ctRows.rows) {
-    const cardId = String(Number(row.ct_id) * 2);
-    const groups = ctByCard.get(cardId) || [];
+    const ctId = String(row.ct_id);
+    const groups = ctByBlueprint.get(ctId) || [];
     groups.push({
       condition: row.condition_key,
       language: row.language_key,
       minPkn: Number(row.min_pkn),
     });
-    ctByCard.set(cardId, groups);
+    ctByBlueprint.set(ctId, groups);
   }
 
-  const game = require('./_marketplace_game').currentGame();
+  const game = dependencies.currentGame ? dependencies.currentGame() : require('./_marketplace_game').currentGame();
   let tcgplayer;
   try {
-    tcgplayer = await readTcgplayerPrices(game, ids);
+    tcgplayer = await (dependencies.readTcgplayerPrices || readTcgplayerPrices)(game, ids);
   } catch (error) {
     console.error('TCGCSV price feed unavailable', error.code || error.message);
     tcgplayer = { status: 'unavailable', prices: {} };
   }
   const prices = {};
   for (const item of items) {
-    const { ctCheapestPkn, ctMatchedPkn } = pickMatchedCt(ctByCard.get(item.cardId) || [], item.condition, item.language);
+    const ctId = blueprintByCard.get(item.cardId);
+    const { ctCheapestPkn, ctMatchedPkn } = pickMatchedCt(ctByBlueprint.get(ctId) || [], item.condition, item.language);
     prices[item.cardId] = {
       pokoinCheapestPkn: pokoinByCard.get(item.cardId) ?? null,
       ctCheapestPkn,
       ctMatchedPkn,
-      soldMedianPkn: soldByCard.get(item.cardId) ?? null,
+      soldMedianPkn: soldByBlueprint.get(ctId) ?? null,
       tcgplayer: tcgplayer.prices[item.cardId] || [],
       tcgplayerStatus: tcgplayer.status,
     };
