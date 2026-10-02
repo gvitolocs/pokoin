@@ -89,3 +89,18 @@ scripts/deploy-recents-api.sh
 # 3) Web SPA (separate)
 scripts/deploy-web.sh
 ```
+
+### Marketplace read overlays (2026-10-02)
+
+Handlers vendored from CardVault into `server/api/` / `server/pokoin-api/`
+are the source of truth for the shared marketplace API — CardVault's
+`pokemon_card_vault/api/` copies are deprecated for API work (ownership and
+the transitional list: [GAMES.md](GAMES.md) "API handler ownership").
+
+```bash
+# Artist desk: tiles=1 identity-once payload + vendored handler/helpers
+scripts/deploy-artist-cards-api.sh
+
+# Seller listings: offset pagination, owner reads skip the Firestore enrich
+scripts/deploy-live-listings-api.sh        # also ships cardtrader-live-listings.js
+```
