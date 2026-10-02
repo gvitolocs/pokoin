@@ -47,8 +47,10 @@ export function isUltraRareFaEx(name, number) {
   const m = Number(matches.at(-1)[2]);
   if (!m) return false;
   if (n > m) return true;
-  // Mega EX Ultra Rare in-set keeps the illustration window (M Mewtwo 159/162).
-  if (/\bmega\b|^m\s+/i.test(nameS)) return false;
+  // Full-art Mega EX is the Ultra Rare near the end of the set (Evolutions
+  // M Venusaur-EX 100/108, BREAKthrough M Mewtwo-EX 159/162). The framed
+  // Mega EX is the low collector (2/108, 63/162) and stays a window.
+  // Gold Secret Mega (108/106) is not Ultra Rare, so it stays a window.
   return n >= Math.max(1, Math.floor(m * 0.85)) || m - n <= 12;
 }
 
