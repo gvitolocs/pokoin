@@ -14,6 +14,11 @@ const {
   pushAndLinkListing,
   pushListingToCardTrader,
 } = require('./_cardtrader_seller_listings');
+const {
+  getSellerPublicProfiles,
+  readSellerUidByName,
+  rememberSellerUidByName,
+} = require('./_seller_profile_cache');
 
 function parseGameFromRequest(...args) {
   return require('./_marketplace_game').parseGameFromRequest(...args);
@@ -411,6 +416,18 @@ async function sellerProfileForUsername(username, { listingsFirst = true } = {})
     throw error;
   }
 
+  // Shared slug cache first: a resolved seller name → uid pair is stable and
+  // public. Unknown names are never negatively cached (new sellers can
+  // appear any time).
+  const cachedUid = await readSellerUidByName(clean);
+  if (cachedUid?.uid) {
+    return {
+      uid: cachedUid.uid,
+      username: clean,
+      displayName: cachedUid.displayName || '',
+    };
+  }
+
   let uid = '';
   let displayName = '';
   if (listingsFirst) {
@@ -444,6 +461,7 @@ async function sellerProfileForUsername(username, { listingsFirst = true } = {})
     throw error;
   }
 
+  await rememberSellerUidByName(clean, { uid, displayName });
   return {
     uid,
     username: clean,
@@ -479,19 +497,9 @@ async function enrichListingRowsWithSellerProfiles(rows = []) {
   const uids = [...uidSet];
   if (uids.length === 0) return rows;
   try {
-    const firestore = getFirebaseAdmin().firestore();
-    const docs = await Promise.all(
-      uids.map((uid) => firestore.collection('users').doc(uid).get()),
-    );
-    const profiles = new Map();
-    docs.forEach((doc, index) => {
-      const data = doc.data?.() || {};
-      profiles.set(uids[index], {
-        displayName: cleanText(data.displayName, 120),
-        username: cleanText(data.username || data.usernameLower, 120),
-        acceptsPkn: data.acceptsPkn !== false,
-      });
-    });
+    // Shared read-through cache: Valkey first, one Firestore users/{uid} read
+    // per cache-miss only. Display enrichment — never used for authorization.
+    const profiles = await getSellerPublicProfiles(uids);
     return rows.map((row) => {
       const profile = profiles.get(cleanText(row.seller_uid, 160));
       return profile

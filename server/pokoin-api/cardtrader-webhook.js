@@ -218,7 +218,11 @@ async function handleOrderPayload({ admin, firestore, uid, cause, order }) {
     }).catch((error) => {
       console.error('cardtrader webhook sale record failed', { uid, listingId: updated.id, message: error.message });
     });
-    await marketplaceQuery(
+    // refresh_marketplace_blueprint_price_summary is DELETE+INSERT, so it must
+    // run on the writer pool; marketplaceQuery can land on a read-only replica.
+    // Kept best-effort: the decrement is already durable and a refresh failure
+    // must not fail the webhook (CardTrader would redeliver → double decrement).
+    await marketplaceWriteQuery(
       'select public.refresh_marketplace_blueprint_price_summary($1)',
       [updated.card_id],
     ).catch((error) => {
