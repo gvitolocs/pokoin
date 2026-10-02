@@ -4,7 +4,7 @@
 #
 #   scripts/deploy-search-api.sh
 #
-# Ships ONLY the files this repository owns (server/api/*) into a copy of the
+# Ships ONLY the files this repository owns into a copy of the
 # live Pi release, restarts pokoin-oracle-api, verifies health, and rolls
 # back automatically. Nothing is read from any other checkout, so unrelated
 # work in other trees can never ship. See scripts/deploy-web.sh for the web
@@ -24,6 +24,10 @@ trap 'rm -rf "$HERE"' EXIT
 # Archive the whole commit for tests; only API_FILES below enter the release.
 git -C "$REPO" archive "$COMMIT" | tar -C "$HERE" -xf -
 export NODE_PATH="${REPO}/server/node_modules${NODE_PATH:+:$NODE_PATH}"
+# The shared pipeline helper is maintained under server/pokoin-api; the live
+# release loads it from api/. Keep the legacy Pi HTTP probe and support the
+# overflow pod's real HTTPS CDN probe.
+cp "$HERE/server/pokoin-api/_pipeline_health.js" "$HERE/server/api/_pipeline_health.js"
 
 # Files this repository owns, at their release-relative paths.
 # Multigame SQL is the satellite TCG search/suggest engine (Magic, OP, …) —
@@ -67,6 +71,7 @@ API_FILES=(
   api/_searchbar_session.js
   api/_slug.js
   api/_supabase.js
+  api/_pipeline_health.js
 )
 
 die() { echo "deploy-search-api: $*" >&2; exit 1; }
@@ -75,7 +80,7 @@ say() { echo "== $*"; }
 for f in "${API_FILES[@]}"; do [[ -f "$HERE/server/$f" ]] || die "missing $HERE/server/$f"; done
 
 say "pokoin-web unit tests"
-(cd "$HERE" && node --test server/api/*.test.js >"/tmp/search-api-tests-$STAMP.log" 2>&1) \
+(cd "$HERE" && node --test server/api/*.test.js server/pokoin-api/_pipeline_health.test.js >"/tmp/search-api-tests-$STAMP.log" 2>&1) \
   || { tail -30 "/tmp/search-api-tests-$STAMP.log" >&2; die "server tests failed"; }
 grep -E "^# (tests|pass|fail)" "/tmp/search-api-tests-$STAMP.log"
 
