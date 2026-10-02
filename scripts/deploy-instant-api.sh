@@ -52,7 +52,7 @@ say "writer tables"
 for table in marketplace_outbox marketplace_artist_summary; do
   found="$(docker exec "$WRITER" psql -U pokoin_marketplace -d pokoin_marketplace -Atc "select to_regclass('public.$table')")" \
     || die "cannot read writer"
-  [[ "$found" == "public.$table" ]] || die "writer is missing public.$table — apply scripts/sql/096 then 097 first"
+  [[ "$found" == "$table" || "$found" == "public.$table" ]] || die "writer is missing public.$table — apply scripts/sql/096 then 097 first"
 done
 
 say "live release has external modules"
