@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchPriceCheck } from '../api.js';
+import { inventoryMarketLabel, inventoryMarketValue } from '../inventory-price.js';
 import { homepageDerivativeUrl, ownCatalogImage, preferFullImage } from '../image-urls.js';
 import { listingBox } from '../inventory-listings.js';
 import { groupInventoryStacks } from '../inventory-listings.js';
@@ -39,34 +40,10 @@ const SORT_LABELS = {
   name: 'Name A → Z',
 };
 
-function marketValueFor(prices, row, source) {
-  const entry = prices[String(row?.cardId || row?.card_id || '')];
-  if (!entry) return null;
-  if (source === 'tcgplayer') {
-    const quotes = (entry.tcgplayer || []).filter((quote) => quote.marketPrice != null);
-    if (!quotes.length) return null;
-    const values = quotes.map((quote) => Number(quote.marketPrice));
-    const low = Math.min(...values), high = Math.max(...values);
-    return { currency: 'USD', low, high, title: quotes.map((quote) =>
-      `${quote.subtype}: $${quote.marketPrice} (${quote.sourceTimestamp})`).join('\n')
-      + '\nAggregate market price; no condition-specific quote.' };
-  }
-  if (source === 'cardtrader') {
-    return entry.ctMatchedPkn ?? entry.ctCheapestPkn ?? null;
-  }
-  return entry.pokoinCheapestPkn ?? entry.soldMedianPkn ?? null;
-}
-
 function MarketCell({ value, pending }) {
   if (pending) return <span className="inv-mkt is-pending">…</span>;
   if (value == null) return <span className="inv-mkt is-none">—</span>;
-  if (value.currency === 'USD') {
-    const format = (amount) => amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-    return <span className="inv-mkt" title={value.title}>
-      {format(value.low)}{value.high !== value.low ? `–${format(value.high)}` : ''} USD
-    </span>;
-  }
-  return <span className="inv-mkt">{value.toLocaleString('en-US', { maximumFractionDigits: 0 })} PKN</span>;
+  return <span className="inv-mkt" title={value.title}>{inventoryMarketLabel(value)}</span>;
 }
 
 function titleGroups(rows) {
@@ -319,7 +296,7 @@ export default function InventoryBoard({ rows, formatPrice, defaultSource = '', 
                     <span className="inv-qty num">{Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0)}×</span>
                     <span className="inv-price num">{formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
                     {pricerOn ? (
-                      <MarketCell value={marketValueFor(prices, row, pricerSource)} pending={pricesPending} />
+                      <MarketCell value={inventoryMarketValue(prices, row, pricerSource)} pending={pricesPending} />
                     ) : null}
                     <span className={`inv-status ${String(row?.status || '').toLowerCase() === 'paused' ? 'is-paused' : 'is-live'}`}>
                       {String(row?.status || '').toLowerCase() === 'paused' ? 'Paused' : 'Live'}
@@ -364,7 +341,7 @@ export default function InventoryBoard({ rows, formatPrice, defaultSource = '', 
                       <span className="inv-qty num">{Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0)}×</span>
                       <span className="inv-price num">{formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
                       {pricerOn ? (
-                        <MarketCell value={marketValueFor(prices, row, pricerSource)} pending={pricesPending} />
+                        <MarketCell value={inventoryMarketValue(prices, row, pricerSource)} pending={pricesPending} />
                       ) : null}
                       <span className={`inv-status ${String(row?.status || '').toLowerCase() === 'paused' ? 'is-paused' : 'is-live'}`}>
                         {String(row?.status || '').toLowerCase() === 'paused' ? 'Paused' : 'Live'}
@@ -441,7 +418,7 @@ export default function InventoryBoard({ rows, formatPrice, defaultSource = '', 
               <span className="inv-price num">{formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
               {pricerOn ? (
                 <MarketCell
-                  value={marketValueFor(prices, row, pricerSource)}
+                  value={inventoryMarketValue(prices, row, pricerSource)}
                   pending={pricesPending}
                 />
               ) : null}

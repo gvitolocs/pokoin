@@ -433,13 +433,6 @@ export function fetchCanonicalPath(cardId, { lang = 'en' } = {}) {
   return pending;
 }
 
-export function fetchCardPriceHistory(cardId) {
-  const id = String(cardId || '').trim();
-  if (!/^\d+$/.test(id)) return Promise.resolve(null);
-  const params = new URLSearchParams({ cardId: id });
-  return getJson(`/api/marketplace-card-price-history?${params}`);
-}
-
 export function fetchCardSales(cardId, {
   condition,
   language,

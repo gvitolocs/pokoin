@@ -38,11 +38,11 @@ handler, and the route manifest declares the new endpoint. Deploy the API with
 `scripts/deploy-price-check-api.sh` and the SPA with `scripts/deploy-web.sh`
 from the exact pushed `origin/main` commit.
 
-The card desk offers CardTrader listings, TCGplayer market and recorded sales
-as separate graph sources. It defaults to the first available quote source,
-then recorded sales when neither feed has priced observations. Source variants
-remain separate, an isolated quote renders as one point, and missing daily
-observations leave gaps. Listing asks never enter the sold-price calculations.
+The existing card desk and its CardTrader inferred-sale graph retain their
+layout and source contract from `docs/MARKET.md`. Imported listing asks and
+TCGplayer quotes are available separately to Poko and the MyPokoin pricer.
+Source variants remain separate and missing daily observations stay missing.
+Listing asks never enter the sold-price calculations.
 
 Pi reads the separate price database through the private reader SSH tunnel.
 `scripts/nezopt-k3s.sh sync` rewrites that localhost connection to the private
