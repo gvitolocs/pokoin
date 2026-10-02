@@ -72,3 +72,46 @@ test('periodic reconcile revalidates account type when legacy metadata has no fl
   assert.equal(storedOneDayReady({ metadata: { oneDayReady: false } }), false);
   assert.equal(storedOneDayReady({ metadata: {} }), undefined);
 });
+
+// --- Shared cross-instance reconcile lock ---
+
+test('a seller locked by another instance is skipped without failing the run', async () => {
+  const synced = [];
+  const result = await reconcileAllConnectedSellers({
+    admin: {},
+    firestore: {},
+    listIntegrations: async () => [
+      { uid: 'u1', provider: 'cardtrader', enabled: true },
+      { uid: 'u2', provider: 'cardtrader', enabled: true },
+    ],
+    decryptToken: async (_, uid) => `token-${uid}`,
+    registerWebhook: async () => ({ ok: true }),
+    reconcileInventory: async ({ uid }) => { synced.push(uid); return { ok: true }; },
+    acquireLock: async (uid) => (uid === 'u1' ? null : { key: `lock:ct-reconcile:${uid}`, owner: 'other' }),
+    releaseLock: async () => {},
+  });
+  assert.deepEqual(synced, ['u2'], 'locked seller must not be reconciled here');
+  assert.equal(result.skipped, 1);
+  assert.equal(result.failed, 0);
+  assert.equal(result.ok, true, 'a skip is not a failure');
+  assert.equal(result.results[0].skipped, true);
+});
+
+test('locks are released after each seller reconcile', async () => {
+  const released = [];
+  const result = await reconcileAllConnectedSellers({
+    admin: {},
+    firestore: {},
+    listIntegrations: async () => [
+      { uid: 'u1', provider: 'cardtrader', enabled: true },
+      { uid: 'u2', provider: 'cardtrader', enabled: true },
+    ],
+    decryptToken: async (_, uid) => `token-${uid}`,
+    registerWebhook: async () => ({ ok: true }),
+    reconcileInventory: async () => ({ ok: true }),
+    acquireLock: async (uid) => ({ key: `lock:ct-reconcile:${uid}`, owner: 'me' }),
+    releaseLock: async (lock) => { released.push(lock.key); },
+  });
+  assert.deepEqual(released, ['lock:ct-reconcile:u1', 'lock:ct-reconcile:u2']);
+  assert.equal(result.ok, true);
+});

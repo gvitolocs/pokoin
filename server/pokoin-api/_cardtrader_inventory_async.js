@@ -3,15 +3,55 @@
 /**
  * Background CardTrader inventory sync jobs.
  * Connect/sync return immediately; progress lives in seller_sync.last_sync_summary.
+ *
+ * Concurrency guard is two layers, both efficiency-only (the reconcile itself
+ * stays idempotent): the in-process `running` map and a shared Valkey lock
+ * (`lock:ct-reconcile:{uid}`, 15 min TTL, owner-checked release) so Pi and
+ * k3s overflow instances do not reconcile the same seller twice. Valkey down
+ * degrades to the in-process guard only — duplicating an idempotent reconcile
+ * is better than skipping a needed one.
  */
+
+const crypto = require('node:crypto');
 
 const {
   reconcileCardTraderInventory,
   recordSellerSync,
   readSellerSync,
 } = require('./_cardtrader_inventory_sync');
+const valkey = require('./_valkey');
 
 const running = new Map(); // sellerUid -> { promise, startedAt }
+
+const RECONCILE_LOCK_TTL_SEC = 15 * 60;
+
+function reconcileLockKey(uid) {
+  return `lock:ct-reconcile:${cleanText(uid, 160)}`;
+}
+
+/**
+ * Acquire the cross-instance reconcile lock.
+ * @returns {{ key, owner, degraded } | null} null = another instance holds it.
+ */
+async function acquireReconcileLock(uid) {
+  const key = reconcileLockKey(uid);
+  const owner = crypto.randomUUID();
+  try {
+    const pong = await valkey.command(['PING']);
+    if (pong !== 'PONG') return { key, owner: '', degraded: true };
+    const acquired = await valkey.acquireLock(key, owner, RECONCILE_LOCK_TTL_SEC);
+    return acquired ? { key, owner, degraded: false } : null;
+  } catch (_) {
+    return { key, owner: '', degraded: true };
+  }
+}
+
+async function releaseReconcileLock(lock) {
+  if (lock && lock.owner) {
+    await valkey.releaseLock(lock.key, lock.owner);
+  }
+}
+
 
 function cleanText(value, maxLength = 240) {
   return String(value || '').trim().slice(0, maxLength);
@@ -46,7 +86,7 @@ async function markRunning(sellerUid, partial) {
  * Start a background reconcile. Safe to call twice — second call is a no-op.
  * @returns {{ started: boolean, alreadyRunning: boolean }}
  */
-function enqueueCardTraderInventorySync(args = {}) {
+async function enqueueCardTraderInventorySync(args = {}) {
   const sellerUid = cleanText(args.uid, 160);
   if (!sellerUid) {
     const error = new Error('Missing seller uid.');
@@ -54,6 +94,12 @@ function enqueueCardTraderInventorySync(args = {}) {
     throw error;
   }
   if (running.has(sellerUid)) {
+    return { started: false, alreadyRunning: true };
+  }
+
+  const lock = await acquireReconcileLock(sellerUid);
+  if (!lock) {
+    console.warn('cardtrader inventory sync already running on another instance', { uid: sellerUid });
     return { started: false, alreadyRunning: true };
   }
 
@@ -105,6 +151,7 @@ function enqueueCardTraderInventorySync(args = {}) {
     })
     .finally(() => {
       running.delete(sellerUid);
+      releaseReconcileLock(lock);
     });
 
   running.set(sellerUid, { promise, startedAt });
@@ -134,4 +181,6 @@ module.exports = {
   enqueueCardTraderInventorySync,
   isInventorySyncRunning,
   readInventorySyncProgress,
+  acquireReconcileLock,
+  releaseReconcileLock,
 };

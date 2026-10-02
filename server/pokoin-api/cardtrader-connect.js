@@ -58,7 +58,7 @@ async function connect(req, decoded, admin, firestore) {
       || info?.seller?.name
       || decoded.email
       || 'Pokoin seller';
-    const job = enqueueCardTraderInventorySync({
+    const job = await enqueueCardTraderInventorySync({
       firestore,
       uid: decoded.uid,
       sellerName: String(sellerName),

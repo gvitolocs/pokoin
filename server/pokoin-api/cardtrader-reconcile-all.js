@@ -12,6 +12,10 @@ const { getFirebaseAdmin } = require('../server/_firebase');
 const { decryptIntegrationToken } = require('./_cardtrader_integration');
 const { registerSellerWebhook } = require('./_cardtrader_webhook_registration');
 const { reconcileCardTraderInventory } = require('./_cardtrader_inventory_sync');
+const {
+  acquireReconcileLock,
+  releaseReconcileLock,
+} = require('./_cardtrader_inventory_async');
 
 function sellerNameFromIntegration(data = {}) {
   return String(
@@ -42,12 +46,24 @@ async function reconcileAllConnectedSellers({
   decryptToken = decryptIntegrationToken,
   registerWebhook = registerSellerWebhook,
   reconcileInventory = reconcileCardTraderInventory,
+  acquireLock = acquireReconcileLock,
+  releaseLock = releaseReconcileLock,
 } = {}) {
   const integrations = await listIntegrations(firestore);
   const results = [];
   for (const integration of integrations) {
     const uid = String(integration.uid || '').trim();
     const row = { uid, webhookOk: false, syncOk: false };
+    // Shared advisory lock: another instance reconciling this seller is a
+    // skip, not a failure. Valkey down degrades to no cross-instance guard.
+    const lock = await acquireLock(uid);
+    if (!lock) {
+      row.skipped = true;
+      row.syncError = 'already reconciling on another instance';
+      results.push(row);
+      console.log('cardtrader periodic seller reconcile', row);
+      continue;
+    }
     try {
       const token = await decryptToken(firestore, uid);
       try {
@@ -70,14 +86,17 @@ async function reconcileAllConnectedSellers({
       if (!row.syncOk) row.syncError = String(sync?.error || 'Incomplete inventory export.').slice(0, 500);
     } catch (error) {
       row.syncError = String(error.message || error).slice(0, 500);
+    } finally {
+      await releaseLock(lock);
     }
     results.push(row);
     console.log('cardtrader periodic seller reconcile', row);
   }
   return {
-    ok: results.every((row) => row.webhookOk && row.syncOk),
+    ok: results.every((row) => row.skipped || (row.webhookOk && row.syncOk)),
     sellers: results.length,
-    failed: results.filter((row) => !row.webhookOk || !row.syncOk).length,
+    failed: results.filter((row) => !row.skipped && (!row.webhookOk || !row.syncOk)).length,
+    skipped: results.filter((row) => row.skipped === true).length,
     results,
   };
 }

@@ -303,7 +303,8 @@ module.exports = async function handler(req, res) {
     if (results.some((row) => row.reason === 'no_linked_listing' || row.reason === 'decrement_failed')) {
       try {
         const token = await decryptIntegrationToken(firestore, uid);
-        enqueueCardTraderInventorySync({ firestore, uid, sellerName: 'Pokoin seller', token });
+        enqueueCardTraderInventorySync({ firestore, uid, sellerName: 'Pokoin seller', token })
+          .catch(() => {}); // the enqueue path logs its own failures
       } catch (error) {
         console.error('cardtrader-webhook fallback sync enqueue failed', { uid, message: error.message });
       }
