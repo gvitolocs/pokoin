@@ -162,6 +162,7 @@ def build_rows(game: str, cards: list[dict], ids: dict[str, int]) -> list[dict]:
             "category_id": 1,
             "image_url": card.get("image_url") or None,
             "image_fallback": card.get("image_fallback") or None,
+            "image_referer": card.get("image_referer") or None,
             "expansion": {"name": card.get("set_name") or "Unknown", "code": card.get("set_code") or ""},
             "blueprint": {
                 "source": card["source"],
@@ -221,13 +222,17 @@ def carry_cardmarket_ids(rows: list[dict], wayback: list[dict]) -> int:
     return matched
 
 
-def fetch_bytes(url: str, attempts: int = 3) -> bytes:
+def fetch_bytes(url: str, attempts: int = 3, referer: str | None = None) -> bytes:
     import requests
 
+    headers = {"User-Agent": USER_AGENT}
+    if referer:
+        # Wiki CDNs (Fandom) serve card art to their own pages only.
+        headers["Referer"] = referer
     last = None
     for attempt in range(attempts):
         try:
-            resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=40)
+            resp = requests.get(url, headers=headers, timeout=40)
             if resp.status_code == 200 and resp.content:
                 return resp.content
             last = f"HTTP {resp.status_code}"
@@ -286,7 +291,7 @@ def stage_images(game: str, rows: list[dict], concurrency: int) -> dict[int, str
         last = None
         for url in dict.fromkeys(urls):
             try:
-                render_image(fetch_bytes(url), full, home)
+                render_image(fetch_bytes(url, referer=row.get("image_referer")), full, home)
                 manifest[row["cdn_object_key"]] = url
                 return row["id"], "ok"
             except Exception as error:

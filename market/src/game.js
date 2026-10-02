@@ -69,6 +69,15 @@ const GAMES = {
   star_wars_destiny: {
     id: 'star_wars_destiny', apiGame: 'star_wars_destiny', slug: 'star-wars-destiny', name: 'Star Wars Destiny', brand: 'Pokoin', title: 'Star Wars Destiny marketplace', ...SATELLITE,
   },
+  the_spoils: {
+    id: 'the_spoils', apiGame: 'the_spoils', slug: 'the-spoils', name: 'The Spoils', brand: 'Pokoin', title: 'The Spoils marketplace', ...SATELLITE,
+  },
+  my_little_pony: {
+    id: 'my_little_pony', apiGame: 'my_little_pony', slug: 'my-little-pony', name: 'My Little Pony CCG', brand: 'Pokoin', title: 'My Little Pony CCG marketplace', ...SATELLITE,
+  },
+  dragon_born: {
+    id: 'dragon_born', apiGame: 'dragon_born', slug: 'dragon-born', name: 'Dragoborne', brand: 'Pokoin', title: 'Dragoborne marketplace', ...SATELLITE,
+  },
 };
 
 const SLUG_TO_ID = Object.fromEntries(

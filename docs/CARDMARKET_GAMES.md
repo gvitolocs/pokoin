@@ -13,9 +13,9 @@ CDN prefix `<slug>/` under `/srv/pokoin/card-images/objects/` on the Pi.
 | Force of Will | `force_of_will` | `/force-of-will` | FoWDB (scrape) | — | pending |
 | World of Warcraft TCG | `world_of_warcraft` | `/world-of-warcraft` | WoW TCG Reborn scans | — | pending |
 | Battle Spirits Saga | `battle_spirits_saga` | `/battle-spirits-saga` | official card database | — | pending |
-| Dragoborne | `dragon_born` | `/dragon-born` | Dragoborne wiki / CCGTrader | — | pending |
-| My Little Pony CCG | `my_little_pony` | `/my-little-pony` | mlpmerch.com CCG database | — | pending |
-| The Spoils | `the_spoils` | `/the-spoils` | the-spoils-cardgame.vercel.app | — | pending |
+| Dragoborne | `dragon_born` | `/dragon-born` | dragoborne.fandom.com MediaWiki API (480×670, needs the wiki Referer) | 476 | yes |
+| My Little Pony CCG | `my_little_pony` | `/my-little-pony` | data.mlpmerch.com CCG database (full-size originals) | 2,172 | yes |
+| The Spoils | `the_spoils` | `/the-spoils` | the-spoils-cardgame.vercel.app (Cloudinary art 500×700) | 2,101 | yes |
 
 ## History
 
