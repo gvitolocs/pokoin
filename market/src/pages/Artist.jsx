@@ -322,32 +322,24 @@ function ArtistDesk() {
     const node = sentinel.current;
     if (!node || shown >= groups.length) return undefined;
     let last = 0;
-    let prevY = window.scrollY;
-    let upward = false;
     const grow = () => setShown((current) => Math.min(current + ALBUM_PAGE, groups.length));
-    // A fast fling downward can land past the sentinel so it never intersects.
-    // Growing while the user is scrolling back up inserts rows above them and
-    // the page yanks. Time-throttled (not rAF) so it still runs in throttled
-    // renderers.
+    // Append while the sentinel is still ahead. Once it sits above the
+    // viewport, new rows reflow the dense grid and the page yanks.
+    const ahead = (rect) => rect && rect.bottom >= 0 && rect.top <= window.innerHeight + 800;
     const check = () => {
-      const rect = sentinel.current?.getBoundingClientRect();
-      if (rect && rect.top <= window.innerHeight + 800) grow();
+      if (ahead(sentinel.current?.getBoundingClientRect())) grow();
     };
     const onScroll = () => {
-      const y = window.scrollY;
-      upward = y < prevY - 1;
-      prevY = y;
-      if (upward) return;
       const now = Date.now();
       if (now - last < 150) return;
       last = now;
       check();
     };
     const observer = new IntersectionObserver((entries) => {
-      if (upward) return;
-      if (entries.some((entry) => entry.isIntersecting)) grow();
+      if (entries.some((entry) => ahead(entry.boundingClientRect))) grow();
     }, { rootMargin: '800px 0px' });
     observer.observe(node);
+    check();
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll, { passive: true });
     return () => {
@@ -557,6 +549,24 @@ function ArtistDesk() {
       )}
       {payload && shown < groups.length ? (
         <div ref={sentinel} className="album-scroll-sentinel" aria-hidden="true" />
+      ) : null}
+      {payload && shown >= groups.length && total > uniqueCardCount && type === 'singles' && !rarity && !setName && !query.trim() ? (
+        <div className="album-other-prints">
+          <p>{total - uniqueCardCount} more cards on the other prints</p>
+          <div className="artist-print-flags" role="group" aria-label="Other print regions">
+            {ARTIST_PRINT_FLAGS.filter((row) => row.code !== print).map((row) => (
+              <button
+                key={row.code}
+                type="button"
+                aria-label={row.label}
+                title={row.label}
+                onClick={() => changePrint(row.code)}
+              >
+                <img src={flagSrc(row.flag)} alt="" width="32" height="32" />
+              </button>
+            ))}
+          </div>
+        </div>
       ) : null}
       {pile ? (
         <ArtworkPileOverlay

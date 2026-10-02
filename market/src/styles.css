@@ -2661,8 +2661,6 @@ html.is-card-banding * {
     color-mix(in srgb, var(--album-shade, var(--g4)) 70%, transparent),
     transparent
   );
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
   -webkit-mask-image: linear-gradient(to bottom, #000 18%, transparent);
   mask-image: linear-gradient(to bottom, #000 18%, transparent);
 }
@@ -2681,8 +2679,6 @@ html.is-card-banding * {
     color-mix(in srgb, var(--album-shade, var(--g4)) 78%, transparent),
     transparent
   );
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
   -webkit-mask-image: linear-gradient(to top, #000 12%, transparent);
   mask-image: linear-gradient(to top, #000 12%, transparent);
 }
