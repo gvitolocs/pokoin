@@ -18,6 +18,8 @@ import {
 import { seedSellerListings } from '../seller-seed.js';
 import { game } from '../game.js';
 import { associateRoleLabel } from '../associate-roles.js';
+import Avatar from '../components/Avatar.jsx';
+import { safeAvatarUrl } from '../avatar.js';
 
 const PAGE_SIZE = 100;
 
@@ -78,6 +80,7 @@ function sellerFromPayload(data, handle, sample) {
     uid: row?.uid || sample?.sellerUid || '',
     username,
     displayName,
+    photoUrl: safeAvatarUrl(row?.photoUrl),
     associate: associateRole ? { role: associateRole, displayName: String(associateRow.displayName || '').trim() } : null,
   };
 }
@@ -202,9 +205,19 @@ export default function Seller() {
   return (
     <div className="page desk seller-page seller-shop-ct">
       <header className="seller-hero seller-hero-ct">
-        <span className="seller-avatar" aria-hidden="true">
-          {(display || '?').slice(0, 1).toUpperCase()}
-        </span>
+        {seller.photoUrl ? (
+          <Avatar
+            className="seller-avatar"
+            src={seller.photoUrl}
+            seed={seller.uid}
+            name={display}
+            size={88}
+          />
+        ) : (
+          <span className="seller-avatar" aria-hidden="true">
+            {(display || '?').slice(0, 1).toUpperCase()}
+          </span>
+        )}
         <div className="seller-id">
           <p className="page-kicker">Seller</p>
           <h1 className="page-title">

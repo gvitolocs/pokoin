@@ -222,6 +222,18 @@ async function associateBadgeForUid(uid) {
   }
 }
 
+/** Public shop may show an https profile picture. Storage paths stay private. */
+function publicPhotoUrl(value) {
+  const text = cleanText(value, 500);
+  if (!text) return '';
+  try {
+    const url = new URL(text);
+    return url.protocol === 'https:' ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
 function shopSellerFromProfile({ uid, profile = {}, queried = '', via = '' }) {
   const handle = currentHandle(profile.username);
   const asked = currentHandle(queried);
@@ -229,7 +241,12 @@ function shopSellerFromProfile({ uid, profile = {}, queried = '', via = '' }) {
   const username = handle || asked;
   const rawName = cleanText(profile.displayName, 120);
   const displayName = rawName && !rawName.includes('@') ? rawName : username;
-  return { uid, username, displayName };
+  return {
+    uid,
+    username,
+    displayName,
+    photoUrl: publicPhotoUrl(profile.photoUrl),
+  };
 }
 
 async function registeredSeller(firestore, username) {
@@ -272,6 +289,7 @@ async function sellerProfileForUsername(username) {
     profile: {
       username: data.username || data.usernameLower || '',
       displayName: data.displayName || '',
+      photoUrl: data.photoUrl || '',
     },
   });
   if (!seller) {
@@ -462,6 +480,7 @@ async function readSellerShopData(url, game) {
       uid: seller.uid,
       username: seller.username,
       displayName: seller.displayName || seller.username,
+      photoUrl: publicPhotoUrl(seller.photoUrl),
       associate: await associateBadgeForUid(seller.uid),
       acceptsPkn: seller.acceptsPkn !== false,
     },
@@ -509,6 +528,7 @@ module.exports._test = {
   raritySql,
   truthyFlag,
   sortSql,
+  publicPhotoUrl,
   shopSellerFromProfile,
   listingRow,
   sellerCardIdsForGame,
