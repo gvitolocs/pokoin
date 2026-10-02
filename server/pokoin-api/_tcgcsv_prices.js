@@ -1,16 +1,23 @@
 'use strict';
 
 let pool;
-function getPool() {
-  const connectionString = process.env.TCGCSV_DATABASE_URL;
-  if (!connectionString) return null;
-  if (!pool) {
+let historyPool;
+function poolOptions(history = false) {
+  return { connectionString: process.env.TCGCSV_DATABASE_URL, max: history ? 1 : 2,
+    connectionTimeoutMillis: 5000, statement_timeout: history ? 15000 : 5000,
+    application_name: history ? 'pokoin-tcgcsv-history' : 'pokoin-tcgcsv-prices',
+    ssl: process.env.TCGCSV_DATABASE_SSL === '0' ? false : { rejectUnauthorized: true } };
+}
+function getPool(history = false) {
+  if (!process.env.TCGCSV_DATABASE_URL) return null;
+  if (history ? !historyPool : !pool) {
     const { Pool } = require('pg');
-    pool = new Pool({ connectionString, max: 2, connectionTimeoutMillis: 5000,
-      statement_timeout: 5000, application_name: 'pokoin-tcgcsv-prices',
-      ssl: process.env.TCGCSV_DATABASE_SSL === '0' ? false : { rejectUnauthorized: true } });
+    // Older indexed history is on the 15 TB HDD. Give cold heap reads a bounded
+    // 15 seconds without slowing current-price requests or increasing concurrency.
+    if (history) historyPool = new Pool(poolOptions(true));
+    else pool = new Pool(poolOptions(false));
   }
-  return pool;
+  return history ? historyPool : pool;
 }
 
 // Preserve every mapped product and subtype; condition/language-specific quotes
@@ -48,7 +55,7 @@ async function readTcgplayerPrices(game, ids, query) {
 
 async function readTcgplayerHistory(game, cardId, from, to, query) {
   if (!query) {
-    const client = getPool();
+    const client = getPool(true);
     if (!client) { const error = new Error('TCGplayer history unavailable.'); error.statusCode=503; throw error; }
     query = (...args) => client.query(...args);
   }
@@ -68,4 +75,4 @@ async function readTcgplayerHistory(game, cardId, from, to, query) {
     languageSpecific:false,game,cardId,from,to,observations:result.rows};
 }
 
-module.exports = { readTcgplayerPrices, readTcgplayerHistory, groupPrices };
+module.exports = { readTcgplayerPrices, readTcgplayerHistory, groupPrices, poolOptions };

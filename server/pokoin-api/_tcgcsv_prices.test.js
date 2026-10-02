@@ -31,3 +31,13 @@ test('missing configuration never falls back to marketplace database or invented
   try { assert.deepEqual(await readTcgplayerPrices('pokemon',['42']),{status:'unconfigured',prices:{}}); }
   finally { if (previous !== undefined) process.env.TCGCSV_DATABASE_URL = previous; }
 });
+
+
+test('cold history uses one bounded 15-second connection independently of current quotes', () => {
+  const { poolOptions } = require('./_tcgcsv_prices');
+  const history = poolOptions(true), current = poolOptions(false);
+  assert.equal(history.max, 1); assert.equal(history.statement_timeout, 15000);
+  assert.equal(current.max, 2); assert.equal(current.statement_timeout, 5000);
+  assert.equal(history.connectionTimeoutMillis, 5000); assert.equal(current.connectionTimeoutMillis, 5000);
+  assert.notEqual(history.application_name, current.application_name);
+});
