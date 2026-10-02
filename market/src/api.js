@@ -1,5 +1,6 @@
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 import { createExpansionCardsFetcher } from './expansion-cards.js';
+import { createNamePrintingsFetcher } from './name-printings.js';
 import { attachRecentsToHome, fetchCardTiles, fetchExpansionFromLists, fetchHomeFromLists, fetchSetIndexFromLists, isPublicRailsVector } from './lists.js';
 import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsMissingTilePrice, lastMedianFromSales, tilePricePkn } from './pkn.js';
 export { formatPkn, formatPknNumber };
@@ -285,13 +286,29 @@ export async function fetchExactNameCards(name, {
   return collected;
 }
 
-export function fetchSuggest(query, { limit = 20, signal, lang, printLang, match } = {}) {
+/** SQL-backed candidate pool for ambiguous early set prefixes. The endpoint's
+ * 1,000-row bound keeps hydration finite; the shared scorer chooses the popup. */
+export const fetchNamePrintings = createNamePrintingsFetcher({
+  fetchRows: ({ name, lang, limit }) => {
+    const params = new URLSearchParams({ query: name, limit: String(limit),
+      productType: 'card', search_language: lang });
+    return getJson(`/api/marketplace-card-versions?${params}`);
+  },
+  mapCard: cardFromCatalogRow,
+});
+
+export function fetchSuggest(query, { limit = 20, signal, lang, printLang, match, hydrate = false } = {}) {
   const params = new URLSearchParams({
     q: query || '',
     limit: String(limit),
     search_language: lang || getSearchLang(),
-    print_language: printLang || 'all',
+    // Candidate hydration must precede the authoritative local print filter.
+    // Old Meili documents can lack the indexed bucket even when the expansion
+    // nationality is known, so filtering that index silently loses printings.
+    print_language: 'all',
   });
+  void printLang;
+  if (hydrate) params.set('hydrate', '1');
   // Corrected semantic lookups require every token to hit server-side so a
   // resolver anchor cannot silently vanish (default Meili "last" relaxes).
   if (match === 'all') {

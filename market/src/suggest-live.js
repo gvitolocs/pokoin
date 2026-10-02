@@ -17,6 +17,8 @@
  */
 
 import {
+  absorbNames,
+  NAME_POOL,
   compactQuery,
   fillSuggestGroups,
   isArtAwareQuery,
@@ -25,6 +27,7 @@ import {
   isRarityAwareQuery,
   isSetAwareQuery,
   isSetOnlyQuery,
+  isModifierWord,
   hasRivalMechanic,
   typedModifiers,
   mergeSuggestGroups,
@@ -35,6 +38,7 @@ import {
   printingMatchesSetFilter,
   printingNumberRank,
   rankNames,
+  resolveSearchQuery,
   SUGGEST_RESULT_FLOOR,
 } from './suggest-rank.js';
 import { catalogCacheKey, catalogIntent, groupsFromCards } from './suggest-catalog.js';
@@ -42,7 +46,7 @@ import { resolverOwns, resolveSuggestQuery } from './suggest-resolve.js';
 import { suggestKind } from './identity.js';
 import { filterSuggestByPrintLang } from './locale.js';
 import { mergePrintingFields } from './print-bucket.js';
-import { rankFreeText, scoreGroups } from './search-score.js';
+import { earlySetPrefixName, rankFreeText, scoreGroups, tokenizeQuery } from './search-score.js';
 
 export const SUGGEST_LIVE_MIN_CHARS = 3;
 const TTL_MS = 30 * 60 * 1000;
@@ -401,7 +405,7 @@ export function liveSuggestGroups(query, {
   const resolved = isBareCollectorQuery(parsed) ? null : resolveSuggestQuery(query);
   // LEGACY (kept for parity comparison per §15, superseded by the scorer's
   // typed artist evidence): the resolver-artist paint branch. Artist queries
-  // now flow through the ONE scorer below, which credits `artist` evidence on
+  // now flow through the printing scorer below, which credits `artist` evidence on
   // hydrated rows. Flip LEGACY_ARTIST_PAINT to true only to A/B the old paint.
   const LEGACY_ARTIST_PAINT = false;
   if (LEGACY_ARTIST_PAINT && resolved && resolved.hasArtist && resolverOwns(resolved)) {
@@ -423,17 +427,11 @@ export function liveSuggestGroups(query, {
     }
   }
   // ---------------------------------------------------------------------------
-  // ORDINARY FREE-TEXT SINGLES: one scorer owns it (search-score.js). No engine
-  // fork, no destructive set-peel, no resolver pipeline swap. Set/mechanic
-  // recognition is EVIDENCE only. Genuinely structured/browse queries keep
-  // their own paths below: bare collector numbers, set-only browse
-  // (`expedition`), art/rarity/number peels, the `energy` set browse, and
-  // resolver artist bindings — each a hard universe constraint the coverage
-  // scorer cannot express, not free-text card search.
-  // Knowledge-rich, branch-poor: every curated vocabulary (artist, set/era
-  // alias, rarity/art alias, collector number) now enters the ONE scorer as
-  // TYPED EVIDENCE (search-score.js), so recognition never routes a different
-  // pipeline. Only genuinely structured/browse queries keep an optimized path:
+  // Ordinary name queries retain the documented local probability pool.
+  // Mixed name/metadata queries score each cached printing with typed artist,
+  // set, rarity and collector evidence in search-score.js. Repeated or leading
+  // mechanic tokens retain that token interpretation. These browse queries
+  // keep their existing constrained paths:
   //   - a bare collector number  (`025`, `SH1`)      → number-filtered browse
   //   - a bare set-title browse   (`expedition`)      → that set's printings
   //   - the `energy` set browse   (`hgss energy`)     → elemental energies
@@ -443,11 +441,45 @@ export function liveSuggestGroups(query, {
   const isFreeText = !isBareCollectorQuery(parsed) && !isSetOnlyQuery(parsed) && !isEnergySet;
   if (isFreeText) {
     const lang = String(searchLang || 'en').toLowerCase();
+    const tokens = tokenizeQuery(query).tokens;
+    const nameCandidate = lang === 'en' && compactQuery(nameQuery) === compactQuery(query)
+      && intent.kind === 'name' && !resolved?.hasArtist
+      && !tokens.some((token) => token.interps.length)
+      && new Set(tokens.map((token) => token.compact)).size === tokens.length
+      && !tokens.some((token, index) => index < tokens.length - 1 && isModifierWord(token.raw))
+      && !earlySetPrefixName(query, { lang });
+    const cached = nameCandidate ? allCachedGroups() : [];
+    const nameRanked = nameCandidate ? rank(nameQuery, absorbNames(pool ?? NAME_POOL, cached)) : [];
+    if (nameCandidate && (tokens.length === 1 || nameRanked[0]?.withinCap === true)) {
+      // The documented compact-name probability pool owns name relevance.
+      // A word-token rescore must not reject joined names or accepted keyboard
+      // typos after that same pool successfully retrieved their printings.
+      // Use the same accepted correction as retrieval and Enter. Ranking the
+      // misspelling again lets a high-prior competing species outrank variants
+      // of the corrected identity even after its complete bucket is hydrated.
+      const corrected = resolveSearchQuery(nameQuery, nameRanked);
+      const ranked = compactQuery(corrected) === compactQuery(nameQuery) ? nameRanked
+        : rank(corrected, absorbNames(pool ?? NAME_POOL, cached));
+      const eligible = new Set(ranked.filter((row) => row.withinCap !== false).map((row) => row.compact));
+      const candidates = popupGroups(allCachedGroups(), printLang)
+        .filter((group) => eligible.has(compactQuery(group.name)));
+      // Keep deterministic printing ties without using token coverage as a
+      // second name-eligibility gate. Name order comes from rankNames below.
+      const scored = scoreGroups(query, candidates, { lang, minCoverage: 0 });
+      const merged = mergeSuggestGroups([scored.groups]);
+      const ordered = orderSuggestGroups(merged, ranked);
+      return {
+        groups: fillSuggestGroups(ordered, limit, limit, parsed, kind),
+        ranked,
+        parsed,
+        intent,
+      };
+    }
     // Name-pool order (English local vocab) for the returned `ranked` and FLIP.
     const ranked = pool
       ? rank(nameQuery, pool)
       : rankFreeText(query, { lang, limit: SUGGEST_RESULT_FLOOR * 2 });
-    // The displayed rows are the live cache scored by the ONE model, filtered
+    // The displayed rows are the live cache scored by the printing model, filtered
     // to tokens actually covered and ordered by coverage→quality. Scoring the
     // whole cache (not just rankFreeText's top-N) keeps a low-quality-but-valid
     // reading (base `Pikachu` under `pikahc gx`), lets typed evidence surface

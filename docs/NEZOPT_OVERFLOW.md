@@ -76,6 +76,12 @@ reads its replica). UFW drops container → host traffic, so pods reach the writ
 
 So an API deploy to the Pi reaches nezopt within ~5 minutes.
 
+The overflow API's pipeline health probe uses
+`POKOIN_CDN_HEALTH_URL=https://cdn.pokoin.com/health` with a 2-second timeout.
+The Pi keeps its local HTTP probe on `127.0.0.1:18081`; that address is not a
+CDN inside a Kubernetes API pod. The shared `_pipeline_health.js` supports
+both HTTP and HTTPS. All four dependency checks remain active.
+
 ## Commands
 
 ```bash

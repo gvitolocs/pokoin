@@ -35,6 +35,7 @@ import {
   RARITY_PHRASE_COMPACT,
   compactQuery,
   exactSetAlias,
+  isModifierWord,
   maxDistance,
   parseCollectorWord,
   prefixEditDistance,
@@ -42,6 +43,7 @@ import {
   printingMatchesNumberFilter,
   printingMatchesRarityFilter,
   printingMatchesSetFilter,
+  rankNames,
 } from './suggest-rank.js';
 import { ARTIST_POOL, SET_POOL, expansionNationality } from './suggest-catalog.js';
 import { printBucket } from './print-bucket.js';
@@ -69,6 +71,9 @@ export const QUALITY_UNIT = 10;
 // proportional to the fraction of letters preserved. Coverage dominates.
 export const Q_NAME_EXACT = 1.0;
 export const Q_NAME_PREFIX = 0.7; // query token is a prefix of a name token (pika → Pikachu)
+// One/two letters are ambiguous. Joint name+set evidence should beat either
+// reading alone, while a long cohort of name completions cannot bury the set.
+export const Q_NAME_SHORT_PREFIX = 0.25;
 export const Q_NAME_TYPO = 0.65; // scaled by 1 - edit distance / query length
 export const Q_COLLECTOR = 0.9; // exact printed collector number (n, n/m, SH1, 74a)
 export const Q_ARTIST_EXACT = 0.6;
@@ -100,8 +105,8 @@ const PRIOR_REF = 400;
 // and constructing numeric collation options inside every comparison is slow.
 const PRINTING_ID_COLLATOR = new Intl.Collator('en', { numeric: true });
 
-// Tokens this short are meaningful exact lexical tokens (ex / gx / v) but must
-// NOT be prefix/typo-expanded — that is exactly how `pika` used to become a set.
+// Literal short mechanics (ex / gx / v) stay exact-only. An unfinished trailing
+// name/set word can add quality after independent name evidence, never coverage.
 export const SHORT_TOKEN_MAX = 2;
 
 // A typo may only COUNT toward coverage when it changes at most this fraction of
@@ -242,6 +247,7 @@ function makeNameDoc(row) {
 }
 
 const NAME_DOCS = NAME_POOL.map(makeNameDoc);
+const NAME_DOC_INDEX = new Map(NAME_DOCS.map((doc, index) => [doc.compact, index]));
 const SET_DOCS = SET_POOL.map((row) => ({
   kind: 'set',
   display: row.display,
@@ -322,7 +328,7 @@ function tokensWithinDistance(token, cap) {
 // --- Per-token, per-field evidence -------------------------------------------
 
 /** Best evidence one query token draws from one list of field tokens. */
-function fieldEvidence(compact, fieldTokens, tiers) {
+function fieldEvidence(compact, fieldTokens, tiers, { allowShortPrefix = false } = {}) {
   if (!fieldTokens || !fieldTokens.length) {
     return null;
   }
@@ -341,18 +347,22 @@ function fieldEvidence(compact, fieldTokens, tiers) {
   if (best && best.quality >= tiers.exact) {
     return best; // exact is the ceiling for this field.
   }
-  if (short) {
+  if (short && !allowShortPrefix) {
     return best; // short tokens: exact lexical evidence only, no expansion.
   }
   if (tiers.prefix) {
     for (const fieldToken of fieldTokens) {
       if (fieldToken.length > compact.length && fieldToken.startsWith(compact)) {
         const extra = fieldToken.length - compact.length;
-        consider(tiers.prefix / (1 + 0.03 * extra), extra, `${tiers.name}-prefix`, fieldToken);
+        // One or two letters cannot distinguish a short set word from a long
+        // one. Equal context strength avoids preferring EX/Expansion merely
+        // because fewer letters remain than in Evolutions.
+        consider(short ? tiers.prefix : tiers.prefix / (1 + 0.03 * extra),
+          extra, `${tiers.name}-prefix`, fieldToken);
       }
     }
   }
-  if (tiers.typo) {
+  if (!short && tiers.typo) {
     const cap = maxDistance(compact.length);
     if (cap > 0) {
       let bestDistance = Infinity;
@@ -385,12 +395,30 @@ const NAME_TIERS = { name: 'name', exact: Q_NAME_EXACT, prefix: Q_NAME_PREFIX, t
 const SET_TIERS = { name: 'set', exact: Q_SET_EXACT, prefix: Q_SET_PREFIX, typo: Q_SET_TYPO };
 const ARTIST_TIERS = { name: 'artist', exact: Q_ARTIST_EXACT, prefix: Q_ARTIST_PREFIX, typo: 0 };
 
+// Reuse the established compact-name pool for accepted lexical recoveries.
+// This is particularly important when spaces disappeared from a multiword
+// identity, or the word-token coverage ratio is tighter than the pool's cap.
+// Only its winning identity may provide this evidence; unrelated fuzzy names
+// cannot manufacture another covered token from a broad set/artist match.
+const recoveredNameCache = new Map();
+function recoveredName(token) {
+  if (token.compact.length <= SHORT_TOKEN_MAX || token.interps?.length) return null;
+  if (!recoveredNameCache.has(token.compact)) {
+    const best = rankNames(token.compact)[0];
+    recoveredNameCache.set(token.compact, best?.withinCap ? best : null);
+    if (recoveredNameCache.size > 256) recoveredNameCache.delete(recoveredNameCache.keys().next().value);
+  }
+  return recoveredNameCache.get(token.compact);
+}
+
 /**
  * Best evidence a single query token can draw from one doc, across the active
  * languages. Name tokens beat metadata; a selected-language hit earns a small
  * bias over English. Returns `{ quality, distance, via, lang }` or null.
  */
-export function tokenEvidence(token, doc, langs = ['en']) {
+export function tokenEvidence(token, doc, langs = ['en'], {
+  allowShortSetPrefix = false, shortNamePrefixTokens = null,
+} = {}) {
   const compact = token.compact;
   if (!compact) {
     return null;
@@ -408,6 +436,10 @@ export function tokenEvidence(token, doc, langs = ['en']) {
         via: evidence.via,
         canonical: evidence.canonical || '',
         matchedToken: evidence.matchedToken || '',
+        ...(evidence.matchedTokens ? { matchedTokens: evidence.matchedTokens } : {}),
+        ...(allowShortSetPrefix && compact.length <= SHORT_TOKEN_MAX
+          && ['set-prefix', 'name-prefix'].includes(evidence.via)
+          ? { countsForCoverage: false } : {}),
         lang,
       };
     }
@@ -417,9 +449,34 @@ export function tokenEvidence(token, doc, langs = ['en']) {
     if (!text) {
       continue;
     }
-    consider(fieldEvidence(compact, text.name, NAME_TIERS), lang);
+    const nameEvidence = fieldEvidence(compact, text.name, NAME_TIERS);
+    consider(nameEvidence, lang);
+    if (shortNamePrefixTokens) {
+      const namePrefix = fieldEvidence(compact, shortNamePrefixTokens.get(lang),
+        { ...NAME_TIERS, prefix: Q_NAME_SHORT_PREFIX }, { allowShortPrefix: true });
+      if (namePrefix?.via === 'name-prefix') {
+        const setPrefix = fieldEvidence(compact, text.set, SET_TIERS, { allowShortPrefix: true });
+        // Converging readings refine quality without counting the token twice.
+        consider({ ...namePrefix, quality: namePrefix.quality
+          + (setPrefix?.via === 'set-prefix' ? setPrefix.quality : 0) }, lang);
+      }
+    }
+    if (lang === 'en' && !nameEvidence && text.name?.length) {
+      const recovered = recoveredName(token);
+      const matchedTokens = recovered ? nameTokens(recovered.display) : [];
+      const matches = matchedTokens.length && text.name.some((_, index) => (
+        matchedTokens.every((word, offset) => text.name[index + offset] === word)
+      ));
+      if (matches) {
+        consider({ quality: recovered.compact === compact ? Q_NAME_EXACT
+          : recovered.compact.startsWith(compact) ? Q_NAME_PREFIX
+          : Q_NAME_TYPO * (1 - recovered.distance / compact.length),
+        distance: recovered.distance, via: 'name-pool', canonical: recovered.display,
+        matchedToken: matchedTokens[0], matchedTokens }, lang);
+      }
+    }
     if (!best || best.quality < Q_SET_EXACT) {
-      consider(fieldEvidence(compact, text.set, SET_TIERS), lang);
+      consider(fieldEvidence(compact, text.set, SET_TIERS, { allowShortPrefix: allowShortSetPrefix }), lang);
     }
     if (!best || best.quality < Q_ARTIST_EXACT) {
       consider(fieldEvidence(compact, text.artist, ARTIST_TIERS), lang);
@@ -467,17 +524,41 @@ export function tokenEvidence(token, doc, langs = ['en']) {
 
 /**
  * Score one doc against tokenized query. coverage counts tokens with ANY
- * evidence; quality sums the best per-token evidence; prior is a bounded nudge.
+ * substantive evidence; quality sums the best per-token evidence, including
+ * an anchored unfinished short set prefix; prior is a bounded nudge.
  */
 export function scoreEntry(tokens, doc, langs = ['en']) {
   let coverage = 0;
   let quality = 0;
   let distance = 0;
   const perToken = [];
-  for (const token of tokens) {
-    const evidence = tokenEvidence(token, doc, langs);
+  const evidenceByToken = tokens.map((token) => tokenEvidence(token, doc, langs));
+  const tail = tokens[tokens.length - 1];
+  if (tail && tail.compact.length <= SHORT_TOKEN_MAX && !isModifierWord(tail.raw)
+    && evidenceByToken.some((evidence, index) => index < tokens.length - 1
+      && tokens[index].compact.length > SHORT_TOKEN_MAX && evidence?.via.startsWith('name-'))) {
+    // A short suffix can complete both a name (`e` -> EX) and a set
+    // (`e` -> Evolutions). Exclude already-matched name words: `palkia p`
+    // must still distinguish Plasma rather than reusing Palkia as evidence.
+    // Neither broad prefix earns coverage or becomes a hard mechanic filter.
+    const shortNamePrefixTokens = new Map(langs.map((lang) => {
+      // Check each language independently: a selected-language winner must
+      // not leave the equivalent English anchor available to match again.
+      const matched = new Set(tokens.slice(0, -1)
+        .map((token) => tokenEvidence(token, doc, [lang]))
+        .filter((evidence) => evidence?.via.startsWith('name-'))
+        .flatMap((evidence) => evidence.matchedTokens || [evidence.matchedToken]));
+      return [lang, (doc.langText?.[lang]?.name || []).filter((word) => !matched.has(word)
+        && (matched.size > 0 || (lang === 'en' && isModifierWord(word))))];
+    }));
+    evidenceByToken[tokens.length - 1] = tokenEvidence(tail, doc, langs,
+      { allowShortSetPrefix: true, shortNamePrefixTokens });
+  }
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const evidence = evidenceByToken[index];
     if (evidence) {
-      coverage += 1;
+      coverage += evidence.countsForCoverage === false ? 0 : 1;
       quality += evidence.quality;
       distance += evidence.distance;
       perToken.push({ token: token.raw, ...evidence });
@@ -493,7 +574,9 @@ export function scoreEntry(tokens, doc, langs = ['en']) {
       if (!matchedNames.has(evidence.lang)) {
         matchedNames.set(evidence.lang, new Set());
       }
-      matchedNames.get(evidence.lang).add(evidence.matchedToken);
+      for (const name of evidence.matchedTokens || [evidence.matchedToken]) {
+        matchedNames.get(evidence.lang).add(name);
+      }
     }
   }
   let extraTokens = Infinity;
@@ -527,6 +610,9 @@ function candidateNameDocs(tokens) {
     if (!compact) {
       continue;
     }
+    const recovered = recoveredName(token);
+    const recoveredIndex = recovered ? NAME_DOC_INDEX.get(recovered.compact) : undefined;
+    if (recoveredIndex !== undefined) seen.add(recoveredIndex);
     for (const index of NAME_TOKEN_TO_DOCS.get(compact) || []) {
       seen.add(index);
     }
@@ -590,6 +676,40 @@ export function rankFreeText(query, { limit = 48, lang = 'en' } = {}) {
   }
   ranked.sort(compareScored);
   return ranked.slice(0, Math.max(1, Number(limit) || 48));
+}
+
+/** Supplemental name lookups for mixed queries. Keep raw/full-name retrieval
+ * and add both the scorer's readings and independent local-pool anchors, so
+ * reordered/repeated metadata cannot turn the only lookup into a sealed SKU. */
+export function hydrationNameCandidates(query, { lang = 'en' } = {}) {
+  const { tokens } = tokenizeQuery(query);
+  const selected = String(lang).toLowerCase();
+  const anchors = tokens.filter((token) => !isModifierWord(token.raw))
+    .map(recoveredName).filter((row) => row && (selected === 'en' || row.distance === 0));
+  const readings = rankFreeText(query, { lang, limit: 6 })
+    .filter((row) => selected === 'en' || row.distance === 0);
+  return [...readings, ...anchors];
+}
+
+/** A confident name anchor followed by an unfinished 1–3 letter set word.
+ * Retrieval adds that name's printings, rather than choosing one ambiguous
+ * artist/set hypothesis or hydrating every matching expansion. */
+export function earlySetPrefixName(query, { lang = 'en' } = {}) {
+  const { tokens } = tokenizeQuery(query);
+  const tail = tokens[tokens.length - 1];
+  if (tokens.length < 2 || !tail || tail.compact.length > 3 || isModifierWord(tail.raw)
+    || isModifierWord(tokens.slice(-2).map((token) => token.raw).join(' '))
+    || !SET_DOCS.some((doc) => doc.langText.en.set.some((word) => word.startsWith(tail.compact)))) {
+    return '';
+  }
+  const anchorTokens = tokens.slice(0, -1);
+  const anchor = anchorTokens.map((token) => token.raw).join(' ');
+  const best = rankFreeText(anchor, { limit: 1 })[0];
+  // The local name pool is English. Let server-authoritative localized
+  // retrieval handle non-English spellings instead of inventing an English
+  // correction (`Glurak` must not hydrate `Golurk` while German is selected).
+  if (String(lang).toLowerCase() !== 'en' && best?.distance !== 0) return '';
+  return best?.coverage === anchorTokens.length ? best.display : '';
 }
 
 /** Map a hydrated Meili printing into the shared, language-tagged doc shape. */

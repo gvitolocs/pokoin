@@ -136,6 +136,9 @@ spec:
             - { name: VALKEY_HOST, value: valkey.pokoin-overflow.svc.cluster.local }
             - { name: VALKEY_PORT, value: "6379" }
             - { name: POKOIN_OVERFLOW_NODE, value: nezopt }
+            # The CDN runs on the Pi, not this pod's loopback interface.
+            - { name: POKOIN_CDN_HEALTH_URL, value: "https://cdn.pokoin.com/health" }
+            - { name: PIPELINE_HEALTH_TIMEOUT_MS, value: "2000" }
           ports:
             - { containerPort: 8080, name: http }
           readinessProbe:
