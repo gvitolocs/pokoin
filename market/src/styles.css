@@ -529,6 +529,15 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--suggest-shade-raised, var(--g3));
 }
 
+.suggest-row.is-rainbow {
+  background: linear-gradient(100deg, #4c1d86 0%, #12386a 34%, #6e5210 68%, #6a2458 100%);
+}
+
+.suggest-row.is-rainbow:hover,
+.suggest-row.is-rainbow.is-active {
+  filter: brightness(1.12);
+}
+
 .suggest-main {
   display: grid;
   /* Set | thumb | name/set + aligned number column. */
@@ -2985,8 +2994,19 @@ html.is-card-banding * {
   overflow: hidden;
 }
 .tile-row .tile-art {
-  width: 3.35rem;
-  flex: 0 0 3.35rem;
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0.35rem 0 0.35rem 0.45rem;
+}
+.tile-row .thumb-zoom-host,
+.tile-row .art-cut {
+  display: block;
+  width: 5.6rem;
+}
+.tile-row:hover .art-cut img,
+.tile-row .art-cut img {
+  transform: none;
+  filter: none;
 }
 .tile-row .tile-meta {
   flex: 1;
@@ -3130,6 +3150,28 @@ html.desk-tinted .card-page .reserve-blurb {
 html.desk-tinted .card-page .shop-panel {
   background: var(--desk-raised);
   border-color: var(--desk-border);
+}
+
+/* Fields, chips, arrows, and pills still used the site navy (--g2 #14121c).
+   On a tinted desk they are the page's deepest delta step. */
+html.desk-tinted .card-page {
+  --g2: var(--desk-bg);
+  --g3: var(--desk-bg);
+  --g4: color-mix(in srgb, var(--desk-bg) 72%, var(--desk-surface));
+  --g5: var(--desk-border);
+  --surface: var(--desk-bg);
+}
+
+html.desk-tinted .card-page .lang-pick-menu,
+html.desk-tinted .card-page .lang-redirect-card,
+html.desk-tinted .card-page .sold-graph-filters select {
+  background: var(--desk-bg);
+  border-color: var(--desk-border);
+}
+
+html.desk-tinted .card-page .lang-pick-menu button[aria-selected="true"] {
+  background: var(--desk-raised);
+  color: var(--text);
 }
 
 html.desk-tinted .asset-header.shaded {
@@ -7536,8 +7578,12 @@ dialog.zoom:not([open]) {
   }
 
   .tile-row .tile-art {
-    width: 2.85rem;
-    flex: 0 0 2.85rem;
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .tile-row .art-cut {
+    width: 4.4rem;
   }
 
   .tile-art {

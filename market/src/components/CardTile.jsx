@@ -10,6 +10,7 @@ import { cardReference, cardsReference, writeListingDrag } from '../chat-listing
 import { useCardSelect } from './CardSelectGrid.jsx';
 import { cardImageAlt } from '../seo.js';
 import { Action, track } from '../track.js';
+import ArtworkZoom from './ArtworkZoom.jsx';
 import CardArt from './CardArt.jsx';
 
 export default function CardTile({ card, action = Action.clickTile, rank, layout = 'grid', cut = false }) {
@@ -79,7 +80,14 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
       style={cut ? albumShadeStyle(card) : undefined}
     >
       <span className="tile-art">
-        {art ? (
+        {art && list ? (
+          <ArtworkZoom
+            src={hero || art}
+            name={card.name}
+            set={card.set || card.expansion || ''}
+            alt={cardImageAlt(card)}
+          />
+        ) : art ? (
           <CardArt
             src={art}
             alt={cardImageAlt(card)}

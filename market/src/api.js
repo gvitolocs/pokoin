@@ -1587,6 +1587,7 @@ export function cardFromAutocomplete(row = {}) {
     localized_set: row.localized_set || row.localizedSet || '',
     number: row.card_number || row.number,
     rarity: row.rarity,
+    cardType: row.card_type || row.cardType || '',
     localized_rarity: row.localized_rarity || row.localizedRarity || '',
     artist: row.artist || row.illustrator || '',
     illustrator: row.illustrator || row.artist || '',

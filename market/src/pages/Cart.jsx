@@ -6,7 +6,7 @@ import { useAuth } from '../auth.jsx';
 import { useCart } from '../cart.jsx';
 import { currencyFromLocale, formatLocalFromPkn } from '../pkn.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
-import CardArt from '../components/CardArt.jsx';
+import ArtworkZoom from '../components/ArtworkZoom.jsx';
 import { DeskPanel, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
 export default function Cart() {
@@ -59,7 +59,9 @@ export default function Cart() {
                     sellerUid: row.sellerUid, pricePkn: row.pricePkn, listingId: row.listingId,
                   }))}
                 >
-                  {row.image ? <CardArt src={row.image} alt="" full /> : <span className="suggest-ph" />}
+                  {row.image ? (
+                    <ArtworkZoom src={row.image} name={row.name} set={row.set || row.card?.set || ''} alt={row.name} />
+                  ) : <span className="suggest-ph" />}
                 </Link>
                 <div className="bag-info">
                   <Link className="bag-name" to={row.href || '/marketplace'}>{row.name}</Link>

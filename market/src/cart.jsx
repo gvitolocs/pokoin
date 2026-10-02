@@ -81,8 +81,13 @@ export function cartItemFromOffer(card, offer) {
     sellerCountry: String(offer?.sellerCountry || offer?.seller_country || offer?.shipFromCountry || '').trim().toUpperCase(),
     nftAvailable: Boolean(offer?.nftAvailable || offer?.isNftEligible),
     reserveAvailable: Boolean(offer?.reserveAvailable),
+    set: card.set || card.expansion || card.group || '',
     href: card.canonicalPath || `/marketplace/en/cards/${card.id}`,
-    card: { id: String(card.id), name: card.name || 'Card' },
+    card: {
+      id: String(card.id),
+      name: card.name || 'Card',
+      set: card.set || card.expansion || card.group || '',
+    },
   };
 }
 

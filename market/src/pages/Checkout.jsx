@@ -26,7 +26,7 @@ import {
   previewShipmentCents,
   shippingServiceOptions,
 } from '../shipping-quote.js';
-import CardArt from '../components/CardArt.jsx';
+import ArtworkZoom from '../components/ArtworkZoom.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 
 function FeeTip({ label, children }) {
@@ -515,7 +515,9 @@ export default function Checkout() {
                       sellerUid: row.sellerUid, pricePkn: row.pricePkn, listingId: row.listingId,
                     }))}
                   >
-                    {row.image ? <CardArt src={row.image} alt="" full /> : <span className="suggest-ph" />}
+                    {row.image ? (
+                      <ArtworkZoom src={row.image} name={row.name} set={row.set || row.card?.set || ''} alt={row.name} />
+                    ) : <span className="suggest-ph" />}
                   </Link>
                   <div className="bag-info">
                     <strong className="bag-name">{row.name}</strong>

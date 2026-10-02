@@ -346,25 +346,30 @@
   border-bottom: 1px solid var(--g5);
 }
 .bag-row.summary {
-  grid-template-columns: calc(11rem * 63 / 88) minmax(0, 1fr) minmax(7rem, auto);
+  grid-template-columns: 5.6rem minmax(0, 1fr) minmax(7rem, auto);
   align-items: center;
   padding: 0.75rem 1.15rem;
 }
 .bag-art {
   display: block;
-  width: calc(11rem * 63 / 88);
-  height: 11rem;
+  width: 5.6rem;
+  height: auto;
   min-width: 0;
   align-self: center;
-  overflow: hidden;
+  overflow: visible;
   border-radius: 0;
   border: 0;
   background: transparent;
 }
+.bag-art .thumb-zoom-host,
+.bag-art .art-cut {
+  display: block;
+  width: 5.6rem;
+}
 .bag-row.summary .bag-art {
-  width: 100%;
+  width: 5.6rem;
   height: auto;
-  aspect-ratio: 63 / 88;
+  aspect-ratio: auto;
 }
 .bag-info,
 .bag-qty,
@@ -372,8 +377,8 @@
 .bag-remove {
   align-self: center;
 }
-.bag-art img,
-.bag-art .card-art {
+.bag-art > img,
+.bag-art > .card-art {
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -2333,7 +2338,8 @@
   }
   .bag-qty,
   .bag-remove { grid-column: 1 / -1; }
-  .bag-art { width: calc(5.5rem * 63 / 88); height: 5.5rem; border-radius: 0; }
+  .bag-art,
+  .bag-art .art-cut { width: 4.4rem; height: auto; border-radius: 0; }
   .shop-search { min-width: 0; width: 100%; }
 }
 

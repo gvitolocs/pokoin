@@ -17,6 +17,7 @@ export default function ThumbZoom({
   disabled = false,
   footer = null,
   openOnClick = false,
+  maxHeight,
 }) {
   const [box, setBox] = useState(null);
   const pointer = useRef({ x: 0, y: 0 });
@@ -42,6 +43,7 @@ export default function ThumbZoom({
       viewportHeight: window.innerHeight,
       pointerX: x,
       pointerY: y,
+      maxHeight,
     }));
   }
 

@@ -33,7 +33,7 @@ test('places the card left of the panel when there is room', () => {
   });
   assert.equal(box.side, 'left');
   assert.ok(box.left + box.width <= 520 - 12);
-  assert.ok(box.height <= 680);
+  assert.equal(box.height, 680);
   assert.ok(Math.abs(box.width / box.height - 63 / 88) < 0.01);
 });
 

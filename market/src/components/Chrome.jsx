@@ -19,12 +19,11 @@ import {
 import { resolveArtLayout } from '../art-cut.js';
 import {
   albumShade,
-  deskTheme,
   rememberCardBucket,
   rememberDeskIdentity,
-  subscribeShadeBuckets,
   warmCardBucket,
 } from '../art-shade.js';
+import { rarityRowTheme } from '../rarity-theme.js';
 import { pickSuggestHoverSrc, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
 import { fetchSuggestRanked, rankConcurrency, rankNames, resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
 import { rankChunkOnWorker, warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
@@ -491,9 +490,6 @@ export default function Chrome({ children }) {
     || pending
   );
   useSuggestFlip(listRef, suggestVisible ? suggestIds : '');
-
-  const [shadeTick, setShadeTick] = useState(0);
-  useEffect(() => subscribeShadeBuckets(() => setShadeTick((tick) => tick + 1)), []);
 
   useEffect(() => {
     if (!visibleGroups.length) {
@@ -1212,7 +1208,7 @@ export default function Chrome({ children }) {
                                 bucket === 'unknown' ? '' : bucket,
                               );
                             const live = isLiveStub(card) || isLiveStub(printing);
-                            const rowTheme = shadeTick >= 0 ? deskTheme(card) : null;
+                            const rowTheme = rarityRowTheme(card);
                             const rowIndex = flat.findIndex((row) => row.optionId === optionId);
                             const thumbLoading = rowIndex >= SUGGEST_THUMB_EAGER ? 'lazy' : undefined;
                             const thumbPriority = rowIndex < SUGGEST_THUMB_HIGH ? 'high' : 'low';
@@ -1237,10 +1233,10 @@ export default function Chrome({ children }) {
                                 }}
                               >
                                   <div
-                                    className={`suggest-row${active ? ' is-active' : ''}${rowTheme ? ' is-shaded' : ''}`}
-                                    style={rowTheme ? {
-                                      '--suggest-shade': rowTheme.surface,
-                                      '--suggest-shade-raised': rowTheme.surfaceRaised,
+                                    className={`suggest-row${active ? ' is-active' : ''}${rowTheme?.shade ? ' is-shaded' : ''}${rowTheme?.kind === 'rainbow' ? ' is-rainbow' : ''}${rowTheme?.kind === 'gold' ? ' is-gold' : ''}${rowTheme?.kind === 'ghost' ? ' is-ghost' : ''}`}
+                                    style={rowTheme?.shade ? {
+                                      '--suggest-shade': rowTheme.shade,
+                                      '--suggest-shade-raised': rowTheme.raised,
                                     } : undefined}
                                   >
                                   <button

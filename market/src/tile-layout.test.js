@@ -99,7 +99,8 @@ test('era names are gold links to the era setlist', () => {
 test('set browse list view is one column with compact row tiles', () => {
   assert.match(css, /\.grid\.is-list \{[^}]*grid-template-columns:\s*1fr/);
   assert.match(css, /\.tile-row \{[^}]*flex-direction:\s*row/);
-  assert.match(css, /\.tile-row \.tile-art \{[^}]*flex:\s*0 0 3\.35rem/);
+  assert.match(css, /\.tile-row \.tile-art \{[^}]*flex:\s*0 0 auto/);
+  assert.match(css, /\.tile-row \.art-cut \{[^}]*width:\s*5\.6rem/);
 });
 
 test('unpriced CardTile copy is Out of stock, not an em dash', () => {

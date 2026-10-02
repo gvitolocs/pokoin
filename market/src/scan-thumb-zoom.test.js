@@ -3,11 +3,28 @@ import test from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanZoomBox, SCAN_ZOOM_DELAY_MS, SCAN_ZOOM_RATIO, SCAN_ZOOM_MAX_HEIGHT } from './scan-thumb-zoom.js';
+import { scanZoomBox, SCAN_ZOOM_DELAY_MS, SCAN_ZOOM_RATIO, SCAN_ZOOM_MAX_HEIGHT, CHAT_ZOOM_MAX_HEIGHT } from './scan-thumb-zoom.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const deskSrc = fs.readFileSync(path.join(root, 'pages/ScanDesk.jsx'), 'utf8');
 const zoomSrc = fs.readFileSync(path.join(root, 'components/ThumbZoom.jsx'), 'utf8');
+
+test('shop and cart hover at the full card height; chat keeps the smaller cap', () => {
+  assert.equal(SCAN_ZOOM_MAX_HEIGHT, 640);
+  assert.equal(CHAT_ZOOM_MAX_HEIGHT, 320);
+  const chat = scanZoomBox({
+    viewportWidth: 1400,
+    viewportHeight: 900,
+    pointerX: 400,
+    pointerY: 450,
+    maxHeight: CHAT_ZOOM_MAX_HEIGHT,
+  });
+  assert.equal(chat.height, 320);
+  const tag = fs.readFileSync(path.join(root, 'components/ChatListingTag.jsx'), 'utf8');
+  assert.match(tag, /maxHeight=\{CHAT_ZOOM_MAX_HEIGHT\}/);
+  const tile = fs.readFileSync(path.join(root, 'components/CardTile.jsx'), 'utf8');
+  assert.match(tile, /list \? \([\s\S]*<ArtworkZoom/);
+});
 
 test('scan zoom box floats right of the pointer and centers vertically', () => {
   const box = scanZoomBox({ viewportWidth: 1400, viewportHeight: 900, pointerX: 400, pointerY: 450 });

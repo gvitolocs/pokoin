@@ -19,6 +19,7 @@ import {
 import ChatBundle from './ChatBundle.jsx';
 import QtyStepper from './QtyStepper.jsx';
 import ThumbZoom from './ThumbZoom.jsx';
+import { CHAT_ZOOM_MAX_HEIGHT } from '../scan-thumb-zoom.js';
 import { endTrayDrag, startTrayDrag } from '../tray-drag.js';
 
 function unique(list) {
@@ -155,7 +156,7 @@ function CardTag({ row, onRemove, onQty, peer, me, trayId }) {
   const draft = Boolean(onRemove);
   const quantity = <CardQuantity row={row} draft={draft} onQty={onQty} />;
   const image = src ? (
-    <ThumbZoom src={full} full alt={label}>
+    <ThumbZoom src={full} full alt={label} maxHeight={CHAT_ZOOM_MAX_HEIGHT}>
       <img
         src={src}
         alt=""
