@@ -29,6 +29,7 @@ const CACHE_MAX_ENTRY = 2 * 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = Number(process.env.POKOIN_API_UPSTREAM_TIMEOUT_MS || 60_000);
 const HOP_HEADERS = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-length', 'date']);
 const SEO_DIR = process.env.POKOIN_SEO_DIR || '/srv/pokoin/seo';
+const RUST_ROUTES_FILE = process.env.POKOIN_RUST_ROUTES || '/srv/pokoin/api/rust-routes.json';
 const SITEMAP_FILES = new Set([
   'sitemap.xml',
   'sitemap-hubs.xml',
@@ -95,9 +96,45 @@ function sendSitemap(req, res, name) {
   });
 }
 
+const ROUTE_IDS = {
+  '/api/marketplace-suggest': 'suggest',
+  '/api/marketplace-card-page': 'card_page',
+  '/api/marketplace-search-page': 'search',
+};
+
+function routeId(pathname, method) {
+  if (pathname === '/api/marketplace-listings' && method !== 'GET' && method !== 'HEAD') {
+    return 'listings_write';
+  }
+  return ROUTE_IDS[pathname] || '';
+}
+
+/** Stable 0–99 bucket so one client stays on one implementation. */
+function stickyBucket(key) {
+  let hash = 0x811c9dc5;
+  const text = String(key || '');
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) % 100;
+}
+
+function rustPercent(rust, id) {
+  if (!rust || !rust.origin || !id) return 0;
+  const percent = Number(rust.routes && rust.routes[id]);
+  if (!Number.isFinite(percent)) return 0;
+  return Math.min(100, Math.max(0, percent));
+}
+
 /** Where one API request goes. Pure so it can be tested. */
-function chooseApiOrigin({ method, pathname, inFlight, localMax, overflowHealthy, overflowOrigin }) {
+function chooseApiOrigin({
+  method, pathname, inFlight, localMax, overflowHealthy, overflowOrigin, rust, clientKey,
+}) {
   if (pathname === '/api/marketplace-live') return 'local';
+  const id = routeId(pathname, method);
+  const percent = rustPercent(rust, id);
+  if (percent > 0 && stickyBucket(clientKey || 'anon') < percent) return 'rust';
   const idempotent = method === 'GET' || method === 'HEAD';
   if (overflowOrigin && overflowHealthy && idempotent && inFlight >= localMax) {
     return 'overflow';
@@ -165,7 +202,99 @@ class ResponseCache {
   }
 }
 
-const state = { inFlight: 0, overflowHealthy: false, overflowServed: 0, hits: 0, misses: 0, fallbacks: 0 };
+const state = {
+  inFlight: 0, overflowHealthy: false, overflowServed: 0, hits: 0, misses: 0, fallbacks: 0,
+  rustServed: 0, shadowMismatch: 0, shadowError: 0, shadowOk: 0,
+};
+let rustRoutes = { origin: '', routes: {}, shadow: [] };
+let rustRoutesMtime = 0;
+
+function loadRustRoutes() {
+  try {
+    const stat = fs.statSync(RUST_ROUTES_FILE);
+    if (stat.mtimeMs === rustRoutesMtime) return rustRoutes;
+    const parsed = JSON.parse(fs.readFileSync(RUST_ROUTES_FILE, 'utf8'));
+    rustRoutes = {
+      origin: String(parsed.rustOrigin || '').replace(/\/$/, ''),
+      routes: parsed.routes || {},
+      shadow: Array.isArray(parsed.shadow) ? parsed.shadow : [],
+    };
+    rustRoutesMtime = stat.mtimeMs;
+  } catch (_) {
+    rustRoutes = { origin: '', routes: {}, shadow: [] };
+    rustRoutesMtime = 0;
+  }
+  return rustRoutes;
+}
+
+function clientKey(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwarded || req.socket?.remoteAddress || 'anon';
+}
+
+function jsonPaths(left, right, path, out) {
+  if (out.length >= 8) return;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      out.push(path);
+      return;
+    }
+    for (let i = 0; i < left.length; i += 1) jsonPaths(left[i], right[i], `${path}[${i}]`, out);
+    return;
+  }
+  if (left && right && typeof left === 'object' && typeof right === 'object') {
+    const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+    for (const key of keys) jsonPaths(left[key], right[key], `${path}.${key}`, out);
+    return;
+  }
+  if (left !== right) out.push(path);
+}
+
+function shadowCompare(pathname, search, nodeStatus, nodeBody) {
+  const routes = loadRustRoutes();
+  const id = routeId(pathname, 'GET');
+  if (!routes.origin || !routes.shadow.includes(id)) return;
+  if (rustPercent(routes, id) >= 100) return;
+  const started = Date.now();
+  let target;
+  try {
+    target = new URL(pathname + search, routes.origin);
+  } catch (_) {
+    return;
+  }
+  const probe = http.get(target, { timeout: 2000 }, (up) => {
+    const chunks = [];
+    up.on('data', (chunk) => chunks.push(chunk));
+    up.on('end', () => {
+      const rustMs = Date.now() - started;
+      const body = Buffer.concat(chunks);
+      let mismatch = up.statusCode !== nodeStatus;
+      let paths = [];
+      if (!mismatch) {
+        try {
+          jsonPaths(JSON.parse(nodeBody), JSON.parse(body), '$', paths);
+          mismatch = paths.length > 0;
+        } catch (_) {
+          mismatch = !nodeBody.equals(body);
+        }
+      }
+      if (mismatch) {
+        state.shadowMismatch += 1;
+        console.log(JSON.stringify({
+          event: 'rust_shadow', route: id, mismatch: true, nodeStatus, rustStatus: up.statusCode,
+          rustMs, paths: paths.slice(0, 8),
+        }));
+      } else {
+        state.shadowOk += 1;
+      }
+    });
+  });
+  probe.on('timeout', () => probe.destroy(new Error('shadow timeout')));
+  probe.on('error', (error) => {
+    state.shadowError += 1;
+    console.log(JSON.stringify({ event: 'rust_shadow', route: id, rustError: error.message }));
+  });
+}
 const cache = new ResponseCache(CACHE_MAX_BYTES);
 const flights = new Map();
 // Paths whose last response was not storable (no-store, private, errors):
@@ -246,7 +375,17 @@ function pickRoute(req, pathname) {
     localMax: LOCAL_MAX,
     overflowHealthy: state.overflowHealthy,
     overflowOrigin: OVERFLOW,
+    rust: loadRustRoutes(),
+    clientKey: clientKey(req),
   });
+}
+
+function originFor(route) {
+  if (route === 'rust') {
+    return { url: loadRustRoutes().origin, label: 'rust', countsLocal: false };
+  }
+  if (route === 'overflow') return { url: OVERFLOW, label: 'nezopt', countsLocal: false };
+  return { url: API, label: 'pi', countsLocal: true };
 }
 
 /**
@@ -275,7 +414,16 @@ function forwardApi(req, res, pathname, search) {
       onConnectError: retry ? null : () => { state.overflowHealthy = false; toLocal(true); },
     });
   };
-  if (pickRoute(req, pathname) === 'overflow') toOverflow(false);
+  const route = pickRoute(req, pathname);
+  if (route === 'rust') {
+    const chosen = originFor('rust');
+    res.setHeader('x-pokoin-origin', 'rust');
+    forward(req, res, new URL(chosen.url), pathname, search, {
+      onConnectError: () => { state.fallbacks += 1; toLocal(true); },
+    });
+    return;
+  }
+  if (route === 'overflow') toOverflow(false);
   else toLocal(false);
 }
 
@@ -287,10 +435,12 @@ function forwardApi(req, res, pathname, search) {
 function fetchEntry(req, pathname, search, leaderRes) {
   return new Promise((resolve, reject) => {
     const attempt = (route, retried) => {
-      const local = route === 'local';
-      const origin = new URL(local ? API : OVERFLOW);
+      const chosen = originFor(route);
+      const local = chosen.countsLocal;
+      const origin = new URL(chosen.url);
       if (local) state.inFlight += 1;
-      else state.overflowServed += 1;
+      else if (route === 'overflow') state.overflowServed += 1;
+      else state.rustServed += 1;
       let released = false;
       const release = () => {
         if (local && !released) {
@@ -306,7 +456,7 @@ function fetchEntry(req, pathname, search, leaderRes) {
           const neverStorable = !/\bpublic\b/i.test(String(up.headers['cache-control'] || ''))
             || /\b(private|no-store)\b/i.test(String(up.headers['cache-control'] || ''));
           if (leaderRes && !leaderRes.headersSent) {
-            leaderRes.setHeader('x-pokoin-origin', local ? 'pi' : 'nezopt');
+            leaderRes.setHeader('x-pokoin-origin', chosen.label);
             leaderRes.setHeader('x-pokoin-edge-cache', 'BYPASS');
             leaderRes.writeHead(up.statusCode || 502, withNoindex(pathname, up.headers));
             up.pipe(leaderRes);
@@ -333,7 +483,7 @@ function fetchEntry(req, pathname, search, leaderRes) {
             status: up.statusCode,
             headers: withNoindex(pathname, headers),
             body: Buffer.concat(chunks, size),
-            origin: local ? 'pi' : 'nezopt',
+            origin: chosen.label,
             storedAt: now,
             freshUntil: now + policy.ttl * 1000,
             staleUntil: now + (policy.ttl + policy.swr) * 1000,
@@ -342,9 +492,14 @@ function fetchEntry(req, pathname, search, leaderRes) {
       });
       upstream.on('error', (error) => {
         release();
+        if (route === 'rust' && !retried) {
+          state.fallbacks += 1;
+          attempt('local', true);
+          return;
+        }
         const other = local ? 'overflow' : 'local';
         const canRetry = !retried && (other === 'local' || (OVERFLOW && state.overflowHealthy));
-        if (!local) state.overflowHealthy = false;
+        if (route === 'overflow') state.overflowHealthy = false;
         if (canRetry) {
           if (local) state.fallbacks += 1;
           attempt(other, true);
@@ -398,6 +553,7 @@ function serveCacheable(req, res, key, pathname, search) {
   if (hit && now < hit.freshUntil) {
     state.hits += 1;
     sendEntry(res, hit, 'HIT');
+    if (hit.origin !== 'rust') shadowCompare(pathname, search, hit.status, hit.body);
     return;
   }
   if (hit && now < hit.staleUntil) {
@@ -412,6 +568,7 @@ function serveCacheable(req, res, key, pathname, search) {
     (entry) => {
       if (!entry.uncacheable) {
         sendEntry(res, entry, leader ? 'MISS' : 'COALESCED');
+        if (entry.origin !== 'rust') shadowCompare(pathname, search, entry.status, entry.body);
       } else if (!leader) {
         forwardApi(req, res, pathname, search);
       }
@@ -451,11 +608,15 @@ if (require.main === module) {
   }
   setInterval(() => {
     if (state.overflowServed || state.hits || state.misses || state.fallbacks) {
-      console.log(`pokoin-api-edge minute: cache hits=${state.hits} misses=${state.misses} entries=${cache.map.size} mb=${(cache.bytes / 1048576).toFixed(1)} overflow=${state.overflowServed} fallbacks=${state.fallbacks} healthy=${state.overflowHealthy}`);
+      console.log(`pokoin-api-edge minute: cache hits=${state.hits} misses=${state.misses} entries=${cache.map.size} mb=${(cache.bytes / 1048576).toFixed(1)} overflow=${state.overflowServed} rust=${state.rustServed} shadowOk=${state.shadowOk} shadowMismatch=${state.shadowMismatch} shadowError=${state.shadowError} fallbacks=${state.fallbacks} healthy=${state.overflowHealthy}`);
       state.overflowServed = 0;
       state.hits = 0;
       state.misses = 0;
       state.fallbacks = 0;
+      state.rustServed = 0;
+      state.shadowOk = 0;
+      state.shadowMismatch = 0;
+      state.shadowError = 0;
     }
   }, 60_000).unref();
   http.createServer(proxy).listen(PORT, BIND, () => {
@@ -463,4 +624,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { chooseApiOrigin, cachePolicy, cacheKey, ResponseCache, isApiPath, rewritePath };
+module.exports = {
+  chooseApiOrigin, cachePolicy, cacheKey, ResponseCache, isApiPath, rewritePath,
+  routeId, stickyBucket, rustPercent,
+};

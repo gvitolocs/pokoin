@@ -17,6 +17,14 @@ test('only saturated GET/HEAD API calls overflow, and only to a healthy nezopt',
   assert.equal(chooseApiOrigin({ ...base, method: 'GET', overflowHealthy: false }), 'local');
   assert.equal(chooseApiOrigin({ ...base, method: 'GET', overflowOrigin: '' }), 'local');
   assert.equal(chooseApiOrigin({ ...base, method: 'GET', pathname: '/api/marketplace-live' }), 'local');
+  const rust = { origin: 'http://127.0.0.1:18082', routes: { suggest: 100, card_page: 0, listings_write: 0 } };
+  assert.equal(chooseApiOrigin({ ...base, method: 'GET', pathname: '/api/marketplace-suggest', rust, clientKey: 'a' }), 'rust');
+  assert.equal(chooseApiOrigin({ ...base, method: 'GET', pathname: '/api/marketplace-card-page', rust, clientKey: 'a' }), 'overflow');
+  assert.equal(chooseApiOrigin({ ...base, method: 'POST', pathname: '/api/marketplace-listings', rust, clientKey: 'a' }), 'local');
+  assert.equal(chooseApiOrigin({
+    ...base, method: 'GET', pathname: '/api/marketplace-suggest', inFlight: 0,
+    rust: { origin: 'http://127.0.0.1:18082', routes: { suggest: 0 } }, clientKey: 'a',
+  }), 'local');
   assert.equal(cacheKey({ method: 'GET', headers: {} }, '/api/marketplace-live', '?cardId=1'), null);
   assert.equal(isApiPath('/api/marketplace-suggest'), true);
   assert.equal(isApiPath('/some-image.webp'), false);

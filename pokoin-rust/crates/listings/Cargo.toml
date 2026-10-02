@@ -1,0 +1,8 @@
+[package]
+name = "pokoin-listings"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pokoin-inventory = { path = "../inventory" }
+thiserror = { workspace = true }

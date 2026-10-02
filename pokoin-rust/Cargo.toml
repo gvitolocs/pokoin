@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+  "apps/api",
+  "crates/config",
+  "crates/db",
+  "crates/cache",
+  "crates/auth",
+  "crates/catalog",
+  "crates/search",
+  "crates/marketplace",
+  "crates/inventory",
+  "crates/listings",
+  "crates/sync",
+  "crates/integrations",
+  "crates/observability",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+
+[workspace.dependencies]
+anyhow = "1"
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tower = { version = "0.5", features = ["limit"] }
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "signal"] }
+tracing = "0.1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
+sha2 = "0.10"
+hex = "0.4"
