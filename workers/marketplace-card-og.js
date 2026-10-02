@@ -41,6 +41,15 @@ const GAME_SLUGS = {
   sorcery: 'sorcery',
   palworld: 'palworld',
   cyberpunk: 'cyberpunk',
+  'weiss-schwarz': 'weiss_schwarz',
+  'final-fantasy': 'final_fantasy',
+  'force-of-will': 'force_of_will',
+  'world-of-warcraft': 'world_of_warcraft',
+  'battle-spirits-saga': 'battle_spirits_saga',
+  'star-wars-destiny': 'star_wars_destiny',
+  'dragon-born': 'dragon_born',
+  'my-little-pony': 'my_little_pony',
+  'the-spoils': 'the_spoils',
 };
 
 export function siteOriginFromHost(hostname) {

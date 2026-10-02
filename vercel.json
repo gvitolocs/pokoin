@@ -118,7 +118,7 @@
       ]
     },
     {
-      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk)/:path*",
+      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk|weiss-schwarz|final-fantasy|force-of-will|world-of-warcraft|battle-spirits-saga|star-wars-destiny|dragon-born|my-little-pony|the-spoils)/:path*",
       "headers": [
         {
           "key": "Cache-Control",
@@ -710,15 +710,15 @@
       "destination": "/landing.html"
     },
     {
-      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk)",
+      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk|weiss-schwarz|final-fantasy|force-of-will|world-of-warcraft|battle-spirits-saga|star-wars-destiny|dragon-born|my-little-pony|the-spoils)",
       "destination": "/market/index.html"
     },
     {
-      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk)/",
+      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk|weiss-schwarz|final-fantasy|force-of-will|world-of-warcraft|battle-spirits-saga|star-wars-destiny|dragon-born|my-little-pony|the-spoils)/",
       "destination": "/market/index.html"
     },
     {
-      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk)/:path*",
+      "source": "/:game(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk|weiss-schwarz|final-fantasy|force-of-will|world-of-warcraft|battle-spirits-saga|star-wars-destiny|dragon-born|my-little-pony|the-spoils)/:path*",
       "destination": "/market/index.html"
     },
     {

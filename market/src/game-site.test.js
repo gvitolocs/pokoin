@@ -31,7 +31,7 @@ test('game picker on a seller desk keeps the handle under the new TCG path', () 
 test('game paths rewrite to the market SPA', () => {
   const root = path.dirname(fileURLToPath(import.meta.url));
   const config = JSON.parse(fs.readFileSync(path.join(root, '../../vercel.json'), 'utf8'));
-  const slugs = 'one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk';
+  const slugs = 'one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk|weiss-schwarz|final-fantasy|force-of-will|world-of-warcraft|battle-spirits-saga|star-wars-destiny|dragon-born|my-little-pony|the-spoils';
   const hit = (config.rewrites || []).find(
     (rule) => rule.source === `/:game(${slugs})/:path*` && rule.destination === '/market/index.html',
   );

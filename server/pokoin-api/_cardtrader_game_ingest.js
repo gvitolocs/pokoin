@@ -203,12 +203,148 @@ const INGEST_GAMES = {
     aliases: ['cyberpunk_edgerunners', 'edgerunners'],
     hosts: ['cyberpunk.pokoin.com'],
   },
+  weiss_schwarz: {
+    id: 'weiss_schwarz',
+    slug: 'weiss-schwarz',
+    displayName: 'Weiss Schwarz',
+    // Cardmarket-only game: no CardTrader catalog (docs/CARDMARKET_GAMES.md).
+    cardtraderGameId: null,
+    source: 'cardmarket',
+    database: 'pokoin_weiss_schwarz',
+    databaseUrlEnv: 'WEISS_SCHWARZ_MARKETPLACE_DATABASE_URL',
+    schema: 'marketplace_weiss_schwarz',
+    table: 'cardmarket_products',
+    cdnKeyPrefix: 'weiss-schwarz/',
+    aliases: ['weiss', 'weissschwarz', 'ws'],
+    hosts: [],
+  },
+  final_fantasy: {
+    id: 'final_fantasy',
+    slug: 'final-fantasy',
+    displayName: 'Final Fantasy TCG',
+    // Cardmarket-only game: no CardTrader catalog (docs/CARDMARKET_GAMES.md).
+    cardtraderGameId: null,
+    source: 'cardmarket',
+    database: 'pokoin_final_fantasy',
+    databaseUrlEnv: 'FINAL_FANTASY_MARKETPLACE_DATABASE_URL',
+    schema: 'marketplace_final_fantasy',
+    table: 'cardmarket_products',
+    cdnKeyPrefix: 'final-fantasy/',
+    aliases: ['fftcg', 'final_fantasy_tcg'],
+    hosts: [],
+  },
+  force_of_will: {
+    id: 'force_of_will',
+    slug: 'force-of-will',
+    displayName: 'Force of Will',
+    // Cardmarket-only game: no CardTrader catalog (docs/CARDMARKET_GAMES.md).
+    cardtraderGameId: null,
+    source: 'cardmarket',
+    database: 'pokoin_force_of_will',
+    databaseUrlEnv: 'FORCE_OF_WILL_MARKETPLACE_DATABASE_URL',
+    schema: 'marketplace_force_of_will',
+    table: 'cardmarket_products',
+    cdnKeyPrefix: 'force-of-will/',
+    aliases: ['fow'],
+    hosts: [],
+  },
+  world_of_warcraft: {
+    id: 'world_of_warcraft',
+    slug: 'world-of-warcraft',
+    displayName: 'World of Warcraft TCG',
+    // Cardmarket-only game: no CardTrader catalog (docs/CARDMARKET_GAMES.md).
+    cardtraderGameId: null,
+    source: 'cardmarket',
+    database: 'pokoin_world_of_warcraft',
+    databaseUrlEnv: 'WORLD_OF_WARCRAFT_MARKETPLACE_DATABASE_URL',
+    schema: 'marketplace_world_of_warcraft',
+    table: 'cardmarket_products',
+    cdnKeyPrefix: 'world-of-warcraft/',
+    aliases: ['wow_tcg', 'wowtcg'],
+    hosts: [],
+  },
+  battle_spirits_saga: {
+    id: 'battle_spirits_saga',
+    slug: 'battle-spirits-saga',
+    displayName: 'Battle Spirits Saga',
+    // Cardmarket-only game: no CardTrader catalog (docs/CARDMARKET_GAMES.md).
+    cardtraderGameId: null,
+    source: 'cardmarket',
+    database: 'pokoin_battle_spirits_saga',
+    databaseUrlEnv: 'BATTLE_SPIRITS_SAGA_MARKETPLACE_DATABASE_URL',
+    schema: 'marketplace_battle_spirits_saga',
+    table: 'cardmarket_products',
+    cdnKeyPrefix: 'battle-spirits-saga/',
+    aliases: ['battle_spirits', 'bss'],
+    hosts: [],
+  },
+  star_wars_destiny: {
+    id: 'star_wars_destiny',
+    slug: 'star-wars-destiny',
+    displayName: 'Star Wars Destiny',
+    // Cardmarket-only game: no CardTrader catalog (docs/CARDMARKET_GAMES.md).
+    cardtraderGameId: null,
+    source: 'cardmarket',
+    database: 'pokoin_star_wars_destiny',
+    databaseUrlEnv: 'STAR_WARS_DESTINY_MARKETPLACE_DATABASE_URL',
+    schema: 'marketplace_star_wars_destiny',
+    table: 'cardmarket_products',
+    cdnKeyPrefix: 'star-wars-destiny/',
+    aliases: ['swd', 'destiny'],
+    hosts: [],
+  },
+  dragon_born: {
+    id: 'dragon_born',
+    slug: 'dragon-born',
+    displayName: 'Dragoborne',
+    // Cardmarket-only game: no CardTrader catalog (docs/CARDMARKET_GAMES.md).
+    cardtraderGameId: null,
+    source: 'cardmarket',
+    database: 'pokoin_dragon_born',
+    databaseUrlEnv: 'DRAGON_BORN_MARKETPLACE_DATABASE_URL',
+    schema: 'marketplace_dragon_born',
+    table: 'cardmarket_products',
+    cdnKeyPrefix: 'dragon-born/',
+    aliases: ['dragoborne'],
+    hosts: [],
+  },
+  my_little_pony: {
+    id: 'my_little_pony',
+    slug: 'my-little-pony',
+    displayName: 'My Little Pony CCG',
+    // Cardmarket-only game: no CardTrader catalog (docs/CARDMARKET_GAMES.md).
+    cardtraderGameId: null,
+    source: 'cardmarket',
+    database: 'pokoin_my_little_pony',
+    databaseUrlEnv: 'MY_LITTLE_PONY_MARKETPLACE_DATABASE_URL',
+    schema: 'marketplace_my_little_pony',
+    table: 'cardmarket_products',
+    cdnKeyPrefix: 'my-little-pony/',
+    aliases: ['mlp', 'mlp_ccg'],
+    hosts: [],
+  },
+  the_spoils: {
+    id: 'the_spoils',
+    slug: 'the-spoils',
+    displayName: 'The Spoils',
+    // Cardmarket-only game: no CardTrader catalog (docs/CARDMARKET_GAMES.md).
+    cardtraderGameId: null,
+    source: 'cardmarket',
+    database: 'pokoin_the_spoils',
+    databaseUrlEnv: 'THE_SPOILS_MARKETPLACE_DATABASE_URL',
+    schema: 'marketplace_the_spoils',
+    table: 'cardmarket_products',
+    cdnKeyPrefix: 'the-spoils/',
+    aliases: ['spoils'],
+    hosts: [],
+  },
 };
 
 const POKEMON_ALIASES = new Set(['pokemon', 'poke', 'pokémon', 'default']);
 
 function ingestGameList() {
-  return Object.values(INGEST_GAMES).sort((a, b) => a.cardtraderGameId - b.cardtraderGameId);
+  const order = (game) => (game.cardtraderGameId == null ? Number.MAX_SAFE_INTEGER : game.cardtraderGameId);
+  return Object.values(INGEST_GAMES).sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id));
 }
 
 function ingestAliasMap() {

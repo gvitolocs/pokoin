@@ -332,9 +332,11 @@ async function rowsForCards({
         withTotal: withTotal === true,
       },
     );
-    const payloadRows = withTotal === true && loaded && !Array.isArray(loaded)
-      ? loaded.rows
-      : loaded;
+    // rowsForSearchTerm (CardVault runtime) can answer { rows, total } even
+    // without withTotal; filtering that object 500'd every Singles search.
+    const payloadRows = loaded && !Array.isArray(loaded)
+      ? (Array.isArray(loaded.rows) ? loaded.rows : [])
+      : (loaded || []);
     const meiliTotal = withTotal === true && loaded && !Array.isArray(loaded)
       ? loaded.total
       : null;

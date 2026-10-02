@@ -41,10 +41,19 @@ const SKIP_INDEX_PREFIXES = [
   'sorcery/',
   'palworld/',
   'cyberpunk/',
+  'weiss-schwarz/',
+  'final-fantasy/',
+  'force-of-will/',
+  'world-of-warcraft/',
+  'battle-spirits-saga/',
+  'star-wars-destiny/',
+  'dragon-born/',
+  'my-little-pony/',
+  'the-spoils/',
 ];
 
 const GAME_PREFIX_RE =
-  /^(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk)\//i;
+  /^(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk|weiss-schwarz|final-fantasy|force-of-will|world-of-warcraft|battle-spirits-saga|star-wars-destiny|dragon-born|my-little-pony|the-spoils)\//i;
 
 function leftoverCdnObjectKey(requestedKey) {
   const key = String(requestedKey || '').replace(/^\/+/, '');

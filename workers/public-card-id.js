@@ -71,7 +71,7 @@ export function rewriteLeftoverCatalogImage(url, cardId) {
   if (!leftover || !text) {
     return text;
   }
-  if (/(?:^|\/)(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk|competitive)\//i.test(text)) {
+  if (/(?:^|\/)(one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery|palworld|cyberpunk|weiss-schwarz|final-fantasy|force-of-will|world-of-warcraft|battle-spirits-saga|star-wars-destiny|dragon-born|my-little-pony|the-spoils|competitive)\//i.test(text)) {
     return text;
   }
   return text.replace(/(^|\/)(previews\/)?(\d+)_/, `$1$2${leftover}_`);
