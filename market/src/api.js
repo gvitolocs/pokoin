@@ -1105,8 +1105,12 @@ export async function hydrateWatchlist() {
 
 const expansionCache = new Map();
 const expansionInflight = new Map();
-/** Page at 48 as defense. The old Oracle SQL cap was 64 and lied hasMore=false. */
-const EXPANSION_PAGE = 48;
+/**
+ * API max is 400. A normal set fits in that one page (Surging Sparks is 252),
+ * so the desk can paint after a single round trip. A short page ends the walk.
+ * A full page still asks for the next: an old server reported hasMore=false at 64.
+ */
+export const EXPANSION_PAGE = 400;
 
 function expansionCacheKey({ slug = '', expansionName = '', limit = 48, offset = 0 } = {}) {
   return JSON.stringify({ slug, expansionName, limit: Number(limit), offset: Number(offset) });

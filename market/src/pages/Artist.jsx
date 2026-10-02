@@ -29,6 +29,8 @@ import { rememberPageView, restoredPageView } from '../scroll-restore.js';
 
 const ALBUM_PAGE = 24;
 const PRELOAD_AHEAD = 20;
+/** First pokedex page. SQL already returns this order, so it can paint before the rest. */
+const ARTIST_FIRST = 48;
 
 function artistCardCount(row) {
   return Number(row?.count || row?.cardCount || 0);
@@ -164,7 +166,8 @@ function ArtistDesk() {
   const { addItem } = useCart();
   const restored = restoredPageView(navType, location.key, `${location.pathname}${location.search}`);
   const restoredHere = restored?.slug === artistSlug ? restored : null;
-  const [payload, setPayload] = useState(() => peekArtist(artistSlug, 5000));
+  const [payload, setPayload] = useState(() => peekArtist(artistSlug, 5000) || peekArtist(artistSlug, ARTIST_FIRST));
+  const [restPending, setRestPending] = useState(() => !peekArtist(artistSlug, 5000));
   const [error, setError] = useState('');
   const [query, setQuery] = useState(() => String(restoredHere?.query || ''));
   const [type, setType] = useState(() => restoredHere?.type || 'singles');
@@ -201,9 +204,10 @@ function ArtistDesk() {
   useEffect(() => {
     const saved = restoredPageView(navType, location.key, `${location.pathname}${location.search}`);
     const hydrate = saved?.slug === artistSlug ? saved : null;
-    const cached = peekArtist(artistSlug, 5000);
+    const cached = peekArtist(artistSlug, 5000) || peekArtist(artistSlug, ARTIST_FIRST);
     setError('');
     setPayload(cached);
+    setRestPending(!peekArtist(artistSlug, 5000));
     if (hydrate) {
       suppressShownReset.current = true;
       setQuery(String(hydrate.query || ''));
@@ -225,19 +229,37 @@ function ArtistDesk() {
     }
     document.title = artistSeoTitle(firstPaint);
     let cancelled = false;
+    let painted = Boolean(cached?.cards?.length);
+    function paintArtist(data, { replace = false } = {}) {
+      if (cancelled || !data) return;
+      if (data.cards?.length) painted = true;
+      setPayload((current) => {
+        if (!replace && (current?.cards?.length || 0) > (data.cards?.length || 0)) {
+          return current;
+        }
+        return data;
+      });
+      if (artistDeskIsUnknown(data)) {
+        document.title = 'Artist · Pokoin';
+      } else {
+        document.title = artistSeoTitle(data.artist?.name || firstPaint);
+      }
+      setError('');
+    }
+    if (!peekArtist(artistSlug, 5000)) {
+      fetchArtist(artistSlug, { limit: ARTIST_FIRST })
+        .then((data) => paintArtist(data))
+        .catch(() => {});
+    }
     fetchArtist(artistSlug, { limit: 5000 })
       .then((data) => {
-        if (cancelled) return;
-        setPayload(data);
-        if (artistDeskIsUnknown(data)) {
-          document.title = 'Artist · Pokoin';
-        } else {
-          document.title = artistSeoTitle(data.artist?.name || firstPaint);
-        }
-        setError('');
+        paintArtist(data, { replace: true });
+        if (!cancelled) setRestPending(false);
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message || 'Artist failed.');
+        if (cancelled) return;
+        setRestPending(false);
+        if (!painted) setError(err.message || 'Artist failed.');
       });
     return () => {
       cancelled = true;
@@ -520,6 +542,9 @@ function ArtistDesk() {
                 <CardTile key={albumTileKey(group.cards[0])} card={group.cards[0]} rank={index} cut />
               )
             ))}
+          {payload && restPending && !filtersOn
+            ? Array.from({ length: 8 }, (_, index) => <SkeletonTile key={`rest-${index}`} album />)
+            : null}
         </CardSelectGrid>
       )}
       {payload && shown < groups.length ? (

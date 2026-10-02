@@ -138,6 +138,7 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   assert.match(pile, /select\.click\(rep\.id, event\)/);
   // Fast flings that skip past the sentinel must still load more tiles.
   assert.match(artist, /rect\.top <= window\.innerHeight \+ 800/);
+  assert.match(artist, /fetchArtist\(artistSlug, \{ limit: ARTIST_FIRST \}\)/);
   assert.match(artist, /fetchArtist\(artistSlug, \{ limit: 5000 \}\)/);
   assert.match(artist, /peekArtist\(artistSlug, 5000\)/);
   assert.match(artist, /restoredPageView/);

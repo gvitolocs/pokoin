@@ -203,9 +203,10 @@ and grid immediately. When that home payload lands, idle `warmupSearchBar()`
 opens Meili suggest (and Pokemon token-predict warmup). Each slide is official-set copy plus a 3-card fan of **random chase leftover JPEGs** from that set that
 overflows the banner. Homepage pan lock is `html:has(.page.home) { overflow-x: clip }` plus `.page.home { overflow: clip }` — not `html`/`body` globally, so artist album desks still scroll. The fan pool is the Pi `set:{slug}` rail (no PKN wait). Autoplay pauses on hover of the whole stage (so the
 arrows stay clickable). Hovering a side fan card lifts the center
-(`is-mid-away`); the center card itself does not. Set browse (`/marketplace/sets/:slug`) keeps skeletons until the full set
-walk finishes (`expansionTilesReady`: `hasMore === false`), then paints
-Number order (Official when we have a checklist). Search uses skeleton tiles
+(`is-mid-away`); the center card itself does not. Set browse (`/marketplace/sets/:slug`) asks for one page of 400 (`EXPANSION_PAGE`).
+A normal set fits, `hasMore` is false, and the first 12 tiles paint in Number
+order (Official when we have a checklist). Larger sets keep walking until a
+short page (`expansionTilesReady`). Search uses skeleton tiles
 (it can still flash **Searching…** in the
 result count). Set-desk walk: [Set desk first paint](#set-desk-first-paint).
 Card pages seed from the tile you clicked. The landing page prefetches this
@@ -496,7 +497,7 @@ those contradict the live contract. Page BFFs are **GET**.
 | `POST /api/marketplace-orders?action=nft-shipping-request` | NFT shipping intent. Bearer |
 | `POST /api/create-pkn-checkout-session` | Stripe PKN packages |
 | `POST /api/unlock-silver` | 20 site PKN Silver |
-| `GET /api/marketplace-expansion-page?slug=` | Set browse walk, 48-row pages, leftover `card_id` desc. SPA does not paint until the walk finishes. `expansion.nationality` drives the JP/CN title flag ([PRINT_FLAGS.md](PRINT_FLAGS.md)). English `expansion.name` for slugs, official lists, and the desk title. [Set desk first paint](#set-desk-first-paint). |
+| `GET /api/marketplace-expansion-page?slug=` | Set browse walk, 400-row pages (`EXPANSION_PAGE`), leftover `card_id` desc. A normal set finishes in one response and paints; a longer set stays on skeletons until `hasMore === false`. `expansion.nationality` drives the JP/CN title flag ([PRINT_FLAGS.md](PRINT_FLAGS.md)). English `expansion.name` for slugs, official lists, and the desk title. [Set desk first paint](#set-desk-first-paint). |
 | `GET /api/marketplace-suggest?q=` | Header typeahead (grouped printings). Meili from 1 character in the background; popup from 3 compact characters, instant local rank + **cached printings** (not a 120ms blank dump, not `live:` name stubs). One Meili index, English-identity rows for every title language; after grouping the API stamps `localized_name` / `localized_set` / `localized_rarity` so the popup can show a CardTrader-style English title plus translation subtitle. SPA `suggest-rank.js` scores the compact English name against unique blueprint names (`marketplace_card_names`). Popularity is 2 log-capped points, never 428×; a perfect typed `gx`/`ex`/`v` match is 4. `oin` ranks Oinkologne; `pikahc gx` ranks Pikachu GX; `dawe` expands to Dawn; `miikyu ex` scores `Mimikyu ex`, not a peeled EX layer. `sylveon ex il` peels `il` as illustration/full-art and ranks SIR/FA printings first. `061 shieldon` peels the collector token and ranks Shieldon printings (061 first); Meili is not queried for every 061. `Sh1` is the SH1/SH10 collector prefix first, then real name-pool printings (Shinx, Shuppet) fill toward 20; the print-language chip keeps western rows in that 20. Set-code tokens: `hgss energy` peels HeartGold & SoulSilver and ranks elemental energies from that era; `palkai sl` peels Call of Legends (SL secrets) and ranks that set’s Palkia, not LV.X. Set-title phrases with a typo (`flareon call of legendsd`) peel to a name lookup on the search page, then filter printings by TCG era — expansion short codes stay off suggest `attributesToSearchOn`. A bare `expedition` browses Expedition Base Set and fills 20 singles; it is not Expedition Uniform from Chilling Reign. Jumbo / oversized leftovers are Product, not Singles. Not Flutter `marketplace-autocomplete` / token-predict. UI flattens groups into CardTrader-style rows. The “View all N results” number prefers the search-page payload’s `total` (same query object as its rows, same-WHERE window count), so `pikachu gx 30th` no longer reports the broad `pikachu` pool where that total exists; suggest `count` stays the baseline for universes without one. Popup cap 20 is the top real ranked matches; **western is a visual tie-break** on equal Meili points, not a `search_weight` change. After suggest, the SPA prefetches search-page so Enter is hot (`search-hot.js`). **2pikabench** (10 two-insert + keyboard typos, `seed=2`) recovered 10/10 on 2026-09-13: pool rank 2.7 ms avg, `fetchSuggestRanked` search **105 ms avg** (1053 ms / 10). Table: [CHROME.md](CHROME.md). |
 | `GET /api/marketplace-card-sales?cardId=` | Desk header last-day PKN (`series.lastMedianPkn`) + daily median series. Tile/versions last-median uses this thin response (no `slices`). Desk graph uses `?slices=1` once per card: every `cardtrader_sold_daily` combination as camelCase `slices` (day, condition, language, reverse, firstEdition, graded, medianPkn, sampleCount, …). SPA filters locally and caches 15 days. `series.soldQty` is copies sold in the current slice (shown as **n units**); `series.sampleCount` is listing-disappearance events. Each `series.days[]` has `sampleCount` / `soldQty`. Optional `condition` / `language` (`cond` / `lang`), `reverse`, `firstEdition`, `graded` (`0`/`1`) still apply on the series path. `filters` lists keys that exist for the printing on that path. Default has no observation rows (`includeRows=1` for a capped sample). |
 | `GET /api/marketplace-price-check?items=` | MyPokoin pricer (PowerTools-style). Bearer required. `items` = comma list of `cardId[:COND:LANG]` (≤100). Per card: cheapest live native listing (caller's own excluded), cheapest CardTrader ask in the complete book + condition/language-matched ask, and the 30-day sold median. eBay / TCGPlayer comps have no source yet; the SPA shows those pricer sources disabled. |
@@ -677,16 +678,18 @@ the art, the catalog name is Levincia.
 
 ### Set desk first paint
 
-`/marketplace/sets/:slug` does **not** paint the first 48 leftover-id rows
-and then append the rest. That page size (`EXPANSION_PAGE` = 48 in
-`market/src/api.js`) is only the walk chunk. SQL `readCardsForSet` is still
-`order by card_id desc`; the SPA hides it.
+`/marketplace/sets/:slug` does **not** paint a partial `card_id desc` page and
+then reshuffle. `EXPANSION_PAGE` is 400 in `market/src/api.js` (the API max).
+A normal set comes back in that one response and paints. SQL `readCardsForSet`
+is still `order by card_id desc`; the SPA sorts Number / Official after the
+page lands. A set bigger than 400 keeps walking; those later pages stay
+hidden until `hasMore === false` so the checklist does not jump.
 
 Default:
 
 1. Show skeletons (title / flag may land from expansion metadata). Count
    follows `expansion.cardCount` when the metadata hop has it.
-2. `fetchExpansionCards` walks offset 0, 48, 96, … until a short page.
+2. `fetchExpansionCards` walks offset 0, 400, 800, … until a short page.
 3. Paint order once `hasMore === false` (`expansionTilesReady`), sorted
    **Number** (or **Official** when `set-official-lists.js` has a checklist:
    Celebrations, Lost Origin, Platinum Arceus). Letter-prefix secrets sort

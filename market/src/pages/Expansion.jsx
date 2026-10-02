@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigationType, useParams } from 'react-router-dom';
-import { fetchExpansion, fetchExpansionCards, peekExpansion, prettySlug } from '../api.js';
+import { EXPANSION_PAGE, fetchExpansion, fetchExpansionCards, peekExpansion, prettySlug } from '../api.js';
 import { Action, track } from '../track.js';
 import { printFlagFromNationality } from '../locale.js';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
@@ -67,7 +67,7 @@ export default function Expansion() {
   const restored = restoredPageView(navType, location.key, `${location.pathname}${location.search}`);
   const restoredHere = restored?.slug === slug ? restored : null;
   const [payload, setPayload] = useState(() => {
-    const cached = peekExpansion({ slug, limit: 48, offset: 0 });
+    const cached = peekExpansion({ slug, limit: EXPANSION_PAGE, offset: 0 });
     return expansionTilesReady(cached, slug, cached?.expansion?.name) ? cached : null;
   });
   const [error, setError] = useState('');
@@ -84,7 +84,7 @@ export default function Expansion() {
 
   useEffect(() => {
     let cancelled = false;
-    const cached = peekExpansion({ slug, limit: 48, offset: 0 });
+    const cached = peekExpansion({ slug, limit: EXPANSION_PAGE, offset: 0 });
     setPayload(expansionTilesReady(cached, slug, cached?.expansion?.name) ? cached : null);
     const saved = restoredPageView(navType, location.key, `${location.pathname}${location.search}`);
     const hydrate = saved?.slug === slug ? saved : null;
@@ -110,7 +110,7 @@ export default function Expansion() {
     }
     fetchExpansion({
       slug,
-      limit: 48,
+      limit: EXPANSION_PAGE,
       offset: 0,
       onUpdate: (data) => {
         if (cancelled || !data) {
@@ -134,8 +134,10 @@ export default function Expansion() {
         }
         document.title = setSeoTitle(data?.expansion?.name || prettySlug(slug));
         setError('');
-        if (expansionTilesReady(data, slug, data?.expansion?.name)) {
-          setPayload(data);
+        const shortPage = (data?.cards?.length || 0) > 0 && data.cards.length < EXPANSION_PAGE;
+        if (shortPage || expansionTilesReady(data, slug, data?.expansion?.name)) {
+          setPayload(shortPage ? { ...data, hasMore: false } : data);
+          if (shortPage) return null;
         } else {
           setPayload({
             expansion: data?.expansion || null,
@@ -170,7 +172,7 @@ export default function Expansion() {
     const data = await fetchExpansion({
       slug,
       expansionName: payload?.expansion?.name,
-      limit: 48,
+      limit: EXPANSION_PAGE,
       offset: (payload?.cards || []).length,
     });
     const extra = data.cards || [];
