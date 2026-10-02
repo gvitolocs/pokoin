@@ -3,7 +3,7 @@
  * Source: GET /api/marketplace-version-set (pokoin_version_sets).
  *
  * Batch Defaults / row language drives the default printing:
- * western langs → western, JP/KO/ID/TH/VI → japanese|korean, ZH/ZHT → leave print.
+ * western langs → western, JP/KO/ID/TH/VI → japanese|korean, ZH/ZHT → chinese.
  *
  * Scan Desk LANG select lists every language; picking an Asian code remaps the
  * expansion when a sibling exists. Card desk still restricts langs by nationality.
@@ -25,9 +25,28 @@ const ASIAN = new Set(ASIAN_CARD_LANGS.map((c) => String(c).toUpperCase()));
 /** @returns {'western'|'jpko'|'chinese'} */
 export function preferredPrintBucket(listingLanguage = '') {
   const lang = String(listingLanguage || '').trim().toUpperCase();
-  if (lang === 'JP' || lang === 'KO') return 'jpko';
   if (lang === 'ZH' || lang === 'ZHT') return 'chinese';
+  if (lang === 'JP' || lang === 'KO' || lang === 'ID' || lang === 'TH' || lang === 'VI') return 'jpko';
   return 'western';
+}
+
+/**
+ * The row's own language picks the printing. The batch language is only the
+ * fallback before that row has one.
+ */
+export function remapListingLanguage(rowLanguage = '', batchLanguage = '') {
+  return String(rowLanguage || batchLanguage || 'EN').trim() || 'EN';
+}
+
+/** Fields a Batch Defaults change writes onto every open row. Qty and stack stay per card. */
+export const BATCH_ROW_FIELDS = ['language', 'condition', 'foilState', 'firstEdition', 'signed', 'altered', 'location'];
+
+export function batchDefaultRowPatch(patch = {}) {
+  const out = {};
+  for (const key of BATCH_ROW_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) out[key] = patch[key];
+  }
+  return out;
 }
 
 export function matchesPrintBucket(row, bucket) {
@@ -100,14 +119,10 @@ export function sortArtworkVersions(printings = [], listingLanguage = '') {
 
 /**
  * Manual-add language → artwork remap bucket.
- * JP/KO/ID/TH/VI → japanese|korean sibling. Western → western.
- * ZH/ZHT → null (do not auto-change the expansion).
+ * Same regions as the queue: western, japanese|korean, chinese.
  */
 export function draftArtworkBucket(listingLanguage = '') {
-  const lang = String(listingLanguage || '').trim().toUpperCase();
-  if (lang === 'ZH' || lang === 'ZHT') return null;
-  if (lang === 'JP' || lang === 'KO' || lang === 'ID' || lang === 'TH' || lang === 'VI') return 'jpko';
-  return 'western';
+  return preferredPrintBucket(listingLanguage);
 }
 
 /**
@@ -125,7 +140,7 @@ export function preferArtworkPrinting(printings = [], currentId = '', listingLan
   return current || rows[0];
 }
 
-/** Pick a CLIP sibling for the draft language, or null if none / Chinese. */
+/** Pick a CLIP sibling for the draft language, or null if this printing already matches. */
 export function preferDraftArtwork(printings = [], currentId = '', listingLanguage = '') {
   const bucket = draftArtworkBucket(listingLanguage);
   if (!bucket) return null;

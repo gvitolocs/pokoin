@@ -8,7 +8,7 @@ splits that:
 | Section | What | Not |
 | --- | --- | --- |
 | **Rarity Lineup** | Other **rarities** of this card in **this set** (regular ↔ illustration rare ↔ reverse / poké ball of the same collector). Secret numbers (`087/080`) pair with the in-set card (`032/080`). FA / SIR / gold secrets of the same name join that same lineup (Storm Emeralda Mega Rayquaza 058 / 095 / 110 / 113). | Language. Two different arts of the same species in the set (Cottonee **009** and **010**). |
-| **Era grids** | CLIP printings of this name/illustration, grouped by TCG block. Same-era full-art / gold is still that era, not a reprint. JP/EN/CN stay in the same block. Full EN/JP/CN expansion lists: [TCG_ERAS.md](TCG_ERAS.md). | |
+| **Era grids** | CLIP printings of this illustration, grouped by TCG block. Item, supporter, stadium, and energy cards also list every other printing of the same English name — those are reprints even when the painting changed (Dark Explorers Ultra Ball and Sun & Moon 135/149). A Pokémon with the same name stays off this list unless the artwork match put it here. JP/EN/CN stay in the same block. Full EN/JP/CN expansion lists: [TCG_ERAS.md](TCG_ERAS.md). | |
 | **Original / Neo / e-Card / …** | Pre-EX is split (Original, Neo, Legendary Collection, VS / web, e-Card). Platinum and Call of Legends are their own blocks. | Do not dump WotC into one **Legacy** heading. Do not map Pokémon Card★web onto Legendary Collection. |
 
 Each `public_id` keeps its own page. The desk `<select>` between ‹ › is the
@@ -247,7 +247,7 @@ painting stay together.
 
 ## What not to show
 
-- Every catalog row with the English name (peer2 Espurr is ~35 cards)
+- Every catalog row with the English name of a Pokémon (peer2 Espurr is ~35 cards). Item and trainer names are the exception: same name is the reprint.
 - Same-set species mates that are not a rarity pair (Cottonee 009 vs 010)
 - Union-find of JP/EN/CN into one western desk id
 - Searchbar `artcut/` files on `CardTile` / the versions grid (full leftover

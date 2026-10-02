@@ -8,6 +8,7 @@ const {
   cleanUsername,
   conditionSql,
   sortSql,
+  publicPhotoUrl,
   shopSellerFromProfile,
   listingRow,
   sellerCardIdsForGame,
@@ -62,6 +63,28 @@ test('truthyFlag and raritySql build shop filters', () => {
   assert.match(where2[0], /not like/);
   assert.ok(values2.includes('%common%'));
   assert.ok(values2.includes('%uncommon%'));
+});
+
+test('freshness accepts a firebase uid and stamps dates', () => {
+  const { cleanSellerUid, isoStamp } = require('./marketplace-seller-shop.js')._test;
+  assert.equal(cleanSellerUid('PUH1ygG9mOOyQRPXaY5Fa1W6DKd2'), 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2');
+  assert.equal(cleanSellerUid('no'), '');
+  assert.equal(isoStamp('2026-10-02T15:30:39.334Z'), '2026-10-02T15:30:39.334Z');
+  assert.equal(isoStamp(''), '');
+});
+
+test('public shop photo is an https URL only', () => {
+  const photo = 'https://pub-example.r2.dev/profile-pictures/u1/a.jpg';
+  assert.equal(publicPhotoUrl(photo), photo);
+  assert.equal(publicPhotoUrl('http://pub-example.r2.dev/a.jpg'), '');
+  assert.equal(publicPhotoUrl('profile-pictures/u1/a.jpg'), '');
+  const seller = shopSellerFromProfile({
+    uid: 'u1',
+    queried: 'redshakkio',
+    via: 'firebase',
+    profile: { username: 'redshakkio', displayName: 'Red', photoUrl: photo },
+  });
+  assert.equal(seller.photoUrl, photo);
 });
 
 test('a nickname or email change keeps the listing on the Firebase user', () => {

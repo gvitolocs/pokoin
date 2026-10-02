@@ -27,6 +27,8 @@ function runWithGame(...args) {
 
 const PAGE_DEFAULT = 100;
 const PAGE_MAX = 100;
+/** One background download of a shop. Larger shops stay on per-filter queries. */
+const BOOK_MAX = 20000;
 
 function cleanText(value, maxLength = 240) {
   return String(value || '').trim().slice(0, maxLength);
@@ -222,6 +224,18 @@ async function associateBadgeForUid(uid) {
   }
 }
 
+/** Public shop may show an https profile picture. Storage paths stay private. */
+function publicPhotoUrl(value) {
+  const text = cleanText(value, 500);
+  if (!text) return '';
+  try {
+    const url = new URL(text);
+    return url.protocol === 'https:' ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
 function shopSellerFromProfile({ uid, profile = {}, queried = '', via = '' }) {
   const handle = currentHandle(profile.username);
   const asked = currentHandle(queried);
@@ -229,7 +243,12 @@ function shopSellerFromProfile({ uid, profile = {}, queried = '', via = '' }) {
   const username = handle || asked;
   const rawName = cleanText(profile.displayName, 120);
   const displayName = rawName && !rawName.includes('@') ? rawName : username;
-  return { uid, username, displayName };
+  return {
+    uid,
+    username,
+    displayName,
+    photoUrl: publicPhotoUrl(profile.photoUrl),
+  };
 }
 
 async function registeredSeller(firestore, username) {
@@ -272,6 +291,7 @@ async function sellerProfileForUsername(username) {
     profile: {
       username: data.username || data.usernameLower || '',
       displayName: data.displayName || '',
+      photoUrl: data.photoUrl || '',
     },
   });
   if (!seller) {
@@ -313,6 +333,7 @@ function listingRow(row, seller = {}) {
     reserveAvailable: row.reserve_available === true,
     nftAvailable: row.nft_available === true,
     status: row.status,
+    rarity: cleanText(row.catalog_rarity || row.rarity, 80),
     cardName: row.card_name,
     cardImageUrl: row.card_image_url,
     photoUrls: Array.isArray(row.photo_urls) ? row.photo_urls.filter((url) => typeof url === 'string').slice(0, 2) : [],
@@ -354,6 +375,56 @@ async function sellerCardIdsForGame(sellerUid, game, {
   return catalog.rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean);
 }
 
+function isoStamp(value) {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
+function cleanSellerUid(value) {
+  const uid = cleanText(value, 160);
+  return /^[A-Za-z0-9_-]{8,160}$/.test(uid) ? uid : '';
+}
+
+async function sellerActivityStamp(sellerUid) {
+  const result = await withGameContext('pokemon', () => marketplaceQuery(
+    `
+      select max(updated_at) as max_updated
+      from public.marketplace_user_listings
+      where seller_uid = $1
+        and status = 'active'
+        and quantity_available > 0
+    `,
+    [sellerUid],
+  ));
+  return isoStamp(result.rows[0]?.max_updated);
+}
+
+async function attachCatalogRarity(rows, catalogGame) {
+  const ids = [...new Set(rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean))];
+  if (!ids.length) return rows;
+  let result = { rows: [] };
+  try {
+    result = await withGameContext(catalogGame, () => marketplaceQuery(
+      `
+        select card_id::text as card_id, max(rarity) as rarity
+        from public.marketplace_search_candidates
+        where card_id::text = any($1::text[])
+        group by 1
+      `,
+      [ids],
+    ));
+  } catch (error) {
+    console.warn('seller shop rarity attach failed', error.message);
+    return rows;
+  }
+  const rarityByCard = new Map(result.rows.map((row) => [String(row.card_id), row.rarity || '']));
+  return rows.map((row) => ({
+    ...row,
+    catalog_rarity: rarityByCard.get(String(row.card_id || '')) || '',
+  }));
+}
+
 async function readSellerShopData(url, game) {
   const sellerUsername = cleanText(url.searchParams.get('sellerUsername'), 64);
   if (!sellerUsername) {
@@ -362,9 +433,20 @@ async function readSellerShopData(url, game) {
     throw error;
   }
 
+  if (truthyFlag(url.searchParams.get('fresh'))) {
+    const sellerUid = cleanSellerUid(url.searchParams.get('sellerUid'));
+    if (!sellerUid) {
+      const error = new Error('sellerUid is required.');
+      error.statusCode = 400;
+      throw error;
+    }
+    return { fresh: true, maxUpdatedAt: await sellerActivityStamp(sellerUid) };
+  }
+
   const seller = await withGameContext('pokemon', () => sellerProfileForUsername(sellerUsername));
-  const limit = cleanLimit(url.searchParams.get('limit'));
-  const offset = cleanOffset(url.searchParams.get('offset'));
+  const book = truthyFlag(url.searchParams.get('book'));
+  const limit = book ? BOOK_MAX + 1 : cleanLimit(url.searchParams.get('limit'));
+  const offset = book ? 0 : cleanOffset(url.searchParams.get('offset'));
   const q = cleanText(url.searchParams.get('q') || url.searchParams.get('query'), 120).toLowerCase();
   const condition = cleanText(url.searchParams.get('condition'), 40);
   const language = cleanText(url.searchParams.get('language'), 10).toUpperCase();
@@ -396,7 +478,7 @@ async function readSellerShopData(url, game) {
     where.push(`card_id = any($${values.length}::text[])`);
   }
 
-  if (q) {
+  if (!book && q) {
     values.push(`%${q}%`);
     where.push(`(
       lower(coalesce(card_name, '')) like $${values.length}
@@ -406,29 +488,81 @@ async function readSellerShopData(url, game) {
   }
 
   const cond = conditionSql(condition);
-  if (cond?.codes?.length) {
+  if (!book && cond?.codes?.length) {
     values.push(cond.codes);
     where.push(`upper(btrim(coalesce(condition, ''))) = any($${values.length}::text[])`);
   }
 
-  if (language) {
+  if (!book && language) {
     values.push(`${language}%`);
     where.push(`upper(coalesce(language, '')) like $${values.length}`);
   }
 
-  if (reverseOnly) {
+  if (!book && reverseOnly) {
     where.push('reverse = true');
   }
-  if (firstEditionOnly) {
+  if (!book && firstEditionOnly) {
     where.push('first_edition = true');
   }
 
   const rarityFilter = raritySql(rarity);
-  if (rarityFilter) {
+  if (!book && rarityFilter) {
     rarityFilter.apply(where, values);
   }
 
   const whereSql = where.join(' and ');
+
+  if (book) {
+    const pageValues = [...values, limit];
+    const result = await withGameContext('pokemon', () => marketplaceQuery(
+      `
+        select *
+        from public.marketplace_user_listings
+        where ${whereSql}
+        order by ${sortSql('price-asc')}
+        limit $${pageValues.length}
+      `,
+      pageValues,
+    ));
+    if (result.rows.length > BOOK_MAX) {
+      return {
+        book: false,
+        game,
+        seller: {
+          uid: seller.uid,
+          username: seller.username,
+          displayName: seller.displayName || seller.username,
+          photoUrl: publicPhotoUrl(seller.photoUrl),
+          acceptsPkn: seller.acceptsPkn !== false,
+        },
+        listings: [],
+        total: 0,
+        unique: 0,
+        maxUpdatedAt: '',
+      };
+    }
+    const stamped = await attachCatalogRarity(result.rows, catalogGame);
+    const listings = stamped.map((row) => listingRow(row, seller));
+    const unique = new Set(listings.map((row) => String(row.cardId || '')).filter(Boolean)).size;
+    return {
+      book: true,
+      game,
+      seller: {
+        uid: seller.uid,
+        username: seller.username,
+        displayName: seller.displayName || seller.username,
+        photoUrl: publicPhotoUrl(seller.photoUrl),
+        associate: await associateBadgeForUid(seller.uid),
+        acceptsPkn: seller.acceptsPkn !== false,
+      },
+      listings,
+      total: listings.length,
+      unique,
+      maxUpdatedAt: await sellerActivityStamp(seller.uid),
+      limit: listings.length,
+      offset: 0,
+    };
+  }
 
   const totals = await withGameContext('pokemon', () => marketplaceQuery(
     `
@@ -462,6 +596,7 @@ async function readSellerShopData(url, game) {
       uid: seller.uid,
       username: seller.username,
       displayName: seller.displayName || seller.username,
+      photoUrl: publicPhotoUrl(seller.photoUrl),
       associate: await associateBadgeForUid(seller.uid),
       acceptsPkn: seller.acceptsPkn !== false,
     },
@@ -509,6 +644,9 @@ module.exports._test = {
   raritySql,
   truthyFlag,
   sortSql,
+  publicPhotoUrl,
+  cleanSellerUid,
+  isoStamp,
   shopSellerFromProfile,
   listingRow,
   sellerCardIdsForGame,

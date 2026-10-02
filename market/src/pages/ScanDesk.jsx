@@ -23,10 +23,12 @@ import {
 import {
   artworkVersionLabel,
   artworkVersionShortLabel,
+  batchDefaultRowPatch,
   draftArtworkBucket,
   listingLanguageForPrint,
   preferArtworkPrinting,
   preferDraftArtwork,
+  remapListingLanguage,
   shouldRemapArtwork,
   sortArtworkVersions,
 } from '../scan-artwork-versions.js';
@@ -573,7 +575,7 @@ export default function ScanDesk() {
   // guard so the region-remap effect doesn't bounce the row back to the
   // batch-language sibling on the first click.
   function markPick(row, nextId) {
-    const lang = defaults.language || row.language || 'EN';
+    const lang = remapListingLanguage(row.language, defaults.language);
     remapTried.current.add(`${row.id}\0${lang}\0${String(nextId)}`);
   }
 
@@ -694,10 +696,17 @@ export default function ScanDesk() {
       rememberStoppedPositions(store);
     }
     setBatch((current) => ({ ...current, defaults: { ...current.defaults, ...patch } }));
+    const rowPatch = batchDefaultRowPatch(patch);
+    const rowIds = Object.keys(rowPatch).length
+      ? list.filter((row) => row.status === 'active').map((row) => row.id)
+      : [];
     try {
       const t = await token();
       const data = await scanApi.defaults(t, batch.id, patch);
       setBatch((current) => ({ ...current, ...data.batch }));
+      if (rowIds.length) {
+        await patchRows(rowIds, rowPatch, { label: 'Batch defaults' });
+      }
     } catch (err) {
       setError(err.message || 'Defaults not saved.');
     }
@@ -780,7 +789,7 @@ export default function ScanDesk() {
     void remapDraftArtwork(card.id, language);
   }
 
-  /** JP/KO/ID/TH/VI → matching asian expansion; western → western; ZH/ZHT leave the printing. */
+  /** JP/KO/ID/TH/VI → japanese|korean; ZH/ZHT → chinese; western langs → western. */
   async function remapDraftArtwork(fromCardId, language) {
     if (!draftArtworkBucket(language)) return;
     const data = await loadVersionSet(fromCardId);
@@ -1635,7 +1644,7 @@ function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackB
   };
   return (
     <section className={`scan-defaults${stackFull ? ' is-stack-full' : ''}`} aria-labelledby="scan-defaults-title">
-      <h2 id="scan-defaults-title" className="scan-defaults-label" title="New scans take these values. Shift + a row key changes them.">Batch defaults</h2>
+      <h2 id="scan-defaults-title" className="scan-defaults-label" title="Changing these updates every card in this batch, and the next scan. Shift + a row key changes them.">Batch defaults</h2>
       <div className="scan-defaults-row">
       {/* The TCG is the pokoin.com/{slug} prefix. Pokemon has no prefix. */}
       <label className="sd-field sd-game" title="Switch TCG — phone catalog follows this">
@@ -1800,8 +1809,8 @@ function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick }) {
   const remapTried = useRef(new Set());
   const onPickRef = useRef(onPick);
   onPickRef.current = onPick;
-  // Batch defaults language is the region intent (EN → western sibling).
-  const listingLanguage = preferredLanguage || row.language || 'EN';
+  // The row language picks the printing. Batch language is only the fallback.
+  const listingLanguage = remapListingLanguage(row.language, preferredLanguage);
 
   useEffect(() => {
     let cancelled = false;
@@ -1825,8 +1834,8 @@ function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick }) {
           onPickRef.current(nextId);
         }
       }
-      // Do not coerce row.language here — Scan Desk keeps the full LANG list;
-      // picking JP/KO remaps the expansion; ZH/ZHT leave the print (D000065).
+      // Do not coerce row.language here — Scan Desk keeps the full LANG list.
+      // JP/KO/ID/TH/VI and ZH/ZHT remap the expansion when a sibling exists.
     });
     return () => { cancelled = true; };
   }, [row.cardId, row.id, row.nationality, row.language, closed, listingLanguage]);
@@ -1942,7 +1951,7 @@ function QueueRow({
   const thumbArt = thumbFor(row.cardId, row.cardName, row.imageUrl);
   const thumb = thumbArt.thumb;
   const zoomSrc = thumbArt.hero || thumbArt.thumb;
-  const remapLang = preferredLanguage || row.language || 'EN';
+  const remapLang = remapListingLanguage(row.language, preferredLanguage);
   return (
     <div
       className={`scan-row${focused ? ' focused' : ''}${selected ? ' selected' : ''}${row.status === 'submitted' ? ' done' : ''}`}
