@@ -35,6 +35,13 @@ function cleanLimit(value, fallback = 500) {
   return Math.min(Math.max(Math.trunc(limit), 1), 1000);
 }
 
+/** Offset pagination for seller inventory top-up pages (0..50k guard). */
+function cleanOffset(value) {
+  const offset = Number(value);
+  if (!Number.isFinite(offset) || offset <= 0) return 0;
+  return Math.min(Math.trunc(offset), 50000);
+}
+
 function cleanText(value, maxLength = 240) {
   return String(value || '').trim().slice(0, maxLength);
 }
@@ -676,6 +683,11 @@ async function readListings(url, decoded, { marketplaceGame = 'pokemon' } = {}) 
   }
   values.push(cleanLimit(url.searchParams.get('limit')));
   const qualifiedWhere = addListingTableAlias(where);
+  const offset = cleanOffset(url.searchParams.get('offset'));
+  const offsetSql = offset > 0 ? `\n      offset $${values.length + 1}` : '';
+  if (offset > 0) {
+    values.push(offset);
+  }
   const result = await marketplaceQuery(
     `
       select
@@ -683,11 +695,14 @@ async function readListings(url, decoded, { marketplaceGame = 'pokemon' } = {}) 
       from public.marketplace_user_listings listings
       ${qualifiedWhere.length ? `where ${qualifiedWhere.join(' and ')}` : ''}
       order by price_pkn asc, updated_at desc, created_at desc
-      limit $${values.length}
+      limit $${values.length - (offset > 0 ? 1 : 0)}${offsetSql}
     `,
     values,
   );
-  const enrichedRows = sellerUsername
+  // Owner reads (MyPokoin / stock) skip the Firestore profile enrich: the
+  // seller is the caller, rows fall back to their native username columns,
+  // and the extra Google round trip dominated the desk's time to first row.
+  const enrichedRows = sellerUsername || sellerUid
     ? result.rows
     : await enrichListingRowsWithSellerProfiles(result.rows);
   const urlEnrichedRows = await enrichListingRowsWithCardUrls(enrichedRows);

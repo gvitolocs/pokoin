@@ -1518,6 +1518,10 @@ export default function Card() {
   }, [cardId, lang, slug, location.state]);
   const stubCardRef = useRef(stubCard);
   stubCardRef.current = stubCard;
+  // lang:cardId of the last successful desk fetch. The canonical-URL replace
+  // re-runs this effect with a new slug but the same card — that must not
+  // re-hit the origin for data that just painted.
+  const fetchedForRef = useRef('');
   const [payload, setPayload] = useState(() => {
     const cached = peekCard(cardId, { lang });
     if (cached) {
@@ -1694,6 +1698,7 @@ export default function Card() {
       if (cancelled || !data?.card) {
         return;
       }
+      fetchedForRef.current = `${lang}:${cardId}`;
       const neighborWindow = neighborsOrPeek(cardId, data.neighbors);
       warmupNeighbors(neighborWindow, { lang });
       setPayload((current) => {
@@ -1724,6 +1729,12 @@ export default function Card() {
       if (card.canonicalPath) {
         replaceToCanonical(card.canonicalPath, navigate, card, location.pathname);
       }
+    }
+
+    // The desk already painted this card in this mount; only the URL slug
+    // changed (canonical replace). Skip the duplicate origin fetch.
+    if (cached && fetchedForRef.current === `${lang}:${cardId}`) {
+      return undefined;
     }
 
     fetchCard(cardId, { lang, slug, includeOffers: false, fresh: Boolean(cached) })

@@ -1027,6 +1027,10 @@ export function fetchArtist(slug, { limit = 240 } = {}) {
   const params = new URLSearchParams({
     artistSlug: String(slug || ''),
     limit: String(limit),
+    // Slim tiles payload (artist/profile served once). Legacy handlers
+    // ignore the param and answer with the full shape, so this is safe
+    // to send before the API ships.
+    tiles: '1',
   });
   const pending = getJson(`/api/marketplace-artist-cards?${params}`)
     .then((data) => {
@@ -1281,6 +1285,18 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
   const key = expansionCacheKey({ slug, expansionName, limit, offset });
   if (offset === 0 && expansionCache.has(key)) {
     return Promise.resolve(expansionCache.get(key));
+  }
+  // The set desk fetches page 0 nameless first, then fetchExpansionCards
+  // repeats the same page under the expansion's own name. Same set, same
+  // rows — seed the named key from the nameless payload instead of paying
+  // a second cold origin round trip.
+  if (offset === 0 && expansionName) {
+    const siblingKey = expansionCacheKey({ slug, expansionName: '', limit, offset });
+    const sibling = expansionCache.get(siblingKey);
+    if (sibling?.expansion?.name === expansionName) {
+      expansionCache.set(key, sibling);
+      return Promise.resolve(sibling);
+    }
   }
   if (offset === 0 && expansionInflight.has(key)) {
     return expansionInflight.get(key);
@@ -2438,12 +2454,15 @@ export async function fetchPriceCheck(items, token) {
   });
 }
 
-export function fetchSellerListings(sellerUid, token, { limit = 40 } = {}) {
+export function fetchSellerListings(sellerUid, token, { limit = 40, offset = 0 } = {}) {
   const params = new URLSearchParams({
     sellerUid: String(sellerUid || ''),
     nativeOnly: '1',
     limit: String(limit),
   });
+  if (Number(offset) > 0) {
+    params.set('offset', String(Math.trunc(Number(offset))));
+  }
   return getJson(`/api/marketplace-listings?${params}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

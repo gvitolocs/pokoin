@@ -18,7 +18,7 @@ const vercel = fs.readFileSync(path.join(root, '../../vercel.json'), 'utf8');
 const CARD_ICON = 'M6 3h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 0h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM6 14h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zm8 0h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z';
 
 test('pokoin.com/dashboard renders SellerHome; /scan stays the public photo page', () => {
-  assert.match(appSrc, /import SellerHome from '\.\/pages\/SellerHome\.jsx'/);
+  assert.match(appSrc, /const SellerHome = lazy\(\(\) => import\('\.\/pages\/SellerHome\.jsx'\)\)/);
   assert.match(appSrc, /both\('\/dashboard',\s*<SellerHome \/>/);
   assert.match(appSrc, /both\('\/dashboard\/scan',\s*<ScanDesk \/>/);
   assert.match(appSrc, /both\('\/scan',\s*<Scan \/>/);

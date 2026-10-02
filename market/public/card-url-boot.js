@@ -11,6 +11,9 @@ if ("serviceWorker" in navigator) {
   }
   var lang = match[1].toLowerCase();
   var id = match[2];
+  // Warm the exact URL the desk's first fetchCard will use — same slug,
+  // same cache key — so the edge/origin hit once instead of twice.
+  var slug = (match[3] || "").replace(/^\/+/, "");
   fetch("/api/marketplace-card-url?cardId=" + encodeURIComponent(id) + "&language=" + encodeURIComponent(lang), {
     headers: { Accept: "application/json" },
   }).then(function (res) {
@@ -25,7 +28,11 @@ if ("serviceWorker" in navigator) {
       history.replaceState(history.state, "", next);
     }
   }).catch(function () {});
-  fetch("/api/marketplace-card-page?cardId=" + encodeURIComponent(id) + "&lang=" + encodeURIComponent(lang), {
+  var pageUrl = "/api/marketplace-card-page?cardId=" + encodeURIComponent(id) + "&lang=" + encodeURIComponent(lang);
+  if (slug) {
+    pageUrl += "&slug=" + encodeURIComponent(slug);
+  }
+  fetch(pageUrl, {
     headers: { Accept: "application/json" },
   }).catch(function () {});
 })();

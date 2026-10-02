@@ -48,7 +48,7 @@ test('roleHref and roleMeta follow Ashby-shaped fields', () => {
 });
 
 test('App routes /careers to Careers', () => {
-  assert.match(appSrc, /import Careers from '\.\/pages\/Careers\.jsx'/);
+  assert.match(appSrc, /const Careers = lazy\(\(\) => import\('\.\/pages\/Careers\.jsx'\)\)/);
   assert.match(appSrc, /both\('\/careers',\s*<Careers \/>\)/);
 });
 
