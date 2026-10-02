@@ -37,8 +37,12 @@ if [[ "$mode" == scanner || "$mode" == all ]]; then
   # The current deployed phone, including its printing picker, now belongs to this repo.
   ssh oracle-peer1 "set -e; cd /opt/pokoin-cardscan; mkdir -p '.backups/$stamp-scan-diagnostics'; cp -a web '.backups/$stamp-scan-diagnostics/'"
   tar -C "$web" -cf - . | ssh oracle-peer1 "set -e; mkdir -p '/tmp/scan-diagnostics-$stamp'; tar -C '/tmp/scan-diagnostics-$stamp' -xf -; cd /opt/pokoin-cardscan; for file in static/pokoin-icon.png static/scan-diagnostics.js static/scan-connect.js index.html; do install -m 644 '/tmp/scan-diagnostics-$stamp/'\"\$file\" web/\"\$file\".new; mv web/\"\$file\".new web/\"\$file\"; done; rm -rf '/tmp/scan-diagnostics-$stamp'"
-  if ! curl -fsS "https://scan.pokoin.com/connect?v=$stamp" | grep -q 'scan-connect.js?v=scan-diag-v2' \
-    || ! curl -fsS "https://scan.pokoin.com/static/scan-diagnostics.js?v=$stamp" | grep -q 'scan-diag-v2'; then
+  # Read the entire response before grep: grep -q can close the pipe early,
+  # causing curl exit 23 under pipefail even when the expected asset is live.
+  if ! curl -fsS "https://scan.pokoin.com/connect?v=$stamp" -o "$stage/live-phone.html" \
+    || ! grep -q 'scan-connect.js?v=scan-diag-v2' "$stage/live-phone.html" \
+    || ! curl -fsS "https://scan.pokoin.com/static/scan-diagnostics.js?v=$stamp" -o "$stage/live-diagnostics.js" \
+    || ! grep -q 'scan-diag-v2' "$stage/live-diagnostics.js"; then
     ssh oracle-peer1 "set -e; cd /opt/pokoin-cardscan; cp -a '.backups/$stamp-scan-diagnostics/web/.' web/"
     echo 'Scanner verification failed; restored previous phone files.' >&2; exit 1
   fi
