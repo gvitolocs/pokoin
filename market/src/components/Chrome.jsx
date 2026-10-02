@@ -19,11 +19,13 @@ import {
 import { resolveArtLayout } from '../art-cut.js';
 import {
   albumShade,
+  deskTheme,
   rememberCardBucket,
   rememberDeskIdentity,
+  subscribeShadeBuckets,
   warmCardBucket,
 } from '../art-shade.js';
-import { rarityRowTheme } from '../rarity-theme.js';
+import { prefersArtworkDelta, rarityRowTheme } from '../rarity-theme.js';
 import { pickSuggestHoverSrc, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
 import { fetchSuggestRanked, rankConcurrency, rankNames, resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
 import { rankChunkOnWorker, warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
@@ -490,6 +492,9 @@ export default function Chrome({ children }) {
     || pending
   );
   useSuggestFlip(listRef, suggestVisible ? suggestIds : '');
+
+  const [shadeTick, setShadeTick] = useState(0);
+  useEffect(() => subscribeShadeBuckets(() => setShadeTick((n) => n + 1)), []);
 
   useEffect(() => {
     if (!visibleGroups.length) {
@@ -1208,7 +1213,14 @@ export default function Chrome({ children }) {
                                 bucket === 'unknown' ? '' : bucket,
                               );
                             const live = isLiveStub(card) || isLiveStub(printing);
-                            const rowTheme = rarityRowTheme(card);
+                            const special = rarityRowTheme(card);
+                            const delta = !special && prefersArtworkDelta(card) ? deskTheme(card) : null;
+                            const rowTheme = special?.shade
+                              ? special
+                              : delta
+                                ? { kind: 'delta', shade: delta.surface, raised: delta.surfaceRaised }
+                                : special;
+                            void shadeTick;
                             const rowIndex = flat.findIndex((row) => row.optionId === optionId);
                             const thumbLoading = rowIndex >= SUGGEST_THUMB_EAGER ? 'lazy' : undefined;
                             const thumbPriority = rowIndex < SUGGEST_THUMB_HIGH ? 'high' : 'low';

@@ -1,6 +1,7 @@
 /**
- * Search-row color is the printing's rarity, not the artist or the artwork.
- * Ghost, gold, and rainbow are full treatments. Ordinary cards stay uncolored.
+ * Special rarity color, not the artist or the artwork.
+ * Rainbow and gold are full treatments. Ghost is the Yu-Gi-Oh Ghost Rare only.
+ * A Pokémon ghost emoji or Psychic type keeps the artwork delta.
  */
 
 const GOLD = { kind: 'gold', shade: '#6e5210', raised: '#8a6818' };
@@ -26,6 +27,12 @@ export function rarityRowTheme(card) {
   if (!text.trim()) return null;
   if (/rainbow|hyper\s*rare/.test(text)) return RAINBOW;
   if (/\bgold\b/.test(text)) return GOLD;
-  if (/ghost|\bpsychic\b|👻/.test(text)) return GHOST;
+  if (/\bghost\s+rare\b/.test(text)) return GHOST;
   return null;
+}
+
+/** Pokémon ghost/psychic marks are not the Yu-Gi-Oh Ghost Rare. */
+export function prefersArtworkDelta(card) {
+  if (rarityRowTheme(card)) return false;
+  return /👻|\bghost\b|\bpsychic\b/.test(haystack(card));
 }
