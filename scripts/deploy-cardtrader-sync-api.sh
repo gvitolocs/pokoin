@@ -30,6 +30,7 @@ CT_FILES=(
   _cardtrader_inventory_sync_core.js
   _cardtrader_inventory_sync.js
   _cardtrader_inventory_async.js
+  _valkey.js
   _cardtrader_webhook_core.js
   _cardtrader_webhook_registration.js
   cardtrader-connect.js
