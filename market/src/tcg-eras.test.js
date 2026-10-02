@@ -139,6 +139,19 @@ test('code wins over a misleading translated title', () => {
   assert.equal(matchTcgEra('CSM1a: Storming Emergence - Radiant'), 'Sun & Moon');
 });
 
+test('XY Super Legend and Sun & Moon Strength Expansion Pack are not older blocks', () => {
+  assert.equal(
+    tcgEra({ set: 'Super Legend Set: Xerneas EX & Yveltal EX' }),
+    'XY',
+  );
+  assert.equal(
+    tcgEra({ set: 'Strength Expansion Pack Sun & Moon' }),
+    'Sun & Moon',
+  );
+  assert.equal(tcgEra({ set: 'Strength Expansion Pack Shining Legends' }), 'Sun & Moon');
+  assert.equal(tcgEra({ set: 'Expansion Pack' }), 'Original');
+});
+
 test('eras/platinum is the 2008–2009 block, not a title that contains Arceus', () => {
   const desk = (slug, name) => tcgEra({ slug, name, set: name });
   assert.equal(desk('arceus', 'Arceus'), 'Platinum');

@@ -248,7 +248,7 @@ export const TCG_ERA_CATALOG = [
     extras: [
       'mysterious-treasures', 'secret-wonders', 'great-encounters', 'majestic-dawn',
       'legends-awakened', 'stormfront', 'diamond-collection', 'pearl-collection',
-      'secret-of-the-lakes', 'super-legend', 'dp-black-star', 'space-time-creation',
+      'secret-of-the-lakes', 'dp-black-star', 'space-time-creation',
     ],
   },
   {
@@ -432,6 +432,7 @@ export const TCG_ERA_ALIASES = [
     'Extra Regulation Box',
     'Rockruff Full Power Deck',
     'Thailand & Indonesia Products',
+    'Strength Expansion Pack Sun & Moon',
     'Arceus & Dialga & Palkia-GX',
     'Arceus, Dialga & Palkia-GX',
   ]],
@@ -449,6 +450,7 @@ export const TCG_ERA_ALIASES = [
     'Yveltal Half Deck',
     'Golduck BREAK',
     'Zygarde EX Perfect Battle Deck',
+    'Super Legend Set: Xerneas EX & Yveltal EX',
     'Emboar EX vs Togekiss EX Deck Kit',
   ]],
   ['Black & White', [
@@ -714,7 +716,7 @@ const TCG_ERA_FALLBACK = [
   ['Call of Legends', /call-of-legends/],
   ['HeartGold & SoulSilver', /heartgold|soulsilver|lost-link|(^|-)hgss-|(^|-)hs-/],
   ['Platinum', /rising-rivals|supreme-victors|advent-of-arceus|galactic-conquest|(^|-)pl($|-)/],
-  ['Diamond & Pearl', /mysterious-treasures|stormfront|super-legend|(^|-)dpt-|(^|-)dp-/],
+  ['Diamond & Pearl', /mysterious-treasures|stormfront|(^|-)dpt-|(^|-)dp-/],
   ['EX', /(^|-)ex-(ruby-and-sapphire|sandstorm|dragon|team-magma|team-rocket|hidden-legends|firered|deoxys|emerald|unseen-forces|delta-species|legend-maker|holon|crystal-guardians|power-keepers|trainer-kit|battle-stadium)|ruby-and-sapphire|holon|delta-species|legend-maker|power-keepers|firered|deoxys|unseen-forces|adv-expansion|adv-promo/],
   ['e-Card', /expedition|aquapolis|skyridge|e-card|split-earth|town-on-no-map/],
   ['Legendary Collection', /legendary-collection/],
