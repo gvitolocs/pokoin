@@ -3,12 +3,14 @@ import test from 'node:test';
 import {
   artworkVersionLabel,
   artworkVersionShortLabel,
+  batchDefaultRowPatch,
   draftArtworkBucket,
   languagesForPrint,
   listingLanguageForPrint,
   preferArtworkPrinting,
   preferDraftArtwork,
   preferredPrintBucket,
+  remapListingLanguage,
   shouldRemapArtwork,
   sortArtworkVersions,
 } from './scan-artwork-versions.js';
@@ -47,8 +49,25 @@ test('preferredPrintBucket follows listing language', () => {
   assert.equal(preferredPrintBucket('IT'), 'western');
   assert.equal(preferredPrintBucket('JP'), 'jpko');
   assert.equal(preferredPrintBucket('KO'), 'jpko');
+  assert.equal(preferredPrintBucket('ID'), 'jpko');
+  assert.equal(preferredPrintBucket('TH'), 'jpko');
+  assert.equal(preferredPrintBucket('VI'), 'jpko');
   assert.equal(preferredPrintBucket('ZH'), 'chinese');
   assert.equal(preferredPrintBucket('ZHT'), 'chinese');
+});
+
+test('a row language picks the printing ahead of the batch language', () => {
+  assert.equal(remapListingLanguage('JP', 'EN'), 'JP');
+  assert.equal(remapListingLanguage('', 'EN'), 'EN');
+  assert.equal(remapListingLanguage('IT', 'JP'), 'IT');
+});
+
+test('batch defaults write language and condition onto the batch, not qty or stack', () => {
+  assert.deepEqual(
+    batchDefaultRowPatch({ language: 'JP', condition: 'NM', stack: 3, quantity: 4, mergeRepeats: true }),
+    { language: 'JP', condition: 'NM' },
+  );
+  assert.deepEqual(batchDefaultRowPatch({ game: 'pokemon' }), {});
 });
 
 test('EN defaults remap JP identify to western sibling', () => {

@@ -25,9 +25,28 @@ const ASIAN = new Set(ASIAN_CARD_LANGS.map((c) => String(c).toUpperCase()));
 /** @returns {'western'|'jpko'|'chinese'} */
 export function preferredPrintBucket(listingLanguage = '') {
   const lang = String(listingLanguage || '').trim().toUpperCase();
-  if (lang === 'JP' || lang === 'KO') return 'jpko';
   if (lang === 'ZH' || lang === 'ZHT') return 'chinese';
+  if (lang === 'JP' || lang === 'KO' || lang === 'ID' || lang === 'TH' || lang === 'VI') return 'jpko';
   return 'western';
+}
+
+/**
+ * The row's own language picks the printing. The batch language is only the
+ * fallback before that row has one.
+ */
+export function remapListingLanguage(rowLanguage = '', batchLanguage = '') {
+  return String(rowLanguage || batchLanguage || 'EN').trim() || 'EN';
+}
+
+/** Fields a Batch Defaults change writes onto every open row. Qty and stack stay per card. */
+export const BATCH_ROW_FIELDS = ['language', 'condition', 'foilState', 'firstEdition', 'signed', 'altered', 'location'];
+
+export function batchDefaultRowPatch(patch = {}) {
+  const out = {};
+  for (const key of BATCH_ROW_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) out[key] = patch[key];
+  }
+  return out;
 }
 
 export function matchesPrintBucket(row, bucket) {
