@@ -34,6 +34,26 @@ test('cards without a version key stay singletons, never merge', () => {
   assert.equal(groups.length, 2);
 });
 
+test('item and trainer reprints stay separate even with one CLIP key', () => {
+  const groups = groupArtworkRows([
+    { id: 'a', name: 'Poké Pad', version: 'v728656' },
+    { id: 'b', name: 'Poké Pad', version: 'v728656' },
+    { id: 'c', name: 'Switch', version: 'v1' },
+    { id: 'd', name: 'Switch', version: 'v1' },
+  ]);
+  assert.equal(groups.length, 4);
+});
+
+test('energy reprints still pile, and Pokémon reprints still pile', () => {
+  const groups = groupArtworkRows([
+    { id: 'e1', name: 'Basic Grass Energy', version: 'vE' },
+    { id: 'e2', name: 'Basic Grass Energy', version: 'vE' },
+    { id: 'p1', name: 'Bulbasaur', version: 'vP' },
+    { id: 'p2', name: 'Bulbasaur', version: 'vP' },
+  ]);
+  assert.equal(groups.length, 2);
+});
+
 test('LEGEND halves never pile — the landscape pair forms the full art', () => {
   const groups = groupArtworkRows([
     { id: 'top', name: 'Ho-Oh LEGEND', version: 'v10' },

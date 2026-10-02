@@ -1,7 +1,7 @@
 import { artistPrintRegion } from './locale.js';
 import { printLangBadge } from './card-versions.js';
 import { printingIdentity, suggestKind } from './identity.js';
-import { pokedexPartnerNumbers, pokedexSortValue } from './pokedex.js';
+import { pokedexNumber, pokedexPartnerNumbers, pokedexSortValue } from './pokedex.js';
 import { tilePricePkn } from './pkn.js';
 import { assignOfficialIndexes, officialListFor } from './set-official-lists.js';
 import { expansionSortValue } from './tcg-eras.js';
@@ -108,16 +108,29 @@ export function pileCardTier(card) {
 }
 
 /**
+ * Pokémon reprints share a painting, and so do energy symbols. Item and
+ * trainer reprints are different paintings even when the card name matches,
+ * so they never pile on a CLIP version key.
+ */
+export function sharesReprintArtwork(card) {
+  if (isLegendCard(card)) return false;
+  const name = String(card?.name || '').replace(/\s+/g, ' ').trim();
+  if (/energy$/i.test(name)) return true;
+  return pokedexNumber(card) > 0;
+}
+
+/**
  * Artist desk: collapse same-artwork printings (shared CLIP version key) into
  * one pile row, in sort order. LEGEND halves keep their own rows — the
  * landscape pair forms the full art side by side. Tag Team Pokédex clones
- * (same card twice) dedupe by card id.
+ * (same card twice) dedupe by card id. Item and trainer printings stay
+ * one row each.
  */
 export function groupArtworkRows(cards) {
   const map = new Map();
   for (const card of cards || []) {
     const id = String(card?.id || card?.card_id || '');
-    const key = isLegendCard(card) ? `id:${id}` : artworkVersionKey(card);
+    const key = sharesReprintArtwork(card) ? artworkVersionKey(card) : `id:${id}`;
     let group = map.get(key);
     if (!group) {
       group = { key, cards: [], seen: new Set() };
