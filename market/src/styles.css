@@ -1789,6 +1789,12 @@ h1, h2 { margin: 0 0 0.85rem; }
 }
 
 @media (min-width: 721px) {
+  .promo,
+  .promo-slide {
+    height: 23.5rem;
+    min-height: 23.5rem;
+  }
+
   .promo-slide {
     position: relative;
     top: -20px;
@@ -1830,17 +1836,31 @@ h1, h2 { margin: 0 0 0.85rem; }
 }
 
 .promo-copy > .eyebrow { animation-delay: 0s; }
-.promo-copy > .promo-wordmark { animation-delay: 0.21s; }
+.promo-copy > .promo-wordmark-slot { animation-delay: 0.21s; }
 .promo-copy > h1 { animation-delay: 0.42s; }
 .promo-copy > .promo-lede { animation-delay: 0.84s; }
 .promo-copy > .btn { animation-delay: 1.26s; }
 
+.promo-wordmark-slot {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: min(100%, 26rem);
+  height: 4.6rem;
+  margin: 0 0 0.55rem;
+}
+
+.promo-copy.is-logo-name .promo-wordmark-slot {
+  width: min(100%, 34rem);
+  height: 8.75rem;
+}
+
 .promo-wordmark {
   display: block;
   width: auto;
-  max-width: min(100%, 26rem);
-  max-height: 4.8rem;
-  margin: 0 0 0.55rem;
+  max-width: 100%;
+  height: 100%;
+  margin: 0;
   object-fit: contain;
   object-position: left center;
 }
@@ -4784,11 +4804,17 @@ span.shop-flag {
   margin-bottom: 1.25rem;
 }
 
+.set-desk .page-actions {
+  flex: 1 1 12rem;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
 .set-wordmark {
   display: block;
-  flex: none;
-  width: min(70vw, 56rem);
-  height: auto;
+  width: auto;
+  max-width: min(100%, 26rem);
+  height: 5.25rem;
   object-fit: contain;
   object-position: right center;
   cursor: grab;
@@ -7074,6 +7100,18 @@ dialog.zoom:not([open]) {
     text-align: center;
   }
 
+  .promo-wordmark-slot,
+  .promo-copy.is-logo-name .promo-wordmark-slot {
+    width: min(100%, 16rem);
+    height: 3.4rem;
+    justify-content: center;
+  }
+
+  .promo-copy.is-logo-name .promo-wordmark-slot {
+    width: min(100%, 20rem);
+    height: 5.25rem;
+  }
+
   .promo-wordmark {
     object-position: center;
     margin-left: auto;
@@ -7324,8 +7362,18 @@ dialog.zoom:not([open]) {
     text-align: center;
   }
 
+  .promo-wordmark-slot,
+  .promo-copy.is-logo-name .promo-wordmark-slot {
+    width: min(100%, 14rem);
+    height: 3.1rem;
+    justify-content: center;
+  }
+
+  .promo-copy.is-logo-name .promo-wordmark-slot {
+    height: 4.6rem;
+  }
+
   .promo-wordmark {
-    max-height: 3.4rem;
     object-position: center;
     margin-left: auto;
     margin-right: auto;

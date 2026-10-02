@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GAMES } from './game.js';
-import { promoLogoSrc, satellitePromoBanners } from './promo-banners.js';
+import { promoLogoIsName, promoLogoSrc, satellitePromoBanners } from './promo-banners.js';
 
 test('every TCG homepage uses the promo super tile', () => {
   for (const item of Object.values(GAMES)) {
@@ -28,6 +28,13 @@ test('satellite slides keep the official logo and skip empty rows', () => {
   assert.match(slides[0].lede, /140 cards/);
   assert.equal(slides[1].logoImageUrl, '');
   assert.equal(slides[1].cta, 'Explore cards from this expansion');
+});
+
+test('western wordmarks replace the text expansion name', () => {
+  assert.equal(promoLogoIsName({ western: true, title: 'Black Bolt' }), true);
+  assert.equal(promoLogoIsName({ nationality: 'western' }), true);
+  assert.equal(promoLogoIsName({ title: 'Storm Emeralda' }), false);
+  assert.equal(promoLogoIsName({ nationality: 'japanese' }), false);
 });
 
 test('pokemon promo logos use the set wordmark path', () => {

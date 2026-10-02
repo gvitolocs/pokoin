@@ -27,12 +27,24 @@ export function satellitePromoBanners(rows, gameName, limit = SATELLITE_PROMO_LI
         : 'Browse every printing in this expansion.',
       cta: 'Explore cards from this expansion',
       logoImageUrl: String(row?.logoImageUrl || row?.logo_image_url || '').trim(),
+      nationality: String(row?.nationality || '').trim().toLowerCase(),
     });
     if (slides.length >= cap) {
       break;
     }
   }
   return slides;
+}
+
+/**
+ * A western wordmark already writes the expansion name, so the hero
+ * does not repeat it as a text title.
+ */
+export function promoLogoIsName(banner) {
+  if (banner?.western === true) {
+    return true;
+  }
+  return String(banner?.nationality || '').trim().toLowerCase() === 'western';
 }
 
 /** Official set wordmark for the hero. Pokémon curated slides use the CDN path. */
