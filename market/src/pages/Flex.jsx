@@ -54,7 +54,7 @@ function Calculator() {
   const [sellers, setSellers] = useState(3);
   const [tracked, setTracked] = useState(null);
   const [delivery, setDelivery] = useState('pickup');
-  const [fill, setFill] = useState(Math.round(FLEX_ASSUMPTIONS.defaultBagFill * 100));
+  const [pickupPackets, setPickupPackets] = useState(FLEX_ASSUMPTIONS.defaultPickupPackets);
 
   useEffect(() => {
     if (!ready || routeReady) return undefined;
@@ -101,30 +101,21 @@ function Calculator() {
       sellers,
       tracked: effectiveTracked,
       delivery,
-      bagFill: fill / 100,
-    })
-    : null;
-  const pickup = routeReady && delivery === 'home'
-    ? flexQuote({
-      from,
-      to,
-      cards,
-      sellers,
-      tracked: effectiveTracked,
-      bagFill: fill / 100,
+      pickupPackets,
     })
     : null;
   const parts = quote?.flex.parts;
-  const alone = quote?.alone.cents || 0;
-  const bar = (value) => `${Math.max(0, Math.min(100, (value / Math.max(1, alone)) * 100))}%`;
+  const scale = Math.max(quote?.alone.cents || 0, quote?.flex.cents || 0, 1);
+  const bar = (value) => `${Math.max(0, Math.min(100, (value / scale) * 100))}%`;
 
   return (
     <section id="flex-calc" className="flex-panel flex-calc" aria-labelledby="flex-calc-title">
       <header className="flex-panel-head">
         <h2 id="flex-calc-title">What you’d save</h2>
         <p>
-          “Alone” is what checkout charges when each seller posts their own pack. Flex is the same
-          cards as Flex boxes sharing one ~20 kg bag.
+          “Alone” is what checkout charges when each seller posts their own pack. Flex is two
+          shipments: the partner sends one pack for the sellers who dropped off, then the magazine
+          sends one pack to the city pickup.
         </p>
       </header>
       <div className="flex-calc-grid">
@@ -155,12 +146,16 @@ function Calculator() {
               min="1"
               max={FLEX_ASSUMPTIONS.maxSellers}
               value={sellers}
-              onChange={(event) => setSellers(Number(event.target.value))}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setSellers(next);
+                setPickupPackets((current) => Math.max(current, next));
+              }}
             />
             <small className="flex-range-hint">
               {sellers === 1
-                ? 'One seller ships every card alone — Flex shines with several packs in one bag.'
-                : `${sellers} sellers · ~${Math.ceil(cards / sellers)} cards each · ${sellers} parcels alone vs 1 shared bag`}
+                ? 'One seller is one direct shipment. Flex adds a box, handling, and a second hop, so it costs more.'
+                : `${sellers} sellers drop at the partner · ~${Math.ceil(cards / sellers)} cards each · the partner ships one pack instead of ${sellers}`}
             </small>
           </label>
           <fieldset className="flex-seg flex-services">
@@ -191,9 +186,21 @@ function Calculator() {
               </label>
             ))}
           </fieldset>
-          <label className="flex-range">
-            <span>How full the bag gets <strong>{fill}%</strong></span>
-            <input type="range" min="25" max="100" step="5" value={fill} onChange={(event) => setFill(Number(event.target.value))} />
+          <label className={`flex-range${delivery === 'home' ? ' is-off' : ''}`}>
+            <span>Packets in the city pickup pack <strong>{delivery === 'home' ? '—' : pickupPackets}</strong></span>
+            <input
+              type="range"
+              min={sellers}
+              max={FLEX_ASSUMPTIONS.maxPickupPackets}
+              value={Math.max(pickupPackets, sellers)}
+              disabled={delivery === 'home'}
+              onChange={(event) => setPickupPackets(Number(event.target.value))}
+            />
+            <small className="flex-range-hint">
+              {delivery === 'home'
+                ? 'Home delivery is one parcel from the magazine to the buyer. This slider is the shared pack people collect at a partner.'
+                : `The magazine ships one pack to the partner shop. ${pickupPackets} buyer ${pickupPackets === 1 ? 'packet shares' : 'packets share'} it · this order is ${sellers} of them.`}
+            </small>
           </label>
         </form>
 
@@ -220,26 +227,29 @@ function Calculator() {
                 {quote.savedCents > 0 ? (
                   <>You save <strong><Money cents={quote.savedCents} /></strong> · {quote.savedPct}% on this order</>
                 ) : sellers === 1 ? (
-                  <>Flex is not cheaper with one seller{delivery === 'home' ? ' and home delivery' : ''} here</>
+                  <>One seller is one direct shipment. Flex costs <strong><Money cents={-quote.savedCents} /></strong> more here</>
                 ) : (
                   <>Flex is not cheaper here</>
                 )}
               </p>
-              {quote.savedCents <= 0 && sellers === 1 && pickup && pickup.savedCents > 0 ? (
+              {quote.sellers === 1 ? (
                 <p className="flex-note">
-                  Home delivery inside {country(to)} costs about what posting it yourself does.
-                  With partner pickup this pack is <strong><Money cents={pickup.flex.cents} /></strong> —
-                  {' '}{pickup.savedPct}% less. Add more sellers to see Flex fill a shared bag.
+                  The partner still ships one pack, the same size as posting these cards yourself,
+                  plus the Flex box and handling
+                  {delivery === 'pickup'
+                    ? ', and the magazine still sends a pack to the city pickup.'
+                    : ', and home delivery is a second parcel.'}
                 </p>
-              ) : null}
-              {quote.sellers > 1 ? (
+              ) : (
                 <p className="flex-note">
-                  {quote.sellers} sellers · {quote.perSellerCards} cards each · {quote.sellers} parcels alone
-                  become {quote.sellers} Flex boxes in one bag.
+                  {quote.sellers} seller packets become one partner shipment
+                  {delivery === 'pickup' && quote.city
+                    ? `. The city pack holds ${quote.pickupPackets} packets; this order pays for ${quote.sellers} of them.`
+                    : '. Home delivery is one parcel for the whole order, not one per seller.'}
                 </p>
-              ) : null}
+              )}
               <div className="flex-bars" aria-hidden="true">
-                <div className="flex-bar is-alone"><span style={{ width: '100%' }} /></div>
+                <div className="flex-bar is-alone"><span style={{ width: bar(quote.alone.cents) }} /></div>
                 <div className="flex-bar is-flex">
                   <span className="p-box" style={{ width: bar(parts.box) }} />
                   <span className="p-handling" style={{ width: bar(parts.handling) }} />
@@ -255,12 +265,26 @@ function Calculator() {
                   <i className="p-handling" />Partner handling{quote.sellers > 1 ? ` ×${quote.sellers}` : ''} <Money cents={parts.handling} />
                 </li>
                 <li>
-                  <i className="p-trunk" />Share of the bag <Money cents={parts.trunk} />
+                  <i className="p-trunk" />Partner ships one pack <Money cents={parts.trunk} />
                   <small>
-                    {quote.totalGrams} g of a {Math.round(FLEX_ASSUMPTIONS.bagGrams * quote.bagFill / 1000)} kg bag ·
-                    {' '}one {quote.trunk.carrier} parcel {country(from)} → {country(to)} = <Money cents={quote.trunk.cents} /> per bag
+                    {quote.sellers} seller {quote.sellers === 1 ? 'packet' : 'packets'} · {quote.totalGrams} g ·
+                    {' '}{quote.intake.carrier} · {quote.intake.service} · {country(from)} → {country(to)}
+                    {quote.intake.tier === 'EXTRA_LARGE'
+                      ? ` · ${quote.intake.bags} × 20 kg bag`
+                      : ' · same size class as a normal parcel'}
                   </small>
                 </li>
+                {quote.city ? (
+                  <li>
+                    <i className="p-last" />
+                    City pickup pack <Money cents={parts.lastMile} />
+                    <small>
+                      Magazine → partner in {country(to)} · {quote.city.carrier} · {quote.city.service} ·
+                      {' '}{quote.pickupPackets} {quote.pickupPackets === 1 ? 'packet' : 'packets'} in the pack · this order is {quote.sellers} ·
+                      {' '}full pack <Money cents={quote.city.cents} />
+                    </small>
+                  </li>
+                ) : null}
                 {quote.lastMile ? (
                   <li>
                     <i className="p-last" />
@@ -272,11 +296,11 @@ function Calculator() {
                 ) : null}
               </ul>
               <p className="flex-road">
-                <strong>{quote.packsPerBag}</strong> packs like each seller’s fill one bag —
-                {' '}{quote.packsPerBag} parcels become 2 bag moves.
+                A 20 kg bag holds <strong>{quote.packsPerBag}</strong> packs this size.
+                This quote prices the two hops from the packets you set, not from a guessed fill.
               </p>
-              {quote.trunk.estimated ? (
-                <p className="flex-note">This route has no parcel rate yet in one direction, so the bag uses the reverse direction’s price.</p>
+              {quote.intake.estimated || quote.city?.estimated ? (
+                <p className="flex-note">This route has no parcel rate yet in one direction, so that hop uses the reverse direction’s price.</p>
               ) : null}
             </>
           ) : (
@@ -294,7 +318,10 @@ function LaneTable() {
     <section className="flex-panel flex-lanes" aria-labelledby="flex-lanes-title">
       <header className="flex-panel-head">
         <h2 id="flex-lanes-title">Every route we ship today</h2>
-        <p>Tracked alone → Flex pickup for <strong>3 sellers</strong> splitting that card count, 60% full bag.</p>
+        <p>
+          Tracked alone → Flex pickup for <strong>3 sellers</strong> dropping at a partner,
+          with <strong>{FLEX_ASSUMPTIONS.defaultPickupPackets} packets</strong> in the city pickup pack.
+        </p>
       </header>
       <div className="flex-table-wrap">
         <table className="flex-table">
@@ -331,7 +358,13 @@ function LaneTable() {
 export default function Flex() {
   const [stores, setStores] = useState(PLACEHOLDER_STORES);
   const average = useMemo(() => flexAverageSaving(), []);
-  const example = useMemo(() => flexQuote({ from: 'DK', to: 'IT', cards: 20 }), []);
+  const example = useMemo(() => flexQuote({
+    from: 'DK',
+    to: 'IT',
+    cards: 20,
+    sellers: 3,
+    pickupPackets: FLEX_ASSUMPTIONS.defaultPickupPackets,
+  }), []);
 
   useEffect(() => {
     document.title = 'Pokoin Flex · Ship together, pay less · Pokoin';
@@ -366,8 +399,8 @@ export default function Flex() {
             ) : null}
             {example ? (
               <>
-                <div><strong>{formatEur(example.flex.cents)}</strong><span>20 cards Denmark → Italy, instead of {formatEur(example.alone.cents)}</span></div>
-                <div><strong>{example.packsPerBag}</strong><span>packs share one bag instead of {example.packsPerBag} parcels</span></div>
+                <div><strong>{formatEur(example.flex.cents)}</strong><span>20 cards, 3 sellers, Denmark → Italy, instead of {formatEur(example.alone.cents)}</span></div>
+                <div><strong>{example.pickupPackets}</strong><span>packets share the city pickup pack; the partner ships one pack for the 3 sellers</span></div>
               </>
             ) : null}
           </div>
@@ -448,10 +481,11 @@ export default function Flex() {
       <details className="flex-panel flex-method">
         <summary>How the estimate is worked out</summary>
         <ul>
-          <li><strong>Shipping alone</strong> is the rate Pokoin checkout uses today for that route and pack size (4 / 20 / 50 / more cards) — tracked or untracked letter, as you pick.</li>
-          <li><strong>The bag</strong> travels as one parcel on the same route at the carrier’s largest parcel rate. A route with no direct rate borrows the reverse direction.</li>
-          <li><strong>Your share</strong> is your pack’s weight ({FLEX_ASSUMPTIONS.boxGrams} g box + {FLEX_ASSUMPTIONS.gramsPerCard} g per sleeved card) out of a {FLEX_ASSUMPTIONS.bagGrams / 1000} kg bag at the fill level you choose.</li>
-          <li><strong>Fixed costs</strong>: Flex box {formatEur(FLEX_ASSUMPTIONS.boxCents)}, partner handling {formatEur(FLEX_ASSUMPTIONS.handlingCents)} per pack. Home delivery adds <em>one</em> hop from the Pokoin warehouse to the buyer (all packs already consolidated — not one delivery per seller).</li>
+          <li><strong>Shipping alone</strong> is the rate Pokoin checkout uses today, once per seller, for that route and that seller’s card count — tracked or untracked letter, as you pick.</li>
+          <li><strong>Phase 1 — partner shop.</strong> The sellers drop their Flex boxes. The partner ships <em>one</em> pack on the same route, sized to the cards inside. One seller means that pack is the same shipment as posting it yourself.</li>
+          <li><strong>Phase 2 — city pickup.</strong> The magazine ships <em>one</em> pack to the partner shop in the destination country. The slider is how many buyer packets are in it. This order pays its seller packets’ share of that one shipment. Home delivery replaces this with one parcel to the buyer.</li>
+          <li><strong>Weight.</strong> Each Flex box is {FLEX_ASSUMPTIONS.boxGrams} g plus {FLEX_ASSUMPTIONS.gramsPerCard} g per sleeved card. A hop at or under {FLEX_ASSUMPTIONS.parcelMaxGrams / 1000} kg uses the normal letter or parcel rate for that weight. Heavier than that, it uses the 20 kg bag rate, and another bag for each extra {FLEX_ASSUMPTIONS.bagGrams / 1000} kg.</li>
+          <li><strong>Fixed costs</strong>: Flex box {formatEur(FLEX_ASSUMPTIONS.boxCents)}, partner handling {formatEur(FLEX_ASSUMPTIONS.handlingCents)} per seller packet.</li>
           <li>These are planning numbers — the final Flex price is set when partner shops open.</li>
         </ul>
       </details>
