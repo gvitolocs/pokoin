@@ -154,6 +154,7 @@ test('desk theme transition is a direct color fade, not a class reset', () => {
   const jsx = fs.readFileSync(new URL('./pages/Card.jsx', import.meta.url), 'utf8');
   assert.match(css, /html\.desk-tinted #root \{[^}]*transition: background-color 180ms ease;/s);
   assert.match(css, /html\.desk-tinted \.card-page \{[^}]*--g2: var\(--desk-bg\);/s);
+  assert.match(css, /html\.desk-tinted \.card-page \.asset-header \{[^}]*background-color: var\(--desk-hero\);[^}]*background-image: none;/s);
   const themeEffect = jsx.slice(jsx.indexOf('const pageTheme = useMemo'));
   const untilUnmount = themeEffect.slice(0, themeEffect.indexOf('useEffect(() => () =>'));
   assert.doesNotMatch(untilUnmount, /classList\.remove\('desk-tinted'\)/);

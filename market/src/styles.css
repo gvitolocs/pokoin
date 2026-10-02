@@ -3174,9 +3174,14 @@ html.desk-tinted .card-page .lang-pick-menu button[aria-selected="true"] {
   color: var(--text);
 }
 
-html.desk-tinted .asset-header.shaded {
-  background: linear-gradient(100deg, var(--desk-hero), var(--desk-raised));
+/* Stay on the previous desk color while the next card's shade is still
+   unknown. The unshaded header is navy (#1a2748); a gradient also cannot
+   fade, so the bar is a solid hero color that interpolates old → new. */
+html.desk-tinted .card-page .asset-header {
+  background-color: var(--desk-hero);
+  background-image: none;
   border-color: var(--desk-hero-border);
+  transition: background-color 180ms ease, border-color 180ms ease;
 }
 
 .asset-title-row,
