@@ -1,8 +1,10 @@
 // Pokoin Flex savings from the real carrier table (shipping-rates.json, the
-// same rates checkout quotes). "Alone" is N sellers each posting their share.
-// "Flex" is N Flex boxes sharing one ~20 kg bag (EXTRA_LARGE trunk), plus —
-// for home delivery — one consolidated last-mile from the Pokoin warehouse
-// to the buyer (never N× last-mile).
+// same rates checkout quotes). "Alone" is N sellers each posting their own
+// pack. Flex is two shipments, each split by the packets actually inside:
+//   1. Sellers drop at a partner; the partner ships one pack on the route.
+//   2. The magazine ships one pack to a city pickup (or one home parcel).
+// One seller is one direct-sized pack plus the Flex box, handling, and the
+// second hop — never a gram-slice of a half-empty 20 kg bag.
 
 import ratesCatalog from './shipping-rates.json' with { type: 'json' };
 import { findShippingRate, packageTierForCount } from './shipping-quote.js';
@@ -10,12 +12,16 @@ import { findShippingRate, packageTierForCount } from './shipping-quote.js';
 /** Every number here is shown on /flex so the estimate can be checked. */
 export const FLEX_ASSUMPTIONS = Object.freeze({
   bagGrams: 20000,
-  defaultBagFill: 0.6,
   boxGrams: 45,
   gramsPerCard: 2,
   boxCents: 60,
   handlingCents: 50,
   maxSellers: 8,
+  /** Buyer packets in the magazine → city partner pack (the second hop). */
+  defaultPickupPackets: 12,
+  maxPickupPackets: 40,
+  /** Heavier than this, the hop is the ~20 kg bag. Lighter packs use the normal parcel rate. */
+  parcelMaxGrams: 10000,
 });
 
 const TRUNK_TIER = 'EXTRA_LARGE';
@@ -108,9 +114,8 @@ export function perSellerCards(cards, sellers) {
 }
 
 /**
- * Card-count proxy for last-mile of the consolidated home parcel (all sellers'
- * cards after they meet at the Pokoin warehouse). EXTRA_LARGE is the ~20 kg
- * bag/trunk tier only — never quote that for a padded letter/small parcel.
+ * Card-count proxy for a single home parcel. EXTRA_LARGE is the ~20 kg bag
+ * only — a buyer's own cards stay on the letter/parcel tier.
  */
 export function lastMileCardCount(grams) {
   const g = Math.max(1, Number(grams) || 1);
@@ -120,9 +125,71 @@ export function lastMileCardCount(grams) {
 }
 
 /**
+ * One carrier shipment that holds `packets` Flex boxes of `cardsPerPacket`
+ * cards. Weight picks the letter/parcel tier. The ~20 kg bag rate starts
+ * once the pack passes `parcelMaxGrams`, and another bag for each extra 20 kg.
+ */
+export function consolidatedLeg({
+  from,
+  to,
+  packets,
+  cardsPerPacket,
+  tracked = true,
+  assumptions = FLEX_ASSUMPTIONS,
+  catalog = ratesCatalog,
+} = {}) {
+  const fromCode = String(from || '').toUpperCase();
+  const toCode = String(to || '').toUpperCase();
+  const count = Math.max(1, Math.trunc(Number(packets) || 1));
+  const cardsEach = Math.max(1, Math.trunc(Number(cardsPerPacket) || 1));
+  const gramsEach = packGrams(cardsEach, assumptions);
+  const totalGrams = gramsEach * count;
+  const totalCards = cardsEach * count;
+  const usingBag = totalGrams > assumptions.parcelMaxGrams;
+  const quoteCards = usingBag
+    ? Math.max(totalCards, (catalog.tiers || []).find((tier) => tier.id === 'EXTRA_LARGE')?.maxCards || 9999)
+    : lastMileCardCount(totalGrams);
+  const services = routeServices({
+    from: fromCode,
+    to: toCode,
+    cards: quoteCards,
+    catalog,
+  });
+  const picked = pickService(services, tracked !== false);
+  if (!picked) return null;
+  let carrier = picked.carrier;
+  let service = picked.service;
+  let cents = picked.cents;
+  let estimated = false;
+  let bags = 1;
+  if (usingBag) {
+    bags = Math.max(1, Math.ceil(totalGrams / assumptions.bagGrams));
+    const trunk = trunkLeg(fromCode, toCode, catalog);
+    if (!trunk) return null;
+    cents = trunk.cents * bags;
+    carrier = trunk.carrier;
+    service = bags > 1 ? `${bags} × ${trunk.carrier} parcel` : (picked.service || 'Parcel');
+    estimated = trunk.estimated;
+  }
+  return {
+    cents,
+    carrier,
+    service,
+    tracked: picked.tracked,
+    estimated,
+    packets: count,
+    totalCards,
+    totalGrams,
+    tier: usingBag ? 'EXTRA_LARGE' : packageTierForCount(quoteCards),
+    bags,
+  };
+}
+
+/**
  * Alone vs Flex for `sellers` packs on one route.
- * `tracked` picks the service each seller would use alone (and last-mile).
- * `delivery` is 'pickup' (partner shop, no last mile) or 'home'.
+ * `tracked` picks the service each seller would use alone (and each Flex hop).
+ * `delivery` is 'pickup' (city partner pack) or 'home' (one warehouse parcel).
+ * `pickupPackets` is how many buyer packets share the magazine → city pack.
  * Returns null when a price is missing.
  */
 export function flexQuote({
@@ -132,7 +199,7 @@ export function flexQuote({
   sellers = 1,
   tracked = true,
   delivery = 'pickup',
-  bagFill = FLEX_ASSUMPTIONS.defaultBagFill,
+  pickupPackets,
   assumptions = FLEX_ASSUMPTIONS,
   catalog = ratesCatalog,
 } = {}) {
@@ -147,17 +214,35 @@ export function flexQuote({
   const tier = packageTierForCount(perSeller);
   const services = routeServices({ from: fromCode, to: toCode, cards: perSeller, catalog });
   const aloneOne = pickService(services, tracked !== false);
-  const trunk = trunkLeg(fromCode, toCode, catalog);
-  if (!aloneOne || !trunk) return null;
+  if (!aloneOne) return null;
 
-  const fill = Math.min(1, Math.max(0.1, Number(bagFill) || assumptions.defaultBagFill));
   const gramsOne = packGrams(perSeller, assumptions);
   const totalGrams = gramsOne * sellerCount;
-  const filledGrams = assumptions.bagGrams * fill;
-  // Home: packs already met at the Pokoin warehouse → one domestic hop with
-  // every card, not one last-mile per seller.
+  // Phase 1: the partner ships one pack containing this order's seller packets.
+  // One seller → that pack is the same size as posting it yourself.
+  const intake = consolidatedLeg({
+    from: fromCode,
+    to: toCode,
+    packets: sellerCount,
+    cardsPerPacket: perSeller,
+    tracked: aloneOne.tracked,
+    assumptions,
+    catalog,
+  });
+  if (!intake) return null;
+
+  const maxPickup = assumptions.maxPickupPackets || FLEX_ASSUMPTIONS.maxPickupPackets;
+  const requestedPickup = Math.trunc(Number(pickupPackets));
+  const cityPackets = Math.min(
+    maxPickup,
+    Math.max(sellerCount, requestedPickup > 0 ? requestedPickup : sellerCount),
+  );
+
+  let city = null;
   let lastMile = null;
   if (delivery === 'home') {
+    // One parcel to this buyer. Sized to their cards, never the 20 kg bag,
+    // and never once per seller.
     lastMile = pickService(
       routeServices({
         from: toCode,
@@ -168,12 +253,25 @@ export function flexQuote({
       aloneOne.tracked,
     );
     if (!lastMile) return null;
+  } else {
+    city = consolidatedLeg({
+      from: toCode,
+      to: toCode,
+      packets: cityPackets,
+      cardsPerPacket: perSeller,
+      tracked: aloneOne.tracked,
+      assumptions,
+      catalog,
+    });
+    if (!city) return null;
   }
+
+  const cityShare = city ? Math.round((city.cents * sellerCount) / cityPackets) : 0;
   const parts = {
     box: assumptions.boxCents * sellerCount,
     handling: assumptions.handlingCents * sellerCount,
-    trunk: Math.round((trunk.cents * totalGrams) / filledGrams),
-    lastMile: lastMile ? lastMile.cents : 0,
+    trunk: intake.cents,
+    lastMile: lastMile ? lastMile.cents : cityShare,
   };
   const flex = parts.box + parts.handling + parts.trunk + parts.lastMile;
   const aloneCents = aloneOne.cents * sellerCount;
@@ -192,7 +290,7 @@ export function flexQuote({
     perSellerCards: perSeller,
     tier,
     delivery,
-    bagFill: fill,
+    pickupPackets: delivery === 'home' ? null : cityPackets,
     services,
     alone,
     flex: { cents: flex, parts },
@@ -200,14 +298,21 @@ export function flexQuote({
     savedPct: aloneCents > 0 ? Math.round((saved / aloneCents) * 100) : 0,
     packGrams: gramsOne,
     totalGrams,
-    packsPerBag: Math.floor(filledGrams / gramsOne),
-    trunk,
+    packsPerBag: Math.floor(assumptions.bagGrams / gramsOne),
+    trunk: intake,
+    intake,
+    city,
     lastMile,
   };
 }
 
 /** Every lane × a few pack sizes, for the table under the calculator. */
-export function flexLaneTable({ sizes = [4, 20, 50], sellers = 3, ...options } = {}) {
+export function flexLaneTable({
+  sizes = [4, 20, 50],
+  sellers = 3,
+  pickupPackets = FLEX_ASSUMPTIONS.defaultPickupPackets,
+  ...options
+} = {}) {
   return flexLanes(options.catalog).map((lane) => ({
     ...lane,
     quotes: sizes.map((cards) => flexQuote({
@@ -216,6 +321,8 @@ export function flexLaneTable({ sizes = [4, 20, 50], sellers = 3, ...options } =
       to: lane.to,
       cards,
       sellers,
+      pickupPackets,
+      delivery: 'pickup',
     })),
   }));
 }
