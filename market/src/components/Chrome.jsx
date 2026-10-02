@@ -17,6 +17,14 @@ import {
   warmupCard,
 } from '../api.js';
 import { resolveArtLayout } from '../art-cut.js';
+import {
+  albumShade,
+  deskTheme,
+  rememberCardBucket,
+  rememberDeskIdentity,
+  subscribeShadeBuckets,
+  warmCardBucket,
+} from '../art-shade.js';
 import { pickSuggestHoverSrc, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
 import { fetchSuggestRanked, rankConcurrency, rankNames, resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
 import { rankChunkOnWorker, warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
@@ -484,11 +492,27 @@ export default function Chrome({ children }) {
   );
   useSuggestFlip(listRef, suggestVisible ? suggestIds : '');
 
+  const [shadeTick, setShadeTick] = useState(0);
+  useEffect(() => subscribeShadeBuckets(() => setShadeTick((tick) => tick + 1)), []);
+
   useEffect(() => {
     if (!visibleGroups.length) {
       return;
     }
     preloadSuggestThumbs(collectPrintingThumbUrls(visibleGroups, suggestThumbSrc), { first: true });
+    for (const group of visibleGroups) {
+      for (const printing of group.printings || []) {
+        const card = cardFromAutocomplete(printing);
+        if (!card.id || isLiveStub(card)) continue;
+        rememberDeskIdentity(card);
+        const shade = albumShade(card);
+        if (shade) {
+          rememberCardBucket(card.id, shade);
+          continue;
+        }
+        warmCardBucket(card.id, imageSrc(card, 'suggest'));
+      }
+    }
   }, [visibleGroups]);
 
   useEffect(() => {
@@ -1188,6 +1212,7 @@ export default function Chrome({ children }) {
                                 bucket === 'unknown' ? '' : bucket,
                               );
                             const live = isLiveStub(card) || isLiveStub(printing);
+                            const rowTheme = shadeTick >= 0 ? deskTheme(card) : null;
                             const rowIndex = flat.findIndex((row) => row.optionId === optionId);
                             const thumbLoading = rowIndex >= SUGGEST_THUMB_EAGER ? 'lazy' : undefined;
                             const thumbPriority = rowIndex < SUGGEST_THUMB_HIGH ? 'high' : 'low';
@@ -1211,7 +1236,13 @@ export default function Chrome({ children }) {
                                   }
                                 }}
                               >
-                                  <div className={`suggest-row${active ? ' is-active' : ''}`}>
+                                  <div
+                                    className={`suggest-row${active ? ' is-active' : ''}${rowTheme ? ' is-shaded' : ''}`}
+                                    style={rowTheme ? {
+                                      '--suggest-shade': rowTheme.surface,
+                                      '--suggest-shade-raised': rowTheme.surfaceRaised,
+                                    } : undefined}
+                                  >
                                   <button
                                     type="button"
                                     className="suggest-main"

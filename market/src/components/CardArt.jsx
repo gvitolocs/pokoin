@@ -61,6 +61,23 @@ export default function CardArt({
   const current = urls[index] || '';
   const figureMask = figureMaskOverride
     ?? (cut && cutSurface === 'album' ? artworkFigureMaskSrc(card) : '');
+  const [showFigure, setShowFigure] = useState(false);
+  useEffect(() => {
+    const node = imgRef.current?.closest('.tile');
+    if (!node || !figureMask) return undefined;
+    const on = () => setShowFigure(true);
+    const off = () => setShowFigure(false);
+    node.addEventListener('pointerenter', on);
+    node.addEventListener('pointerleave', off);
+    node.addEventListener('focusin', on);
+    node.addEventListener('focusout', off);
+    return () => {
+      node.removeEventListener('pointerenter', on);
+      node.removeEventListener('pointerleave', off);
+      node.removeEventListener('focusin', on);
+      node.removeEventListener('focusout', off);
+    };
+  }, [figureMask]);
 
   function failCurrent() {
     const failed = urlsRef.current[indexRef.current] || current || src;
@@ -185,7 +202,7 @@ export default function CardArt({
   return (
     <span className="art-cut" style={artCutVars(card, cutSurface)}>
       {image}
-      {figureMask ? (
+      {figureMask && showFigure ? (
         <>
           <img
             className="art-figure-layer art-figure-shadow"

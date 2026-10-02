@@ -59,11 +59,11 @@ def darken_for_caption(red: float, green: float, blue: float) -> str:
     return f"#{int(round(red)):02x}{int(round(green)):02x}{int(round(blue)):02x}"
 
 
-def shade_from_image(image: Image.Image, *, already_cut: bool) -> str:
+def shade_from_image(image: Image.Image, *, already_cut: bool, cut: tuple[float, float, float, float] = ART_CUT) -> str:
     rgb = image.convert("RGB")
     if not already_cut:
         width, height = rgb.size
-        left, top, cut_w, cut_h = ART_CUT
+        left, top, cut_w, cut_h = cut
         rgb = rgb.crop(
             (
                 int(width * left),

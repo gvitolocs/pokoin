@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { cardFromCatalogRow, cardHref, fetchCard, fetchExactNameCards, fetchLastMedianPknMap, fetchVersionSet } from '../api.js';
-import { mergePrintingRows, printLangBadge, splitVersionPage } from '../card-versions.js';
+import { cardFromCatalogRow, cardHref, fetchCard, fetchExactNameCards, fetchLastMedianPknMap, fetchNamePrintings, fetchVersionSet } from '../api.js';
+import { mergePrintingRows, printLangBadge, splitVersionPage, isNameReprintCard } from '../card-versions.js';
+import { filterExactNameRows } from '../exact-name.js';
 import { eraHref } from '../set-logos.js';
 import { realPublicCardId } from '../card-stub.js';
 import { applyLastMedianPrices } from '../pkn.js';
@@ -85,6 +86,16 @@ export default function Versions() {
               setNameRows((current) => mergePrintingRows(current, rows));
             }
           }).catch(() => {});
+          // Meili stops once a page has no exact hit. Item and trainer
+          // reprints are the whole name, so the SQL catalog is the full list.
+          if (isNameReprintCard({ name })) {
+            fetchNamePrintings(name, { lang }).then((rows) => {
+              const exact = filterExactNameRows(rows, name);
+              if (!cancelled && exact.length) {
+                setNameRows((current) => mergePrintingRows(current, exact));
+              }
+            }).catch(() => {});
+          }
         }
       })
       .catch((err) => {

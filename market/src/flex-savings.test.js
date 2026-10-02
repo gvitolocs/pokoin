@@ -8,6 +8,7 @@ import {
   flexLanes,
   flexQuote,
   formatEur,
+  consolidatedLeg,
   lastMileCardCount,
   packGrams,
   perSellerCards,
@@ -40,27 +41,54 @@ test('perSellerCards splits an order across sellers', () => {
   assert.equal(perSellerCards(4, 3), 2);
 });
 
-test('DK → IT pickup: alone is N parcels, Flex is N boxes in one bag', () => {
-  const one = flexQuote({ from: 'DK', to: 'IT', cards: 20, sellers: 1 });
+test('one seller is one direct shipment, so Flex costs more', () => {
+  const one = flexQuote({
+    from: 'DK',
+    to: 'IT',
+    cards: 20,
+    sellers: 1,
+    pickupPackets: 40,
+  });
   assert.ok(one);
   assert.equal(one.sellers, 1);
-  assert.ok(one.alone.cents > 0);
-  assert.ok(one.savedPct > 0);
+  assert.equal(one.flex.parts.trunk, one.alone.perSellerCents);
+  assert.ok(one.flex.parts.box + one.flex.parts.handling > 0);
+  assert.ok(one.flex.parts.lastMile > 0);
+  assert.ok(one.savedCents < 0);
 
-  const three = flexQuote({ from: 'DK', to: 'IT', cards: 20, sellers: 3 });
-  assert.equal(three.sellers, 3);
-  assert.equal(three.perSellerCards, 7);
-  assert.equal(three.alone.cents, three.alone.perSellerCents * 3);
-  assert.ok(three.flex.parts.box === FLEX_ASSUMPTIONS.boxCents * 3);
-  assert.ok(three.savedPct > one.savedPct || three.alone.cents > one.alone.cents);
+  const home = flexQuote({ from: 'IT', to: 'IT', cards: 20, sellers: 1, delivery: 'home' });
+  assert.ok(home.savedCents < 0);
 });
 
-test('three IT sellers make Flex cheaper than alone on pickup', () => {
-  const one = flexQuote({ from: 'IT', to: 'IT', cards: 20, sellers: 1, delivery: 'home' });
-  assert.ok(one.savedCents < 0);
-  const three = flexQuote({ from: 'IT', to: 'IT', cards: 20, sellers: 3, delivery: 'pickup' });
+test('several sellers share one partner shipment, and the city pack splits the second hop', () => {
+  const three = flexQuote({
+    from: 'DK',
+    to: 'IT',
+    cards: 20,
+    sellers: 3,
+    pickupPackets: FLEX_ASSUMPTIONS.defaultPickupPackets,
+  });
+  assert.equal(three.sellers, 3);
+  assert.equal(three.perSellerCards, 7);
+  assert.equal(three.pickupPackets, FLEX_ASSUMPTIONS.defaultPickupPackets);
+  assert.equal(three.alone.cents, three.alone.perSellerCents * 3);
+  assert.equal(three.flex.parts.box, FLEX_ASSUMPTIONS.boxCents * 3);
+  assert.ok(three.intake.cents < three.alone.cents);
+  assert.equal(
+    three.flex.parts.lastMile,
+    Math.round((three.city.cents * 3) / FLEX_ASSUMPTIONS.defaultPickupPackets),
+  );
   assert.ok(three.savedCents > 0);
-  assert.ok(three.savedPct >= 50);
+
+  const tight = flexQuote({ from: 'DK', to: 'IT', cards: 20, sellers: 3, pickupPackets: 3 });
+  assert.ok(three.flex.cents < tight.flex.cents);
+  assert.equal(three.flex.parts.trunk, tight.flex.parts.trunk);
+});
+
+test('a pickup pack cannot be smaller than this order’s seller packets', () => {
+  const quote = flexQuote({ from: 'IT', to: 'DK', cards: 12, sellers: 4, pickupPackets: 1 });
+  assert.equal(quote.pickupPackets, 4);
+  assert.equal(quote.flex.parts.lastMile, quote.city.cents);
 });
 
 test('home delivery is one warehouse hop, not one per seller', () => {
@@ -74,7 +102,7 @@ test('home delivery quotes Flex-box last-mile, never EXTRA_LARGE bag tier', () =
   const tracked = flexQuote({ from: 'DK', to: 'IT', cards: 20, delivery: 'home', sellers: 1 });
   assert.ok(tracked.lastMile);
   assert.equal(tracked.lastMile.tracked, true);
-  const heavy = flexQuote({ from: 'IT', to: 'IT', cards: 60, delivery: 'home', sellers: 1, bagFill: 1 });
+  const heavy = flexQuote({ from: 'IT', to: 'IT', cards: 60, delivery: 'home', sellers: 1 });
   assert.equal(packageTierForCount(60), 'LARGE');
   assert.notEqual(heavy.lastMile?.service, 'Parcel');
 });
@@ -86,10 +114,39 @@ test('lastMileCardCount never maps a Flex box onto the bag tier', () => {
   assert.equal(lastMileCardCount(400), 50);
 });
 
-test('a fuller bag is cheaper per pack', () => {
-  const half = flexQuote({ from: 'IT', to: 'DK', cards: 50, sellers: 1, bagFill: 0.5 });
-  const full = flexQuote({ from: 'IT', to: 'DK', cards: 50, sellers: 1, bagFill: 1 });
-  assert.ok(full.flex.cents < half.flex.cents);
+test('a city pack is a normal parcel until it is heavy enough for the 20 kg bag', () => {
+  const parcel = consolidatedLeg({
+    from: 'IT',
+    to: 'IT',
+    packets: 20,
+    cardsPerPacket: 20,
+    tracked: true,
+  });
+  assert.equal(parcel.totalGrams, 20 * packGrams(20));
+  assert.ok(parcel.totalGrams < FLEX_ASSUMPTIONS.parcelMaxGrams);
+  assert.notEqual(parcel.tier, 'EXTRA_LARGE');
+
+  const bag = consolidatedLeg({
+    from: 'IT',
+    to: 'IT',
+    packets: 200,
+    cardsPerPacket: 20,
+    tracked: true,
+  });
+  assert.ok(bag.totalGrams > FLEX_ASSUMPTIONS.parcelMaxGrams);
+  assert.equal(bag.tier, 'EXTRA_LARGE');
+  assert.equal(bag.bags, 1);
+
+  const quote = flexQuote({
+    from: 'DK',
+    to: 'IT',
+    cards: 20,
+    sellers: 1,
+    pickupPackets: 20,
+  });
+  assert.notEqual(quote.city.tier, 'EXTRA_LARGE');
+  assert.ok(quote.flex.parts.lastMile < quote.city.cents);
+  assert.ok(quote.savedCents < 0);
 });
 
 test('a missing parcel direction borrows the reverse lane and says so', () => {

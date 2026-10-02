@@ -7,7 +7,10 @@
 -- stay empty. Never overwrite an existing marketplace_blueprint_artists row.
 -- Energy cards (Fighting Energy, Double Colorless Energy, …) do not inherit
 -- a CLIP sibling. Only OCR / pokemontcg.io / TCGdex / pkmncards credits
--- show on the illustrator desk. Trainers named Energy Removal stay copyable.
+-- show on the illustrator desk.
+-- Item and trainer reprints are different paintings (Poké Pad, Switch, Potion).
+-- Same-artwork copy is Pokémon species only: pokedex_num 1–1025. Energy
+-- Removal is a trainer and does not inherit.
 
 set statement_timeout = 0;
 
@@ -45,6 +48,7 @@ begin
       and c.product_type = 'card'
       and coalesce(c.version, '') <> ''
       and (p_version is null or c.version = p_version)
+      and c.pokedex_num between 1 and 1025
       and not public.marketplace_is_energy_name(c.name)
       and coalesce(artist.normalized_artist, '') <> ''
     group by c.version
@@ -57,6 +61,7 @@ begin
       and c.product_type = 'card'
       and coalesce(c.version, '') <> ''
       and (p_version is null or c.version = p_version)
+      and c.pokedex_num between 1 and 1025
       and not public.marketplace_is_energy_name(c.name)
     group by c.version
     having count(distinct public.marketplace_search_normalize(c.name)) = 1
@@ -97,6 +102,7 @@ begin
   where existing.blueprint_id is null
     and c.item_kind = 'single'
     and c.product_type = 'card'
+    and c.pokedex_num between 1 and 1025
     and not public.marketplace_is_energy_name(c.name)
   on conflict (blueprint_id) do nothing;
 
@@ -177,6 +183,55 @@ grant execute on function public.marketplace_is_energy_name(text)
   to pokoin_marketplace;
 grant execute on function public.marketplace_copy_same_art_artists(text)
   to pokoin_marketplace;
+
+-- Drop illustrators that were copied onto item/trainer reprints, and give
+-- each printing its own version key so they are not one painting.
+delete from public.marketplace_blueprint_artists artist
+using public.marketplace_search_candidates c
+where c.ct_id = artist.blueprint_id
+  and artist.source = 'same_artwork'
+  and c.pokedex_num not between 1 and 1025
+  and not public.marketplace_is_energy_name(c.name);
+
+insert into public.pokoin_version_sets (version, gameplay_name, member_count, source)
+select 'v' || c.card_id::text,
+       coalesce(nullif(c.name, ''), 'card'),
+       1,
+       'singleton'
+from public.marketplace_search_candidates c
+where c.item_kind = 'single'
+  and c.product_type = 'card'
+  and c.pokedex_num not between 1 and 1025
+  and not public.marketplace_is_energy_name(c.name)
+  and coalesce(c.version, '') <> ''
+  and c.version is distinct from ('v' || c.card_id::text)
+on conflict (version) do nothing;
+
+alter table public.marketplace_search_candidates
+  disable trigger marketplace_search_candidates_copy_same_art_artist;
+
+update public.marketplace_search_candidates c
+set version = 'v' || c.card_id::text
+where c.item_kind = 'single'
+  and c.product_type = 'card'
+  and c.pokedex_num not between 1 and 1025
+  and not public.marketplace_is_energy_name(c.name)
+  and coalesce(c.version, '') <> ''
+  and c.version is distinct from ('v' || c.card_id::text);
+
+alter table public.marketplace_search_candidates
+  enable trigger marketplace_search_candidates_copy_same_art_artist;
+
+update public.pokoin_version_sets s
+set member_count = sub.n
+from (
+  select version, count(*)::int as n
+  from public.marketplace_search_candidates
+  where coalesce(version, '') <> ''
+  group by version
+) sub
+where s.version = sub.version
+  and s.member_count is distinct from sub.n;
 
 select public.marketplace_copy_same_art_artists() as same_art_artists_copied;
 select public.refresh_marketplace_artist_card_counts() as artist_counts_refreshed;

@@ -9,6 +9,8 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 test('Versions soft-fails CLIP version-set so satellite rarities still paint', () => {
   const src = fs.readFileSync(path.join(root, 'pages/Versions.jsx'), 'utf8');
   assert.match(src, /fetchVersionSet\(cardId\)\.catch\(\(\) => \(\{ printings: \[\] \}\)\)/);
+  assert.match(src, /isNameReprintCard\(\{ name \}\)/);
+  assert.match(src, /fetchNamePrintings\(name/);
   assert.match(src, /page\?\.rarities/);
   assert.match(src, /page\?\.versions/);
 });

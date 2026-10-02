@@ -1,3 +1,4 @@
+import { safeAvatarUrl } from './avatar.js';
 import { peekHasListingRows, peekSellerListings } from './listings-cache.js';
 
 /** Default first-page shop key — must match fetchSellerShop defaults in Seller.jsx. */
@@ -39,6 +40,7 @@ export function seedSellerListings(handle, { pageSize = 100, sort = 'price-asc',
       uid: fromApi?.uid || sample.sellerUid || '',
       username,
       displayName: displayName && !displayName.includes('@') ? displayName : username,
+      photoUrl: safeAvatarUrl(fromApi?.photoUrl),
     },
   };
 }

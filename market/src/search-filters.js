@@ -108,6 +108,15 @@ export function pileCardTier(card) {
 }
 
 /**
+ * A shared version key is one painting. Item and trainer cards with the
+ * same name often have different paintings, so they only pile when the
+ * artwork match gave them the same key.
+ */
+export function sharesReprintArtwork(card) {
+  return !isLegendCard(card);
+}
+
+/**
  * Artist desk: collapse same-artwork printings (shared CLIP version key) into
  * one pile row, in sort order. LEGEND halves keep their own rows — the
  * landscape pair forms the full art side by side. Tag Team Pokédex clones
@@ -117,7 +126,7 @@ export function groupArtworkRows(cards) {
   const map = new Map();
   for (const card of cards || []) {
     const id = String(card?.id || card?.card_id || '');
-    const key = isLegendCard(card) ? `id:${id}` : artworkVersionKey(card);
+    const key = sharesReprintArtwork(card) ? artworkVersionKey(card) : `id:${id}`;
     let group = map.get(key);
     if (!group) {
       group = { key, cards: [], seen: new Set() };
