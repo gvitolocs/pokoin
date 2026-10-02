@@ -322,21 +322,29 @@ function ArtistDesk() {
     const node = sentinel.current;
     if (!node || shown >= groups.length) return undefined;
     let last = 0;
+    let prevY = window.scrollY;
+    let upward = false;
     const grow = () => setShown((current) => Math.min(current + ALBUM_PAGE, groups.length));
-    // A fast fling can land past the sentinel so it never intersects; the
-    // scroll check also fires when the sentinel is above the viewport. Time-
-    // throttled (not rAF) so it still runs in throttled renderers.
+    // A fast fling downward can land past the sentinel so it never intersects.
+    // Growing while the user is scrolling back up inserts rows above them and
+    // the page yanks. Time-throttled (not rAF) so it still runs in throttled
+    // renderers.
     const check = () => {
       const rect = sentinel.current?.getBoundingClientRect();
       if (rect && rect.top <= window.innerHeight + 800) grow();
     };
     const onScroll = () => {
+      const y = window.scrollY;
+      upward = y < prevY - 1;
+      prevY = y;
+      if (upward) return;
       const now = Date.now();
       if (now - last < 150) return;
       last = now;
       check();
     };
     const observer = new IntersectionObserver((entries) => {
+      if (upward) return;
       if (entries.some((entry) => entry.isIntersecting)) grow();
     }, { rootMargin: '800px 0px' });
     observer.observe(node);

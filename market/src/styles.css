@@ -2432,6 +2432,9 @@ html.is-card-banding * {
   gap: 1rem;
   min-width: 0;
   width: 100%;
+  /* Tall tiles change the row tracks as pages append. Anchoring fights an
+   * upward scroll and the grid yanks. */
+  overflow-anchor: none;
 }
 
 .tile-album {
@@ -2712,7 +2715,11 @@ html.is-card-banding * {
   pointer-events: none;
   opacity: 0;
   transform-origin: 50% 50%;
-  will-change: transform, opacity;
+}
+
+/* Hundreds of promoted blur layers made scrolling back up flicker. */
+.tile.tile-album:not(:hover):not(:focus-within) .art-cut img.art-figure-layer {
+  content-visibility: hidden;
 }
 
 .tile.tile-album .art-cut img.art-figure-hover {
