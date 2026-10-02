@@ -12,6 +12,7 @@ const TARGET = path.resolve(__dirname, 'poko-market.js');
 // the select lists ever widen without care.
 const FIXTURE_CARD_ROW = {
   card_id: '246912',
+  ct_id: '123456',
   name: 'Raichu ex',
   set_name: 'EX Team Rocket Returns',
   artist: 'Ken Sugimori',
@@ -46,10 +47,16 @@ function makeDb(stubs) {
   };
 }
 
-function loadHandler(dbStub) {
+function loadHandler(dbStub, priceHistoryStub) {
   const originalLoad = Module._load;
   delete require.cache[TARGET];
   Module._load = function load(request, parent, isMain) {
+    if (request === './_card_price_history') {
+      const sources = originalLoad(request, parent, isMain);
+      return { ...sources, readCardPriceHistory: priceHistoryStub || (async () => ({
+        cardtrader: sources.cardtraderSource([]), tcgplayer: sources.tcgplayerSource([]),
+      })) };
+    }
     if (request === './_marketplace_db') {
       return { marketplaceQuery: dbStub }; // dbStub returns pg-shaped { rows }
     }
@@ -155,10 +162,10 @@ test('like patterns escape wildcards; fuzzy artist allows only [a-z0-9]', () => 
   assert.equal(T.fuzzyArtistPattern("'); drop table x;--"), '%d%r%o%p%t%a%b%l%e%x%');
 });
 
-test('blueprint ids derive only from even public card ids', () => {
-  assert.equal(T.blueprintIdFromCardId('246912'), 123456);
-  assert.equal(T.blueprintIdFromCardId('246913'), null);
-  assert.equal(T.blueprintIdFromCardId('abc'), null);
+test('blueprint IDs require explicit catalog identity, including nonarithmetic public IDs', () => {
+  assert.equal(T.blueprintIdFromCatalogRow({card_id:'777',ct_id:'88'}), 88);
+  assert.equal(T.blueprintIdFromCatalogRow({card_id:'246912'}), null);
+  assert.equal(T.blueprintIdFromCatalogRow({card_id:'777',ct_id:'bad'}), null);
 });
 
 test('confidence and price strategies degrade honestly with sample size', () => {
@@ -317,6 +324,77 @@ test('card_quote reports sold estimate, asks and strategies without inventing da
   assert.equal(res2.body.quotes[0].currentAsk.min, 48);
 });
 
+test('card_quote keeps dated CardTrader and USD analytics without sold comps or arithmetic IDs', async () => {
+  const { cardtraderSource, tcgplayerSource } = require('./_card_price_history');
+  const queries = [], historyCalls = [];
+  const handler = loadHandler(makeDb({
+    queries, cardRow: { ...FIXTURE_CARD_ROW, card_id: '777', ct_id: '88' },
+    askRows: [{ min_price_pkn: 11128, median_price_pkn: 999999,
+      observed_day: new Date('2026-10-02T00:00:00Z'), refreshed_at: new Date('2026-10-02T02:27:50Z') }],
+  }), async (params) => {
+    historyCalls.push(params);
+    return {
+      cardtrader: cardtraderSource([
+        { day: '2026-09-30', dump_day: '2026-09-29', lowest_ask_pkn: 13128, listing_count: 4,
+          refreshed_at: '2026-09-30T15:57:44Z', seller_uid: 'PRIVATE' },
+        { day: '2026-10-02', dump_day: '2026-10-01', lowest_ask_pkn: 11128, listing_count: 5,
+          refreshed_at: '2026-10-02T02:27:50Z' },
+      ]),
+      tcgplayer: tcgplayerSource([{ category_id: 85, product_id: 719552, subtype: 'Holofoil',
+        observed_on: '2026-09-30', market_price: 59.27, low_price: 56, mid_price: 60.89,
+        high_price: 75, snapshot_timestamp: '2026-09-30T20:05:12Z', email: 'PRIVATE' }]),
+    };
+  });
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '777' } } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.card.blueprintId, 88);
+  const quote = res.body.quotes[0];
+  assert.equal(quote.askingPriceOnly, true);
+  assert.equal(quote.estimate, null);
+  assert.equal(quote.strategies, null);
+  assert.equal(quote.currentAsk.min, 11128);
+  assert.equal(quote.currentAsk.median, undefined);
+  assert.equal(quote.currentAsk.observedDay, '2026-10-02');
+  assert.equal(quote.currentAsk.sourceTimestamp, '2026-10-02T02:27:50.000Z');
+  assert.equal(res.body.priceSources.cardtrader.currency, 'PKN');
+  assert.equal(res.body.priceSources.tcgplayer.currency, 'USD');
+  const tcg = res.body.priceSources.tcgplayer.series[0];
+  assert.equal(tcg.subtype, 'Holofoil');
+  assert.equal(tcg.days[0].marketPrice, 59.27);
+  assert.equal(tcg.days[0].day, '2026-09-30');
+  assert.equal(res.body.priceSources.tcgplayer.conditionSpecific, false);
+  assert.equal(res.body.askHistory.trend, 'falling');
+  assert.equal(res.body.askHistory.series[0].median, undefined);
+  assert.equal(historyCalls[0].cardId, '777');
+  assert.match(res.body.priceSources.citationUrl, /cardId=777/);
+  assert.match(res.body.dataNote, /Zero sold comps does not mean no price analytics/);
+  assert.ok(queries.filter(q => /cardtrader_sold_daily|cardtrader_market_listing_snapshots/.test(q.sql))
+    .every(q => q.params[0] === '88'), 'all blueprint queries use catalog ct_id');
+  assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
+});
+
+test('optional history outage preserves current asks and reports source availability', async () => {
+  const handler = loadHandler(makeDb({ queries: [], askRows: [{ min_price_pkn: 48 }] }),
+    async () => { throw new Error('history unavailable'); });
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '246912' } } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.quotes[0].currentAsk.min, 48);
+  assert.equal(res.body.priceSources.cardtrader.status, 'unavailable');
+  assert.equal(res.body.priceSources.tcgplayer.status, 'unavailable');
+  assert.deepEqual(res.body.askHistory.series, []);
+});
+
+test('unmapped catalog cards never guess a blueprint from an even public ID', async () => {
+  const queries = [];
+  const handler = loadHandler(makeDb({ queries, cardRow: { ...FIXTURE_CARD_ROW, ct_id: null } }));
+  const res = makeRes();
+  await handler(makeReq({ body: { tool: 'card_quote', params: { cardId: '246912' } } }), res);
+  assert.equal(res.body.status, 'unsupported');
+  assert.ok(!queries.some(q => /cardtrader_/.test(q.sql)));
+});
+
 test('vague condition wording quotes a range instead of claiming a grade', async () => {
   const soldByCall = [];
   const handler = loadHandler(async (sql, params = []) => {
@@ -343,6 +421,7 @@ test('collection_quote resolves fuzzy artists, reports coverage honestly', async
   const cards = Array.from({ length: 4 }, (_, i) => ({
     ...FIXTURE_CARD_ROW,
     card_id: String(246912 + i * 2),
+    ct_id: String(123456 + i),
     name: `Morii Card ${i + 1}`,
   }));
   const handler = loadHandler(makeDb({
@@ -528,6 +607,10 @@ test('top_movers ranks a subject by ask change and drops sub-floor noise', async
   assert.ok(!FORBIDDEN.test(JSON.stringify(res.body)));
   const sql = stubs.queries.find((q) => /with cands as/.test(q.sql));
   assert.deepEqual(sql.params, [30, 400, '%raikou%']);
+  assert.ok(!sql.sql.includes('median_price_pkn'));
+  assert.match(sql.sql, /refreshed_at at time zone 'utc'/);
+  assert.match(sql.sql, /s.ct_id as blueprint_id/);
+  assert.match(res.body.basis, /lowest listed ask/);
 });
 
 test('top_movers supports falling direction and answers empty windows with 200', async () => {

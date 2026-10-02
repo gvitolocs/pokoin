@@ -45,6 +45,8 @@
 const crypto = require('node:crypto');
 
 const { marketplaceQuery } = require('./_marketplace_db');
+const { currentGame } = require('./_marketplace_game');
+const { readCardPriceHistory, cardtraderSource, tcgplayerSource } = require('./_card_price_history');
 
 // marketplaceQuery resolves to the pg QueryResult; the tools want rows.
 async function queryRows(text, values = []) {
@@ -153,11 +155,11 @@ function normalizeLanguage(value) {
   return { code: LANGUAGES.includes(upper) ? upper : 'EN', matched: LANGUAGES.includes(upper) };
 }
 
-/** Public card ids for singles are CardTrader blueprint ids × 2 (pokoin_public_card_id). */
-function blueprintIdFromCardId(cardId) {
-  const num = Number(cardId);
-  if (!Number.isInteger(num) || num <= 0 || num % 2 !== 0) return null;
-  return num / 2;
+/** Only the catalog's explicit blueprint identity is authoritative. */
+function blueprintIdFromCatalogRow(row) {
+  const id = String(row?.ct_id ?? '');
+  const num = Number(id);
+  return /^[1-9]\d*$/.test(id) && Number.isSafeInteger(num) ? num : null;
 }
 
 function confidenceForSample(sampleSize) {
@@ -255,7 +257,7 @@ function candidateFromRow(row) {
   const cardId = String(row.card_id);
   return {
     cardId,
-    blueprintId: blueprintIdFromCardId(row.card_id),
+    blueprintId: blueprintIdFromCatalogRow(row),
     name: row.name || '',
     setName: row.set_name || '',
     cardNumber: row.card_number || '',
@@ -336,7 +338,7 @@ async function resolveCard(params = {}) {
       params2.push(artistPattern);
     }
     const rows = await queryRows(
-      `select s.card_id, s.name, s.set_name, s.artist, s.item_kind, s.version,
+      `select s.card_id, s.ct_id, s.name, s.set_name, s.artist, s.item_kind, s.version,
               coalesce(nullif(c.card_number, ''), '') as card_number
          from marketplace_search_candidates s
          left join marketplace_cards c on c.card_id = s.card_id
@@ -677,56 +679,48 @@ function dealVerdict(ask, soldMedian) {
 
 const FLUCTUATION_PCT = 15;
 
-/** Daily min/median asks over the last `days`, with dated fluctuation moves. */
-async function askHistoryForBlueprint(blueprintId, days = 14) {
-  const rows = await queryRows(
-    `select observed_day, min_price_pkn, median_price_pkn
-       from cardtrader_blueprint_daily_analytics
-      where blueprint_id = $1::bigint
-        and observed_day >= current_date - ($2::int || ' days')::interval
-      order by observed_day`,
-    [String(blueprintId), days],
-  );
-  const series = rows.map((r) => ({
-    day: String(r.observed_day).slice(0, 10),
-    min: round2(r.min_price_pkn),
-    median: round2(r.median_price_pkn),
-  })).filter((p) => p.min != null);
+function askHistoryFromSource(source, days = 14) {
+  const series = (source?.days || []).map((row) => ({
+    day: row.day, min: row.lowestAskPkn, sourceTimestamp: row.sourceTimestamp, dumpDay: row.dumpDay,
+  })).filter((row) => row.min > 0);
   const fluctuations = [];
   for (let i = 1; i < series.length; i += 1) {
-    const prev = series[i - 1];
-    const cur = series[i];
-    if (!prev.min || !cur.min) continue;
+    const prev = series[i - 1], cur = series[i];
     const changePct = Math.round(((cur.min - prev.min) / prev.min) * 100);
-    if (Math.abs(changePct) >= FLUCTUATION_PCT) {
-      fluctuations.push({
-        fromDay: prev.day,
-        toDay: cur.day,
-        from: prev.min,
-        to: cur.min,
-        changePct,
-      });
-    }
+    if (Math.abs(changePct) >= FLUCTUATION_PCT) fluctuations.push({
+      fromDay: prev.day, toDay: cur.day, from: prev.min, to: cur.min, changePct,
+    });
   }
   let trend = 'stable';
   if (series.length >= 2) {
-    const first = series[0].min;
-    const last = series[series.length - 1].min;
-    if (first && last) {
-      const move = ((last - first) / first) * 100;
-      if (move >= 10) trend = 'rising';
-      else if (move <= -10) trend = 'falling';
-    }
+    const move = (series.at(-1).min - series[0].min) / series[0].min * 100;
+    if (move >= 10) trend = 'rising';
+    else if (move <= -10) trend = 'falling';
   }
-  return { days, series, fluctuations, trend };
+  return { days, series, fluctuations, trend, metric: 'lowestAsk', source: 'cardtrader_listed' };
+}
+
+async function recentPriceSources(card, days = 14) {
+  const boundedDays = Math.max(1, Math.min(90, Math.trunc(Number(days) || 14)));
+  const from = daysAgoIso(boundedDays - 1), to = todayIso(), game = currentGame();
+  const query = new URLSearchParams({ cardId: card.cardId, from, to });
+  if (game !== 'pokemon') query.set('game', game);
+  let history;
+  try {
+    history = await readCardPriceHistory({ game, cardId: card.cardId, from, to }, { marketplaceQuery });
+  } catch (_) {
+    history = { cardtrader: cardtraderSource([], 'unavailable'), tcgplayer: tcgplayerSource([], 'unavailable') };
+  }
+  return { from, to, cardtrader: history.cardtrader, tcgplayer: history.tcgplayer,
+    citationUrl: `https://api.pokoin.com/api/marketplace-card-price-history?${query}` };
 }
 
 async function askSignalForBlueprint(blueprintId) {
   const rows = await queryRows(
-    `select min_price_pkn, median_price_pkn, observed_day
+    `select min_price_pkn, (refreshed_at at time zone 'utc')::date as observed_day, refreshed_at
        from cardtrader_blueprint_daily_analytics
       where blueprint_id = $1::bigint
-      order by observed_day desc
+      order by refreshed_at desc, observed_day desc
       limit 1`,
     [String(blueprintId)],
   );
@@ -734,11 +728,12 @@ async function askSignalForBlueprint(blueprintId) {
   if (!row) return null;
   return {
     min: round2(row.min_price_pkn),
-    median: round2(row.median_price_pkn),
     currency: 'PKN',
     pknEurRate: PKN_EUR_RATE,
-    observedDay: row.observed_day ? String(row.observed_day).slice(0, 10) : null,
-    note: 'current asks, all conditions; asking price is not a confirmed sale',
+    observedDay: row.observed_day ? dayOf(row.observed_day) : null,
+    source: 'cardtrader_listed', metric: 'lowestAsk',
+    sourceTimestamp: row.refreshed_at ? new Date(row.refreshed_at).toISOString() : null,
+    note: 'lowest listed ask across all conditions/languages; asking price is not a confirmed sale',
   };
 }
 
@@ -747,7 +742,7 @@ async function requireCard(params) {
   const cardId = cleanText(params.cardId, 40);
   if (/^\d+$/.test(cardId)) {
     const rows = await queryRows(
-      `select card_id, name, set_name, artist, item_kind
+      `select card_id, ct_id, name, set_name, artist, item_kind
          from marketplace_search_candidates
         where card_id = $1 limit 1`,
       [cardId],
@@ -771,7 +766,7 @@ async function cardOcr(params = {}) {
   const owned = await requireCard(params);
   if (owned.error) return owned.error;
   const card = owned.card;
-  const leftoverId = blueprintIdFromCardId(card.cardId);
+  const leftoverId = card.blueprintId;
   const rows = await queryRows(
     `select card_id, leftover_id, name, set_name, card_number, text, junk, ok,
             engine, crop, line_count, updated_at
@@ -824,9 +819,9 @@ async function cardQuote(params = {}) {
   const owned = await requireCard(params);
   if (owned.error) return owned.error;
   const card = owned.card;
-  const blueprintId = blueprintIdFromCardId(card.cardId);
+  const blueprintId = card.blueprintId;
   if (blueprintId == null) {
-    return { status: 'unsupported', error: 'card_quote needs a single card (public even card id)', card };
+    return { status: 'unsupported', error: 'card_quote needs an explicit catalog blueprint mapping', card };
   }
 
   // Unstated condition / language mean "every copy of this variant", not NM/EN:
@@ -843,10 +838,10 @@ async function cardQuote(params = {}) {
     variants.push({ condition: cond.alternatives[0], language: variants[0].language, vague: true });
   }
 
-  const [rows, liveGroups, askHistory, liquidity, blueprintAsk] = await Promise.all([
+  const [rows, liveGroups, priceSources, liquidity, blueprintAsk] = await Promise.all([
     soldRowsForBlueprint(blueprintId, 90),
     liveAsksForBlueprint(blueprintId),
-    askHistoryForBlueprint(blueprintId, 14),
+    recentPriceSources(card, params.priceDays),
     cardLiquidity({ cardId: card.cardId }),
     askSignalForBlueprint(blueprintId),
   ]);
@@ -904,14 +899,15 @@ async function cardQuote(params = {}) {
       ? `This printing never sold a standard copy in 90 days; quoting its most-sold variant (${variantLabel}).`
       : undefined,
     window: { soldDays: 90, from: daysAgoIso(90), to: daysAgoIso(0) },
-    askHistory,
+    priceSources,
+    askHistory: askHistoryFromSource(priceSources.cardtrader, Math.max(1, Math.min(90, Math.trunc(Number(params.priceDays) || 14)))),
     conditionNote: cond.vague
       ? `Vague condition wording: showing ${cond.primary} and ${cond.alternatives[0]} ranges instead of claiming a grade.`
       : undefined,
     quotes,
     variantsSold: variantsSold(rows),
     soldByConditionLanguage: soldByConditionLanguage(facetRows, 8),
-    dataNote: 'Sold = CardTrader listings that left the book (inferred sales, sanitized). 1st Edition, reverse and graded sales are separate variants and never mixed into the standard price.',
+    dataNote: 'Recorded sold comps are sanitized CardTrader inferred sales; variants/conditions/languages stay separate. priceSources.cardtrader is daily lowest listed ask PKN, not a sold price or measured median. priceSources.tcgplayer is daily aggregate TCGplayer market quotes in USD, condition/language unspecified; never convert USD into PKN implicitly. Report source, subtype and observation date, cite citationUrl. Zero sold comps does not mean no price analytics; use available dated quotes and disclose they are asking/aggregate prices.',
   };
 }
 
@@ -923,9 +919,9 @@ async function cardSales(params = {}) {
   const owned = await requireCard(params);
   if (owned.error) return owned.error;
   const card = owned.card;
-  const blueprintId = blueprintIdFromCardId(card.cardId);
+  const blueprintId = card.blueprintId;
   if (blueprintId == null) {
-    return { status: 'unsupported', error: 'card_sales needs a single card (public even card id)', card };
+    return { status: 'unsupported', error: 'card_sales needs an explicit catalog blueprint mapping', card };
   }
   const days = Math.min(Math.max(Number(params.days) || 30, 1), 90);
   const limit = Math.min(Math.max(Number(params.limit) || 25, 1), 60);
@@ -990,9 +986,9 @@ async function dealCheck(params = {}) {
   const owned = await requireCard(params);
   if (owned.error) return owned.error;
   const card = owned.card;
-  const blueprintId = blueprintIdFromCardId(card.cardId);
+  const blueprintId = card.blueprintId;
   if (blueprintId == null) {
-    return { status: 'unsupported', error: 'deal_check needs a single card (public even card id)', card };
+    return { status: 'unsupported', error: 'deal_check needs an explicit catalog blueprint mapping', card };
   }
   const cond = normalizeCondition(params.condition);
   const lang = normalizeLanguage(params.language);
@@ -1078,7 +1074,7 @@ async function cardLiquidity(params = {}) {
     });
   }
   if (!bands) {
-    const blueprintId = blueprintIdFromCardId(card.cardId);
+    const blueprintId = card.blueprintId;
     if (blueprintId != null) {
       const sold = await soldSummaryForBlueprint(blueprintId, null, null, 28);
       if (sold && sold.sampleSize > 0) {
@@ -1133,7 +1129,7 @@ async function collectionQuote(params = {}) {
   const artist = artistRows[0].artist;
 
   const cardRows = await queryRows(
-    `select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
+    `select s.card_id, s.ct_id, s.name, s.set_name, s.artist, s.item_kind,
             coalesce(nullif(c.card_number, ''), '') as card_number
        from marketplace_search_candidates s
        left join marketplace_cards c on c.card_id = s.card_id
@@ -1144,7 +1140,7 @@ async function collectionQuote(params = {}) {
   );
   const cards = cardRows.map(candidateFromRow);
   const blueprintIds = cards
-    .map((c) => blueprintIdFromCardId(c.cardId))
+    .map((c) => c.blueprintId)
     .filter((id) => id != null);
 
   if (!cards.length) return { status: 'not_found', error: 'no catalog cards for that artist' };
@@ -1236,13 +1232,13 @@ async function suggestCards(params = {}) {
   const conditions = tokens.map((_, i) => `s.search_text ilike $${i + 1}`);
   const values = tokens.map((t) => `%${escapeLike(t)}%`);
   const rows = await queryRows(
-    `select s.card_id, s.name, s.set_name, s.artist, s.item_kind, s.version,
+    `select s.card_id, s.ct_id, s.name, s.set_name, s.artist, s.item_kind, s.version,
             coalesce(nullif(c.card_number, ''), '') as card_number,
             ask.min_price_pkn
        from marketplace_search_candidates s
        left join marketplace_cards c on c.card_id = s.card_id
        left join cardtrader_blueprint_daily_analytics ask
-         on ask.blueprint_id = case when s.card_id::text ~ '^[0-9]+$' then (s.card_id::text::bigint / 2) end
+         on ask.blueprint_id = s.ct_id
         and ask.observed_day = (select max(observed_day) from cardtrader_blueprint_daily_analytics)
       where s.item_kind <> 'product'
         and ${conditions.join(' and ')}
@@ -1310,8 +1306,8 @@ const MOVERS_MAX_CANDIDATES = 300;
 
 /**
  * Biggest ask-price moves for a subject ("which Raikou card rose the most?").
- * Compares each matching single's first vs latest daily median ask (min ask
- * when the median is missing) inside the window, then ranks by % change.
+ * Compares each matching single's first vs latest daily lowest listed ask
+ * on its actual UTC refresh date, then ranks by % change.
  * Without a subject it ranks the most-searched catalog cards.
  */
 async function topMovers(params = {}) {
@@ -1330,34 +1326,36 @@ async function topMovers(params = {}) {
   const values = [days, MOVERS_MIN_PRICE_PKN, ...tokens.map((t) => `%${escapeLike(t)}%`)];
   const rows = await queryRows(
     `with cands as (
-       select s.card_id, s.name, s.set_name, s.artist, s.item_kind,
+       select s.card_id, s.ct_id, s.name, s.set_name, s.artist, s.item_kind,
               coalesce(nullif(c.card_number, ''), '') as card_number,
-              (case when s.card_id::text ~ '^[0-9]+$' then s.card_id::text::bigint end) / 2 as blueprint_id
+              s.ct_id as blueprint_id
          from marketplace_search_candidates s
          left join marketplace_cards c on c.card_id = s.card_id
         where s.item_kind <> 'product'
-          and (case when s.card_id::text ~ '^[0-9]+$' then s.card_id::text::bigint end) % 2 = 0
+          and s.ct_id is not null
           ${conditions.length ? `and ${conditions.join(' and ')}` : ''}
         order by s.search_weight desc nulls last, s.name
         limit ${MOVERS_MAX_CANDIDATES}
      ), series as (
-       select a.blueprint_id, a.observed_day,
-              coalesce(a.median_price_pkn, a.min_price_pkn) as px
+       select a.blueprint_id, (a.refreshed_at at time zone 'utc')::date as observed_day,
+              a.refreshed_at,
+              a.min_price_pkn as px
          from cardtrader_blueprint_daily_analytics a
          join cands on cands.blueprint_id = a.blueprint_id
         where a.observed_day >= current_date - ($1::int || ' days')::interval
-          and coalesce(a.median_price_pkn, a.min_price_pkn) > 0
+          and (a.refreshed_at at time zone 'utc')::date >= current_date - ($1::int || ' days')::interval
+          and a.min_price_pkn > 0 and a.listing_count > 0
      ), ends as (
        select blueprint_id,
-              (array_agg(px order by observed_day asc))[1] as start_px,
+              (array_agg(px order by refreshed_at asc))[1] as start_px,
               min(observed_day) as start_day,
-              (array_agg(px order by observed_day desc))[1] as end_px,
+              (array_agg(px order by refreshed_at desc))[1] as end_px,
               max(observed_day) as end_day,
               count(*)::int as points
          from series
         group by blueprint_id
      )
-     select cands.card_id, cands.name, cands.set_name, cands.artist, cands.item_kind,
+     select cands.card_id, cands.ct_id, cands.name, cands.set_name, cands.artist, cands.item_kind,
             cands.card_number, ends.start_px, ends.start_day, ends.end_px, ends.end_day, ends.points
        from ends
        join cands on cands.blueprint_id = ends.blueprint_id
@@ -1374,8 +1372,8 @@ async function topMovers(params = {}) {
       if (!(start > 0) || !Number.isFinite(end)) return null;
       return {
         ...candidateFromRow(row),
-        fromDay: row.start_day ? String(row.start_day).slice(0, 10) : null,
-        toDay: row.end_day ? String(row.end_day).slice(0, 10) : null,
+        fromDay: row.start_day ? dayOf(row.start_day) : null,
+        toDay: row.end_day ? dayOf(row.end_day) : null,
         fromAsk: round2(start),
         toAsk: round2(end),
         fromAskEur: round2(start * PKN_EUR_RATE),
@@ -1394,7 +1392,7 @@ async function topMovers(params = {}) {
     subject: subject || undefined,
     direction,
     window: { days, from: daysAgoIso(days), to: daysAgoIso(0) },
-    basis: 'daily median asking price (min ask when median missing), all conditions; asks are not confirmed sales',
+    basis: 'daily lowest listed ask on the actual UTC refresh date, all conditions/languages; asks are not confirmed sales',
     priceUnit: 'PKN',
     pknEurRate: PKN_EUR_RATE,
     minPricePkn: MOVERS_MIN_PRICE_PKN,
@@ -1507,11 +1505,11 @@ async function topSellers(params = {}) {
           and blueprint_id in (select blueprint_id from sold)
         group by blueprint_id
      )
-     select s.card_id, s.name, s.set_name, s.artist, s.item_kind, s.card_number,
+     select s.card_id, s.ct_id, s.name, s.set_name, s.artist, s.item_kind, s.card_number,
             sold.sold_qty, sold.sale_days, sold.median_pkn, sold.last_sale_day, asks.ask_pkn
        from sold
        join marketplace_search_candidates s
-         on s.card_id = sold.blueprint_id * 2 and s.item_kind = 'single'
+         on s.ct_id = sold.blueprint_id and s.item_kind = 'single'
        left join asks on asks.blueprint_id = sold.blueprint_id
       where sold.median_pkn >= $3
         and ($4::numeric is null or sold.median_pkn <= $4)
@@ -1587,7 +1585,7 @@ async function setSales(params = {}) {
   });
   const rows = await queryRows(
     `with cards as (
-       select c.card_id, c.name, c.set_name, c.artist, c.item_kind, c.card_number
+       select c.card_id, c.ct_id, c.name, c.set_name, c.artist, c.item_kind, c.card_number
          from marketplace_search_candidates c
         where c.item_kind = 'single'
           and ${setConditions.join(' and ')}
@@ -1599,7 +1597,7 @@ async function setSales(params = {}) {
               percentile_cont(0.5) within group (order by d.median_pkn) as median_pkn,
               max(d.observed_day) as last_sale_day
          from cardtrader_sold_daily d
-        where d.blueprint_id in (select card_id / 2 from cards where card_id % 2 = 0)
+        where d.blueprint_id in (select ct_id from cards where ct_id is not null)
           and d.observed_day >= current_date - ($1::int || ' days')::interval
           and d.sold_qty > 0
           and not d.graded
@@ -1614,10 +1612,10 @@ async function setSales(params = {}) {
           and a.blueprint_id in (select blueprint_id from set_sold)
         group by a.blueprint_id
      )
-     select cards.card_id, cards.name, cards.set_name, cards.artist, cards.item_kind, cards.card_number,
+     select cards.card_id, cards.ct_id, cards.name, cards.set_name, cards.artist, cards.item_kind, cards.card_number,
             set_sold.sold_qty, set_sold.value_pkn, set_sold.median_pkn, set_sold.last_sale_day
        from set_sold
-       join cards on cards.card_id = set_sold.blueprint_id * 2
+       join cards on cards.ct_id = set_sold.blueprint_id
        left join asks on asks.blueprint_id = set_sold.blueprint_id
       where ${plausibleSold('set_sold.median_pkn', '$3')}`,
     values,
@@ -1701,12 +1699,12 @@ async function recentSales(params = {}) {
           and a.blueprint_id in (select blueprint_id from recent)
         group by a.blueprint_id
      )
-     select s.card_id, s.name, s.set_name, s.artist, s.item_kind, s.card_number,
+     select s.card_id, s.ct_id, s.name, s.set_name, s.artist, s.item_kind, s.card_number,
             recent.observed_day, recent.condition, recent.language, recent.reverse, recent.first_edition,
             recent.graded, recent.sold_qty, recent.median_pkn, asks.ask_pkn
        from recent
        join marketplace_search_candidates s
-         on s.card_id = recent.blueprint_id * 2 and s.item_kind = 'single'
+         on s.ct_id = recent.blueprint_id and s.item_kind = 'single'
        left join asks on asks.blueprint_id = recent.blueprint_id
       where ${plausibleSold('recent.median_pkn', '$5')}
         ${subjectConditions.length ? `and ${subjectConditions.join(' and ')}` : ''}
@@ -1809,10 +1807,10 @@ async function artistCards(params = {}) {
 
   const rows = await queryRows(
     `with art as (
-       select s.card_id, s.name, s.set_name, s.artist, s.item_kind, s.card_number,
-              s.card_id / 2 as blueprint_id
+       select s.card_id, s.ct_id, s.name, s.set_name, s.artist, s.item_kind, s.card_number,
+              s.ct_id as blueprint_id
          from marketplace_search_candidates s
-        where s.artist = $1 and s.item_kind = 'single' and s.card_id % 2 = 0
+        where s.artist = $1 and s.item_kind = 'single' and s.ct_id is not null
      ), sold as (
        select d.blueprint_id,
               sum(d.sold_qty)::int as sold_qty,
@@ -1835,7 +1833,7 @@ async function artistCards(params = {}) {
           and coalesce(a.min_price_pkn, a.median_price_pkn) > 0
         group by a.blueprint_id
      )
-     select art.card_id, art.name, art.set_name, art.artist, art.item_kind, art.card_number,
+     select art.card_id, art.ct_id, art.name, art.set_name, art.artist, art.item_kind, art.card_number,
             sold.sold_qty, sold.median_pkn, sold.last_sale_day, asks.current_ask_pkn,
             (sold.median_pkn is not null and ${plausibleSold('sold.median_pkn', '$3')}) as sold_ok
        from art
@@ -2084,7 +2082,9 @@ module.exports._test = {
   fuzzyArtistPattern,
   normalizeCondition,
   normalizeLanguage,
-  blueprintIdFromCardId,
+  blueprintIdFromCatalogRow,
+  askHistoryFromSource,
+  recentPriceSources,
   confidenceForSample,
   liquidityBands,
   normalizeRarity,

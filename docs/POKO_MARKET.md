@@ -1,6 +1,6 @@
 # POKO MARKET — Poko market intelligence API
 
-Status: **live** (Pi release `poko-market-102dc55`, 2026-09-28). One
+Status: **live**. Price-source integration updated 2026-10-02. One
 authoritative read-only market tool surface for every Poko channel (site chat
 dock + `/messages/poko`, Telegram, YouTube replies).
 
@@ -36,12 +36,12 @@ consumers must not interpret PKN as euro cents.
 | Tool | Params | Returns |
 |---|---|---|
 | `resolve_card` | `query` and/or `artist` | catalog candidates only (`status: ok \| ambiguous \| not_found`); never an invented cardId |
-| `card_quote` | `cardId` or `query`; optional `condition`, `language` | sold estimate (median/p25/p75, 90d, `cardtrader_sold_daily`), current asks (`cardtrader_blueprint_daily_analytics`), liquidity band, quick/market/patient strategies when sample supports |
+| `card_quote` | `cardId` or `query`; optional `condition`, `language`, `priceDays` (1–90, default 14) | sold estimate (median/p25/p75, 90d), current asks, dated `priceSources.cardtrader` lowest asks in PKN and `priceSources.tcgplayer` aggregate subtype quotes in USD, liquidity and strategies when sold samples support them |
 | `card_liquidity` | `cardId` or `query` | deterministic `lowDays/typicalDays/highDays` + `methodology` + confidence |
 | `collection_quote` | `artist` (+ optional `condition`, `language`, default NM/EN/1 copy) | per-artist totals with explicit `coveragePct`; market value vs acquisition cost kept separate |
 | `suggest_cards` | `subject` (+ `excludeCardId`, `limit` 1-12) | real catalog cards matching the subject with current lowest ask — powers "another cool steelix card?" |
 | `market_snapshot` | `limit` (1-50) | top `sold_qty_7d` cards |
-| `top_movers` | `subject` (pokemon/card words, optional), `days` (7-90, default 30), `direction` (`up`\|`down`), `limit` (1-10) | singles ranked by % change of daily median ask (first vs latest day in window), cards under €2 / 400 PKN excluded as bulk noise; returns explicit PKN and EUR values — powers "which Raikou card rose the most lately?"; empty window → 200 with `movers: []` + `note` |
+| `top_movers` | `subject` (pokemon/card words, optional), `days` (7-90, default 30), `direction` (`up`\|`down`), `limit` (1-10) | singles ranked by % change of daily lowest listed ask (first vs latest actual UTC refresh date), cards under €2 / 400 PKN excluded as bulk noise; returns explicit PKN and EUR values — powers "which Raikou card rose the most lately?"; empty window → 200 with `movers: []` + `note` |
 | `card_ocr` | `cardId` or `query` | approximate western leftover PP-OCRv5 chrome (`marketplace_card_ocr`): attacks/abilities/HP text; `junk`/`confidence` when noisy; missing printing → `not_found` (never invent text) |
 
 ## Product rules baked into the handler
@@ -50,6 +50,16 @@ consumers must not interpret PKN as euro cents.
   never claims a grade; casual terms map onto the CardTrader scale
   (NM/SP/MP/PL/Poor).
 - Zero sold observations → `askingPriceOnly: true`; no sold median is invented.
+- Zero sold observations do not erase price analytics: quote available dated
+  CardTrader asks and TCGplayer aggregate prices, naming source, currency,
+  subtype and observation date. `priceSources.citationUrl` links the public
+  source response. An unavailable optional history source preserves live asks.
+- CardTrader analytics retain the genuine lowest listed ask only. Their copied
+  median/average/max fields are not measured distribution statistics. The
+  observation day comes from `refreshed_at` in UTC; `dumpDay` separately names
+  the daily dump bucket. These asks are never inserted into sold history.
+- TCGplayer subtype histories use USD, with condition/language unspecified.
+  Never convert them into PKN implicitly or use them as condition-matched comps.
 - Sample size and confidence ride every estimate (`high >=10`, `medium >=4`,
   else `low`/`none`).
 - `marketplace_card_weights` older than 3 days is treated as absent (stale
@@ -68,13 +78,21 @@ serialized output).
 
 - `cardtrader_sold_daily` — sanitized sold market (all inference-sanitization
   passes already applied upstream; this module adds none).
-- `cardtrader_blueprint_daily_analytics` — latest min/median asks per blueprint.
+- `cardtrader_blueprint_daily_analytics` — dated lowest listed asks per blueprint.
+- `tcgplayer_product_links` and the private TCGCSV reader — verified exact
+  printing links and daily TCGplayer quotes, grouped by product/subtype.
 - `marketplace_card_weights` — sell-through / days-of-supply signals.
 - `marketplace_search_candidates` (+ `marketplace_cards`) — catalog resolution.
 - `marketplace_card_ocr` — western leftover PP-OCRv5 chrome (attacks/rules);
   loaded by `scripts/import-marketplace-card-ocr.py` from
   `western-full-ocr-gpu.jsonl` after `scripts/sql/093_marketplace_card_ocr.sql`.
-- Public card id = CardTrader blueprint × 2 for singles.
+- All blueprint queries resolve `marketplace_search_candidates.ct_id` from the
+  exact public `card_id`; no arithmetic fallback or blueprint-ID collision.
+
+The card desk layout and its existing sanitized CardTrader sold graph remain
+unchanged. Poko consumes these source DTOs directly. MyPokoin price-check adds
+`cardtraderListed` history alongside live asks and a separate TCGplayer USD
+column; daily asks and aggregate USD prices do not change automatic strategies.
 
 ## Hermes side
 

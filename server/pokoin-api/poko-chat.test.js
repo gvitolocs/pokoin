@@ -54,6 +54,10 @@ test('marketFirstDirective and cleanPageContext pin desk cardId', () => {
   assert.equal(ctx.cart[0].cardId, '22');
   const directive = marketFirstDirective(cards, ctx);
   assert.match(directive, /card_quote/);
+  assert.match(directive, /CardTrader lowest listed asks in PKN/);
+  assert.match(directive, /TCGplayer aggregate market quotes in USD/);
+  assert.match(directive, /asks are not sales/);
+  assert.match(directive, /observation date/);
   assert.match(directive, /card_ocr/);
   assert.match(directive, /246912/);
   assert.match(directive, /Never invent/);

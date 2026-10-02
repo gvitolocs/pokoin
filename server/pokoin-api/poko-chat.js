@@ -175,6 +175,7 @@ function marketFirstDirective(cards, pageContext) {
     'Operator directive for this turn:',
     `- The user is on the Pokoin marketplace looking at ${bits}.`,
     '- First purpose: Pokoin card analytics (sold median, asks, liquidity) via market_query multipath including card_quote (use the given cardId when present).',
+    '- card_quote.priceSources includes dated CardTrader lowest listed asks in PKN and separate TCGplayer aggregate market quotes in USD. Cite the source and observation date; asks are not sales, aggregate quotes are not condition-specific, and zero sold comps does not erase price analytics. Never convert USD to PKN implicitly.',
     '- For attacks, abilities, HP, or printed rules on this card, include card_ocr in the same multipath with the same cardId (western leftover OCR; approximate).',
     '- Never invent a different card name, set, HP, or attack. If tools fail, say you do not know yet.',
     '- Lore/flavor only after quoting site numbers, and only if it matches the same cardId.',
