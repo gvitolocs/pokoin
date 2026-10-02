@@ -1799,6 +1799,30 @@ h1, h2 { margin: 0 0 0.85rem; }
     position: relative;
     top: -20px;
   }
+
+  .promo-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding-left: 0;
+  }
+
+  .promo-wordmark-slot,
+  .promo-copy.is-logo-name .promo-wordmark-slot {
+    justify-content: center;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .promo-wordmark {
+    object-position: center;
+  }
+
+  .promo-lede {
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
 
 @keyframes promo-rise {
