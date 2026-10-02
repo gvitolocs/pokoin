@@ -34,14 +34,16 @@ test('cards without a version key stay singletons, never merge', () => {
   assert.equal(groups.length, 2);
 });
 
-test('item and trainer reprints stay separate even with one CLIP key', () => {
+test('item reprints pile only when the artwork match gave them one key', () => {
   const groups = groupArtworkRows([
-    { id: 'a', name: 'Poké Pad', version: 'v728656' },
-    { id: 'b', name: 'Poké Pad', version: 'v728656' },
-    { id: 'c', name: 'Switch', version: 'v1' },
-    { id: 'd', name: 'Switch', version: 'v1' },
+    { id: 'a', name: 'Poké Pad', version: 'v813574' },
+    { id: 'b', name: 'Poké Pad', version: 'v813574' },
+    { id: 'c', name: 'Poké Pad', version: 'v728656' },
+    { id: 'd', name: 'Pal Pad', version: 'v258700' },
+    { id: 'e', name: 'Pal Pad', version: 'v260640' },
   ]);
   assert.equal(groups.length, 4);
+  assert.deepEqual(groups[0].cards.map((card) => card.id), ['a', 'b']);
 });
 
 test('energy reprints still pile, and Pokémon reprints still pile', () => {
