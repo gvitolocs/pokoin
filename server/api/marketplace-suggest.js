@@ -6,6 +6,24 @@ const { useMeiliSearchForLanguage } = require('./_marketplace_search_engine');
 const { groupSuggestHits, capSuggestRows, suggestMeiliHitLimit } = require('./_meili_suggest');
 const { attachExpansionNationality } = require('./_expansion_nationality');
 const { attachTitleLanguageOnGroups } = require('./_catalog_title_language');
+const { catalogSqlNeeded } = require('./_suggest_catalog');
+
+function loadTiming() {
+  try {
+    return require('../pokoin-api/_request_timing');
+  } catch (_) {
+    try {
+      return require('./_request_timing');
+    } catch (_) {
+      return {
+        beginRequest() { return null; },
+        finishRequest() {},
+        timed(_bucket, fn) { return fn(); },
+      };
+    }
+  }
+}
+const { beginRequest, finishRequest, timed } = loadTiming();
 const {
   applySuggestPrintPriority,
   WESTERN_PRINTING_POOL,
@@ -73,6 +91,8 @@ function createHandler(deps = {}) {
     : marketplaceDatabaseUrl;
 
   return async function handler(req, res) {
+    const span = beginRequest('marketplace-suggest', req.method);
+    if (typeof res.on === 'function') res.on('finish', () => finishRequest(span));
     setCorsHeaders(res);
     if (req.method === 'OPTIONS') {
       return res.status(204).end();
@@ -150,10 +170,10 @@ function createHandler(deps = {}) {
         const hitLimit = hydrate || printLanguage !== 'all'
           ? 1000 : suggestMeiliHitLimit(groupLimit);
         const loaded = unpackSuggestHits(
-          await loadHits(query, searchLanguage, hitLimit, {
+          await timed('meiliMs', () => loadHits(query, searchLanguage, hitLimit, {
             matchingStrategy,
             printLanguage: 'all',
-          }),
+          })),
         );
         const globalCount = Number(loaded.estimatedTotalHits) || 0;
         try {
@@ -169,16 +189,17 @@ function createHandler(deps = {}) {
           hydrate || printLanguage !== 'all' ? 1000 : WESTERN_PRINTING_POOL,
           query,
         );
-        if (typeof attachNationality === 'function' && (deps.marketplaceQuery || databaseUrl())) {
+        const catalog = catalogSqlNeeded(groups, searchLanguage);
+        if (catalog.nationality && typeof attachNationality === 'function' && (deps.marketplaceQuery || databaseUrl())) {
           try {
-            groups = await attachNationality(groups, queryFn);
+            groups = await timed('sqlMs', () => attachNationality(groups, queryFn));
           } catch (error) {
             console.error('marketplace-suggest nationality failed', error?.message || error);
           }
         }
-        if (typeof attachTitle === 'function' && (deps.marketplaceQuery || databaseUrl())) {
+        if (catalog.title && typeof attachTitle === 'function' && (deps.marketplaceQuery || databaseUrl())) {
           try {
-            groups = await attachTitle(groups, searchLanguage, queryFn);
+            groups = await timed('sqlMs', () => attachTitle(groups, searchLanguage, queryFn));
           } catch (error) {
             console.error('marketplace-suggest title language failed', error?.message || error);
           }

@@ -2,6 +2,10 @@ const { marketplaceQuery, marketplaceWriteQuery } = require('./_marketplace_db')
 const { getFirebaseAdmin, verifyBearerToken } = require('./_firebase');
 const { requireReserveAccess } = require('./_firebase_roles');
 const { publicSellerComment } = require('./_seller_comment_filter');
+const { beginRequest, finishRequest, timed } = require('./_request_timing');
+const { commitListingWrite } = require('./_outbox');
+const { kickSync, start: startSync } = require('./_sync_engine');
+const { DECREMENT_SQL, decrementHttpStatus } = require('./_listing_inventory');
 const {
   readLiveCardTraderListings,
   _test: {
@@ -402,10 +406,32 @@ async function readLiveCardTraderListingsForCard(cardId, limit, game = 'pokemon'
 async function refreshPriceSummary(cardId) {
   const cleanCardId = cleanText(cardId, 80);
   if (!cleanCardId) return;
-  await marketplaceWriteQuery(
+  await timed('sqlMs', () => marketplaceWriteQuery(
     'select public.refresh_marketplace_blueprint_price_summary($1)',
     [cleanCardId],
-  );
+  ));
+}
+
+function listingChangedEvent(listing, extra = {}) {
+  if (!listing?.id) return null;
+  return {
+    type: 'listing.changed',
+    aggregateId: String(listing.id),
+    idempotencyKey: `listing.changed:${listing.id}:${listing.updatedAt || listing.updated_at || Date.now()}`,
+    payload: {
+      cardId: listing.cardId || listing.card_id || '',
+      game: extra.game || 'pokemon',
+      sellerUid: extra.sellerUid || listing.sellerUid || listing.seller_uid || '',
+      listingId: String(listing.id),
+      quantityAvailable: listing.quantityAvailable ?? listing.quantity_available,
+      status: listing.status || '',
+      wantsCardtrader: extra.wantsCardtrader === true,
+      destroyCardtrader: extra.destroyCardtrader === true,
+      sourceListingId: extra.sourceListingId || listing.sourceListingId || listing.source_listing_id || '',
+      listing: extra.cardtraderListing || null,
+      steps: {},
+    },
+  };
 }
 
 async function sellerProfileForUsername(username, { listingsFirst = true } = {}) {
@@ -866,8 +892,9 @@ async function createListing(req, decoded) {
     body.altered === true,
     normalizeMarketplaceGame(body.marketplaceGame || parseGameFromRequest(req)),
   ];
-  const result = await marketplaceWriteQuery(
-    `
+  const game = normalizeMarketplaceGame(body.marketplaceGame || parseGameFromRequest(req));
+  const written = await timed('sqlMs', () => commitListingWrite({
+    sql: `
       insert into public.marketplace_user_listings (
         card_id, seller_uid, seller_name, seller_country, seller_reputation_label,
         condition, language, price_pkn, quantity_available, signed, reverse,
@@ -884,12 +911,41 @@ async function createListing(req, decoded) {
       returning *
     `,
     values,
-  );
-  const [row] = await enrichListingRowsWithSellerProfiles(result.rows);
+    writeQuery: marketplaceWriteQuery,
+    event: (queryResult) => {
+      const raw = queryResult.rows[0];
+      if (!raw) return null;
+      return listingChangedEvent(raw, {
+        game,
+        sellerUid: decoded.uid,
+        wantsCardtrader: targets.cardtrader === true,
+        cardtraderListing: targets.cardtrader ? {
+          id: raw.id,
+          cardId: raw.card_id,
+          pricePkn: raw.price_pkn,
+          quantityAvailable: raw.quantity_available,
+          condition: raw.condition,
+          language: raw.language,
+          signed: raw.signed,
+          reverse: raw.reverse,
+          firstEdition: raw.first_edition,
+          foilState: raw.foil_state,
+          graded: raw.graded,
+          altered: raw.altered,
+          sellerComment: raw.seller_comment,
+        } : null,
+      });
+    },
+  }));
+  const result = written.result;
+  const [row] = await timed('firestoreMs', () => enrichListingRowsWithSellerProfiles(result.rows));
   let listing = listingRow(row || result.rows[0], { owner: true });
-  await refreshPriceSummary(listing.cardId);
+  if (written.queued) kickSync();
+  else await refreshPriceSummary(listing.cardId);
 
-  if (targets.cardtrader) {
+  if (targets.cardtrader && written.queued) {
+    cardtrader = { ok: true, pending: true };
+  } else if (targets.cardtrader) {
     const firestore = getFirebaseAdmin().firestore();
     try {
       const pushed = await pushAndLinkListing({
@@ -997,22 +1053,37 @@ async function updateListing(req, decoded, id) {
   addNonEmptyTextField(sets, values, body, 'cardImageUrl', 'card_image_url', 800);
   addNonEmptyTextField(sets, values, body, 'setName', 'set_name', 240);
   addNonEmptyTextField(sets, values, body, 'collectorNumber', 'collector_number', 80);
-  const result = await marketplaceWriteQuery(
-    `
+  const becameInactive = status === 'inactive' || status === 'sold_out'
+    || (quantityValue !== undefined && Number(quantityValue) === 0);
+  values.push(decoded.uid);
+  const sellerParam = values.length;
+  const written = await timed('sqlMs', () => commitListingWrite({
+    sql: `
       update public.marketplace_user_listings
       set ${sets.join(', ')}
-      where id = $1
+      where id = $1 and seller_uid = $${sellerParam}
       returning *
     `,
     values,
-  );
-  const [row] = await enrichListingRowsWithSellerProfiles(result.rows);
+    writeQuery: marketplaceWriteQuery,
+    event: (queryResult) => listingChangedEvent(queryResult.rows[0], {
+      sellerUid: decoded.uid,
+      destroyCardtrader: becameInactive && Boolean(existingListing.source_listing_id),
+      sourceListingId: existingListing.source_listing_id,
+    }),
+  }));
+  const result = written.result;
+  if (!result.rows[0]) {
+    const error = new Error('Listing not found for this seller.');
+    error.statusCode = 404;
+    throw error;
+  }
+  const [row] = await timed('firestoreMs', () => enrichListingRowsWithSellerProfiles(result.rows));
   const listing = listingRow(row || result.rows[0], { owner: true });
-  await refreshPriceSummary(listing.cardId);
+  if (written.queued) kickSync();
+  else await refreshPriceSummary(listing.cardId);
 
-  const becameInactive = status === 'inactive' || status === 'sold_out'
-    || (quantityValue !== undefined && Number(quantityValue) === 0);
-  if (becameInactive && existingListing.source_listing_id) {
+  if (!written.queued && becameInactive && existingListing.source_listing_id) {
     try {
       const firestore = getFirebaseAdmin().firestore();
       await destroyLinkedCardTraderProduct({
@@ -1032,31 +1103,30 @@ async function updateListing(req, decoded, id) {
   return listing;
 }
 
-async function decrementListing(req, id) {
+async function decrementListing(req, id, sellerUid) {
   const quantity = Number(req.body?.quantity || 0);
   if (!Number.isSafeInteger(quantity) || quantity <= 0) {
-    return null;
+    return { outcome: 'invalid', listing: null, queued: false };
   }
-  const result = await marketplaceWriteQuery(
-    `
-      update public.marketplace_user_listings
-      set
-        quantity_available = greatest(quantity_available - $2, 0),
-        status = case when greatest(quantity_available - $2, 0) = 0 then 'sold_out' else status end,
-        updated_at = now()
-      where id = $1
-      returning *
-    `,
-    [id, quantity],
-  );
-  const enrichedRows = result.rows[0]
-    ? await enrichListingRowsWithSellerProfiles(result.rows)
-    : [];
-  const listing = enrichedRows[0] ? listingRow(enrichedRows[0]) : null;
-  if (listing) {
-    await refreshPriceSummary(listing.cardId);
+  const written = await timed('sqlMs', () => commitListingWrite({
+    sql: DECREMENT_SQL,
+    values: [id, sellerUid, quantity],
+    writeQuery: marketplaceWriteQuery,
+    event: (queryResult) => {
+      const outcome = queryResult.rows[0];
+      if (outcome?.outcome !== 'updated' || !outcome.listing) return null;
+      return listingChangedEvent(outcome.listing, { sellerUid });
+    },
+  }));
+  const outcome = written.result.rows[0] || { outcome: 'missing', listing: null };
+  if (outcome.outcome !== 'updated' || !outcome.listing) {
+    return { outcome: outcome.outcome || 'missing', listing: null, queued: written.queued };
   }
-  return listing;
+  const enrichedRows = await timed('firestoreMs', () => enrichListingRowsWithSellerProfiles([outcome.listing]));
+  const listing = listingRow(enrichedRows[0] || outcome.listing, { owner: true });
+  if (written.queued) kickSync();
+  else await refreshPriceSummary(listing.cardId);
+  return { outcome: 'updated', listing, queued: written.queued };
 }
 
 async function readPublicOffersForCard(cardId, limit = 40, options = {}) {
@@ -1070,6 +1140,7 @@ async function readPublicOffersForCard(cardId, limit = 40, options = {}) {
 }
 
 module.exports = async function handler(req, res) {
+  const span = beginRequest('marketplace-listings', req.method);
   try {
     const marketplaceGame = normalizeMarketplaceGame(parseGameFromRequest(req));
     if (req.method === 'GET') {
@@ -1091,8 +1162,18 @@ module.exports = async function handler(req, res) {
     const action = cleanText(url.searchParams.get('action'), 40);
 
     if (req.method === 'POST' && action === 'decrement' && id) {
-      const listing = await decrementListing(req, id);
-      return res.status(200).json({ listing });
+      const outcome = await decrementListing(req, id, decoded.uid);
+      const statusCode = decrementHttpStatus(outcome.outcome);
+      if (statusCode === 400) {
+        return res.status(400).json({ error: 'Quantity must be a positive integer.' });
+      }
+      if (statusCode === 404) {
+        return res.status(404).json({ error: 'Listing not found for this seller.' });
+      }
+      if (statusCode === 409) {
+        return res.status(409).json({ error: 'Not enough quantity.', code: 'insufficient_quantity' });
+      }
+      return res.status(200).json({ listing: outcome.listing });
     }
     if (req.method === 'POST') {
       const created = await createListing(req, decoded);
@@ -1115,8 +1196,12 @@ module.exports = async function handler(req, res) {
     return res.status(error.statusCode || 500).json({
       error: error.message || 'Marketplace listings failed.',
     });
+  } finally {
+    finishRequest(span);
   }
 };
+
+if (!process.env.NODE_TEST_CONTEXT) startSync();
 
 module.exports.readPublicOffersForCard = readPublicOffersForCard;
 module.exports.readListings = readListings;
