@@ -229,7 +229,8 @@ export function parseListingLocation(raw) {
   }
   const box = text.slice(0, sepIndex).trim();
   const tail = text.slice(sepIndex + 1);
-  const numbers = tail.split(/[·•–—-]/).map((part) => parseInt(part, 10)).filter((n) => Number.isFinite(n) && n > 0);
+  // Dashes delimit a range inside one slot, not a new stack/position field.
+  const numbers = tail.split(/[·•]/).map((part) => parseInt(part, 10)).filter((n) => Number.isFinite(n) && n > 0);
   const stack = numbers.length ? numbers[0] : null;
   const position = numbers.length > 1 ? numbers[1] : null;
   return { box, stack, position, structured: stack != null };
@@ -249,7 +250,9 @@ export function inventoryRowsForLocation(rows, location) {
 }
 
 /**
- * Stacks for one box, ordered by stack number asc (unnumbered rows last),
+ * Explicit divider stacks for one box, ordered by stack number asc,
+ * followed by flat box positions. A two-part location is a flat position;
+ * only a location carrying an intra-stack position proves a divider exists.
  * each stack's postings ordered by position asc, then date, then id.
  */
 export function groupBoxStacks(rows, box) {
@@ -259,9 +262,12 @@ export function groupBoxStacks(rows, box) {
     .filter((entry) => entry.parsed.box && entry.parsed.box === wanted);
   const stacks = new Map();
   for (const { row, parsed } of list) {
-    const stackNo = parsed.stack ?? 0; // 0 = box-level, no divider number
+    const stackNo = parsed.position == null ? 0 : (parsed.stack ?? 0);
     const stack = stacks.get(stackNo) || { stack: stackNo, postings: [] };
-    stack.postings.push({ ...row, slotPosition: parsed.position });
+    const fields = String(row?.location || '').trim().split(/[·•]/);
+    const positionText = fields[parsed.position == null ? 1 : 2] || '';
+    stack.postings.push({ ...row, slotPosition: parsed.position ?? parsed.stack,
+      slotPositionText: /^\d+(?:[-–—]\d+)?$/.test(positionText) ? positionText : '' });
     stacks.set(stackNo, stack);
   }
   const order = (a, b) => {

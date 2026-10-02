@@ -65,6 +65,22 @@ model as an expansion hint among artwork siblings, preserve every version option
 and log crop family, candidates, confidence and rejection reasons. No production
 worker is changed by running this training script.
 
+The integration under `server/scan/worker` uses the chosen Milo orientation and
+only runs the symbol model after a confident artwork match whose catalog group
+contains multiple parent expansions. A 69,706-card catalog snapshot maps foil
+subsets to their parent set. A match must be ≥0.95 confident with ≥0.20 margin
+and belong to that artwork's expansion candidates. Low-detail, weak, ambiguous,
+unsupported and conflicting predictions preserve the artwork ranking. All
+printing options stay available and still require seller confirmation.
+
+`scripts/deploy-expansion-symbol-worker.sh` verifies artifact checksums and real
+ROCm HTTP inference before switching a systemd drop-in to an immutable release.
+It preserves the existing BattleScan working tree and restores the prior worker
+if health verification fails. GPU process teardown currently aborts in the
+unchanged deployed worker as well as the new worker; HTTP smoke tests report that
+existing shutdown issue separately from inference health. Runtime errors reject
+the expansion hint and keep recognition running.
+
 ## First completed run — 2026-10-01
 
 On nezopt's gfx1100, torch 2.9.1+rocm6.4 / HIP 6.4, 35 epochs completed in
