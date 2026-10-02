@@ -24,6 +24,17 @@ test('merge listing rows prepends the created ask and dedupes by id', () => {
   );
 });
 
+test('optimistic replace and rollback drop the pending ask', () => {
+  const pending = { id: 'pending-1', pending: true, pricePkn: 10 };
+  const saved = { id: '99', pricePkn: 12, replaceId: 'pending-1' };
+  assert.deepEqual(mergeListingRows([{ id: 'old' }], pending), [pending, { id: 'old' }]);
+  assert.deepEqual(mergeListingRows([pending, { id: 'old' }], saved), [saved, { id: 'old' }]);
+  assert.deepEqual(
+    mergeListingRows([pending, { id: 'old' }], { remove: true, id: 'pending-1' }),
+    [{ id: 'old' }],
+  );
+});
+
 test('shop payload keeps existing offers when POST returns a listing', () => {
   const next = mergeCreatedListing(
     { card: { id: '713832' }, offers: [] },

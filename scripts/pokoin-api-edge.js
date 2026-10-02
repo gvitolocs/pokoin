@@ -96,7 +96,8 @@ function sendSitemap(req, res, name) {
 }
 
 /** Where one API request goes. Pure so it can be tested. */
-function chooseApiOrigin({ method, inFlight, localMax, overflowHealthy, overflowOrigin }) {
+function chooseApiOrigin({ method, pathname, inFlight, localMax, overflowHealthy, overflowOrigin }) {
+  if (pathname === '/api/marketplace-live') return 'local';
   const idempotent = method === 'GET' || method === 'HEAD';
   if (overflowOrigin && overflowHealthy && idempotent && inFlight >= localMax) {
     return 'overflow';
@@ -125,6 +126,7 @@ function cachePolicy(status, headers, maxTtl = CACHE_MAX_TTL) {
 /** Key for a GET anyone could have made; null when the request is personal. */
 function cacheKey(req, pathname, search) {
   if (req.method !== 'GET') return null;
+  if (pathname === '/api/marketplace-live') return null;
   if (req.headers.authorization || req.headers.cookie) return null;
   return [pathname + search, req.headers['x-pokoin-game'] || '', req.headers['x-pokoin-host'] || ''].join('\n');
 }
@@ -236,9 +238,10 @@ function forward(req, res, origin, pathname, search, { onDone, onConnectError, b
   else req.pipe(upstream);
 }
 
-function pickRoute(req) {
+function pickRoute(req, pathname) {
   return chooseApiOrigin({
     method: req.method,
+    pathname,
     inFlight: state.inFlight,
     localMax: LOCAL_MAX,
     overflowHealthy: state.overflowHealthy,
@@ -272,7 +275,7 @@ function forwardApi(req, res, pathname, search) {
       onConnectError: retry ? null : () => { state.overflowHealthy = false; toLocal(true); },
     });
   };
-  if (pickRoute(req) === 'overflow') toOverflow(false);
+  if (pickRoute(req, pathname) === 'overflow') toOverflow(false);
   else toLocal(false);
 }
 
@@ -351,7 +354,7 @@ function fetchEntry(req, pathname, search, leaderRes) {
       });
       upstream.end();
     };
-    attempt(pickRoute(req), false);
+    attempt(pickRoute(req, pathname), false);
   });
 }
 

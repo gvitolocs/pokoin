@@ -115,8 +115,16 @@ export function mergeListingRows(rows, created) {
     return [...(rows || [])];
   }
   const next = rows || [];
+  if (created.remove) {
+    const drop = String(created.id || '');
+    return next.filter((row) => String(row.id) !== drop);
+  }
+  const replaceId = created.replaceId ? String(created.replaceId) : '';
   if (created.id) {
-    return [created, ...next.filter((row) => String(row.id) !== String(created.id))];
+    return [created, ...next.filter((row) => {
+      const id = String(row.id);
+      return id !== String(created.id) && id !== replaceId;
+    })];
   }
   return [created, ...next];
 }

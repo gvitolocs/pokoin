@@ -1,42 +1,21 @@
 'use strict';
 
 /**
- * Tiny fail-open Valkey client for disposable shared state: cache snapshots,
- * best-effort rate-limit counters, and non-authoritative job locks.
+ * One persistent Valkey connection for disposable cache state.
+ * Every helper resolves to a miss/empty value on timeout, protocol error,
+ * or a down server. Callers must not store stock, balances, or orders here.
  *
- * Contract (do not break):
- *   - No helper ever rejects. Any transport error, timeout, non-integer reply,
- *     or parse failure resolves to the "nothing" value for that helper
- *     (null / false / 0). A down or slow Valkey must degrade reads to
- *     recompute and coordination to "lock not held", never fail a request.
- *   - Nothing stored here is authoritative. Quantities, orders, balances,
- *     checkout holds, webhook claims, and scanner security state live in
- *     Postgres or Firestore. If a key encodes correctness, it is in the
- *     wrong place.
- *   - One TCP connection per command with a short timeout: the client talks
- *     to localhost (Pi) or the in-cluster service (k3s overflow), so 150 ms
- *     is ~2 orders of magnitude above a healthy round trip and caps the
- *     worst case a sick Valkey can add to a request. Override with
- *     VALKEY_TIMEOUT_MS if a topology ever needs more.
- *
- * Key rules: every key carries a TTL except owner-controlled locks; keys
- * never contain raw tokens, secrets, or unbounded user-controlled text
- * (hash identities before keying them). `configure()` exists for tests only.
+ * Commands written while a reply is outstanding are pipelined on the same
+ * socket. A timeout destroys the socket so the reply queue cannot desync.
  */
 
-const net = require('net');
+const net = require('node:net');
 
 let HOST = process.env.VALKEY_HOST || '127.0.0.1';
 let PORT = Number(process.env.VALKEY_PORT || 6379);
 let TIMEOUT_MS = Number(process.env.VALKEY_TIMEOUT_MS || 150);
+const MAX_CONNECT_ATTEMPTS = 2;
 
-function configure(options = {}) {
-  if (options.host) HOST = String(options.host);
-  if (options.port) PORT = Number(options.port);
-  if (options.timeoutMs) TIMEOUT_MS = Number(options.timeoutMs);
-}
-
-// Coarse counters for tests and health introspection. Never per-request logged.
 const stats = {
   getHit: 0,
   getMiss: 0,
@@ -50,93 +29,191 @@ const stats = {
   lockDenied: 0,
   lockReleased: 0,
   lockError: 0,
+  connects: 0,
+  timeouts: 0,
 };
 
 let lastErrorLogAt = 0;
 const ERROR_LOG_INTERVAL_MS = 30_000;
 
-/** Rate-limit error noise: one warn per interval, no payloads, no keys with secrets. */
 function noteError(operation, error) {
   stats[operation] = (stats[operation] || 0) + 1;
-  if (operation.endsWith('Error')) {
-    const now = Date.now();
-    if (now - lastErrorLogAt >= ERROR_LOG_INTERVAL_MS) {
-      lastErrorLogAt = now;
-      console.warn('valkey unavailable', { operation, message: String(error?.message || error || 'unknown') });
-    }
-  }
+  if (!String(operation).endsWith('Error') && operation !== 'timeouts') return;
+  const now = Date.now();
+  if (now - lastErrorLogAt < ERROR_LOG_INTERVAL_MS) return;
+  lastErrorLogAt = now;
+  console.warn(JSON.stringify({
+    msg: 'valkey_unavailable',
+    operation,
+    message: String(error?.message || error || 'unknown'),
+  }));
+}
+
+function configure(options = {}) {
+  if (options.host) HOST = String(options.host);
+  if (options.port) PORT = Number(options.port);
+  if (options.timeoutMs) TIMEOUT_MS = Number(options.timeoutMs);
+  resetConnection();
 }
 
 function encode(parts) {
   let out = `*${parts.length}\r\n`;
   for (const part of parts) {
-    const text = String(part);
-    out += `$${Buffer.byteLength(text)}\r\n${text}\r\n`;
+    const text = Buffer.from(String(part));
+    out += `$${text.length}\r\n${text.toString('utf8')}\r\n`;
   }
   return out;
 }
 
-function parseReply(buf) {
+function parseOne(buf) {
+  if (!buf.length) return null;
   const firstNl = buf.indexOf('\r\n');
-  if (firstNl < 0) {
-    return null;
-  }
+  if (firstNl < 0) return null;
   const head = buf.slice(0, firstNl).toString('utf8');
   const kind = head[0];
   if (kind === '+' || kind === '-') {
-    return { value: kind === '+' ? head.slice(1) : null, used: firstNl + 2 };
+    return { value: kind === '+' ? head.slice(1) : null, used: firstNl + 2, error: kind === '-' };
   }
   if (kind === ':') {
     return { value: Number(head.slice(1)), used: firstNl + 2 };
   }
   if (kind === '$') {
     const size = Number(head.slice(1));
-    if (size < 0) {
-      return { value: null, used: firstNl + 2 };
-    }
+    if (size < 0) return { value: null, used: firstNl + 2 };
     const start = firstNl + 2;
     const end = start + size + 2;
-    if (buf.length < end) {
-      return null;
-    }
+    if (buf.length < end) return null;
     return { value: buf.slice(start, start + size).toString('utf8'), used: end };
   }
-  return { value: null, used: buf.length };
+  if (kind === '*') {
+    const count = Number(head.slice(1));
+    if (count < 0) return { value: null, used: firstNl + 2 };
+    let offset = firstNl + 2;
+    const values = [];
+    for (let i = 0; i < count; i += 1) {
+      const parsed = parseOne(buf.slice(offset));
+      if (!parsed) return null;
+      values.push(parsed.value);
+      offset += parsed.used;
+    }
+    return { value: values, used: offset };
+  }
+  return { value: null, used: buf.length, error: true };
+}
+
+let socket = null;
+let buffer = Buffer.alloc(0);
+let queue = [];
+let connecting = null;
+let connectAttempts = 0;
+
+function failAll(error) {
+  const pending = queue;
+  queue = [];
+  buffer = Buffer.alloc(0);
+  for (const item of pending) {
+    clearTimeout(item.timer);
+    item.resolve(null);
+  }
+  if (error) noteError('getError', error);
+}
+
+function resetConnection() {
+  connectAttempts = 0;
+  if (socket) {
+    const dying = socket;
+    socket = null;
+    dying.destroy();
+  }
+  failAll(null);
+}
+
+function onData(chunk) {
+  buffer = buffer.length ? Buffer.concat([buffer, chunk]) : chunk;
+  while (queue.length) {
+    const parsed = parseOne(buffer);
+    if (!parsed) return;
+    buffer = buffer.slice(parsed.used);
+    const item = queue.shift();
+    clearTimeout(item.timer);
+    if (parsed.error) noteError('getError', parsed.value);
+    item.resolve(parsed.error ? null : parsed.value);
+  }
+}
+
+function ensureConnected() {
+  if (socket && !socket.destroyed) return Promise.resolve(socket);
+  if (connecting) return connecting;
+  connecting = new Promise((resolve) => {
+    connectAttempts += 1;
+    const next = net.connect({ host: HOST, port: PORT });
+    const fail = (error) => {
+      if (socket === next) socket = null;
+      next.destroy();
+      connecting = null;
+      noteError('getError', error);
+      if (connectAttempts < MAX_CONNECT_ATTEMPTS) {
+        resolve(ensureConnected());
+        return;
+      }
+      connectAttempts = 0;
+      failAll(error);
+      resolve(null);
+    };
+    next.setTimeout(TIMEOUT_MS, () => fail(new Error('valkey connect timeout')));
+    next.once('error', fail);
+    next.once('connect', () => {
+      stats.connects += 1;
+      connectAttempts = 0;
+      socket = next;
+      connecting = null;
+      next.setTimeout(0);
+      next.on('data', onData);
+      next.on('error', (error) => {
+        if (socket === next) socket = null;
+        failAll(error);
+      });
+      next.on('close', () => {
+        if (socket === next) socket = null;
+        failAll(null);
+      });
+      resolve(next);
+    });
+  });
+  return connecting;
 }
 
 function command(parts) {
   return new Promise((resolve) => {
-    const sock = net.connect({ host: HOST, port: PORT });
-    const chunks = [];
-    const timer = setTimeout(() => {
-      sock.destroy();
-      resolve(null);
-    }, TIMEOUT_MS);
-    function finish(value) {
-      clearTimeout(timer);
-      sock.end();
-      resolve(value);
-    }
-    sock.on('error', (error) => {
-      noteError('getError', error);
-      finish(null);
-    });
-    sock.on('data', (chunk) => {
-      chunks.push(chunk);
-      const parsed = parseReply(Buffer.concat(chunks));
-      if (parsed) {
-        finish(parsed.value);
+    const item = {
+      resolve,
+      timer: setTimeout(() => {
+        const index = queue.indexOf(item);
+        if (index >= 0) queue.splice(index, 1);
+        stats.timeouts += 1;
+        noteError('timeouts', new Error('valkey command timeout'));
+        item.resolve(null);
+        if (socket) socket.destroy();
+        else failAll(new Error('valkey command timeout'));
+      }, TIMEOUT_MS),
+    };
+    queue.push(item);
+    ensureConnected().then((sock) => {
+      if (!sock || item.resolve == null) return;
+      if (!queue.includes(item)) return;
+      try {
+        sock.write(encode(parts));
+      } catch (error) {
+        noteError('getError', error);
+        if (socket) socket.destroy();
       }
-    });
-    sock.on('connect', () => {
-      sock.write(encode(parts));
     });
   });
 }
 
 async function getJson(key) {
   const raw = await command(['GET', key]);
-  if (!raw) {
+  if (raw == null || raw === '') {
     stats.getMiss += 1;
     return null;
   }
@@ -151,9 +228,7 @@ async function getJson(key) {
 }
 
 async function setJson(key, value, ttlSeconds) {
-  if (value == null || !ttlSeconds) {
-    return false;
-  }
+  if (value == null || !ttlSeconds) return false;
   const reply = await command(['SETEX', key, String(ttlSeconds), JSON.stringify(value)]);
   if (reply === 'OK') {
     stats.setOk += 1;
@@ -172,12 +247,6 @@ async function del(key) {
   return 0;
 }
 
-/**
- * Atomic fixed-window counter: INCR the key and set its TTL on the first
- * increment inside one server-side script, so a crash between INCR and
- * EXPIRE can never leave an immortal key. Returns the new count, or null
- * when Valkey is unavailable (callers fall back to their local limiter).
- */
 const INCR_WINDOW_SCRIPT = `
 local count = redis.call('INCR', KEYS[1])
 if count == 1 then
@@ -187,34 +256,26 @@ return count
 `;
 
 async function incrWindow(key, windowSeconds) {
-  const count = await command(['EVAL', INCR_WINDOW_SCRIPT, '1', key, String(Math.max(1, Math.trunc(windowSeconds)))]);
-  if (Number.isFinite(count)) {
-    return count;
-  }
+  const count = await command([
+    'EVAL', INCR_WINDOW_SCRIPT, '1', key, String(Math.max(1, Math.trunc(windowSeconds))),
+  ]);
+  if (Number.isFinite(count)) return count;
   noteError('incrError', count);
   return null;
 }
 
-/**
- * Non-authoritative distributed locks. SET key owner NX EX ttl semantics;
- * release/refresh compare the owner token server-side so an expired lock
- * that was taken by someone else is never released or extended by the
- * previous owner. These locks protect efficiency only.
- */
 const ACQUIRE_LOCK_SCRIPT = `
 if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2]) then
   return 1
 end
 return 0
 `;
-
 const RELEASE_LOCK_SCRIPT = `
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   return redis.call('DEL', KEYS[1])
 end
 return 0
 `;
-
 const REFRESH_LOCK_SCRIPT = `
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   return redis.call('EXPIRE', KEYS[1], ARGV[2])
@@ -244,9 +305,7 @@ async function releaseLock(key, ownerToken) {
     stats.lockReleased += 1;
     return true;
   }
-  if (released === 0) {
-    return false;
-  }
+  if (released === 0) return false;
   noteError('lockError', released);
   return false;
 }
@@ -255,12 +314,8 @@ async function refreshLock(key, ownerToken, ttlSeconds) {
   const refreshed = await command([
     'EVAL', REFRESH_LOCK_SCRIPT, '1', key, String(ownerToken), String(Math.max(1, Math.trunc(ttlSeconds))),
   ]);
-  if (refreshed === 1) {
-    return true;
-  }
-  if (refreshed === 0) {
-    return false;
-  }
+  if (refreshed === 1) return true;
+  if (refreshed === 0) return false;
   noteError('lockError', refreshed);
   return false;
 }
@@ -285,4 +340,5 @@ module.exports = {
   configure,
   valkeyStats,
   resetStats,
+  _test: { encode, parseOne, resetConnection },
 };

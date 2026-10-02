@@ -49,6 +49,7 @@ import {
   readWatchlistIds,
   vintedHref,
 } from '../api.js';
+import { applyListingLive, subscribeListingLive } from '../listing-live.js';
 import { suggestPriceFromSlices } from '../scan-pricing.js';
 import { getChatDock } from '../chat-dock-store.js';
 import { bundleReference, cardsReference, preloadDragImage, referenceForPeer, writeListingDrag } from '../chat-listing.js';
@@ -949,11 +950,31 @@ function ListingForm({
     setSaving(true);
     setError('');
     setDone('');
+    let pendingId = '';
     try {
       const token = await getBearer();
       if (!token) {
         navigate(authFrom(fromPath));
         return;
+      }
+      pendingId = isEditing ? '' : `pending-${Date.now()}`;
+      if (pendingId) {
+        onListed?.({
+          id: pendingId,
+          pending: true,
+          cardId: publicCardId(card),
+          sellerUid: user?.uid || '',
+          sellerName,
+          sellerCountry: shipFromCountry,
+          pricePkn: amount,
+          quantityAvailable: quantity,
+          condition,
+          language,
+          status: 'active',
+          reverse: foil === 'reverse',
+          firstEdition: chips.firstEd,
+          graded: chips.graded,
+        });
       }
       const fields = {
         condition,
@@ -1015,9 +1036,12 @@ function ListingForm({
         listingRow.photoUrls = attached?.photoUrls || photos;
       }
       if (listingRow?.id) {
-        onListed?.(listingRow);
+        onListed?.(pendingId ? { ...listingRow, replaceId: pendingId } : listingRow);
+      } else if (pendingId) {
+        onListed?.({ remove: true, id: pendingId });
       }
     } catch (err) {
+      if (pendingId) onListed?.({ remove: true, id: pendingId });
       if (err.status === 401) {
         navigate(authFrom(fromPath));
         return;
@@ -1621,6 +1645,17 @@ export default function Card() {
   const zoomRef = useRef(null);
   const copiedTimer = useRef(0);
   const listingsSeq = useRef(0);
+
+  useEffect(() => {
+    if (!cardId) return undefined;
+    return subscribeListingLive(cardId, (event) => {
+      setPayload((current) => {
+        if (!current?.offers?.length) return current;
+        const offers = applyListingLive(current.offers, event);
+        return offers === current.offers ? current : { ...current, offers };
+      });
+    });
+  }, [cardId]);
 
   useLayoutEffect(() => {
     if (String(rawCardId) !== String(cardId)) {

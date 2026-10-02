@@ -16,6 +16,8 @@ test('only saturated GET/HEAD API calls overflow, and only to a healthy nezopt',
   assert.equal(chooseApiOrigin({ ...base, method: 'GET', inFlight: 23 }), 'local');
   assert.equal(chooseApiOrigin({ ...base, method: 'GET', overflowHealthy: false }), 'local');
   assert.equal(chooseApiOrigin({ ...base, method: 'GET', overflowOrigin: '' }), 'local');
+  assert.equal(chooseApiOrigin({ ...base, method: 'GET', pathname: '/api/marketplace-live' }), 'local');
+  assert.equal(cacheKey({ method: 'GET', headers: {} }, '/api/marketplace-live', '?cardId=1'), null);
   assert.equal(isApiPath('/api/marketplace-suggest'), true);
   assert.equal(isApiPath('/some-image.webp'), false);
 });

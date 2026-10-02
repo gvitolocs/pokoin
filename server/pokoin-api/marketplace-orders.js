@@ -1,3 +1,4 @@
+const { beginRequest, finishRequest, timed } = require('./_request_timing');
 const { getFirebaseAdmin, verifyBearerToken } = require('./_firebase');
 const { marketplaceQuery, marketplaceWriteQuery } = require('./_marketplace_db');
 const { sendSellerSaleNotificationsForPaidOrder } = require('./_marketplace_sale_notifications');
@@ -763,7 +764,7 @@ async function createPaidOrder({ admin, firestore, decoded, body }) {
 
   let orderData = null;
   try {
-    await firestore.runTransaction(async (transaction) => {
+    await timed('firestoreMs', () => firestore.runTransaction(async (transaction) => {
       const buyerBalance = await transaction.get(buyerBalanceRef);
       const available = numberValue(buyerBalance.data()?.availablePkn);
       if (available < totalPkn) {
@@ -846,7 +847,7 @@ async function createPaidOrder({ admin, firestore, decoded, body }) {
           );
         }
       }
-    });
+    }));
   } catch (error) {
     for (const item of items) {
       if (isCardTraderLiveItem(item)) continue;
@@ -1381,6 +1382,7 @@ async function sellerSoldHistory({ firestore, decoded, limit = 200 }) {
 }
 
 module.exports = async function handler(req, res) {
+  const span = beginRequest('marketplace-orders', req.method);
   try {
     const decoded = await verifyBearerToken(req);
     const admin = getFirebaseAdmin();
@@ -1485,6 +1487,8 @@ module.exports = async function handler(req, res) {
       error: error.message || 'Marketplace order failed.',
       ...(error.code ? { code: error.code } : {}),
     });
+  } finally {
+    finishRequest(span);
   }
 };
 
