@@ -66,6 +66,15 @@ const GAMES = {
   weiss_schwarz: {
     id: 'weiss_schwarz', apiGame: 'weiss_schwarz', slug: 'weiss-schwarz', name: 'Weiss Schwarz', brand: 'Pokoin', title: 'Weiss Schwarz marketplace', ...SATELLITE,
   },
+  force_of_will: {
+    id: 'force_of_will', apiGame: 'force_of_will', slug: 'force-of-will', name: 'Force of Will', brand: 'Pokoin', title: 'Force of Will marketplace', ...SATELLITE,
+  },
+  world_of_warcraft: {
+    id: 'world_of_warcraft', apiGame: 'world_of_warcraft', slug: 'world-of-warcraft', name: 'World of Warcraft TCG', brand: 'Pokoin', title: 'World of Warcraft TCG marketplace', ...SATELLITE,
+  },
+  battle_spirits_saga: {
+    id: 'battle_spirits_saga', apiGame: 'battle_spirits_saga', slug: 'battle-spirits-saga', name: 'Battle Spirits Saga', brand: 'Pokoin', title: 'Battle Spirits Saga marketplace', ...SATELLITE,
+  },
   final_fantasy: {
     id: 'final_fantasy', apiGame: 'final_fantasy', slug: 'final-fantasy', name: 'Final Fantasy TCG', brand: 'Pokoin', title: 'Final Fantasy TCG marketplace', ...SATELLITE,
   },

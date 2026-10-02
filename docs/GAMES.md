@@ -27,6 +27,13 @@ API calls append `?game=` and send `x-pokoin-game`.
 | `pokoin.com/cyberpunk` | `cyberpunk` | `pokoin_cyberpunk` | `ct_id * 2` |
 | `pokoin.com/final-fantasy` | `final_fantasy` | `pokoin_final_fantasy` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
 | `pokoin.com/star-wars-destiny` | `star_wars_destiny` | `pokoin_star_wars_destiny` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
+| `pokoin.com/weiss-schwarz` | `weiss_schwarz` | `pokoin_weiss_schwarz` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
+| `pokoin.com/force-of-will` | `force_of_will` | `pokoin_force_of_will` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
+| `pokoin.com/world-of-warcraft` | `world_of_warcraft` | `pokoin_world_of_warcraft` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
+| `pokoin.com/battle-spirits-saga` | `battle_spirits_saga` | `pokoin_battle_spirits_saga` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
+| `pokoin.com/dragon-born` | `dragon_born` | `pokoin_dragon_born` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
+| `pokoin.com/my-little-pony` | `my_little_pony` | `pokoin_my_little_pony` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
+| `pokoin.com/the-spoils` | `the_spoils` | `pokoin_the_spoils` | `id * 2` ([Cardmarket-only](CARDMARKET_GAMES.md)) |
 
 `onepiece.pokoin.com` and `riftbound.pokoin.com` redirect to
 `pokoin.com/one-piece` and `pokoin.com/riftbound`. Do not add new game subdomains.

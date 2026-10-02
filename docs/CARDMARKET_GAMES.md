@@ -10,9 +10,9 @@ CDN prefix `<slug>/` under `/srv/pokoin/card-images/objects/` on the Pi.
 | Final Fantasy TCG | `final_fantasy` | `/final-fantasy` | Square Enix card browser JSON (`fftcg.square-enix-games.com/en/get-cards`) | 4,260 | yes |
 | Star Wars Destiny | `star_wars_destiny` | `/star-wars-destiny` | SWD Renewed Hope public API (`db.swdrenewedhope.com/api/public/cards/`) | 2,883 | yes |
 | Weiss Schwarz | `weiss_schwarz` | `/weiss-schwarz` | `CCondeluci/WeissSchwarz-ENG-DB` + `-JP-DB` (official ws-tcg.com art, EncoreDecks for gaps) | 65,982 EN+JP with images (725 without art hidden) | yes |
-| Force of Will | `force_of_will` | `/force-of-will` | FoWDB (scrape) | — | pending |
-| World of Warcraft TCG | `world_of_warcraft` | `/world-of-warcraft` | WoW TCG Reborn scans | — | pending |
-| Battle Spirits Saga | `battle_spirits_saga` | `/battle-spirits-saga` | official card database | — | pending |
+| Force of Will | `force_of_will` | `/force-of-will` | FoWDB set listings (480×670) | 4,213 | yes |
+| World of Warcraft TCG | `world_of_warcraft` | `/world-of-warcraft` | wowcards.info edition tables + scans (312×440; WoW TCG Reborn 750×1050 packs are Google Drive only) | 7,784 | yes |
+| Battle Spirits Saga | `battle_spirits_saga` | `/battle-spirits-saga` | official battlespirits-saga.com database (600×838) | 1,089 | yes |
 | Dragoborne | `dragon_born` | `/dragon-born` | dragoborne.fandom.com MediaWiki API (480×670, needs the wiki Referer) | 476 | yes |
 | My Little Pony CCG | `my_little_pony` | `/my-little-pony` | data.mlpmerch.com CCG database (full-size originals) | 2,172 | yes |
 | The Spoils | `the_spoils` | `/the-spoils` | the-spoils-cardgame.vercel.app (Cloudinary art 500×700) | 2,101 | yes |
