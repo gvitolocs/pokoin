@@ -332,11 +332,11 @@ async function rowsForCards({
         withTotal: withTotal === true,
       },
     );
-    // rowsForSearchTerm (CardVault runtime) can answer { rows, total } even
-    // without withTotal; filtering that object 500'd every Singles search.
-    const payloadRows = loaded && !Array.isArray(loaded)
-      ? (Array.isArray(loaded.rows) ? loaded.rows : [])
-      : (loaded || []);
+    // rowsForSearchTerm (CardVault runtime) answers { rows, total } with
+    // `rows` still a Promise (unawaited theme-pack attach). Filtering that
+    // 500'd, then painted "No matches", for every Singles search.
+    const rawRows = loaded && !Array.isArray(loaded) ? await loaded.rows : loaded;
+    const payloadRows = Array.isArray(rawRows) ? rawRows : [];
     const meiliTotal = withTotal === true && loaded && !Array.isArray(loaded)
       ? loaded.total
       : null;
