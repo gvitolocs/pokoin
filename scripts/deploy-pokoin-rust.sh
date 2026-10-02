@@ -26,7 +26,8 @@ scp -q "$REPO/deploy/systemd/pokoin-rust-api.service" "$PI:/tmp/pokoin-rust-api.
 scp -q "$REPO/deploy/pokoin-rust-routes.json" "$PI:/tmp/pokoin-rust-routes.json"
 
 ssh "$PI" "set -euo pipefail
-install -o nes -g nes -m 0755 /srv/pokoin/rust/releases/pokoin-api-$SHORT-aarch64 /srv/pokoin/rust/releases/pokoin-api-$SHORT-aarch64
+chown nes:nes /srv/pokoin/rust/releases/pokoin-api-$SHORT-aarch64
+chmod 0755 /srv/pokoin/rust/releases/pokoin-api-$SHORT-aarch64
 if [[ -L /srv/pokoin/rust/current ]]; then cp -a /srv/pokoin/rust/current /srv/pokoin/rust/previous; fi
 ln -sfn /srv/pokoin/rust/releases/pokoin-api-$SHORT-aarch64 /srv/pokoin/rust/current
 python3 - <<'PY'

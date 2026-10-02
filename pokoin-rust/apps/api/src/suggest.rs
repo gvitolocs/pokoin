@@ -1,4 +1,5 @@
-use std::time::Instant;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
@@ -259,16 +260,27 @@ async fn meili_hits(
     })
 }
 
-async fn fill_nationality(pool: &sqlx::PgPool, groups: &mut [Value]) {
+async fn nationality_map(pool: &sqlx::PgPool) -> HashMap<String, String> {
+    // Same 10-minute expansion map Node keeps in `_expansion_nationality.js`.
+    static CACHE: tokio::sync::Mutex<Option<(Instant, HashMap<String, String>)>> =
+        tokio::sync::Mutex::const_new(None);
+    {
+        let guard = CACHE.lock().await;
+        if let Some((at, map)) = guard.as_ref() {
+            if at.elapsed() < Duration::from_secs(600) {
+                return map.clone();
+            }
+        }
+    }
     let Ok(rows) = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
         "select name, normalized_name, nationality from public.pokoin_pokemon_expansions",
     )
     .fetch_all(pool)
     .await
     else {
-        return;
+        return HashMap::new();
     };
-    let mut map = std::collections::HashMap::<String, String>::new();
+    let mut map = HashMap::new();
     for (name, normalized, nationality) in rows {
         let nationality = nationality.unwrap_or_default().trim().to_lowercase();
         if nationality.is_empty() {
@@ -280,6 +292,15 @@ async fn fill_nationality(pool: &sqlx::PgPool, groups: &mut [Value]) {
         if let Some(normalized) = normalized {
             map.insert(normalized.trim().to_lowercase(), nationality);
         }
+    }
+    *CACHE.lock().await = Some((Instant::now(), map.clone()));
+    map
+}
+
+async fn fill_nationality(pool: &sqlx::PgPool, groups: &mut [Value]) {
+    let map = nationality_map(pool).await;
+    if map.is_empty() {
+        return;
     }
     for group in groups {
         let Some(printings) = group.get_mut("printings").and_then(|v| v.as_array_mut()) else {
