@@ -585,3 +585,53 @@ export function liveSuggestGroups(query, {
     parsed,
   };
 }
+
+function printingCount(groups) {
+  let count = 0;
+  for (const group of groups || []) count += (group.printings || []).length;
+  return count;
+}
+
+function firstNameToken(query) {
+  const parsed = parseTypedQuery(query);
+  if (isBareCollectorQuery(parsed) || isSetOnlyQuery(parsed)) return '';
+  const words = String(parsed.nameQuery || query || '').trim().split(/\s+/).filter(Boolean);
+  return words.find((word) => !isModifierWord(word)) || '';
+}
+
+/**
+ * Rows for the popup. A query that already fills 20 keeps that order.
+ * Otherwise the first name token's cached printings fill the list, so a
+ * second word cannot replace the local catalog with an empty singles row.
+ */
+export function paintCatalogGroups(query, options = {}) {
+  const live = liveSuggestGroups(query, options);
+  const limit = options.limit || SUGGEST_RESULT_FLOOR;
+  const have = printingCount(live.groups);
+  if (have >= limit) return live.groups;
+  const token = firstNameToken(query);
+  if (compactQuery(token).length < SUGGEST_LIVE_MIN_CHARS) return live.groups;
+  const rank = options.rank || rankNames;
+  const ranked = rank(token, options.pool);
+  const groups = ranked.filter((row) => row.withinCap !== false).flatMap((row) => {
+    const printings = cachedPrintings(row.display);
+    return printings.length ? [{ name: row.display, printings }] : [];
+  });
+  if (!groups.length) return live.groups;
+  const filled = fillSuggestGroups(
+    popupGroups(orderSuggestGroups(groups, ranked), options.printLang),
+    limit,
+    limit,
+    {
+      ...live.parsed,
+      setTokens: [],
+      artTokens: [],
+      rarityTokens: [],
+      numberTokens: [],
+      eras: [],
+      nameQuery: token,
+    },
+    options.kind,
+  );
+  return printingCount(filled) > have ? filled : live.groups;
+}

@@ -1,24 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fetchSuggest } from './api.js';
 import { isPokemonGame } from './game.js';
+import { rememberSuggestGroups } from './suggest-live.js';
 import {
   buildScope,
+  catalogRecall,
   chunkSize,
-  consumePage,
   createGenerationClock,
   emptyPool,
-  filterCandidates,
-  paintSource,
-  projectPoolGroups,
   reuseDecision,
-  shouldContinue,
   FIRST_CHUNK,
+  MAX_CHUNKS,
+  SAFETY_BUDGET,
 } from './suggest-pool.js';
-import { compactQuery, rankNames } from './suggest-rank.js';
-
-function compactLengthOfQuery(query) {
-  return compactQuery(query).length;
-}
+import { compactQuery } from './suggest-rank.js';
 
 /**
  * Keystroke paints from the pool already in memory. The network chunk for
@@ -40,44 +35,6 @@ export function useProgressiveSuggest({
   const clock = useRef(createGenerationClock());
   const [epoch, setEpoch] = useState(0);
   const [pending, setPending] = useState(false);
-  const [nameRank, setNameRank] = useState(null);
-  const [nameRankQuery, setNameRankQuery] = useState('');
-  const scope = buildScope({
-    lang,
-    printLang,
-    kind,
-    game: game || (isPokemonGame() ? 'pokemon' : 'other'),
-    query,
-  });
-  const source = paintSource(pool.current, query, scope);
-
-  const groups = useMemo(() => {
-    if (!enabled) return null;
-    const started = typeof performance !== 'undefined' ? performance.now() : 0;
-    const ranked = nameRankQuery === query ? nameRank : null;
-    const next = projectPoolGroups(query, source.rows, { limit, kind, printLang, ranked });
-    pool.current.lastLocalMs = started ? performance.now() - started : 0;
-    return next;
-  }, [query, source.rows, limit, kind, printLang, enabled, nameRank, nameRankQuery]);
-
-  useEffect(() => {
-    if (!enabled || !String(query || '').trim()) {
-      setNameRank(null);
-      setNameRankQuery('');
-      return undefined;
-    }
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      const ranked = rankNames(query);
-      if (cancelled) return;
-      setNameRank(ranked);
-      setNameRankQuery(query);
-    }, 0);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [query, enabled]);
 
   useEffect(() => {
     if (!enabled) {
@@ -109,53 +66,53 @@ export function useProgressiveSuggest({
     const controller = new AbortController();
     let stopped = false;
     setPending(true);
+    const lookups = catalogRecall(term);
     (async () => {
-      let offset = 0;
-      let chunks = 0;
-      let fetched = 0;
-      while (!stopped && pool.current.generation === generation) {
-        const size = chunkSize(chunks);
-        let page;
-        try {
-          page = await fetchSuggest(term, {
-            limit: size,
-            offset,
-            progressive: true,
-            hydrate: true,
-            signal: controller.signal,
-            lang,
-            printLang,
-          });
-        } catch (error) {
-          if (error?.name === 'AbortError') pool.current.cancelled += 1;
-          return;
-        }
-        if (stopped || pool.current.generation !== generation) {
-          pool.current.stale += 1;
-          return;
-        }
-        const applied = consumePage(pool.current, generation, page);
-        if (!applied.applied) return;
-        onPageRef.current?.(page);
-        fetched += applied.incoming || 0;
-        chunks += 1;
-        offset = Number.isFinite(Number(page?.nextOffset))
-          ? Number(page.nextOffset)
-          : offset + (applied.incoming || 0);
-        setEpoch((value) => value + 1);
-        const visible = filterCandidates(pool.current.rows, term).length;
-        const total = Number(page?.globalCount || page?.count || 0) || 0;
-        const exhaustive = page?.exhaustive === true || (applied.incoming || 0) < size;
-        if (!shouldContinue({
-          compactLength: compactLengthOfQuery(term),
-          fetched,
-          chunkHits: applied.incoming || 0,
-          estimatedTotal: total,
-          chunks,
-          exhaustive,
-          visibleRows: visible,
-        })) {
-          break;
+      for (const lookup of lookups) {
+        if (stopped || pool.current.generation !== generation) return;
+        let offset = 0;
+        let chunks = 0;
+        let fetched = 0;
+        const compactLength = compactQuery(lookup).length;
+        while (!stopped && pool.current.generation === generation) {
+          const size = chunkSize(chunks);
+          let page;
+          try {
+            page = await fetchSuggest(lookup, {
+              limit: size,
+              offset,
+              progressive: true,
+              hydrate: true,
+              signal: controller.signal,
+              lang,
+              printLang,
+            });
+          } catch (error) {
+            if (error?.name === 'AbortError') pool.current.cancelled += 1;
+            return;
+          }
+          if (stopped || pool.current.generation !== generation) {
+            pool.current.stale += 1;
+            return;
+          }
+          rememberSuggestGroups(page?.groups, { searchLang: lang });
+          const incoming = (page?.groups || []).reduce(
+            (sum, group) => sum + (group.printings || []).length,
+            0,
+          );
+          pool.current.transferred += incoming;
+          onPageRef.current?.(page);
+          fetched += incoming;
+          chunks += 1;
+          offset = Number.isFinite(Number(page?.nextOffset))
+            ? Number(page.nextOffset)
+            : offset + incoming;
+          setEpoch((value) => value + 1);
+          const exhaustive = page?.exhaustive === true || incoming < size;
+          if (exhaustive || incoming === 0) break;
+          if (fetched >= SAFETY_BUDGET || chunks >= MAX_CHUNKS) break;
+          // One letter prefetches a page. A real name keeps paging its printings.
+          if (compactLength <= 2) break;
         }
       }
     })().finally(() => {
@@ -169,8 +126,8 @@ export function useProgressiveSuggest({
   }, [query, lang, printLang, kind, game, enabled, limit]);
 
   return {
-    groups: groups || [],
-    projected: source.rows.length > 0,
+    groups: [],
+    projected: false,
     pending,
     epoch,
     poolSize: pool.current.rows.length,

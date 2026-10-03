@@ -232,7 +232,7 @@ export const PRINT_LANGS = [
   { code: 'all', label: 'All prints' },
   { code: 'western', label: 'Western print', flag: 'euus', tag: 'EN' },
   { code: 'japanese', label: 'Japanese print', flag: 'jpko', tag: 'JP' },
-  { code: 'chinese', label: 'Chinese print', flag: 'zh' },
+  { code: 'chinese', label: 'Chinese print', flag: 'zh', tag: 'ZH' },
 ];
 
 const PRINT_CODES = new Set(PRINT_LANGS.map((row) => row.code));

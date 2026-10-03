@@ -19,10 +19,12 @@ import {
   compactQuery,
   fillSuggestGroups,
   isBareCollectorQuery,
+  isModifierWord,
   isNumberAwareQuery,
   isSetOnlyQuery,
   orderSuggestGroups,
   parseTypedQuery,
+  rankNames,
 } from './suggest-rank.js';
 
 /** First page. Measured on production Meili (read-only): 50 ~11 ms, 100 ~14 ms, 250 ~25 ms, 500 ~43 ms. */
@@ -43,6 +45,40 @@ export function queryMode(query) {
   if (isBareCollectorQuery(parsed) || isNumberAwareQuery(parsed)) return 'collector';
   if (isSetOnlyQuery(parsed)) return 'set';
   return 'name';
+}
+
+/**
+ * What Redis is asked for.
+ *
+ * The ~10k name catalog is already local. The first name token is matched
+ * there, including a neighbor key and a swapped pair of letters. Redis then
+ * loads that name's printings. Later words stay on the client and rank those
+ * cards; they are not AND-ed into the request, which used to exhaust the
+ * pool at a handful of hits and leave the popup empty.
+ */
+export function catalogRecall(query, { limit = 6 } = {}) {
+  const raw = String(query || '').trim();
+  if (!raw) return [];
+  const parsed = parseTypedQuery(raw);
+  if (isBareCollectorQuery(parsed) || isSetOnlyQuery(parsed)) return [raw];
+  const words = String(parsed.nameQuery || raw).trim().split(/\s+/).filter(Boolean);
+  const token = words.find((word) => !isModifierWord(word)) || words[0] || raw;
+  const ranked = rankNames(token);
+  const accepted = ranked.filter((row) => row.withinCap !== false);
+  if (accepted.some((row) => row.distance === 0)) {
+    return [String(token).trim()];
+  }
+  const names = [];
+  const seen = new Set();
+  for (const row of accepted) {
+    const display = String(row.display || '').trim();
+    const key = compactQuery(display);
+    if (!display || seen.has(key)) continue;
+    seen.add(key);
+    names.push(display);
+    if (names.length >= Math.max(1, Number(limit) || 1)) break;
+  }
+  return names.length ? names : [String(token).trim()];
 }
 
 export function buildScope({ lang = 'en', printLang = 'all', kind = 'singles', game = 'pokemon', query = '' } = {}) {

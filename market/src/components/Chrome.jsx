@@ -34,7 +34,7 @@ import { useSuggestFlip } from '../suggest-flip.js';
 import {
   cachedPrintings,
   isLiveStub,
-  liveSuggestGroups,
+  paintCatalogGroups,
   rememberPrintings,
   rememberSuggestGroups,
   suggestLiveReady,
@@ -273,8 +273,8 @@ function PrintLangToggle() {
             )}
           </span>
           <svg className="search-go-icon" viewBox="0 0 24 24" width="30" height="30">
-            <circle cx="9.2" cy="9.2" r="7.1" fill="none" stroke="currentColor" stroke-width="1.7" />
-            <path d="M14.3 14.3 21.2 21.2" fill="none" stroke="currentColor" stroke-width="2.15" stroke-linecap="round" />
+            <circle cx="9.2" cy="9.2" r="7.1" fill="none" stroke="currentColor" strokeWidth="1.7" />
+            <path d="M14.3 14.3 21.2 21.2" fill="none" stroke="currentColor" strokeWidth="2.15" strokeLinecap="round" />
           </svg>
         </span>
         <svg className="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true">
@@ -461,10 +461,12 @@ export default function Chrome({ children }) {
     // writeListingDrag → markCardDragging dispatches this (survives stopPropagation).
     window.addEventListener('pokoin-card-drag', openDragTrays);
     window.addEventListener('dragend', onDragEnd);
+    window.addEventListener('pokoin-card-drag-end', onDragEnd);
     return () => {
       if (openTray) cancelAnimationFrame(openTray);
       window.removeEventListener('pokoin-card-drag', openDragTrays);
       window.removeEventListener('dragend', onDragEnd);
+      window.removeEventListener('pokoin-card-drag-end', onDragEnd);
     };
   }, []);
   useWindowScrollRestore();
@@ -493,7 +495,7 @@ export default function Chrome({ children }) {
       return [];
     }
     if (progressive.projected) return progressive.groups;
-    return liveSuggestGroups(query, { printLang, searchLang: lang, kind: catalogTab }).groups;
+    return paintCatalogGroups(query, { printLang, searchLang: lang, kind: catalogTab });
   }, [groups, liveTick, printLang, lang, query, searchTab, catalogTab, progressive.projected, progressive.groups, progressive.epoch]);
   const flat = flattenPrintings(visibleGroups);
   const activeOption = activeIndex >= 0 ? flat[activeIndex] : null;

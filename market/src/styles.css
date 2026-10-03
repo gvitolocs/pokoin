@@ -939,7 +939,10 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 }
 
 .print-lang-toggle > button:hover,
-.print-lang-toggle > button[aria-expanded="true"] {
+.print-lang-toggle > button[aria-expanded="true"],
+.print-lang-toggle > button:focus,
+.print-lang-toggle > button:focus-visible {
+  outline: none;
   color: var(--yellow);
   background: #0c0b12;
   box-shadow: inset 0 0 0 999px rgb(255 211 61 / 0.12);
@@ -987,7 +990,10 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 }
 
 .lang-menu button:hover,
-.lang-menu button.is-active {
+.lang-menu button.is-active,
+.lang-menu button:focus,
+.lang-menu button:focus-visible {
+  outline: none;
   background: var(--g3);
 }
 

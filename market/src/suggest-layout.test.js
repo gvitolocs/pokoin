@@ -22,7 +22,7 @@ test('suggest row is two columns without a Singles cell', () => {
   assert.equal(chrome.includes('suggest-pending'), false);
   assert.equal(desktopCss.includes('.suggest-pending'), false);
   assert.match(chrome, /data-suggest-id/);
-  assert.match(chrome, /liveSuggestGroups/);
+  assert.match(chrome, /paintCatalogGroups/);
   assert.match(chrome, /suggestLiveReady/);
   assert.match(chrome, /identity\.suggestExpansionShort/);
   assert.match(chrome, /<ExpansionMark/);

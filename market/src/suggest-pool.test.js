@@ -17,6 +17,7 @@ import {
   rankCandidates,
   reuseDecision,
   shouldContinue,
+  catalogRecall,
 } from './suggest-pool.js';
 
 function card(id, name, extra = {}) {
@@ -156,6 +157,15 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
     assert.ok(ms < 16, `${step} project ${ms.toFixed(2)}ms`);
   }
   console.log(JSON.stringify({ local: timings, ranked }));
+});
+
+test('recall asks Redis for the first catalog token, not the whole typed string', () => {
+  assert.deepEqual(catalogRecall('mewtwo evol'), ['mewtwo']);
+  assert.deepEqual(catalogRecall('pikachu gx'), ['pikachu']);
+  assert.deepEqual(catalogRecall('p'), ['p']);
+  const swapped = catalogRecall('ipk');
+  assert.ok(swapped.includes('Pikachu'), swapped.join(','));
+  assert.equal(swapped.includes('ipk'), false);
 });
 
 test('merged chunks keep identity and do not duplicate', () => {

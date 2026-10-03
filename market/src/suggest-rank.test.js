@@ -268,7 +268,7 @@ test('Chrome ranks from one character and opens the popup at three', () => {
   const chrome = readFileSync(new URL('./components/Chrome.jsx', import.meta.url), 'utf8');
   assert.match(chrome, /useProgressiveSuggest/);
   assert.match(chrome, /progressive\.projected/);
-  assert.match(chrome, /liveSuggestGroups/);
+  assert.match(chrome, /paintCatalogGroups/);
   assert.match(chrome, /printLang/);
   assert.match(chrome, /suggestLiveReady/);
   assert.match(chrome, /fetchSearch,/);

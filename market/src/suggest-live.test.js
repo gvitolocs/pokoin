@@ -6,6 +6,7 @@ import {
   cachedPrintings,
   isLiveStub,
   liveSuggestGroups,
+  paintCatalogGroups,
   rememberPrintings,
   rememberSuggestGroups,
   resetSuggestLive,
@@ -28,6 +29,25 @@ test('one-letter Meili cache is ready when the popup opens at three characters',
   const live = liveSuggestGroups('cyn', { pool, preferPerGroup: 1 });
   assert.equal(live.groups[0].name, 'Cynthia');
   assert.equal(live.groups[0].printings[0].id, '20');
+});
+
+test('a second word still paints the first token cache up to 20', () => {
+  resetSuggestLive();
+  const printings = [];
+  for (let index = 0; index < 24; index += 1) {
+    printings.push({
+      id: `mw-${index}`,
+      name: 'Mewtwo',
+      set: index < 2 ? 'Evolutions' : 'Base Set',
+      product_type: 'card',
+      item_kind: 'single',
+    });
+  }
+  rememberSuggestGroups([{ name: 'Mewtwo', printings }]);
+  const groups = paintCatalogGroups('mewtwo evol', { kind: 'singles', limit: 20 });
+  const rows = groups.flatMap((group) => group.printings || []);
+  assert.equal(rows.length, 20);
+  assert.ok(rows.every((row) => row.name === 'Mewtwo'));
 });
 
 test('search tabs fill singles or product, not a mixed 20', () => {

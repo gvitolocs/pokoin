@@ -22,7 +22,7 @@ import {
 import {
   cachedPrintings,
   isLiveStub,
-  liveSuggestGroups,
+  paintCatalogGroups,
   rememberPrintings,
   rememberSuggestGroups,
   suggestLiveReady,
@@ -201,7 +201,7 @@ export function useLiveSuggest(query, { kind = 'singles', enabled = true, limit 
     if (!ready) return [];
     const groups = progressive.projected
       ? progressive.groups
-      : liveSuggestGroups(query, { printLang, searchLang: lang, kind }).groups;
+      : paintCatalogGroups(query, { printLang, searchLang: lang, kind, limit });
     return flattenPickable(groups).slice(0, limit);
     // liveTick forces re-read after Meili / catalog hydration
     // eslint-disable-next-line react-hooks/exhaustive-deps
