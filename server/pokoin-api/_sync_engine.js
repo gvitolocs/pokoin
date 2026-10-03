@@ -1,7 +1,7 @@
 'use strict';
 
 const { claimOne, finishClaim, withWriterTransaction } = require('./_outbox');
-const { invalidateCard, invalidateSearch } = require('./_read_model_cache');
+const { invalidateMarketplaceReads } = require('./_marketplace_cache_invalidate');
 const { publishListing } = require('./marketplace-live');
 const { timed } = require('./_request_timing');
 
@@ -53,8 +53,13 @@ async function applyListingEvent(payload) {
     await refreshPrice(next.cardId);
     next.steps.price = true;
   }
-  await invalidateCard(next.game || 'pokemon', next.cardId);
-  await invalidateSearch(next.game || 'pokemon');
+  const game = next.game || 'pokemon';
+  await invalidateMarketplaceReads({
+    game,
+    cardId: next.cardId,
+    sellerUid: next.sellerUid,
+    reason: 'listing.changed',
+  });
   publishListing({
     cardId: next.cardId,
     listingId: next.listingId,

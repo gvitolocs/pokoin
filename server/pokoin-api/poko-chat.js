@@ -410,8 +410,8 @@ async function hermesReply({
   };
 }
 
-// Per-IP comfort limit shared across API instances through Valkey, with a
-// bounded local fallback when Valkey is down: 20 msgs / minute, same shape as
+// Per-IP comfort limit shared across API instances through Redis, with a
+// bounded local fallback when Redis is down: 20 msgs / minute, same shape as
 // the legacy assistant. The IP is hashed before it reaches any key.
 async function chatRateLimited(req) {
   const forwarded = String(req.headers?.['x-forwarded-for'] || req.headers?.['X-Forwarded-For'] || '').split(',')[0].trim();

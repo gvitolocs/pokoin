@@ -10,21 +10,22 @@
  * webhook/ownership paths read Firestore directly. Firestore stays the
  * source of truth; this cache only saves the per-request Firestore fan-out.
  *
- * Valkey keys (TTL-only, plus best-effort DEL on server-side profile writes):
- *   seller:{uid}:profile              -> { displayName, username, acceptsPkn }
- *   seller:slug:{sha256(name)}:uid    -> { uid, displayName }
+ * Redis keys (TTL-only, plus best-effort DEL on server-side profile writes):
+ *   pokoin:seller:v1:{uid}:profile           -> { displayName, username, acceptsPkn }
+ *   pokoin:seller:v1:slug:{sha256(name)}:uid -> { uid, displayName }
  *
  * Display names and usernames are written by the Flutter clients directly to
  * Firestore — there is no server-side write path to hook for renames, so the
  * 6h TTL is the staleness bound for those. Server-side writes that DO touch
  * cached fields (marketplace-seller-settings POST) call
- * invalidateSellerProfile. Fail-open: with Valkey down every helper falls
+ * invalidateSellerProfile. Fail-open: with Redis down every helper falls
  * straight through to Firestore.
  */
 
 const crypto = require('node:crypto');
 
-const valkey = require('./_valkey');
+const redisCache = require('./_redis_cache');
+const { sellerKey } = require('./_redis_ns');
 
 const PUBLIC_PROFILE_TTL_SEC = 6 * 60 * 60;
 
@@ -33,13 +34,13 @@ function cleanText(value, maxLength = 240) {
 }
 
 function profileKey(uid) {
-  return `seller:${cleanText(uid, 160)}:profile`;
+  return sellerKey(cleanText(uid, 160), 'profile');
 }
 
 /** Hash the username: names are user-controlled, so they never go raw in keys. */
 function slugKey(normalizedName) {
   const hash = crypto.createHash('sha256').update(String(normalizedName || '').trim().toLowerCase()).digest('hex').slice(0, 32);
-  return `seller:slug:${hash}:uid`;
+  return sellerKey('slug', hash, 'uid');
 }
 
 function publicProfileFromDoc(doc) {
@@ -83,7 +84,7 @@ async function getPublicSellerProfiles(uids, { loadProfiles = defaultLoadProfile
   const profiles = new Map();
   const missing = [];
   await Promise.all(wanted.map(async (uid) => {
-    const cached = await valkey.getJson(profileKey(uid));
+    const cached = await redisCache.getJson(profileKey(uid));
     if (isValidCachedProfile(cached)) {
       profiles.set(uid, cached);
     } else {
@@ -94,7 +95,7 @@ async function getPublicSellerProfiles(uids, { loadProfiles = defaultLoadProfile
     const fresh = await loadProfiles(missing);
     await Promise.all([...fresh.entries()].map(async ([uid, profile]) => {
       profiles.set(uid, profile);
-      await valkey.setJson(profileKey(uid), profile, PUBLIC_PROFILE_TTL_SEC);
+      await redisCache.setJson(profileKey(uid), profile, PUBLIC_PROFILE_TTL_SEC);
     }));
   }
   return profiles;
@@ -107,7 +108,7 @@ async function getPublicSellerProfiles(uids, { loadProfiles = defaultLoadProfile
 async function readSellerUidByName(normalizedName) {
   const clean = cleanText(normalizedName, 120).toLowerCase();
   if (!clean) return null;
-  const cached = await valkey.getJson(slugKey(clean));
+  const cached = await redisCache.getJson(slugKey(clean));
   const uidValue = String(cached?.uid || '');
   if (cached && typeof cached === 'object' && /^[A-Za-z0-9:_-]{4,160}$/.test(uidValue)) {
     return { uid: uidValue, displayName: cleanText(cached.displayName, 120) };
@@ -119,7 +120,7 @@ async function rememberSellerUidByName(normalizedName, { uid, displayName = '' }
   const clean = cleanText(normalizedName, 120).toLowerCase();
   const cleanUid = cleanText(uid, 160);
   if (!clean || !cleanUid) return;
-  await valkey.setJson(slugKey(clean), { uid: cleanUid, displayName: cleanText(displayName, 120) }, PUBLIC_PROFILE_TTL_SEC);
+  await redisCache.setJson(slugKey(clean), { uid: cleanUid, displayName: cleanText(displayName, 120) }, PUBLIC_PROFILE_TTL_SEC);
 }
 
 /**
@@ -130,8 +131,8 @@ async function rememberSellerUidByName(normalizedName, { uid, displayName = '' }
 async function invalidateSellerProfile(uid, { usernames = [] } = {}) {
   const cleanUid = cleanText(uid, 160);
   if (!cleanUid) return;
-  await valkey.del(profileKey(cleanUid));
-  await Promise.all(usernames.map((name) => valkey.del(slugKey(name))));
+  await redisCache.del(profileKey(cleanUid));
+  await Promise.all(usernames.map((name) => redisCache.del(slugKey(name))));
 }
 
 module.exports = {

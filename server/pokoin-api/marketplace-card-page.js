@@ -120,7 +120,7 @@ function createHandler(deps = {}) {
         if (shared) return jsonOk(res, shared, CARD_PAGE_CACHE);
       }
       const cachedPage = await loadCardPage(cacheParts, async () => null);
-      if (cachedPage.source === 'valkey' && cachedPage.payload) {
+      if (cachedPage.source === 'redis' && cachedPage.payload) {
         flight.finish(cachedPage.payload);
         return jsonOk(res, cachedPage.payload, CARD_PAGE_CACHE);
       }

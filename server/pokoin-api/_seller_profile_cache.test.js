@@ -9,7 +9,7 @@ const { createFirestore } = require('./_firestore_fake');
 
 const TARGET = path.join(__dirname, '_seller_profile_cache.js');
 
-function fakeValkey() {
+function fakeRedis() {
   const fake = { store: new Map(), sets: [], dels: [], down: false };
   fake.getJson = async (key) => {
     if (fake.down) return null;
@@ -29,28 +29,28 @@ function fakeValkey() {
   return fake;
 }
 
-/** Run `run` with the cache module loaded: ./_valkey and ../server/_firebase stubbed. */
+/** Run `run` with the cache module loaded: ./_redis_cache and ../server/_firebase stubbed. */
 async function withProfileCache(run, { seedUsers = {} } = {}) {
-  const valkey = fakeValkey();
+  const redisCache = fakeRedis();
   const { admin } = createFirestore(seedUsers);
   const originalLoad = Module._load;
   delete require.cache[TARGET];
   Module._load = function load(request, parent, isMain) {
-    if (request === './_valkey') return valkey;
+    if (request === './_redis_cache') return redisCache;
     if (request === '../server/_firebase') return { getFirebaseAdmin: () => admin };
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
     const cache = require(TARGET);
-    await run({ cache, valkey });
+    await run({ cache, redisCache });
   } finally {
     Module._load = originalLoad;
     delete require.cache[TARGET];
   }
 }
 
-test('cache miss loads from Firestore, populates Valkey with the 6h TTL, and second read skips Firestore', async () => {
-  await withProfileCache(async ({ cache, valkey }) => {
+test('cache miss loads from Firestore, populates Redis with the 6h TTL, and second read skips Firestore', async () => {
+  await withProfileCache(async ({ cache, redisCache }) => {
     let loaderCalls = 0;
     const loadProfiles = async (uids) => {
       loaderCalls += 1;
@@ -59,7 +59,7 @@ test('cache miss loads from Firestore, populates Valkey with the 6h TTL, and sec
     const first = await cache.getPublicSellerProfiles(['uid-1'], { loadProfiles });
     assert.equal(first.get('uid-1').displayName, 'Alice');
     assert.equal(loaderCalls, 1);
-    const writes = valkey.sets.filter((set) => set.key === 'seller:uid-1:profile');
+    const writes = redisCache.sets.filter((set) => set.key === 'pokoin:seller:v1:uid-1:profile');
     assert.equal(writes.length, 1);
     assert.equal(writes[0].ttlSeconds, cache.PUBLIC_PROFILE_TTL_SEC);
     assert.equal(cache.PUBLIC_PROFILE_TTL_SEC, 6 * 60 * 60);
@@ -84,9 +84,9 @@ test('partial cache: only the missing uids go to the durable loader', async () =
   });
 });
 
-test('Valkey down degrades to Firestore without failing the read', async () => {
-  await withProfileCache(async ({ cache, valkey }) => {
-    valkey.down = true;
+test('Redis down degrades to Firestore without failing the read', async () => {
+  await withProfileCache(async ({ cache, redisCache }) => {
+    redisCache.down = true;
     let loaderCalls = 0;
     const profiles = await cache.getPublicSellerProfiles(['uid-1'], {
       loadProfiles: async (uids) => {
@@ -100,8 +100,8 @@ test('Valkey down degrades to Firestore without failing the read', async () => {
 });
 
 test('a malformed cached profile is ignored and recomputed', async () => {
-  await withProfileCache(async ({ cache, valkey }) => {
-    valkey.store.set('seller:uid-1:profile', 'garbage');
+  await withProfileCache(async ({ cache, redisCache }) => {
+    redisCache.store.set('pokoin:seller:v1:uid-1:profile', 'garbage');
     let loaderCalls = 0;
     await cache.getPublicSellerProfiles(['uid-1'], {
       loadProfiles: async (uids) => {
@@ -114,32 +114,32 @@ test('a malformed cached profile is ignored and recomputed', async () => {
 });
 
 test('invalidateSellerProfile deletes the profile key and each known slug key', async () => {
-  await withProfileCache(async ({ cache, valkey }) => {
+  await withProfileCache(async ({ cache, redisCache }) => {
     await cache.rememberSellerUidByName('alice', { uid: 'uid-1', displayName: 'Alice' });
     await cache.invalidateSellerProfile('uid-1', { usernames: ['alice'] });
-    assert.ok(valkey.dels.includes('seller:uid-1:profile'));
-    assert.ok(valkey.dels.includes(cache.slugKey('alice')));
+    assert.ok(redisCache.dels.includes('pokoin:seller:v1:uid-1:profile'));
+    assert.ok(redisCache.dels.includes(cache.slugKey('alice')));
     assert.equal(await cache.readSellerUidByName('alice'), null, 'slug must be gone after invalidation');
   });
 });
 
-test('slug cache: remember → read hits, unknown name reads null, valkey down falls through', async () => {
-  await withProfileCache(async ({ cache, valkey }) => {
+test('slug cache: remember → read hits, unknown name reads null, redis down falls through', async () => {
+  await withProfileCache(async ({ cache, redisCache }) => {
     await cache.rememberSellerUidByName('alice', { uid: 'uid-1', displayName: 'Alice' });
     assert.deepEqual(await cache.readSellerUidByName('alice'), { uid: 'uid-1', displayName: 'Alice' });
     assert.deepEqual(await cache.readSellerUidByName('ALICE'), { uid: 'uid-1', displayName: 'Alice' }, 'lookup normalizes case');
     assert.equal(await cache.readSellerUidByName('nobody'), null);
 
-    valkey.down = true;
-    assert.equal(await cache.readSellerUidByName('alice'), null, 'down Valkey reads as unknown');
+    redisCache.down = true;
+    assert.equal(await cache.readSellerUidByName('alice'), null, 'down Redis reads as unknown');
     await cache.rememberSellerUidByName('alice', { uid: 'uid-9', displayName: '' });
-    assert.equal(valkey.store.get(cache.slugKey('alice')).uid, 'uid-1', 'failed write must not corrupt the slug');
+    assert.equal(redisCache.store.get(cache.slugKey('alice')).uid, 'uid-1', 'failed write must not corrupt the slug');
   });
 });
 
 test('a cached slug with a malformed uid is rejected', async () => {
-  await withProfileCache(async ({ cache, valkey }) => {
-    valkey.store.set(cache.slugKey('evil'), { uid: '../escape', displayName: 'x' });
+  await withProfileCache(async ({ cache, redisCache }) => {
+    redisCache.store.set(cache.slugKey('evil'), { uid: '../escape', displayName: 'x' });
     assert.equal(await cache.readSellerUidByName('evil'), null);
   });
 });

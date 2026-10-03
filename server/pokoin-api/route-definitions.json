@@ -812,13 +812,14 @@
         "FIREBASE_*",
         "MARKETPLACE_DATABASE_URL",
         "MARKETPLACE_WRITER_DATABASE_URL",
-        "VALKEY_URL"
+        "REDIS_HOST",
+        "REDIS_PORT"
       ],
       "services": [
         "Firebase Admin",
         "Marketplace replica PostgreSQL",
         "nezopt writer PostgreSQL (marketplace_user_carts)",
-        "Valkey rate limit"
+        "Redis rate limit"
       ]
     }
   },
@@ -839,12 +840,13 @@
       "env": [
         "FIREBASE_*",
         "MARKETPLACE_DATABASE_URL",
-        "VALKEY_URL"
+        "REDIS_HOST",
+        "REDIS_PORT"
       ],
       "services": [
         "Marketplace replica PostgreSQL",
         "Firebase Admin (orders, seller profiles)",
-        "Valkey"
+        "Redis"
       ]
     }
   }

@@ -11,11 +11,11 @@ const CACHE = path.join(__dirname, '_seller_profile_cache.js');
 
 // Keep the real listing-to-profile-cache connection. Only external services
 // are replaced, so an import/export name mismatch cannot pass this test.
-async function withListings(run, { valkeyDown = false, firestoreDown = false } = {}) {
+async function withListings(run, { redisDown = false, firestoreDown = false } = {}) {
   const stored = new Map();
-  const valkey = {
-    getJson: async key => valkeyDown ? null : stored.get(key),
-    setJson: async (key, value) => { if (!valkeyDown) stored.set(key, value); },
+  const redisCache = {
+    getJson: async key => redisDown ? null : stored.get(key),
+    setJson: async (key, value) => { if (!redisDown) stored.set(key, value); },
   };
   const { admin } = createFirestore({ users: {
     'seller-1': { displayName: 'Shakkio', username: 'shakkio', acceptsPkn: false, email: 'private@example.com' },
@@ -28,7 +28,7 @@ async function withListings(run, { valkeyDown = false, firestoreDown = false } =
   delete require.cache[TARGET];
   delete require.cache[CACHE];
   Module._load = function load(request, parent, isMain) {
-    if (request === './_valkey') return valkey;
+    if (request === './_redis_cache') return redisCache;
     if (request === './_firebase' || request === '../server/_firebase') return firebase;
     if (request === './_marketplace_db') return {};
     if (request === './_firebase_roles') return {};
@@ -62,15 +62,15 @@ test('real cache enrichment restores the public seller handle from cold and warm
       assert.equal(dto.quantityAvailable, 2);
       assert.ok(!JSON.stringify(dto).includes('private@example.com'));
     }
-    assert.equal(stored.get('seller:seller-1:profile').displayName, 'Shakkio');
+    assert.equal(stored.get('pokoin:seller:v1:seller-1:profile').displayName, 'Shakkio');
   });
 });
 
-test('Valkey outage still resolves the seller from Firestore', async () => {
+test('Redis outage still resolves the seller from Firestore', async () => {
   await withListings(async ({ listings }) => {
     const rows = await listings._test.enrichListingRowsWithSellerProfiles([native]);
     assert.equal(listings._test.listingRow(rows[0]).sellerName, 'Shakkio');
-  }, { valkeyDown: true });
+  }, { redisDown: true });
 });
 
 test('missing profiles and Firestore outages preserve listing identity and stock', async () => {

@@ -7,7 +7,7 @@ const test = require('node:test');
 process.env.POKOIN_READ_CACHE = '1';
 
 const redisCache = require('./_redis_cache');
-const cache = require('./_read_model_cache');
+const cache = require('./_seller_shop_cache');
 
 function listen(store) {
   return new Promise((resolve) => {
@@ -42,46 +42,47 @@ function listen(store) {
   });
 }
 
-test('card and bounded search models hit Redis and a generation bump misses', async () => {
+test('seller shop key skips filtered and book requests', () => {
+  assert.ok(cache.sellerShopKey({
+    sellerUid: 'uid-1', limit: 100, offset: 0, sort: 'price-asc',
+  }).startsWith('pokoin:marketplace:v1:seller-shop:'));
+  assert.equal(cache.sellerShopKey({
+    sellerUid: 'uid-1', limit: 100, q: 'charizard',
+  }), '');
+  assert.equal(cache.sellerShopKey({
+    sellerUid: 'uid-1', limit: 100, book: true,
+  }), '');
+});
+
+test('seller shop hit/miss/invalidate and concurrent coalesce', async () => {
   const store = new Map();
   const server = await listen(store);
   redisCache.configure({ host: '127.0.0.1', port: server.address().port, timeoutMs: 300 });
   try {
-    assert.equal(cache.cardPageKey({ cardId: '1', liveOffers: true }), '');
-    assert.equal(cache.searchPageKey({ query: 'a' }), '');
-    assert.equal(cache.searchPageKey({ query: 'x'.repeat(80) }), '');
-    assert.ok(cache.searchPageKey({ query: 'charizard', limit: 24, offset: 0 }));
-
     let builds = 0;
-    const first = await cache.loadCardPage({ cardId: '693360', lang: 'en' }, async () => {
+    const parts = { sellerUid: 'uid-1', game: 'pokemon', limit: 100, offset: 0, sort: 'price-asc' };
+    const load = async () => {
       builds += 1;
-      return { card: { id: '693360' } };
-    });
-    const second = await cache.loadCardPage({ cardId: '693360', lang: 'en' }, async () => {
-      builds += 1;
-      return { card: { id: 'rebuilt' } };
-    });
-    assert.equal(first.source, 'postgres');
-    assert.equal(second.source, 'redis');
-    assert.equal(second.payload.card.id, '693360');
+      return { listings: [{ id: `L${builds}` }], total: 1, unique: 1 };
+    };
+    const [a, b] = await Promise.all([
+      cache.loadSellerShop(parts, load),
+      cache.loadSellerShop(parts, load),
+    ]);
+    assert.equal(builds, 1, 'stampede must coalesce to one load');
+    assert.equal(a.source, 'postgres');
+    assert.equal(b.source, 'postgres');
+
+    const warm = await cache.loadSellerShop(parts, load);
+    assert.equal(warm.source, 'redis');
+    assert.equal(warm.payload.listings[0].id, 'L1');
     assert.equal(builds, 1);
 
-    await cache.invalidateCard('pokemon', '693360');
-    const third = await cache.loadCardPage({ cardId: '693360', lang: 'en' }, async () => {
-      builds += 1;
-      return { card: { id: 'fresh' } };
-    });
-    assert.equal(third.source, 'postgres');
-    assert.equal(third.payload.card.id, 'fresh');
+    await cache.invalidateSellerShop('uid-1');
+    const fresh = await cache.loadSellerShop(parts, load);
+    assert.equal(fresh.source, 'postgres');
+    assert.equal(fresh.payload.listings[0].id, 'L2');
     assert.equal(builds, 2);
-
-    const key = cache.cardPageKey({ cardId: '1', lang: 'en' });
-    const leader = cache.beginFlight(key);
-    const follower = cache.beginFlight(key);
-    assert.equal(leader.leader, true);
-    assert.equal(follower.leader, false);
-    leader.finish({ card: { id: '1' } });
-    assert.deepEqual(await follower.wait, { card: { id: '1' } });
   } finally {
     redisCache._test.resetConnection();
     await new Promise((resolve) => server.close(resolve));
