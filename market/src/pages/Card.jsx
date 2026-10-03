@@ -1446,11 +1446,11 @@ function SilverHead({ card, fromPath }) {
         <div className="silver-pills">
           <button className="silver-pill is-ct" type="button" onClick={openCardtrader}>CT</button>
           <button className="silver-pill is-cm" type="button" onClick={openCardmarket}>CM</button>
+          <button className="silver-pill is-tp" type="button" onClick={openTcgplayer} aria-label="TCGplayer">TP</button>
           <button className="silver-pill is-vt" type="button" onClick={openVinted}>VT</button>
           <button className="silver-pill is-eb" type="button" onClick={openEbay} aria-label="Search eBay">
             <span className="eb-e">E</span><span className="eb-b">B</span>
           </button>
-          <button className="silver-pill is-tp" type="button" onClick={openTcgplayer} aria-label="TCGplayer">TP</button>
         </div>
         {message ? <p className="muted silver-note">{message}</p> : null}
       </div>
@@ -1472,8 +1472,8 @@ function SilverHead({ card, fromPath }) {
       )}
       <p className="muted silver-note">
         {signedIn
-          ? `Site balance ${formatPknNumber(availablePkn)} PKN. CT / CM / VT / EB / TP stay hidden until Silver.`
-          : 'CT / CM / VT / EB / TP need Silver on this session.'}
+          ? `Site balance ${formatPknNumber(availablePkn)} PKN. CT / CM / TP / VT / EB stay hidden until Silver.`
+          : 'CT / CM / TP / VT / EB need Silver on this session.'}
       </p>
       {message ? <p className="muted silver-note">{message}</p> : null}
     </div>
