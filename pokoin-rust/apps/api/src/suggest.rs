@@ -7,7 +7,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use pokoin_search::{
     assemble_pokemon_suggest, catalog_sql_needed, clean_print_language, clean_text, empty_suggest,
-    group_suggest_hits, parse_limit, suggest_meili_hit_limit, SuggestHitPage, SuggestParts,
+    group_suggest_hits, parse_limit, redis_search_query, suggest_meili_hit_limit, SuggestHitPage,
+    SuggestParts,
 };
 use serde_json::{json, Value};
 
@@ -101,30 +102,58 @@ pub async fn suggest(
             "public, max-age=5, s-maxage=30",
         );
     }
-    if state.config.search_engine != "meili"
-        || state.config.meili_url.is_none()
-        || !language_ok(&search_language)
-    {
+    if !language_ok(&search_language) {
         return json_ok(
             &empty_suggest(&query, &game, "meili_unavailable"),
             "public, max-age=5, s-maxage=15",
         );
     }
-    let hit_limit = if hydrate || print_language != "all" {
+    let progressive = param("progressive") == Some("1");
+    let offset = param("offset")
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value >= 0)
+        .unwrap_or(0);
+    let hit_limit = if state.config.search_engine == "redis" {
+        if progressive {
+            parse_limit(param("limit"), 48, 240)
+        } else if hydrate || print_language != "all" {
+            parse_limit(param("limit"), 96, 240)
+        } else {
+            suggest_meili_hit_limit(group_limit).clamp(1, 96)
+        }
+    } else if hydrate || print_language != "all" {
         1000
     } else {
         suggest_meili_hit_limit(group_limit)
     };
     let started = Instant::now();
-    let page = match meili_hits(&state, &query, hit_limit, param("match") == Some("all")).await {
-        Ok(page) => page,
-        Err(error) => {
-            tracing::error!(%error, "marketplace-suggest failed");
-            return json_ok(
-                &empty_suggest(&query, &game, "meili_error"),
-                "public, max-age=5, s-maxage=15",
-            );
+    let page = if state.config.search_engine == "redis" {
+        match redis_hits(&state, &query, &print_language, hit_limit, offset).await {
+            Ok(page) => page,
+            Err(error) => {
+                tracing::error!(%error, "redis suggest failed");
+                return json_ok(
+                    &empty_suggest(&query, &game, "redis_error"),
+                    "public, max-age=5, s-maxage=15",
+                );
+            }
         }
+    } else if state.config.search_engine == "meili" && state.config.meili_url.is_some() {
+        match meili_hits(&state, &query, hit_limit, param("match") == Some("all")).await {
+            Ok(page) => page,
+            Err(error) => {
+                tracing::error!(%error, "marketplace-suggest failed");
+                return json_ok(
+                    &empty_suggest(&query, &game, "meili_error"),
+                    "public, max-age=5, s-maxage=15",
+                );
+            }
+        }
+    } else {
+        return json_ok(
+            &empty_suggest(&query, &game, "meili_unavailable"),
+            "public, max-age=5, s-maxage=15",
+        );
     };
     state.meili_ms.fetch_add(
         started.elapsed().as_millis() as u64,
@@ -132,9 +161,11 @@ pub async fn suggest(
     );
     let mut groups = group_suggest_hits(
         &page.hits,
-        group_limit,
-        if hydrate || print_language != "all" {
-            1000
+        if progressive { page.hits.len().max(1) as i64 } else { group_limit },
+        if progressive {
+            page.hits.len().max(1) as i64
+        } else if hydrate || print_language != "all" {
+            if state.config.search_engine == "redis" { 240 } else { 1000 }
         } else {
             96
         },
@@ -154,7 +185,9 @@ pub async fn suggest(
             std::sync::atomic::Ordering::Relaxed,
         );
     }
-    let body = assemble_pokemon_suggest(
+    let incoming = page.hits.len() as i64;
+    let estimated = page.estimated_total as i64;
+    let mut body = assemble_pokemon_suggest(
         &SuggestParts {
             query,
             game,
@@ -168,6 +201,9 @@ pub async fn suggest(
         },
         groups,
     );
+    body["offset"] = json!(offset);
+    body["nextOffset"] = json!(offset + incoming);
+    body["exhaustive"] = json!(incoming < hit_limit || offset + incoming >= estimated);
     json_ok(
         &body,
         "public, max-age=5, s-maxage=30, stale-while-revalidate=120",
@@ -202,6 +238,131 @@ fn game_from(headers: &HeaderMap, query_game: Option<&str>) -> String {
     } else {
         raw
     }
+}
+
+async fn redis_hits(
+    state: &AppState,
+    query: &str,
+    print_language: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<SuggestHitPage, redis::RedisError> {
+    let Some(mut conn) = state.redis.clone() else {
+        return Err(redis::RedisError::from((
+            redis::ErrorKind::IoError,
+            "redis is not configured",
+        )));
+    };
+    let text = redis_search_query(query, print_language);
+    if text.is_empty() {
+        return Ok(SuggestHitPage {
+            hits: Vec::new(),
+            estimated_total: 0,
+            print_filter_applied: print_language != "all",
+        });
+    }
+    let reply: redis::Value = redis::cmd("FT.SEARCH")
+        .arg(&state.config.redis_index)
+        .arg(text)
+        .arg("LIMIT")
+        .arg(offset.max(0))
+        .arg(limit.clamp(1, 240))
+        .arg("RETURN")
+        .arg(12)
+        .arg("card_id")
+        .arg("name")
+        .arg("name_group")
+        .arg("card_number")
+        .arg("rarity")
+        .arg("set_name")
+        .arg("expansion_name")
+        .arg("nicknames")
+        .arg("cdn_image_url")
+        .arg("search_weight")
+        .arg("nationality")
+        .arg("effective_print_bucket")
+        .arg("DIALECT")
+        .arg(2)
+        .arg("TIMEOUT")
+        .arg(800)
+        .query_async(&mut conn)
+        .await?;
+    let rows = match reply {
+        redis::Value::Array(rows) => rows,
+        _ => Vec::new(),
+    };
+    let estimated = redis_int(rows.first()).unwrap_or(0) as u64;
+    let mut hits = Vec::new();
+    let mut index = 1;
+    while index + 1 < rows.len() {
+        let fields = redis_pairs(&rows[index + 1]);
+        let card_id = fields.get("card_id").cloned().unwrap_or_default();
+        if !card_id.trim().is_empty() {
+            let nicknames = fields
+                .get("nicknames")
+                .map(|value| {
+                    value
+                        .split('|')
+                        .map(str::trim)
+                        .filter(|part| !part.is_empty())
+                        .map(|part| json!(part))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            hits.push(json!({
+                "card_id": card_id,
+                "name": fields.get("name").cloned().unwrap_or_default(),
+                "name_group": fields.get("name").cloned().unwrap_or_default(),
+                "card_number": fields.get("card_number").cloned().unwrap_or_default(),
+                "rarity": fields.get("rarity").cloned().unwrap_or_default(),
+                "set_name": fields.get("set_name").cloned().unwrap_or_default(),
+                "expansion_name": fields.get("expansion_name").cloned().unwrap_or_default(),
+                "nicknames": nicknames,
+                "cdn_image_url": fields.get("cdn_image_url").cloned().unwrap_or_default(),
+                "search_weight": fields.get("search_weight").and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0),
+                "nationality": fields.get("nationality").cloned().unwrap_or_default(),
+                "effective_print_bucket": fields.get("effective_print_bucket").cloned().unwrap_or_default(),
+            }));
+        }
+        index += 2;
+    }
+    Ok(SuggestHitPage {
+        hits,
+        estimated_total: estimated,
+        print_filter_applied: print_language != "all",
+    })
+}
+
+fn redis_int(value: Option<&redis::Value>) -> Option<i64> {
+    match value {
+        Some(redis::Value::Int(number)) => Some(*number),
+        Some(redis::Value::BulkString(bytes)) => String::from_utf8_lossy(bytes).parse().ok(),
+        _ => None,
+    }
+}
+
+fn redis_string(value: &redis::Value) -> String {
+    match value {
+        redis::Value::BulkString(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+        redis::Value::SimpleString(text) => text.clone(),
+        redis::Value::Int(number) => number.to_string(),
+        redis::Value::Double(number) => number.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn redis_pairs(value: &redis::Value) -> HashMap<String, String> {
+    let rows = match value {
+        redis::Value::Array(rows) => rows,
+        _ => return HashMap::new(),
+    };
+    let mut out = HashMap::new();
+    let mut index = 0;
+    while index + 1 < rows.len() {
+        out.insert(redis_string(&rows[index]), redis_string(&rows[index + 1]));
+        index += 2;
+    }
+    out
 }
 
 async fn meili_hits(

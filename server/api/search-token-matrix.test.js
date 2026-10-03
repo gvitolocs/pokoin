@@ -117,6 +117,10 @@ const STUBS = {
     marketplaceSearchEngine: () => (globalThis.__matrixMeili === true ? 'meili' : 'legacy'),
     marketplaceSearchShadowEnabled: () => false,
     useMeiliSearchForLanguage: () => globalThis.__matrixMeili === true,
+    useRedisSearch: () => false,
+  };`,
+  '_redis_search.js': `module.exports = {
+    redisSearchCandidates: async () => ({ hits: [], estimatedTotalHits: 0, exhaustive: true }),
   };`,
   '_meili_marketplace.js': `const capture = require('./_test_capture');
     module.exports = { meiliMarketplaceCandidates: async () => ({

@@ -27,7 +27,7 @@ set -euo pipefail
 systemctl reset-failed docker.service cloudflared.service pokoin-card-images.service pokoin-api-edge.service ssh.service sshd.service 2>/dev/null || true
 systemctl start docker.service
 sleep 2
-docker start pokoin-marketplace-postgres-replica pokoin-oracle-api pokoin-meili pokoin-valkey 2>/dev/null || true
+docker start pokoin-marketplace-postgres-replica pokoin-oracle-api pokoin-redis pokoin-rust-api 2>/dev/null || true
 # Do not start pokoin-card-images docker; CDN is systemd Node on :18081.
 systemctl start pokoin-card-images.service pokoin-api-edge.service cloudflared.service ssh.service 2>/dev/null || true
 

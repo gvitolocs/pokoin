@@ -47,7 +47,7 @@ start_containers() {
     reset_unit docker.service
     sleep 2
   fi
-  docker start pokoin-marketplace-postgres-replica pokoin-oracle-api pokoin-meili pokoin-valkey 2>/dev/null || true
+  docker start pokoin-marketplace-postgres-replica pokoin-oracle-api pokoin-redis pokoin-rust-api 2>/dev/null || true
 }
 
 repaired=0
@@ -93,14 +93,9 @@ if ! port_up 18079; then
   sleep 1
 fi
 
-if ! port_up 6379; then
-  repair "valkey :6379 down"
-  docker restart pokoin-valkey 2>/dev/null || true
-fi
-
-if ! port_up 7700; then
-  repair "meili :7700 down"
-  docker restart pokoin-meili 2>/dev/null || true
+if ! port_up 6380; then
+  repair "redis :6380 down"
+  docker restart pokoin-redis 2>/dev/null || true
 fi
 
 if ! systemctl is-active --quiet cloudflared.service; then

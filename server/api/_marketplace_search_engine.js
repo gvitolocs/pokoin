@@ -1,4 +1,4 @@
-const VALID_SEARCH_ENGINES = new Set(['legacy', 'meili']);
+const VALID_SEARCH_ENGINES = new Set(['legacy', 'meili', 'redis']);
 
 function cleanSearchEngine(value) {
   const engine = String(value || 'legacy').trim().toLowerCase();
@@ -22,9 +22,13 @@ function useMeiliSearch() {
   return marketplaceSearchEngine() === 'meili';
 }
 
+function useRedisSearch() {
+  return marketplaceSearchEngine() === 'redis';
+}
+
 function useMeiliSearchForLanguage(searchLanguage) {
   const language = String(searchLanguage || '').trim().toLowerCase();
-  if (!useMeiliSearch()) {
+  if (!useMeiliSearch() && !useRedisSearch()) {
     return false;
   }
   if (!language || language === 'en') {
@@ -38,5 +42,6 @@ module.exports = {
   marketplaceSearchEngine,
   marketplaceSearchShadowEnabled,
   useMeiliSearch,
+  useRedisSearch,
   useMeiliSearchForLanguage,
 };

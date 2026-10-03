@@ -20,8 +20,10 @@ const {
   marketplaceSearchEngine,
   marketplaceSearchShadowEnabled,
   useMeiliSearchForLanguage,
+  useRedisSearch,
 } = require('./_marketplace_search_engine');
 const { meiliMarketplaceCandidates } = require('./_meili_marketplace');
+const { redisSearchCandidates } = require('./_redis_search');
 const { canonicalPathForRow } = require('./_marketplace_canonical_path');
 const sql = require('./_marketplace_react_sql');
 
@@ -662,6 +664,16 @@ async function searchNonNameTrainerVariantWithDatabase(searchTerm, resultLimit, 
 function collectorNumberKey(value) {
   const match = String(value || '').match(/(\d+)\s*\/\s*(\d+)/);
   return match ? `${Number(match[1])}/${Number(match[2])}` : '';
+}
+
+function localNameScore(row, searchTerm) {
+  const name = String(row?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const query = String(searchTerm || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  let score = Math.min(Math.max(Number(row?.search_weight || row?.search_rank || 0), 0), 5000);
+  if (query && name === query) score += 100000;
+  else if (query && name.startsWith(query)) score += 40000;
+  else if (query && name.includes(query)) score += 10000;
+  return score;
 }
 
 function rankRowsByQueryCollectorNumber(rows, searchTerm) {
@@ -1313,13 +1325,17 @@ async function rowsForMeiliSearchTerm(
   // The suggest hot pool is deliberately not reused here: it is a different
   // universe (name/number search-on, relaxed strategy), so serving it as
   // search rows would detach the result count from the result predicate.
-  const candidateLoad = await meiliMarketplaceCandidates(
-    searchTerm,
-    searchLanguage,
-    pageSize,
-    pageOffset,
-    { printLanguage: options.printLanguage || 'all' },
-  );
+  const candidateLoad = useRedisSearch()
+    ? await redisSearchCandidates(searchTerm, pageSize, pageOffset, {
+      printLanguage: options.printLanguage || 'all',
+    })
+    : await meiliMarketplaceCandidates(
+      searchTerm,
+      searchLanguage,
+      pageSize,
+      pageOffset,
+      { printLanguage: options.printLanguage || 'all' },
+    );
   const meiliCandidates = candidateLoad.hits;
   const ids = meiliCandidates.map((candidate) => String(candidate.card_id)).filter(Boolean);
   const lightHydrate = options.lightHydrate === true;
@@ -1327,8 +1343,14 @@ async function rowsForMeiliSearchTerm(
     ? await searchRowsByCardIdsIdentity(ids)
     : await searchRowsByCardIdsWithDatabase(ids);
   const byId = new Map(hydratedRows.map((row) => [String(row.card_id), row]));
-  const merged = rankRowsByQueryCollectorNumber(
-    ids.map((id, index) => {
+  const ranked = useRedisSearch()
+    ? ids.map((id, index) => {
+      const row = byId.get(id);
+      if (!row) return null;
+      const hit = meiliCandidates[index];
+      return { ...row, search_rank: Number(hit?.meili_rank || row.search_weight || 0) };
+    }).filter(Boolean).sort((left, right) => localNameScore(right, searchTerm) - localNameScore(left, searchTerm))
+    : ids.map((id, index) => {
       const row = byId.get(id);
       if (!row) return null;
       const meili = meiliCandidates[index];
@@ -1336,9 +1358,8 @@ async function rowsForMeiliSearchTerm(
         ...row,
         search_rank: Number(meili?.meili_rank || 0),
       };
-    }).filter(Boolean),
-    searchTerm,
-  ).slice(0, pageSize);
+    }).filter(Boolean);
+  const merged = rankRowsByQueryCollectorNumber(ranked, searchTerm).slice(0, pageSize);
   if (debug) {
     debug.searchPath = 'meili_en_candidates';
     debug.tokenPlan = {

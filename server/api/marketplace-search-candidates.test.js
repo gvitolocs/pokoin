@@ -47,6 +47,12 @@ const STUBS = {
       marketplaceSearchEngine: () => 'meili',
       marketplaceSearchShadowEnabled: () => false,
       useMeiliSearchForLanguage: () => true,
+      useRedisSearch: () => false,
+    };
+  `,
+  '_redis_search.js': `
+    module.exports = {
+      redisSearchCandidates: async () => ({ hits: [], estimatedTotalHits: 0, exhaustive: true }),
     };
   `,
   '_meili_marketplace.js': `
