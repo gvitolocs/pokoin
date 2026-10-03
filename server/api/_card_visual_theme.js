@@ -136,11 +136,14 @@ function buildVisualTheme(artShade, artworkIdentity = '') {
   if (!source) {
     return null;
   }
-  const hue = source.c < 0.02 ? 265 : source.h;
+  // A near-gray scan (Colorless / Normal) is achromatic. Hue 265 plus a
+  // chroma floor painted the page blue under a gray header tile.
+  const neutral = source.c < 0.02;
+  const hue = neutral ? 0 : source.h;
   const chroma = source.c;
-  // Keep enough chroma that a dark step still reads as the artwork hue.
-  // A 0.03 cap on a yellow scan collapsed to the same blue-black as the old page.
-  const kept = Math.min(Math.max(chroma * 2.2, 0.055), 0.11);
+  // Chromatic artwork keeps a floor so a dark yellow does not fall back to
+  // blue-black. A 0.03 cap on a yellow scan collapsed to the same blue-black.
+  const kept = neutral ? 0 : Math.min(Math.max(chroma * 2.2, 0.055), 0.11);
   const background = {
     l: clamp(source.l * 0.5, 0.15, 0.2),
     c: kept,
@@ -158,7 +161,7 @@ function buildVisualTheme(artShade, artworkIdentity = '') {
   };
   let hero = {
     l: clamp(source.l + 0.04, 0.34, 0.52),
-    c: Math.min(chroma * 1.35, 0.115),
+    c: neutral ? 0 : Math.min(chroma * 1.35, 0.115),
     h: hue,
   };
   for (let guard = 0; guard < 8 && contrastRatio(shade(hero), WHITE) < 4.5; guard += 1) {
@@ -166,11 +169,11 @@ function buildVisualTheme(artShade, artworkIdentity = '') {
   }
   const tint = {
     l: clamp(hero.l + 0.05, 0.4, 0.55),
-    c: Math.min(chroma, 0.075),
+    c: neutral ? 0 : Math.min(chroma, 0.075),
     h: hue,
   };
-  const border = { l: 0.34, c: Math.min(chroma * 0.5, 0.035), h: hue };
-  const heroBorder = { l: 0.45, c: Math.min(chroma * 0.9, 0.09), h: hue };
+  const border = { l: 0.34, c: neutral ? 0 : Math.min(chroma * 0.5, 0.035), h: hue };
+  const heroBorder = { l: 0.45, c: neutral ? 0 : Math.min(chroma * 0.9, 0.09), h: hue };
   return {
     version: THEME_VERSION,
     artworkShade: String(artShade).toLowerCase(),

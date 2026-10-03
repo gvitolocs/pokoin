@@ -11,7 +11,8 @@ import {
 } from '../chat-client.js';
 import { useChatThread } from '../use-chat-thread.js';
 import { usePokoThread } from '../use-poko-thread.js';
-import { chatTime, eventAriaLabel, requestActionFor } from '../chat-format.js';
+import { chatPersonName, chatPersonPhoto, chatTime, eventAriaLabel, requestActionFor } from '../chat-format.js';
+import Avatar from '../components/Avatar.jsx';
 import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
 import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
@@ -145,8 +146,8 @@ export default function Messages() {
         </Link>
         {loading ? <div className="messages-list-skeleton" aria-label="Loading conversations" /> : rows.map((row) => (
           <Link key={row.pairKey} className="messages-row" to={`/messages/${encodeURIComponent(row.peerUsername)}`}>
-            <span className="messages-avatar" aria-hidden="true">{row.peerUsername?.slice(0, 1).toUpperCase() || '?'}</span>
-            <span className="messages-row-copy"><strong>@{row.peerUsername || 'Pokoin user'}</strong><span>{row.preview || 'Start the conversation'}</span></span>
+            <Avatar src={chatPersonPhoto(row)} seed={row.peerUid} name={chatPersonName(row)} size={42} />
+            <span className="messages-row-copy"><strong>{chatPersonName(row)}</strong><span>{row.preview || 'Start the conversation'}</span></span>
             <span className="messages-row-meta"><time>{chatTime(row.updatedAt)}</time>{row.unread > 0 && <b aria-label={`${row.unread} unread`}>{row.unread}</b>}</span>
           </Link>
         ))}
@@ -507,9 +508,9 @@ function HumanConversation({ peer }) {
       <header className="conversation-head">
         <button type="button" onClick={() => navigate('/messages')} aria-label="Back to messages">‹</button>
         <Link className="conversation-person" to={`/marketplace/${lang}/users/${encodeURIComponent(peer)}`}>
-          <span className="messages-avatar" aria-hidden="true">{peer.slice(0, 1).toUpperCase()}</span>
+          <Avatar src={chatPersonPhoto(thread.person)} seed={thread.person?.uid} name={chatPersonName({ ...thread.person, peerUsername: peer })} size={38} />
           <span>
-            <strong>@{peer}</strong>
+            <strong>{chatPersonName({ ...thread.person, peerUsername: peer })}</strong>
             <span>Pokoin conversation</span>
           </span>
         </Link>

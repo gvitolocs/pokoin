@@ -266,18 +266,19 @@ test('live Meili names join the pool without replacing priors', () => {
 
 test('Chrome ranks from one character and opens the popup at three', () => {
   const chrome = readFileSync(new URL('./components/Chrome.jsx', import.meta.url), 'utf8');
-  assert.match(chrome, /fetchSuggestRanked/);
+  assert.match(chrome, /useProgressiveSuggest/);
+  assert.match(chrome, /progressive\.projected/);
   assert.match(chrome, /liveSuggestGroups/);
   assert.match(chrome, /printLang/);
   assert.match(chrome, /suggestLiveReady/);
   assert.match(chrome, /fetchSearch,/);
-  assert.match(chrome, /mapChunk: rankChunkOnWorker/);
-  assert.match(chrome, /kind: searchTabRef\.current/);
+  assert.match(chrome, /kind: catalogTab/);
   assert.match(chrome, /catalogIntent/);
   assert.match(chrome, /fetchArtist/);
   assert.match(chrome, /liveTick/);
   assert.match(chrome, /SearchTabs/);
   assert.match(chrome, /searchTab/);
+  assert.equal(chrome.includes('fetchSuggestRanked'), false);
   assert.equal(chrome.includes('setGroups(liveSuggestGroups'), false);
   assert.equal(chrome.includes('suggest-pending'), false);
   assert.equal(chrome.includes('term.length < 2'), false);

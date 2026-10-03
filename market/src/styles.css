@@ -343,10 +343,45 @@ button, input, select { font: inherit; color: inherit; }
   -webkit-user-drag: element;
 }
 
-.search-go-icon {
+.search-lens {
+  position: relative;
   display: block;
-  width: 1.2rem;
-  height: 1.2rem;
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+}
+
+.search-go-icon {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.search-lens-mark {
+  position: absolute;
+  left: 38.33%;
+  top: 38.33%;
+  z-index: 0;
+  width: 62%;
+  height: 62%;
+  overflow: hidden;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.search-lens-mark img,
+.search-lens-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.search-lens-mark svg {
+  transform: scale(1.2);
 }
 
 .suggest {

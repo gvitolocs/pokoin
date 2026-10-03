@@ -9,7 +9,6 @@ import {
   fetchArtist,
   fetchExpansionCards,
   fetchNamePrintings,
-  fetchSearch,
   fetchSuggest,
   imageSrc,
 } from './api.js';
@@ -28,8 +27,8 @@ import {
   rememberSuggestGroups,
   suggestLiveReady,
 } from './suggest-live.js';
-import { fetchSuggestRanked, rankConcurrency } from './suggest-rank.js';
-import { rankChunkOnWorker, warmupSuggestRankWorkers } from './suggest-rank-runtime.js';
+import { warmupSuggestRankWorkers } from './suggest-rank-runtime.js';
+import { useProgressiveSuggest } from './use-progressive-suggest.js';
 import { resolveSuggestQuery } from './suggest-resolve.js';
 import { earlySetPrefixName } from './search-score.js';
 
@@ -77,9 +76,15 @@ export function useLiveSuggest(query, { kind = 'singles', enabled = true, limit 
   const printLang = usePrintLang();
   const [liveTick, setLiveTick] = useState(0);
   const [pending, setPending] = useState(false);
+  const progressive = useProgressiveSuggest({
+    query,
+    lang,
+    printLang,
+    kind,
+    enabled: enabled && isPokemonGame(),
+    limit,
+  });
   const queryRef = useRef('');
-  const pokemonScheduled = useRef(new Set());
-  const meiliControllers = useRef([]);
 
   useEffect(() => {
     warmupSuggestRankWorkers();
@@ -89,11 +94,6 @@ export function useLiveSuggest(query, { kind = 'singles', enabled = true, limit 
     if (!enabled) return undefined;
     const term = String(query || '').trim();
     queryRef.current = term;
-    // Match Chrome: drop in-flight Meili work on every keystroke / print change
-    // so stale responses cannot pile up and re-paint after a newer query.
-    for (const running of meiliControllers.current) running.abort();
-    meiliControllers.current = [];
-    pokemonScheduled.current.clear();
     if (!term) {
       setPending(false);
       return undefined;
@@ -101,17 +101,6 @@ export function useLiveSuggest(query, { kind = 'singles', enabled = true, limit 
 
     const ready = suggestLiveReady(term);
     const resolvedOnce = resolveSuggestQuery(term);
-
-    function rememberAndPaint(data) {
-      const remembered = data?.hydrated || data?.groups;
-      // Stamp with the fetch language so the unified scorer only trusts these
-      // rows' localized_* fields while that language stays selected.
-      rememberSuggestGroups(remembered, { searchLang: lang });
-      preloadSuggestThumbs(collectPrintingThumbUrls(remembered, suggestThumbSrc), { first: true });
-      const current = String(queryRef.current || '').trim();
-      if (!isPokemonGame() || !suggestLiveReady(current)) return;
-      setLiveTick((tick) => tick + 1);
-    }
 
     function hydrateCatalog(nextTerm, resolved) {
       const targets = [];
@@ -179,52 +168,7 @@ export function useLiveSuggest(query, { kind = 'singles', enabled = true, limit 
 
     if (isPokemonGame()) {
       if (ready) hydrateCatalog(term, resolvedOnce);
-      const kickKey = `${term}\0${lang}\0${printLang}\0${kind}`;
-      if (pokemonScheduled.current.has(kickKey)) return undefined;
-      const start = () => {
-        if (pokemonScheduled.current.has(kickKey)) return;
-        pokemonScheduled.current.add(kickKey);
-        const controller = new AbortController();
-        meiliControllers.current.push(controller);
-        const requestPrint = printLang;
-        if (queryRef.current === term) setPending(true);
-        fetchSuggestRanked(term, {
-          fetchSuggest,
-          fetchSearch,
-          limit,
-          signal: controller.signal,
-          lang,
-          printLang: requestPrint,
-          concurrency: rankConcurrency(),
-          mapChunk: rankChunkOnWorker,
-          kind,
-          resolved: resolvedOnce,
-        }).catch((error) => {
-          if (error?.name === 'AbortError') throw error;
-          return fetchSuggest(term, { limit, signal: controller.signal, lang, printLang: requestPrint })
-            .then((data) => ({
-              groups: Array.isArray(data.groups) ? data.groups : [],
-              hydrated: data.groups,
-              count: Number(data.count) || 0,
-              resolvedQuery: term,
-            }));
-        }).then((data) => {
-          rememberAndPaint(data);
-        }).catch((error) => {
-          if (error?.name !== 'AbortError') {
-            /* leave live cache as-is */
-          }
-        }).finally(() => {
-          meiliControllers.current = meiliControllers.current.filter((row) => row !== controller);
-          if (queryRef.current === term) setPending(false);
-        });
-      };
-      if (pokemonScheduled.current.size === 0) {
-        start();
-        return undefined;
-      }
-      const timer = setTimeout(start, 40);
-      return () => clearTimeout(timer);
+      return undefined;
     }
 
     // Non-Pokemon: plain Meili suggest (same fallback as Chrome).
@@ -255,11 +199,17 @@ export function useLiveSuggest(query, { kind = 'singles', enabled = true, limit 
   const ready = enabled && suggestLiveReady(query);
   const results = useMemo(() => {
     if (!ready) return [];
-    const groups = liveSuggestGroups(query, { printLang, searchLang: lang, kind }).groups;
+    const groups = progressive.projected
+      ? progressive.groups
+      : liveSuggestGroups(query, { printLang, searchLang: lang, kind }).groups;
     return flattenPickable(groups).slice(0, limit);
     // liveTick forces re-read after Meili / catalog hydration
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, printLang, lang, kind, ready, liveTick, limit]);
+  }, [query, printLang, lang, kind, ready, liveTick, limit, progressive.projected, progressive.groups, progressive.epoch]);
 
-  return { results, pending, ready };
+  return {
+    results,
+    pending: isPokemonGame() ? progressive.pending : pending,
+    ready,
+  };
 }

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { listConversations, sendChatMessage, uploadChatPhoto } from '../chat-client.js';
-import { chatTime } from '../chat-format.js';
+import { chatPersonName, chatPersonPhoto, chatTime } from '../chat-format.js';
 import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
 import {
   addChatTag,
@@ -37,6 +37,7 @@ import {
   resolvePokoCards,
 } from '../poko-chat.js';
 import { useChatThread } from '../use-chat-thread.js';
+import Avatar from './Avatar.jsx';
 import { usePokoThread } from '../use-poko-thread.js';
 import ChatListingTag from './ChatListingTag.jsx';
 import ChatPhotos from './ChatPhotos.jsx';
@@ -153,9 +154,9 @@ function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
             }}
           >
             <button type="button" onClick={() => onOpen(row)}>
-              <span className="chat-dock-avatar" aria-hidden="true">{(row.peerUsername || '?').slice(0, 1).toUpperCase()}</span>
+              <Avatar src={chatPersonPhoto(row)} seed={row.peerUid} name={chatPersonName(row)} size={36} />
               <span className="chat-dock-row-copy">
-                <strong>@{row.peerUsername || 'Pokoin user'}</strong>
+                <strong>{chatPersonName(row)}</strong>
                 <em className={line.draft ? 'is-draft' : ''}>{line.text}</em>
               </span>
               <time>{chatTime(row.updatedAt)}</time>
@@ -280,9 +281,10 @@ export default function ChatDock() {
     );
   }
 
-  const label = poko
-    ? POKO_DISPLAY
-    : (dock.peerLabel && dock.peerLabel !== 'Seller' ? `@${dock.peerLabel}` : 'Seller');
+  const handle = dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '';
+  const personName = thread.person?.displayName || dock.peerName || '';
+  const personPhoto = thread.person?.photoUrl || dock.peerPhotoUrl || '';
+  const label = poko ? POKO_DISPLAY : (personName || handle || 'Seller');
   const events = poko ? pokoThread.events : thread.events;
   const activeLogRef = poko ? pokoThread.logRef : thread.logRef;
   const sending = busy || (poko && pokoThread.busy);
@@ -374,7 +376,7 @@ export default function ChatDock() {
         {dock.view === 'thread' ? (
           <button type="button" aria-label="Conversations" onClick={() => openChatList(text)}>‹</button>
         ) : <span />}
-        <strong className={poko ? 'chat-dock-person is-poko' : undefined}>
+        <strong className={`chat-dock-person${poko ? ' is-poko' : ''}`}>
           {poko ? (
             <>
               <span className="chat-dock-avatar is-poko poko-avatar" aria-hidden="true">
@@ -382,8 +384,11 @@ export default function ChatDock() {
               </span>
               {POKO_DISPLAY}
             </>
-          ) : dock.view === 'thread' && dock.peerLabel && dock.peerLabel !== 'Seller' ? (
-            <Link to={`/marketplace/${lang}/users/${encodeURIComponent(dock.peerLabel)}`}>{label}</Link>
+          ) : dock.view === 'thread' && handle ? (
+            <Link to={`/marketplace/${lang}/users/${encodeURIComponent(handle)}`}>
+              <Avatar src={personPhoto} seed={dock.peer} name={label} size={30} />
+              {label}
+            </Link>
           ) : (dock.view === 'thread' ? label : 'Messages')}
         </strong>
         <button type="button" aria-label="Close chat" onClick={() => closeChatDock(text)}>×</button>
@@ -393,7 +398,10 @@ export default function ChatDock() {
           signedIn={signedIn}
           getBearer={getBearer}
           onPoko={() => openThread(POKO_PEER, POKO_DISPLAY, text)}
-          onOpen={(row) => openThread(row.peerUid, row.peerUsername, text)}
+          onOpen={(row) => openThread(row.peerUid, row.peerUsername, text, {
+            displayName: row.peerDisplayName,
+            photoUrl: row.peerPhotoUrl,
+          })}
         />
       ) : (
         <>

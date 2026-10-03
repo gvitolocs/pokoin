@@ -143,7 +143,9 @@ async function meiliMarketplaceSuggestHits(searchTerm, searchLanguage, limit = 2
   const body = {
     q,
     limit: meiliSearchLimit(limit, 24),
-    offset: 0,
+    // Offset is the page cursor. Redis Search should use FT.AGGREGATE
+    // WITHCURSOR instead of a deep OFFSET; this field is the shared contract.
+    offset: Math.min(Math.max(Math.trunc(Number(options.offset) || 0), 0), 10000),
     showRankingScore: true,
     attributesToRetrieve: SUGGEST_ATTRIBUTES,
     attributesToSearchOn: SUGGEST_SEARCH_ON,

@@ -25,6 +25,7 @@ export function useChatThread({ peer = '', peerUid = '', signedIn = false, getBe
   const [hasMore, setHasMore] = useState(cached.hasMore);
   const [settled, setSettled] = useState(cached.events.length > 0);
   const [error, setError] = useState('');
+  const [person, setPerson] = useState(null);
   const logRef = useRef(null);
   const pinBottom = useRef(true);
   const olderLock = useRef(false);
@@ -38,6 +39,7 @@ export function useChatThread({ peer = '', peerUid = '', signedIn = false, getBe
     setHasMore(cached.hasMore);
     setSettled(cached.events.length > 0);
     setError('');
+    setPerson(null);
     pinBottom.current = true;
   }
 
@@ -53,6 +55,7 @@ export function useChatThread({ peer = '', peerUid = '', signedIn = false, getBe
         const more = pageHasMore(result);
         setHasMore(more);
         setEvents((current) => mergeChatEvents(current, page));
+        if (result.peer) setPerson(result.peer);
         remember(result, page, more, peer);
         setError('');
       } catch (err) {
@@ -110,6 +113,7 @@ export function useChatThread({ peer = '', peerUid = '', signedIn = false, getBe
 
   return {
     events,
+    person,
     hasMore,
     settled,
     error,

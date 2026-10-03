@@ -41,6 +41,24 @@ test('card shade style feeds the desk header tile', () => {
   assert.equal(cardShadeStyle({}), undefined);
 });
 
+test('a near-gray leftover stays gray on every desk step', () => {
+  for (const hex of ['#8a8680', '#4a4244']) {
+    const theme = deskThemeFromShade(hex);
+    assert.ok(theme);
+    for (const field of ['background', 'surface', 'surfaceRaised', 'hero', 'border', 'tint']) {
+      const rgb = theme[field].slice(1);
+      const red = Number.parseInt(rgb.slice(0, 2), 16);
+      const green = Number.parseInt(rgb.slice(2, 4), 16);
+      const blue = Number.parseInt(rgb.slice(4, 6), 16);
+      assert.ok(Math.abs(red - blue) <= 1, `${hex} ${field} ${theme[field]}`);
+      assert.ok(Math.abs(red - green) <= 1, `${hex} ${field} ${theme[field]}`);
+    }
+    const server = buildVisualTheme(hex);
+    assert.equal(theme.background, server.background);
+    assert.equal(theme.hero, server.hero);
+  }
+});
+
 test('desk theme keeps the page darker than the tiles', () => {
   const theme = deskThemeFromShade('#3a5c8a');
   assert.ok(theme);

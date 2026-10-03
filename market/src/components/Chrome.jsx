@@ -27,8 +27,9 @@ import {
 } from '../art-shade.js';
 import { prefersArtworkDelta, rarityRowTheme } from '../rarity-theme.js';
 import { pickSuggestHoverSrc, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
-import { fetchSuggestRanked, rankConcurrency, rankNames, resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
-import { rankChunkOnWorker, warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
+import { resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
+import { useProgressiveSuggest } from '../use-progressive-suggest.js';
+import { warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
 import { useSuggestFlip } from '../suggest-flip.js';
 import {
   cachedPrintings,
@@ -261,9 +262,21 @@ function PrintLangToggle() {
         title={current.label}
         onClick={() => setOpen((value) => !value)}
       >
-        <svg className="search-go-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-          <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-        </svg>
+        <span className="search-lens" aria-hidden="true">
+          <span className="search-lens-mark">
+            {current.flag ? (
+              <img src={flagSrc(current.flag)} alt="" />
+            ) : (
+              <svg className="print-lang-all" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
+              </svg>
+            )}
+          </span>
+          <svg className="search-go-icon" viewBox="0 0 24 24" width="30" height="30">
+            <circle cx="9.2" cy="9.2" r="7.1" fill="none" stroke="currentColor" stroke-width="1.7" />
+            <path d="M14.3 14.3 21.2 21.2" fill="none" stroke="currentColor" stroke-width="2.15" stroke-linecap="round" />
+          </svg>
+        </span>
         <svg className="lang-caret" viewBox="0 0 12 8" width="10" height="7" aria-hidden="true">
           <path fill="currentColor" d="M1.2 1.5h9.6L6 6.8z" />
         </svg>
@@ -419,8 +432,6 @@ export default function Chrome({ children }) {
   const suggestRef = useRef(null);
   const listRef = useRef(null);
   const queryRef = useRef('');
-  const pokemonScheduled = useRef(new Set());
-  const meiliControllers = useRef([]);
   const [pointerHoverId, setPointerHoverId] = useState(null);
   const [hoverBox, setHoverBox] = useState(null);
   const [searchTab, setSearchTab] = useState('singles');
@@ -461,8 +472,19 @@ export default function Chrome({ children }) {
   searchTabRef.current = searchTab;
   const printLangRef = useRef(printLang);
   printLangRef.current = printLang;
-  const suggestRequestId = useRef(0);
   const catalogTab = searchTab === 'users' ? 'singles' : searchTab;
+  const progressive = useProgressiveSuggest({
+    query,
+    lang,
+    printLang,
+    kind: catalogTab,
+    enabled: isPokemonGame() && searchTab !== 'users',
+    limit: 20,
+    onPage: (data) => {
+      setHitCount(Number(data?.count) || 0);
+    },
+  });
+  const suggestPending = isPokemonGame() && searchTab !== 'users' ? progressive.pending : pending;
   const visibleGroups = useMemo(() => {
     if (!isPokemonGame()) {
       return groups;
@@ -470,8 +492,9 @@ export default function Chrome({ children }) {
     if (!suggestLiveReady(query) || searchTab === 'users') {
       return [];
     }
+    if (progressive.projected) return progressive.groups;
     return liveSuggestGroups(query, { printLang, searchLang: lang, kind: catalogTab }).groups;
-  }, [groups, liveTick, printLang, lang, query, searchTab, catalogTab]);
+  }, [groups, liveTick, printLang, lang, query, searchTab, catalogTab, progressive.projected, progressive.groups, progressive.epoch]);
   const flat = flattenPrintings(visibleGroups);
   const activeOption = activeIndex >= 0 ? flat[activeIndex] : null;
   const previewOptionId = pointerHoverId || activeOption?.optionId || '';
@@ -489,7 +512,7 @@ export default function Chrome({ children }) {
   const suggestVisible = open && suggestLiveReady(query) && (
     isPokemonGame()
     || visibleGroups.length > 0
-    || pending
+    || suggestPending
   );
   useSuggestFlip(listRef, suggestVisible ? suggestIds : '');
 
@@ -608,13 +631,6 @@ export default function Chrome({ children }) {
   useEffect(() => {
     const term = query.trim();
     queryRef.current = term;
-    // Print / query identity changed — drop in-flight work so stale All
-    // responses cannot race past a newer Western paint.
-    for (const running of meiliControllers.current) {
-      running.abort();
-    }
-    meiliControllers.current = [];
-    pokemonScheduled.current.clear();
     if (!term) {
       setPending(false);
       setGroups([]);
@@ -624,39 +640,6 @@ export default function Chrome({ children }) {
     }
 
     const ready = suggestLiveReady(term);
-
-    function rememberAndPaint(data, requestMeta = {}) {
-      const requestPrint = requestMeta.printLang || 'all';
-      const requestSeq = Number(requestMeta.seq) || 0;
-      // Stale All responses must not overwrite a newer Western (etc.) paint.
-      if (requestSeq && requestSeq !== suggestRequestId.current) {
-        return;
-      }
-      if (requestPrint !== printLangRef.current) {
-        return;
-      }
-      const remembered = data?.hydrated || data?.groups;
-      rememberSuggestGroups(remembered);
-      preloadSuggestThumbs(collectPrintingThumbUrls(remembered, suggestThumbSrc));
-      const current = String(queryRef.current || '').trim();
-      if (!isPokemonGame() || !suggestLiveReady(current)) {
-        return;
-      }
-      setLiveTick((tick) => tick + 1);
-      if (current !== term) {
-        return;
-      }
-      // Suggest's relaxed estimate is the footer baseline; the search-page
-      // prefetch effect below overrides it whenever the payload carries an
-      // exact total.
-      setHitCount(Number(data?.count) || 0);
-      // Warm the "View all" destination so Enter is hot.
-      prefetchSearchPage(data?.resolvedQuery || term, lang, {
-        fetchSearchPage: fetchSearch,
-        tab: searchTabRef.current,
-        printLang: requestPrint,
-      });
-    }
 
     function hydrateCatalog(nextTerm) {
       const targets = [];
@@ -745,76 +728,12 @@ export default function Chrome({ children }) {
 
     if (isPokemonGame()) {
       if (ready) {
-        setActiveIndex(-1);
         hydrateCatalog(term);
       } else {
         setGroups([]);
-        setPending(false);
         setHitCount(0);
-        setActiveIndex(-1);
       }
-      const kickKey = `${term}\0${lang}\0${printLang}\0${catalogTab}`;
-      if (pokemonScheduled.current.has(kickKey)) {
-        return undefined;
-      }
-      const start = () => {
-        if (pokemonScheduled.current.has(kickKey)) {
-          return;
-        }
-        pokemonScheduled.current.add(kickKey);
-        const controller = new AbortController();
-        meiliControllers.current.push(controller);
-        const seq = (suggestRequestId.current += 1);
-        const requestPrint = printLang;
-        if (queryRef.current === term) {
-          setPending(true);
-        }
-        fetchSuggestRanked(term, {
-          fetchSuggest,
-          fetchSearch,
-          limit: 20,
-          signal: controller.signal,
-          lang,
-          printLang: requestPrint,
-          concurrency: rankConcurrency(),
-          mapChunk: rankChunkOnWorker,
-          kind: searchTabRef.current,
-          resolved: resolveSuggestQuery(term),
-        }).catch((error) => {
-          if (error?.name === 'AbortError') {
-            throw error;
-          }
-          return fetchSuggest(term, {
-            limit: 20,
-            signal: controller.signal,
-            lang,
-            printLang: requestPrint,
-          })
-            .then((data) => ({
-              groups: Array.isArray(data.groups) ? data.groups : [],
-              hydrated: data.groups,
-              count: Number(data.count) || 0,
-              resolvedQuery: term,
-            }));
-        }).then((data) => {
-          rememberAndPaint(data, { printLang: requestPrint, seq });
-        }).catch((error) => {
-          if (error.name !== 'AbortError') {
-            setActiveIndex(-1);
-          }
-        }).finally(() => {
-          meiliControllers.current = meiliControllers.current.filter((row) => row !== controller);
-          if (queryRef.current === term && printLangRef.current === requestPrint) {
-            setPending(false);
-          }
-        });
-      };
-      if (pokemonScheduled.current.size === 0) {
-        start();
-        return undefined;
-      }
-      const timer = setTimeout(start, 40);
-      return () => clearTimeout(timer);
+      return undefined;
     }
 
     if (!ready) {
@@ -1136,7 +1055,7 @@ export default function Chrome({ children }) {
                 aria-controls="market-suggest"
                 aria-activedescendant={activeOption ? activeOption.optionId : undefined}
                 aria-autocomplete="list"
-                aria-busy={suggestVisible && pending}
+                aria-busy={suggestVisible && suggestPending}
               />
               {isPokemonGame() ? <PrintLangToggle /> : null}
               <button className="sr-only" type="submit">Search</button>
@@ -1328,7 +1247,7 @@ export default function Chrome({ children }) {
                       </li>
                   )) : (
                     <li className="suggest-empty">
-                      {pending
+                      {suggestPending
                         ? 'Searching…'
                         : searchTab === 'product'
                           ? `No products match “${query.trim()}”.`

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { fetchPortfolioHistory, formatPknNumber } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { listConversations } from '../chat-client.js';
+import { chatPersonName } from '../chat-format.js';
 import { openThread } from '../chat-dock-store.js';
 import { GAMES, game, gameSiteHref } from '../game.js';
 import { loadPortfolioHistory, peekPortfolioHistory } from '../portfolio-history-cache.js';
@@ -69,8 +70,11 @@ export function MessagesPreview() {
         <ul>
           {rows.map((row) => (
             <li key={row.peerUid || row.pairKey}>
-              <button type="button" onClick={() => openThread(row.peerUid, row.peerUsername)}>
-                <strong>@{row.peerUsername || 'Pokoin user'}</strong>
+              <button type="button" onClick={() => openThread(row.peerUid, row.peerUsername, undefined, {
+                displayName: row.peerDisplayName,
+                photoUrl: row.peerPhotoUrl,
+              })}>
+                <strong>{chatPersonName(row)}</strong>
                 <span>{row.preview || 'No messages yet'}</span>
               </button>
             </li>

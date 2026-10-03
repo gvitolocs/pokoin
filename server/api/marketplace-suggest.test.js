@@ -67,6 +67,16 @@ test('legacy All clients retain twenty rows while hydration is explicitly bounde
   assert.ok(rows(hydrate.body).length <= 1000);
 });
 
+test('progressive suggest pages by offset instead of a 1000-row ceiling', async () => {
+  const { body, calls } = await invoke('progressive=1&hydrate=1&limit=50&offset=50&print_language=all');
+  assert.equal(calls[0].limit, 50);
+  assert.equal(calls[0].options.offset, 50);
+  assert.equal(body.offset, 50);
+  assert.equal(body.candidateLimit, 50);
+  assert.equal(body.exhaustive, false);
+  assert.ok(rows(body).length <= 50);
+});
+
 test('an unknown indexed nationality hydrates from the catalog without overwriting known prints', async () => {
   resetExpansionNationalityCache();
   const groups = await attachExpansionNationality([{ name: 'Dialga', printings: [

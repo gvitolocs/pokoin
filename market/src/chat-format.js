@@ -32,3 +32,16 @@ export function eventAriaLabel(event = {}) {
   }
   return event.mine ? `You: ${event.text || ''}` : event.text || '';
 }
+
+/** Display name when the profile has one. The @handle is only the fallback. */
+export function chatPersonName(row) {
+  const person = row || {};
+  const display = String(person.peerDisplayName || person.displayName || '').trim();
+  const handle = String(person.peerUsername || person.username || '').trim();
+  return display || handle || 'Pokoin user';
+}
+
+export function chatPersonPhoto(row) {
+  const person = row || {};
+  return String(person.peerPhotoUrl || person.photoUrl || '').trim();
+}

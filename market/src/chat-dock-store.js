@@ -3,7 +3,7 @@ import { appendChatTag, chatQty, dragCardsOf, explicitStock, sellerUserId, tagKe
 const DRAFT_KEY = 'pokoin.chatDrafts';
 const DROP_HINT_KEY = 'pokoin.chatDropHint';
 
-let snapshot = { open: false, view: 'list', peer: '', peerLabel: '', tags: [], text: '' };
+let snapshot = { open: false, view: 'list', peer: '', peerLabel: '', peerName: '', peerPhotoUrl: '', tags: [], text: '' };
 const listeners = new Set();
 
 function emit() {
@@ -134,7 +134,7 @@ export function stageChatCards(references) {
   return true;
 }
 
-export function openThread(peer, label = '', text) {
+export function openThread(peer, label = '', text, profile = null) {
   const uid = sellerUserId(peer) || String(peer || '').trim();
   if (!uid) return false;
   persistCurrent(text);
@@ -144,11 +144,14 @@ export function openThread(peer, label = '', text) {
     for (const row of stagedCards) tags = appendChatTag(tags, row);
     stagedCards = [];
   }
+  const person = profile && typeof profile === 'object' ? profile : {};
   snapshot = {
     open: true,
     view: 'thread',
     peer: uid,
     peerLabel: label || draft.label || 'Seller',
+    peerName: String(person.displayName || '').trim(),
+    peerPhotoUrl: String(person.photoUrl || '').trim(),
     tags,
     text: draft.text || '',
   };

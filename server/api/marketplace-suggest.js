@@ -42,6 +42,7 @@ const {
   jsonOk,
   cleanText,
   parseLimit,
+  parseOffset,
 } = require('./_marketplace_react_card');
 
 function emptySuggest(query, reason) {
@@ -113,12 +114,17 @@ function createHandler(deps = {}) {
           || 'en',
         12,
       ) || 'en';
-      // Web ranking hydrates a bounded candidate window before its own cap.
-      // Existing clients still receive the ordinary twenty-row popup payload.
+      // Existing clients still receive the ordinary twenty-row popup, or one
+      // hydrate window. Progressive clients page with offset. Each response
+      // is a transport chunk (max 500), not a semantic candidate ceiling.
       const hydrate = url.searchParams.get('hydrate') === '1';
-      const rowLimit = hydrate
-        ? parseLimit(url.searchParams.get('limit'), 1000, 1000)
-        : SUGGEST_POPUP_ROWS;
+      const offset = parseOffset(url.searchParams.get('offset'));
+      const progressive = url.searchParams.get('progressive') === '1' || offset > 0;
+      const rowLimit = progressive
+        ? parseLimit(url.searchParams.get('limit'), 50, 500)
+        : hydrate
+          ? parseLimit(url.searchParams.get('limit'), 1000, 1000)
+          : SUGGEST_POPUP_ROWS;
       const groupLimit = hydrate ? rowLimit
         : parseLimit(url.searchParams.get('limit'), SUGGEST_POPUP_ROWS, 24);
       const printLanguage = cleanPrintLanguage(
@@ -167,12 +173,15 @@ function createHandler(deps = {}) {
         // A valid indexed facet can still be incomplete. Hydrate canonical
         // expansion nationality before filtering, rather than losing older
         // printings with a missing effective_print_bucket in Meili.
-        const hitLimit = hydrate || printLanguage !== 'all'
-          ? 1000 : suggestMeiliHitLimit(groupLimit);
+        const hitLimit = progressive
+          ? rowLimit
+          : (hydrate || printLanguage !== 'all'
+            ? 1000 : suggestMeiliHitLimit(groupLimit));
         const loaded = unpackSuggestHits(
           await timed('meiliMs', () => loadHits(query, searchLanguage, hitLimit, {
             matchingStrategy,
             printLanguage: 'all',
+            offset: progressive ? offset : 0,
           })),
         );
         const globalCount = Number(loaded.estimatedTotalHits) || 0;
@@ -185,8 +194,8 @@ function createHandler(deps = {}) {
         // tie-break before the 20-row cap. Cap happens in applySuggestPrintPriority.
         let groups = groupSuggestHits(
           loaded.hits,
-          groupLimit,
-          hydrate || printLanguage !== 'all' ? 1000 : WESTERN_PRINTING_POOL,
+          progressive ? hitLimit : groupLimit,
+          progressive ? hitLimit : (hydrate || printLanguage !== 'all' ? 1000 : WESTERN_PRINTING_POOL),
           query,
         );
         const catalog = catalogSqlNeeded(groups, searchLanguage);
@@ -217,7 +226,7 @@ function createHandler(deps = {}) {
         );
         groups = applyPrintPriority(groups, {
           printLanguage,
-          maxRows: rowLimit,
+          maxRows: progressive ? hitLimit : rowLimit,
         });
         const shown = groups.reduce((sum, group) => sum + group.printings.length, 0);
         let count = shown;
@@ -241,7 +250,9 @@ function createHandler(deps = {}) {
           printLanguage,
           hydrated: hydrate,
           candidateLimit: hitLimit,
-          exhaustive: loaded.hits.length >= globalCount,
+          offset,
+          nextOffset: offset + loaded.hits.length,
+          exhaustive: offset + loaded.hits.length >= globalCount || loaded.hits.length < hitLimit,
         }, 'public, max-age=5, s-maxage=30, stale-while-revalidate=120');
       } catch (error) {
         console.error('marketplace-suggest failed', error?.message || error);

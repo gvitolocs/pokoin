@@ -297,7 +297,16 @@ export const fetchNamePrintings = createNamePrintingsFetcher({
   mapCard: cardFromCatalogRow,
 });
 
-export function fetchSuggest(query, { limit = 20, signal, lang, printLang, match, hydrate = false } = {}) {
+export function fetchSuggest(query, {
+  limit = 20,
+  signal,
+  lang,
+  printLang,
+  match,
+  hydrate = false,
+  offset = 0,
+  progressive = false,
+} = {}) {
   const params = new URLSearchParams({
     q: query || '',
     limit: String(limit),
@@ -309,6 +318,8 @@ export function fetchSuggest(query, { limit = 20, signal, lang, printLang, match
   });
   void printLang;
   if (hydrate) params.set('hydrate', '1');
+  if (progressive) params.set('progressive', '1');
+  if (offset > 0) params.set('offset', String(offset));
   // Corrected semantic lookups require every token to hit server-side so a
   // resolver anchor cannot silently vanish (default Meili "last" relaxes).
   if (match === 'all') {

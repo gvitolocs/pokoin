@@ -87,6 +87,46 @@ function timestampMillis(value) {
   return new Date(value).getTime() || 0;
 }
 
+function httpsPhoto(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  try {
+    const url = new URL(text);
+    return url.protocol === 'https:' ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function profileFromUser(data = {}) {
+  const displayName = String(data.displayName || '').trim();
+  return {
+    displayName: displayName && !displayName.includes('@') ? displayName.slice(0, 120) : '',
+    photoUrl: httpsPhoto(data.photoUrl),
+  };
+}
+
+async function profilesFor(firestore, uids) {
+  const ids = [...new Set(uids.map((id) => String(id || '').trim()).filter(Boolean))];
+  const out = new Map();
+  if (!ids.length) return out;
+  const refs = ids.map((uid) => firestore.collection('users').doc(uid));
+  let docs = [];
+  try {
+    docs = typeof firestore.getAll === 'function'
+      ? await firestore.getAll(...refs)
+      : await Promise.all(refs.map((ref) => ref.get()));
+  } catch (error) {
+    console.error('chat peer profiles failed', error?.message || error);
+    return out;
+  }
+  for (const doc of docs) {
+    if (!doc?.exists) continue;
+    out.set(doc.id, profileFromUser(doc.data() || {}));
+  }
+  return out;
+}
+
 async function usernameFor(firestore, uid, fallback = '') {
   const doc = await firestore.collection('users').doc(uid).get();
   return String(doc.data()?.username || fallback).trim().toLowerCase();
@@ -174,7 +214,7 @@ module.exports = async function handler(req, res) {
     if (req.method === 'GET' && action === 'list') {
       const snap = await firestore.collection('conversations')
         .where('members', 'array-contains', me.uid).limit(100).get();
-      const conversations = snap.docs.map((doc) => {
+      const rows = snap.docs.map((doc) => {
         const data = doc.data() || {};
         if (!isParticipant(data.members, me.uid)) return null;
         const peerUid = otherMember(data.members, me.uid);
@@ -188,6 +228,15 @@ module.exports = async function handler(req, res) {
           updatedAt: lastEvent.at || data.createdAt || null,
         };
       }).filter(Boolean).sort((a, b) => timestampMillis(b.updatedAt) - timestampMillis(a.updatedAt));
+      const profiles = await profilesFor(firestore, rows.map((row) => row.peerUid));
+      const conversations = rows.map((row) => {
+        const profile = profiles.get(row.peerUid) || {};
+        return {
+          ...row,
+          peerDisplayName: profile.displayName || '',
+          peerPhotoUrl: profile.photoUrl || '',
+        };
+      });
       return res.status(200).json({ conversations });
     }
 
@@ -221,9 +270,15 @@ module.exports = async function handler(req, res) {
       const unread = !beforeId && doc.exists ? unreadFor(doc.data(), me.uid) : 0;
       if (unread) await ref.update({ [`unread.${me.uid}`]: 0 });
       const storedName = doc.exists ? doc.data()?.memberUsernames?.[peer.uid] : '';
+      const profile = (await profilesFor(firestore, [peer.uid])).get(peer.uid) || {};
       return res.status(200).json({
         pairKey,
-        peer: { uid: peer.uid, username: storedName || peer.username || '' },
+        peer: {
+          uid: peer.uid,
+          username: storedName || peer.username || '',
+          displayName: profile.displayName || '',
+          photoUrl: profile.photoUrl || '',
+        },
         unread,
         hasMore,
         events: docs.map((event) => serializeEvent(event, me.uid, requestsById)),
