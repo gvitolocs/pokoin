@@ -169,7 +169,8 @@ function rankTrending(pool, affinity, { exclude, limit = DEFAULT_LIMIT }) {
     scored.push({
       card,
       score: heat + Math.min(0.3, taste.score / 40),
-      reason: taste.score > 0 ? `Trending · ${taste.reason}` : 'Trending on Pokoin',
+      // The rail title already says Trending; only a personal match earns a line.
+      reason: taste.score > 0 ? taste.reason : '',
     });
   }
   scored.sort((a, b) => b.score - a.score);
