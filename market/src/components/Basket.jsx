@@ -428,6 +428,13 @@ export function BasketSummary({
   availablePkn,
   gift,
   onGift,
+  shipOptions = [],
+  shippingService = '',
+  onShippingService,
+  usePknDiscount = false,
+  onPknDiscount,
+  discountPkn = 0,
+  discountLocal = '',
 }) {
   const buyer = useBuyerCurrency();
   const n = totals.selectedCount;
@@ -449,7 +456,7 @@ export function BasketSummary({
             Add up to <span className="bk-red">{nudge.estimate.room} more card{nudge.estimate.room === 1 ? '' : 's'}</span> from{' '}
             {nudgeLink ? <Link className="bk-link" to={nudgeLink}>{nudgeLabel}</Link> : nudgeLabel} to the same parcel: shipping stays{' '}
             <b>{formatLocalFromEurCents(nudge.estimate.amountCents, currency)}</b>.{' '}
-            <Link className="bk-link" to="/flex">Shipping details</Link>
+            <Link className="bk-link" to="/shipping">Shipping details</Link>
           </p>
         </div>
       ) : null}
@@ -477,12 +484,48 @@ export function BasketSummary({
           </div>
         ) : null}
       </dl>
+      {shipOptions.length ? (
+        <fieldset className="bk-ship-pick">
+          <legend>Shipping service</legend>
+          {shipOptions.map((option) => (
+            <label key={option.id} className={shippingService === option.id ? 'is-on' : ''}>
+              <input
+                type="radio"
+                name="cartShipping"
+                checked={shippingService === option.id}
+                onChange={() => onShippingService?.(option.id)}
+              />
+              <span>
+                <strong>{option.label}</strong>
+                <em>{[option.serviceName, option.carrier].filter(Boolean).join(' · ')}</em>
+              </span>
+            </label>
+          ))}
+          <Link className="bk-link" to="/shipping">Shipping details</Link>
+        </fieldset>
+      ) : null}
       {signedIn && subtotal > 0 ? (
         <p className="bk-sum-hint">
           {covered
             ? 'Your PKN balance covers these cards. Card payment works too.'
             : 'Pay by card at checkout, or top up PKN in your wallet.'}
         </p>
+      ) : null}
+      {signedIn ? (
+        <label className="bk-gift">
+          <input
+            type="checkbox"
+            checked={usePknDiscount}
+            onChange={(event) => onPknDiscount?.(event.target.checked)}
+          />
+          Use site balance as a discount
+          {discountPkn > 0 ? (
+            <span className="bk-discount">{usePknDiscount ? '−' : ''}{discountPkn} PKN{discountLocal ? ` (${discountLocal})` : ''}</span>
+          ) : null}
+        </label>
+      ) : null}
+      {signedIn && usePknDiscount && !(discountPkn > 0) ? (
+        <p className="bk-sum-hint">The card charge stays at least 0.50 EUR, so this balance is not taken off yet.</p>
       ) : null}
       <label className="bk-gift">
         <input type="checkbox" checked={gift} onChange={(event) => onGift(event.target.checked)} />

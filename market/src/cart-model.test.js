@@ -88,6 +88,12 @@ test('a small parcel previews the untracked letter and the room left at that pri
   assert.equal(parcelEstimate({ from: '', to: 'DK', cards: 1 }), null);
 });
 
+test('a chosen tracked service overrides the letter default', () => {
+  const estimate = parcelEstimate({ from: 'IT', to: 'DK', cards: 2, serviceId: 'tracked' });
+  assert.equal(estimate.tracked, true);
+  assert.ok(estimate.amountCents > 435);
+});
+
 test('shipping estimate is one parcel per seller with ticked cards', () => {
   const groups = groupBySeller([
     row({ id: 'a', sellerUid: 's1', sellerCountry: 'IT', qty: 2 }),
