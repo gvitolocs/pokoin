@@ -275,20 +275,30 @@ async function mapPool(items, concurrency, worker) {
 
 async function applyCtQuantity(listingId, quantity) {
   const qty = Math.max(0, Math.min(999999, Math.trunc(Number(quantity) || 0)));
+  // Absolute CardTrader quantity minus units an unpaid checkout is holding.
+  // A held card stays sold_out here, so the release cannot add a second copy.
   const result = await marketplaceWriteQuery(
     `
-      update public.marketplace_user_listings
+      update public.marketplace_user_listings as listing
       set
-        quantity_available = $2,
+        quantity_available = greatest(0, $2 - coalesce((
+          select sum(hold.quantity)::int
+          from public.marketplace_checkout_holds as hold
+          where hold.listing_id = listing.id
+        ), 0)),
         status = case
-          when $2 <= 0 then 'sold_out'
-          when status = 'sold_out' then 'active'
-          else status
+          when greatest(0, $2 - coalesce((
+            select sum(hold.quantity)::int
+            from public.marketplace_checkout_holds as hold
+            where hold.listing_id = listing.id
+          ), 0)) <= 0 then 'sold_out'
+          when listing.status = 'sold_out' then 'active'
+          else listing.status
         end,
         updated_at = now()
-      where id = $1
-        and source_listing_id like 'ct:%'
-      returning id, quantity_available, status, card_id, source_listing_id
+      where listing.id = $1
+        and listing.source_listing_id like 'ct:%'
+      returning listing.id, listing.quantity_available, listing.status, listing.card_id, listing.source_listing_id
     `,
     [listingId, qty],
   );
@@ -360,15 +370,26 @@ async function linkExistingListing(listingId, product) {
   }
   const result = await marketplaceWriteQuery(
     `
-      update public.marketplace_user_listings
+      update public.marketplace_user_listings as listing
       set
         source_listing_id = $2,
-        quantity_available = $3,
-        status = case when $3 <= 0 then 'sold_out' else 'active' end,
+        quantity_available = greatest(0, $3 - coalesce((
+          select sum(hold.quantity)::int
+          from public.marketplace_checkout_holds as hold
+          where hold.listing_id = listing.id
+        ), 0)),
+        status = case
+          when greatest(0, $3 - coalesce((
+            select sum(hold.quantity)::int
+            from public.marketplace_checkout_holds as hold
+            where hold.listing_id = listing.id
+          ), 0)) <= 0 then 'sold_out'
+          else 'active'
+        end,
         updated_at = now()
         ${priceSql}
-      where id = $1
-      returning id, source_listing_id, quantity_available, status, card_id
+      where listing.id = $1
+      returning listing.id, listing.source_listing_id, listing.quantity_available, listing.status, listing.card_id
     `,
     values,
   );

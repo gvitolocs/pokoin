@@ -19,7 +19,7 @@ function expansionAdapter(getJson, fetchExpansionFromLists = async () => null) {
     fetchExpansionFromLists,
     getJson,
     mapExpansionCards: (payload) => payload && { ...payload, cards: payload.cards || [] },
-    fillMissingTilePrices: async (cards) => cards,
+    overlayCatalogTilePrices: async (cards) => cards,
     mergeExpansionPayload: (_, page) => page,
   };
   return new Function(...Object.keys(dependencies), `${adapterSource}\nreturn fetchExpansion;`)(

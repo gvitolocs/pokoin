@@ -3,8 +3,9 @@
 /**
  * Inventory lifecycle for EUR (Stripe Checkout) marketplace orders.
  *
- *   create session  → reserve: marketplace_user_listings qty-- / sold_out (same
- *                     SQL as the PKN path), order.inventory.state = reserved
+ *   create session  → reserve: marketplace_user_listings qty-- / sold_out, and a
+ *                     checkout-hold row so CardTrader sync cannot put it back
+ *                     on sale. order.inventory.state = reserved
  *   paid webhook    → commit the hold, then the PKN fulfilment pieces once:
  *                     seller ownership, linked CardTrader decrement,
  *                     CardTrader buy-through, seller emails, native sale rows
@@ -82,7 +83,7 @@ function inventoryLine(entry = {}) {
  * Re-price every cart row from Postgres and take the stock.
  * Throws 409 when a listing is gone or its ask changed (nothing stays held).
  */
-async function reserveEurCheckoutItems({ rawItems, deps }) {
+async function reserveEurCheckoutItems({ rawItems, deps, orderId = '' }) {
   const d = withDeps(deps);
   const raw = Array.isArray(rawItems) ? rawItems : [];
   const items = d.normalizedItems(raw).map((item) => ({ ...item, fulfillmentMode: 'physical' }));
@@ -90,7 +91,7 @@ async function reserveEurCheckoutItems({ rawItems, deps }) {
     throw httpError(400, 'Every cart row needs a listing, seller, quantity and price.', 'invalid_cart');
   }
   await d.verifyCardTraderLiveItems(items);
-  const decremented = await d.verifyAndDecrementListings(items);
+  const decremented = await d.verifyAndDecrementListings(items, { holdOrderId: cleanText(orderId, 80) });
   const byListing = new Map(decremented.map((entry) => [entry.listingId, entry]));
   const priced = items.map((item) => {
     const entry = byListing.get(item.listingId) || {};
@@ -106,18 +107,19 @@ async function reserveEurCheckoutItems({ rawItems, deps }) {
 }
 
 /** Undo a reservation that never reached Firestore (session create failed). */
-async function rollbackReservation({ lines, deps }) {
+async function rollbackReservation({ lines, deps, orderId = '' }) {
   const d = withDeps(deps);
   const held = (lines || []).filter((line) => !line.external);
   if (!held.length) return;
-  await d.restoreListingQuantities(held).catch((error) => {
+  await d.restoreListingQuantities(held, { orderId }).catch((error) => {
     console.error('eur checkout reservation rollback failed', error);
   });
 }
 
 /**
  * Put held stock back and close the unpaid order. Never touches a paid order.
- * Idempotent: the Firestore transaction flips inventory.state exactly once.
+ * Idempotent: the Firestore transaction flips inventory.state exactly once,
+ * and the hold row is deleted in the same statement that puts the quantity back.
  */
 async function releaseEurReservation({
   admin,
@@ -137,6 +139,12 @@ async function releaseEurReservation({
   let heldPkn = 0;
   let buyerUid = '';
   await firestore.runTransaction(async (transaction) => {
+    // Firestore re-runs this callback after a conflict. A previous attempt
+    // must not leave `lines` set once another worker already released.
+    lines = null;
+    heldPkn = 0;
+    buyerUid = '';
+    outcome = 'noop';
     const snap = await transaction.get(ref);
     if (!snap.exists) {
       outcome = 'missing';
@@ -196,7 +204,7 @@ async function releaseEurReservation({
   if (lines && lines.length) {
     const d = withDeps(deps);
     try {
-      await d.restoreListingQuantities(lines.filter((line) => !line.external));
+      await d.restoreListingQuantities(lines.filter((line) => !line.external), { orderId });
     } catch (error) {
       await ref.set({
         inventory: { restoreError: cleanText(error.message, 500) },
@@ -266,7 +274,7 @@ async function fulfillPaidEurOrder({
   if (inventory.state !== 'committed') {
     if (inventory.state !== 'reserved') {
       try {
-        const retaken = await reserveEurCheckoutItems({ rawItems: order.items || [], deps: d });
+        const retaken = await reserveEurCheckoutItems({ rawItems: order.items || [], deps: d, orderId });
         inventory = { ...inventory, lines: retaken.lines, retakenAt: nowIso(now) };
       } catch (error) {
         await ref.set({
@@ -284,6 +292,12 @@ async function fulfillPaidEurOrder({
   }
 
   const lines = (Array.isArray(inventory.lines) ? inventory.lines : []).filter((line) => !line.external);
+  if (typeof d.dropCheckoutHolds === 'function') {
+    const nativeIds = lines
+      .filter((line) => !String(line.sourceListingId || '').startsWith('ct:'))
+      .map((line) => line.listingId);
+    if (nativeIds.length) await d.dropCheckoutHolds(orderId, nativeIds).catch(() => {});
+  }
   const steps = { ...(fulfillment.steps || {}) };
   const ownershipDone = new Set(fulfillment.ownershipDone || []);
   const cardTraderDone = new Set(fulfillment.cardTraderDone || []);
@@ -303,7 +317,15 @@ async function fulfillPaidEurOrder({
     const result = await d.syncCardTraderAfterPokoinSale({ admin, firestore, decremented: [line] })
       .catch((error) => ({ ok: false, error: error.message }));
     if (result?.ok === false) failures.push(`cardtrader_sync:${line.listingId}`);
-    else cardTraderDone.add(line.listingId);
+    else {
+      cardTraderDone.add(line.listingId);
+      // CardTrader now has the sold unit removed, so the hold must not keep
+      // subtracting it from the next sync. A skipped decrement keeps the hold.
+      const decrementedOnCt = (result?.items || []).some((row) => row.ok === true && row.listingId === line.listingId);
+      if (decrementedOnCt && typeof d.dropCheckoutHolds === 'function') {
+        await d.dropCheckoutHolds(orderId, [line.listingId]).catch(() => {});
+      }
+    }
   }
   await markStep(ref, admin, {
     ...fulfillment,

@@ -17,13 +17,13 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
-    from valkey_cache import get_json as valkey_get_json
-    from valkey_cache import set_json as valkey_set_json
+    from redis_cache import get_json as redis_get_json
+    from redis_cache import set_json as redis_set_json
 except ImportError:
-    def valkey_get_json(_key):
+    def redis_get_json(_key):
         return None
 
-    def valkey_set_json(_key, _value, _ttl):
+    def redis_set_json(_key, _value, _ttl):
         return False
 
 API_ORIGIN = os.environ.get("API_ORIGIN", "http://127.0.0.1:18080").rstrip("/")
@@ -1011,7 +1011,7 @@ def overlay_cardtrader_asks(cards: list[dict], limit: int = 40) -> list[dict]:
     priced = {}
     to_fetch = []
     for cid, blueprint in needed:
-        cached = valkey_get_json(f"pkn:ct:{blueprint}")
+        cached = redis_get_json(f"pokoin:reference:v1:pkn:ct:{blueprint}")
         if isinstance(cached, dict) and "pkn" in cached:
             if cached.get("pkn"):
                 priced[cid] = cached["pkn"]
@@ -1034,9 +1034,9 @@ def overlay_cardtrader_asks(cards: list[dict], limit: int = 40) -> list[dict]:
         eur = _cardtrader_ask_eur(_cardtrader_rows(payload))
         pkn = pkn_from_eur(eur)
         if pkn is None:
-            valkey_set_json(f"pkn:ct:{blueprint}", {"pkn": None}, 300)
+            redis_set_json(f"pokoin:reference:v1:pkn:ct:{blueprint}", {"pkn": None}, 300)
             continue
-        valkey_set_json(f"pkn:ct:{blueprint}", {"pkn": pkn, "eur": eur}, 21600)
+        redis_set_json(f"pokoin:reference:v1:pkn:ct:{blueprint}", {"pkn": pkn, "eur": eur}, 21600)
         priced[cid] = pkn
     if priced:
         print(

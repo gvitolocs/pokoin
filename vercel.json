@@ -1143,6 +1143,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/shipping/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/shipping",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/invite/",
       "destination": "/market/index.html"
     },

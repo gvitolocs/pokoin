@@ -4113,6 +4113,24 @@ a.era-link:focus-visible {
   color: #fff;
 }
 
+.silver-pill.is-eb {
+  background: #fff;
+  letter-spacing: 0;
+}
+
+.silver-pill.is-eb .eb-e {
+  color: #e53238;
+}
+
+.silver-pill.is-eb .eb-b {
+  color: #0064d2;
+}
+
+.silver-pill.is-tp {
+  background: #141416;
+  color: #fff;
+}
+
 .silver-pill:hover,
 .silver-pill:focus-visible {
   text-decoration: none;

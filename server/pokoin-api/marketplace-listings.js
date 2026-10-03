@@ -23,6 +23,7 @@ const {
   readSellerUidByName,
   rememberSellerUidByName,
 } = require('./_seller_profile_cache');
+const { invalidateMarketplaceReads } = require('./_marketplace_cache_invalidate');
 
 function parseGameFromRequest(...args) {
   return require('./_marketplace_game').parseGameFromRequest(...args);
@@ -523,7 +524,7 @@ async function enrichListingRowsWithSellerProfiles(rows = []) {
   const uids = [...uidSet];
   if (uids.length === 0) return rows;
   try {
-    // Shared read-through cache: Valkey first, one Firestore users/{uid} read
+    // Shared read-through cache: Redis first, one Firestore users/{uid} read
     // per cache-miss only. Display enrichment — never used for authorization.
     const profiles = await getPublicSellerProfiles(uids);
     return rows.map((row) => {
@@ -940,6 +941,12 @@ async function createListing(req, decoded) {
   const result = written.result;
   const [row] = await timed('firestoreMs', () => enrichListingRowsWithSellerProfiles(result.rows));
   let listing = listingRow(row || result.rows[0], { owner: true });
+  await invalidateMarketplaceReads({
+    game,
+    cardId: listing.cardId,
+    sellerUid: decoded.uid,
+    reason: 'listing.created',
+  });
   if (written.queued) kickSync();
   else await refreshPriceSummary(listing.cardId);
 
@@ -1080,6 +1087,12 @@ async function updateListing(req, decoded, id) {
   }
   const [row] = await timed('firestoreMs', () => enrichListingRowsWithSellerProfiles(result.rows));
   const listing = listingRow(row || result.rows[0], { owner: true });
+  await invalidateMarketplaceReads({
+    game: listing.marketplaceGame || listing.marketplace_game || 'pokemon',
+    cardId: listing.cardId,
+    sellerUid: decoded.uid,
+    reason: becameInactive ? 'listing.deleted' : 'listing.updated',
+  });
   if (written.queued) kickSync();
   else await refreshPriceSummary(listing.cardId);
 
@@ -1124,6 +1137,12 @@ async function decrementListing(req, id, sellerUid) {
   }
   const enrichedRows = await timed('firestoreMs', () => enrichListingRowsWithSellerProfiles([outcome.listing]));
   const listing = listingRow(enrichedRows[0] || outcome.listing, { owner: true });
+  await invalidateMarketplaceReads({
+    game: listing.marketplaceGame || listing.marketplace_game || 'pokemon',
+    cardId: listing.cardId,
+    sellerUid,
+    reason: 'listing.quantity',
+  });
   if (written.queued) kickSync();
   else await refreshPriceSummary(listing.cardId);
   return { outcome: 'updated', listing, queued: written.queued };

@@ -143,17 +143,19 @@ export function AddCardButton({ card, className = 'bk-btn-y is-small' }) {
       setState('error');
     }
   }
+  if (state === 'none') {
+    return <span className="bk-oos">No copies listed</span>;
+  }
   const label = {
     busy: 'Adding…',
     added: 'Added to cart',
-    none: 'No copies listed',
     error: 'Try again',
   }[state] || 'Add to cart';
   return (
     <button
       type="button"
       className={className}
-      disabled={state === 'busy' || state === 'added' || state === 'none'}
+      disabled={state === 'busy' || state === 'added'}
       onClick={add}
     >
       {label}
@@ -413,7 +415,7 @@ export function RecentList({ items }) {
                   {offer ? null : <span className="bk-from">from</span>}
                   <BigPrice pricePkn={price} sellerAcceptsPkn={offer ? offer.sellerAcceptsPkn !== false : true} size="sm" />
                 </div>
-              ) : null}
+              ) : unavailable ? null : <span className="bk-oos">No copies listed</span>}
               <CardAction card={card} offer={offer} known={known} href={href} />
             </div>
           </div>

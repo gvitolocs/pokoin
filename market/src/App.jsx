@@ -71,6 +71,7 @@ const CardTraderZero = lazy(() => import('./pages/CardTraderZero.jsx'));
 const NftRedirect = lazy(() => import('./pages/Nft.jsx'));
 const Protection = lazy(() => import('./pages/Protection.jsx'));
 const Flex = lazy(() => import('./pages/Flex.jsx'));
+const Shipping = lazy(() => import('./pages/Shipping.jsx'));
 const Invite = lazy(() => import('./pages/Invite.jsx'));
 const Join = lazy(() => import('./pages/Join.jsx'));
 const AmbassadorProgram = lazy(() => import('./pages/AmbassadorProgram.jsx'));
@@ -237,6 +238,7 @@ function AppShell() {
       {both('/email-preferences', <EmailPreferences />)}
       {both('/protection', <Protection />)}
       {both('/flex', <Flex />)}
+      {both('/shipping', <Shipping />)}
       {both('/invite', <Invite />)}
       {both('/join/:code', <Join />)}
       {both('/ambassadorprogram', <AmbassadorProgram />)}

@@ -4,13 +4,19 @@ import { cartImageFor, repairCartImage } from './cart-image.js';
 import { cartTotals, isSelected, moveRow, reconcileRow, settleCheckoutRows } from './cart-model.js';
 import { listingStock, nextCartQty } from './cart-qty.js';
 import { useAccountCartSync } from './cart-sync.js';
+import {
+  readPknDiscount,
+  readShippingCountry,
+  readShippingService,
+  writePknDiscount,
+  writeShippingCountry,
+  writeShippingService,
+} from './shipping-choice.js';
 
 const CART_KEY = 'pokoin.cartItems';
 const SAVED_KEY = 'pokoin.cartSaved';
 const GIFT_KEY = 'pokoin.cartGift';
 const PENDING_KEY = 'pokoin.cartCheckout';
-const SHIPPING_KEY = 'pokoin.cartShipping';
-const BALANCE_KEY = 'pokoin.cartUseBalance';
 const CART_MAX = 400;
 const SAVED_MAX = 200;
 const PENDING_TTL_MS = 3 * 24 * 60 * 60 * 1000;
@@ -88,28 +94,6 @@ function readGift() {
     return localStorage.getItem(GIFT_KEY) === '1';
   } catch (_) {
     return false;
-  }
-}
-
-function readFlag(key) {
-  try {
-    return localStorage.getItem(key) === '1';
-  } catch (_) {
-    return false;
-  }
-}
-
-/** { country, service } the buyer picked in the cart; '' means "use the default". */
-function readShippingChoice() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SHIPPING_KEY) || 'null') || {};
-    const country = String(parsed.country || '').toUpperCase();
-    return {
-      country: /^[A-Z]{2}$/.test(country) ? country : '',
-      service: /^[a-z_]{1,24}$/.test(String(parsed.service || '')) ? String(parsed.service) : '',
-    };
-  } catch (_) {
-    return { country: '', service: '' };
   }
 }
 
@@ -232,9 +216,11 @@ export function CartProvider({ children }) {
   const [items, setItems] = useState(() => (typeof window === 'undefined' ? [] : readCart()));
   const [saved, setSaved] = useState(() => (typeof window === 'undefined' ? [] : readRows(SAVED_KEY)));
   const [gift, setGiftState] = useState(() => (typeof window === 'undefined' ? false : readGift()));
-  const [useBalance, setUseBalanceState] = useState(() => (typeof window === 'undefined' ? false : readFlag(BALANCE_KEY)));
+  const [useBalance, setUseBalanceState] = useState(() => (typeof window === 'undefined' ? false : readPknDiscount()));
   const [shippingChoice, setShippingChoiceState] = useState(() => (
-    typeof window === 'undefined' ? { country: '', service: '' } : readShippingChoice()
+    typeof window === 'undefined'
+      ? { country: '', service: '' }
+      : { country: readShippingCountry(), service: readShippingService() }
   ));
 
   useEffect(() => {
@@ -250,12 +236,12 @@ export function CartProvider({ children }) {
   }, [gift]);
 
   useEffect(() => {
-    writeFlag(BALANCE_KEY, useBalance ? '1' : '');
+    writePknDiscount(useBalance);
   }, [useBalance]);
 
   useEffect(() => {
-    const empty = !shippingChoice.country && !shippingChoice.service;
-    writeFlag(SHIPPING_KEY, empty ? '' : JSON.stringify(shippingChoice));
+    writeShippingCountry(shippingChoice.country);
+    writeShippingService(shippingChoice.service);
   }, [shippingChoice]);
 
   const applyAccountCart = useCallback((state) => {

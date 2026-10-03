@@ -1,21 +1,20 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const path = require('node:path');
 const test = require('node:test');
 
-const valkey = require('./_valkey');
+const redisCache = require('./_redis_cache');
 const rateLimit = require('./_rate_limit');
 
-const TEST_HOST = process.env.VALKEY_TEST_HOST || '127.0.0.1';
-const TEST_PORT = Number(process.env.VALKEY_TEST_PORT || 6390);
+const TEST_HOST = process.env.REDIS_CACHE_TEST_HOST || process.env.VALKEY_TEST_HOST || '127.0.0.1';
+const TEST_PORT = Number(process.env.REDIS_CACHE_TEST_PORT || process.env.VALKEY_TEST_PORT || 6390);
 
 function restoreServerConfig() {
-  valkey.configure({ host: TEST_HOST, port: TEST_PORT, timeoutMs: 400 });
+  redisCache.configure({ host: TEST_HOST, port: TEST_PORT, timeoutMs: 400 });
 }
 
-function useDeadValkey() {
-  valkey.configure({ host: '127.0.0.1', port: 1, timeoutMs: 200 });
+function useDeadRedis() {
+  redisCache.configure({ host: '127.0.0.1', port: 1, timeoutMs: 200 });
 }
 
 function sleep(ms) {
@@ -24,12 +23,12 @@ function sleep(ms) {
 
 test('keys hash the identity and scope into one compact bucket name', () => {
   const bucket = rateLimit.rateLimitBucket('poko-chat', '203.0.113.7');
-  assert.match(bucket, /^rl:poko-chat:[0-9a-f]{32}$/);
+  assert.match(bucket, /^pokoin:rl:v1:poko-chat:[0-9a-f]{32}$/);
   assert.equal(bucket.includes('203.0.113.7'), false, 'raw IP must never appear in the key');
 });
 
-test('valkey down: comfort limiter falls back to the bounded local window and still enforces', async () => {
-  useDeadValkey();
+test('redis down: comfort limiter falls back to the bounded local window and still enforces', async () => {
+  useDeadRedis();
   rateLimit.resetLocalWindows();
   try {
     const verdicts = [];
@@ -46,7 +45,7 @@ test('valkey down: comfort limiter falls back to the bounded local window and st
 });
 
 test('local fallback table stays bounded under a single-window flood', async () => {
-  useDeadValkey();
+  useDeadRedis();
   rateLimit.resetLocalWindows();
   try {
     for (let i = 0; i < 10_050; i += 1) {
@@ -74,7 +73,7 @@ test('security limiter: postgres fixed window allows up to the limit then reject
   }
   assert.deepEqual(verdicts.map((v) => v.allowed), [true, true, false]);
   assert.ok(verdicts.every((v) => v.backend === 'postgres'));
-  assert.match(verdicts[0] && require('./_rate_limit').rateLimitBucket('test-secure', '9.9.9.9'), /^rl:test-secure:[0-9a-f]{32}$/);
+  assert.match(rateLimit.rateLimitBucket('test-secure', '9.9.9.9'), /^pokoin:rl:v1:test-secure:[0-9a-f]{32}$/);
 });
 
 test('security limiter fails CLOSED when the durable store is unavailable', async () => {
@@ -92,32 +91,28 @@ test('security limiter fails CLOSED when the durable store is unavailable', asyn
   assert.equal(malformed.allowed, false, 'malformed store answer must reject');
 });
 
-test('shared comfort limiter: two simulated instances consume ONE shared valkey window', async (t) => {
-  const ping = await valkey.command(['PING']);
-  if (ping !== 'PONG') return t.skip(`no local test Valkey on ${TEST_HOST}:${TEST_PORT}`);
+test('shared comfort limiter: two simulated instances consume ONE shared redis window', async (t) => {
+  const ping = await redisCache.command(['PING']);
+  if (ping !== 'PONG') return t.skip(`no local test Redis on ${TEST_HOST}:${TEST_PORT}`);
   restoreServerConfig();
   const bucket = rateLimit.rateLimitBucket('test-shared', '7.7.7.7');
-  await valkey.del(bucket);
-  // Instance A (this process/module state) and instance B (same valkey, fresh
-  // bucket math) both consume the same server-side counter.
+  await redisCache.del(bucket);
   const a1 = await rateLimit.limitBestEffort({ scope: 'test-shared', identity: '7.7.7.7', limit: 3, windowSeconds: 60 });
-  await valkey.del(bucket);
+  await redisCache.del(bucket);
   const a2 = await rateLimit.limitBestEffort({ scope: 'test-shared', identity: '7.7.7.7', limit: 3, windowSeconds: 60 });
-  // A second "instance": same call again — the counter must keep climbing in
-  // valkey rather than restarting per process.
-  const rawAfter = Number(await valkey.command(['GET', bucket]));
-  assert.equal(a2.backend, 'valkey');
+  const rawAfter = Number(await redisCache.command(['GET', bucket]));
+  assert.equal(a2.backend, 'redis');
   assert.equal(rawAfter, a2.count);
   assert.ok(a1.count >= 1);
-  await valkey.del(bucket);
+  await redisCache.del(bucket);
 });
 
 test('shared comfort limiter: window expiry restarts the budget', async (t) => {
-  const ping = await valkey.command(['PING']);
-  if (ping !== 'PONG') return t.skip('no local test Valkey');
+  const ping = await redisCache.command(['PING']);
+  if (ping !== 'PONG') return t.skip('no local test Redis');
   restoreServerConfig();
   const bucket = rateLimit.rateLimitBucket('test-expiry', '6.6.6.6');
-  await valkey.del(bucket);
+  await redisCache.del(bucket);
   const first = await rateLimit.limitBestEffort({ scope: 'test-expiry', identity: '6.6.6.6', limit: 1, windowSeconds: 1 });
   const second = await rateLimit.limitBestEffort({ scope: 'test-expiry', identity: '6.6.6.6', limit: 1, windowSeconds: 1 });
   assert.equal(first.allowed, true);
@@ -125,5 +120,5 @@ test('shared comfort limiter: window expiry restarts the budget', async (t) => {
   await sleep(1100);
   const third = await rateLimit.limitBestEffort({ scope: 'test-expiry', identity: '6.6.6.6', limit: 1, windowSeconds: 1 });
   assert.equal(third.allowed, true, 'new window must reset the budget');
-  await valkey.del(bucket);
+  await redisCache.del(bucket);
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   cancelEurOrder,
@@ -14,12 +14,13 @@ import {
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { useAuth } from '../auth.jsx';
 import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
-import { checkoutFees } from '../checkout-fees.js';
+import { checkoutFees, pknBalanceVoucher } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
 import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
 import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { brandSrc } from '../brand-assets.js';
+import { readPknDiscount } from '../shipping-choice.js';
 import {
   defaultShippingService,
   pknFromEurCents,
@@ -109,7 +110,6 @@ export default function Checkout() {
     canNftOnly,
     gift,
     setGift,
-    useBalance,
     setUseBalance,
     shippingChoice,
     setShippingChoice,
@@ -135,7 +135,7 @@ export default function Checkout() {
   const [shippingService, setShippingService] = useState(() => shippingChoice.service || 'tracked'); // tracked | untracked
   const [shippingPicked, setShippingPicked] = useState(() => Boolean(shippingChoice.service)); // buyer chose a service
   const [pknRefused, setPknRefused] = useState([]); // sellers who take card payments only
-  const [usePknDiscount, setUsePknDiscount] = useState(false); // opt-in PKN balance voucher
+  const [usePknDiscount, setUsePknDiscount] = useState(() => readPknDiscount()); // opt-in PKN balance voucher
   const stripeCancelled = searchParams.get('cancelled') === '1';
   const cancelledOrderId = String(searchParams.get('order') || '').trim();
 
@@ -229,11 +229,13 @@ export default function Checkout() {
   ), 0);
   // 1 PKN = €0.005 → 2 PKN per euro-cent, rounded down (server: _checkout_core).
   // Opt-in: nothing is discounted until the buyer ticks the voucher box.
-  const pknVoucherEurCents = Math.max(0, Math.min(
-    Math.floor(Math.min(Number(availablePkn) || 0, Math.trunc(pknEligiblePkn)) / 2),
-    Math.round(Number(fiatFromPkn(totalPkn, 'EUR')) * 100) - 50,
-  ));
-  const pknVoucherPkn = pknVoucherEurCents * 2;
+  const voucher = pknBalanceVoucher({
+    availablePkn,
+    eligiblePkn: pknEligiblePkn,
+    chargeEurCents: Math.round(Number(fiatFromPkn(totalPkn, 'EUR')) * 100),
+  });
+  const pknVoucherEurCents = voucher.eurCents;
+  const pknVoucherPkn = voucher.pkn;
   const pknDiscountEurCents = usePknDiscount ? pknVoucherEurCents : 0;
   const pknDiscountPkn = pknDiscountEurCents * 2;
   const eurSubtotal = useMemo(
@@ -270,15 +272,6 @@ export default function Checkout() {
   useEffect(() => {
     if (preferFiat && payMethod === 'pkn') setPayMethod('stripe');
   }, [preferFiat, payMethod]);
-
-  // "Use my site balance as a discount" ticked in the cart: start with the
-  // voucher on once it applies. Still opt-in, and the buyer can untick here.
-  const balanceFromCart = useRef(false);
-  useEffect(() => {
-    if (balanceFromCart.current || !useBalance || pknVoucherPkn < 1) return;
-    balanceFromCart.current = true;
-    setUsePknDiscount(true);
-  }, [useBalance, pknVoucherPkn]);
 
   useEffect(() => {
     document.title = 'Checkout · Pokoin';

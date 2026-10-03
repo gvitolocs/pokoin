@@ -1,10 +1,18 @@
 /** In-memory native listings cache. Empty `[]` is still a hit — callers that
- * need a live shop after POST must `invalidate` + `fresh` fetch. */
+ * need a live shop after POST must `invalidate` + `fresh` fetch.
+ *
+ * Seller first-page keys (`handle::l100::…`) also mirror into sessionStorage so
+ * a hard reload / chat → profile navigation can seed without waiting on SQL.
+ * Pi Redis also caches unfiltered seller-shop browse pages; this module is
+ * the browser L1 (memory + sessionStorage) in front of that API cache. */
 
 const listingsCache = new Map();
 const listingsInflight = new Map();
 const listingsEpoch = new Map();
 const sellerListingsCache = new Map();
+
+const SELLER_SHOP_STORAGE = 'pokoin.seller.shop.v1';
+const SELLER_SHOP_STORAGE_MAX = 6;
 
 function rememberMap(map, key, value, max) {
   map.delete(key);
@@ -12,6 +20,49 @@ function rememberMap(map, key, value, max) {
   while (map.size > max) {
     map.delete(map.keys().next().value);
   }
+}
+
+function isSellerShopPageKey(key) {
+  return String(key || '').includes('::');
+}
+
+function readSellerShopStorage() {
+  if (typeof sessionStorage === 'undefined') return {};
+  try {
+    const data = JSON.parse(sessionStorage.getItem(SELLER_SHOP_STORAGE) || '{}');
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSellerShopStorage(bag) {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(SELLER_SHOP_STORAGE, JSON.stringify(bag));
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+function persistSellerShopPage(key, data) {
+  if (!isSellerShopPageKey(key) || !Array.isArray(data?.listings) || !data.listings.length) {
+    return;
+  }
+  const bag = readSellerShopStorage();
+  delete bag[key];
+  bag[key] = data;
+  const keys = Object.keys(bag);
+  while (keys.length > SELLER_SHOP_STORAGE_MAX) {
+    delete bag[keys.shift()];
+  }
+  writeSellerShopStorage(bag);
+}
+
+function restoreSellerShopPage(key) {
+  if (!isSellerShopPageKey(key)) return null;
+  const row = readSellerShopStorage()[key];
+  return row && Array.isArray(row.listings) && row.listings.length ? row : null;
 }
 
 export function sellerCacheKey(username, opts = {}) {
@@ -58,7 +109,14 @@ export function sellerCacheKey(username, opts = {}) {
 }
 
 export function peekSellerListings(username, opts) {
-  return sellerListingsCache.get(sellerCacheKey(username, opts)) || null;
+  const key = sellerCacheKey(username, opts);
+  if (!key) return null;
+  const hit = sellerListingsCache.get(key);
+  if (hit) return hit;
+  const stored = restoreSellerShopPage(key);
+  if (!stored) return null;
+  rememberMap(sellerListingsCache, key, stored, 48);
+  return stored;
 }
 
 export function rememberSellerListings(username, data, opts) {
@@ -67,6 +125,7 @@ export function rememberSellerListings(username, data, opts) {
     return data;
   }
   rememberMap(sellerListingsCache, key, data, 48);
+  persistSellerShopPage(key, data);
   return data;
 }
 
@@ -172,9 +231,17 @@ export function omitListings(payload, listingIds) {
   };
 }
 
+/** Drop the in-memory seller Map only — sessionStorage stays (reload within tab). */
+export function clearSellerListingsMemoryForTests() {
+  sellerListingsCache.clear();
+}
+
 export function resetListingsCacheForTests() {
   listingsCache.clear();
   listingsInflight.clear();
   listingsEpoch.clear();
   sellerListingsCache.clear();
+  if (typeof sessionStorage !== 'undefined') {
+    try { sessionStorage.removeItem(SELLER_SHOP_STORAGE); } catch { /* ignore */ }
+  }
 }

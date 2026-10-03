@@ -229,7 +229,7 @@ export function withGameQuery(path, hostname = hostName()) {
     return path;
   }
   const text = String(path || '');
-  if (!text.startsWith('/api/marketplace') && !text.startsWith('/api/cardtrader-redirect') && !text.startsWith('/api/cardmarket-redirect')) {
+  if (!text.startsWith('/api/marketplace') && !text.startsWith('/api/cardtrader-redirect') && !text.startsWith('/api/cardmarket-redirect') && !text.startsWith('/api/tcgplayer-redirect')) {
     return text;
   }
   const hashIndex = text.indexOf('#');

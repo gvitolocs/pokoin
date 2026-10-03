@@ -7,8 +7,10 @@
  * Pokoin overlay (server/pokoin-api) — replaces the legacy CardVault
  * api/marketplace-home-page.js copy on the Pi release.
  *
- * Valkey cache contract for `home:react` (game-scoped via valkeyKey):
- *   - one TTL for every game (SNAPSHOT_TTL_SEC); TTL-only expiry, no DEL.
+ * Redis cache contract for home snapshots
+ * (`pokoin:marketplace:v1:home:react[:game:{id}]:g{gen}`):
+ *   - short TTL (HOME_TTL_SEC) plus generation bump on listing/rails changes
+ *   - in-process coalesce so concurrent misses share one SQL/rails load
  *   - a parsed snapshot whose `cards` is an Array is a valid hit, including
  *     the empty snapshot — an empty catalog is cached for the same short TTL
  *     instead of re-running the SQL fallback on every request.
@@ -16,13 +18,19 @@
  */
 const { toReactCards, parseLimit, setCorsHeaders, jsonOk, withTimeout } = require('./_marketplace_react_card');
 const { mergeRecentIntoHome, recentIdsFromUrl } = require('./_marketplace_home_recent');
-const { parseGameFromRequest, runWithGame, valkeyKey, isPokemonGame } = require('./_marketplace_game');
+const { parseGameFromRequest, runWithGame, isPokemonGame, currentGame } = require('./_marketplace_game');
 const sql = require('./_marketplace_react_sql');
-const valkey = require('./_valkey');
+const redisCache = require('./_redis_cache');
+const {
+  HOME_TTL_SEC,
+  homeSnapshotKey,
+  coalesce,
+} = require('./_read_model_cache');
+const { generationKey } = require('./_redis_ns');
 const { publicErrorBody, publicErrorStatus } = require('./_public_error');
+const { timed } = require('./_request_timing');
 
-const SNAPSHOT_TTL_SEC = 20;
-const SNAPSHOT_KEY = 'home:react';
+const SNAPSHOT_TTL_SEC = HOME_TTL_SEC;
 
 function emptySections() {
   return {
@@ -35,12 +43,16 @@ function emptySections() {
   };
 }
 
-async function defaultLoadHomeSnapshot({ limit = 36 } = {}) {
-  const cacheKey = valkeyKey(SNAPSHOT_KEY);
-  const cached = await valkey.getJson(cacheKey);
-  if (cached && typeof cached === 'object' && Array.isArray(cached.cards)) {
-    return cached;
-  }
+async function homeGeneration(game) {
+  const raw = await timed('redisCacheMs', () => redisCache.command([
+    'GET',
+    generationKey(`home:${game || 'pokemon'}`),
+  ]));
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? String(n) : '0';
+}
+
+async function buildHomeSnapshot({ limit = 36 } = {}) {
   if (isPokemonGame()) {
     try {
       const { readRails, assembleHomeVector, HOME_RAILS } = require('./_marketplace_rails');
@@ -48,7 +60,6 @@ async function defaultLoadHomeSnapshot({ limit = 36 } = {}) {
       if (rows.length) {
         const fromRails = assembleHomeVector(rows);
         if ((fromRails.cards || []).length) {
-          await valkey.setJson(cacheKey, fromRails, SNAPSHOT_TTL_SEC);
           return fromRails;
         }
       }
@@ -84,7 +95,7 @@ async function defaultLoadHomeSnapshot({ limit = 36 } = {}) {
   const cards = toReactCards(enriched);
   const newestIds = newestRows.map((row) => String(row.card_id)).filter(Boolean);
   const hotIds = hotRows.map((row) => String(row.card_id)).filter(Boolean);
-  const snapshot = {
+  return {
     cards,
     sections: {
       recentlySeenIds: [],
@@ -94,11 +105,24 @@ async function defaultLoadHomeSnapshot({ limit = 36 } = {}) {
       spotlightIds: newestIds.slice(0, 16),
     },
   };
-  // A valid empty snapshot is cached too: it keeps a catalog hiccup from
-  // turning into one uncached SQL fallback per request. Same TTL for every
-  // game — the satellite keys are game-scoped, so they cannot thrash pokemon.
-  await valkey.setJson(cacheKey, snapshot, SNAPSHOT_TTL_SEC);
-  return snapshot;
+}
+
+async function defaultLoadHomeSnapshot({ limit = 36 } = {}) {
+  const game = currentGame();
+  const baseKey = homeSnapshotKey(game);
+  return coalesce(baseKey, async () => {
+    const gen = await homeGeneration(game);
+    const cacheKey = `${baseKey}:g${gen}`;
+    const cached = await timed('redisCacheMs', () => redisCache.getJson(cacheKey));
+    if (cached && typeof cached === 'object' && Array.isArray(cached.cards)) {
+      return { ...cached, cacheSource: 'redis' };
+    }
+    const snapshot = await buildHomeSnapshot({ limit });
+    // A valid empty snapshot is cached too: it keeps a catalog hiccup from
+    // turning into one uncached SQL fallback per request.
+    await timed('redisCacheMs', () => redisCache.setJson(cacheKey, snapshot, SNAPSHOT_TTL_SEC));
+    return { ...snapshot, cacheSource: 'postgres' };
+  });
 }
 
 function createHandler(deps = {}) {

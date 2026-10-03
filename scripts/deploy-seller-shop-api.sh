@@ -20,18 +20,32 @@ git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
 say "stage exact origin/main commit $COMMIT"
 git -C "$REPO" archive "$COMMIT" server/pokoin-api | tar -C "$STAGE" -xf -
 SRC="$STAGE/server/pokoin-api"
-for file in marketplace-seller-shop.js marketplace-seller-shop.test.js; do
+SHOP_FILES=(
+  marketplace-seller-shop.js
+  marketplace-seller-shop.test.js
+  _seller_shop_cache.js
+  _seller_shop_cache.test.js
+  _redis_cache.js
+  _redis_ns.js
+  _read_model_cache.js
+  _marketplace_cache_invalidate.js
+  _valkey.js
+)
+for file in "${SHOP_FILES[@]}"; do
   [[ -f "$SRC/$file" ]] || die "commit is missing server/pokoin-api/$file"
 done
 
 say "seller shop unit tests"
-node --test "$SRC/marketplace-seller-shop.test.js"
-node --check "$SRC/marketplace-seller-shop.js"
+node --test "$SRC/marketplace-seller-shop.test.js" "$SRC/_seller_shop_cache.test.js"
+for file in "${SHOP_FILES[@]}"; do
+  [[ "$file" == *.test.js ]] && continue
+  node --check "$SRC/$file"
+done
 
 release="releases/seller-shop-$SHORT-$STAMP"
 say "Pi release $release"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .seller-shop-previous; cp -a \$prev '$release'; mkdir -p '$release/api'"
-tar -C "$SRC" -cf - marketplace-seller-shop.js \
+tar -C "$SRC" -cf - "${SHOP_FILES[@]}" \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-seller-shop-commit'"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"

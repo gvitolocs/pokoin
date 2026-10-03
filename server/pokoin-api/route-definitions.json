@@ -773,6 +773,27 @@
     }
   },
   {
+    "path": "/api/client-country",
+    "file": "client-country.js",
+    "methods": ["GET", "OPTIONS"],
+    "purpose": "Visitor IP country for local eBay and Vinted links. Not the shipping address.",
+    "auth": "Public. Private, never cached. Vary CF-IPCountry.",
+    "params": { "query": "none", "body": "none" },
+    "dependencies": { "env": [], "services": ["Cloudflare CF-IPCountry"] }
+  },
+  {
+    "path": "/api/tcgplayer-redirect",
+    "file": "tcgplayer-redirect.js",
+    "methods": ["GET", "OPTIONS"],
+    "purpose": "TCGplayer product URL for a Pokoin card id, from pokoin_product_links. 404 when unlinked so the desk can open search.",
+    "auth": "Public. No-store.",
+    "params": { "query": "id (public card id), format=json, optional game", "body": "none" },
+    "dependencies": {
+      "env": ["TCGCSV_DATABASE_URL"],
+      "services": ["TCGCSV PostgreSQL"]
+    }
+  },
+  {
     "path": "/api/marketplace-cart-sync",
     "file": "marketplace-cart-sync.js",
     "methods": [
@@ -791,13 +812,14 @@
         "FIREBASE_*",
         "MARKETPLACE_DATABASE_URL",
         "MARKETPLACE_WRITER_DATABASE_URL",
-        "VALKEY_URL"
+        "REDIS_HOST",
+        "REDIS_PORT"
       ],
       "services": [
         "Firebase Admin",
         "Marketplace replica PostgreSQL",
         "nezopt writer PostgreSQL (marketplace_user_carts)",
-        "Valkey rate limit"
+        "Redis rate limit"
       ]
     }
   },
@@ -818,12 +840,13 @@
       "env": [
         "FIREBASE_*",
         "MARKETPLACE_DATABASE_URL",
-        "VALKEY_URL"
+        "REDIS_HOST",
+        "REDIS_PORT"
       ],
       "services": [
         "Marketplace replica PostgreSQL",
         "Firebase Admin (orders, seller profiles)",
-        "Valkey"
+        "Redis"
       ]
     }
   }

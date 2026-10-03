@@ -469,7 +469,7 @@ export function BasketSummary({
             Add up to <span className="bk-red">{nudge.estimate.room} more card{nudge.estimate.room === 1 ? '' : 's'}</span> from{' '}
             {nudgeLink ? <Link className="bk-link" to={nudgeLink}>{nudgeLabel}</Link> : nudgeLabel} to the same parcel: shipping stays{' '}
             <b>{formatLocalFromEurCents(nudge.estimate.amountCents, currency)}</b>.{' '}
-            <Link className="bk-link" to="/flex">Shipping details</Link>
+            <Link className="bk-link" to="/shipping">Shipping details</Link>
           </p>
         </div>
       ) : null}
@@ -477,7 +477,7 @@ export function BasketSummary({
         Subtotal ({n} {n === 1 ? 'item' : 'items'}): <SubtotalAmount pricePkn={subtotal} />
       </div>
 
-      <div className="bk-ship-pick">
+      <div className="bk-ship-fields">
         <label className="bk-field">
           <span>Deliver to</span>
           <select value={country} onChange={(event) => onCountry(event.target.value)}>
@@ -504,6 +504,7 @@ export function BasketSummary({
             No shipping service from these sellers to {shipFromCountryName(country) || country} yet.
           </p>
         ) : null}
+        {shipping.count ? <Link className="bk-link" to="/shipping">Rates for each parcel</Link> : null}
       </div>
 
       <dl className="bk-sum-lines">

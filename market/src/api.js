@@ -8,7 +8,7 @@ import { readRecentCardIds, rememberCardId, peekRecentTile } from './recents.js'
 import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
 import { withGameQuery, isPokemonGame, gameRequestHeaders, game } from './game.js';
 import { homePayloadMatchesGame } from './home-cache.js';
-import { sanitizeCardName, vintedSearchUrl } from './identity.js';
+import { ebaySearchUrl, sanitizeCardName, tcgplayerSearchUrl, vintedSearchUrl } from './identity.js';
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { getSearchLang } from './locale.js';
 import { artistSlug } from './artist-name.js';
@@ -1313,11 +1313,14 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
   const pending = fromLists.then(async (cached) => {
     // Rail / first SQL page is metadata only. The set desk waits for
     // fetchExpansionCards (hasMore false) before painting tiles.
+    // Batch tile PKN only — do not last-median-fill via N sales calls.
+    // Secret Lair (~2500) was firing hundreds of marketplace-card-sales
+    // while the walk ran; homepage rails still use fillMissingLastMedianPrices.
     const fromRail = mapExpansionCards(cached);
     if (fromRail?.cards?.length) {
       const pricedRail = {
         ...fromRail,
-        cards: await fillMissingTilePrices(fromRail.cards),
+        cards: await overlayCatalogTilePrices(fromRail.cards),
       };
       expansionCache.set(key, pricedRail);
       void fromPage.then(async (page) => {
@@ -1325,7 +1328,7 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
           return;
         }
         const merged = mergeExpansionPayload(pricedRail, mapExpansionCards(page));
-        merged.cards = await fillMissingTilePrices(merged.cards || []);
+        merged.cards = await overlayCatalogTilePrices(merged.cards || []);
         expansionCache.set(key, merged);
         onUpdate?.(merged);
       });
@@ -1338,7 +1341,7 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
     if (page?.cards?.length || (offset > 0 && Array.isArray(payload?.cards))) {
       return {
         ...page,
-        cards: await fillMissingTilePrices(page.cards),
+        cards: await overlayCatalogTilePrices(page.cards),
       };
     }
     throw new Error('Expansion failed.');
@@ -2205,8 +2208,35 @@ export function cardtraderHref(card) {
   return withGameQuery(`/api/cardtrader-redirect?${params}`);
 }
 
-export function vintedHref(card, hostname) {
-  return vintedSearchUrl(card, game(hostname).id);
+export function vintedHref(card, hostname, country = '') {
+  return vintedSearchUrl(card, game(hostname).id, country);
+}
+
+export function ebayHref(card, hostname, country = '') {
+  return ebaySearchUrl(card, game(hostname).id, country);
+}
+
+let clientCountryPromise = null;
+
+/** Edge IP country. Empty when Cloudflare does not know. Not the ship-to address. */
+export function fetchClientCountry() {
+  if (!clientCountryPromise) {
+    clientCountryPromise = getJson('/api/client-country')
+      .then((data) => String(data?.country || '').trim().toUpperCase())
+      .catch(() => '');
+  }
+  return clientCountryPromise;
+}
+
+export function tcgplayerSearchHref(card, hostname) {
+  return tcgplayerSearchUrl(card, game(hostname).id);
+}
+
+export async function fetchTcgplayerRedirect(card) {
+  const id = typeof card === 'object' ? publicCardId(card) : String(card || '');
+  const params = new URLSearchParams({ id, format: 'json' });
+  const data = await getJson(`/api/tcgplayer-redirect?${params}`);
+  return data.url || '';
 }
 
 export function fileToDataUrl(file) {
@@ -2411,9 +2441,10 @@ export function fetchSellerShop(username, {
     sort,
     game: marketplaceGame,
   };
-  // Always hit the network so refresh picks up name/tag changes. Seller.jsx
-  // paints the in-memory shop cache first via seedSellerListings.
-  // The full shop book and the freshness stamp stay out of that page cache.
+  // Seller.jsx paints seedSellerListings (memory + sessionStorage) first.
+  // Revalidate in the background so inventory changes still land; book/fresh
+  // stay out of the page cache. API Cache-Control is no-store — Redis only
+  // has seller profile fields, not the listings book.
   const params = new URLSearchParams();
   if (handle) params.set('sellerUsername', handle);
   if (fresh) {

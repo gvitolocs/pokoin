@@ -3,6 +3,7 @@
 // Buy-it-again. Shipping previews live in cart-shipping.js. No React —
 // node:test covers them.
 
+import { pknBalanceVoucher } from './checkout-fees.js';
 import { isSoldOrder } from './order-status.js';
 import { conditionTone, listingLanguageCode } from './listing-meta.js';
 
@@ -277,10 +278,11 @@ export function balanceDiscount({ balancePkn = 0, items = [], shippingCents = 0 
     subtotalPkn += line;
     if (row.sellerAcceptsPkn !== false) eligiblePkn += line;
   }
-  const balance = Math.max(0, Math.trunc(Number(balancePkn) || 0));
   const totalCents = Math.round(subtotalPkn / 2) + Math.max(0, Math.round(Number(shippingCents) || 0));
-  const cents = Math.max(0, Math.min(Math.floor(Math.min(balance, Math.trunc(eligiblePkn)) / 2), totalCents - 50));
-  return { pkn: cents * 2, cents, eligiblePkn, totalCents, chargeCents: Math.max(0, totalCents - cents) };
+  // Same voucher rule checkout applies (and the server re-checks).
+  const voucher = pknBalanceVoucher({ availablePkn: balancePkn, eligiblePkn, chargeEurCents: totalCents });
+  const cents = voucher.eurCents;
+  return { pkn: voucher.pkn, cents, eligiblePkn, totalCents, chargeCents: Math.max(0, totalCents - cents) };
 }
 
 function unionRows(local = [], remote = [], max = 400) {

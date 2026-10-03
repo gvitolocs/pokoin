@@ -6,7 +6,7 @@ const test = require('node:test');
 
 process.env.POKOIN_READ_CACHE = '1';
 
-const valkey = require('./_valkey');
+const redisCache = require('./_redis_cache');
 const cache = require('./_read_model_cache');
 
 function listen(store) {
@@ -16,7 +16,7 @@ function listen(store) {
       socket.on('data', (chunk) => {
         buf = Buffer.concat([buf, chunk]);
         while (buf.length) {
-          const parsed = valkey._test.parseOne(buf);
+          const parsed = redisCache._test.parseOne(buf);
           if (!parsed) return;
           buf = buf.slice(parsed.used);
           const cmd = parsed.value || [];
@@ -42,10 +42,10 @@ function listen(store) {
   });
 }
 
-test('card and bounded search models hit Valkey and a generation bump misses', async () => {
+test('card and bounded search models hit Redis and a generation bump misses', async () => {
   const store = new Map();
   const server = await listen(store);
-  valkey.configure({ host: '127.0.0.1', port: server.address().port, timeoutMs: 300 });
+  redisCache.configure({ host: '127.0.0.1', port: server.address().port, timeoutMs: 300 });
   try {
     assert.equal(cache.cardPageKey({ cardId: '1', liveOffers: true }), '');
     assert.equal(cache.searchPageKey({ query: 'a' }), '');
@@ -62,7 +62,7 @@ test('card and bounded search models hit Valkey and a generation bump misses', a
       return { card: { id: 'rebuilt' } };
     });
     assert.equal(first.source, 'postgres');
-    assert.equal(second.source, 'valkey');
+    assert.equal(second.source, 'redis');
     assert.equal(second.payload.card.id, '693360');
     assert.equal(builds, 1);
 
@@ -83,7 +83,7 @@ test('card and bounded search models hit Valkey and a generation bump misses', a
     leader.finish({ card: { id: '1' } });
     assert.deepEqual(await follower.wait, { card: { id: '1' } });
   } finally {
-    valkey._test.resetConnection();
+    redisCache._test.resetConnection();
     await new Promise((resolve) => server.close(resolve));
   }
 });

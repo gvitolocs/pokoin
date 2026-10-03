@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Deploy the marketplace read-side Valkey overlay from an exact origin/main commit:
+# Deploy the marketplace read-side Redis overlay from an exact origin/main commit:
 # marketplace-home-page.js (TTL-unified, empty-snapshot-cacheable home snapshot),
 # the shared best-effort limiter versions of marketplace-image-log.js and
-# trainingai-card-classify.js, and the helpers they require (_valkey.js,
-# _rate_limit.js). These files were CardVault api/ legacy copies; the Pokoin
-# overlay replaces them on the Pi release.
+# trainingai-card-classify.js, and the helpers they require (_redis_cache.js,
+# _valkey.js shim, _rate_limit.js). These files were CardVault api/ legacy
+# copies; the Pokoin overlay replaces them on the Pi release.
 set -euo pipefail
 
 die() { echo "deploy-marketplace-read-api: $*" >&2; exit 1; }
@@ -23,8 +23,15 @@ READ_FILES=(
   marketplace-home-page.test.js
   marketplace-image-log.js
   trainingai-card-classify.js
+  _redis_cache.js
+  _redis_ns.js
+  _redis_ns.test.js
+  _read_model_cache.js
+  _seller_shop_cache.js
+  _seller_shop_cache.test.js
+  _marketplace_cache_invalidate.js
   _valkey.js
-  _valkey.test.js
+  _redis_cache.test.js
   _rate_limit.js
   _rate_limit.test.js
 )
@@ -41,7 +48,7 @@ for file in "${READ_FILES[@]}"; do
 done
 
 say "marketplace read unit tests"
-node --test "$SRC/marketplace-home-page.test.js" "$SRC/_valkey.test.js" "$SRC/_rate_limit.test.js"
+node --test "$SRC/marketplace-home-page.test.js" "$SRC/_redis_cache.test.js" "$SRC/_rate_limit.test.js"
 for file in "${READ_FILES[@]}"; do
   [[ "$file" == *.js ]] || continue
   [[ "$file" == *.test.js ]] && continue
@@ -56,8 +63,8 @@ ssh pi-home "printf '%s\\n' '$COMMIT' > '/srv/pokoin/api/$release/.marketplace-r
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
 # Health plus the two behaviors this overlay changes: the home snapshot must
-# answer with a cards array (Valkey-backed, 20s TTL), and the valkey client
-# must PING (healthz covers postgres/valkey/meili/cdn).
+# answer with a cards array (Redis-backed, 20s TTL), and the redis client
+# must PING (healthz covers postgres/redis/cdn).
 say "verify health and home snapshot"
 healthy=0
 for _ in $(seq 1 45); do

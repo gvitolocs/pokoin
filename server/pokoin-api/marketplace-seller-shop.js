@@ -467,6 +467,57 @@ async function readSellerShopData(url, game) {
   const reverseOnly = truthyFlag(url.searchParams.get('reverse'));
   const firstEditionOnly = truthyFlag(url.searchParams.get('firstEdition'));
 
+  const { loadSellerShop } = require('./_seller_shop_cache');
+  const cached = await loadSellerShop({
+    game,
+    sellerUid: seller.uid,
+    limit,
+    offset,
+    sort,
+    book,
+    q,
+    condition,
+    language,
+    rarity,
+    reverseOnly,
+    firstEditionOnly,
+  }, () => loadSellerShopUncached({
+    game,
+    seller,
+    fast,
+    book,
+    limit,
+    offset,
+    q,
+    condition,
+    language,
+    sort,
+    rarity,
+    reverseOnly,
+    firstEditionOnly,
+  }));
+  const payload = cached.payload;
+  if (payload && typeof payload === 'object') {
+    payload.cacheSource = cached.source;
+  }
+  return payload;
+}
+
+async function loadSellerShopUncached({
+  game,
+  seller,
+  fast,
+  book,
+  limit,
+  offset,
+  q,
+  condition,
+  language,
+  sort,
+  rarity,
+  reverseOnly,
+  firstEditionOnly,
+}) {
   const values = [seller.uid];
   const where = [
     'seller_uid = $1',

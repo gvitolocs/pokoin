@@ -337,7 +337,8 @@ function collectorHash(number) {
  * Vinted catalog search. Name alone matches every printing (Gumshoos → 500+).
  * Name + collector hash (`184` from `184/182`). Skip English set names and a
  * Pokemon prefix — Vinted ANDs tokens and Italian listings omit those.
- * OP/RB keep the game prefix so character names are not generic.
+ * OP/RB keep the game prefix so character names are not generic on eBay.
+ * Vinted Riftbound / Magic use the brand filter instead of that prefix.
  */
 export function vintedSearchText(card = {}, gameId = 'pokemon') {
   const row = typeof card === 'object' && card ? card : { name: card };
@@ -356,16 +357,223 @@ export function vintedSearchText(card = {}, gameId = 'pokemon') {
   return [name, number].filter(Boolean).join(' ');
 }
 
-/** Vinted.it Hobby e collezionismo. Do not send search_id / time. */
+/**
+ * Live eBay sites (eBay international selling list). No ebay.pt, ebay.jp,
+ * ebay.ph, or ebay.co.nz — those markets are closed or were never a site.
+ * US category 183454 is not valid on the other sites.
+ */
+const EBAY_HOST = {
+  AT: 'www.ebay.at',
+  AU: 'www.ebay.com.au',
+  BE: 'www.ebay.be',
+  CA: 'www.ebay.ca',
+  CH: 'www.ebay.ch',
+  DE: 'www.ebay.de',
+  ES: 'www.ebay.es',
+  FR: 'www.ebay.fr',
+  GB: 'www.ebay.co.uk',
+  HK: 'www.ebay.com.hk',
+  IE: 'www.ebay.ie',
+  IT: 'www.ebay.it',
+  MY: 'www.ebay.com.my',
+  NL: 'www.ebay.nl',
+  PL: 'www.ebay.pl',
+  SG: 'www.ebay.com.sg',
+  US: 'www.ebay.com',
+};
+
+/** Territories that shop on a neighbour's eBay. Countries with no site stay on ebay.com. */
+const EBAY_NEIGHBOR = {
+  UK: 'GB',
+  GG: 'GB',
+  JE: 'GB',
+  IM: 'GB',
+  GI: 'GB',
+  VA: 'IT',
+  SM: 'IT',
+  MC: 'FR',
+  GF: 'FR',
+  GP: 'FR',
+  MQ: 'FR',
+  RE: 'FR',
+  YT: 'FR',
+  PM: 'FR',
+  BL: 'FR',
+  MF: 'FR',
+  NC: 'FR',
+  PF: 'FR',
+  WF: 'FR',
+  LI: 'CH',
+  AD: 'ES',
+  NZ: 'AU',
+  CX: 'AU',
+  CC: 'AU',
+  NF: 'AU',
+  PR: 'US',
+  GU: 'US',
+  AS: 'US',
+  VI: 'US',
+  UM: 'US',
+  MO: 'HK',
+  BN: 'MY',
+};
+
+/**
+ * Vinted markets checked September 2026. vinted.com is the US site, not a
+ * world catalog. The Italian hobby catalog id is not reused on other countries.
+ */
+const VINTED_HOST = {
+  AT: 'www.vinted.at',
+  AU: 'www.vinted.com.au',
+  BE: 'www.vinted.be',
+  HR: 'www.vinted.hr',
+  CZ: 'www.vinted.cz',
+  DK: 'www.vinted.dk',
+  EE: 'www.vinted.ee',
+  FI: 'www.vinted.fi',
+  FR: 'www.vinted.fr',
+  DE: 'www.vinted.de',
+  GR: 'www.vinted.gr',
+  HU: 'www.vinted.hu',
+  IE: 'www.vinted.ie',
+  IT: 'www.vinted.it',
+  LV: 'www.vinted.lv',
+  LT: 'www.vinted.lt',
+  LU: 'www.vinted.lu',
+  NL: 'www.vinted.nl',
+  PL: 'www.vinted.pl',
+  PT: 'www.vinted.pt',
+  RO: 'www.vinted.ro',
+  SK: 'www.vinted.sk',
+  SI: 'www.vinted.si',
+  ES: 'www.vinted.es',
+  SE: 'www.vinted.se',
+  GB: 'www.vinted.co.uk',
+  US: 'www.vinted.com',
+};
+
+/** No vinted.ch or vinted.li, so Liechtenstein uses the German catalog. */
+const VINTED_NEIGHBOR = {
+  ...EBAY_NEIGHBOR,
+  LI: 'DE',
+  AX: 'FI',
+  FO: 'DK',
+  GL: 'DK',
+};
+
+/** Vinted.it Hobby e collezionismo. Other countries do not share this id. */
 const VINTED_IT_CATALOG = '4824';
 
-export function vintedSearchUrl(card = {}, gameId = 'pokemon') {
-  const query = vintedSearchText(card, gameId);
-  const catalog = `catalog[]=${VINTED_IT_CATALOG}`;
-  if (!query) {
-    return `https://www.vinted.it/catalog?${catalog}`;
+/** Vinted brand “Riftbound”. Same id on every country catalog. */
+const VINTED_RIFTBOUND_BRAND = '29810327';
+
+/** Vinted brand “Magic: The Gathering”. Same id on every country catalog. */
+const VINTED_MAGIC_BRAND = '399547';
+
+/** eBay.com Pokémon Individual Cards. Omitted everywhere else. */
+const EBAY_US_POKEMON_CATEGORY = '183454';
+
+const EBAY_GAME_PREFIX = {
+  magic: 'Magic the Gathering',
+  yugioh: 'Yu-Gi-Oh',
+  lorcana: 'Lorcana',
+  flesh_and_blood: 'Flesh and Blood',
+  digimon: 'Digimon',
+  dragon_ball_super: 'Dragon Ball Super',
+  vanguard: 'Cardfight Vanguard',
+};
+
+function marketCountry(country) {
+  const code = String(country || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code) || code === 'EU' || code === 'XX' || code === 'T1') {
+    return '';
   }
-  return `https://www.vinted.it/catalog?search_text=${encodeURIComponent(query)}&${catalog}`;
+  return code;
+}
+
+function hostFor(table, neighbors, country, fallback) {
+  const code = marketCountry(country);
+  const folded = neighbors[code] || code;
+  return table[folded] || fallback;
+}
+
+export function ebayHost(country) {
+  return hostFor(EBAY_HOST, EBAY_NEIGHBOR, country, 'www.ebay.com');
+}
+
+export function vintedHost(country) {
+  return hostFor(VINTED_HOST, VINTED_NEIGHBOR, country, 'www.vinted.com');
+}
+
+export function vintedSearchUrl(card = {}, gameId = 'pokemon', country = '') {
+  const host = vintedHost(country);
+  const brandId = gameId === 'riftbound'
+    ? VINTED_RIFTBOUND_BRAND
+    : gameId === 'magic'
+      ? VINTED_MAGIC_BRAND
+      : '';
+  // Brand-filtered games: name + collector only — no “Magic the Gathering” /
+  // “Riftbound TCG” in search_text (eBay still prefixes via EBAY_GAME_PREFIX).
+  const query = brandId
+    ? vintedSearchText(card, 'pokemon')
+    : vintedSearchText(card, gameId);
+  const url = new URL(`https://${host}/catalog`);
+  if (query) {
+    url.searchParams.set('search_text', query);
+  }
+  if (brandId) {
+    url.searchParams.append('brand_ids[]', brandId);
+  }
+  if (host === 'www.vinted.it') {
+    url.searchParams.append('catalog[]', VINTED_IT_CATALOG);
+  }
+  return url.toString();
+}
+
+/**
+ * Local eBay search. ebay.com keeps the Pokémon category. Other sites search
+ * by words only, with a Pokemon token so the missing category does not match
+ * every "Energy". Unknown, Tor, and countries without a site stay on ebay.com.
+ */
+export function ebaySearchUrl(card = {}, gameId = 'pokemon', country = '') {
+  const host = ebayHost(country);
+  const text = vintedSearchText(card, gameId);
+  const local = host !== 'www.ebay.com';
+  const pokemon = gameId === 'pokemon' && local ? 'Pokemon' : '';
+  const prefix = EBAY_GAME_PREFIX[gameId] || pokemon;
+  const query = [prefix, text].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  const url = new URL(`https://${host}/sch/i.html`);
+  if (query) {
+    url.searchParams.set('_nkw', query);
+  }
+  if (!local && gameId === 'pokemon') {
+    url.searchParams.set('_sacat', EBAY_US_POKEMON_CATEGORY);
+  }
+  return url.toString();
+}
+
+const TCGPLAYER_LINE = {
+  pokemon: 'pokemon',
+  magic: 'magic',
+  yugioh: 'yugioh',
+};
+
+/** TCGplayer product page for a linked product id. */
+export function tcgplayerProductUrl(productId) {
+  const id = String(productId || '').replace(/\D/g, '');
+  return id ? `https://www.tcgplayer.com/product/${id}` : '';
+}
+
+/** Search fallback when a printing has no pokoin_product_links row. */
+export function tcgplayerSearchUrl(card = {}, gameId = 'pokemon') {
+  const query = vintedSearchText(card, gameId);
+  const line = TCGPLAYER_LINE[gameId] || 'all';
+  const url = new URL(`https://www.tcgplayer.com/search/${line}/product`);
+  if (query) {
+    url.searchParams.set('q', query);
+  }
+  url.searchParams.set('view', 'grid');
+  return url.toString();
 }
 
 /** Cardmarket `/en/{Game}/Products/Search` segment. Pokemon stays on the API. */

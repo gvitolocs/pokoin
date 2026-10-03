@@ -17,7 +17,7 @@ const spa = [
   'dashboard', 'docs', 'earn', 'email-preferences', 'espurr', 'exchange', 'extension',
   'favorites', 'flex', 'forum', 'health', 'inventory', 'invite', 'join', 'jumbos',
   'marketplace', 'messages', 'mypokoin', 'nft', 'ocr', 'orders', 'privacy', 'product',
-  'profile', 'protection', 'sales', 'sanitize', 'scan', 'scancard', 'sitemap', 'stock',
+  'profile', 'protection', 'sales', 'sanitize', 'scan', 'scancard', 'shipping', 'sitemap', 'stock',
   'swap', 'tests', 'wallet', 'whitepaper',
   ...games,
 ];

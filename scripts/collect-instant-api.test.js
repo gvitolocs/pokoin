@@ -11,7 +11,7 @@ test('instant API artifact closes over the new runtime modules', () => {
   for (const name of [
     '_outbox.js',
     '_sync_engine.js',
-    '_valkey.js',
+    '_redis_cache.js',
     '_read_model_cache.js',
     '_listing_inventory.js',
     '_request_timing.js',

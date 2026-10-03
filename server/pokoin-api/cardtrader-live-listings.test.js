@@ -75,7 +75,7 @@ test('an explicit request game wins over the Pokemon request context', async () 
   assert.match(calls[0], /ct_id/);
 });
 
-// --- Shared L2 cache (Valkey ct:live:*) ---
+// --- Shared L2 cache (Redis pokoin:marketplace:v1:ct:live:*) ---
 
 function liveRequest() {
   return { blueprintId: '355401', limit: 20 };
@@ -110,7 +110,7 @@ test('the first live-listings read fetches CardTrader and shares the payload wit
   assert.equal(fetchCalls.length, 1);
   assert.equal(payload.cache.ttlSeconds, 60, 'L2 TTL must match the payload TTL');
   assert.equal(shared.sets.length, 1);
-  assert.match(shared.sets[0].key, /^ct:live:cardtrader:355401:/);
+  assert.match(shared.sets[0].key, /^pokoin:marketplace:v1:ct:live:cardtrader:355401:/);
   assert.equal(shared.sets[0].ttlSeconds, 60);
   assert.equal(shared.sets[0].value.payload.ok, true);
   assert.equal(shared.sets[0].value.expiresAtMs, 1_060_000);
@@ -154,7 +154,7 @@ test('an in-process L1 hit does not touch the shared cache and keeps one TTL reg
   assert.equal(l1Hit.cache.hit, true);
 });
 
-test('valkey down: every instance falls back to CardTrader without failing', async () => {
+test('redis down: every instance falls back to CardTrader without failing', async () => {
   const live = loadFor('pokemon');
   const fetchCalls = [];
   const shared = fakeSharedCache({ down: true });

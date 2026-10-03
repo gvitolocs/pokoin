@@ -66,39 +66,8 @@ spec:
   ports:
     - { port: 7700, targetPort: 7700, name: http }
 ---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: valkey
-  namespace: pokoin-overflow
-spec:
-  replicas: 1
-  selector:
-    matchLabels: { app: valkey }
-  template:
-    metadata:
-      labels: { app: valkey }
-    spec:
-      containers:
-        - name: valkey
-          image: valkey/valkey:8
-          args: ["--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
-          ports:
-            - { containerPort: 6379 }
-          resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits: { cpu: 500m, memory: 320Mi }
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: valkey
-  namespace: pokoin-overflow
-spec:
-  selector: { app: valkey }
-  ports:
-    - { port: 6379, targetPort: 6379 }
----
+# Shared cache/search Redis lives only on the Pi (:6380). Overflow pods do not
+# run a second Redis/Valkey — cache helpers fail open to Postgres/Firestore.
 # The Pi API release (synced to /srv/pokoin-overflow/api/current).
 apiVersion: apps/v1
 kind: Deployment
@@ -133,8 +102,9 @@ spec:
             - { name: MARKETPLACE_DATABASE_SSL, value: "0" }
             - { name: MARKETPLACE_DATABASE_POOL_MAX, value: "8" }
             - { name: MEILI_HOST, value: "http://meili.pokoin-overflow.svc.cluster.local:7700" }
-            - { name: VALKEY_HOST, value: valkey.pokoin-overflow.svc.cluster.local }
-            - { name: VALKEY_PORT, value: "6379" }
+            # Intentionally unreachable inside the pod: fail-open cache path.
+            - { name: REDIS_HOST, value: "127.0.0.1" }
+            - { name: REDIS_PORT, value: "6380" }
             - { name: POKOIN_OVERFLOW_NODE, value: nezopt }
             # The CDN runs on the Pi, not this pod's loopback interface.
             - { name: POKOIN_CDN_HEALTH_URL, value: "https://cdn.pokoin.com/health" }
