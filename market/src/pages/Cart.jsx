@@ -3,17 +3,15 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
 import {
+  balanceDiscount,
   cartTotals,
   groupBySeller,
-  isSelected,
   nextSelectAll,
-  parcelNudge,
   purchasedLabel,
   reconcileRow,
-  rowTotalPkn,
   sellerKeyOf,
-  shippingEstimate,
 } from '../cart-model.js';
+import { orderServices, parcelNudge, shippingEstimate } from '../cart-shipping.js';
 import {
   useBuyAgain,
   useCardTiles,
@@ -25,10 +23,6 @@ import {
   useSellerShelves,
   useWatchlistIds,
 } from '../cart-rails.js';
-import { pknBalanceVoucher } from '../checkout-fees.js';
-import { fiatFromPkn, formatLocalFromEurCents } from '../pkn.js';
-import { readPknDiscount, readShippingService, writePknDiscount, writeShippingService } from '../shipping-choice.js';
-import { defaultShippingService, shippingServiceOptions } from '../shipping-quote.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
 import {
   BasketRow,
@@ -80,8 +74,6 @@ export default function Cart() {
   const uid = user?.uid || profile?.uid || '';
   const delivery = useDeliveryCountry({ signedIn, getBearer });
   const [removed, setRemoved] = useState(null);
-  const [shippingService, setShippingService] = useState(() => readShippingService());
-  const [usePknDiscount, setUsePknDiscount] = useState(() => readPknDiscount());
 
   useEffect(() => {
     document.title = 'Cart · Pokoin';
@@ -89,44 +81,20 @@ export default function Cart() {
 
   const totals = useMemo(() => cartTotals(items), [items]);
   const groups = useMemo(() => groupBySeller(items), [items]);
-  const shipOptions = useMemo(() => {
-    for (const group of groups) {
-      if (!group.selectedCount || !group.sellerCountry) continue;
-      const options = shippingServiceOptions({
-        fromCountry: group.sellerCountry,
-        toCountry: delivery.country,
-        cardCount: group.selectedCount,
-      }).filter((row) => !row.unavailable);
-      if (options.length) return options;
-    }
-    return [];
-  }, [groups, delivery.country]);
-  const activeService = shipOptions.some((row) => row.id === shippingService)
-    ? shippingService
-    : defaultShippingService(shipOptions);
-  const shipping = useMemo(
-    () => shippingEstimate(groups, delivery.country, activeService),
-    [groups, delivery.country, activeService],
-  );
+  // The buyer's pick wins over the saved address / browser country.
+  const country = cart.shippingChoice.country || delivery.country;
+  const service = cart.shippingChoice.service;
+  const services = useMemo(() => orderServices(groups, country), [groups, country]);
+  const shipping = useMemo(() => shippingEstimate(groups, country, service), [groups, country, service]);
   const estimates = useMemo(
     () => Object.fromEntries(shipping.parcels.map((parcel) => [parcel.key, parcel.estimate])),
     [shipping],
   );
-  const nudge = useMemo(
-    () => parcelNudge(groups, delivery.country, activeService),
-    [groups, delivery.country, activeService],
+  const nudge = useMemo(() => parcelNudge(groups, country, service), [groups, country, service]);
+  const discount = useMemo(
+    () => balanceDiscount({ balancePkn: signedIn ? availablePkn : 0, items, shippingCents: shipping.cents }),
+    [signedIn, availablePkn, items, shipping.cents],
   );
-  const discount = useMemo(() => {
-    const eligiblePkn = items.reduce((sum, row) => (
-      isSelected(row) && row.sellerAcceptsPkn !== false ? sum + rowTotalPkn(row) : sum
-    ), 0);
-    const itemCents = Math.round((Number(fiatFromPkn(totals.selectedSubtotalPkn, 'EUR')) || 0) * 100);
-    return pknBalanceVoucher({
-      availablePkn,
-      eligiblePkn,
-      chargeEurCents: itemCents + (Number(shipping.cents) || 0),
-    });
-  }, [items, totals.selectedSubtotalPkn, availablePkn, shipping.cents]);
 
   const live = useCartLive({ items, saved, applyLive: cart.applyLive, excludeSellerUid: uid });
   const liveByRow = useMemo(() => {
@@ -165,15 +133,17 @@ export default function Cart() {
   const shelves = useSellerShelves(fallback ? groups : NONE);
   const inCart = useMemo(() => new Set(items.map((row) => String(row.listingId || row.id))), [items]);
 
-  const recentItems = serverRails
-    ? (railById.get('recent')?.items || NONE)
-    : recent.cards.map((card) => ({ card, offer: null }));
+  // Server items carry live availability: no offer means no copy for sale.
+  const recentItems = useMemo(() => (serverRails
+    ? (railById.get('recent')?.items || NONE).map((item) => ({ ...item, known: true }))
+    : recent.cards.map((card) => ({ card, offer: null, known: false }))), [serverRails, railById, recent.cards]);
   const buyAgain = useMemo(() => {
     if (serverRails) {
       return (railById.get('buy_again')?.items || NONE).map((item) => ({
         card: item.card,
         offer: item.offer,
         note: purchasedLabel(item.purchasedAt),
+        known: true,
       }));
     }
     const notes = new Map(again.cards.map((row) => [row.cardId, purchasedLabel(row.purchasedAt)]));
@@ -324,27 +294,20 @@ export default function Cart() {
               totals={totals}
               shipping={shipping}
               nudge={nudge}
-              delivery={delivery}
+              country={country}
+              countrySaved={delivery.saved && !cart.shippingChoice.country}
+              services={services}
+              service={service}
+              onCountry={(code) => cart.setShippingChoice({ country: code })}
+              onService={(id) => cart.setShippingChoice({ service: id })}
               currency={buyer.currency}
               signedIn={signedIn}
               availablePkn={availablePkn}
+              discount={discount}
+              useBalance={cart.useBalance}
+              onUseBalance={cart.setUseBalance}
               gift={gift}
               onGift={cart.setGift}
-              shipOptions={shipOptions}
-              shippingService={activeService}
-              onShippingService={(id) => {
-                setShippingService(id);
-                writeShippingService(id);
-              }}
-              usePknDiscount={usePknDiscount}
-              onPknDiscount={(on) => {
-                setUsePknDiscount(on);
-                writePknDiscount(on);
-              }}
-              discountPkn={discount.pkn}
-              discountLocal={discount.eurCents
-                ? formatLocalFromEurCents(discount.eurCents, buyer.currency)
-                : ''}
             />
           </aside>
         ) : null}

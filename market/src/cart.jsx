@@ -4,6 +4,14 @@ import { cartImageFor, repairCartImage } from './cart-image.js';
 import { cartTotals, isSelected, moveRow, reconcileRow, settleCheckoutRows } from './cart-model.js';
 import { listingStock, nextCartQty } from './cart-qty.js';
 import { useAccountCartSync } from './cart-sync.js';
+import {
+  readPknDiscount,
+  readShippingCountry,
+  readShippingService,
+  writePknDiscount,
+  writeShippingCountry,
+  writeShippingService,
+} from './shipping-choice.js';
 
 const CART_KEY = 'pokoin.cartItems';
 const SAVED_KEY = 'pokoin.cartSaved';
@@ -126,6 +134,8 @@ const CartContext = createContext({
   checkoutSubtotalPkn: 0,
   canNftOnly: false,
   gift: false,
+  useBalance: false,
+  shippingChoice: { country: '', service: '' },
   addItem: () => {},
   setQty: () => {},
   removeItem: () => {},
@@ -140,6 +150,8 @@ const CartContext = createContext({
   removeSaved: () => {},
   applyLive: () => {},
   setGift: () => {},
+  setUseBalance: () => {},
+  setShippingChoice: () => {},
   markCheckoutPending: () => {},
   settleCheckout: () => {},
   clear: () => {},
@@ -204,6 +216,12 @@ export function CartProvider({ children }) {
   const [items, setItems] = useState(() => (typeof window === 'undefined' ? [] : readCart()));
   const [saved, setSaved] = useState(() => (typeof window === 'undefined' ? [] : readRows(SAVED_KEY)));
   const [gift, setGiftState] = useState(() => (typeof window === 'undefined' ? false : readGift()));
+  const [useBalance, setUseBalanceState] = useState(() => (typeof window === 'undefined' ? false : readPknDiscount()));
+  const [shippingChoice, setShippingChoiceState] = useState(() => (
+    typeof window === 'undefined'
+      ? { country: '', service: '' }
+      : { country: readShippingCountry(), service: readShippingService() }
+  ));
 
   useEffect(() => {
     writeCart(items);
@@ -216,6 +234,15 @@ export function CartProvider({ children }) {
   useEffect(() => {
     writeFlag(GIFT_KEY, gift ? '1' : '');
   }, [gift]);
+
+  useEffect(() => {
+    writePknDiscount(useBalance);
+  }, [useBalance]);
+
+  useEffect(() => {
+    writeShippingCountry(shippingChoice.country);
+    writeShippingService(shippingChoice.service);
+  }, [shippingChoice]);
 
   const applyAccountCart = useCallback((state) => {
     setItems(state.items.slice(0, CART_MAX));
@@ -235,6 +262,8 @@ export function CartProvider({ children }) {
       items,
       saved,
       gift,
+      useBalance,
+      shippingChoice,
       count: totals.count,
       subtotalPkn: totals.subtotalPkn,
       totalPkn: totals.subtotalPkn,
@@ -368,6 +397,18 @@ export function CartProvider({ children }) {
       setGift(on) {
         setGiftState(Boolean(on));
       },
+      /** "Use my site balance as a discount" — checkout starts with its voucher ticked. */
+      setUseBalance(on) {
+        setUseBalanceState(Boolean(on));
+      },
+      /** Merge { country?, service? } into the buyer's shipping choice. */
+      setShippingChoice(patch) {
+        setShippingChoiceState((current) => {
+          const next = { ...current, ...(patch || {}) };
+          if (next.country === current.country && next.service === current.service) return current;
+          return { country: String(next.country || '').toUpperCase(), service: String(next.service || '') };
+        });
+      },
       /** Stripe leaves the SPA: remember which rows that payment covers. */
       markCheckoutPending(ids) {
         const list = (ids || []).map(String).filter(Boolean);
@@ -390,7 +431,7 @@ export function CartProvider({ children }) {
         setItems([]);
       },
     };
-  }, [items, saved, gift]);
+  }, [items, saved, gift, useBalance, shippingChoice]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

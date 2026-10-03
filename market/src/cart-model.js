@@ -1,11 +1,11 @@
 // Pure cart rules behind the Amazon-layout /cart: which rows check out,
-// seller parcels and their shipping preview, live-listing reconcile, the
-// Saved-for-later moves and Buy-it-again. No React — node:test covers them.
+// seller parcels, live-listing reconcile, the Saved-for-later moves and
+// Buy-it-again. Shipping previews live in cart-shipping.js. No React —
+// node:test covers them.
 
-import ratesCatalog from './shipping-rates.json' with { type: 'json' };
+import { pknBalanceVoucher } from './checkout-fees.js';
 import { isSoldOrder } from './order-status.js';
 import { conditionTone, listingLanguageCode } from './listing-meta.js';
-import { defaultShippingService, previewShipment, shippingServiceOptions } from './shipping-quote.js';
 
 /** Rows default to selected, like Amazon's basket; only an explicit false opts out. */
 export function isSelected(row) {
@@ -92,88 +92,6 @@ export function groupBySeller(items = []) {
     group.sellerName = group.sellerName || String(row?.sellerName || '');
   }
   return [...groups.values()];
-}
-
-const TIERS = [...(ratesCatalog.tiers || [])].sort((a, b) => a.maxCards - b.maxCards);
-
-/** Cards past this many are not worth a "room for N more" line. */
-export const PARCEL_ROOM_MAX = 200;
-
-/**
- * One seller parcel as checkout would first quote it: the pre-selected
- * service (a few cards go as the untracked letter) and how many more cards
- * ride in the same parcel before that service's price changes.
- */
-export function parcelEstimate({ from, to, cards, serviceId: preferredId } = {}) {
-  const n = Math.max(0, Math.trunc(Number(cards) || 0));
-  const fromCode = String(from || '').trim().toUpperCase();
-  const toCode = String(to || '').trim().toUpperCase();
-  if (n < 1 || !/^[A-Z]{2}$/.test(fromCode) || !/^[A-Z]{2}$/.test(toCode)) return null;
-  const options = shippingServiceOptions({ fromCountry: fromCode, toCountry: toCode, cardCount: n })
-    .filter((row) => !row.unavailable);
-  if (!options.length) return null;
-  const preferred = options.find((row) => row.id === preferredId);
-  const serviceId = preferred ? preferred.id : defaultShippingService(options);
-  const picked = options.find((row) => row.id === serviceId) || options[0];
-  const tracked = picked.tracked !== false;
-  let room = 0;
-  for (const tier of TIERS) {
-    const max = Number(tier.maxCards) || 0;
-    if (max < n) continue;
-    const at = previewShipment({ fromCountry: fromCode, toCountry: toCode, cardCount: max, tracked });
-    if (!at || at.amountCents !== picked.amountCents || at.tracked !== tracked) break;
-    room = max - n;
-  }
-  return {
-    amountCents: Number(picked.amountCents) || 0,
-    tracked,
-    serviceName: picked.serviceName || '',
-    carrier: picked.carrier || '',
-    packageTier: picked.packageTier || '',
-    room: Math.min(room, PARCEL_ROOM_MAX),
-  };
-}
-
-/** Shipping preview for the ticked rows: one parcel per seller. */
-export function shippingEstimate(groups = [], to = '', serviceId = '') {
-  const parcels = [];
-  let cents = 0;
-  let missing = 0;
-  for (const group of groups || []) {
-    if (!group.selectedCount) continue;
-    const estimate = parcelEstimate({
-      from: group.sellerCountry,
-      to,
-      cards: group.selectedCount,
-      serviceId,
-    });
-    parcels.push({ key: group.key, estimate });
-    if (estimate) cents += estimate.amountCents;
-    else missing += 1;
-  }
-  return { parcels, cents, missing, count: parcels.length };
-}
-
-/**
- * Pokoin's "Add €30.21 to qualify for FREE Delivery": the ticked parcel with
- * the dearest shipping that still has room for more cards at the same price.
- */
-export function parcelNudge(groups = [], to = '', serviceId = '') {
-  let best = null;
-  for (const group of groups || []) {
-    if (!group.selectedCount) continue;
-    const estimate = parcelEstimate({
-      from: group.sellerCountry,
-      to,
-      cards: group.selectedCount,
-      serviceId,
-    });
-    if (!estimate || estimate.room < 1) continue;
-    if (!best || estimate.amountCents > best.estimate.amountCents) {
-      best = { group, estimate };
-    }
-  }
-  return best;
 }
 
 function liveStock(offer) {
@@ -343,6 +261,28 @@ export function settleCheckoutRows(items = [], { rowIds = [], listingIds = [] } 
   if (!rows.size && !listings.size) return items;
   const next = items.filter((row) => !rows.has(String(row.id)) && !listings.has(String(row.listingId || '')));
   return next.length === items.length ? items : next;
+}
+
+/**
+ * Site-balance discount preview — the rule checkout applies to a card
+ * payment: only ticked lines from sellers who take PKN count, 2 PKN per
+ * euro-cent rounded down, and the card is still charged at least €0.50.
+ * `shippingCents` is the shipping estimate in euro-cents (0 when unknown).
+ */
+export function balanceDiscount({ balancePkn = 0, items = [], shippingCents = 0 } = {}) {
+  let subtotalPkn = 0;
+  let eligiblePkn = 0;
+  for (const row of items) {
+    if (!isSelected(row) || row.unavailable) continue;
+    const line = rowTotalPkn(row);
+    subtotalPkn += line;
+    if (row.sellerAcceptsPkn !== false) eligiblePkn += line;
+  }
+  const totalCents = Math.round(subtotalPkn / 2) + Math.max(0, Math.round(Number(shippingCents) || 0));
+  // Same voucher rule checkout applies (and the server re-checks).
+  const voucher = pknBalanceVoucher({ availablePkn: balancePkn, eligiblePkn, chargeEurCents: totalCents });
+  const cents = voucher.eurCents;
+  return { pkn: voucher.pkn, cents, eligiblePkn, totalCents, chargeCents: Math.max(0, totalCents - cents) };
 }
 
 function unionRows(local = [], remote = [], max = 400) {

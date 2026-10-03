@@ -6,6 +6,8 @@ const {
   affinityScore,
   boughtCardIds,
   buildAffinity,
+  parcelMatch,
+  parcelProfile,
   parseIds,
   pickOffer,
   rankByAffinity,
@@ -113,3 +115,34 @@ test('bought ids come from paid orders, newest first, once each', () => {
   ]);
   assert.deepEqual(bought.map((row) => row.cardId), ['2', '1']);
 });
+
+test('trainers and energies (Pokédex bucket 10000) are not one species', () => {
+  const affinity = buildAffinity([{ card: card(1, { name: 'Basic Metal Energy', pokedex_num: 10000, artist: '', set_name: 'Prize Pack' }), source: 'cart' }]);
+  const eviolite = affinityScore(card(2, { name: 'Eviolite', pokedex_num: 10000, artist: '', set_name: 'Plasma Storm' }), affinity);
+  assert.equal(eviolite.score, 0);
+  assert.equal(affinity.species.size, 0);
+});
+
+test('a seller parcel ranks listings like the cart lines from that seller', () => {
+  const pidove = card(10, { name: 'Pidove', pokedex_num: 519, set_name: 'Next Destinies' });
+  const byId = new Map([
+    ['10', pidove],
+    ['11', card(11, { name: 'Pidove', pokedex_num: 519, set_name: 'Emerging Powers' })],
+    ['12', card(12, { name: 'Snivy', pokedex_num: 495, set_name: 'Next Destinies' })],
+    ['13', card(13, { name: 'Eviolite', pokedex_num: 10000, set_name: 'Plasma Storm' })],
+  ]);
+  const anchors = [{ card_id: '10', card_name: 'Pidove', set_name: 'Next Destinies', language: 'IT', condition: 'PL' }];
+  const profile = parcelProfile(anchors, byId);
+  const sameName = parcelMatch({ language: 'it', condition: 'Played' }, byId.get('11'), profile);
+  assert.equal(sameName.reason, 'Other printing of Pidove · Italian · PL');
+  const sameSet = parcelMatch({ language: 'en', condition: 'NM' }, byId.get('12'), profile);
+  assert.equal(sameSet.reason, 'Next Destinies');
+  const ranked = rankSellerShelf([
+    { id: 'a', card_id: '13', price_pkn: 10, language: 'en', condition: 'NM' },
+    { id: 'b', card_id: '12', price_pkn: 90, language: 'IT', condition: 'PL' },
+    { id: 'c', card_id: '11', price_pkn: 95, language: 'IT', condition: 'PL' },
+  ], byId, buildAffinity([]), { excludeListings: new Set(), excludeCards: new Set(['10']), anchors });
+  assert.deepEqual(ranked.map((row) => row.offer.id), ['c', 'b', 'a']);
+  assert.equal(ranked[2].reason, 'Ships in the same parcel');
+});
+

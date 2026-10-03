@@ -30,8 +30,46 @@ export const SHIP_FROM_COUNTRIES = [
   { code: 'SE', name: 'Sweden' },
 ];
 
+/**
+ * Where buyers can have cards shipped: every EU ship-from country plus the
+ * worldwide destinations scripts/sync-shipping-rates.py quotes
+ * (WORLD_DESTINATIONS there; shipping-coverage.test.js keeps them in step).
+ */
+export const SHIP_TO_COUNTRIES = [
+  ...SHIP_FROM_COUNTRIES,
+  { code: 'GB', name: 'United Kingdom' },
+  { code: 'CH', name: 'Switzerland' },
+  { code: 'NO', name: 'Norway' },
+  { code: 'IS', name: 'Iceland' },
+  { code: 'US', name: 'United States' },
+  { code: 'CA', name: 'Canada' },
+  { code: 'MX', name: 'Mexico' },
+  { code: 'BR', name: 'Brazil' },
+  { code: 'AR', name: 'Argentina' },
+  { code: 'CL', name: 'Chile' },
+  { code: 'JP', name: 'Japan' },
+  { code: 'CN', name: 'China' },
+  { code: 'HK', name: 'Hong Kong' },
+  { code: 'TW', name: 'Taiwan' },
+  { code: 'KR', name: 'South Korea' },
+  { code: 'SG', name: 'Singapore' },
+  { code: 'MY', name: 'Malaysia' },
+  { code: 'TH', name: 'Thailand' },
+  { code: 'PH', name: 'Philippines' },
+  { code: 'ID', name: 'Indonesia' },
+  { code: 'VN', name: 'Vietnam' },
+  { code: 'IN', name: 'India' },
+  { code: 'AU', name: 'Australia' },
+  { code: 'NZ', name: 'New Zealand' },
+  { code: 'AE', name: 'United Arab Emirates' },
+  { code: 'SA', name: 'Saudi Arabia' },
+  { code: 'IL', name: 'Israel' },
+  { code: 'TR', name: 'Türkiye' },
+  { code: 'ZA', name: 'South Africa' },
+].sort((a, b) => a.name.localeCompare(b.name));
+
 const NAME_BY_CODE = Object.fromEntries(
-  SHIP_FROM_COUNTRIES.map((row) => [row.code, row.name]),
+  SHIP_TO_COUNTRIES.map((row) => [row.code, row.name]),
 );
 
 /** Regional-indicator emoji for an ISO 3166-1 alpha-2 code (🇬🇧 for GB/UK). */

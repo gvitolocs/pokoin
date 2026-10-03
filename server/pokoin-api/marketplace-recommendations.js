@@ -267,24 +267,42 @@ async function readOffers(cardIds) {
  * artists first, then cheapest. Non-catalog rows never reach the shelf.
  */
 async function readSellerListings(sellerUid, taste = {}) {
+  const lower = (list) => [...new Set((list || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean))];
   const result = await marketplaceQuery(
     `select ${LISTING_COLUMNS}
        from public.marketplace_user_listings l
        join public.marketplace_search_candidates c on c.card_id = l.card_id::bigint
       where l.seller_uid = $1 and ${BUYABLE}
       order by (
-                 c.pokedex_num = any($2::int[])
-                 or lower(c.name) = any($3::text[])
-                 or lower(coalesce(nullif(c.artist, ''), c.illustrator, '')) = any($4::text[])
+                 (case when lower(c.name) = any($3::text[]) then 4 else 0 end)
+               + (case when c.pokedex_num = any($2::int[]) then 3 else 0 end)
+               + (case when lower(c.set_name) = any($5::text[]) then 3 else 0 end)
+               + (case when lower(l.language) = any($6::text[]) then 2 else 0 end)
+               + (case when lower(l.condition) = any($7::text[]) then 1 else 0 end)
+               + (case when lower(coalesce(nullif(c.artist, ''), c.illustrator, '')) = any($4::text[]) then 1 else 0 end)
                ) desc,
                l.price_pkn asc
       limit 600`,
     [
       sellerUid,
-      (taste.species || []).map(Number).filter((n) => Number.isSafeInteger(n) && n > 0),
-      (taste.names || []).map(String),
-      (taste.artists || []).map(String),
+      (taste.species || []).map(Number).filter((n) => Number.isSafeInteger(n) && n > 0 && n <= 1025),
+      lower(taste.names),
+      lower(taste.artists),
+      lower(taste.sets),
+      lower(taste.languages),
+      lower(taste.conditions),
     ],
+  );
+  return result.rows || [];
+}
+
+/** The cart's own listings (any status): what each seller parcel already holds. */
+async function readListingsById(ids) {
+  const wanted = (ids || []).map((id) => String(id || '').trim()).filter((id) => id && id.length <= 80).slice(0, 400);
+  if (!wanted.length) return [];
+  const result = await marketplaceQuery(
+    `select ${LISTING_COLUMNS} from public.marketplace_user_listings l where l.id::text = any($1::text[])`,
+    [wanted],
   );
   return result.rows || [];
 }
@@ -410,20 +428,32 @@ async function recommend(signals, io, { limit = DEFAULT_LIMIT } = {}) {
       .map((row) => ({ card: pool.byId.get(row.cardId), reason: 'You bought this before', purchasedAt: row.purchasedAt })),
   });
 
-  // Same parcel: more from each seller already in the cart, this buyer's taste first.
-  const taste = {
-    species: [...affinity.species.keys()].slice(0, 40),
-    names: [...affinity.names.keys()].slice(0, 40),
-    artists: [...affinity.artists.keys()].slice(0, 40),
-  };
-  const sellerRails = await Promise.all(signals.sellerUids.slice(0, MAX_SELLER_SHELVES).map(async (sellerUid) => ({
-    sellerUid,
-    ranked: rankSellerShelf(await io.readSellerListings(sellerUid, taste), pool.byId, affinity, {
-      excludeListings: new Set(signals.listingIds),
-      excludeCards: new Set(signals.cartIds),
-      limit,
-    }),
-  })));
+  // Same parcel: more from each seller already in the cart, matched to the
+  // cart lines from that seller (name, expansion, language, condition).
+  const anchors = io.readListingsById
+    ? await io.readListingsById(signals.listingIds).catch(() => [])
+    : [];
+  const sellerRails = await Promise.all(signals.sellerUids.slice(0, MAX_SELLER_SHELVES).map(async (sellerUid) => {
+    const own = anchors.filter((row) => row.seller_uid === sellerUid);
+    const ownCards = own.map((row) => pool.byId.get(String(row.card_id)) || {});
+    const taste = {
+      species: [...ownCards.map((card) => Number(card.pokedex_num)), ...affinity.species.keys()].slice(0, 40),
+      names: [...own.map((row, at) => ownCards[at].name || row.card_name), ...[...affinity.names.values()].map((entry) => entry.label)].slice(0, 40),
+      artists: [...affinity.artists.values()].map((entry) => entry.label).slice(0, 40),
+      sets: own.map((row, at) => ownCards[at].set_name || row.set_name),
+      languages: own.map((row) => row.language),
+      conditions: own.map((row) => row.condition),
+    };
+    return {
+      sellerUid,
+      ranked: rankSellerShelf(await io.readSellerListings(sellerUid, taste), pool.byId, affinity, {
+        excludeListings: new Set(signals.listingIds),
+        excludeCards: new Set(signals.cartIds),
+        anchors: own,
+        limit,
+      }),
+    };
+  }));
   for (const { sellerUid, ranked } of sellerRails) {
     pushRail({
       id: `parcel:${sellerUid}`,
@@ -536,6 +566,7 @@ function liveIo() {
     readCards: (ids) => db(() => readCards(ids)),
     readOffers: (ids) => db(() => readOffers(ids)),
     readSellerListings: (uid, taste) => db(() => readSellerListings(uid, taste)),
+    readListingsById: (ids) => db(() => readListingsById(ids)),
     readCoCarted: (ids, uid) => db(() => readCoCarted(ids, uid)),
     sellerProfiles: (uids) => getPublicSellerProfiles(uids),
   };

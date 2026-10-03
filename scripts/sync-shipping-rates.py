@@ -50,8 +50,22 @@ CURRENCY_PER_EUR = {
     "BGN": 1.96,
 }
 
-# Sell-from / common destinations we expand PackZoo across.
+# Where Pokoin sellers ship from (seller settings); every lane starts here.
 COUNTRIES = ("DK", "DE", "IT", "FR", "NL", "ES", "PL")
+
+# Where buyers can ship to. Keep in sync with SHIP_TO_COUNTRIES in
+# market/src/ship-countries.js (market/src/shipping-coverage.test.js checks it).
+EU_DESTINATIONS = (
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE",
+    "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+)
+WORLD_DESTINATIONS = (
+    "GB", "CH", "NO", "IS",
+    "US", "CA", "MX", "BR", "AR", "CL",
+    "JP", "CN", "HK", "TW", "KR", "SG", "MY", "TH", "PH", "ID", "VN", "IN",
+    "AU", "NZ", "AE", "SA", "IL", "TR", "ZA",
+)
+DESTINATIONS = EU_DESTINATIONS + WORLD_DESTINATIONS
 
 TIERS = [
     {"id": "SMALL", "maxCards": 4},
@@ -406,6 +420,36 @@ def detect_flat_parcel(quotes_by_tier: dict[str, dict]) -> None:
             q["productClass"] = "parcel"
 
 
+def report_coverage(rates: list[dict], lanes: list[tuple[str, str]]) -> None:
+    """Print every lane/tier with no rate at all, and lanes with no tracked option."""
+    have = {(r["fromCountry"], r["toCountry"], r["packageTier"]) for r in rates}
+    tracked = {(r["fromCountry"], r["toCountry"]) for r in rates if r.get("tracked")}
+    gaps = [
+        f"{frm}>{to}:{tier['id']}"
+        for frm, to in lanes
+        for tier in TIERS
+        if (frm, to, tier["id"]) not in have
+    ]
+    untracked_only = [f"{frm}>{to}" for frm, to in lanes if (frm, to) not in tracked]
+    print(f"coverage: {len(lanes)} lanes, {len(gaps)} lane/tier gaps, {len(untracked_only)} lanes without tracked")
+    if gaps:
+        print("  gaps: " + " ".join(gaps[:80]) + (" …" if len(gaps) > 80 else ""))
+    if untracked_only:
+        print("  untracked only: " + " ".join(untracked_only[:80]) + (" …" if len(untracked_only) > 80 else ""))
+
+
+SPA_FIELDS = ("id", "fromCountry", "toCountry", "packageTier", "maxCards", "priceEURCents", "carrier", "serviceName", "active", "tracked")
+
+
+def spa_catalog(catalog: dict) -> dict:
+    """The SPA only previews prices: keep the fields shipping-quote.js reads."""
+    return {
+        "tiers": catalog["tiers"],
+        "rates": [{k: r[k] for k in SPA_FIELDS if k in r} for r in catalog["rates"]],
+        "source": {"fetchedAt": catalog["source"]["fetchedAt"], "providers": catalog["source"]["providers"]},
+    }
+
+
 def build_catalog(*, sleep_s: float = 0.12) -> dict:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     packzoo_ok = smoke_packzoo()
@@ -427,7 +471,7 @@ def build_catalog(*, sleep_s: float = 0.12) -> dict:
     # Cache PackZoo: (from,to,tier) -> rows
     pz_cache: dict[tuple, list] = {}
     rates: list[dict] = []
-    lanes = [(a, b) for a in COUNTRIES for b in COUNTRIES]
+    lanes = [(a, b) for a in COUNTRIES for b in DESTINATIONS]
 
     for frm, to in lanes:
         lane_quotes: dict[str, dict] = {}
@@ -502,6 +546,7 @@ def build_catalog(*, sleep_s: float = 0.12) -> dict:
 
     rates.sort(key=lambda r: (r["fromCountry"], r["toCountry"], r["packageTier"], not r["tracked"]))
     print(f"built {len(rates)} rate rows across {len(lanes)} lanes")
+    report_coverage(rates, lanes)
     providers = [
         p for p, ok in (
             ("packzoo", packzoo_ok),
@@ -542,7 +587,7 @@ def main() -> int:
         return 0
 
     API_JSON.write_text(text, encoding="utf-8")
-    SPA_JSON.write_text(text, encoding="utf-8")
+    SPA_JSON.write_text(json.dumps(spa_catalog(catalog), separators=(",", ":"), ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"wrote {API_JSON.relative_to(ROOT)}")
     print(f"wrote {SPA_JSON.relative_to(ROOT)}")
     if args.also_cardvault and CARDVAULT_JSON.is_file():

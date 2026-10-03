@@ -18,9 +18,9 @@ import { checkoutFees, pknBalanceVoucher } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
 import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
-import { SHIP_FROM_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
+import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { brandSrc } from '../brand-assets.js';
-import { readPknDiscount, readShippingService, writePknDiscount, writeShippingService } from '../shipping-choice.js';
+import { readPknDiscount } from '../shipping-choice.js';
 import {
   defaultShippingService,
   pknFromEurCents,
@@ -77,9 +77,9 @@ function cartPayload(items) {
   }));
 }
 
-function emptyAddressDraft() {
-  const localeCountry = countryFromLocale();
-  const known = SHIP_FROM_COUNTRIES.some((row) => row.code === localeCountry);
+function emptyAddressDraft(preferred = '') {
+  const localeCountry = SHIP_TO_COUNTRIES.some((row) => row.code === preferred) ? preferred : countryFromLocale();
+  const known = SHIP_TO_COUNTRIES.some((row) => row.code === localeCountry);
   return {
     fullName: '',
     addressLine1: '',
@@ -110,6 +110,9 @@ export default function Checkout() {
     canNftOnly,
     gift,
     setGift,
+    setUseBalance,
+    shippingChoice,
+    setShippingChoice,
     removeItems,
     markCheckoutPending,
   } = useCart();
@@ -124,12 +127,13 @@ export default function Checkout() {
   const [payMethod, setPayMethod] = useState('stripe'); // stripe | pkn
   const [addresses, setAddresses] = useState([]);
   const [addressId, setAddressId] = useState('');
-  const [draft, setDraft] = useState(emptyAddressDraft);
+  const [draft, setDraft] = useState(() => emptyAddressDraft(shippingChoice.country));
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState('');
-  const [shippingService, setShippingService] = useState(() => readShippingService() || 'tracked');
-  const [shippingPicked, setShippingPicked] = useState(() => Boolean(readShippingService()));
+  // The service picked in the cart carries over; checkout still lists every option.
+  const [shippingService, setShippingService] = useState(() => shippingChoice.service || 'tracked'); // tracked | untracked
+  const [shippingPicked, setShippingPicked] = useState(() => Boolean(shippingChoice.service)); // buyer chose a service
   const [pknRefused, setPknRefused] = useState([]); // sellers who take card payments only
   const [usePknDiscount, setUsePknDiscount] = useState(() => readPknDiscount()); // opt-in PKN balance voucher
   const stripeCancelled = searchParams.get('cancelled') === '1';
@@ -594,7 +598,7 @@ export default function Checkout() {
                               if (!unavailable) {
                                 setShippingPicked(true);
                                 setShippingService(option.id);
-                                writeShippingService(option.id);
+                                setShippingChoice({ service: option.id });
                               }
                             }}
                           />
@@ -739,7 +743,7 @@ export default function Checkout() {
                       }))}
                       required
                     >
-                      {SHIP_FROM_COUNTRIES.map((row) => (
+                      {SHIP_TO_COUNTRIES.map((row) => (
                         <option key={row.code} value={row.code}>
                           {shipFromCountryOptionLabel(row.code)}
                         </option>
@@ -854,7 +858,7 @@ export default function Checkout() {
                           checked={usePknDiscount}
                           onChange={(event) => {
                             setUsePknDiscount(event.target.checked);
-                            writePknDiscount(event.target.checked);
+                            setUseBalance(event.target.checked);
                           }}
                         />
                         {' '}Use my PKN balance as a discount
