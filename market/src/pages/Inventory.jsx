@@ -5,6 +5,7 @@ import { useAuth } from '../auth.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice } from '../seller-currency.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
+import CollectionHoldings from '../components/CollectionHoldings.jsx';
 import InventoryBoard from '../components/InventoryBoard.jsx';
 import LocationBoard from '../components/LocationBoard.jsx';
 import PricingStrategies, { PricerDefaults } from '../components/PricingStrategies.jsx';
@@ -36,11 +37,16 @@ function downloadText(text, filename) {
   downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), filename);
 }
 
-/** Pokemon seller stock desk — live path is /mypokoin (legacy /inventory redirects). */
+/**
+ * Pokemon seller stock desk — live path is /mypokoin (legacy /inventory
+ * redirects). The Collection tab holds what you own (legacy /collection and
+ * /nft redirect to it).
+ */
 export default function Inventory() {
   const location = useLocation();
   const onImportTab = Boolean(useMatch({ path: '/mypokoin/import', end: true }));
   const onSettingsTab = Boolean(useMatch({ path: '/mypokoin/settings', end: true }));
+  const onCollectionTab = Boolean(useMatch({ path: '/mypokoin/collection', end: true }));
   const locationMatch = useMatch({ path: '/mypokoin/location/:location', end: false });
   let locationName = locationMatch ? decodeURIComponent(locationMatch.params.location || '') : '';
   // The auth bounce can double-encode the · separator — decode until stable.
@@ -98,13 +104,16 @@ export default function Inventory() {
   }
 
   useEffect(() => {
-    document.title = onSettingsTab
+    document.title = onCollectionTab
+      ? 'Collection · MyPokoin'
+      : onSettingsTab
       ? 'Settings · MyPokoin'
       : locationName
       ? `${locationName} · MyPokoin`
       : (onImportTab ? 'Import / export · MyPokoin' : 'MyPokoin · Pokoin');
     const uid = user?.uid || profile?.uid;
-    if (!signedIn || !uid) return undefined;
+    // The Collection tab loads holdings, not listings.
+    if (!signedIn || !uid || onCollectionTab) return undefined;
     let cancelled = false;
     const gen = ++inventorySeq.current;
     getBearer()
@@ -120,12 +129,12 @@ export default function Inventory() {
     return () => {
       cancelled = true;
     };
-  }, [signedIn, user?.uid, profile?.uid, getBearer, onImportTab, locationName, onSettingsTab]);
+  }, [signedIn, user?.uid, profile?.uid, getBearer, onImportTab, locationName, onSettingsTab, onCollectionTab]);
 
   // Pricer defaults feed the board's market column and source preselect.
   const [pricerDefaults, setPricerDefaults] = useState(null);
   useEffect(() => {
-    if (!signedIn || onImportTab) return undefined;
+    if (!signedIn || onImportTab || onCollectionTab) return undefined;
     let cancelled = false;
     getBearer()
       .then((token) => fetchPricingStrategies(token))
@@ -134,7 +143,7 @@ export default function Inventory() {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [signedIn, getBearer, onImportTab, onSettingsTab]);
+  }, [signedIn, getBearer, onImportTab, onSettingsTab, onCollectionTab]);
 
   async function onExport() {
     setError('');
@@ -189,6 +198,7 @@ export default function Inventory() {
   }
 
   const counts = preview?.counts;
+  const onListings = !onImportTab && !onSettingsTab && !onCollectionTab;
 
   return (
     <div className="page desk">
@@ -301,7 +311,9 @@ export default function Inventory() {
         </DeskPanel>
       ) : null}
 
-      {!onImportTab && rows == null && !error ? (
+      {onCollectionTab ? <CollectionHoldings /> : null}
+
+      {!onImportTab && !onCollectionTab && rows == null && !error ? (
         <DeskPanel title="Listings"><div className="skeleton-line" /><div className="skeleton-line" /></DeskPanel>
       ) : null}
       {onSettingsTab ? (
@@ -317,7 +329,7 @@ export default function Inventory() {
           </DeskPanel>
         </>
       ) : null}
-      {!onImportTab && !onSettingsTab && rows && !rows.length ? (
+      {onListings && rows && !rows.length ? (
         <EmptyDesk
           title={locationName ? `Nothing stored in ${locationName}` : 'No live listings'}
           lede={locationName ? 'Move a listing into this location from its card desk, or scan a new pile.' : 'Scan a pile with your phone, import a CSV, or open a card and use List your card.'}>
@@ -326,14 +338,14 @@ export default function Inventory() {
           <Link className="btn ghost" to="/marketplace">Find a card</Link>
         </EmptyDesk>
       ) : null}
-      {!onImportTab && !onSettingsTab && locationName && rows?.length ? (
+      {onListings && locationName && rows?.length ? (
         <LocationBoard
           rows={inventoryRowsForLocation(rows, locationName)}
           location={locationName}
           formatPrice={formatPrice}
         />
       ) : null}
-      {!onImportTab && !onSettingsTab && !locationName && rows?.length ? (
+      {onListings && !locationName && rows?.length ? (
         <InventoryBoard
           rows={rows}
           formatPrice={formatPrice}

@@ -2528,7 +2528,7 @@ export function fetchCollectionSummary(token) {
   });
 }
 
-/** Full owned holdings for /collection. Uid comes from the bearer only. */
+/** Full owned holdings for the MyPokoin Collection tab. Uid comes from the bearer only. */
 export function fetchOwnedCollection(token) {
   return getJson('/api/marketplace-collection', {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
