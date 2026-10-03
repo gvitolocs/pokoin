@@ -36,7 +36,10 @@ for file in "${SHOP_FILES[@]}"; do
 done
 
 say "seller shop unit tests"
-node --test "$SRC/marketplace-seller-shop.test.js" "$SRC/_seller_shop_cache.test.js"
+REDIS_CACHE_TEST_PORT="${REDIS_CACHE_TEST_PORT:-6390}" \
+  node --test --test-force-exit \
+  "$SRC/marketplace-seller-shop.test.js" \
+  "$SRC/_seller_shop_cache.test.js"
 for file in "${SHOP_FILES[@]}"; do
   [[ "$file" == *.test.js ]] && continue
   node --check "$SRC/$file"
