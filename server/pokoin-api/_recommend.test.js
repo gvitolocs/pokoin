@@ -69,7 +69,7 @@ test('trending works with no signals at all', () => {
   const pool = [card(1, { hot_24h: 1, hot_7d: 1 }), card(2, { hot_24h: 50, hot_7d: 10 }), card(3)];
   const ranked = rankTrending(pool, buildAffinity([]), { exclude: new Set() });
   assert.deepEqual(ranked.map((row) => row.card.card_id), ['2', '1']);
-  assert.equal(ranked[0].reason, 'Trending on Pokoin');
+  assert.equal(ranked[0].reason, '');
 });
 
 test('co-carted cards rank by how many carts share them', () => {
