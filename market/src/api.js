@@ -1313,11 +1313,14 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
   const pending = fromLists.then(async (cached) => {
     // Rail / first SQL page is metadata only. The set desk waits for
     // fetchExpansionCards (hasMore false) before painting tiles.
+    // Batch tile PKN only — do not last-median-fill via N sales calls.
+    // Secret Lair (~2500) was firing hundreds of marketplace-card-sales
+    // while the walk ran; homepage rails still use fillMissingLastMedianPrices.
     const fromRail = mapExpansionCards(cached);
     if (fromRail?.cards?.length) {
       const pricedRail = {
         ...fromRail,
-        cards: await fillMissingTilePrices(fromRail.cards),
+        cards: await overlayCatalogTilePrices(fromRail.cards),
       };
       expansionCache.set(key, pricedRail);
       void fromPage.then(async (page) => {
@@ -1325,7 +1328,7 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
           return;
         }
         const merged = mergeExpansionPayload(pricedRail, mapExpansionCards(page));
-        merged.cards = await fillMissingTilePrices(merged.cards || []);
+        merged.cards = await overlayCatalogTilePrices(merged.cards || []);
         expansionCache.set(key, merged);
         onUpdate?.(merged);
       });
@@ -1338,7 +1341,7 @@ export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offs
     if (page?.cards?.length || (offset > 0 && Array.isArray(payload?.cards))) {
       return {
         ...page,
-        cards: await fillMissingTilePrices(page.cards),
+        cards: await overlayCatalogTilePrices(page.cards),
       };
     }
     throw new Error('Expansion failed.');
