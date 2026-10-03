@@ -338,7 +338,7 @@ function collectorHash(number) {
  * Name + collector hash (`184` from `184/182`). Skip English set names and a
  * Pokemon prefix — Vinted ANDs tokens and Italian listings omit those.
  * OP/RB keep the game prefix so character names are not generic on eBay.
- * Vinted Riftbound uses the brand filter instead of that prefix.
+ * Vinted Riftbound / Magic use the brand filter instead of that prefix.
  */
 export function vintedSearchText(card = {}, gameId = 'pokemon') {
   const row = typeof card === 'object' && card ? card : { name: card };
@@ -467,6 +467,9 @@ const VINTED_IT_CATALOG = '4824';
 /** Vinted brand “Riftbound”. Same id on every country catalog. */
 const VINTED_RIFTBOUND_BRAND = '29810327';
 
+/** Vinted brand “Magic: The Gathering”. Same id on every country catalog. */
+const VINTED_MAGIC_BRAND = '399547';
+
 /** eBay.com Pokémon Individual Cards. Omitted everywhere else. */
 const EBAY_US_POKEMON_CATEGORY = '183454';
 
@@ -504,15 +507,22 @@ export function vintedHost(country) {
 
 export function vintedSearchUrl(card = {}, gameId = 'pokemon', country = '') {
   const host = vintedHost(country);
-  const query = gameId === 'riftbound'
+  const brandId = gameId === 'riftbound'
+    ? VINTED_RIFTBOUND_BRAND
+    : gameId === 'magic'
+      ? VINTED_MAGIC_BRAND
+      : '';
+  // Brand-filtered games: name + collector only — no “Magic the Gathering” /
+  // “Riftbound TCG” in search_text (eBay still prefixes via EBAY_GAME_PREFIX).
+  const query = brandId
     ? vintedSearchText(card, 'pokemon')
     : vintedSearchText(card, gameId);
   const url = new URL(`https://${host}/catalog`);
   if (query) {
     url.searchParams.set('search_text', query);
   }
-  if (gameId === 'riftbound') {
-    url.searchParams.append('brand_ids[]', VINTED_RIFTBOUND_BRAND);
+  if (brandId) {
+    url.searchParams.append('brand_ids[]', brandId);
   }
   if (host === 'www.vinted.it') {
     url.searchParams.append('catalog[]', VINTED_IT_CATALOG);

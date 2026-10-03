@@ -702,7 +702,12 @@ Default:
    stay skeletons until the user scrolls (the sentinel after the current
    batch sits in the first rows, so a fat `rootMargin` would mount the whole
    set in one frame). Do not fire every set preview at once.
-5. `.result-count` is the full desk total, not `48`.
+5. Expansion pages batch missing PKN through `overlayCatalogTilePrices`
+   only. Do **not** `fillMissingLastMedianPrices` (one
+   `marketplace-card-sales` per id) on the set walk — Secret Lair-scale sets
+   were opening hundreds of sales requests before paint. Homepage rails still
+   use the last-median fill.
+6. `.result-count` is the full desk total, not `48`.
 
 Load more stays only if the walk hit the 40-page cap. Do not treat a 48-row
 SQL page as the checklist. Tiles stay full leftover 63:88 (`CardTile`).

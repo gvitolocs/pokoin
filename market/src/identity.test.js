@@ -181,6 +181,18 @@ test('Riftbound Vinted selects the Riftbound brand and leaves the game name out 
   assert.equal(url.search.includes('time='), false);
 });
 
+test('Magic Vinted selects the Magic brand and leaves the game name out of the query', () => {
+  const url = new URL(vintedSearchUrl({
+    name: 'Samut, Voice of Dissent',
+  }, 'magic', 'DK'));
+  assert.equal(url.hostname, 'www.vinted.dk');
+  assert.equal(url.searchParams.get('search_text'), 'Samut, Voice of Dissent');
+  assert.equal(url.searchParams.get('brand_ids[]'), '399547');
+  assert.equal(url.search.toLowerCase().includes('magic'), false);
+  assert.equal(url.search.includes('search_id'), false);
+  assert.equal(url.search.includes('time='), false);
+});
+
 test('leftover ct_id is not a collector number', () => {
   const identity = printingIdentity({
     id: '281978',
