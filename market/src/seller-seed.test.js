@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import './session-storage-test-polyfill.js';
 import {
+  clearSellerListingsMemoryForTests,
   peekSellerListings,
   rememberSellerListings,
   resetListingsCacheForTests,
@@ -90,4 +92,22 @@ test('seed never crosses from another game cache', () => {
     unique: 1,
   }, sellerShopSeedOpts({ game: 'pokemon' }));
   assert.equal(seedSellerListings(handle, { game: 'sorcery' }), null);
+});
+
+test('seller shop first page survives a memory clear via sessionStorage', () => {
+  resetListingsCacheForTests();
+  const handle = 'redshakkio';
+  const opts = sellerShopSeedOpts({ game: 'pokemon' });
+  rememberSellerListings(handle, {
+    seller: { uid: 'u1', username: handle, displayName: 'RotationMotionTCG', photoUrl: '' },
+    listings: [{ id: '1', sellerUsername: handle }],
+    total: 9611,
+    unique: 6134,
+  }, opts);
+  clearSellerListingsMemoryForTests();
+  const seeded = seedSellerListings(handle, { game: 'pokemon' });
+  assert.equal(seeded.total, 9611);
+  assert.equal(seeded.unique, 6134);
+  assert.equal(seeded.seller.displayName, 'RotationMotionTCG');
+  assert.equal(peekSellerListings(handle, opts).total, 9611);
 });

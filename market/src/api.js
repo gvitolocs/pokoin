@@ -2441,9 +2441,10 @@ export function fetchSellerShop(username, {
     sort,
     game: marketplaceGame,
   };
-  // Always hit the network so refresh picks up name/tag changes. Seller.jsx
-  // paints the in-memory shop cache first via seedSellerListings.
-  // The full shop book and the freshness stamp stay out of that page cache.
+  // Seller.jsx paints seedSellerListings (memory + sessionStorage) first.
+  // Revalidate in the background so inventory changes still land; book/fresh
+  // stay out of the page cache. API Cache-Control is no-store — Redis only
+  // has seller profile fields, not the listings book.
   const params = new URLSearchParams();
   if (handle) params.set('sellerUsername', handle);
   if (fresh) {
