@@ -19,7 +19,7 @@ import { buyAgainCards, isSelected, liveMessages } from './cart-model.js';
 import { sellerHandle } from './listing-meta.js';
 import { countryFromLocale } from './pkn.js';
 import { syncRemoteRecentCardIds } from './recents.js';
-import { SHIP_FROM_COUNTRIES } from './ship-countries.js';
+import { SHIP_TO_COUNTRIES } from './ship-countries.js';
 import { fetchSpeciesCards } from './species-cards.js';
 
 /**
@@ -47,7 +47,7 @@ export function useDeliveryCountry({ signedIn, getBearer }) {
   }, [signedIn, getBearer]);
   if (fromAccount) return { country: fromAccount, saved: true };
   const locale = countryFromLocale();
-  const known = SHIP_FROM_COUNTRIES.some((row) => row.code === locale);
+  const known = SHIP_TO_COUNTRIES.some((row) => row.code === locale);
   return { country: known ? locale : 'DK', saved: false };
 }
 

@@ -29,9 +29,12 @@ function cardIdOf(card) {
   return text(card?.card_id ?? card?.cardId ?? card?.id, 24);
 }
 
+/** National Pokédex number, or 0. Trainers and energies carry 10000 (sort bucket), not a species. */
+const MAX_SPECIES = 1025;
+
 function species(card) {
   const n = Math.trunc(Number(card?.pokedex_num));
-  return Number.isSafeInteger(n) && n > 0 ? n : 0;
+  return Number.isSafeInteger(n) && n > 0 && n <= MAX_SPECIES ? n : 0;
 }
 
 function artistOf(card) {
@@ -194,8 +197,82 @@ function rankCoCarted(poolById, counts, { exclude, limit = DEFAULT_LIMIT }) {
   return scored.slice(0, limit);
 }
 
-/** A seller's other listings, best match for this buyer first, then cheapest. */
-function rankSellerShelf(listings, poolById, affinity, { excludeListings, excludeCards, limit = DEFAULT_LIMIT }) {
+function languageKey(value) {
+  const lang = key(value);
+  if (lang === 'ja' || lang === 'jpn') return 'jp';
+  if (lang === 'eng' || lang === 'english') return 'en';
+  return lang;
+}
+
+const LANGUAGE_NAMES = {
+  en: 'English', it: 'Italian', jp: 'Japanese', de: 'German', fr: 'French', es: 'Spanish',
+  pt: 'Portuguese', nl: 'Dutch', pl: 'Polish', ko: 'Korean', zh: 'Chinese', zht: 'Chinese',
+};
+
+/**
+ * What a seller's cart lines look like: card names, species, expansions,
+ * languages and conditions the buyer already picked from that seller.
+ * `anchors` are listing rows (card_id, card_name, set_name, language,
+ * condition) joined to pool cards where known.
+ */
+function parcelProfile(anchors = [], poolById = new Map()) {
+  const profile = { names: new Map(), species: new Map(), sets: new Set(), languages: new Set(), conditions: new Set() };
+  for (const row of anchors) {
+    const card = poolById.get(text(row.card_id, 24));
+    const name = text(card?.name || row.card_name);
+    if (name) profile.names.set(key(name), name);
+    const kind = species(card || {});
+    if (kind) profile.species.set(kind, name);
+    const set = key(card?.set_name || row.set_name);
+    if (set) profile.sets.add(set);
+    const lang = languageKey(row.language);
+    if (lang) profile.languages.add(lang);
+    const tone = conditionTone(row.condition);
+    if (tone) profile.conditions.add(tone);
+  }
+  return profile;
+}
+
+/** How closely one listing matches the cart lines from its seller. */
+function parcelMatch(offer, card, profile) {
+  const facets = [];
+  let score = 0;
+  const name = profile.names.get(key(card?.name));
+  const kind = profile.species.get(species(card || {}));
+  if (name) {
+    score += 4;
+    facets.push(`other printing of ${name}`);
+  } else if (kind) {
+    score += 3;
+    facets.push(`more ${kind.replace(/\s+(ex|EX|GX|V|VMAX|VSTAR)\b.*$/, '')}`);
+  }
+  if (profile.sets.has(key(card?.set_name || offer.set_name))) {
+    score += 3;
+    facets.push(text(card?.set_name || offer.set_name));
+  }
+  const lang = languageKey(offer.language);
+  if (lang && profile.languages.has(lang)) {
+    score += 2;
+    facets.push(LANGUAGE_NAMES[lang] || lang.toUpperCase());
+  }
+  const tone = conditionTone(offer.condition);
+  if (tone && profile.conditions.has(tone)) {
+    score += 1.5;
+    facets.push(tone === 'poor' ? 'Poor' : tone.toUpperCase());
+  }
+  if (!facets.length) return { score: 0, reason: '' };
+  const [first, ...rest] = facets;
+  const lead = first.charAt(0).toUpperCase() + first.slice(1);
+  return { score, reason: rest.length ? `${lead} · ${rest.join(' · ')}` : lead };
+}
+
+/**
+ * A seller's other listings ranked against the buyer's cart lines from that
+ * seller (card name, expansion, language, condition), then the buyer's wider
+ * taste, then price.
+ */
+function rankSellerShelf(listings, poolById, affinity, { excludeListings, excludeCards, anchors = [], limit = DEFAULT_LIMIT }) {
+  const profile = parcelProfile(anchors, poolById);
   const scored = [];
   const seenCards = new Set();
   for (const offer of listings) {
@@ -205,13 +282,14 @@ function rankSellerShelf(listings, poolById, affinity, { excludeListings, exclud
     const card = poolById.get(id);
     if (!card) continue;
     seenCards.add(id);
+    const match = parcelMatch(offer, card, profile);
     const taste = affinityScore(card, affinity);
     scored.push({
       card,
       offer,
-      score: taste.score,
+      score: match.score + taste.score / 10,
       price: Number(offer.price_pkn) || 0,
-      reason: taste.reason || 'Ships in the same parcel',
+      reason: match.reason || taste.reason || 'Ships in the same parcel',
     });
   }
   scored.sort((a, b) => b.score - a.score || a.price - b.price);
@@ -311,6 +389,8 @@ module.exports = {
   conditionTone,
   joinLabels,
   parseIds,
+  parcelMatch,
+  parcelProfile,
   pickOffer,
   rankByAffinity,
   rankCoCarted,

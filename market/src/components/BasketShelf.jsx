@@ -185,7 +185,7 @@ export function TileCard({ card, note }) {
         ) : <span className="bk-oos">No price yet</span>}
       </div>
       {note ? <div className="bk-purchased">{note}</div> : null}
-      <AddCardButton card={card} />
+      {price > 0 ? <AddCardButton card={card} /> : <ViewCardLink card={card} href={href} />}
     </div>
   );
 }
@@ -288,10 +288,31 @@ function OfferAddButton({ card, offer, inCart = false, className = 'bk-btn-y is-
 }
 
 /**
+ * The buy button for a suggestion. The API already checked live listings, so
+ * a card it sent without an offer has no copy for sale on Pokoin: say so and
+ * link the card instead of an Add to cart that can only fail. Client-side
+ * fallback cards (`known` false) still look the listing up on click.
+ */
+function CardAction({ card, offer, inCart, known, href, className = 'bk-btn-y is-small' }) {
+  if (offer) return <OfferAddButton card={card} offer={offer} inCart={inCart} className={className} />;
+  // A tile with no listed price has no copy to add either.
+  if (known || !(tilePricePkn(card) > 0)) return <ViewCardLink card={card} href={href} />;
+  return <AddCardButton card={card} className={className} />;
+}
+
+function ViewCardLink({ card, href }) {
+  return (
+    <Link className="bk-btn-o is-small bk-view" to={href} state={{ card }} onClick={() => rememberCardId(card)}>
+      View card
+    </Link>
+  );
+}
+
+/**
  * A recommendation: scan, name, printing, why it is here, the live offer
  * (condition, language, price) and one-tap add of that exact copy.
  */
-export function RecCard({ card, offer, reason = '', note = '', inCart = false }) {
+export function RecCard({ card, offer, reason = '', note = '', inCart = false, known = false }) {
   const href = cardHref(card);
   const identity = printingIdentity(card);
   const name = displayName(card);
@@ -326,6 +347,8 @@ export function RecCard({ card, offer, reason = '', note = '', inCart = false })
       <div className="bk-pcard-price">
         {offer ? (
           <BigPrice pricePkn={offer.pricePkn} sellerAcceptsPkn={offer.sellerAcceptsPkn !== false} size="md" />
+        ) : known ? (
+          <span className="bk-unavailable">Currently unavailable</span>
         ) : fallbackPrice > 0 ? (
           <>
             <span className="bk-from">from</span>
@@ -334,7 +357,7 @@ export function RecCard({ card, offer, reason = '', note = '', inCart = false })
         ) : <span className="bk-oos">No copies listed</span>}
       </div>
       {note ? <div className="bk-purchased">{note}</div> : null}
-      {offer ? <OfferAddButton card={card} offer={offer} inCart={inCart} /> : <AddCardButton card={card} />}
+      <CardAction card={card} offer={offer} inCart={inCart} known={known} href={href} />
     </div>
   );
 }
@@ -357,6 +380,7 @@ export function RailShelf({ rail, inCart, note }) {
           reason={item.reason}
           note={note ? note(item) : ''}
           inCart={Boolean(item.offer?.id && inCart?.has(String(item.offer.id)))}
+          known
         />
       ))}
     </Shelf>
@@ -369,26 +393,28 @@ export function RecentList({ items }) {
   return (
     <div className="bk-card bk-recent">
       <h3>Your recently viewed cards</h3>
-      {items.slice(0, 5).map(({ card, offer }) => {
+      {items.slice(0, 5).map(({ card, offer, known }) => {
         const href = cardHref(card);
-        const price = offer ? Number(offer.pricePkn) : tilePricePkn(card);
+        const unavailable = known && !offer;
+        const price = offer ? Number(offer.pricePkn) : unavailable ? 0 : tilePricePkn(card);
         const identity = printingIdentity(card);
         const name = displayName(card);
         return (
-          <div className="bk-r-item" key={card.id}>
+          <div className={`bk-r-item${unavailable ? ' is-unavailable' : ''}`} key={card.id}>
             <Link className="bk-r-pic" to={href} state={{ card }}>
               <CardArt src={imageSrc(card, 'grid')} alt="" loading="lazy" />
             </Link>
             <div className="bk-r-det">
               <Link className="bk-r-title" to={href} state={{ card }}>{name}</Link>
               {identity.tileLine ? <span className="bk-r-id">{identity.tileLine}</span> : null}
+              {unavailable ? <span className="bk-unavailable">Currently unavailable</span> : null}
               {price > 0 ? (
                 <div className="bk-r-price">
                   {offer ? null : <span className="bk-from">from</span>}
                   <BigPrice pricePkn={price} sellerAcceptsPkn={offer ? offer.sellerAcceptsPkn !== false : true} size="sm" />
                 </div>
               ) : null}
-              {offer ? <OfferAddButton card={card} offer={offer} /> : <AddCardButton card={card} />}
+              <CardAction card={card} offer={offer} known={known} href={href} />
             </div>
           </div>
         );
@@ -516,8 +542,8 @@ export function YourItems({ saved, buyAgain, buyAgainLoading, signedIn, onMove, 
           <p className="bk-empty-note">Loading your orders…</p>
         ) : buyAgain.length ? (
           <div className="bk-again-grid">
-            {buyAgain.map(({ card, offer, note }) => (
-              <RecCard key={card.id} card={card} offer={offer || null} note={note} />
+            {buyAgain.map(({ card, offer, note, known }) => (
+              <RecCard key={card.id} card={card} offer={offer || null} note={note} known={Boolean(known)} />
             ))}
           </div>
         ) : (

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  balanceDiscount,
   buyAgainCards,
   carouselPage,
   cartSignature,
@@ -12,13 +13,10 @@ import {
   mergeCartStates,
   moveRow,
   nextSelectAll,
-  parcelEstimate,
-  parcelNudge,
   priceDrop,
   purchasedLabel,
   reconcileRow,
   settleCheckoutRows,
-  shippingEstimate,
 } from './cart-model.js';
 
 const row = (over = {}) => ({
@@ -75,32 +73,6 @@ test('rows group into one parcel per seller in first-seen order', () => {
   assert.equal(groups[0].selectedCount, 2);
   assert.equal(groups[0].rows.length, 2);
   assert.equal(groups[1].sellerCountry, 'DE');
-});
-
-test('a small parcel previews the untracked letter and the room left at that price', () => {
-  // IT→DK: SMALL and MEDIUM letters cost the same (4.35 €), LARGE does not.
-  const estimate = parcelEstimate({ from: 'IT', to: 'DK', cards: 2 });
-  assert.equal(estimate.tracked, false);
-  assert.equal(estimate.amountCents, 435);
-  assert.equal(estimate.room, 18);
-  assert.equal(parcelEstimate({ from: 'IT', to: 'DK', cards: 0 }), null);
-  assert.equal(parcelEstimate({ from: 'EU', to: 'DK', cards: 1 }), null);
-  assert.equal(parcelEstimate({ from: '', to: 'DK', cards: 1 }), null);
-});
-
-test('shipping estimate is one parcel per seller with ticked cards', () => {
-  const groups = groupBySeller([
-    row({ id: 'a', sellerUid: 's1', sellerCountry: 'IT', qty: 2 }),
-    row({ id: 'b', sellerUid: 's2', sellerCountry: 'IT', selected: false }),
-    row({ id: 'c', sellerUid: 's3', sellerCountry: '' }),
-  ]);
-  const estimate = shippingEstimate(groups, 'DK');
-  assert.equal(estimate.count, 2);
-  assert.equal(estimate.cents, 435);
-  assert.equal(estimate.missing, 1);
-  const nudge = parcelNudge(groups, 'DK');
-  assert.equal(nudge.group.key, 's1');
-  assert.equal(nudge.estimate.room, 18);
 });
 
 test('reconcile takes the live price and stock and caps the quantity', () => {
@@ -266,5 +238,25 @@ test('cart signature changes with lines, saved and gift', () => {
   assert.equal(cartSignature(base), cartSignature({ ...base }));
   assert.notEqual(cartSignature(base), cartSignature({ ...base, gift: true }));
   assert.notEqual(cartSignature(base), cartSignature({ ...base, items: [row({ qty: 2 })] }));
+});
+
+test('balance discount follows the checkout voucher rule', () => {
+  const items = [
+    row({ id: 'a', pricePkn: 1000, qty: 2 }),
+    row({ id: 'b', pricePkn: 600, sellerAcceptsPkn: false }),
+    row({ id: 'c', pricePkn: 400, selected: false }),
+  ];
+  // 2600 PKN ticked = 1300 cents; shipping 435 → 1735 cents total.
+  const rich = balanceDiscount({ balancePkn: 99999, items, shippingCents: 435 });
+  assert.equal(rich.eligiblePkn, 2000);
+  assert.equal(rich.cents, 1000);
+  assert.equal(rich.pkn, 2000);
+  assert.equal(rich.chargeCents, 735);
+  const poor = balanceDiscount({ balancePkn: 19, items, shippingCents: 435 });
+  assert.equal(poor.pkn, 18);
+  assert.equal(balanceDiscount({ balancePkn: 0, items }).pkn, 0);
+  // Never below a 50-cent card charge.
+  const tiny = balanceDiscount({ balancePkn: 5000, items: [row({ pricePkn: 120 })], shippingCents: 0 });
+  assert.equal(tiny.cents, 10);
 });
 

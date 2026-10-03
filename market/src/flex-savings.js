@@ -74,10 +74,19 @@ export function flexCountries(catalog = ratesCatalog) {
 export function flexLanes(catalog = ratesCatalog) {
   const seen = new Set();
   const lanes = [];
+  // Flex rides in the ~20 kg bag and ends with a domestic leg in the buyer's
+  // country: only routes with that trunk rate into a country that has
+  // domestic rates (the seller countries). Worldwide letter-only routes
+  // have no bag to share.
+  const domestic = new Set((catalog.rates || [])
+    .filter((rate) => rate.active !== false && rate.fromCountry === rate.toCountry)
+    .map((rate) => String(rate.toCountry).toUpperCase()));
   for (const rate of catalog.rates || []) {
     if (rate.active === false || rate.tracked === false) continue;
+    if (String(rate.packageTier).toUpperCase() !== TRUNK_TIER) continue;
     const from = String(rate.fromCountry).toUpperCase();
     const to = String(rate.toCountry).toUpperCase();
+    if (!domestic.has(to)) continue;
     const key = `${from}-${to}`;
     if (seen.has(key)) continue;
     seen.add(key);

@@ -23,7 +23,7 @@ import {
   sellerHref,
 } from '../listing-meta.js';
 import { fiatFromPkn, formatLocalFromEurCents, formatPkn, formatPknNumber } from '../pkn.js';
-import { shipFromCountryName } from '../ship-countries.js';
+import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
 import CardArt from './CardArt.jsx';
 
@@ -366,7 +366,9 @@ export function SellerBar({ group, estimate, currency }) {
           : estimate
             ? (
               <>
-                {estimate.serviceName || 'Shipping'} {formatLocalFromEurCents(estimate.amountCents, currency)}
+                {estimate.tracked ? 'Tracked' : 'Untracked letter'}
+                {estimate.carrier ? ` (${estimate.carrier})` : ''} {formatLocalFromEurCents(estimate.amountCents, currency)}
+                {estimate.fallback ? ' · your pick is not offered on this route' : ''}
                 {estimate.room > 0 ? ` · room for ${estimate.room} more card${estimate.room === 1 ? '' : 's'} at this price` : ''}
               </>
             )
@@ -417,29 +419,47 @@ export function SubtotalAmount({ pricePkn }) {
   );
 }
 
-/** Right-rail box: parcel nudge, Subtotal, shipping and balance lines, gift, checkout. */
+/**
+ * Right-rail box: parcel nudge, Subtotal, where to deliver and which
+ * shipping service (every service our rates table has for these parcels),
+ * the site-balance discount, gift, checkout.
+ */
 export function BasketSummary({
   totals,
   shipping,
   nudge,
-  delivery,
+  country,
+  countrySaved,
+  services,
+  service,
+  onCountry,
+  onService,
   currency,
   signedIn,
   availablePkn,
+  discount,
+  useBalance,
+  onUseBalance,
   gift,
   onGift,
 }) {
   const buyer = useBuyerCurrency();
   const n = totals.selectedCount;
   const subtotal = totals.selectedSubtotalPkn;
-  const covered = signedIn && Number(availablePkn) >= subtotal && subtotal > 0;
+  const balance = Math.max(0, Math.trunc(Number(availablePkn) || 0));
+  const discountOn = Boolean(useBalance && discount.pkn >= 1);
   const nudgeLabel = nudge
     ? sellerOf({ sellerUsername: nudge.group.sellerUsername, sellerName: nudge.group.sellerName })
     : '';
   const nudgeLink = nudge
     ? sellerHref({ sellerUsername: nudge.group.sellerUsername, sellerName: nudge.group.sellerName })
     : '';
-  const deliveryName = shipFromCountryName(delivery.country) || delivery.country;
+  const selected = services.find((option) => option.id === service) || null;
+  const shippingCell = !shipping.count
+    ? '—'
+    : shipping.cents > 0
+      ? `≈ ${formatLocalFromEurCents(shipping.cents, currency)}${shipping.missing ? ' + more at checkout' : ''}`
+      : 'not available';
   return (
     <div className="bk-card bk-summary">
       {nudge ? (
@@ -456,34 +476,78 @@ export function BasketSummary({
       <div className="bk-subtotal">
         Subtotal ({n} {n === 1 ? 'item' : 'items'}): <SubtotalAmount pricePkn={subtotal} />
       </div>
+
+      <div className="bk-ship-pick">
+        <label className="bk-field">
+          <span>Deliver to</span>
+          <select value={country} onChange={(event) => onCountry(event.target.value)}>
+            {SHIP_TO_COUNTRIES.map((row) => (
+              <option key={row.code} value={row.code}>{shipFromCountryOptionLabel(row.code)}</option>
+            ))}
+          </select>
+        </label>
+        {services.length ? (
+          <label className="bk-field">
+            <span>Shipping</span>
+            <select value={selected ? selected.id : ''} onChange={(event) => onService(event.target.value)}>
+              {selected ? null : <option value="">Cheapest for each parcel</option>}
+              {services.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.tracked ? 'Tracked' : 'Untracked letter'} · {formatLocalFromEurCents(option.cents, currency)}
+                  {option.complete ? '' : ' (not every parcel)'}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : shipping.count ? (
+          <p className="bk-sum-hint is-warn">
+            No shipping service from these sellers to {shipFromCountryName(country) || country} yet.
+          </p>
+        ) : null}
+      </div>
+
       <dl className="bk-sum-lines">
         <div>
           <dt>
-            Shipping to {deliveryName}
-            {shipping.count ? ` · ${shipping.count} parcel${shipping.count === 1 ? '' : 's'}` : ''}
+            Shipping{shipping.count ? ` · ${shipping.count} parcel${shipping.count === 1 ? '' : 's'}` : ''}
           </dt>
-          <dd>
-            {!shipping.count
-              ? '—'
-              : shipping.cents > 0
-                ? `≈ ${formatLocalFromEurCents(shipping.cents, currency)}${shipping.missing ? ' + more at checkout' : ''}`
-                : 'at checkout'}
-          </dd>
+          <dd>{shippingCell}</dd>
         </div>
-        {signedIn ? (
-          <div>
-            <dt>Site balance</dt>
-            <dd className={covered ? 'is-ok' : ''}>{formatPkn(availablePkn) || '0 PKN'}</dd>
-          </div>
+        {discountOn ? (
+          <>
+            <div>
+              <dt>Site balance discount</dt>
+              <dd className="is-ok">−{formatLocalFromEurCents(discount.cents, currency)} ({discount.pkn} PKN)</dd>
+            </div>
+            <div>
+              <dt>Estimated card charge</dt>
+              <dd>{formatLocalFromEurCents(discount.chargeCents, currency)}</dd>
+            </div>
+          </>
         ) : null}
       </dl>
-      {signedIn && subtotal > 0 ? (
-        <p className="bk-sum-hint">
-          {covered
-            ? 'Your PKN balance covers these cards. Card payment works too.'
-            : 'Pay by card at checkout, or top up PKN in your wallet.'}
-        </p>
+
+      {signedIn ? (
+        <label className={`bk-balance${discount.pkn >= 1 ? '' : ' is-off'}`}>
+          <input
+            type="checkbox"
+            checked={discountOn}
+            disabled={discount.pkn < 1}
+            onChange={(event) => onUseBalance(event.target.checked)}
+          />
+          <span>
+            Use my site balance as a discount
+            <em>
+              {balance > 0
+                ? discount.pkn >= 1
+                  ? `${formatPkn(balance)} available · up to ${discount.pkn} PKN on this order`
+                  : `${formatPkn(balance)} available · these sellers only take card payments`
+                : <>No site balance yet · <Link className="bk-link" to="/wallet">Top up</Link></>}
+            </em>
+          </span>
+        </label>
       ) : null}
+
       <label className="bk-gift">
         <input type="checkbox" checked={gift} onChange={(event) => onGift(event.target.checked)} />
         This order contains a gift
@@ -495,9 +559,12 @@ export function BasketSummary({
       ) : (
         <span className="btn bk-checkout is-disabled" aria-disabled="true">Proceed to checkout</span>
       )}
-      {!delivery.saved ? (
-        <p className="bk-sum-fine">Shipping is estimated for {deliveryName}; checkout quotes your address.</p>
-      ) : null}
+      <p className="bk-sum-fine">
+        {countrySaved
+          ? 'Checkout quotes your saved address with the same rates.'
+          : 'Checkout quotes the address you enter with the same rates.'}
+        {subtotal > 0 ? ` ${buyer.fiat(subtotal) ? 'Prices shown in your currency; settlement is in PKN.' : ''}` : ''}
+      </p>
     </div>
   );
 }

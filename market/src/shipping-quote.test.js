@@ -53,3 +53,15 @@ test('catalog was built from live providers', () => {
   assert.ok(Array.isArray(ratesCatalog.source?.providers));
   assert.ok(ratesCatalog.source.providers.includes('packzoo'));
 });
+
+test('a letter-only lane offers only the untracked letter, never a fake Tracked', () => {
+  const options = shippingServiceOptions({ fromCountry: 'IT', toCountry: 'JP', cardCount: 2 })
+    .filter((option) => !option.unavailable);
+  assert.deepEqual(options.map((option) => option.id), ['untracked']);
+  assert.equal(options[0].tracked, false);
+  const dk = shippingServiceOptions({ fromCountry: 'IT', toCountry: 'DK', cardCount: 2 })
+    .filter((option) => !option.unavailable)
+    .map((option) => [option.id, option.tracked]);
+  assert.deepEqual(dk, [['tracked', true], ['untracked', false]]);
+});
+

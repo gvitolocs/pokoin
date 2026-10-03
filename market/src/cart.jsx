@@ -9,6 +9,8 @@ const CART_KEY = 'pokoin.cartItems';
 const SAVED_KEY = 'pokoin.cartSaved';
 const GIFT_KEY = 'pokoin.cartGift';
 const PENDING_KEY = 'pokoin.cartCheckout';
+const SHIPPING_KEY = 'pokoin.cartShipping';
+const BALANCE_KEY = 'pokoin.cartUseBalance';
 const CART_MAX = 400;
 const SAVED_MAX = 200;
 const PENDING_TTL_MS = 3 * 24 * 60 * 60 * 1000;
@@ -89,6 +91,28 @@ function readGift() {
   }
 }
 
+function readFlag(key) {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch (_) {
+    return false;
+  }
+}
+
+/** { country, service } the buyer picked in the cart; '' means "use the default". */
+function readShippingChoice() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SHIPPING_KEY) || 'null') || {};
+    const country = String(parsed.country || '').toUpperCase();
+    return {
+      country: /^[A-Z]{2}$/.test(country) ? country : '',
+      service: /^[a-z_]{1,24}$/.test(String(parsed.service || '')) ? String(parsed.service) : '',
+    };
+  } catch (_) {
+    return { country: '', service: '' };
+  }
+}
+
 /** Row ids a Stripe checkout took to the payment page; settled on /orders?eur_session. */
 function readPendingIds(now = Date.now()) {
   try {
@@ -126,6 +150,8 @@ const CartContext = createContext({
   checkoutSubtotalPkn: 0,
   canNftOnly: false,
   gift: false,
+  useBalance: false,
+  shippingChoice: { country: '', service: '' },
   addItem: () => {},
   setQty: () => {},
   removeItem: () => {},
@@ -140,6 +166,8 @@ const CartContext = createContext({
   removeSaved: () => {},
   applyLive: () => {},
   setGift: () => {},
+  setUseBalance: () => {},
+  setShippingChoice: () => {},
   markCheckoutPending: () => {},
   settleCheckout: () => {},
   clear: () => {},
@@ -204,6 +232,10 @@ export function CartProvider({ children }) {
   const [items, setItems] = useState(() => (typeof window === 'undefined' ? [] : readCart()));
   const [saved, setSaved] = useState(() => (typeof window === 'undefined' ? [] : readRows(SAVED_KEY)));
   const [gift, setGiftState] = useState(() => (typeof window === 'undefined' ? false : readGift()));
+  const [useBalance, setUseBalanceState] = useState(() => (typeof window === 'undefined' ? false : readFlag(BALANCE_KEY)));
+  const [shippingChoice, setShippingChoiceState] = useState(() => (
+    typeof window === 'undefined' ? { country: '', service: '' } : readShippingChoice()
+  ));
 
   useEffect(() => {
     writeCart(items);
@@ -216,6 +248,15 @@ export function CartProvider({ children }) {
   useEffect(() => {
     writeFlag(GIFT_KEY, gift ? '1' : '');
   }, [gift]);
+
+  useEffect(() => {
+    writeFlag(BALANCE_KEY, useBalance ? '1' : '');
+  }, [useBalance]);
+
+  useEffect(() => {
+    const empty = !shippingChoice.country && !shippingChoice.service;
+    writeFlag(SHIPPING_KEY, empty ? '' : JSON.stringify(shippingChoice));
+  }, [shippingChoice]);
 
   const applyAccountCart = useCallback((state) => {
     setItems(state.items.slice(0, CART_MAX));
@@ -235,6 +276,8 @@ export function CartProvider({ children }) {
       items,
       saved,
       gift,
+      useBalance,
+      shippingChoice,
       count: totals.count,
       subtotalPkn: totals.subtotalPkn,
       totalPkn: totals.subtotalPkn,
@@ -368,6 +411,18 @@ export function CartProvider({ children }) {
       setGift(on) {
         setGiftState(Boolean(on));
       },
+      /** "Use my site balance as a discount" — checkout starts with its voucher ticked. */
+      setUseBalance(on) {
+        setUseBalanceState(Boolean(on));
+      },
+      /** Merge { country?, service? } into the buyer's shipping choice. */
+      setShippingChoice(patch) {
+        setShippingChoiceState((current) => {
+          const next = { ...current, ...(patch || {}) };
+          if (next.country === current.country && next.service === current.service) return current;
+          return { country: String(next.country || '').toUpperCase(), service: String(next.service || '') };
+        });
+      },
       /** Stripe leaves the SPA: remember which rows that payment covers. */
       markCheckoutPending(ids) {
         const list = (ids || []).map(String).filter(Boolean);
@@ -390,7 +445,7 @@ export function CartProvider({ children }) {
         setItems([]);
       },
     };
-  }, [items, saved, gift]);
+  }, [items, saved, gift, useBalance, shippingChoice]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

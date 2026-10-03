@@ -60,14 +60,16 @@ export function previewShipmentCents({ fromCountry, toCountry, cardCount, tracke
 
 /** List tracked + untracked options for a route (when both exist). */
 export function shippingServiceOptions({ fromCountry, toCountry, cardCount }) {
-  const tracked = previewShipment({ fromCountry, toCountry, cardCount, tracked: true });
-  const untracked = previewShipment({ fromCountry, toCountry, cardCount, tracked: false });
+  // findRate falls back to whatever the lane has, so a lane with only an
+  // untracked letter (e.g. IT → JP) answers the tracked ask with that letter:
+  // label each option by the rate it really is, once.
   const options = [];
-  if (tracked) {
-    options.push({ id: 'tracked', label: 'Tracked', ...tracked });
-  }
-  if (untracked && (!tracked || untracked.rateId !== tracked.rateId)) {
-    options.push({ id: 'untracked', label: 'Untracked', ...untracked });
+  for (const want of [true, false]) {
+    const row = previewShipment({ fromCountry, toCountry, cardCount, tracked: want });
+    if (!row) continue;
+    const id = row.tracked ? 'tracked' : 'untracked';
+    if (options.some((option) => option.id === id || option.rateId === row.rateId)) continue;
+    options.push({ id, label: row.tracked ? 'Tracked' : 'Untracked', ...row });
   }
   // Always offer Pokoin Flex in the chooser, disabled until partner stores launch.
   options.push(pokoinFlexOption());

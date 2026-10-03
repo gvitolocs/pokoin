@@ -3,15 +3,15 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
 import {
+  balanceDiscount,
   cartTotals,
   groupBySeller,
   nextSelectAll,
-  parcelNudge,
   purchasedLabel,
   reconcileRow,
   sellerKeyOf,
-  shippingEstimate,
 } from '../cart-model.js';
+import { orderServices, parcelNudge, shippingEstimate } from '../cart-shipping.js';
 import {
   useBuyAgain,
   useCardTiles,
@@ -81,12 +81,20 @@ export default function Cart() {
 
   const totals = useMemo(() => cartTotals(items), [items]);
   const groups = useMemo(() => groupBySeller(items), [items]);
-  const shipping = useMemo(() => shippingEstimate(groups, delivery.country), [groups, delivery.country]);
+  // The buyer's pick wins over the saved address / browser country.
+  const country = cart.shippingChoice.country || delivery.country;
+  const service = cart.shippingChoice.service;
+  const services = useMemo(() => orderServices(groups, country), [groups, country]);
+  const shipping = useMemo(() => shippingEstimate(groups, country, service), [groups, country, service]);
   const estimates = useMemo(
     () => Object.fromEntries(shipping.parcels.map((parcel) => [parcel.key, parcel.estimate])),
     [shipping],
   );
-  const nudge = useMemo(() => parcelNudge(groups, delivery.country), [groups, delivery.country]);
+  const nudge = useMemo(() => parcelNudge(groups, country, service), [groups, country, service]);
+  const discount = useMemo(
+    () => balanceDiscount({ balancePkn: signedIn ? availablePkn : 0, items, shippingCents: shipping.cents }),
+    [signedIn, availablePkn, items, shipping.cents],
+  );
 
   const live = useCartLive({ items, saved, applyLive: cart.applyLive, excludeSellerUid: uid });
   const liveByRow = useMemo(() => {
@@ -125,15 +133,17 @@ export default function Cart() {
   const shelves = useSellerShelves(fallback ? groups : NONE);
   const inCart = useMemo(() => new Set(items.map((row) => String(row.listingId || row.id))), [items]);
 
-  const recentItems = serverRails
-    ? (railById.get('recent')?.items || NONE)
-    : recent.cards.map((card) => ({ card, offer: null }));
+  // Server items carry live availability: no offer means no copy for sale.
+  const recentItems = useMemo(() => (serverRails
+    ? (railById.get('recent')?.items || NONE).map((item) => ({ ...item, known: true }))
+    : recent.cards.map((card) => ({ card, offer: null, known: false }))), [serverRails, railById, recent.cards]);
   const buyAgain = useMemo(() => {
     if (serverRails) {
       return (railById.get('buy_again')?.items || NONE).map((item) => ({
         card: item.card,
         offer: item.offer,
         note: purchasedLabel(item.purchasedAt),
+        known: true,
       }));
     }
     const notes = new Map(again.cards.map((row) => [row.cardId, purchasedLabel(row.purchasedAt)]));
@@ -284,10 +294,18 @@ export default function Cart() {
               totals={totals}
               shipping={shipping}
               nudge={nudge}
-              delivery={delivery}
+              country={country}
+              countrySaved={delivery.saved && !cart.shippingChoice.country}
+              services={services}
+              service={service}
+              onCountry={(code) => cart.setShippingChoice({ country: code })}
+              onService={(id) => cart.setShippingChoice({ service: id })}
               currency={buyer.currency}
               signedIn={signedIn}
               availablePkn={availablePkn}
+              discount={discount}
+              useBalance={cart.useBalance}
+              onUseBalance={cart.setUseBalance}
               gift={gift}
               onGift={cart.setGift}
             />
