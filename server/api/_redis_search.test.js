@@ -4,6 +4,12 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { redisSearchQuery } = require('./_redis_search');
 
+test('a set title token searches the set name', () => {
+  const query = redisSearchQuery('base set charizard', 'all');
+  assert.match(query, /@set_name:base\*/);
+  assert.match(query, /@expansion_name:charizard\*/);
+});
+
 test('pika is a prefix query', () => {
   const query = redisSearchQuery('pika', 'all');
   assert.match(query, /@name_compact:pika\*/);

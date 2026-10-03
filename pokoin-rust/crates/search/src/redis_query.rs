@@ -59,6 +59,8 @@ fn token_clause(token: &str) -> String {
         format!("@name_normalized:{token}*"),
         format!("@nicknames:{token}*"),
         format!("@card_number:{token}*"),
+        format!("@set_name:{token}*"),
+        format!("@expansion_name:{token}*"),
     ];
     if token.len() >= 6 {
         parts.push(format!("@name:%%{token}%%"));
@@ -97,6 +99,13 @@ fn print_clause(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_tokens_search_the_set_name() {
+        let query = redis_search_query("base set charizard", "all");
+        assert!(query.contains("@set_name:base*"));
+        assert!(query.contains("@expansion_name:charizard*"));
+    }
 
     #[test]
     fn pika_is_a_prefix_and_umbrean_is_fuzzy() {
