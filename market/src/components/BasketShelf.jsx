@@ -143,17 +143,19 @@ export function AddCardButton({ card, className = 'bk-btn-y is-small' }) {
       setState('error');
     }
   }
+  if (state === 'none') {
+    return <span className="bk-oos">No copies listed</span>;
+  }
   const label = {
     busy: 'Adding…',
     added: 'Added to cart',
-    none: 'No copies listed',
     error: 'Try again',
   }[state] || 'Add to cart';
   return (
     <button
       type="button"
       className={className}
-      disabled={state === 'busy' || state === 'added' || state === 'none'}
+      disabled={state === 'busy' || state === 'added'}
       onClick={add}
     >
       {label}
@@ -185,7 +187,7 @@ export function TileCard({ card, note }) {
         ) : <span className="bk-oos">No price yet</span>}
       </div>
       {note ? <div className="bk-purchased">{note}</div> : null}
-      <AddCardButton card={card} />
+      {price > 0 ? <AddCardButton card={card} /> : null}
     </div>
   );
 }
@@ -334,7 +336,7 @@ export function RecCard({ card, offer, reason = '', note = '', inCart = false })
         ) : <span className="bk-oos">No copies listed</span>}
       </div>
       {note ? <div className="bk-purchased">{note}</div> : null}
-      {offer ? <OfferAddButton card={card} offer={offer} inCart={inCart} /> : <AddCardButton card={card} />}
+      {offer ? <OfferAddButton card={card} offer={offer} inCart={inCart} /> : fallbackPrice > 0 ? <AddCardButton card={card} /> : null}
     </div>
   );
 }
@@ -387,8 +389,10 @@ export function RecentList({ items }) {
                   {offer ? null : <span className="bk-from">from</span>}
                   <BigPrice pricePkn={price} sellerAcceptsPkn={offer ? offer.sellerAcceptsPkn !== false : true} size="sm" />
                 </div>
+              ) : <span className="bk-oos">No copies listed</span>}
+              {offer || price > 0 ? (
+                offer ? <OfferAddButton card={card} offer={offer} /> : <AddCardButton card={card} />
               ) : null}
-              {offer ? <OfferAddButton card={card} offer={offer} /> : <AddCardButton card={card} />}
             </div>
           </div>
         );
