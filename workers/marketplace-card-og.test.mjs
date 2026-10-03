@@ -32,7 +32,29 @@ test('parses marketplace card paths', () => {
     parseCardPath('/one-piece/marketplace/en/cards/818358/luffy'),
     { language: 'en', cardId: '818358', game: 'one_piece' },
   );
+  assert.deepEqual(
+    parseCardPath('/weiss-schwarz/marketplace/en/cards/200124708/sr-pxr-s94-t44s-toy-story-30th-anniversary'),
+    { language: 'en', cardId: '200124708', game: 'weiss_schwarz' },
+  );
   assert.equal(parseCardPath('/marketplace'), null);
+});
+
+test('other TCG card HTML keeps the game scan in og:image and img', () => {
+  const payload = buildCardOgPayload(
+    {
+      seo: {
+        title: 'SR PXR/S94-T44S Toy Story 30th Anniversary',
+        imageUrl: '/card-images/weiss-schwarz/100062354_card.jpg',
+        canonicalPath: '/weiss-schwarz/marketplace/en/cards/200124708/sr-pxr-s94-t44s-toy-story-30th-anniversary',
+      },
+      card: { id: '200124708', name: 'Toy Story' },
+    },
+    { cardId: '200124708', language: 'en' },
+  );
+  assert.equal(payload.image, 'https://pokoin.com/card-images/weiss-schwarz/100062354_card.jpg');
+  const html = renderCardOgHtml(payload);
+  assert.match(html, /property="og:image" content="https:\/\/pokoin\.com\/card-images\/weiss-schwarz\/100062354_card\.jpg"/);
+  assert.match(html, /<img src="https:\/\/pokoin\.com\/card-images\/weiss-schwarz\/100062354_card\.jpg"/);
 });
 
 test('builds absolute image and HTML with og tags', () => {

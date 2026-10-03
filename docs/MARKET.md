@@ -32,7 +32,7 @@ port notes): [PRINT_FLAGS.md](PRINT_FLAGS.md).
 **Link-preview bots:** they do not run the SPA. Worker `pokoin-origin`
 (`marketplace-card-og.js`) matches Discord / Twitter / Slack / LinkedIn /
 Facebook / WhatsApp / Telegram / Googlebot and peers on
-`/marketplace/{lang}/cards/{id}…`, loads `GET api.pokoin.com/api/marketplace-card-page`,
+`/marketplace/{lang}/cards/{id}…` and `/{game}/marketplace/{lang}/cards/{id}…`, loads `GET api.pokoin.com/api/marketplace-card-page`,
 and returns **HTML** with `og:title` / `og:image`. Social scrapers still omit
 the leftover subtitle and send `x-robots-tag: noindex`. **Googlebot / bingbot**
 get an indexable document (`index, follow`) with H1, crawlable `<a href>`
