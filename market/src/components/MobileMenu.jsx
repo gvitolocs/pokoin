@@ -140,7 +140,7 @@ export default function MobileMenu({
         <ul>
           <Row to={paths.dashboard} icon={ico.dashboard} label="Dashboard" onClose={onClose} />
           <Row to="/orders" icon={ico.orders} label="Orders" onClose={onClose} />
-          <Row to="/collection" icon={ico.nft} label="Collection" onClose={onClose} />
+          <Row to="/mypokoin/collection" icon={ico.nft} label="Collection" onClose={onClose} />
           <Row to={paths.buy} icon={ico.buy} label="Buy PKN" onClose={onClose} />
           {signedIn ? <Row to={paths.profile} icon={ico.profile} label="Profile" onClose={onClose} /> : null}
           {admin ? <Row to={paths.admin} icon={ico.admin} label="Admin" onClose={onClose} /> : null}

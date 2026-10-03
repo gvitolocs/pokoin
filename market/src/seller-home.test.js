@@ -10,7 +10,9 @@ const chromeSrc = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf
 const homeSrc = fs.readFileSync(path.join(root, 'pages/SellerHome.jsx'), 'utf8');
 const viewSrc = fs.readFileSync(path.join(root, 'components/SellerDashboardView.jsx'), 'utf8');
 const cssSrc = fs.readFileSync(path.join(root, 'seller-home.css'), 'utf8');
-const collectionSrc = fs.readFileSync(path.join(root, 'pages/Collection.jsx'), 'utf8');
+const collectionSrc = fs.readFileSync(path.join(root, 'components/CollectionHoldings.jsx'), 'utf8');
+const inventorySrc = fs.readFileSync(path.join(root, 'pages/Inventory.jsx'), 'utf8');
+const stockNavSrc = fs.readFileSync(path.join(root, 'components/StockNav.jsx'), 'utf8');
 const nftSrc = fs.readFileSync(path.join(root, 'pages/Nft.jsx'), 'utf8');
 const deskSrc = fs.readFileSync(path.join(root, 'pages/ScanDesk.jsx'), 'utf8');
 const vercel = fs.readFileSync(path.join(root, '../../vercel.json'), 'utf8');
@@ -62,7 +64,7 @@ test('Chrome Dashboard nav is a same-origin /dashboard link', () => {
   assert.match(chromeSrc, /to=\{DASHBOARD_HOME\}/);
   assert.doesNotMatch(chromeSrc, /onDashboard \? '\/'/);
   assert.doesNotMatch(chromeSrc, /dashboard\.pokoin\.com/);
-  assert.match(chromeSrc, /to="\/collection"/);
+  assert.match(chromeSrc, /to="\/mypokoin\/collection"/);
   assert.match(chromeSrc, />Collection</);
 });
 
@@ -195,10 +197,19 @@ test('Dashboard history panel keeps chart frame; never draws a real fake series'
   assert.doesNotMatch(viewSrc, /series\(total/);
 });
 
-test('/collection is holdings; /nft redirects to /collection', () => {
-  assert.match(appSrc, /both\('\/collection',\s*<Collection/);
+test('holdings are the MyPokoin Collection tab; /collection and /nft redirect there', () => {
+  assert.match(appSrc, /both\('\/mypokoin\/collection',\s*<Inventory \/>\)/);
+  assert.match(appSrc, /both\('\/collection',\s*<Navigate to="\/mypokoin\/collection" replace \/>\)/);
+  assert.doesNotMatch(appSrc, /pages\/Collection\.jsx/);
   assert.match(appSrc, /both\('\/nft',\s*<NftRedirect/);
-  assert.match(nftSrc, /Navigate to="\/collection"/);
+  assert.match(nftSrc, /Navigate to="\/mypokoin\/collection"/);
+  assert.match(stockNavSrc, /\{ to: '\/mypokoin\/collection', label: 'Collection', end: true \}/);
+  assert.match(inventorySrc, /onCollectionTab \? <CollectionHoldings \/> : null/);
+  // The tab loads holdings only: no listings or pricer round trip.
+  assert.match(inventorySrc, /if \(!signedIn \|\| !uid \|\| onCollectionTab\) return undefined;/);
+  assert.match(inventorySrc, /if \(!signedIn \|\| onImportTab \|\| onCollectionTab\) return undefined;/);
+  // MyPokoin owns the page head and the sign-in gate.
+  assert.doesNotMatch(collectionSrc, /PageHead|<Navigate/);
   assert.match(collectionSrc, /partitionHoldings|isNftHolding/);
   assert.match(collectionSrc, /data-testid="collection-physical"|Physical/);
   assert.match(collectionSrc, /Request physical shipping \(NFT\)|canShip/);

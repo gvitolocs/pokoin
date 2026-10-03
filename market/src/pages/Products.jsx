@@ -39,7 +39,7 @@ const PRODUCTS = {
     query: 'nft',
     productType: '',
     unit: 'products',
-    lede: 'Live NFT catalog search. Owned holdings and shipping requests live on /collection after nft_only checkout.',
+    lede: 'Live NFT catalog search. Owned holdings and shipping requests live on MyPokoin → Collection after nft_only checkout.',
   },
 };
 

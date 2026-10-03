@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const pageSrc = fs.readFileSync(path.join(root, 'pages/Collection.jsx'), 'utf8');
+const pageSrc = fs.readFileSync(path.join(root, 'components/CollectionHoldings.jsx'), 'utf8');
 const apiSrc = fs.readFileSync(path.join(root, 'api.js'), 'utf8');
 const deskCss = fs.readFileSync(path.join(root, 'desk.css'), 'utf8');
 

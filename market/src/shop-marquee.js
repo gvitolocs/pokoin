@@ -103,7 +103,6 @@ export function selectBandRoute(pathname = '') {
     path.includes('/marketplace')
     || path.startsWith('/mypokoin')
     || path.startsWith('/inventory')
-    || path.startsWith('/collection')
     || path.startsWith('/dashboard')
   );
 }

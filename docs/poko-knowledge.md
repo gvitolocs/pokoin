@@ -66,7 +66,7 @@ Poko answers these from live Pokoin data through its market tools. Never tell a 
 - Profile: https://pokoin.com/profile
 - Favorites: https://pokoin.com/favorites
 - Inventory: https://pokoin.com/inventory
-- Collection: https://pokoin.com/collection
+- Collection: https://pokoin.com/mypokoin/collection (MyPokoin → Collection tab)
 - Native NFTs: https://pokoin.com/nft
 - Buy PKN: https://pokoin.com/buy
 - Orders: https://pokoin.com/orders
@@ -160,7 +160,7 @@ Base host: https://pokoin.com (also game hosts like onepiece.pokoin.com for that
 27. Seller dashboard home — https://pokoin.com/dashboard
 28. Scan Connect listing desk — https://pokoin.com/dashboard/scan (also /inventory/scan)
 29. Public photo scan page — https://pokoin.com/scan
-30. Collection / portfolio ownership — https://pokoin.com/collection
+30. Collection / portfolio ownership — https://pokoin.com/mypokoin/collection (MyPokoin → Collection tab; /collection redirects)
 31. Messages inbox — https://pokoin.com/messages
 32. Chat with Poko — https://pokoin.com/messages/poko
 33. Chat with a person — https://pokoin.com/messages/{username}

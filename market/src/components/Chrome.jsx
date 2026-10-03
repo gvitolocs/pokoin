@@ -1381,7 +1381,7 @@ export default function Chrome({ children }) {
             <AppLink to={APP.cart}>Cart</AppLink>
             <AppLink to="/checkout">Checkout</AppLink>
             <AppLink to="/orders">Orders</AppLink>
-            <AppLink to="/collection">Collection</AppLink>
+            <AppLink to="/mypokoin/collection">Collection</AppLink>
             <AppLink to={APP.profile}>Profile</AppLink>
             {admin ? <AppLink to={APP.admin}>Admin</AppLink> : null}
             {signedIn ? null : <AppLink to={from}>Sign in</AppLink>}
