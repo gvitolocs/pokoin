@@ -75,4 +75,27 @@ async function readTcgplayerHistory(game, cardId, from, to, query) {
     languageSpecific:false,game,cardId,from,to,observations:result.rows};
 }
 
-module.exports = { readTcgplayerPrices, readTcgplayerHistory, groupPrices, poolOptions };
+async function readTcgplayerProductId(game, cardId, query) {
+  const id = String(cardId || '').replace(/\D/g, '');
+  if (!id) return '';
+  if (!query) {
+    const client = getPool();
+    if (!client) {
+      const error = new Error('TCGplayer links unavailable.');
+      error.statusCode = 503;
+      throw error;
+    }
+    query = (...args) => client.query(...args);
+  }
+  const result = await query(
+    `SELECT product_id::text AS product_id
+     FROM pokoin_product_links
+     WHERE active AND game = $1 AND card_id = $2::bigint
+     ORDER BY last_seen DESC NULLS LAST, product_id
+     LIMIT 1`,
+    [game, id],
+  );
+  return result.rows[0]?.product_id ? String(result.rows[0].product_id) : '';
+}
+
+module.exports = { readTcgplayerPrices, readTcgplayerHistory, readTcgplayerProductId, groupPrices, poolOptions };

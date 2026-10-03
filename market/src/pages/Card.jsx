@@ -18,8 +18,11 @@ import {
   fetchCard,
   fetchCardSales,
   fetchCanonicalPath,
+  fetchClientCountry,
+  ebayHref,
   fetchCardmarketRedirect,
   fetchCardtraderRedirect,
+  fetchTcgplayerRedirect,
   fetchExactNameCards,
   fetchListings,
   fetchPrintNationality,
@@ -43,6 +46,7 @@ import {
   rememberNeighbors,
   setSlug,
   toggleWatchlist,
+  tcgplayerSearchHref,
   unlockSilver,
   warmupCard,
   warmupNeighbors,
@@ -1336,6 +1340,19 @@ function SilverHead({ card, fromPath }) {
   const { signedIn, silver, ready, profile, availablePkn, getBearer } = useAuth();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [country, setCountry] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    fetchClientCountry().then((code) => {
+      if (live) {
+        setCountry(code);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   async function unlock() {
     if (!signedIn) {
@@ -1387,12 +1404,40 @@ function SilverHead({ card, fromPath }) {
 
   function openVinted() {
     setMessage('');
-    const url = vintedHref(card);
+    const url = vintedHref(card, undefined, country);
     if (!url || /search_text=?$/.test(url)) {
       setMessage('Vinted search is empty.');
       return;
     }
     openOffsite(url);
+  }
+
+  function openEbay() {
+    setMessage('');
+    const url = ebayHref(card, undefined, country);
+    if (!url || /_nkw=?$/.test(url)) {
+      setMessage('eBay search is empty.');
+      return;
+    }
+    openOffsite(url);
+  }
+
+  async function openTcgplayer() {
+    setMessage('');
+    try {
+      const url = await fetchTcgplayerRedirect(card);
+      if (!url) {
+        throw new Error('No TCGplayer product for this card.');
+      }
+      openOffsite(url);
+    } catch (err) {
+      const fallback = tcgplayerSearchHref(card);
+      if (fallback && !/[?&]q=?$/.test(fallback)) {
+        openOffsite(fallback);
+        return;
+      }
+      setMessage(err.message || 'TCGplayer unavailable.');
+    }
   }
 
   if (silver) {
@@ -1402,6 +1447,10 @@ function SilverHead({ card, fromPath }) {
           <button className="silver-pill is-ct" type="button" onClick={openCardtrader}>CT</button>
           <button className="silver-pill is-cm" type="button" onClick={openCardmarket}>CM</button>
           <button className="silver-pill is-vt" type="button" onClick={openVinted}>VT</button>
+          <button className="silver-pill is-eb" type="button" onClick={openEbay} aria-label="Search eBay">
+            <span className="eb-e">E</span><span className="eb-b">B</span>
+          </button>
+          <button className="silver-pill is-tp" type="button" onClick={openTcgplayer} aria-label="TCGplayer">TP</button>
         </div>
         {message ? <p className="muted silver-note">{message}</p> : null}
       </div>
@@ -1423,8 +1472,8 @@ function SilverHead({ card, fromPath }) {
       )}
       <p className="muted silver-note">
         {signedIn
-          ? `Site balance ${formatPknNumber(availablePkn)} PKN. CT / CM / VT stay hidden until Silver.`
-          : 'CT / CM / VT need Silver on this session.'}
+          ? `Site balance ${formatPknNumber(availablePkn)} PKN. CT / CM / VT / EB / TP stay hidden until Silver.`
+          : 'CT / CM / VT / EB / TP need Silver on this session.'}
       </p>
       {message ? <p className="muted silver-note">{message}</p> : null}
     </div>

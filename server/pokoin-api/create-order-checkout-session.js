@@ -114,9 +114,10 @@ module.exports = async function handler(req, res) {
     }
 
     // Take the stock now (same decrement as the PKN path) and re-price every
-    // row from Postgres — client prices never reach Stripe.
-    const reserved = await reserveEurCheckoutItems({ rawItems: items });
+    // row from Postgres — client prices never reach Stripe. The order id is
+    // the hold key, so it exists before the decrement.
     const orderId = `eur_${crypto.randomBytes(12).toString('hex')}`;
+    const reserved = await reserveEurCheckoutItems({ rawItems: items, orderId });
     const orderRef = firestore.collection('orders').doc(orderId);
     let orderWritten = false;
     let quote;
@@ -312,7 +313,7 @@ module.exports = async function handler(req, res) {
           console.error('create-order-checkout-session release failed', releaseError.message);
         });
       } else {
-        await rollbackReservation({ lines: reserved.lines });
+        await rollbackReservation({ lines: reserved.lines, orderId });
       }
       throw error;
     }

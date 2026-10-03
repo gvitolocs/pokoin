@@ -178,6 +178,29 @@ test('expiry puts the card back exactly once and closes the order', async () => 
   assert.equal(deps.listings[MIMIKYU].qty, 1);
 });
 
+test('a release that loses the race does not restore the card twice', async () => {
+  const { admin, firestore } = createFirestore();
+  const deps = fakeDeps(mimikyuListing());
+  await heldOrder(firestore, deps);
+  const original = firestore.runTransaction.bind(firestore);
+  firestore.runTransaction = async (fn) => {
+    await fn({
+      async get(ref) { return ref.get(); },
+      set() {},
+    });
+    const order = firestore.dump('orders/eur_1');
+    order.inventory.state = 'released';
+    order.paymentStatus = 'expired';
+    await firestore.collection('orders').doc('eur_1').set(order);
+    deps.listings[MIMIKYU].qty = 1;
+    deps.listings[MIMIKYU].status = 'active';
+    return original(fn);
+  };
+  const result = await releaseEurReservation({ admin, firestore, orderId: 'eur_1', deps });
+  assert.equal(result.lines, 0);
+  assert.equal(deps.listings[MIMIKYU].qty, 1);
+});
+
 test('a paid order is never released', async () => {
   const { admin, firestore } = createFirestore();
   const deps = fakeDeps(mimikyuListing());
