@@ -8,7 +8,7 @@ import { readRecentCardIds, rememberCardId, peekRecentTile } from './recents.js'
 import { framedByChromeExtension, publicApiUrl } from './extension-auth-bridge.js';
 import { withGameQuery, isPokemonGame, gameRequestHeaders, game } from './game.js';
 import { homePayloadMatchesGame } from './home-cache.js';
-import { sanitizeCardName, vintedSearchUrl } from './identity.js';
+import { ebaySearchUrl, sanitizeCardName, tcgplayerSearchUrl, vintedSearchUrl } from './identity.js';
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { getSearchLang } from './locale.js';
 import { artistSlug } from './artist-name.js';
@@ -2205,8 +2205,35 @@ export function cardtraderHref(card) {
   return withGameQuery(`/api/cardtrader-redirect?${params}`);
 }
 
-export function vintedHref(card, hostname) {
-  return vintedSearchUrl(card, game(hostname).id);
+export function vintedHref(card, hostname, country = '') {
+  return vintedSearchUrl(card, game(hostname).id, country);
+}
+
+export function ebayHref(card, hostname, country = '') {
+  return ebaySearchUrl(card, game(hostname).id, country);
+}
+
+let clientCountryPromise = null;
+
+/** Edge IP country. Empty when Cloudflare does not know. Not the ship-to address. */
+export function fetchClientCountry() {
+  if (!clientCountryPromise) {
+    clientCountryPromise = getJson('/api/client-country')
+      .then((data) => String(data?.country || '').trim().toUpperCase())
+      .catch(() => '');
+  }
+  return clientCountryPromise;
+}
+
+export function tcgplayerSearchHref(card, hostname) {
+  return tcgplayerSearchUrl(card, game(hostname).id);
+}
+
+export async function fetchTcgplayerRedirect(card) {
+  const id = typeof card === 'object' ? publicCardId(card) : String(card || '');
+  const params = new URLSearchParams({ id, format: 'json' });
+  const data = await getJson(`/api/tcgplayer-redirect?${params}`);
+  return data.url || '';
 }
 
 export function fileToDataUrl(file) {

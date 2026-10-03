@@ -20,6 +20,7 @@ import {
   planInventoryReconcile,
   productLinkNeedsRefresh,
   publicCardIdFromBlueprint,
+  quantityVisibleAfterSync,
   resolveProductAttachment,
   pknFromProduct,
 } from './_cardtrader_inventory_sync_core.js';
@@ -473,4 +474,14 @@ test('dashboard 1-DR price is the last sold median of the slice, never an ask', 
   }
   assert.match(src, /lastSoldFor/);
   assert.doesNotMatch(coreSrc, /min_pkn|cheapest/);
+});
+
+test('a CardTrader sync keeps checkout-held units off sale', () => {
+  assert.equal(quantityVisibleAfterSync(1, 1), 0);
+  assert.equal(quantityVisibleAfterSync(2, 1), 1);
+  assert.equal(quantityVisibleAfterSync(1, 0), 1);
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const sync = readFileSync(path.join(here, '_cardtrader_inventory_sync.js'), 'utf8');
+  assert.match(sync, /marketplace_checkout_holds/);
+  assert.match(sync, /greatest\(0, \$2 - coalesce/);
 });

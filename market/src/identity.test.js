@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cardDocumentTitle, cardmarketSearchUrl, clipSuggestCollector, collectorFromImageUrl, displayName, printingIdentity, sanitizeCardName, suggestCardName, suggestKind, suggestTranslatedLine, translatedName, vintedSearchText, vintedSearchUrl } from './identity.js';
+import { cardDocumentTitle, cardmarketSearchUrl, clipSuggestCollector, collectorFromImageUrl, displayName, ebaySearchUrl, printingIdentity, sanitizeCardName, suggestCardName, suggestKind, suggestTranslatedLine, tcgplayerProductUrl, tcgplayerSearchUrl, translatedName, vintedSearchText, vintedSearchUrl } from './identity.js';
 
 test('suggest kind treats pin collections as products even without itemKind', () => {
   assert.equal(suggestKind({ name: 'Mimikyu', number: '042/094' }), 'Singles');
@@ -275,15 +275,49 @@ test('name-only fallback is the card name on Pokemon', () => {
   assert.equal(vintedSearchText(''), '');
 });
 
-test('Vinted URL pins Hobby e collezionismo catalog 4824', () => {
+test('eBay and Vinted follow the visitor country and skip closed markets', () => {
+  const card = { name: 'Dawn', number: 'Illustration Rare | 129/094' };
+  const us = new URL(ebaySearchUrl(card));
+  assert.equal(us.hostname, 'www.ebay.com');
+  assert.equal(us.searchParams.get('_nkw'), 'Dawn 129');
+  assert.equal(us.searchParams.get('_sacat'), '183454');
+
+  const it = new URL(ebaySearchUrl(card, 'pokemon', 'it'));
+  assert.equal(it.hostname, 'www.ebay.it');
+  assert.equal(it.searchParams.get('_nkw'), 'Pokemon Dawn 129');
+  assert.equal(it.searchParams.get('_sacat'), null);
+  assert.equal(new URL(ebaySearchUrl(card, 'pokemon', 'VA')).hostname, 'www.ebay.it');
+  assert.equal(new URL(ebaySearchUrl(card, 'pokemon', 'NZ')).hostname, 'www.ebay.com.au');
+  assert.equal(new URL(ebaySearchUrl(card, 'pokemon', 'PT')).hostname, 'www.ebay.com');
+  assert.equal(new URL(ebaySearchUrl(card, 'pokemon', 'JP')).hostname, 'www.ebay.com');
+  assert.equal(new URL(ebaySearchUrl(card, 'pokemon', 'T1')).hostname, 'www.ebay.com');
+
+  const vintedIt = new URL(vintedSearchUrl(card, 'pokemon', 'IT'));
+  assert.equal(vintedIt.hostname, 'www.vinted.it');
+  assert.equal(vintedIt.searchParams.get('search_text'), 'Dawn 129');
+  assert.equal(vintedIt.searchParams.get('catalog[]'), '4824');
+  const vintedUs = new URL(vintedSearchUrl(card));
+  assert.equal(vintedUs.hostname, 'www.vinted.com');
+  assert.equal(vintedUs.searchParams.get('catalog[]'), null);
+  assert.equal(new URL(vintedSearchUrl(card, 'pokemon', 'GB')).hostname, 'www.vinted.co.uk');
+  assert.equal(new URL(vintedSearchUrl(card, 'pokemon', 'LI')).hostname, 'www.vinted.de');
+  assert.equal(new URL(vintedSearchUrl(card, 'pokemon', 'JP')).hostname, 'www.vinted.com');
+  assert.equal(new URL(ebaySearchUrl({ name: 'Luffy' }, 'one_piece', 'FR')).searchParams.get('_nkw'), 'One Piece Card Game Luffy');
+});
+
+test('TCGplayer uses the linked product id, and search only as a fallback', () => {
+  assert.equal(tcgplayerProductUrl('198527'), 'https://www.tcgplayer.com/product/198527');
+  const url = new URL(tcgplayerSearchUrl({ name: 'Dawn', number: '129/094' }));
+  assert.equal(url.origin + url.pathname, 'https://www.tcgplayer.com/search/pokemon/product');
+  assert.equal(url.searchParams.get('q'), 'Dawn 129');
+});
+
+test('Vinted Italy pins Hobby e collezionismo and never sends search_id', () => {
   const url = vintedSearchUrl({
     name: 'Dawn',
     number: 'Illustration Rare | 129/094',
-  });
-  assert.equal(
-    url,
-    'https://www.vinted.it/catalog?search_text=Dawn%20129&catalog[]=4824',
-  );
+  }, 'pokemon', 'IT');
+  assert.equal(new URL(url).searchParams.get('catalog[]'), '4824');
   assert.equal(url.includes('search_id'), false);
   assert.equal(url.includes('time='), false);
 });

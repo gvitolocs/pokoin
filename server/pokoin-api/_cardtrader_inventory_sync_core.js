@@ -558,6 +558,16 @@ function oneDayReadyTotals(rows = []) {
   return { products, cards, pricedCards, valuePkn: Math.round(valuePkn * 100) / 100 };
 }
 
+/**
+ * Shop quantity after a CardTrader sync. Units reserved by an open EUR
+ * checkout stay off sale: CardTrader still has them, Pokoin must not.
+ */
+function quantityVisibleAfterSync(ctQuantity, reservedQuantity) {
+  const ct = Math.max(0, Math.min(999999, Math.trunc(Number(ctQuantity) || 0)));
+  const reserved = Math.max(0, Math.trunc(Number(reservedQuantity) || 0));
+  return Math.max(0, ct - reserved);
+}
+
 module.exports = {
   CT_PREFIX,
   POKEMON_GAME_ID,
@@ -588,5 +598,6 @@ module.exports = {
   productLinkNeedsRefresh,
   pknFromProduct,
   publicCardIdFromBlueprint,
+  quantityVisibleAfterSync,
   resolveProductAttachment,
 };

@@ -554,8 +554,9 @@ async function buyCardTraderItemsForPaidOrder({
   return { ok: results.every((result) => result.ok || result.skipped), dryRun: false, items: results };
 }
 
-async function verifyAndDecrementListings(items, { writeQuery = marketplaceWriteQuery } = {}) {
+async function verifyAndDecrementListings(items, { writeQuery = marketplaceWriteQuery, holdOrderId = '' } = {}) {
   const decremented = [];
+  const orderId = cleanText(holdOrderId, 80);
   try {
     for (const item of items) {
       if (isCardTraderLiveItem(item)) {
@@ -568,20 +569,43 @@ async function verifyAndDecrementListings(items, { writeQuery = marketplaceWrite
         });
         continue;
       }
+      const params = [item.listingId, item.quantity, item.sellerUid];
+      // EUR checkout records the hold in the same statement as the decrement.
+      // CardTrader sync subtracts these rows, so it cannot put the card back
+      // on sale while the buyer still has it held.
+      const holdSql = orderId
+        ? `,
+            held as (
+              insert into public.marketplace_checkout_holds (order_id, listing_id, quantity)
+              select $4, id, $2 from taken
+              on conflict (order_id, listing_id) do update
+                set quantity = excluded.quantity
+              returning listing_id
+            )
+            select taken.card_id, taken.source_listing_id, taken.source, taken.seller_uid,
+              taken.quantity_available, taken.price_pkn
+            from taken`
+        : `
+            select card_id, source_listing_id, source, seller_uid, quantity_available, price_pkn
+            from taken`;
+      if (orderId) params.push(orderId);
       const result = await writeQuery(
         `
-          update public.marketplace_user_listings
-          set
-            quantity_available = quantity_available - $2,
-            status = case when quantity_available - $2 <= 0 then 'sold_out' else status end,
-            updated_at = now()
-          where id = $1
-            and seller_uid = $3
-            and status = 'active'
-            and quantity_available >= $2
-          returning card_id, source_listing_id, source, seller_uid, quantity_available, price_pkn
+          with taken as (
+            update public.marketplace_user_listings
+            set
+              quantity_available = quantity_available - $2,
+              status = case when quantity_available - $2 <= 0 then 'sold_out' else status end,
+              updated_at = now()
+            where id = $1
+              and seller_uid = $3
+              and status = 'active'
+              and quantity_available >= $2
+            returning id, card_id, source_listing_id, source, seller_uid, quantity_available, price_pkn
+          )
+          ${holdSql}
         `,
-        [item.listingId, item.quantity, item.sellerUid],
+        params,
       );
       const row = result.rows[0];
       if (!row) {
@@ -604,6 +628,12 @@ async function verifyAndDecrementListings(items, { writeQuery = marketplaceWrite
   } catch (error) {
     for (const entry of decremented.reverse()) {
       if (entry.external) continue;
+      if (orderId) {
+        await writeQuery(
+          `delete from public.marketplace_checkout_holds where order_id = $1 and listing_id = $2`,
+          [orderId, entry.listingId],
+        ).catch(() => {});
+      }
       await writeQuery(
         `
           update public.marketplace_user_listings
@@ -632,11 +662,38 @@ async function verifyAndDecrementListings(items, { writeQuery = marketplaceWrite
   return decremented;
 }
 
-/** Put held/sold quantity back (EUR hold release, rollbacks). */
-async function restoreListingQuantities(entries = [], { writeQuery = marketplaceWriteQuery } = {}) {
+/**
+ * Put held quantity back. With an order id the hold row is the lock: the
+ * quantity is added only when this call deletes that row, so a retried
+ * release cannot create a second copy.
+ */
+async function restoreListingQuantities(entries = [], { writeQuery = marketplaceWriteQuery, orderId = '' } = {}) {
   const cardIds = new Set();
+  const holdOrderId = cleanText(orderId, 80);
   for (const entry of entries) {
     if (!entry || entry.external || !entry.listingId || !(Number(entry.quantity) > 0)) continue;
+    if (holdOrderId) {
+      const restored = await writeQuery(
+        `
+          with released as (
+            delete from public.marketplace_checkout_holds
+            where order_id = $2 and listing_id = $1
+            returning quantity
+          )
+          update public.marketplace_user_listings as listing
+          set
+            quantity_available = listing.quantity_available + released.quantity,
+            status = case when listing.status = 'sold_out' then 'active' else listing.status end,
+            updated_at = now()
+          from released
+          where listing.id = $1
+          returning listing.id
+        `,
+        [entry.listingId, holdOrderId],
+      );
+      if (restored.rowCount && entry.cardId) cardIds.add(entry.cardId);
+      continue;
+    }
     await writeQuery(
       `
         update public.marketplace_user_listings
@@ -655,6 +712,21 @@ async function restoreListingQuantities(entries = [], { writeQuery = marketplace
       .catch((error) => console.error('marketplace price summary refresh failed', error));
   }
   return { restored: entries.length };
+}
+
+/** Forget a paid hold without putting the unit back. Sync must not subtract it twice. */
+async function dropCheckoutHolds(orderId, listingIds = [], { writeQuery = marketplaceWriteQuery } = {}) {
+  const id = cleanText(orderId, 80);
+  const ids = [...new Set((listingIds || []).map((value) => cleanText(value, 80)).filter(Boolean))];
+  if (!id || !ids.length) return { dropped: 0 };
+  const result = await writeQuery(
+    `
+      delete from public.marketplace_checkout_holds
+      where order_id = $1 and listing_id = any($2::uuid[])
+    `,
+    [id, ids],
+  );
+  return { dropped: result.rowCount || 0 };
 }
 
 async function syncCardTraderAfterPokoinSale({ admin, firestore, decremented = [] }) {
@@ -1497,6 +1569,7 @@ module.exports.fulfillment = {
   buyCardTraderItemsForPaidOrder,
   isCardTraderLiveItem,
   normalizedItems,
+  dropCheckoutHolds,
   restoreListingQuantities,
   syncCardTraderAfterPokoinSale,
   syncSellerOwnershipAfterPhysicalSale,
