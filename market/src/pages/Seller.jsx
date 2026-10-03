@@ -67,9 +67,9 @@ function isOneDayReady(offer) {
   );
 }
 
-function sellerFromPayload(data, handle, sample) {
+function sellerFromPayload(data, handle, sample, previous = null) {
   const row = data?.seller && typeof data.seller === 'object' ? data.seller : null;
-  const username = String(row?.username || sellerHandle(sample) || handle || '')
+  const username = String(row?.username || sellerHandle(sample) || previous?.username || handle || '')
     .trim()
     .replace(/^@/, '');
   const rawName = String(row?.displayName || publicListingSellerName(sample, username || handle) || '')
@@ -78,15 +78,19 @@ function sellerFromPayload(data, handle, sample) {
   const apiName = rawName && !rawName.includes('@') && rawName.toLowerCase() !== username.toLowerCase()
     ? rawName
     : '';
-  const displayName = apiName || known?.displayName || username || handle;
+  // Book/fresh paths often send sellerUid with an empty photo and the
+  // username as displayName — keep whatever the first page or chat already painted.
+  const displayName = apiName || known?.displayName || previous?.displayName || username || handle;
   const associateRow = row?.associate && typeof row.associate === 'object' ? row.associate : null;
   const associateRole = String(associateRow?.role || '').trim().toLowerCase();
   return {
-    uid: row?.uid || sample?.sellerUid || known?.uid || '',
+    uid: row?.uid || sample?.sellerUid || known?.uid || previous?.uid || '',
     username,
     displayName,
-    photoUrl: safeAvatarUrl(row?.photoUrl) || known?.photoUrl || '',
-    associate: associateRole ? { role: associateRole, displayName: String(associateRow.displayName || '').trim() } : null,
+    photoUrl: safeAvatarUrl(row?.photoUrl) || known?.photoUrl || previous?.photoUrl || '',
+    associate: associateRole
+      ? { role: associateRole, displayName: String(associateRow.displayName || '').trim() }
+      : (previous?.associate || null),
   };
 }
 
@@ -152,7 +156,7 @@ export default function Seller() {
         }
         setBook(data);
         setBookPhase('ready');
-        setSeller(sellerFromPayload(data, handle, data.listings[0]));
+        setSeller((current) => sellerFromPayload(data, handle, data.listings[0], current));
       })
       .catch(() => {
         if (!cancelled) setBookPhase('server');
@@ -176,7 +180,7 @@ export default function Seller() {
         .then((data) => {
           if (cancelled || !data?.book || !Array.isArray(data.listings)) return;
           setBook(data);
-          setSeller(sellerFromPayload(data, handle, data.listings[0]));
+          setSeller((current) => sellerFromPayload(data, handle, data.listings[0], current));
         })
         .catch(() => {});
     }, 250);
@@ -224,7 +228,7 @@ export default function Seller() {
         if (cancelled) return;
         const rows = data.listings || data.items || [];
         setListings(rows);
-        setSeller(sellerFromPayload(data, handle, rows[0]));
+        setSeller((current) => sellerFromPayload(data, handle, rows[0], current));
         setTotal(Number(data.total ?? rows.length) || 0);
         setUnique(
           Number(
