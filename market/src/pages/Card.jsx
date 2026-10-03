@@ -94,7 +94,8 @@ import { saveListingPhotos, uploadChatPhoto } from '../chat-client.js';
 import { MAX_LISTING_PHOTOS, photoFileToJpeg } from '../user-photos.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { deskClipCandidates, deskSetShortcuts, deskShowMoreVersions, mergePrintingRows, rarityVersions, versionOptionLabel } from '../card-versions.js';
-import { cardDocumentTitle, displayName, printingIdentity } from '../identity.js';
+import { cardDocumentTitle, cardmarketSearchUrl, displayName, printingIdentity } from '../identity.js';
+import { game } from '../game.js';
 import { defaultCardLanguage, getSearchLang, languagesForNationality, rewriteCatalogLang, searchLangFromPath } from '../locale.js';
 import { sellLanguages, versionRedirects } from '../listing-languages.js';
 import ListingLangPick from '../components/ListingLangPick.jsx';
@@ -1374,7 +1375,7 @@ function SilverHead({ card, fromPath }) {
   async function openCardmarket() {
     setMessage('');
     try {
-      const url = await fetchCardmarketRedirect(card);
+      const url = cardmarketSearchUrl(card, game().id) || await fetchCardmarketRedirect(card);
       if (!url) {
         throw new Error('Cardmarket did not return a URL.');
       }

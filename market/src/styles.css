@@ -2092,6 +2092,11 @@ h1, h2 { margin: 0 0 0.85rem; }
   background: transparent;
 }
 
+.promo-card.is-wide .promo-card-rise {
+  position: relative;
+  container-type: size;
+}
+
 .promo-card.is-ready .promo-card-rise {
   animation: promo-card-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -2099,6 +2104,17 @@ h1, h2 { margin: 0 0 0.85rem; }
 .promo-card.is-ready.is-left .promo-card-rise { animation-delay: 0s; }
 .promo-card.is-ready.is-right .promo-card-rise { animation-delay: 0.42s; }
 .promo-card.is-ready.is-center .promo-card-rise { animation-delay: 0.84s; }
+
+.promo-card.is-wide img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100cqh;
+  height: 100cqw;
+  max-width: none;
+  object-fit: cover;
+  transform: translate(-50%, -50%) rotate(90deg);
+}
 
 .promo-card img {
   display: block;
@@ -2154,6 +2170,10 @@ h1, h2 { margin: 0 0 0.85rem; }
 .promo-fan.is-mid-away .promo-card.is-center img {
   opacity: 0;
   transform: translateZ(0) translateY(2.4rem) scale(0.88);
+}
+
+.promo-fan.is-mid-away .promo-card.is-center.is-wide img {
+  transform: translate(-50%, -50%) rotate(90deg) scale(0.88);
 }
 
 .promo-card:hover.is-center {

@@ -367,6 +367,63 @@ export function vintedSearchUrl(card = {}, gameId = 'pokemon') {
   return `https://www.vinted.it/catalog?search_text=${encodeURIComponent(query)}&${catalog}`;
 }
 
+/** Cardmarket `/en/{Game}/Products/Search` segment. Pokemon stays on the API. */
+const CARDMARKET_GAME_PATH = {
+  one_piece: 'OnePiece',
+  riftbound: 'Riftbound',
+  magic: 'Magic',
+  yugioh: 'YuGiOh',
+  lorcana: 'Lorcana',
+  flesh_and_blood: 'FleshAndBlood',
+  digimon: 'Digimon',
+  dragon_ball_super: 'DragonBallSuper',
+  vanguard: 'Vanguard',
+  star_wars: 'StarWarsUnlimited',
+  union_arena: 'UnionArena',
+  gundam: 'Gundam',
+  sorcery: 'Sorcery',
+  palworld: 'Palworld',
+  cyberpunk: 'Cyberpunk',
+  weiss_schwarz: 'WeissSchwarz',
+  force_of_will: 'ForceOfWill',
+  world_of_warcraft: 'WorldOfWarcraft',
+  battle_spirits_saga: 'BattleSpiritsSaga',
+  final_fantasy: 'FinalFantasy',
+  star_wars_destiny: 'StarWarsDestiny',
+  the_spoils: 'TheSpoils',
+  my_little_pony: 'MyLittlePony',
+  dragon_born: 'Dragoborne',
+};
+
+/** Weiss codes keep the slash (`PXR/S94-T44S`). Pokemon n/m stays the left side. */
+function cardmarketCollector(number) {
+  const text = String(number || '').trim();
+  if (!text) {
+    return '';
+  }
+  if (text.includes('|') || /^\d+[A-Za-z]?\s*\/\s*\d+/.test(text)) {
+    return collectorHash(text.includes('|') ? text.split('|').pop() : text);
+  }
+  return text;
+}
+
+export function cardmarketSearchUrl(card = {}, gameId = 'pokemon') {
+  const path = CARDMARKET_GAME_PATH[gameId];
+  if (!path) {
+    return '';
+  }
+  const row = typeof card === 'object' && card ? card : { name: card };
+  const identity = printingIdentity(row);
+  const name = String(row.name || '').trim();
+  const number = cardmarketCollector(identity.number);
+  const url = new URL(`https://www.cardmarket.com/en/${path}/Products/Search`);
+  const search = [name, number].filter(Boolean).join(' ');
+  if (search) {
+    url.searchParams.set('searchString', search);
+  }
+  return url.toString();
+}
+
 export function withPrintingIdentity(card = {}) {
   const identity = printingIdentity(card);
   return {

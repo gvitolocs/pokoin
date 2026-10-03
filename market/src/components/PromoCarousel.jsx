@@ -54,6 +54,7 @@ export const PROMO_BANNERS = [
 
 function PromoFanCard({ card, role, index, onPointerEnter, onFail }) {
   const [ready, setReady] = useState(false);
+  const [wide, setWide] = useState(false);
   const art = imageSrc(card, 'hero');
   useEffect(() => {
     if (!art) {
@@ -65,7 +66,7 @@ function PromoFanCard({ card, role, index, onPointerEnter, onFail }) {
   }
   return (
     <Link
-      className={`promo-card is-${role}${ready ? ' is-ready' : ''}`}
+      className={`promo-card is-${role}${ready ? ' is-ready' : ''}${wide ? ' is-wide' : ''}`}
       to={cardHref(card)}
       state={{ card }}
       aria-label={card.name}
@@ -81,7 +82,12 @@ function PromoFanCard({ card, role, index, onPointerEnter, onFail }) {
           dragCard={card}
           loading="eager"
           fetchPriority="high"
-          onLoad={() => setReady(true)}
+          onLoad={(img) => {
+            if (img && img.naturalWidth > img.naturalHeight) {
+              setWide(true);
+            }
+            setReady(true);
+          }}
           onError={onFail}
         />
       </span>

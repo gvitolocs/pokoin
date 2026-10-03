@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cardDocumentTitle, clipSuggestCollector, collectorFromImageUrl, displayName, printingIdentity, sanitizeCardName, suggestCardName, suggestKind, suggestTranslatedLine, translatedName, vintedSearchText, vintedSearchUrl } from './identity.js';
+import { cardDocumentTitle, cardmarketSearchUrl, clipSuggestCollector, collectorFromImageUrl, displayName, printingIdentity, sanitizeCardName, suggestCardName, suggestKind, suggestTranslatedLine, translatedName, vintedSearchText, vintedSearchUrl } from './identity.js';
 
 test('suggest kind treats pin collections as products even without itemKind', () => {
   assert.equal(suggestKind({ name: 'Mimikyu', number: '042/094' }), 'Singles');
@@ -140,6 +140,21 @@ test('Pokemon Vinted query strips the printedTotal side of 113/156', () => {
     number: '113/156',
   });
   assert.equal(query, 'Gumshoos 113');
+});
+
+test('Weiss Schwarz Cardmarket search stays on WeissSchwarz and keeps the card code', () => {
+  const url = cardmarketSearchUrl({
+    name: 'やさしいレッカー車 メーター',
+    number: 'PXR/S94-T44S',
+  }, 'weiss_schwarz');
+  assert.match(url, /\/en\/WeissSchwarz\/Products\/Search/);
+  assert.match(url, /searchString=/);
+  assert.equal(url.includes('/Pokemon/'), false);
+  assert.match(decodeURIComponent(url), /PXR\/S94-T44S/);
+});
+
+test('Pokemon Cardmarket search stays on the API', () => {
+  assert.equal(cardmarketSearchUrl({ name: 'Drifloon', number: '6/17' }), '');
 });
 
 test('One Piece and Riftbound keep their game prefix and collector', () => {
