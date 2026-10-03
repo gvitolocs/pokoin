@@ -29,6 +29,9 @@ ROOT = Path(os.environ.get("CARDSCAN_ROOT", Path(__file__).resolve().parent))
 WEB = ROOT / "web"
 MODELS = Path(os.environ.get("CARDSCAN_MODELS", ROOT / "models"))
 YOLO_PATH = MODELS / "card_detector.tflite"
+# Optional: the same TCG YOLO exported to ONNX with NMS (output 1x300x6), run on
+# the GPU EP. ~3.5 ms vs ~19 ms TFLite on CPU. Unset keeps the TFLite path.
+YOLO_ONNX_PATH = os.environ.get("CARDSCAN_DETECTOR_ONNX")
 MILO_PATH = MODELS / "milo.onnx"
 EMB_PATH = MODELS / "embeddings.bin"
 META_PATH = MODELS / "metadata.jsonl"
@@ -61,6 +64,7 @@ ALBUM_LOCK_TIMEOUT_S = 90.0
 
 _lock = threading.Lock()
 _yolo = None
+_yolo_onnx = None
 _milo = None
 _vecs: np.ndarray | None = None
 _cards: list[dict] = []
@@ -107,7 +111,7 @@ def _ort_providers() -> list:
 
 
 def _load() -> None:
-    global _yolo, _milo, _vecs, _cards, _tcg_to_ct, _catalogs, _milo_providers, _expansion_symbols
+    global _yolo, _yolo_onnx, _milo, _vecs, _cards, _tcg_to_ct, _catalogs, _milo_providers, _expansion_symbols
     _prepare_ort_path()
     import onnxruntime as ort
 
@@ -116,6 +120,8 @@ def _load() -> None:
     opts.intra_op_num_threads = ORT_THREADS
     opts.inter_op_num_threads = 1
     providers = _ort_providers()
+    if YOLO_ONNX_PATH:
+        _yolo_onnx = ort.InferenceSession(YOLO_ONNX_PATH, opts, providers=providers)
     _milo = ort.InferenceSession(str(MILO_PATH), opts, providers=providers)
     _milo_providers = list(_milo.get_providers())
     raw = np.fromfile(EMB_PATH, dtype=np.float32)
@@ -189,7 +195,32 @@ def _letterbox(rgb: np.ndarray, size: int = YOLO_SIZE) -> tuple[np.ndarray, floa
     return canvas, scale, float(pad_x), float(pad_y)
 
 
+def _detect_onnx(rgb: np.ndarray) -> list[dict]:
+    """Same letterbox, area floor and NMS as the TFLite path; rows are x1,y1,x2,y2,conf,cls."""
+    h, w = rgb.shape[:2]
+    square, scale, pad_x, pad_y = _letterbox(rgb, YOLO_SIZE)
+    inp = np.ascontiguousarray(np.transpose(square, (2, 0, 1))[None], dtype=np.float32) / 255.0
+    name = _yolo_onnx.get_inputs()[0].name
+    out = _yolo_onnx.run(None, {name: inp})[0][0]
+    inv = 1.0 / max(scale, 1e-8)
+    min_area = MIN_AREA * w * h
+    raw = []
+    for j in np.flatnonzero(out[:, 4] >= YOLO_CONF):
+        bx1, by1, bx2, by2, conf = (float(v) for v in out[j, :5])
+        x1 = max(0.0, min(w, (bx1 - pad_x) * inv))
+        y1 = max(0.0, min(h, (by1 - pad_y) * inv))
+        x2 = max(0.0, min(w, (bx2 - pad_x) * inv))
+        y2 = max(0.0, min(h, (by2 - pad_y) * inv))
+        if (x2 - x1) * (y2 - y1) < min_area:
+            continue
+        raw.append((x1, y1, x2, y2, conf))
+    kept = _nms(raw)
+    return [{"xyxy": [round(v, 1) for v in b[:4]], "conf": round(b[4], 4)} for b in kept]
+
+
 def _detect(rgb: np.ndarray) -> list[dict]:
+    if _yolo_onnx is not None:
+        return _detect_onnx(rgb)
     h, w = rgb.shape[:2]
     square, scale, pad_x, pad_y = _letterbox(rgb, YOLO_SIZE)
     inp = np.asarray(square, dtype=np.float32) / 255.0
@@ -202,10 +233,8 @@ def _detect(rgb: np.ndarray) -> list[dict]:
     inv = 1.0 / max(scale, 1e-8)
     min_area = MIN_AREA * w * h
     raw = []
-    for j in range(YOLO_ANCHORS):
+    for j in np.flatnonzero(out[4] >= YOLO_CONF):
         conf = float(out[4, j])
-        if conf < YOLO_CONF:
-            continue
         cx, cy, bw, bh = (float(out[k, j]) for k in range(4))
         x1 = max(0.0, min(w, (cx - bw / 2 - pad_x) * inv))
         y1 = max(0.0, min(h, (cy - bh / 2 - pad_y) * inv))
@@ -354,17 +383,26 @@ def _is_card_back_hit(rec: dict | None) -> bool:
     return "pokemoncardback" in compact or compact == "cardback"
 
 
-def _best_card_back_score(scores: np.ndarray, cards: list[dict]) -> tuple[float, int]:
-    best_i = -1
-    best_score = -1.0
-    for i, card in enumerate(cards):
-        if not _is_card_back_hit(card):
-            continue
-        score = float(scores[i])
-        if score > best_score:
-            best_score = score
-            best_i = i
-    return best_score, best_i
+# catalog -> (cards list it was built from, card_back row indices). Scanning every
+# row's name per search cost ~41 ms on the 60k pokemon_generic catalog.
+_card_back_rows: dict[str, tuple[list[dict], np.ndarray]] = {}
+
+
+def _card_back_index(catalog: str, cards: list[dict]) -> np.ndarray:
+    cached = _card_back_rows.get(catalog)
+    if cached is not None and cached[0] is cards:
+        return cached[1]
+    rows = np.fromiter((i for i, card in enumerate(cards) if _is_card_back_hit(card)), dtype=np.int64)
+    _card_back_rows[catalog] = (cards, rows)
+    return rows
+
+
+def _best_card_back_score(scores: np.ndarray, cards: list[dict], catalog: str) -> tuple[float, int]:
+    rows = _card_back_index(catalog, cards)
+    if not rows.size:
+        return -1.0, -1
+    j = int(np.argmax(scores[rows]))
+    return float(scores[rows[j]]), int(rows[j])
 
 
 def _prefer_card_back_hits(
@@ -381,7 +419,7 @@ def _prefer_card_back_hits(
     """
     if catalog == "tcgplayer" or not len(cards):
         return hits
-    best_score, best_i = _best_card_back_score(scores, cards)
+    best_score, best_i = _best_card_back_score(scores, cards, catalog)
     if best_i < 0:
         return hits
     for hit in hits:
@@ -479,7 +517,7 @@ def health():
         "ok": True,
         "n": 0 if _vecs is None else int(_vecs.shape[0]),
         "identity": "tcgplayer",
-        "detect": "yolo-tflite",
+        "detect": "yolo-onnx" if _yolo_onnx is not None else "yolo-tflite",
         "identify": "milo-cnn-128",
         "embedder": "milo_cnn",
         "orient": "90-270",

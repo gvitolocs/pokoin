@@ -197,10 +197,8 @@ def _detect(rgb: np.ndarray) -> list[dict]:
     inv = 1.0 / max(scale, 1e-8)
     min_area = MIN_AREA * w * h
     raw = []
-    for j in range(YOLO_ANCHORS):
+    for j in np.flatnonzero(out[4] >= YOLO_CONF):
         conf = float(out[4, j])
-        if conf < YOLO_CONF:
-            continue
         cx, cy, bw, bh = (float(out[k, j]) for k in range(4))
         x1 = max(0.0, min(w, (cx - bw / 2 - pad_x) * inv))
         y1 = max(0.0, min(h, (cy - bh / 2 - pad_y) * inv))
@@ -340,17 +338,26 @@ def _is_card_back_hit(rec: dict | None) -> bool:
     return "pokemoncardback" in compact or compact == "cardback"
 
 
-def _best_card_back_score(scores: np.ndarray, cards: list[dict]) -> tuple[float, int]:
-    best_i = -1
-    best_score = -1.0
-    for i, card in enumerate(cards):
-        if not _is_card_back_hit(card):
-            continue
-        score = float(scores[i])
-        if score > best_score:
-            best_score = score
-            best_i = i
-    return best_score, best_i
+# catalog -> (cards list it was built from, card_back row indices). Scanning every
+# row's name per search cost ~41 ms on the 60k pokemon_generic catalog.
+_card_back_rows: dict[str, tuple[list[dict], np.ndarray]] = {}
+
+
+def _card_back_index(catalog: str, cards: list[dict]) -> np.ndarray:
+    cached = _card_back_rows.get(catalog)
+    if cached is not None and cached[0] is cards:
+        return cached[1]
+    rows = np.fromiter((i for i, card in enumerate(cards) if _is_card_back_hit(card)), dtype=np.int64)
+    _card_back_rows[catalog] = (cards, rows)
+    return rows
+
+
+def _best_card_back_score(scores: np.ndarray, cards: list[dict], catalog: str) -> tuple[float, int]:
+    rows = _card_back_index(catalog, cards)
+    if not rows.size:
+        return -1.0, -1
+    j = int(np.argmax(scores[rows]))
+    return float(scores[rows[j]]), int(rows[j])
 
 
 def _prefer_card_back_hits(
@@ -367,7 +374,7 @@ def _prefer_card_back_hits(
     """
     if catalog == "tcgplayer" or not len(cards):
         return hits
-    best_score, best_i = _best_card_back_score(scores, cards)
+    best_score, best_i = _best_card_back_score(scores, cards, catalog)
     if best_i < 0:
         return hits
     for hit in hits:

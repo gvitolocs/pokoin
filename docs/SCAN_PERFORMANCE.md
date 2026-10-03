@@ -111,3 +111,25 @@ times what a fast human hand does — and it is the abuse ceiling, not a target.
   throwaway database, and the production primary is not load-tested from here.
 - Recognition *accuracy* on a live pile. This page is latency only; the
   candidate scores in the bench output are incidental.
+
+## Worker hot path (2026-10-03)
+
+In-process stage medians on nezopt (RX 7900 XTX, ROCm), six BattleScan GT photos ×5,
+`catalog=pokemon_generic`, JPEG ≤960 px q72. Harness and raw results:
+`pokoin-scanner/bench/` (`worker_bench.py`, `compare_detectors.py`).
+
+| Worker | Live frame | Photo (≤4 orientations) |
+| --- | --- | --- |
+| Release `8af493c` | **81.5 ms** (detect 24, embed 7, search 48) | **194 ms** (search 143) |
+| Card-back rows indexed once per catalog, YOLO decode only above conf | **35.8 ms** (search 2.8) | **59 ms** |
+| + `CARDSCAN_DETECTOR_ONNX` (same YOLO, ONNX+NMS on ROCm) | **19.1 ms** (detect 7.8) | **41 ms** |
+
+- Search was a per-request Python scan of every catalog row's name looking for card
+  backs (41 ms on 60k rows). No current catalog contains a card-back row. Results are
+  byte-identical to the release on all GT photos; `tests/card_back_index_test.py`
+  checks the index against the old loop with synthetic backs.
+- The ONNX detector is opt-in and only for the GPU worker; on CPU it is ~58 ms vs
+  ~19 ms TFLite. On 56 photos (GT + Vinted) it returned the same box count, every box
+  IoU ≥ 0.996 vs TFLite, and the same top-1 in live and photo mode.
+- Batching orientations into one Milo run was tried and rejected: the GPU run is
+  2.7 ms, preprocessing is ~4 ms per crop, and batching loses the early exit.
