@@ -267,7 +267,7 @@ Do not send `listingId` in `marketplace-event`.
 | `/buy` | Stripe PKN packages (Starter/Collector/Validator). Return `?session_id=` confirms. |
 | `/auth` | Email/password, Google, return `?from=` |
 | `/profile` | Session, site PKN, Silver, sign out, admin link if role |
-| `/cart` | Qty, remove, clear, Checkout |
+| `/cart` | Amazon basket layout: tick rows to check out (unticked stay), qty pill, Delete + Undo, Delete all, Save for later, Share, live price/stock re-check with Important messages and cheaper-copy swap, seller parcels with shipping preview, Subtotal + gift + Checkout, Your Items tabs, personal carousels |
 | `/checkout` | Bearer `POST /api/marketplace-orders`. Physical: PKN escrow until the buyer confirms delivery. NFT-only: pay now. Tax 8%. Physical shipping 2000 PKN. |
 | `/orders` | Buyer confirm / report; seller mark shipped. |
 | `/protection` | Buyer protection: escrow, 7-day no-ship refund, dispute times. |
@@ -504,6 +504,8 @@ those contradict the live contract. Page BFFs are **GET**.
 | `GET /api/marketplace-version-set?cardId=` | CLIP group for `/versions` era grids. Same English name + same illustration key. SPA splits those rows by TCG era (`tcgEra`). Rarity versions are SPA-side. [VERSIONS.md](VERSIONS.md). |
 | `GET /api/marketplace-expansion-page?limit=` | Sets index (SPA asks 2000). `?slug=` is one set desk. |
 | `POST /api/marketplace-event` | Actions above |
+| `GET/PUT /api/marketplace-cart-sync` | Signed-in `/cart`: cart lines, Saved for later and the gift flag as one account cart (`public.marketplace_user_carts`, nezopt writer, Pi replica reads). PUT carries `baseRev`; a lost race is `409 CART_REV` with the current cart, which the SPA merges and saves once more (`cart-sync.js`). Private, never cached. Signed out or unreachable, the cart stays in the browser. |
+| `GET /api/marketplace-recommendations?cart=&recent=&watch=&sellers=&listings=` | `/cart` carousels for every buyer: Buy it again, More from each cart seller (same parcel), Customers who carried these also carried, Inspired by your browsing history (same artwork / species / name), From artists you like, Trending, watchlist and recently viewed. Only buyable cards, each with the native offer to add. A Bearer adds the account's synced cart, Recently Seen, Poko watchlist snapshot and paid orders. Private, never cached. Pokémon only for now; the SPA keeps its client rails when this fails. Deploy: `scripts/deploy-cart-api.sh` (+ `scripts/sql/101_marketplace_user_carts.sql` on the writer). |
 
 Same-origin `https://pokoin.com/api/marketplace-suggest` rewrites to
 `https://api.pokoin.com/api/marketplace-suggest`. Omitting `/api` 404s. Do not
