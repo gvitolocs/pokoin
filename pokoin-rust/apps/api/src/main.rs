@@ -20,6 +20,7 @@ struct AppState {
     config: Config,
     db: Option<PgPool>,
     http: reqwest::Client,
+    redis: Option<redis::aio::ConnectionManager>,
     requests: Arc<AtomicU64>,
     meili_ms: Arc<AtomicU64>,
     sql_ms: Arc<AtomicU64>,
@@ -39,12 +40,20 @@ async fn main() -> anyhow::Result<()> {
         Some(url) => pokoin_db::pool(&url, config.db_pool_max).await.ok(),
         None => None,
     };
+    let redis = match config.valkey_url.as_deref() {
+        Some(url) => match redis::Client::open(url) {
+            Ok(client) => redis::aio::ConnectionManager::new(client).await.ok(),
+            Err(_) => None,
+        },
+        None => None,
+    };
     let state = AppState {
         config: config.clone(),
         db,
         http: reqwest::Client::builder()
             .timeout(Duration::from_millis(800))
             .build()?,
+        redis,
         requests: Arc::new(AtomicU64::new(0)),
         meili_ms: Arc::new(AtomicU64::new(0)),
         sql_ms: Arc::new(AtomicU64::new(0)),
@@ -108,12 +117,19 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
         }
         None => false,
     };
+    let search_ok = if state.config.search_engine == "redis" {
+        valkey
+    } else {
+        meili
+    };
     Json(json!({
-        "ok": db && meili,
+        "ok": db && search_ok,
         "service": "pokoin-rust",
         "db": db,
         "valkey": valkey,
+        "redis": valkey,
         "meili": meili,
+        "search": state.config.search_engine,
     }))
 }
 

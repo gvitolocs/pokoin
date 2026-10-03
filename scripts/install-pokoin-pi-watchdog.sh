@@ -54,7 +54,7 @@ sysctl -p /etc/sysctl.d/99-pokoin-panic.conf >/dev/null 2>&1 || true
 
 if command -v docker >/dev/null; then
   systemctl enable docker.service >/dev/null 2>&1 || true
-  for name in pokoin-marketplace-postgres-replica pokoin-oracle-api pokoin-meili pokoin-valkey; do
+  for name in pokoin-marketplace-postgres-replica pokoin-oracle-api pokoin-redis pokoin-rust-api; do
     docker update --restart always "$name" 2>/dev/null || true
   done
 fi

@@ -6,6 +6,7 @@ pub struct Config {
     pub meili_url: Option<String>,
     pub meili_key: Option<String>,
     pub meili_index: String,
+    pub redis_index: String,
     pub search_engine: String,
     pub node_origin: String,
     pub db_pool_max: u32,
@@ -34,6 +35,8 @@ impl Config {
             meili_key: env_first(&["MEILI_API_KEY", "MEILISEARCH_API_KEY"]),
             meili_index: std::env::var("MEILI_MARKETPLACE_INDEX")
                 .unwrap_or_else(|_| "marketplace_cards".into()),
+            redis_index: std::env::var("POKOIN_REDIS_INDEX")
+                .unwrap_or_else(|_| "pokoin:cards".into()),
             search_engine: env_first(&["MARKETPLACE_SEARCH_ENGINE", "SEARCH_ENGINE"])
                 .unwrap_or_else(|| "legacy".into()),
             node_origin: std::env::var("POKOIN_NODE_ORIGIN")

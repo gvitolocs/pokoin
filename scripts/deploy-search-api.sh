@@ -67,6 +67,7 @@ API_FILES=(
   api/_marketplace_watchlist_analytics.js
   api/_meili_client.js
   api/_meili_marketplace.js
+  api/_redis_search.js
   api/_search_debug_auth.js
   api/_searchbar_session.js
   api/_slug.js
