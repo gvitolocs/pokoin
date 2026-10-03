@@ -37,6 +37,8 @@ function tokenClause(token) {
     `@name_normalized:${token}*`,
     `@nicknames:${token}*`,
     `@card_number:${token}*`,
+    `@set_name:${token}*`,
+    `@expansion_name:${token}*`,
   ];
   if (token.length >= 6) {
     parts.push(`@name:%%${token}%%`, `@name_compact:%%${token}%%`);
