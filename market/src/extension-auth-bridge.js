@@ -89,13 +89,10 @@ export function framedByChromeExtension(win = typeof window === 'undefined' ? un
 
 export const PUBLIC_API_ORIGIN = 'https://api.pokoin.com';
 
-/** Apex /api is Bot Fight. The credentialless iframe has no cf_clearance. */
-export function publicApiUrl(path, win) {
+/** Browser calls go to api.pokoin.com. pokoin.com itself is static files. */
+export function publicApiUrl(path) {
   const raw = String(path || '');
   if (!raw.startsWith('/api')) {
-    return raw;
-  }
-  if (!framedByChromeExtension(win)) {
     return raw;
   }
   return `${PUBLIC_API_ORIGIN}${raw}`;

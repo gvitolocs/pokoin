@@ -147,6 +147,14 @@ test('mixed rarity, illustrator, and collector queries lead with complete readin
       ],
     },
     {
+      query: 'pikachu komiye', leading: 'pikachu-komiya',
+      rows: [
+        single('pikachu-komiya', 'Pikachu', 'Legendary Treasures', 'RC7/RC25', { artist: 'Tomokazu Komiya' }),
+        single('pikachu-name', 'Pikachu', 'Base Set', '58/102', { artist: 'Mitsuhiro Arita' }),
+        single('garchomp-komiya', 'Garchomp', 'Ultra Prism', '99/156', { artist: 'Tomokazu Komiya' }),
+      ],
+    },
+    {
       query: 'shiledon 061', leading: 'shieldon-number',
       rows: [
         single('shieldon-number', 'Shieldon', 'Mysterious Treasures', '61/123'),
@@ -161,6 +169,31 @@ test('mixed rarity, illustrator, and collector queries lead with complete readin
     assert.equal(idsFor(entry.query)[0], entry.leading, entry.query);
     assert.equal(explainQuery(entry.query, entry.rows[0]).coverage, 2, entry.query);
   }
+});
+
+test('joined illustrator compacts cover the printing the resolver already named', () => {
+  const rows = [
+    single('pikachu-komiya', 'Pikachu', 'Legendary Treasures', 'RC7/RC25', { artist: 'Tomokazu Komiya' }),
+    single('pikachu-arita', 'Pikachu', 'Base Set', '58/102', { artist: 'Mitsuhiro Arita' }),
+    single('pikachu-sugimori', 'Pikachu', 'Base Set', '58/102', { artist: 'Ken Sugimori' }),
+    single('pikachu-saitou', 'Pikachu', 'Base Set', '58/102', { artist: 'Kouki Saitou' }),
+  ];
+  for (const [query, leading, via] of [
+    ['tomokazukomiya', 'pikachu-komiya', 'artist-joined'],
+    ['tomokazukomiye', 'pikachu-komiya', 'artist-joined-typo'],
+    ['kensugimori', 'pikachu-sugimori', 'artist-joined'],
+    ['mitsuhiroarita', 'pikachu-arita', 'artist-joined'],
+  ]) {
+    remember(rows);
+    assert.equal(idsFor(query)[0], leading, query);
+    const explained = explainQuery(query, rows.find((row) => row.id === leading));
+    assert.equal(explained.coverage, 1, query);
+    assert.equal(explained.perToken[0].via, via, query);
+  }
+  remember(rows);
+  const trap = explainQuery('switch', rows.find((row) => row.id === 'pikachu-saitou'));
+  assert.equal(trap.coverage, 0);
+  assert.equal(trap.perToken[0].via, 'none');
 });
 
 test('set aliases and compound names retain the coverage-first interpretation', () => {

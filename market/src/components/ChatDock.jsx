@@ -25,6 +25,8 @@ import {
 } from '../chat-dock-store.js';
 import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
+import { game } from '../game.js';
+import { warmSellerFromChat } from '../seller-seed.js';
 import { MESSAGES_UNREAD_EVENT, MESSAGES_UNREAD_REFRESH_MS, unreadMessagesCount } from '../messages-unread.js';
 import {
   acceptTrayDrop,
@@ -42,7 +44,7 @@ import { usePokoThread } from '../use-poko-thread.js';
 import ChatListingTag from './ChatListingTag.jsx';
 import ChatPhotos from './ChatPhotos.jsx';
 import ChatText from './ChatText.jsx';
-import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
+import { MAX_CHAT_PHOTOS, imageFilesFromClipboard, photoFileToJpeg } from '../user-photos.js';
 import mascotUrl from '../assets/pokoin-mascot@8x.png';
 import '../chat-dock.css';
 
@@ -200,6 +202,29 @@ export default function ChatDock() {
   useEffect(() => subscribeChatDock(setDock), []);
 
   useEffect(() => {
+    if (!dock.open || dock.view !== 'thread' || poko) return undefined;
+    const username = dock.peerLabel && dock.peerLabel !== 'Seller' ? dock.peerLabel : '';
+    if (!username) return undefined;
+    warmSellerFromChat({
+      username,
+      uid: dock.peer,
+      displayName: thread.person?.displayName || dock.peerName,
+      photoUrl: thread.person?.photoUrl || dock.peerPhotoUrl,
+      game: game().apiGame,
+    });
+    return undefined;
+  }, [
+    dock.open,
+    dock.view,
+    dock.peer,
+    dock.peerLabel,
+    dock.peerName,
+    dock.peerPhotoUrl,
+    poko,
+    thread.person,
+  ]);
+
+  useEffect(() => {
     function onUnread(event) {
       if (typeof event?.detail?.count === 'number') setUnread(event.detail.count);
     }
@@ -290,17 +315,16 @@ export default function ChatDock() {
   const sending = busy || (poko && pokoThread.busy);
   const threadError = error || (poko ? pokoThread.error : thread.error);
 
-  async function addPhotos(event) {
-    const files = [...(event.target.files || [])];
-    event.target.value = '';
+  async function addPhotoFiles(files) {
     const room = MAX_CHAT_PHOTOS - photos.length;
-    if (!files.length || room <= 0) return;
+    const list = [...files].filter(Boolean).slice(0, room);
+    if (!list.length || room <= 0) return;
     setBusy(true);
     setError('');
     try {
       const token = await getBearer();
       const next = [];
-      for (const file of files.slice(0, room)) {
+      for (const file of list) {
         const dataUrl = await photoFileToJpeg(file);
         const saved = await uploadChatPhoto(token, dataUrl, 'chat');
         if (saved?.url) next.push(saved.url);
@@ -311,6 +335,19 @@ export default function ChatDock() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function addPhotos(event) {
+    const files = [...(event.target.files || [])];
+    event.target.value = '';
+    addPhotoFiles(files);
+  }
+
+  function pastePhotos(event) {
+    const files = imageFilesFromClipboard(event.clipboardData);
+    if (!files.length) return;
+    event.preventDefault();
+    addPhotoFiles(files);
   }
 
   async function send(event) {
@@ -479,6 +516,7 @@ export default function ChatDock() {
                   value={text}
                   placeholder={poko ? 'Message Poko' : (dock.peerLabel && dock.peerLabel !== 'Seller' ? `Message @${dock.peerLabel}` : 'Message')}
                   onChange={(event) => setText(event.target.value)}
+                  onPaste={pastePhotos}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();

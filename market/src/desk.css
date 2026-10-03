@@ -434,6 +434,59 @@
   align-items: start;
 }
 
+.collection-desk {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.collection-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.collection-column {
+  min-height: 14rem;
+  border-radius: 14px;
+  outline: 1px dashed transparent;
+  outline-offset: 4px;
+}
+
+.collection-column.is-over {
+  outline-color: var(--yellow);
+}
+
+.collection-card {
+  cursor: grab;
+}
+
+.collection-card:active {
+  cursor: grabbing;
+}
+
+.collection-ask {
+  display: grid;
+  gap: 0.15rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.collection-ask input {
+  width: 5.2rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  background: var(--g2);
+  color: inherit;
+}
+
+@media (max-width: 800px) {
+  .collection-split {
+    grid-template-columns: 1fr;
+  }
+}
+
 .ct-connect-form {
   display: grid;
   gap: 0.75rem;

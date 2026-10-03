@@ -4,6 +4,11 @@ One path, one line of history. Several agent sessions work on this repo at the
 same time; this page is the rule they all follow. Scan Connect's multi-host
 rollout: [SCAN_CONNECT.md](SCAN_CONNECT.md#production-deployment).
 
+As of 2026-10-03, `scripts/deploy-web.sh` is the Vercel rollback path, not the
+live host. `pokoin.com` is temporarily the Pi origin, and the target preview
+is Cloudflare Workers Static Assets. See [WEB_HOST.md](WEB_HOST.md). Do not
+run `deploy-web.sh` to publish the current site.
+
 ## The rule
 
 1. **Integrate on `main`.** Branch or worktree for work, then merge into

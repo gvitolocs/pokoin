@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { pickSuggestHoverSrc, suggestHoverAllowed, suggestHoverBox } from './suggest-hover.js';
+import { pickSuggestHoverSrc, sameSuggestHoverBox, suggestHoverAllowed, suggestHoverBox } from './suggest-hover.js';
 
 test('hover is desktop-only', () => {
   assert.equal(suggestHoverAllowed(1440, true), true);
@@ -20,6 +20,21 @@ test('hover src prefers leftover JPEG over the suggest thumb', () => {
     pickSuggestHoverSrc('', 'https://cardtrader.com/uploads/blueprints/image/1/preview_mimikyu.jpg'),
     'https://cardtrader.com/uploads/blueprints/image/1/preview_mimikyu.jpg',
   );
+});
+
+test('an unchanged hover box keeps the same object', () => {
+  const box = suggestHoverBox({
+    viewportWidth: 1600,
+    viewportHeight: 900,
+    panelLeft: 520,
+    panelRight: 1280,
+    rowTop: 80,
+    rowHeight: 72,
+  });
+  const again = { ...box };
+  assert.equal(sameSuggestHoverBox(box, again), true);
+  assert.equal(sameSuggestHoverBox(box, null), false);
+  assert.equal(sameSuggestHoverBox(null, null), true);
 });
 
 test('places the card left of the panel when there is room', () => {

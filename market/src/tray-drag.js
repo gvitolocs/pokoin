@@ -121,6 +121,13 @@ export function endTrayDrag() {
   return true;
 }
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('pokoin-card-drag-end', () => {
+    // Drop listeners still need to record the target tray before this runs.
+    queueMicrotask(() => endTrayDrag());
+  });
+}
+
 /** Test / teardown helper. */
 export function resetTrayDrag() {
   session = null;

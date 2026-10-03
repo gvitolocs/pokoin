@@ -172,7 +172,7 @@ pub async fn suggest(
         &query,
     );
     let (needs_nationality, needs_title) = catalog_sql_needed(&groups, &search_language);
-    if let Some(pool) = state.db.clone() {
+    if let Some(pool) = state.db.read().await.clone() {
         let sql_started = Instant::now();
         if needs_nationality {
             fill_nationality(&pool, &mut groups).await;
@@ -225,7 +225,7 @@ fn language_ok(language: &str) -> bool {
         && bytes[3..].iter().all(|b| b.is_ascii_lowercase())
 }
 
-fn game_from(headers: &HeaderMap, query_game: Option<&str>) -> String {
+pub(crate) fn game_from(headers: &HeaderMap, query_game: Option<&str>) -> String {
     let raw = query_game
         .filter(|value| !value.trim().is_empty())
         .or_else(|| headers.get("x-pokoin-game").and_then(|v| v.to_str().ok()))
@@ -247,7 +247,7 @@ async fn redis_hits(
     limit: i64,
     offset: i64,
 ) -> Result<SuggestHitPage, redis::RedisError> {
-    let Some(mut conn) = state.redis.clone() else {
+    let Some(mut conn) = state.redis.read().await.clone() else {
         return Err(redis::RedisError::from((
             redis::ErrorKind::IoError,
             "redis is not configured",
@@ -657,7 +657,7 @@ fn json_ok(body: &Value, cache: &str) -> Response {
     .into_response()
 }
 
-fn cors(
+pub(crate) fn cors(
     status: StatusCode,
     cache: Option<String>,
     content_type: Option<&str>,

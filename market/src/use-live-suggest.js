@@ -14,7 +14,7 @@ import {
 } from './api.js';
 import { isPokemonGame } from './game.js';
 import { usePrintLang, useSearchLang } from './locale.js';
-import { catalogCacheKey, catalogIntent, groupsFromCards } from './suggest-catalog.js';
+import { cardsWithCatalogArtist, catalogCacheKey, catalogIntent, groupsFromCards } from './suggest-catalog.js';
 import {
   collectPrintingThumbUrls,
   preloadSuggestThumbs,
@@ -140,9 +140,10 @@ export function useLiveSuggest(query, { kind = 'singles', enabled = true, limit 
         if (target.kind === 'artist') {
           fetchArtist(target.slug, { limit: 80 })
             .then((data) => {
-              rememberPrintings(target.key, data.cards);
-              rememberSuggestGroups(groupsFromCards(data.cards));
-              preloadSuggestThumbs(collectPrintingThumbUrls(groupsFromCards(data.cards), suggestThumbSrc));
+              const cards = cardsWithCatalogArtist(data);
+              rememberPrintings(target.key, cards);
+              rememberSuggestGroups(groupsFromCards(cards));
+              preloadSuggestThumbs(collectPrintingThumbUrls(groupsFromCards(cards), suggestThumbSrc));
               if (suggestLiveReady(String(queryRef.current || '').trim())) {
                 setLiveTick((tick) => tick + 1);
               }

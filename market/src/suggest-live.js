@@ -62,6 +62,7 @@ export function resetSuggestLive() {
 }
 
 export function isLiveStub(printing = {}) {
+  if (!printing || typeof printing !== 'object') return false;
   return printing.live === true || String(printing.id || printing.card_id || '').startsWith('live:');
 }
 

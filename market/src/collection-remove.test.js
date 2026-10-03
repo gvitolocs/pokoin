@@ -12,10 +12,12 @@ const deskCss = fs.readFileSync(path.join(root, 'desk.css'), 'utf8');
 test('Collection red cross removes physical holdings via the authenticated BFF', () => {
   assert.match(pageSrc, /removeCollectionItem/);
   assert.match(pageSrc, /data-testid="collection-remove"/);
-  assert.match(pageSrc, /aria-label=\{`Remove \$\{row\.cardName \|\| row\.name \|\| row\.cardId\} from collection`\}/);
+  // The label names the card: cardLabel(row) is cardName || name || cardId.
+  assert.match(pageSrc, /aria-label=\{`Remove \$\{cardLabel\(row\)\} from collection`\}/);
+  assert.match(pageSrc, /function cardLabel\(row\) \{\s*return row\?\.cardName \|\| row\?\.name \|\| row\?\.cardId/);
   // Only physical rows pass onRemove; NFT holdings keep no red cross.
   assert.match(pageSrc, /onRemove=\{removeItem\}/);
-  assert.match(pageSrc, /nft\.map\(\(row\) => <HoldingRow key=\{row\.id\} row=\{row\} \/>\)/);
+  assert.match(pageSrc, /heldNft\.map\(\(entry\) => <HoldingRow key=\{entry\.holding\.id\} row=\{entry\.holding\} \/>\)/);
   // The row updates in place from the API result (after/deleted).
   assert.match(pageSrc, /result\.deleted/);
   assert.match(pageSrc, /quantity: result\.after/);

@@ -111,8 +111,8 @@ export async function fetchRail(id) {
   });
   if (!response.ok) {
     const raw = await response.text().catch(() => '');
-    if (!framedByChromeExtension() && (isOriginDownStatus(response.status) || isOriginDownError({ message: raw }, response.status, raw))) {
-      noteOriginDown();
+    if (isOriginDownStatus(response.status) || isOriginDownError({ message: raw }, response.status, raw)) {
+      return null;
     }
     return null;
   }

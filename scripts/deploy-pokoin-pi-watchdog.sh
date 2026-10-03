@@ -18,7 +18,7 @@ scp "${SSH_OPTS[@]}" \
 
 echo "copying pipeline health"
 scp "${SSH_OPTS[@]}" \
-  "$API_SRC/api/_pipeline_health.js" \
+  "$ROOT/../server/pokoin-api/_pipeline_health.js" \
   "$API_SRC/server/oracle-api-server.js" \
   "$HOST:/tmp/"
 

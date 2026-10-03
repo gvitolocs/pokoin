@@ -32,6 +32,7 @@ import {
   rememberCreatedListing,
   rememberListings,
   rememberSellerListings,
+  sellerCacheKey,
   setListingsInflight,
 } from './listings-cache.js';
 import {
@@ -85,7 +86,6 @@ function readIdList(key) {
 }
 
 export async function getJson(path, options = {}) {
-  const framed = framedByChromeExtension();
   let response;
   try {
     response = await fetch(publicApiUrl(withGameQuery(path)), {
@@ -101,10 +101,7 @@ export async function getJson(path, options = {}) {
     });
   } catch (err) {
     if (isApiRequestPath(path) && isNetworkError(err)) {
-      if (!framed) {
-        noteOriginDown();
-      }
-      const error = new Error(WORKING_MESSAGE);
+      const error = new Error('The network request failed.');
       error.cause = err;
       throw error;
     }
@@ -119,10 +116,7 @@ export async function getJson(path, options = {}) {
       body = {};
     }
     if (isOriginDownError({ message: body.error || body.message || '' }, response.status, raw) || isTunnelHtml(raw)) {
-      if (!framed) {
-        noteOriginDown();
-      }
-      const error = new Error(WORKING_MESSAGE);
+      const error = new Error('The network request failed.');
       error.status = response.status;
       error.body = body;
       throw error;
@@ -137,10 +131,7 @@ export async function getJson(path, options = {}) {
     return JSON.parse(raw);
   } catch (err) {
     if (isTunnelHtml(raw)) {
-      if (!framed) {
-        noteOriginDown();
-      }
-      throw new Error(WORKING_MESSAGE);
+      throw new Error('The network request failed.');
     }
     throw err;
   }
@@ -1572,6 +1563,9 @@ export function imageSrc(card, kind = 'grid') {
 }
 
 export function cardFromAutocomplete(row = {}) {
+  if (!row || typeof row !== 'object') {
+    return { id: '', name: '', set: '', number: '', rarity: '' };
+  }
   const id = String(row.card_id || row.id || '');
   const live = row.live === true || id.startsWith('live:');
   // Multigame API emits camelCase imageUrl / gridImageUrl (prefixed CDN paths).
@@ -2382,6 +2376,8 @@ export async function fetchSellerSearchWithAssociates(username, { limit = 20, si
   return { listings: [...associateRows, ...rows] };
 }
 
+const sellerShopInflight = new Map();
+
 /** Public seller shop with server total + offset pagination (100/page UI). */
 export function fetchSellerShop(username, {
   limit = 100,
@@ -2425,6 +2421,7 @@ export function fetchSellerShop(username, {
     if (sellerUid) params.set('sellerUid', String(sellerUid));
   } else if (book) {
     params.set('book', '1');
+    if (sellerUid) params.set('sellerUid', String(sellerUid));
   } else {
     params.set('limit', String(limit));
     params.set('offset', String(offset || 0));
@@ -2435,11 +2432,21 @@ export function fetchSellerShop(username, {
     if (reverse) params.set('reverse', '1');
     if (firstEdition) params.set('firstEdition', '1');
     if (sort) params.set('sort', String(sort));
+    if (sellerUid) params.set('sellerUid', String(sellerUid));
   }
   if (marketplaceGame) params.set('game', String(marketplaceGame));
-  return getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) => (
+  const run = () => getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) => (
     book || fresh ? data : rememberSellerListings(handle, data, opts)
   ));
+  if (book || fresh) return run();
+  const key = sellerCacheKey(handle, opts);
+  const pending = sellerShopInflight.get(key);
+  if (pending) return pending;
+  const request = run().finally(() => {
+    if (sellerShopInflight.get(key) === request) sellerShopInflight.delete(key);
+  });
+  sellerShopInflight.set(key, request);
+  return request;
 }
 
 /** PowerTools pricing strategies + pricer defaults (users/{uid}). */

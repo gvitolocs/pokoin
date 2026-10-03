@@ -169,6 +169,7 @@ async function main() {
   }
   await db.end();
   process.stdout.write(`redis delta since ${since}: ${written} documents index=${INDEX}\n`);
+  process.exit(0);
 }
 
 main().catch((error) => {

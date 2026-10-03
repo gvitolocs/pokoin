@@ -10,6 +10,10 @@ const {
   cleanPageContext,
   cardsContext,
   imagesContext,
+  isUserPhotoUrl,
+  photoCardsFromIdentify,
+  photoSearchContext,
+  identifyChatPhotos,
   marketFirstDirective,
   resolveHermesChatUrl,
   hermesToken,
@@ -39,6 +43,59 @@ test('cleanImages keeps http(s) urls only', () => {
 test('cardsContext and imagesContext', () => {
   assert.match(cardsContext([{ cardId: '1', name: 'Mew' }]), /Attached cards/);
   assert.match(imagesContext(['https://cdn.pokoin.com/a.jpg']), /Attached photos/);
+});
+
+test('photo search keeps every multi-card hit and ignores a single lookup', () => {
+  const cards = photoCardsFromIdentify({
+    top1: { name: 'Scorbunny', public_id: '1', score: 0.99 },
+    uniqueHits: [
+      { name: 'Scorbunny', set: 'Sword & Shield', collector_number: '026/202', public_id: '111', score: 0.91 },
+      { name: 'Grookey', set: 'Sword & Shield', collector_number: '011/202', public_id: '222', score: 0.2 },
+      { name: 'Sobble', set: 'Sword & Shield', public_id: '333', score: 0.7 },
+    ],
+  });
+  assert.deepEqual(cards.map((card) => card.cardId), ['111', '333']);
+  assert.equal(cards[0].setName, 'Sword & Shield');
+  assert.match(photoSearchContext(cards), /not a single-card lookup/);
+  assert.match(photoSearchContext(cards), /Sobble/);
+  const directive = marketFirstDirective(
+    [],
+    { deskCardId: '999', deskCardName: 'Snubbull' },
+    cards,
+  );
+  assert.match(directive, /multi-card search/);
+  assert.match(directive, /cardId=111/);
+  assert.match(directive, /cardId=333/);
+  assert.doesNotMatch(directive, /looking at Snubbull/);
+});
+
+test('chat photo identify calls multi-card search and skips other urls', async () => {
+  const jpeg = Uint8Array.from([0xff, 0xd8, ...new Array(40).fill(0)]);
+  const seen = [];
+  const fetchImpl = async (url, init) => {
+    seen.push({ url: String(url), method: init?.method || 'GET' });
+    if (!init?.method || init.method === 'GET') {
+      return { ok: true, arrayBuffer: async () => jpeg.buffer };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        uniqueHits: [
+          { name: 'Scorbunny', public_id: '111', score: 0.9 },
+          { name: 'Grookey', public_id: '222', score: 0.8 },
+        ],
+      }),
+    };
+  };
+  const cards = await identifyChatPhotos([
+    'https://pub-example.r2.dev/user-photos/chat/u/a.jpg',
+    'https://evil.example/a.jpg',
+  ], { fetchImpl, primary: 'http://scan', fallback: '' });
+  assert.deepEqual(cards.map((card) => card.name), ['Scorbunny', 'Grookey']);
+  assert.equal(seen.length, 2);
+  assert.match(seen[1].url, /multi=1/);
+  assert.match(seen[1].url, /live=0/);
+  assert.equal(isUserPhotoUrl('https://cdn.pokoin.com/a.jpg'), false);
 });
 
 test('marketFirstDirective and cleanPageContext pin desk cardId', () => {

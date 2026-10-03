@@ -164,8 +164,151 @@ function imagesContext(images) {
   return `Attached photos (${images.length}):\n${images.map((url, index) => `- #${index + 1} ${url}`).join('\n')}`;
 }
 
+/** Chat photos live on our R2 bucket. Anything else is not fetched. */
+function isUserPhotoUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:'
+      && url.hostname.endsWith('.r2.dev')
+      && url.pathname.startsWith('/user-photos/');
+  } catch {
+    return false;
+  }
+}
+
+function hitToPhotoCard(hit) {
+  if (!hit || typeof hit !== 'object') return null;
+  const score = Number(hit.score);
+  if (!Number.isFinite(score) || score < 0.42) return null;
+  const name = cleanText(hit.name, 120);
+  if (!name) return null;
+  const cardId = cleanText(hit.public_id || hit.publicId || '', 40);
+  const path = cardId ? `/marketplace/en/cards/${cardId}` : '';
+  return {
+    kind: 'card',
+    cardId,
+    name,
+    cardName: name,
+    setName: cleanText(hit.set || hit.set_name || hit.expansion || '', 120),
+    number: cleanText(hit.collector_number || hit.number || '', 20),
+    score: Math.round(score * 1000) / 1000,
+    path,
+    canonicalPath: path,
+  };
+}
+
+/** uniqueHits is the multi-card result. A lone top1 is the single-card lookup. */
+function photoCardsFromIdentify(payload) {
+  const unique = Array.isArray(payload?.uniqueHits) ? payload.uniqueHits : [];
+  const boxes = Array.isArray(payload?.cards)
+    ? payload.cards.map((row) => row?.top1).filter(Boolean)
+    : [];
+  const rows = unique.length ? unique : boxes;
+  const out = [];
+  const seen = new Set();
+  for (const hit of rows) {
+    const card = hitToPhotoCard(hit);
+    if (!card) continue;
+    const key = card.cardId || `${card.name}|${card.setName}|${card.number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(card);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+function photoCardLine(card, index) {
+  return [
+    `#${index + 1}`,
+    card.name,
+    card.setName ? `(${card.setName})` : '',
+    card.number ? card.number : '',
+    card.cardId ? `cardId=${card.cardId}` : '',
+    Number.isFinite(card.score) ? `score=${card.score}` : '',
+  ].filter(Boolean).join(' ');
+}
+
+function photoSearchContext(photoCards) {
+  if (!photoCards.length) return '';
+  return [
+    `Multi-card search of the attached photo (${photoCards.length} printings; not a single-card lookup):`,
+    ...photoCards.map((card, index) => `- ${photoCardLine(card, index)}`),
+  ].join('\n');
+}
+
+const SCAN_PRIMARY = process.env.SCAN_PRIMARY_URL || 'http://127.0.0.1:18151';
+const SCAN_FALLBACK = process.env.SCAN_FALLBACK_URL || 'http://127.0.0.1:18150';
+
+async function identifyOnePhoto(url, { fetchImpl, primary, fallback }) {
+  const image = await fetchImpl(url, { signal: AbortSignal.timeout(8000), redirect: 'error' });
+  if (!image?.ok) return [];
+  const bytes = Buffer.from(await image.arrayBuffer());
+  if (bytes.length < 32 || bytes.length > 4_000_000) return [];
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return [];
+  const path = '/identify?catalog=pokemon_generic&multi=1&live=0&top_k=3';
+  for (const base of [primary, fallback].filter(Boolean)) {
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type: 'image/jpeg' }), 'photo.jpg');
+    try {
+      const response = await fetchImpl(`${base}${path}`, {
+        method: 'POST',
+        body: form,
+        signal: AbortSignal.timeout(base === primary ? 12000 : 25000),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data || data.busy) continue;
+      const cards = photoCardsFromIdentify(data);
+      if (cards.length) return cards;
+    } catch {
+      /* try the other worker */
+    }
+  }
+  return [];
+}
+
+/** YOLO + Milo on every box in the photo. Single-card lookup is not used. */
+async function identifyChatPhotos(urls, {
+  fetchImpl = globalThis.fetch,
+  primary = SCAN_PRIMARY,
+  fallback = SCAN_FALLBACK,
+} = {}) {
+  const own = (Array.isArray(urls) ? urls : []).filter(isUserPhotoUrl).slice(0, 4);
+  const found = [];
+  const seen = new Set();
+  for (const url of own) {
+    let cards = [];
+    try {
+      cards = await identifyOnePhoto(url, { fetchImpl, primary, fallback });
+    } catch (error) {
+      console.warn('poko-chat photo search skipped', String(error?.message || error).slice(0, 160));
+    }
+    for (const card of cards) {
+      const key = card.cardId || `${card.name}|${card.setName}|${card.number}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      found.push(card);
+      if (found.length >= 8) return found;
+    }
+  }
+  return found;
+}
+
 /** Force market-tool path on Hermes: desk card → quote analytics first, never invent identity. */
-function marketFirstDirective(cards, pageContext) {
+function marketFirstDirective(cards, pageContext, photoCards = []) {
+  if (photoCards.length) {
+    return [
+      'Operator directive for this turn:',
+      '- The attached photo was identified with multi-card search (every detected card), not a single-card lookup.',
+      '- Identified printings, in reading order:',
+      ...photoCards.map((card, index) => `- ${photoCardLine(card, index)}`),
+      '- Quote Pokoin analytics for every identified printing via market_query multipath including card_quote (use each cardId). Do not answer as if the photo contains only one card.',
+      '- card_quote.priceSources includes dated CardTrader lowest listed asks in PKN and separate TCGplayer aggregate market quotes in USD. Cite the source and observation date; asks are not sales, aggregate quotes are not condition-specific, and zero sold comps does not erase price analytics. Never convert USD to PKN implicitly.',
+      '- For attacks, abilities, HP, or printed rules, include card_ocr in that card\'s multipath (western leftover OCR; approximate).',
+      '- A weak score is a guess: say so. Never invent a card that is not in this list.',
+      '- The open desk card is separate from the photo. Mention it only if the user also asked about the page.',
+    ].join('\n');
+  }
   const card = cards[0];
   const id = card?.cardId || pageContext?.deskCardId;
   if (!id && !card?.name) return '';
@@ -202,6 +345,7 @@ async function hermesReply({
   message,
   cards,
   images,
+  photoCards = [],
   pageContext,
   personalIntent = '',
   personal = null,
@@ -218,9 +362,10 @@ async function hermesReply({
   }
 
   const enriched = [
-    marketFirstDirective(cards, pageContext),
+    marketFirstDirective(cards, pageContext, photoCards),
     personalIntent,
     message,
+    photoSearchContext(photoCards),
     cardsContext(cards),
     imagesContext(images),
     REPLY_CARDS_DIRECTIVE,
@@ -459,10 +604,13 @@ async function handleChat(req, res, decoded) {
   if (!message && !cards.length && !images.length) {
     return res.status(400).json({ error: 'message, cards, or images required' });
   }
-  const prompt = message || (cards[0]?.name
+  const photoCards = images.length ? await identifyChatPhotos(images) : [];
+  const prompt = message || (photoCards.length
+    ? `The attached photo was identified with multi-card search (${photoCards.length} printings). Quote Pokoin sold median, current asks, and liquidity for each one. Do not collapse the photo to a single card.`
+    : cards[0]?.name
     ? `Quote Pokoin sold median, current asks, and liquidity for ${cards[0].name}${cards[0].cardId ? ` (cardId=${cards[0].cardId})` : ''}. Lead with site analytics.`
     : images.length
-      ? 'What can you tell me about the attached photo? Prefer OCR identity then Pokoin market tools when you can resolve a card.'
+      ? 'What can you tell me about the attached photo? Multi-card search found no printings; do not invent cards.'
       : 'Tell me about the attached card with Pokoin sold/ask/liquidity analytics first.');
   const sessionId = cleanText(req.body?.sessionId || decoded.uid, 80) || decoded.uid;
   const userVisible = message || prompt;
@@ -478,6 +626,7 @@ async function handleChat(req, res, decoded) {
       message: prompt,
       cards,
       images,
+      photoCards,
       pageContext,
       personalIntent,
       personal,
@@ -492,10 +641,11 @@ async function handleChat(req, res, decoded) {
       query: hermesCards.length ? null : marketplaceQuery,
     });
     reply = attached.text || hermes.reply;
+    const fromPhoto = photoCards.filter((card) => card.cardId);
     replyCards = withoutOpenCards(
-      hermesCards.length ? hermesCards : attached.cards,
+      [...fromPhoto, ...(hermesCards.length ? hermesCards : attached.cards)],
       { pageContext, cards, byName: !hermesCards.length },
-    );
+    ).slice(0, 8);
   } catch (error) {
     hermesError = String(error?.message || error).slice(0, 200);
     console.warn('poko-chat hermes failed', hermesError);
@@ -574,6 +724,10 @@ module.exports._test = {
   cleanPageContext,
   cardsContext,
   imagesContext,
+  isUserPhotoUrl,
+  photoCardsFromIdentify,
+  photoSearchContext,
+  identifyChatPhotos,
   marketFirstDirective,
   resolveHermesChatUrl,
   hermesToken,

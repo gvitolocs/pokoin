@@ -91,6 +91,16 @@ const scenarios = [
     group('Pikachu ex', [card('903', 'Pikachu ex', 'Scarlet & Violet', { artist: 'Ken Sugimori' })]),
     group('Switch', [card('904', 'Switch', 'Base Set', { artist: 'Ken Sugimori' })]),
   ], caps: [1, 4, 20] },
+  { label: 'artist-typo', query: 'pikachu komiye', groups: [
+    group('Pikachu', [card('a901', 'Pikachu', 'Legendary Treasures', { artist: 'Tomokazu Komiya' }), card('a902', 'Pikachu', 'Base Set', { artist: 'Mitsuhiro Arita' })]),
+    group('Garchomp', [card('a903', 'Garchomp', 'Ultra Prism', { artist: 'Tomokazu Komiya' })]),
+    group('Switch', [card('a904', 'Switch', 'Base Set', { artist: 'Ken Sugimori' })]),
+  ], caps: [1, 4, 20] },
+  { label: 'artist-joined', query: 'tomokazukomiya', groups: [
+    group('Pikachu', [card('a911', 'Pikachu', 'Legendary Treasures', { artist: 'Tomokazu Komiya' })]),
+    group('Pikachu ex', [card('a912', 'Pikachu ex', 'Base Set', { artist: 'Mitsuhiro Arita' })]),
+    group('Switch', [card('a914', 'Switch', 'Base Set', { artist: 'Ken Sugimori' })]),
+  ], caps: [1, 4, 20] },
   { label: 'name-collector', query: '025 pikachu', groups: [
     group('Pikachu', [card('1001', 'Pikachu', 'Base Set', { number: '25/102' }), card('1002', 'Pikachu', 'Evolutions', { number: '35/108' })]),
     group('Pikachu ex', [card('1003', 'Pikachu ex', 'Scarlet & Violet', { number: '025/198' })]),
@@ -271,6 +281,26 @@ const bareProbes = ['e', 'ev'].map((query) => {
   const result = evaluate(query, card(`bare-${query}`, 'Switch', 'Evolutions'));
   return { label: query, coverage: result.coverage, noSetEvidence: result.perToken[0].via === 'none' };
 });
+function coverageIgnoringArtistGuess(result) {
+  return result.perToken.filter((row) => row.via !== 'none'
+    && row.via !== 'artist-typo' && row.via !== 'artist-joined' && row.via !== 'artist-joined-typo'
+    && row.countsForCoverage !== false).length;
+}
+const artistProbeRows = [
+  ['pikachu komiye', card('ap-komiya', 'Pikachu', 'Legendary Treasures', { artist: 'Tomokazu Komiya' }), card('ap-arita', 'Pikachu', 'Base Set', { artist: 'Mitsuhiro Arita' }), 'artist-typo'],
+  ['tomokazukomiya', card('ap-joined', 'Pikachu', 'Legendary Treasures', { artist: 'Tomokazu Komiya' }), card('ap-joined-other', 'Pikachu', 'Base Set', { artist: 'Mitsuhiro Arita' }), 'artist-joined'],
+  ['tomokazukomiye', card('ap-joined-typo', 'Pikachu', 'Legendary Treasures', { artist: 'Tomokazu Komiya' }), card('ap-joined-typo-other', 'Pikachu', 'Base Set', { artist: 'Mitsuhiro Arita' }), 'artist-joined-typo'],
+  ['kensugimori', card('ap-sugimori', 'Pikachu', 'Base Set', { artist: 'Ken Sugimori' }), card('ap-sugimori-other', 'Pikachu', 'Evolutions', { artist: 'Mitsuhiro Arita' }), 'artist-joined'],
+];
+const artistProbes = artistProbeRows.map(([query, match, other, via]) => {
+  const matched = evaluate(query, match);
+  const rival = evaluate(query, other);
+  const evidence = matched.perToken.find((row) => row.via === via);
+  return { label: query, matchCoverage: matched.coverage, otherCoverage: rival.coverage,
+    matchScore: integerScore(matched.score), otherScore: integerScore(rival.score),
+    oldMatchCoverage: coverageIgnoringArtistGuess(matched),
+    matchVia: Boolean(evidence) };
+});
 const mechanicProbes = mechanicScenarios.map((scenario) => {
   const ordinary = evaluate(scenario.query, scenario.groups[0].printings[0]);
   const match = evaluate(scenario.query, scenario.groups[1].printings[0]);
@@ -439,18 +469,20 @@ const fixtureText = [
   `EarlyPrefixProbes == {${earlyProbes.map(tla).join(', ')}}`,
   `BarePrefixProbes == {${bareProbes.map(tla).join(', ')}}`,
   `MechanicProbes == {${mechanicProbes.map(tla).join(', ')}}`,
+  `ArtistProbes == {${artistProbes.map(tla).join(', ')}}`,
   `ColdProbes == {${coldProbes.map(tla).join(', ')}}`,
   `ColdTripleProbes == {${coldTripleProbes.map(tla).join(', ')}}`,
   '=============================================================================', '',
 ].join('\n');
 await writeFile(resolve(process.env.SEARCH_RANKING_RUN_DIR, 'SearchRankingFixtures.tla'), fixtureText);
-console.log(`SEARCH_RANKING_FIXTURES scenarios=${scenarios.length} executions=${cases.length} three_component_executions=${tripleExecutions} probes=${probes.length} early_prefix_probes=${earlyProbes.length} bare_prefix_probes=${bareProbes.length} mechanic_probes=${mechanicProbes.length}`);
+console.log(`SEARCH_RANKING_FIXTURES scenarios=${scenarios.length} executions=${cases.length} three_component_executions=${tripleExecutions} probes=${probes.length} early_prefix_probes=${earlyProbes.length} bare_prefix_probes=${bareProbes.length} mechanic_probes=${mechanicProbes.length} artist_probes=${artistProbes.length}`);
 console.log(`SEARCH_RANKING_COLD_PROBES executions=${coldProbes.length}`);
 console.log(`SEARCH_RANKING_COLD_TRIPLE_PROBES executions=${coldTripleProbes.length}`);
 for (const probe of probes) console.log(`SEARCH_RANKING_PROBE ${JSON.stringify(probe)}`);
 for (const probe of earlyProbes) console.log(`SEARCH_RANKING_EARLY_PREFIX_PROBE ${JSON.stringify(probe)}`);
 for (const probe of bareProbes) console.log(`SEARCH_RANKING_BARE_PREFIX_PROBE ${JSON.stringify(probe)}`);
 for (const probe of mechanicProbes) console.log(`SEARCH_RANKING_MECHANIC_PROBE ${JSON.stringify(probe)}`);
+for (const probe of artistProbes) console.log(`SEARCH_RANKING_ARTIST_PROBE ${JSON.stringify(probe)}`);
 JS
 
 run_check() {
@@ -470,4 +502,5 @@ failed=0
 run_check SearchRanking 0 || failed=1
 run_check SearchRanking-old-extra-tokens 12 || failed=1
 run_check SearchRanking-old-group-fill 12 || failed=1
+run_check SearchRanking-old-artist-typo 12 || failed=1
 exit "${failed}"

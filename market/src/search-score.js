@@ -78,6 +78,10 @@ export const Q_NAME_TYPO = 0.65; // scaled by 1 - edit distance / query length
 export const Q_COLLECTOR = 0.9; // exact printed collector number (n, n/m, SH1, 74a)
 export const Q_ARTIST_EXACT = 0.6;
 export const Q_ARTIST_PREFIX = 0.42;
+// A one-edit illustrator (`komiye` → Komiya) must cover that token. Zero
+// made the resolver bind the artist while the popup still ranked popular
+// printings of the name alone.
+export const Q_ARTIST_TYPO = 0.35;
 export const Q_SET_EXACT = 0.5; // literal set-name word, or a set/era alias (hgss, sl)
 export const Q_SET_PREFIX = 0.32;
 export const Q_SET_TYPO = 0.18;
@@ -328,7 +332,7 @@ function tokensWithinDistance(token, cap) {
 // --- Per-token, per-field evidence -------------------------------------------
 
 /** Best evidence one query token draws from one list of field tokens. */
-function fieldEvidence(compact, fieldTokens, tiers, { allowShortPrefix = false } = {}) {
+function fieldEvidence(compact, fieldTokens, tiers, { allowShortPrefix = false, maxTypoDistance = Infinity } = {}) {
   if (!fieldTokens || !fieldTokens.length) {
     return null;
   }
@@ -378,7 +382,8 @@ function fieldEvidence(compact, fieldTokens, tiers, { allowShortPrefix = false }
         }
       }
       // Only a real typo (few edits per typed char) counts toward coverage.
-      if (bestDistance !== Infinity && bestDistance <= compact.length * TYPO_COVER_RATIO + 1e-9) {
+      if (bestDistance !== Infinity && bestDistance <= compact.length * TYPO_COVER_RATIO + 1e-9
+        && bestDistance <= maxTypoDistance + 1e-9) {
         // The compact-name ranker's exponential likelihood is much too steep
         // for this bounded quality tiebreak: one transpose used to reduce a
         // name to 0.06, below a broad set prefix. Keep the existing acceptance
@@ -393,7 +398,7 @@ function fieldEvidence(compact, fieldTokens, tiers, { allowShortPrefix = false }
 
 const NAME_TIERS = { name: 'name', exact: Q_NAME_EXACT, prefix: Q_NAME_PREFIX, typo: Q_NAME_TYPO };
 const SET_TIERS = { name: 'set', exact: Q_SET_EXACT, prefix: Q_SET_PREFIX, typo: Q_SET_TYPO };
-const ARTIST_TIERS = { name: 'artist', exact: Q_ARTIST_EXACT, prefix: Q_ARTIST_PREFIX, typo: 0 };
+const ARTIST_TIERS = { name: 'artist', exact: Q_ARTIST_EXACT, prefix: Q_ARTIST_PREFIX, typo: Q_ARTIST_TYPO };
 
 // Reuse the established compact-name pool for accepted lexical recoveries.
 // This is particularly important when spaces disappeared from a multiword
@@ -401,6 +406,7 @@ const ARTIST_TIERS = { name: 'artist', exact: Q_ARTIST_EXACT, prefix: Q_ARTIST_P
 // Only its winning identity may provide this evidence; unrelated fuzzy names
 // cannot manufacture another covered token from a broad set/artist match.
 const recoveredNameCache = new Map();
+const recoveredArtistCache = new Map();
 function recoveredName(token) {
   if (token.compact.length <= SHORT_TOKEN_MAX || token.interps?.length) return null;
   if (!recoveredNameCache.has(token.compact)) {
@@ -409,6 +415,28 @@ function recoveredName(token) {
     if (recoveredNameCache.size > 256) recoveredNameCache.delete(recoveredNameCache.keys().next().value);
   }
   return recoveredNameCache.get(token.compact);
+}
+
+// A spaced illustrator is scored word by word. The pool also stores the joined
+// compact (`tomokazukomiya`), which the resolver accepts and the word matcher
+// never sees. Only that full-name row counts: last-name compacts stay on the
+// per-word path, so `switch` cannot become Kouki Saitou.
+function recoveredArtist(token) {
+  const compact = token.compact;
+  if (compact.length < 8) return null;
+  if (!recoveredArtistCache.has(compact)) {
+    const hit = rankNames(compact, ARTIST_POOL).find((row) => {
+      const words = nameTokens(row.display);
+      const joined = compactQuery(row.display);
+      return row.withinCap && words.length >= 2 && row.compact === joined
+        && Math.abs(joined.length - compact.length) <= Math.ceil(maxDistance(compact.length)) + 1
+        && (row.distance === 0 || (row.distance <= 1
+          && row.distance <= compact.length * TYPO_COVER_RATIO + 1e-9));
+    }) || null;
+    recoveredArtistCache.set(compact, hit);
+    if (recoveredArtistCache.size > 256) recoveredArtistCache.delete(recoveredArtistCache.keys().next().value);
+  }
+  return recoveredArtistCache.get(compact);
 }
 
 /**
@@ -479,7 +507,25 @@ export function tokenEvidence(token, doc, langs = ['en'], {
       consider(fieldEvidence(compact, text.set, SET_TIERS, { allowShortPrefix: allowShortSetPrefix }), lang);
     }
     if (!best || best.quality < Q_ARTIST_EXACT) {
-      consider(fieldEvidence(compact, text.artist, ARTIST_TIERS), lang);
+      // One edit only. Two edits still fits the 0.34 cover ratio on a short
+      // token (`switch` → Saitou) and would mark the wrong illustrator.
+      consider(fieldEvidence(compact, text.artist, ARTIST_TIERS, { maxTypoDistance: 1 }), lang);
+    }
+    if (lang === 'en' && (!best || best.quality < Q_ARTIST_EXACT)) {
+      const recovered = recoveredArtist(token);
+      const words = recovered ? nameTokens(recovered.display) : [];
+      if (words.length >= 2 && words.every((word) => text.artist?.includes(word))) {
+        const distance = recovered.distance;
+        consider({
+          quality: distance === 0 ? Q_ARTIST_EXACT
+            : Q_ARTIST_TYPO * (1 - distance / compact.length),
+          distance,
+          via: distance === 0 ? 'artist-joined' : 'artist-joined-typo',
+          canonical: recovered.display,
+          matchedToken: words[0],
+          matchedTokens: words,
+        }, lang);
+      }
     }
     const number = text.number;
     if (number && (!best || best.quality < Q_NUMBER)

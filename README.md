@@ -193,10 +193,12 @@ environment files must not be committed.
 
 ## Deployment Status
 
-This repo is the public web. Android/iOS is CardVault. Production is Vercel
-project `web` (`pokoin.com`): `vercel.json` runs `scripts/build-web.sh`, then
-`vercel --prebuilt --prod`. Details: [docs/LANDING.md](docs/LANDING.md),
-[docs/MARKET.md](docs/MARKET.md), [docs/APP.md](docs/APP.md).
+This repo is the public web. Android/iOS is CardVault. As of 2026-10-03,
+`pokoin.com` is temporarily the Pi origin, and the target is Cloudflare
+Workers Static Assets. Vercel project `web` is the rollback, not the live
+host. Map: [docs/WEB_HOST.md](docs/WEB_HOST.md). Details:
+[docs/LANDING.md](docs/LANDING.md), [docs/MARKET.md](docs/MARKET.md),
+[docs/APP.md](docs/APP.md).
 
 ## Usage
 

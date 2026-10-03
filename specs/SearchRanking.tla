@@ -40,7 +40,7 @@ Next == AppendObserved \/ Done
 Spec == Init /\ [][Next]_vars
 
 TypeOK ==
-  /\ LegacyMode \in {"current", "extra-tokens", "whole-group"}
+  /\ LegacyMode \in {"current", "extra-tokens", "whole-group", "artist-typo"}
   /\ chosen \in Cases
   /\ cursor \in 0..Len(ObservedOutput)
   /\ displayed \in Seq({row.id : row \in chosen.rows})
@@ -103,6 +103,17 @@ UnfinishedSetKeepsMechanicEligibility ==
 BareShortPrefixesDoNotExpandSets ==
   cursor > 0 =>
     \A probe \in BarePrefixProbes : probe.coverage = 0 /\ probe.noSetEvidence
+
+(* A misspelled or spaceless illustrator adds coverage. Zeroing that evidence
+   leaves the name-only printing tied with the illustrator's printing. *)
+ArtistTypoAddsCoverage ==
+  cursor > 0 =>
+    \A probe \in ArtistProbes :
+      IF LegacyMode = "artist-typo"
+      THEN probe.oldMatchCoverage > probe.otherCoverage
+      ELSE /\ probe.matchCoverage > probe.otherCoverage
+           /\ probe.matchScore > probe.otherScore
+           /\ probe.matchVia
 
 ExactMechanicsStayLiteral ==
   cursor > 0 =>

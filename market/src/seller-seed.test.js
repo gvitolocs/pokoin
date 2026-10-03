@@ -5,7 +5,13 @@ import {
   rememberSellerListings,
   resetListingsCacheForTests,
 } from './listings-cache.js';
-import { seedSellerListings, sellerShopSeedOpts } from './seller-seed.js';
+import {
+  rememberSellerIdentity,
+  resetSellerIdentityForTests,
+  seedSellerListings,
+  sellerIdentitySeed,
+  sellerShopSeedOpts,
+} from './seller-seed.js';
 
 test('seed uses full shop cache key, never a one-row location stub', () => {
   resetListingsCacheForTests();
@@ -44,6 +50,35 @@ test('seed uses full shop cache key, never a one-row location stub', () => {
   assert.equal(seeded.seller.username, handle);
   assert.equal(seeded.seller.photoUrl, 'https://pub-example.r2.dev/profile-pictures/u1/a.jpg');
   assert.equal(peekSellerListings(handle, opts).total, 9153);
+});
+
+test('chat identity paints the display name before the shop response', () => {
+  resetListingsCacheForTests();
+  resetSellerIdentityForTests();
+  const handle = 'redshakkio';
+  assert.equal(sellerIdentitySeed(handle), null);
+  rememberSellerIdentity(handle, {
+    uid: 'uid-rotation',
+    username: handle,
+    displayName: 'RotationMotionTCG',
+    photoUrl: 'https://cdn.pokoin.com/profile-pictures/uid-rotation/a.jpg',
+  });
+  const header = sellerIdentitySeed(handle);
+  assert.equal(header.displayName, 'RotationMotionTCG');
+  assert.equal(header.username, handle);
+  assert.equal(header.photoUrl, 'https://cdn.pokoin.com/profile-pictures/uid-rotation/a.jpg');
+  assert.equal(seedSellerListings(handle), null);
+
+  rememberSellerListings(handle, {
+    seller: { uid: 'uid-rotation', username: handle, displayName: handle, photoUrl: '' },
+    listings: [{ id: '1', sellerUsername: handle, sellerDisplayName: handle }],
+    total: 100,
+    unique: 80,
+  }, sellerShopSeedOpts());
+  const seeded = seedSellerListings(handle);
+  assert.equal(seeded.listings.length, 1);
+  assert.equal(seeded.seller.displayName, 'RotationMotionTCG');
+  assert.equal(seeded.seller.photoUrl, 'https://cdn.pokoin.com/profile-pictures/uid-rotation/a.jpg');
 });
 
 test('seed never crosses from another game cache', () => {
