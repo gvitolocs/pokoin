@@ -30,6 +30,7 @@ READ_FILES=(
   _seller_shop_cache.js
   _seller_shop_cache.test.js
   _marketplace_cache_invalidate.js
+  _pipeline_health.js
   _valkey.js
   _redis_cache.test.js
   _rate_limit.js
@@ -48,7 +49,12 @@ for file in "${READ_FILES[@]}"; do
 done
 
 say "marketplace read unit tests"
-node --test "$SRC/marketplace-home-page.test.js" "$SRC/_redis_cache.test.js" "$SRC/_rate_limit.test.js"
+REDIS_CACHE_TEST_PORT="${REDIS_CACHE_TEST_PORT:-6390}" \
+  node --test --test-force-exit \
+  "$SRC/marketplace-home-page.test.js" \
+  "$SRC/_redis_cache.test.js" \
+  "$SRC/_redis_ns.test.js" \
+  "$SRC/_rate_limit.test.js"
 for file in "${READ_FILES[@]}"; do
   [[ "$file" == *.js ]] || continue
   [[ "$file" == *.test.js ]] && continue
