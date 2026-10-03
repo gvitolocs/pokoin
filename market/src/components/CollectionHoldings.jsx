@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { fetchOwnedCollection, removeCollectionItem, requestNftShipping } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { isNftHolding, partitionHoldings } from '../collection-holdings.js';
-import { authFrom } from '../punchouts.js';
-import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
+import { Alert, DeskPanel, EmptyDesk } from './Desk.jsx';
 
 function canShip(row) {
   const status = String(row.physicalShippingStatus || '');
@@ -50,12 +49,13 @@ function HoldingRow({ row, onRemove, removing }) {
 }
 
 /**
- * Canonical holdings desk for /collection (physical + NFT).
- * Loads via authenticated BFF — never client Firestore (no rules match).
+ * MyPokoin Collection tab (/mypokoin/collection): what you own, physical +
+ * NFT. The old /collection page redirects here. MyPokoin owns the page head
+ * and the sign-in gate. Loads via authenticated BFF — never client Firestore
+ * (no rules match).
  */
-export default function Collection() {
-  const location = useLocation();
-  const { ready, signedIn, user, profile, getBearer } = useAuth();
+export default function CollectionHoldings() {
+  const { signedIn, user, profile, getBearer } = useAuth();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -78,7 +78,6 @@ export default function Collection() {
   }, [getBearer]);
 
   useEffect(() => {
-    document.title = 'Collection · Pokoin';
     if (!signedIn) {
       setRows(null);
       return undefined;
@@ -108,11 +107,6 @@ export default function Collection() {
     [rows],
   );
   const shippable = nft.filter(canShip);
-
-  if (!ready) return <SessionWait />;
-  if (!signedIn) {
-    return <Navigate to={authFrom(location.pathname || '/collection')} replace />;
-  }
 
   async function removeItem(row) {
     if (removingId) return;
@@ -165,14 +159,7 @@ export default function Collection() {
   const loading = rows == null && !error;
 
   return (
-    <div className="page desk" data-testid="collection-desk">
-      <PageHead
-        kicker="Holdings"
-        title="Collection"
-      >
-        <Link className="btn ghost" to="/product/nft">NFT catalog</Link>
-        <Link className="btn ghost" to="/scan">Scan cards</Link>
-      </PageHead>
+    <div className="collection-holdings" data-testid="collection-desk">
       {error ? (
         <div className="desk-panel" data-testid="collection-error">
           <Alert>{error}</Alert>
@@ -193,7 +180,11 @@ export default function Collection() {
       ) : null}
       {rows && !empty && !error ? (
         <div className="wallet-desk">
-          <DeskPanel flush title={`${ownedCards} card${ownedCards === 1 ? '' : 's'} owned`}>
+          <DeskPanel
+            flush
+            title={`${ownedCards} card${ownedCards === 1 ? '' : 's'} owned`}
+            extra={<Link className="btn ghost" to="/product/nft">NFT catalog</Link>}
+          >
             {physical.length ? (
               <div className="thread-list" data-testid="collection-physical">
                 <p className="page-lede">Physical · {physical.length} stack{physical.length === 1 ? '' : 's'}</p>

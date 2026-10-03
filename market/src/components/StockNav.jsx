@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom';
 
 const TABS = [
   { to: '/mypokoin', label: 'Listings', end: true },
+  { to: '/mypokoin/collection', label: 'Collection', end: true },
   { to: '/mypokoin/import', label: 'Import / export', end: true },
   { to: '/sales', label: 'Sold history' },
   { to: '/bought', label: 'Buy history' },
@@ -10,7 +11,7 @@ const TABS = [
   { to: '/mypokoin/settings', label: 'Settings' },
 ];
 
-/** Shared Listings / Sold / Bought / import strip under the MyPokoin desk. */
+/** Shared Listings / Collection / Sold / Bought / import strip under the MyPokoin desk. */
 export default function StockNav({ forceActive = '' } = {}) {
   return (
     <nav className="stock-nav" aria-label="MyPokoin">

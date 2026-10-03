@@ -105,7 +105,7 @@ export const APP = {
   protection: route('/protection'),
   whitepaper: route('/whitepaper'),
   nft: route('/nft'),
-  collection: route('/collection'),
+  collection: route('/mypokoin/collection'),
   checkout: route('/checkout'),
   orders: route('/orders'),
 };

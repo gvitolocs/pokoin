@@ -1331,7 +1331,7 @@ export default function ScanDesk() {
               : `${batch.submitResult?.listings ?? 0} listings are live (also added to your collection).`}
           </p>
           <div className="scan-done-actions">
-            <a className="btn ghost" href={marketUrl('/collection')}>View collection</a>
+            <a className="btn ghost" href={marketUrl('/mypokoin/collection')}>View collection</a>
             {batch.submitResult?.intent !== 'collection' ? (
               <Link className="btn ghost" to="/mypokoin">Open MyPokoin</Link>
             ) : null}

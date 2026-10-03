@@ -1023,6 +1023,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/mypokoin/collection/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/collection",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/mypokoin/settings/",
       "destination": "/market/index.html"
     },

@@ -68,7 +68,6 @@ const Bought = lazy(() => import('./pages/Bought.jsx'));
 const Stock = lazy(() => import('./pages/Stock.jsx'));
 const SyncReview = lazy(() => import('./pages/SyncReview.jsx'));
 const CardTraderZero = lazy(() => import('./pages/CardTraderZero.jsx'));
-const Collection = lazy(() => import('./pages/Collection.jsx'));
 const NftRedirect = lazy(() => import('./pages/Nft.jsx'));
 const Protection = lazy(() => import('./pages/Protection.jsx'));
 const Flex = lazy(() => import('./pages/Flex.jsx'));
@@ -213,7 +212,7 @@ function AppShell() {
       {both('/bought', <Bought />)}
       {both('/stock', <Stock />)}
       {both('/inventory/sync-review', <SyncReview />)}
-      {both('/collection', <Collection />)}
+      {both('/collection', <Navigate to="/mypokoin/collection" replace />)}
       {both('/forum', <Forum />)}
       {both('/forum/category/:categoryId', <Forum />)}
       {both('/forum/topic/:topicId', <Forum />)}
@@ -224,6 +223,7 @@ function AppShell() {
       {both('/mypokoin/import', <Inventory />)}
       {both('/mypokoin/location/:location', <Inventory />)}
       {both('/mypokoin/settings', <Inventory />)}
+      {both('/mypokoin/collection', <Inventory />)}
       {both('/mypokoin/zero', <CardTraderZero />)}
       {both('/mypokoin', <Inventory />)}
       {both('/inventory', <Navigate to="/mypokoin" replace />)}

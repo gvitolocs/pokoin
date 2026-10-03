@@ -480,7 +480,7 @@ export default function Profile() {
           />
           <QuickTile to="/wallet" icon="wallet" title="Wallet" meta="Send, swap, WPKN" />
           <QuickTile to="/buy" icon="buy" title="Buy PKN" meta="Top up site balance" />
-          <QuickTile to="/collection" icon="collection" title="Collection" meta="Physical + NFT" />
+          <QuickTile to="/mypokoin/collection" icon="collection" title="Collection" meta="MyPokoin · physical + NFT" />
           <QuickTile to="/messages" icon="messages" title="Messages" meta="Chats & Poko" />
           <QuickTile to="/forum" icon="forum" title="Forum" meta="Community" />
           <QuickTile to="/invite" icon="invite" title="Invite & Earn" meta="20 PKN for you and a friend" />
