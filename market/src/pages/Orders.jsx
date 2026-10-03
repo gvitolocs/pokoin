@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
@@ -68,7 +68,7 @@ export default function Orders() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { ready, signedIn, user, profile, getBearer } = useAuth();
-  const { clear } = useCart();
+  const { settleCheckout } = useCart();
   const [bought, setBought] = useState(null);
   const [sold, setSold] = useState(null);
   const [error, setError] = useState('');
@@ -81,6 +81,9 @@ export default function Orders() {
   const eurSession = String(searchParams.get('eur_session') || '').trim();
   const returnedOrder = String(searchParams.get('order') || '').trim();
   const [focusOrder, setFocusOrder] = useState('');
+  const settledSession = useRef('');
+  // Order whose cart rows still need removing once its Firestore doc arrives.
+  const [settleOrder, setSettleOrder] = useState('');
 
   useEffect(() => {
     document.title = 'Orders · Pokoin';
@@ -112,10 +115,12 @@ export default function Orders() {
   }, []);
 
   useEffect(() => {
-    if (!eurSession) return;
-    // The cards are held for this order, so the cart can go. "Paid" only shows
-    // once Stripe's webhook confirms — the row below updates live.
-    clear();
+    if (!eurSession || settledSession.current === eurSession) return;
+    settledSession.current = eurSession;
+    // The cards are held for this order, so their cart rows can go; unticked
+    // rows stay. "Paid" only shows once Stripe's webhook confirms — the row
+    // below updates live.
+    if (!settleCheckout() && returnedOrder) setSettleOrder(returnedOrder);
     setFocusOrder(returnedOrder);
     setNotice('Payment submitted. The order turns Paid as soon as Stripe confirms it.');
     setSearchParams((prev) => {
@@ -125,7 +130,19 @@ export default function Orders() {
       next.delete('order');
       return next;
     }, { replace: true });
-  }, [eurSession, returnedOrder, clear, setSearchParams]);
+  }, [eurSession, returnedOrder, settleCheckout, setSearchParams]);
+
+  // No checkout record on this browser: match the paid order's listings instead.
+  useEffect(() => {
+    if (!settleOrder || !bought) return;
+    const order = bought.find((row) => row.id === settleOrder);
+    if (!order) return;
+    const listingIds = (Array.isArray(order.items) ? order.items : [])
+      .map((item) => String(item?.listingId || ''))
+      .filter(Boolean);
+    settleCheckout({ listingIds });
+    setSettleOrder('');
+  }, [settleOrder, bought, settleCheckout]);
 
   if (!ready) return <SessionWait />;
   if (!signedIn) {

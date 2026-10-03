@@ -771,5 +771,60 @@
         "Optional TCGCSV PostgreSQL on Nezopt 15TB"
       ]
     }
+  },
+  {
+    "path": "/api/marketplace-cart-sync",
+    "file": "marketplace-cart-sync.js",
+    "methods": [
+      "GET",
+      "PUT",
+      "OPTIONS"
+    ],
+    "purpose": "Signed-in buyer's cart for pokoin.com/cart: cart lines, Saved for later and gift flag, synced across devices with revision-checked saves (409 CART_REV + current cart on a lost race).",
+    "auth": "Firebase bearer token required. Private, never cached.",
+    "params": {
+      "query": "none",
+      "body": "PUT: items[] (max 400), saved[] (max 200), gift, baseRev."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL",
+        "MARKETPLACE_WRITER_DATABASE_URL",
+        "VALKEY_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Marketplace replica PostgreSQL",
+        "nezopt writer PostgreSQL (marketplace_user_carts)",
+        "Valkey rate limit"
+      ]
+    }
+  },
+  {
+    "path": "/api/marketplace-recommendations",
+    "file": "marketplace-recommendations.js",
+    "methods": [
+      "GET",
+      "OPTIONS"
+    ],
+    "purpose": "Personal card rails for every buyer (buy again, same-seller parcel, also carried, inspired by browsing, artists, trending, watchlist, recently viewed). Only buyable cards, each with the native offer to add.",
+    "auth": "Public; an optional Firebase bearer adds the account's cart, Recently Seen, watchlist snapshot and paid orders. Private, never cached.",
+    "params": {
+      "query": "cart, recent, watch (card ids), sellers (uids), listings (listing ids), limit (4-30). Pokemon storefront only for now.",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL",
+        "VALKEY_URL"
+      ],
+      "services": [
+        "Marketplace replica PostgreSQL",
+        "Firebase Admin (orders, seller profiles)",
+        "Valkey"
+      ]
+    }
   }
 ]

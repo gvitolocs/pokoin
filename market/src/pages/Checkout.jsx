@@ -29,6 +29,9 @@ import {
 import ArtworkZoom from '../components/ArtworkZoom.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 
+/** "This order contains a gift" in the cart pre-fills the note to the sellers. */
+const GIFT_NOTE = 'This order is a gift: please leave prices and receipts out of the parcel.';
+
 function FeeTip({ label, children }) {
   return (
     <span className="fee-tip">
@@ -97,10 +100,21 @@ export default function Checkout() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { ready, signedIn, user, getBearer, availablePkn } = useAuth();
-  const { items, count, subtotalPkn, canNftOnly, clear } = useCart();
+  // Only the ticked cart rows check out; unticked ones stay in the cart.
+  const {
+    items: cartRows,
+    checkoutItems: items,
+    checkoutCount: count,
+    checkoutSubtotalPkn: subtotalPkn,
+    canNftOnly,
+    gift,
+    setGift,
+    removeItems,
+    markCheckoutPending,
+  } = useCart();
   const [nftOnly, setNftOnly] = useState(false);
   const [insurance, setInsurance] = useState(false);
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(() => (gift ? GIFT_NOTE : ''));
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -397,7 +411,8 @@ export default function Checkout() {
       }, token);
       const id = data?.order?.id || data?.id || '';
       setOrderId(id);
-      clear();
+      removeItems(items.map((row) => row.id));
+      setGift(false);
       setConfirm(false);
     } catch (err) {
       setError(err.message || 'Checkout failed.');
@@ -440,6 +455,8 @@ export default function Checkout() {
         throw new Error('Stripe did not return a checkout URL.');
       }
       // Keep the cart until Stripe success (/orders?eur_session=…) so cancel can return here.
+      // Orders then drops exactly these rows; unticked ones stay for later.
+      markCheckoutPending(items.map((row) => row.id));
       window.location.assign(data.checkoutUrl);
     } catch (err) {
       const code = err?.body?.code;
@@ -492,13 +509,23 @@ export default function Checkout() {
         </p>
       ) : null}
       {!items.length && !orderId ? (
-        <EmptyDesk
-          title="Cart is empty"
-          lede="Add a listing from Shop, then come back to pay with card or site PKN."
-        >
-          <Link className="btn" to="/marketplace">Browse marketplace</Link>
-          <Link className="btn ghost" to="/cart">Open cart</Link>
-        </EmptyDesk>
+        cartRows.length ? (
+          <EmptyDesk
+            icon="cart"
+            title="No cards selected"
+            lede="Tick the cards you want to buy in your cart. Unticked cards stay there for later."
+          >
+            <Link className="btn" to="/cart">Open cart</Link>
+          </EmptyDesk>
+        ) : (
+          <EmptyDesk
+            title="Cart is empty"
+            lede="Add a listing from Shop, then come back to pay with card or site PKN."
+          >
+            <Link className="btn" to="/marketplace">Browse marketplace</Link>
+            <Link className="btn ghost" to="/cart">Open cart</Link>
+          </EmptyDesk>
+        )
       ) : null}
       {items.length ? (
         <div className="wallet-desk">
