@@ -8,7 +8,8 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const src = fs.readFileSync(path.join(root, 'pages/Checkout.jsx'), 'utf8');
 
 test('PKN balance voucher is opt-in and priced at 2 PKN per euro-cent', () => {
-  assert.match(src, /useState\(false\); \/\/ opt-in PKN balance voucher/);
+  assert.match(src, /readPknDiscount\(\)/);
+  assert.match(src, /opt-in PKN balance voucher/);
   assert.match(src, /Use my PKN balance as a discount/);
   assert.match(src, /pknDiscountEurCents = usePknDiscount \? pknVoucherEurCents : 0/);
   assert.match(src, /usePknDiscount: pknDiscountPkn >= 1/);

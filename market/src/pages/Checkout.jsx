@@ -14,12 +14,13 @@ import {
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { useAuth } from '../auth.jsx';
 import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
-import { checkoutFees } from '../checkout-fees.js';
+import { checkoutFees, pknBalanceVoucher } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
 import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
 import { SHIP_FROM_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { brandSrc } from '../brand-assets.js';
+import { readPknDiscount, readShippingService, writePknDiscount, writeShippingService } from '../shipping-choice.js';
 import {
   defaultShippingService,
   pknFromEurCents,
@@ -127,10 +128,10 @@ export default function Checkout() {
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [quote, setQuote] = useState(null);
   const [quoteError, setQuoteError] = useState('');
-  const [shippingService, setShippingService] = useState('tracked'); // tracked | untracked
-  const [shippingPicked, setShippingPicked] = useState(false); // buyer chose a service
+  const [shippingService, setShippingService] = useState(() => readShippingService() || 'tracked');
+  const [shippingPicked, setShippingPicked] = useState(() => Boolean(readShippingService()));
   const [pknRefused, setPknRefused] = useState([]); // sellers who take card payments only
-  const [usePknDiscount, setUsePknDiscount] = useState(false); // opt-in PKN balance voucher
+  const [usePknDiscount, setUsePknDiscount] = useState(() => readPknDiscount()); // opt-in PKN balance voucher
   const stripeCancelled = searchParams.get('cancelled') === '1';
   const cancelledOrderId = String(searchParams.get('order') || '').trim();
 
@@ -224,11 +225,13 @@ export default function Checkout() {
   ), 0);
   // 1 PKN = €0.005 → 2 PKN per euro-cent, rounded down (server: _checkout_core).
   // Opt-in: nothing is discounted until the buyer ticks the voucher box.
-  const pknVoucherEurCents = Math.max(0, Math.min(
-    Math.floor(Math.min(Number(availablePkn) || 0, Math.trunc(pknEligiblePkn)) / 2),
-    Math.round(Number(fiatFromPkn(totalPkn, 'EUR')) * 100) - 50,
-  ));
-  const pknVoucherPkn = pknVoucherEurCents * 2;
+  const voucher = pknBalanceVoucher({
+    availablePkn,
+    eligiblePkn: pknEligiblePkn,
+    chargeEurCents: Math.round(Number(fiatFromPkn(totalPkn, 'EUR')) * 100),
+  });
+  const pknVoucherEurCents = voucher.eurCents;
+  const pknVoucherPkn = voucher.pkn;
   const pknDiscountEurCents = usePknDiscount ? pknVoucherEurCents : 0;
   const pknDiscountPkn = pknDiscountEurCents * 2;
   const eurSubtotal = useMemo(
@@ -591,6 +594,7 @@ export default function Checkout() {
                               if (!unavailable) {
                                 setShippingPicked(true);
                                 setShippingService(option.id);
+                                writeShippingService(option.id);
                               }
                             }}
                           />
@@ -848,7 +852,10 @@ export default function Checkout() {
                         <input
                           type="checkbox"
                           checked={usePknDiscount}
-                          onChange={(event) => setUsePknDiscount(event.target.checked)}
+                          onChange={(event) => {
+                            setUsePknDiscount(event.target.checked);
+                            writePknDiscount(event.target.checked);
+                          }}
                         />
                         {' '}Use my PKN balance as a discount
                       </label>

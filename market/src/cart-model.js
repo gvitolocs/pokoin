@@ -104,7 +104,7 @@ export const PARCEL_ROOM_MAX = 200;
  * service (a few cards go as the untracked letter) and how many more cards
  * ride in the same parcel before that service's price changes.
  */
-export function parcelEstimate({ from, to, cards } = {}) {
+export function parcelEstimate({ from, to, cards, serviceId: preferredId } = {}) {
   const n = Math.max(0, Math.trunc(Number(cards) || 0));
   const fromCode = String(from || '').trim().toUpperCase();
   const toCode = String(to || '').trim().toUpperCase();
@@ -112,7 +112,8 @@ export function parcelEstimate({ from, to, cards } = {}) {
   const options = shippingServiceOptions({ fromCountry: fromCode, toCountry: toCode, cardCount: n })
     .filter((row) => !row.unavailable);
   if (!options.length) return null;
-  const serviceId = defaultShippingService(options);
+  const preferred = options.find((row) => row.id === preferredId);
+  const serviceId = preferred ? preferred.id : defaultShippingService(options);
   const picked = options.find((row) => row.id === serviceId) || options[0];
   const tracked = picked.tracked !== false;
   let room = 0;
@@ -134,13 +135,18 @@ export function parcelEstimate({ from, to, cards } = {}) {
 }
 
 /** Shipping preview for the ticked rows: one parcel per seller. */
-export function shippingEstimate(groups = [], to = '') {
+export function shippingEstimate(groups = [], to = '', serviceId = '') {
   const parcels = [];
   let cents = 0;
   let missing = 0;
   for (const group of groups || []) {
     if (!group.selectedCount) continue;
-    const estimate = parcelEstimate({ from: group.sellerCountry, to, cards: group.selectedCount });
+    const estimate = parcelEstimate({
+      from: group.sellerCountry,
+      to,
+      cards: group.selectedCount,
+      serviceId,
+    });
     parcels.push({ key: group.key, estimate });
     if (estimate) cents += estimate.amountCents;
     else missing += 1;
@@ -152,11 +158,16 @@ export function shippingEstimate(groups = [], to = '') {
  * Pokoin's "Add €30.21 to qualify for FREE Delivery": the ticked parcel with
  * the dearest shipping that still has room for more cards at the same price.
  */
-export function parcelNudge(groups = [], to = '') {
+export function parcelNudge(groups = [], to = '', serviceId = '') {
   let best = null;
   for (const group of groups || []) {
     if (!group.selectedCount) continue;
-    const estimate = parcelEstimate({ from: group.sellerCountry, to, cards: group.selectedCount });
+    const estimate = parcelEstimate({
+      from: group.sellerCountry,
+      to,
+      cards: group.selectedCount,
+      serviceId,
+    });
     if (!estimate || estimate.room < 1) continue;
     if (!best || estimate.amountCents > best.estimate.amountCents) {
       best = { group, estimate };
