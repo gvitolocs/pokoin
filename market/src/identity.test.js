@@ -168,6 +168,19 @@ test('One Piece and Riftbound keep their game prefix and collector', () => {
   );
 });
 
+test('Riftbound Vinted selects the Riftbound brand and leaves the game name out of the query', () => {
+  const url = new URL(vintedSearchUrl({
+    name: 'Ahri',
+    number: '001',
+  }, 'riftbound', 'DK'));
+  assert.equal(url.hostname, 'www.vinted.dk');
+  assert.equal(url.searchParams.get('search_text'), 'Ahri 001');
+  assert.equal(url.searchParams.get('brand_ids[]'), '29810327');
+  assert.equal(url.search.toLowerCase().includes('riftbound'), false);
+  assert.equal(url.search.includes('search_id'), false);
+  assert.equal(url.search.includes('time='), false);
+});
+
 test('leftover ct_id is not a collector number', () => {
   const identity = printingIdentity({
     id: '281978',
