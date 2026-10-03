@@ -2,7 +2,7 @@
  * Pokoin overlay (server/pokoin-api) — replaces the legacy CardVault
  * api/marketplace-image-log.js copy on the Pi release. Change from the
  * legacy copy: the per-process hitsByIp Map (unbounded, per-instance) is now
- * the shared best-effort limiter (Valkey counter, bounded local fallback).
+ * the shared best-effort limiter (Redis counter, bounded local fallback).
  */
 const { limitBestEffort } = require('./_rate_limit');
 const {

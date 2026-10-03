@@ -1,11 +1,13 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const valkey = require('./_valkey');
+const redisCache = require('./_redis_cache');
+const { marketplaceKey, generationKey } = require('./_redis_ns');
 const { timed } = require('./_request_timing');
 
 const CARD_TTL_SEC = Number(process.env.POKOIN_CARD_CACHE_TTL || 20);
 const SEARCH_TTL_SEC = Number(process.env.POKOIN_SEARCH_CACHE_TTL || 20);
+const HOME_TTL_SEC = Number(process.env.POKOIN_HOME_CACHE_TTL || 20);
 const flights = new Map();
 
 function cacheEnabled() {
@@ -26,15 +28,15 @@ function cardPageKey({
   if (liveOffers) return '';
   const id = String(cardId || '').trim();
   if (!id) return '';
-  return [
-    'card-page:v1',
+  return marketplaceKey(
+    'card',
     String(game || 'pokemon'),
     id,
     String(lang || 'en').toLowerCase(),
     includeOffers ? 'offers' : 'nooffers',
     includeSales ? 'sales' : 'nosales',
     includeSameAs ? 'same' : 'nosame',
-  ].join(':');
+  );
 }
 
 function searchPageKey({
@@ -53,20 +55,27 @@ function searchPageKey({
   if (text.length < 2 || text.length > 48) return '';
   if (start !== 0 || capped < 1 || capped > 48) return '';
   const digest = crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
-  return [
-    'search-page:v1',
+  return marketplaceKey(
+    'search',
     String(game || 'pokemon'),
     String(lang || 'en').toLowerCase(),
-    String(productType || ''),
+    String(productType || 'any'),
     String(printLanguage || 'all'),
     productSearchOnly ? 'products' : 'mixed',
     String(capped),
     digest,
-  ].join(':');
+  );
+}
+
+function homeSnapshotKey(game = 'pokemon') {
+  const id = String(game || 'pokemon');
+  return id === 'pokemon'
+    ? marketplaceKey('home', 'react')
+    : marketplaceKey('home', 'react', 'game', id);
 }
 
 async function generation(scope) {
-  const raw = await timed('valkeyMs', () => valkey.command(['GET', `gen:v1:${scope}`]));
+  const raw = await timed('redisCacheMs', () => redisCache.command(['GET', generationKey(scope)]));
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? String(n) : '0';
 }
@@ -74,19 +83,28 @@ async function generation(scope) {
 async function readAssembled(key, scope) {
   if (!cacheEnabled() || !key) return null;
   const gen = await generation(scope);
-  const hit = await timed('valkeyMs', () => valkey.getJson(`${key}:g${gen}`));
+  const hit = await timed('redisCacheMs', () => redisCache.getJson(`${key}:g${gen}`));
   return hit && typeof hit === 'object' ? hit : null;
 }
 
 async function writeAssembled(key, scope, payload, ttlSeconds) {
   if (!cacheEnabled() || !key || payload == null) return false;
   const gen = await generation(scope);
-  return timed('valkeyMs', () => valkey.setJson(`${key}:g${gen}`, payload, ttlSeconds));
+  return timed('redisCacheMs', () => redisCache.setJson(`${key}:g${gen}`, payload, ttlSeconds));
 }
 
 async function bumpGeneration(scope) {
   if (!cacheEnabled() || !scope) return null;
-  return timed('valkeyMs', () => valkey.command(['INCR', `gen:v1:${scope}`]));
+  return timed('redisCacheMs', () => redisCache.command(['INCR', generationKey(scope)]));
+}
+
+async function invalidateHome(game = 'pokemon') {
+  if (!cacheEnabled()) return null;
+  const scope = `home:${game || 'pokemon'}`;
+  await bumpGeneration(scope);
+  // Also drop the legacy TTL key used before gen-scoped home caching.
+  await timed('redisCacheMs', () => redisCache.del(homeSnapshotKey(game)));
+  return true;
 }
 
 function beginFlight(key) {
@@ -131,7 +149,7 @@ async function loadCardPage(keyParts, load) {
   const scope = `card:${keyParts.game || 'pokemon'}:${keyParts.cardId}`;
   return coalesce(key || `miss:${keyParts.cardId}`, async () => {
     const cached = await readAssembled(key, scope);
-    if (cached) return { payload: cached, source: 'valkey' };
+    if (cached) return { payload: cached, source: 'redis' };
     const payload = await load();
     if (payload) await writeAssembled(key, scope, payload, CARD_TTL_SEC);
     return { payload, source: 'postgres' };
@@ -143,7 +161,7 @@ async function loadSearchPage(keyParts, load) {
   const scope = `search:${keyParts.game || 'pokemon'}`;
   return coalesce(key || `search-miss:${keyParts.query}`, async () => {
     const cached = await readAssembled(key, scope);
-    if (cached) return { payload: cached, source: 'valkey' };
+    if (cached) return { payload: cached, source: 'redis' };
     const payload = await load();
     if (payload) await writeAssembled(key, scope, payload, SEARCH_TTL_SEC);
     return { payload, source: 'postgres' };
@@ -159,13 +177,20 @@ async function invalidateSearch(game) {
 }
 
 module.exports = {
+  CARD_TTL_SEC,
+  SEARCH_TTL_SEC,
+  HOME_TTL_SEC,
   cardPageKey,
   searchPageKey,
+  homeSnapshotKey,
   loadCardPage,
   loadSearchPage,
   beginFlight,
+  coalesce,
   invalidateCard,
   invalidateSearch,
+  invalidateHome,
+  bumpGeneration,
   cacheEnabled,
   _test: { flights },
 };

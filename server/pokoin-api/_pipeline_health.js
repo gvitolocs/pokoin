@@ -159,13 +159,26 @@ async function readiness() {
   const ok = Object.entries(required).every(
     ([name, row]) => skip.has(name) || (row && row.ok),
   );
+  let cache = null;
+  try {
+    cache = require('./_redis_cache').redisCacheStats();
+  } catch (_) {
+    cache = null;
+  }
+  const target = redisTarget();
   return {
     ok,
     ready: ok,
     service: apiServiceName(),
     checks: {
       postgres: { ...postgres, role: 'required' },
-      redis: { ...redis, role: 'required' },
+      redis: {
+        ...redis,
+        role: 'required',
+        host: target.host,
+        port: target.port,
+        cache,
+      },
       cdn: { ...cdn, role: 'degraded' },
     },
     retired: ['meili', 'valkey'],

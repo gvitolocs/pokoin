@@ -1049,7 +1049,7 @@ every 15 min  refresh-listing-weights.py
 
 every 5 min  sync-marketplace-rails.py
   SQL tiles + PKN + live CT overlay for new sets
-  Valkey `pkn:ct:{blueprint}` TTL 6h (misses 5 min)
+  Redis `pkn:ct:{blueprint}` TTL 6h (misses 5 min)
   → marketplace_rails / marketplace_card_tiles on nezopt 15T (Pi replica streams)
 
 Worker GET /api/marketplace-home  (pokoin-origin)
@@ -1064,15 +1064,23 @@ SPA Home.jsx
 
 On **pokoin.com**, `GET /api/marketplace-home` is the Worker vector (1 day).
 The Flutter app still calls **api.pokoin.com** `GET /api/marketplace-home`
-(Valkey 30s, ~170 KB). The SPA must not use that payload. First paint:
-[HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md).
+(Redis snapshot, short TTL, ~170 KB). The SPA must not use that payload. First
+paint: [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md).
 Pi `GET /api/marketplace-home-page` remains the fallback if the Worker is
 skipped; that handler prefers `marketplace_rails` then newest/hot SQL.
 
-**Valkey, not Redis.** Honcho on nezopt and Nextcloud’s cache image are
-`valkey/valkey`. Marketplace Valkey runs on the **Pi** with Meili and the API.
-Do **not** put Valkey or Redis on `pokoin-peer1`. Pi `marketplace_rails` is
-the SPA source of truth.
+**Redis on the Pi (not Valkey).** Marketplace cache and Redis Search share
+`pokoin-redis` on the **Pi** (`127.0.0.1:6380`, `scripts/install-pokoin-redis.sh`).
+Canonical client: `server/pokoin-api/_redis_cache.js` (`REDIS_HOST`/`REDIS_PORT`;
+`VALKEY_*` is a temporary fallback). Namespaces:
+`pokoin:card:*` (search docs), `pokoin:marketplace:v1:*` (home/card/search/
+seller-shop/CT-live/gen), `pokoin:seller:v1:*` (public profile),
+`pokoin:rl:v1:*`, `pokoin:lock:v1:*`, `pokoin:reference:v1:*`. Listing mutations
+invalidate immediately via `_marketplace_cache_invalidate.js` (plus outbox
+sync). Eviction: `volatile-lru` / `maxmemory 1400mb` so search docs without TTL
+are not evicted. Valkey is retired (`retired: ['meili', 'valkey']` in readiness).
+Do **not** put Redis on `pokoin-peer1`. Pi `marketplace_rails` is the SPA source
+of truth.
 
 **Card images:** public URLs stay `https://cdn.pokoin.com/…` (set by
 `POKOIN_CARD_CDN_BASE_URL` at import). Catalog leftover JPEGs live on the
@@ -1090,7 +1098,7 @@ from leftover trees already on nezopt (`scripts/sync-pi-card-images-replica.sh`)
 Pi delta uses LAN `rsync://192.168.178.46/card-images/` — not SSH. Crop with
 `scripts/export-leftover-artcut.py`. Version CLIP runs on the RX 7900 XTX.
 
-Install: `scripts/install-marketplace-valkey.sh` then
+Install: `scripts/install-pokoin-redis.sh` then
 `scripts/install-listing-pipeline.sh`.
 
 ```

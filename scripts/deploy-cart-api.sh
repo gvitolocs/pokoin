@@ -30,6 +30,7 @@ CART_FILES=(
   _recommend.js
   _seller_profile_cache.js
   _rate_limit.js
+  _redis_cache.js
   _valkey.js
 )
 

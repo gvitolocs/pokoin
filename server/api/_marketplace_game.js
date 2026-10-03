@@ -146,12 +146,21 @@ function runWithGame(game, fn) {
   return gameStore.run(normalizeGame(game), fn);
 }
 
-function valkeyKey(base) {
+function redisCacheKey(base) {
+  const { marketplaceKey } = require('../pokoin-api/_redis_ns');
   const game = currentGame();
+  const logical = String(base || '');
   if (game === 'pokemon') {
-    return String(base || '');
+    return logical.startsWith('pokoin:') ? logical : marketplaceKey(logical);
   }
-  return `game:${game}:${base}`;
+  return logical.startsWith('pokoin:')
+    ? logical
+    : marketplaceKey('game', game, logical);
+}
+
+/** @deprecated use redisCacheKey */
+function valkeyKey(base) {
+  return redisCacheKey(base);
 }
 
 function deriveDatabaseUrlFromMarketplace(pathname) {
@@ -194,6 +203,7 @@ module.exports = {
   parseGameFromHost,
   parseGameFromRequest,
   runWithGame,
+  redisCacheKey,
   valkeyKey,
   databaseUrlForGame,
 };

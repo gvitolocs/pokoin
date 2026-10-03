@@ -26,6 +26,7 @@ FILES=(
   marketplace-seller-settings.js
   marketplace-seller-settings.test.js
   _seller_profile_cache.js
+  _redis_cache.js
   _valkey.js
   _seller_pkn_policy.js
   _seller_pkn_policy.test.js
@@ -78,7 +79,7 @@ ADDRESS_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
 for file in account-addresses.js marketplace-checkout-quote.js marketplace-seller-settings.js \
   stripe-connect-onboard.js create-order-checkout-session.js stripe-webhook.js marketplace-orders.js \
   _eur_order_inventory.js _native_sales.js _order_refund.js eur-orders-sweep.js marketplace-native-sales.js \
-  _seller_profile_cache.js _valkey.js; do
+  _seller_profile_cache.js _redis_cache.js _valkey.js; do
   node --check "$SRC/$file"
 done
 

@@ -37,7 +37,7 @@ env = json.loads(raw)[0]['Config']['Env']
 keep = {
   'MEILI_HOST','MEILISEARCH_HOST','MEILI_API_KEY','MEILISEARCH_API_KEY',
   'MEILI_MARKETPLACE_INDEX','MARKETPLACE_SEARCH_ENGINE','SEARCH_ENGINE',
-  'MARKETPLACE_DATABASE_URL','VALKEY_HOST','VALKEY_PORT','VALKEY_URL','REDIS_URL',
+  'MARKETPLACE_DATABASE_URL','REDIS_HOST','REDIS_PORT','REDIS_URL','POKOIN_REDIS_PORT','VALKEY_HOST','VALKEY_PORT',
 }
 lines = [item for item in env if item.split('=',1)[0] in keep]
 open('/srv/pokoin/rust/pokoin-api.env','w').write('\n'.join(lines)+'\n')

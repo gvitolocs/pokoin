@@ -11,7 +11,7 @@ const PKN_USDT_REFERENCE_PRICE = 0.005;
 const CARDTRADER_MARKUP_PKN = 0; // market reference PKN matches dump (EUR/0.005); no shipping pad
 const CARDTRADER_MARKETPLACE_PRODUCTS_PATH = '/api/v2/marketplace/products';
 const MAX_EXPLICIT_LIMIT = 1000;
-// L1 (this process) and L2 (shared Valkey `ct:live:*`) MUST use one TTL so
+// L1 (this process) and L2 (shared Redis `pokoin:marketplace:v1:ct:live:*`) MUST use one TTL so
 // the layers never disagree about freshness.
 const CACHE_TTL_MS = 60_000;
 const CACHE_TTL_SEC = CACHE_TTL_MS / 1000;
@@ -561,13 +561,14 @@ function pruneCache(nowMs) {
   }
 }
 
-/** L2 shared cache (Valkey). Injectable for tests; fail-open via _valkey. */
+/** L2 shared cache (Redis). Injectable for tests; fail-open via _redis_cache. */
 function defaultSharedCache() {
-  return require('./_valkey');
+  return require('./_redis_cache');
 }
 
 function sharedCacheKeyFor(cacheKey) {
-  return `ct:live:${cacheKey}`;
+  const { marketplaceKey } = require('./_redis_ns');
+  return marketplaceKey('ct', 'live', cacheKey);
 }
 
 function hitPayload(cached, nowMs) {

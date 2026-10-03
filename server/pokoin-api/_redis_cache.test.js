@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const net = require('node:net');
 const test = require('node:test');
-const valkey = require('./_valkey');
+const redisCache = require('./_redis_cache');
 
 function listen(onSocket) {
   return new Promise((resolve) => {
@@ -21,7 +21,7 @@ test('one socket pipelines commands and a refused server fails open', async () =
     socket.on('data', (chunk) => {
       buf = Buffer.concat([buf, chunk]);
       while (buf.length) {
-        const parsed = valkey._test.parseOne(buf);
+        const parsed = redisCache._test.parseOne(buf);
         if (!parsed) return;
         buf = buf.slice(parsed.used);
         seen.push(parsed.value);
@@ -30,24 +30,30 @@ test('one socket pipelines commands and a refused server fails open', async () =
     });
   });
   const { port } = server.address();
-  valkey.configure({ host: '127.0.0.1', port, timeoutMs: 200 });
+  redisCache.configure({ host: '127.0.0.1', port, timeoutMs: 200 });
   try {
     const [first, second] = await Promise.all([
-      valkey.command(['GET', 'a']),
-      valkey.command(['GET', 'b']),
+      redisCache.command(['GET', 'a']),
+      redisCache.command(['GET', 'b']),
     ]);
     assert.equal(first, 'bar');
     assert.equal(second, 'bar');
     assert.equal(seen.length, 2);
     assert.equal(sockets, 1);
     const closedPort = port;
-    valkey._test.resetConnection();
+    redisCache._test.resetConnection();
     await new Promise((resolve) => server.close(resolve));
-    valkey.configure({ host: '127.0.0.1', port: closedPort, timeoutMs: 200 });
-    const missed = await valkey.getJson('card-page:missing');
+    redisCache.configure({ host: '127.0.0.1', port: closedPort, timeoutMs: 200 });
+    const missed = await redisCache.getJson('card-page:missing');
     assert.equal(missed, null);
   } finally {
-    valkey._test.resetConnection();
+    redisCache._test.resetConnection();
     server.close();
   }
+});
+
+test('legacy _valkey shim re-exports the Redis cache client', () => {
+  const shim = require('./_valkey');
+  assert.equal(shim, redisCache);
+  assert.equal(typeof shim.redisCacheStats, 'function');
 });

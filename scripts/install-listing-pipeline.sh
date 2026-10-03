@@ -23,14 +23,14 @@ scp $SSH_OPTS \
     "$ROOT/scripts/refresh-listing-weights.py" \
     "$ROOT/scripts/listing-weights.service" \
     "$ROOT/scripts/listing-weights.timer" \
-    "$ROOT/scripts/valkey_cache.py" \
+    "$ROOT/scripts/redis_cache.py" \
     "$HOST:/tmp/"
 
 ssh $SSH_OPTS "$HOST" "set -euo pipefail
 POSTGRES='$POSTGRES'
 install -d -m 0755 /srv/pokoin/scripts /srv/pokoin/schema
 install -m 0755 /tmp/refresh-listing-weights.py /srv/pokoin/scripts/refresh-listing-weights.py
-install -m 0644 /tmp/valkey_cache.py /srv/pokoin/scripts/valkey_cache.py
+install -m 0644 /tmp/redis_cache.py /srv/pokoin/scripts/redis_cache.py
 install -m 0644 /tmp/listing-weights.service /etc/systemd/system/listing-weights.service
 install -m 0644 /tmp/listing-weights.timer /etc/systemd/system/listing-weights.timer
 install -m 0644 /tmp/cardtrader-population.sql /srv/pokoin/schema/cardtrader-population.sql

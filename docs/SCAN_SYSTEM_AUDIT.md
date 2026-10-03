@@ -44,7 +44,7 @@ cardscan.pokoin.com/identify ──▶ nezopt battlescan-fast (YOLO + Milo, one 
 | API router | CardVault `server/oracle-api-server.js`, routes in `server/api-route-manifest.js`, families `server/api-route-families.js` | `/api/foo` → `api/foo.js`, Vercel-style `(req, res)`. New handlers must be registered in the manifest. Body is buffered and JSON-parsed unless the file is in `RAW_BODY_ROUTE_FILES`. After the handler resolves the server calls `res.end()` — a streaming handler must not resolve until the client disconnects. |
 | Auth | Firebase ID token, `verifyBearerToken` (CardVault `api/_firebase.js`); SPA `getBearer()` (`market/src/auth.jsx`) | Desktop calls reuse it. The phone has **no** Firebase session by design. |
 | DB split | `marketplaceQuery` (replica) vs `marketplaceWriteQuery` (primary) in CardVault `api/_marketplace_db.js` | Scan state must be **read from the writer** — replica lag would make a just-scanned card invisible to its own stream. |
-| Valkey | CardVault `api/_valkey.js` | One TCP connection per command, 400 ms timeout, **returns `null` on any error**. Fine for caches, wrong for security counters (fails open). No pub/sub client. |
+| Redis cache | `server/pokoin-api/_redis_cache.js` (Pi `:6380`) | Pipelined TCP, short timeout, **returns `null` on any error**. Fine for caches, wrong for security counters (fails open). Valkey retired. |
 | CORS | Per handler (`auth-login.js`, `cardtrader-live-listings.js`, …); none global | Phone origin `scan.pokoin.com` calls `api.pokoin.com` directly → scan handlers set their own allowlist. |
 
 ## 2. Catalog identity (do not add a second version system)

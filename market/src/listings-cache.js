@@ -3,7 +3,8 @@
  *
  * Seller first-page keys (`handle::l100::…`) also mirror into sessionStorage so
  * a hard reload / chat → profile navigation can seed without waiting on SQL.
- * Redis/Valkey on the API only caches seller *profile* fields, not the shop. */
+ * Pi Redis also caches unfiltered seller-shop browse pages; this module is
+ * the browser L1 (memory + sessionStorage) in front of that API cache. */
 
 const listingsCache = new Map();
 const listingsInflight = new Map();

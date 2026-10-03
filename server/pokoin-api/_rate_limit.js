@@ -6,8 +6,8 @@
  * accident on a money or security path.
  *
  * - limitBestEffort: comfort throttling for expensive-but-harmless routes
- *   (chat, assistants, image logging, AI classification). Atomic Valkey
- *   counter shared by every API instance (Pi + k3s overflow pods). If Valkey
+ *   (chat, assistants, image logging, AI classification). Atomic Redis
+ *   counter shared by every API instance (Pi + k3s overflow pods). If Redis
  *   is unavailable it degrades to a bounded in-process fixed window on the
  *   local instance — availability over precision. FAIL-OPEN by design.
  *
@@ -18,14 +18,15 @@
  *   rejected, because a per-instance memory limit would silently multiply
  *   across overflow pods and an unavailable store must not look like consent.
  *
- * Keys: rl:{scope}:{sha256(identity)[0:32]} — identities (IP, uid) are hashed
- * so raw credentials/PII never appear in Valkey keys or Postgres buckets.
- * Values: fixed-window counters; the window restarts from the first hit.
+ * Keys: pokoin:rl:v1:{scope}:{sha256(identity)[0:32]} — identities (IP, uid)
+ * are hashed so raw credentials/PII never appear in Redis keys or Postgres
+ * buckets. Values: fixed-window counters; the window restarts from the first hit.
  */
 
 const crypto = require('node:crypto');
 
-const valkey = require('./_valkey');
+const redisCache = require('./_redis_cache');
+const { rateLimitKey } = require('./_redis_ns');
 
 /** Bound on the local fallback table: ~10k identities × small objects. */
 const LOCAL_MAX_IDENTITIES = 10_000;
@@ -42,7 +43,7 @@ function identityHash(identity) {
 }
 
 function rateLimitBucket(scope, identity) {
-  return `rl:${cleanScope(scope)}:${identityHash(identity)}`;
+  return rateLimitKey(cleanScope(scope), identityHash(identity));
 }
 
 /** Sampled rejection log: one line per scope/backend per interval, no identity. */
@@ -83,17 +84,17 @@ function localConsume(bucket, limit, windowSeconds) {
 
 /**
  * Best-effort limit. Resolves { allowed, backend, count, retryAfterSec } and
- * never throws: a Valkey outage is invisible to callers except in `backend`.
+ * never throws: a Redis outage is invisible to callers except in `backend`.
  */
 async function limitBestEffort({ scope, identity, limit, windowSeconds }) {
   const bucket = rateLimitBucket(scope, identity);
   const window = Math.max(1, Math.trunc(windowSeconds || 60));
   const max = Math.max(1, Math.trunc(limit));
-  const count = await valkey.incrWindow(bucket, window);
+  const count = await redisCache.incrWindow(bucket, window);
   if (count != null) {
     const allowed = count <= max;
-    if (!allowed) noteRejection(scope, 'valkey');
-    return { allowed, backend: 'valkey', count, retryAfterSec: allowed ? 0 : window };
+    if (!allowed) noteRejection(scope, 'redis');
+    return { allowed, backend: 'redis', count, retryAfterSec: allowed ? 0 : window };
   }
   const localCount = localConsume(bucket, max, window);
   const allowed = localCount <= max;

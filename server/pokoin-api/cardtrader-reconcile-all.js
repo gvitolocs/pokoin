@@ -55,7 +55,7 @@ async function reconcileAllConnectedSellers({
     const uid = String(integration.uid || '').trim();
     const row = { uid, webhookOk: false, syncOk: false };
     // Shared advisory lock: another instance reconciling this seller is a
-    // skip, not a failure. Valkey down degrades to no cross-instance guard.
+    // skip, not a failure. Redis down degrades to no cross-instance guard.
     const lock = await acquireLock(uid);
     if (!lock) {
       row.skipped = true;
