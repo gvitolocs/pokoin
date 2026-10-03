@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { fetchSellerShop } from '../api.js';
@@ -15,7 +15,7 @@ import {
   sellerCountryShort,
   sellerHandle,
 } from '../listing-meta.js';
-import { seedSellerListings } from '../seller-seed.js';
+import { seedSellerListings, sellerIdentitySeed } from '../seller-seed.js';
 import { game } from '../game.js';
 import { associateRoleLabel } from '../associate-roles.js';
 import Avatar from '../components/Avatar.jsx';
@@ -74,14 +74,18 @@ function sellerFromPayload(data, handle, sample) {
     .replace(/^@/, '');
   const rawName = String(row?.displayName || publicListingSellerName(sample, username || handle) || '')
     .trim();
-  const displayName = rawName && !rawName.includes('@') ? rawName : (username || handle);
+  const known = sellerIdentitySeed(handle);
+  const apiName = rawName && !rawName.includes('@') && rawName.toLowerCase() !== username.toLowerCase()
+    ? rawName
+    : '';
+  const displayName = apiName || known?.displayName || username || handle;
   const associateRow = row?.associate && typeof row.associate === 'object' ? row.associate : null;
   const associateRole = String(associateRow?.role || '').trim().toLowerCase();
   return {
-    uid: row?.uid || sample?.sellerUid || '',
+    uid: row?.uid || sample?.sellerUid || known?.uid || '',
     username,
     displayName,
-    photoUrl: safeAvatarUrl(row?.photoUrl),
+    photoUrl: safeAvatarUrl(row?.photoUrl) || known?.photoUrl || '',
     associate: associateRole ? { role: associateRole, displayName: String(associateRow.displayName || '').trim() } : null,
   };
 }
@@ -98,15 +102,18 @@ export default function Seller() {
     sort: 'price-asc',
     game: selectedGame,
   });
+  const known = sellerIdentitySeed(handle);
 
   const [listings, setListings] = useState(() => seeded?.listings ?? null);
   const [total, setTotal] = useState(() => seeded?.total ?? null);
   const [unique, setUnique] = useState(() => seeded?.unique ?? null);
-  const [seller, setSeller] = useState(() => seeded?.seller ?? {
+  const [seller, setSeller] = useState(() => seeded?.seller ?? known ?? {
     uid: '',
     username: handle,
     displayName: handle,
   });
+  const sellerUidRef = useRef(seeded?.seller?.uid || known?.uid || '');
+  const listingsRef = useRef(seeded?.listings ?? null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [condition, setCondition] = useState('');
@@ -118,7 +125,10 @@ export default function Seller() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(!seeded);
   const [book, setBook] = useState(null);
-  const [bookPhase, setBookPhase] = useState('loading');
+  const [bookPhase, setBookPhase] = useState('idle');
+  const [pageSettled, setPageSettled] = useState(() => Boolean(seeded));
+  listingsRef.current = listings;
+  if (seller.uid) sellerUidRef.current = seller.uid;
 
   useEffect(() => {
     setPage(1);
@@ -129,11 +139,11 @@ export default function Seller() {
   }, [seller.displayName, handle]);
 
   useEffect(() => {
-    if (!handle) return undefined;
+    if (!handle || !pageSettled) return undefined;
     let cancelled = false;
     setBook(null);
     setBookPhase('loading');
-    fetchSellerShop(handle, { book: true, game: selectedGame })
+    fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: sellerUidRef.current })
       .then((data) => {
         if (cancelled) return;
         if (!data?.book || !Array.isArray(data.listings)) {
@@ -150,7 +160,7 @@ export default function Seller() {
     return () => {
       cancelled = true;
     };
-  }, [handle, selectedGame]);
+  }, [handle, selectedGame, pageSettled]);
 
   useEffect(() => {
     if (!book?.seller?.uid) return undefined;
@@ -161,7 +171,7 @@ export default function Seller() {
           const next = String(stamp?.maxUpdatedAt || '');
           const prev = String(book.maxUpdatedAt || '');
           if (cancelled || !next || next === prev) return null;
-          return fetchSellerShop(handle, { book: true, game: selectedGame });
+          return fetchSellerShop(handle, { book: true, game: selectedGame, sellerUid: book.seller.uid });
         })
         .then((data) => {
           if (cancelled || !data?.book || !Array.isArray(data.listings)) return;
@@ -189,9 +199,13 @@ export default function Seller() {
     );
     // First page still comes from the small query. A filter click while the
     // full shop is downloading waits for that book instead of asking again.
-    if (!handle || book || (bookPhase === 'loading' && filtersNarrow)) return undefined;
+    if (!handle || book || (bookPhase === 'loading' && filtersNarrow)) {
+      if (handle) setPageSettled(true);
+      return undefined;
+    }
     let cancelled = false;
-    setLoading(true);
+    const warm = !filtersNarrow && listingsRef.current != null;
+    if (!warm) setLoading(true);
     const offset = (Math.max(1, page) - 1) * PAGE_SIZE;
     fetchSellerShop(handle, {
       limit: PAGE_SIZE,
@@ -204,6 +218,7 @@ export default function Seller() {
       firstEdition,
       sort,
       game: selectedGame,
+      sellerUid: sellerUidRef.current,
     })
       .then((data) => {
         if (cancelled) return;
@@ -220,9 +235,15 @@ export default function Seller() {
         );
         setError('');
         setLoading(false);
+        setPageSettled(true);
       })
       .catch((err) => {
         if (cancelled) return;
+        setPageSettled(true);
+        if (warm) {
+          setLoading(false);
+          return;
+        }
         setListings([]);
         setTotal(0);
         setUnique(0);

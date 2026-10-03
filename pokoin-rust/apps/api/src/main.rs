@@ -1,8 +1,11 @@
+mod search_page;
 mod suggest;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use tokio::sync::RwLock;
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -18,13 +21,14 @@ use sqlx::PgPool;
 #[derive(Clone)]
 struct AppState {
     config: Config,
-    db: Option<PgPool>,
+    db: Arc<RwLock<Option<PgPool>>>,
     http: reqwest::Client,
-    redis: Option<redis::aio::ConnectionManager>,
+    redis: Arc<RwLock<Option<redis::aio::ConnectionManager>>>,
     requests: Arc<AtomicU64>,
     meili_ms: Arc<AtomicU64>,
     sql_ms: Arc<AtomicU64>,
     errors: Arc<AtomicU64>,
+    booted: Instant,
 }
 
 #[tokio::main]
@@ -35,39 +39,45 @@ async fn main() -> anyhow::Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
+    let booted = Instant::now();
+    tracing::info!(phase = "process", elapsed_ms = 0, "startup");
     let config = Config::from_env();
-    let db = match config.database_url.clone() {
-        Some(url) => pokoin_db::pool(&url, config.db_pool_max).await.ok(),
-        None => None,
-    };
-    let redis = match config.valkey_url.as_deref() {
-        Some(url) => match redis::Client::open(url) {
-            Ok(client) => redis::aio::ConnectionManager::new(client).await.ok(),
-            Err(_) => None,
-        },
-        None => None,
-    };
+    tracing::info!(
+        phase = "config",
+        elapsed_ms = elapsed_ms(booted),
+        "startup"
+    );
     let state = AppState {
         config: config.clone(),
-        db,
+        db: Arc::new(RwLock::new(None)),
         http: reqwest::Client::builder()
             .timeout(Duration::from_millis(800))
             .build()?,
-        redis,
+        redis: Arc::new(RwLock::new(None)),
         requests: Arc::new(AtomicU64::new(0)),
         meili_ms: Arc::new(AtomicU64::new(0)),
         sql_ms: Arc::new(AtomicU64::new(0)),
         errors: Arc::new(AtomicU64::new(0)),
+        booted,
     };
+    let warm = state.clone();
+    tokio::spawn(async move {
+        warm_dependencies(warm).await;
+    });
     let app = Router::new()
-        .route("/health", get(health))
+        .route("/livez", get(livez))
+        .route("/readyz", get(readyz))
+        .route("/health", get(readyz))
         .route("/metrics", get(metrics))
         .route(
             "/api/marketplace-suggest",
             get(suggest::suggest).options(suggest::options),
         )
         .route("/api/marketplace-card-page", get(card_page))
-        .route("/api/marketplace-search-page", get(search_page))
+        .route(
+            "/api/marketplace-search-page",
+            get(search_page::search_page).options(search_page::options),
+        )
         .route(
             "/api/marketplace-listings",
             get(listings_probe).post(listings_write),
@@ -75,7 +85,12 @@ async fn main() -> anyhow::Result<()> {
         .layer(tower::limit::ConcurrencyLimitLayer::new(64))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;
-    tracing::info!(bind = %config.bind, "pokoin rust api listening");
+    tracing::info!(
+        phase = "bind",
+        bind = %config.bind,
+        elapsed_ms = elapsed_ms(booted),
+        "startup"
+    );
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let ctrl_c = tokio::signal::ctrl_c();
@@ -99,56 +114,119 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn health(State(state): State<AppState>) -> Json<Value> {
-    let db = match &state.db {
+fn elapsed_ms(booted: Instant) -> u64 {
+    booted.elapsed().as_millis() as u64
+}
+
+async fn warm_dependencies(state: AppState) {
+    loop {
+        if state.db.read().await.is_none() {
+            if let Some(url) = state.config.database_url.clone() {
+                match tokio::time::timeout(
+                    Duration::from_secs(2),
+                    pokoin_db::pool(&url, state.config.db_pool_max),
+                )
+                .await
+                {
+                    Ok(Ok(pool)) => {
+                        *state.db.write().await = Some(pool);
+                        tracing::info!(
+                            phase = "postgres",
+                            elapsed_ms = elapsed_ms(state.booted),
+                            "startup"
+                        );
+                    }
+                    Ok(Err(error)) => {
+                        tracing::warn!(phase = "postgres", %error, "startup");
+                    }
+                    Err(_) => {
+                        tracing::warn!(phase = "postgres", error = "timeout", "startup");
+                    }
+                }
+            }
+        }
+        if state.redis.read().await.is_none() {
+            if let Some(url) = state.config.valkey_url.clone() {
+                match tokio::time::timeout(Duration::from_secs(2), connect_redis(&url)).await {
+                    Ok(Ok(conn)) => {
+                        *state.redis.write().await = Some(conn);
+                        tracing::info!(
+                            phase = "redis",
+                            elapsed_ms = elapsed_ms(state.booted),
+                            "startup"
+                        );
+                    }
+                    Ok(Err(error)) => {
+                        tracing::warn!(phase = "redis", %error, "startup");
+                    }
+                    Err(_) => {
+                        tracing::warn!(phase = "redis", error = "timeout", "startup");
+                    }
+                }
+            }
+        }
+        let ready = state.db.read().await.is_some() && state.redis.read().await.is_some();
+        if ready {
+            tracing::info!(
+                phase = "ready",
+                elapsed_ms = elapsed_ms(state.booted),
+                "startup"
+            );
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+async fn connect_redis(url: &str) -> Result<redis::aio::ConnectionManager, redis::RedisError> {
+    let client = redis::Client::open(url)?;
+    let config = redis::aio::ConnectionManagerConfig::new()
+        .set_number_of_retries(1)
+        .set_connection_timeout(Duration::from_millis(500));
+    redis::aio::ConnectionManager::new_with_config(client, config).await
+}
+
+async fn livez() -> Json<Value> {
+    Json(json!({
+        "ok": true,
+        "live": true,
+        "service": "pokoin-rust",
+    }))
+}
+
+async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
+    let db = match state.db.read().await.clone() {
         Some(pool) => sqlx::query_scalar::<_, i32>("select 1")
-            .fetch_one(pool)
+            .fetch_one(&pool)
             .await
             .is_ok(),
         None => false,
     };
-    let valkey = match state.config.valkey_url.as_deref() {
-        Some(url) => ping_valkey(url).await,
+    let redis_ok = match state.redis.read().await.clone() {
+        Some(mut conn) => redis::cmd("PING")
+            .query_async::<String>(&mut conn)
+            .await
+            .map(|pong| pong.eq_ignore_ascii_case("PONG"))
+            .unwrap_or(false),
         None => false,
     };
-    let meili = match state.config.meili_url.as_deref() {
-        Some(url) => {
-            pokoin_integrations::meili_health(url, state.config.meili_key.as_deref()).await
-        }
-        None => false,
-    };
-    let search_ok = if state.config.search_engine == "redis" {
-        valkey
-    } else {
-        meili
-    };
-    Json(json!({
-        "ok": db && search_ok,
-        "service": "pokoin-rust",
-        "db": db,
-        "valkey": valkey,
-        "redis": valkey,
-        "meili": meili,
-        "search": state.config.search_engine,
-    }))
-}
-
-async fn ping_valkey(url: &str) -> bool {
-    let Ok(client) = redis::Client::open(url) else {
-        return false;
-    };
-    let Ok(mut conn) = client.get_multiplexed_async_connection().await else {
-        return false;
-    };
-    redis::cmd("PING")
-        .query_async::<String>(&mut conn)
-        .await
-        .map(|pong| pong.eq_ignore_ascii_case("PONG"))
-        .unwrap_or(false)
+    let ok = db && redis_ok;
+    (
+        if ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE },
+        Json(json!({
+            "ok": ok,
+            "ready": ok,
+            "service": "pokoin-rust",
+            "db": db,
+            "redis": redis_ok,
+            "search": state.config.search_engine,
+            "retired": ["meili", "valkey"],
+        })),
+    )
 }
 
 async fn metrics(State(state): State<AppState>) -> Json<Value> {
-    let (pool_size, idle) = match &state.db {
+    let (pool_size, idle) = match state.db.read().await.as_ref() {
         Some(pool) => (pool.size(), pool.num_idle() as u32),
         None => (0, 0),
     };
@@ -180,28 +258,6 @@ async fn card_page(Query(q): Query<CardQuery>) -> Json<Value> {
         "cacheKey": key,
         "source": "rust-miss",
     }))
-}
-
-#[derive(Deserialize)]
-struct SearchQuery {
-    q: Option<String>,
-    query: Option<String>,
-    limit: Option<i64>,
-}
-
-async fn search_page(Query(q): Query<SearchQuery>) -> Json<Value> {
-    let query = q.q.or(q.query).unwrap_or_default();
-    let key = pokoin_cache::search_page_key(
-        "pokemon",
-        &query,
-        "en",
-        q.limit.unwrap_or(24),
-        0,
-        "",
-        "all",
-        false,
-    );
-    Json(json!({ "query": query, "cards": [], "cacheKey": key, "source": "rust-miss" }))
 }
 
 async fn listings_probe() -> Json<Value> {

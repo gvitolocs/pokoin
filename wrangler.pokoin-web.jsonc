@@ -1,0 +1,15 @@
+{
+  "name": "pokoin-web",
+  "compatibility_date": "2026-10-03",
+  "workers_dev": true,
+  "account_id": "e2620981465c01b9bf805522507d963a",
+  "routes": [
+    { "pattern": "pokoin.com/*", "zone_name": "pokoin.com" },
+    { "pattern": "www.pokoin.com/*", "zone_name": "pokoin.com" }
+  ],
+  "assets": {
+    "directory": "./dist-web",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  }
+}

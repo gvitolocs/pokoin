@@ -50,8 +50,12 @@ function isApiPath(pathname) {
     pathname === '/'
     || pathname === '/marketplace'
     || pathname === '/healthz'
+    || pathname === '/livez'
+    || pathname === '/readyz'
     || pathname === '/api'
     || pathname === '/api/healthz'
+    || pathname === '/api/livez'
+    || pathname === '/api/readyz'
     || (pathname.startsWith('/api/') && pathname !== '/api/health')
   );
 }
@@ -582,9 +586,28 @@ function serveCacheable(req, res, key, pathname, search) {
   );
 }
 
+function browserCors(req) {
+  const requested = String(req.headers['access-control-request-headers'] || 'authorization,content-type,accept,x-pokoin-game,x-pokoin-host');
+  return {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS',
+    'access-control-allow-headers': requested,
+    'access-control-max-age': '86400',
+  };
+}
+
 function proxy(req, res) {
   const incoming = new URL(req.url || '/', 'http://127.0.0.1');
   const pathname = rewritePath(incoming.pathname);
+  if (isApiPath(pathname)) {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, browserCors(req));
+      res.end();
+      return;
+    }
+    const writeHead = res.writeHead.bind(res);
+    res.writeHead = (status, headers, ...rest) => writeHead(status, { ...(headers && typeof headers === 'object' && !Array.isArray(headers) ? headers : {}), ...browserCors(req) }, ...rest);
+  }
   const sitemap = sitemapFile(pathname);
   if (sitemap && (req.method === 'GET' || req.method === 'HEAD')) {
     sendSitemap(req, res, sitemap);

@@ -2,10 +2,9 @@
 
 const http = require('http');
 const https = require('https');
+const net = require('node:net');
 const { Client } = require('pg');
 const { marketplaceDatabaseUrl } = require('./_marketplace_db');
-const { command } = require('./_valkey');
-const { meiliConfigured, meiliHealth } = require('./_meili_client');
 const { sanitizeCheckError } = require('./_public_error');
 
 const TIMEOUT_MS = Number(process.env.PIPELINE_HEALTH_TIMEOUT_MS || 800);
@@ -79,25 +78,40 @@ async function probePostgres() {
   }
 }
 
-async function probeValkey() {
-  try {
-    const reply = await withTimeout(command(['PING']), 'valkey');
-    return reply === 'PONG' ? { ok: true } : { ok: false, error: reply == null ? 'econnrefused' : String(reply) };
-  } catch (error) {
-    return fail(error);
-  }
+function redisTarget() {
+  return {
+    host: process.env.REDIS_HOST || '127.0.0.1',
+    port: Number(process.env.REDIS_PORT || process.env.POKOIN_REDIS_PORT || 6380),
+  };
 }
 
-async function probeMeili() {
-  if (!meiliConfigured()) {
-    return { ok: false, error: 'not_configured' };
-  }
-  try {
-    const payload = await withTimeout(meiliHealth(), 'meili');
-    return { ok: String(payload?.status || '') === 'available' };
-  } catch (error) {
-    return fail(error);
-  }
+/** Dedicated PING. The shared cache socket pipelines other replies, so a
+ * health check on that socket can observe SET "OK" or a cached document. */
+function probeRedis() {
+  const { host, port } = redisTarget();
+  return new Promise((resolve) => {
+    let settled = false;
+    const socket = net.connect({ host, port });
+    const done = (row) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(row);
+    };
+    const timer = setTimeout(() => done({ ok: false, error: 'timeout' }), TIMEOUT_MS);
+    socket.once('error', (error) => done(fail(error)));
+    socket.once('connect', () => {
+      socket.write('*1\r\n$4\r\nPING\r\n');
+    });
+    let buf = '';
+    socket.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      if (!buf.includes('\n')) return;
+      const line = buf.split('\r\n', 1)[0];
+      done(line === '+PONG' ? { ok: true } : { ok: false, error: 'unexpected' });
+    });
+  });
 }
 
 function probeCdn() {
@@ -126,30 +140,49 @@ function probeCdn() {
   });
 }
 
-async function pipelineHealth() {
-  const [postgres, valkey, meili, cdn] = await Promise.all([
+function liveness() {
+  return {
+    ok: true,
+    live: true,
+    service: apiServiceName(),
+  };
+}
+
+async function readiness() {
+  const [postgres, redis, cdn] = await Promise.all([
     probePostgres(),
-    probeValkey(),
-    probeMeili(),
+    probeRedis(),
     probeCdn(),
   ]);
-  const checks = { postgres, valkey, meili, cdn };
   const skip = skippedHealthChecks();
-  const ok = Object.entries(checks).every(
+  const required = { postgres, redis };
+  const ok = Object.entries(required).every(
     ([name, row]) => skip.has(name) || (row && row.ok),
   );
   return {
     ok,
+    ready: ok,
     service: apiServiceName(),
-    checks,
+    checks: {
+      postgres: { ...postgres, role: 'required' },
+      redis: { ...redis, role: 'required' },
+      cdn: { ...cdn, role: 'degraded' },
+    },
+    retired: ['meili', 'valkey'],
   };
+}
+
+async function pipelineHealth() {
+  return readiness();
 }
 
 module.exports = {
   apiServiceName,
+  liveness,
+  readiness,
   pipelineHealth,
   probePostgres,
-  probeValkey,
-  probeMeili,
+  probeRedis,
   probeCdn,
+  redisTarget,
 };

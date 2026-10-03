@@ -72,3 +72,14 @@ export function suggestHoverBox({
     side,
   };
 }
+
+/** Same pixels must keep the previous object so a layout pass cannot setState forever. */
+export function sameSuggestHoverBox(prev, next) {
+  if (prev === next) return true;
+  if (!prev || !next) return false;
+  return prev.left === next.left
+    && prev.top === next.top
+    && prev.width === next.width
+    && prev.height === next.height
+    && prev.side === next.side;
+}

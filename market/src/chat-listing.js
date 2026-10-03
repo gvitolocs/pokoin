@@ -765,10 +765,38 @@ function invisibleDragImage() {
 function stopDragStack() {
   if (dragStackFrame) cancelAnimationFrame(dragStackFrame);
   dragStackFrame = 0;
+  if (dragStack?.style) dragStack.style.display = 'none';
   dragStack?.remove?.();
   dragStack = null;
   dragStackPos = [];
   document.removeEventListener('dragover', trackDragStack, true);
+}
+
+/** Chrome plays a snap-back after mouseup and holds dragend for about two
+ * seconds. Accepting the drag on the window makes mouseup a drop, so the
+ * pile is removed in that turn instead of waiting for the animation. */
+function armInstantDragRelease() {
+  if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+  const allow = (event) => {
+    if (!dragStack && !dragGhost) return;
+    event.preventDefault();
+  };
+  const release = (event) => {
+    if (event?.type === 'drop') event.preventDefault();
+    window.removeEventListener('dragover', allow, true);
+    window.removeEventListener('drop', release, true);
+    window.removeEventListener('dragend', release, true);
+    stopDragStack();
+    document.documentElement?.classList?.remove('is-card-dragging');
+    try {
+      window.dispatchEvent(new CustomEvent('pokoin-card-drag-end'));
+    } catch (_) {
+      /* jsdom */
+    }
+  };
+  window.addEventListener('dragover', allow, true);
+  window.addEventListener('drop', release, true);
+  window.addEventListener('dragend', release, true);
 }
 
 function trackDragStack(event) {
@@ -824,7 +852,7 @@ function mountDragStack(cards, event) {
   dragStackPos = rows.map(() => ({ x: event.clientX, y: event.clientY }));
   document.addEventListener('dragover', trackDragStack, true);
   dragStackFrame = requestAnimationFrame(tickDragStack);
-  window.addEventListener('dragend', stopDragStack, { once: true, capture: true });
+  armInstantDragRelease();
 }
 
 function paintDragGhost(image, fit = 'cover') {
@@ -949,6 +977,7 @@ export function writeListingDrag(event, reference) {
     /* the browser keeps its default ghost */
   }
   markCardDragging();
+  armInstantDragRelease();
 }
 
 export function readListingDrag(event) {

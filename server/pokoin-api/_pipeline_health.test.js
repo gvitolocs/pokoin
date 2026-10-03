@@ -9,7 +9,26 @@ const { EventEmitter } = require('node:events');
 
 const source = fs.readFileSync(path.join(__dirname, '_pipeline_health.js'), 'utf8');
 
-function loadProbe({ url, status = 200, error, stall = false } = {}) {
+function fakeRedis(reply) {
+  return {
+    connect() {
+      const socket = new EventEmitter();
+      socket.destroy = () => { socket.destroyed = true; };
+      socket.write = () => {
+        process.nextTick(() => {
+          if (reply instanceof Error) socket.emit('error', reply);
+          else socket.emit('data', Buffer.from(reply));
+        });
+      };
+      process.nextTick(() => {
+        if (!(reply instanceof Error)) socket.emit('connect');
+      });
+      return socket;
+    },
+  };
+}
+
+function loadProbe({ url, status = 200, error, stall = false, redisReply = '+PONG\r\n' } = {}) {
   const calls = [];
   function transport(protocol) {
     return { get(target, onResponse) {
@@ -35,16 +54,15 @@ function loadProbe({ url, status = 200, error, stall = false } = {}) {
     async query() { return { rows: [{ ok: 1 }] }; }
     async end() {}
   }
+  const env = { PIPELINE_HEALTH_TIMEOUT_MS: '20', MARKETPLACE_DATABASE_SSL: '0', REDIS_PORT: '6380' };
   const modules = {
     http: transport('http'),
     https: transport('https'),
     pg: { Client },
     './_marketplace_db': { marketplaceDatabaseUrl: () => 'postgres://localhost/catalog' },
-    './_valkey': { command: async () => 'PONG' },
-    './_meili_client': { meiliConfigured: () => true, meiliHealth: async () => ({ status: 'available' }) },
+    'node:net': fakeRedis(redisReply),
     './_public_error': { sanitizeCheckError: value => String(value).toLowerCase() },
   };
-  const env = { PIPELINE_HEALTH_TIMEOUT_MS: '20', MARKETPLACE_DATABASE_SSL: '0' };
   if (url) env.POKOIN_CDN_HEALTH_URL = url;
   const sandbox = {
     module: { exports: {} },
@@ -76,14 +94,17 @@ for (const protocol of ['http', 'https']) {
     assert.equal(calls[0].target, url);
   });
 
-  test(`${protocol} CDN non-success keeps pipeline health red`, async () => {
+  test(`${protocol} CDN non-success stays degraded and does not fail readiness`, async () => {
     const { helper } = loadProbe({ url, status: 503 });
-    const result = await helper.pipelineHealth();
-    assert.equal(result.ok, false);
+    const result = await helper.readiness();
+    assert.equal(result.ok, true);
+    assert.equal(result.checks.cdn.ok, false);
     assert.equal(result.checks.cdn.error, 'http_503');
-    for (const dependency of ['postgres', 'valkey', 'meili']) {
+    assert.equal(result.checks.cdn.role, 'degraded');
+    for (const dependency of ['postgres', 'redis']) {
       assert.equal(result.checks[dependency].ok, true);
     }
+    assert.equal(JSON.stringify(result.retired), JSON.stringify(['meili', 'valkey']));
   });
 
   test(`${protocol} CDN connection errors remain visible`, async () => {
@@ -102,13 +123,30 @@ for (const protocol of ['http', 'https']) {
   });
 }
 
-test('remote HTTPS CDN succeeds with all four pipeline checks active', async () => {
+test('redis health is a dedicated PING and does not publish another reply', async () => {
+  const stolen = '{"displayName":"RotationMotionTCG","username":"redshakkio"}';
+  const { helper } = loadProbe({ redisReply: `+OK\r\n${stolen}\r\n` });
+  const result = await helper.probeRedis();
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'unexpected');
+  assert.equal(JSON.stringify(result).includes('redshakkio'), false);
+  assert.equal(helper.redisTarget().port, 6380);
+});
+
+test('readiness requires postgres and redis; liveness does not probe them', async () => {
   const { helper } = loadProbe({ url: 'https://cdn.pokoin.com/health' });
+  const live = helper.liveness();
+  assert.equal(live.ok, true);
+  assert.equal(live.live, true);
+  assert.equal(live.checks, undefined);
   const result = await helper.pipelineHealth();
   assert.equal(result.ok, true);
-  for (const dependency of ['postgres', 'valkey', 'meili', 'cdn']) {
+  assert.equal(result.ready, true);
+  for (const dependency of ['postgres', 'redis', 'cdn']) {
     assert.equal(result.checks[dependency].ok, true);
   }
+  assert.equal(result.checks.meili, undefined);
+  assert.equal(result.checks.valkey, undefined);
 });
 
 test('overflow manifest probes the remote CDN without skipping a dependency', () => {

@@ -300,8 +300,17 @@ function fuzzyCandidates(comps, start, end) {
   if (start !== end || !comps[start]) {
     return [];
   }
-  return rankNames(comps[start], VOCAB_ROWS, { fill: 6 })
-    .filter((row) => row.distance <= maxDistance(comps[start].length) + 1e-9)
+  const span = comps[start];
+  return rankNames(span, VOCAB_ROWS, { fill: 6 })
+    .filter((row) => {
+      if (row.distance > maxDistance(span.length) + 1e-9) return false;
+      const kind = VOCAB_BY_COMPACT.get(row.compact)?.kind || 'name';
+      // A one-letter prefix is not an artist. `g` is distance 0 from GIDORA
+      // (prior 391) and used to hydrate that whole catalog while `gx` was
+      // still being typed.
+      if (kind !== 'name' && span.length < 3) return false;
+      return true;
+    })
     .slice(0, 3);
 }
 

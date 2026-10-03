@@ -211,6 +211,9 @@ test('holdings are the MyPokoin Collection tab; /collection and /nft redirect th
   // MyPokoin owns the page head and the sign-in gate.
   assert.doesNotMatch(collectionSrc, /PageHead|<Navigate/);
   assert.match(collectionSrc, /partitionHoldings|isNftHolding/);
+  assert.match(collectionSrc, /data-testid="collection-held"/);
+  assert.match(collectionSrc, /data-testid="collection-listed"/);
+  assert.match(collectionSrc, /fetchSellerListings/);
   assert.match(collectionSrc, /data-testid="collection-physical"|Physical/);
   assert.match(collectionSrc, /Request physical shipping \(NFT\)|canShip/);
   assert.match(collectionSrc, /fetchOwnedCollection/);

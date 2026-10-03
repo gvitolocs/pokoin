@@ -443,7 +443,19 @@ async function readSellerShopData(url, game) {
     return { fresh: true, maxUpdatedAt: await sellerActivityStamp(sellerUid) };
   }
 
-  const seller = await withGameContext('pokemon', () => sellerProfileForUsername(sellerUsername));
+  const hintedUid = cleanSellerUid(url.searchParams.get('sellerUid'));
+  // A personal chat already knows the account. Skip the Firestore username
+  // lookup so the first hundred listings are just the SQL page.
+  const seller = hintedUid
+    ? {
+      uid: hintedUid,
+      username: sellerUsername,
+      displayName: sellerUsername,
+      photoUrl: '',
+      acceptsPkn: true,
+    }
+    : await withGameContext('pokemon', () => sellerProfileForUsername(sellerUsername));
+  const fast = Boolean(hintedUid);
   const book = truthyFlag(url.searchParams.get('book'));
   const limit = book ? BOOK_MAX + 1 : cleanLimit(url.searchParams.get('limit'));
   const offset = book ? 0 : cleanOffset(url.searchParams.get('offset'));
@@ -552,7 +564,7 @@ async function readSellerShopData(url, game) {
         username: seller.username,
         displayName: seller.displayName || seller.username,
         photoUrl: publicPhotoUrl(seller.photoUrl),
-        associate: await associateBadgeForUid(seller.uid),
+        associate: fast ? null : await associateBadgeForUid(seller.uid),
         acceptsPkn: seller.acceptsPkn !== false,
       },
       listings,
@@ -597,7 +609,7 @@ async function readSellerShopData(url, game) {
       username: seller.username,
       displayName: seller.displayName || seller.username,
       photoUrl: publicPhotoUrl(seller.photoUrl),
-      associate: await associateBadgeForUid(seller.uid),
+      associate: fast ? null : await associateBadgeForUid(seller.uid),
       acceptsPkn: seller.acceptsPkn !== false,
     },
     listings: result.rows.map((row) => listingRow(row, seller)),

@@ -33,6 +33,8 @@ import {
   hasRivalMechanic,
 } from './suggest-rank.js';
 import REDDIT_TYPOS from './data/reddit-pokemon-typos.js';
+import { suggestKind } from './identity.js';
+import { paintCatalogGroups, rememberSuggestGroups, resetSuggestLive } from './suggest-live.js';
 
 const FIXTURE = [
   { display: 'Pikachu', prior: 321 },
@@ -1538,4 +1540,32 @@ test('latios ex 011 keeps the 011 printing ahead of number misses', () => {
   const ids = groups.flatMap((group) => group.printings.map((row) => row.id));
   assert.equal(ids[0], 'half', 'the typed collector number leads');
   assert.ok(ids.includes('exd'), 'number misses still fill behind the match');
+});
+
+test('a null printing does not throw while painting mimikyu gx', () => {
+  assert.equal(suggestKind(null), 'Singles');
+  const parsed = parseTypedQuery('mimikyu gx');
+  const groups = fillSuggestGroups([
+    {
+      name: 'Mimikyu GX',
+      printings: [
+        null,
+        { id: 'gx', name: 'Mimikyu GX', itemKind: 'single', productType: 'card', number: '149/214' },
+      ],
+    },
+  ], 20, 20, parsed, 'singles');
+  assert.deepEqual(groups.flatMap((group) => group.printings.map((row) => row.id)), ['gx']);
+  resetSuggestLive();
+  rememberSuggestGroups([
+    {
+      name: 'Mimikyu GX',
+      printings: [
+        null,
+        { id: 'gx', name: 'Mimikyu GX', itemKind: 'single', productType: 'card', number: '149/214', set: 'Lost Thunder' },
+      ],
+    },
+  ], { searchLang: 'en' });
+  const painted = paintCatalogGroups('mimikyu gx', { printLang: 'all', searchLang: 'en', kind: 'singles' });
+  assert.ok(painted.some((group) => (group.printings || []).some((row) => row.id === 'gx')));
+  assert.ok(painted.every((group) => (group.printings || []).every((row) => row && typeof row === 'object')));
 });

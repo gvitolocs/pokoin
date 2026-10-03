@@ -73,8 +73,11 @@ test('desk session tokens are accepted only from the framing extension', () => {
   assert.equal(isTrustedDeskSessionEvent({ origin: 'https://evil.example' }, win), false);
 });
 
-test('publicApiUrl uses api.pokoin.com inside the side-panel iframe', () => {
-  assert.equal(publicApiUrl('/api/marketplace-expansion-page?limit=500'), '/api/marketplace-expansion-page?limit=500');
+test('publicApiUrl always uses api.pokoin.com for API paths', () => {
+  assert.equal(
+    publicApiUrl('/api/marketplace-expansion-page?limit=500'),
+    'https://api.pokoin.com/api/marketplace-expansion-page?limit=500',
+  );
   assert.equal(
     publicApiUrl('/api/marketplace-expansion-page?limit=500', { credentialless: true }),
     'https://api.pokoin.com/api/marketplace-expansion-page?limit=500',

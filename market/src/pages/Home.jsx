@@ -165,9 +165,7 @@ export default function Home() {
       .catch((err) => {
         if (!cancelled) {
           if (isOriginDownError(err, err?.status, err?.message)) {
-            if (!framedByChromeExtension()) {
-              noteOriginDown();
-            }
+            setError('Marketplace home failed.');
             setRecentPending(false);
             return;
           }

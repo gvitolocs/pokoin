@@ -1,6 +1,8 @@
 #!/bin/bash
-# Repair Pi marketplace pipeline, then record /healthz.
-# Runs locally on pi-home via systemd timer (every 5 minutes).
+# Repair a down listener, then record livez/readyz.
+# A failed postgres, redis, or CDN check must not reboot the Pi.
+# Host reboot stays in pokoin-pi-ro-watch (USB root emergency_ro) and the
+# kernel watchdog. Meili and Valkey are retired.
 set -u
 LOG="${POKOIN_WATCHDOG_LOG:-/var/log/pokoin-watchdog.log}"
 # tmpfs so consecutive_fails still increments when USB root is emergency_ro.
@@ -98,6 +100,12 @@ if ! port_up 6380; then
   docker restart pokoin-redis 2>/dev/null || true
 fi
 
+if ! port_up 18082; then
+  repair "rust :18082 down"
+  systemctl reset-failed pokoin-rust-api.service 2>/dev/null || true
+  systemctl restart pokoin-rust-api.service 2>/dev/null || true
+fi
+
 if ! systemctl is-active --quiet cloudflared.service; then
   repair "cloudflared inactive"
   systemctl reset-failed cloudflared.service 2>/dev/null || true
@@ -111,43 +119,32 @@ if ! ssh_banner_ok; then
   systemctl restart ssh.service 2>/dev/null || systemctl restart sshd.service 2>/dev/null || true
 fi
 
-health="$(curl -sS --max-time 5 http://127.0.0.1:18080/healthz 2>/dev/null || echo '{"ok":false,"error":"healthz_unreachable"}')"
-log "healthz ${health}"
+live_code="$(curl -sS --max-time 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/livez 2>/dev/null || echo 000)"
+ready="$(curl -sS --max-time 5 http://127.0.0.1:18080/readyz 2>/dev/null || echo '{"ok":false,"error":"readyz_unreachable"}')"
+log "livez ${live_code} readyz ${ready}"
 
-health_ok=0
-if printf '%s' "$health" | python3 -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") else 1)' 2>/dev/null; then
-  health_ok=1
-fi
-
-if [ "$health_ok" -eq 0 ] && [ "$repaired" -eq 0 ]; then
-  repair "healthz not ok"
+if [ "$live_code" != "200" ]; then
+  repair "node livez ${live_code}"
   sleep 2
-  health="$(curl -sS --max-time 5 http://127.0.0.1:18080/healthz 2>/dev/null || echo '{"ok":false,"error":"healthz_unreachable"}')"
-  log "healthz-retry ${health}"
-  if printf '%s' "$health" | python3 -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") else 1)' 2>/dev/null; then
-    health_ok=1
-  fi
+  live_code="$(curl -sS --max-time 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/livez 2>/dev/null || echo 000)"
+  log "livez-retry ${live_code}"
 fi
 
-if [ "$health_ok" -eq 1 ]; then
+ready_ok=0
+if printf '%s' "$ready" | python3 -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") else 1)' 2>/dev/null; then
+  ready_ok=1
+fi
+
+if [ "$live_code" = "200" ] && [ "$ready_ok" -eq 1 ]; then
   echo 0 >"$FAIL_FILE"
   exit 0
 fi
 
-fails=$(( $(cat "$FAIL_FILE" 2>/dev/null || echo 0) + 1 ))
-echo "$fails" >"$FAIL_FILE"
-log "consecutive_fails ${fails}"
-
-# Three missed 5-minute checks (~15 min) → reboot once per hour.
-if [ "$fails" -ge 3 ]; then
-  now="$(date +%s)"
-  last="$(cat "$REBOOT_FILE" 2>/dev/null || echo 0)"
-  if [ $((now - last)) -gt 3600 ]; then
-    echo "$now" >"$REBOOT_FILE"
-    log "reboot after ${fails} failed healthz"
-    /sbin/reboot
-  else
-    log "reboot skipped; last reboot $((now - last))s ago"
-  fi
+if [ "$ready_ok" -eq 0 ]; then
+  log "degraded readyz; application dependencies do not reboot the host"
+fi
+if [ "$live_code" != "200" ]; then
+  log "node livez still ${live_code}; listener repair only, no host reboot"
+  exit 1
 fi
 exit 1

@@ -1,5 +1,5 @@
 [Unit]
-Description=Pokoin Pi pipeline watchdog (postgres, api, cdn, meili, valkey, tunnel)
+Description=Pokoin Pi pipeline watchdog (ports and process liveness; no host reboot)
 After=network-online.target
 Wants=network-online.target docker.service
 

@@ -1,6 +1,18 @@
 export const MAX_CHAT_PHOTOS = 4;
 export const MAX_LISTING_PHOTOS = 2;
 
+/** Screenshots arrive as clipboard items; some apps also put them in files. */
+export function imageFilesFromClipboard(clipboardData) {
+  const fromItems = [];
+  for (const item of clipboardData?.items || []) {
+    if (item.kind !== 'file' || !String(item.type || '').startsWith('image/')) continue;
+    const file = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
+    if (file) fromItems.push(file);
+  }
+  if (fromItems.length) return fromItems;
+  return [...(clipboardData?.files || [])].filter((file) => String(file?.type || '').startsWith('image/'));
+}
+
 export function photoFileToJpeg(file) {
   return new Promise((resolve, reject) => {
     const image = new Image();

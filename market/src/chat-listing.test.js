@@ -251,6 +251,44 @@ test('an artist cover drags as a warm pile of one, not a network ghost', () => {
   assert.match(String(kids[0].style?.cssText || ''), /width:240px/);
 });
 
+test('releasing a drag removes the pile in that drop, before dragend', () => {
+  let removed = false;
+  const listeners = {};
+  const { doc, root, kids } = pileDragDocument();
+  root.remove = () => { removed = true; };
+  root.style = {};
+  doc.documentElement = { classList: { add() {}, remove() {} } };
+  globalThis.document = doc;
+  globalThis.window = {
+    devicePixelRatio: 1,
+    addEventListener(type, fn, capture) {
+      listeners[`${type}:${capture ? 'c' : 'b'}`] = fn;
+    },
+    removeEventListener() {},
+    dispatchEvent() {},
+  };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  writeListingDrag({
+    clientX: 40,
+    clientY: 60,
+    currentTarget: { nodeType: 1, tagName: 'DIV', querySelector: () => null },
+    dataTransfer: { setData() {}, setDragImage() {} },
+  }, { cardName: 'Meowth', imageUrl: '/card.jpg', kind: 'card' });
+  assert.equal(root.className, 'drag-stack');
+  assert.equal(kids.length, 1);
+  const allow = listeners['dragover:c'];
+  const release = listeners['drop:c'];
+  assert.equal(typeof allow, 'function');
+  assert.equal(typeof release, 'function');
+  let prevented = false;
+  allow({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  release({ type: 'drop', preventDefault() {} });
+  assert.equal(removed, true);
+  assert.equal(root.style.display, 'none');
+});
+
 test('card drag imageUrl prefers the homepage derivative already on rails', () => {
   const row = cardReference({
     id: '9',

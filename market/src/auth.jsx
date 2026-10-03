@@ -23,12 +23,10 @@ import { safeAvatarUrl } from './avatar.js';
 export { sellerNameOf };
 
 /**
- * Hosts that proxy `/__/auth/*` to pokoin.firebaseapp.com (vercel.json), so the
- * Google account chooser says "Continue to pokoin.com" instead of the Firebase
- * domain. Each needs `https://<host>/__/auth/handler` on the Google OAuth client
- * and the host in Firebase Auth authorized domains.
+ * Sign-in stays on pokoin.firebaseapp.com. pokoin.com is static files and does
+ * not proxy /__/auth. The app origin remains an authorized Firebase domain.
  */
-const FIRST_PARTY_AUTH_HOSTS = new Set(['pokoin.com', 'dashboard.pokoin.com']);
+const FIRST_PARTY_AUTH_HOSTS = new Set();
 
 function firebaseAuthDomain() {
   const host = typeof window === 'undefined' ? '' : String(window.location.hostname || '').toLowerCase();

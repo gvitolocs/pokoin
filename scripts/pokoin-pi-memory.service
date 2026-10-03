@@ -1,0 +1,9 @@
+[Unit]
+Description=Sample Pokoin Pi memory attribution
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/pokoin-pi-memory.py
+Nice=10
+TimeoutStartSec=30

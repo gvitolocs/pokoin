@@ -97,6 +97,19 @@ test('paint tiers walk literal → alternate reading → single entity', () => {
   assert.equal(entityCount, 1);
 });
 
+test('a one-letter mechanic prefix does not bind an artist', () => {
+  const resolved = entitiesOf('mimikyu g');
+  assert.equal(resolved.best.entities.artist.length, 0);
+  assert.equal(resolved.hasArtist, false);
+  assert.equal(resolved.best.entities.name[0]?.display, 'Mimikyu');
+});
+
+test('mimikyu gx stays a name and does not bind an artist', () => {
+  const resolved = entitiesOf('mimikyu gx');
+  assert.equal(resolved.best.entities.artist.length, 0);
+  assert.equal(resolved.hasArtist, false);
+});
+
 test('serialization round-trips through the URL param', () => {
   const resolved = entitiesOf('pika yuka');
   const serialized = serializeResolution(resolved);

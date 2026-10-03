@@ -1920,6 +1920,7 @@ function printingId(row) {
 }
 
 function isStubPrinting(row = {}) {
+  if (!row || typeof row !== 'object') return false;
   return row.live === true || printingId(row).startsWith('live:');
 }
 
@@ -1933,6 +1934,9 @@ export function fillSuggestGroups(groups, limit = SUGGEST_RESULT_FLOOR, preferPe
   const mods = typedModifiers(parsed?.raw || parsed?.nameQuery || '').mods;
 
   function addPrinting(group, printing, relaxed = false) {
+    if (!printing || typeof printing !== 'object') {
+      return false;
+    }
     if (n >= cap) {
       return false;
     }

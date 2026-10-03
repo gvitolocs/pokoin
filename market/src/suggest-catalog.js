@@ -151,6 +151,18 @@ export function catalogIntent(query) {
   return result;
 }
 
+/** Tile responses put the illustrator on the envelope, not on each card. */
+export function cardsWithCatalogArtist(data) {
+  const illustrator = String(data?.artist?.illustrator || data?.artist?.name || '').trim();
+  const cards = data?.cards || [];
+  if (!illustrator) return cards;
+  return cards.map((card) => (
+    card?.artist || card?.illustrator
+      ? card
+      : { ...card, artist: illustrator, illustrator }
+  ));
+}
+
 export function groupsFromCards(cards) {
   const groups = [];
   const byName = new Map();

@@ -260,6 +260,7 @@ export function setAbbrev(setName) {
 }
 
 export function suggestKind(card = {}, groupName = '') {
+  if (!card || typeof card !== 'object') return 'Singles';
   const blob = `${card.itemKind || ''} ${card.productType || ''} ${card.item_kind || ''} ${card.product_type || ''}`.toLowerCase();
   if (/box|sealed|booster/.test(blob)) {
     return 'Box set';

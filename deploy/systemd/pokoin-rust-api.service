@@ -1,7 +1,6 @@
 [Unit]
 Description=Pokoin Rust marketplace API
-After=network-online.target
-Wants=network-online.target
+After=network.target
 
 [Service]
 Type=simple

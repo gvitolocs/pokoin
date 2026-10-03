@@ -15,6 +15,8 @@ import {
 } from './suggest-pool.js';
 import { compactQuery } from './suggest-rank.js';
 
+const EMPTY_GROUPS = [];
+
 /**
  * Keystroke paints from the pool already in memory. The network chunk for
  * this generation arrives later and may only merge if it is still current.
@@ -126,7 +128,7 @@ export function useProgressiveSuggest({
   }, [query, lang, printLang, kind, game, enabled, limit]);
 
   return {
-    groups: [],
+    groups: EMPTY_GROUPS,
     projected: false,
     pending,
     epoch,

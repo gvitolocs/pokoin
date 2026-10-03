@@ -1,9 +1,7 @@
 # Pokoin.com root landing — pipeline and files
 
 Static get.rarecandy-style page. Source of truth: this repo (`gvitolocs/pokoin`).
-This repo is the public web. Production host: Vercel project `web`
-(`prj_1x0bUwaSZPeMRU90jQL5Ak8WWnPX`). Live URL: `https://pokoin.com/`.
-Android/iOS CardVault is a separate app: [APP.md](APP.md).
+This repo is the public web. **As of 2026-10-03 the live host is a temporary Pi origin** (see [WEB_HOST.md](WEB_HOST.md) for the full host map). The target preview is Cloudflare Workers Static Assets project `pokoin-web` (not yet cut over). Android/iOS CardVault is a separate app: [APP.md](APP.md).
 
 Action map canvas (clicks, not files): [pokoin-react-action-map.canvas.tsx](/home/nez/.cursor/projects/home-nez-Projects-pokoin-web/canvases/pokoin-react-action-map.canvas.tsx). Landing-only hops: [landing-action-map.canvas.tsx](/home/nez/.cursor/projects/home-nez-Projects-pokoin-web/canvases/landing-action-map.canvas.tsx).
 
@@ -11,14 +9,29 @@ Action map canvas (clicks, not files): [pokoin-react-action-map.canvas.tsx](/hom
 
 ## Pipeline (edit → live)
 
+**Current temporary host (Pi):**
 ```
-pokoin-web/                 scripts/build-web.sh          Vercel project `web`
-index.html + home/  ──►     dist-web/                    pokoin.com/
+pokoin-web/                 scripts/build-web.sh          Pi: /srv/pokoin/web/current
+index.html + home/  ──►     dist-web/                    (release f3aef6a of origin/main)
 market/             ──►     dist-web/market/
-vercel.json                 GET /              = landing
-                            GET /marketplace*   = React market
-                            /api/*              = api.pokoin.com
+pokoin-web-origin.mjs       GET /              = landing
+                            GET /marketplace*   = React SPA
+                            /api/*              → 127.0.0.1:18079 (api.pokoin.com)
+                            /card-images/*      → 127.0.0.1:18081 (cdn.pokoin.com)
 ```
+
+**Target preview (Cloudflare Workers Static Assets, not yet live):**
+```
+pokoin-web/                 scripts/build-web.sh          pokoin-web (Workers Static Assets)
+index.html + home/  ──►     dist-web/                    preview: pokoin-web.vitologiuseppe17.workers.dev
+market/             ──►     dist-web/market/
+dist-web/_redirects         GET /              = landing (index.html copy)
+                            GET /marketplace*   = React SPA (/market/app.html)
+                            /api/*              = Worker proxy (run_worker_first)
+                            /card-images/*      = Worker proxy (run_worker_first)
+```
+
+See [WEB_HOST.md](WEB_HOST.md) for the complete host map including DNS, ingress, and rollback.
 
 Wallet, auth, `/extension/auth-bridge`, cart, checkout, forum, signal, scan,
 inventory, and docs are React on this host. Android/iOS stays on `https://app.pokoin.com`. Links:
@@ -49,21 +62,32 @@ Cursor’s browser on the Mac cannot use `127.0.0.1` on this host. Use Tailscale
 
 ### Step 2 — Build and deploy this repo
 
-Do **not** copy into CardVault for production. Do **not** run
-`deploy-pokoin-web.sh`. See [APP.md](APP.md).
+**Current (Pi temporary host):**
+The live files are the `f3aef6a` tree under `/srv/pokoin/web/current`. The system unit is `pokoin-web-origin.service` (user `nes`). There is no deploy script for that unit yet. Do **not** use the Vercel commands below for the current live site.
 
+**Target preview (Cloudflare Workers):**
+```bash
+scripts/build-web.sh
+node scripts/write-cloudflare-web-routing.mjs dist-web
+npx wrangler deploy -c wrangler.pokoin-web.jsonc
+```
+The domain is not attached (Worker daily cap until 2026-10-04 00:00 UTC).
+
+**Legacy Vercel path (rollback only):**
 ```bash
 cd /home/nez/Projects/pokoin-web
 env -u VERCEL_TOKEN vercel pull --yes --environment=production
 env -u VERCEL_TOKEN vercel build --prod --yes
 env -u VERCEL_TOKEN vercel deploy --prebuilt --prod --yes --archive=tgz
 ```
+Vercel project `web` and its environment variables were not deleted. Rollback: remove any `pokoin-web` custom-domain routes, then set `pokoin.com` and `www` CNAMEs back to `00dae56389d2f4d1.vercel-dns-017.com`.
 
 | Flag / file | Why |
 | --- | --- |
 | `env -u VERCEL_TOKEN` | A stale `VERCEL_TOKEN` in the environment fails CLI login. CLI session `giuseppevitolo17` works. |
-| `vercel.json` `buildCommand` | `scripts/build-web.sh` writes `dist-web/` (landing with `/home/` paths + Vite `market/`). |
-| `outputDirectory` | `dist-web`. Never upload the GitHub source tree as static — that ships Vite `src/main.jsx` and 404s `/marketplace`. |
+| `scripts/build-web.sh` | Writes `dist-web/` (landing with `/home/` paths + Vite `market/`). |
+| `dist-web/_redirects` | App routes rewrite to `/market/app.html`; hashed `/market/assets` are immutable. |
+| `run_worker_first` | Only `/api/*`, `/card-images/*`, `/__/auth/*`, `/__/firebase/*`, `/chain/*`, `/cardscan/identify` run the Worker. |
 
 `vercel deploy --prod` aliases `pokoin.com`. `explorer.pokoin.com` is served
 by this same project through host-based rewrites to `/explorer/*` (vendored
@@ -72,7 +96,7 @@ node or Caddy origin.
 
 `scripts/sync-landing.sh` / `scripts/sync-market.sh` copy into CardVault. They are leftover and not the production path.
 
-### Step 3 — What Vercel serves
+### Step 3 — What the current Pi origin serves
 
 Filesystem `index.html` is evaluated **before** rewrites.
 
@@ -81,22 +105,33 @@ Filesystem `index.html` is evaluated **before** rewrites.
 | `GET /` | `index.html` (landing) | Static HTML |
 | `GET /home/landing.css` | `home/landing.css` | Static |
 | `GET /marketplace` (and search / sets / cards, **with or without trailing `/`**) | `/market/index.html` | React SPA |
-| `GET /api/*` | Pi API proxy | `api.pokoin.com` (Raspberry Pi tunnel). Tunnel 1033 → `/working.html` (“We are working on a solution.” + Pikachu GIF). |
+| `GET /api/*` | Pi API proxy | `api.pokoin.com` (Raspberry Pi tunnel) |
 | `GET /wallet`, `/auth`, `/cart`, `/forum`, `/scan`, `/docs`, … | `/market/index.html` | React SPA |
 | `https://explorer.pokoin.com/*` | `/explorer/*` (host rewrite) | PokoinPoS explorer UI (static, vendored from pokoinpos) |
 
 `www.pokoin.com/` 301s to `https://pokoin.com/`.
 
+**Target preview (Cloudflare Workers Static Assets):**
+- Static files (landing, hashed `/market/assets/*`, HTML) return `200` from Static Assets.
+- `/api/*`, `/card-images/*`, `/__/auth/*`, `/__/firebase/*`, `/chain/*`, `/cardscan/identify` run the Worker (currently `429` due to daily cap).
+- Ordinary HTML, JS, CSS do **not** run the Worker.
+- Extension zip (31 MB) is not in Static Assets; `/aab` stays on `pokoin-extension-download` Worker.
+
 ---
 
 ## Cache (why HTML can update while CSS stays lime)
 
-`vercel.json`:
+**Current (Pi origin):**
+`vercel.json` headers are not used; the Pi process sets headers directly.
+
+**Target preview (Cloudflare Workers Static Assets):**
+`dist-web/_headers` (generated by `scripts/write-cloudflare-web-routing.mjs`):
 
 | Path | Cache-Control |
 | --- | --- |
-| `/`, `/index.html`, `/market/index.html` | `max-age=0, must-revalidate` |
+| `/`, `/index.html`, `/market/app.html` | `max-age=0, must-revalidate` |
 | `/home/:path*` (css, js, font, logo) | `max-age=0, must-revalidate` |
+| `/market/assets/:path*` (hashed) | `max-age=31536000, immutable` |
 
 After a landing-only deploy, bump `?v=` on `landing.css` / `landing.js` if a browser still holds an old sheet. Origin is `must-revalidate`; query strings defeat leftover 1h caches from before this header change.
 

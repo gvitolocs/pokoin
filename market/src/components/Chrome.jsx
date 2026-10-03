@@ -26,8 +26,8 @@ import {
   warmCardBucket,
 } from '../art-shade.js';
 import { prefersArtworkDelta, rarityRowTheme } from '../rarity-theme.js';
-import { pickSuggestHoverSrc, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
-import { resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
+import { pickSuggestHoverSrc, sameSuggestHoverBox, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
+import { compactQuery, resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
 import { useProgressiveSuggest } from '../use-progressive-suggest.js';
 import { warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
 import { useSuggestFlip } from '../suggest-flip.js';
@@ -39,7 +39,7 @@ import {
   rememberSuggestGroups,
   suggestLiveReady,
 } from '../suggest-live.js';
-import { catalogCacheKey, catalogIntent, groupsFromCards } from '../suggest-catalog.js';
+import { cardsWithCatalogArtist, catalogCacheKey, catalogIntent, groupsFromCards } from '../suggest-catalog.js';
 import { resolveSuggestQuery, serializeResolution } from '../suggest-resolve.js';
 import { earlySetPrefixName } from '../search-score.js';
 import {
@@ -393,12 +393,13 @@ function flattenPrintings(groups) {
   const rows = [];
   groups.forEach((group, groupIndex) => {
     (group.printings || []).forEach((card, printingIndex) => {
+      if (!card || typeof card !== 'object') return;
       rows.push({
         card,
         group,
         groupIndex,
         printingIndex,
-        optionId: `suggest-${card.id}`,
+        optionId: `suggest-${card.id || card.card_id || ''}`,
       });
     });
   });
@@ -652,7 +653,9 @@ export default function Chrome({ children }) {
       const resolved = resolveSuggestQuery(nextTerm);
       if (resolved?.best) {
         for (const entity of resolved.best.entities.artist) {
-          if (entity.slug) {
+          const span = resolved.best.spans?.find((row) => row.candidate?.slug === entity.slug);
+          const typed = compactQuery(span?.raw || '');
+          if (entity.slug && typed.length >= 3) {
             targets.push({ key: `artist:${entity.slug}`, kind: 'artist', slug: entity.slug });
           }
         }
@@ -692,10 +695,11 @@ export default function Chrome({ children }) {
           if (target.kind === 'artist') {
             fetchArtist(target.slug, { limit: 80 })
               .then((data) => {
-                rememberPrintings(target.key, data.cards);
-                rememberSuggestGroups(groupsFromCards(data.cards));
+                const cards = cardsWithCatalogArtist(data);
+                rememberPrintings(target.key, cards);
+                rememberSuggestGroups(groupsFromCards(cards));
                 preloadSuggestThumbs(collectPrintingThumbUrls(
-                  groupsFromCards(data.cards),
+                  groupsFromCards(cards),
                   suggestThumbSrc,
                 ));
                 const current = String(queryRef.current || '').trim();
@@ -820,30 +824,31 @@ export default function Chrome({ children }) {
 
   useLayoutEffect(() => {
     if (!open || !previewOptionId || !hoverSrc) {
-      setHoverBox(null);
+      setHoverBox((prev) => (prev == null ? prev : null));
       return undefined;
     }
     function place() {
       if (!suggestHoverAllowed(window.innerWidth, window.matchMedia('(hover: hover)').matches)) {
-        setHoverBox(null);
+        setHoverBox((prev) => (prev == null ? prev : null));
         return;
       }
       const panel = suggestRef.current;
       const row = document.getElementById(previewOptionId);
       if (!panel || !row) {
-        setHoverBox(null);
+        setHoverBox((prev) => (prev == null ? prev : null));
         return;
       }
       const panelRect = panel.getBoundingClientRect();
       const rowRect = row.getBoundingClientRect();
-      setHoverBox(suggestHoverBox({
+      const next = suggestHoverBox({
         viewportWidth: window.innerWidth,
         viewportHeight: window.innerHeight,
         panelLeft: panelRect.left,
         panelRight: panelRect.right,
         rowTop: rowRect.top,
         rowHeight: rowRect.height,
-      }));
+      });
+      setHoverBox((prev) => (sameSuggestHoverBox(prev, next) ? prev : next));
     }
     place();
     const list = suggestRef.current?.querySelector('.suggest-list');
@@ -853,7 +858,7 @@ export default function Chrome({ children }) {
       window.removeEventListener('resize', place);
       list?.removeEventListener('scroll', place);
     };
-  }, [open, previewOptionId, hoverSrc, visibleGroups]);
+  }, [open, previewOptionId, hoverSrc, suggestIds]);
 
   useEffect(() => {
     setMenu(false);
@@ -1116,7 +1121,9 @@ export default function Chrome({ children }) {
                       <li key={`${group.name}:${group.printings?.[0]?.id || ''}`} className="suggest-group">
                         <ul>
                           {(group.printings || []).map((printing) => {
+                            if (!printing || typeof printing !== 'object') return null;
                             const card = cardFromAutocomplete(printing);
+                            if (!card.id) return null;
                             const identity = printingIdentity(card);
                             const englishName = suggestCardName(card, group.name);
                             const artLayout = isPokemonGame()

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { searchRecipientUsernames } from '../api.js';
+import { game } from '../game.js';
+import { warmSellerFromChat } from '../seller-seed.js';
 import { useAuth } from '../auth.jsx';
 import {
   listConversations,
@@ -19,7 +21,7 @@ import { useSearchLang } from '../locale.js';
 import ChatListingTag from '../components/ChatListingTag.jsx';
 import ChatText from '../components/ChatText.jsx';
 import ChatPhotos from '../components/ChatPhotos.jsx';
-import { MAX_CHAT_PHOTOS, photoFileToJpeg } from '../user-photos.js';
+import { MAX_CHAT_PHOTOS, imageFilesFromClipboard, photoFileToJpeg } from '../user-photos.js';
 import { createMoneyRequest, payMoneyRequest, requestStatusLabel, respondMoneyRequest } from '../money-requests.js';
 import {
   isPokoPeer,
@@ -291,17 +293,16 @@ function PokoConversation() {
     });
   }
 
-  async function addPhotos(event) {
-    const files = [...(event.target.files || [])];
-    event.target.value = '';
+  async function addPhotoFiles(files) {
     const room = MAX_CHAT_PHOTOS - photos.length;
-    if (!files.length || room <= 0) return;
+    const list = [...files].filter(Boolean).slice(0, room);
+    if (!list.length || room <= 0) return;
     setPhotoBusy(true);
     setPhotoError('');
     try {
       const token = await getBearer();
       const next = [];
-      for (const file of files.slice(0, room)) {
+      for (const file of list) {
         const dataUrl = await photoFileToJpeg(file);
         const saved = await uploadChatPhoto(token, dataUrl, 'chat');
         if (saved?.url) next.push(saved.url);
@@ -312,6 +313,19 @@ function PokoConversation() {
     } finally {
       setPhotoBusy(false);
     }
+  }
+
+  function addPhotos(event) {
+    const files = [...(event.target.files || [])];
+    event.target.value = '';
+    addPhotoFiles(files);
+  }
+
+  function pastePhotos(event) {
+    const files = imageFilesFromClipboard(event.clipboardData);
+    if (!files.length) return;
+    event.preventDefault();
+    addPhotoFiles(files);
   }
 
   async function send(event) {
@@ -413,7 +427,7 @@ function PokoConversation() {
         </div>
       ) : null}
       {!cards.length && !photos.length ? (
-        <p className="poko-drop-hint">Drag a listing or card onto this chat to attach it — or tap + for a photo.</p>
+        <p className="poko-drop-hint">Drag a listing or card onto this chat, paste a photo, or tap +.</p>
       ) : null}
       <form className="chat-composer" onSubmit={send}>
         <label className="chat-photo-add" aria-label="Add photos">
@@ -428,6 +442,7 @@ function PokoConversation() {
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder="Message Poko"
+          onPaste={pastePhotos}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
@@ -453,16 +468,27 @@ function HumanConversation({ peer }) {
   const [flash, setFlash] = useState('');
   const thread = useChatThread({ peer, signedIn, getBearer, enabled: signedIn && Boolean(peer) });
 
-  async function addPhotos(event) {
-    const files = [...(event.target.files || [])];
-    event.target.value = '';
+  useEffect(() => {
+    if (!peer || isPokoPeer(peer)) return undefined;
+    warmSellerFromChat({
+      username: thread.person?.username || peer,
+      uid: thread.person?.uid,
+      displayName: thread.person?.displayName,
+      photoUrl: thread.person?.photoUrl,
+      game: game().apiGame,
+    });
+    return undefined;
+  }, [peer, thread.person]);
+
+  async function addPhotoFiles(files) {
     const room = MAX_CHAT_PHOTOS - photos.length;
-    if (!files.length || room <= 0) return;
+    const list = [...files].filter(Boolean).slice(0, room);
+    if (!list.length || room <= 0) return;
     setBusy(true); setError('');
     try {
       const token = await getBearer();
       const next = [];
-      for (const file of files.slice(0, room)) {
+      for (const file of list) {
         const dataUrl = await photoFileToJpeg(file);
         const saved = await uploadChatPhoto(token, dataUrl, 'chat');
         if (saved?.url) next.push(saved.url);
@@ -470,6 +496,19 @@ function HumanConversation({ peer }) {
       setPhotos((current) => [...current, ...next].slice(0, MAX_CHAT_PHOTOS));
     } catch (err) { setError(err.message || 'Photo was not added.'); }
     finally { setBusy(false); }
+  }
+
+  function addPhotos(event) {
+    const files = [...(event.target.files || [])];
+    event.target.value = '';
+    addPhotoFiles(files);
+  }
+
+  function pastePhotos(event) {
+    const files = imageFilesFromClipboard(event.clipboardData);
+    if (!files.length) return;
+    event.preventDefault();
+    addPhotoFiles(files);
   }
 
   async function send(event) {
@@ -522,7 +561,7 @@ function HumanConversation({ peer }) {
       </section>
       <div className="chat-tools"><button type="button" onClick={() => setMoneyMode('request')}>Request</button><button type="button" onClick={() => setMoneyMode('send')}>Send PKN</button></div>
       {photos.length ? <div className="chat-photo-draft"><ChatPhotos urls={photos} /><button type="button" onClick={() => setPhotos([])}>Clear photos</button></div> : null}
-      <form className="chat-composer" onSubmit={send}><label className="chat-photo-add" aria-label="Add photos">+<input type="file" accept="image/*" multiple hidden onChange={addPhotos} disabled={busy || photos.length >= MAX_CHAT_PHOTOS} /></label><label className="sr-only" htmlFor="chat-message">Message</label><textarea id="chat-message" rows="1" maxLength={1000} value={text} onChange={(event) => setText(event.target.value)} placeholder={`Message @${peer}`} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(event); } }} /><button type="submit" disabled={busy || (!text.trim() && !photos.length)} aria-label="Send message">↑</button></form>
+      <form className="chat-composer" onSubmit={send}><label className="chat-photo-add" aria-label="Add photos">+<input type="file" accept="image/*" multiple hidden onChange={addPhotos} disabled={busy || photos.length >= MAX_CHAT_PHOTOS} /></label><label className="sr-only" htmlFor="chat-message">Message</label><textarea id="chat-message" rows="1" maxLength={1000} value={text} onChange={(event) => setText(event.target.value)} placeholder={`Message @${peer}`} onPaste={pastePhotos} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(event); } }} /><button type="submit" disabled={busy || (!text.trim() && !photos.length)} aria-label="Send message">↑</button></form>
       {moneyMode && <MoneyModal mode={moneyMode} peer={peer} onClose={() => setMoneyMode('')} onDone={(message) => { setMoneyMode(''); setFlash(message); thread.refresh(); }} />}
     </main>
   );
