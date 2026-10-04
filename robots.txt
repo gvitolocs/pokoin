@@ -35,4 +35,4 @@ Disallow: /tests
 User-agent: Googlebot-Image
 Allow: /
 
-Sitemap: https://sitemap.pokoin.com/sitemap.xml
+Sitemap: https://pokoin.com/sitemap.xml

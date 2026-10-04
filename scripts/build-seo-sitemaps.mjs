@@ -11,7 +11,7 @@ import { speciesSlug, speciesLabel } from '../market/src/pokemon-hubs.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ORIGIN = 'https://pokoin.com';
 /** GSC fetch uses datacenter IPs that Bot Fight 403s on orange-clouded hosts. */
-const SITEMAP_ORIGIN = 'https://sitemap.pokoin.com';
+const SITEMAP_ORIGIN = 'https://pokoin.com';
 
 function eraId(era) {
   return String(era || 'other').toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'other';
