@@ -79,6 +79,18 @@ test('native seller profile is a users path; reserve is not', () => {
     sellerHref({ sellerName: 'Giuseppe', sellerUsername: 'vitologiuseppe17' }, 'en'),
     '/marketplace/en/users/vitologiuseppe17',
   );
+  assert.equal(
+    sellerHref({
+      sellerName: 'Simone Di Blasi',
+      sellerUsername: '',
+      sellerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2',
+    }, 'en'),
+    '/marketplace/en/users/Simone%20Di%20Blasi?sellerUid=PUH1ygG9mOOyQRPXaY5Fa1W6DKd2',
+  );
+  assert.match(
+    sellerHref({ sellerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2' }, 'en'),
+    /^\/marketplace\/en\/users\/seller-PUH1ygG9mOOy\?sellerUid=PUH1ygG9mOOyQRPXaY5Fa1W6DKd2$/,
+  );
   assert.deepEqual(listingExtraTags({ reverse: true, language: 'EN' }), ['Reverse']);
 });
 

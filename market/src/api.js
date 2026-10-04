@@ -1791,6 +1791,24 @@ export function quoteMarketplaceCheckout(body, token) {
   });
 }
 
+/** Live Packlink + letter rates for one seller parcel (cart /shipping preview). */
+export function fetchShippingOptions({
+  fromCountry,
+  toCountry,
+  cards,
+  fromZip = '',
+  toZip = '',
+  signal,
+} = {}) {
+  const params = new URLSearchParams();
+  if (fromCountry) params.set('fromCountry', String(fromCountry).toUpperCase());
+  if (toCountry) params.set('toCountry', String(toCountry).toUpperCase());
+  if (cards) params.set('cards', String(Math.max(1, Math.trunc(Number(cards) || 1))));
+  if (fromZip) params.set('fromZip', String(fromZip));
+  if (toZip) params.set('toZip', String(toZip));
+  return getJson(`/api/marketplace-shipping-options?${params}`, { signal });
+}
+
 export function createOrderCheckoutSession(body, token) {
   return getJson('/api/create-order-checkout-session', {
     method: 'POST',

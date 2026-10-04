@@ -20,9 +20,12 @@ FILES=(
   _address_crypto.js
   _client_country.js
   _client_country.test.js
+  _packlink.js
+  _packlink.test.js
   shipping-rates.json
   account-addresses.js
   marketplace-checkout-quote.js
+  marketplace-shipping-options.js
   marketplace-seller-settings.js
   marketplace-seller-settings.test.js
   _seller_profile_cache.js
@@ -65,9 +68,10 @@ done
 
 say "unit tests"
 ADDRESS_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
-  node --test \
+  node --test --test-force-exit \
     "$SRC/_checkout_core.test.js" \
     "$SRC/_client_country.test.js" \
+    "$SRC/_packlink.test.js" \
     "$SRC/_marketplace_order_stripe.test.js" \
     "$SRC/_eur_order_inventory.test.js" \
     "$SRC/_native_sales.test.js" \
@@ -76,10 +80,11 @@ ADDRESS_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
     "$SRC/_seller_pkn_policy.test.js" \
     "$SRC/marketplace-seller-settings.test.js" \
     "$SRC/patch-route-manifest.test.js"
-for file in account-addresses.js marketplace-checkout-quote.js marketplace-seller-settings.js \
+for file in account-addresses.js marketplace-checkout-quote.js marketplace-shipping-options.js \
+  marketplace-seller-settings.js \
   stripe-connect-onboard.js create-order-checkout-session.js stripe-webhook.js marketplace-orders.js \
   _eur_order_inventory.js _native_sales.js _order_refund.js eur-orders-sweep.js marketplace-native-sales.js \
-  _seller_profile_cache.js _redis_cache.js _valkey.js; do
+  _seller_profile_cache.js _redis_cache.js _valkey.js _packlink.js; do
   node --check "$SRC/$file"
 done
 
@@ -90,6 +95,35 @@ tar -C "$SRC" -cf - "${FILES[@]}" \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
 ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'; rm -f '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json' '/srv/pokoin/api/$release/api/'*.test.js '/srv/pokoin/api/$release/api/_firestore_fake.js'"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-checkout-eur-commit'"
+
+# Packlink PRO key from Infisical (pokoin/dev `packlink`) — not committed.
+if [[ -z "${PACKLINK_API_KEY:-}" && -f /home/nez/secrets/infisical/admin.password ]]; then
+  PACKLINK_API_KEY="$(python3 - <<'PY'
+import json,urllib.request
+email="vitologiuseppe17@gmail.com"
+password=open("/home/nez/secrets/infisical/admin.password").read().strip()
+tok=json.load(urllib.request.urlopen(urllib.request.Request(
+  "http://127.0.0.1:8088/api/v3/auth/login",
+  data=json.dumps({"email":email,"password":password}).encode(),
+  headers={"Content-Type":"application/json"}, method="POST")))["accessToken"]
+tok=json.load(urllib.request.urlopen(urllib.request.Request(
+  "http://127.0.0.1:8088/api/v3/auth/select-organization",
+  data=json.dumps({"organizationId":"4963c8aa-39de-42e8-a945-380ce729b0f0"}).encode(),
+  headers={"Content-Type":"application/json","Authorization":f"Bearer {tok}"}, method="POST")))["token"]
+data=json.load(urllib.request.urlopen(urllib.request.Request(
+  "http://127.0.0.1:8088/api/v3/secrets/raw?environment=dev&workspaceId=f957a939-90f0-4ee1-b490-9afff162b64e&recursive=true",
+  headers={"Authorization":f"Bearer {tok}"})))
+for s in data.get("secrets") or []:
+  if s.get("secretKey")=="packlink":
+    print(s.get("secretValue") or "", end="")
+    break
+PY
+)" || true
+fi
+if [[ -n "${PACKLINK_API_KEY:-}" ]]; then
+  say "install Packlink API key into release (mode 600)"
+  printf '%s\n' "$PACKLINK_API_KEY" | ssh pi-home "umask 077; cat > '/srv/pokoin/api/$release/api/.packlink-key'"
+fi
 
 # Ensure ADDRESS_ENCRYPTION_KEY exists in the container env (idempotent).
 ssh pi-home "set -e
@@ -108,14 +142,15 @@ ssh pi-home "set -e
 
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
-say "verify health + auth guards"
+say "verify health + auth guards + Packlink options"
 healthy=0
 for _ in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
   quote="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18080/api/marketplace-checkout-quote" || true)"
   addresses="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/account-addresses" || true)"
   connect="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/stripe-connect-onboard" || true)"
-  if [[ "$health" == "200" && "$quote" =~ ^(401|403)$ && "$addresses" =~ ^(401|403)$ && "$connect" =~ ^(401|403)$ ]]; then
+  ship="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-shipping-options?fromCountry=IT&toCountry=DK&cards=1'" || true)"
+  if [[ "$health" == "200" && "$quote" =~ ^(401|403)$ && "$addresses" =~ ^(401|403)$ && "$connect" =~ ^(401|403)$ && "$ship" == "200" ]]; then
     healthy=1
     break
   fi
@@ -123,10 +158,10 @@ for _ in $(seq 1 45); do
 done
 
 if [[ "$healthy" != "1" ]]; then
-  echo "health failed (health=$health quote=$quote addresses=$addresses connect=$connect) — rolling back" >&2
+  echo "health failed (health=$health quote=$quote addresses=$addresses connect=$connect ship=$ship) — rolling back" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .checkout-eur-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "Pi API verification failed; previous release restored"
 fi
 
 say "API live: $(ssh pi-home 'readlink /srv/pokoin/api/current')"
-say "health=$health quote=$quote addresses=$addresses connect=$connect"
+say "health=$health quote=$quote addresses=$addresses connect=$connect ship=$ship"

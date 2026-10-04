@@ -344,7 +344,11 @@ export function BasketRow({ row, live, checking, onSelect, onQty, onDelete, onSa
 /** Seller strip above that seller's rows: one parcel, its preview price and room. */
 export function SellerBar({ group, estimate, currency }) {
   const label = sellerOf({ sellerUsername: group.sellerUsername, sellerName: group.sellerName });
-  const link = sellerHref({ sellerUsername: group.sellerUsername, sellerName: group.sellerName });
+  const link = sellerHref({
+    sellerUsername: group.sellerUsername,
+    sellerName: group.sellerName,
+    sellerUid: group.sellerUid,
+  });
   const country = sellerCountryFlag(group.sellerCountry);
   const countryName = sellerCountryLabel(group.sellerCountry);
   return (
@@ -452,7 +456,11 @@ export function BasketSummary({
     ? sellerOf({ sellerUsername: nudge.group.sellerUsername, sellerName: nudge.group.sellerName })
     : '';
   const nudgeLink = nudge
-    ? sellerHref({ sellerUsername: nudge.group.sellerUsername, sellerName: nudge.group.sellerName })
+    ? sellerHref({
+      sellerUsername: nudge.group.sellerUsername,
+      sellerName: nudge.group.sellerName,
+      sellerUid: nudge.group.sellerUid,
+    })
     : '';
   const selected = services.find((option) => option.id === service) || null;
   const shippingCell = !shipping.count
@@ -493,7 +501,9 @@ export function BasketSummary({
               {selected ? null : <option value="">Cheapest for each parcel</option>}
               {services.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {option.tracked ? 'Tracked' : 'Untracked letter'} · {formatLocalFromEurCents(option.cents, currency)}
+                  {option.label || (option.tracked ? 'Tracked' : 'Untracked letter')}
+                  {' · '}
+                  {formatLocalFromEurCents(option.cents, currency)}
                   {option.complete ? '' : ' (not every parcel)'}
                 </option>
               ))}

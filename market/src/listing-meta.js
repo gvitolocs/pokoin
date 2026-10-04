@@ -144,11 +144,20 @@ export function sellerHandle(offer) {
   return name.replace(/^@/, '').trim();
 }
 
+/**
+ * Public shop URL. Prefer a real handle; when only sellerUid is known (common
+ * for CardTrader-linked native listings with a display name), still link and
+ * pass sellerUid so the shop API can skip the Firestore username lookup.
+ */
 export function sellerHref(offer, lang = getSearchLang()) {
   const handle = sellerHandle(offer);
-  if (!handle) return '';
+  const uid = String(offer?.sellerUid || offer?.seller_uid || '').trim();
+  if (!handle && !uid) return '';
   const code = isSearchLang(lang) ? String(lang).toLowerCase() : 'en';
-  return `/marketplace/${code}/users/${encodeURIComponent(handle)}`;
+  const slug = handle || (uid ? `seller-${uid.slice(0, 12)}` : '');
+  if (!slug) return '';
+  const path = `/marketplace/${code}/users/${encodeURIComponent(slug)}`;
+  return uid ? `${path}?sellerUid=${encodeURIComponent(uid)}` : path;
 }
 
 export function conditionKey(condition) {
