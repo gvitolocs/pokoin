@@ -40,7 +40,7 @@ if [[ "$mode" == scanner || "$mode" == all ]]; then
   # Read the entire response before grep: grep -q can close the pipe early,
   # causing curl exit 23 under pipefail even when the expected asset is live.
   if ! curl -fsS "https://scan.pokoin.com/connect?v=$stamp" -o "$stage/live-phone.html" \
-    || ! grep -q 'scan-connect.js?v=scan-diag-v2' "$stage/live-phone.html" \
+    || ! grep -q 'scan-connect.js?v=cam-gate-1' "$stage/live-phone.html" \
     || ! curl -fsS "https://scan.pokoin.com/static/scan-diagnostics.js?v=$stamp" -o "$stage/live-diagnostics.js" \
     || ! grep -q 'scan-diag-v2' "$stage/live-diagnostics.js"; then
     ssh oracle-peer1 "set -e; cd /opt/pokoin-cardscan; cp -a '.backups/$stamp-scan-diagnostics/web/.' web/"
