@@ -1,6 +1,6 @@
-# Pokoin Web Host Map (2026-10-03)
+# Pokoin Web Host Map (2026-10-04)
 
-Live `pokoin.com` is Cloudflare Workers Static Assets (`pokoin-web`, version `7ded97af-4f23-4016-a6be-202d9c227ecb` from `origin/main` 7ec665e, 2026-10-04; previous `02547d29`). Numeric short links (`/{id}`, `/{id}/{slug}`) are `_redirects` rules (one per leading digit, 302 to `/marketplace/en/cards/{id}`). There is no Worker script on ordinary page views. The browser calls `https://api.pokoin.com`. Card photos redirect to `cdn.pokoin.com`. The Pi website process is stopped.
+Live `pokoin.com` is Cloudflare Workers Static Assets (`pokoin-web`, version `81628312-3650-4644-bce6-53222d643f02` from `origin/main` 8bcdc56, 2026-10-04; previous `623887bb`). `wrangler deployments list --name pokoin-web` is authoritative; each deployment message names its `origin/main` SHA. Numeric short links (`/{id}`, `/{id}/{slug}`) are `_redirects` rules (one per leading digit, 302 to `/marketplace/en/cards/{id}`). There is no Worker script on ordinary page views. The browser calls `https://api.pokoin.com`. Card photos redirect to `cdn.pokoin.com`. The Pi website process is stopped.
 
 ## One origin (2026-10-04)
 
