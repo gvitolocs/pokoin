@@ -258,3 +258,42 @@ test('single-origin pokoin_url forms open the card; a URL for another game never
  s.run('selectCatalog("pokemon","western")');
  assert.equal(s.run('pokoinUrl({top1:{public_id:"531072",pokoin_url:"https://pokoin.com/marketplace/en/cards/531072"}})'), fullCardUrl('','531072'));
 });
+
+// iOS Safari never shows the first camera prompt without a user gesture, so a
+// freshly scanned QR (zero taps) must not call getUserMedia blindly.
+test('a first visit with no user activation waits for the Start camera tap',async()=>{
+ const s=scanner();
+ s.run('cameraRequestVersion += 1'); // retire the eval-time start; only the gate decides now
+ let gated=0;
+ s.sandbox.navigator.userActivation={hasBeenActive:false};
+ s.sandbox.navigator.mediaDevices={getUserMedia:async()=>{gated++;return {getVideoTracks:()=>[],getTracks:()=>[]};}};
+ s.sandbox.window.startCam();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(gated,0,'no blind getUserMedia without a gesture');
+ assert.equal(s.element('startCameraTap').hidden,false);
+ assert.equal(s.element('warming').textContent,'Tap to start the camera.');
+});
+test('a granted camera or a tap starts without the extra step',async()=>{
+ const granted=scanner();let grantedCalls=0;
+ granted.run('cameraRequestVersion += 1');
+ granted.sandbox.navigator.userActivation={hasBeenActive:false};
+ granted.sandbox.navigator.permissions={query:async()=>({state:'granted'})};
+ granted.sandbox.navigator.mediaDevices={getUserMedia:async()=>{grantedCalls++;return {getVideoTracks:()=>[],getTracks:()=>[]};}};
+ granted.sandbox.window.startCam();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(grantedCalls,1,'granted phones auto-start');
+ const tapped=scanner();let tappedCalls=0;
+ tapped.run('cameraRequestVersion += 1');
+ tapped.sandbox.navigator.userActivation={hasBeenActive:true};
+ tapped.sandbox.navigator.mediaDevices={getUserMedia:async()=>{tappedCalls++;return {getVideoTracks:()=>[],getTracks:()=>[]};}};
+ tapped.sandbox.window.startCam();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(tappedCalls,1,'the tap gesture itself unlocks the prompt');
+});
+test('the Open in Chrome hop survives pairing and is removed only when the camera starts',()=>{
+ const connectJs=fs.readFileSync(path.join(__dirname,'..','web','static','scan-connect.js'),'utf8');
+ assert.doesNotMatch(connectJs,/tip\.remove\(\)/,'pairing no longer removes the hop');
+ assert.match(html,/getElementById\("scOpenBrowser"\)/,'startCam removes the hop on stream success');
+ assert.match(html,/id="startCameraTap"/,'the Start camera tap ships in the dock');
+ assert.match(html,/Tap to start the camera\./);
+});

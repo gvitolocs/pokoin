@@ -293,6 +293,8 @@
     .sc-flash.check { color: #f5a524; border: 2px solid #f5a524; }
     /* Shutter sits in the bottom safe band; dock pads above it so camera select is tappable. */
     .sc-shutter { position: absolute; z-index: 8; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); min-width: 150px; height: 56px; border-radius: 28px; border: 0; background: var(--yellow); color: #111; font-size: 17px; font-weight: 800; }
+    /* First camera start on iOS needs the user gesture the Start tap provides. */
+    .sc-cam-start { position: absolute; z-index: 9; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); min-width: 190px; height: 56px; border-radius: 28px; border: 0; background: var(--yellow); color: #111; font-size: 17px; font-weight: 800; pointer-events: auto; }
     body.scan-connect .game-rail, body.scan-connect .catalog-status, body.scan-connect .dock .controls, body.scan-connect #multiList { display: none !important; }
     body.scan-connect .dock {
       padding-bottom: calc(88px + env(safe-area-inset-bottom));
@@ -386,6 +388,7 @@
         <label for="cameraSelect">Camera</label>
         <select id="cameraSelect" aria-label="Camera"></select>
       </div>
+      <button type="button" class="sc-cam-start" id="startCameraTap" hidden>Start camera</button>
       <div class="controls">
         <div class="seg" role="group" aria-label="Mode">
           <button type="button" class="on" id="modeSingle">Single</button>
@@ -449,6 +452,7 @@
     }
     const catalogLabel = document.getElementById("catalogLabel");
     const resumeCamera = document.getElementById("resumeCamera");
+    const startCameraTap = document.getElementById("startCameraTap");
     let game = "pokemon";
     let language = "western";
     let scanRevision = 0;
@@ -666,6 +670,10 @@
         if (galleryObjectUrl) URL.revokeObjectURL(galleryObjectUrl);
         gallerySource = null; galleryObjectUrl = null; shot.removeAttribute("src");
         live.hidden = false; shot.hidden = true; cameraViewChanged(); camReady = true;
+        startCameraTap.hidden = true;
+        // The camera works here, so an "Open in Chrome" hop is no longer needed.
+        const hop = document.getElementById("scOpenBrowser");
+        hop?.remove?.();
         populateCameras(devices, active.getSettings ? active.getSettings().deviceId : "");
         const caps = track.getCapabilities ? track.getCapabilities() : {};
         torchBtn.disabled = !caps.torch; resumeCamera.hidden = true;
@@ -1026,6 +1034,29 @@
         return { data, context: { blob, capturedAt, requestAt, respondedAt: Date.now() } };
       };
     }
+    // iOS Safari never shows the first camera prompt without a user gesture,
+    // so a freshly scanned QR (zero taps yet) sat on a black frame with no
+    // prompt (2026-10-04). Phones that already granted the camera auto-start;
+    // everyone else gets one obvious tap whose gesture unlocks the prompt.
+    startCameraTap.addEventListener("click", () => {
+      startCameraTap.hidden = true;
+      warming.hidden = true;
+      startCam();
+    });
+    window.startCam = () => {
+      const activation = navigator.userActivation;
+      if (!activation || activation.hasBeenActive) return startCam();
+      const granted = (navigator.permissions && navigator.permissions.query)
+        ? navigator.permissions.query({ name: "camera" })
+            .then((status) => status.state === "granted").catch(() => false)
+        : Promise.resolve(false);
+      granted.then((ok) => {
+        if (ok) return startCam();
+        warming.textContent = "Tap to start the camera.";
+        warming.hidden = false;
+        startCameraTap.hidden = false;
+      });
+    };
     if (!scanConnect) startCam();
   </script>
 </body>
