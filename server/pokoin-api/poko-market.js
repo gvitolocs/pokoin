@@ -315,6 +315,83 @@ function queryVariants(rawQuery) {
   return variants.slice(0, 3);
 }
 
+// Asking prices ride along in seller lines ("70kr", "70 Danish kroner") and are
+// not part of the card. Collector numbers such as "SUM 89" have no currency word.
+function stripAskingPrices(value) {
+  return String(value || '')
+    .replace(/\b\d+(?:[.,]\d+)?(?:\s+[A-Za-z]{2,16}){0,2}\s*(?:kr|dkk|kroner|eur|euro|euros|usd|dollars?|pkn)\b/gi, ' ')
+    .replace(/(?:€|\$)\s*\d+(?:[.,]\d+)?/g, ' ');
+}
+
+// One parenthetical set code: "Solgaleo GX (30C SUM 89)". The first token is
+// the set; the rest is the collector number printed on the card.
+function singleParentheticalSet(value) {
+  const text = String(value || '');
+  const groups = [...text.matchAll(/\(\s*([A-Za-z0-9]{2,8})\b([^)]*)\)/g)];
+  if (groups.length !== 1) return null;
+  const group = groups[0];
+  return {
+    code: group[1],
+    number: group[2].replace(/\s+/g, ' ').trim(),
+    raw: group[0],
+    index: group.index,
+  };
+}
+
+// "Lycanroc 30C 138" — a short code with both a letter and a digit. Letter-only
+// aliases (SUM, CIN, mew, ex) stay in the query because they are collector
+// prefixes or part of the card name.
+function digitSetCode(value) {
+  const tokens = String(value || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const codes = [...new Set(tokens.filter((token) => (
+    token.length >= 2 && token.length <= 8 && /[a-z]/.test(token) && /\d/.test(token)
+  )))];
+  return codes.length === 1 ? codes[0] : '';
+}
+
+async function expansionForSetCode(code) {
+  const compact = String(code || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (compact.length < 2 || compact.length > 8) return '';
+  const rows = await queryRows(
+    `select expansion_name
+       from marketplace_expansion_aliases
+      where compact_alias = $1
+      order by priority asc
+      limit 1`,
+    [compact],
+  );
+  return rows[0]?.expansion_name || '';
+}
+
+/**
+ * Website search already resolves set shorthand (30C → 30th Celebration) through
+ * marketplace_expansion_aliases. Card lookup has to do the same, then search
+ * the card name and collector number inside that set. Otherwise "30C" is ANDed
+ * into search_text, which stores the set name and never the code, and the
+ * catalog miss is a 404.
+ */
+async function applySetAlias(rawQuery) {
+  const stripped = stripAskingPrices(rawQuery);
+  const paren = singleParentheticalSet(stripped);
+  if (paren) {
+    const expansion = await expansionForSetCode(paren.code);
+    if (!expansion) return { query: stripped, setName: '' };
+    const before = stripped.slice(0, paren.index);
+    return {
+      query: `${before} ${paren.number}`.replace(/\s+/g, ' ').trim(),
+      setName: expansion,
+    };
+  }
+  const code = digitSetCode(stripped);
+  if (!code) return { query: stripped, setName: '' };
+  const expansion = await expansionForSetCode(code);
+  if (!expansion) return { query: stripped, setName: '' };
+  return {
+    query: stripped.replace(new RegExp(`\\b${code}\\b`, 'i'), ' ').replace(/\s+/g, ' ').trim(),
+    setName: expansion,
+  };
+}
+
 async function resolveCard(params = {}) {
   const query = cleanText(params.query, 120);
   const artist = cleanText(params.artist, 80);
@@ -322,10 +399,11 @@ async function resolveCard(params = {}) {
     return { status: 'invalid', error: 'query or artist required' };
   }
   const artistPattern = artist ? `%${escapeLike(artist)}%` : null;
+  const aliased = query ? await applySetAlias(query) : { query: '', setName: '' };
   // Token-AND search: every significant word of the chat phrase must appear in
   // search_text, in any order — "rocky helmet boundaries crossed secret rare
   // 153/149" and "claydol ex ex power keepers" both resolve.
-  for (const variant of queryVariants(query)) {
+  for (const variant of queryVariants(aliased.query || query)) {
     const tokens = variant
       .toLowerCase()
       .split(/\s+/)
@@ -336,6 +414,10 @@ async function resolveCard(params = {}) {
     if (artistPattern) {
       conditions.push(`s.artist ilike $${params2.length + 1}`);
       params2.push(artistPattern);
+    }
+    if (aliased.setName) {
+      conditions.push(`s.set_name = $${params2.length + 1}`);
+      params2.push(aliased.setName);
     }
     const rows = await queryRows(
       `select s.card_id, s.ct_id, s.name, s.set_name, s.artist, s.item_kind, s.version,

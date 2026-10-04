@@ -294,6 +294,52 @@ test('resolve_card returns catalog candidates only and marks ambiguity', async (
   assert.match(res3.body.note, /which one they mean/i);
 });
 
+test('resolve_card maps a set code alias onto the expansion and drops the asking price', async () => {
+  const queries = [];
+  const handler = loadHandler(async (sql, params = []) => {
+    queries.push({ sql, params });
+    if (/marketplace_expansion_aliases/.test(sql)) {
+      return { rows: params[0] === '30c' ? [{ expansion_name: '30th Celebration' }] : [] };
+    }
+    if (/limit 24/.test(sql)) {
+      return { rows: [{
+        card_id: '826440', ct_id: '1', name: 'Solgaleo GX', set_name: '30th Celebration',
+        artist: '', item_kind: 'single', version: 'sum89', card_number: 'SUM 89',
+      }] };
+    }
+    return { rows: [] };
+  });
+  const res = makeRes();
+  await handler(makeReq({
+    body: { tool: 'resolve_card', params: { query: 'Solgaleo GX (30C SUM 89) 70kr' } },
+  }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'ok');
+  assert.equal(res.body.candidates[0].cardId, '826440');
+  assert.equal(res.body.candidates[0].setName, '30th Celebration');
+
+  const resolveQuery = queries.find((q) => /limit 24/.test(q.sql));
+  assert.match(resolveQuery.sql, /s\.set_name = \$/);
+  assert.ok(resolveQuery.params.includes('30th Celebration'));
+  assert.ok(resolveQuery.params.some((value) => String(value).includes('solgaleo')));
+  assert.ok(resolveQuery.params.some((value) => String(value).includes('sum')));
+  assert.ok(resolveQuery.params.some((value) => String(value).includes('89')));
+  assert.ok(resolveQuery.params.every((value) => !String(value).toLowerCase().includes('30c')));
+  assert.ok(resolveQuery.params.every((value) => !String(value).toLowerCase().includes('70')));
+
+  // A digit-less name must not be rewritten through the "mew" → 151 alias.
+  const plain = [];
+  const plainHandler = loadHandler(async (sql, params = []) => {
+    plain.push({ sql, params });
+    if (/limit 24/.test(sql)) return { rows: [FIXTURE_CARD_ROW] };
+    return { rows: [] };
+  });
+  const plainRes = makeRes();
+  await plainHandler(makeReq({ body: { tool: 'resolve_card', params: { query: 'Mew ex' } } }), plainRes);
+  assert.equal(plain.some((q) => /marketplace_expansion_aliases/.test(q.sql)), false);
+  assert.equal(/set_name =/.test(plain.find((q) => /limit 24/.test(q.sql)).sql), false);
+});
+
 test('card_quote reports sold estimate, asks and strategies without inventing data', async () => {
   const queries = [];
   const handler = loadHandler(makeDb({
