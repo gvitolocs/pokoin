@@ -700,6 +700,11 @@ function listedDealLanguages(offers, card) {
   return LIST_LANGS.filter((code) => allowed.has(code));
 }
 
+function listedDealConditions(offers) {
+  const present = new Set((offers || []).map((row) => moodCondition(row)));
+  return DEAL_CONDS.filter((row) => present.has(row.value));
+}
+
 function ConditionPick({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
@@ -2242,7 +2247,8 @@ export default function Card() {
     ? shownLangRaw
     : (dealLangs.includes(defaultCardLanguage(card.nationality)) ? defaultCardLanguage(card.nationality) : dealLangs[0] || '');
   const listedDealLangs = listedDealLanguages(payload?.offers, card);
-  const shownCond = dealCond || (dealPick ? moodCondition(dealPick) : 'NM');
+  const listedDealConds = listedDealConditions(payload?.offers);
+  const shownCond = dealCond || (dealPick ? moodCondition(dealPick) : '');
   const languages = languagesForNationality(
     card.nationality,
     [...new Set((payload?.offers || []).map((row) => String(row.language || '').toUpperCase()).filter(Boolean))],
@@ -2673,28 +2679,30 @@ export default function Card() {
               <p className="muted own-k">{dealCopy || '\u00a0'}</p>
             )}
             <div className="deal-facets">
-              <div className="deal-facet-row" role="radiogroup" aria-label="Condition">
-                {DEAL_CONDS.map((row) => (
-                  <button
-                    key={row.value}
-                    type="button"
-                    role="radio"
-                    className={`deal-chip${shownCond === row.value ? ' is-on' : ''}`}
-                    aria-checked={shownCond === row.value}
-                    aria-label={row.label}
-                    onClick={() => setDealCond(row.value)}
-                  >
-                    <img
-                      className="shop-cond"
-                      src={conditionChipSrc(row.value)}
-                      alt=""
-                      width="40"
-                      height="28"
-                      draggable={false}
-                    />
-                  </button>
-                ))}
-              </div>
+              {listedDealConds.length ? (
+                <div className="deal-facet-row" role="radiogroup" aria-label="Condition">
+                  {listedDealConds.map((row) => (
+                    <button
+                      key={row.value}
+                      type="button"
+                      role="radio"
+                      className={`deal-chip${shownCond === row.value ? ' is-on' : ''}`}
+                      aria-checked={shownCond === row.value}
+                      aria-label={row.label}
+                      onClick={() => setDealCond(row.value)}
+                    >
+                      <img
+                        className="shop-cond"
+                        src={conditionChipSrc(row.value)}
+                        alt=""
+                        width="40"
+                        height="28"
+                        draggable={false}
+                      />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               {listedDealLangs.length ? (
                 <div className="deal-facet-row" role="radiogroup" aria-label="Language">
                   {listedDealLangs.map((code) => (
