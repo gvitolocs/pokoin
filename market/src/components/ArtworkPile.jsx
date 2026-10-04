@@ -14,7 +14,7 @@ import CardArt from './CardArt.jsx';
 export { groupArtworkRows };
 
 /** Artist album tile for a same-artwork group: stacked sheets + count chip. */
-export function ArtistPileTile({ group, rank, onOpen }) {
+export function ArtistPileTile({ group, rank, onOpen, flat = false }) {
   const rep = group.cards[0];
   const select = useCardSelect();
   const picked = Boolean(select?.selected?.has(String(rep.id)));
@@ -25,7 +25,7 @@ export function ArtistPileTile({ group, rank, onOpen }) {
   const landscape = isLandscapePrintName(rep.name);
   const artLayout = resolveArtLayout(rep);
   const item = artLayout === 'item';
-  const tall = !landscape && isFeatureAlbumArt(rep);
+  const tall = !flat && !landscape && isFeatureAlbumArt(rep);
   const hero = imageSrc(rep, 'hero');
 
   function prefetch() {
