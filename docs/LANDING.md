@@ -62,16 +62,14 @@ Cursor’s browser on the Mac cannot use `127.0.0.1` on this host. Use Tailscale
 
 ### Step 2 — Build and deploy this repo
 
-**Current (Pi temporary host):**
-The live files are the `f3aef6a` tree under `/srv/pokoin/web/current`. The system unit is `pokoin-web-origin.service` (user `nes`). There is no deploy script for that unit yet. Do **not** use the Vercel commands below for the current live site.
-
-**Target preview (Cloudflare Workers):**
+**Live (Cloudflare Workers Static Assets, since 2026-10-04):** build from an exact
+`origin/main` archive and publish with `wrangler versions upload` + `versions deploy`;
+full procedure and rollback in [DEPLOY.md](DEPLOY.md). Quick form:
 ```bash
 scripts/build-web.sh
 node scripts/write-cloudflare-web-routing.mjs dist-web
 npx wrangler deploy -c wrangler.pokoin-web.jsonc
 ```
-The domain is not attached (Worker daily cap until 2026-10-04 00:00 UTC).
 
 **Legacy Vercel path (rollback only):**
 ```bash
