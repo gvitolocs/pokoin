@@ -10855,3 +10855,45 @@ html:has(.wallet-page) .brand span {
   }
 }
 
+
+/* Album hover pop-out: the zoomed Pokémon silhouette leaves the frame.
+ * Only where object-view-box crops the base painting inside its own box
+ * (Chrome/Edge): the painting keeps a rounded clip of its own, and the tile,
+ * art box and crop box stop clipping so just the masked figure and its shadow
+ * overflow. Safari positions the painting with negative offsets, so it keeps
+ * the in-frame zoom. */
+@supports (object-view-box: none) {
+  .tile.tile-album:has(img.art-figure-hover):hover,
+  .tile.tile-album:has(img.art-figure-hover):focus-within {
+    position: relative;
+    z-index: 6;
+    overflow: visible;
+    contain: none;
+  }
+
+  .tile-pile-wrap:has(img.art-figure-hover):hover,
+  .tile-pile-wrap:has(img.art-figure-hover):focus-within {
+    position: relative;
+    z-index: 6;
+  }
+
+  .tile.tile-album:has(img.art-figure-hover):hover .tile-art,
+  .tile.tile-album:has(img.art-figure-hover):hover .art-cut,
+  .tile.tile-album:has(img.art-figure-hover):focus-within .tile-art,
+  .tile.tile-album:has(img.art-figure-hover):focus-within .art-cut {
+    overflow: visible;
+  }
+
+  .tile.tile-album:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
+  .tile.tile-album:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
+    clip-path: inset(0 round 14px);
+  }
+
+  .tile.tile-album:hover .art-cut img.art-figure-hover {
+    transform: translateY(-3%) scale(1.18) !important;
+  }
+
+  .tile.tile-album:hover .art-cut img.art-figure-shadow {
+    transform: translateY(5%) scale(1.18) !important;
+  }
+}
