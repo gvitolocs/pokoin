@@ -101,6 +101,19 @@ test('phone ≤720px suggest row stays two columns', () => {
   assert.match(phone720First, /\.suggest-main \{[^}]*width:\s*100%/);
 });
 
+test('suggest list never pans sideways; long names scale to fit beside the art', () => {
+  const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
+  assert.match(desktopCss, /\.suggest-list \{[^}]*overflow-x:\s*hidden/);
+  assert.match(desktopCss, /\.suggest-list \{[^}]*touch-action:\s*pan-y/);
+  assert.match(desktopCss, /\.suggest-copy strong \{[^}]*max-width:\s*100%/);
+  assert.match(desktopCss, /\.suggest-copy strong \{[^}]*text-overflow:\s*ellipsis/);
+  // Phone: the name may run to 1px before the artwork.
+  const row = phone720First.match(/\.suggest-row \{[^}]+\}/g)?.find((block) => /grid-template-columns/.test(block));
+  assert.match(row, /gap:\s*1px/);
+  // Titles are fitted before FLIP measures the rows.
+  assert.match(chrome, /useSuggestTitleFit\(listRef[\s\S]*useSuggestFlip\(listRef/);
+});
+
 test('LEGEND and BREAK suggest art is the full card rotated, not the art-cut', () => {
   const chrome = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/Chrome.jsx'), 'utf8');
   assert.match(chrome, /resolveArtLayout/);

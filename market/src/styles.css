@@ -511,8 +511,11 @@ button, input, select { font: inherit; color: inherit; }
 .suggest-list {
   flex: 1 1 auto;
   min-height: 0;
+  /* Vertical only: a long title must never make the popup pan sideways. */
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  touch-action: pan-y;
   scrollbar-width: thin;
   scrollbar-color: var(--g5) #121018;
 }
@@ -756,6 +759,9 @@ button, input, select { font: inherit; color: inherit; }
 
 .suggest-copy strong {
   display: block;
+  /* The box ends at its column; suggest-title-fit.js shrinks the font so
+     the whole name fits, and the ellipsis only shows past its floor. */
+  max-width: 100%;
   overflow: hidden;
   color: var(--yellow);
   font-size: 1.4rem;
@@ -7613,7 +7619,8 @@ dialog.zoom:not([open]) {
   }
   .suggest-hover { display: none; }
   .suggest-row {
-    gap: 0.5rem;
+    /* Name may run to 1px before the artwork, so it shrinks less. */
+    gap: 1px;
     grid-template-columns: minmax(0, 1fr) auto;
   }
   .suggest-art { width: 6.75rem; }
@@ -7624,7 +7631,7 @@ dialog.zoom:not([open]) {
     width: 100%;
     grid-template-columns: 40px minmax(0, 1fr);
     gap: 0.55rem;
-    padding: 0.4rem;
+    padding: 0.4rem 0 0.4rem 0.4rem;
   }
   .suggest-art-cluster {
     position: relative;
