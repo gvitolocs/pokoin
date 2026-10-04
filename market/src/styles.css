@@ -4128,6 +4128,11 @@ a.era-link:focus-visible {
   text-align: right;
 }
 
+.hero-deal .silver-tools.is-locked {
+  flex: 1 0 100%;
+  text-align: center;
+}
+
 .silver-tools.is-pending {
   min-height: 1.7rem;
   min-width: 7.5rem;
@@ -9031,6 +9036,10 @@ dialog.zoom:not([open]) {
     text-align: left;
     margin-left: 0;
     justify-content: flex-start;
+  }
+
+  .hero-deal .silver-tools.is-locked {
+    text-align: center;
   }
 }
 
