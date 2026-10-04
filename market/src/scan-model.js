@@ -93,9 +93,19 @@ export function stackPosToIndex(stack, position, stackSize) {
  * Each row's capture-time snapshot supplies stack, stackSize, and startPosition.
  * Quantity claims consecutive positions; overflowing a stack spills into the next.
  * Mirrors CardVault `_scan_store.js` listing locations.
+ *
+ * `occupiedAbs` (Map of bare box → last absolute index already taken in live
+ * inventory) seeds the counter so a late-assigned location continues after
+ * stock already in that box, instead of restarting at ·1.
  */
-export function boxSlots(list) {
+export function boxSlots(list, { occupiedAbs = null } = {}) {
   const counters = new Map(); // loc -> last absolute index used
+  if (occupiedAbs instanceof Map) {
+    for (const [loc, abs] of occupiedAbs) {
+      const n = Math.trunc(Number(abs)) || 0;
+      if (loc && n > 0) counters.set(String(loc), n);
+    }
+  }
   const sizes = new Map(); // loc -> stackSize in force (last seen)
   const slots = new Map();
   for (const row of list || []) {
@@ -129,9 +139,9 @@ export function boxSlots(list) {
  * Next free cursor per location: { stack, startPosition, stackSize }.
  * With stackSize 1, position stays 1 and stack advances each card.
  */
-export function nextBoxPositions(list) {
+export function nextBoxPositions(list, options) {
   const next = new Map();
-  const slots = boxSlots(list);
+  const slots = boxSlots(list, options);
   const lastByLoc = new Map();
   for (const row of list || []) {
     const loc = String(row.location ?? '').trim();

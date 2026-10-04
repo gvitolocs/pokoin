@@ -17,6 +17,7 @@ import {
   maxOccupiedStack,
   nextFreeSlot,
   nextPositionInStack,
+  occupiedAbsForScanBoxes,
   parseListingLocation,
   liveInventoryListings,
   sortInventoryRows,
@@ -238,6 +239,21 @@ test('typing a stack continues after the cards already in it', () => {
   assert.equal(nextPositionInStack(rows, 'b', 6, 20), 21); // whole-stack location
   assert.equal(nextPositionInStack(rows, 'b', 7, 20), null);
   assert.equal(nextPositionInStack(rows, 'b', 3, 1), null);
+});
+
+test('occupiedAbsForScanBoxes seeds the scan desk from live inventory', () => {
+  const stock = [
+    { location: 'megaevoluzionietb·40' },
+    { location: 'megaevoluzionietb·41' },
+    { location: 'other·9' },
+  ];
+  const scan = [
+    { location: 'megaevoluzionietb', defaultsSnapshot: { stackSize: 1 } },
+    { location: 'megaevoluzionietb', defaultsSnapshot: { stackSize: 1 } },
+  ];
+  const map = occupiedAbsForScanBoxes(scan, stock);
+  assert.equal(map.get('megaevoluzionietb'), 41);
+  assert.equal(map.has('other'), false);
 });
 
 

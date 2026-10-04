@@ -716,13 +716,56 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
   letter-spacing: 0.08em;
 }
 
+/* Titles sit on the right of each column (Qty / Price / State already read that way). */
+.scan-row-head > [role="columnheader"] {
+  justify-content: flex-end;
+  text-align: right;
+}
+
 .scan-row.focused { background: #1d1a10; box-shadow: inset 3px 0 0 var(--yellow); }
 .scan-row.selected { background: #17161f; }
 .scan-row.done { opacity: 0.75; }
 
-.c-num { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+/* Alternating column bands so Lang / Cond / Finish / … read as separate lanes. */
+.scan-row > * {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  min-width: 0;
+}
+.scan-row > :nth-child(odd) {
+  background: rgba(255, 255, 255, 0.03);
+}
+.scan-row > :nth-child(even) {
+  background: rgba(0, 0, 0, 0.28);
+}
+.scan-row-head > :nth-child(odd) {
+  background: rgba(255, 255, 255, 0.05);
+}
+.scan-row-head > :nth-child(even) {
+  background: rgba(0, 0, 0, 0.35);
+}
+.scan-row.focused > :nth-child(odd) {
+  background: rgba(245, 197, 66, 0.06);
+}
+.scan-row.focused > :nth-child(even) {
+  background: rgba(0, 0, 0, 0.32);
+}
 
-.c-art { display: flex; gap: 0.2rem; }
+.c-num { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; justify-content: flex-end; }
+
+.c-art { display: flex; gap: 0.2rem; align-items: center; }
+.c-flags { justify-content: flex-end; }
+.c-lang,
+.c-cond,
+.c-finish,
+.c-loc,
+.c-qty,
+.c-price,
+.c-state { justify-content: flex-end; }
 .c-art img { width: 2.2rem; aspect-ratio: 63 / 88; object-fit: cover; border-radius: 3px; background: var(--g3); }
 /* Photo the phone took, beside the catalog art of the current candidate. */
 .c-art .scan-shot { object-fit: contain; background: #000; outline: 1px solid var(--scan-warn); }
@@ -730,7 +773,14 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 /* Hover zoom host wraps the catalog thumb; the floating full-res card is a body portal. */
 .thumb-zoom-host { display: inline-flex; }
 
-.c-card { position: relative; min-width: 0; display: flex; flex-direction: column; }
+.c-card {
+  position: relative;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0.05rem;
+}
 .c-card strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .c-card em { font-style: normal; color: var(--muted); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Version control: small labelled select, same chrome as LANG — not a full-width fake row. */

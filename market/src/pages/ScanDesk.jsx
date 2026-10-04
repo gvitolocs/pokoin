@@ -7,6 +7,7 @@ import {
   liveInventoryListings,
   nextFreeSlot,
   nextPositionInStack,
+  occupiedAbsForScanBoxes,
 } from '../inventory-listings.js';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
@@ -388,7 +389,12 @@ export default function ScanDesk() {
   }, [rows, pending]);
 
   const list = useMemo(() => queueRows(displayRows), [displayRows]);
-  const slots = useMemo(() => boxSlots(list), [list]);
+  const [boxStockRows, setBoxStockRows] = useState([]);
+  const occupiedAbs = useMemo(
+    () => occupiedAbsForScanBoxes(list, boxStockRows),
+    [list, boxStockRows],
+  );
+  const slots = useMemo(() => boxSlots(list, { occupiedAbs }), [list, occupiedAbs]);
   const counts = useMemo(
     () => batchCounts(displayRows, { intent: submitIntent }),
     [displayRows, submitIntent],
@@ -427,7 +433,7 @@ export default function ScanDesk() {
   useEffect(() => {
     const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
     if (!list.length) return;
-    const next = nextBoxPositions(list);
+    const next = nextBoxPositions(list, { occupiedAbs });
     const store = loadStoppedPositions();
     let dirty = false;
     for (const [box, cursor] of next) {
@@ -442,7 +448,7 @@ export default function ScanDesk() {
       }
     }
     if (dirty) rememberStoppedPositions(store);
-  }, [list, defaults.location, defaults.startPosition, defaults.stack, defaults.stackSize]);
+  }, [list, occupiedAbs, defaults.location, defaults.startPosition, defaults.stack, defaults.stackSize]);
 
   // Advance Stack / Position as cards land, and flash when a divider fills.
   const prevListLenRef = useRef(0);
@@ -465,13 +471,13 @@ export default function ScanDesk() {
     } else if (size === 1 && stackFull) {
       setStackFull(false);
     }
-    const next = nextBoxPositions(list).get(loc);
+    const next = nextBoxPositions(list, { occupiedAbs }).get(loc);
     if (!next) return;
     const patch = {};
     if (next.stack !== (defaults.stack ?? 1)) patch.stack = next.stack;
     if (next.startPosition !== (defaults.startPosition ?? 1)) patch.startPosition = next.startPosition;
     if (Object.keys(patch).length) setDefaults(patch);
-  }, [list]);
+  }, [list, occupiedAbs]);
 
   // Resume stack/position when the seller switches box (or opens a batch).
   const prevLocationRef = useRef(undefined);
@@ -520,6 +526,7 @@ export default function ScanDesk() {
         if (cancelled) return;
         const rows = liveInventoryListings(data.listings || data.items || []);
         boxStockRef.current = { key, box, rows };
+        setBoxStockRows(rows);
         const d = defaultsRef.current;
         if (listingBox(String(d.location || '').trim()) !== box) return;
         const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
@@ -530,6 +537,7 @@ export default function ScanDesk() {
         }
       } catch (_) {
         boxStockRef.current = { key: '', box: '', rows: [] }; // retry on the next location change
+        setBoxStockRows([]);
       }
     })();
     return () => { cancelled = true; };
@@ -683,26 +691,56 @@ export default function ScanDesk() {
 
   async function setDefaults(patch) {
     if (!batch?.id) return;
-    const merged = { ...(batch.defaults || {}), ...patch };
+    let nextPatch = { ...patch };
+    // Typing a box after cards were scanned empty: look at live stock in that
+    // box and resume stack/position after the last taken slot before rows get
+    // the bare location (otherwise every row anchors at ·1 and collides).
+    if (Object.prototype.hasOwnProperty.call(patch, 'location') && stockUid) {
+      const loc = String(patch.location || '').trim();
+      if (loc) {
+        const box = listingBox(loc);
+        const size = Math.max(1, Math.trunc(Number(patch.stackSize ?? defaults.stackSize)) || 1);
+        try {
+          const data = await fetchSellerListings(stockUid, await getBearer(), { limit: 1000 });
+          const rows = liveInventoryListings(data.listings || data.items || []);
+          boxStockRef.current = { key: `${batch.id}|${box}`, box, rows };
+          setBoxStockRows(rows);
+          const next = nextFreeSlot(rows, box, size);
+          if (next && patch.stack == null && patch.startPosition == null) {
+            nextPatch = {
+              ...nextPatch,
+              stack: Math.min(9999, next.stack),
+              startPosition: size === 1 ? 1 : next.startPosition,
+            };
+          }
+        } catch (_) {
+          /* stock hint is best-effort; submit still seeds from inventory */
+        }
+      } else {
+        setBoxStockRows([]);
+        boxStockRef.current = { key: '', box: '', rows: [] };
+      }
+    }
+    const merged = { ...(batch.defaults || {}), ...nextPatch };
     const loc = String(merged.location || '').trim();
-    if (loc && (patch.startPosition != null || patch.stack != null || patch.stackSize != null)) {
-      const size = Math.max(1, Math.trunc(Number(patch.stackSize ?? defaults.stackSize)) || 1);
+    if (loc && (nextPatch.startPosition != null || nextPatch.stack != null || nextPatch.stackSize != null)) {
+      const size = Math.max(1, Math.trunc(Number(nextPatch.stackSize ?? defaults.stackSize)) || 1);
       const store = loadStoppedPositions();
       store[loc] = {
-        stack: Math.max(1, Math.trunc(Number(patch.stack ?? defaults.stack)) || 1),
-        startPosition: size === 1 ? 1 : Math.max(1, Math.trunc(Number(patch.startPosition ?? defaults.startPosition)) || 1),
+        stack: Math.max(1, Math.trunc(Number(nextPatch.stack ?? defaults.stack)) || 1),
+        startPosition: size === 1 ? 1 : Math.max(1, Math.trunc(Number(nextPatch.startPosition ?? defaults.startPosition)) || 1),
         stackSize: size,
       };
       rememberStoppedPositions(store);
     }
-    setBatch((current) => ({ ...current, defaults: { ...current.defaults, ...patch } }));
-    const rowPatch = batchDefaultRowPatch(patch);
+    setBatch((current) => ({ ...current, defaults: { ...current.defaults, ...nextPatch } }));
+    const rowPatch = batchDefaultRowPatch(nextPatch);
     const rowIds = Object.keys(rowPatch).length
       ? list.filter((row) => row.status === 'active').map((row) => row.id)
       : [];
     try {
       const t = await token();
-      const data = await scanApi.defaults(t, batch.id, patch);
+      const data = await scanApi.defaults(t, batch.id, nextPatch);
       setBatch((current) => ({ ...current, ...data.batch }));
       if (rowIds.length) {
         await patchRows(rowIds, rowPatch, { label: 'Batch defaults' });

@@ -93,3 +93,105 @@ test('reserve listings retain their reserve identity', async () => {
     assert.equal(stored.size, 0);
   });
 });
+
+test('card-desk read by cardId keeps mistagged satellite natives (no CT live)', async () => {
+  const mistagged = {
+    id: '6257a7dc-a82e-4756-8963-f5414933a95b',
+    card_id: '801170',
+    seller_uid: 'seller-1',
+    seller_name: 'RotationMotionTCG',
+    marketplace_game: 'pokemon',
+    source: 'cardtrader_seller_import',
+    price_pkn: 20,
+    quantity_available: 1,
+    condition: 'NM',
+    language: 'EN',
+    status: 'active',
+    foil_state: 'standard',
+    card_name: 'Sanction',
+    set_name: 'Vendetta',
+    collector_number: '035',
+  };
+  const queries = [];
+  const original = Module._load;
+  delete require.cache[TARGET];
+  delete require.cache[CACHE];
+  Module._load = function load(request, parent, isMain) {
+    if (request === './_marketplace_db') {
+      return {
+        marketplaceQuery: async (sql, values) => {
+          queries.push({ sql, values });
+          if (/marketplace_user_listings/i.test(sql)) {
+            return { rows: [mistagged] };
+          }
+          return { rows: [] };
+        },
+        marketplaceWriteQuery: async () => ({ rows: [] }),
+      };
+    }
+    if (request === './_firebase' || request === '../server/_firebase') {
+      return { getFirebaseAdmin: () => createFirestore({ users: {} }).admin, verifyBearerToken: async () => null };
+    }
+    if (request === './_firebase_roles') return {};
+    if (request === './_seller_comment_filter') return { publicSellerComment: (value) => value || '' };
+    if (request === './_cardtrader_seller_listings') return {};
+    if (request === './cardtrader-live-listings') {
+      return {
+        readLiveCardTraderListings: async () => {
+          throw new Error('CT live must not run for nativeOnly card desk');
+        },
+        _test: { PKNRESERVE_SELLER_USERNAME: 'pknreserve' },
+      };
+    }
+    if (request === './_marketplace_game') {
+      return {
+        normalizeGame: (value) => String(value || 'pokemon').toLowerCase(),
+        parseGameFromRequest: () => 'riftbound',
+        runWithGame: async (_game, fn) => fn(),
+      };
+    }
+    if (request === './_redis_cache') {
+      return { getJson: async () => null, setJson: async () => {} };
+    }
+    if (request === './_seller_profile_cache') {
+      return {
+        getPublicSellerProfiles: async () => new Map(),
+        readSellerUidByName: async () => null,
+        rememberSellerUidByName: async () => {},
+      };
+    }
+    if (request === './_marketplace_cache_invalidate') {
+      return { invalidateMarketplaceReads: async () => {} };
+    }
+    if (request === './_request_timing') {
+      return {
+        beginRequest: () => ({}),
+        finishRequest: () => {},
+        timed: async (_name, fn) => fn(),
+      };
+    }
+    if (request === './_outbox') return { commitListingWrite: async () => ({}) };
+    if (request === './_sync_engine') return { kickSync: () => {}, start: () => {} };
+    if (request === './_listing_inventory') {
+      return { DECREMENT_SQL: '', decrementHttpStatus: () => 200 };
+    }
+    return original.call(this, request, parent, isMain);
+  };
+  try {
+    const listings = require(TARGET);
+    const url = new URL('https://pokoin.com/api/marketplace-listings?cardId=801170&nativeOnly=1&game=riftbound');
+    const rows = await listings.readListings(url, null, { marketplaceGame: 'riftbound' });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].cardId, '801170');
+    assert.equal(rows[0].pricePkn, 20);
+    const listingSql = queries.find((q) => /marketplace_user_listings/i.test(q.sql));
+    assert.ok(listingSql, 'expected listings query');
+    assert.match(listingSql.sql, /card_id = \$1/);
+    assert.doesNotMatch(listingSql.sql, /marketplace_game/);
+    assert.deepEqual(listingSql.values.slice(0, 2), ['801170', 500]);
+  } finally {
+    Module._load = original;
+    delete require.cache[TARGET];
+    delete require.cache[CACHE];
+  }
+});

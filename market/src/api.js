@@ -643,16 +643,12 @@ export function fetchListings(cardId, { limit = 40, fresh = false } = {}) {
     }
   }
   const epoch = listingsFetchEpoch(id);
-  // Pokémon Shop stays native-only (CardTrader is Silver / CT pills). Satellite
-  // TCGs are almost entirely CardTrader live via pknreserve — nativeOnly would
-  // paint an empty shop (Riftbound Sanction 801170, 2026-10-04).
+  // Shop is native Pokoin listings only — never CardTrader live/pknreserve.
   const params = new URLSearchParams({
     cardId: id,
+    nativeOnly: '1',
     limit: String(limit),
   });
-  if (isPokemonGame()) {
-    params.set('nativeOnly', '1');
-  }
   if (fresh) {
     params.set('_', String(Date.now()));
   }

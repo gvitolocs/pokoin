@@ -341,6 +341,25 @@ export function nextFreeSlot(rows, box, stackSize = 1) {
 }
 
 /**
+ * Seed map for scan `boxSlots`: bare box location → last absolute index
+ * already taken in live inventory. Uses each scan row's stackSize snapshot.
+ */
+export function occupiedAbsForScanBoxes(scanRows, stockRows) {
+  const map = new Map();
+  const seen = new Set();
+  for (const row of Array.isArray(scanRows) ? scanRows : []) {
+    const loc = String(row?.location ?? '').trim();
+    if (!loc || seen.has(loc)) continue;
+    seen.add(loc);
+    const snap = row.defaultsSnapshot || row.defaults_snapshot || {};
+    const size = Math.max(1, Math.trunc(Number(snap.stackSize)) || 1);
+    const last = lastOccupiedIndex(stockRows, loc, size);
+    if (last > 0) map.set(loc, last);
+  }
+  return map;
+}
+
+/**
  * Next free position inside one stack (the seller typed that stack), or null
  * when nothing is stored there yet. Returns size + 1 when the stack is full.
  */
