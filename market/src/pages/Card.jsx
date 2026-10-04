@@ -100,7 +100,7 @@ import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { deskClipCandidates, deskSetShortcuts, deskShowMoreVersions, mergePrintingRows, rarityVersions, versionOptionLabel } from '../card-versions.js';
 import { cardDocumentTitle, cardmarketSearchUrl, displayName, printingIdentity } from '../identity.js';
 import { game } from '../game.js';
-import { defaultCardLanguage, getSearchLang, languagesForNationality, rewriteCatalogLang, searchLangFromPath } from '../locale.js';
+import { defaultCardLanguage, flagSrc, getSearchLang, languagesForNationality, rewriteCatalogLang, searchLangFromPath } from '../locale.js';
 import { sellLanguages, versionRedirects } from '../listing-languages.js';
 import ListingLangPick from '../components/ListingLangPick.jsx';
 import { SILVER_PRICE_PKN } from '../silver.js';
@@ -158,6 +158,15 @@ const MOOD_CONDS = [
   { value: 'MP', label: 'Moderately Played' },
   { value: 'PL', label: 'Played' },
   { value: 'Poor', label: 'Poor' },
+];
+
+/** Best Deal condition row, Poor through Near Mint. */
+const DEAL_CONDS = [
+  { value: 'Poor', label: 'Poor' },
+  { value: 'PL', label: 'Played' },
+  { value: 'MP', label: 'Moderately Played' },
+  { value: 'SP', label: 'Slightly Played' },
+  { value: 'NM', label: 'Near Mint' },
 ];
 
 function catalogPrintings(rows) {
@@ -683,6 +692,12 @@ function listingFormFromOffer(offer, card) {
     grade: String(offer?.grade || ''),
     cert: String(offer?.certificationId || ''),
   };
+}
+
+function listedDealLanguages(offers, card) {
+  const codes = [...new Set((offers || []).map((row) => offerLanguage(row, card)).filter(Boolean))];
+  const allowed = new Set(languagesForNationality(card?.nationality, codes));
+  return LIST_LANGS.filter((code) => allowed.has(code));
 }
 
 function ConditionPick({ value, onChange }) {
@@ -2226,6 +2241,7 @@ export default function Card() {
   const shownLang = dealLangs.includes(shownLangRaw)
     ? shownLangRaw
     : (dealLangs.includes(defaultCardLanguage(card.nationality)) ? defaultCardLanguage(card.nationality) : dealLangs[0] || '');
+  const listedDealLangs = listedDealLanguages(payload?.offers, card);
   const shownCond = dealCond || (dealPick ? moodCondition(dealPick) : 'NM');
   const languages = languagesForNationality(
     card.nationality,
@@ -2656,15 +2672,45 @@ export default function Card() {
             {canBuy && offersReady ? null : (
               <p className="muted own-k">{dealCopy || '\u00a0'}</p>
             )}
-            <div className="deal-selects sell-options-row">
-              <div className="sell-field sell-pick condition-pick">
-                <span className="sr-only">Condition</span>
-                <ConditionPick value={shownCond} onChange={setDealCond} />
+            <div className="deal-facets">
+              <div className="deal-facet-row" role="radiogroup" aria-label="Condition">
+                {DEAL_CONDS.map((row) => (
+                  <button
+                    key={row.value}
+                    type="button"
+                    role="radio"
+                    className={`deal-chip${shownCond === row.value ? ' is-on' : ''}`}
+                    aria-checked={shownCond === row.value}
+                    aria-label={row.label}
+                    onClick={() => setDealCond(row.value)}
+                  >
+                    <img
+                      className="shop-cond"
+                      src={conditionChipSrc(row.value)}
+                      alt=""
+                      width="40"
+                      height="28"
+                      draggable={false}
+                    />
+                  </button>
+                ))}
               </div>
-              {shownLang ? (
-                <div className="sell-field sell-pick language-pick">
-                  <span className="sr-only">Language</span>
-                  <ListingLangPick value={shownLang} listed={dealLangs} onChange={setDealLang} />
+              {listedDealLangs.length ? (
+                <div className="deal-facet-row" role="radiogroup" aria-label="Language">
+                  {listedDealLangs.map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      role="radio"
+                      className={`deal-chip${shownLang === code ? ' is-on' : ''}`}
+                      aria-checked={shownLang === code}
+                      aria-label={code}
+                      onClick={() => setDealLang(code)}
+                    >
+                      <img className="deal-flag" src={flagSrc(code)} alt="" width="16" height="16" />
+                      <span>{code}</span>
+                    </button>
+                  ))}
                 </div>
               ) : null}
             </div>
