@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { fetchCardSales, fetchCheapestPricePknMap, fetchSellerListings, fetchVersionSet, imageSrc } from '../api.js';
+import {
+  fetchCardSales,
+  fetchCheapestPricePknMap,
+  fetchExactNameCards,
+  fetchSellerListings,
+  fetchVersionSet,
+  imageSrc,
+} from '../api.js';
 import {
   listingBox,
   liveInventoryListings,
@@ -25,11 +32,14 @@ import {
   artworkVersionLabel,
   artworkVersionShortLabel,
   batchDefaultRowPatch,
+  currentMatchesLanguageBucket,
   draftArtworkBucket,
   listingLanguageForPrint,
+  mergeArtworkCandidates,
   preferArtworkPrinting,
   preferDraftArtwork,
   remapListingLanguage,
+  resolveArtworkRemap,
   shouldRemapArtwork,
   sortArtworkVersions,
 } from '../scan-artwork-versions.js';
@@ -848,14 +858,27 @@ export default function ScanDesk() {
       location: defaults.location,
       quantity: 1,
     });
-    void remapDraftArtwork(card.id, language);
+    void remapDraftArtwork(card.id, language, card.name || '');
   }
 
   /** JP/KO/ID/TH/VI → japanese|korean; ZH/ZHT → chinese; western langs → western. */
-  async function remapDraftArtwork(fromCardId, language) {
+  async function remapDraftArtwork(fromCardId, language, cardName = '') {
     if (!draftArtworkBucket(language)) return;
     const data = await loadVersionSet(fromCardId);
-    const preferred = preferDraftArtwork(data?.printings || [], fromCardId, language);
+    const clip = data?.printings || [];
+    let preferred = preferDraftArtwork(clip, fromCardId, language);
+    if (!preferred) {
+      const name = String(cardName || draft?.name || '').trim();
+      if (name) {
+        const nameRows = await fetchExactNameCards(name).catch(() => []);
+        preferred = resolveArtworkRemap({
+          clipPrintings: clip,
+          namePrintings: nameRows,
+          currentId: fromCardId,
+          listingLanguage: language,
+        });
+      }
+    }
     if (!preferred) return;
     const nextId = String(preferred.id || preferred.card_id || '');
     if (!nextId || nextId === String(fromCardId)) return;
@@ -939,7 +962,7 @@ export default function ScanDesk() {
       if (cmd.command === 'set') {
         setDraft((current) => (current ? { ...current, [cmd.field]: cmd.value } : null));
         if (cmd.field === 'language' && draft.cardId) {
-          void remapDraftArtwork(draft.cardId, cmd.value);
+          void remapDraftArtwork(draft.cardId, cmd.value, draft.name || '');
         }
         return null;
       }
@@ -1877,30 +1900,45 @@ function ArtworkVersionSelect({ row, closed, preferredLanguage, onPick }) {
   useEffect(() => {
     let cancelled = false;
     const cardId = String(row.cardId || '').trim();
+    const cardName = String(row.cardName || '').trim();
     if (!cardId) {
       setPrintings(null);
       return undefined;
     }
-    loadVersionSet(cardId).then((data) => {
+    (async () => {
+      const data = await loadVersionSet(cardId);
       if (cancelled) return;
-      const rows = sortArtworkVersions(data?.printings || [], listingLanguage);
+      let rows = sortArtworkVersions(data?.printings || [], listingLanguage);
       setPrintings(rows);
       if (closed) return;
       const tryKey = `${row.id}\0${listingLanguage}\0${cardId}`;
       if (remapTried.current.has(tryKey)) return;
       remapTried.current.add(tryKey);
+      let preferred = null;
       if (shouldRemapArtwork(rows, cardId, listingLanguage)) {
-        const preferred = preferArtworkPrinting(rows, cardId, listingLanguage);
-        const nextId = String(preferred?.id || preferred?.card_id || '');
-        if (nextId && nextId !== cardId) {
-          onPickRef.current(nextId);
+        preferred = preferArtworkPrinting(rows, cardId, listingLanguage);
+      } else if (!currentMatchesLanguageBucket(rows, cardId, listingLanguage) && cardName) {
+        // CLIP often misses a JP/CN sibling that still exists under the same
+        // English name (Wondrous Patch → Nihil Zero). Exact-name fills that gap.
+        const nameRows = await fetchExactNameCards(cardName).catch(() => []);
+        if (cancelled) return;
+        if (nameRows.length) {
+          const merged = mergeArtworkCandidates(rows, nameRows);
+          rows = sortArtworkVersions(merged, listingLanguage);
+          setPrintings(rows);
+          preferred = resolveArtworkRemap({
+            clipPrintings: data?.printings || [],
+            namePrintings: nameRows,
+            currentId: cardId,
+            listingLanguage,
+          });
         }
       }
-      // Do not coerce row.language here — Scan Desk keeps the full LANG list.
-      // JP/KO/ID/TH/VI and ZH/ZHT remap the expansion when a sibling exists.
-    });
+      const nextId = String(preferred?.id || preferred?.card_id || '');
+      if (nextId && nextId !== cardId) onPickRef.current(nextId);
+    })();
     return () => { cancelled = true; };
-  }, [row.cardId, row.id, row.nationality, row.language, closed, listingLanguage]);
+  }, [row.cardId, row.cardName, row.id, row.nationality, row.language, closed, listingLanguage]);
 
   const fallback = [row.setName, row.collectorNumber].filter(Boolean).join(' · ');
   if (closed || !row.cardId) {

@@ -526,6 +526,8 @@ function listingLanguageForPrint(nationality, preferred = 'EN') {
   if (bucket === 'indonesian') return 'ID';
   if (bucket === 'thai') return 'TH';
   if (bucket === 'idth') return want === 'TH' ? 'TH' : 'ID';
+  // Unknown nationality: keep preferred (do not stomp JP→EN before hydrate).
+  if (bucket === 'unknown') return want || 'EN';
   if (bucket === 'western' && ['JP','KO','ZH','ZHT','ID','TH','VI'].includes(want)) return 'EN';
   return want;
 }
