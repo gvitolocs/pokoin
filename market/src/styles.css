@@ -10736,14 +10736,7 @@ html:has(.wallet-page) .brand span {
   .seller-shop-list .shop-row.is-profile .shop-card-ph {
     grid-column: 1;
     grid-row: 1 / span 2;
-    width: 2.75rem;
-    height: 3.85rem;
-    overflow: hidden;
-    border-radius: 4px;
-  }
-  .seller-shop-list .shop-row.is-profile .shop-art {
-    width: 2.75rem;
-    height: 3.85rem;
+    align-self: center;
   }
   .seller-shop-list .shop-row.is-profile .shop-card-copy strong {
     grid-column: 2 / 4;
