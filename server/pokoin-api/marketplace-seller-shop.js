@@ -348,8 +348,10 @@ async function sellerCardIdsForGame(sellerUid, game, {
   query = marketplaceQuery,
   run = withGameContext,
 } = {}) {
-  // Shared listings live in the pokemon DB; intersect with the selected
-  // catalog so Pokemon shops never show satellite TCG rows (and vice versa).
+  // Shared listings live in the pokemon DB. Public card ids are per-game
+  // (blueprint×2), so the same number is a different card in Magic than in
+  // Pokémon. Scope the listing pull to marketplace_game, then keep CardTrader
+  // singles (product_type=card, item_kind=single) from that game's catalog.
   const catalogGame = game || 'pokemon';
   const listed = await run('pokemon', () => query(
     `
@@ -359,8 +361,9 @@ async function sellerCardIdsForGame(sellerUid, game, {
         and status = 'active'
         and quantity_available > 0
         and nullif(card_id, '') is not null
+        and marketplace_game = $2
     `,
-    [sellerUid],
+    [sellerUid, catalogGame],
   ));
   const ids = listed.rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean);
   if (!ids.length) return [];
@@ -369,6 +372,8 @@ async function sellerCardIdsForGame(sellerUid, game, {
       select card_id::text as card_id
       from public.marketplace_search_candidates
       where card_id::text = any($1::text[])
+        and product_type = 'card'
+        and item_kind = 'single'
     `,
     [ids],
   ));
@@ -525,11 +530,11 @@ async function loadSellerShopUncached({
     'quantity_available > 0',
   ];
 
-  // Pokemon listings + catalog share one DB. CardTrader's Pokémon shop is
-  // Singles (category 73): one product row is one unique item, and total
-  // items is the quantity sum. A singles blueprint with no search-candidate
-  // row still counts. Satellite TCGs still need the id intersect, then the
-  // same product-row / copy-sum totals.
+  // CardTrader's shop for a game is that game's Singles: one product row
+  // is one unique item, and total items is the quantity sum. Pokémon singles
+  // are category 73, including a blueprint that has no search-candidate row.
+  // Other games use the same product-row / copy-sum totals on their own
+  // singles, scoped by marketplace_game so a Pokémon id cannot count as Magic.
   const catalogGame = game || 'pokemon';
   if (catalogGame === 'pokemon') {
     where.push(pokemonSinglesWhere());
@@ -537,6 +542,8 @@ async function loadSellerShopUncached({
     const gameCardIds = await sellerCardIdsForGame(seller.uid, catalogGame);
     values.push(gameCardIds);
     where.push(`card_id = any($${values.length}::text[])`);
+    values.push(catalogGame);
+    where.push(`marketplace_game = $${values.length}`);
   }
 
   if (!book && q) {
