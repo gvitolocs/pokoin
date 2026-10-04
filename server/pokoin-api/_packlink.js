@@ -18,7 +18,8 @@ const DEFAULT_ZIP = {
 };
 
 const TIER_PROFILE = {
-  SMALL: { weight: 0.053, length: 18, width: 12, height: 1 },
+  // ≤20 g so Postamail Normalizzato (€1.30 Zona 1) applies for 1–4 cards.
+  SMALL: { weight: 0.018, length: 18, width: 12, height: 0.5 },
   MEDIUM: { weight: 0.085, length: 20, width: 14, height: 1.5 },
   LARGE: { weight: 0.165, length: 22, width: 16, height: 2.5 },
   EXTRA_LARGE: { weight: 20, length: 60, width: 40, height: 40 },

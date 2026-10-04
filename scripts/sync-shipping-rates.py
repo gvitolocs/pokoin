@@ -74,8 +74,10 @@ TIERS = [
     {"id": "EXTRA_LARGE", "maxCards": 9999},
 ]
 
+# SMALL must stay ≤20 g so Poste Italiane Postamail "Normalizzato" (€1.30
+# Zona 1) wins over the Compact 50 g / 100 g bands PackZoo was quoting.
 TIER_PROFILES = {
-    "SMALL": {"weight": 0.053, "length": 18, "width": 12, "height": 1.0, "grams": 53},
+    "SMALL": {"weight": 0.018, "length": 18, "width": 12, "height": 0.5, "grams": 18},
     "MEDIUM": {"weight": 0.085, "length": 20, "width": 14, "height": 1.5, "grams": 85},
     "LARGE": {"weight": 0.165, "length": 22, "width": 16, "height": 2.5, "grams": 165},
     "EXTRA_LARGE": {"weight": 20.0, "length": 60, "width": 40, "height": 40, "grams": 20000},
@@ -380,6 +382,59 @@ def pick_dao_letter(table: dict[str, int], frm: str, to: str, grams: int, *, tra
     }
 
 
+# --- Poste Italiane Postamail Internazionale (posta ordinaria) ---------------
+# Official Postamail Internazionale Zona tariffs (francobollo B). Denmark and
+# the rest of Europe are Zona 1. Giuseppe: IT→DK cheapest is Posta Ordinaria
+# €1.30 (Normalizzato ≤20 g), not the Compact 50–100 g PackZoo letter.
+
+POSTE_ZONA1 = frozenset(
+    EU_DESTINATIONS
+    + ("GB", "CH", "NO", "IS", "TR", "RU", "UA", "BY", "BA", "RS", "ME", "MK", "AL", "XK")
+)
+POSTE_ZONA3 = frozenset(("AU", "NZ", "FJ", "PF"))
+# Zona 2 = everywhere else we quote (Americas, Asia, Africa, …).
+
+# (max_grams, zona1, zona2, zona3) EUR cents — Normalizzato / Compatto bands.
+POSTE_POSTAMAIL_BANDS = (
+    (20, 130, 245, 320),    # Normalizzato
+    (50, 315, 400, 495),    # Compatto
+    (100, 420, 495, 695),
+    (250, 610, 890, 1095),
+    (350, 695, 930, 1295),
+    (1000, 880, 1395, 1915),
+    (2000, 1395, 2380, 2845),
+)
+
+
+def poste_zona(to_cc: str) -> int:
+    code = to_cc.upper()
+    if code in POSTE_ZONA1 or code == "IT":
+        return 1
+    if code in POSTE_ZONA3:
+        return 3
+    return 2
+
+
+def pick_poste_italiane_letter(frm: str, to: str, grams: int, *, tracked: bool) -> dict | None:
+    """Untracked Postamail Internazionale from Italy. Tracked uses Raccomandata (not here)."""
+    if tracked or frm.upper() != "IT":
+        return None
+    n = max(1, int(grams or 0))
+    zona = poste_zona(to)
+    for max_g, z1, z2, z3 in POSTE_POSTAMAIL_BANDS:
+        if n <= max_g:
+            cents = (z1, z2, z3)[zona - 1]
+            return {
+                "priceEURCents": cents,
+                "carrier": "Poste Italiane",
+                "serviceName": "Posta Ordinaria",
+                "tracked": False,
+                "rateSource": "poste-italiane-postamail",
+                "productClass": "letter",
+            }
+    return None
+
+
 # --- merge / write -----------------------------------------------------------
 
 def rate_id(frm: str, to: str, tier: str, tracked: bool) -> str:
@@ -506,6 +561,10 @@ def build_catalog(*, sleep_s: float = 0.12) -> dict:
                         best,
                         pick_dao_letter(dao_table, frm, to, profile["grams"], tracked=tracked),
                     )
+                best = merge_quote(
+                    best,
+                    pick_poste_italiane_letter(frm, to, profile["grams"], tracked=tracked),
+                )
                 if not best:
                     continue
                 best["fetchedAt"] = now
@@ -552,6 +611,7 @@ def build_catalog(*, sleep_s: float = 0.12) -> dict:
             ("packzoo", packzoo_ok),
             ("porto-data", porto_ok),
             ("dao-brev", dao_ok),
+            ("poste-italiane-postamail", True),
         ) if ok
     ]
     return {
@@ -564,9 +624,10 @@ def build_catalog(*, sleep_s: float = 0.12) -> dict:
                 "packzoo": PACKZOO,
                 "portoData": PORTO_RAW,
                 "daoBrev": DAO_BREV,
+                "posteItaliane": "Postamail Internazionale (francobollo B)",
             },
             "note": (
-                "Live PackZoo compare merged with porto-data + dao letter grids. "
+                "Live PackZoo compare merged with porto-data + dao + Poste Italiane Postamail. "
                 "Cheapest non-express wins. No manual overrides."
             ),
         },

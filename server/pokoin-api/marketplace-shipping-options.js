@@ -41,16 +41,17 @@ function seedLetterOptions({ fromCountry, toCountry, cardCount }) {
     if (!row) continue;
     const id = row.tracked !== false ? 'tracked' : 'untracked';
     if (options.some((option) => option.id === id)) continue;
+    const serviceName = row.serviceName || (row.tracked !== false ? 'Tracked letter' : 'Untracked letter');
     options.push({
       id,
-      label: row.tracked !== false ? 'Tracked letter' : 'Untracked letter',
-      serviceName: row.serviceName || 'Letter',
+      label: serviceName,
+      serviceName,
       carrier: row.carrier || '',
       amountCents: Number(row.priceEURCents) || 0,
       currency: 'EUR',
       tracked: row.tracked !== false,
       packageTier: tier,
-      source: 'seed',
+      source: row.rateSource || 'seed',
     });
   }
   return options;

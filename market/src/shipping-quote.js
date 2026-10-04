@@ -81,8 +81,8 @@ const LETTER_TIERS = new Set(['SMALL', 'MEDIUM']);
 
 /**
  * Pre-selected service before the buyer picks one: a few cards go as the
- * untracked letter (IT→DK 1–20 cards: €4.35 vs €16.84 tracked); bigger
- * parcels default to tracked. The buyer can always switch.
+ * untracked letter (IT→DK 1–4 cards: Posta Ordinaria €1.30 vs tracked parcel);
+ * bigger parcels default to tracked. The buyer can always switch.
  */
 export function defaultShippingService(options = []) {
   const selectable = (options || []).filter((row) => !row.unavailable);
