@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { shortlinkCardPath } from './shortlink.js';
 import { AuthProvider } from './auth.jsx';
 import { CartProvider } from './cart.jsx';
 import { WalletProvider } from './wallet.jsx';
@@ -90,6 +91,12 @@ function RouteSuspense({ children }) {
       {children}
     </Suspense>
   );
+}
+
+/** Numeric short links open their card (also under a game basename); the rest → marketplace. */
+function UnknownPath() {
+  const { pathname } = useLocation();
+  return <Navigate to={shortlinkCardPath(pathname) || '/marketplace'} replace />;
 }
 
 function both(path, element) {
@@ -250,7 +257,7 @@ function AppShell() {
       {both('/dashboard', <SellerHome />)}
       {both('/', <Navigate to="/marketplace" replace />)}
       {import.meta.env.DEV ? both('/dash-preview', <SellerHome />) : null}
-      <Route path="*" element={<Navigate to="/marketplace" replace />} />
+      <Route path="*" element={<UnknownPath />} />
       </Routes>
     </RouteSuspense>
   );
