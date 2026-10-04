@@ -1051,3 +1051,6 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
   .scan-row > .c-state { display: none; }
   .scan-submit { min-width: 0; }
 }
+
+/* Editable queue-row quantity (ported from #127). */
+.c-qty input { text-align: center; font-weight: 800; font-variant-numeric: tabular-nums; }

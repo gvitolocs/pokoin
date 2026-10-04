@@ -63,6 +63,7 @@ import {
   slotFilledStack,
   typeQuantity,
   locationDefaultsText,
+  quantityFieldCommit,
 } from '../scan-model.js';
 import { HELP_SECTIONS, shortcutFor, DRAFT_HOTKEY_LEGEND, draftLegendActive, dispatchDraftHotkey } from '../scan-shortcuts.js';
 import {
@@ -2072,7 +2073,28 @@ function QueueRow({
           </>
         )}
       </span>
-      <span className="c-qty">{row.quantity}</span>
+      <span className="c-qty">
+        {closed ? row.quantity : (
+          <input
+            inputMode="numeric"
+            aria-label={`Quantity for ${row.cardName || `row ${index + 1}`}`}
+            title="Cards in this row (1–99)"
+            tabIndex={-1}
+            maxLength={2}
+            key={`${row.id}:${row.quantity}`}
+            defaultValue={row.quantity}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={(e) => {
+              const commit = quantityFieldCommit(row, e.currentTarget.value);
+              if (commit.action === 'set') onPatch({ quantity: commit.quantity });
+              else e.currentTarget.value = String(row.quantity);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
+          />
+        )}
+      </span>
       {hidePrice ? null : (
       <span className={`c-price${row.priceSuggested ? ' suggested' : ''}`}>
         {closed ? formatSellerPrice(row.pricePkn, priceCurrency) : (
