@@ -404,8 +404,8 @@
 
   <!-- Recognition runs on the Pi API (nezopt GPU, Pi CPU fallback): pokoin-web docs/SCAN_API.md. -->
   <script data-scan-api>window.CARDSCAN_API = window.CARDSCAN_API || "https://api.pokoin.com/api/scan";</script>
-  <script src="/static/scan-diagnostics.js?v=scan-diag-v2"></script>
-  <script src="/static/scan-connect.js?v=scan-diag-v2"></script>
+  <script src="/static/scan-diagnostics.js?v=cam-gate-1"></script>
+  <script src="/static/scan-connect.js?v=cam-gate-1"></script>
   <script>
     const LIVE_MS = 280;
     const LIVE_MS_CONNECT = 450;
@@ -1044,6 +1044,17 @@
       startCam();
     });
     window.startCam = () => {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        // Mini browsers can never open a camera. Go back to the pairing panel:
+        // its Open in Chrome hop is the way out (2026-10-04 iPhone report).
+        const panel = document.getElementById("scanConnectPanel");
+        if (panel) { panel.hidden = false; panel.classList.add("ok"); }
+        const shutter = document.querySelector(".sc-shutter");
+        if (shutter) shutter.hidden = true;
+        warming.textContent = "Open this page in Chrome to scan.";
+        warming.hidden = false;
+        return;
+      }
       const activation = navigator.userActivation;
       if (!activation || activation.hasBeenActive) return startCam();
       const granted = (navigator.permissions && navigator.permissions.query)
