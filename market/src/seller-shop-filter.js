@@ -97,6 +97,6 @@ function compareRows(sort, a, b) {
 export function filterSellerBook(listings, filters = {}) {
   const rows = (Array.isArray(listings) ? listings : []).filter((row) => matchesRow(row, filters));
   rows.sort((a, b) => compareRows(filters.sort, a, b));
-  const unique = new Set(rows.map((row) => String(row.cardId || '')).filter(Boolean)).size;
-  return { rows, unique };
+  const copies = rows.reduce((sum, row) => sum + (Number(row.quantityAvailable) || 0), 0);
+  return { rows, unique: rows.length, copies };
 }

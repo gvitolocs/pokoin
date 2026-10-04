@@ -45,7 +45,7 @@ function listen(store) {
 test('seller shop key skips filtered and book requests', () => {
   assert.ok(cache.sellerShopKey({
     sellerUid: 'uid-1', limit: 100, offset: 0, sort: 'price-asc',
-  }).startsWith('pokoin:marketplace:v1:seller-shop:'));
+  }).startsWith('pokoin:marketplace:v1:seller-shop-ct:'));
   assert.equal(cache.sellerShopKey({
     sellerUid: 'uid-1', limit: 100, q: 'charizard',
   }), '');

@@ -525,16 +525,14 @@ async function loadSellerShopUncached({
     'quantity_available > 0',
   ];
 
-  // Pokemon listings + catalog share one DB. Prefer an EXISTS filter so large
-  // shops (thousands of SKUs) do not round-trip every distinct card_id through
-  // Node just to page 100 rows. Satellite TCGs still need the id intersect.
+  // Pokemon listings + catalog share one DB. CardTrader's Pokémon shop is
+  // Singles (category 73): one product row is one unique item, and total
+  // items is the quantity sum. A singles blueprint with no search-candidate
+  // row still counts. Satellite TCGs still need the id intersect, then the
+  // same product-row / copy-sum totals.
   const catalogGame = game || 'pokemon';
   if (catalogGame === 'pokemon') {
-    where.push(`exists (
-      select 1
-      from public.marketplace_search_candidates c
-      where c.card_id::text = marketplace_user_listings.card_id
-    )`);
+    where.push(pokemonSinglesWhere());
   } else {
     const gameCardIds = await sellerCardIdsForGame(seller.uid, catalogGame);
     values.push(gameCardIds);
@@ -601,12 +599,12 @@ async function loadSellerShopUncached({
         listings: [],
         total: 0,
         unique: 0,
+        copies: 0,
         maxUpdatedAt: '',
       };
     }
     const stamped = await attachCatalogRarity(result.rows, catalogGame);
     const listings = stamped.map((row) => listingRow(row, seller));
-    const unique = new Set(listings.map((row) => String(row.cardId || '')).filter(Boolean)).size;
     return {
       book: true,
       game,
@@ -620,7 +618,8 @@ async function loadSellerShopUncached({
       },
       listings,
       total: listings.length,
-      unique,
+      unique: listings.length,
+      copies: listingCopies(listings),
       maxUpdatedAt: await sellerActivityStamp(seller.uid),
       limit: listings.length,
       offset: 0,
@@ -631,14 +630,14 @@ async function loadSellerShopUncached({
     `
       select
         count(*)::int as total,
-        count(distinct nullif(card_id, ''))::int as unique_cards
+        coalesce(sum(quantity_available), 0)::int as copies
       from public.marketplace_user_listings
       where ${whereSql}
     `,
     values,
   ));
   const total = Number(totals.rows[0]?.total || 0);
-  const unique = Number(totals.rows[0]?.unique_cards || 0);
+  const copies = Number(totals.rows[0]?.copies || 0);
 
   const pageValues = [...values, limit, offset];
   const result = await withGameContext('pokemon', () => marketplaceQuery(
@@ -665,10 +664,54 @@ async function loadSellerShopUncached({
     },
     listings: result.rows.map((row) => listingRow(row, seller)),
     total,
-    unique,
+    unique: total,
+    copies,
     limit,
     offset,
   };
+}
+
+/** CardTrader unique items are product rows; total items is the copy sum. */
+function listingCopies(rows) {
+  let copies = 0;
+  for (const row of rows) {
+    const qty = Number(row?.quantityAvailable ?? row?.quantity_available);
+    if (Number.isFinite(qty) && qty > 0) copies += qty;
+  }
+  return copies;
+}
+
+/**
+ * Pokémon Singles, matching CardTrader category 73.
+ * Catalog cards are product_type=card and item_kind=single. A leftover with
+ * no candidate still counts when its public id is an even blueprint×2 of a
+ * category-73 blueprint (Basic Psychic Energy 812104).
+ */
+function pokemonSinglesWhere() {
+  return `(
+    exists (
+      select 1
+      from public.marketplace_search_candidates c
+      where c.card_id::text = marketplace_user_listings.card_id
+        and c.product_type = 'card'
+        and c.item_kind = 'single'
+    )
+    or (
+      marketplace_user_listings.card_id ~ '^[0-9]+$'
+      and (marketplace_user_listings.card_id::bigint % 2) = 0
+      and exists (
+        select 1
+        from public.cardtrader_pokemon_blueprints b
+        where b.category_id = 73
+          and b.id = (marketplace_user_listings.card_id::bigint / 2)
+      )
+      and not exists (
+        select 1
+        from public.marketplace_search_candidates c
+        where c.card_id::text = marketplace_user_listings.card_id
+      )
+    )
+  )`;
 }
 
 function withGameContext(game, fn, runner = runWithGame) {
