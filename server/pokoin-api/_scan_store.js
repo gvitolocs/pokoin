@@ -1138,8 +1138,22 @@ function createStore({
       }
       const created = [];
       // Location → Stack → Position. Snapshot may be legacy flat startPosition
-      // (treated as absolute) or stack/stackSize/startPosition.
-      const slotFor = rules.boxSlots(rows);
+      // (treated as absolute) or stack/stackSize/startPosition. Seed from live
+      // inventory so a batch that got its box name after scanning continues
+      // after slots already taken in that box (not ·1 again).
+      let stockRows = [];
+      if (writePokoinListings && rows.some((row) => String(row.location || '').trim())) {
+        stockRows = (await client.query(
+          `select location
+             from public.marketplace_user_listings
+            where seller_uid = $1
+              and status in ('active', 'paused')
+              and quantity_available > 0
+              and nullif(location, '') is not null`,
+          [sellerUid],
+        )).rows;
+      }
+      const slotFor = rules.boxSlots(rows, { stockRows });
       for (const row of rows) {
         let listingId = null;
         let listingStatus = null;

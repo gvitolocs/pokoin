@@ -280,3 +280,17 @@ test('boxSlots sized stacks: listing uses stack·pos and flags filledStack', () 
   assert.equal(slots.get('b').filledStack, true);
   assert.ok(rules.slotText(slots.get('b')).includes('·'));
 });
+
+test('boxSlots seeds from live stock so late location continues after the box', () => {
+  const rows = [
+    { id: 'a', location: 'megaevoluzionietb', quantity: 1, defaults_snapshot: { stack: 1, stackSize: 1, startPosition: 1 } },
+    { id: 'b', location: 'megaevoluzionietb', quantity: 1, defaults_snapshot: { stack: 1, stackSize: 1, startPosition: 1 } },
+  ];
+  const stockRows = [
+    { location: 'megaevoluzionietb·40' },
+    { location: 'megaevoluzionietb·41' },
+  ];
+  const slots = rules.boxSlots(rows, { stockRows });
+  assert.equal(rules.slotText(slots.get('a')), '·42');
+  assert.equal(rules.slotText(slots.get('b')), '·43');
+});

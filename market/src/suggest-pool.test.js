@@ -162,13 +162,40 @@ test('keystroke local rank stays inside one frame on a few thousand candidates',
   console.log(JSON.stringify({ local: timings, ranked }));
 });
 
-test('recall asks Redis for the first catalog token, not the whole typed string', () => {
+test('recall asks Redis for the stem, plus the full string when a mechanic stays on the name', () => {
+  // Peeled set/rarity tokens (`evol`, `legend`, `sr`) leave a one-word nameQuery —
+  // stem-only recall is enough (and `palkia` already returns LEGEND printings).
   assert.deepEqual(catalogRecall('mewtwo evol'), ['mewtwo']);
-  assert.deepEqual(catalogRecall('pikachu gx'), ['pikachu']);
+  assert.deepEqual(catalogRecall('palkia legend'), ['palkia']);
+  // Mechanic words stay on the name (`gx`); bare `pikachu` omits Tag Team.
+  assert.deepEqual(catalogRecall('pikachu gx'), ['pikachu', 'pikachu gx']);
+  assert.deepEqual(catalogRecall('reshiram charizard'), ['reshiram', 'reshiram charizard']);
   assert.deepEqual(catalogRecall('p'), ['p']);
   const swapped = catalogRecall('ipk');
   assert.ok(swapped.includes('Pikachu'), swapped.join(','));
   assert.equal(swapped.includes('ipk'), false);
+});
+
+test('pikachu gx paints Tag Team #2 once the full-query recall chunk is merged', async () => {
+  const { liveSuggestGroups, rememberSuggestGroups, resetSuggestLive } = await import('./suggest-live.js');
+  resetSuggestLive();
+  // Stem-only progressive chunk (what `catalogRecall` used to fetch alone).
+  rememberSuggestGroups([
+    { name: 'Pikachu GX', printings: [{ id: '1', name: 'Pikachu GX', set: 'SM Black Star Promos', number: 'SM232', nationality: 'western', rarity: 'Rare Holo GX' }] },
+    { name: 'Pikachu ☆ Gold Star', printings: [{ id: '2', name: 'Pikachu ☆', set: 'EX Holon Phantoms', number: '104/110', nationality: 'western' }] },
+    { name: 'Pikachu', printings: [{ id: '3', name: 'Pikachu', set: 'BREAKthrough', number: '48/162', nationality: 'western' }] },
+  ]);
+  assert.equal(
+    liveSuggestGroups('pikachu gx', { kind: 'singles' }).groups.some((g) => /Zekrom/i.test(g.name)),
+    false,
+  );
+  // Full-query chunk — Meili returns Tag Team for `pikachu gx`, not bare `pikachu`.
+  rememberSuggestGroups([
+    { name: 'Pikachu & Zekrom GX', printings: [{ id: '4', name: 'Pikachu & Zekrom GX', set: 'Team Up', number: '33/181', nationality: 'western', rarity: 'Rare Holo GX' }] },
+  ]);
+  const names = liveSuggestGroups('pikachu gx', { kind: 'singles' }).groups.map((g) => g.name);
+  assert.equal(names[0], 'Pikachu GX');
+  assert.equal(names[1], 'Pikachu & Zekrom GX', names.slice(0, 5).join(', '));
 });
 
 test('merged chunks keep identity and do not duplicate', () => {

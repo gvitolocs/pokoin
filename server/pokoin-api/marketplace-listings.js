@@ -622,25 +622,16 @@ function addBooleanField(sets, values, body, bodyKey, columnName, trueDefault = 
   sets.push(`${columnName} = $${values.length}`);
 }
 
-async function sellerCardIdsForGame(sellerUid, game) {
+async function cardIdsInGameCatalog(cardIds, game) {
   const catalogGame = normalizeMarketplaceGame(game);
+  const ids = (cardIds || []).map((id) => cleanText(id, 80)).filter(Boolean);
+  if (!ids.length) return [];
   let runWithGame;
   try {
     runWithGame = require('./_marketplace_game').runWithGame;
   } catch (_) {
     runWithGame = async (_game, fn) => fn();
   }
-  const listed = await marketplaceQuery(
-    `
-      select distinct card_id
-      from public.marketplace_user_listings
-      where seller_uid = $1
-        and nullif(card_id, '') is not null
-    `,
-    [sellerUid],
-  );
-  const ids = listed.rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean);
-  if (!ids.length) return [];
   try {
     const catalog = await runWithGame(catalogGame, () => marketplaceQuery(
       `
@@ -658,6 +649,21 @@ async function sellerCardIdsForGame(sellerUid, game) {
     }
     throw error;
   }
+}
+
+async function sellerCardIdsForGame(sellerUid, game) {
+  const listed = await marketplaceQuery(
+    `
+      select distinct card_id
+      from public.marketplace_user_listings
+      where seller_uid = $1
+        and nullif(card_id, '') is not null
+    `,
+    [sellerUid],
+  );
+  const ids = listed.rows.map((row) => cleanText(row.card_id, 80)).filter(Boolean);
+  if (!ids.length) return [];
+  return cardIdsInGameCatalog(ids, game);
 }
 
 async function readListings(url, decoded, { marketplaceGame = 'pokemon' } = {}) {
@@ -709,7 +715,11 @@ async function readListings(url, decoded, { marketplaceGame = 'pokemon' } = {}) 
   // Game scope: tagged marketplace_game from CT sync / createListing, plus
   // catalog intersection for seller inventory so pre-tag mixed CT imports
   // (all stored in the pokemon listings table) stay site-scoped.
-  if (!listingId) {
+  // Public card-desk reads key by card_id only — CT seller imports often leave
+  // marketplace_game='pokemon' on satellite printings (Riftbound Sanction
+  // 801170), and CardTrader blueprint ids are globally unique so the numeric
+  // public card_id already picks the right TCG.
+  if (!listingId && !cardId) {
     let gameCardIds = null;
     if (ownerUid) {
       gameCardIds = await sellerCardIdsForGame(ownerUid, game);

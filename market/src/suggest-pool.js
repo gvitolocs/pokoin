@@ -55,6 +55,11 @@ export function queryMode(query) {
  * loads that name's printings. Later words stay on the client and rank those
  * cards; they are not AND-ed into the request, which used to exhaust the
  * pool at a handful of hits and leave the popup empty.
+ *
+ * When the typed string is longer than that stem (`pikachu gx`, `reshiram
+ * charizard`), also recall the full query: Meili's bare-species page often
+ * omits Tag Team / compound printings (`pikachu` has no Zekrom; `palkia`
+ * happens to include LEGEND), while the full string returns them.
  */
 export function catalogRecall(query, { limit = 6 } = {}) {
   const raw = String(query || '').trim();
@@ -65,8 +70,10 @@ export function catalogRecall(query, { limit = 6 } = {}) {
   const token = words.find((word) => !isModifierWord(word)) || words[0] || raw;
   const ranked = rankNames(token);
   const accepted = ranked.filter((row) => row.withinCap !== false);
+  const stem = String(token).trim();
+  const full = words.length >= 2 && compactQuery(raw) !== compactQuery(stem) ? raw : '';
   if (accepted.some((row) => row.distance === 0)) {
-    return [String(token).trim()];
+    return full ? [stem, full] : [stem];
   }
   const names = [];
   const seen = new Set();
@@ -78,7 +85,11 @@ export function catalogRecall(query, { limit = 6 } = {}) {
     names.push(display);
     if (names.length >= Math.max(1, Number(limit) || 1)) break;
   }
-  return names.length ? names : [String(token).trim()];
+  if (!names.length) names.push(stem);
+  if (full && !names.some((name) => compactQuery(name) === compactQuery(full))) {
+    names.push(full);
+  }
+  return names;
 }
 
 export function buildScope({ lang = 'en', printLang = 'all', kind = 'singles', game = 'pokemon', query = '' } = {}) {

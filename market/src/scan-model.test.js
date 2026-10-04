@@ -266,6 +266,25 @@ test('rows without a captured start anchor at 1; next box positions remember the
   assert.equal(next.box2.stack, 4);
 });
 
+test('late-assigned box location resumes after stock already in that box', () => {
+  // Scanned without location, then Location filled in — snapshots still say ·1.
+  const list = [
+    row('a', { position: 1, location: 'megaevoluzionietb', quantity: 1, defaultsSnapshot: { stack: 1, stackSize: 1, startPosition: 1 } }),
+    row('b', { position: 2, location: 'megaevoluzionietb', quantity: 1, defaultsSnapshot: { stack: 1, stackSize: 1, startPosition: 1 } }),
+    row('c', { position: 3, location: 'megaevoluzionietb', quantity: 1, defaultsSnapshot: { stack: 1, stackSize: 1, startPosition: 1 } }),
+    row('d', { position: 4, location: 'megaevoluzionietb', quantity: 1, defaultsSnapshot: { stack: 1, stackSize: 1, startPosition: 1 } }),
+  ];
+  const occupiedAbs = new Map([['megaevoluzionietb', 41]]);
+  const slots = boxSlots(list, { occupiedAbs });
+  assert.equal(slots.get('a').stack, 42);
+  assert.equal(slots.get('b').stack, 43);
+  assert.equal(slots.get('c').stack, 44);
+  assert.equal(slots.get('d').stack, 45);
+  assert.equal(slotText(slots.get('a')), '·42');
+  const next = Object.fromEntries(nextBoxPositions(list, { occupiedAbs }));
+  assert.equal(next.megaevoluzionietb.stack, 46);
+});
+
 test('stackSize > 1 fills positions then spills to the next divider', () => {
   const snap = { stack: 1, stackSize: 3, startPosition: 1 };
   const list = [

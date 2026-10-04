@@ -190,12 +190,62 @@ function slotText(slot) {
   return `·${stack}·${slot.start}${slot.end > slot.start ? `-${slot.end}` : ''}`;
 }
 
+/** Parse `box·stack[·pos]` / ranges the same way the inventory desk does. */
+function listingSlotEnd(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return { box: '', stack: null, position: null };
+  const sepIndex = text.search(/[·•]/);
+  if (sepIndex === -1) return { box: text, stack: null, position: null };
+  const box = text.slice(0, sepIndex).trim();
+  const tail = text.slice(sepIndex + 1).replace(/\s+/g, '');
+  let m = tail.match(/^(\d+)[·•](\d+)[–—](\d+)[·•](\d+)$/);
+  if (m) return { box, stack: Number(m[3]), position: Number(m[4]) };
+  m = tail.match(/^(\d+)[·•](\d+)-(\d+)$/);
+  if (m) return { box, stack: Number(m[1]), position: Number(m[3]) };
+  m = tail.match(/^(\d+)[-–—](\d+)$/);
+  if (m) return { box, stack: Number(m[2]), position: null };
+  const numbers = tail.split(/[·•]/).map((part) => parseInt(part, 10)).filter((n) => Number.isFinite(n) && n > 0);
+  return { box, stack: numbers[0] || null, position: numbers.length > 1 ? numbers[1] : null };
+}
+
+function lastOccupiedIndex(stockRows, box, stackSize = 1) {
+  const wanted = String(box || '').trim();
+  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  let max = 0;
+  for (const row of Array.isArray(stockRows) ? stockRows : []) {
+    const end = listingSlotEnd(row?.location);
+    if (!end.box || end.box !== wanted || end.stack == null) continue;
+    const abs = size === 1
+      ? end.stack
+      : end.position == null
+        ? end.stack * size
+        : stackPosToIndex(end.stack, Math.min(size, end.position), size);
+    if (abs > max) max = abs;
+  }
+  return max;
+}
+
 /**
  * Walk queue order and assign slots. Snapshot may be camelCase (API) or
  * already on the row as defaults_snapshot. Quantity spills across stacks.
+ *
+ * `stockRows` (live listings with `location`) seed each bare-box counter so
+ * submit continues after inventory already in that box.
  */
-function boxSlots(rows) {
+function boxSlots(rows, { stockRows = [] } = {}) {
   const counters = new Map();
+  if (stockRows.length) {
+    const seen = new Set();
+    for (const row of rows || []) {
+      const loc = String(row.location || '').trim();
+      if (!loc || seen.has(loc)) continue;
+      seen.add(loc);
+      const snap = row.defaults_snapshot || row.defaultsSnapshot || {};
+      const size = Math.max(1, Math.trunc(Number(snap.stackSize)) || 1);
+      const last = lastOccupiedIndex(stockRows, loc, size);
+      if (last > 0) counters.set(loc, last);
+    }
+  }
   const slots = new Map();
   for (const row of rows || []) {
     const loc = String(row.location || '').trim();
