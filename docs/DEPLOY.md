@@ -4,10 +4,22 @@ One path, one line of history. Several agent sessions work on this repo at the
 same time; this page is the rule they all follow. Scan Connect's multi-host
 rollout: [SCAN_CONNECT.md](SCAN_CONNECT.md#production-deployment).
 
-As of 2026-10-03, `scripts/deploy-web.sh` is the Vercel rollback path, not the
-live host. `pokoin.com` is temporarily the Pi origin, and the target preview
-is Cloudflare Workers Static Assets. See [WEB_HOST.md](WEB_HOST.md). Do not
-run `deploy-web.sh` to publish the current site.
+**Live host since 2026-10-04: Cloudflare Workers Static Assets** (`pokoin-web`,
+assets-only, see [WEB_HOST.md](WEB_HOST.md)). `scripts/deploy-web.sh` is the
+**Vercel rollback path only** — it does not publish the live site. Publish an exact
+`origin/main` commit like this (nezopt, login shell for `wrangler`):
+
+```bash
+S=$(mktemp -d); git archive <origin/main sha> | tar -C "$S" -xf -; cd "$S"
+scripts/build-web.sh                                    # dist-web/
+node scripts/write-cloudflare-web-routing.mjs dist-web  # _redirects (≤100 rules) + _headers
+wrangler versions upload -c wrangler.pokoin-web.jsonc --message "main <sha>"   # no traffic yet
+# check the printed Version Preview URL (short links, /, /marketplace, app assets), then:
+wrangler versions deploy <version-id>@100% --name pokoin-web -y
+```
+
+Rollback: `wrangler versions deploy <previous version>@100% --name pokoin-web -y`
+(`wrangler deployments list --name pokoin-web` shows the history).
 
 ## The rule
 

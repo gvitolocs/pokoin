@@ -1,6 +1,6 @@
 # Pokoin Web Host Map (2026-10-03)
 
-Live `pokoin.com` is Cloudflare Workers Static Assets (`pokoin-web`, version `b5bdd213-a157-415f-8335-eb5c436c1bf3`). There is no Worker script on ordinary page views. The browser calls `https://api.pokoin.com`. Card photos redirect to `cdn.pokoin.com`. The Pi website process is stopped.
+Live `pokoin.com` is Cloudflare Workers Static Assets (`pokoin-web`, version `7ded97af-4f23-4016-a6be-202d9c227ecb` from `origin/main` 7ec665e, 2026-10-04; previous `02547d29`). Numeric short links (`/{id}`, `/{id}/{slug}`) are `_redirects` rules (one per leading digit, 302 to `/marketplace/en/cards/{id}`). There is no Worker script on ordinary page views. The browser calls `https://api.pokoin.com`. Card photos redirect to `cdn.pokoin.com`. The Pi website process is stopped.
 
 ---
 
