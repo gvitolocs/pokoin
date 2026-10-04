@@ -45,6 +45,7 @@ const RARITY_FILTERS = [
   { value: 'illustration', label: 'Illustration Rare' },
   { value: 'secret', label: 'Secret Rare' },
   { value: 'promo', label: 'Promo' },
+  { value: 'no-rarity', label: 'No Rarity' },
 ];
 
 function ShopToggle({ label, pressed, onToggle }) {
