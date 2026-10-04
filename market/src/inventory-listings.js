@@ -241,12 +241,22 @@ export function listingBox(raw) {
   return parseListingLocation(raw).box;
 }
 
+/**
+ * Case-insensitive box match: does a stored location (which may carry a
+ * ·stack-position suffix) belong to the box a URL names? A hand-typed slug
+ * matches across casing.
+ */
+export function sameListingBox(raw, box) {
+  const left = listingBox(raw).trim().toLowerCase();
+  const right = listingBox(box).trim().toLowerCase();
+  return Boolean(left) && left === right;
+}
+
 /** Match a location page to its whole box, including numbered slots. */
 export function inventoryRowsForLocation(rows, location) {
-  const box = listingBox(location);
-  if (!box) return [];
+  if (!listingBox(location)) return [];
   return (Array.isArray(rows) ? rows : [])
-    .filter((row) => listingBox(row?.location) === box);
+    .filter((row) => sameListingBox(row?.location, location));
 }
 
 /**
@@ -259,7 +269,8 @@ export function groupBoxStacks(rows, box) {
   const wanted = String(box || '').trim();
   const list = (Array.isArray(rows) ? rows : [])
     .map((row) => ({ row, parsed: parseListingLocation(row?.location) }))
-    .filter((entry) => entry.parsed.box && entry.parsed.box === wanted);
+    .filter((entry) => entry.parsed.box
+      && entry.parsed.box.toLowerCase() === wanted.toLowerCase());
   const stacks = new Map();
   for (const { row, parsed } of list) {
     const stackNo = parsed.position == null ? 0 : (parsed.stack ?? 0);

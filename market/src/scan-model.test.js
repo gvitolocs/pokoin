@@ -15,6 +15,7 @@ import {
   orderedRows,
   phaseText,
   queueRows,
+  quantityFieldCommit,
   rowProblem,
   sessionPhase,
   slotText,
@@ -185,6 +186,11 @@ test('defaults label, finish cycle, candidates, quantity typing', () => {
   assert.deepEqual(typeQuantity('4', '2'), { buffer: '42', quantity: 42 });
   assert.deepEqual(typeQuantity('42', '7'), { buffer: '27', quantity: 27 });
   assert.deepEqual(typeQuantity('', '0'), { buffer: '', quantity: null });
+  assert.deepEqual(quantityFieldCommit({ quantity: 1 }, '80'), { action: 'set', quantity: 80 });
+  assert.deepEqual(quantityFieldCommit({ quantity: 80 }, '80'), { action: 'keep', quantity: 80 });
+  assert.deepEqual(quantityFieldCommit({ quantity: 80 }, ''), { action: 'restore' });
+  assert.deepEqual(quantityFieldCommit({ quantity: 80 }, '100'), { action: 'restore' });
+  assert.deepEqual(quantityFieldCommit({ quantity: 80 }, '2.5'), { action: 'restore' });
 });
 
 test('QR link carries code and secret in the fragment; dashboard host detection', () => {

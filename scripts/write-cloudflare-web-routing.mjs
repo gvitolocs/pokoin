@@ -40,6 +40,13 @@ const lines = [
   '/brand* /market/brand/:splat 200',
   '/working* /working.html 200',
 ];
+// Numeric card short links (pokoin.com/239324, also /239324/slug): one rule per
+// leading digit, because _redirects has no digit-only pattern. The old Pi origin and
+// the pokoin-shortlink Worker served these; without them every shared or scanned
+// short link was an empty 404 on this host. No real root path starts with a digit.
+for (let digit = 0; digit <= 9; digit += 1) {
+  lines.push(`/${digit}* /marketplace/en/cards/${digit}:splat 302`);
+}
 for (const board of testBoards) {
   lines.push(`/${board}* https://test.pokoin.com/${board}/:splat 301`);
 }
@@ -48,6 +55,8 @@ for (const prefix of spa) {
   if (testBoards.includes(prefix)) continue;
   lines.push(`/${prefix}* /market/app 200`);
 }
+const rules = lines.filter((line) => line && !line.startsWith('#')).length;
+if (rules > 100) throw new Error(`_redirects has ${rules} rules; Workers Static Assets allow 100`);
 fs.writeFileSync(path.join(root, '_redirects'), `${lines.join('\n')}\n`);
 
 const headers = `/*
