@@ -5064,6 +5064,13 @@ span.shop-flag {
   outline: 2px solid var(--yellow);
   outline-offset: 1px;
 }
+.ct-qty.is-single {
+  justify-content: center;
+  min-width: 1.15rem;
+  color: var(--text);
+  font-weight: 750;
+  font-size: 0.78rem;
+}
 
 .shop-card {
   display: flex;

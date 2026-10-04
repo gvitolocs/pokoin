@@ -221,6 +221,27 @@ export default function ShopListingRow({
       </span>
       <span className="shop-px"><PriceStack parts={buyer.parts(offer.pricePkn, offer.sellerAcceptsPkn)} /></span>
       {!mine ? (
+        choices > 1 ? (
+          <label className="ct-qty" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+            <select
+              aria-label={`Quantity, ${Math.min(pick, choices)} available`}
+              value={Math.min(pick, choices)}
+              onChange={(event) => {
+                event.stopPropagation();
+                setPick(Number(event.target.value) || 1);
+              }}
+            >
+              {Array.from({ length: choices }, (_, index) => {
+                const n = index + 1;
+                return <option key={n} value={n}>{n}</option>;
+              })}
+            </select>
+          </label>
+        ) : (
+          <span className="ct-qty is-single" aria-label="Quantity 1">1</span>
+        )
+      ) : null}
+      {!mine ? (
         <span className="shop-row-actions">
           {sellerUid ? (
             <button
@@ -287,24 +308,6 @@ export default function ShopListingRow({
             <TrashIcon />
           </button>
         </span>
-      ) : null}
-      {!mine ? (
-        <label className="ct-qty" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-          <select
-            aria-label={`Quantity, ${Math.min(pick, choices)} of ${stock || choices}`}
-            value={Math.min(pick, choices)}
-            onChange={(event) => {
-              event.stopPropagation();
-              setPick(Number(event.target.value) || 1);
-            }}
-          >
-            {Array.from({ length: choices }, (_, index) => {
-              const n = index + 1;
-              return <option key={n} value={n}>{n}</option>;
-            })}
-          </select>
-          <span>of {stock || choices}</span>
-        </label>
       ) : null}
       {Array.isArray(offer?.photoUrls) && offer.photoUrls.length ? (
         <span className="shop-photos">
