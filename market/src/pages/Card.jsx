@@ -1384,7 +1384,7 @@ function SilverHead({ card, fromPath }) {
   async function openCardmarket() {
     setMessage('');
     try {
-      const url = cardmarketSearchUrl(card, game().id) || await fetchCardmarketRedirect(card);
+      const url = await fetchCardmarketRedirect(card).catch(() => '') || cardmarketSearchUrl(card, game().id);
       if (!url) {
         throw new Error('Cardmarket did not return a URL.');
       }
