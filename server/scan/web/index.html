@@ -603,11 +603,16 @@
 
     function safeCardUrl(hit) {
       if (!hit || !hit.public_id || !/^\d+$/.test(String(hit.public_id))) return "";
+      const prefix = {pokemon:"", one_piece:"one-piece/", riftbound:"riftbound/"}[game];
+      if (prefix === undefined) return "";
+      // pokoin_url still names the game by host: a hit from another game's catalog never opens.
       try {
         const url = new URL(hit.pokoin_url);
         const host = {pokemon:"pokoin.com", one_piece:"onepiece.pokoin.com", riftbound:"riftbound.pokoin.com"}[game];
-        return url.protocol === "https:" && url.host === host && url.pathname === "/" + hit.public_id && !url.search && !url.hash ? url.href : "";
+        if (url.protocol !== "https:" || url.host !== host || url.pathname !== "/" + hit.public_id || url.search || url.hash) return "";
       } catch (_) { return ""; }
+      // Open the full card path: numeric pokoin.com/{id} short links 404 on the static web host (2026-10-03).
+      return "https://pokoin.com/" + prefix + "marketplace/en/cards/" + hit.public_id;
     }
     function pokoinUrl(data) { return safeCardUrl(data.top1); }
 

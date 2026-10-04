@@ -45,6 +45,8 @@ function scanner() {
   return {run:code=>vm.runInContext(code,context),sandbox,elements,element,draws,navigations,requests,timers};
 }
 
+// Card links open the full path; numeric pokoin.com/{id} short links 404 on the static host.
+const fullCardUrl=(prefix,id)=>`https://pokoin.com/${prefix}marketplace/en/cards/${id}`;
 test('portrait preview and capture keep the entire sensor frame without software zoom',async()=>{
  const s=scanner();
  assert.match(html,/#live \{ object-fit: contain;/);
@@ -140,7 +142,7 @@ test('switching catalog discards an in-flight match',async()=>{
 });
 test('single navigation uses the top match only and rejects the wrong game hostname',async()=>{
  const s=scanner();await turn();s.run('selectCatalog("one_piece","english")');
- assert.equal(s.run('pokoinUrl({top1:{public_id:"488352",pokoin_url:"https://onepiece.pokoin.com/488352"}})'), 'https://onepiece.pokoin.com/488352');
+ assert.equal(s.run('pokoinUrl({top1:{public_id:"488352",pokoin_url:"https://onepiece.pokoin.com/488352"}})'), fullCardUrl('one-piece/','488352'));
  assert.equal(s.run('pokoinUrl({top1:{public_id:"488352",pokoin_url:"https://pokoin.com/488352"}})'), '');
  assert.equal(s.run('pokoinUrl({top1:{id:"not-mapped"},hits:[{public_id:"488352",pokoin_url:"https://onepiece.pokoin.com/488352"}]})'), '');
 });
@@ -190,7 +192,7 @@ test('weak live match offers a clickable candidate without automatic navigation'
  const top={id:'489018',public_id:'489018',score:.715,name:'Monkey.D.Luffy',pokoin_url:'https://onepiece.pokoin.com/489018'};
  s.sandbox.fetch=async()=>({ok:true,json:async()=>({catalog:'one_piece_english',top1:top,boxes:[]})});
  await s.run('identify({}, {live:true,viewVersion:cameraViewVersion})');
- assert.equal(s.element('multiList').children[0].href,top.pokoin_url);assert.match(s.element('warming').textContent,/Possible match/);assert.deepEqual(s.navigations,[]);
+ assert.equal(s.element('multiList').children[0].href,fullCardUrl('one-piece/',top.public_id));assert.match(s.element('warming').textContent,/Possible match/);assert.deepEqual(s.navigations,[]);
 });
 test('the actual accepted Luffy API response opens its card on the first frame',async()=>{
  const s=scanner();await turn();s.run('selectCatalog("one_piece","english")');
@@ -198,9 +200,9 @@ test('the actual accepted Luffy API response opens its card on the first frame',
  assert.equal(response.immediate,false);assert.equal(response.top1.score,.78);
  s.sandbox.fetch=async()=>({ok:true,json:async()=>response});
  await s.run('identify({}, {live:true,viewVersion:cameraViewVersion})');
- assert.deepEqual(s.navigations,[response.top1.pokoin_url]);
+ assert.deepEqual(s.navigations,[fullCardUrl('one-piece/',response.top1.public_id)]);
  assert.match(s.element('warming').textContent,/Opening/);
- assert.equal(s.element('multiList').children[0].href,response.top1.pokoin_url);
+ assert.equal(s.element('multiList').children[0].href,fullCardUrl('one-piece/',response.top1.public_id));
 });
 
 test('browser chrome resize during identification does not discard a valid full-sensor response',async()=>{
@@ -211,14 +213,14 @@ test('browser chrome resize during identification does not discard a valid full-
  const pending=s.run('identify({}, {live:true,viewVersion:cameraViewVersion})');
  s.element('overlay').clientHeight=620;s.run('cameraViewChanged()');
  reply({ok:true,json:async()=>response});
- assert.ok(await pending);assert.deepEqual(s.navigations,[response.top1.pokoin_url]);
+ assert.ok(await pending);assert.deepEqual(s.navigations,[fullCardUrl('one-piece/',response.top1.public_id)]);
 });
 test('accepted Japanese gallery response opens the exact public card',async()=>{
  const s=scanner();await turn();s.run('selectCatalog("one_piece","japanese")');
  const response=JSON.parse(fs.readFileSync(path.join(__dirname,'fixtures/scanner-redirect/shanks-response.json'),'utf8'));
  s.sandbox.fetch=async()=>({ok:true,json:async()=>response});
  await s.run('identify({}, {live:false})');
- assert.deepEqual(s.navigations,[response.top1.pokoin_url]);
+ assert.deepEqual(s.navigations,[fullCardUrl('one-piece/',response.top1.public_id)]);
 });
 test('a failed navigation keeps a usable card link and explains the next action',async()=>{
  const s=scanner();await turn();s.run('selectCatalog("one_piece","english")');
@@ -226,7 +228,7 @@ test('a failed navigation keeps a usable card link and explains the next action'
  s.sandbox.fetch=async()=>({ok:true,json:async()=>response});
  s.sandbox.location.assign=()=>{throw new Error('navigation denied')};
  await s.run('identify({}, {live:true,viewVersion:cameraViewVersion})');
- assert.equal(s.element('multiList').children[0].href,response.top1.pokoin_url);
+ assert.equal(s.element('multiList').children[0].href,fullCardUrl('one-piece/',response.top1.public_id));
  assert.match(s.element('warming').textContent,/Tap.*open/);
 });
 
@@ -240,4 +242,10 @@ test('a failed camera canvas capture is logged and the live loop schedules a ret
  assert.equal(s.run('busy'),false);
  assert.ok(s.timers.length>count,'next camera tick remains scheduled');
  assert.deepEqual(logged,[['camera-loop-error','InvalidStateError']]);
+});
+test('pokemon hits open the full card path, never the numeric short link',async()=>{
+ const s=scanner();await turn();s.run('selectCatalog("pokemon","western")');
+ assert.equal(s.run('pokoinUrl({top1:{public_id:"531072",pokoin_url:"https://pokoin.com/531072"}})'), fullCardUrl('','531072'));
+ assert.equal(s.run('pokoinUrl({top1:{public_id:"531072",pokoin_url:"https://riftbound.pokoin.com/531072"}})'), '');
+ assert.equal(s.run('pokoinUrl({top1:{public_id:"5310x2",pokoin_url:"https://pokoin.com/5310x2"}})'), '');
 });
