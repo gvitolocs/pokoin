@@ -57,10 +57,18 @@ function wantsHtml(req) {
   return accept.includes('text/html');
 }
 
+function publicApiHost(req) {
+  const forwarded = String(req.headers?.['x-forwarded-host'] || '').split(',')[0].trim();
+  if (forwarded && !/^(127\.|localhost|0\.0\.0\.0)/i.test(forwarded)) return forwarded;
+  const host = String(req.headers?.host || '').split(',')[0].trim();
+  if (host && !/^(127\.|localhost|0\.0\.0\.0)/i.test(host)) return host;
+  return 'api.pokoin.com';
+}
+
 function authRedirect(req) {
-  const host = String(req.headers?.host || 'api.pokoin.com');
-  const proto = String(req.headers?.['x-forwarded-proto'] || 'https');
-  const path = String(req.url || '/api/user-photos');
+  const host = publicApiHost(req);
+  const proto = String(req.headers?.['x-forwarded-proto'] || 'https').split(',')[0].trim() || 'https';
+  const path = String(req.url || '/api/user-photos').split('?')[0];
   const next = `${proto}://${host}${path.startsWith('/') ? path : `/${path}`}`;
   const from = `/messages?photo=${encodeURIComponent(next)}`;
   return `${AUTH_ORIGIN}/auth?from=${encodeURIComponent(from)}`;
@@ -152,5 +160,6 @@ module.exports = async function handler(req, res) {
 module.exports._test = {
   parsePhotoKey,
   authRedirect,
+  publicApiHost,
   wantsHtml,
 };

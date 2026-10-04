@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { parsePhotoKey, authRedirect, wantsHtml } = require('./user-photos')._test;
+const { parsePhotoKey, authRedirect, publicApiHost, wantsHtml } = require('./user-photos')._test;
 
 test('parsePhotoKey accepts chat and listing keys only', () => {
   assert.deepEqual(
@@ -22,10 +22,23 @@ test('parsePhotoKey accepts chat and listing keys only', () => {
 test('unauthenticated browser GETs redirect to /auth', () => {
   const location = authRedirect({
     headers: { host: 'api.pokoin.com', 'x-forwarded-proto': 'https' },
-    url: '/api/user-photos/chat/u/x.jpg',
+    url: '/api/user-photos/chat/u/abcdef012345.jpg',
   });
   assert.match(location, /^https:\/\/pokoin\.com\/auth\?from=/);
-  assert.match(decodeURIComponent(location), /\/messages\?photo=/);
+  const once = decodeURIComponent(location);
+  assert.match(once, /\/messages\?photo=/);
+  assert.match(decodeURIComponent(once), /https:\/\/api\.pokoin\.com\/api\/user-photos\//);
+});
+
+test('publicApiHost ignores loopback Host from the Pi reverse proxy', () => {
+  assert.equal(
+    publicApiHost({ headers: { host: '127.0.0.1:18080', 'x-forwarded-host': 'api.pokoin.com' } }),
+    'api.pokoin.com',
+  );
+  assert.equal(
+    publicApiHost({ headers: { host: '127.0.0.1:18080' } }),
+    'api.pokoin.com',
+  );
 });
 
 test('wantsHtml follows Accept', () => {
