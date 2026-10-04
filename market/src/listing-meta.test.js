@@ -92,6 +92,7 @@ test('native seller profile is a users path; reserve is not', () => {
     /^\/marketplace\/en\/users\/seller-PUH1ygG9mOOy\?sellerUid=PUH1ygG9mOOyQRPXaY5Fa1W6DKd2$/,
   );
   assert.deepEqual(listingExtraTags({ reverse: true, language: 'EN' }), ['Reverse']);
+  assert.deepEqual(listingExtraTags({ foilState: 'foil' }), ['Foil']);
 });
 
 test('public seller label never shows email; falls back to handle', () => {

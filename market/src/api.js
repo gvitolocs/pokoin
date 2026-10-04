@@ -643,11 +643,16 @@ export function fetchListings(cardId, { limit = 40, fresh = false } = {}) {
     }
   }
   const epoch = listingsFetchEpoch(id);
+  // Pokémon Shop stays native-only (CardTrader is Silver / CT pills). Satellite
+  // TCGs are almost entirely CardTrader live via pknreserve — nativeOnly would
+  // paint an empty shop (Riftbound Sanction 801170, 2026-10-04).
   const params = new URLSearchParams({
     cardId: id,
-    nativeOnly: '1',
     limit: String(limit),
   });
+  if (isPokemonGame()) {
+    params.set('nativeOnly', '1');
+  }
   if (fresh) {
     params.set('_', String(Date.now()));
   }
@@ -1856,6 +1861,18 @@ export function confirmMarketplaceDelivery(orderId, token) {
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ orderId }),
+  });
+}
+
+/** Buyer rates a seller 1–5 stars after confirming delivery. */
+export function rateMarketplaceSeller(orderId, token, { sellerUid, stars, comment = '' } = {}) {
+  return getJson('/api/marketplace-orders?action=rate-seller', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ orderId, sellerUid, stars, comment }),
   });
 }
 
