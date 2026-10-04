@@ -724,3 +724,14 @@ test("XY Ultra Rare FA EX near set end is bleed", () => {
   );
 });
 
+
+test('modern full-art items and tools are full art, like supporters (Air Balloon MEG 166/132)', () => {
+  const megaFa = { name: 'Air Balloon', number: 'Ultra Rare | 166/132', set: 'Mega Evolution', art_layout: 'window' };
+  assert.equal(resolveArtLayout(megaFa), 'bleed');
+  assert.equal(isFeatureAlbumArt(megaFa), true);
+  assert.equal(resolveArtLayout({ name: 'Air Balloon', number: 'Secret Rare | 213/202', set: 'Sword & Shield' }), 'bleed');
+  // The regular printings stay framed windows.
+  assert.equal(resolveArtLayout({ name: 'Air Balloon', number: 'Uncommon | 079/086', set: 'Black Bolt', art_layout: 'window' }), 'window');
+  // Gold Secret items stay windows, exactly like gold supporters.
+  assert.equal(resolveArtLayout({ name: 'Air Balloon', number: 'Gold Secret Rare | 238/202', set: 'Sword & Shield', art_layout: 'window' }), 'window');
+});

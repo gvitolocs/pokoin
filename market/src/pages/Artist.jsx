@@ -532,14 +532,14 @@ function ArtistDesk() {
           <button className="btn" type="button" onClick={clearFilters}>Clear filters</button>
         </EmptyDesk>
       ) : (
-        <CardSelectGrid className={`grid album-grid${sort === 'pokedex' ? ' is-pokedex-order' : ''}`} cards={payload ? visibleCards : []}>
+        <CardSelectGrid className="grid album-grid" cards={payload ? visibleCards : []}>
           {!payload && !error
             ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} album />)
             : visibleGroups.map((group, index) => (
               group.cards.length > 1 ? (
-                <ArtistPileTile key={group.key} group={group} rank={index} onOpen={setPile} flat={sort === 'pokedex'} />
+                <ArtistPileTile key={group.key} group={group} rank={index} onOpen={setPile} />
               ) : (
-                <CardTile key={albumTileKey(group.cards[0])} card={group.cards[0]} rank={index} cut flat={sort === 'pokedex'} />
+                <CardTile key={albumTileKey(group.cards[0])} card={group.cards[0]} rank={index} cut />
               )
             ))}
           {payload && restPending && !filtersOn

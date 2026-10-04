@@ -97,10 +97,23 @@ const ACE_SPEC_RE = /\b(?:rare\s*ace|ace\s*spec)\b/i;
 /** Framed Item / Tool / Stadium still-lifes — never Secret Rare FA bleed. */
 const FRAMED_TRAINER_STILL_LIFE = /\b(?:(?:super|hyper|max|full\s*heal)?\s*potion|antidote|awakening|(?:burn|ice|paralyze)\s*heal|revive|rare\s*candy|(?:poke|great|ultra|master|nest|net|dive|luxury|timer|quick|dusk|heal|heavy|level|love|lure|friend|moon|fast|sport|beast|dream|safari|premier)\s*ball|rocky\s*helmet|computer\s*search|escape\s*rope|enhanced\s*hammer|dowsing\s*machine|colress\s*machine|vs\s*seeker|switch|pokegear|bicycle|town\s*map|pokemon\s*catcher|super\s*rod|fishing\s*rod|energy\s*(?:search|retrieval|switch|recycler)|tool\s*scrapper|startling\s*megaphone|lucky\s*egg|exp\.?\s*share|float\s*stone|air\s*balloon|choice\s*band|choice\s*specs|assault\s*vest|weakness\s*policy|muscle\s*band|focus\s*sash|life\s*orb|black\s*belt|expert\s*belt|rocky\s*helmet|eviolite|leftovers|stadium|city\s*gym|gym)\b/i;
 
+/** Sword & Shield onward print Ultra Rare / Secret Rare items and tools as full-art
+ * paintings, exactly like supporters (Air Balloon MEG 166/132). Older blocks keep the
+ * framed still-life (BW/XY Rocky Helmet, SM gold items). */
+const MODERN_TRAINER_FA_ERAS = new Set(['Sword & Shield', 'Scarlet & Violet', 'Mega Evolution']);
+function isModernFullArtTrainerPrint(card) {
+  const hay = catalogHay(card);
+  if (ACE_SPEC_RE.test(hay) || /gold\s*secret/i.test(hay)) return false;
+  if (!/\bultra\s*rare\b|rainbow\s*(secret\s*)?rare|\bsecret\s*rare\b/i.test(hay)) return false;
+  const setHay = `${card?.slug || ''} ${card?.set || ''} ${card?.set_name || ''} ${card?.expansion_name || ''}`;
+  return MODERN_TRAINER_FA_ERAS.has(matchTcgEra(setHay));
+}
+
 function isFramedTrainerStillLife(card) {
   const name = String(card?.name || card?.english_name || '').replace(/\s+/g, ' ').trim();
   if (!name) return false;
   if (isItemAlbumCard(card)) return false;
+  if (isModernFullArtTrainerPrint(card)) return false;
   if (isTrainerItemName(name)) return true;
   if (ACE_SPEC_RE.test(catalogHay(card))) return true;
   return FRAMED_TRAINER_STILL_LIFE.test(name);
@@ -129,7 +142,7 @@ function isTrainerFullArtBleed(card) {
   }
   const setHay = `${card?.slug || ''} ${card?.set || ''} ${card?.set_name || ''} ${card?.expansion_name || ''}`;
   const era = matchTcgEra(setHay);
-  return era === 'Sword & Shield' || era === 'Scarlet & Violet';
+  return MODERN_TRAINER_FA_ERAS.has(era);
 }
 
 function isStampExWindow(card) {
