@@ -638,7 +638,9 @@
 
     async function startCam(deviceId) {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        warming.textContent = "Camera unavailable — use Gallery"; warming.hidden = false; return;
+        warming.textContent = "Camera unavailable — use Gallery"; warming.hidden = false;
+        window.scanDiagnostics?.("camera-start-failed", null, { error: "no_mediaDevices" });
+        return;
       }
       const requestVersion = ++cameraRequestVersion;
       invalidateScan(); invalidateCameraView(); stopLive(); camReady = false;
@@ -679,10 +681,17 @@
         torchBtn.disabled = !caps.torch; resumeCamera.hidden = true;
         warming.textContent = "Point at a card. Keep all four corners visible."; warming.hidden = false;
         scheduleLive(LIVE_MS);
-      } catch (_) {
+      } catch (error) {
         if (nextStream) nextStream.getTracks().forEach(t=>t.stop());
         if (requestVersion !== cameraRequestVersion) return;
-        resumeCamera.hidden = false; warming.textContent = "Camera unavailable — use Gallery or retry."; warming.hidden = false;
+        resumeCamera.hidden = false;
+        // iOS keeps silent per-site denials from earlier prompt-less attempts;
+        // the fix lives in the address bar (aA → Website Settings → Camera).
+        warming.textContent = error && error.name === "NotAllowedError"
+          ? "Camera blocked — allow it in Safari's Website Settings, then retry."
+          : "Camera unavailable — use Gallery or retry.";
+        warming.hidden = false;
+        window.scanDiagnostics?.("camera-start-failed", null, { error: error?.name || "unknown" });
       }
     }
 
