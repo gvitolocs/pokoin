@@ -38,6 +38,20 @@
   const nameKey = (hit) => String((hit && hit.name) || '').trim().toLowerCase();
 
   /**
+   * One physical card = one artwork. Printings of the same painting tie in the
+   * gallery and flap public ids frame to frame, so the gate keys cards on the
+   * worker's artwork group when present, then the name, and only then the id.
+   */
+  function cardKey(hit) {
+    if (!hit) return '';
+    const artwork = String(hit.artwork || '').trim();
+    if (artwork) return artwork;
+    const name = nameKey(hit);
+    if (name) return name;
+    return String(hit.public_id || '');
+  }
+
+  /**
    * The picture is settled even though printings tie: top ≥ 0.80 and every
    * hit within the margin carries the top's name (HGSS vs Call of Legends
    * energy). BattleScan's own `_immediate` accepts that frame. Only *when* to
@@ -52,7 +66,8 @@
   /**
    * One physical card → one event. Fires on a confident match, or after a
    * card has been in view ~1.2 s without one. Re-arms when the card leaves
-   * the frame, or when a *different* confident card replaces it for two frames.
+   * the frame, or when a *different* card replaces it for two frames —
+   * different by cardKey (artwork/name), never by a same-printing id flap.
    */
   function createCaptureGate(now = () => Date.now()) {
     let armed = true;
@@ -69,7 +84,7 @@
       best = null;
       clearFrames = 0;
       swapFrames = 0;
-      emittedId = result.summary.top ? String(result.summary.top.public_id) : '';
+      emittedId = cardKey(result.summary.top);
       return result;
     }
 
@@ -102,10 +117,13 @@
           return null;
         }
         clearFrames = 0;
-        if (confident(summary) && String(summary.top.public_id) !== emittedId) {
-          const id = String(summary.top.public_id);
-          swapFrames = id === swapId ? swapFrames + 1 : 1;
-          swapId = id;
+        // Same-artwork printings tie and flap ids, so the margin rule between
+        // artworks (settled) counts here too; the key must still be stable
+        // for two frames and differ from the emitted card.
+        const key = cardKey(summary.top);
+        if ((confident(summary) || settled(summary)) && key && key !== emittedId) {
+          swapFrames = key === swapId ? swapFrames + 1 : 1;
+          swapId = key;
           if (swapFrames >= SWAP_FRAMES) return emit(result);
         } else {
           swapFrames = 0;
@@ -348,13 +366,17 @@
           event,
           printings: printings.slice(),
           ids: new Set([...hits.map((h) => String(h.public_id)), ...printings.map((p) => String(p.cardId))]),
+          names: new Set(hits.map(nameKey).filter(Boolean)),
         };
         return current;
       },
       /** The pending card back in view (or re-sent by the gate) keeps its tiles. */
       sameCard(result) {
         const top = result && result.summary && result.summary.top;
-        return Boolean(current && top && current.ids.has(String(top.public_id)));
+        if (!current || !top) return false;
+        if (current.ids.has(String(top.public_id))) return true;
+        const name = nameKey(top);
+        return Boolean(name) && current.names.has(name);
       },
       /** A tile tap. Only the first tap of this card counts. */
       choose(cardId) {
@@ -1070,6 +1092,7 @@
     topAndMargin,
     confident,
     settled,
+    cardKey,
     createCaptureGate,
     createPrintingPick,
     asksPrintings,

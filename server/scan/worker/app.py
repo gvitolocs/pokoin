@@ -449,7 +449,12 @@ def _search(q: np.ndarray, top_k: int, catalog: str = "tcgplayer") -> list[dict]
     for i in idx:
         rec = dict(cards[int(i)])
         rec["score"] = round(float(scores[int(i)]), 4)
-        hits.append(_with_pokoin(rec) if catalog == "tcgplayer" else rec)
+        if catalog == "tcgplayer":
+            hits.append(_with_pokoin(rec))
+            continue
+        if catalog.startswith("pokemon_"):
+            _stamp_artwork(rec)
+        hits.append(rec)
     if catalog != "tcgplayer":
         hits = _prefer_card_back_hits(q, hits, catalog, scores, cards)
     return hits
@@ -486,6 +491,19 @@ def _with_pokoin(rec: dict) -> dict:
     rec["public_id"] = str(int(ct) * 2)
     rec["pokoin_url"] = f"https://pokoin.com/{rec['public_id']}"
     return rec
+
+
+def _stamp_artwork(rec: dict) -> None:
+    """Tag the CLIP same-artwork group so clients key cards by painting.
+
+    Same-painting printings tie in cosine and flap public ids frame to frame;
+    the phone capture gate needs one stable key per physical card.
+    """
+    if _expansion_symbols is None:
+        return
+    member = _expansion_symbols.mapping.get(str(rec.get("public_id") or rec.get("id")))
+    if member and member.get("group"):
+        rec["artwork"] = str(member["group"])
 
 
 app = FastAPI(title="pokoin-cardscan", version="2.0")
@@ -753,6 +771,7 @@ def _identify_locked_image(blob, top_k, live, catalog, multi, box_limit=None):
                     "name": hits[0].get("name"),
                     "score": hits[0].get("score"),
                     "collector_number": hits[0].get("collector_number"),
+                    "artwork": hits[0].get("artwork"),
                     "card_back_score": hits[0].get("_card_back_score"),
                 }),
                 flush=True,

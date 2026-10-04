@@ -98,5 +98,9 @@ class ExpansionSymbols:
         selected = dict(target[0]); public_id = str(selected.get('public_id') or selected.get('id'))
         selected['score'] = float(top['score'])
         selected['_expansion_symbol'] = winner
+        # The selected row is rebuilt from the raw catalog card and would lose
+        # the _search artwork stamp; every member here shares the group.
         ordered = [selected] + [dict(hit) for hit in hits if str(hit.get('public_id') or hit.get('id')) != public_id]
+        for hit in ordered:
+            hit.setdefault('artwork', str(m['group']))
         return ordered[:max(1,len(hits))], detail | {'state': 'matched', 'reason': 'same_artwork_expansion', 'selected_public_id': public_id, **winner}

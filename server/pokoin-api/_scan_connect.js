@@ -505,16 +505,19 @@ function printingCandidate(row, score) {
  *
  * `rows`: catalog printings (card_id, name, set_name, card_number, version,
  * nationality, kind, code, symbol_image_url, image_url) for the hit ids plus
- * every member of the top hit's artwork. `language` is retained for caller
- * compatibility but does not filter versions. `choice` is the seller's tap.
+ * every member of the top hit's artwork. `language` scopes the offering to the
+ * batch's print family (`printFamily` tiers, e.g. western for EN/IT, jpko for
+ * JP/KO); an artwork with no printing in that family falls back to every
+ * member. `choice` is the seller's tap.
  *
  * Returns null when this layer has nothing to add, so the caller keeps
  * `classifyRecognition`: the artwork itself is not a confident match, the top
  * hit has no artwork key, or the batch's print family has no printing of it.
  *
- * Once the artwork is confident, offer every member across all print languages.
- * Recognition scores distinguish artworks, not reprints of one illustration;
- * collector numbers and scan quality must never hide an eligible printing.
+ * Once the artwork is confident, offer the batch family's members first —
+ * recognition scores distinguish artworks, not reprints of one illustration;
+ * collector numbers and scan quality must never hide an eligible printing of
+ * the batch's print language.
  */
 /** Set the selected printing's language without changing the batch defaults. */
 function listingLanguageForPrint(nationality, preferred = 'EN') {
@@ -548,25 +551,32 @@ function resolvePrintings({ hits, rows, language, choice } = {}) {
   const margin = rival ? Math.round((top.score - rival.score) * 10000) / 10000 : 1;
   if (margin < MATCH_MARGIN) return null;
 
+  // Batch language picks the print family: an EN/IT batch sees western tiles,
+  // a JP batch japanese with korean fallback. Artworks with no printing in the
+  // family keep every member so the phone can still offer a choice.
+  const tiers = printFamily(language).tiers;
+  const inFamily = (row) => tiers.some((tier) => tier.includes(printBucket(row.nationality)));
   const members = [...byId.values()].filter((row) => String(row.version || '') === art);
+  const familyMembers = members.filter(inFamily);
   const scoreOf = new Map(scored.map((c) => [c.cardId, c.score]));
   const seen = scored.filter((c) => artworkOf(c.cardId) === art);
-  const picked = members;
+  const picked = familyMembers.length ? familyMembers : members;
   picked.sort((a, b) => kindRank(a) - kindRank(b) || Number(rowCardId(a)) - Number(rowCardId(b)));
 
   const ids = picked.map(rowCardId);
   const wanted = cleanCardId(choice);
   const chosen = wanted && ids.includes(wanted) ? wanted : '';
   const choose = picked.length > 1;
-  // Unchosen doubt keeps the best-scored printing as the provisional card, like
-  // today's ambiguous rows; the desk must still confirm it.
-  const provisional = seen.length ? seen[0].cardId : ids[0];
+  // Unchosen doubt keeps the best-scored printing of the offered family as the
+  // provisional card, like today's ambiguous rows; the desk must still confirm.
+  const seenInPicked = seen.filter((c) => ids.includes(c.cardId));
+  const provisional = seenInPicked.length ? seenInPicked[0].cardId : ids[0];
   return {
     state: choose && !chosen ? 'ambiguous' : 'matched',
     cardId: chosen || (choose ? provisional : ids[0]),
     choose,
     chosen,
-    family: 'all',
+    family: familyMembers.length ? 'batch' : 'all',
     artwork: art,
     topScore: top.score,
     margin,

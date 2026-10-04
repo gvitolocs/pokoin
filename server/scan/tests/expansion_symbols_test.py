@@ -37,6 +37,8 @@ class SymbolRulesTest(unittest.TestCase):
         hits, detail = self.model.resolve(self.crop,self.hits,'pokemon_generic',self.cards)
         self.assertEqual(detail['state'],'matched');self.assertEqual(hits[0]['public_id'],'2')
         self.assertEqual(hits[0]['score'],.92);self.assertEqual({h['public_id'] for h in hits},{'1','2'})
+        # The rebuilt selected row still carries the artwork group for the phone gate.
+        self.assertEqual({h.get('artwork') for h in hits},{'art'})
 
     def test_unknown_symbol_never_selects_a_different_artwork(self):
         self.model.session = FakeSession([0,0,9])
