@@ -56,13 +56,21 @@ test('truthyFlag and raritySql build shop filters', () => {
   assert.match(where[0], /foil_state/);
   assert.match(where[0], /marketplace_search_candidates/);
   assert.deepEqual(values, ['%holo%', '%holofoil%']);
-  const common = raritySql('common');
+  const common = raritySql('common', { pokemon: true });
   const where2 = [];
   const values2 = [];
   common.apply(where2, values2);
   assert.match(where2[0], /not like/);
+  assert.match(where2[0], /pokemon_rarity/);
+  assert.match(where2[0], /cardtrader_pokemon_blueprints/);
   assert.ok(values2.includes('%common%'));
   assert.ok(values2.includes('%uncommon%'));
+  const promo = raritySql('promo', { pokemon: true });
+  const where3 = [];
+  const values3 = [];
+  promo.apply(where3, values3);
+  assert.match(where3[0], /pokemon_rarity/);
+  assert.deepEqual(values3, ['%promo%']);
 });
 
 test('freshness accepts a firebase uid and stamps dates', () => {

@@ -86,13 +86,47 @@ function truthyFlag(value) {
 }
 
 /**
- * Rarity filter against listing foil_state and catalog rarity on
- * marketplace_search_candidates (listings do not store rarity text).
- * Returns { sql, push(values) } or null.
+ * Printed rarity for a Pokémon candidate. The stored column is "Card" for
+ * almost every single; the real label is the collector-line prefix, otherwise
+ * CardTrader fixed_properties.pokemon_rarity.
  */
-function raritySql(key) {
+function catalogRarityExpr(alias = 'c', blueprintAlias = 'b') {
+  return `coalesce(
+    nullif(case
+      when ${alias}.card_number like '%|%'
+        and lower(coalesce(${alias}.rarity, '')) in ('', 'card')
+      then btrim(split_part(${alias}.card_number, '|', 1))
+      else null
+    end, ''),
+    nullif(case
+      when lower(coalesce(${alias}.rarity, '')) not in ('', 'card') then ${alias}.rarity
+      else null
+    end, ''),
+    nullif(${blueprintAlias}.blueprint#>>'{fixed_properties,pokemon_rarity}', ''),
+    nullif(${alias}.rarity, '')
+  )`;
+}
+
+function pokemonBlueprintJoin(alias = 'c', blueprintAlias = 'b') {
+  return `
+    left join public.cardtrader_pokemon_blueprints ${blueprintAlias}
+      on (${alias}.card_id % 2) = 0
+     and ${blueprintAlias}.id = (${alias}.card_id / 2)`;
+}
+
+/**
+ * Rarity filter against listing foil_state and the printed catalog rarity.
+ * Listings do not store rarity text. Pokémon uses the CardTrader blueprint
+ * when the candidate column is the generic "Card".
+ * Returns { apply(where, values) } or null.
+ */
+function raritySql(key, { pokemon = false } = {}) {
   const rarity = cleanText(key, 40).toLowerCase();
   if (!rarity) return null;
+  const label = pokemon ? catalogRarityExpr('c', 'b') : 'c.rarity';
+  const from = pokemon
+    ? `from public.marketplace_search_candidates c ${pokemonBlueprintJoin('c', 'b')}`
+    : 'from public.marketplace_search_candidates c';
 
   function catalogMatch(likePatterns, { exclude = [] } = {}) {
     return {
@@ -100,17 +134,17 @@ function raritySql(key) {
         const likes = [];
         for (const pattern of likePatterns) {
           values.push(pattern);
-          likes.push(`lower(coalesce(c.rarity, '')) like $${values.length}`);
+          likes.push(`lower(coalesce(${label}, '')) like $${values.length}`);
         }
         const nots = [];
         for (const pattern of exclude) {
           values.push(pattern);
-          nots.push(`lower(coalesce(c.rarity, '')) not like $${values.length}`);
+          nots.push(`lower(coalesce(${label}, '')) not like $${values.length}`);
         }
         const body = [...likes, ...nots].join(' and ');
         where.push(`exists (
           select 1
-          from public.marketplace_search_candidates c
+          ${from}
           where c.card_id::text = marketplace_user_listings.card_id
             and (${body})
         )`);
@@ -127,11 +161,11 @@ function raritySql(key) {
           lower(coalesce(foil_state, '')) in ('holo', 'holofoil')
           or exists (
             select 1
-            from public.marketplace_search_candidates c
+            ${from}
             where c.card_id::text = marketplace_user_listings.card_id
               and (
-                lower(coalesce(c.rarity, '')) like $${values.length - 1}
-                or lower(coalesce(c.rarity, '')) like $${values.length}
+                lower(coalesce(${label}, '')) like $${values.length - 1}
+                or lower(coalesce(${label}, '')) like $${values.length}
               )
           )
         )`);
@@ -157,6 +191,9 @@ function raritySql(key) {
   }
   if (rarity === 'secret') {
     return catalogMatch(['%secret%']);
+  }
+  if (rarity === 'promo') {
+    return catalogMatch(['%promo%']);
   }
   return null;
 }
@@ -410,13 +447,22 @@ async function attachCatalogRarity(rows, catalogGame) {
   if (!ids.length) return rows;
   let result = { rows: [] };
   try {
-    result = await withGameContext(catalogGame, () => marketplaceQuery(
-      `
-        select card_id::text as card_id, max(rarity) as rarity
-        from public.marketplace_search_candidates
-        where card_id::text = any($1::text[])
-        group by 1
-      `,
+    const pokemon = catalogGame === 'pokemon' || !catalogGame;
+    result = await withGameContext(catalogGame || 'pokemon', () => marketplaceQuery(
+      pokemon
+        ? `
+          select c.card_id::text as card_id, max(${catalogRarityExpr('c', 'b')}) as rarity
+          from public.marketplace_search_candidates c
+          ${pokemonBlueprintJoin('c', 'b')}
+          where c.card_id::text = any($1::text[])
+          group by 1
+        `
+        : `
+          select card_id::text as card_id, max(rarity) as rarity
+          from public.marketplace_search_candidates
+          where card_id::text = any($1::text[])
+          group by 1
+        `,
       [ids],
     ));
   } catch (error) {
@@ -573,7 +619,7 @@ async function loadSellerShopUncached({
     where.push('first_edition = true');
   }
 
-  const rarityFilter = raritySql(rarity);
+  const rarityFilter = raritySql(rarity, { pokemon: catalogGame === 'pokemon' });
   if (!book && rarityFilter) {
     rarityFilter.apply(where, values);
   }
