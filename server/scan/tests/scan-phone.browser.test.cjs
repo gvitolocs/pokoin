@@ -57,6 +57,9 @@ test('phone captures Crispin, shows all printings, uploads the chosen Prismatic 
   await page.waitForFunction(()=>document.getElementById('scanLogStatus')?.textContent==='Logs active');
   const badge=await page.locator('#scanLogStatus').boundingBox();
   assert.ok(badge.x>=0 && badge.x+badge.width<=390,'logging badge stays inside phone viewport');
+  // First run on a fresh phone: the gate asks for one tap before the camera.
+  const startTap = page.locator("#startCameraTap");
+  if (await startTap.isVisible()) await startTap.click();
   recognizing=true;
   // Batch language IT → the western family only; the japanese/chinese rows of
   // the same artwork are never offered.
@@ -82,5 +85,52 @@ test('phone captures Crispin, shows all printings, uploads the chosen Prismatic 
   assert.ok(logs.every(e=>e.sessionId==='browser-session'));
   assert.equal(new Set(logs.map(e=>`${e.runId}:${e.sequence}`)).size,logs.length);
   assert.deepEqual(errors,[]);
+ }finally{await browser.close();await new Promise(r=>server.close(r));}
+});
+
+test('a paired phone with a denied camera sees the Start tap, then the Safari fix',async()=>{
+ const store={
+  heartbeat:async({token})=>{if(token!=='test-phone-token')throw Object.assign(new Error('gone'),{statusCode:401});return {sessionId:'denied-session',batchId:'denied-batch',serverTime:Date.now(),paused:false,received:0};},
+  resolvePrintingsForPhone:async()=>({choose:false,printings:[]}),
+  ingestScan:async()=>({received:1}),
+ };
+ const target=path.resolve(__dirname,'../../pokoin-api/scan-phone.js');
+ const Mod=require('node:module');
+ const original=Mod._load;
+ Mod._load=function(request,parent,isMain){
+  if(parent?.filename===target && request==='./_scan_store')return {getScanStore:()=>store};
+  if(parent?.filename===target && request==='./_scan_diagnostics')return {...diagnostic,recordDiagnostics:()=>[]};
+  return original.call(this,request,parent,isMain);
+ };
+ let handler;try{delete require.cache[target];handler=require(target);}finally{Mod._load=original;}
+ const server=http.createServer(async(req,res)=>{
+  const url=new URL(req.url,'http://localhost');
+  if(url.pathname==='/api/scan-phone'){let body='';for await(const chunk of req)body+=chunk;req.body=JSON.parse(body||'{}');return handler(req,res);}
+  if(url.pathname==='/api/scan/catalogs'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({catalogs:[{id:'pokemon_generic'}]}));return;}
+  if(url.pathname==='/api/scan/identify'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ok:true,hits:[],boxes:[],top1:null}));return;}
+  const file=url.pathname.startsWith('/static/')?path.join(WEB,url.pathname):path.join(WEB,'index.html');
+  if(!fs.existsSync(file)){res.writeHead(404);res.end();return;}
+  res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type',file.endsWith('.js')?'application/javascript':file.endsWith('.png')?'image/png':'text/html');fs.createReadStream(file).pipe(res);
+ });
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const base=`http://127.0.0.1:${server.address().port}`;
+ const browser=await chromium.launch({headless:true});
+ const context=await browser.newContext({viewport:{width:390,height:844}});
+ await context.addInitScript(()=>{
+  localStorage.setItem('pokoin.scanConnect.v1',JSON.stringify({token:'test-phone-token',sessionId:'denied-session'}));
+  window.SCAN_CONNECT_API=location.origin;window.CARDSCAN_API=location.origin+'/api/scan';
+  // iOS sticky denial: the prompt never shows and getUserMedia always refuses.
+  const refuse=async()=>{const e=new Error('rejected');e.name='NotAllowedError';throw e;};
+  Object.defineProperty(navigator,'mediaDevices',{value:{getUserMedia:refuse,enumerateDevices:async()=>[]},configurable:true});
+  Object.defineProperty(navigator,'permissions',{value:{query:async()=>({state:'denied'})},configurable:true});
+ });
+ try{
+  const page=await context.newPage();
+  await page.goto(base+'/connect');
+  // The stored-token path must meet the gated startCam: tap, not a dead camera.
+  await page.waitForFunction(()=>document.getElementById('warming')?.textContent==='Tap to start the camera.');
+  assert.equal(await page.locator('#startCameraTap').isVisible(),true);
+  await page.locator('#startCameraTap').click();
+  await page.waitForFunction(()=>/Camera blocked/.test(document.getElementById('warming')?.textContent||''));
  }finally{await browser.close();await new Promise(r=>server.close(r));}
 });
