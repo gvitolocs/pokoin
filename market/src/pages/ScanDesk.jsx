@@ -78,6 +78,8 @@ import { SessionWait } from '../components/Desk.jsx';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import ThumbZoom from '../components/ThumbZoom.jsx';
 import { game, GAMES, setScanGameOverride, gameIdFromHost, gameBasename } from '../game.js';
+import { conditionChipSrc } from '../listing-meta.js';
+import { flagSrc } from '../locale.js';
 import { marketUrl } from '../punchouts.js';
 import '../scan-desk.css';
 
@@ -2045,23 +2047,39 @@ function QueueRow({
         {replacing && !unidentified ? <ReplacePrinting onPick={(id) => { onPick(id); onReplaceDone(); }} onClose={onReplaceDone} seed={row.cardName} /> : null}
       </span>
       <span className="c-lang">
-        {closed ? langValue : (
-          <select
-            value={langValue}
-            onChange={(e) => onPatch({ language: e.target.value })}
-            tabIndex={-1}
-          >
-            {(LANGUAGES.includes(langValue) ? LANGUAGES : [langValue, ...LANGUAGES]).map((code) => (
-              <option key={code} value={code}>{code}</option>
-            ))}
-          </select>
+        {closed ? (
+          <img className="scan-lang-flag" src={flagSrc(langValue)} alt="" title={langValue} width="18" height="18" />
+        ) : (
+          <label className="scan-icon-select" title={langValue}>
+            <img className="scan-lang-flag" src={flagSrc(langValue)} alt="" width="18" height="18" />
+            <select
+              value={langValue}
+              aria-label={`Language ${langValue}`}
+              onChange={(e) => onPatch({ language: e.target.value })}
+              tabIndex={-1}
+            >
+              {(LANGUAGES.includes(langValue) ? LANGUAGES : [langValue, ...LANGUAGES]).map((code) => (
+                <option key={code} value={code}>{code}</option>
+              ))}
+            </select>
+          </label>
         )}
       </span>
       <span className="c-cond">
-        {closed ? row.condition : (
-          <select value={row.condition} onChange={(e) => onPatch({ condition: e.target.value })} tabIndex={-1}>
-            {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+        {closed ? (
+          <img className="scan-cond-chip" src={conditionChipSrc(row.condition)} alt="" title={row.condition} width="28" height="20" />
+        ) : (
+          <label className="scan-icon-select" title={row.condition}>
+            <img className="scan-cond-chip" src={conditionChipSrc(row.condition)} alt="" width="28" height="20" />
+            <select
+              value={row.condition}
+              aria-label={`Condition ${row.condition}`}
+              onChange={(e) => onPatch({ condition: e.target.value })}
+              tabIndex={-1}
+            >
+              {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
         )}
       </span>
       <span className="c-finish">
