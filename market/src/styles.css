@@ -3555,6 +3555,28 @@ select.collector-badge.version-badge option {
   filter: drop-shadow(0 12px 28px rgb(0 0 0 / 0.45));
 }
 
+/* LEGEND / BREAK leftovers are portrait with the name bar on the left;
+ * rotate into a landscape desk frame (same convention as suggest/album). */
+.art-frame.is-landscape {
+  aspect-ratio: 88 / 63;
+  container-type: size;
+  position: relative;
+  overflow: hidden;
+}
+
+.art-frame.is-landscape img,
+.art-frame.is-landscape .tile-ph {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100cqh;
+  height: 100cqw;
+  max-width: none;
+  aspect-ratio: auto;
+  object-fit: fill;
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+
 .art-frame img.missing-card,
 .tile img.missing-card,
 .zoom img.missing-card {
@@ -3945,6 +3967,10 @@ a.era-link:focus-visible {
   flex: none;
   width: 100%;
   aspect-ratio: 63 / 88;
+}
+
+.hero-art-col .art-frame.is-landscape {
+  aspect-ratio: 88 / 63;
 }
 
 .hero-center .sell-field.comment {
@@ -5157,6 +5183,12 @@ dialog.zoom:not([open]) {
   clip-path: none;
   cursor: zoom-out;
   filter: drop-shadow(0 18px 40px rgb(0 0 0 / 0.55));
+}
+
+.zoom.is-landscape img {
+  transform: rotate(90deg);
+  max-width: min(92vh, 58rem);
+  max-height: min(96vw, 42rem);
 }
 
 .more { display: block; margin: 1.5rem auto; }

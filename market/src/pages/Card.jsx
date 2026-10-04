@@ -110,6 +110,7 @@ import { LIST_CURRENCIES, fiatFromPkn, listingPriceToPkn } from '../pkn.js';
 import { cardStubFromRoute, mergeDeskCard, realPublicCardId } from '../card-stub.js';
 import { clearActiveDeskCard, setActiveDeskCard } from '../poko-chat.js';
 import CardArt from '../components/CardArt.jsx';
+import { isLandscapePrintName } from '../art-cut-landscape.js';
 import RelatedCards from '../components/RelatedCards.jsx';
 import { ShipFromCountryGate } from '../components/SellerShippingSettings.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
@@ -1526,11 +1527,13 @@ function DeskArtFrame({ card, art, offers, onZoom }) {
   const select = useCardSelect();
   const id = String(card?.id || '');
   const picked = Boolean(id && select?.selected?.has(id));
+  const landscape = isLandscapePrintName(card?.name)
+    || String(card?.artLayout || card?.art_layout || '').toLowerCase() === 'landscape';
   return (
     <div
       role="button"
       tabIndex={0}
-      className={`art-frame${picked ? ' is-selected' : ''}`}
+      className={`art-frame${picked ? ' is-selected' : ''}${landscape ? ' is-landscape' : ''}`}
       data-card-id={id || undefined}
       draggable
       onClick={() => onZoom?.()}
@@ -2786,7 +2789,10 @@ export default function Card() {
       {zoom ? (
         <dialog
           ref={zoomRef}
-          className="zoom"
+          className={`zoom${isLandscapePrintName(card?.name)
+            || String(card?.artLayout || card?.art_layout || '').toLowerCase() === 'landscape'
+            ? ' is-landscape'
+            : ''}`}
           onClose={() => setZoom(false)}
           onClick={(event) => {
             if (event.target === zoomRef.current) {
