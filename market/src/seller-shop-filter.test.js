@@ -12,6 +12,13 @@ test('reverse filter keeps only reverse rows and stays local', () => {
   const filtered = filterSellerBook(rows, { reverse: true, sort: 'price-asc' });
   assert.deepEqual(filtered.rows.map((row) => row.id), ['2', '3']);
   assert.equal(filtered.unique, 2);
+  assert.equal(filtered.copies, 3);
+});
+
+test('unique items are product rows, total items is the copy sum', () => {
+  const filtered = filterSellerBook(rows, {});
+  assert.equal(filtered.unique, 3);
+  assert.equal(filtered.copies, 4);
 });
 
 test('condition language rarity and name search stack', () => {

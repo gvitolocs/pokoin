@@ -7,7 +7,7 @@
  * facets, not the full `book=` download). Listing mutations bump a per-seller
  * generation so the next read misses immediately.
  *
- * Key: pokoin:marketplace:v1:seller-shop:{game}:{uid}:l{limit}:o{offset}:s{sort}:g{gen}
+ * Key: pokoin:marketplace:v1:seller-shop-ct:{game}:{uid}:l{limit}:o{offset}:s{sort}:g{gen}
  * TTL: 20s (safety net). Source of truth: marketplace_user_listings.
  * Stale tolerance: 0 for seller/admin mutations (gen bump); ≤20s otherwise.
  */
@@ -56,7 +56,7 @@ function sellerShopKey({
   const start = Math.trunc(Number(offset) || 0);
   if (capped < 1 || capped > 100 || start < 0 || start > 5000) return '';
   return marketplaceKey(
-    'seller-shop',
+    'seller-shop-ct',
     game || 'pokemon',
     uid,
     `l${capped}`,

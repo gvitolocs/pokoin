@@ -142,6 +142,7 @@ export function seedSellerListings(handle, { pageSize = 100, sort = 'price-asc',
     listings,
     total: Number(cached.total ?? listings.length) || 0,
     unique: Number(cached.unique ?? 0) || 0,
+    copies: cached.copies == null ? null : (Number(cached.copies) || 0),
     seller: {
       uid: fromApi?.uid || sample.sellerUid || known?.uid || '',
       username,

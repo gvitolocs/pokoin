@@ -112,6 +112,7 @@ export default function Seller() {
   const [listings, setListings] = useState(() => seeded?.listings ?? null);
   const [total, setTotal] = useState(() => seeded?.total ?? null);
   const [unique, setUnique] = useState(() => seeded?.unique ?? null);
+  const [copies, setCopies] = useState(() => seeded?.copies ?? null);
   const [seller, setSeller] = useState(() => seeded?.seller ?? known ?? {
     uid: hintedUid,
     username: handle,
@@ -239,13 +240,8 @@ export default function Seller() {
         setListings(rows);
         setSeller((current) => sellerFromPayload(data, handle, rows[0], current));
         setTotal(Number(data.total ?? rows.length) || 0);
-        setUnique(
-          Number(
-            data.unique ??
-              data.uniqueCards ??
-              new Set(rows.map((r) => String(r.cardId || r.card_id || '')).filter(Boolean)).size,
-          ) || 0,
-        );
+        setUnique(Number(data.unique ?? data.uniqueCards ?? rows.length) || 0);
+        setCopies(data.copies == null ? null : (Number(data.copies) || 0));
         setError('');
         setLoading(false);
         setPageSettled(true);
@@ -260,6 +256,7 @@ export default function Seller() {
         setListings([]);
         setTotal(0);
         setUnique(0);
+        setCopies(0);
         setError(err.message || 'Seller not found.');
         setLoading(false);
       });
@@ -295,6 +292,7 @@ export default function Seller() {
   const shown = bookView ? bookView.rows.slice(shownOffset, shownOffset + PAGE_SIZE) : listings;
   const shownTotal = bookView ? bookView.rows.length : total;
   const shownUnique = bookView ? bookView.unique : unique;
+  const shownCopies = bookView ? bookView.copies : copies;
   const busy = bookView ? false : (loading || (bookPhase === 'loading' && filtersNarrow));
 
   const sample = shown?.[0];
@@ -305,14 +303,15 @@ export default function Seller() {
   const countryShort = sellerCountryShort(sample?.sellerCountry);
   const ready = useMemo(() => Boolean((shown || []).some(isOneDayReady)), [shown]);
 
-  const totalItems = shownTotal ?? 0;
+  const productCount = shownTotal ?? 0;
   const uniqueItems = shownUnique ?? 0;
-  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE) || 1);
+  const copyCount = shownCopies;
+  const totalPages = Math.max(1, Math.ceil(productCount / PAGE_SIZE) || 1);
   const safePage = Math.min(Math.max(1, page), totalPages);
-  const startIdx = totalItems ? (safePage - 1) * PAGE_SIZE + 1 : 0;
-  const endIdx = Math.min(safePage * PAGE_SIZE, totalItems);
+  const startIdx = productCount ? (safePage - 1) * PAGE_SIZE + 1 : 0;
+  const endIdx = Math.min(safePage * PAGE_SIZE, productCount);
 
-  if (shown && !shown.length && error && totalItems === 0 && !busy) {
+  if (shown && !shown.length && error && productCount === 0 && !busy) {
     return (
       <EmptyDesk title="Seller not found" lede={error}>
         <p className="status">Usernames match live native listings.</p>
@@ -370,7 +369,7 @@ export default function Seller() {
       </header>
 
       <MetricGrid>
-        <Metric value={shown == null ? '…' : totalItems} label="Total items" />
+        <Metric value={shown == null || copyCount == null ? '…' : copyCount} label="Total items" />
         <Metric value={shown == null ? '…' : uniqueItems} label="Unique items" />
       </MetricGrid>
 
@@ -447,10 +446,10 @@ export default function Seller() {
         <p className="seller-result-count">
           {shown == null || busy ? (
             'Loading…'
-          ) : totalItems ? (
+          ) : productCount ? (
             <>
               Showing <strong>{startIdx}</strong>–<strong>{endIdx}</strong> of{' '}
-              <strong>{totalItems}</strong>
+              <strong>{productCount}</strong>
             </>
           ) : (
             'No matching listings'
@@ -521,7 +520,7 @@ export default function Seller() {
           <EmptyDesk title="No listings" lede={`${display} has no live asks for these filters.`} />
         ) : null}
 
-        {totalItems > PAGE_SIZE ? (
+        {productCount > PAGE_SIZE ? (
           <div className="seller-pager">
             <button
               type="button"

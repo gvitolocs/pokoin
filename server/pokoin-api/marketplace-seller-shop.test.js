@@ -176,11 +176,16 @@ test('shop listings carry the seller PKN payment choice', () => {
   assert.equal(listingRow(base, { uid: 'u1', username: 'marco', acceptsPkn: false }).sellerAcceptsPkn, false);
 });
 
-test('pokemon shop filter stays in SQL instead of materializing every card id', () => {
+test('pokemon shop counts CardTrader singles: product rows plus copy sum', () => {
   const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'marketplace-seller-shop.js'), 'utf8');
   assert.match(src, /catalogGame === 'pokemon'/);
-  assert.match(src, /exists \(/);
-  assert.match(src, /marketplace_search_candidates c/);
+  assert.match(src, /pokemonSinglesWhere\(\)/);
+  assert.match(src, /c\.product_type = 'card'/);
+  assert.match(src, /c\.item_kind = 'single'/);
+  assert.match(src, /b\.category_id = 73/);
+  assert.match(src, /card_id::bigint \/ 2/);
+  assert.match(src, /coalesce\(sum\(quantity_available\), 0\)::int as copies/);
+  assert.doesNotMatch(src, /count\(distinct nullif\(card_id/);
   // Satellite TCGs still go through sellerCardIdsForGame + any().
   assert.match(src, /sellerCardIdsForGame\(seller\.uid, catalogGame\)/);
   assert.match(src, /card_id = any\(/);
