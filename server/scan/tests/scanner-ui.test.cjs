@@ -249,3 +249,12 @@ test('pokemon hits open the full card path, never the numeric short link',async(
  assert.equal(s.run('pokoinUrl({top1:{public_id:"531072",pokoin_url:"https://riftbound.pokoin.com/531072"}})'), '');
  assert.equal(s.run('pokoinUrl({top1:{public_id:"5310x2",pokoin_url:"https://pokoin.com/5310x2"}})'), '');
 });
+test('single-origin pokoin_url forms open the card; a URL for another game never does',async()=>{
+ const s=scanner();await turn();s.run('selectCatalog("riftbound","western")');
+ for(const url of ['https://pokoin.com/riftbound/marketplace/en/cards/661762','https://pokoin.com/riftbound/661762','https://riftbound.pokoin.com/661762'])
+  assert.equal(s.run(`pokoinUrl({top1:{public_id:"661762",pokoin_url:${JSON.stringify(url)}}})`), fullCardUrl('riftbound/','661762'), url);
+ for(const url of ['https://pokoin.com/one-piece/marketplace/en/cards/661762','https://pokoin.com/marketplace/en/cards/661762','https://pokoin.com/riftbound/661763','https://evil.example/riftbound/661762'])
+  assert.equal(s.run(`pokoinUrl({top1:{public_id:"661762",pokoin_url:${JSON.stringify(url)}}})`), '', url);
+ s.run('selectCatalog("pokemon","western")');
+ assert.equal(s.run('pokoinUrl({top1:{public_id:"531072",pokoin_url:"https://pokoin.com/marketplace/en/cards/531072"}})'), fullCardUrl('','531072'));
+});

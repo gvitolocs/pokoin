@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
+import { publicIdFromPokoinUrl, publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 
 test('pokemon_western hit uses public_id, never doubles it', () => {
   assert.equal(publicIdFromScanHit({
@@ -65,4 +65,12 @@ test('every other game scans its own all-languages catalog, never Pokémon', () 
   assert.equal(scanCatalogId('pokoin.com', 'all', '/weiss-schwarz/scan'), 'weiss_schwarz_all');
   assert.equal(scanCatalogId('pokoin.com', 'all', '/scan'), 'pokemon_generic');
   assert.equal(scanCatalogId('pokoin.com', 'japanese', '/one-piece/scan'), 'one_piece_japanese');
+});
+
+test('pokoin_url parses on the single pokoin.com origin, with or without a game path', () => {
+  assert.equal(publicIdFromPokoinUrl('https://pokoin.com/marketplace/en/cards/531072'), '531072');
+  assert.equal(publicIdFromPokoinUrl('https://pokoin.com/riftbound/marketplace/en/cards/661762'), '661762');
+  assert.equal(publicIdFromPokoinUrl('https://pokoin.com/one-piece/488884'), '488884');
+  assert.equal(publicIdFromPokoinUrl('https://pokoin.com/531072'), '531072');
+  assert.equal(publicIdFromPokoinUrl('https://pokoin.com/riftbound/marketplace'), '');
 });

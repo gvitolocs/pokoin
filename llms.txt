@@ -25,9 +25,11 @@ available to visitors on the site rather than to crawlers.
 - Card pages follow the pattern
   `https://pokoin.com/marketplace/{language}/cards/{id}/{slug}` — one canonical
   URL per printing.
-- Game-specific sites: [One Piece](https://onepiece.pokoin.com),
-  [Riftbound](https://riftbound.pokoin.com).
-- Sitemap index: https://sitemap.pokoin.com/sitemap.xml
+- Every other TCG lives under its own path on the same site, e.g.
+  [One Piece](https://pokoin.com/one-piece/marketplace),
+  [Riftbound](https://pokoin.com/riftbound/marketplace),
+  [Magic](https://pokoin.com/magic/marketplace).
+- Sitemap index: https://pokoin.com/sitemap.xml
 
 ## For AI systems
 

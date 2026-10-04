@@ -605,11 +605,16 @@
       if (!hit || !hit.public_id || !/^\d+$/.test(String(hit.public_id))) return "";
       const prefix = {pokemon:"", one_piece:"one-piece/", riftbound:"riftbound/"}[game];
       if (prefix === undefined) return "";
-      // pokoin_url still names the game by host: a hit from another game's catalog never opens.
+      // pokoin_url must name the same game and card: a hit from another game's catalog
+      // never opens. Accepts the single-origin forms and the retired subdomain form.
       try {
         const url = new URL(hit.pokoin_url);
-        const host = {pokemon:"pokoin.com", one_piece:"onepiece.pokoin.com", riftbound:"riftbound.pokoin.com"}[game];
-        if (url.protocol !== "https:" || url.host !== host || url.pathname !== "/" + hit.public_id || url.search || url.hash) return "";
+        const id = hit.public_id;
+        const legacyHost = {pokemon:"pokoin.com", one_piece:"onepiece.pokoin.com", riftbound:"riftbound.pokoin.com"}[game];
+        const paths = url.host === "pokoin.com"
+          ? ["/" + prefix + id, "/" + prefix + "marketplace/en/cards/" + id]
+          : (url.host === legacyHost ? ["/" + id] : []);
+        if (url.protocol !== "https:" || !paths.includes(url.pathname) || url.search || url.hash) return "";
       } catch (_) { return ""; }
       // Open the full card path: numeric pokoin.com/{id} short links 404 on the static web host (2026-10-03).
       return "https://pokoin.com/" + prefix + "marketplace/en/cards/" + hit.public_id;

@@ -28,11 +28,12 @@ export function scanCatalogId(hostname, printLang = getPrintLang(), pathname) {
 
 export function publicIdFromPokoinUrl(url) {
   const text = String(url || '');
-  const canonical = text.match(/pokoin\.com\/marketplace\/[a-z0-9-]+\/cards\/(\d+)/i);
+  // Every game lives on pokoin.com, optionally under its path: /riftbound/marketplace/…
+  const canonical = text.match(/pokoin\.com\/(?:[a-z0-9-]+\/)?marketplace\/[a-z0-9-]+\/cards\/(\d+)/i);
   if (canonical) {
     return canonical[1];
   }
-  const short = text.match(/pokoin\.com\/(\d+)(?:\/|$|\?)/i);
+  const short = text.match(/pokoin\.com\/(?:[a-z][a-z0-9-]*\/)?(\d+)(?:\/|$|\?)/i);
   return short ? short[1] : '';
 }
 
