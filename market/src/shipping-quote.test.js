@@ -31,6 +31,11 @@ test('Italy to Denmark offers tracked, untracked, and unavailable Pokoin Flex', 
   assert.ok(options.length >= 2);
   assert.equal(options[0].id, 'tracked');
   assert.ok(options[0].amountCents > 0);
+  const untracked = options.find((row) => row.id === 'untracked');
+  assert.ok(untracked);
+  assert.equal(untracked.amountCents, 130);
+  assert.equal(untracked.serviceName, 'Posta Ordinaria');
+  assert.ok(untracked.amountCents < options[0].amountCents);
   const flex = options.find((row) => row.id === 'pokoin_flex');
   assert.ok(flex);
   assert.equal(flex.unavailable, true);

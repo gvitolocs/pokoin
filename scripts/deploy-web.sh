@@ -94,7 +94,10 @@ mkdir -p "$stage/.vercel"
 cp "$CANONICAL/.vercel/project.json" "$stage/.vercel/project.json"
 
 say "unit tests"
-(cd "$stage/market" && npm ci --no-audit --no-fund >/dev/null && cd .. && node --test market/src/*.test.js >"$stage/tests.log" 2>&1) \
+# Exclude the TLC exhaustive search-token-triples sweep from the deploy gate —
+# it is a multi-minute combinatorial model, not a regression smoke suite.
+(cd "$stage/market" && npm ci --no-audit --no-fund >/dev/null && cd .. && \
+  node --test --test-force-exit $(ls market/src/*.test.js | grep -v 'search-token-triples\.test\.js$') >"$stage/tests.log" 2>&1) \
   || { tail -30 "$stage/tests.log" >&2; die "tests failed"; }
 grep -E "^# (tests|pass|fail)" "$stage/tests.log"
 

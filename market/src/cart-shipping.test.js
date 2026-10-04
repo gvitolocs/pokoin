@@ -19,12 +19,13 @@ const row = (over = {}) => ({
   ...over,
 });
 
-test('a small parcel previews the untracked letter and the room left at that price', () => {
-  // IT→DK: SMALL and MEDIUM letters cost the same (4.35 €), LARGE does not.
+test('a small parcel previews Posta Ordinaria and the room left at that price', () => {
+  // IT→DK: SMALL is Postamail Normalizzato €1.30; MEDIUM jumps to the 100 g band.
   const estimate = parcelEstimate({ from: 'IT', to: 'DK', cards: 2 });
   assert.equal(estimate.tracked, false);
-  assert.equal(estimate.amountCents, 435);
-  assert.equal(estimate.room, 18);
+  assert.equal(estimate.amountCents, 130);
+  assert.equal(estimate.serviceName, 'Posta Ordinaria');
+  assert.equal(estimate.room, 2); // same €1.30 only through SMALL (max 4)
   assert.equal(parcelEstimate({ from: 'IT', to: 'DK', cards: 0 }), null);
   assert.equal(parcelEstimate({ from: 'EU', to: 'DK', cards: 1 }), null);
   assert.equal(parcelEstimate({ from: '', to: 'DK', cards: 1 }), null);
@@ -38,11 +39,11 @@ test('shipping estimate is one parcel per seller with ticked cards', () => {
   ]);
   const estimate = shippingEstimate(groups, 'DK');
   assert.equal(estimate.count, 2);
-  assert.equal(estimate.cents, 435);
+  assert.equal(estimate.cents, 130);
   assert.equal(estimate.missing, 1);
   const nudge = parcelNudge(groups, 'DK');
   assert.equal(nudge.group.key, 's1');
-  assert.equal(nudge.estimate.room, 18);
+  assert.equal(nudge.estimate.room, 2);
 });
 
 test('the buyer can pick tracked; an unknown service falls back to the default', () => {
