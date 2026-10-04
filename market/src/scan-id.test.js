@@ -56,3 +56,13 @@ test('scan catalog follows host and print region, not tcgplayer', () => {
   assert.equal(scanCatalogId('onepiece.pokoin.com', 'all'), 'one_piece_singles');
   assert.equal(scanCatalogId('riftbound.pokoin.com', 'all'), 'riftbound_western');
 });
+
+test('every other game scans its own all-languages catalog, never Pokémon', () => {
+  assert.equal(scanCatalogId('pokoin.com', 'all', '/magic/scan'), 'magic_all');
+  assert.equal(scanCatalogId('pokoin.com', 'japanese', '/yugioh/scan'), 'yugioh_all');
+  assert.equal(scanCatalogId('pokoin.com', 'all', '/flesh-and-blood/cardscan'), 'flesh_and_blood_all');
+  assert.equal(scanCatalogId('pokoin.com', 'all', '/dragon-ball-super/scan'), 'dragon_ball_super_all');
+  assert.equal(scanCatalogId('pokoin.com', 'all', '/weiss-schwarz/scan'), 'weiss_schwarz_all');
+  assert.equal(scanCatalogId('pokoin.com', 'all', '/scan'), 'pokemon_generic');
+  assert.equal(scanCatalogId('pokoin.com', 'japanese', '/one-piece/scan'), 'one_piece_japanese');
+});

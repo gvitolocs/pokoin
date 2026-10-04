@@ -29,6 +29,7 @@ still searches the 27,027-entry TCGPlayer index.
 | `pokoin.com/one-piece` | all / english | **`one_piece_singles`** |
 | `pokoin.com/one-piece` | japanese | `one_piece_japanese` |
 | `pokoin.com/riftbound` | any | `riftbound_western` |
+| `pokoin.com/{other game}` | any | **`{game}_all`** (e.g. `magic_all`, `yugioh_all`); a game without a catalog gets the API's 422, never a Pokémon match |
 
 `pokemon_generic` and `one_piece_singles` are leftover-**JPEG** galleries (old
 Milo behaviour): cardboard scans, not official product renders / png/webp
@@ -53,18 +54,29 @@ URL keeps `?catalog=`. Default camera rail is still EN (`pokemon_western` /
 `one_piece_english`) until GS/SG is pressed. Marketplace `/scan` does **not**
 use that EN default; it posts generic/singles as in the table above.
 
-## Live catalogs (`GET /catalogs`, worker `nezopt`, 2026-09-05)
+## Live catalogs (`GET /catalogs`, worker `nezopt`, 2026-10-04)
 
-| id | language | count | Detector | What it is |
-| --- | --- | ---: | --- | --- |
-| `pokemon_western` | western | 26,693 | yolo-tflite | Western singles (includes some product-ish rows) |
-| `pokemon_japanese` | japanese | 24,067 | yolo-tflite | JP singles |
-| `pokemon_chinese` | chinese | 10,956 | yolo-tflite | CN singles |
-| `pokemon_generic` | generic | **54,908** | yolo-tflite | JPEG leftovers from W+JP+CN; no booster boxes / ETBs / Battle Arena decks |
-| `one_piece_english` | english | 7,218 | card-quad | EN (png/webp product art still present) |
-| `one_piece_japanese` | japanese | 448 | card-quad | JP |
-| `one_piece_singles` | singles | **5,588** | card-quad | EN+JP **JPEG only**; drop png/webp and Premium Bandai products |
-| `riftbound_western` | western | 1,571 | card-quad | All Riftbound in that gallery |
+Built by pokoin-scanner (`src/build_catalogs.py`, `src/build_all_games.py`) from the
+current DB singles (`item_kind='single' AND product_type='card'`) and one `milo_cnn`
+vector per current leftover image. Root:
+`/home/nez/data/pokoin-scan-catalogs/catalogs-cnn-v22-allgames-20261004` (Pi: same
+files under `/srv/pokoin/scan/catalogs`). Per-catalog `embedder_sha256` in the manifest.
+
+| id | count | Detector | Notes |
+| --- | ---: | --- | --- |
+| `pokemon_western` / `_japanese` / `_chinese` | 26,051 / 25,938 / 11,227 | yolo | split by `pokoin_pokemon_expansions.milo_gallery` |
+| `pokemon_generic` | 63,216 | yolo | leftover JPEG W+JP+CN, no products |
+| `one_piece_english` / `_japanese` / `_singles` | 7,316 / 456 / 5,684 | card-quad | re-embedded 2026-10-04 (were teacher-space vectors) |
+| `riftbound_western` | 1,640 | card-quad | re-embedded 2026-10-04 |
+| `magic_all` | 113,801 | card-quad | all languages; language is a listing attribute |
+| `yugioh_all` | 46,294 | card-quad | |
+| `vanguard_all` | 25,782 | card-quad | |
+| `dragon_ball_super_all` / `flesh_and_blood_all` / `digimon_all` | 13,769 / 13,212 / 9,369 | card-quad | |
+| `star_wars_all` / `union_arena_all` / `lorcana_all` | 8,392 / 6,946 / 3,694 | card-quad | |
+| `gundam_all` / `sorcery_all` / `cyberpunk_all` / `palworld_all` | 2,018 / 1,762 / 436 / 289 | card-quad | |
+
+Synthetic-capture accuracy per catalog (exact printing / same card name) and the
+evaluation scripts: pokoin-scanner `bench/results/eval-allgames.json`, `docs/06-RUN-2026-10-04.md`.
 
 Album path in the API is `ALBUM_CATALOG = pokemon_generic` (leftover JPEG,
 same as marketplace `/scan`). Live `POST /identify-album` is routed on peer1
