@@ -195,6 +195,9 @@ function raritySql(key, { pokemon = false } = {}) {
   if (rarity === 'promo') {
     return catalogMatch(['%promo%']);
   }
+  if (rarity === 'no-rarity') {
+    return catalogMatch(['%no rarity%']);
+  }
   return null;
 }
 

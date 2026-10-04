@@ -45,6 +45,15 @@ test('promo matches the printed rarity and common does not', () => {
   assert.deepEqual(filterSellerBook(book, { rarity: 'common' }).rows.map((row) => row.id).sort(), ['1', '2']);
 });
 
+test('no rarity matches that printed label only', () => {
+  const book = [
+    ...rows,
+    { id: '5', cardId: 'n', cardName: 'Pikachu', setName: 'Base', collectorNumber: '58', condition: 'NM', language: 'EN', reverse: false, firstEdition: false, rarity: 'No Rarity', foilState: 'standard', pricePkn: 2, quantityAvailable: 1, updatedAt: '2026-10-03T00:00:00.000Z' },
+  ];
+  assert.deepEqual(filterSellerBook(book, { rarity: 'no-rarity' }).rows.map((row) => row.id), ['5']);
+  assert.equal(filterSellerBook(book, { rarity: 'rare' }).rows.some((row) => row.id === '5'), false);
+});
+
 test('price sort puts the cheapest reverse first', () => {
   const filtered = filterSellerBook(rows, { reverse: true, sort: 'price-asc' });
   assert.equal(filtered.rows[0].id, '2');

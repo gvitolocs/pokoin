@@ -71,6 +71,11 @@ test('truthyFlag and raritySql build shop filters', () => {
   promo.apply(where3, values3);
   assert.match(where3[0], /pokemon_rarity/);
   assert.deepEqual(values3, ['%promo%']);
+  const none = raritySql('no-rarity', { pokemon: true });
+  const where4 = [];
+  const values4 = [];
+  none.apply(where4, values4);
+  assert.deepEqual(values4, ['%no rarity%']);
 });
 
 test('freshness accepts a firebase uid and stamps dates', () => {
