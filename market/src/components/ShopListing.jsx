@@ -194,13 +194,11 @@ export default function ShopListingRow({
       ) : href ? (
         <Link className="shop-seller" to={href} state={{ listing: offer }} onClick={(event) => event.stopPropagation()}>
           <Flag flag={country} className="shop-flag shop-flag-country" />
-          {country?.short ? <span className="shop-country-code">{country.short}</span> : null}
           <span className="shop-brand">{name}</span>
         </Link>
       ) : (
         <span className="shop-seller">
           <Flag flag={country} className="shop-flag shop-flag-country" />
-          {country?.short ? <span className="shop-country-code">{country.short}</span> : null}
           <span className="shop-brand">{name}</span>
         </span>
       )}

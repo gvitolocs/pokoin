@@ -7762,6 +7762,24 @@ dialog.zoom:not([open]) {
   .prod-layout,
   .prod-side { grid-template-columns: 1fr; }
   .shop-row { width: 100%; }
+  .shop-panel .shop-row:not(.is-profile) {
+    flex-wrap: nowrap;
+    gap: 0.3rem 0.4rem;
+  }
+  .shop-panel .shop-row:not(.is-profile) .shop-seller {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .shop-panel .shop-row:not(.is-profile) .shop-facets {
+    margin-left: 0;
+    gap: 0.35rem;
+    flex: none;
+  }
+  .shop-panel .shop-row:not(.is-profile) .shop-px,
+  .shop-panel .shop-row:not(.is-profile) .shop-row-actions,
+  .shop-panel .shop-row:not(.is-profile) .ct-qty {
+    flex: none;
+  }
   .shop-row.is-profile .shop-card { flex: 1 0 100%; max-width: none; }
   .shop-txt { display: none; }
   .list-btn { width: 100%; }
