@@ -2,14 +2,20 @@ import { gameIdFromHost } from './game.js';
 import { getPrintLang } from './locale.js';
 
 /** Live leftover-JPEG catalogs (`GET /catalogs`). Do not use default identify catalog tcgplayer on the desk. Map: docs/SCAN.md */
-export function scanCatalogId(hostname, printLang = getPrintLang()) {
-  const game = gameIdFromHost(hostname);
+export function scanCatalogId(hostname, printLang = getPrintLang(), pathname) {
+  const game = gameIdFromHost(hostname, pathname);
   const print = String(printLang || 'all').toLowerCase();
   if (game === 'one_piece') {
     return print === 'japanese' ? 'one_piece_japanese' : 'one_piece_singles';
   }
   if (game === 'riftbound') {
     return 'riftbound_western';
+  }
+  if (game !== 'pokemon') {
+    // One all-languages catalog per other game (language is a listing attribute
+    // there). A game without a catalog gets the API's "unsupported catalog", never
+    // a Pokémon match.
+    return `${game}_all`;
   }
   if (print === 'japanese') {
     return 'pokemon_japanese';
