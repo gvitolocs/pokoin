@@ -382,19 +382,31 @@ def pick_dao_letter(table: dict[str, int], frm: str, to: str, grams: int, *, tra
     }
 
 
-# --- Poste Italiane Postamail Internazionale (posta ordinaria) ---------------
-# Official Postamail Internazionale Zona tariffs (francobollo B). Denmark and
-# the rest of Europe are Zona 1. Giuseppe: IT→DK cheapest is Posta Ordinaria
-# €1.30 (Normalizzato ≤20 g), not the Compact 50–100 g PackZoo letter.
+# --- Poste Italiane: domestic Posta Ordinaria ≠ Postamail Internazionale -----
+# Two products, two price lists (Giuseppe 2026-10-04):
+#   IT→IT  = Posta Ordinaria (ex Posta4), Piccolo/Medio Standard
+#   IT→abroad = Postamail Internazionale (francobollo B), Zona 1/2/3
+# Denmark is Zona 1: Normalizzato ≤20 g = €1.30.
 
 POSTE_ZONA1 = frozenset(
     EU_DESTINATIONS
     + ("GB", "CH", "NO", "IS", "TR", "RU", "UA", "BY", "BA", "RS", "ME", "MK", "AL", "XK")
 )
 POSTE_ZONA3 = frozenset(("AU", "NZ", "FJ", "PF"))
-# Zona 2 = everywhere else we quote (Americas, Asia, Africa, …).
 
-# (max_grams, zona1, zona2, zona3) EUR cents — Normalizzato / Compatto bands.
+# Domestic Posta Ordinaria: (max_grams, piccolo_standard, medio_standard) cents.
+# Piccolo stops at 50 g; above that only Medio applies.
+POSTE_DOMESTIC_BANDS = (
+    (20, 130, 290),
+    (50, 290, 290),
+    (100, None, 295),
+    (250, None, 425),
+    (350, None, 540),
+    (1000, None, 585),
+    (2000, None, 705),
+)
+
+# International Postamail: (max_grams, zona1, zona2, zona3) cents.
 POSTE_POSTAMAIL_BANDS = (
     (20, 130, 245, 320),    # Normalizzato
     (50, 315, 400, 495),    # Compatto
@@ -408,31 +420,56 @@ POSTE_POSTAMAIL_BANDS = (
 
 def poste_zona(to_cc: str) -> int:
     code = to_cc.upper()
-    if code in POSTE_ZONA1 or code == "IT":
+    if code in POSTE_ZONA1:
         return 1
     if code in POSTE_ZONA3:
         return 3
     return 2
 
 
-def pick_poste_italiane_letter(frm: str, to: str, grams: int, *, tracked: bool) -> dict | None:
-    """Untracked Postamail Internazionale from Italy. Tracked uses Raccomandata (not here)."""
-    if tracked or frm.upper() != "IT":
-        return None
+def pick_poste_domestica(grams: int) -> dict | None:
+    """Untracked Posta Ordinaria inside Italy (Piccolo when possible, else Medio)."""
     n = max(1, int(grams or 0))
-    zona = poste_zona(to)
-    for max_g, z1, z2, z3 in POSTE_POSTAMAIL_BANDS:
+    for max_g, piccolo, medio in POSTE_DOMESTIC_BANDS:
         if n <= max_g:
-            cents = (z1, z2, z3)[zona - 1]
+            cents = piccolo if piccolo is not None else medio
+            if cents is None:
+                return None
             return {
                 "priceEURCents": cents,
                 "carrier": "Poste Italiane",
                 "serviceName": "Posta Ordinaria",
                 "tracked": False,
+                "rateSource": "poste-italiane-domestica",
+                "productClass": "letter",
+            }
+    return None
+
+
+def pick_poste_postamail(to: str, grams: int) -> dict | None:
+    """Untracked Postamail Internazionale (estero)."""
+    n = max(1, int(grams or 0))
+    zona = poste_zona(to)
+    for max_g, z1, z2, z3 in POSTE_POSTAMAIL_BANDS:
+        if n <= max_g:
+            return {
+                "priceEURCents": (z1, z2, z3)[zona - 1],
+                "carrier": "Poste Italiane",
+                "serviceName": "Postamail Internazionale",
+                "tracked": False,
                 "rateSource": "poste-italiane-postamail",
                 "productClass": "letter",
             }
     return None
+
+
+def pick_poste_italiane_letter(frm: str, to: str, grams: int, *, tracked: bool) -> dict | None:
+    """Route domestic vs international Poste letter products. Never mix the tables."""
+    if tracked or frm.upper() != "IT":
+        return None
+    if to.upper() == "IT":
+        return pick_poste_domestica(grams)
+    return pick_poste_postamail(to, grams)
 
 
 # --- merge / write -----------------------------------------------------------

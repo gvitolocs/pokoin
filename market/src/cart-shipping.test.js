@@ -19,13 +19,17 @@ const row = (over = {}) => ({
   ...over,
 });
 
-test('a small parcel previews Posta Ordinaria and the room left at that price', () => {
+test('a small parcel previews Postamail Internazionale and the room left at that price', () => {
   // IT→DK: SMALL is Postamail Normalizzato €1.30; MEDIUM jumps to the 100 g band.
+  // Domestic Posta Ordinaria is a different product/table (IT→IT).
   const estimate = parcelEstimate({ from: 'IT', to: 'DK', cards: 2 });
   assert.equal(estimate.tracked, false);
   assert.equal(estimate.amountCents, 130);
-  assert.equal(estimate.serviceName, 'Posta Ordinaria');
+  assert.equal(estimate.serviceName, 'Postamail Internazionale');
   assert.equal(estimate.room, 2); // same €1.30 only through SMALL (max 4)
+  const domestic = parcelEstimate({ from: 'IT', to: 'IT', cards: 2 });
+  assert.equal(domestic.serviceName, 'Posta Ordinaria');
+  assert.equal(domestic.amountCents, 130);
   assert.equal(parcelEstimate({ from: 'IT', to: 'DK', cards: 0 }), null);
   assert.equal(parcelEstimate({ from: 'EU', to: 'DK', cards: 1 }), null);
   assert.equal(parcelEstimate({ from: '', to: 'DK', cards: 1 }), null);

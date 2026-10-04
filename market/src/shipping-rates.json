@@ -11966,7 +11966,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -11979,7 +11979,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -11992,7 +11992,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12005,7 +12005,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12018,7 +12018,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12031,7 +12031,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12068,7 +12068,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12093,7 +12093,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12118,7 +12118,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12131,7 +12131,7 @@
       "maxCards": 200,
       "priceEURCents": 1095,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12144,7 +12144,7 @@
       "maxCards": 20,
       "priceEURCents": 695,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12157,7 +12157,7 @@
       "maxCards": 4,
       "priceEURCents": 320,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12194,7 +12194,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12219,7 +12219,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12244,7 +12244,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12281,7 +12281,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12306,7 +12306,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12331,7 +12331,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12344,7 +12344,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12357,7 +12357,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12370,7 +12370,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12383,7 +12383,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12396,7 +12396,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12409,7 +12409,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12434,7 +12434,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12447,7 +12447,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12460,7 +12460,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12473,7 +12473,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12486,7 +12486,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12499,7 +12499,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12512,7 +12512,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12525,7 +12525,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12538,7 +12538,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12575,7 +12575,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12600,7 +12600,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12625,7 +12625,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12662,7 +12662,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12687,7 +12687,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12712,7 +12712,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12749,7 +12749,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12774,7 +12774,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12799,7 +12799,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12836,7 +12836,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12861,7 +12861,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12886,7 +12886,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12923,7 +12923,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12948,7 +12948,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -12973,7 +12973,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13010,7 +13010,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13035,7 +13035,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13060,7 +13060,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13097,7 +13097,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13122,7 +13122,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13147,7 +13147,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13184,7 +13184,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13209,7 +13209,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13234,7 +13234,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13271,7 +13271,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13296,7 +13296,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13321,7 +13321,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13358,7 +13358,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13383,7 +13383,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13408,7 +13408,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13421,7 +13421,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13434,7 +13434,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13447,7 +13447,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13484,7 +13484,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13509,7 +13509,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13534,7 +13534,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13571,7 +13571,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13596,7 +13596,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13621,7 +13621,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13634,7 +13634,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13647,7 +13647,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13660,7 +13660,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13697,7 +13697,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13722,7 +13722,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13747,7 +13747,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13760,7 +13760,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13773,7 +13773,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13786,7 +13786,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13799,7 +13799,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13812,7 +13812,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13825,7 +13825,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13850,7 +13850,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13863,7 +13863,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13876,7 +13876,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13911,12 +13911,12 @@
       "toCountry": "IT",
       "packageTier": "LARGE",
       "maxCards": 200,
-      "priceEURCents": 610,
+      "priceEURCents": 425,
       "carrier": "Poste Italiane",
       "serviceName": "Posta Ordinaria",
       "active": true,
       "tracked": false,
-      "rateSource": "poste-italiane-postamail"
+      "rateSource": "poste-italiane-domestica"
     },
     {
       "id": "it-it-medium",
@@ -13936,12 +13936,12 @@
       "toCountry": "IT",
       "packageTier": "MEDIUM",
       "maxCards": 20,
-      "priceEURCents": 420,
+      "priceEURCents": 295,
       "carrier": "Poste Italiane",
       "serviceName": "Posta Ordinaria",
       "active": true,
       "tracked": false,
-      "rateSource": "poste-italiane-postamail"
+      "rateSource": "poste-italiane-domestica"
     },
     {
       "id": "it-it-small",
@@ -13966,7 +13966,7 @@
       "serviceName": "Posta Ordinaria",
       "active": true,
       "tracked": false,
-      "rateSource": "poste-italiane-postamail"
+      "rateSource": "poste-italiane-domestica"
     },
     {
       "id": "it-jp-large-untracked",
@@ -13976,7 +13976,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -13989,7 +13989,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14002,7 +14002,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14015,7 +14015,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14028,7 +14028,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14041,7 +14041,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14078,7 +14078,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14103,7 +14103,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14128,7 +14128,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14165,7 +14165,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14190,7 +14190,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14215,7 +14215,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14252,7 +14252,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14277,7 +14277,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14302,7 +14302,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14339,7 +14339,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14364,7 +14364,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14389,7 +14389,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14402,7 +14402,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14415,7 +14415,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14428,7 +14428,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14441,7 +14441,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14454,7 +14454,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14467,7 +14467,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14504,7 +14504,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14529,7 +14529,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14554,7 +14554,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14579,7 +14579,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14592,7 +14592,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14605,7 +14605,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14618,7 +14618,7 @@
       "maxCards": 200,
       "priceEURCents": 1095,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14631,7 +14631,7 @@
       "maxCards": 20,
       "priceEURCents": 695,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14644,7 +14644,7 @@
       "maxCards": 4,
       "priceEURCents": 320,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14657,7 +14657,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14670,7 +14670,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14683,7 +14683,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14720,7 +14720,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14745,7 +14745,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14770,7 +14770,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14807,7 +14807,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14832,7 +14832,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14857,7 +14857,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14894,7 +14894,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14919,7 +14919,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14944,7 +14944,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14957,7 +14957,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14970,7 +14970,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -14983,7 +14983,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15020,7 +15020,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15045,7 +15045,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15070,7 +15070,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15083,7 +15083,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15096,7 +15096,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15109,7 +15109,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15146,7 +15146,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15171,7 +15171,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15196,7 +15196,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15233,7 +15233,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15258,7 +15258,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15283,7 +15283,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15296,7 +15296,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15309,7 +15309,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15322,7 +15322,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15335,7 +15335,7 @@
       "maxCards": 200,
       "priceEURCents": 610,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15348,7 +15348,7 @@
       "maxCards": 20,
       "priceEURCents": 420,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15361,7 +15361,7 @@
       "maxCards": 4,
       "priceEURCents": 130,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15374,7 +15374,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15387,7 +15387,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15400,7 +15400,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15413,7 +15413,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15426,7 +15426,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15439,7 +15439,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15452,7 +15452,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15465,7 +15465,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15478,7 +15478,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15491,7 +15491,7 @@
       "maxCards": 200,
       "priceEURCents": 890,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15504,7 +15504,7 @@
       "maxCards": 20,
       "priceEURCents": 495,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -15517,7 +15517,7 @@
       "maxCards": 4,
       "priceEURCents": 245,
       "carrier": "Poste Italiane",
-      "serviceName": "Posta Ordinaria",
+      "serviceName": "Postamail Internazionale",
       "active": true,
       "tracked": false,
       "rateSource": "poste-italiane-postamail"
@@ -20821,7 +20821,8 @@
       "packzoo",
       "porto-data",
       "dao-brev",
-      "poste-italiane-postamail"
+      "poste-italiane-postamail",
+      "poste-italiane-domestica"
     ]
   }
 }
