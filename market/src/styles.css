@@ -10855,5 +10855,3 @@ html:has(.wallet-page) .brand span {
   }
 }
 
-/* Artist album sorted by Pokédex: strict row order, no dense back-filling (#20). */
-.grid.album-grid.is-pokedex-order { grid-auto-flow: row; }

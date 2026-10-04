@@ -13,7 +13,7 @@ import { Action, track } from '../track.js';
 import ArtworkZoom from './ArtworkZoom.jsx';
 import CardArt from './CardArt.jsx';
 
-export default function CardTile({ card, action = Action.clickTile, rank, layout = 'grid', cut = false, flat = false }) {
+export default function CardTile({ card, action = Action.clickTile, rank, layout = 'grid', cut = false }) {
   const { currency } = useBuyerCurrency();
   if (!card?.id) {
     return null;
@@ -27,8 +27,7 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
   const landscape = cut && isLandscapePrintName(card.name);
   const artLayout = cut ? resolveArtLayout(card) : 'window';
   const item = cut && artLayout === 'item';
-  // `flat`: Pokédex order must read left-to-right, so no two-row feature tiles.
-  const tall = !flat && cut && !landscape && isFeatureAlbumArt(card);
+  const tall = cut && !landscape && isFeatureAlbumArt(card);
   const hero = imageSrc(card, 'hero');
   const art = cut ? hero : imageSrc(card, layout === 'list' ? 'hero' : 'grid');
   const list = layout === 'list';

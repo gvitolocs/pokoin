@@ -368,3 +368,15 @@ test('Pokédex LEGEND pairing leaves Tag Team expand and non-LEGEND order intact
     ],
   );
 });
+
+test('a full-art print never piles with the framed prints, even on a shared CLIP key', async () => {
+  const { groupArtworkRows } = await import('./search-filters.js');
+  const rows = [
+    { id: '684690', name: 'Air Balloon', number: 'Uncommon | 079/086', set: 'Black Bolt', version: 'v286774', art_layout: 'window' },
+    { id: '703348', name: 'Air Balloon', number: 'Ultra Rare | 166/132', set: 'Mega Evolution', version: 'v286774', art_layout: 'window' },
+    { id: '741638', name: 'Air Balloon', number: 'Uncommon | 181/217', set: 'Ascended Heroes', version: 'v286774', art_layout: 'window' },
+  ];
+  const groups = groupArtworkRows(rows);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map((g) => g.cards.map((c) => c.id)), [['684690', '741638'], ['703348']]);
+});

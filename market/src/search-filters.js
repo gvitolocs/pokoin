@@ -5,6 +5,7 @@ import { pokedexPartnerNumbers, pokedexSortValue } from './pokedex.js';
 import { tilePricePkn } from './pkn.js';
 import { assignOfficialIndexes, officialListFor } from './set-official-lists.js';
 import { expansionSortValue } from './tcg-eras.js';
+import { isFeatureAlbumArt } from './art-layout.js';
 
 export function searchRarity(card) {
   return printingIdentity(card).rarity;
@@ -126,7 +127,11 @@ export function groupArtworkRows(cards) {
   const map = new Map();
   for (const card of cards || []) {
     const id = String(card?.id || card?.card_id || '');
-    const key = sharesReprintArtwork(card) ? artworkVersionKey(card) : `id:${id}`;
+    // A full-art painting is never a reprint of the framed card, even when CLIP gave
+    // both the same key (trainer items/supporters: same subject, different art).
+    const key = sharesReprintArtwork(card)
+      ? `${artworkVersionKey(card)}${isFeatureAlbumArt(card) ? ':fa' : ''}`
+      : `id:${id}`;
     let group = map.get(key);
     if (!group) {
       group = { key, cards: [], seen: new Set() };
