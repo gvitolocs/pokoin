@@ -362,6 +362,27 @@
     }
   },
   {
+    "path": "/api/marketplace-shipping-options",
+    "file": "marketplace-shipping-options.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Live Packlink carriers plus seeded letter rates for a seller→buyer lane. Cart/shipping preview.",
+    "auth": "Public read.",
+    "params": {
+      "query": "fromCountry, toCountry, cards; optional fromZip, toZip",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "PACKLINK_API_KEY"
+      ],
+      "services": [
+        "Packlink PRO"
+      ]
+    }
+  },
+  {
     "path": "/api/stripe-connect-onboard",
     "file": "stripe-connect-onboard.js",
     "methods": [

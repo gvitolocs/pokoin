@@ -11,7 +11,7 @@ import {
   reconcileRow,
   sellerKeyOf,
 } from '../cart-model.js';
-import { orderServices, parcelNudge, shippingEstimate } from '../cart-shipping.js';
+import { parcelNudge } from '../cart-shipping.js';
 import {
   useBuyAgain,
   useCardTiles,
@@ -23,6 +23,7 @@ import {
   useSellerShelves,
   useWatchlistIds,
 } from '../cart-rails.js';
+import { useLiveShipping } from '../use-live-shipping.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
 import {
   BasketRow,
@@ -84,12 +85,8 @@ export default function Cart() {
   // The buyer's pick wins over the saved address / browser country.
   const country = cart.shippingChoice.country || delivery.country;
   const service = cart.shippingChoice.service;
-  const services = useMemo(() => orderServices(groups, country), [groups, country]);
-  const shipping = useMemo(() => shippingEstimate(groups, country, service), [groups, country, service]);
-  const estimates = useMemo(
-    () => Object.fromEntries(shipping.parcels.map((parcel) => [parcel.key, parcel.estimate])),
-    [shipping],
-  );
+  const liveShip = useLiveShipping({ groups, to: country, service });
+  const { services, shipping, estimates } = liveShip;
   const nudge = useMemo(() => parcelNudge(groups, country, service), [groups, country, service]);
   const discount = useMemo(
     () => balanceDiscount({ balancePkn: signedIn ? availablePkn : 0, items, shippingCents: shipping.cents }),

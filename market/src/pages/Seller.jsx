@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, useParams } from 'react-router-dom';
+import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { fetchSellerShop } from '../api.js';
 import { rewriteCanonicalCardPath } from '../card-stub.js';
@@ -15,7 +15,7 @@ import {
   sellerCountryShort,
   sellerHandle,
 } from '../listing-meta.js';
-import { seedSellerListings, sellerIdentitySeed } from '../seller-seed.js';
+import { rememberSellerIdentity, seedSellerListings, sellerIdentitySeed } from '../seller-seed.js';
 import { game } from '../game.js';
 import { associateRoleLabel } from '../associate-roles.js';
 import Avatar from '../components/Avatar.jsx';
@@ -96,10 +96,12 @@ function sellerFromPayload(data, handle, sample, previous = null) {
 
 export default function Seller() {
   const { username = '', lang: routeLang } = useParams();
+  const [searchParams] = useSearchParams();
   const { addItem } = useCart();
   const { user, profile } = useAuth();
   const lang = routeLang || getSearchLang();
   const handle = decodeURIComponent(String(username || '').trim());
+  const hintedUid = String(searchParams.get('sellerUid') || '').trim();
   const selectedGame = game().apiGame;
   const seeded = seedSellerListings(handle, {
     pageSize: PAGE_SIZE,
@@ -112,11 +114,11 @@ export default function Seller() {
   const [total, setTotal] = useState(() => seeded?.total ?? null);
   const [unique, setUnique] = useState(() => seeded?.unique ?? null);
   const [seller, setSeller] = useState(() => seeded?.seller ?? known ?? {
-    uid: '',
+    uid: hintedUid,
     username: handle,
     displayName: handle,
   });
-  const sellerUidRef = useRef(seeded?.seller?.uid || known?.uid || '');
+  const sellerUidRef = useRef(hintedUid || seeded?.seller?.uid || known?.uid || '');
   const listingsRef = useRef(seeded?.listings ?? null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -133,6 +135,14 @@ export default function Seller() {
   const [pageSettled, setPageSettled] = useState(() => Boolean(seeded));
   listingsRef.current = listings;
   if (seller.uid) sellerUidRef.current = seller.uid;
+  else if (hintedUid) sellerUidRef.current = hintedUid;
+
+  useEffect(() => {
+    if (!hintedUid) return;
+    sellerUidRef.current = hintedUid;
+    rememberSellerIdentity(handle, { uid: hintedUid, username: handle });
+    setSeller((current) => (current.uid ? current : { ...current, uid: hintedUid }));
+  }, [hintedUid, handle]);
 
   useEffect(() => {
     setPage(1);

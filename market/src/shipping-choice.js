@@ -21,13 +21,19 @@ function write(key, value) {
   }
 }
 
+/** Letter rates or a live Packlink service id (`packlink:22131`). */
+export function isShippingServiceId(value) {
+  const id = String(value || '');
+  return id === 'tracked' || id === 'untracked' || /^packlink:\d+$/.test(id);
+}
+
 export function readShippingService() {
   const value = read(SERVICE_KEY);
-  return value === 'tracked' || value === 'untracked' ? value : '';
+  return isShippingServiceId(value) ? value : '';
 }
 
 export function writeShippingService(id) {
-  write(SERVICE_KEY, id === 'tracked' || id === 'untracked' ? id : '');
+  write(SERVICE_KEY, isShippingServiceId(id) ? id : '');
 }
 
 export function readPknDiscount() {
