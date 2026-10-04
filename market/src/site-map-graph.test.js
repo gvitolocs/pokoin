@@ -149,7 +149,7 @@ test('market summary counts listed desks and finds the cheapest', () => {
 });
 
 test('review boards and plumbing routes are not on the map', () => {
-  for (const id of ['/tests', '/sanitize', '/espurr', '/ocr', '/ocr/artists', '/artwork', '/jumbos', '/extension/auth-bridge']) {
+  for (const id of ['/tests', '/sanitize', '/espurr', '/ocr', '/ocr/artists', '/artwork', '/jumbos', '/poko', '/extension/auth-bridge']) {
     assert.equal(refFromKey(model, `page:${id}`), null, id);
   }
   assert.ok(refFromKey(model, 'page:/marketplace'));

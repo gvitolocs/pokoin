@@ -16,13 +16,13 @@ const spa = [
   'bought', 'buy', 'cardscan', 'careers', 'cart', 'checkout', 'collection', 'contact',
   'dashboard', 'docs', 'earn', 'email-preferences', 'espurr', 'exchange', 'extension',
   'favorites', 'flex', 'forum', 'health', 'inventory', 'invite', 'join', 'jumbos',
-  'marketplace', 'messages', 'mypokoin', 'nft', 'ocr', 'orders', 'privacy', 'product',
+  'marketplace', 'messages', 'mypokoin', 'nft', 'ocr', 'orders', 'poko', 'privacy', 'product',
   'profile', 'protection', 'sales', 'sanitize', 'scan', 'scancard', 'shipping', 'sitemap', 'stock',
   'swap', 'tests', 'wallet', 'whitepaper',
   ...games,
 ];
 
-const testBoards = ['tests', 'sanitize', 'espurr', 'ocr', 'artwork', 'jumbos'];
+const testBoards = ['tests', 'sanitize', 'espurr', 'ocr', 'artwork', 'jumbos', 'poko'];
 const lines = [
   '# One wildcard per prefix. Workers Static Assets allow 100 redirect rules.',
   '# External hosts (www, /card-images) are zone Redirect Rules, not _redirects.',

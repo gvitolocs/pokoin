@@ -23,6 +23,7 @@ const OcrArtists = lazy(() => import('./pages/OcrArtists.jsx'));
 const ArtworkHover = lazy(() => import('./pages/ArtworkHover.jsx'));
 const TestsDashboard = lazy(() => import('./pages/TestsDashboard.jsx'));
 const JumbosBoard = lazy(() => import('./pages/JumbosBoard.jsx'));
+const PokoVideoBoard = lazy(() => import('./pages/PokoVideoBoard.jsx'));
 const Search = lazy(() => import('./pages/Search.jsx'));
 const Card = lazy(() => import('./pages/Card.jsx'));
 const Expansion = lazy(() => import('./pages/Expansion.jsx'));
@@ -142,7 +143,7 @@ function AppShell() {
     return () => document.documentElement.classList.remove('is-extension-desk');
   }, []);
   const stripped = pathname.replace(/\/$/, '');
-  const board = stripped === '/tests' || stripped === '/sanitize' || stripped === '/espurr' || stripped === '/ocr' || stripped === '/ocr/artists' || stripped === '/artwork' || stripped === '/jumbos' || stripped === '/extension/auth-bridge';
+  const board = stripped === '/tests' || stripped === '/sanitize' || stripped === '/espurr' || stripped === '/ocr' || stripped === '/ocr/artists' || stripped === '/artwork' || stripped === '/jumbos' || stripped === '/poko' || stripped === '/extension/auth-bridge';
   const framed = framedByChromeExtension();
   // pokoin.com/scan stays the public photo page. Scan Connect is /dashboard/scan.
   // The legacy host never paints the SPA: / and /scan move under /dashboard.
@@ -162,6 +163,7 @@ function AppShell() {
       {both('/ocr/artists', <OcrArtists />)}
       {both('/artwork', <ArtworkHover />)}
       {both('/jumbos', <JumbosBoard />)}
+      {both('/poko', <PokoVideoBoard />)}
       {both('/marketplace', <Home />)}
       {both('/marketplace/search', <Search />)}
       {both('/marketplace/explore', <Explore />)}

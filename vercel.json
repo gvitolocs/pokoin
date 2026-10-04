@@ -407,7 +407,7 @@
       "permanent": true
     },
     {
-      "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos)",
+      "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos|poko)",
       "has": [
         {
           "type": "host",
@@ -418,7 +418,7 @@
       "permanent": true
     },
     {
-      "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos)/:rest*",
+      "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos|poko)/:rest*",
       "has": [
         {
           "type": "host",
@@ -796,6 +796,14 @@
     },
     {
       "source": "/jumbos",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/poko/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/poko",
       "destination": "/market/index.html"
     },
     {

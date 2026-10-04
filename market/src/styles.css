@@ -9329,6 +9329,9 @@ html.is-extension-desk select.collector-badge.version-badge {
   display: block;
   background: var(--g2, #1c1b25);
 }
+.poko-video { margin: 1.5rem 0 2rem; }
+.poko-video video { display: block; width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; }
+.poko-video p { margin: .5rem 0 0; }
 .jumbos-grid figcaption {
   margin-top: 0.45rem;
   font-size: 0.72rem;
