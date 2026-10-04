@@ -1686,6 +1686,15 @@ function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackB
   const commitLocation = () => {
     if (locationDraft !== defaults.location) onChange({ location: locationDraft });
   };
+  // Giuseppe 2026-10-04: the location applies while typing — a short pause is
+  // enough, no Enter. Blur and Enter still commit immediately.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  useEffect(() => {
+    if (locationDraft === defaults.location) return undefined;
+    const t = setTimeout(() => onChangeRef.current({ location: locationDraft }), 700);
+    return () => clearTimeout(t);
+  }, [locationDraft, defaults.location]);
   const commitStack = () => {
     const n = Number.parseInt(stackDraft, 10);
     if (!(n >= 1 && n <= 9999)) {

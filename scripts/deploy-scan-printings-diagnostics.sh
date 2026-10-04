@@ -11,7 +11,7 @@ stamp="$(date -u +%Y%m%d%H%M%S)"
 stage="$(mktemp -d /tmp/scan-printings-diagnostics-XXXXXX)"
 trap 'rm -rf "$stage"' EXIT
 git archive "$commit" server/pokoin-api server/scan | tar -C "$stage" -xf -
-node --test "$stage/server/pokoin-api/_scan_connect.test.js" "$stage/server/pokoin-api/scan-printings-diagnostics.test.js" "$stage/server/pokoin-api/scan-phone.test.js" "$stage/server/scan/tests/scan-connect.test.cjs" "$stage/server/scan/tests/scanner-ui.test.cjs"
+node --test "$stage/server/pokoin-api/_scan_connect.test.js" "$stage/server/pokoin-api/scan-printings-diagnostics.test.js" "$stage/server/pokoin-api/scan-phone.test.js" "$stage/server/pokoin-api/scan-store-set-defaults.test.js" "$stage/server/scan/tests/scan-connect.test.cjs" "$stage/server/scan/tests/scanner-ui.test.cjs"
 api="$stage/server/pokoin-api"
 web="$stage/server/scan/web"
 if [[ "$mode" == api || "$mode" == all ]]; then
