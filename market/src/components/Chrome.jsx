@@ -31,6 +31,7 @@ import { compactQuery, resolveSearchQuery, typedMeiliQuery } from '../suggest-ra
 import { useProgressiveSuggest } from '../use-progressive-suggest.js';
 import { warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
 import { useSuggestFlip } from '../suggest-flip.js';
+import { useSuggestTitleFit } from '../suggest-title-fit.js';
 import {
   cachedPrintings,
   isLiveStub,
@@ -518,6 +519,8 @@ export default function Chrome({ children }) {
     || visibleGroups.length > 0
     || suggestPending
   );
+  // Fit long names beside the artwork first, so FLIP measures fitted rows.
+  useSuggestTitleFit(listRef, suggestVisible ? suggestIds : '');
   useSuggestFlip(listRef, suggestVisible ? suggestIds : '');
 
   const [shadeTick, setShadeTick] = useState(0);

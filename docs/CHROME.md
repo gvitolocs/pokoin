@@ -245,7 +245,7 @@ Not Flutter `POST /api/marketplace-autocomplete` and not
 | Set square | Official expansion **symbol** (`expansionSymbolSrc`, same PNG as the set desk title). 2.15rem mark, **vertically centered in the 68px thumb column** (`min-height: 0` so tall PNGs cannot overflow). Missing official files are saved as dark SVI-style plates (`export-expansion-code-marks.py`); HTML `setAbbrev` is only a last resort on a dark plate — never yellow on white. Empty set → `●`. Hidden `≤720px`. Autocomplete may send `expansion_symbol_url`; suggest maps that plus the slug path. `/marketplace` HTML is `max-age=0, must-revalidate` so the hashed JS (not letter-code `setAbbrev`) loads. |
 | Thumb | Left mini **full card** (48×68, phone 40×56). `imageSrc(card, 'suggest')` prefers `_homepage.webp`, then leftover JPEG. CardTrader `preview_` URLs are allowed **only** here so empty squares do not appear. Hero/grid still drop previews. Same URL as the right crop. `suggest-images.js` preloads those thumbs into a **128** LRU (4 in flight, visible rows first). First 8 rows eager (`fetchPriority` high on the first 4); the rest `loading="lazy"`. Not leftover JPEGs. Not unlimited. |
 | Hover | Desktop: hovering a row (or keyboard highlight) opens `.suggest-hover` — leftover JPEG, as large as the viewport beside the panel allows. Phone: no hover card. |
-| Title | **Bold English** name on desktop, **gold** (`var(--yellow)`). Alternate title language adds a gray CardTrader second line (`.suggest-translated`): `Camilla - 119/156`. Phone keeps `Name - 006/021` in the title (`suggest-num-phone`). Expansion name under that, clipped at 20 characters, stays English. |
+| Title | **Bold English** name on desktop, **gold** (`var(--yellow)`). Alternate title language adds a gray CardTrader second line (`.suggest-translated`): `Camilla - 119/156`. Phone keeps `Name - 006/021` in the title (`suggest-num-phone`). A title that does not fit its column **shrinks to fit** (`suggest-title-fit.js`, run before FLIP; floor 55% of the CSS size, then the ellipsis) — never under the art. Expansion name under that, clipped at 20 characters, stays English. |
 | Number | Desktop: `.suggest-number` is the **left** column in `.suggest-copy` (`auto minmax(0, 1fr)`), **first-baseline** with the name. Numbers left-anchor in a `7.5ch` tabular column; name/set sit to their right. Hidden at `≤720px`. Popup-only: `clipSuggestCollector` cuts to 9 characters (`Mewtwo Stamp` → `Mewtwo St`). Desk, tiles, and version badge keep the full number. |
 | Right art | Pokemon only: landscape **illustration rectangle** (`CardArt cut`, `art-cut.js`). Same `suggest` URL as the left thumb — one download, CSS crop, **not** a 1:1 square, **not** a second `_art.webp`. **LEGEND** and **BREAK** cards skip the crop: `.suggest-art.is-landscape` shows the leftover rotated +90° (`isLandscapePrintName` in `art-cut.js`) so the name bar is on top. Not Call of Legends / BREAKthrough.
 | Print flag | Desktop: left of that rectangle. Phone `≤720px`: overlay on the crop (top-left). `nationality` from `pokoin_pokemon_expansions`: `japanese` → JPKO (JP+KO split), `korean` → KO (Taegeukgi), `chinese` → CN, `western` → EUUS (US+EU split). Product: none. Leftover rows with empty nationality use the expansion’s flag (`expansionNationality(set)`), so HeartGold Collection energies still show jpko. Same mapping on the **set desk** `h1.page-title` ([PRINT_FLAGS.md](PRINT_FLAGS.md)). |
@@ -276,7 +276,7 @@ still sit in the **last column**, not wrap under the title.
 | `.suggest-main` | 3 cols: set, thumb, **copy (number left, name/set right)** | 2 cols: thumb, copy; number back in the title |
 | `.suggest-number` | own column **left of** the name/set (`008/022`), left-anchored | `display: none` |
 | `.suggest-num-phone` | `display: none` | inline ` - 008/022` |
-| Columns | `minmax(0,1fr) auto` — flag+art on the **right**; number sits next to the name | `minmax(0,1fr) auto` |
+| Columns | `minmax(0,1fr) auto` — flag+art on the **right**; number sits next to the name | `minmax(0,1fr) auto`, `gap: 1px` — the name may run to 1px before the art |
 | Mini scan | 48×68 | 40×56 |
 | Art crop | 8.75rem, last column | 6.75rem, last column |
 | Missing leftover | placeholder + flag in last column; **one row**, not 120px wrap | same |
@@ -292,6 +292,8 @@ playwright-cli resize 393 852    # iPhone 16
 
 No uppercase group headers (`MIMIKYU`). Groups still exist in the payload for
 rank. The popup shows **20** printing rows, scrollable; the footer stays pinned.
+`.suggest-list` scrolls **vertically only** (`overflow-x: hidden`, `touch-action: pan-y`):
+a long name must never let the popup pan sideways on a phone.
 
 Row pick goes to the card page.
 
