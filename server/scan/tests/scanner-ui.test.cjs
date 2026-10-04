@@ -26,7 +26,7 @@ function scanner() {
   }
   const track = {stop(){},getSettings:()=>({deviceId:"rear"}),applyConstraints: async constraints => requests.push(constraints)};
   const sandbox = {
-    document: {getElementById:element, createElement:()=>node()},
+    document: {getElementById:element, createElement:()=>node(), querySelector:()=>null, querySelectorAll:()=>[]},
     navigator: {mediaDevices:{getUserMedia: async constraints => {
       requests.push(constraints.video); return {getVideoTracks:()=>[track],getTracks:()=>[track]};
     }}},
@@ -259,36 +259,34 @@ test('single-origin pokoin_url forms open the card; a URL for another game never
  assert.equal(s.run('pokoinUrl({top1:{public_id:"531072",pokoin_url:"https://pokoin.com/marketplace/en/cards/531072"}})'), fullCardUrl('','531072'));
 });
 
-// iOS Safari never shows the first camera prompt without a user gesture, so a
-// freshly scanned QR (zero taps) must not call getUserMedia blindly.
-test('a first visit with no user activation waits for the Start camera tap',async()=>{
+// iOS reports sticky activation across the Camera-app QR hop, so the gate
+// never trusts activation: only a granted camera auto-starts.
+test('an ungranted camera waits for the Start camera tap',async()=>{
  const s=scanner();
  s.run('cameraRequestVersion += 1'); // retire the eval-time start; only the gate decides now
  let gated=0;
- s.sandbox.navigator.userActivation={hasBeenActive:false};
  s.sandbox.navigator.mediaDevices={getUserMedia:async()=>{gated++;return {getVideoTracks:()=>[],getTracks:()=>[]};}};
  s.sandbox.window.startCam();
  await new Promise(resolve=>setImmediate(resolve));
- assert.equal(gated,0,'no blind getUserMedia without a gesture');
+ assert.equal(gated,0,'no blind getUserMedia without a grant');
  assert.equal(s.element('startCameraTap').hidden,false);
  assert.equal(s.element('warming').textContent,'Tap to start the camera.');
 });
-test('a granted camera or a tap starts without the extra step',async()=>{
+test('a granted camera auto-starts; tap start works where the gate ran',async()=>{
  const granted=scanner();let grantedCalls=0;
  granted.run('cameraRequestVersion += 1');
- granted.sandbox.navigator.userActivation={hasBeenActive:false};
  granted.sandbox.navigator.permissions={query:async()=>({state:'granted'})};
  granted.sandbox.navigator.mediaDevices={getUserMedia:async()=>{grantedCalls++;return {getVideoTracks:()=>[],getTracks:()=>[]};}};
  granted.sandbox.window.startCam();
  await new Promise(resolve=>setImmediate(resolve));
  assert.equal(grantedCalls,1,'granted phones auto-start');
- const tapped=scanner();let tappedCalls=0;
- tapped.run('cameraRequestVersion += 1');
- tapped.sandbox.navigator.userActivation={hasBeenActive:true};
- tapped.sandbox.navigator.mediaDevices={getUserMedia:async()=>{tappedCalls++;return {getVideoTracks:()=>[],getTracks:()=>[]};}};
- tapped.sandbox.window.startCam();
+ const prompted=scanner();let promptedCalls=0;
+ prompted.run('cameraRequestVersion += 1');
+ prompted.sandbox.navigator.permissions={query:async()=>({state:'prompt'})};
+ prompted.sandbox.navigator.mediaDevices={getUserMedia:async()=>{promptedCalls++;return {getVideoTracks:()=>[],getTracks:()=>[]};}};
+ prompted.sandbox.window.startCam();
  await new Promise(resolve=>setImmediate(resolve));
- assert.equal(tappedCalls,1,'the tap gesture itself unlocks the prompt');
+ assert.equal(promptedCalls,0,'the gate never fires getUserMedia on prompt state');
 });
 test('the Open in Chrome hop survives pairing and is removed only when the camera starts',()=>{
  const connectJs=fs.readFileSync(path.join(__dirname,'..','web','static','scan-connect.js'),'utf8');

@@ -503,7 +503,11 @@
       const url = new URL(location.href); url.searchParams.set("catalog", catalogId());
       history.replaceState(null, "", url);
       warming.hidden = camReady || !!gallerySource;
-      if (!camReady && !gallerySource) warming.textContent = "Camera unavailable — use Gallery or retry.";
+      // The gate's "Tap to start" prompt must survive the heartbeat-driven
+      // selectCatalog calls while the camera is still off.
+      if (!camReady && !gallerySource && warming.textContent !== "Tap to start the camera.") {
+        warming.textContent = "Camera unavailable — use Gallery or retry.";
+      }
       if (gallerySource) scanGallery();
       else { stopLive(); scheduleLive(100); }
     }
@@ -673,6 +677,8 @@
         gallerySource = null; galleryObjectUrl = null; shot.removeAttribute("src");
         live.hidden = false; shot.hidden = true; cameraViewChanged(); camReady = true;
         startCameraTap.hidden = true;
+        const dockShutter = document.querySelector(".sc-shutter");
+        if (dockShutter) dockShutter.hidden = false;
         // The camera works here, so an "Open in Chrome" hop is no longer needed.
         const hop = document.getElementById("scOpenBrowser");
         hop?.remove?.();
@@ -990,7 +996,7 @@
       if (galleryObjectUrl) URL.revokeObjectURL(galleryObjectUrl);
       galleryObjectUrl = null; shot.removeAttribute("src"); shot.hidden = true; live.hidden = false;
       resumeCamera.hidden = true; warming.hidden = true;
-      if (stream) scheduleLive(100); else startCam();
+      if (stream) scheduleLive(100); else startCameraRaw();
     });
     document.getElementById("file").addEventListener("change", async (ev) => {
       const file = ev.target.files && ev.target.files[0];
@@ -1024,6 +1030,54 @@
     });
     window.addEventListener("pageshow", ev => { if (ev.persisted) location.reload(); });
 
+    // The connect camera start is gated: only a *granted* camera auto-starts,
+    // everyone else taps once. Assigned BEFORE ScanConnect.start so the stored
+    // token path (synchronous openScanner) is gated too — iOS reports sticky
+    // activation across the Camera-app QR hop, and keeps silent per-site
+    // denials from prompt-less attempts (2026-10-04 iPhone report).
+    // window IS the global in a browser: assigning the gate over the global
+    // startCam binding silently recursed into itself (2026-10-04 iPhone black
+    // screen), so the raw start is captured first and the gate calls that.
+    const startCameraRaw = startCam;
+    function startCameraGated() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        // Mini browsers can never open a camera. Go back to the pairing panel:
+        // its Open in Chrome hop is the way out (2026-10-04 iPhone report).
+        const panel = document.getElementById("scanConnectPanel");
+        if (panel) { panel.hidden = false; panel.classList.add("ok"); }
+        const shutter = document.querySelector(".sc-shutter");
+        if (shutter) shutter.hidden = true;
+        warming.textContent = "Open this page in Chrome to scan.";
+        warming.hidden = false;
+        return;
+      }
+      // permissions.query can hang forever (headless browsers, some iOS
+      // builds) — settle the gate within 400 ms no matter what.
+      let gateSettled = false;
+      const gateTapOrStart = (ok) => {
+        if (gateSettled) return;
+        gateSettled = true;
+        clearTimeout(gateTimer);
+        if (ok) return startCameraRaw();
+        warming.textContent = "Tap to start the camera.";
+        warming.hidden = false;
+        // The Add card shutter shares this dock spot and paints above the dock;
+        // a dead camera has nothing to add, so the tap owns the spot until the
+        // stream starts.
+        const shutter = document.querySelector(".sc-shutter");
+        if (shutter) shutter.hidden = true;
+        startCameraTap.hidden = false;
+      };
+      const gateTimer = setTimeout(() => gateTapOrStart(false), 400);
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: "camera" })
+          .then((status) => gateTapOrStart(status.state === "granted"))
+          .catch(() => gateTapOrStart(false));
+      } else {
+        gateTapOrStart(false);
+      }
+    }
+    window.startCam = startCameraGated;
     setTimeout(() => boot.classList.add("hide"), 500);
     startPulse();
     // scan.pokoin.com/connect pairs first and starts the camera itself.
@@ -1050,33 +1104,8 @@
     startCameraTap.addEventListener("click", () => {
       startCameraTap.hidden = true;
       warming.hidden = true;
-      startCam();
+      startCameraRaw();
     });
-    window.startCam = () => {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        // Mini browsers can never open a camera. Go back to the pairing panel:
-        // its Open in Chrome hop is the way out (2026-10-04 iPhone report).
-        const panel = document.getElementById("scanConnectPanel");
-        if (panel) { panel.hidden = false; panel.classList.add("ok"); }
-        const shutter = document.querySelector(".sc-shutter");
-        if (shutter) shutter.hidden = true;
-        warming.textContent = "Open this page in Chrome to scan.";
-        warming.hidden = false;
-        return;
-      }
-      const activation = navigator.userActivation;
-      if (!activation || activation.hasBeenActive) return startCam();
-      const granted = (navigator.permissions && navigator.permissions.query)
-        ? navigator.permissions.query({ name: "camera" })
-            .then((status) => status.state === "granted").catch(() => false)
-        : Promise.resolve(false);
-      granted.then((ok) => {
-        if (ok) return startCam();
-        warming.textContent = "Tap to start the camera.";
-        warming.hidden = false;
-        startCameraTap.hidden = false;
-      });
-    };
     if (!scanConnect) startCam();
   </script>
 </body>
