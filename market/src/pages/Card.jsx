@@ -1349,7 +1349,7 @@ function Chevron({ dir }) {
 
 function SilverHead({ card, fromPath }) {
   const navigate = useNavigate();
-  const { signedIn, silver, ready, profile, availablePkn, getBearer } = useAuth();
+  const { signedIn, silver, ready, profile, getBearer } = useAuth();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [country, setCountry] = useState('');
@@ -1474,7 +1474,7 @@ function SilverHead({ card, fromPath }) {
   }
 
   return (
-    <div className="silver-tools">
+    <div className="silver-tools is-locked">
       {signedIn ? (
         <button className="silver-link" type="button" disabled={busy} onClick={unlock}>
           {busy ? 'Unlocking…' : `Unlock Silver · ${SILVER_PRICE_PKN} PKN`}
@@ -1482,11 +1482,6 @@ function SilverHead({ card, fromPath }) {
       ) : (
         <Link className="silver-link" to={authFrom(fromPath)}>Sign in to unlock</Link>
       )}
-      <p className="muted silver-note">
-        {signedIn
-          ? `Site balance ${formatPknNumber(availablePkn)} PKN. CT / CM / TP / VT / EB stay hidden until Silver.`
-          : 'CT / CM / TP / VT / EB need Silver on this session.'}
-      </p>
       {message ? <p className="muted silver-note">{message}</p> : null}
     </div>
   );
