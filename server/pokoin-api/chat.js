@@ -38,9 +38,9 @@ async function storeUserPhoto(uid, body) {
   const bytes = Buffer.from(match[1].replace(/\s/g, ''), 'base64');
   if (bytes.length < 32 || bytes.length > 1800000) throw httpError(400, 'That photo is too large.');
   if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw httpError(400, 'Send a JPEG photo.');
-  const publicBase = String(process.env.R2_USER_PHOTOS_PUBLIC_URL || '').replace(/\/+$/, '');
   const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-  if (!publicBase || !account || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY) {
+  const apiOrigin = String(process.env.POKOIN_API_PUBLIC_ORIGIN || process.env.API_ORIGIN || 'https://api.pokoin.com').replace(/\/+$/, '');
+  if (!account || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY) {
     throw httpError(500, 'Photo storage is not configured.');
   }
   const id = crypto.randomBytes(12).toString('hex');
@@ -59,9 +59,11 @@ async function storeUserPhoto(uid, body) {
     Key: key,
     Body: bytes,
     ContentType: 'image/jpeg',
-    CacheControl: 'public, max-age=31536000, immutable',
+    // Chat photos are private via /api/user-photos; listing photos are proxied
+    // publicly from that same API after r2.dev was disabled.
+    CacheControl: kind === 'chat' ? 'private, max-age=300' : 'public, max-age=86400',
   }));
-  return { url: `${publicBase}/${key}` };
+  return { url: `${apiOrigin}/api/user-photos/${kind}/${uid}/${id}.jpg` };
 }
 
 async function saveListingPhotos(uid, body) {

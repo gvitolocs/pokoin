@@ -81,6 +81,13 @@ export function setSearchLang(code) {
     /* private mode */
   }
   emit();
+  // Language is a strong search-universe signal — warm before the next keystroke.
+  import('./search-warmup.js')
+    .then(({ warmupSearchUniverse }) => warmupSearchUniverse({
+      lang: current,
+      printLang: getPrintLang(),
+    }))
+    .catch(() => {});
   return current;
 }
 
@@ -274,6 +281,13 @@ export function setPrintLang(code) {
     /* private mode */
   }
   emitPrint();
+  // Print-family selection pre-warms that catalogue universe immediately.
+  import('./search-warmup.js')
+    .then(({ warmupSearchUniverse }) => warmupSearchUniverse({
+      lang: getSearchLang(),
+      printLang: currentPrint,
+    }))
+    .catch(() => {});
   return currentPrint;
 }
 

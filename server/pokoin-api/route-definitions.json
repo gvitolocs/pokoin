@@ -47,6 +47,32 @@
     }
   },
   {
+    "path": "/api/user-photos/:kind/:uid/:file",
+    "file": "user-photos.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Proxy pokoin-user-photos from private R2. Chat requires auth (redirects to /auth); listing is public.",
+    "auth": "chat: Firebase bearer required. listing: public.",
+    "params": {
+      "query": "kind, uid, file from path; optional key=user-photos/...",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "R2_USER_PHOTOS_BUCKET"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Cloudflare R2"
+      ]
+    }
+  },
+  {
     "path": "/api/money-request",
     "file": "money-request.js",
     "methods": [

@@ -49,6 +49,7 @@ import {
   preloadSuggestThumbs,
 } from '../suggest-images.js';
 import { prefetchSearchPage } from '../search-hot.js';
+import { warmupSearchUniverse } from '../search-warmup.js';
 import { SelectBandProvider } from '../select-band.jsx';
 import { GAMES, game, gameIconSrc, gameSiteHref, isPokemonGame, sellerDeskUsesGameOverride, setScanGameOverride } from '../game.js';
 
@@ -545,6 +546,22 @@ export default function Chrome({ children }) {
   useEffect(() => {
     warmupSuggestRankWorkers();
   }, []);
+
+  // Language / print-family changes must refresh an already-typed query in that
+  // universe immediately (no waiting for another keystroke). Empty query still
+  // pre-warms the seed path via setSearchLang / setPrintLang.
+  useEffect(() => {
+    if (!isPokemonGame() || searchTab === 'users') return undefined;
+    const typed = query.trim();
+    warmupSearchUniverse({
+      lang,
+      printLang,
+      query: typed,
+      fetchSearchPage: fetchSearch,
+      force: Boolean(typed),
+    });
+    return undefined;
+  }, [lang, printLang, searchTab]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);

@@ -44,11 +44,17 @@ test('listing tags keep https images and drop everything else', () => {
 
 test('chat and listing photos stay on the owner path', () => {
   const uid = 'abcdefghijklmnop';
-  const own = `https://pub-example.r2.dev/user-photos/chat/${uid}/abc.jpg`;
-  assert.deepEqual(core.cleanChatImages([own, `https://pub-example.r2.dev/user-photos/chat/someoneelse/abc.jpg`, 'https://evil.example/a.jpg'], uid), [own]);
-  const listing = `https://pub-example.r2.dev/user-photos/listing/${uid}/one.jpg`;
+  const own = `https://pub-example.r2.dev/user-photos/chat/${uid}/abcdef012345.jpg`;
+  assert.deepEqual(core.cleanChatImages([own, `https://pub-example.r2.dev/user-photos/chat/someoneelse/abcdef012345.jpg`, 'https://evil.example/a.jpg'], uid), [own]);
+  const listing = `https://pub-example.r2.dev/user-photos/listing/${uid}/abcdef012345.jpg`;
   assert.equal(core.cleanListingPhotos(Array.from({ length: 12 }, () => listing), uid).length, 2);
   assert.equal(core.previewForEvent({ type: 'text', images: [own] }, 'a'), 'Photo');
+  const proxied = `https://api.pokoin.com/api/user-photos/chat/${uid}/abcdef012345.jpg`;
+  assert.deepEqual(core.cleanChatImages([proxied], uid), [proxied]);
+  assert.equal(
+    core.publicPhotoProxyUrl(own),
+    `https://api.pokoin.com/api/user-photos/chat/${uid}/abcdef012345.jpg`,
+  );
 });
 
 test('event previews are human readable', () => {

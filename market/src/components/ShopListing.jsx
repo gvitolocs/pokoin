@@ -19,6 +19,7 @@ import {
 } from '../listing-meta.js';
 import { listingSelectId } from '../shop-marquee.js';
 import { useSelectBand } from '../select-band.jsx';
+import { chatPhotoDisplayUrl } from '../user-photo-urls.js';
 
 function ShopScan({ image, name, setName = '' }) {
   const full = preferFullImage(image) || image;
@@ -309,12 +310,15 @@ export default function ShopListingRow({
       ) : null}
       {Array.isArray(offer?.photoUrls) && offer.photoUrls.length ? (
         <span className="shop-photos">
-          {offer.photoUrls.slice(0, 2).map((url) => (
-            <span className="shop-photo" key={url}>
-              <img src={url} alt="" draggable={false} />
-              <img className="shop-photo-big" src={url} alt="" draggable={false} />
-            </span>
-          ))}
+          {offer.photoUrls.slice(0, 2).map((url) => {
+            const src = chatPhotoDisplayUrl(url);
+            return (
+              <span className="shop-photo" key={url}>
+                <img src={src} alt="" draggable={false} />
+                <img className="shop-photo-big" src={src} alt="" draggable={false} />
+              </span>
+            );
+          })}
         </span>
       ) : null}
     </div>
