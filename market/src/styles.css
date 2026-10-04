@@ -7344,6 +7344,47 @@ dialog.zoom:not([open]) {
     padding: 0.1rem 0.28rem;
   }
 
+  /* Phone shop tile: "Shop" is the title row; the filters sit on one row
+     under it, each label a small caption above its select. */
+  .shop-head {
+    flex-wrap: wrap;
+    row-gap: 0.55rem;
+  }
+
+  .shop-head > h2 {
+    flex: 1 0 100%;
+  }
+
+  .shop-head > .shop-tools {
+    flex: 1 1 100%;
+    align-items: end;
+    justify-content: stretch;
+    gap: 0.4rem;
+  }
+
+  .shop-tools .sort {
+    display: grid;
+    flex: 1 1 auto;
+    gap: 0.2rem;
+    min-width: 0;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .shop-tools .sort select {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    margin-left: 0;
+    color: var(--text);
+    font-size: 0.78rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
   .hero-art-col {
     max-width: 22.5rem;
     width: 100%;
@@ -7969,16 +8010,6 @@ dialog.zoom:not([open]) {
 
   .listing-filters {
     flex-wrap: wrap;
-  }
-
-  .shop-head {
-    flex-wrap: wrap;
-  }
-
-  .shop-tools {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    width: 100%;
   }
 
   .comp-split, .decklist-main, .comp-deck-hero, .comp-card-hero {
