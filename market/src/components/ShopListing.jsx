@@ -177,7 +177,7 @@ export default function ShopListingRow({
             }}
           >
             {image ? <ShopScan image={image} name={cardName} setName={setName} /> : <span className="shop-card-ph" />}
-            <span>
+            <span className="shop-card-copy">
               <strong>{cardName || 'Card'}</strong>
               {setName ? <em>{setName}</em> : null}
             </span>
@@ -185,7 +185,7 @@ export default function ShopListingRow({
         ) : (
           <span className="shop-card">
             {image ? <ShopScan image={image} name={cardName} setName={setName} /> : <span className="shop-card-ph" />}
-            <span>
+            <span className="shop-card-copy">
               <strong>{cardName || 'Card'}</strong>
               {setName ? <em>{setName}</em> : null}
             </span>
@@ -219,7 +219,8 @@ export default function ShopListingRow({
         />
         <Flag flag={language} className="shop-flag shop-flag-lang" />
       </span>
-      <span className="shop-px"><PriceStack parts={buyer.parts(offer.pricePkn, offer.sellerAcceptsPkn)} /></span>
+      <span className="shop-offer">
+        <span className="shop-px"><PriceStack parts={buyer.parts(offer.pricePkn, offer.sellerAcceptsPkn)} /></span>
       {!mine ? (
         choices > 1 ? (
           <label className="ct-qty" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
@@ -241,6 +242,7 @@ export default function ShopListingRow({
           <span className="ct-qty is-single" aria-label="Quantity 1">1</span>
         )
       ) : null}
+      </span>
       {!mine ? (
         <span className="shop-row-actions">
           {sellerUid ? (
