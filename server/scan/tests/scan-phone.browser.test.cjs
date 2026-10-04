@@ -58,7 +58,9 @@ test('phone captures Crispin, shows all printings, uploads the chosen Prismatic 
   const badge=await page.locator('#scanLogStatus').boundingBox();
   assert.ok(badge.x>=0 && badge.x+badge.width<=390,'logging badge stays inside phone viewport');
   recognizing=true;
-  await page.waitForFunction(()=>document.querySelectorAll('.sc-tile').length===7);
+  // Batch language IT → the western family only; the japanese/chinese rows of
+  // the same artwork are never offered.
+  await page.waitForFunction(()=>document.querySelectorAll('.sc-tile').length===5);
   await page.getByRole('button',{name:'Prismatic Evolutions, card 105/131',exact:true}).click();
   await page.waitForFunction(()=>!document.body.classList.contains('sc-picking'));
   const until=Date.now()+5000;while(!uploads.length && Date.now()<until)await new Promise(r=>setTimeout(r,50));
@@ -75,7 +77,7 @@ test('phone captures Crispin, shows all printings, uploads the chosen Prismatic 
   await page.waitForFunction(()=>document.getElementById('scanLogStatus')?.textContent==='Logs active',{},{timeout:10000});
   assert.ok(logs.some(e=>e.kind==='test-before-reload'));
   assert.ok(logs.some(e=>e.kind==='gate' && e.hits.length===2 && e.gateAfter));
-  assert.ok(logs.some(e=>e.kind==='printing-response' && e.offered.length===7));
+  assert.ok(logs.some(e=>e.kind==='printing-response' && e.offered.length===5 && !e.offered.includes('900') && !e.offered.includes('901')));
   assert.ok(logs.some(e=>e.kind==='printing-choice' && e.chosen==='633460'));
   assert.ok(logs.every(e=>e.sessionId==='browser-session'));
   assert.equal(new Set(logs.map(e=>`${e.runId}:${e.sequence}`)).size,logs.length);

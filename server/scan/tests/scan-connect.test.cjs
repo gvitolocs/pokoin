@@ -70,6 +70,63 @@ test('swap without clearing the frame: a different confident card for two frames
   assert.equal(gate.push(frame([['2', 0.95]])), null);
 });
 
+// One artwork, several printings: sibling ids tie in cosine and flap frame to
+// frame. The 2026-10-04 session had Fighting Gong flip 116/132 → 654/742 →
+// 187/217 for 18 s without firing; the card key must survive the flap.
+const siblingFlap = (id, score = 0.96) => ({
+  catalog: 'pokemon_generic',
+  boxes: [{ xyxy: [10, 10, 200, 280] }],
+  img_w: 960,
+  img_h: 720,
+  hits: [
+    { public_id: id, score, name: 'Fighting Gong' },
+    { public_id: '77', score: 0.6, name: 'Bulk Trainer' },
+  ],
+});
+
+test('same-artwork printings flap ids: the shared name still swaps after two frames', () => {
+  const now = clockAt();
+  const gate = sc.createCaptureGate(now);
+  assert.ok(gate.push(frame([['1', 0.95]])));
+  assert.equal(gate.push(siblingFlap('116')), null, 'first frame only arms the swap');
+  const fired = gate.push(siblingFlap('654'));
+  assert.ok(fired, 'a different sibling id with the same name is still card #2');
+  assert.equal(fired.summary.top.public_id, '654');
+});
+
+test('a different-name rival within the margin still blocks the swap', () => {
+  const now = clockAt();
+  const gate = sc.createCaptureGate(now);
+  assert.ok(gate.push(frame([['1', 0.95]])));
+  const contested = () => ({
+    catalog: 'pokemon_generic',
+    boxes: [{ xyxy: [10, 10, 200, 280] }],
+    img_w: 960,
+    img_h: 720,
+    hits: [
+      { public_id: '9', score: 0.9, name: 'Alpha' },
+      { public_id: '8', score: 0.85, name: 'Beta' },
+    ],
+  });
+  assert.equal(gate.push(contested()), null);
+  assert.equal(gate.push(contested()), null);
+});
+
+test('the worker artwork group beats the name: two artworks of one name are different cards', () => {
+  const now = clockAt();
+  const gate = sc.createCaptureGate(now);
+  const withArt = (id, artwork) => ({
+    catalog: 'pokemon_generic',
+    boxes: [{ xyxy: [10, 10, 200, 280] }],
+    img_w: 960,
+    img_h: 720,
+    hits: [{ public_id: id, score: 0.96, name: 'Vulpix', artwork }],
+  });
+  assert.ok(gate.push(withArt('1', 'vA')));
+  assert.equal(gate.push(withArt('2', 'vB')), null);
+  assert.ok(gate.push(withArt('2', 'vB')));
+});
+
 test('ambiguous or unidentified card fires after ~1.2 s with the best frame, so scanning never stalls', () => {
   const now = clockAt();
   const gate = sc.createCaptureGate(now);
@@ -101,6 +158,28 @@ test('manual shutter forces an event even when disarmed', () => {
   const gate = sc.createCaptureGate(clockAt());
   gate.push(frame([['1', 0.95]]));
   assert.ok(gate.force(frame([['1', 0.95]])));
+});
+
+test('printing pick: a sibling printing of the pending card keeps its tiles open', () => {
+  const released = [];
+  const picker = sc.createPrintingPick({ release: (id, patch) => released.push([id, patch]) });
+  const event = {
+    scanEventId: '12345678-1234-1234-1234-123456789012',
+    recognition: { hits: [{ public_id: '116', score: 0.96, name: 'Fighting Gong' }] },
+  };
+  picker.open(event, [{ cardId: '116', name: 'Fighting Gong' }]);
+  assert.equal(
+    picker.sameCard({ summary: { top: { public_id: '654', name: 'Fighting Gong' } } }),
+    true,
+    'same name, different printing id',
+  );
+  assert.equal(
+    picker.sameCard({ summary: { top: { public_id: '9', name: 'Other Card' } } }),
+    false,
+    'a genuinely different card closes the tray',
+  );
+  assert.equal(picker.choose('116').name, 'Fighting Gong');
+  assert.deepEqual(released, [[event.scanEventId, { printing: { cardId: '116' } }]]);
 });
 
 test('clock offset keeps the tightest round trip', () => {

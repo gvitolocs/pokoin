@@ -40,7 +40,9 @@ with tempfile.TemporaryFile() as log:
             req=urllib.request.Request(base+'/identify?catalog=pokemon_generic&top_k=8',data=body,headers={'Content-Type':'multipart/form-data; boundary='+boundary})
             result=json.load(urllib.request.urlopen(req,timeout=30));top=result['top1'];mark=top.get('_expansion_symbol')
             assert mark and mark['code']==expected,(file,top)
-            print(json.dumps({'fixture':file,'public_id':top['public_id'],'symbol':mark,'identify_ms':result['identify_ms']}),flush=True)
+            # The phone capture gate keys cards by artwork: hits must carry the group.
+            assert top.get('artwork'),(file,top)
+            print(json.dumps({'fixture':file,'public_id':top['public_id'],'symbol':mark,'artwork':top.get('artwork'),'identify_ms':result['identify_ms']}),flush=True)
         assert process.poll() is None,'Worker exited during inference'
         print(json.dumps({'passed':True,'providers':health['expansion_symbols']['providers']}),flush=True)
     finally:

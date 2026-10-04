@@ -20,17 +20,51 @@ for(const hits of [[hit('596880',.8947)], [hit('596880',.8947),hit('633460',.7)]
     assert.equal(chosen.cardId,'633460');assert.equal(chosen.state,'matched');
   });
 }
-test('every batch language sees all same-artwork expansions and print languages',()=>{
+test('the batch print family scopes the offered printings and every choice inside it is accepted',()=>{
  const extra=['japanese','korean','chinese','indonesian','thai'].map((nationality,i)=>({...crispin[0],card_id:String(900+i),nationality}));
  const rows=[...crispin,...extra];
+ const western=crispin.map(p=>p.card_id);
+ const family=(language)=>{
+  if(language==='IT'||language==='EN') return western;
+  if(language==='JP'||language==='KO') return ['900','901'];
+  if(language==='ZH') return ['902'];
+  if(language==='TH') return ['904'];
+  return null;
+ };
  for(const language of ['IT','EN','JP','KO','ZH','TH']) {
+  const allowed=family(language);
   const answer=rules.resolvePrintings({hits:[hit('900',.95),hit('596880',.82)],rows,language});
-  assert.equal(answer.printings.length,10);
+  assert.deepEqual(new Set(answer.printings.map(p=>p.card_id)),new Set(allowed),language);
   for(const row of rows) {
    const chosen=rules.resolvePrintings({hits:[hit('900',.95)],rows,language,choice:row.card_id});
-   assert.equal(chosen.cardId,row.card_id);assert.equal(chosen.state,'matched');
+   assert.ok(allowed.includes(chosen.cardId),language+': '+row.card_id+' -> '+chosen.cardId);
+   if(allowed.includes(row.card_id)) {
+    assert.equal(chosen.chosen,row.card_id);assert.equal(chosen.state,'matched');
+   } else {
+    // A tap outside the batch family is ignored; the decided card stays in it.
+    assert.equal(chosen.chosen,'');
+   }
   }
  }
+});
+test('an EN batch preselects the western printing even when the japanese hit scored higher',()=>{
+ const extra=[{...crispin[0],card_id:'900',nationality:'japanese'}];
+ const answer=rules.resolvePrintings({hits:[hit('900',.95),hit('596880',.82)],rows:[...crispin,...extra],language:'EN'});
+ assert.equal(answer.choose,true);
+ assert.equal(answer.cardId,'596880');
+});
+test('a single printing in the batch family needs no picker',()=>{
+ const single=[crispin[0]];
+ const answer=rules.resolvePrintings({hits:[hit('596880',.95)],rows:single,language:'IT'});
+ assert.equal(answer.choose,false);
+ assert.equal(answer.cardId,'596880');
+ assert.equal(answer.printings.length,1);
+});
+test('an artwork with no printing in the batch family still offers every member',()=>{
+ const japaneseOnly=[{...crispin[0],card_id:'950',nationality:'japanese'},{...crispin[0],card_id:'951',nationality:'chinese'}];
+ const answer=rules.resolvePrintings({hits:[hit('950',.95)],rows:japaneseOnly,language:'EN'});
+ assert.deepEqual(new Set(answer.printings.map(p=>p.card_id)),new Set(['950','951']));
+ assert.equal(answer.family,'all');
 });
 test('selected foreign printing gets a compatible listing language',()=>{
  assert.equal(rules.listingLanguageForPrint('japanese','IT'),'JP');

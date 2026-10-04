@@ -329,13 +329,24 @@ phone baseline, including the printing picker and manual shutter. BattleScan
 continues to run the recognition worker; it is no longer the deploy source
 for this phone page. Existing unrelated production modules remain in place.
 
-A confident artwork offers **every** member across every expansion and print
-language. Per-printing scores, collector numbers and batch language never hide
-a reprint. Artwork uncertainty still applies. Selecting a foreign printing sets
-a compatible listing language while preserving the captured batch defaults. Crispin's
-Stellar Crown 133/142 and Prismatic Evolutions 105/131 are both selectable
-from artwork `v589520`, along with the Poké Ball and Prize Pack prints.
-Ingest revalidates the selected printing with the same rule.
+A confident artwork offers the **batch print family** first: EN/IT and other
+western batch languages see the western printings, JP/KO see japanese with a
+korean fallback, ZH/ZHT see chinese. One member left in the family needs no
+picker at all — it is auto-picked. An artwork with no printing in the batch
+family falls back to every print language, so a scanned foreign card still
+offers a choice. Per-printing scores and collector numbers never hide a
+reprint of the batch's language. Artwork uncertainty still applies. Selecting
+a foreign printing sets a compatible listing language while preserving the
+captured batch defaults. Crispin's Stellar Crown 133/142 and Prismatic
+Evolutions 105/131 are both selectable from artwork `v589520`, along with the
+Poké Ball and Prize Pack prints. Ingest revalidates the selected printing
+with the same rule.
+
+The capture gate keys a physical card by its **artwork group** (the worker
+stamps every pokemon hit with the CLIP same-artwork key), then the name, then
+the id. Same-painting printings tie in cosine and flap ids frame to frame, so
+id-keyed swaps stalled 18 s on multi-printing cards (2026-10-04 session); a
+stable artwork/name for two frames now swaps without clearing the frame.
 
 Every live result logs candidates, scores, detection boxes, timings and capture
 gate state before/after acceptance. Additional records cover camera stalls,
