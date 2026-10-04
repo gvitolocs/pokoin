@@ -1077,8 +1077,8 @@ function createStore({
 
   async function setDefaults({ sellerUid, batchId, defaults }) {
     const nowMs = now();
-    // Fan out language/condition/… onto every active row in the same
-    // transaction so the desk never shows Batch Defaults IT with EN flags.
+    // Fan out the same editable seller fields as market BATCH_ROW_FIELDS.
+    // Qty / stack / mergeRepeats stay on the batch (capture snapshot).
     const ROW_FIELDS = [
       ['language', 'language'],
       ['condition', 'condition'],

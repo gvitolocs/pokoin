@@ -68,10 +68,13 @@ heartbeat (midpoint of the round trip). Consequences:
   A–C keep Italian even if C's upload lands after the switch.
 - A card captured just after the switch, from a phone that has not yet seen
   the new label, gets English.
-- The snapshot is written once, into immutable `defaults_snapshot`; the
-  row's editable `language` starts from it. Changing defaults never
-  rewrites existing rows. Code: `api/_scan_connect.js` `pickDefaults`,
-  tests "defaults changed while a scan is in flight".
+- The snapshot is written once, into immutable `defaults_snapshot` (stack /
+  position / merge rule at capture). The row's editable seller fields
+  (`language`, `condition`, `foil_state`, flags, `location`) start from that
+  snapshot, and Batch Defaults also fan those fields onto every **active**
+  row in the same defaults transaction so the desk bar and LANG flags stay
+  in sync. Stack / qty / merge-repeats stay batch-only. Code:
+  `api/_scan_connect.js` `pickDefaults`, `_scan_store.js` `setDefaults`.
 
 ## Recognition states
 

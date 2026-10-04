@@ -4,13 +4,16 @@ import {
   artworkVersionLabel,
   artworkVersionShortLabel,
   batchDefaultRowPatch,
+  currentMatchesLanguageBucket,
   draftArtworkBucket,
   languagesForPrint,
   listingLanguageForPrint,
+  mergeArtworkCandidates,
   preferArtworkPrinting,
   preferDraftArtwork,
   preferredPrintBucket,
   remapListingLanguage,
+  resolveArtworkRemap,
   shouldRemapArtwork,
   sortArtworkVersions,
 } from './scan-artwork-versions.js';
@@ -124,6 +127,33 @@ test('listingLanguageForPrint blocks EN on JP and JP on western', () => {
   assert.equal(listingLanguageForPrint('western', 'KO'), 'EN');
   assert.equal(listingLanguageForPrint('western', 'IT'), 'IT');
   assert.equal(listingLanguageForPrint('western', 'EN'), 'EN');
+  assert.equal(listingLanguageForPrint('', 'JP'), 'JP');
+  assert.equal(listingLanguageForPrint('', 'IT'), 'IT');
+});
+
+test('name-pool fallback remaps when CLIP missed the JP sibling', () => {
+  // Phantasmal Flames CLIP group is western-only; Nihil Zero lives under the name.
+  const clip = [EN, { id: '5', name: 'Wondrous Patch', set_name: 'Prize', nationality: 'western' }];
+  const byName = [JP, EN, CN];
+  assert.equal(currentMatchesLanguageBucket(clip, '2', 'JP'), false);
+  assert.equal(shouldRemapArtwork(clip, '2', 'JP'), false);
+  const hit = resolveArtworkRemap({
+    clipPrintings: clip,
+    namePrintings: byName,
+    currentId: '2',
+    listingLanguage: 'JP',
+  });
+  assert.equal(hit.id, '1');
+  assert.equal(
+    resolveArtworkRemap({
+      clipPrintings: clip,
+      namePrintings: byName,
+      currentId: '2',
+      listingLanguage: 'IT',
+    }),
+    null,
+  );
+  assert.deepEqual(mergeArtworkCandidates(clip, byName).map((r) => r.id).sort(), ['1', '2', '3', '5']);
 });
 
 test('languagesForPrint: western has no asian; JP has only JP', () => {
