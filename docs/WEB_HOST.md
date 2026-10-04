@@ -2,6 +2,18 @@
 
 Live `pokoin.com` is Cloudflare Workers Static Assets (`pokoin-web`, version `7ded97af-4f23-4016-a6be-202d9c227ecb` from `origin/main` 7ec665e, 2026-10-04; previous `02547d29`). Numeric short links (`/{id}`, `/{id}/{slug}`) are `_redirects` rules (one per leading digit, 302 to `/marketplace/en/cards/{id}`). There is no Worker script on ordinary page views. The browser calls `https://api.pokoin.com`. Card photos redirect to `cdn.pokoin.com`. The Pi website process is stopped.
 
+## One origin (2026-10-04)
+
+Every game lives on `pokoin.com/{game path}` with soft navigation; there are **no game
+subdomains**. DNS records for `onepiece.pokoin.com`, `riftbound.pokoin.com` and
+`dashboard.pokoin.com` were deleted on 2026-10-04 (backup with record ids/targets in
+pokoin-scanner `docs/dns-backup-2026-10-04-retired-subdomains.json`). Links, scan
+catalogs (`pokoin_url`), robots/sitemap and llms.txt all use `https://pokoin.com/...`.
+Old `/{game}/{id}` short links open the card (SPA catch-all, `market/src/shortlink.js`).
+Host checks for those names left in code (`game.js`, `marketplace-recents.js`,
+`workers/*`) are dead paths, not link sources. The vanity redirects `cards.`,
+`cardcaveau.`, `cardvault.`, `forum.`, `wallet.`, `sitemap.` (301 → pokoin.com) remain.
+
 ---
 
 ## Previous temporary host (no longer in the request path)
