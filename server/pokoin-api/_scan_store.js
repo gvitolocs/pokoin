@@ -1109,7 +1109,7 @@ function createStore({
       for (const [key, column] of ROW_FIELDS) {
         if (prev[key] === next[key]) continue;
         fieldValues.push(next[key]);
-        fieldSets.push(`${column} = $${fieldValues.length + 1}`); // $1+ fields; batch is last
+        fieldSets.push(`${column} = $${fieldValues.length}`); // fields bind $1..$N; the batch id is last
       }
       let rows = [];
       if (fieldSets.length) {
