@@ -256,13 +256,36 @@ function sourceListingIdForCardTrader(listing = {}) {
   return externalId ? `cardtrader:live:${externalId}` : '';
 }
 
+function foilStateFromCardTraderProperties(properties = {}) {
+  const props = properties && typeof properties === 'object' ? properties : {};
+  if (String(props.pokemon_reverse || '').toLowerCase() === 'true') return 'reverse';
+  const explicit = String(props.foil_state || props.foilState || '').toLowerCase();
+  if (['reverse', 'holo', 'foil', 'stamped', 'promo', 'other', 'standard'].includes(explicit)) {
+    return explicit;
+  }
+  for (const [key, value] of Object.entries(props)) {
+    const name = String(key || '').toLowerCase();
+    if (name !== 'foil' && name !== 'mtg_foil' && !name.endsWith('_foil')) continue;
+    const on = value === true || ['true', 'yes', '1', 'foil'].includes(String(value).toLowerCase());
+    if (on) return 'foil';
+  }
+  return 'standard';
+}
+
 function syntheticCardTraderListingRow({ listing, seller, fallbackCardId }) {
   const sourceListingId = sourceListingIdForCardTrader(listing);
   if (!sourceListingId || listing.displayPricePkn == null) return null;
   const sourceAccountName = cleanText(listing.seller?.sourceAccountName || listing.seller?.accountName, 120);
+  const foilState = cleanText(listing.foilState, 40)
+    || foilStateFromCardTraderProperties(listing.properties);
+  // Prefer the public Pokoin card id the desk asked for — never leave the
+  // blueprint/leftover id on satellite rows (Riftbound 400585 vs 801170).
+  const publicCardId = cleanText(fallbackCardId, 80)
+    || cleanText(listing.pokoinCardId, 80)
+    || cleanText(listing.blueprintId, 80);
   return {
     id: sourceListingId,
-    cardId: cleanText(listing.pokoinCardId || listing.blueprintId || fallbackCardId, 80),
+    cardId: publicCardId,
     sellerUid: seller.uid,
     sellerName: PKNRESERVE_SELLER_USERNAME,
     sellerCountry: cleanText(listing.seller?.country, 40) || '',
@@ -272,12 +295,9 @@ function syntheticCardTraderListingRow({ listing, seller, fallbackCardId }) {
     pricePkn: Number(listing.displayPricePkn),
     quantityAvailable: Math.max(Number(listing.quantity || 0), 0),
     signed: false,
-    reverse: String(listing.properties?.pokemon_reverse || '').toLowerCase() === 'true' ||
-      String(listing.properties?.foil_state || listing.properties?.foilState || '').toLowerCase() === 'reverse',
+    reverse: foilState === 'reverse',
     firstEdition: false,
-    foilState: String(listing.properties?.foil_state || listing.properties?.foilState || '').toLowerCase() === 'reverse'
-      ? 'reverse'
-      : 'standard',
+    foilState,
     variantState: cleanText(listing.properties?.variant_state || listing.properties?.variantState, 80),
     sealed: false,
     graded: listing.graded === true,
@@ -1152,10 +1172,12 @@ async function readPublicOffersForCard(cardId, limit = 40, options = {}) {
   const url = new URL('https://pokoin.com/api/marketplace-listings');
   url.searchParams.set('cardId', String(cardId || ''));
   url.searchParams.set('limit', String(limit));
+  const game = normalizeMarketplaceGame(options.game || 'pokemon');
+  url.searchParams.set('game', game);
   if (options.nativeOnly) {
     url.searchParams.set('nativeOnly', '1');
   }
-  return readListings(url, null);
+  return readListings(url, null, { marketplaceGame: game });
 }
 
 module.exports = async function handler(req, res) {

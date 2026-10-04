@@ -274,7 +274,10 @@ export function sellerCountryFlag(country) {
 
 export function listingExtraTags(offer) {
   const tags = [];
-  if (offer?.reverse) tags.push('Reverse');
+  const foil = String(offer?.foilState || '').toLowerCase();
+  if (offer?.reverse || foil === 'reverse') tags.push('Reverse');
+  else if (foil === 'foil') tags.push('Foil');
+  else if (foil === 'holo') tags.push('Holo');
   if (offer?.firstEdition) tags.push('1st Ed.');
   if (offer?.sealed) tags.push('Sealed');
   if (offer?.graded) {

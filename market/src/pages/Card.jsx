@@ -125,6 +125,8 @@ import ShopList from '../components/ShopList.jsx';
 import ShopListingRow from '../components/ShopListing.jsx';
 import { listingSelectId, shopDragOffers } from '../shop-marquee.js';
 import { conditionChipSrc, conditionShort } from '../listing-meta.js';
+import { listingExtraChips, listingFoilOptions } from '../listing-faces.js';
+import { game as currentGame } from '../game.js';
 import {
   breadcrumbJsonLd,
   cardImageAlt,
@@ -148,15 +150,6 @@ const LIST_LANGS = [
   'EN', 'IT', 'FR', 'DE', 'ES', 'JP', 'PT', 'NL', 'PL', 'RU', 'KO', 'ZH', 'ZHT', 'ID', 'TH', 'VI',
 ];
 
-const FOILS = [
-  { value: 'standard', label: 'Standard' },
-  { value: 'holo', label: 'Holo' },
-  { value: 'reverse', label: 'Reverse' },
-  { value: 'stamped', label: 'Stamped' },
-  { value: 'promo', label: 'Promo' },
-  { value: 'other', label: 'Other' },
-];
-
 /** Listing form condition grades — display is the /conditions/*.svg chip, not emoji. */
 const MOOD_CONDS = [
   { value: 'NM', label: 'Near Mint' },
@@ -164,13 +157,6 @@ const MOOD_CONDS = [
   { value: 'MP', label: 'Moderately Played' },
   { value: 'PL', label: 'Played' },
   { value: 'Poor', label: 'Poor' },
-];
-
-const LIST_CHIPS = [
-  { key: 'firstEd', label: '1st Ed.' },
-  { key: 'sealed', label: 'Sealed' },
-  { key: 'graded', label: 'Graded' },
-  { key: 'shipping', label: 'Shipping' },
 ];
 
 function catalogPrintings(rows) {
@@ -618,22 +604,24 @@ function preferredDeal(rows, nationality) {
     || matchDeal(rows);
 }
 
-function defaultFoil(card) {
+function defaultFoil(card, foils = listingFoilOptions()) {
   const hay = `${card?.rarity || ''} ${card?.name || ''} ${card?.variant || ''}`.toLowerCase();
-  if (/\breverse\b/.test(hay)) return 'reverse';
-  if (/\bholo\b/.test(hay)) return 'holo';
+  const allowed = new Set(foils.map((row) => row.value));
+  if (allowed.has('reverse') && /\breverse\b/.test(hay)) return 'reverse';
+  if (allowed.has('holo') && /\bholo\b/.test(hay)) return 'holo';
+  if (allowed.has('foil') && /\bfoil\b/.test(hay)) return 'foil';
   return 'standard';
 }
 
-function foilFromOffer(offer, card) {
+function foilFromOffer(offer, card, foils = listingFoilOptions()) {
   const state = String(offer?.foilState || '').toLowerCase();
-  if (FOILS.some((row) => row.value === state)) {
+  if (foils.some((row) => row.value === state)) {
     return state;
   }
   if (offer?.reverse) {
     return 'reverse';
   }
-  return defaultFoil(card);
+  return defaultFoil(card, foils);
 }
 
 function moodCondition(offer) {
@@ -791,6 +779,9 @@ function ListingForm({
   const navigate = useNavigate();
   const { signedIn, ready, sellerName, user, getBearer } = useAuth();
   const formRef = useRef(null);
+  const gameId = currentGame().id;
+  const foils = listingFoilOptions(gameId);
+  const listChips = listingExtraChips(gameId);
   const blank = blankListingForm(card);
   const [price, setPrice] = useState(blank.price);
   const priceManual = useRef(Boolean(editing?.id));
@@ -1176,15 +1167,15 @@ function ListingForm({
           />
         </div>
         <label className="sell-field sell-pick foil-pick">
-          <span className="sr-only">Foil</span>
+          <span className="sr-only">Finish</span>
           <select value={foil} onChange={(event) => setFoil(event.target.value)}>
-            {FOILS.map((row) => (
+            {foils.map((row) => (
               <option key={row.value} value={row.value}>{row.label}</option>
             ))}
           </select>
         </label>
         <div className="sell-chips" role="group" aria-label="Listing extras">
-          {LIST_CHIPS.map((chip) => (
+          {listChips.map((chip) => (
             <button
               key={chip.key}
               type="button"
