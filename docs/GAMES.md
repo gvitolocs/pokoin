@@ -320,9 +320,11 @@ has no R2 fallback for a miss.
 
 Seller listing photos are at most **2** JPEGs per listing (`photo_urls`).
 Chat messages take at most **4**. Both are stored in Cloudflare R2 bucket
-`pokoin-user-photos` and served from its public `r2.dev` URL. Profile photos
-stay in `pokoin-profile-pictures`. Forum photos stay in `pokoin-forum-media`.
-The Pi `user-photos/` tree is not the store.
+`pokoin-user-photos` with **public r2.dev disabled**. Objects are served through
+`GET /api/user-photos/:kind/:uid/:file` — chat requires a Firebase bearer
+(unauthenticated browser GETs **302 → `/auth`**); listing stays public for the
+marketplace. Profile photos stay in `pokoin-profile-pictures`. Forum photos stay
+in `pokoin-forum-media`. The Pi `user-photos/` tree is not the store.
 
 ## New CardTrader printing
 

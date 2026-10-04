@@ -22,24 +22,26 @@ git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
 say "stage exact origin/main commit $COMMIT"
 git -C "$REPO" archive "$COMMIT" server/pokoin-api | tar -C "$STAGE" -xf -
 SRC="$STAGE/server/pokoin-api"
-for file in chat.js money-request.js _chat_core.js _money_request_core.js route-definitions.json patch-route-manifest.js; do
+for file in chat.js money-request.js _chat_core.js _money_request_core.js user-photos.js user-photos.test.js route-definitions.json patch-route-manifest.js; do
   [[ -f "$SRC/$file" ]] || die "commit is missing server/pokoin-api/$file"
 done
 
 say "API core tests"
 # The staged tree is server/pokoin-api only. CardTrader handler tests need the
 # Pi layout (api/ beside server/) and cannot load here.
-node --test \
+node --test --test-force-exit \
   "$SRC/_chat_core.test.js" \
   "$SRC/_money_request_core.test.js" \
+  "$SRC/user-photos.test.js" \
   "$SRC/patch-route-manifest.test.js"
 node --check "$SRC/chat.js"
 node --check "$SRC/money-request.js"
+node --check "$SRC/user-photos.js"
 
 release="releases/messages-$SHORT-$STAMP"
 say "Pi release $release"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .messages-previous; cp -a \$prev '$release'; mkdir -p '$release/api'"
-tar -C "$SRC" -cf - chat.js money-request.js _chat_core.js _money_request_core.js route-definitions.json patch-route-manifest.js \
+tar -C "$SRC" -cf - chat.js money-request.js _chat_core.js _money_request_core.js user-photos.js route-definitions.json patch-route-manifest.js \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
 ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'; rm '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-messages-commit'"
@@ -51,7 +53,8 @@ for _ in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
   chat="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/chat?action=list'" || true)"
   requests="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/money-request?action=list'" || true)"
-  if [[ "$health" == "200" && "$chat" =~ ^(401|403)$ && "$requests" =~ ^(401|403)$ ]]; then
+  photo="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -H 'Accept: text/html' 'http://127.0.0.1:18080/api/user-photos/chat/Ax7G1IOIOvZUd7mrIc5gsw0Fcgt2/5962f78b9aacb6bcf053abab.jpg'" || true)"
+  if [[ "$health" == "200" && "$chat" =~ ^(401|403)$ && "$requests" =~ ^(401|403)$ && "$photo" == "302" ]]; then
     healthy=1
     break
   fi
@@ -59,10 +62,10 @@ for _ in $(seq 1 45); do
 done
 
 if [[ "$healthy" != "1" ]]; then
-  echo "health failed (health=$health chat=$chat money-request=$requests) — rolling back" >&2
+  echo "health failed (health=$health chat=$chat money-request=$requests photo=$photo) — rolling back" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .messages-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "Pi API verification failed; previous release restored"
 fi
 
 say "API live: $(ssh pi-home 'readlink /srv/pokoin/api/current')"
-say "health=$health chat=$chat money-request=$requests"
+say "health=$health chat=$chat money-request=$requests photo=$photo"

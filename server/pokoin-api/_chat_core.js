@@ -101,16 +101,36 @@ function photoPath(value) {
   const raw = String(value || '').trim();
   if (!raw || raw.includes('..') || raw.includes('\\')) return '';
   if (raw.startsWith('/card-images/user-photos/')) return raw.slice('/card-images'.length);
+  if (raw.startsWith('/api/user-photos/')) {
+    return raw.slice('/api'.length);
+  }
   if (raw.startsWith('https://')) {
     try {
       const url = new URL(raw);
-      if (!url.hostname.endsWith('.r2.dev')) return '';
-      return url.pathname;
+      if (url.hostname.endsWith('.r2.dev') && url.pathname.startsWith('/user-photos/')) {
+        return url.pathname;
+      }
+      if (
+        (url.hostname === 'api.pokoin.com' || url.hostname.endsWith('.pokoin.com'))
+        && url.pathname.startsWith('/api/user-photos/')
+      ) {
+        return url.pathname.slice('/api'.length);
+      }
+      return '';
     } catch (_) {
       return '';
     }
   }
   return '';
+}
+
+/** Rewrite legacy public r2.dev chat/listing URLs onto the auth-aware API proxy. */
+function publicPhotoProxyUrl(value, {
+  apiOrigin = 'https://api.pokoin.com',
+} = {}) {
+  const path = photoPath(value);
+  if (!path.startsWith('/user-photos/')) return String(value || '').trim();
+  return `${String(apiOrigin || 'https://api.pokoin.com').replace(/\/+$/, '')}/api${path}`;
 }
 
 function cleanOwnedPhotos(value, uid, kind, limit) {
@@ -186,6 +206,7 @@ module.exports = {
   cleanListings,
   cleanChatImages,
   cleanListingPhotos,
+  publicPhotoProxyUrl,
   cleanNote,
   validateAmountPkn,
   bumpUnread,
