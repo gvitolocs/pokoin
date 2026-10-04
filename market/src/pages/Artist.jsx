@@ -520,8 +520,8 @@ function ArtistDesk() {
           {payload
             ? (allCards?.length
               ? (filtersOn
-                ? <><strong>{uniqueCardCount}</strong> matching</>
-                : <><strong>{uniqueCardCount}</strong> {uniqueCardCount === 1 ? 'card' : 'cards'}{total > uniqueCardCount ? ` of ${total}` : ''}</>)
+                ? <><strong>{uniqueCardCount}</strong> matching{sort === 'pokedex' ? ' · Sorted by Pokédex' : ''}</>
+                : <><strong>{uniqueCardCount}</strong> {uniqueCardCount === 1 ? 'card' : 'cards'}{total > uniqueCardCount ? ` of ${total}` : ''}{sort === 'pokedex' ? ' · Sorted by Pokédex' : ''}</>)
               : 'No cards for this artist.')
             : 'Loading…'}
         </p>
@@ -532,14 +532,14 @@ function ArtistDesk() {
           <button className="btn" type="button" onClick={clearFilters}>Clear filters</button>
         </EmptyDesk>
       ) : (
-        <CardSelectGrid className="grid album-grid" cards={payload ? visibleCards : []}>
+        <CardSelectGrid className={`grid album-grid${sort === 'pokedex' ? ' is-pokedex-order' : ''}`} cards={payload ? visibleCards : []}>
           {!payload && !error
             ? Array.from({ length: 12 }, (_, index) => <SkeletonTile key={index} album />)
             : visibleGroups.map((group, index) => (
               group.cards.length > 1 ? (
-                <ArtistPileTile key={group.key} group={group} rank={index} onOpen={setPile} />
+                <ArtistPileTile key={group.key} group={group} rank={index} onOpen={setPile} flat={sort === 'pokedex'} />
               ) : (
-                <CardTile key={albumTileKey(group.cards[0])} card={group.cards[0]} rank={index} cut />
+                <CardTile key={albumTileKey(group.cards[0])} card={group.cards[0]} rank={index} cut flat={sort === 'pokedex'} />
               )
             ))}
           {payload && restPending && !filtersOn

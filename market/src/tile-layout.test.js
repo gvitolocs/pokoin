@@ -128,8 +128,8 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   assert.match(tile, /identity\.tileLine/);
   assert.doesNotMatch(tile, /cut \? displayName/);
   assert.match(artist, /albumShadeStyle\(row\)/);
-  assert.match(artist, /<CardTile key=\{albumTileKey\(group\.cards\[0\]\)\} card=\{group\.cards\[0\]\} rank=\{index\} cut \/>/);
-  assert.match(artist, /<ArtistPileTile key=\{group\.key\} group=\{group\} rank=\{index\} onOpen=\{setPile\} \/>/);
+  assert.match(artist, /<CardTile key=\{albumTileKey\(group\.cards\[0\]\)\} card=\{group\.cards\[0\]\} rank=\{index\} cut flat=\{sort === 'pokedex'\} \/>/);
+  assert.match(artist, /<ArtistPileTile key=\{group\.key\} group=\{group\} rank=\{index\} onOpen=\{setPile\} flat=\{sort === 'pokedex'\} \/>/);
   // Piles wrap the tile in a div, so two-row tall cards must span from the wrapper.
   const pile = readFileSync(join(root, 'components/ArtworkPile.jsx'), 'utf8');
   assert.match(pile, /tile-pile-wrap\$\{tall \? " tile-pile-tall" : ""\}/);
@@ -265,4 +265,16 @@ test('list-form selects use a transparent chevron so Standard is not covered', (
   assert.match(css, /\.sell-field select \{[^}]*appearance:\s*none/);
   assert.match(css, /\.sell-field select \{[^}]*background-image:\s*url\("data:image\/svg\+xml/);
   assert.match(css, /\.sell-options-row \.foil-pick \{[^}]*width:\s*7\.4rem/);
+});
+
+test('Pokédex sort keeps album tiles uniform and in strict row order (#20)', () => {
+  const tile = readFileSync(new URL('./components/CardTile.jsx', import.meta.url), 'utf8');
+  const pile = readFileSync(new URL('./components/ArtworkPile.jsx', import.meta.url), 'utf8');
+  const artist = readFileSync(new URL('./pages/Artist.jsx', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+  assert.match(tile, /const tall = !flat && cut && !landscape && isFeatureAlbumArt\(card\)/);
+  assert.match(pile, /const tall = !flat && !landscape && isFeatureAlbumArt\(rep\)/);
+  assert.match(artist, /is-pokedex-order/);
+  assert.match(artist, /Sorted by Pokédex/);
+  assert.match(css, /\.grid\.album-grid\.is-pokedex-order \{[^}]*grid-auto-flow:\s*row/);
 });

@@ -6959,6 +6959,30 @@ dialog.zoom:not([open]) {
   transform-origin: center 30%;
 }
 
+/* Artists · album illustration window, sat lower (crop math is inline on the node) */
+.careers-life-art.is-art-cut {
+  left: 4%;
+  right: 4%;
+  width: auto;
+  height: auto;
+  bottom: 0;
+  display: block;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 10%, #000 100%);
+}
+
+.careers-life-art.is-art-cut.pose-sit-low {
+  bottom: -4%;
+}
+
+.careers-life-art.is-art-cut.pose-sit-low .careers-art-cut {
+  transform: scale(1.06) translateY(5px);
+  transform-origin: center bottom;
+}
+
+.careers-life-art.is-art-cut .careers-art-cut {
+  width: 100%;
+}
+
 /* B · Physical trading card: real aspect, clipped by pastel bottom */
 .careers-life-art.is-physical-card {
   left: 50%;
@@ -10830,3 +10854,6 @@ html:has(.wallet-page) .brand span {
     font-size: 1.1rem;
   }
 }
+
+/* Artist album sorted by Pokédex: strict row order, no dense back-filling (#20). */
+.grid.album-grid.is-pokedex-order { grid-auto-flow: row; }

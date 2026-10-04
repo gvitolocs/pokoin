@@ -240,3 +240,16 @@ test('accented species names fold before tokenizing (Flabébé is #669)', () => 
   assert.equal(pokedexNumber('Poké Ball'), 0);
   assert.equal(pokedexNumber('Pokémon Center'), 0);
 });
+
+test('every SPECIES key resolves as a single-token card name', async () => {
+  const { default: SPECIES } = await import('./data/pokedex-species.js');
+  let checked = 0;
+  for (const [key, n] of Object.entries(SPECIES)) {
+    if (key.length < 3) continue;
+    const name = key.charAt(0).toUpperCase() + key.slice(1);
+    assert.equal(pokedexNumber(name), n, name);
+    checked += 1;
+  }
+  assert.ok(checked >= 1000, `expected >=1000 species keys, got ${checked}`);
+});
+

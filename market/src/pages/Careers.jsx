@@ -24,11 +24,51 @@ function TitleMark({ className = '' }) {
   );
 }
 
-/** Art-dependent shot: full-art bleed vs ~50–70% physical card. */
+/** Art-dependent shot: full-art bleed, physical card, or album art-cut window. */
 function CareersCardArt({ art, className }) {
   if (!art?.src) return null;
-  const mode = art.mode === 'physical-card' ? 'physical-card' : 'full-art';
   const pose = art.pose ? ` pose-${art.pose}` : '';
+  if (art.mode === 'art-cut') {
+    const cut = art.cut || { left: 0.086, top: 0.126, width: 0.828, height: 0.338, cardRatio: 63 / 88 };
+    const cardRatio = cut.cardRatio ?? 63 / 88;
+    // Same window math as album .art-cut, but inline so careers-card-shot CSS cannot blank it.
+    const windowStyle = {
+      position: 'relative',
+      width: '100%',
+      aspectRatio: String((cut.width * cardRatio) / cut.height),
+      overflow: 'hidden',
+      borderRadius: '0.45rem',
+    };
+    const imgStyle = {
+      position: 'absolute',
+      display: 'block',
+      width: `${100 / cut.width}%`,
+      height: 'auto',
+      maxWidth: 'none',
+      left: `${(-100 * cut.left) / cut.width}%`,
+      top: `${(-100 * cut.top) / cut.height}%`,
+      objectFit: 'fill',
+    };
+    return (
+      <div
+        className={`${className} is-art-cut${pose}`.trim()}
+        aria-hidden="true"
+        title={art.card || undefined}
+      >
+        <div className="careers-art-cut" style={windowStyle}>
+          <img
+            src={art.src}
+            alt=""
+            style={imgStyle}
+            loading="eager"
+            decoding="async"
+            draggable={false}
+          />
+        </div>
+      </div>
+    );
+  }
+  const mode = art.mode === 'physical-card' ? 'physical-card' : 'full-art';
   return (
     <div
       className={`${className} is-${mode}${pose}`.trim()}
