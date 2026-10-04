@@ -198,6 +198,7 @@ export default function ScanDesk() {
   const undoStack = useRef([]);
   const redoStack = useRef([]);
   const rowsRef = useRef(rows);
+  const displayRowsRef = useRef(rows);
   const pricesAsked = useRef(new Set());
   const slicesCache = useRef(new Map());
   const priceTouched = useRef(new Set());
@@ -390,6 +391,7 @@ export default function ScanDesk() {
     }
     return merged;
   }, [rows, pending]);
+  displayRowsRef.current = displayRows;
 
   const list = useMemo(() => queueRows(displayRows), [displayRows]);
   const [boxStockRows, setBoxStockRows] = useState([]);
@@ -611,7 +613,10 @@ export default function ScanDesk() {
   }
 
   async function patchRows(ids, changes, { record = true, label = '' } = {}) {
-    const targets = ids.map((id) => rowsRef.current[id]).filter((row) => row && row.status === 'active');
+    // Prefer displayRows (includes in-flight pending) so a version remap right
+    // after Batch Defaults → IT does not stomp language back to stale EN.
+    const source = displayRowsRef.current;
+    const targets = ids.map((id) => source[id] || rowsRef.current[id]).filter((row) => row && row.status === 'active');
     if (!targets.length) return;
     const tokenId = `${Date.now()}-${Math.random()}`;
     const optimistic = { ...changes };
@@ -627,7 +632,7 @@ export default function ScanDesk() {
       const nationality = String(
         fromVersions?.nationality || cand?.nationality || targets[0].nationality || '',
       ).toLowerCase();
-      const preferredLang = changes.language || targets[0].language || 'EN';
+      const preferredLang = changes.language || targets[0].language || defaults.language || 'EN';
       Object.assign(optimistic, {
         cardName: cand?.name || fromVersions?.name || targets[0].cardName || '',
         setName: cand?.setName || fromVersions?.set_name || fromVersions?.setName || fromVersions?.set || '',
@@ -741,15 +746,32 @@ export default function ScanDesk() {
     const rowIds = Object.keys(rowPatch).length
       ? list.filter((row) => row.status === 'active').map((row) => row.id)
       : [];
+    // Paint LANG flags immediately; server fans the same fields onto active rows.
+    const tokenId = rowIds.length ? `defaults-${Date.now()}` : '';
+    if (tokenId) {
+      setPending((current) => {
+        const next = { ...current };
+        for (const id of rowIds) next[id] = [...(next[id] || []), { token: tokenId, changes: rowPatch }];
+        return next;
+      });
+    }
     try {
       const t = await token();
       const data = await scanApi.defaults(t, batch.id, nextPatch);
       setBatch((current) => ({ ...current, ...data.batch }));
-      if (rowIds.length) {
-        await patchRows(rowIds, rowPatch, { label: 'Batch defaults' });
-      }
+      if (data?.items?.length) dispatch({ type: 'items', items: data.items });
     } catch (err) {
       setError(err.message || 'Defaults not saved.');
+    } finally {
+      if (!tokenId) return;
+      setPending((current) => {
+        const next = { ...current };
+        for (const id of rowIds) {
+          next[id] = (next[id] || []).filter((p) => p.token !== tokenId);
+          if (!next[id]?.length) delete next[id];
+        }
+        return next;
+      });
     }
   }
 

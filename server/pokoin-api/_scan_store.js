@@ -1077,9 +1077,21 @@ function createStore({
 
   async function setDefaults({ sellerUid, batchId, defaults }) {
     const nowMs = now();
-    const batch = await withTx(pool, async (client) => {
+    // Fan out language/condition/… onto every active row in the same
+    // transaction so the desk never shows Batch Defaults IT with EN flags.
+    const ROW_FIELDS = [
+      ['language', 'language'],
+      ['condition', 'condition'],
+      ['foilState', 'foil_state'],
+      ['firstEdition', 'first_edition'],
+      ['signed', 'signed'],
+      ['altered', 'altered'],
+      ['location', 'location'],
+    ];
+    const { batch, items } = await withTx(pool, async (client) => {
       const locked = await lockBatch(client, sellerUid, batchId);
-      const next = rules.normalizeDefaults(defaults, rules.normalizeDefaults(locked.defaults));
+      const prev = rules.normalizeDefaults(locked.defaults);
+      const next = rules.normalizeDefaults(defaults, prev);
       const version = Number(locked.defaults_version) + 1;
       const history = rules.appendDefaults(locked.defaults_history, next, version, nowMs);
       const updated = await client.query(
@@ -1092,10 +1104,34 @@ function createStore({
         `update public.scan_sessions set last_activity_at = now() where batch_id = $1 and status <> 'ended'`,
         [locked.id],
       );
-      return updated.rows[0];
+      const fieldSets = [];
+      const fieldValues = [];
+      for (const [key, column] of ROW_FIELDS) {
+        if (prev[key] === next[key]) continue;
+        fieldValues.push(next[key]);
+        fieldSets.push(`${column} = $${fieldValues.length + 1}`); // $1+ fields; batch is last
+      }
+      let rows = [];
+      if (fieldSets.length) {
+        await bumpBatch(client, locked.id);
+        rows = (await client.query(
+          `update public.scan_items
+              set ${fieldSets.join(', ')},
+                  seq = seq + 1,
+                  updated_at = now()
+            where batch_id = $${fieldValues.length + 1} and status = 'active'
+            returning ${ITEM_COLUMNS}`,
+          [...fieldValues, locked.id],
+        )).rows;
+      }
+      return { batch: updated.rows[0], items: rows };
     });
     require('./_scan_bus').notifyBatch(batchId);
-    return { batch: rules.batchView(batch), serverTime: nowMs };
+    return {
+      batch: rules.batchView(batch),
+      items: (items || []).map(rules.itemView),
+      serverTime: nowMs,
+    };
   }
 
   async function submitBatch({
