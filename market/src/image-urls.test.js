@@ -80,6 +80,21 @@ test('Battle Party and SV-P Chinese leftovers bust cache after CardTrader webp i
   );
 });
 
+test('30th Celebration Darkrai LEGEND busts cache after portrait reorient', () => {
+  assert.equal(
+    preferFullImage('https://cdn.pokoin.com/413224_darkrai-cresselia-legend.jpg'),
+    '/card-images/413224_darkrai-cresselia-legend.jpg?v=leg1',
+  );
+  assert.equal(
+    preferFullImage('https://cdn.pokoin.com/826448_darkrai-cresselia-legend.jpg'),
+    '/card-images/826448_darkrai-cresselia-legend.jpg?v=leg1',
+  );
+  assert.equal(
+    homepageDerivativeUrl('/card-images/413222_darkrai-cresselia-legend.jpg'),
+    '/card-images/413222_darkrai-cresselia-legend_homepage.webp?v=leg1',
+  );
+});
+
 test('CardTrader 186×260 leftover backs bust cache after Pokoin missing-card stamp', () => {
   assert.equal(
     preferFullImage('https://cdn.pokoin.com/286874_fighting-energy-unnumbered-latios-ex-half-deck.jpg'),

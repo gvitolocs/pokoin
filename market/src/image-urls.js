@@ -36,6 +36,12 @@ const WEBP_AS_JPEG_IDS = new Set([
   406703, 406711, 406749, 406763, 406774, 406777, 406800, 406805,
 ]);
 export const WEBP_AS_JPEG_CACHE = 'wj1';
+/**
+ * 30th Celebration Darkrai & Cresselia LEGEND halves reoriented to Pokoin
+ * portrait (name bar left), matching Triumphant. Leftover + public ids.
+ */
+const LEGEND_ORIENT_IDS = new Set([413222, 413224, 826444, 826448]);
+export const LEGEND_ORIENT_CACHE = 'leg1';
 const SMALL_SCAN_ID_SET = new Set(SMALL_SCAN_IDS.map(Number));
 const POKOIN_PLACEHOLDER_ID_SET = new Set(POKOIN_PLACEHOLDER_IDS.map(Number));
 /** 312×437 catalog thumbs replaced with CardTrader full (SV Magnemite cohort). */
@@ -46,6 +52,9 @@ function catalogCacheToken(id) {
   const value = Number(id);
   if (value === 397269) {
     return TEAM_UP_CHARIZARD_CACHE;
+  }
+  if (LEGEND_ORIENT_IDS.has(value)) {
+    return LEGEND_ORIENT_CACHE;
   }
   if (WEBP_AS_JPEG_IDS.has(value)) {
     return WEBP_AS_JPEG_CACHE;
