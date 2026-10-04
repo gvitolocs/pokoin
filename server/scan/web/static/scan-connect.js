@@ -629,8 +629,9 @@
           saveState();
           status.textContent = 'Connected to Pokoin Dashboard';
           panel.classList.add('ok');
-          const tip = doc.getElementById('scOpenBrowser');
-          if (tip) tip.remove();
+          // The scOpenBrowser hop stays until the camera actually starts
+          // (index.html removes it on stream success): iOS Camera's mini
+          // browser pairs fine but can never open a camera.
           if (data.defaultsLabel) barPile.textContent = data.defaultsLabel;
           if (data.scanCatalog) applyScanCatalog(data.scanCatalog);
           setTimeout(openScanner, 700);
