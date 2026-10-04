@@ -1,3 +1,4 @@
+import { safeAvatarUrl } from './avatar.js';
 import { timestampMs } from './chat-format.js';
 
 const HISTORY_KEY = 'pokoin.chatHistory';
@@ -115,6 +116,18 @@ export function nearChatTop(scrollTop, threshold = 48) {
 
 const PREVIEW_KEY = 'pokoin.chatPreviews';
 
+function previewIdentity(row) {
+  return {
+    peerDisplayName: String(row?.peerDisplayName || row?.displayName || '').trim().slice(0, 80),
+    peerPhotoUrl: safeAvatarUrl(row?.peerPhotoUrl || row?.photoUrl),
+  };
+}
+
+/** A handle-only row is not a list paint. The dock waits for the profile. */
+export function paintableChatPreviews(rows) {
+  return (rows || readChatPreviews()).filter((row) => previewIdentity(row).peerDisplayName);
+}
+
 export function readChatPreviews() {
   try {
     const rows = JSON.parse(localStorage.getItem(PREVIEW_KEY) || '[]');
@@ -125,18 +138,62 @@ export function readChatPreviews() {
   }
 }
 
+/** True when a fresh download would paint the same people, photos, and previews. */
+export function chatPreviewsLookSame(left, right) {
+  const a = left || [];
+  const b = right || [];
+  if (a.length !== b.length) return false;
+  return a.every((row, index) => {
+    const other = b[index] || {};
+    const mine = previewIdentity(row);
+    const theirs = previewIdentity(other);
+    return String(row?.peerUid || row?.pairKey || '') === String(other?.peerUid || other?.pairKey || '')
+      && mine.peerDisplayName === theirs.peerDisplayName
+      && mine.peerPhotoUrl === theirs.peerPhotoUrl
+      && String(row?.preview || '') === String(other?.preview || '')
+      && (Number(row?.unread) || 0) === (Number(other?.unread) || 0)
+      && timestampMs(row?.updatedAt) === timestampMs(other?.updatedAt);
+  });
+}
+
+/** Keep a name and photo the server row left blank, so a refresh cannot swap the person. */
+export function mergeChatPreviewRows(cached, incoming) {
+  const previous = new Map();
+  for (const row of cached || []) {
+    const key = String(row?.peerUid || row?.pairKey || '');
+    if (key) previous.set(key, row);
+  }
+  return (incoming || []).map((row) => {
+    const key = String(row?.peerUid || row?.pairKey || '');
+    const old = previous.get(key);
+    const identity = previewIdentity(row);
+    const kept = previewIdentity(old);
+    return {
+      ...row,
+      peerUsername: String(row?.peerUsername || old?.peerUsername || ''),
+      peerDisplayName: identity.peerDisplayName || kept.peerDisplayName,
+      peerPhotoUrl: identity.peerPhotoUrl || kept.peerPhotoUrl,
+    };
+  });
+}
+
 export function writeChatPreviews(rows) {
   const clean = (rows || [])
     .filter((row) => row && (row.peerUid || row.peerUsername))
     .slice(0, 100)
-    .map((row) => ({
-      pairKey: String(row.pairKey || ''),
-      peerUid: String(row.peerUid || ''),
-      peerUsername: String(row.peerUsername || ''),
-      preview: String(row.preview || '').slice(0, 80),
-      unread: Number(row.unread) || 0,
-      updatedAt: row.updatedAt || null,
-    }));
+    .map((row) => {
+      const identity = previewIdentity(row);
+      return {
+        pairKey: String(row.pairKey || ''),
+        peerUid: String(row.peerUid || ''),
+        peerUsername: String(row.peerUsername || ''),
+        peerDisplayName: identity.peerDisplayName,
+        peerPhotoUrl: identity.peerPhotoUrl,
+        preview: String(row.preview || '').slice(0, 80),
+        unread: Number(row.unread) || 0,
+        updatedAt: row.updatedAt || null,
+      };
+    });
   try {
     localStorage.setItem(PREVIEW_KEY, JSON.stringify(clean));
   } catch (_) {

@@ -16,7 +16,7 @@ import { usePokoThread } from '../use-poko-thread.js';
 import { chatPersonName, chatPersonPhoto, chatTime, eventAriaLabel, requestActionFor } from '../chat-format.js';
 import Avatar from '../components/Avatar.jsx';
 import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
-import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
+import { chatPreviewsLookSame, mergeChatPreviewRows, paintableChatPreviews, readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import ChatListingTag from '../components/ChatListingTag.jsx';
 import ChatText from '../components/ChatText.jsx';
@@ -100,8 +100,8 @@ function NewConversation({ onClose }) {
 
 export default function Messages() {
   const { ready, signedIn, getBearer, user } = useAuth();
-  const [rows, setRows] = useState(readChatPreviews);
-  const [loading, setLoading] = useState(() => readChatPreviews().length === 0);
+  const [rows, setRows] = useState(paintableChatPreviews);
+  const [loading, setLoading] = useState(() => paintableChatPreviews().length === 0);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const uid = user?.uid || '';
@@ -112,9 +112,9 @@ export default function Messages() {
     try {
       const token = await getBearer();
       const result = await listConversations(token);
-      const next = result.conversations || [];
-      setRows(next);
+      const next = mergeChatPreviewRows(readChatPreviews(), result.conversations || []);
       writeChatPreviews(next);
+      setRows((current) => (chatPreviewsLookSame(current, next) ? current : next));
       setError('');
     } catch (err) {
       setError(err.message || 'Messages could not be loaded.');

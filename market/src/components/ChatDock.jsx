@@ -23,7 +23,7 @@ import {
   setChatTagQty,
   subscribeChatDock,
 } from '../chat-dock-store.js';
-import { readChatPreviews, writeChatPreviews } from '../chat-history.js';
+import { chatPreviewsLookSame, mergeChatPreviewRows, paintableChatPreviews, readChatPreviews, writeChatPreviews } from '../chat-history.js';
 import { useSearchLang } from '../locale.js';
 import { game } from '../game.js';
 import { warmSellerFromChat } from '../seller-seed.js';
@@ -56,8 +56,8 @@ function draftLine(row, drafts) {
 }
 
 function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
-  const [rows, setRows] = useState(readChatPreviews);
-  const [seen, setSeen] = useState(() => readChatPreviews().length > 0);
+  const [rows, setRows] = useState(paintableChatPreviews);
+  const [seen, setSeen] = useState(() => paintableChatPreviews().length > 0);
   const [drafts, setDrafts] = useState(getChatDrafts);
   const [overUid, setOverUid] = useState('');
   const [error, setError] = useState('');
@@ -70,9 +70,9 @@ function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
         const token = await getBearer();
         const result = await listConversations(token);
         if (!live) return;
-        const next = result.conversations || [];
-        setRows(next);
+        const next = mergeChatPreviewRows(readChatPreviews(), result.conversations || []);
         writeChatPreviews(next);
+        setRows((current) => (chatPreviewsLookSame(current, next) ? current : next));
         setDrafts(getChatDrafts());
         setError('');
       } catch (err) {

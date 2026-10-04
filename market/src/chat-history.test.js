@@ -7,6 +7,9 @@ import {
   nearChatTop,
   pageHasMore,
   readChatHistory,
+  chatPreviewsLookSame,
+  mergeChatPreviewRows,
+  paintableChatPreviews,
   readChatPreviews,
   writeChatHistory,
   writeChatPreviews,
@@ -58,7 +61,9 @@ test('the message list keeps the last preview in this browser', () => {
       pairKey: 'direct_a',
       peerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2',
       peerUsername: 'redshakkio',
-      preview: 'Scambi?',
+      peerDisplayName: 'RotationMotionTCG',
+      peerPhotoUrl: 'https://cdn.pokoin.com/profile-pictures/a.jpg',
+      preview: 'Mega Rayquaza ex',
       unread: 0,
       updatedAt: '2026-09-25T13:50:00.000Z',
     },
@@ -67,7 +72,48 @@ test('the message list keeps the last preview in this browser', () => {
   const saved = readChatPreviews();
   assert.equal(saved.length, 1);
   assert.equal(saved[0].peerUsername, 'redshakkio');
-  assert.equal(saved[0].preview, 'Scambi?');
+  assert.equal(saved[0].peerDisplayName, 'RotationMotionTCG');
+  assert.equal(saved[0].peerPhotoUrl, 'https://cdn.pokoin.com/profile-pictures/a.jpg');
+  assert.equal(saved[0].preview, 'Mega Rayquaza ex');
+  assert.equal(paintableChatPreviews().length, 1);
+});
+
+test('a saved handle without a display name is not painted', () => {
+  writeChatPreviews([{
+    pairKey: 'direct_a',
+    peerUid: 'PUH1ygG9mOOyQRPXaY5Fa1W6DKd2',
+    peerUsername: 'redshakkio',
+    preview: 'Mega Rayquaza ex',
+  }]);
+  assert.equal(paintableChatPreviews().length, 0);
+});
+
+test('the same person and preview is not a new list paint', () => {
+  const row = {
+    peerUid: 'uid-1',
+    peerDisplayName: 'RotationMotionTCG',
+    peerPhotoUrl: 'https://cdn.pokoin.com/profile-pictures/a.jpg',
+    preview: 'Mega Rayquaza ex',
+    unread: 0,
+    updatedAt: '2026-09-28T12:00:00.000Z',
+  };
+  assert.equal(chatPreviewsLookSame([row], [{ ...row }]), true);
+  assert.equal(chatPreviewsLookSame([row], [{ ...row, preview: 'other' }]), false);
+});
+
+test('a refresh keeps the name and photo when the new row omits them', () => {
+  const merged = mergeChatPreviewRows(
+    [{
+      peerUid: 'uid-1',
+      peerUsername: 'redshakkio',
+      peerDisplayName: 'RotationMotionTCG',
+      peerPhotoUrl: 'https://cdn.pokoin.com/profile-pictures/a.jpg',
+    }],
+    [{ peerUid: 'uid-1', peerUsername: 'redshakkio', preview: 'Mega Rayquaza ex' }],
+  );
+  assert.equal(merged[0].peerDisplayName, 'RotationMotionTCG');
+  assert.equal(merged[0].peerPhotoUrl, 'https://cdn.pokoin.com/profile-pictures/a.jpg');
+  assert.equal(merged[0].preview, 'Mega Rayquaza ex');
 });
 
 test('scrolling to the top is the cue to fetch older messages', () => {
