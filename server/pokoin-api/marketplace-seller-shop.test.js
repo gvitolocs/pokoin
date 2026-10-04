@@ -186,7 +186,11 @@ test('pokemon shop counts CardTrader singles: product rows plus copy sum', () =>
   assert.match(src, /card_id::bigint \/ 2/);
   assert.match(src, /coalesce\(sum\(quantity_available\), 0\)::int as copies/);
   assert.doesNotMatch(src, /count\(distinct nullif\(card_id/);
-  // Satellite TCGs still go through sellerCardIdsForGame + any().
+  // Every other TCG uses the same singles rule, scoped to marketplace_game
+  // so a shared public id cannot count a Pokémon listing as Magic.
   assert.match(src, /sellerCardIdsForGame\(seller\.uid, catalogGame\)/);
   assert.match(src, /card_id = any\(/);
+  assert.match(src, /marketplace_game = \$\$\{values\.length\}/);
+  assert.match(src, /and product_type = 'card'/);
+  assert.match(src, /and item_kind = 'single'/);
 });
