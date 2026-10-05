@@ -10,11 +10,12 @@ import {
   imageSrc,
 } from '../api.js';
 import {
+  continueBoxCursor,
   listingBox,
   liveInventoryListings,
-  nextFreeSlot,
   nextPositionInStack,
   occupiedAbsForScanBoxes,
+  recentBoxes,
 } from '../inventory-listings.js';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
@@ -406,6 +407,7 @@ export default function ScanDesk() {
 
   const list = useMemo(() => queueRows(displayRows), [displayRows]);
   const [boxStockRows, setBoxStockRows] = useState([]);
+  const [recentBoxNames, setRecentBoxNames] = useState([]);
   const occupiedAbs = useMemo(
     () => occupiedAbsForScanBoxes(list, boxStockRows),
     [list, boxStockRows],
@@ -530,7 +532,14 @@ export default function ScanDesk() {
       stackSize: defaults.stackSize ?? 1,
       locationChanged: true,
     });
-    if (suggested) setDefaults(suggested);
+    // A stored stop only moves the cursor forward. Stock that already sits
+    // further on (the last stack) must not be rewound to an older session.
+    if (suggested) {
+      const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
+      const hintAbs = stackPosToIndex(suggested.stack, suggested.startPosition, size);
+      const nowAbs = stackPosToIndex(defaults.stack ?? 1, defaults.startPosition ?? 1, size);
+      if (hintAbs > nowAbs) setDefaults(suggested);
+    }
   }, [batch?.id, defaults.location, closed]);
 
   // A batch never starts on top of stock already in the box: continue after
@@ -559,15 +568,48 @@ export default function ScanDesk() {
         const d = defaultsRef.current;
         if (listingBox(String(d.location || '').trim()) !== box) return;
         const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
-        const next = nextFreeSlot(rows, box, size);
+        const next = continueBoxCursor(rows, box, size);
         if (!next) return;
-        if (next.abs > stackPosToIndex(d.stack ?? 1, d.startPosition ?? 1, size)) {
-          setDefaults({ stack: Math.min(9999, next.stack), startPosition: size === 1 ? 1 : next.startPosition });
+        const nextIndex = stackPosToIndex(next.stack, next.startPosition, next.stackSize);
+        if (nextIndex > stackPosToIndex(d.stack ?? 1, d.startPosition ?? 1, size) || next.stackSize !== size) {
+          setDefaults({
+            stack: Math.min(9999, next.stack),
+            startPosition: next.stackSize === 1 ? 1 : next.startPosition,
+            ...(next.stackSize !== size ? { stackSize: next.stackSize } : {}),
+          });
         }
       } catch (_) {
         boxStockRef.current = { key: '', box: '', rows: [] }; // retry on the next location change
         setBoxStockRows([]);
       }
+    })();
+    return () => { cancelled = true; };
+  }, [batch?.id, defaults.location, closed, stockUid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // An empty location suggests the box on the seller's newest listing.
+  // One shot per batch: clearing the field afterwards stays cleared.
+  const locationSeeded = useRef('');
+  useEffect(() => {
+    if (closed || !batch?.id || !stockUid) return undefined;
+    if (String(defaults.location || '').trim()) {
+      locationSeeded.current = batch.id;
+      return undefined;
+    }
+    if (locationSeeded.current === batch.id) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchSellerListings(stockUid, await getBearer(), { limit: 200 });
+        if (cancelled || locationSeeded.current === batch.id) return;
+        const rows = liveInventoryListings(data.listings || data.items || []);
+        const boxes = recentBoxes(rows);
+        setRecentBoxNames(boxes);
+        setBoxStockRows((current) => (current.length ? current : rows));
+        const last = boxes[0];
+        if (!last || String(defaultsRef.current.location || '').trim()) return;
+        locationSeeded.current = batch.id;
+        setDefaults({ location: last });
+      } catch (_) { /* the field stays empty; the seller can still type a box */ }
     })();
     return () => { cancelled = true; };
   }, [batch?.id, defaults.location, closed, stockUid]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -737,12 +779,14 @@ export default function ScanDesk() {
           const rows = liveInventoryListings(data.listings || data.items || []);
           boxStockRef.current = { key: `${batch.id}|${box}`, box, rows };
           setBoxStockRows(rows);
-          const next = nextFreeSlot(rows, box, size);
+          setRecentBoxNames(recentBoxes(rows));
+          const next = continueBoxCursor(rows, box, size);
           if (next && patch.stack == null && patch.startPosition == null) {
             nextPatch = {
               ...nextPatch,
               stack: Math.min(9999, next.stack),
-              startPosition: size === 1 ? 1 : next.startPosition,
+              startPosition: next.stackSize === 1 ? 1 : next.startPosition,
+              ...(next.stackSize !== size ? { stackSize: next.stackSize } : {}),
             };
           }
         } catch (_) {
@@ -1465,6 +1509,7 @@ export default function ScanDesk() {
           </section>
           <DefaultsBar
             defaults={defaults}
+            boxes={recentBoxNames}
             stackFull={stackFull}
             onChange={setDefaults}
             positionForStack={positionForStack}
@@ -1673,8 +1718,17 @@ function QrBlock({ secret, pin }) {
   );
 }
 
-function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackButtonRef, stackFull = false }) {
+function boxSuggestions(boxes, draft) {
+  const q = String(draft || '').trim().toLowerCase();
+  const list = Array.isArray(boxes) ? boxes : [];
+  if (!q) return list.slice(0, 8);
+  return list.filter((name) => name.toLowerCase().includes(q)).slice(0, 8);
+}
+
+function DefaultsBar({ defaults, boxes = [], onChange, positionForStack, locationRef, stackButtonRef, stackFull = false }) {
   const [locationDraft, setLocationDraft] = useState(defaults.location);
+  const [boxMenuOpen, setBoxMenuOpen] = useState(false);
+  const [boxActive, setBoxActive] = useState(0);
   const [stackDraft, setStackDraft] = useState(String(defaults.stack ?? 1));
   const [posDraft, setPosDraft] = useState(String(defaults.startPosition ?? 1));
   const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
@@ -1695,6 +1749,16 @@ function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackB
   useEffect(() => setSizeDraft(String(size)), [size]);
   const commitLocation = () => {
     if (locationDraft !== defaults.location) onChange({ location: locationDraft });
+  };
+  const suggestions = boxSuggestions(boxes, locationDraft);
+  const draftBox = locationDraft.trim().toLowerCase();
+  const showBoxMenu = boxMenuOpen && suggestions.length > 0 && !(
+    suggestions.length === 1 && suggestions[0].toLowerCase() === draftBox
+  );
+  const pickBox = (name) => {
+    setLocationDraft(name);
+    setBoxMenuOpen(false);
+    if (name !== defaults.location) onChange({ location: name });
   };
   // Giuseppe 2026-10-04: the location applies while typing — a short pause is
   // enough, no Enter. Blur and Enter still commit immediately.
@@ -1807,10 +1871,46 @@ function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackB
             ref={locationRef}
             value={locationDraft}
             maxLength={64}
-            placeholder="Box A12"
-            onChange={(e) => setLocationDraft(e.target.value)}
-            onBlur={commitLocation}
-            onKeyDown={blurOnEnter}
+            placeholder={suggestions[0] && !locationDraft ? suggestions[0] : ''}
+            autoComplete="off"
+            role="combobox"
+            aria-expanded={showBoxMenu}
+            aria-controls="scan-box-suggestions"
+            aria-autocomplete="list"
+            onChange={(e) => {
+              setLocationDraft(e.target.value);
+              setBoxActive(0);
+              setBoxMenuOpen(true);
+            }}
+            onFocus={() => { setBoxMenuOpen(true); setBoxActive(0); }}
+            onBlur={() => {
+              setBoxMenuOpen(false);
+              commitLocation();
+            }}
+            onKeyDown={(e) => {
+              if (showBoxMenu) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setBoxActive((i) => Math.min(suggestions.length - 1, i + 1));
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setBoxActive((i) => Math.max(0, i - 1));
+                  return;
+                }
+                if (e.key === 'Enter' && suggestions[boxActive]) {
+                  e.preventDefault();
+                  pickBox(suggestions[boxActive]);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  setBoxMenuOpen(false);
+                  return;
+                }
+              }
+              blurOnEnter(e);
+            }}
           />
           <button
             ref={stackButtonRef}
@@ -1828,6 +1928,25 @@ function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackB
             {size > 1 ? <b className="sd-gear-size">{size}</b> : null}
           </button>
         </span>
+        {showBoxMenu ? (
+          <ul id="scan-box-suggestions" className="sd-box-menu" role="listbox">
+            {suggestions.map((name, i) => (
+              <li key={name} role="presentation">
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={i === boxActive}
+                  className={i === boxActive ? 'on' : ''}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setBoxActive(i)}
+                  onClick={() => pickBox(name)}
+                >
+                  {name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {sizeOpen ? (
           <div className="sd-stack-menu" role="dialog" aria-label="Stack setup">
             <p className="sd-stack-help">How many cards fit in one stack between two dividers. Each scan is one card; the slot counts up by itself.</p>
