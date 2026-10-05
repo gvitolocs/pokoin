@@ -1,6 +1,6 @@
 // schema.org JSON-LD builders for Pokoin News.
 import { sectionLabel } from './format.mjs';
-import { computeReadingStats } from './schema.mjs';
+import { computeReadingStats, articlePath } from './schema.mjs';
 import { SITE } from './site.mjs';
 
 function toAbsolute(url, base = SITE.baseUrl) {
@@ -49,7 +49,7 @@ function aboutEntities(record, base) {
 
 export function newsArticleJsonLd(record, { baseUrl } = {}) {
   const base = baseUrl || SITE.baseUrl;
-  const canonical = `${base}/news/${record.slug}`;
+  const canonical = `${base}${articlePath(record)}`;
   const stats = computeReadingStats(record);
   const type = record.template === 'analysis' ? ['NewsArticle', 'AnalysisNewsArticle'] : 'NewsArticle';
 
@@ -95,7 +95,7 @@ export function claimReviewJsonLd(record, { baseUrl } = {}) {
   return {
     '@context': 'https://schema.org',
     '@type': 'ClaimReview',
-    url: `${base}/news/${record.slug}`,
+    url: `${base}${articlePath(record)}`,
     claimReviewed: block.claim,
     reviewRating: {
       '@type': 'Rating',

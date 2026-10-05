@@ -80,6 +80,11 @@ export function sectionLabel(id) {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
 }
 
+// Section links for one game's news (Pokémon: /news/…, others: /<slug>/news/…).
+export function sectionNav(base = '/news') {
+  return SECTION_NAV.map((item) => ({ ...item, href: item.id === 'latest' ? base : `${base}/${item.id}` }));
+}
+
 export const SECTION_NAV = Object.freeze([
   { id: 'latest', label: 'Latest', href: '/news' },
   { id: 'sets', label: 'Sets', href: '/news/sets' },

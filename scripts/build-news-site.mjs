@@ -9,7 +9,8 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { validateArticle } from '../news/lib/schema.mjs';
+import { validateArticle, articlePath, GAME_SLUGS } from '../news/lib/schema.mjs';
+import { gameNewsBase, gamesWithNews } from '../news/lib/games.mjs';
 import { SECTION_NAV } from '../news/lib/format.mjs';
 import { esc } from '../news/lib/html.mjs';
 import { renderPage } from '../news/lib/layout.mjs';
@@ -21,7 +22,7 @@ import {
   renderSection,
   renderStaticPage,
 } from '../news/lib/pages.mjs';
-import { newsSitemap, newsUrlSitemap, rssFeed } from '../news/lib/feeds.mjs';
+import { newsSitemap, newsUrlSitemap, rssFeed, sectionsFor } from '../news/lib/feeds.mjs';
 import { SITE, STATIC_PAGES, fallbackHero } from '../news/lib/site.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -51,15 +52,19 @@ function heroFileMissing(hero, mediaDir) {
   return urls.some((url) => typeof url === 'string' && url.startsWith(MEDIA_PREFIX) && !mediaExists(mediaDir, url));
 }
 
+// Every game's news root: /news plus /<slug>/news for the other games.
+export const NEWS_ROOTS = ['/news', ...Object.values(GAME_SLUGS).filter(Boolean).map((slug) => `/${slug}/news`)];
+
 function headersFile(preview) {
   const robots = preview ? '  X-Robots-Tag: noindex, nofollow\n' : '';
-  return (
-    `/news*\n${robots}` +
+  const pageRules =
     `  X-Content-Type-Options: nosniff\n` +
     `  Referrer-Policy: strict-origin-when-cross-origin\n` +
     `  Strict-Transport-Security: max-age=31536000\n` +
     `  Content-Security-Policy: ${CSP}\n` +
-    `  Cache-Control: public, max-age=300, stale-while-revalidate=86400\n` +
+    `  Cache-Control: public, max-age=300, stale-while-revalidate=86400\n`;
+  return (
+    NEWS_ROOTS.map((root) => `${root}*\n${robots}${pageRules}`).join('') +
     `/news/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n` +
     `/news/media/*\n  Cache-Control: public, max-age=86400\n` +
     `/news-sitemap.xml\n${robots}  Cache-Control: public, max-age=300\n`
@@ -81,7 +86,8 @@ function renderDesk(records, ctx) {
       const scores = record.scores || {};
       return (
         `<tr>` +
-        `<td><a href="/news/${esc(record.slug)}">${esc(record.headline)}</a></td>` +
+        `<td><a href="${esc(articlePath(record))}">${esc(record.headline)}</a></td>` +
+        `<td>${esc(record.game || 'pokemon')}</td>` +
         `<td>${esc(record.status)}</td>` +
         `<td>${esc(record.template)}</td>` +
         `<td>${esc(gate.verdict || '')}</td>` +
@@ -97,7 +103,7 @@ function renderDesk(records, ctx) {
   const body =
     `<section class="nx-section"><h1>Newsroom desk</h1>` +
     `<p class="nx-empty">${records.length} records · preview build</p>` +
-    `<table class="nx-table"><thead><tr><th>Headline</th><th>Status</th><th>Template</th>` +
+    `<table class="nx-table"><thead><tr><th>Headline</th><th>Game</th><th>Status</th><th>Template</th>` +
     `<th>Gate</th><th>Failing checks</th><th>Editorial</th><th>Original</th>` +
     `<th>Published</th><th>Modified</th></tr></thead><tbody>${rows}</tbody></table></section>`;
   return renderPage({
@@ -176,29 +182,45 @@ export function buildNewsSite({
     writeFileSync(file, html);
   };
 
-  writePage('news.html', renderHome(prepared, ctx));
+  // One news hub per game that has stories (Pokémon's /news always exists).
+  // `/<root>` is served from `<root>.html` and articles from `<root>/<slug>.html`.
+  const games = gamesWithNews(prepared);
+  for (const game of games) {
+    const root = gameNewsBase(game).slice(1);
+    writePage(`${root}.html`, renderHome(prepared, { ...ctx, game }));
+    const sections = game === 'pokemon'
+      ? SECTION_NAV.filter((item) => item.id !== 'latest').map((item) => item.id)
+      : sectionsFor(game, prepared);
+    for (const section of sections) writePage(`${root}/${section}.html`, renderSection(section, prepared, { ...ctx, game }));
+    if (game !== 'pokemon') {
+      mkdirSync(join(outDir, root), { recursive: true });
+      writeFileSync(join(outDir, root, 'rss.xml'), rssFeed(valid, { baseUrl, now: nowIso, game }));
+    }
+  }
   for (const record of prepared) {
     writePage(
-      `news/${record.slug}.html`,
+      `${articlePath(record).slice(1)}.html`,
       renderArticlePage(record, prepared, { ...ctx, fallbackHero: fallbackHero(record.section) }),
     );
-  }
-  for (const item of SECTION_NAV) {
-    if (item.id === 'latest') continue;
-    writePage(`news/${item.id}.html`, renderSection(item.id, prepared, ctx));
   }
   writePage('news/authors/poko.html', renderAuthorPage(prepared, ctx));
   for (const page of STATIC_PAGES) {
     writePage(`news/${page.slug}.html`, renderStaticPage(page, ctx));
   }
+  // not_found_handling walks up to the nearest 404.html: one per game root.
   writePage('news/404.html', renderNotFound(ctx));
+  for (const game of games.filter((entry) => entry !== 'pokemon')) {
+    writePage(`${gameNewsBase(game).slice(1)}/404.html`, renderNotFound(ctx));
+  }
   if (preview) writePage('news/desk.html', renderDesk(valid, ctx));
 
   const urlSitemap = newsUrlSitemap(valid, { baseUrl, now: nowIso });
   const recentSitemap = newsSitemap(valid, { now: nowIso, baseUrl });
   writeFileSync(join(outDir, 'news-sitemap.xml'), recentSitemap);
   writeFileSync(join(outDir, 'news/sitemap.xml'), urlSitemap);
-  writeFileSync(join(outDir, 'news/rss.xml'), rssFeed(valid, { baseUrl, now: nowIso }));
+  // /news/rss.xml is the Pokémon feed (like /news); /news/all.xml carries every game.
+  writeFileSync(join(outDir, 'news/rss.xml'), rssFeed(valid, { baseUrl, now: nowIso, game: 'pokemon' }));
+  writeFileSync(join(outDir, 'news/all.xml'), rssFeed(valid, { baseUrl, now: nowIso }));
   writeFileSync(join(outDir, '_headers'), headersFile(preview));
 
   const report = {
@@ -208,6 +230,7 @@ export function buildNewsSite({
     articles: prepared.length,
     published: prepared.filter((record) => record.status === 'published').length,
     previewOnly: prepared.filter((record) => record.status !== 'published').length,
+    games,
     sitemapEntries: countLocs(recentSitemap),
     urlSitemapEntries: countLocs(urlSitemap),
     invalid,

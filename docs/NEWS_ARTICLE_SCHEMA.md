@@ -3,7 +3,8 @@
 One JSON **article record** per canonical story and language. The Poko
 Newsroom (Hermes, `src/newsroom/`) writes records; the website builder
 (`news/` + `scripts/build-news-site.mjs` in this repo) renders them into static,
-crawlable HTML at `https://pokoin.com/news/<slug>`. The builder **validates
+crawlable HTML at `https://pokoin.com/news/<slug>` (Pokémon) or
+`https://pokoin.com/<game-slug>/news/<slug>` (every other game). The builder **validates
 every record** and refuses to render invalid ones; Hermes validates before it
 stores. Both sides implement the same rules below.
 
@@ -24,6 +25,7 @@ Truth boundaries:
 | `slug` | string | `^[a-z0-9]+(?:-[a-z0-9]+)*$`, 8–90 chars. Assigned **once** when the record is created and **never changes**, even if the headline changes. Collisions get `-2`, `-3`… |
 | `canonicalStoryId` | string | the newsroom story id; one article per story per language |
 | `language` | `"en"` | canonical newsroom language; future editions set `editionOf` |
+| `game` | enum | Pokoin marketplace game id (`pokemon`, `one_piece`, `magic`, `yugioh`, `lorcana`, … — `GAME_SLUGS` in the validator, mirroring `market/src/game.js`). Decides the URL: `/news/<slug>` for Pokémon, `/<game-slug>/news/<slug>` otherwise. Set once; never changes |
 | `editionOf` | string \| null | id of the canonical-language article this edition translates; `null` for originals |
 | `status` | `draft` \| `review` \| `published` \| `blocked` \| `withdrawn` | only `published` is rendered publicly |
 | `gate` | object | `{ verdict: READY\|REVIEW\|BLOCKED, checks: [{ id, pass, detail }], evaluatedAt }` |

@@ -220,7 +220,8 @@
     "seo": {
       "title": "Delta Reign Prerelease Promos Revealed: Enamorus, Kommo-o, Masquerain and Magmortar",
       "description": "Each Build & Battle Box carries one of four foil promos; prerelease events start October 24 ahead of the November 6 release."
-    }
+    },
+    "game": "pokemon"
   },
   {
     "schemaVersion": 1,
@@ -393,7 +394,8 @@
     "seo": {
       "title": "Is the Pokémon TCG Valentine’s Box Confirmed for January 27? Not Yet",
       "description": "Several outlets report a January 27, 2027 Valentine’s Box, but one headline calls it confirmed while Pokémon has not announced it."
-    }
+    },
+    "game": "pokemon"
   },
   {
     "schemaVersion": 1,
@@ -842,7 +844,8 @@
     "seo": {
       "title": "Charizard ex 151 SIR Asks Climb Through September on Pokoin",
       "description": "The lowest asking price for the 199/165 Special Illustration Rare rose across the month while active listings thinned."
-    }
+    },
+    "game": "pokemon"
   },
   {
     "schemaVersion": 1,
@@ -972,6 +975,121 @@
     "seo": {
       "title": "What the 30th Celebration Battle Decks Mean for Espeon ex and Umbreon ex Players",
       "description": "Two ready-to-play decks arrive October 30. Here is what is known and what is still interpretation."
+    },
+    "game": "pokemon"
+  },
+  {
+    "schemaVersion": 1,
+    "language": "en",
+    "editionOf": null,
+    "author": {
+      "id": "poko",
+      "name": "Poko",
+      "role": "Pokoin News Desk",
+      "url": "/news/authors/poko"
+    },
+    "updates": [
+      {
+        "at": "2026-10-04T15:03:00.000Z",
+        "text": "Pokémon’s prerelease page now lists October 24 as the first day of prerelease events.",
+        "statusChange": "multi_source→confirmed"
+      }
+    ],
+    "corrections": [],
+    "images": [],
+    "entities": [],
+    "tags": [
+      "lorcana",
+      "explainer"
+    ],
+    "id": "art_fixture_lorcana_en",
+    "slug": "how-lorcana-collector-boosters-differ",
+    "canonicalStoryId": "fixture-lorcana",
+    "game": "lorcana",
+    "status": "published",
+    "template": "explainer",
+    "articleType": "EXPLAINER",
+    "section": "collectors",
+    "gate": {
+      "verdict": "READY",
+      "checks": [],
+      "evaluatedAt": "2026-10-04T10:00:00.000Z"
+    },
+    "headline": "How Disney Lorcana collector boosters differ from regular packs",
+    "dek": "Fixture article for the website build: a Lorcana explainer used to test game-scoped URLs, hubs and feeds.",
+    "datePublished": "2026-10-04T10:00:00.000Z",
+    "dateModified": "2026-10-04T10:00:00.000Z",
+    "hero": null,
+    "related": {
+      "cards": [],
+      "sets": []
+    },
+    "market": null,
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "This fixture paragraph stands in for reporting about Disney Lorcana collector boosters.",
+        "sourceIds": [
+          "s1"
+        ]
+      },
+      {
+        "type": "heading",
+        "text": "What changes for collectors"
+      },
+      {
+        "type": "paragraph",
+        "text": "A second fixture paragraph keeps the explainer template satisfied for the build tests.",
+        "sourceIds": [
+          "s1"
+        ]
+      },
+      {
+        "type": "why_it_matters",
+        "text": "Fixture context: collectors compare pack formats before buying sealed product."
+      }
+    ],
+    "sources": [
+      {
+        "id": "s1",
+        "outlet": "Disney Lorcana",
+        "url": "https://www.disneylorcana.com/en-US/news",
+        "title": "Disney Lorcana news",
+        "tier": "A",
+        "role": "primary",
+        "firstReported": false,
+        "publishedAt": "2026-10-03T12:00:00.000Z",
+        "accessedAt": "2026-10-04T09:00:00.000Z"
+      }
+    ],
+    "revisions": [
+      {
+        "rev": 1,
+        "at": "2026-10-04T10:00:00.000Z",
+        "reason": "initial",
+        "material": true,
+        "hash": "fixture",
+        "changed": [
+          "created"
+        ]
+      }
+    ],
+    "scores": {
+      "editorialWorthiness": 0.5,
+      "originalReporting": 0.3,
+      "components": {}
+    },
+    "seo": {
+      "title": "How Disney Lorcana collector boosters differ from regular packs",
+      "description": "Fixture article for the website build: a Lorcana explainer used to test game-scoped URLs, hubs and feeds."
+    },
+    "generation": {
+      "provider": "fixture",
+      "reporterModel": null,
+      "editorModel": null,
+      "skillVersion": null,
+      "styleVersion": null,
+      "editorVerdict": "approve"
     }
   }
 ]

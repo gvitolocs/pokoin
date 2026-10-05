@@ -31,6 +31,8 @@ export function relatedStories(record, all, limit = 4) {
   const scored = [];
   for (const candidate of all) {
     if (!isPublished(candidate) || candidate === record || candidate.slug === record.slug) continue;
+    // Related stories never cross games.
+    if ((candidate.game || 'pokemon') !== (record.game || 'pokemon')) continue;
     const other = entitySets(candidate);
     const otherTags = new Set((candidate.tags || []).map((tag) => String(tag).toLowerCase()));
     const score =

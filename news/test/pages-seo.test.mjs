@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { esc } from '../lib/html.mjs';
+import { articlePath } from '../lib/schema.mjs';
 import { newsSitemap, newsUrlSitemap, rssFeed } from '../lib/feeds.mjs';
 import { relatedStories } from '../lib/related.mjs';
 import { renderArticlePage, renderHome, renderNotFound, renderStaticPage } from '../lib/pages.mjs';
@@ -116,7 +117,7 @@ test('2. analysis type is AnalysisNewsArticle and disputed fact checks omit Clai
 test('3. home links every published story and never a review record', () => {
   const html = renderHome(fixtures, ctx);
   for (const record of publishedFixtures) {
-    assert.ok(html.includes(`<a href="/news/${record.slug}">`), `${record.slug} must be linked`);
+    assert.ok(html.includes(`<a href="${articlePath(record)}">`), `${record.slug} must be linked`);
   }
   const review = fixtures.find((record) => record.status === 'review');
   assert.ok(review, 'fixture set must contain a review record');
@@ -158,7 +159,7 @@ test('5. RSS is well-formed XML and carries every published link', () => {
   assert.ok(xml.includes('xmlns:dc='));
   assert.ok(xml.includes('<atom:link'));
   for (const record of publishedFixtures) {
-    assert.ok(xml.includes(`${baseUrl}/news/${record.slug}`), `${record.slug} must be in the feed`);
+    assert.ok(xml.includes(`${baseUrl}${articlePath(record)}`), `${record.slug} must be in the feed`);
   }
   assert.ok(xml.includes('<pubDate>Sun, 04 Oct 2026 09:14:00 GMT</pubDate>'));
   const review = fixtures.find((record) => record.status === 'review');

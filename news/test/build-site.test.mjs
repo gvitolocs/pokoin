@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { buildNewsSite } from '../../scripts/build-news-site.mjs';
 import { esc } from '../lib/html.mjs';
+import { articlePath } from '../lib/schema.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = JSON.parse(readFileSync(join(here, '..', 'fixtures', 'sample-articles.json'), 'utf8'));
@@ -30,7 +31,7 @@ test('1. public build writes pages, feeds, headers and hashed assets', () => {
   const report = buildNewsSite({ records: fixtures, outDir, now, baseUrl });
 
   assert.ok(existsSync(join(outDir, 'news.html')));
-  for (const record of published) assert.ok(existsSync(join(outDir, 'news', `${record.slug}.html`)));
+  for (const record of published) assert.ok(existsSync(join(outDir, `${articlePath(record).slice(1)}.html`)), `missing ${articlePath(record)}`);
   for (const section of ['sets', 'cards', 'market', 'competitive', 'collectors', 'fact-check', 'analysis']) {
     assert.ok(existsSync(join(outDir, 'news', `${section}.html`)), `missing section ${section}`);
   }
@@ -116,7 +117,7 @@ test('6. the home page links every published article', () => {
   buildNewsSite({ records: fixtures, outDir, now, baseUrl });
   const home = readFileSync(join(outDir, 'news.html'), 'utf8');
   for (const record of published) {
-    assert.ok(home.includes(`<a href="/news/${record.slug}">`), `${record.slug} must be linked`);
+    assert.ok(home.includes(`<a href="${articlePath(record)}">`), `${record.slug} must be linked`);
   }
 });
 

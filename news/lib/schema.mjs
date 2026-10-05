@@ -26,6 +26,29 @@ export const IMAGE_ORIGINS = Object.freeze(['pokoin_generated', 'pokoin_catalog'
 export const IMAGE_RIGHTS = Object.freeze(['owned', 'press_kit', 'editorial_permitted', 'unknown']);
 export const MEASUREMENTS = Object.freeze(['asking', 'inferred_sold', 'count']);
 export const POKO_AUTHOR = Object.freeze({ id: 'poko', name: 'Poko', role: 'Pokoin News Desk', url: '/news/authors/poko' });
+// Pokoin game ids → pokoin.com URL slug (mirrors pokoin-web market/src/game.js).
+// Pokémon has no prefix: /news. Every other game: /<slug>/news.
+export const GAME_SLUGS = Object.freeze({
+  pokemon: '', one_piece: 'one-piece', riftbound: 'riftbound', magic: 'magic', yugioh: 'yugioh', lorcana: 'lorcana',
+  flesh_and_blood: 'flesh-and-blood', digimon: 'digimon', dragon_ball_super: 'dragon-ball-super', vanguard: 'vanguard',
+  star_wars: 'star-wars', union_arena: 'union-arena', gundam: 'gundam', sorcery: 'sorcery', palworld: 'palworld',
+  cyberpunk: 'cyberpunk', weiss_schwarz: 'weiss-schwarz', final_fantasy: 'final-fantasy', force_of_will: 'force-of-will',
+  world_of_warcraft: 'world-of-warcraft', battle_spirits_saga: 'battle-spirits-saga', star_wars_destiny: 'star-wars-destiny',
+  the_spoils: 'the-spoils', my_little_pony: 'my-little-pony', dragon_born: 'dragon-born',
+});
+export const GAME_IDS = Object.freeze(Object.keys(GAME_SLUGS));
+
+/** '/news' for Pokémon, '/<slug>/news' for every other game. */
+export function gameNewsBase(game = 'pokemon') {
+  const slug = GAME_SLUGS[game] || '';
+  return slug ? `/${slug}/news` : '/news';
+}
+
+/** Public path of an article: '<gameNewsBase>/<slug>'. Never changes once published. */
+export function articlePath(record) {
+  return `${gameNewsBase(record?.game || 'pokemon')}/${record?.slug || ''}`;
+}
+
 export const RESERVED_SLUGS = Object.freeze(['latest', 'sets', 'cards', 'market', 'competitive', 'collectors', 'fact-check', 'analysis', 'industry', 'authors', 'about', 'editorial-policy', 'corrections', 'methodology', 'contact', 'rss', 'sitemap', 'assets', 'media', 'page', 'tags', 'desk']);
 
 export function slugify(text) {
@@ -374,6 +397,7 @@ export function validateArticle(record) {
   if (!TEMPLATE_IDS.includes(record.template)) errors.push(`template must be one of ${TEMPLATE_IDS.join(', ')}`);
   if (!ARTICLE_TYPES.includes(record.articleType)) errors.push(`articleType must be one of ${ARTICLE_TYPES.join(', ')}`);
   if (!SECTIONS.includes(record.section)) errors.push(`section must be one of ${SECTIONS.join(', ')}`);
+  if (!GAME_IDS.includes(record.game)) errors.push(`game must be one of ${GAME_IDS.join(', ')}`);
 
   if (!record.gate || typeof record.gate !== 'object') {
     errors.push('gate is required');

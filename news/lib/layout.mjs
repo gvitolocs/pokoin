@@ -1,7 +1,8 @@
 // Full HTML document shell for every Pokoin News page.
 import { esc } from './html.mjs';
-import { SECTION_NAV } from './format.mjs';
+import { sectionNav } from './format.mjs';
 import { SITE } from './site.mjs';
+import { gameName, gameNewsBase, gameMarketplaceBase } from './games.mjs';
 
 const DEFAULT_ROBOTS =
   'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1';
@@ -60,7 +61,10 @@ export function renderPage({
   preview = false,
   extraHead = '',
   assets,
+  game = 'pokemon',
+  games = [],
 } = {}) {
+  const base = gameNewsBase(game);
   const css = (assets && assets.css) || '/news/assets/news.css';
   const js = (assets && assets.js) || '/news/assets/news.js';
   const canonical = absoluteUrl(canonicalPath);
@@ -79,7 +83,7 @@ export function renderPage({
     meta('description', description) +
     `<link rel="canonical" href="${esc(canonical)}">` +
     meta('robots', robotsContent) +
-    '<link rel="alternate" type="application/rss+xml" title="Pokoin News" href="/news/rss.xml">' +
+    `<link rel="alternate" type="application/rss+xml" title="${esc(game === 'pokemon' ? 'Pokoin News' : `Pokoin News — ${gameName(game)}`)}" href="${esc(`${base}/rss.xml`)}">` +
     '<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">' +
     '<link rel="apple-touch-icon" href="/apple-touch-icon.png">' +
     `<link rel="preload" href="${esc(SITE.fontUrl)}" as="font" type="font/woff2" crossorigin>` +
@@ -101,7 +105,12 @@ export function renderPage({
     extraHead +
     structuredData;
 
-  const nav = `<nav class="nx-nav" aria-label="Sections"><ul>${SECTION_NAV.map(
+  const switcher = games.length
+    ? `<nav class="nx-games" aria-label="Games"><ul>${games.map(
+      (entry) => `<li><a href="${esc(entry.href)}"${entry.id === game ? ' aria-current="true"' : ''}>${esc(entry.name)}</a></li>`,
+    ).join('')}</ul></nav>`
+    : '';
+  const nav = `<nav class="nx-nav" aria-label="Sections"><ul>${sectionNav(base).map(
     (item) =>
       `<li><a href="${esc(item.href)}"${item.id === activeNav ? ' aria-current="page"' : ''}>${esc(item.label)}</a></li>`,
   ).join('')}</ul></nav>`;
@@ -112,8 +121,10 @@ export function renderPage({
     `<header class="nx-top">` +
     `<a class="nx-logo" href="/"><img src="/home/logo.png" width="28" height="28" alt="Pokoin"></a>` +
     `<a class="nx-mast" href="/news">Pokoin <span>News</span></a>` +
-    `<a class="nx-market-link" href="/marketplace">Marketplace</a>` +
+    (game !== 'pokemon' ? `<a class="nx-mast__game" href="${esc(base)}">${esc(gameName(game))}</a>` : '') +
+    `<a class="nx-market-link" href="${esc(gameMarketplaceBase(game))}">Marketplace</a>` +
     `</header>` +
+    switcher +
     nav;
 
   const legalBits = [];

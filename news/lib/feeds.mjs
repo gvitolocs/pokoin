@@ -1,8 +1,9 @@
 // Feeds and sitemaps for Pokoin News: Google News sitemap, URL sitemap, RSS 2.0.
 import { esc } from './html.mjs';
 import { rfc822, sectionLabel } from './format.mjs';
-import { SECTIONS } from './schema.mjs';
+import { SECTIONS, articlePath } from './schema.mjs';
 import { SITE, STATIC_PAGES } from './site.mjs';
+import { gameOf, gameName, gameNewsBase, gamesWithNews } from './games.mjs';
 
 const NEWS_WINDOW_MS = 48 * 60 * 60 * 1000;
 
@@ -30,7 +31,7 @@ export function newsSitemap(all, { now = new Date(), baseUrl = SITE.baseUrl } = 
     .slice(0, 1000)
     .map(
       (record) =>
-        `  <url><loc>${esc(`${baseUrl}/news/${record.slug}`)}</loc>\n` +
+        `  <url><loc>${esc(`${baseUrl}${articlePath(record)}`)}</loc>\n` +
         `    <news:news><news:publication><news:name>${esc(SITE.publicationName)}</news:name>` +
         `<news:language>${esc(SITE.language)}</news:language></news:publication>\n` +
         `      <news:publication_date>${esc(isoZ(record.datePublished))}</news:publication_date>` +
@@ -51,13 +52,26 @@ function urlEntry(loc, lastmod) {
   return `<url><loc>${esc(loc)}</loc>${lastmod ? `<lastmod>${esc(lastmod)}</lastmod>` : ''}</url>`;
 }
 
-// Standard sitemap: every published article plus the fixed news surfaces.
+// Sections a game's news actually has (Pokémon: all sections).
+export function sectionsFor(game, all) {
+  if (game === 'pokemon') return [...SECTIONS];
+  const published = publishedRecords(all).filter((record) => gameOf(record) === game);
+  return SECTIONS.filter((section) => published.some((record) => record.section === section
+    || (section === 'fact-check' && record.template === 'fact_check')
+    || (section === 'analysis' && record.template === 'analysis')));
+}
+
+// Standard sitemap: every published article plus the fixed news surfaces of
+// every game that has stories.
 export function newsUrlSitemap(all, { baseUrl = SITE.baseUrl, now = new Date() } = {}) {
   const entries = publishedRecords(all).map((record) =>
-    urlEntry(`${baseUrl}/news/${record.slug}`, record.dateModified ? isoZ(record.dateModified) : ''),
+    urlEntry(`${baseUrl}${articlePath(record)}`, record.dateModified ? isoZ(record.dateModified) : ''),
   );
-  entries.push(urlEntry(`${baseUrl}/news`, isoZ(now)));
-  for (const section of SECTIONS) entries.push(urlEntry(`${baseUrl}/news/${section}`, ''));
+  for (const game of gamesWithNews(all)) {
+    const base = gameNewsBase(game);
+    entries.push(urlEntry(`${baseUrl}${base}`, isoZ(now)));
+    for (const section of sectionsFor(game, all)) entries.push(urlEntry(`${baseUrl}${base}/${section}`, ''));
+  }
   entries.push(urlEntry(`${baseUrl}/news/authors/poko`, ''));
   for (const page of STATIC_PAGES) entries.push(urlEntry(`${baseUrl}/news/${page.slug}`, ''));
 
@@ -69,16 +83,24 @@ export function newsUrlSitemap(all, { baseUrl = SITE.baseUrl, now = new Date() }
   );
 }
 
-// RSS 2.0 feed of the latest 30 published stories.
-export function rssFeed(all, { baseUrl = SITE.baseUrl, now = new Date() } = {}) {
-  const records = publishedRecords(all).slice(0, 30);
+// RSS 2.0 feed of the latest 30 published stories: the whole publication, or
+// one game's stories when `game` is given (served at <game news base>/rss.xml).
+export function rssFeed(all, { baseUrl = SITE.baseUrl, now = new Date(), game = null } = {}) {
+  const records = publishedRecords(all).filter((record) => !game || gameOf(record) === game).slice(0, 30);
+  const base = game ? gameNewsBase(game) : '/news';
+  const title = game && game !== 'pokemon' ? `${SITE.publicationName} — ${gameName(game)}` : SITE.publicationName;
+  const description = game && game !== 'pokemon'
+    ? `${gameName(game)} news, fact checks and market data from Poko, Pokoin's AI-assisted news desk.`
+    : game === 'pokemon'
+      ? 'Pokémon TCG news, fact checks and market data from Poko, Pokoin\'s AI-assisted news desk.'
+      : 'Trading card game news, fact checks and market data from Poko, Pokoin\'s AI-assisted news desk.';
   const lastBuildDate = records.length
     ? rfc822(records[0].datePublished)
     : rfc822(new Date(now).toISOString());
 
   const items = records
     .map((record) => {
-      const url = `${baseUrl}/news/${record.slug}`;
+      const url = `${baseUrl}${articlePath(record)}`;
       return (
         `    <item>\n` +
         `      <title>${esc(record.headline)}</title>\n` +
@@ -86,6 +108,7 @@ export function rssFeed(all, { baseUrl = SITE.baseUrl, now = new Date() } = {}) 
         `      <guid isPermaLink="true">${esc(url)}</guid>\n` +
         `      <pubDate>${esc(rfc822(record.datePublished))}</pubDate>\n` +
         `      <dc:creator>${esc('Poko — Pokoin News Desk')}</dc:creator>\n` +
+        `      <category>${esc(gameName(gameOf(record)))}</category>\n` +
         `      <category>${esc(sectionLabel(record.section))}</category>\n` +
         `      <description>${esc(record.dek)}</description>\n` +
         `    </item>`
@@ -98,11 +121,11 @@ export function rssFeed(all, { baseUrl = SITE.baseUrl, now = new Date() } = {}) 
     '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" ' +
     'xmlns:dc="http://purl.org/dc/elements/1.1/">\n' +
     `  <channel>\n` +
-    `    <title>${esc(SITE.publicationName)}</title>\n` +
-    `    <link>${esc(`${baseUrl}/news`)}</link>\n` +
-    `    <description>Pokémon TCG news, fact checks and market data from Poko, Pokoin's AI-assisted news desk.</description>\n` +
+    `    <title>${esc(title)}</title>\n` +
+    `    <link>${esc(`${baseUrl}${base}`)}</link>\n` +
+    `    <description>${esc(description)}</description>\n` +
     `    <language>${esc(SITE.language)}</language>\n` +
-    `    <atom:link href="${esc(`${baseUrl}/news/rss.xml`)}" rel="self" type="application/rss+xml"/>\n` +
+    `    <atom:link href="${esc(`${baseUrl}${base}/rss.xml`)}" rel="self" type="application/rss+xml"/>\n` +
     `    <lastBuildDate>${esc(lastBuildDate)}</lastBuildDate>\n` +
     (items ? `${items}\n` : '') +
     `  </channel>\n` +

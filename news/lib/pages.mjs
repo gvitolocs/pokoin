@@ -15,6 +15,9 @@ import {
 } from './jsonld.mjs';
 import { relatedStories } from './related.mjs';
 import { SITE, STATIC_PAGES } from './site.mjs';
+import { articlePath } from './schema.mjs';
+import { sectionsFor } from './feeds.mjs';
+import { gameOf, gameName, gameNewsBase, gameSwitcher, sectionHref } from './games.mjs';
 
 const CONTENT_DIR = new URL('../content/', import.meta.url);
 const contentCache = new Map();
@@ -57,7 +60,7 @@ function cardImage(hero) {
   );
 }
 
-export function renderArticleCard(record, { size = 'm' } = {}) {
+export function renderArticleCard(record, { size = 'm', showGame = false } = {}) {
   const heading = size === 'lead' ? 'h2' : 'h3';
   const stats = computeReadingStats(record);
   const date = record.datePublished
@@ -68,8 +71,10 @@ export function renderArticleCard(record, { size = 'm' } = {}) {
     `<article class="nx-card nx-card--${esc(size)}">` +
     cardImage(record.hero) +
     `<p class="nx-card__meta"><span class="nx-type nx-type--${esc(typeSlug(record.articleType))}">` +
-    `${esc(record.articleType)}</span> ${esc(sectionLabel(record.section))}</p>` +
-    `<${heading}><a href="/news/${esc(record.slug)}">${esc(record.headline)}</a></${heading}>` +
+    `${esc(record.articleType)}</span> ` +
+    (showGame ? `<span class="nx-card__game">${esc(gameName(gameOf(record)))}</span> · ` : '') +
+    `${esc(sectionLabel(record.section))}</p>` +
+    `<${heading}><a href="${esc(articlePath(record))}">${esc(record.headline)}</a></${heading}>` +
     dek +
     `<p class="nx-card__by">Poko · ${date} · ${stats.readingMinutes} min read</p>` +
     `</article>`
@@ -109,7 +114,8 @@ export function renderArticlePage(record, all, ctx = {}) {
   const baseUrl = ctx.baseUrl || SITE.baseUrl;
   const hero = record.hero || ctx.fallbackHero || null;
   const image = hero ? { url: hero.url, width: hero.width, height: hero.height, alt: hero.alt } : null;
-  const canonicalPath = `/news/${record.slug}`;
+  const canonicalPath = articlePath(record);
+  const game = gameOf(record);
 
   const extraHead = [
     `<meta property="article:published_time" content="${esc(record.datePublished)}">`,
@@ -127,7 +133,8 @@ export function renderArticlePage(record, all, ctx = {}) {
     breadcrumbJsonLd(
       [
         { name: 'News', url: `${baseUrl}/news` },
-        { name: sectionLabel(record.section), url: `${baseUrl}/news/${record.section}` },
+        ...(game !== 'pokemon' ? [{ name: gameName(game), url: `${baseUrl}${gameNewsBase(game)}` }] : []),
+        { name: sectionLabel(record.section), url: `${baseUrl}${sectionHref(game, record.section)}` },
         { name: record.headline, url: `${baseUrl}${canonicalPath}` },
       ],
       { baseUrl },
@@ -149,32 +156,51 @@ export function renderArticlePage(record, all, ctx = {}) {
     extraHead,
     preview: ctx.preview === true,
     assets: ctx.assets,
+    game,
+    games: gameSwitcher(all),
   });
 }
 
 const HOME_DESCRIPTION = 'Pokémon TCG news, fact checks and market data from Poko, Pokoin\'s AI-assisted news desk.';
 
+function homeTitle(game) {
+  return game === 'pokemon'
+    ? 'Pokoin News — Pokémon TCG news, fact checks and market data'
+    : `${gameName(game)} news — Pokoin News`;
+}
+
+function homeDescription(game) {
+  return game === 'pokemon'
+    ? HOME_DESCRIPTION
+    : `${gameName(game)} news, fact checks and market data from Poko, Pokoin's AI-assisted news desk.`;
+}
+
 export function renderHome(all, ctx = {}) {
   const baseUrl = ctx.baseUrl || SITE.baseUrl;
-  const published = publishedSorted(all);
+  const game = ctx.game || 'pokemon';
+  const base = gameNewsBase(game);
+  const everything = publishedSorted(all);
+  const published = everything.filter((record) => gameOf(record) === game);
   const page = {
-    canonicalPath: '/news',
+    canonicalPath: base,
     activeNav: 'latest',
     preview: ctx.preview === true,
     assets: ctx.assets,
+    game,
+    games: gameSwitcher(all),
   };
 
   if (!published.length) {
     const body =
-      `<section class="nx-empty"><h1>Pokoin News</h1>` +
-      `<p>Pokoin News is getting ready. The first stories are in editorial review.</p>` +
+      `<section class="nx-empty"><h1>${esc(game === 'pokemon' ? 'Pokoin News' : `${gameName(game)} news`)}</h1>` +
+      `<p>${game === 'pokemon' ? 'Pokoin News is getting ready. The first stories are in editorial review.' : `No ${esc(gameName(game))} stories yet. Poko publishes when there is something worth reporting.`}</p>` +
       `<p><a href="/news/about">About Pokoin News</a> · ` +
       `<a href="/news/editorial-policy">Editorial policy</a> · ` +
       `<a href="/news/methodology">Sources &amp; methodology</a></p></section>`;
     return renderPage({
       ...page,
-      title: 'Pokoin News — Pokémon TCG news, fact checks and market data',
-      description: HOME_DESCRIPTION,
+      title: homeTitle(game),
+      description: homeDescription(game),
       jsonLd: [websiteJsonLd()],
       body,
     });
@@ -188,31 +214,35 @@ export function renderHome(all, ctx = {}) {
 
   const rest = published.slice(5);
   const rails = [
-    { title: 'Latest', href: '/news', records: rest.slice(0, 8) },
+    { title: 'Latest', href: base, records: rest.slice(0, 8) },
     {
       title: 'Market Pulse',
-      href: '/news/market',
+      href: `${base}/market`,
       records: published.filter((record) => ['market_pulse', 'data_deep_dive'].includes(record.template)),
     },
-    { title: 'Reveals', href: '/news/cards', records: published.filter((record) => record.template === 'reveal') },
+    { title: 'Reveals', href: `${base}/cards`, records: published.filter((record) => record.template === 'reveal') },
     {
       title: 'Explainers',
-      href: '/news/cards',
+      href: `${base}/cards`,
       records: published.filter((record) => ['explainer', 'comparison'].includes(record.template)),
     },
     {
       title: 'Fact Checks',
-      href: '/news/fact-check',
+      href: `${base}/fact-check`,
       records: published.filter((record) => record.template === 'fact_check'),
     },
+    // Pokémon front page: latest from the other games, each linking to its own hub.
+    ...(game === 'pokemon'
+      ? [{ title: 'Across the TCGs', href: null, showGame: true, records: everything.filter((record) => gameOf(record) !== 'pokemon').slice(0, 8) }]
+      : []),
   ].filter((rail) => rail.records.length);
 
   const railsHtml = rails
     .map(
       (rail) =>
         `<section class="nx-rail"><h2>${esc(rail.title)}</h2>` +
-        `<a class="nx-rail__more" href="${esc(rail.href)}">More</a>` +
-        `<div class="nx-rail__items">${rail.records.map((record) => renderArticleCard(record, { size: 'm' })).join('')}</div>` +
+        (rail.href ? `<a class="nx-rail__more" href="${esc(rail.href)}">More</a>` : '') +
+        `<div class="nx-rail__items">${rail.records.map((record) => renderArticleCard(record, { size: 'm', showGame: rail.showGame === true })).join('')}</div>` +
         `</section>`,
     )
     .join('');
@@ -223,21 +253,22 @@ export function renderHome(all, ctx = {}) {
     itemListElement: published.slice(0, 10).map((record, index) => ({
       '@type': 'ListItem',
       position: index + 1,
-      url: `${baseUrl}/news/${record.slug}`,
+      url: `${baseUrl}${articlePath(record)}`,
     })),
   };
 
   return renderPage({
     ...page,
-    title: 'Pokoin News — Pokémon TCG news, fact checks and market data',
-    description: HOME_DESCRIPTION,
+    title: homeTitle(game),
+    description: homeDescription(game),
     jsonLd: [websiteJsonLd(), itemList],
     body: front + railsHtml,
   });
 }
 
 export function renderSection(sectionId, all, ctx = {}) {
-  const published = publishedSorted(all).filter(
+  const game = ctx.game || 'pokemon';
+  const published = publishedSorted(all).filter((record) => gameOf(record) === game).filter(
     (record) =>
       record.section === sectionId ||
       (sectionId === 'fact-check' && record.template === 'fact_check') ||
@@ -247,15 +278,18 @@ export function renderSection(sectionId, all, ctx = {}) {
   const list = published.length
     ? published.map((record) => renderArticleCard(record, { size: 'm' })).join('')
     : `<p class="nx-empty">No articles in ${esc(label)} yet.</p>`;
-  const body = `<section class="nx-section"><h1>${esc(label)}</h1><div class="nx-list">${list}</div></section>`;
+  const heading = game === 'pokemon' ? label : `${gameName(game)}: ${label}`;
+  const body = `<section class="nx-section"><h1>${esc(heading)}</h1><div class="nx-list">${list}</div></section>`;
   return renderPage({
-    title: `${label} — Pokoin News`,
-    description: `Pokoin News coverage in ${label}.`,
-    canonicalPath: `/news/${sectionId}`,
+    title: `${heading} — Pokoin News`,
+    description: `Pokoin News ${game === 'pokemon' ? '' : `${gameName(game)} `}coverage in ${label}.`,
+    canonicalPath: sectionHref(game, sectionId),
     body,
     activeNav: sectionId,
     preview: ctx.preview === true,
     assets: ctx.assets,
+    game,
+    games: gameSwitcher(all),
   });
 }
 
@@ -266,11 +300,11 @@ export function renderAuthorPage(all, ctx = {}) {
     `<article class="nx-page nx-author"><h1>Poko — Pokoin News Desk</h1>` +
     content +
     `<section class="nx-author__latest"><h2>Latest from Poko</h2>` +
-    `<div class="nx-list">${latest.map((record) => renderArticleCard(record, { size: 'm' })).join('')}</div>` +
+    `<div class="nx-list">${latest.map((record) => renderArticleCard(record, { size: 'm', showGame: true })).join('')}</div>` +
     `</section></article>`;
   return renderPage({
     title: 'Poko — Pokoin News Desk',
-    description: "Poko is Pokoin's AI-assisted Pokémon TCG reporter.",
+    description: "Poko is Pokoin's AI-assisted trading card game reporter.",
     canonicalPath: '/news/authors/poko',
     jsonLd: [authorPageJsonLd()],
     body,
@@ -311,4 +345,4 @@ export function renderNotFound(ctx = {}) {
   });
 }
 
-export { STATIC_PAGES, readContent };
+export { STATIC_PAGES, readContent, sectionsFor };

@@ -54,6 +54,14 @@ h1, h2, h3 { line-height: 1.2; overflow-wrap: anywhere; }
 .nx-mast span { color: var(--accent); }
 .nx-market-link { margin-left: auto; font-size: 14px; color: var(--muted); }
 
+.nx-mast__game { font-weight: 700; font-size: 15px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-mast__game::before { content: '/'; color: var(--line); margin-right: 10px; }
+.nx-games { border-bottom: 1px solid var(--line); background: var(--paper); }
+.nx-games ul { display: flex; flex-wrap: nowrap; gap: 6px; margin: 0; padding: 8px 16px; list-style: none; overflow-x: auto; scrollbar-width: none; }
+.nx-games ul::-webkit-scrollbar { display: none; }
+.nx-games a { display: block; padding: 4px 10px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.nx-games a:hover { color: var(--text); }
+.nx-games a[aria-current='true'] { color: #000; background: var(--accent); border-color: var(--accent); }
 .nx-nav { border-bottom: 1px solid var(--line); background: var(--bg); }
 .nx-nav ul { display: flex; flex-wrap: nowrap; gap: 18px; margin: 0; padding: 10px 16px; list-style: none; overflow-x: auto; scrollbar-width: none; }
 .nx-nav ul::-webkit-scrollbar { display: none; }
@@ -81,6 +89,7 @@ main { display: block; max-width: var(--wide); margin: 0 auto; padding: 22px 16p
 /* Cards ------------------------------------------------------------------- */
 .nx-card img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; background: var(--paper); }
 .nx-card__meta { margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
+.nx-card__game { color: var(--text); font-weight: 600; }
 .nx-type { color: var(--accent); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
 .nx-kicker .nx-type { display: inline-block; padding: 3px 8px; border-radius: 2px; background: var(--accent); color: #000; }
 .nx-kicker .nx-type--analysis { background: var(--analysis); }

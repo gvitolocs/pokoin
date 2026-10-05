@@ -1,7 +1,8 @@
 // Article body renderer: the <article> element only (page layout/head is W2).
+import { gameOf, gameName, gameNewsBase, sectionHref } from './games.mjs';
 import { esc, attr, safeUrl } from './html.mjs';
 import { formatDateTime, formatTime, sectionLabel } from './format.mjs';
-import { POKO_AUTHOR, computeReadingStats } from './schema.mjs';
+import { POKO_AUTHOR, computeReadingStats, articlePath } from './schema.mjs';
 import { renderBlocks } from './blocks.mjs';
 
 const UPDATED_THRESHOLD_MS = 60 * 1000;
@@ -123,14 +124,16 @@ function renderShare(record, url) {
 
 export function renderArticleBody(record, ctx = {}) {
   const baseUrl = ctx.baseUrl || 'https://pokoin.com';
-  const url = `${baseUrl}/news/${record.slug}`;
+  const url = `${baseUrl}${articlePath(record)}`;
+  const game = gameOf(record);
   const { readingMinutes } = computeReadingStats(record);
   const hero = record.hero || ctx.fallbackHero || null;
 
   const crumbs =
     `<nav class="nx-crumbs" aria-label="Breadcrumb"><ol>` +
     `<li><a href="/news">News</a></li>` +
-    `<li><a href="/news/${esc(record.section)}">${esc(sectionLabel(record.section))}</a></li>` +
+    (game !== 'pokemon' ? `<li><a href="${esc(gameNewsBase(game))}">${esc(gameName(game))}</a></li>` : '') +
+    `<li><a href="${esc(sectionHref(game, record.section))}">${esc(sectionLabel(record.section))}</a></li>` +
     `</ol></nav>`;
 
   const kicker =
