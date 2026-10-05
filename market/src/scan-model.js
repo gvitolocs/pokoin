@@ -198,8 +198,19 @@ export function suggestedStackCursor({
   let hintStack = 0;
   let hintPos = 0;
   if (stored && typeof stored === 'object') {
-    hintStack = Math.trunc(Number(stored.stack)) || 0;
-    hintPos = Math.trunc(Number(stored.startPosition)) || 0;
+    const storedSize = Math.max(1, Math.trunc(Number(stored.stackSize)) || 1);
+    if (storedSize === size) {
+      hintStack = Math.trunc(Number(stored.stack)) || 0;
+      hintPos = Math.trunc(Number(stored.startPosition)) || 0;
+    } else {
+      // The box changed cards-per-stack since the cursor was saved: convert
+      // through the absolute index so stack 104 of size 1 lands on 80-card
+      // stack 2 position 24 instead of an out-of-range stack 104.
+      const abs = stackPosToIndex(stored.stack || 1, stored.startPosition || 1, storedSize);
+      const cur = indexToStackPos(abs, size);
+      hintStack = cur.stack;
+      hintPos = cur.position;
+    }
   } else {
     const abs = Math.trunc(Number(stored)) || 0;
     if (abs >= 1) {

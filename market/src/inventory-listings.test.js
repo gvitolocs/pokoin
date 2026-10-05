@@ -20,6 +20,7 @@ import {
   occupiedAbsForScanBoxes,
   parseListingLocation,
   liveInventoryListings,
+  recentListingBoxes,
   sameListingBox,
   sortInventoryRows,
   summarizeLiveInventory,
@@ -283,6 +284,38 @@ test('occupiedAbsForScanBoxes seeds the scan desk from live inventory', () => {
   assert.equal(map.has('other'), false);
 });
 
+
+test('recentListingBoxes strips slot suffixes and orders by recency', () => {
+  const rows = [
+    { location: 'box1·2·5', updatedAt: '2026-10-01T10:00:00Z' },
+    { location: 'box2·1', updatedAt: '2026-10-03T10:00:00Z' },
+    { location: 'box3', updated_at: '2026-10-02T10:00:00Z' },
+  ];
+  assert.deepEqual(recentListingBoxes(rows), ['box2', 'box3', 'box1']);
+});
+
+test('recentListingBoxes dedupes case-insensitively keeping the newest spelling', () => {
+  const rows = [
+    { location: 'box1·2', updatedAt: '2026-10-01T10:00:00Z' },
+    { location: 'BOX1', updatedAt: '2026-10-04T10:00:00Z' },
+    { location: 'box1', createdAt: '2026-10-02T10:00:00Z' },
+  ];
+  assert.deepEqual(recentListingBoxes(rows), ['BOX1']);
+});
+
+test('recentListingBoxes skips empties, sorts missing dates last and caps at the limit', () => {
+  const rows = [
+    { location: '', updatedAt: '2026-10-05T10:00:00Z' },
+    { location: '   ', updatedAt: '2026-10-05T10:00:00Z' },
+    { location: 'boxA', updatedAt: '2026-10-04T10:00:00Z' },
+    { location: 'boxB' },
+    { location: 'boxC', createdAt: '2026-10-03T10:00:00Z' },
+  ];
+  assert.deepEqual(recentListingBoxes(rows), ['boxA', 'boxC', 'boxB']);
+  assert.deepEqual(recentListingBoxes(rows, 2), ['boxA', 'boxC']);
+  assert.deepEqual(recentListingBoxes(rows, 0), []);
+  assert.deepEqual(recentListingBoxes(null), []);
+});
 
 test('location pages include every slot in the linked box without matching neighboring boxes', () => {
   const rows = [

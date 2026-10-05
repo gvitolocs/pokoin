@@ -242,6 +242,36 @@ export function listingBox(raw) {
 }
 
 /**
+ * Distinct boxes a seller has used, most recently updated first (max 30).
+ * Slots are stripped, dedupe is case-insensitive and keeps the newest
+ * spelling, and rows without a date sort last. Sold-out boxes are included:
+ * a location the seller stopped using is still a box worth suggesting.
+ */
+export function recentListingBoxes(rows, limit = 30) {
+  const dated = (Array.isArray(rows) ? rows : []).map((row, index) => ({
+    box: listingBox(row?.location).trim(),
+    date: String(row?.updatedAt || row?.updated_at || row?.createdAt || row?.created_at || ''),
+    index,
+  })).filter((entry) => entry.box);
+  dated.sort((a, b) => {
+    if (a.date && b.date) return b.date.localeCompare(a.date) || a.index - b.index;
+    if (a.date) return -1;
+    if (b.date) return 1;
+    return a.index - b.index;
+  });
+  const out = [];
+  const seen = new Set();
+  for (const entry of dated) {
+    if (out.length >= limit) break;
+    const key = entry.box.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry.box);
+  }
+  return out;
+}
+
+/**
  * Case-insensitive box match: does a stored location (which may carry a
  * ·stack-position suffix) belong to the box a URL names? A hand-typed slug
  * matches across casing.

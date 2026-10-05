@@ -15,6 +15,7 @@ import {
   nextFreeSlot,
   nextPositionInStack,
   occupiedAbsForScanBoxes,
+  recentListingBoxes,
 } from '../inventory-listings.js';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
@@ -204,6 +205,8 @@ export default function ScanDesk() {
   const [priceRetry, setPriceRetry] = useState(0);
   /** PowerTools single-card draft: printing picked, Qty focused, hotkeys edit, Enter creates. */
   const [draft, setDraft] = useState(null);
+  /** Boxes this seller has used, for the Location datalist. */
+  const [sellerBoxes, setSellerBoxes] = useState([]);
   const qtyBuffer = useRef({ id: '', buffer: '', at: 0 });
   const undoStack = useRef([]);
   const redoStack = useRef([]);
@@ -557,6 +560,29 @@ export default function ScanDesk() {
     })();
     return () => { cancelled = true; };
   }, [batch?.id, defaults.location, closed, stockUid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Location suggestions: every box this seller has used, sold-out included,
+  // loaded once the uid is known. The current batch default leads the list.
+  useEffect(() => {
+    if (!stockUid) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchSellerListings(stockUid, await getBearer(), { limit: 1000 });
+        if (cancelled) return;
+        setSellerBoxes(recentListingBoxes(data.listings || data.items || []));
+      } catch (_) {
+        // Suggestions are a hint: a failed load just leaves the list empty.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [stockUid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const locationOptions = useMemo(() => {
+    const current = String(defaults.location || '').trim();
+    if (!current) return sellerBoxes;
+    return [current, ...sellerBoxes.filter((box) => box.toLowerCase() !== current.toLowerCase())];
+  }, [sellerBoxes, defaults.location]);
 
   /** Next free position when the seller types a stack: stock in the box plus this batch. */
   function positionForStack(stack) {
@@ -1452,6 +1478,7 @@ export default function ScanDesk() {
           <DefaultsBar
             defaults={defaults}
             stackFull={stackFull}
+            locationOptions={locationOptions}
             onChange={setDefaults}
             positionForStack={positionForStack}
             locationRef={locationInput}
@@ -1663,7 +1690,7 @@ function QrBlock({ secret, pin }) {
   );
 }
 
-function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackButtonRef, stackFull = false }) {
+function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackButtonRef, stackFull = false, locationOptions = [] }) {
   const [locationDraft, setLocationDraft] = useState(defaults.location);
   const [stackDraft, setStackDraft] = useState(String(defaults.stack ?? 1));
   const [posDraft, setPosDraft] = useState(String(defaults.startPosition ?? 1));
@@ -1798,10 +1825,20 @@ function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackB
             value={locationDraft}
             maxLength={64}
             placeholder="Box A12"
-            onChange={(e) => setLocationDraft(e.target.value)}
+            list="scan-location-options"
+            onChange={(e) => {
+              const value = e.target.value;
+              setLocationDraft(value);
+              // Picking a datalist option keeps focus: apply it now instead of
+              // waiting for blur / Enter (both still commit as before).
+              if (locationOptions.includes(value)) onChange({ location: value });
+            }}
             onBlur={commitLocation}
             onKeyDown={blurOnEnter}
           />
+          <datalist id="scan-location-options">
+            {locationOptions.map((box) => <option key={box} value={box} />)}
+          </datalist>
           <button
             ref={stackButtonRef}
             type="button"
