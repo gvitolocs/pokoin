@@ -422,9 +422,9 @@ export default function Expansion() {
         <div className="set-filters">
           {langs.length ? (
             <label className="sort">
-              Language
+              <span className="set-filter-name">Language</span>
               <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-                <option value="">Any</option>
+                <option value="">Any language</option>
                 {langs.map((value) => (
                   <option key={value} value={value}>{value}</option>
                 ))}
@@ -432,34 +432,34 @@ export default function Expansion() {
             </label>
           ) : null}
           <label className="sort">
-            Rarity
+            <span className="set-filter-name">Rarity</span>
             <select value={rarity} onChange={(event) => setRarity(event.target.value)}>
-              <option value="">Any</option>
+              <option value="">Any rarity</option>
               {rarities.map((value) => (
                 <option key={value} value={value}>{value}</option>
               ))}
             </select>
           </label>
           <label className="sort">
-            Reverse
+            <span className="set-filter-name">Reverse</span>
             <select value={reverse} onChange={(event) => setReverse(event.target.value)}>
-              <option value="any">Any</option>
+              <option value="any">Reverse: any</option>
               <option value="yes">Reverse</option>
               <option value="no">Not reverse</option>
             </select>
           </label>
           <label className="sort">
-            First edition
+            <span className="set-filter-name">First edition</span>
             <select value={firstEdition} onChange={(event) => setFirstEdition(event.target.value)}>
-              <option value="any">Any</option>
+              <option value="any">1st Ed.: any</option>
               <option value="yes">1st Ed.</option>
               <option value="no">Unlimited</option>
             </select>
           </label>
           <label className="sort">
-            Listed
+            <span className="set-filter-name">Listed</span>
             <select value={listed} onChange={(event) => setListed(event.target.value)}>
-              <option value="any">Any</option>
+              <option value="any">Listed: any</option>
               <option value="yes">Has PKN</option>
               <option value="no">No price</option>
             </select>
