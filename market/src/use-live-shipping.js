@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchShippingOptions } from './api.js';
-import { orderServices, shippingEstimate } from './cart-shipping.js';
+import { orderServices, parcelEstimate, shippingEstimate, tierRoom } from './cart-shipping.js';
 import { defaultShippingService } from './shipping-quote.js';
 
 function iso(value) {
@@ -111,7 +111,9 @@ export function useLiveShipping({ groups = [], to = '', service = '' } = {}) {
           serviceName: picked.serviceName || '',
           carrier: picked.carrier || '',
           packageTier: picked.packageTier || '',
-          room: 0,
+          room: picked.id === 'tracked' || picked.id === 'untracked'
+            ? parcelEstimate({ from: group.sellerCountry, to: country, cards: group.selectedCount, service: picked.id })?.room || 0
+            : tierRoom(group.selectedCount),
           fallback: Boolean(wanted && picked.id !== wanted),
         }
         : null;

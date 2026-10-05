@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { groupBySeller } from './cart-model.js';
-import { orderServices, parcelEstimate, parcelNudge, parcelServices, shippingEstimate } from './cart-shipping.js';
+import { nudgeFromParcels, orderServices, parcelEstimate, parcelNudge, parcelServices, shippingEstimate, tierRoom } from './cart-shipping.js';
 
 const row = (over = {}) => ({
   id: 'l1',
@@ -80,4 +80,40 @@ test('order services total each choice across parcels', () => {
   );
   const total = shippingEstimate(groups, 'DK', 'tracked');
   assert.equal(total.cents, tracked.cents);
+});
+
+test('tier room is the room left in the tier that fits the cards', () => {
+  assert.equal(tierRoom(2), 2); // SMALL max 4
+  assert.equal(tierRoom(4), 0); // at the SMALL cap
+  assert.equal(tierRoom(5), 15); // MEDIUM max 20
+  assert.equal(tierRoom(79), 121); // LARGE max 200
+  assert.equal(tierRoom(0), 0);
+  assert.equal(tierRoom(9999), 0); // at the EXTRA_LARGE cap
+  assert.equal(tierRoom(10000), 0); // no tier covers it
+});
+
+test('the nudge picks the dearest parcel that still has room', () => {
+  const groups = [
+    { key: 'a', sellerCountry: 'IT', selectedCount: 2 },
+    { key: 'b', sellerCountry: 'DE', selectedCount: 5 },
+  ];
+  const parcels = [
+    { key: 'a', estimate: { amountCents: 130, room: 2 } },
+    { key: 'b', estimate: { amountCents: 9525, room: 15 } },
+  ];
+  const best = nudgeFromParcels(groups, parcels);
+  assert.equal(best.group.key, 'b');
+  assert.equal(best.estimate.amountCents, 9525);
+  assert.equal(best.estimate.room, 15);
+  // A parcel with no room is skipped even when dearest; so is a null estimate.
+  const stuck = nudgeFromParcels(groups, [
+    { key: 'b', estimate: { amountCents: 9525, room: 0 } },
+    { key: 'a', estimate: null },
+  ]);
+  assert.equal(stuck, null);
+  const none = nudgeFromParcels(groups, [
+    { key: 'a', estimate: { amountCents: 130, room: 0 } },
+    { key: 'b', estimate: { amountCents: 9525, room: 0 } },
+  ]);
+  assert.equal(none, null);
 });

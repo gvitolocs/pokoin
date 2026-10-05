@@ -21,6 +21,15 @@ flock 9
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# The newsroom service and SSH sessions have no global wrangler on PATH; a
+# bare `wrangler` call failed there with "command not found". Prefer an
+# installed wrangler, else run the pinned major through npx.
+if command -v wrangler >/dev/null 2>&1; then
+  WRANGLER=(wrangler)
+else
+  WRANGLER=(npx --yes wrangler@4)
+fi
+
 git fetch origin main
 
 WORK="$(mktemp -d)"
@@ -39,12 +48,12 @@ node "$WORK/scripts/build-news-site.mjs" \
   --strict
 
 if [ "${1:-}" = "--deploy" ]; then
-  (cd "$WORK" && wrangler deploy -c wrangler.pokoin-news.jsonc --message "news $SHA $STAMP")
+  (cd "$WORK" && "${WRANGLER[@]}" deploy -c wrangler.pokoin-news.jsonc --message "news $SHA $STAMP")
   exit 0
 fi
 
 UPLOAD_OUT="$(
-  cd "$WORK" && wrangler versions upload \
+  cd "$WORK" && "${WRANGLER[@]}" versions upload \
     -c wrangler.pokoin-news.jsonc \
     --message "news $SHA $STAMP"
 )"
@@ -60,5 +69,5 @@ fi
 
 if [ "${1:-}" = "--promote" ]; then
   PROMOTE_ID="${2:?--promote requires a version id}"
-  wrangler versions deploy "$PROMOTE_ID@100%" --name pokoin-news -y
+  "${WRANGLER[@]}" versions deploy "$PROMOTE_ID@100%" --name pokoin-news -y
 fi

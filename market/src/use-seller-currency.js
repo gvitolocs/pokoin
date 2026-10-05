@@ -39,5 +39,6 @@ export function useSellerCurrency() {
     return () => { cancelled = true; };
   }, [signedIn, getBearer]);
 
-  return { currency: sellerListCurrency(settings), settings, failed };
+  const pending = Boolean(signedIn) && settings == null && !failed;
+  return { currency: sellerListCurrency(settings), settings, failed, pending };
 }

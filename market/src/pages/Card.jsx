@@ -346,6 +346,7 @@ function SoldPriceGraph({
   onFirstEdition,
   onGraded,
   onPickDay,
+  formatPrice,
 }) {
   const wrapRef = useRef(null);
   const touchPointerActiveRef = useRef(false);
@@ -451,7 +452,9 @@ function SoldPriceGraph({
   const active = hoverIndex == null ? null : days[hoverIndex];
   const activePt = hoverIndex == null ? null : points[hoverIndex];
   const tipMods = activePt ? soldGraphTipMods(activePt[0], activePt[1], width, pad) : [];
-  const price = active ? (formatPkn(active.medianPkn) || '0 PKN') : '';
+  const price = active
+    ? ((formatPrice ? formatPrice(active.medianPkn) : formatPkn(active.medianPkn)) || '0 PKN')
+    : '';
   const hoverLabel = active ? formatSoldDay(active.day, dateLocale) : '';
 
   function hoverFromPointer(event) {
@@ -2231,7 +2234,7 @@ export default function Card() {
   const dealPick = dealLang || dealCond
     ? matchDeal(nativeLive, dealLang || null, dealCond || null)
     : preferredDeal(nativeLive, card.nationality);
-  const lastDayPkn = formatPkn(salesSeries?.lastMedianPkn);
+  const lastDayPkn = buyer.format(salesSeries?.lastMedianPkn);
   const change72h = formatChange72h(salesSeries?.change24hPct);
   const canBuy = Boolean(dealPick);
   const dealLangs = sellLanguages({
@@ -2475,10 +2478,10 @@ export default function Card() {
           </p>
           <div className="asset-quotes">
             <span
-              className={lastDayPkn ? 'quote-pill quote-pkn' : 'quote-pill quote-pkn oos'}
-              title="Last day's median inferred sold price in PKN"
+              className={buyer.pending || lastDayPkn ? 'quote-pill quote-pkn' : 'quote-pill quote-pkn oos'}
+              title="Last day's median inferred sold price"
             >
-              {salesSeries == null ? '—' : (lastDayPkn || '—')}
+              {buyer.pending ? '\u00a0' : (salesSeries == null ? '—' : (lastDayPkn || '—'))}
             </span>
             <span
               className={change72h.empty ? 'quote-pill oos' : 'quote-pill'}
@@ -2616,6 +2619,7 @@ export default function Card() {
             onReverse={setSalesReverse}
             onFirstEdition={setSalesFirstEdition}
             onGraded={setSalesGraded}
+            formatPrice={(pkn) => buyer.format(pkn)}
             onPickDay={(day) => {
               const traits = soldTraitsForGraphDay(salesSlices || [], {
                 nationality: salesNationality,

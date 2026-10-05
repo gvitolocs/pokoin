@@ -22,7 +22,7 @@ import {
   sellerCountryLabel,
   sellerHref,
 } from '../listing-meta.js';
-import { fiatFromPkn, formatLocalFromEurCents, formatPkn, formatPknNumber } from '../pkn.js';
+import { formatLocalFromEurCents, formatPkn, formatPknNumber, moneyFromPkn } from '../pkn.js';
 import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
 import CardArt from './CardArt.jsx';
@@ -30,9 +30,9 @@ import CardArt from './CardArt.jsx';
 const LOW_STOCK = 3;
 
 function fiatParts(pricePkn, currency) {
-  const amount = fiatFromPkn(pricePkn, currency);
-  if (amount == null) return null;
-  const [int, dec] = amount.toFixed(2).split('.');
+  const money = moneyFromPkn(pricePkn, currency);
+  if (!money?.amount) return null;
+  const [int, dec] = money.amount.split('.');
   if (currency === 'DKK') return { pre: '', int, dec, post: 'DKK' };
   if (currency === 'USD') return { pre: '$', int, dec, post: '' };
   return { pre: '€', int, dec, post: '' };
@@ -40,13 +40,16 @@ function fiatParts(pricePkn, currency) {
 
 /**
  * Amazon's price: small symbol, big whole part, small raised cents. PKN stays
- * digits only (2642 PKN, never 2,642); local currency shows the PKN under it.
+ * digits only (2642 PKN, never 2,642). A pinned currency keeps PKN under
+ * the local amount; an unaffordable price is the local amount alone.
  */
 export function BigPrice({ pricePkn, sellerAcceptsPkn = true, size = 'lg', fiat }) {
   const buyer = useBuyerCurrency();
   const pkn = Number(pricePkn) || 0;
+  if (buyer.pending) return <span className={`bk-price is-${size} is-pending`} aria-hidden="true" />;
   if (!(pkn > 0)) return <span className="bk-price is-none">—</span>;
   const local = (fiat ?? buyer.fiat(pkn, sellerAcceptsPkn)) ? fiatParts(pkn, buyer.currency) : null;
+  const keepPkn = Boolean(buyer.pinned && buyer.pinned !== 'PKN');
   if (local) {
     return (
       <span className={`bk-price is-${size}`}>
@@ -56,7 +59,7 @@ export function BigPrice({ pricePkn, sellerAcceptsPkn = true, size = 'lg', fiat 
           <span className="bk-price-dec">{local.dec}</span>
           {local.post ? <span className="bk-price-sym is-post">{local.post}</span> : null}
         </span>
-        <span className="bk-price-sub">{formatPkn(pkn)}</span>
+        {keepPkn ? <span className="bk-price-sub">{formatPkn(pkn)}</span> : null}
       </span>
     );
   }
