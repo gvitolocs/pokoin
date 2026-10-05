@@ -1,0 +1,977 @@
+[
+  {
+    "schemaVersion": 1,
+    "language": "en",
+    "editionOf": null,
+    "author": {
+      "id": "poko",
+      "name": "Poko",
+      "role": "Pokoin News Desk",
+      "url": "/news/authors/poko"
+    },
+    "images": [],
+    "entities": [],
+    "related": {
+      "cards": [],
+      "sets": [
+        {
+          "slug": "ex-delta-species",
+          "name": "EX Delta Species",
+          "path": "/marketplace/sets/ex-delta-species",
+          "cardCount": 114,
+          "nationality": "western",
+          "logoUrl": "https://cdn.pokoin.com/expansions/logos/ex-delta-species.png",
+          "symbolUrl": "https://cdn.pokoin.com/expansions/symbols/ex-delta-species.png",
+          "retrievedAt": "2026-10-04T09:00:00.000Z"
+        }
+      ]
+    },
+    "market": null,
+    "updates": [
+      {
+        "at": "2026-10-04T15:03:00.000Z",
+        "text": "Pokémon’s prerelease page now lists October 24 as the first day of prerelease events.",
+        "statusChange": "multi_source→confirmed"
+      }
+    ],
+    "corrections": [],
+    "tags": [
+      "cards",
+      "reveal",
+      "delta reign"
+    ],
+    "generation": {
+      "provider": "fixture",
+      "reporterModel": null,
+      "editorModel": null,
+      "skillVersion": null,
+      "styleVersion": null,
+      "editorVerdict": "approve"
+    },
+    "scores": {
+      "editorialWorthiness": 0.7,
+      "originalReporting": 0.5,
+      "components": {}
+    },
+    "id": "art_story_fixture_reveal_en",
+    "slug": "delta-reign-prerelease-promos-revealed",
+    "canonicalStoryId": "story_fixture_reveal",
+    "status": "published",
+    "template": "reveal",
+    "articleType": "NEWS",
+    "section": "cards",
+    "headline": "Delta Reign Prerelease Promos Revealed: Enamorus, Kommo-o, Masquerain and Magmortar",
+    "dek": "Each Build & Battle Box carries one of four foil promos; prerelease events start October 24 ahead of the November 6 release.",
+    "datePublished": "2026-10-04T09:14:00.000Z",
+    "dateModified": "2026-10-04T15:03:00.000Z",
+    "hero": {
+      "id": "hero",
+      "url": "/news/media/delta-reign-prerelease-promos-revealed/hero-1600x900.jpg",
+      "width": 1600,
+      "height": 900,
+      "alt": "Pokoin News artwork for the Delta Reign prerelease promos story",
+      "caption": "",
+      "credit": "Pokoin",
+      "origin": "pokoin_generated",
+      "sourceUrl": "https://pokoin.com/marketplace",
+      "rights": "owned",
+      "isIllustration": false,
+      "variants": [
+        {
+          "url": "/news/media/delta-reign-prerelease-promos-revealed/hero-1600x900.jpg",
+          "width": 1600,
+          "height": 900,
+          "ratio": "16x9"
+        },
+        {
+          "url": "/news/media/delta-reign-prerelease-promos-revealed/hero-1200x900.jpg",
+          "width": 1200,
+          "height": 900,
+          "ratio": "4x3"
+        },
+        {
+          "url": "/news/media/delta-reign-prerelease-promos-revealed/hero-1200x1200.jpg",
+          "width": 1200,
+          "height": 1200,
+          "ratio": "1x1"
+        }
+      ]
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "outlet": "Pokémon",
+        "url": "https://www.pokemon.com/us/news/play-at-a-pokemon-tcg-mega-evolution-delta-reign-prerelease-event",
+        "title": "Play at a Pokémon TCG: Mega Evolution—Delta Reign Prerelease Event",
+        "tier": "A",
+        "role": "primary",
+        "firstReported": false,
+        "publishedAt": "2026-09-26T16:00:00.000Z",
+        "accessedAt": "2026-10-04T09:00:00.000Z"
+      },
+      {
+        "id": "s2",
+        "outlet": "ScreenRant",
+        "url": "https://screenrant.com/pokemon-tcg-delta-reign-prerelease-promo-cards/",
+        "title": "Pokémon TCG: Delta Reign Prerelease Reveals Brand-New Promo Cards",
+        "tier": "C",
+        "role": "secondary",
+        "firstReported": true,
+        "publishedAt": "2026-10-03T12:00:00.000Z",
+        "accessedAt": "2026-10-04T09:00:00.000Z"
+      },
+      {
+        "id": "s3",
+        "outlet": "GameRant",
+        "url": "https://gamerant.com/pokemon-tcg-delta-reign-promo-cards/",
+        "title": "Pokemon TCG Reveals 4 New Delta Reign Promo Cards",
+        "tier": "C",
+        "role": "secondary",
+        "firstReported": false,
+        "publishedAt": "2026-10-03T18:00:00.000Z",
+        "accessedAt": "2026-10-04T09:00:00.000Z"
+      }
+    ],
+    "blocks": [
+      {
+        "type": "update_note",
+        "at": "2026-10-04T15:03:00.000Z",
+        "text": "Pokémon’s prerelease page now lists October 24 as the first day of prerelease events."
+      },
+      {
+        "type": "paragraph",
+        "text": "The four Mega Evolution—Delta Reign prerelease promos are Enamorus, Kommo-o, Masquerain and Magmortar, first shown in coverage by ScreenRant.",
+        "sourceIds": [
+          "s2",
+          "s3"
+        ]
+      },
+      {
+        "type": "key_facts",
+        "items": [
+          {
+            "text": "Each Build & Battle Box contains four Delta Reign booster packs, a 40-card deck and one of the four foil promos.",
+            "sourceIds": [
+              "s1",
+              "s3"
+            ]
+          },
+          {
+            "text": "Prerelease events begin October 24.",
+            "sourceIds": [
+              "s1"
+            ]
+          },
+          {
+            "text": "Delta Reign releases November 6, 2026.",
+            "sourceIds": [
+              "s3"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "context",
+        "text": "Build & Battle Box promos are randomly inserted, so a specific promo is not guaranteed from a single box."
+      },
+      {
+        "type": "why_it_matters",
+        "text": "Collectors chasing all four promos will need several boxes or singles; prerelease promos usually stay tied to these kits."
+      },
+      {
+        "type": "related_set",
+        "slug": "ex-delta-species"
+      }
+    ],
+    "revisions": [
+      {
+        "rev": 1,
+        "at": "2026-10-04T09:14:00.000Z",
+        "reason": "initial",
+        "material": true,
+        "hash": "a1",
+        "changed": [
+          "*"
+        ]
+      },
+      {
+        "rev": 2,
+        "at": "2026-10-04T15:03:00.000Z",
+        "reason": "update",
+        "material": true,
+        "hash": "a2",
+        "changed": [
+          "blocks"
+        ]
+      }
+    ],
+    "gate": {
+      "verdict": "READY",
+      "checks": [
+        {
+          "id": "article_schema",
+          "pass": true,
+          "severity": "block",
+          "detail": "ok"
+        }
+      ],
+      "evaluatedAt": "2026-10-04T15:03:00.000Z"
+    },
+    "seo": {
+      "title": "Delta Reign Prerelease Promos Revealed: Enamorus, Kommo-o, Masquerain and Magmortar",
+      "description": "Each Build & Battle Box carries one of four foil promos; prerelease events start October 24 ahead of the November 6 release."
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "language": "en",
+    "editionOf": null,
+    "author": {
+      "id": "poko",
+      "name": "Poko",
+      "role": "Pokoin News Desk",
+      "url": "/news/authors/poko"
+    },
+    "images": [],
+    "entities": [],
+    "related": {
+      "cards": [],
+      "sets": []
+    },
+    "market": null,
+    "updates": [],
+    "corrections": [],
+    "tags": [
+      "fact-check",
+      "valentines box"
+    ],
+    "generation": {
+      "provider": "fixture",
+      "reporterModel": null,
+      "editorModel": null,
+      "skillVersion": null,
+      "styleVersion": null,
+      "editorVerdict": "approve"
+    },
+    "scores": {
+      "editorialWorthiness": 0.7,
+      "originalReporting": 0.5,
+      "components": {}
+    },
+    "id": "art_story_fixture_fc_en",
+    "slug": "is-the-pokemon-tcg-valentines-box-confirmed",
+    "canonicalStoryId": "story_fixture_fc",
+    "status": "published",
+    "template": "fact_check",
+    "articleType": "FACT CHECK",
+    "section": "fact-check",
+    "headline": "Is the Pokémon TCG Valentine’s Box Confirmed for January 27? Not Yet",
+    "dek": "Several outlets report a January 27, 2027 Valentine’s Box, but one headline calls it confirmed while Pokémon has not announced it.",
+    "datePublished": "2026-10-03T08:00:00.000Z",
+    "dateModified": "2026-10-03T08:00:00.000Z",
+    "hero": null,
+    "sources": [
+      {
+        "id": "s1",
+        "outlet": "Dexerto",
+        "url": "https://www.dexerto.com/pokemon/pokemon-tcg-reportedly-releasing-valentines-day-set-with-package-that-turns-into-mailbox-3414802/",
+        "title": "Pokemon TCG reportedly releasing Valentine’s Day set",
+        "tier": "C",
+        "role": "secondary",
+        "firstReported": false,
+        "publishedAt": "2026-10-01T10:00:00.000Z",
+        "accessedAt": "2026-10-03T07:00:00.000Z"
+      },
+      {
+        "id": "s2",
+        "outlet": "GameRant",
+        "url": "https://gamerant.com/pokemon-tcg-valentines-day-box-release-date/",
+        "title": "New Official Pokemon TCG Release Confirmed for January 27",
+        "tier": "C",
+        "role": "secondary",
+        "firstReported": false,
+        "publishedAt": "2026-10-01T14:00:00.000Z",
+        "accessedAt": "2026-10-03T07:00:00.000Z"
+      },
+      {
+        "id": "s3",
+        "outlet": "PokeBeach",
+        "url": "https://www.pokebeach.com/",
+        "title": "Valentine’s Box report",
+        "tier": "B",
+        "role": "secondary",
+        "firstReported": true,
+        "publishedAt": "2026-09-30T20:00:00.000Z",
+        "accessedAt": "2026-10-03T07:00:00.000Z"
+      }
+    ],
+    "blocks": [
+      {
+        "type": "fact_check",
+        "claim": "Pokémon has confirmed a Valentine’s Day TCG box for January 27, 2027.",
+        "verdict": "DISPUTED",
+        "explanation": "PokeBeach reported the box and its date, and other outlets repeat that report. One headline says the release is confirmed, but none of the sources cite an announcement from Pokémon.",
+        "supportedBy": [
+          "s2"
+        ],
+        "contradictedBy": [
+          "s1"
+        ],
+        "primarySourceId": null
+      },
+      {
+        "type": "key_facts",
+        "items": [
+          {
+            "text": "PokeBeach first reported a Valentine’s Box dated January 27, 2027.",
+            "sourceIds": [
+              "s3"
+            ]
+          },
+          {
+            "text": "Dexerto describes the box as reported, not announced.",
+            "sourceIds": [
+              "s1"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "source_comparison",
+        "rows": [
+          {
+            "claim": "Status of the January 27 date",
+            "says": [
+              {
+                "sourceId": "s2",
+                "text": "Headline says “confirmed”"
+              },
+              {
+                "sourceId": "s1",
+                "text": "Says “reportedly”"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "unknowns",
+        "items": [
+          {
+            "text": "Pokémon has not published a product page or press release for the box."
+          },
+          {
+            "text": "Which cards the packs contain has not been reported."
+          }
+        ]
+      }
+    ],
+    "revisions": [
+      {
+        "rev": 1,
+        "at": "2026-10-03T08:00:00.000Z",
+        "reason": "initial",
+        "material": true,
+        "hash": "b1",
+        "changed": [
+          "*"
+        ]
+      }
+    ],
+    "gate": {
+      "verdict": "READY",
+      "checks": [
+        {
+          "id": "article_schema",
+          "pass": true,
+          "severity": "block",
+          "detail": "ok"
+        }
+      ],
+      "evaluatedAt": "2026-10-03T08:00:00.000Z"
+    },
+    "seo": {
+      "title": "Is the Pokémon TCG Valentine’s Box Confirmed for January 27? Not Yet",
+      "description": "Several outlets report a January 27, 2027 Valentine’s Box, but one headline calls it confirmed while Pokémon has not announced it."
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "language": "en",
+    "editionOf": null,
+    "author": {
+      "id": "poko",
+      "name": "Poko",
+      "role": "Pokoin News Desk",
+      "url": "/news/authors/poko"
+    },
+    "images": [],
+    "entities": [
+      {
+        "type": "card",
+        "name": "Charizard ex",
+        "pokoinId": "522754",
+        "path": "/marketplace/en/cards/522754/card-charizard-ex-special-illustration-rare-199-165-151",
+        "resolved": true
+      }
+    ],
+    "related": {
+      "cards": [
+        {
+          "cardId": "522754",
+          "name": "Charizard ex",
+          "setName": "151",
+          "number": "199/165",
+          "imageUrl": "https://cdn.pokoin.com/522754_charizard-ex-special-illustration-rare-199-165-151.jpg",
+          "path": "/marketplace/en/cards/522754/card-charizard-ex-special-illustration-rare-199-165-151",
+          "listings": {
+            "count": 100,
+            "sellerCount": 88,
+            "lowestAskPkn": 50126,
+            "day": "2026-10-04"
+          },
+          "retrievedAt": "2026-10-04T11:00:00.000Z"
+        }
+      ],
+      "sets": []
+    },
+    "market": {
+      "subject": {
+        "type": "card",
+        "name": "Charizard ex — 151 199/165",
+        "pokoinId": "522754",
+        "path": "/marketplace/en/cards/522754/card-charizard-ex-special-illustration-rare-199-165-151"
+      },
+      "window": {
+        "from": "2026-09-04",
+        "to": "2026-10-04",
+        "days": 30
+      },
+      "retrievedAt": "2026-10-04T11:00:00.000Z",
+      "currency": "PKN",
+      "metrics": [
+        {
+          "id": "lowest_ask_latest",
+          "label": "Lowest ask (latest snapshot)",
+          "value": 50126,
+          "unit": "PKN",
+          "measurement": "asking",
+          "definition": "Lowest asking price among CardTrader offers for this printing on 2026-10-04."
+        },
+        {
+          "id": "lowest_ask_change",
+          "label": "Lowest ask change over the window",
+          "value": 13.1,
+          "unit": "%",
+          "measurement": "asking",
+          "definition": "Change between the first (2026-09-11) and last (2026-10-04) lowest ask in the window."
+        },
+        {
+          "id": "listings_latest",
+          "label": "Active listings (latest snapshot)",
+          "value": 100,
+          "unit": "listings",
+          "measurement": "count",
+          "definition": "CardTrader offers for this printing on 2026-10-04."
+        }
+      ],
+      "charts": [
+        {
+          "id": "c_ask",
+          "kind": "line",
+          "title": "Lowest ask per day",
+          "measurement": "asking",
+          "unit": "PKN",
+          "series": [
+            {
+              "label": "Lowest ask",
+              "points": [
+                {
+                  "x": "2026-09-11",
+                  "y": 44328
+                },
+                {
+                  "x": "2026-09-12",
+                  "y": 44328
+                },
+                {
+                  "x": "2026-09-13",
+                  "y": 44328
+                },
+                {
+                  "x": "2026-09-14",
+                  "y": 44328
+                },
+                {
+                  "x": "2026-09-15",
+                  "y": 44328
+                },
+                {
+                  "x": "2026-09-16",
+                  "y": 44328
+                },
+                {
+                  "x": "2026-09-17",
+                  "y": 45100
+                },
+                {
+                  "x": "2026-09-18",
+                  "y": 45100
+                },
+                {
+                  "x": "2026-09-19",
+                  "y": 46200
+                },
+                {
+                  "x": "2026-09-20",
+                  "y": 46200
+                },
+                {
+                  "x": "2026-09-21",
+                  "y": 46900
+                },
+                {
+                  "x": "2026-09-22",
+                  "y": 47500
+                },
+                {
+                  "x": "2026-09-23",
+                  "y": 47500
+                },
+                {
+                  "x": "2026-09-24",
+                  "y": 48200
+                },
+                {
+                  "x": "2026-09-25",
+                  "y": 48900
+                },
+                {
+                  "x": "2026-09-26",
+                  "y": 48900
+                },
+                {
+                  "x": "2026-09-27",
+                  "y": 49300
+                },
+                {
+                  "x": "2026-09-28",
+                  "y": 49300
+                },
+                {
+                  "x": "2026-09-29",
+                  "y": 49800
+                },
+                {
+                  "x": "2026-09-30",
+                  "y": 50126
+                },
+                {
+                  "x": "2026-10-01",
+                  "y": 50126
+                },
+                {
+                  "x": "2026-10-02",
+                  "y": 50126
+                },
+                {
+                  "x": "2026-10-03",
+                  "y": 50126
+                },
+                {
+                  "x": "2026-10-04",
+                  "y": 50126
+                }
+              ]
+            }
+          ],
+          "summary": "Lowest ask moved from 44328 PKN on Sep 11 to 50126 PKN on Oct 4 (min 44328, max 50126)."
+        },
+        {
+          "id": "c_listings",
+          "kind": "bar",
+          "title": "Active listings per day",
+          "measurement": "count",
+          "unit": "listings",
+          "series": [
+            {
+              "label": "Listings",
+              "points": [
+                {
+                  "x": "2026-09-11",
+                  "y": 110
+                },
+                {
+                  "x": "2026-09-12",
+                  "y": 110
+                },
+                {
+                  "x": "2026-09-13",
+                  "y": 110
+                },
+                {
+                  "x": "2026-09-14",
+                  "y": 107
+                },
+                {
+                  "x": "2026-09-15",
+                  "y": 109
+                },
+                {
+                  "x": "2026-09-16",
+                  "y": 114
+                },
+                {
+                  "x": "2026-09-17",
+                  "y": 111
+                },
+                {
+                  "x": "2026-09-18",
+                  "y": 112
+                },
+                {
+                  "x": "2026-09-19",
+                  "y": 110
+                },
+                {
+                  "x": "2026-09-20",
+                  "y": 108
+                },
+                {
+                  "x": "2026-09-21",
+                  "y": 106
+                },
+                {
+                  "x": "2026-09-22",
+                  "y": 105
+                },
+                {
+                  "x": "2026-09-23",
+                  "y": 104
+                },
+                {
+                  "x": "2026-09-24",
+                  "y": 104
+                },
+                {
+                  "x": "2026-09-25",
+                  "y": 103
+                },
+                {
+                  "x": "2026-09-26",
+                  "y": 101
+                },
+                {
+                  "x": "2026-09-27",
+                  "y": 101
+                },
+                {
+                  "x": "2026-09-28",
+                  "y": 100
+                },
+                {
+                  "x": "2026-09-29",
+                  "y": 100
+                },
+                {
+                  "x": "2026-09-30",
+                  "y": 99
+                },
+                {
+                  "x": "2026-10-01",
+                  "y": 100
+                },
+                {
+                  "x": "2026-10-02",
+                  "y": 100
+                },
+                {
+                  "x": "2026-10-03",
+                  "y": 101
+                },
+                {
+                  "x": "2026-10-04",
+                  "y": 100
+                }
+              ]
+            }
+          ],
+          "summary": "Active listings moved from 110 on Sep 11 to 100 on Oct 4 (min 99, max 114)."
+        }
+      ],
+      "observations": 24,
+      "sufficient": true,
+      "sourceNote": "Pokoin marketplace data (CardTrader offers tracked by Pokoin). Pokoin News is published by Pokoin, which operates this marketplace."
+    },
+    "updates": [],
+    "corrections": [],
+    "tags": [
+      "market",
+      "charizard ex"
+    ],
+    "generation": {
+      "provider": "fixture",
+      "reporterModel": null,
+      "editorModel": null,
+      "skillVersion": null,
+      "styleVersion": null,
+      "editorVerdict": "approve"
+    },
+    "scores": {
+      "editorialWorthiness": 0.7,
+      "originalReporting": 0.5,
+      "components": {}
+    },
+    "id": "art_story_fixture_mkt_en",
+    "slug": "charizard-ex-151-sir-asks-climb-through-september",
+    "canonicalStoryId": "story_fixture_mkt",
+    "status": "published",
+    "template": "market_pulse",
+    "articleType": "MARKET",
+    "section": "market",
+    "headline": "Charizard ex 151 SIR Asks Climb Through September on Pokoin",
+    "dek": "The lowest asking price for the 199/165 Special Illustration Rare rose across the month while active listings thinned.",
+    "datePublished": "2026-10-04T12:00:00.000Z",
+    "dateModified": "2026-10-04T12:00:00.000Z",
+    "hero": {
+      "id": "hero",
+      "url": "/news/media/charizard-ex-151-sir-asks-climb-through-september/hero-1600x900.jpg",
+      "width": 1600,
+      "height": 900,
+      "alt": "Charizard ex Special Illustration Rare 199/165 from the 151 set, card image from the Pokoin catalog",
+      "caption": "",
+      "credit": "Pokoin",
+      "origin": "pokoin_generated",
+      "sourceUrl": "https://pokoin.com/marketplace",
+      "rights": "owned",
+      "isIllustration": false,
+      "variants": [
+        {
+          "url": "/news/media/charizard-ex-151-sir-asks-climb-through-september/hero-1600x900.jpg",
+          "width": 1600,
+          "height": 900,
+          "ratio": "16x9"
+        },
+        {
+          "url": "/news/media/charizard-ex-151-sir-asks-climb-through-september/hero-1200x900.jpg",
+          "width": 1200,
+          "height": 900,
+          "ratio": "4x3"
+        },
+        {
+          "url": "/news/media/charizard-ex-151-sir-asks-climb-through-september/hero-1200x1200.jpg",
+          "width": 1200,
+          "height": 1200,
+          "ratio": "1x1"
+        }
+      ]
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "outlet": "Pokoin marketplace data",
+        "url": "https://pokoin.com/marketplace/en/cards/522754/card-charizard-ex-special-illustration-rare-199-165-151",
+        "title": "Charizard ex — 151 199/165",
+        "tier": "A",
+        "role": "primary",
+        "firstReported": false,
+        "publishedAt": "2026-10-04T11:00:00.000Z",
+        "accessedAt": "2026-10-04T11:00:00.000Z"
+      }
+    ],
+    "blocks": [
+      {
+        "type": "paragraph",
+        "text": "The cheapest listing for Charizard ex 199/165 from 151 rose steadily over the last month in Pokoin’s marketplace data, while the number of active offers edged down.",
+        "sourceIds": [
+          "s1"
+        ]
+      },
+      {
+        "type": "market"
+      },
+      {
+        "type": "chart",
+        "chartId": "c_ask"
+      },
+      {
+        "type": "chart",
+        "chartId": "c_listings"
+      },
+      {
+        "type": "context",
+        "text": "These are asking prices, not sales. A rising lowest ask with fewer offers means sellers are listing higher, not that buyers paid more."
+      },
+      {
+        "type": "analysis",
+        "text": "The move is gradual rather than a spike, which fits thinning supply more than a single news event. Asking data alone cannot show demand."
+      },
+      {
+        "type": "methodology",
+        "text": "Daily lowest ask and listing counts from CardTrader offers tracked by Pokoin, all conditions and languages, window September 4 to October 4, 2026."
+      },
+      {
+        "type": "related_card",
+        "cardId": "522754"
+      }
+    ],
+    "revisions": [
+      {
+        "rev": 1,
+        "at": "2026-10-04T12:00:00.000Z",
+        "reason": "initial",
+        "material": true,
+        "hash": "c1",
+        "changed": [
+          "*"
+        ]
+      }
+    ],
+    "gate": {
+      "verdict": "READY",
+      "checks": [
+        {
+          "id": "article_schema",
+          "pass": true,
+          "severity": "block",
+          "detail": "ok"
+        }
+      ],
+      "evaluatedAt": "2026-10-04T12:00:00.000Z"
+    },
+    "seo": {
+      "title": "Charizard ex 151 SIR Asks Climb Through September on Pokoin",
+      "description": "The lowest asking price for the 199/165 Special Illustration Rare rose across the month while active listings thinned."
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "language": "en",
+    "editionOf": null,
+    "author": {
+      "id": "poko",
+      "name": "Poko",
+      "role": "Pokoin News Desk",
+      "url": "/news/authors/poko"
+    },
+    "images": [],
+    "entities": [],
+    "related": {
+      "cards": [],
+      "sets": []
+    },
+    "market": null,
+    "updates": [],
+    "corrections": [],
+    "tags": [
+      "analysis"
+    ],
+    "generation": {
+      "provider": "fixture",
+      "reporterModel": null,
+      "editorModel": null,
+      "skillVersion": null,
+      "styleVersion": null,
+      "editorVerdict": "approve"
+    },
+    "scores": {
+      "editorialWorthiness": 0.7,
+      "originalReporting": 0.5,
+      "components": {}
+    },
+    "id": "art_story_fixture_review_en",
+    "slug": "what-the-30th-celebration-battle-decks-change",
+    "canonicalStoryId": "story_fixture_review",
+    "status": "review",
+    "template": "analysis",
+    "articleType": "ANALYSIS",
+    "section": "analysis",
+    "headline": "What the 30th Celebration Battle Decks Mean for Espeon ex and Umbreon ex Players",
+    "dek": "Two ready-to-play decks arrive October 30. Here is what is known and what is still interpretation.",
+    "datePublished": null,
+    "dateModified": null,
+    "hero": null,
+    "sources": [
+      {
+        "id": "s1",
+        "outlet": "Scryda",
+        "url": "https://scryda.com/news/pokemon-tcg-30th-celebration-battle-deck",
+        "title": "30th Celebration Battle Decks",
+        "tier": "C",
+        "role": "secondary",
+        "firstReported": false,
+        "publishedAt": "2026-10-02T10:00:00.000Z",
+        "accessedAt": "2026-10-05T07:00:00.000Z"
+      },
+      {
+        "id": "s2",
+        "outlet": "PocketMonsters.Net",
+        "url": "https://pocketmonsters.net/news/9538",
+        "title": "Battle Deck Espeon ex / Umbreon ex",
+        "tier": "C",
+        "role": "secondary",
+        "firstReported": true,
+        "publishedAt": "2026-10-01T10:00:00.000Z",
+        "accessedAt": "2026-10-05T07:00:00.000Z"
+      }
+    ],
+    "blocks": [
+      {
+        "type": "key_facts",
+        "items": [
+          {
+            "text": "Both Battle Decks release October 30.",
+            "sourceIds": [
+              "s1",
+              "s2"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "analysis",
+        "text": "Fixed-list decks tend to lower the entry cost for new players."
+      },
+      {
+        "type": "context",
+        "text": "Battle Decks are preconstructed 60-card decks."
+      },
+      {
+        "type": "unknowns",
+        "items": [
+          {
+            "text": "The full deck lists have not been published."
+          }
+        ]
+      }
+    ],
+    "revisions": [
+      {
+        "rev": 1,
+        "at": "2026-10-05T07:00:00.000Z",
+        "reason": "initial",
+        "material": true,
+        "hash": "d1",
+        "changed": [
+          "*"
+        ]
+      }
+    ],
+    "gate": {
+      "verdict": "REVIEW",
+      "checks": [
+        {
+          "id": "article_schema",
+          "pass": true,
+          "severity": "block",
+          "detail": "ok"
+        }
+      ],
+      "evaluatedAt": "2026-10-05T07:00:00.000Z"
+    },
+    "seo": {
+      "title": "What the 30th Celebration Battle Decks Mean for Espeon ex and Umbreon ex Players",
+      "description": "Two ready-to-play decks arrive October 30. Here is what is known and what is still interpretation."
+    }
+  }
+]
