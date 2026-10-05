@@ -2231,7 +2231,7 @@ export default function Card() {
   const dealPick = dealLang || dealCond
     ? matchDeal(nativeLive, dealLang || null, dealCond || null)
     : preferredDeal(nativeLive, card.nationality);
-  const lastDayPkn = formatPkn(salesSeries?.lastMedianPkn);
+  const lastDayPkn = buyer.format(salesSeries?.lastMedianPkn);
   const change72h = formatChange72h(salesSeries?.change24hPct);
   const canBuy = Boolean(dealPick);
   const dealLangs = sellLanguages({
@@ -2475,8 +2475,10 @@ export default function Card() {
           </p>
           <div className="asset-quotes">
             <span
-              className={lastDayPkn ? 'quote-pill quote-pkn' : 'quote-pill quote-pkn oos'}
-              title="Last day's median inferred sold price in PKN"
+              className={lastDayPkn
+                ? (lastDayPkn.endsWith('PKN') ? 'quote-pill quote-pkn' : 'quote-pill')
+                : 'quote-pill quote-pkn oos'}
+              title="Last day's median inferred sold price"
             >
               {salesSeries == null ? '—' : (lastDayPkn || '—')}
             </span>

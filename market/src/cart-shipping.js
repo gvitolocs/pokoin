@@ -103,19 +103,41 @@ export function orderServices(groups = [], to = '') {
     .sort((a, b) => Number(b.complete) - Number(a.complete) || a.cents - b.cents);
 }
 
+/** Cards left in the parcel tier that fits them, capped; 0 when nothing fits. */
+export function tierRoom(cards) {
+  const n = Math.max(0, Math.trunc(Number(cards) || 0));
+  if (n < 1) return 0;
+  for (const tier of TIERS) {
+    const max = Number(tier.maxCards) || 0;
+    if (max < n) continue;
+    return Math.min(max - n, PARCEL_ROOM_MAX);
+  }
+  return 0;
+}
+
 /**
- * Pokoin's "Add €30.21 to qualify for FREE Delivery": the ticked parcel with
- * the dearest shipping that still has room for more cards at the same price.
+ * Pokoin's "Add €30.21 to qualify for FREE Delivery": the parcel whose estimate
+ * has room for more cards, dearest shipping first. `parcels` is the
+ * `shipping.parcels` array ({ key, estimate } per seller).
  */
-export function parcelNudge(groups = [], to = '', service = '') {
+export function nudgeFromParcels(groups = [], parcels = []) {
   let best = null;
-  for (const group of groups || []) {
-    if (!group.selectedCount) continue;
-    const estimate = parcelEstimate({ from: group.sellerCountry, to, cards: group.selectedCount, service });
+  for (const parcel of parcels || []) {
+    const estimate = parcel?.estimate;
     if (!estimate || estimate.room < 1) continue;
+    const group = (groups || []).find((entry) => entry.key === parcel.key);
+    if (!group) continue;
     if (!best || estimate.amountCents > best.estimate.amountCents) {
       best = { group, estimate };
     }
   }
   return best;
+}
+
+/**
+ * Pokoin's "Add €30.21 to qualify for FREE Delivery": the ticked parcel with
+ * the dearest shipping that still has room for more cards at the same price.
+ */
+export function parcelNudge(groups = [], to = '', service = '') {
+  return nudgeFromParcels(groups, shippingEstimate(groups, to, service).parcels);
 }
