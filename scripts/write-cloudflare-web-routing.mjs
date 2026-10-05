@@ -16,13 +16,13 @@ const spa = [
   'bought', 'buy', 'cardscan', 'careers', 'cart', 'checkout', 'collection', 'contact',
   'dashboard', 'docs', 'earn', 'email-preferences', 'espurr', 'exchange', 'extension',
   'favorites', 'flex', 'forum', 'health', 'inventory', 'invite', 'join', 'jumbos',
-  'marketplace', 'messages', 'mypokoin', 'nft', 'ocr', 'orders', 'privacy', 'product',
+  'marketplace', 'messages', 'mypokoin', 'nft', 'ocr', 'orders', 'poko', 'privacy', 'product',
   'profile', 'protection', 'sales', 'sanitize', 'scan', 'scancard', 'shipping', 'sitemap', 'stock',
   'swap', 'tests', 'wallet', 'whitepaper',
   ...games,
 ];
 
-const testBoards = ['tests', 'sanitize', 'espurr', 'ocr', 'artwork', 'jumbos'];
+const testBoards = ['tests', 'sanitize', 'espurr', 'ocr', 'artwork', 'jumbos', 'poko'];
 const lines = [
   '# One wildcard per prefix. Workers Static Assets allow 100 redirect rules.',
   '# /news* is served by the separate assets-only pokoin-news Worker route; the SPA must never catch it.',
@@ -54,6 +54,12 @@ for (const board of testBoards) {
 lines.push('# SPA shell is /market/app.html. A rewrite to index.html loops in the assets router.');
 for (const prefix of spa) {
   if (testBoards.includes(prefix)) continue;
+  // /sitemap is the human graph. /sitemap.xml and /sitemap-cards-001.xml are files.
+  if (prefix === 'sitemap') {
+    lines.push('/sitemap /market/app 200');
+    lines.push('/sitemap/ /market/app 200');
+    continue;
+  }
   lines.push(`/${prefix}* /market/app 200`);
 }
 const rules = lines.filter((line) => line && !line.startsWith('#')).length;

@@ -120,18 +120,72 @@ test('card HTML carries the dated price snapshot and Pokoin attribution', () => 
   );
   assert.match(payload.snapshotDate, /^\d{4}-\d{2}-\d{2}$/);
   const html = renderCardOgHtml(payload);
-  assert.match(html, /Cheapest listing 2642 PKN · price snapshot \d{4}-\d{2}-\d{2}/);
-  assert.match(html, /live prices in PKN on <a href="https:\/\/pokoin\.com">Pokoin<\/a>/);
+  assert.match(html, /Market reference 2642 PKN · price snapshot \d{4}-\d{2}-\d{2}/);
+  assert.match(html, /not a Pokoin offer/);
+  const eurHtml = renderCardOgHtml({ ...payload, currency: 'EUR' });
+  assert.match(eurHtml, /Out of stock · minimum 13.21 EUR/);
+  const eurLd = JSON.parse(eurHtml.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  assert.equal(eurLd.offers.availability, 'https://schema.org/OutOfStock');
+  assert.equal(eurLd.offers.price, '13.21');
   const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
   assert.equal(jsonLd['@type'], 'Product');
   assert.equal(jsonLd.dateModified, payload.snapshotDate);
-  assert.equal(jsonLd.offers.price, 2642);
-  assert.equal(jsonLd.offers.priceCurrency, 'PKN');
-  assert.equal(jsonLd.offers.priceValidUntil, payload.priceValidUntil);
-  assert.equal(jsonLd.offers.seller.name, 'Pokoin');
+  assert.equal(jsonLd.offers, undefined);
+  assert.equal(html.includes('InStock'), false);
   const bare = renderCardOgHtml(
     buildCardOgPayload({ card: { name: 'Drifloon' } }, { cardId: '248768', language: 'en' }),
   );
-  assert.match(bare, /Prices in PKN on <a href="https:\/\/pokoin\.com">Pokoin<\/a>/);
-  assert.match(bare, /"availability": ?"https:\/\/schema\.org\/OutOfStock"/);
+  assert.match(bare, /No Pokoin listing is currently for sale/);
+  assert.equal(bare.includes('InStock'), false);
+});
+
+test('search HTML AggregateOffer uses only active Pokoin listings in the pinned currency', () => {
+  const payload = buildCardOgPayload(
+    {
+      seo: { canonicalPath: '/marketplace/en/cards/239000/card-charizard-4-102-base-set' },
+      card: {
+        id: '239000',
+        name: 'Charizard',
+        set: 'Base Set',
+        number: '4/102',
+        heroImageUrl: 'https://cdn.pokoin.com/cards/239000.jpg',
+      },
+      offers: [
+        {
+          id: 'lst-a',
+          sellerUid: 'seller-a',
+          sellerName: 'Seller A',
+          condition: 'NM',
+          pricePkn: 64000,
+          quantityAvailable: 1,
+          status: 'active',
+          cardImageUrl: 'https://cdn.pokoin.com/cards/239000.jpg',
+        },
+        {
+          id: 'lst-sold',
+          sellerUid: 'seller-b',
+          sellerName: 'Seller B',
+          condition: 'LP',
+          pricePkn: 1000,
+          quantityAvailable: 0,
+          status: 'sold_out',
+          cardImageUrl: 'https://cdn.pokoin.com/cards/239000.jpg',
+        },
+      ],
+    },
+    { cardId: '239000', language: 'en', includeDescription: true },
+  );
+  payload.currency = 'EUR';
+  payload.indexable = true;
+  const html = renderCardOgHtml(payload);
+  assert.match(html, /rel="canonical" href="https:\/\/pokoin\.com\/marketplace\/en\/cards\/239000\/card-charizard-4-102-base-set"/);
+  assert.match(html, /name="robots" content="index, follow"/);
+  assert.match(html, /1 Pokoin listing from 320.00 EUR/);
+  const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  assert.equal(jsonLd.offers['@type'], 'AggregateOffer');
+  assert.equal(jsonLd.offers.lowPrice, '320.00');
+  assert.equal(jsonLd.offers.highPrice, '320.00');
+  assert.equal(jsonLd.offers.offerCount, 1);
+  assert.equal(jsonLd.offers.priceCurrency, 'EUR');
+  assert.equal(jsonLd.offers.availability, 'https://schema.org/InStock');
 });

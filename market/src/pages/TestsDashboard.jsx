@@ -12,6 +12,7 @@ const ABOUT = {
   '/ocr/artists': 'Match the OCR-read illustrator credit to the pokemontcg.io artist table.',
   '/artwork': 'Pokémon-only album hover masks: Qwen3-VL boxes → SAM 2.1 silhouettes, with the whole-silhouette before / after.',
   '/jumbos': 'Every Jumbo Oversized leftover in one grid — homepage tiles with full-resolution links, so wrong pixels under a right name get caught.',
+  '/poko': 'Poko Part 5 (30th Celebration) re-voiced with Azure Dragon HD Omni, excited style — English, Italian, and the previous voice for A/B.',
 };
 
 export default function TestsDashboard() {

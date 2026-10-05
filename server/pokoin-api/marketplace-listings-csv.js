@@ -130,8 +130,8 @@ async function resolveCard(row) {
   };
 }
 
-async function insertListing(decoded, row, resolved, format) {
-  const source = stock.sourceForFormat(format);
+async function insertListing(decoded, row, resolved, format, cardtraderIntent = '') {
+  const source = stock.sourceForFormat(format, cardtraderIntent);
   const sourceListingId = stock.sourceListingIdFor(format, row);
   // Idempotent: skip if same source id already exists for this seller.
   if (sourceListingId) {
@@ -206,7 +206,7 @@ async function handleExport(req, res, decoded) {
   const url = new URL(req.url, `https://${req.headers.host || 'pokoin.com'}`);
   const format = cleanText(url.searchParams.get('format'), 40) || 'powertools';
   if (!stock.FORMATS.includes(format)) {
-    return res.status(400).json({ error: 'format must be powertools, cardmarket, or cardtrader.' });
+    return res.status(400).json({ error: 'format must be powertools, cardmarket, cardtrader, or tcgplayer.' });
   }
   const listings = await loadSellerListings(decoded.uid);
   const body = stock.exportListingsCsv(format, listings);
@@ -226,10 +226,12 @@ async function handleImport(req, res, decoded) {
   const priceMode = cleanText(body.priceMode, 40) || 'eur_to_pkn';
   const dryRun = body.dryRun !== false; // default dry-run for safety
   const formatOpt = cleanText(body.format, 40) || undefined;
+  const preserveLocation = body.preserveLocation === true;
+  const cardtraderIntent = cleanText(body.cardtraderIntent, 20) === 'link' ? 'link' : cleanText(body.cardtraderIntent, 20) === 'import' ? 'import' : '';
 
   let parsed;
   try {
-    parsed = stock.importCsvText(csvText, { format: formatOpt, stackSize, priceMode });
+    parsed = stock.importCsvText(csvText, { format: formatOpt, stackSize, priceMode, preserveLocation });
   } catch (error) {
     return res.status(error.statusCode || 400).json({ error: error.message || 'CSV parse failed.' });
   }
@@ -274,7 +276,7 @@ async function handleImport(req, res, decoded) {
       continue;
     }
     try {
-      const out = await insertListing(decoded, row, resolved, parsed.format);
+      const out = await insertListing(decoded, row, resolved, parsed.format, cardtraderIntent);
       if (out.skipped) skipped.push({ line: entry.index, ...out });
       else created.push({ line: entry.index, ...out });
     } catch (error) {

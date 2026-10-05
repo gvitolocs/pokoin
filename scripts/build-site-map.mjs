@@ -106,7 +106,7 @@ const LABELS = {
  * Not on the map: review boards live on test.pokoin.com only (vercel.json
  * redirects them off pokoin.com), and the extension auth bridge is plumbing.
  */
-const OFF_MAP = new Set(['/tests', '/sanitize', '/espurr', '/ocr', '/ocr/artists', '/artwork', '/jumbos', '/extension/auth-bridge']);
+const OFF_MAP = new Set(['/tests', '/sanitize', '/espurr', '/ocr', '/ocr/artists', '/artwork', '/jumbos', '/poko', '/extension/auth-bridge']);
 const INTERNAL = new Set(['/admin', '/marketplace/admin', '/marketplace/admin/edit']);
 const ACCOUNT = /^\/(auth|profile|cart|wallet|exchange|messages|checkout|orders|collection|inventory|scan|cardscan|scancard|buy|email-preferences|favorites|nft)\b|^\/marketplace\/(portfolio|watchlist)/;
 const INFO = /^\/(docs|about|careers|contact|privacy|protection|earn|whitepaper|health)$/;

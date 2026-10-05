@@ -2579,14 +2579,23 @@ export async function exportStockCsv(format, token) {
 }
 
 /** Import stock CSV. dryRun defaults true on the server. */
-export async function importStockCsv({ csv, format, stackSize = 1, priceMode = 'eur_to_pkn', dryRun = true, token }) {
+export async function importStockCsv({
+  csv,
+  format,
+  stackSize = 1,
+  priceMode = 'eur_to_pkn',
+  dryRun = true,
+  preserveLocation = false,
+  cardtraderIntent = '',
+  token,
+}) {
   return getJson('/api/marketplace-listings-csv', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ csv, format, stackSize, priceMode, dryRun }),
+    body: JSON.stringify({ csv, format, stackSize, priceMode, dryRun, preserveLocation, cardtraderIntent }),
   });
 }
 

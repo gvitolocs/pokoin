@@ -68,6 +68,9 @@ async function applyListingEvent(payload) {
     status: next.status,
   });
   next.steps.publishedAt = Date.now();
+  if (!next.steps.merchant) {
+    next.steps.merchant = await syncMerchant(next);
+  }
   if (next.wantsCardtrader) await pushCardTrader(next);
   if (next.destroyCardtrader && next.sourceListingId && !next.steps.destroyed) {
     const { destroyLinkedCardTraderProduct } = require('./_cardtrader_seller_listings');
@@ -83,8 +86,16 @@ async function applyListingEvent(payload) {
   return next;
 }
 
+async function syncMerchant(payload) {
+  const enabled = process.env.GOOGLE_MERCHANT_ENABLED;
+  if (enabled !== '1' && enabled !== 'true') return { skipped: true };
+  const { syncListingEvent } = require('./google-merchant/sync');
+  return syncListingEvent(payload);
+}
+
 async function handleClaimed(row) {
-  const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+  const payload = row.payload && typeof row.payload === 'object' ? { ...row.payload } : {};
+  payload.merchantAttempts = row.attempts;
   if (row.event_type === 'listing.changed') return applyListingEvent(payload);
   return payload;
 }
@@ -102,10 +113,18 @@ async function drainOnce() {
       });
       return true;
     } catch (error) {
+      if ((claimed.attempts || 0) >= 8) {
+        console.warn(JSON.stringify({
+          msg: 'pokoin_sync_dead_letter',
+          id: claimed.id,
+          event: claimed.event_type,
+        }));
+      }
       await withWriterTransaction(async (client) => {
         await finishClaim(client, claimed.id, {
           error: error.message || 'sync failed',
           payload: claimed.payload,
+          retrySeconds: error.retrySeconds,
         });
       });
       return false;

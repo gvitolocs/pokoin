@@ -407,7 +407,7 @@
       "permanent": true
     },
     {
-      "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos)",
+      "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos|poko)",
       "has": [
         {
           "type": "host",
@@ -418,7 +418,7 @@
       "permanent": true
     },
     {
-      "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos)/:rest*",
+      "source": "/:board(tests|sanitize|espurr|ocr|artwork|jumbos|poko)/:rest*",
       "has": [
         {
           "type": "host",
@@ -799,6 +799,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/poko/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/poko",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/admin/",
       "destination": "/market/index.html"
     },
@@ -1020,6 +1028,14 @@
     },
     {
       "source": "/mypokoin/import",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/spreadsheet/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/spreadsheet",
       "destination": "/market/index.html"
     },
     {

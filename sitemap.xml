@@ -9,4 +9,10 @@
   <sitemap>
     <loc>https://pokoin.com/sitemap-sets.xml</loc>
   </sitemap>
+  <sitemap>
+    <loc>https://pokoin.com/sitemap-cards-001.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://pokoin.com/sitemap-cards-002.xml</loc>
+  </sitemap>
 </sitemapindex>

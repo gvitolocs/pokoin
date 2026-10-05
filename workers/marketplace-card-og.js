@@ -3,11 +3,19 @@
  */
 
 import { realPublicCardId, rewriteLeftoverCatalogImage } from './public-card-id.js';
+import {
+  aggregateLabel,
+  cardCanonicalUrl,
+  productStructuredData,
+  purchasableOffers,
+} from '../market/src/google-commerce.js';
+import { currencyFromSearch, moneyFromPkn } from '../market/src/pkn.js';
 
 export { realPublicCardId } from './public-card-id.js';
 
 export const OG_CACHE_TTL_SEC = 3600;
-export const OG_CACHE_VERSION = 'v5';
+export const OG_SEARCH_CACHE_TTL_SEC = 120;
+export const OG_CACHE_VERSION = 'v6';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
@@ -17,10 +25,10 @@ export function utcSnapshotDate(daysAhead = 0) {
 }
 
 const BOT_RE =
-  /Discordbot|Twitterbot|Slackbot|LinkedInBot|facebookexternalhit|Facebot|WhatsApp|TelegramBot|SkypeUriPreview|Pinterest|Applebot|Googlebot|Google-InspectionTool|bingbot|Baiduspider|DuckDuckBot|Slack-ImgProxy|Embedly|Quora Link Preview|Showyoubot|outbrain|vkShare|W3C_Validator|redditbot|Iframely/i;
+  /Discordbot|Twitterbot|Slackbot|LinkedInBot|facebookexternalhit|Facebot|WhatsApp|TelegramBot|SkypeUriPreview|Pinterest|Applebot|Googlebot|Google-InspectionTool|Storebot-Google|AdsBot-Google|bingbot|Baiduspider|DuckDuckBot|Slack-ImgProxy|Embedly|Quora Link Preview|Showyoubot|outbrain|vkShare|W3C_Validator|redditbot|Iframely/i;
 
 const SEARCH_BOT_RE =
-  /Googlebot|Google-InspectionTool|bingbot|DuckDuckBot|Baiduspider|YandexBot|Applebot/i;
+  /Googlebot|Google-InspectionTool|Storebot-Google|AdsBot-Google|bingbot|DuckDuckBot|Baiduspider|YandexBot|Applebot/i;
 
 const CARD_PATH_RE =
   /^\/(?:([a-z0-9-]+)\/)?marketplace\/([a-z]{2}(?:-[a-z]{2})?)\/cards\/(\d+)(?:\/[^/?#]*)?\/?$/i;
@@ -170,7 +178,8 @@ export function buildCardOgPayload(cardPage, {
   const setName = String(card.set || card.set_name || '').trim();
   const artist = String(card.artist || card.illustrator || cardPage?.artist?.name || '').trim();
   const cheapest = Array.isArray(cardPage?.cheapest) ? cardPage.cheapest[0] : cardPage?.cheapest;
-  const pricePkn = Number(cheapest?.pricePkn || card.price || card.lowest_price_pkn || 0);
+  const referencePkn = Number(cheapest?.pricePkn || 0);
+  const offers = purchasableOffers(cardPage?.offers || []);
   const neighbors = [
     ...(cardPage?.neighbors?.prev || []),
     ...(cardPage?.neighbors?.next || []),
@@ -187,7 +196,11 @@ export function buildCardOgPayload(cardPage, {
     number: String(card.number || card.card_number || '').trim(),
     artist,
     language,
-    pricePkn: Number.isFinite(pricePkn) && pricePkn > 0 ? pricePkn : 0,
+    pricePkn: 0,
+    referencePkn: Number.isFinite(referencePkn) && referencePkn > 0 ? referencePkn : 0,
+    offers,
+    currency: '',
+    listingId: '',
     snapshotDate: utcSnapshotDate(),
     priceValidUntil: utcSnapshotDate(7),
     setHref: setName ? `/marketplace/sets/${setSlug(setName)}` : '',
@@ -197,41 +210,40 @@ export function buildCardOgPayload(cardPage, {
 }
 
 function productJsonLd(payload) {
-  const seller = { '@type': 'Organization', name: 'Pokoin', url: SITE };
-  const offer = payload.pricePkn
-    ? {
-      '@type': 'Offer',
-      priceCurrency: 'PKN',
-      price: payload.pricePkn,
-      availability: 'https://schema.org/InStock',
-      priceValidUntil: payload.priceValidUntil,
-      seller,
-    }
-    : {
-      '@type': 'Offer',
-      priceCurrency: 'PKN',
-      availability: 'https://schema.org/OutOfStock',
-      seller,
-    };
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'Product',
+  const card = {
+    id: payload.cardId,
     name: payload.name || payload.title,
-    description: payload.description || payload.title,
-    image: payload.image,
-    sku: payload.cardId,
-    brand: { '@type': 'Brand', name: 'Pokémon TCG' },
-    url: payload.url,
-    dateModified: payload.snapshotDate,
-    offers: offer,
+    set: payload.setName,
+    number: payload.number,
+    artist: payload.artist,
+    canonicalPath: payload.path,
+    heroImageUrl: payload.image,
   };
+  const data = productStructuredData(card, {
+    offers: payload.offers,
+    currency: payload.currency,
+    listingId: payload.listingId,
+    referencePkn: payload.referencePkn,
+    origin: SITE,
+  });
+  data.dateModified = payload.snapshotDate;
+  if (payload.description) data.description = payload.description;
+  if (data.offers && payload.priceValidUntil) {
+    data.offers.priceValidUntil = payload.priceValidUntil;
+  }
+  return data;
 }
 
 export function renderCardOgHtml(payload) {
   const title = escapeHtml(payload.title);
   const description = escapeHtml(payload.description);
   const image = escapeHtml(payload.image);
-  const url = escapeHtml(payload.url);
+  const canonical = escapeHtml(cardCanonicalUrl({
+    canonicalPath: payload.path,
+    cardId: payload.cardId,
+    origin: SITE,
+  }));
+  const url = canonical;
   const path = escapeHtml(payload.path || '/marketplace');
   const h1 = escapeHtml(payload.name || payload.title);
   const imageAlt = escapeHtml([payload.name, payload.setName, payload.number, 'Pokemon card'].filter(Boolean).join(' ') || payload.title);
@@ -258,9 +270,24 @@ export function renderCardOgHtml(payload) {
     ? `\n  <script type="application/ld+json">${JSON.stringify(productJsonLd(payload)).replace(/</g, '\\u003c')}</script>`
     : '';
   const descriptionBody = description ? `\n  <p>${description}</p>` : '';
-  const snapshotLine = payload.pricePkn
-    ? `\n  <p>Cheapest listing ${payload.pricePkn} PKN · price snapshot ${escapeHtml(payload.snapshotDate)} · live prices in PKN on <a href="${SITE}">Pokoin</a></p>`
-    : `\n  <p>Prices in PKN on <a href="${SITE}">Pokoin</a>, the collectors' marketplace.</p>`;
+  const offerLabel = aggregateLabel(
+    { name: payload.name },
+    payload.offers,
+    payload.currency,
+  );
+  const marketMoney = payload.referencePkn
+    ? moneyFromPkn(payload.referencePkn, payload.currency || 'EUR')
+    : null;
+  const snapshotLine = offerLabel
+    ? `\n  <p>In stock · ${escapeHtml(offerLabel)} · price snapshot ${escapeHtml(payload.snapshotDate)} · live prices on <a href="${SITE}">Pokoin</a></p>`
+    : marketMoney && marketMoney.currency !== 'PKN' && payload.currency
+      ? `\n  <p>Out of stock · minimum ${escapeHtml(marketMoney.amount)} ${escapeHtml(marketMoney.currency)} · price snapshot ${escapeHtml(payload.snapshotDate)}</p>`
+      : payload.referencePkn
+        ? `\n  <p>Market reference ${payload.referencePkn} PKN · price snapshot ${escapeHtml(payload.snapshotDate)} · not a Pokoin offer</p>`
+        : `\n  <p>No Pokoin listing is currently for sale. Catalog prices stay on <a href="${SITE}">Pokoin</a>.</p>`;
+  const robotsMeta = payload.indexable
+    ? '\n  <meta name="robots" content="index, follow" />'
+    : '';
   const extra = payload.name
     ? `\n  <h1>${h1}</h1>\n  <nav>${crumbs}</nav>${descriptionBody}${snapshotLine}${neighborLinks ? `\n  <ul>${neighborLinks}</ul>` : ''}`
     : `\n  <p><a href="${path}">${title}</a></p>${descriptionBody}${snapshotLine}`;
@@ -269,7 +296,7 @@ export function renderCardOgHtml(payload) {
 <head>
   <meta charset="utf-8" />
   <title>${title}</title>${descriptionMeta}
-  <link rel="canonical" href="${url}" />
+  <link rel="canonical" href="${canonical}" />${robotsMeta}
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Pokoin" />
   <meta property="og:locale" content="en_US" />
@@ -289,11 +316,11 @@ export function renderCardOgHtml(payload) {
 </html>`;
 }
 
-async function fetchCardPage(cardId, language, game = '') {
+async function fetchCardPage(cardId, language, game = '', { includeOffers = false } = {}) {
   const params = new URLSearchParams({
     cardId: String(cardId),
     language: String(language || 'en'),
-    includeOffers: '0',
+    includeOffers: includeOffers ? '1' : '0',
   });
   if (game) {
     params.set('game', game);
@@ -325,21 +352,25 @@ export async function handleMarketplaceCardOgRequest(request, env, ctx) {
   const search = isSearchEngineBot(userAgent) && !force;
   const site = siteOriginFromHost(url.hostname);
   const game = parsed.game || apiGameFromHost(url.hostname);
-  const cache = caches.default;
+  const cache = globalThis.caches?.default;
+  const currency = currencyFromSearch(url.search) || (search ? 'EUR' : '');
+  const listingId = String(url.searchParams.get('listing') || '').replace(/[^\w-]/g, '').slice(0, 80);
   const cacheKey = new Request(
-    `${site}/__og/${OG_CACHE_VERSION}/card/${game || 'pokemon'}/${parsed.language}/${parsed.cardId}/${search ? 'search' : 'social'}`,
+    `${site}/__og/${OG_CACHE_VERSION}/card/${game || 'pokemon'}/${parsed.language}/${parsed.cardId}/${search ? 'search' : 'social'}/${currency || 'none'}/${listingId || 'card'}`,
     { method: 'GET' },
   );
-  const hit = await cache.match(cacheKey);
-  if (hit && !force) {
-    const headers = new Headers(hit.headers);
-    headers.set('x-pokoin-og-cache', 'hit');
-    return new Response(hit.body, { status: hit.status, headers });
+  if (cache) {
+    const hit = await cache.match(cacheKey);
+    if (hit && !force) {
+      const headers = new Headers(hit.headers);
+      headers.set('x-pokoin-og-cache', 'hit');
+      return new Response(hit.body, { status: hit.status, headers });
+    }
   }
 
   let page;
   try {
-    page = await fetchCardPage(parsed.cardId, parsed.language, game);
+    page = await fetchCardPage(parsed.cardId, parsed.language, game, { includeOffers: search });
   } catch (_) {
     return null;
   }
@@ -354,6 +385,9 @@ export async function handleMarketplaceCardOgRequest(request, env, ctx) {
     requestUrl: `${site}${remappedPath}`,
     includeDescription: search,
   });
+  payload.currency = currency;
+  payload.listingId = listingId;
+  payload.indexable = search;
   payload.image = absoluteUrl(
     rewriteLeftoverCatalogImage(
       page?.seo?.imageUrl ||
@@ -369,12 +403,12 @@ export async function handleMarketplaceCardOgRequest(request, env, ctx) {
     status: 200,
     headers: {
       'content-type': 'text/html; charset=utf-8',
-      'cache-control': `public, max-age=300, s-maxage=${OG_CACHE_TTL_SEC}`,
+      'cache-control': `public, max-age=60, s-maxage=${search ? OG_SEARCH_CACHE_TTL_SEC : OG_CACHE_TTL_SEC}`,
       'x-pokoin-og-cache': 'miss',
       'x-robots-tag': search ? 'index, follow' : 'noindex',
     },
   });
-  if (ctx?.waitUntil) {
+  if (cache && ctx?.waitUntil) {
     ctx.waitUntil(cache.put(cacheKey, response.clone()));
   }
   return response;

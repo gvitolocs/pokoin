@@ -7,6 +7,8 @@
  * same-origin /api so Cloudflare Bot Fight clearance still applies.
  */
 import { handleMarketplaceHomeRequest } from './marketplace-home.js';
+import { handleMarketplaceCardOgRequest } from './marketplace-card-og.js';
+import { handleMarketplaceHubOgRequest } from './marketplace-hub-og.js';
 
 async function proxy(request, origin, pathname) {
   const incoming = new URL(request.url);
@@ -49,6 +51,11 @@ export default {
     if (pathname === '/cardscan/identify') {
       return proxy(request, 'https://api.pokoin.com', '/api/scan/identify');
     }
+    const cardHtml = await handleMarketplaceCardOgRequest(request, env, ctx);
+    if (cardHtml) return cardHtml;
+    const hubHtml = await handleMarketplaceHubOgRequest(request, env, ctx);
+    if (hubHtml) return hubHtml;
+    if (env?.ASSETS?.fetch) return env.ASSETS.fetch(request);
     return new Response('Not Found', {
       status: 404,
       headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },

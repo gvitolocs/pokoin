@@ -171,16 +171,18 @@ export async function handleMarketplaceHubOgRequest(request, env, ctx) {
     return null;
   }
   const site = siteOriginFromHost(url.hostname);
-  const cache = caches.default;
+  const cache = globalThis.caches?.default;
   const cacheKey = new Request(
     `${site}/__og/${OG_CACHE_VERSION}/hub/${parsed.language}/${parsed.kind}/${parsed.slug || '_index'}`,
     { method: 'GET' },
   );
-  const hit = await cache.match(cacheKey);
-  if (hit && !force) {
-    const headers = new Headers(hit.headers);
-    headers.set('x-pokoin-og-cache', 'hit');
-    return new Response(hit.body, { status: hit.status, headers });
+  if (cache) {
+    const hit = await cache.match(cacheKey);
+    if (hit && !force) {
+      const headers = new Headers(hit.headers);
+      headers.set('x-pokoin-og-cache', 'hit');
+      return new Response(hit.body, { status: hit.status, headers });
+    }
   }
   let cards = [];
   try {
@@ -198,7 +200,7 @@ export async function handleMarketplaceHubOgRequest(request, env, ctx) {
       'x-robots-tag': 'index, follow',
     },
   });
-  if (ctx?.waitUntil) {
+  if (cache && ctx?.waitUntil) {
     ctx.waitUntil(cache.put(cacheKey, response.clone()));
   }
   return response;

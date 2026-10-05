@@ -44,8 +44,44 @@ function isHomepageWebp(value) {
   return /_homepage\.webp(?:\?|$)/i.test(String(value || ''));
 }
 
+const MULTIGAME_KEY_RE = /(?:^|\/)(?:one-piece|riftbound|magic|yugioh|lorcana|flesh-and-blood|digimon|dragon-ball-super|vanguard|star-wars|union-arena|gundam|sorcery)\//i;
+const IMAGE_ID_PREFIX_RE = /(?:^|\/)(?:previews\/)?(\d+)_[^/]*$/;
+
+// Same rule as ctIdFromRow in _marketplace_row (kept local: test harnesses stub that module).
+function rowCtId(row = {}) {
+  const ct = Number(row.ct_id ?? row.ctId);
+  if (Number.isSafeInteger(ct) && ct > 0) {
+    return String(ct);
+  }
+  const id = Number(row.card_id ?? row.id);
+  if (Number.isSafeInteger(id) && id > 0 && id % 2 === 0) {
+    return String(id / 2);
+  }
+  return '';
+}
+
+// A Pokemon key's leading id is the card's own leftover ct_id or public
+// card_id. Anything else (an old halved key: ct_id/2, ct_id/4 …) is another
+// card's picture — 109873_hisuian-zoroark-vstar.jpg served Entei.
+function foreignImagePrefix(url, row = {}) {
+  const text = String(url || '').split(/[?#]/)[0];
+  if (!text || MULTIGAME_KEY_RE.test(text)) {
+    return false;
+  }
+  const match = text.match(IMAGE_ID_PREFIX_RE);
+  if (!match) {
+    return false;
+  }
+  const card = String(row.card_id ?? row.id ?? '').trim();
+  const ct = rowCtId(row);
+  if (!card && !ct) {
+    return false;
+  }
+  return match[1] !== card && match[1] !== ct;
+}
+
 function rewriteRowImages(row = {}) {
-  return {
+  const rewritten = {
     ...row,
     image_url: rewriteCdnPokoinPrefix(
       row.cdn_image_url || row.cdnImageUrl || row.image_url || row.imageUrl || '',
@@ -60,6 +96,23 @@ function rewriteRowImages(row = {}) {
       row,
     ),
   };
+  // Drop another card's picture so pickFullImage falls back to the per-id preview.
+  if (foreignImagePrefix(rewritten.image_url, row)) {
+    rewritten.image_url = '';
+    rewritten.cdn_image_url = '';
+    rewritten.imageUrl = '';
+    rewritten.cdnImageUrl = '';
+    rewritten._foreignFullImage = true;
+  }
+  if (foreignImagePrefix(rewritten.preview_image_url, row)) {
+    rewritten.preview_image_url = '';
+    rewritten.previewImageUrl = '';
+  }
+  if (foreignImagePrefix(rewritten.homepage_image_url, row)) {
+    rewritten.homepage_image_url = '';
+    rewritten.homepageImageUrl = '';
+  }
+  return rewritten;
 }
 
 function pickFullImage(row = {}) {
@@ -110,8 +163,10 @@ function reactImageUrls(row = {}) {
   const imageUrl = pickFullImage(rewritten);
   const previewImageUrl = normalizeImageUrl(rewritten.preview_image_url) || imageUrl;
   const homepageImageUrl = normalizeImageUrl(rewritten.homepage_image_url);
+  // After a foreign full image falls back to the preview, the card's own
+  // homepage webp is still the right tile even when its slug differs.
   const tileFromHomepage = isHomepageWebp(homepageImageUrl)
-    && homepageMatchesFullImage(homepageImageUrl, imageUrl);
+    && (rewritten._foreignFullImage || homepageMatchesFullImage(homepageImageUrl, imageUrl));
   return {
     imageUrl,
     previewImageUrl,
@@ -296,6 +351,7 @@ module.exports = {
   normalizeImageUrl,
   isPreviewPath,
   isHomepageWebp,
+  foreignImagePrefix,
   catalogImageSlug,
   homepageMatchesFullImage,
   reactImageUrls,

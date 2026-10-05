@@ -2902,6 +2902,12 @@ html.is-card-banding * {
 /* Chrome object-view-box crops the base scan into the element itself. Keep
  * the masked duplicate as a full-card-sized layer so its full-card alpha map
  * stays pixel-aligned before the album container clips it. */
+@property --album-figure-w {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 @supports (object-view-box: none) {
   .tile.tile-album:not(.tile-tall):not(.is-landscape):not(.tile-item) .tile-art .art-cut img.art-figure-layer,
   .tile.tile-album:not(.tile-tall):not(.is-landscape):not(.tile-item):hover .tile-art .art-cut img.art-figure-layer {
@@ -2916,15 +2922,35 @@ html.is-card-banding * {
     );
   }
 
+  /* Full-art cells are a row-gap taller than the bleed window, and the
+   * painting uses object-fit: cover from the top. A width-fit silhouette
+   * sat above that Pokémon and the 1.12 scale (from the full-card center)
+   * shoved the tile. Cover the same window and grow from its center. */
+  .tile-album.tile-tall .art-cut {
+    container-type: size;
+  }
+
   .tile.tile-album.tile-tall .tile-art .art-cut img.art-figure-layer,
   .tile.tile-album.tile-tall:hover .tile-art .art-cut img.art-figure-layer {
+    --album-figure-w: max(
+      calc(100cqw / var(--art-width)),
+      calc(100cqh * var(--card-ratio) / var(--art-height))
+    );
     object-view-box: none;
-    width: calc(100% / var(--art-width));
+    position: absolute;
+    width: var(--album-figure-w);
     height: auto;
+    max-width: none;
     aspect-ratio: var(--card-ratio);
-    left: calc(-100% * var(--art-left) / var(--art-width));
-    top: 0;
-    margin-top: calc(-100% * var(--art-top) / var(--art-width) / var(--card-ratio));
+    margin-top: 0;
+    left: calc(
+      (100cqw - var(--art-width) * var(--album-figure-w)) / 2
+      - var(--art-left) * var(--album-figure-w)
+    );
+    top: calc(-1 * var(--art-top) * var(--album-figure-w) / var(--card-ratio));
+    transform-origin:
+      calc((var(--art-left) + var(--art-width) / 2) * 100%)
+      calc((var(--art-top) + var(--art-height) * 0.36) * 100%);
   }
 }
 
@@ -9329,6 +9355,9 @@ html.is-extension-desk select.collector-badge.version-badge {
   display: block;
   background: var(--g2, #1c1b25);
 }
+.poko-video { margin: 1.5rem 0 2rem; }
+.poko-video video { display: block; width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; }
+.poko-video p { margin: .5rem 0 0; }
 .jumbos-grid figcaption {
   margin-top: 0.45rem;
   font-size: 0.72rem;
@@ -11140,5 +11169,36 @@ html:has(.wallet-page) .brand span {
 
   .tile.tile-album:hover .art-cut img.art-figure-shadow {
     transform: translateY(5%) scale(1.18) !important;
+  }
+
+  /* Full art already fills two rows. The pop-out (overflow visible + a
+   * lift) grows the grid track and parks the silhouette above the Pokémon. */
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover,
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within {
+    z-index: 0;
+    overflow: hidden;
+    contain: paint;
+  }
+
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .tile-art,
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .art-cut,
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .tile-art,
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .art-cut {
+    overflow: hidden;
+  }
+
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):hover .art-cut img:not(.art-figure-layer),
+  .tile.tile-album.tile-tall:has(img.art-figure-hover):focus-within .art-cut img:not(.art-figure-layer) {
+    clip-path: none;
+  }
+
+  .tile.tile-album.tile-tall:hover .art-cut img.art-figure-hover,
+  .tile.tile-album.tile-tall:focus-within .art-cut img.art-figure-hover {
+    transform: scale(1.12) !important;
+  }
+
+  .tile.tile-album.tile-tall:hover .art-cut img.art-figure-shadow,
+  .tile.tile-album.tile-tall:focus-within .art-cut img.art-figure-shadow {
+    transform: translateY(7px) scale(1.12) !important;
   }
 }

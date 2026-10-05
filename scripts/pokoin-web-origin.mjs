@@ -108,7 +108,7 @@ function hostRedirect(req) {
   }
   const satellite = satelliteHostRedirect(url);
   if (satellite && host !== 'pokoin.com') return satellite.toString();
-  if (host === 'pokoin.com' && /^\/(tests|sanitize|espurr|ocr|artwork|jumbos)(\/|$)/.test(url.pathname)) {
+  if (host === 'pokoin.com' && /^\/(tests|sanitize|espurr|ocr|artwork|jumbos|poko)(\/|$)/.test(url.pathname)) {
     return `https://test.pokoin.com${url.pathname}${url.search}`;
   }
   return '';
