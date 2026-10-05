@@ -1,0 +1,48 @@
+// pokoin-news — assets-only Worker for Pokoin News on every game path:
+// pokoin.com/news* (Pokémon, editorial pages, /news-sitemap.xml) and
+// pokoin.com/<game>/news* for each marketplace game (same slugs as
+// market/src/game.js and Hermes schema GAME_SLUGS).
+//
+// Route precedence: these routes are more specific than pokoin-web's
+// `pokoin.com/*`, so Cloudflare sends news paths here and the SPA never
+// catches them (/<game>/marketplace stays with the SPA). There is no Worker script on page views: every
+// request is served directly from the uploaded static assets in ./dist-news,
+// so ordinary news traffic costs no Worker invocations.
+{
+  "name": "pokoin-news",
+  "compatibility_date": "2026-10-03",
+  "workers_dev": true,
+  "account_id": "e2620981465c01b9bf805522507d963a",
+  "routes": [
+    { "pattern": "pokoin.com/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/one-piece/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/riftbound/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/magic/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/yugioh/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/lorcana/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/flesh-and-blood/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/digimon/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/dragon-ball-super/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/vanguard/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/star-wars/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/union-arena/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/gundam/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/sorcery/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/palworld/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/cyberpunk/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/weiss-schwarz/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/final-fantasy/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/force-of-will/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/world-of-warcraft/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/battle-spirits-saga/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/star-wars-destiny/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/the-spoils/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/my-little-pony/news*", "zone_name": "pokoin.com" },
+    { "pattern": "pokoin.com/dragon-born/news*", "zone_name": "pokoin.com" }
+  ],
+  "assets": {
+    "directory": "./dist-news",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}

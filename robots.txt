@@ -36,3 +36,5 @@ User-agent: Googlebot-Image
 Allow: /
 
 Sitemap: https://pokoin.com/sitemap.xml
+Sitemap: https://pokoin.com/news-sitemap.xml
+Sitemap: https://pokoin.com/news/sitemap.xml

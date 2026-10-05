@@ -2245,6 +2245,10 @@ export default function Card() {
     : (dealLangs.includes(defaultCardLanguage(card.nationality)) ? defaultCardLanguage(card.nationality) : dealLangs[0] || '');
   const listedDealLangs = listedDealLanguages(payload?.offers, card);
   const listedDealConds = listedDealConditions(payload?.offers);
+  // Best Deal shows every grade and every language of this printing; unlisted ones grey out.
+  const listedCondSet = new Set(listedDealConds.map((row) => row.value));
+  const listedLangSet = new Set(listedDealLangs);
+  const allDealLangs = [...dealLangs, ...listedDealLangs.filter((code) => !dealLangs.includes(code))];
   const shownCond = dealCond || (dealPick ? moodCondition(dealPick) : '');
   const languages = languagesForNationality(
     card.nationality,
@@ -2682,16 +2686,20 @@ export default function Card() {
               <p className="muted own-k">{dealCopy || '\u00a0'}</p>
             )}
             <div className="deal-facets">
-              {listedDealConds.length ? (
-                <div className="deal-facet-row" role="radiogroup" aria-label="Condition">
-                  {listedDealConds.map((row) => (
+              <div className="deal-facet-row" role="radiogroup" aria-label="Condition">
+                {DEAL_CONDS.map((row) => {
+                  const listed = listedCondSet.has(row.value);
+                  const on = listed && shownCond === row.value;
+                  return (
                     <button
                       key={row.value}
                       type="button"
                       role="radio"
-                      className={`deal-chip${shownCond === row.value ? ' is-on' : ''}`}
-                      aria-checked={shownCond === row.value}
+                      className={`deal-chip${on ? ' is-on' : ''}${listed ? '' : ' is-off'}`}
+                      aria-checked={on}
                       aria-label={row.label}
+                      title={listed ? row.label : `${row.label} · none listed`}
+                      disabled={!listed}
                       onClick={() => setDealCond(row.value)}
                     >
                       <img
@@ -2703,25 +2711,31 @@ export default function Card() {
                         draggable={false}
                       />
                     </button>
-                  ))}
-                </div>
-              ) : null}
-              {listedDealLangs.length ? (
+                  );
+                })}
+              </div>
+              {allDealLangs.length ? (
                 <div className="deal-facet-row" role="radiogroup" aria-label="Language">
-                  {listedDealLangs.map((code) => (
-                    <button
-                      key={code}
-                      type="button"
-                      role="radio"
-                      className={`deal-chip${shownLang === code ? ' is-on' : ''}`}
-                      aria-checked={shownLang === code}
-                      aria-label={code}
-                      onClick={() => setDealLang(code)}
-                    >
-                      <img className="deal-flag" src={flagSrc(code)} alt="" width="16" height="16" />
-                      <span>{code}</span>
-                    </button>
-                  ))}
+                  {allDealLangs.map((code) => {
+                    const listed = listedLangSet.has(code);
+                    const on = listed && shownLang === code;
+                    return (
+                      <button
+                        key={code}
+                        type="button"
+                        role="radio"
+                        className={`deal-chip${on ? ' is-on' : ''}${listed ? '' : ' is-off'}`}
+                        aria-checked={on}
+                        aria-label={code}
+                        title={listed ? code : `${code} · none listed`}
+                        disabled={!listed}
+                        onClick={() => setDealLang(code)}
+                      >
+                        <img className="deal-flag" src={flagSrc(code)} alt="" width="22" height="22" />
+                        <span>{code}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               ) : null}
             </div>

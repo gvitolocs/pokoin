@@ -1808,6 +1808,54 @@
   max-width: none;
 }
 
+/* Desktop set desk: search, sort, view and every filter share one line; the select's first option names the filter. */
+@media (min-width: 721px) {
+  .set-desk .set-browse {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.65rem 0.5rem;
+  }
+
+  .set-desk .set-browse-bar {
+    flex: 0 1 auto;
+  }
+
+  .set-desk .set-search {
+    flex: 0 1 15rem;
+    min-width: 9rem;
+  }
+
+  .set-desk .set-filters {
+    flex: 1 1 32rem;
+    min-width: 0;
+    gap: 0.5rem;
+  }
+
+  .set-desk .set-filters .set-filter-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .set-desk .set-filters .sort {
+    gap: 0;
+  }
+
+  .set-desk .set-filters .sort select {
+    height: 2.45rem;
+    border-radius: 10px;
+    text-overflow: ellipsis;
+  }
+
+  .set-desk .set-browse .result-count {
+    flex-basis: 100%;
+  }
+}
+
 .set-search input {
   width: 100%;
   min-width: 0;
