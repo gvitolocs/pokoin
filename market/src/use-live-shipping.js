@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchShippingOptions } from './api.js';
 import { orderServices, parcelEstimate, shippingEstimate, tierRoom } from './cart-shipping.js';
-import { defaultShippingService } from './shipping-quote.js';
+import { cheapestServiceId, eurCentsFromPkn, isUntrackedService, untrackedAllowed } from './shipping-quote.js';
 
 function iso(value) {
   const code = String(value || '').trim().toUpperCase();
@@ -12,17 +12,13 @@ function iso(value) {
  * Live Packlink + letter rates for each ticked seller parcel.
  * Falls back to the seeded table while the network request is in flight.
  */
-export function useLiveShipping({ groups = [], to = '', service = '' } = {}) {
+export function useLiveShipping({ groups = [], to = '', service = '', subtotalPkn = 0 } = {}) {
   const ticked = useMemo(
     () => (groups || []).filter((group) => group.selectedCount > 0 && iso(group.sellerCountry)),
     [groups],
   );
   const country = iso(to);
   const seedServices = useMemo(() => orderServices(ticked, country), [ticked, country]);
-  const seedShipping = useMemo(
-    () => shippingEstimate(ticked, country, service),
-    [ticked, country, service],
-  );
 
   const [liveByKey, setLiveByKey] = useState(() => new Map());
   const [status, setStatus] = useState('idle');
@@ -64,45 +60,60 @@ export function useLiveShipping({ groups = [], to = '', service = '' } = {}) {
     };
   }, [country, ticked.map((group) => `${group.key}:${group.selectedCount}:${group.sellerCountry}`).join('|')]);
 
+  const allowUntracked = untrackedAllowed(eurCentsFromPkn(subtotalPkn));
+
   const services = useMemo(() => {
-    if (!liveByKey.size) return seedServices;
-    const byId = new Map();
-    for (const group of ticked) {
-      const options = liveByKey.get(group.key);
-      if (!options?.length) continue;
-      for (const option of options) {
-        const row = byId.get(option.id) || {
-          id: option.id,
-          label: option.label || option.serviceName || option.id,
-          carrier: option.carrier || '',
-          tracked: option.tracked !== false,
-          source: option.source || '',
-          cents: 0,
-          parcels: 0,
-        };
-        row.cents += Number(option.amountCents) || 0;
-        row.parcels += 1;
-        byId.set(option.id, row);
+    let rows = seedServices;
+    if (liveByKey.size) {
+      const byId = new Map();
+      for (const group of ticked) {
+        const options = liveByKey.get(group.key);
+        if (!options?.length) continue;
+        for (const option of options) {
+          const row = byId.get(option.id) || {
+            id: option.id,
+            label: option.label || option.serviceName || option.id,
+            carrier: option.carrier || '',
+            tracked: option.tracked !== false,
+            source: option.source || '',
+            cents: 0,
+            parcels: 0,
+          };
+          row.cents += Number(option.amountCents) || 0;
+          row.parcels += 1;
+          byId.set(option.id, row);
+        }
+      }
+      if (byId.size) {
+        rows = [...byId.values()]
+          .map((row) => ({ ...row, complete: row.parcels === ticked.length }))
+          .sort((a, b) => Number(b.complete) - Number(a.complete) || a.cents - b.cents);
       }
     }
-    if (!byId.size) return seedServices;
-    return [...byId.values()]
-      .map((row) => ({ ...row, complete: row.parcels === ticked.length }))
-      .sort((a, b) => Number(b.complete) - Number(a.complete) || a.cents - b.cents);
-  }, [liveByKey, seedServices, ticked]);
+    return allowUntracked ? rows : rows.filter((row) => !isUntrackedService(row));
+  }, [liveByKey, seedServices, ticked, allowUntracked]);
+
+  const activeService = services.some((row) => row.id === service)
+    ? service
+    : cheapestServiceId(services, { allowUntracked });
 
   const shipping = useMemo(() => {
-    if (!liveByKey.size) return seedShipping;
-    const wanted = service || defaultShippingService(services);
+    const wanted = activeService;
+    if (!liveByKey.size) {
+      const seeded = shippingEstimate(ticked, country, wanted);
+      const chosen = services.find((row) => row.id === wanted);
+      // The summary follows the dropdown price, not a silent fallback rate.
+      if (chosen && seeded.cents !== chosen.cents) {
+        return { ...seeded, cents: chosen.cents };
+      }
+      return seeded;
+    }
     const parcels = [];
     let cents = 0;
     let missing = 0;
     for (const group of ticked) {
-      const options = liveByKey.get(group.key) || [];
-      const picked = options.find((row) => row.id === wanted)
-        || options.find((row) => row.id === defaultShippingService(options))
-        || options[0]
-        || null;
+      const options = (liveByKey.get(group.key) || []).filter((row) => allowUntracked || !isUntrackedService(row));
+      const picked = options.find((row) => row.id === wanted) || null;
       const estimate = picked
         ? {
           serviceId: picked.id,
@@ -114,15 +125,16 @@ export function useLiveShipping({ groups = [], to = '', service = '' } = {}) {
           room: picked.id === 'tracked' || picked.id === 'untracked'
             ? parcelEstimate({ from: group.sellerCountry, to: country, cards: group.selectedCount, service: picked.id })?.room || 0
             : tierRoom(group.selectedCount),
-          fallback: Boolean(wanted && picked.id !== wanted),
+          fallback: false,
         }
         : null;
       parcels.push({ key: group.key, estimate });
       if (estimate) cents += estimate.amountCents;
       else missing += 1;
     }
-    return { parcels, cents, missing, count: parcels.length };
-  }, [liveByKey, seedShipping, service, services, ticked]);
+    const chosen = services.find((row) => row.id === wanted);
+    return { parcels, cents: chosen ? chosen.cents : cents, missing, count: parcels.length };
+  }, [liveByKey, service, services, ticked, country, activeService, allowUntracked]);
 
   const estimates = useMemo(
     () => Object.fromEntries(shipping.parcels.map((parcel) => [parcel.key, parcel.estimate])),

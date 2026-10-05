@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  cheapestServiceId,
+  eurCentsFromPkn,
   findShippingRate,
   packageTierForCount,
   pknFromEurCents,
   previewShipmentCents,
   shippingServiceOptions,
+  untrackedAllowed,
 } from './shipping-quote.js';
 import ratesCatalog from './shipping-rates.json' with { type: 'json' };
 
@@ -68,5 +71,15 @@ test('a letter-only lane offers only the untracked letter, never a fake Tracked'
     .filter((option) => !option.unavailable)
     .map((option) => [option.id, option.tracked]);
   assert.deepEqual(dk, [['tracked', true], ['untracked', false]]);
+});
+
+test('cheapest skips the untracked letter once the cards pass €20', () => {
+  const options = shippingServiceOptions({ fromCountry: 'IT', toCountry: 'DK', cardCount: 2 })
+    .filter((option) => !option.unavailable);
+  assert.equal(cheapestServiceId(options), 'untracked');
+  assert.equal(cheapestServiceId(options, { allowUntracked: false }), 'tracked');
+  assert.equal(untrackedAllowed(2000), true);
+  assert.equal(untrackedAllowed(2001), false);
+  assert.equal(eurCentsFromPkn(4000), 2000);
 });
 

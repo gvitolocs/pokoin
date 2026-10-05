@@ -451,6 +451,9 @@ export function BasketSummary({
   onUseBalance,
   gift,
   onGift,
+  insurance = false,
+  onInsurance,
+  subtotalEurCents = 0,
 }) {
   const buyer = useBuyerCurrency();
   const n = totals.selectedCount;
@@ -529,6 +532,12 @@ export function BasketSummary({
           </dt>
           <dd>{shippingCell}</dd>
         </div>
+        {insurance && subtotalEurCents > 2000 ? (
+          <div>
+            <dt>Insurance 5%</dt>
+            <dd>{formatLocalFromEurCents(Math.round(subtotalEurCents * 0.05), currency)}</dd>
+          </div>
+        ) : null}
         {discountOn ? (
           <>
             <div>
@@ -559,6 +568,23 @@ export function BasketSummary({
                   ? `${formatPkn(balance)} available · up to ${discount.pkn} PKN on this order`
                   : `${formatPkn(balance)} available · these sellers only take card payments`
                 : <>No site balance yet · <Link className="bk-link" to="/wallet">Top up</Link></>}
+            </em>
+          </span>
+        </label>
+      ) : null}
+
+        {subtotalEurCents > 2000 && onInsurance ? (
+        <label className="bk-gift bk-insurance">
+          <input
+            type="checkbox"
+            checked={insurance}
+            onChange={(event) => onInsurance(event.target.checked)}
+          />
+          <span>
+            Insurance 5%
+            <em>
+              {formatLocalFromEurCents(Math.round(subtotalEurCents * 0.05), currency)}
+              {' · covers 80% of the cards if the parcel is lost'}
             </em>
           </span>
         </label>

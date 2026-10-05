@@ -11,7 +11,7 @@
 const Stripe = require('stripe');
 const path = require('path');
 const crypto = require('node:crypto');
-const { pknBalanceDiscount, quoteCheckout, normalizeCountry, httpError, eurCentsFromPkn } = require('./_checkout_core');
+const { pknBalanceDiscount, quoteCheckout, guardCheckoutQuote, normalizeCountry, httpError, eurCentsFromPkn } = require('./_checkout_core');
 const { sellersRefusingPkn } = require('./_seller_pkn_policy');
 const { encryptAddressPayload, decryptAddressPayload } = require('./_address_crypto');
 const {
@@ -108,7 +108,10 @@ module.exports = async function handler(req, res) {
     const tracked = body.tracked !== false && body.shippingTracked !== false
       && String(body.shippingService || '').toLowerCase() !== 'untracked';
     // Route/price sanity before touching stock (fails closed on no shipping row).
-    const preview = quoteCheckout({ items, sellerOrigins: origins, toCountry, tracked });
+    const preview = guardCheckoutQuote(
+      quoteCheckout({ items, sellerOrigins: origins, toCountry, tracked }),
+      { tracked, insurance: body.insurance === true },
+    );
     if (!preview.grandTotalCents || preview.grandTotalCents < 50) {
       return res.status(400).json({ error: 'Order total too small for Stripe Checkout.' });
     }
@@ -126,7 +129,10 @@ module.exports = async function handler(req, res) {
     // the block threw "pknDiscount is not defined" once Stripe had a session.
     let pknDiscount = { discountPkn: 0, discountEurCents: 0 };
     try {
-      quote = quoteCheckout({ items: reserved.items, sellerOrigins: origins, toCountry, tracked });
+      quote = guardCheckoutQuote(
+        quoteCheckout({ items: reserved.items, sellerOrigins: origins, toCountry, tracked }),
+        { tracked, insurance: body.insurance === true },
+      );
       const now = admin.firestore.FieldValue.serverTimestamp();
       const holdExpiresAt = Math.floor(Date.now() / 1000) + CHECKOUT_HOLD_SECONDS;
       const shipments = quote.shipments.map((shipment) => ({
@@ -172,6 +178,19 @@ module.exports = async function handler(req, res) {
           },
         };
       });
+      if (quote.insuranceCents > 0) {
+        lineItems.push({
+          quantity: 1,
+          price_data: {
+            currency: 'eur',
+            unit_amount: quote.insuranceCents,
+            product_data: {
+              name: 'Shipping insurance',
+              description: '5% of the card prices. Covers 80% if the parcel is lost.',
+            },
+          },
+        });
+      }
       const lineTotal = lineItems.reduce((sum, row) => sum + Number(row.price_data.unit_amount || 0), 0);
       if (lineTotal !== quote.grandTotalCents) {
         throw httpError(500, 'Shipment line items do not sum to checkout total.', 'checkout_line_mismatch');
@@ -225,6 +244,7 @@ module.exports = async function handler(req, res) {
         shipments,
         itemsSubtotalCents: quote.itemsSubtotalCents,
         shippingTotalCents: quote.shippingTotalCents,
+        insuranceCents: quote.insuranceCents || 0,
         totalEURCents: quote.grandTotalCents,
         shippingAddressId: addressId,
         shippingAddressSnapshotEncrypted: snapshotEncrypted,

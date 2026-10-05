@@ -1,5 +1,6 @@
 /** Cart, /shipping and checkout share the buyer's delivery country, shipping service and balance-discount tick. */
 
+const INSURANCE_KEY = 'pokoin.cart.insurance';
 const SERVICE_KEY = 'pokoin.cart.shipping';
 const DISCOUNT_KEY = 'pokoin.cart.pknDiscount';
 const COUNTRY_KEY = 'pokoin.cart.shipTo';
@@ -34,6 +35,14 @@ export function readShippingService() {
 
 export function writeShippingService(id) {
   write(SERVICE_KEY, isShippingServiceId(id) ? id : '');
+}
+
+export function readInsurance() {
+  return read(INSURANCE_KEY) === '1';
+}
+
+export function writeInsurance(on) {
+  write(INSURANCE_KEY, on ? '1' : '');
 }
 
 export function readPknDiscount() {

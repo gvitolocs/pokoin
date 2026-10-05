@@ -23,6 +23,7 @@ import {
   useSellerShelves,
   useWatchlistIds,
 } from '../cart-rails.js';
+import { eurCentsFromPkn } from '../shipping-quote.js';
 import { useLiveShipping } from '../use-live-shipping.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
 import {
@@ -85,7 +86,12 @@ export default function Cart() {
   // The buyer's pick wins over the saved address / browser country.
   const country = cart.shippingChoice.country || delivery.country;
   const service = cart.shippingChoice.service;
-  const liveShip = useLiveShipping({ groups, to: country, service });
+  const liveShip = useLiveShipping({
+    groups,
+    to: country,
+    service,
+    subtotalPkn: totals.selectedSubtotalPkn,
+  });
   const { services, shipping, estimates } = liveShip;
   const nudge = useMemo(() => nudgeFromParcels(groups, shipping.parcels), [groups, shipping.parcels]);
   const discount = useMemo(
@@ -305,6 +311,9 @@ export default function Cart() {
               onUseBalance={cart.setUseBalance}
               gift={gift}
               onGift={cart.setGift}
+              insurance={cart.insurance}
+              onInsurance={cart.setInsurance}
+              subtotalEurCents={eurCentsFromPkn(totals.selectedSubtotalPkn)}
             />
           </aside>
         ) : null}
