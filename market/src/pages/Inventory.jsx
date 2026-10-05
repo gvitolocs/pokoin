@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useMatch } from 'react-router-dom';
 import { exportStockCsv, fetchPricingStrategies, fetchSellerListings } from '../api.js';
-import './export-preview.css';
+import '../export-preview.css';
 import { useAuth } from '../auth.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice } from '../seller-currency.js';
