@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { validateArticle, articlePath, GAME_SLUGS } from '../news/lib/schema.mjs';
-import { gameNewsBase, gamesWithNews } from '../news/lib/games.mjs';
+import { gameNewsBase, gamesWithNews, PINNED } from '../news/lib/games.mjs';
 import { SECTION_NAV } from '../news/lib/format.mjs';
 import { esc } from '../news/lib/html.mjs';
 import { renderPage } from '../news/lib/layout.mjs';
@@ -184,7 +184,8 @@ export function buildNewsSite({
 
   // One news hub per game that has stories (Pokémon's /news always exists).
   // `/<root>` is served from `<root>.html` and articles from `<root>/<slug>.html`.
-  const games = gamesWithNews(prepared);
+  // Games with stories plus every game the switcher links to.
+  const games = [...new Set([...gamesWithNews(prepared), ...PINNED])];
   for (const game of games) {
     const root = gameNewsBase(game).slice(1);
     writePage(`${root}.html`, renderHome(prepared, { ...ctx, game }));

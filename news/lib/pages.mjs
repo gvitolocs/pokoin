@@ -225,6 +225,8 @@ export function renderHome(all, ctx = {}) {
       title: homeTitle(game),
       description: homeDescription(game),
       jsonLd: [websiteJsonLd()],
+      // An empty hub is a thin page: keep it out of the index until it has stories.
+      robots: 'noindex, follow',
       body,
     });
   }
