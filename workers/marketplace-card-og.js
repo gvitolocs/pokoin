@@ -3,6 +3,7 @@
  */
 
 import { realPublicCardId, rewriteLeftoverCatalogImage } from './public-card-id.js';
+import { crawlableCardImage } from '../scripts/card-sitemap.mjs';
 import {
   aggregateLabel,
   cardCanonicalUrl,
@@ -158,7 +159,7 @@ export function buildCardOgPayload(cardPage, {
     [card.name, card.set || card.set_name].filter(Boolean).join(' · ') ||
     `Card ${cardId} · Pokoin`;
   const description = includeDescription ? String(seo.description || '') : '';
-  const image = absoluteUrl(
+  const image = crawlableCardImage(absoluteUrl(
     rewriteLeftoverCatalogImage(
       seo.imageUrl ||
         card.heroImageUrl ||
@@ -168,7 +169,7 @@ export function buildCardOgPayload(cardPage, {
         card.tileImageUrl,
       cardId || card.id,
     ),
-  );
+  ));
   const path =
     seo.canonicalPath ||
     cardPage?.canonicalPath ||
@@ -286,7 +287,7 @@ export function renderCardOgHtml(payload) {
         ? `\n  <p>Market reference ${payload.referencePkn} PKN · price snapshot ${escapeHtml(payload.snapshotDate)} · not a Pokoin offer</p>`
         : `\n  <p>No Pokoin listing is currently for sale. Catalog prices stay on <a href="${SITE}">Pokoin</a>.</p>`;
   const robotsMeta = payload.indexable
-    ? '\n  <meta name="robots" content="index, follow" />'
+    ? '\n  <meta name="robots" content="index, follow, max-image-preview:large" />'
     : '';
   const extra = payload.name
     ? `\n  <h1>${h1}</h1>\n  <nav>${crumbs}</nav>${descriptionBody}${snapshotLine}${neighborLinks ? `\n  <ul>${neighborLinks}</ul>` : ''}`
@@ -296,7 +297,8 @@ export function renderCardOgHtml(payload) {
 <head>
   <meta charset="utf-8" />
   <title>${title}</title>${descriptionMeta}
-  <link rel="canonical" href="${canonical}" />${robotsMeta}
+  <link rel="canonical" href="${canonical}" />
+  <link rel="icon" type="image/png" sizes="48x48" href="https://pokoin.com/favicon-48x48.png" />${robotsMeta}
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Pokoin" />
   <meta property="og:locale" content="en_US" />

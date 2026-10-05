@@ -51,10 +51,10 @@ test('other TCG card HTML keeps the game scan in og:image and img', () => {
     },
     { cardId: '200124708', language: 'en' },
   );
-  assert.equal(payload.image, 'https://pokoin.com/card-images/weiss-schwarz/100062354_card.jpg');
+  assert.equal(payload.image, 'https://cdn.pokoin.com/weiss-schwarz/100062354_card.jpg');
   const html = renderCardOgHtml(payload);
-  assert.match(html, /property="og:image" content="https:\/\/pokoin\.com\/card-images\/weiss-schwarz\/100062354_card\.jpg"/);
-  assert.match(html, /<img src="https:\/\/pokoin\.com\/card-images\/weiss-schwarz\/100062354_card\.jpg"/);
+  assert.match(html, /property="og:image" content="https:\/\/cdn\.pokoin\.com\/weiss-schwarz\/100062354_card\.jpg"/);
+  assert.match(html, /<img src="https:\/\/cdn\.pokoin\.com\/weiss-schwarz\/100062354_card\.jpg"/);
 });
 
 test('builds absolute image and HTML with og tags', () => {
@@ -70,12 +70,12 @@ test('builds absolute image and HTML with og tags', () => {
     },
     { cardId: '248768', language: 'en' },
   );
-  assert.equal(payload.image, 'https://pokoin.com/card-images/124384_drifloon-lv-17.jpg?v=br4');
+  assert.equal(payload.image, 'https://cdn.pokoin.com/124384_drifloon-lv-17.jpg?v=br4');
   assert.equal(payload.description, '');
   assert.equal(absoluteUrl('https://cdn.pokoin.com/x.jpg'), 'https://cdn.pokoin.com/x.jpg');
   const html = renderCardOgHtml(payload);
   assert.match(html, /property="og:title" content="Drifloon Lv\.17 · POP Series 6"/);
-  assert.match(html, /property="og:image" content="https:\/\/pokoin\.com\/card-images\/124384_drifloon-lv-17\.jpg\?v=br4"/);
+  assert.match(html, /property="og:image" content="https:\/\/cdn\.pokoin\.com\/124384_drifloon-lv-17\.jpg\?v=br4"/);
   assert.match(html, /property="og:image:type" content="image\/jpeg"/);
   assert.match(html, /name="twitter:card" content="summary_large_image"/);
   assert.equal(html.includes('name="description"'), false);
@@ -179,7 +179,7 @@ test('search HTML AggregateOffer uses only active Pokoin listings in the pinned 
   payload.indexable = true;
   const html = renderCardOgHtml(payload);
   assert.match(html, /rel="canonical" href="https:\/\/pokoin\.com\/marketplace\/en\/cards\/239000\/card-charizard-4-102-base-set"/);
-  assert.match(html, /name="robots" content="index, follow"/);
+  assert.match(html, /name="robots" content="index, follow, max-image-preview:large"/);
   assert.match(html, /1 Pokoin listing from 320.00 EUR/);
   const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
   assert.equal(jsonLd.offers['@type'], 'AggregateOffer');

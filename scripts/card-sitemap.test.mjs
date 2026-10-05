@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   chunkCardPaths,
+  crawlableCardImage,
   existingCardSitemapNames,
   gameCardPath,
   renderShoppingFeed,
@@ -28,6 +29,12 @@ test('card sitemaps keep canonical desks and drop currency duplicates', () => {
   const xml = renderUrlSet(chunks[0]);
   assert.equal(xml.includes('currency='), false);
   assert.match(xml, /pokoin.com\/marketplace\/en\/cards\/239000\/card-charizard-4-102-base-set</);
+  const withImage = renderUrlSet(chunkCardPaths([
+    { path: '/marketplace/en/cards/342436/card-charizard', image: 'https://pokoin.com/card-images/171218_charizard.jpg' },
+  ])[0]);
+  assert.match(withImage, /xmlns:image="http:\/\/www.google.com\/schemas\/sitemap-image\/1.1"/);
+  assert.match(withImage, /<image:loc>https:\/\/cdn.pokoin.com\/171218_charizard.jpg<\/image:loc>/);
+  assert.equal(crawlableCardImage('https://pokoin.com/card-images/magic/1.jpg'), 'https://cdn.pokoin.com/magic/1.jpg');
   const feed = renderShoppingFeed([{
     id: 'pokemon-342436-EUR',
     title: 'Charizard 001/025',

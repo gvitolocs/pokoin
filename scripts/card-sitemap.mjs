@@ -20,14 +20,34 @@ export function canonicalCardPath(value) {
   }
 }
 
+/** Final image URL. pokoin.com/card-images redirects, and Google often drops that hop. */
+export function crawlableCardImage(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = raw.startsWith('http') ? new URL(raw) : new URL(raw, 'https://pokoin.com');
+    if (url.hostname === 'pokoin.com' && url.pathname.startsWith('/card-images/')) {
+      url.hostname = 'cdn.pokoin.com';
+      url.pathname = url.pathname.slice('/card-images'.length) || '/';
+    }
+    if (url.protocol !== 'https:') return '';
+    if (url.hostname !== 'cdn.pokoin.com' && url.hostname !== 'pokoin.com') return '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
 export function chunkCardPaths(paths, size = CARD_SITEMAP_CHUNK) {
   const unique = [];
   const seen = new Set();
   for (const value of paths || []) {
-    const path = canonicalCardPath(value);
+    const rawPath = typeof value === 'string' ? value : value?.path;
+    const path = canonicalCardPath(rawPath);
     if (!path || seen.has(path)) continue;
     seen.add(path);
-    unique.push(path);
+    const image = typeof value === 'string' ? '' : crawlableCardImage(value?.image);
+    unique.push(image ? { path, image } : path);
   }
   const chunks = [];
   for (let index = 0; index < unique.length; index += size) {
@@ -61,8 +81,19 @@ function xmlText(value) {
 }
 
 export function renderUrlSet(paths, origin = 'https://pokoin.com') {
-  const body = paths.map((path) => `  <url>\n    <loc>${xmlText(`${origin}${path}`)}</loc>\n  </url>`).join('\n');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>\n`;
+  const hasImage = (paths || []).some((page) => page && typeof page === 'object' && page.image);
+  const xmlns = hasImage
+    ? 'xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"'
+    : 'xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"';
+  const body = (paths || []).map((page) => {
+    const path = typeof page === 'string' ? page : page.path;
+    const image = typeof page === 'string' ? '' : crawlableCardImage(page.image);
+    const imageXml = image
+      ? `\n    <image:image>\n      <image:loc>${xmlText(image)}</image:loc>\n    </image:image>`
+      : '';
+    return `  <url>\n    <loc>${xmlText(`${origin}${path}`)}</loc>${imageXml}\n  </url>`;
+  }).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset ${xmlns}>\n${body}\n</urlset>\n`;
 }
 
 export function shoppingFeedFileName(currency, index) {

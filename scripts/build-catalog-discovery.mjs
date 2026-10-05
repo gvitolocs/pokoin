@@ -12,6 +12,7 @@ import {
   SHOPPING_FEED_CHUNK,
   cardSitemapFileName,
   chunkCardPaths,
+  crawlableCardImage,
   gameCardPath,
   renderShoppingFeed,
   renderUrlSet,
@@ -220,8 +221,11 @@ for (const [database, slug, id, brand] of GAMES) {
           where coalesce(u.canonical_path, '') <> ''
         ) to stdout with (format csv)`
       : `copy (
-          select canonical_path from public.marketplace_card_urls
-          where coalesce(canonical_path, '') <> ''
+          select u.canonical_path,
+                 coalesce(nullif(c.cdn_image_url, ''), nullif(c.image_url, ''), '')
+          from public.marketplace_card_urls u
+          left join public.marketplace_search_candidates c on c.card_id = u.card_id
+          where coalesce(u.canonical_path, '') <> ''
         ) to stdout with (format csv)`;
     const rows = parseCsv(psql(database, sql));
     let gamePaths = 0;
@@ -229,7 +233,7 @@ for (const [database, slug, id, brand] of GAMES) {
     for (const cells of rows) {
       const path = gameCardPath(cells[0], slug);
       if (!path) continue;
-      paths.push(path);
+      paths.push({ path, image: crawlableCardImage(hasPrice ? cells[6] : cells[1]) });
       gamePaths += 1;
       if (!hasPrice) continue;
       const itemRow = {
