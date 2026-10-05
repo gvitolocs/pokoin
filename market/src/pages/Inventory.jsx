@@ -10,13 +10,13 @@ import InventoryBoard from '../components/InventoryBoard.jsx';
 import LocationBoard from '../components/LocationBoard.jsx';
 import PricingStrategies, { PricerDefaults } from '../components/PricingStrategies.jsx';
 import StockNav from '../components/StockNav.jsx';
-import WipeAllInventory from '../components/WipeAllInventory.jsx';
 import { inventoryRowsForLocation, liveInventoryListings } from '../inventory-listings.js';
 
 const FORMATS = [
-  { id: 'powertools', label: 'PowerTools' },
+  { id: 'powertools', label: 'Power Tools' },
   { id: 'cardmarket', label: 'Cardmarket' },
   { id: 'cardtrader', label: 'CardTrader' },
+  { id: 'tcgplayer', label: 'TCGPlayer' },
 ];
 
 // Paint the board off the first raw page, then top up the rest in the
@@ -55,9 +55,8 @@ export default function Inventory() {
   const formatPrice = (pkn) => formatSellerPrice(pkn, priceCurrency);
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
-  const [format, setFormat] = useState('powertools');
+  const [askFormat, setAskFormat] = useState(false);
   const [busy, setBusy] = useState('');
-  const [message, setMessage] = useState('');
   // Bumped by reload() so a stale background top-up stops writing rows.
   const inventorySeq = useRef(0);
 
@@ -136,13 +135,14 @@ export default function Inventory() {
     return () => { cancelled = true; };
   }, [signedIn, getBearer, onImportTab, onSettingsTab, onCollectionTab]);
 
-  async function onExport() {
+  async function onExport(formatId) {
     setError('');
-    setBusy('export');
+    setBusy(formatId);
     try {
       const token = await getBearer();
-      const blob = await exportStockCsv(format, token);
-      downloadBlob(blob, `pokoin-stock-${format}.csv`);
+      const blob = await exportStockCsv(formatId, token);
+      downloadBlob(blob, `pokoin-stock-${formatId}.csv`);
+      setAskFormat(false);
     } catch (err) {
       setError(err.message || 'Export failed.');
     } finally {
@@ -168,37 +168,31 @@ export default function Inventory() {
       </PageHead>
       <StockNav forceActive={locationName ? 'Listings' : ''} />
       <Alert>{error}</Alert>
-      {message ? <p className="ct-connect-ok" role="status">{message}</p> : null}
 
       {onImportTab ? (
         <DeskPanel title="Export stock">
           <div className="stock-csv-bar">
-            <label>
-              Format
-              <select value={format} onChange={(e) => setFormat(e.target.value)} disabled={Boolean(busy)}>
-                {FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-              </select>
-            </label>
-            <button type="button" className="btn ghost" onClick={onExport} disabled={Boolean(busy)}>
-              {busy === 'export' ? 'Exporting…' : 'Export CSV'}
-            </button>
+            {askFormat ? (
+              <div className="stock-csv-bar" role="group" aria-label="Export format">
+                {FORMATS.map((row) => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    className="btn"
+                    disabled={Boolean(busy)}
+                    onClick={() => onExport(row.id)}
+                  >
+                    {busy === row.id ? 'Exporting…' : row.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <button type="button" className="btn ghost" onClick={() => setAskFormat(true)} disabled={Boolean(busy)}>
+                Export CSV
+              </button>
+            )}
             <Link className="btn" to="/mypokoin/spreadsheet">Import in spreadsheet</Link>
           </div>
-          <WipeAllInventory
-            disabled={Boolean(busy)}
-            onError={(text) => {
-              setError(text || '');
-              if (text) setMessage('');
-            }}
-            onMessage={(text) => {
-              setMessage(text || '');
-              setError('');
-            }}
-            onWiped={() => {
-              setRows([]);
-              reload().catch(() => {});
-            }}
-          />
         </DeskPanel>
       ) : null}
 
