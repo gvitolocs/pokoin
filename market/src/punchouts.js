@@ -7,6 +7,13 @@ function route(path) {
   return path;
 }
 
+/** Pages served outside the SPA (Pokoin News: /news, /<game>/news): reach them
+ * with a full page load, never the in-app router. */
+export function isStaticSitePath(path = '') {
+  const value = String(path || '');
+  return !value.startsWith('//') && /^\/(?:[a-z0-9-]+\/)?news(?:[/?#]|$)/.test(value);
+}
+
 export function authFrom(path) {
   return route(`/auth?from=${encodeURIComponent(path || '/marketplace')}`);
 }

@@ -20,6 +20,7 @@ import {
   signupTokenFromSearch,
 } from '../email-signup.js';
 import { Alert, PageHead } from '../components/Desk.jsx';
+import { isStaticSitePath } from '../punchouts.js';
 
 function requestVerificationEmail(payload) {
   return getJson('/api/register-email', {
@@ -42,6 +43,11 @@ export default function Auth() {
   const location = useLocation();
   const from = new URLSearchParams(location.search).get('from') || '/profile';
   const safeFrom = from.startsWith('/') ? from : '/profile';
+  // Pokoin News pages are static files outside the SPA: full page load there.
+  const leave = (to) => {
+    if (isStaticSitePath(to)) window.location.replace(to);
+    else navigate(to, { replace: true });
+  };
   const signupToken = signupTokenFromSearch(location.search);
   const verifiedReturn = isNativeVerifiedReturn(location.search);
   // /join/<code> sends new collectors straight to Create account.
@@ -89,7 +95,7 @@ export default function Auth() {
         if (cancelled || !result?.user) {
           return;
         }
-        navigate(safeFrom, { replace: true });
+        leave(safeFrom);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -98,7 +104,7 @@ export default function Auth() {
       });
     const stop = firebaseAuth.onAuthStateChanged((user) => {
       if (!cancelled && user) {
-        navigate(safeFrom, { replace: true });
+        leave(safeFrom);
       }
     });
     return () => {
@@ -131,7 +137,7 @@ export default function Auth() {
       // The account is ACTIVE on the server at this point; mint the session
       // from the custom token so the user lands inside the app signed in.
       await signInWithCustomToken(firebaseAuth, result.customToken);
-      navigate(result.redirectPath || safeFrom, { replace: true });
+      leave(result.redirectPath || safeFrom);
     } catch (err) {
       const classified = classifyVerifyError(err);
       setMode(classified.kind === 'expired' ? 'signup' : 'login');
@@ -197,7 +203,7 @@ export default function Auth() {
         }
         throw err;
       }
-      navigate(safeFrom, { replace: true });
+      leave(safeFrom);
     } catch (err) {
       setError(err.message || (mode === 'signup' ? 'Registration failed.' : 'Sign in failed.'));
     } finally {
@@ -242,7 +248,7 @@ export default function Auth() {
         return;
       }
       await signInWithPopup(firebaseAuth, new GoogleAuthProvider());
-      navigate(safeFrom, { replace: true });
+      leave(safeFrom);
     } catch (err) {
       if (googleAuthPopupFailed(err)) {
         await signInWithRedirect(firebaseAuth, new GoogleAuthProvider());

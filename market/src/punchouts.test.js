@@ -76,3 +76,13 @@ test('legacy dashboard host maps home and scan onto /dashboard', () => {
     'https://pokoin.com/dashboard?dashPreview=1',
   );
 });
+
+test('Pokoin News paths leave the SPA with a full page load', async () => {
+  const { isStaticSitePath } = await import('./punchouts.js');
+  assert.equal(isStaticSitePath('/news/delta-reign-prerelease-promos-revealed#comments'), true);
+  assert.equal(isStaticSitePath('/one-piece/news/op-14-leaders'), true);
+  assert.equal(isStaticSitePath('/news'), true);
+  assert.equal(isStaticSitePath('/marketplace/en/cards/1'), false);
+  assert.equal(isStaticSitePath('/newsletter'), false);
+  assert.equal(isStaticSitePath('//evil.example/news/x'), false);
+});

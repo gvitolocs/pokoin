@@ -5,13 +5,14 @@
 # tree, and uploads a new Worker version. Nothing is promoted unless the caller
 # passes an explicit version id.
 #
-# The first-ever promote also needs the `pokoin.com/news*` route attached in the
-# Cloudflare zone (dashboard or API). That is a production change and requires
-# explicit approval; this script does not attach routes.
+# `--deploy` (used by the newsroom publisher service) builds and runs
+# `wrangler deploy`, which also attaches the routes in wrangler.pokoin-news.jsonc
+# (pokoin.com/news* and pokoin.com/<game>/news*). Approved 2026-10-05.
 #
 # Usage:
-#   scripts/publish-news.sh                 # build + upload a version
+#   scripts/publish-news.sh                 # build + upload a version (no traffic)
 #   scripts/publish-news.sh --promote <id>  # deploy an uploaded version at 100%
+#   scripts/publish-news.sh --deploy        # build + deploy at 100% (routes included)
 set -euo pipefail
 
 exec 9>/tmp/pokoin-news-publish.lock
@@ -37,6 +38,11 @@ node "$WORK/scripts/build-news-site.mjs" \
   --media-dir "$NEWS_MEDIA_DIR" \
   --strict
 
+if [ "${1:-}" = "--deploy" ]; then
+  (cd "$WORK" && wrangler deploy -c wrangler.pokoin-news.jsonc --message "news $SHA $STAMP")
+  exit 0
+fi
+
 UPLOAD_OUT="$(
   cd "$WORK" && wrangler versions upload \
     -c wrangler.pokoin-news.jsonc \
@@ -44,10 +50,8 @@ UPLOAD_OUT="$(
 )"
 printf '%s\n' "$UPLOAD_OUT"
 
-VERSION_ID="$(
-  printf '%s' "$UPLOAD_OUT" | node -e \
-    "let s='';process.stdin.on('data',(d)=>{s+=d}).on('end',()=>{try{const j=JSON.parse(s);process.stdout.write(j.id||j.version_id||'')}catch{}})"
-)"
+# wrangler prints "Worker Version ID: <uuid>".
+VERSION_ID="$(printf '%s' "$UPLOAD_OUT" | grep -oE 'Version ID: [0-9a-f-]{36}' | head -1 | awk '{print $3}')"
 if [ -n "$VERSION_ID" ]; then
   echo "pokoin-news version: $VERSION_ID"
 else
