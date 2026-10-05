@@ -4332,6 +4332,12 @@ a.era-link:focus-visible {
   cursor: not-allowed;
 }
 
+.deal-chip.is-on:disabled {
+  opacity: 1;
+  filter: none;
+  cursor: default;
+}
+
 .deal-chip .shop-cond {
   width: 2.7rem;
   height: 1.85rem;

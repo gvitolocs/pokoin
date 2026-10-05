@@ -235,7 +235,7 @@ export function listingLanguageFlag(language) {
 
 export function sellerCountryCode(country) {
   const raw = String(country || '').trim().toUpperCase();
-  // EU is not a ship-from ISO code. The shop flag is handled in sellerCountryFlag.
+  // EU is not a ship-from country — never paint the EU mark on listings.
   if (!raw || raw === 'EU' || raw === 'EUROPE' || raw === 'EUROPEAN UNION') return '';
   if (COUNTRY_FLAG[raw]) return COUNTRY_FLAG[raw];
   const lower = raw.toLowerCase();
@@ -259,18 +259,6 @@ export function sellerCountryLabel(country) {
 }
 
 export function sellerCountryFlag(country) {
-  const raw = String(country || '').trim().toUpperCase();
-  // EU is not a ship-from ISO code, but the shop still shows that flag.
-  if (raw === 'EU' || raw === 'EUROPE' || raw === 'EUROPEAN UNION') {
-    const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) || '/';
-    return {
-      code: 'eu',
-      short: 'EU',
-      emoji: '🇪🇺',
-      src: `${base}flags/eu.svg`,
-      label: 'European Union',
-    };
-  }
   const short = sellerCountryShort(country);
   const code = sellerCountryCode(country);
   if (!short && !code) return null;
