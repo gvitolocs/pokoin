@@ -16,7 +16,7 @@ export { realPublicCardId } from './public-card-id.js';
 
 export const OG_CACHE_TTL_SEC = 3600;
 export const OG_SEARCH_CACHE_TTL_SEC = 120;
-export const OG_CACHE_VERSION = 'v7';
+export const OG_CACHE_VERSION = 'v8';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
@@ -122,6 +122,14 @@ export function absoluteUrl(pathOrUrl, origin = SITE) {
   return `${origin.replace(/\/$/, '')}${path}`;
 }
 
+/** Scan URL Google can fetch. The handler overwrites the payload image, so both paths use this. */
+export function cardOgImageUrl(imageUrl, cardId, origin = SITE) {
+  return crawlableCardImage(absoluteUrl(
+    rewriteLeftoverCatalogImage(imageUrl, cardId),
+    origin,
+  ));
+}
+
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -159,17 +167,15 @@ export function buildCardOgPayload(cardPage, {
     [card.name, card.set || card.set_name].filter(Boolean).join(' · ') ||
     `Card ${cardId} · Pokoin`;
   const description = includeDescription ? String(seo.description || '') : '';
-  const image = crawlableCardImage(absoluteUrl(
-    rewriteLeftoverCatalogImage(
-      seo.imageUrl ||
-        card.heroImageUrl ||
-        card.gridImageUrl ||
-        card.imageUrl ||
-        card.cdn_image_url ||
-        card.tileImageUrl,
-      cardId || card.id,
-    ),
-  ));
+  const image = cardOgImageUrl(
+    seo.imageUrl ||
+      card.heroImageUrl ||
+      card.gridImageUrl ||
+      card.imageUrl ||
+      card.cdn_image_url ||
+      card.tileImageUrl,
+    cardId || card.id,
+  );
   const path =
     seo.canonicalPath ||
     cardPage?.canonicalPath ||
@@ -390,14 +396,12 @@ export async function handleMarketplaceCardOgRequest(request, env, ctx) {
   payload.currency = currency;
   payload.listingId = listingId;
   payload.indexable = search;
-  payload.image = absoluteUrl(
-    rewriteLeftoverCatalogImage(
-      page?.seo?.imageUrl ||
-        page?.card?.heroImageUrl ||
-        page?.card?.imageUrl ||
-        '',
-      parsed.cardId,
-    ),
+  payload.image = cardOgImageUrl(
+    page?.seo?.imageUrl ||
+      page?.card?.heroImageUrl ||
+      page?.card?.imageUrl ||
+      '',
+    parsed.cardId,
     site,
   );
   const html = renderCardOgHtml(payload);

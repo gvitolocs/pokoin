@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   absoluteUrl,
   buildCardOgPayload,
+  cardOgImageUrl,
   isLinkPreviewBot,
   isSearchEngineBot,
   parseCardPath,
@@ -71,6 +72,10 @@ test('builds absolute image and HTML with og tags', () => {
     { cardId: '248768', language: 'en' },
   );
   assert.equal(payload.image, 'https://cdn.pokoin.com/124384_drifloon-lv-17.jpg?v=br4');
+  assert.equal(
+    cardOgImageUrl('https://pokoin.com/card-images/342436_charizard-001-025-25th-anniversary-edition.jpg', '342436'),
+    'https://cdn.pokoin.com/171218_charizard-001-025-25th-anniversary-edition.jpg',
+  );
   assert.equal(payload.description, '');
   assert.equal(absoluteUrl('https://cdn.pokoin.com/x.jpg'), 'https://cdn.pokoin.com/x.jpg');
   const html = renderCardOgHtml(payload);
