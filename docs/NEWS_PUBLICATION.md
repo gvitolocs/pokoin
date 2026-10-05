@@ -112,3 +112,51 @@ Nothing is deleted until each step is verified:
    rule) so old links keep working.
 4. Remove the Vercel project and the DNS record (production change, needs
    explicit approval).
+
+## Running in production (since 2026-10-05)
+
+**Service:** `pokoin-newsroom.service` (systemd user unit on nezopt,
+`~/.config/systemd/user/pokoin-newsroom.service`).
+
+- Code: `~/services/pokoin-newsroom/app` (detached checkout of gvitolocs/hermes
+  `origin/main`); site renderer: `~/services/pokoin-newsroom/web` (detached
+  checkout of this repo's `origin/main`, refreshed on every service start).
+- Data: `~/services/pokoin-newsroom/data` (article records, revisions, media,
+  site stories, publisher state, reporter memory).
+- Secrets come from Infisical (project Pokoin, env dev): `DEEPSEEK_KEY`,
+  `FIREBASE_*`. Cloudflare deploys use the login-shell wrangler credentials.
+- Every 60 min: scout all games → cadence slots → generate → gate → publish
+  READY articles → `scripts/publish-news.sh --deploy`. Every 60 s: comment
+  moderation.
+
+**Cadence:** Pokémon, One Piece, Magic, Yu-Gi-Oh!, Lorcana and Riftbound get up
+to 2 articles per UTC day (6 h apart, fresh stories). Every other game gets 1
+article per week, picked from stories at least 2 days old so evidence can build
+up. Generation attempts are capped per period.
+
+**Auto-publish:** only gate-READY articles from confirmed or multi-source
+stories (`POKO_NEWSROOM_AUTOPUBLISH=*:confirmed,*:multi_source`); fact checks
+always wait for the desk (`POKO_NEWSROOM_AUTOPUBLISH_EXCLUDE=fact_check`).
+Everything else lands in review:
+
+```bash
+cd ~/services/pokoin-newsroom/app
+NEWSROOM_DATA_DIR=~/services/pokoin-newsroom/data node scripts/newsroom-desk.mjs list
+NEWSROOM_DATA_DIR=~/services/pokoin-newsroom/data node scripts/newsroom-desk.mjs approve <slug>
+```
+
+then redeploy the site with `systemctl --user restart pokoin-newsroom` (or run
+the next cycle).
+
+**Writer model:** DeepSeek V4.1 Flash (`deepseek-flash`, thinking on; editor
+at max effort) through DeepSeek's Anthropic-compatible endpoint
+(`POKO_NEWSROOM_CLAUDE_PROVIDER=deepseek`). Claude Opus 5.5 (reporter/editor)
+with Sonnet 5.5 (repairs) is the default for `anthropic`/`claude-cli` providers
+when a key or CLI quota is available.
+
+**Comments:** `GET/POST https://api.pokoin.com/api/news-comments`
+(`server/pokoin-api/news-comments.js`, Firestore `news_comments`). New comments
+are `pending` until the service's DeepSeek V4.1 Flash moderator sets them
+`visible`, `held` or `rejected` (criticism of Pokoin is allowed). Held
+comments stay visible to their author only; remove or approve by editing the
+Firestore document's `status`.

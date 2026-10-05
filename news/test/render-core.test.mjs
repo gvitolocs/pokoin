@@ -165,3 +165,12 @@ test('11. niceTicks(0, 97, 4) returns round ascending ticks covering 0..97', () 
   }
   for (const tick of ticks) assert.ok(Number.isInteger(tick), `tick ${tick} must be a round number`);
 });
+
+test('update notes: date-only notes show the day and never repeat "Update —"', async () => {
+  const { renderBlock } = await import('../lib/blocks.mjs');
+  const record = fixtures[0];
+  const dated = renderBlock({ type: 'update_note', at: '2026-10-03T00:00:00.000Z', text: 'Update — October 3: Dexerto now carries the report.' }, record, {});
+  assert.match(dated, /Update — Oct 3, 2026<\/strong> Dexerto now carries the report\./);
+  const timed = renderBlock({ type: 'update_note', at: '2026-10-05T15:03:00.000Z', text: 'Pokémon confirmed the date.' }, record, {});
+  assert.match(timed, /Update — 15:03 UTC<\/strong> Pokémon confirmed the date\./);
+});

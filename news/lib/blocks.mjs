@@ -312,11 +312,14 @@ export function renderBlock(block, record, ctx = {}) {
         `<footer>— <cite>${outlet}</cite></footer></blockquote>`
       );
     }
-    case 'update_note':
-      return (
-        `<p class="nx-update"><strong>Update — ${esc(formatTime(block.at))} UTC</strong> ` +
-        `${esc(block.text)}</p>`
-      );
+    case 'update_note': {
+      // Date-only notes ("2026-10-03T00:00:00Z") show the day, timed ones the
+      // time; a leading "Update —" written into the text is not repeated.
+      const midnight = /T00:00(?::00(?:\.000)?)?(?:Z|[+-]00:00)?$/.test(String(block.at || ''));
+      const when = midnight ? formatDate(block.at) : `${formatTime(block.at)} UTC`;
+      const text = String(block.text || '').replace(/^\s*update\s*[—–-]\s*(?:[A-Z][a-z]+ \d{1,2}(?:, \d{4})?\s*:\s*)?/i, '');
+      return `<p class="nx-update"><strong>Update — ${esc(when)}</strong> ${esc(text)}</p>`;
+    }
     default:
       return '';
   }
