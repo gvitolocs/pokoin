@@ -5,9 +5,11 @@ import { cartTotals, isSelected, moveRow, reconcileRow, settleCheckoutRows } fro
 import { listingStock, nextCartQty } from './cart-qty.js';
 import { useAccountCartSync } from './cart-sync.js';
 import {
+  readInsurance,
   readPknDiscount,
   readShippingCountry,
   readShippingService,
+  writeInsurance,
   writePknDiscount,
   writeShippingCountry,
   writeShippingService,
@@ -150,6 +152,8 @@ const CartContext = createContext({
   removeSaved: () => {},
   applyLive: () => {},
   setGift: () => {},
+  setInsurance: () => {},
+  insurance: false,
   setUseBalance: () => {},
   setShippingChoice: () => {},
   markCheckoutPending: () => {},
@@ -216,6 +220,7 @@ export function CartProvider({ children }) {
   const [items, setItems] = useState(() => (typeof window === 'undefined' ? [] : readCart()));
   const [saved, setSaved] = useState(() => (typeof window === 'undefined' ? [] : readRows(SAVED_KEY)));
   const [gift, setGiftState] = useState(() => (typeof window === 'undefined' ? false : readGift()));
+  const [insurance, setInsuranceState] = useState(() => (typeof window === 'undefined' ? false : readInsurance()));
   const [useBalance, setUseBalanceState] = useState(() => (typeof window === 'undefined' ? false : readPknDiscount()));
   const [shippingChoice, setShippingChoiceState] = useState(() => (
     typeof window === 'undefined'
@@ -234,6 +239,10 @@ export function CartProvider({ children }) {
   useEffect(() => {
     writeFlag(GIFT_KEY, gift ? '1' : '');
   }, [gift]);
+
+  useEffect(() => {
+    writeInsurance(insurance);
+  }, [insurance]);
 
   useEffect(() => {
     writePknDiscount(useBalance);
@@ -262,6 +271,7 @@ export function CartProvider({ children }) {
       items,
       saved,
       gift,
+      insurance,
       useBalance,
       shippingChoice,
       count: totals.count,
@@ -397,6 +407,9 @@ export function CartProvider({ children }) {
       setGift(on) {
         setGiftState(Boolean(on));
       },
+      setInsurance(on) {
+        setInsuranceState(Boolean(on));
+      },
       /** "Use my site balance as a discount" — checkout starts with its voucher ticked. */
       setUseBalance(on) {
         setUseBalanceState(Boolean(on));
@@ -431,7 +444,7 @@ export function CartProvider({ children }) {
         setItems([]);
       },
     };
-  }, [items, saved, gift, useBalance, shippingChoice]);
+  }, [items, saved, gift, insurance, useBalance, shippingChoice]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

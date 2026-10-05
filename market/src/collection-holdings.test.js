@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isNftHolding, partitionHoldings, splitOwnedDesk, sumOwnedQuantity } from './collection-holdings.js';
+import { isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk, sumOwnedQuantity } from './collection-holdings.js';
+
+test('suggestedHoldingAsk uses the cheapest Pokoin listing', () => {
+  const ask = suggestedHoldingAsk(
+    { '244538': { pokoinCheapestPkn: 86.4, soldMedianPkn: 40 } },
+    { cardId: '244538', condition: 'NM', language: 'EN' },
+  );
+  assert.equal(ask, '86');
+  assert.equal(suggestedHoldingAsk({}, { cardId: '1' }), '');
+});
 
 test('sumOwnedQuantity sums quantity, ignores junk', () => {
   assert.equal(sumOwnedQuantity([{ quantity: 2 }, { quantity: 3 }, { quantity: 0 }, {}]), 5);

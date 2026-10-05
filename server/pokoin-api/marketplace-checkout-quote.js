@@ -13,7 +13,7 @@
  */
 
 const path = require('path');
-const { quoteCheckout, normalizeCountry, httpError } = require('./_checkout_core');
+const { quoteCheckout, guardCheckoutQuote, normalizeCountry, httpError } = require('./_checkout_core');
 const { decryptAddressPayload } = require('./_address_crypto');
 
 function requireHelper(name) {
@@ -90,7 +90,10 @@ module.exports = async function handler(req, res) {
     const tracked = body.tracked !== false && body.shippingTracked !== false
       && String(body.shippingService || '').toLowerCase() !== 'untracked';
 
-    const quote = quoteCheckout({ items, sellerOrigins, toCountry, tracked });
+    const quote = guardCheckoutQuote(
+      quoteCheckout({ items, sellerOrigins, toCountry, tracked }),
+      { tracked, insurance: body.insurance === true },
+    );
     return res.status(200).json({
       ...quote,
       sellerOrigins,

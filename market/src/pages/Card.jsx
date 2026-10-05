@@ -12,6 +12,7 @@ import {
   createListing,
   updateListing,
   dropListing,
+  fetchSellerListings,
   fetchSellerSettings,
   saveSellerSettings,
   cardFromCatalogRow,
@@ -126,7 +127,9 @@ import { speciesFromCard, pokemonHref } from '../pokemon-hubs.js';
 import ShopList from '../components/ShopList.jsx';
 import ShopListingRow from '../components/ShopListing.jsx';
 import { listingSelectId, shopDragOffers } from '../shop-marquee.js';
-import { conditionChipSrc, conditionShort } from '../listing-meta.js';
+import { readDealLanguage, resolveDealLanguage, writeDealLanguage } from '../deal-pref.js';
+import { conditionChipSrc, conditionShort, publicListingSellerName, sellerHref } from '../listing-meta.js';
+import { continueBoxCursor, listingBox, liveInventoryListings, recentBoxes } from '../inventory-listings.js';
 import { listingExtraChips, listingFoilOptions } from '../listing-faces.js';
 import { game as currentGame } from '../game.js';
 import {
@@ -346,6 +349,7 @@ function SoldPriceGraph({
   onFirstEdition,
   onGraded,
   onPickDay,
+  formatPrice,
 }) {
   const wrapRef = useRef(null);
   const touchPointerActiveRef = useRef(false);
@@ -451,7 +455,9 @@ function SoldPriceGraph({
   const active = hoverIndex == null ? null : days[hoverIndex];
   const activePt = hoverIndex == null ? null : points[hoverIndex];
   const tipMods = activePt ? soldGraphTipMods(activePt[0], activePt[1], width, pad) : [];
-  const price = active ? (formatPkn(active.medianPkn) || '0 PKN') : '';
+  const price = active
+    ? ((formatPrice ? formatPrice(active.medianPkn) : formatPkn(active.medianPkn)) || '0 PKN')
+    : '';
   const hoverLabel = active ? formatSoldDay(active.day, dateLocale) : '';
 
   function hoverFromPointer(event) {
@@ -607,12 +613,14 @@ function matchDeal(rows, language, condition) {
   }) || null;
 }
 
-function preferredDeal(rows, nationality) {
-  const lang = defaultCardLanguage(nationality);
-  return matchDeal(rows, lang, 'NM')
-    || matchDeal(rows, null, 'NM')
-    || matchDeal(rows, lang, null)
-    || matchDeal(rows);
+/** Next inventory slot for a box, or the bare box when it has no stack yet. */
+function nextBoxLocation(rows, box) {
+  const name = String(box || '').trim();
+  if (!name) return '';
+  const cursor = continueBoxCursor(rows, name, 80);
+  if (!cursor) return name;
+  if (cursor.stackSize <= 1) return `${name}·${cursor.stack}`;
+  return `${name}·${cursor.stack}·${cursor.startPosition}`;
 }
 
 function defaultFoil(card, foils = listingFoilOptions()) {
@@ -820,6 +828,10 @@ function ListingForm({
   const [foil, setFoil] = useState(blank.foil);
   const [chips, setChips] = useState(blank.chips);
   const [comment, setComment] = useState(blank.comment);
+  const [box, setBox] = useState('');
+  const [stockRows, setStockRows] = useState([]);
+  const [stockReady, setStockReady] = useState(false);
+  const boxTouched = useRef(false);
   const [photos, setPhotos] = useState(() => (Array.isArray(editing?.photoUrls) ? editing.photoUrls.slice(0, MAX_LISTING_PHOTOS) : []));
   const [company, setCompany] = useState(blank.company);
   const [grade, setGrade] = useState(blank.grade);
@@ -943,6 +955,50 @@ function ListingForm({
     return () => { cancelled = true; };
   }, [signedIn, getBearer]);
 
+  useEffect(() => {
+    if (!signedIn || !user?.uid) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getBearer();
+        const data = await fetchSellerListings(user.uid, token, { limit: 1000 });
+        if (cancelled) return;
+        setStockRows(liveInventoryListings(data.listings || data.items || []));
+        setStockReady(true);
+      } catch (_) {
+        if (!cancelled) {
+          setStockRows([]);
+          setStockReady(true);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [signedIn, user?.uid, getBearer, editingId]);
+
+  useEffect(() => {
+    if (editingId) {
+      const mine = stockRows.find((row) => row.id === editingId);
+      setBox(listingBox(mine?.location || editing?.location || ''));
+      return;
+    }
+    if (boxTouched.current) return;
+    const first = recentBoxes(stockRows)[0] || '';
+    if (first) setBox(first);
+  }, [editingId, stockRows, editing?.location]);
+
+  const boxOptions = (() => {
+    const names = recentBoxes(stockRows);
+    if (box && !names.some((name) => name.toLowerCase() === box.toLowerCase())) {
+      return [box, ...names];
+    }
+    return names;
+  })();
+  const keptLocation = editingId
+    ? (stockRows.find((row) => row.id === editingId)?.location || editing?.location || '')
+    : '';
+  const sameBox = box && listingBox(keptLocation).toLowerCase() === box.toLowerCase();
+  const locationValue = !box ? '' : (sameBox ? keptLocation : nextBoxLocation(stockRows, box));
+
   async function submit(targets = { pokoin: true, cardtrader: false }) {
     if (!signedIn) {
       navigate(authFrom(fromPath));
@@ -1012,6 +1068,7 @@ function ListingForm({
         reserveAvailable: false,
         nftAvailable: false,
         sellerComment: comment.trim(),
+        ...(!isEditing || stockReady ? { location: locationValue } : {}),
         source: 'pokoin_user_listing',
         cardName: card.name,
         cardImageUrl: card.heroImageUrl || card.imageUrl || '',
@@ -1257,6 +1314,33 @@ function ListingForm({
           ) : null}
         </div>
       </div>
+      <div className="sell-location-row">
+        <label className="sell-field location-pick">
+          Location
+          <select
+            value={box}
+            onChange={(event) => {
+              boxTouched.current = true;
+              setBox(event.target.value);
+            }}
+          >
+            <option value="">None</option>
+            {boxOptions.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+        {locationValue && locationValue !== box ? (
+          <span className="sell-slot">{locationValue.slice(box.length)}</span>
+        ) : null}
+        <label className="sell-field comment comment-inline">
+          Seller comment
+          <input
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+          />
+        </label>
+      </div>
       {chips.graded ? (
         <div className="sell-row">
           <label className="sell-field grow">
@@ -1273,14 +1357,6 @@ function ListingForm({
           </label>
         </div>
       ) : null}
-      <label className="sell-field comment">
-        Seller comment
-        <textarea
-          rows={3}
-          value={comment}
-          onChange={(event) => setComment(event.target.value)}
-        />
-      </label>
       {error ? <p className="sell-msg error">{error}</p> : null}
       {done ? <p className="sell-msg ok">{done}</p> : null}
       {jump ? createPortal(
@@ -1600,6 +1676,7 @@ export default function Card() {
   const location = useLocation();
   const pinnedCurrency = currencyFromSearch(location.search);
   const buyer = useBuyerCurrency(pinnedCurrency);
+  const { settings: sellerSettings } = useSellerCurrency();
   const { user, getBearer } = useAuth();
   const { addItem } = useCart();
   const stubCard = useMemo(() => {
@@ -1646,8 +1723,8 @@ export default function Card() {
   const [offerSort, setOfferSort] = useState('price');
   const [condition, setCondition] = useState('');
   const [language, setLanguage] = useState('');
-  const [dealLang, setDealLang] = useState('');
-  const [dealCond, setDealCond] = useState('');
+  const [dealLang, setDealLang] = useState(() => readDealLanguage());
+  const [dealCond, setDealCond] = useState('NM');
   const [offersReady, setOffersReady] = useState(false);
   const [listingBusy, setListingBusy] = useState(false);
   const [shopError, setShopError] = useState('');
@@ -1675,6 +1752,7 @@ export default function Card() {
     setSalesReverse(false);
     setSalesFirstEdition(false);
     setSalesGraded(false);
+    setDealCond('NM');
     setSalesSlices(peekCardSales(cardId)?.slices ?? null);
     setSetNationality('');
     const cached = peekCard(cardId, { lang });
@@ -2228,10 +2306,15 @@ export default function Card() {
   const prevCard = neighborWindow.prev?.[0] || null;
   const nextCard = neighborWindow.next?.[0] || null;
   const nativeLive = pricedOffers(payload?.offers);
-  const dealPick = dealLang || dealCond
-    ? matchDeal(nativeLive, dealLang || null, dealCond || null)
-    : preferredDeal(nativeLive, card.nationality);
-  const lastDayPkn = formatPkn(salesSeries?.lastMedianPkn);
+  const listedDealLangs = listedDealLanguages(payload?.offers, card);
+  const shownCond = dealCond || 'NM';
+  const shownLang = resolveDealLanguage({
+    selected: dealLang || 'EN',
+    listed: offersReady ? listedDealLangs : [],
+    country: sellerSettings?.shipFromCountry,
+  });
+  const dealPick = offersReady ? matchDeal(nativeLive, shownLang, shownCond) : null;
+  const lastDayPkn = buyer.format(salesSeries?.lastMedianPkn);
   const change72h = formatChange72h(salesSeries?.change24hPct);
   const canBuy = Boolean(dealPick);
   const dealLangs = sellLanguages({
@@ -2239,28 +2322,18 @@ export default function Card() {
     setName: identity.set || card.set,
     releaseLanguages: card.releaseLanguages,
   });
-  const shownLangRaw = dealLang || offerLang(dealPick) || '';
-  const shownLang = dealLangs.includes(shownLangRaw)
-    ? shownLangRaw
-    : (dealLangs.includes(defaultCardLanguage(card.nationality)) ? defaultCardLanguage(card.nationality) : dealLangs[0] || '');
-  const listedDealLangs = listedDealLanguages(payload?.offers, card);
   const listedDealConds = listedDealConditions(payload?.offers);
   // Best Deal shows every grade and every language of this printing; unlisted ones grey out.
   const listedCondSet = new Set(listedDealConds.map((row) => row.value));
   const listedLangSet = new Set(listedDealLangs);
-  const allDealLangs = [...dealLangs, ...listedDealLangs.filter((code) => !dealLangs.includes(code))];
-  const shownCond = dealCond || (dealPick ? moodCondition(dealPick) : '');
+  const allDealLangs = [...dealLangs];
+  for (const code of [...listedDealLangs, shownLang]) {
+    if (code && !allDealLangs.includes(code)) allDealLangs.push(code);
+  }
   const languages = languagesForNationality(
     card.nationality,
     [...new Set((payload?.offers || []).map((row) => String(row.language || '').toUpperCase()).filter(Boolean))],
   );
-  const dealCopy = !offersReady
-    ? null
-    : !nativeLive.length
-      ? 'No sellers yet. Be the first to list this card.'
-      : !dealPick
-        ? 'No listing matches this selection.'
-        : null;
   const collector = identity.number || '';
   const versionRows = rarityVersions(card, namePrintings);
   const versionLabel = versionOptionLabel(card) || collector;
@@ -2475,10 +2548,10 @@ export default function Card() {
           </p>
           <div className="asset-quotes">
             <span
-              className={lastDayPkn ? 'quote-pill quote-pkn' : 'quote-pill quote-pkn oos'}
-              title="Last day's median inferred sold price in PKN"
+              className={buyer.pending || lastDayPkn ? 'quote-pill quote-pkn' : 'quote-pill quote-pkn oos'}
+              title="Last day's median inferred sold price"
             >
-              {salesSeries == null ? '—' : (lastDayPkn || '—')}
+              {buyer.pending ? '\u00a0' : (salesSeries == null ? '—' : (lastDayPkn || '—'))}
             </span>
             <span
               className={change72h.empty ? 'quote-pill oos' : 'quote-pill'}
@@ -2616,6 +2689,7 @@ export default function Card() {
             onReverse={setSalesReverse}
             onFirstEdition={setSalesFirstEdition}
             onGraded={setSalesGraded}
+            formatPrice={(pkn) => buyer.format(pkn)}
             onPickDay={(day) => {
               const traits = soldTraitsForGraphDay(salesSlices || [], {
                 nationality: salesNationality,
@@ -2641,8 +2715,8 @@ export default function Card() {
             identity={identity}
             salesSlices={salesSlices}
             fromPath={fromPath}
-            preferredLanguage={dealLang}
-            preferredCondition={dealCond}
+            preferredLanguage={shownLang}
+            preferredCondition={shownCond}
             versions={clipPrintings}
             editing={editingOffer}
             onCancelEdit={() => setEditingOffer(null)}
@@ -2682,20 +2756,27 @@ export default function Card() {
             <div className={canBuy ? 'prod-px' : 'prod-px oos'}>
               {offersReady && canBuy ? <PriceStack parts={buyer.parts(dealPick.pricePkn, dealPick.sellerAcceptsPkn)} /> : '—'}
             </div>
-            {canBuy && offersReady ? null : (
-              <p className="muted own-k">{dealCopy || '\u00a0'}</p>
-            )}
+            {offersReady && canBuy ? (
+              <p className="deal-sold-by">
+                Sold by{' '}
+                {sellerHref(dealPick, lang) ? (
+                  <Link to={sellerHref(dealPick, lang)}>{publicListingSellerName(dealPick) || 'seller'}</Link>
+                ) : (
+                  <span>{publicListingSellerName(dealPick) || 'seller'}</span>
+                )}
+              </p>
+            ) : null}
             <div className="deal-facets">
               <div className="deal-facet-row" role="radiogroup" aria-label="Condition">
                 {DEAL_CONDS.map((row) => {
                   const listed = listedCondSet.has(row.value);
-                  const on = listed && shownCond === row.value;
+                  const on = shownCond === row.value;
                   return (
                     <button
                       key={row.value}
                       type="button"
                       role="radio"
-                      className={`deal-chip${on ? ' is-on' : ''}${listed ? '' : ' is-off'}`}
+                      className={`deal-chip${on ? ' is-on' : ''}${listed || on ? '' : ' is-off'}`}
                       aria-checked={on}
                       aria-label={row.label}
                       title={listed ? row.label : `${row.label} · none listed`}
@@ -2718,18 +2799,21 @@ export default function Card() {
                 <div className="deal-facet-row" role="radiogroup" aria-label="Language">
                   {allDealLangs.map((code) => {
                     const listed = listedLangSet.has(code);
-                    const on = listed && shownLang === code;
+                    const on = shownLang === code;
                     return (
                       <button
                         key={code}
                         type="button"
                         role="radio"
-                        className={`deal-chip${on ? ' is-on' : ''}${listed ? '' : ' is-off'}`}
+                        className={`deal-chip${on ? ' is-on' : ''}${listed || on ? '' : ' is-off'}`}
                         aria-checked={on}
                         aria-label={code}
                         title={listed ? code : `${code} · none listed`}
                         disabled={!listed}
-                        onClick={() => setDealLang(code)}
+                        onClick={() => {
+                          setDealLang(code);
+                          writeDealLanguage(code, user?.uid);
+                        }}
                       >
                         <img className="deal-flag" src={flagSrc(code)} alt="" width="22" height="22" />
                         <span>{code}</span>

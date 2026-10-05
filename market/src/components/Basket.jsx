@@ -22,7 +22,7 @@ import {
   sellerCountryLabel,
   sellerHref,
 } from '../listing-meta.js';
-import { fiatFromPkn, formatLocalFromEurCents, formatPkn, formatPknNumber } from '../pkn.js';
+import { formatLocalFromEurCents, formatPkn, formatPknNumber, moneyFromPkn } from '../pkn.js';
 import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
 import CardArt from './CardArt.jsx';
@@ -30,9 +30,9 @@ import CardArt from './CardArt.jsx';
 const LOW_STOCK = 3;
 
 function fiatParts(pricePkn, currency) {
-  const amount = fiatFromPkn(pricePkn, currency);
-  if (amount == null) return null;
-  const [int, dec] = amount.toFixed(2).split('.');
+  const money = moneyFromPkn(pricePkn, currency);
+  if (!money?.amount) return null;
+  const [int, dec] = money.amount.split('.');
   if (currency === 'DKK') return { pre: '', int, dec, post: 'DKK' };
   if (currency === 'USD') return { pre: '$', int, dec, post: '' };
   return { pre: '€', int, dec, post: '' };
@@ -40,13 +40,16 @@ function fiatParts(pricePkn, currency) {
 
 /**
  * Amazon's price: small symbol, big whole part, small raised cents. PKN stays
- * digits only (2642 PKN, never 2,642); local currency shows the PKN under it.
+ * digits only (2642 PKN, never 2,642). A pinned currency keeps PKN under
+ * the local amount; an unaffordable price is the local amount alone.
  */
 export function BigPrice({ pricePkn, sellerAcceptsPkn = true, size = 'lg', fiat }) {
   const buyer = useBuyerCurrency();
   const pkn = Number(pricePkn) || 0;
+  if (buyer.pending) return <span className={`bk-price is-${size} is-pending`} aria-hidden="true" />;
   if (!(pkn > 0)) return <span className="bk-price is-none">—</span>;
   const local = (fiat ?? buyer.fiat(pkn, sellerAcceptsPkn)) ? fiatParts(pkn, buyer.currency) : null;
+  const keepPkn = Boolean(buyer.pinned && buyer.pinned !== 'PKN');
   if (local) {
     return (
       <span className={`bk-price is-${size}`}>
@@ -56,7 +59,7 @@ export function BigPrice({ pricePkn, sellerAcceptsPkn = true, size = 'lg', fiat 
           <span className="bk-price-dec">{local.dec}</span>
           {local.post ? <span className="bk-price-sym is-post">{local.post}</span> : null}
         </span>
-        <span className="bk-price-sub">{formatPkn(pkn)}</span>
+        {keepPkn ? <span className="bk-price-sub">{formatPkn(pkn)}</span> : null}
       </span>
     );
   }
@@ -274,7 +277,9 @@ export function BasketRow({ row, live, checking, onSelect, onQty, onDelete, onSa
               {language.label}
             </span>
           ) : null}
-          {tags.map((tag) => <em key={tag} className="bk-tag">{tag}</em>)}
+          {tags.map((tag) => (
+            <em key={tag} className={tag === 'Reverse' ? 'bk-tag is-reverse' : 'bk-tag'}>{tag}</em>
+          ))}
         </div>
         {row.nftAvailable || row.reserveAvailable ? (
           <div className="bk-digital">
@@ -446,6 +451,9 @@ export function BasketSummary({
   onUseBalance,
   gift,
   onGift,
+  insurance = false,
+  onInsurance,
+  subtotalEurCents = 0,
 }) {
   const buyer = useBuyerCurrency();
   const n = totals.selectedCount;
@@ -524,6 +532,12 @@ export function BasketSummary({
           </dt>
           <dd>{shippingCell}</dd>
         </div>
+        {insurance && subtotalEurCents > 2000 ? (
+          <div>
+            <dt>Insurance 5%</dt>
+            <dd>{formatLocalFromEurCents(Math.round(subtotalEurCents * 0.05), currency)}</dd>
+          </div>
+        ) : null}
         {discountOn ? (
           <>
             <div>
@@ -554,6 +568,23 @@ export function BasketSummary({
                   ? `${formatPkn(balance)} available · up to ${discount.pkn} PKN on this order`
                   : `${formatPkn(balance)} available · these sellers only take card payments`
                 : <>No site balance yet · <Link className="bk-link" to="/wallet">Top up</Link></>}
+            </em>
+          </span>
+        </label>
+      ) : null}
+
+        {subtotalEurCents > 2000 && onInsurance ? (
+        <label className="bk-gift bk-insurance">
+          <input
+            type="checkbox"
+            checked={insurance}
+            onChange={(event) => onInsurance(event.target.checked)}
+          />
+          <span>
+            Insurance 5%
+            <em>
+              {formatLocalFromEurCents(Math.round(subtotalEurCents * 0.05), currency)}
+              {' · covers 80% of the cards if the parcel is lost'}
             </em>
           </span>
         </label>

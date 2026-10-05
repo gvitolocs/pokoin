@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation } from 'react-router-dom';
 import {
   connectPowerTools,
   disconnectPowerTools,
+  fetchCardTraderStatus,
   fetchCardTraderZero,
   fetchPowerToolsStatus,
 } from '../api.js';
@@ -315,6 +316,7 @@ export default function CardTraderZero() {
   const [notConnected, setNotConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPending, setShowPending] = useState(false);
+  const [oneDayReady, setOneDayReady] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -334,14 +336,26 @@ export default function CardTraderZero() {
 
   useEffect(() => {
     document.title = 'CardTrader Zero · Pokoin';
-    if (signedIn) load();
-  }, [signedIn, load]);
+    if (!signedIn) return undefined;
+    load();
+    let cancelled = false;
+    getBearer()
+      .then((token) => fetchCardTraderStatus(token))
+      .then((status) => {
+        const ready = status?.status?.metadata?.oneDayReady === true
+          || status?.sync?.summary?.mode === 'one_day_ready';
+        if (!cancelled && ready) setOneDayReady(true);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [signedIn, load, getBearer]);
 
   const totals = data?.totals;
   const pendingItems = useMemo(() => data?.pending?.items || [], [data]);
 
   if (!ready) return <SessionWait />;
   if (!signedIn) return <Navigate to={authFrom(location.pathname || '/mypokoin/zero')} replace />;
+  if (oneDayReady || data?.oneDayReady) return <Navigate to="/mypokoin/1dr" replace />;
 
   return (
     <div className="page desk">

@@ -10,12 +10,12 @@ import {
   imageSrc,
 } from '../api.js';
 import {
+  continueBoxCursor,
   listingBox,
   liveInventoryListings,
-  nextFreeSlot,
   nextPositionInStack,
   occupiedAbsForScanBoxes,
-  recentListingBoxes,
+  recentBoxes,
 } from '../inventory-listings.js';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
@@ -33,6 +33,7 @@ import {
   artworkVersionLabel,
   artworkVersionShortLabel,
   batchDefaultRowPatch,
+  candidatesForPrintFamily,
   currentMatchesLanguageBucket,
   draftArtworkBucket,
   listingLanguageForPrint,
@@ -48,8 +49,6 @@ import {
   applyItems,
   batchCounts,
   boxSlots,
-  stackPosToIndex,
-  indexToStackPos,
   candidateList,
   CONDITIONS,
   createPatchChain,
@@ -69,8 +68,6 @@ import {
   slotText,
   stepCandidate,
   submitLabel,
-  suggestedStartPosition,
-  suggestedStackCursor,
   STACK_SIZES,
   slotFilledStack,
   typeQuantity,
@@ -205,8 +202,6 @@ export default function ScanDesk() {
   const [priceRetry, setPriceRetry] = useState(0);
   /** PowerTools single-card draft: printing picked, Qty focused, hotkeys edit, Enter creates. */
   const [draft, setDraft] = useState(null);
-  /** Boxes this seller has used, for the Location datalist. */
-  const [sellerBoxes, setSellerBoxes] = useState([]);
   const qtyBuffer = useRef({ id: '', buffer: '', at: 0 });
   const undoStack = useRef([]);
   const redoStack = useRef([]);
@@ -408,6 +403,7 @@ export default function ScanDesk() {
 
   const list = useMemo(() => queueRows(displayRows), [displayRows]);
   const [boxStockRows, setBoxStockRows] = useState([]);
+  const [recentBoxNames, setRecentBoxNames] = useState([]);
   const occupiedAbs = useMemo(
     () => occupiedAbsForScanBoxes(list, boxStockRows),
     [list, boxStockRows],
@@ -442,6 +438,19 @@ export default function ScanDesk() {
     const el = queueRef.current.querySelector(`[data-row="${focusId}"]`);
     el?.scrollIntoView?.({ block: 'nearest' });
   }, [focusId]);
+
+  // The queue is part of the page. Follow new scans only while the seller
+  // is already at the bottom of that page.
+  useEffect(() => {
+    const onScroll = () => {
+      const el = queueRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      followTail.current = rect.bottom - window.innerHeight < 80;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Keep where the seller stopped per box (stack + position) so the next
   // session can resume at the same divider. An empty batch has not placed a
@@ -497,35 +506,8 @@ export default function ScanDesk() {
     if (Object.keys(patch).length) setDefaults(patch);
   }, [list, occupiedAbs]);
 
-  // Resume stack/position when the seller switches box (or opens a batch).
-  const prevLocationRef = useRef(undefined);
-  const prevBatchRef = useRef(undefined);
-  useEffect(() => {
-    const loc = String(defaults.location || '').trim();
-    if (closed || !batch?.id) {
-      prevLocationRef.current = loc;
-      prevBatchRef.current = batch?.id;
-      return;
-    }
-    const locationChanged = prevLocationRef.current !== loc;
-    const batchChanged = prevBatchRef.current !== batch.id;
-    prevLocationRef.current = loc;
-    prevBatchRef.current = batch.id;
-    if (!loc || (!locationChanged && !batchChanged)) return;
-    const suggested = suggestedStackCursor({
-      stored: loadStoppedPositions()[loc],
-      currentStack: defaults.stack ?? 1,
-      currentPosition: defaults.startPosition ?? 1,
-      stackSize: defaults.stackSize ?? 1,
-      locationChanged: true,
-    });
-    if (suggested) setDefaults(suggested);
-  }, [batch?.id, defaults.location, closed]);
-
-  // A batch never starts on top of stock already in the box: continue after
-  // the last slot the seller's live listings hold there (scan sessions, desk
-  // listings and PowerTools CSV imports all write `box·stack[·position]`).
-  // With stacks of N cards a half-full stack continues at its next position.
+  // A batch continues after the last card added to the box. That inventory
+  // slot wins even when a saved cursor ran ahead into an empty stack.
   const defaultsRef = useRef(defaults);
   defaultsRef.current = defaults;
   const boxStockRef = useRef({ key: '', box: '', rows: [] });
@@ -548,10 +530,20 @@ export default function ScanDesk() {
         const d = defaultsRef.current;
         if (listingBox(String(d.location || '').trim()) !== box) return;
         const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
-        const next = nextFreeSlot(rows, box, size);
+        const next = continueBoxCursor(rows, box, size);
         if (!next) return;
-        if (next.abs > stackPosToIndex(d.stack ?? 1, d.startPosition ?? 1, size)) {
-          setDefaults({ stack: Math.min(9999, next.stack), startPosition: size === 1 ? 1 : next.startPosition });
+        // Inventory is the cursor, including when a saved stop ran ahead of
+        // the last card actually added (that stop opened an empty stack).
+        if (
+          next.stack !== (d.stack ?? 1)
+          || (next.stackSize === 1 ? 1 : next.startPosition) !== (d.startPosition ?? 1)
+          || next.stackSize !== size
+        ) {
+          setDefaults({
+            stack: Math.min(9999, next.stack),
+            startPosition: next.stackSize === 1 ? 1 : next.startPosition,
+            ...(next.stackSize !== size ? { stackSize: next.stackSize } : {}),
+          });
         }
       } catch (_) {
         boxStockRef.current = { key: '', box: '', rows: [] }; // retry on the next location change
@@ -561,28 +553,33 @@ export default function ScanDesk() {
     return () => { cancelled = true; };
   }, [batch?.id, defaults.location, closed, stockUid]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Location suggestions: every box this seller has used, sold-out included,
-  // loaded once the uid is known. The current batch default leads the list.
+  // An empty location suggests the box on the seller's newest listing.
+  // One shot per batch: clearing the field afterwards stays cleared.
+  const locationSeeded = useRef('');
   useEffect(() => {
-    if (!stockUid) return undefined;
+    if (closed || !batch?.id || !stockUid) return undefined;
+    if (String(defaults.location || '').trim()) {
+      locationSeeded.current = batch.id;
+      return undefined;
+    }
+    if (locationSeeded.current === batch.id) return undefined;
     let cancelled = false;
     (async () => {
       try {
-        const data = await fetchSellerListings(stockUid, await getBearer(), { limit: 1000 });
-        if (cancelled) return;
-        setSellerBoxes(recentListingBoxes(data.listings || data.items || []));
-      } catch (_) {
-        // Suggestions are a hint: a failed load just leaves the list empty.
-      }
+        const data = await fetchSellerListings(stockUid, await getBearer(), { limit: 200 });
+        if (cancelled || locationSeeded.current === batch.id) return;
+        const rows = liveInventoryListings(data.listings || data.items || []);
+        const boxes = recentBoxes(rows);
+        setRecentBoxNames(boxes);
+        setBoxStockRows((current) => (current.length ? current : rows));
+        const last = boxes[0];
+        if (!last || String(defaultsRef.current.location || '').trim()) return;
+        locationSeeded.current = batch.id;
+        setDefaults({ location: last });
+      } catch (_) { /* the field stays empty; the seller can still type a box */ }
     })();
     return () => { cancelled = true; };
-  }, [stockUid]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const locationOptions = useMemo(() => {
-    const current = String(defaults.location || '').trim();
-    if (!current) return sellerBoxes;
-    return [current, ...sellerBoxes.filter((box) => box.toLowerCase() !== current.toLowerCase())];
-  }, [sellerBoxes, defaults.location]);
+  }, [batch?.id, defaults.location, closed, stockUid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Next free position when the seller types a stack: stock in the box plus this batch. */
   function positionForStack(stack) {
@@ -749,12 +746,14 @@ export default function ScanDesk() {
           const rows = liveInventoryListings(data.listings || data.items || []);
           boxStockRef.current = { key: `${batch.id}|${box}`, box, rows };
           setBoxStockRows(rows);
-          const next = nextFreeSlot(rows, box, size);
+          setRecentBoxNames(recentBoxes(rows));
+          const next = continueBoxCursor(rows, box, size);
           if (next && patch.stack == null && patch.startPosition == null) {
             nextPatch = {
               ...nextPatch,
               stack: Math.min(9999, next.stack),
-              startPosition: size === 1 ? 1 : next.startPosition,
+              startPosition: next.stackSize === 1 ? 1 : next.startPosition,
+              ...(next.stackSize !== size ? { stackSize: next.stackSize } : {}),
             };
           }
         } catch (_) {
@@ -1477,8 +1476,8 @@ export default function ScanDesk() {
           </section>
           <DefaultsBar
             defaults={defaults}
+            boxes={recentBoxNames}
             stackFull={stackFull}
-            locationOptions={locationOptions}
             onChange={setDefaults}
             positionForStack={positionForStack}
             locationRef={locationInput}
@@ -1545,15 +1544,10 @@ export default function ScanDesk() {
         aria-label="Scan queue"
         tabIndex={0}
         ref={queueRef}
-        onScroll={(event) => {
-          const el = event.currentTarget;
-          followTail.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-        }}
       >
         <div className="scan-row scan-row-head" role="row">
           <span role="columnheader">#</span>
-          <span role="columnheader" />
-          <span role="columnheader">Card</span>
+          <span role="columnheader" className="c-card-head">Card</span>
           <span role="columnheader">Lang</span>
           <span role="columnheader">Cond</span>
           <span role="columnheader">Finish</span>
@@ -1690,8 +1684,17 @@ function QrBlock({ secret, pin }) {
   );
 }
 
-function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackButtonRef, stackFull = false, locationOptions = [] }) {
+function boxSuggestions(boxes, draft) {
+  const q = String(draft || '').trim().toLowerCase();
+  const list = Array.isArray(boxes) ? boxes : [];
+  if (!q) return list.slice(0, 8);
+  return list.filter((name) => name.toLowerCase().includes(q)).slice(0, 8);
+}
+
+function DefaultsBar({ defaults, boxes = [], onChange, positionForStack, locationRef, stackButtonRef, stackFull = false }) {
   const [locationDraft, setLocationDraft] = useState(defaults.location);
+  const [boxMenuOpen, setBoxMenuOpen] = useState(false);
+  const [boxActive, setBoxActive] = useState(0);
   const [stackDraft, setStackDraft] = useState(String(defaults.stack ?? 1));
   const [posDraft, setPosDraft] = useState(String(defaults.startPosition ?? 1));
   const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
@@ -1712,6 +1715,16 @@ function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackB
   useEffect(() => setSizeDraft(String(size)), [size]);
   const commitLocation = () => {
     if (locationDraft !== defaults.location) onChange({ location: locationDraft });
+  };
+  const suggestions = boxSuggestions(boxes, locationDraft);
+  const draftBox = locationDraft.trim().toLowerCase();
+  const showBoxMenu = boxMenuOpen && suggestions.length > 0 && !(
+    suggestions.length === 1 && suggestions[0].toLowerCase() === draftBox
+  );
+  const pickBox = (name) => {
+    setLocationDraft(name);
+    setBoxMenuOpen(false);
+    if (name !== defaults.location) onChange({ location: name });
   };
   // Giuseppe 2026-10-04: the location applies while typing — a short pause is
   // enough, no Enter. Blur and Enter still commit immediately.
@@ -1756,13 +1769,9 @@ function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackB
     if (!keepOpen) setSizeOpen(false);
     setSizeDraft(String(nextSize));
     if (nextSize === size) return;
-    const abs = stackPosToIndex(defaults.stack ?? 1, defaults.startPosition ?? 1, size);
-    const mapped = indexToStackPos(abs, nextSize);
-    onChange({
-      stackSize: nextSize,
-      stack: mapped.stack,
-      startPosition: nextSize === 1 ? 1 : mapped.position,
-    });
+    // Cards per stack is only the divider. Remapping the absolute index
+    // sent a stack-4 cursor back into an earlier stack.
+    onChange({ stackSize: nextSize });
   };
   return (
     <section className={`scan-defaults${stackFull ? ' is-stack-full' : ''}`} aria-labelledby="scan-defaults-title">
@@ -1824,21 +1833,47 @@ function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackB
             ref={locationRef}
             value={locationDraft}
             maxLength={64}
-            placeholder="Box A12"
-            list="scan-location-options"
+            placeholder={suggestions[0] && !locationDraft ? suggestions[0] : ''}
+            autoComplete="off"
+            role="combobox"
+            aria-expanded={showBoxMenu}
+            aria-controls="scan-box-suggestions"
+            aria-autocomplete="list"
             onChange={(e) => {
-              const value = e.target.value;
-              setLocationDraft(value);
-              // Picking a datalist option keeps focus: apply it now instead of
-              // waiting for blur / Enter (both still commit as before).
-              if (locationOptions.includes(value)) onChange({ location: value });
+              setLocationDraft(e.target.value);
+              setBoxActive(0);
+              setBoxMenuOpen(true);
             }}
-            onBlur={commitLocation}
-            onKeyDown={blurOnEnter}
+            onFocus={() => { setBoxMenuOpen(true); setBoxActive(0); }}
+            onBlur={() => {
+              setBoxMenuOpen(false);
+              commitLocation();
+            }}
+            onKeyDown={(e) => {
+              if (showBoxMenu) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setBoxActive((i) => Math.min(suggestions.length - 1, i + 1));
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setBoxActive((i) => Math.max(0, i - 1));
+                  return;
+                }
+                if (e.key === 'Enter' && suggestions[boxActive]) {
+                  e.preventDefault();
+                  pickBox(suggestions[boxActive]);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  setBoxMenuOpen(false);
+                  return;
+                }
+              }
+              blurOnEnter(e);
+            }}
           />
-          <datalist id="scan-location-options">
-            {locationOptions.map((box) => <option key={box} value={box} />)}
-          </datalist>
           <button
             ref={stackButtonRef}
             type="button"
@@ -1855,6 +1890,25 @@ function DefaultsBar({ defaults, onChange, positionForStack, locationRef, stackB
             {size > 1 ? <b className="sd-gear-size">{size}</b> : null}
           </button>
         </span>
+        {showBoxMenu ? (
+          <ul id="scan-box-suggestions" className="sd-box-menu" role="listbox">
+            {suggestions.map((name, i) => (
+              <li key={name} role="presentation">
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={i === boxActive}
+                  className={i === boxActive ? 'on' : ''}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setBoxActive(i)}
+                  onClick={() => pickBox(name)}
+                >
+                  {name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {sizeOpen ? (
           <div className="sd-stack-menu" role="dialog" aria-label="Stack setup">
             <p className="sd-stack-help">How many cards fit in one stack between two dividers. Each scan is one card; the slot counts up by itself.</p>
@@ -2046,16 +2100,18 @@ function CandidateAlts({ row, preferredLanguage, onPick }) {
         name: preferred.name || cand.name,
         setName: preferred.set_name || preferred.setName || preferred.set || cand.setName,
         number: preferred.card_number || preferred.collector_number || preferred.number || cand.number,
+        nationality: preferred.nationality || cand.nationality || '',
       };
     })).then((next) => {
       if (cancelled) return;
       const seen = new Set();
-      setMapped(next.filter((c) => {
+      const unique = next.filter((c) => {
         const id = String(c.cardId || '');
         if (!id || seen.has(id)) return false;
         seen.add(id);
         return true;
-      }));
+      });
+      setMapped(candidatesForPrintFamily(unique, lang));
     });
     return () => { cancelled = true; };
   }, [row.id, lang, raw.map((c) => c.cardId).join(',')]);
@@ -2090,7 +2146,7 @@ function QueueRow({
       ? PROBLEM_LABEL[problem]
       : row.recognitionState === 'manual' ? 'Manual' : row.reviewed && row.recognitionState !== 'matched' ? 'Checked' : 'Matched';
   const tone = row.status === 'submitted' ? 'ok' : problem === 'no_printing' ? 'bad' : problem ? 'warn' : 'ok';
-  const showCandidates = !closed && (row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed;
+  const showCandidates = !closed && (row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched');
   const unidentified = !closed && !row.cardId;
   // Full LANG list — expansion remaps when the language implies another print.
   // Card desk still restricts via languagesForNationality.
@@ -2111,6 +2167,7 @@ function QueueRow({
       }}
     >
       <span className="c-num">{index + 1}</span>
+      <span className="c-identity">
       <span
         className="c-art"
         draggable={Boolean(row.cardId || row.cardName)}
@@ -2152,6 +2209,7 @@ function QueueRow({
           <CandidateAlts row={row} preferredLanguage={remapLang} onPick={onPick} />
         ) : null}
         {replacing && !unidentified ? <ReplacePrinting onPick={(id) => { onPick(id); onReplaceDone(); }} onClose={onReplaceDone} seed={row.cardName} /> : null}
+      </span>
       </span>
       <span className="c-lang">
         {closed ? (

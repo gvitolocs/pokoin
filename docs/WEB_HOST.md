@@ -77,7 +77,7 @@ The Cloudflare account is over the 100,000 Worker-script daily cap until **2026-
 1. The SPA calls same-origin `/api` (see `market/src/extension-auth-bridge.js` `publicApiUrl`).
 2. Google sign-in uses `authDomain: pokoin.com`, so `/__/auth/*` must stay on that host.
 
-**Extension zip:** 31 MB, above the Static Assets per-file limit, so it is not in the asset upload. The download Worker is `pokoin-extension-download`. Its routes were removed during the Pi cutover, and the Pi origin currently serves `/download/extension.zip` from disk. `/aab` is a different Worker, `pokoin-aab-downloads`, and those routes were left in place.
+**Extension zip:** 31 MB, above the Static Assets 25 MiB per-file limit, so it is not in the asset upload. Since 2026-10-05 `/download/extension.zip` and `/download/extention.zip` are static `_redirects` rules (302, no Worker) to the Pi CDN copy `https://cdn.pokoin.com/downloads/pokemon-card-extension-<version>.zip` (Pi `/srv/pokoin/card-images/objects/downloads/`). The URL is `EXTENSION_ZIP` in `scripts/write-cloudflare-web-routing.mjs`. The download Worker `pokoin-extension-download` has had no routes since the Pi cutover. `/aab` is a different Worker, `pokoin-aab-downloads`, and those routes were left in place.
 
 ---
 

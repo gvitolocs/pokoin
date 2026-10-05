@@ -17,15 +17,18 @@ import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
 import { checkoutFees, pknBalanceVoucher } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
-import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
+import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatFiatFromPkn, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
 import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { brandSrc } from '../brand-assets.js';
-import { readPknDiscount } from '../shipping-choice.js';
+import { readInsurance, readPknDiscount, writeInsurance } from '../shipping-choice.js';
 import {
-  defaultShippingService,
+  cheapestServiceId,
+  eurCentsFromPkn,
+  isUntrackedService,
   pknFromEurCents,
   previewShipmentCents,
   shippingServiceOptions,
+  untrackedAllowed,
 } from '../shipping-quote.js';
 import ArtworkZoom from '../components/ArtworkZoom.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
@@ -117,7 +120,8 @@ export default function Checkout() {
     markCheckoutPending,
   } = useCart();
   const [nftOnly, setNftOnly] = useState(false);
-  const [insurance, setInsurance] = useState(false);
+  const [insurance, setInsurance] = useState(() => readInsurance());
+  useEffect(() => { writeInsurance(insurance); }, [insurance]);
   const [notes, setNotes] = useState(() => (gift ? GIFT_NOTE : ''));
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -165,6 +169,7 @@ export default function Checkout() {
     return [...bySeller.values()];
   }, [items, quote?.sellerOrigins]);
 
+  const allowUntracked = untrackedAllowed(eurCentsFromPkn(subtotalPkn));
   const shipOptions = useMemo(() => {
     if (nft || !sellerParcels.length) return [];
     for (const group of sellerParcels) {
@@ -173,11 +178,11 @@ export default function Checkout() {
         fromCountry: group.from,
         toCountry: buyerCountry,
         cardCount: group.count,
-      });
+      }).filter((row) => allowUntracked || !isUntrackedService(row));
       if (options.length) return options;
     }
     return [];
-  }, [nft, sellerParcels, buyerCountry]);
+  }, [nft, sellerParcels, buyerCountry, allowUntracked]);
 
   const shippingPreviewCents = useMemo(() => {
     if (nft || !items.length) return 0;
@@ -250,9 +255,9 @@ export default function Checkout() {
     && !quote?.preview;
 
   function moneyFromPkn(pkn) {
-    return preferFiat || payMethod === 'stripe'
-      ? formatLocalFromPkn(pkn, displayCurrency)
-      : formatPkn(pkn);
+    if (preferFiat) return formatFiatFromPkn(pkn, displayCurrency);
+    if (payMethod === 'stripe') return formatLocalFromPkn(pkn, displayCurrency);
+    return formatPkn(pkn);
   }
 
   function moneyFromEurCents(cents) {
@@ -262,9 +267,9 @@ export default function Checkout() {
   useEffect(() => {
     if (!shipOptions.length) return;
     const selectable = shipOptions.filter((row) => !row.unavailable);
-    // Until the buyer picks, a few cards default to the untracked letter.
+    // Cheapest bookable service. Untracked is not bookable above €20.
     if (!shippingPicked || !selectable.some((row) => row.id === shippingService)) {
-      const next = defaultShippingService(shipOptions);
+      const next = cheapestServiceId(selectable, { allowUntracked }) || 'tracked';
       if (next !== shippingService) setShippingService(next);
     }
   }, [shipOptions, shippingService, shippingPicked]);
@@ -356,6 +361,7 @@ export default function Checkout() {
           ...(addressId ? { shippingAddressId: addressId } : { toCountry: buyerCountry }),
           shippingService,
           tracked: shippingTracked,
+          insurance: insurance && !nft && !allowUntracked,
         }, token);
         if (cancelled) return;
         setQuote(data);
@@ -370,7 +376,7 @@ export default function Checkout() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [nft, payMethod, addressId, buyerCountry, items, missingListing, getBearer, shippingService, shippingTracked]);
+  }, [nft, payMethod, addressId, buyerCountry, items, missingListing, getBearer, shippingService, shippingTracked, insurance, allowUntracked]);
 
   if (!ready) {
     return <SessionWait />;
@@ -456,6 +462,7 @@ export default function Checkout() {
         shippingAddressId: addressId,
         shippingService,
         tracked: shippingTracked,
+        insurance: insurance && !nft && !allowUntracked,
         usePknDiscount: pknDiscountPkn >= 1,
       }, token);
       if (!data.checkoutUrl) {
@@ -822,6 +829,21 @@ export default function Checkout() {
                   </dt>
                   <dd>{moneyFromEurCents(quote.shippingTotalCents)}</dd>
                 </div>
+                {!allowUntracked ? (
+                  <div>
+                    <dt>
+                      <label className="fee-check">
+                        <input
+                          type="checkbox"
+                          checked={insurance}
+                          onChange={(event) => setInsurance(event.target.checked)}
+                        />
+                        Insurance 5%
+                      </label>
+                    </dt>
+                    <dd>{moneyFromEurCents(quote.insuranceCents || 0)}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>Total</dt>
                   <dd>{moneyFromEurCents(quote.grandTotalCents)}</dd>
@@ -841,11 +863,26 @@ export default function Checkout() {
                       : (quoteError || 'Looking up shipping…')}
                   </dd>
                 </div>
+                {!allowUntracked ? (
+                  <div>
+                    <dt>
+                      <label className="fee-check">
+                        <input
+                          type="checkbox"
+                          checked={insurance}
+                          onChange={(event) => setInsurance(event.target.checked)}
+                        />
+                        Insurance 5%
+                      </label>
+                    </dt>
+                    <dd>{moneyFromEurCents(insurance ? Math.round(eurSubtotal * 0.05) : 0)}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>Estimated total</dt>
                   <dd>
                     {shippingPreviewCents != null
-                      ? moneyFromEurCents(eurSubtotal + shippingPreviewCents)
+                      ? moneyFromEurCents(eurSubtotal + shippingPreviewCents + (insurance && !allowUntracked ? Math.round(eurSubtotal * 0.05) : 0))
                       : moneyFromPkn(subtotalPkn)}
                   </dd>
                 </div>

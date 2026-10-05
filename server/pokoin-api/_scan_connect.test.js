@@ -44,6 +44,27 @@ test('classification: matched needs 0.80 and a 0.08 margin; ambiguous 0.60+; els
   assert.deepEqual(amb.candidates.map((c) => c.cardId), ['2', '4']);
 });
 
+test('EN batch ignores a Japanese twin inside the match margin', () => {
+  const hits = [
+    { cardId: '798800', score: 0.91, name: "Misty's Vitality", nationality: 'western' },
+    { cardId: '756100', score: 0.89, name: "Misty's Vitality", nationality: 'japanese' },
+    { cardId: '780200', score: 0.81, name: "Misty's Vitality", nationality: 'western' },
+  ];
+  const scoped = rules.scopeCandidatesToPrintFamily(hits, 'EN');
+  assert.deepEqual(scoped.map((c) => c.cardId), ['798800', '780200']);
+  const again = rules.classifyRecognition(scoped.map((c) => ({ public_id: c.cardId, score: c.score, name: c.name })));
+  assert.equal(again.state, 'matched');
+  assert.equal(again.margin, 0.1);
+});
+
+test('a batch with no in-family hit keeps the foreign candidates', () => {
+  const hits = [
+    { cardId: 'ae', score: 0.91, nationality: 'japanese' },
+    { cardId: 'ae2', score: 0.8, nationality: 'japanese' },
+  ];
+  assert.deepEqual(rules.scopeCandidatesToPrintFamily(hits, 'EN').map((c) => c.cardId), ['ae', 'ae2']);
+});
+
 test('candidates use public_id only, never a TCGplayer id, and dedupe', () => {
   const list = rules.candidatesFromHits([
     { id: '632917', score: 0.99 },

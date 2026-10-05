@@ -3926,8 +3926,11 @@ a.era-link:focus-visible {
 }
 .px-local { color: var(--text); font-size: 0.62em; font-weight: 700; letter-spacing: 0; }
 .px-pkn { color: var(--yellow); }
+.px-local.is-solo { color: var(--yellow); font-size: 1em; font-weight: 800; letter-spacing: -0.03em; }
+.px-pending { display: inline-block; min-width: 4.5rem; min-height: 1.15em; }
 .shop-px .px-stack { align-items: flex-end; text-align: right; }
 .shop-px .px-local { font-size: 0.82em; }
+.shop-px .px-local.is-solo { font-size: 1em; }
 .prod-stock { margin: 0.2rem 0 0.7rem; font-size: 0.85rem; }
 
 .watch-btn {
@@ -4001,8 +4004,27 @@ a.era-link:focus-visible {
 }
 
 .hero-deal .prod-px {
+  font-size: clamp(2.05rem, 3.6vw, 2.65rem);
   text-align: center;
   margin: 0.15rem 0;
+}
+
+.deal-sold-by {
+  margin: -0.35rem 0 0;
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.deal-sold-by a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+.deal-sold-by a:hover,
+.deal-sold-by a:focus-visible {
+  color: var(--yellow);
 }
 
 .hero-deal .px-stack {
@@ -4310,6 +4332,12 @@ a.era-link:focus-visible {
   cursor: not-allowed;
 }
 
+.deal-chip.is-on:disabled {
+  opacity: 1;
+  filter: none;
+  cursor: default;
+}
+
 .deal-chip .shop-cond {
   width: 2.7rem;
   height: 1.85rem;
@@ -4318,21 +4346,31 @@ a.era-link:focus-visible {
 /* Five grades always fit one line: columns shrink in the narrow desk rail, cap on wide panels. */
 .deal-facet-row[aria-label="Condition"] {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 4rem));
-  justify-content: center;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: center;
+  width: 100%;
+  gap: 0.22rem;
 }
 
 .deal-facet-row[aria-label="Condition"] .deal-chip {
   width: 100%;
+  height: auto;
+  align-self: center;
   min-width: 0;
-  padding: 0.4rem 0.3rem;
+  padding: 2px;
+  line-height: 0;
+  border-radius: 0.55rem;
 }
 
 .deal-facet-row[aria-label="Condition"] .shop-cond {
+  display: block;
   width: 100%;
-  max-width: 2.7rem;
+  max-width: none;
   height: auto;
   aspect-ratio: 40 / 28;
+  object-fit: fill;
+  border-radius: 0.42rem;
+  flex: 0 0 auto;
 }
 
 /* Printing languages sit three per row so six or nine wrap evenly. */
@@ -4679,6 +4717,39 @@ a.era-link:focus-visible {
 .sell-field.currency { width: 6.2rem; }
 .sell-field.qty { width: 4.2rem; }
 .sell-field.comment { width: 100%; margin-top: 0.2rem; }
+
+.sell-location-row {
+  display: flex;
+  align-items: end;
+  gap: 0.65rem;
+  margin: 0 0 0.75rem;
+}
+
+.sell-field.location-pick {
+  flex: 0 1 9rem;
+  width: 9rem;
+  max-width: 46%;
+  min-width: 0;
+}
+
+.sell-field.comment.comment-inline {
+  flex: 1 1 auto;
+  width: auto;
+  margin-top: 0;
+  min-width: 0;
+}
+
+.hero-center .sell-field.comment.comment-inline {
+  min-height: 0;
+}
+
+.sell-slot {
+  padding-bottom: 0.55rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
 .sell-field.sell-pick {
   flex: 0 0 auto;
 }
@@ -10861,6 +10932,11 @@ html:has(.wallet-page) .brand span {
     gap: 0.28rem;
   }
   .seller-shop-list .shop-row.is-profile:not(.shop-row-skel) .px-local { font-size: 0.7rem; }
+  .seller-shop-list .shop-row.is-profile:not(.shop-row-skel) .px-local.is-solo {
+    color: var(--yellow);
+    font-size: 1em;
+    font-weight: 800;
+  }
   .seller-shop-list .shop-row.is-profile:not(.shop-row-skel) .ct-qty.is-single { color: var(--muted); font-weight: 700; }
   .seller-shop-list .shop-row.is-profile:not(.shop-row-skel) .ct-qty.is-single::before { content: "×"; }
   .seller-shop-list .shop-row.is-profile:not(.shop-row-skel) .shop-row-actions,

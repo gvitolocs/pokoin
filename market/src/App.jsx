@@ -71,6 +71,7 @@ const Bought = lazy(() => import('./pages/Bought.jsx'));
 const Stock = lazy(() => import('./pages/Stock.jsx'));
 const SyncReview = lazy(() => import('./pages/SyncReview.jsx'));
 const CardTraderZero = lazy(() => import('./pages/CardTraderZero.jsx'));
+const CardTraderOneDay = lazy(() => import('./pages/CardTraderOneDay.jsx'));
 const NftRedirect = lazy(() => import('./pages/Nft.jsx'));
 const Protection = lazy(() => import('./pages/Protection.jsx'));
 const Flex = lazy(() => import('./pages/Flex.jsx'));
@@ -237,6 +238,7 @@ function AppShell() {
       {both('/mypokoin/settings', <Inventory />)}
       {both('/mypokoin/collection', <Inventory />)}
       {both('/mypokoin/zero', <CardTraderZero />)}
+      {both('/mypokoin/1dr', <CardTraderOneDay />)}
       {both('/mypokoin', <Inventory />)}
       {both('/inventory', <Navigate to="/mypokoin" replace />)}
       {both('/inventory/scan', <ScanDesk />)}

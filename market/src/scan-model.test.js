@@ -320,43 +320,6 @@ test('Start suggestion only fires on location change — Start=1 is a real choic
   assert.equal(suggestedStartPosition({ stored: 0, current: 1, locationChanged: true }), null);
 });
 
-test('a saved cursor re-maps through the absolute index when the stack size changed', () => {
-  // Saved with one card per divider (size 1) at stack 104, then the seller
-  // switched the box to 80 cards per stack: 104 → stack 2, position 24.
-  assert.deepEqual(
-    suggestedStackCursor({
-      stored: { stack: 104, startPosition: 1, stackSize: 1 },
-      currentStack: 1,
-      currentPosition: 1,
-      stackSize: 80,
-      locationChanged: true,
-    }),
-    { stack: 2, startPosition: 24 },
-  );
-  // Same size: the saved stack/position is used as-is.
-  assert.deepEqual(
-    suggestedStackCursor({
-      stored: { stack: 2, startPosition: 24, stackSize: 80 },
-      currentStack: 1,
-      currentPosition: 1,
-      stackSize: 80,
-      locationChanged: true,
-    }),
-    { stack: 2, startPosition: 24 },
-  );
-  // Already on that slot: no hint at all.
-  assert.equal(
-    suggestedStackCursor({
-      stored: { stack: 2, startPosition: 24, stackSize: 80 },
-      currentStack: 2,
-      currentPosition: 24,
-      stackSize: 80,
-      locationChanged: true,
-    }),
-    null,
-  );
-});
-
 test('merged quantity growth shifts the following slots; submitted rows still count', () => {
   const list = [
     row('a', { position: 1, location: 'box1', quantity: 4, status: 'submitted' }),

@@ -2,7 +2,10 @@ const { getFirebaseAdmin } = require('../server/_firebase');
 const {
   decryptIntegrationSharedSecret,
   decryptIntegrationToken,
+  isOneDayReadyIntegration,
+  readIntegrationDoc,
 } = require('./_cardtrader_integration');
+const { publicCardIdFromBlueprint } = require('./_cardtrader_inventory_sync_core');
 const { marketplaceWriteQuery, marketplaceQuery } = require('../server/_marketplace_db');
 const {
   ctSourceListingId,
@@ -182,6 +185,46 @@ async function handleOrderPayload({ admin, firestore, uid, cause, order }) {
     // the complete-export fallback will reconcile it without double decrement.
     const listing = await findLinkedListing(uid, item);
     if (!listing) {
+      // 1-Day Ready stock is never a Pokoin listing. The sale still belongs
+      // in Sold history, tagged CardTrader 1-DR, and Pokoin stock stays put.
+      const integration = await readIntegrationDoc(firestore, uid);
+      if (isOneDayReadyIntegration(integration)) {
+        const claim = await claimWebhookEvent(firestore, {
+          uid,
+          orderId: order.id,
+          orderItemId: currentOrderItemId,
+          cause,
+        });
+        if (!claim.claimed) {
+          results.push({ orderItemId: currentOrderItemId, skipped: true, reason: 'already_processed' });
+          continue;
+        }
+        const productId = itemProductId(item);
+        const cardId = publicCardIdFromBlueprint(item.blueprint_id ?? item.blueprintId) || '';
+        await firestore.collection(EVENTS_COLLECTION).doc(claim.id).set({
+          quantity: Math.max(1, Math.trunc(Number(item.quantity) || 1)),
+          productId,
+          channel: '1dr',
+        }, { merge: true }).catch(() => {});
+        await recordCardTraderSale({
+          admin,
+          firestore,
+          sellerUid: uid,
+          order,
+          item,
+          channel: '1dr',
+          listing: { id: productId ? `ct:${productId}` : '', card_id: cardId },
+        }).catch((error) => {
+          console.error('cardtrader webhook 1dr sale record failed', { uid, message: error.message });
+        });
+        results.push({
+          orderItemId: currentOrderItemId,
+          ok: true,
+          channel: '1dr',
+          productId,
+        });
+        continue;
+      }
       results.push({ orderItemId: currentOrderItemId, skipped: true, reason: 'no_linked_listing' });
       continue;
     }

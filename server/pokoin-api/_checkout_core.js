@@ -178,6 +178,24 @@ function quoteCheckout({
     grandTotalCents: itemsSubtotal + shippingTotal,
     currency: 'EUR',
     tracked: tracked !== false,
+    insuranceCents: 0,
+  };
+}
+
+/** Untracked letters stop at €20. Insurance is 5% of the card subtotal. */
+const UNTRACKED_MAX_EUR_CENTS = 2000;
+
+function guardCheckoutQuote(quote, { tracked = true, insurance = false } = {}) {
+  const overLimit = Number(quote?.itemsSubtotalCents) > UNTRACKED_MAX_EUR_CENTS;
+  if (tracked === false && overLimit) {
+    throw httpError(400, 'Untracked shipping is only available for orders up to €20.', 'untracked_not_allowed');
+  }
+  if (!insurance || !overLimit || !quote) return quote;
+  const insuranceCents = Math.round(Number(quote.itemsSubtotalCents) * 0.05);
+  return {
+    ...quote,
+    insuranceCents,
+    grandTotalCents: Number(quote.grandTotalCents) + insuranceCents,
   };
 }
 
@@ -258,6 +276,7 @@ module.exports = {
   normalizeCountry,
   packageTierForCount,
   quoteCheckout,
+  guardCheckoutQuote,
   quoteShipment,
   validateAddressFields,
   eurCentsFromPkn,

@@ -91,6 +91,9 @@ if writer:
     netloc = f"{netloc[0]}@{host}" if len(netloc) == 2 else host
     data["MARKETPLACE_OVERFLOW_DATABASE_URL"] = base64.b64encode(
         urlunsplit(parts._replace(netloc=netloc)).encode()).decode()
+    # Writes too: the Pi LAN writer URL times out from pods (UFW), which
+    # surfaced as "Scan service error." on Scan Connect overflow requests.
+    data["MARKETPLACE_WRITER_DATABASE_URL"] = data["MARKETPLACE_OVERFLOW_DATABASE_URL"]
 # The Pi uses a localhost SSH tunnel; overflow pods reach the independent
 # quote database directly on the private Docker network instead.
 quotes = base64.b64decode(data.get("TCGCSV_DATABASE_URL", "")).decode()

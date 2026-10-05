@@ -62,7 +62,11 @@ Overflow pods **read from the writer Postgres** on nezopt (freshest data; the Pi
 reads its replica). UFW drops container → host traffic, so pods reach the writer
 *container* on the user-defined Docker network `pokoin-overflow`
 (writer `172.31.250.10`, k3s `172.31.250.20`); the secret key
-`MARKETPLACE_OVERFLOW_DATABASE_URL` is the writer URL with that host.
+`MARKETPLACE_OVERFLOW_DATABASE_URL` is the writer URL with that host, and
+`MARKETPLACE_WRITER_DATABASE_URL` is rewritten to the same URL — the Pi's LAN
+writer URL (`192.168.178.55:25432`) times out from pods, so overflowed Scan
+Connect requests (scan-stream / scan-batch use the writer pool) failed with
+"Scan service error.".
 
 ## Staying in sync with the Pi
 

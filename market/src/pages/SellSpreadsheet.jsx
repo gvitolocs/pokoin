@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { importStockCsv } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { SessionWait } from '../components/Desk.jsx';
+import { Alert, DeskPanel, PageHead, SessionWait } from '../components/Desk.jsx';
+import StockNav from '../components/StockNav.jsx';
 import { game as currentGame } from '../game.js';
 import { fileToCsv, SPREADSHEET_ACCEPT, SPREADSHEET_TYPES_LABEL, textToCsv } from '../spreadsheet-file.js';
 import { FORMAT_LABEL, importPayload, previewSpreadsheet, SPREADSHEET_PAGE } from '../spreadsheet-rows.js';
@@ -161,8 +162,15 @@ export default function SellSpreadsheet() {
   }
 
   return (
-    <div className="page sell-sheet">
-      <section className="sell-sheet-card" aria-label="Upload a spreadsheet">
+    <div className="page desk sell-sheet">
+      <PageHead
+        kicker="Seller"
+        title="Sell via spreadsheet"
+        lede="Upload a stock file or paste rows from Power Tools, CardTrader, Cardmarket, TCGPlayer, or your own sheet. Check the cards, then list them in one go."
+      />
+      <StockNav />
+      <Alert>{error}</Alert>
+      <DeskPanel title="Upload">
         <div className="sell-sheet-drops">
           <button
             type="button"
@@ -214,23 +222,22 @@ export default function SellSpreadsheet() {
           }}
         />
         {note ? <p className="sell-sheet-note" role="status">{note}</p> : null}
-        {error ? <p className="sell-sheet-error" role="alert">{error}</p> : null}
         {sheet?.cardtraderLinks ? (
           <div className="sell-sheet-ct" role="group" aria-labelledby="ct-link-title">
-            <h2 id="ct-link-title">CardTrader links in this file</h2>
+            <h3 id="ct-link-title">CardTrader links in this file</h3>
             <p>Link the current Pokoin cards to those CardTrader listings, or import the cards from CardTrader.</p>
             <p className="sell-sheet-warn">If a card is already on both Pokoin and CardTrader, linking or importing can create duplicates.</p>
             <div className="sell-sheet-confirm">
               <button
                 type="button"
-                className={ctIntent === 'link' ? 'sell-sheet-go' : 'sell-sheet-dismiss'}
+                className={ctIntent === 'link' ? 'btn' : 'btn ghost'}
                 onClick={() => setCtIntent('link')}
               >
                 Link to CardTrader
               </button>
               <button
                 type="button"
-                className={ctIntent === 'import' ? 'sell-sheet-go' : 'sell-sheet-dismiss'}
+                className={ctIntent === 'import' ? 'btn' : 'btn ghost'}
                 onClick={() => setCtIntent('import')}
               >
                 Import from CardTrader
@@ -242,27 +249,21 @@ export default function SellSpreadsheet() {
           <div className="sell-sheet-confirm">
             <button
               type="button"
-              className="sell-sheet-go"
+              className="btn"
               disabled={Boolean(busy) || (sheet.cardtraderLinks && !ctIntent)}
               onClick={confirmPending}
             >
               {busy === 'list' ? 'Listing…' : `List ${sheet.rows.length.toLocaleString('en-US')} cards`}
             </button>
-            <button type="button" className="sell-sheet-dismiss" disabled={Boolean(busy)} onClick={() => setSheet(null)}>
+            <button type="button" className="btn ghost" disabled={Boolean(busy)} onClick={() => setSheet(null)}>
               Dismiss
             </button>
           </div>
         ) : null}
-      </section>
+      </DeskPanel>
 
       {sheet ? (
-        <section className="sell-sheet-card" aria-labelledby="sheet-cards-title">
-          <h2 id="sheet-cards-title">
-            {FORMAT_LABEL[sheet.format]}
-            {' · '}
-            {sheet.rows.length.toLocaleString('en-US')}
-            {' cards'}
-          </h2>
+        <DeskPanel title={`${FORMAT_LABEL[sheet.format]} · ${sheet.rows.length.toLocaleString('en-US')} cards`}>
           <div className="sell-sheet-table-wrap">
             <table className="sell-sheet-table">
               <thead>
@@ -297,7 +298,7 @@ export default function SellSpreadsheet() {
             <div className="sell-sheet-pager">
               <button
                 type="button"
-                className="sell-sheet-dismiss"
+                className="btn ghost"
                 disabled={page === 0}
                 onClick={() => setSheet((current) => ({ ...current, page: current.page - 1 }))}
               >
@@ -312,7 +313,7 @@ export default function SellSpreadsheet() {
               </span>
               <button
                 type="button"
-                className="sell-sheet-dismiss"
+                className="btn ghost"
                 disabled={page + 1 >= pageCount}
                 onClick={() => setSheet((current) => ({ ...current, page: current.page + 1 }))}
               >
@@ -320,11 +321,10 @@ export default function SellSpreadsheet() {
               </button>
             </div>
           ) : null}
-        </section>
+        </DeskPanel>
       ) : null}
 
-      <section className="sell-sheet-card" aria-labelledby="recent-imports-title">
-        <h2 id="recent-imports-title">Recent imports</h2>
+      <DeskPanel title="Recent imports">
         <div className="sell-sheet-table-wrap">
           <table className="sell-sheet-table">
             <thead>
@@ -333,6 +333,13 @@ export default function SellSpreadsheet() {
               </tr>
             </thead>
             <tbody>
+              {rows.length ? null : (
+                <tr>
+                  <td className="sell-sheet-empty" colSpan={IMPORT_COLUMNS.length}>
+                    No imports yet. Your spreadsheet imports show up here.
+                  </td>
+                </tr>
+              )}
               {rows.map((row) => (
                 <tr key={row.id}>
                   <td>{row.id}</td>
@@ -351,7 +358,7 @@ export default function SellSpreadsheet() {
             </tbody>
           </table>
         </div>
-      </section>
+      </DeskPanel>
 
       {pasteOpen ? (
         <div className="sell-sheet-modal" role="presentation" onClick={() => setPasteOpen(false)}>
@@ -373,8 +380,8 @@ export default function SellSpreadsheet() {
               autoFocus
             />
             <div className="sell-sheet-dialog-actions">
-              <button type="button" className="sell-sheet-dismiss" onClick={() => setPasteOpen(false)}>Cancel</button>
-              <button type="submit" className="sell-sheet-go" disabled={Boolean(busy) || !pasteText.trim()}>
+              <button type="button" className="btn ghost" onClick={() => setPasteOpen(false)}>Cancel</button>
+              <button type="submit" className="btn" disabled={Boolean(busy) || !pasteText.trim()}>
                 {busy === 'read' ? 'Reading…' : 'Import'}
               </button>
             </div>

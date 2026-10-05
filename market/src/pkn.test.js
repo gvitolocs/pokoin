@@ -44,6 +44,8 @@ test('buyer currency follows country; DK shows DKK converted from PKN', () => {
   assert.equal(currencyFromLocale('en-US'), 'USD');
   assert.equal(formatFiatFromPkn(20, 'DKK'), '0.75 DKK');
   assert.equal(formatFiatFromPkn(20, 'EUR'), '€0.1');
+  // 21 PKN is 10.5 euro-cents → Stripe rounds to 11 cents → 83 øre, not the raw 0.79 float.
+  assert.equal(formatFiatFromPkn(21, 'DKK'), '0.83 DKK');
   assert.equal(formatLocalFromPkn(20, 'DKK'), '0.75 DKK (20 PKN)');
   assert.equal(formatLocalFromEurCents(650, 'DKK'), '48.75 DKK');
   assert.equal(formatEurAndDkkFromPkn(20), '0.75 DKK (20 PKN)');

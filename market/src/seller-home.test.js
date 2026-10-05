@@ -142,6 +142,9 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(viewSrc, /Trending on Pokoin/);
   assert.match(viewSrc, /marketUrl\(cardHref\(card\)\)/);
   assert.match(viewSrc, /Your listings/);
+  assert.match(viewSrc, /const LISTING_PREVIEW = 72/);
+  assert.match(viewSrc, /listingRows\.slice\(0, LISTING_PREVIEW\)/);
+  assert.match(viewSrc, /Show all \$\{listingRows\.length\}/);
   assert.match(viewSrc, /ListingPreviewTile/);
   assert.doesNotMatch(viewSrc, /ListingPreviewRow/);
   assert.doesNotMatch(viewSrc, /seller-listing-copy/);
@@ -149,7 +152,9 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(cssSrc, /grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
   assert.match(cssSrc, /\.seller-listing-tile \{/);
   assert.doesNotMatch(cssSrc, /\.seller-listing-row \{/);
-  assert.match(homeSrc, /const LISTING_PREVIEW = 72/);
+  assert.match(homeSrc, /const LISTINGS_PAGE = 1000/);
+  assert.doesNotMatch(homeSrc, /LISTING_PREVIEW/);
+  assert.doesNotMatch(homeSrc, /live\.slice\(0,/);
   assert.match(cssSrc, /@media \(max-width: 900px\)/);
   assert.match(cssSrc, /repeat\(8, minmax\(0, 1fr\)\)/);
   assert.match(cssSrc, /repeat\(6, minmax\(0, 1fr\)\)/);

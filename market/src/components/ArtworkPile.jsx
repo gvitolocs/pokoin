@@ -125,7 +125,6 @@ export function ArtworkPileOverlay({ group, artistName, onClose }) {
         role="dialog"
         aria-modal="true"
         aria-label={`${rep?.name || 'Artwork'} printings`}
-        onClick={(event) => event.stopPropagation()}
       >
         <header className="artwork-pile-head">
           <div className="artwork-pile-title">
@@ -155,6 +154,7 @@ export function ArtworkPileOverlay({ group, artistName, onClose }) {
                 className="artwork-pile-card"
                 key={card.id || card.card_id || index}
                 style={{ '--pile-i': index, '--pile-tilt': index % 2 ? '2.4deg' : '-2.4deg' }}
+                onClick={(event) => event.stopPropagation()}
               >
                 <Link
                   className="artwork-pile-frame"

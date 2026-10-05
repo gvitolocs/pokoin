@@ -15,14 +15,16 @@ import {
   lastOccupiedIndex,
   listingSlotEnd,
   maxOccupiedStack,
+  continueBoxCursor,
   nextFreeSlot,
   nextPositionInStack,
+  recentBoxes,
   occupiedAbsForScanBoxes,
   parseListingLocation,
   liveInventoryListings,
-  recentListingBoxes,
   sameListingBox,
   sortInventoryRows,
+  groupInventoryTitles,
   summarizeLiveInventory,
 } from './inventory-listings.js';
 
@@ -125,6 +127,19 @@ test('inventory sorts by date, price, qty and name', () => {
   assert.deepEqual(sortInventoryRows(rows, 'price-down').map((r) => r.id), ['a', 'c', 'b']);
   assert.deepEqual(sortInventoryRows(rows, 'qty-down').map((r) => r.id), ['a', 'c', 'b']);
   assert.deepEqual(sortInventoryRows(rows, 'name').map((r) => r.id), ['c', 'b', 'a']);
+});
+
+test('titles follow the sorted rows instead of posting count', () => {
+  const rows = sortInventoryRows([
+    { id: 'cheap', cardName: 'Bronzong', cardId: '1', pricePkn: 40, quantityAvailable: 4 },
+    { id: 'dear', cardName: 'Nest Ball', cardId: '2', pricePkn: 660, quantityAvailable: 1 },
+    { id: 'twin', cardName: 'Nest Ball', cardId: '3', pricePkn: 20, quantityAvailable: 1 },
+  ], 'price-down');
+  const titles = groupInventoryTitles(rows);
+  assert.deepEqual(titles.map((group) => group.title), ['Nest Ball', 'Bronzong']);
+  assert.equal(titles[0].postingCount, 2);
+  assert.equal(titles[0].printings, 2);
+  assert.deepEqual(titles[0].postings.map((row) => row.id), ['dear', 'twin']);
 });
 
 test('inventory facets list distinct conditions and languages', () => {
@@ -285,38 +300,6 @@ test('occupiedAbsForScanBoxes seeds the scan desk from live inventory', () => {
 });
 
 
-test('recentListingBoxes strips slot suffixes and orders by recency', () => {
-  const rows = [
-    { location: 'box1·2·5', updatedAt: '2026-10-01T10:00:00Z' },
-    { location: 'box2·1', updatedAt: '2026-10-03T10:00:00Z' },
-    { location: 'box3', updated_at: '2026-10-02T10:00:00Z' },
-  ];
-  assert.deepEqual(recentListingBoxes(rows), ['box2', 'box3', 'box1']);
-});
-
-test('recentListingBoxes dedupes case-insensitively keeping the newest spelling', () => {
-  const rows = [
-    { location: 'box1·2', updatedAt: '2026-10-01T10:00:00Z' },
-    { location: 'BOX1', updatedAt: '2026-10-04T10:00:00Z' },
-    { location: 'box1', createdAt: '2026-10-02T10:00:00Z' },
-  ];
-  assert.deepEqual(recentListingBoxes(rows), ['BOX1']);
-});
-
-test('recentListingBoxes skips empties, sorts missing dates last and caps at the limit', () => {
-  const rows = [
-    { location: '', updatedAt: '2026-10-05T10:00:00Z' },
-    { location: '   ', updatedAt: '2026-10-05T10:00:00Z' },
-    { location: 'boxA', updatedAt: '2026-10-04T10:00:00Z' },
-    { location: 'boxB' },
-    { location: 'boxC', createdAt: '2026-10-03T10:00:00Z' },
-  ];
-  assert.deepEqual(recentListingBoxes(rows), ['boxA', 'boxC', 'boxB']);
-  assert.deepEqual(recentListingBoxes(rows, 2), ['boxA', 'boxC']);
-  assert.deepEqual(recentListingBoxes(rows, 0), []);
-  assert.deepEqual(recentListingBoxes(null), []);
-});
-
 test('location pages include every slot in the linked box without matching neighboring boxes', () => {
   const rows = [
     { id: 'bare', location: 'megaevoluzionietb1', quantityAvailable: 1 },
@@ -352,4 +335,61 @@ test('flat scan batch stays in one box group with eight postings and nine copies
   assert.equal(groups[0].copies, 9);
   assert.deepEqual(groups[0].postings.map(row => row.slotPosition), [1,2,3,4,5,6,7,8]);
   assert.equal(groups[0].postings[7].slotPositionText, '8-9');
+});
+
+test('recent boxes follow listing order and keep the newest casing', () => {
+  assert.deepEqual(recentBoxes([
+    { location: 'megaevoluzionietb·2·88' },
+    { location: 'megaevoluzionietb·2·57' },
+    { location: 'OtherBox·1' },
+    { location: '' },
+    { location: 'MegaEvoluzioniETB·1·1' },
+  ]), ['megaevoluzionietb', 'OtherBox']);
+  assert.deepEqual(recentBoxes(null), []);
+});
+
+test('the next slot follows the last card added and keeps the divider size', () => {
+  const rows = [
+    { location: 'megaevoluzionietb·1·80', createdAt: '2026-10-05T10:00:00Z' },
+    { location: 'megaevoluzionietb·2·80', createdAt: '2026-10-05T11:00:00Z' },
+    { location: 'megaevoluzionietb·3·30', createdAt: '2026-10-05T12:00:00Z' },
+    { location: 'megaevoluzionietb·8' },
+    { location: 'other·2·9' },
+  ];
+  // A fresh batch is size 1. Adopt the earlier full stack (80) so position
+  // 31 stays on stack 3 instead of counting as a full 31-card stack.
+  assert.deepEqual(continueBoxCursor(rows, 'megaevoluzionietb', 1), {
+    stack: 3, startPosition: 31, stackSize: 80,
+  });
+  assert.deepEqual(continueBoxCursor(rows, 'megaevoluzionietb', 80), {
+    stack: 3, startPosition: 31, stackSize: 80,
+  });
+  // Same insert: the higher position is the last slot.
+  assert.deepEqual(continueBoxCursor([
+    { location: 'box·2·80', createdAt: '2026-10-05T11:00:00Z' },
+    { location: 'box·3·30', createdAt: '2026-10-05T12:00:00Z', id: 'a' },
+    { location: 'box·3·38', createdAt: '2026-10-05T12:00:00Z', id: 'b' },
+  ], 'box', 80), {
+    stack: 3, startPosition: 39, stackSize: 80,
+  });
+  // A position past the divider opens the next stack. It does not grow the size.
+  assert.deepEqual(continueBoxCursor([
+    { location: 'megaevoluzionietb·1·79' },
+    { location: 'megaevoluzionietb·2·88' },
+  ], 'megaevoluzionietb', 80), {
+    stack: 3, startPosition: 1, stackSize: 80,
+  });
+  // A half-full stack still continues inside it.
+  assert.deepEqual(continueBoxCursor([{ location: 'box·2·40' }], 'box', 80), {
+    stack: 2, startPosition: 41, stackSize: 80,
+  });
+  // An exactly full stack opens the next divider.
+  assert.deepEqual(continueBoxCursor([{ location: 'box·2·80' }], 'box', 80), {
+    stack: 3, startPosition: 1, stackSize: 80,
+  });
+  // Flat locations keep the size-1 walk and skip a deleted hole via the max.
+  assert.deepEqual(continueBoxCursor([{ location: 'box·7' }, { location: 'box·9' }], 'box', 1), {
+    stack: 10, startPosition: 1, stackSize: 1,
+  });
+  assert.equal(continueBoxCursor([], 'box', 1), null);
 });

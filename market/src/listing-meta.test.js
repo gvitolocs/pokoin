@@ -64,6 +64,8 @@ test('seller country flag sits next to the username', () => {
   assert.equal(sellerCountryFlag('HU').short, 'HU');
   assert.equal(sellerCountryFlag('HU').emoji, '🇭🇺');
   assert.equal(sellerCountryFlag('EU'), null);
+  assert.equal(sellerCountryFlag('DK').code, 'dk');
+  assert.equal(sellerCountryFlag('DK').emoji, '🇩🇰');
   assert.equal(sellerCountryFlag('US').code, 'us');
 });
 

@@ -35,14 +35,16 @@ const CANDIDATE_COLUMNS_BASE = `
   c.rarity,
   c.card_number,
   c.item_kind,
-  c.product_type,
-  c.emoji
+  c.product_type
 `;
 
-/** Pokemon candidates have `version` and denormed illustrator. Isolated OP/RB catalogs do not. */
+/** Pokemon candidates have `version`, `emoji` (060) and denormed illustrator.
+ * Isolated satellite catalogs (Magic, OP, RB, …) do not: selecting them there
+ * fails every card-page lookup with 42703. */
 function candidateColumns() {
   if (isPokemonGame()) {
     return `${CANDIDATE_COLUMNS_BASE},
+  c.emoji,
   c.version,
   coalesce(c.rarity_kind, '') as rarity_kind,
   coalesce(c.art_layout, '') as art_layout,
@@ -50,6 +52,7 @@ function candidateColumns() {
   coalesce(c.illustrator, '') as illustrator`;
   }
   return `${CANDIDATE_COLUMNS_BASE},
+  ''::text as emoji,
   null::text as version,
   null::text as rarity_kind,
   null::text as art_layout,

@@ -104,7 +104,7 @@ export function warmSellerFromChat({
 }
 
 /** Default first-page shop key — must match fetchSellerShop defaults in Seller.jsx. */
-export function sellerShopSeedOpts({ pageSize = 100, sort = 'price-asc', game = 'pokemon' } = {}) {
+export function sellerShopSeedOpts({ pageSize = 100, sort = 'price-desc', game = 'pokemon' } = {}) {
   return {
     limit: pageSize,
     offset: 0,
@@ -121,7 +121,7 @@ export function sellerShopSeedOpts({ pageSize = 100, sort = 'price-asc', game = 
  * Only reuse a full handle-matched shop cache (same key as fetchSellerShop).
  * Never seed from a single navigated `location.state.listing` stub.
  */
-export function seedSellerListings(handle, { pageSize = 100, sort = 'price-asc', game = 'pokemon' } = {}) {
+export function seedSellerListings(handle, { pageSize = 100, sort = 'price-desc', game = 'pokemon' } = {}) {
   const cached = peekSellerListings(handle, sellerShopSeedOpts({ pageSize, sort, game }));
   if (!peekHasListingRows(cached)) {
     return null;

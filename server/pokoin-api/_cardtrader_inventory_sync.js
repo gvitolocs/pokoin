@@ -732,6 +732,52 @@ async function readOneDayReadyAssets(sellerUid, { limit = 500 } = {}) {
   return result.rows || [];
 }
 
+/**
+ * 1-Day Ready sales never touch Pokoin listings. Record each CardTrader seller
+ * order from the evidence window into Sold history, once, tagged 1-DR.
+ */
+async function recordOneDayReadySales({ firestore, sellerUid, token, fetchOrders = fetchSellerOrders }) {
+  const from = new Date(Date.now() - SALE_EVIDENCE_DAYS * 86400000).toISOString().slice(0, 10);
+  const orders = await fetchOrders(token, { from });
+  const sales = [];
+  for (const list of saleItemsByProduct(orders).values()) sales.push(...list);
+  if (!sales.length) return 0;
+  const { getFirebaseAdmin } = require('../server/_firebase');
+  const admin = getFirebaseAdmin();
+  let recorded = 0;
+  for (const { order, item } of sales) {
+    const id = eventDocId(sellerUid, order.id, orderItemId(item));
+    try {
+      await firestore.collection('cardtrader_webhook_events').doc(id).create({
+        uid: sellerUid,
+        orderId: String(order.id),
+        orderItemId: orderItemId(item),
+        cause: '1dr',
+        productId: cleanText(item.product_id ?? item.productId, 80),
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      if (error.code === 6 || /already exists/i.test(String(error.message || ''))) continue;
+      throw error;
+    }
+    const blueprintId = item.blueprint_id ?? item.blueprintId;
+    await recordCardTraderSale({
+      admin,
+      firestore,
+      sellerUid,
+      order,
+      item,
+      channel: '1dr',
+      listing: {
+        id: `ct:${cleanText(item.product_id ?? item.productId, 80)}`,
+        card_id: publicCardIdFromBlueprint(blueprintId) || '',
+      },
+    });
+    recorded += 1;
+  }
+  return recorded;
+}
+
 async function reconcileCardTraderInventory({
   firestore,
   uid,
@@ -970,7 +1016,7 @@ async function reconcileCardTraderInventory({
   }
 
   if (oneDayReady) {
-    return reconcileOneDayReadyAssets({
+    const ready = await reconcileOneDayReadyAssets({
       sellerUid,
       products,
       gate,
@@ -978,6 +1024,12 @@ async function reconcileCardTraderInventory({
       onProgress,
       writeConcurrency,
     });
+    try {
+      ready.summary.oneDayReadySales = await recordOneDayReadySales({ firestore, sellerUid, token });
+    } catch (error) {
+      console.error('cardtrader 1dr sale record failed', { sellerUid, message: error.message });
+    }
+    return ready;
   }
 
   const listings = await loadSellerListings(sellerUid);

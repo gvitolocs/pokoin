@@ -106,7 +106,7 @@ export default function Seller() {
   const selectedGame = game().apiGame;
   const seeded = seedSellerListings(handle, {
     pageSize: PAGE_SIZE,
-    sort: 'price-asc',
+    sort: 'price-desc',
     game: selectedGame,
   });
   const known = sellerIdentitySeed(handle);
@@ -129,7 +129,7 @@ export default function Seller() {
   const [rarity, setRarity] = useState('');
   const [reverse, setReverse] = useState(false);
   const [firstEdition, setFirstEdition] = useState(false);
-  const [sort, setSort] = useState('price-asc');
+  const [sort, setSort] = useState('price-desc');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(!seeded);
   const [book, setBook] = useState(null);
@@ -210,7 +210,7 @@ export default function Seller() {
       || rarity
       || reverse
       || firstEdition
-      || (sort && sort !== 'price-asc')
+      || (sort && sort !== 'price-desc')
       || page > 1
     );
     // First page still comes from the small query. A filter click while the
@@ -274,7 +274,7 @@ export default function Seller() {
     || rarity
     || reverse
     || firstEdition
-    || (sort && sort !== 'price-asc')
+    || (sort && sort !== 'price-desc')
     || page > 1
   );
   const bookView = useMemo(() => (
@@ -437,8 +437,8 @@ export default function Seller() {
               onChange={(e) => setSort(e.target.value)}
               disabled={shown == null}
             >
-              <option value="price-asc">Price: low</option>
               <option value="price-desc">Price: high</option>
+              <option value="price-asc">Price: low</option>
               <option value="name">Name</option>
               <option value="qty">Quantity</option>
             </select>

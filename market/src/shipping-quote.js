@@ -76,6 +76,33 @@ export function shippingServiceOptions({ fromCountry, toCountry, cardCount }) {
   return options;
 }
 
+/** Untracked letters are only for card orders up to €20. */
+export const UNTRACKED_MAX_EUR_CENTS = 2000;
+
+/** 1 PKN = €0.005, so euro-cents are half the PKN amount. */
+export function eurCentsFromPkn(pkn) {
+  return Math.max(0, Math.round((Number(pkn) || 0) * 0.5));
+}
+
+export function untrackedAllowed(subtotalEurCents) {
+  return Math.max(0, Number(subtotalEurCents) || 0) <= UNTRACKED_MAX_EUR_CENTS;
+}
+
+export function isUntrackedService(option) {
+  if (!option || option.unavailable) return false;
+  if (option.id === 'untracked') return true;
+  return option.tracked === false && option.id !== 'pokoin_flex';
+}
+
+/** Lowest complete price. This is what "Cheapest for each parcel" selects. */
+export function cheapestServiceId(options = [], { allowUntracked = true } = {}) {
+  const rows = (options || []).filter((row) => (
+    row && !row.unavailable && row.complete !== false && (allowUntracked || !isUntrackedService(row))
+  ));
+  rows.sort((a, b) => (Number(a.amountCents ?? a.cents) || 0) - (Number(b.amountCents ?? b.cents) || 0));
+  return rows[0]?.id || '';
+}
+
 /** Tiers that still travel as a letter (up to 20 cards). */
 const LETTER_TIERS = new Set(['SMALL', 'MEDIUM']);
 

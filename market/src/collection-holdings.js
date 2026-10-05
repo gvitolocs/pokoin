@@ -1,6 +1,7 @@
 /** Pure helpers for Portfolio / Collection owned counts. */
 
 import { isLiveInventoryListing } from './inventory-listings.js';
+import { inventoryMarketValue } from './inventory-price.js';
 
 export function sumOwnedQuantity(rows = []) {
   let total = 0;
@@ -97,4 +98,14 @@ export function splitOwnedDesk(holdings = [], listings = []) {
   for (const holding of free) held.push({ kind: 'holding', holding });
   held.push(...nfts);
   return { held, listed };
+}
+
+/** Cheapest Pokoin ask, else the sold median, as the collection listing suggestion. */
+export function suggestedHoldingAsk(prices, holding) {
+  const value = inventoryMarketValue(prices, {
+    ...holding,
+    cardId: holding?.cardId || holding?.blueprintId,
+  }, 'pokoin');
+  if (!value?.value) return '';
+  return String(Math.round(value.value));
 }

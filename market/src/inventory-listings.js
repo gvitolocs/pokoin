@@ -132,6 +132,40 @@ export function sortInventoryRows(rows, sort = 'newest') {
   }
 }
 
+/**
+ * Titles view: one block per card name, in the order the rows were sorted.
+ * Price high → low therefore puts the name of the dearest listing first.
+ */
+export function groupInventoryTitles(rows) {
+  const groups = new Map();
+  const order = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const title = String(row?.cardName || row?.name || 'Listing');
+    let group = groups.get(title);
+    if (!group) {
+      group = {
+        title,
+        printings: new Set(),
+        postingCount: 0,
+        copies: 0,
+        askingPkn: 0,
+        postings: [],
+      };
+      groups.set(title, group);
+      order.push(group);
+    }
+    const id = String(row?.cardId || row?.card_id || '');
+    if (id) group.printings.add(id);
+    const qty = Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0);
+    const price = Number(row?.pricePkn ?? row?.price_pkn ?? 0) || 0;
+    group.postingCount += 1;
+    group.copies += qty;
+    group.askingPkn += qty * price;
+    group.postings.push(row);
+  }
+  return order.map((group) => ({ ...group, printings: group.printings.size }));
+}
+
 /** Distinct condition/language keys present in the rows, for the filter selects. */
 export function inventoryFacets(rows) {
   const list = Array.isArray(rows) ? rows : [];
@@ -242,36 +276,6 @@ export function listingBox(raw) {
 }
 
 /**
- * Distinct boxes a seller has used, most recently updated first (max 30).
- * Slots are stripped, dedupe is case-insensitive and keeps the newest
- * spelling, and rows without a date sort last. Sold-out boxes are included:
- * a location the seller stopped using is still a box worth suggesting.
- */
-export function recentListingBoxes(rows, limit = 30) {
-  const dated = (Array.isArray(rows) ? rows : []).map((row, index) => ({
-    box: listingBox(row?.location).trim(),
-    date: String(row?.updatedAt || row?.updated_at || row?.createdAt || row?.created_at || ''),
-    index,
-  })).filter((entry) => entry.box);
-  dated.sort((a, b) => {
-    if (a.date && b.date) return b.date.localeCompare(a.date) || a.index - b.index;
-    if (a.date) return -1;
-    if (b.date) return 1;
-    return a.index - b.index;
-  });
-  const out = [];
-  const seen = new Set();
-  for (const entry of dated) {
-    if (out.length >= limit) break;
-    const key = entry.box.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(entry.box);
-  }
-  return out;
-}
-
-/**
  * Case-insensitive box match: does a stored location (which may carry a
  * ·stack-position suffix) belong to the box a URL names? A hand-typed slug
  * matches across casing.
@@ -379,6 +383,81 @@ export function nextFreeSlot(rows, box, stackSize = 1) {
   if (!last) return null;
   const next = indexToStackPos(Math.min(9999 * size, last + 1), size);
   return { stack: next.stack, startPosition: next.position, abs: last + 1 };
+}
+
+/**
+ * Boxes in the order the rows are given (newest listing first). The first
+ * name is the box the seller used last. Casing is kept from that first row.
+ */
+export function recentBoxes(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const box = listingBox(row?.location);
+    if (!box) continue;
+    const key = box.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(box);
+  }
+  return out;
+}
+
+function addedStamp(row) {
+  const ms = Date.parse(String(row?.createdAt || row?.created_at || '').trim());
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Where the next scan goes in a box the seller already uses.
+ * The cursor is the slot after the last card added to that box (same
+ * timestamp: the higher position). Stack size stays the seller's divider.
+ * A size-1 batch cannot write `·stack·position`, so it adopts the fullest
+ * earlier stack (the 80 already used) instead of growing the size to
+ * "last position + 1", which made that one card look like a full stack
+ * and opened the next divider. A position past the divider still opens
+ * the next stack. Flat `box·7` locations keep the size-1 walk.
+ */
+export function continueBoxCursor(rows, box, stackSize = 1) {
+  const configured = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  const wanted = String(box || '').trim();
+  const positioned = [];
+  const posByStack = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const end = listingSlotEnd(row?.location);
+    if (!end.box || end.box !== wanted || end.stack == null || end.position == null) continue;
+    positioned.push({ row, stack: end.stack, position: end.position, stamp: addedStamp(row) });
+    posByStack.set(end.stack, Math.max(posByStack.get(end.stack) || 0, end.position));
+  }
+  if (!positioned.length) {
+    const next = nextFreeSlot(rows, box, configured);
+    if (!next) return null;
+    return { stack: next.stack, startPosition: next.startPosition, stackSize: configured };
+  }
+  const stacks = [...posByStack.keys()].sort((a, b) => a - b);
+  const openStack = stacks[stacks.length - 1];
+  let earlierMax = 0;
+  for (const stackNo of stacks) {
+    if (stackNo === openStack) continue;
+    earlierMax = Math.max(earlierMax, posByStack.get(stackNo));
+  }
+  const size = configured === 1 && earlierMax > 1 ? earlierMax : configured;
+  positioned.sort((a, b) => {
+    const as = a.stamp == null ? -1 : a.stamp;
+    const bs = b.stamp == null ? -1 : b.stamp;
+    if (as !== bs) return as - bs;
+    if (a.stack !== b.stack) return a.stack - b.stack;
+    if (a.position !== b.position) return a.position - b.position;
+    return String(a.row?.id || '').localeCompare(String(b.row?.id || ''));
+  });
+  const last = positioned[positioned.length - 1];
+  let stack = last.stack;
+  let startPosition = last.position + 1;
+  if (size > 1 && startPosition > size) {
+    stack += 1;
+    startPosition = 1;
+  }
+  return { stack, startPosition, stackSize: size };
 }
 
 /**
