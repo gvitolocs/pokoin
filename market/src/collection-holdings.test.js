@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk, sumOwnedQuantity } from './collection-holdings.js';
+import { collectionRowMatches, isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk, sumOwnedQuantity } from './collection-holdings.js';
+
+test('collection search matches the name and filters condition and language', () => {
+  const row = { cardName: 'Suicune', setName: 'Prismatic Evolutions', collectorNumber: '024/131', condition: 'NM', language: 'EN' };
+  assert.equal(collectionRowMatches(row, { query: 'suic' }), true);
+  assert.equal(collectionRowMatches(row, { query: '024' }), true);
+  assert.equal(collectionRowMatches(row, { query: 'charizard' }), false);
+  assert.equal(collectionRowMatches(row, { condition: 'NM', language: 'EN' }), true);
+  assert.equal(collectionRowMatches(row, { condition: 'SP' }), false);
+  assert.equal(collectionRowMatches(row, { language: 'IT' }), false);
+});
 
 test('suggestedHoldingAsk uses the cheapest Pokoin listing', () => {
   const ask = suggestedHoldingAsk(

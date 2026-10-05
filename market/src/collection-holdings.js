@@ -100,6 +100,19 @@ export function splitOwnedDesk(holdings = [], listings = []) {
   return { held, listed };
 }
 
+/** Name, set, and collector text plus optional condition and language. */
+export function collectionRowMatches(row, { query = '', condition = '', language = '' } = {}) {
+  const hay = [row?.cardName, row?.name, row?.setName, row?.collectorNumber, row?.cardId]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  const q = String(query || '').trim().toLowerCase();
+  if (q && !hay.includes(q)) return false;
+  if (condition && String(row?.condition || '').toUpperCase() !== String(condition).toUpperCase()) return false;
+  if (language && String(row?.language || '').toUpperCase() !== String(language).toUpperCase()) return false;
+  return true;
+}
+
 /** Cheapest Pokoin ask, else the sold median, as the collection listing suggestion. */
 export function suggestedHoldingAsk(prices, holding) {
   const value = inventoryMarketValue(prices, {

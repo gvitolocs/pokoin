@@ -6,12 +6,14 @@ import {
   fetchOwnedCollection,
   fetchPriceCheck,
   fetchSellerListings,
+  imageSrc,
   removeCollectionItem,
   requestNftShipping,
 } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk } from '../collection-holdings.js';
+import { collectionRowMatches, isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk } from '../collection-holdings.js';
 import { useSellerCurrency } from '../use-seller-currency.js';
+import CardArt from './CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk } from './Desk.jsx';
 
 const DRAG_TYPE = 'application/x-pokoin-collection';
@@ -49,37 +51,49 @@ function listingMeta(listing) {
   ].filter(Boolean);
 }
 
-function HoldingRow({ row, onRemove, removing, ask, suggested = false, onAsk, draggable = false, onDragCard }) {
+function cardPicture(row) {
+  return imageSrc({
+    id: row?.cardId || row?.blueprintId || row?.card_id,
+    imageUrl: row?.cardImageUrl || row?.imageUrl || row?.image_url || row?.heroImageUrl || '',
+    heroImageUrl: row?.heroImageUrl || row?.cardImageUrl || row?.imageUrl || '',
+  }, 'hero');
+}
+
+function HoldingRow({ row, onRemove, removing, ask, currency = 'PKN', suggested = false, onAsk, draggable = false, onDragCard }) {
   const nft = isNftHolding(row);
   const meta = holdingMeta(row);
   return (
     <article
-      className="thread collection-card"
+      className="collection-tile"
       data-ownership={nft ? 'nft' : 'physical'}
       draggable={draggable}
       onDragStart={draggable ? (event) => onDragCard(event, row) : undefined}
     >
-      <span className="thread-main">
+      <CardArt className="collection-tile-art" src={cardPicture(row)} alt={cardLabel(row)} full />
+      <div className="collection-tile-body">
         <strong className="thread-title">{cardLabel(row)}</strong>
         <span className="thread-meta">
           <span className="thread-badge">{nft ? 'NFT' : 'Physical'}</span>
           {meta.length ? ` · ${meta.join(' · ')}` : ''}
         </span>
-      </span>
-      {onAsk ? (
-        <label className="collection-ask">
-          <span>Ask</span>
-          <input
-            inputMode="numeric"
-            className={suggested ? 'is-suggested' : ''}
-            value={ask}
-            placeholder="PKN"
-            aria-label={`Ask price for ${cardLabel(row)}`}
-            onChange={(event) => onAsk(row.id, event.target.value.replace(/[^\d]/g, ''))}
-            onDragStart={(event) => event.preventDefault()}
-          />
-        </label>
-      ) : null}
+        {onAsk ? (
+          <label className="collection-ask">
+            <span>Ask</span>
+            <span className="collection-ask-field">
+              <input
+                inputMode="numeric"
+                className={suggested ? 'is-suggested' : ''}
+                value={ask}
+                placeholder="0"
+                aria-label={`Ask price for ${cardLabel(row)}`}
+                onChange={(event) => onAsk(row.id, event.target.value.replace(/[^\d]/g, ''))}
+                onDragStart={(event) => event.preventDefault()}
+              />
+              <em className="collection-ask-unit">{currency}</em>
+            </span>
+          </label>
+        ) : null}
+      </div>
       {onRemove ? (
         <button
           type="button"
@@ -99,26 +113,69 @@ function HoldingRow({ row, onRemove, removing, ask, suggested = false, onAsk, dr
   );
 }
 
-function ListedRow({ entry, onDragCard }) {
+function ListedRow({ entry, currency = 'PKN', onDragCard }) {
   const listing = entry.listing;
-  const name = cardLabel(entry.holding || listing);
-  const meta = listingMeta(listing);
+  const row = entry.holding || listing;
+  const name = cardLabel(row);
+  const meta = listingMeta(listing).filter((part) => !String(part).endsWith(' PKN'));
+  const price = Number(listing?.pricePkn ?? listing?.price_pkn ?? 0);
   return (
     <article
-      className="thread collection-card"
+      className="collection-tile"
       data-ownership="listed"
       draggable
       onDragStart={(event) => onDragCard(event, entry)}
     >
-      <span className="thread-main">
+      <CardArt className="collection-tile-art" src={cardPicture(row)} alt={name} full />
+      <div className="collection-tile-body">
         <strong className="thread-title">{name}</strong>
         <span className="thread-meta">
           <span className="thread-badge">Listed</span>
           {meta.length ? ` · ${meta.join(' · ')}` : ''}
         </span>
-      </span>
+        {Number.isFinite(price) && price > 0 ? (
+          <p className="collection-tile-price">{price} {currency}</p>
+        ) : null}
+      </div>
     </article>
   );
+}
+
+function ColumnTools({ query, onQuery, condition, onCondition, language, onLanguage, conditions, languages }) {
+  return (
+    <div className="collection-tools">
+      <input
+        type="search"
+        value={query}
+        placeholder="Search"
+        aria-label="Search cards"
+        onChange={(event) => onQuery(event.target.value)}
+      />
+      <select value={condition} aria-label="Condition" onChange={(event) => onCondition(event.target.value)}>
+        <option value="">Condition</option>
+        {conditions.map((code) => <option key={code} value={code}>{code}</option>)}
+      </select>
+      <select value={language} aria-label="Language" onChange={(event) => onLanguage(event.target.value)}>
+        <option value="">Language</option>
+        {languages.map((code) => <option key={code} value={code}>{code}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function facetOptions(rows) {
+  const conditions = new Set();
+  const languages = new Set();
+  for (const row of rows) {
+    const condition = String(row?.condition || '').trim().toUpperCase();
+    const language = String(row?.language || '').trim().toUpperCase();
+    if (condition) conditions.add(condition);
+    if (language) languages.add(language);
+  }
+  return {
+    conditions: [...conditions].sort(),
+    languages: [...languages].sort(),
+  };
 }
 
 function readDrag(event) {
@@ -137,7 +194,7 @@ function readDrag(event) {
  */
 export default function CollectionHoldings() {
   const { signedIn, user, profile, getBearer } = useAuth();
-  const { settings } = useSellerCurrency();
+  const { settings, currency } = useSellerCurrency();
   const [rows, setRows] = useState(null);
   const [listings, setListings] = useState([]);
   const [error, setError] = useState('');
@@ -146,6 +203,12 @@ export default function CollectionHoldings() {
   const [form, setForm] = useState({ name: '', line1: '', city: '', postalCode: '', country: '' });
   const [removingId, setRemovingId] = useState(null);
   const [over, setOver] = useState('');
+  const [heldQuery, setHeldQuery] = useState('');
+  const [heldCond, setHeldCond] = useState('');
+  const [heldLang, setHeldLang] = useState('');
+  const [listedQuery, setListedQuery] = useState('');
+  const [listedCond, setListedCond] = useState('');
+  const [listedLang, setListedLang] = useState('');
   const [asks, setAsks] = useState({});
   const [suggestedAsks, setSuggestedAsks] = useState({});
   const asksRef = useRef(asks);
@@ -190,6 +253,12 @@ export default function CollectionHoldings() {
   const shippable = nft.filter(canShip);
   const heldPhysical = desk.held.filter((entry) => entry.kind !== 'nft');
   const heldNft = desk.held.filter((entry) => entry.kind === 'nft');
+  const heldFilters = { query: heldQuery, condition: heldCond, language: heldLang };
+  const listedFilters = { query: listedQuery, condition: listedCond, language: listedLang };
+  const visibleHeld = heldPhysical.filter((entry) => collectionRowMatches(entry.holding, heldFilters));
+  const visibleListed = desk.listed.filter((entry) => collectionRowMatches(entry.holding || entry.listing, listedFilters));
+  const heldFacets = facetOptions(heldPhysical.map((entry) => entry.holding));
+  const listedFacets = facetOptions(desk.listed.map((entry) => entry.holding || entry.listing));
   const ownedCards = (rows || []).reduce((sum, row) => sum + (Number(row.quantity) > 0 ? Number(row.quantity) : 0), 0)
     + desk.listed.filter((entry) => !entry.holding).reduce((sum, entry) => {
       const qty = Number(entry.listing?.quantityAvailable ?? entry.listing?.quantity_available ?? 0);
@@ -442,13 +511,24 @@ export default function CollectionHoldings() {
             >
               <DeskPanel flush title="In your collection" extra={<span className="thread-badge">{heldPhysical.length}</span>}>
                 <p className="page-lede">Not for sale. Set an ask, then drag the card to Listed.</p>
-                {heldPhysical.length ? (
-                  <div className="thread-list" data-testid="collection-physical">
-                    {heldPhysical.map((entry) => (
+                <ColumnTools
+                  query={heldQuery}
+                  onQuery={setHeldQuery}
+                  condition={heldCond}
+                  onCondition={setHeldCond}
+                  language={heldLang}
+                  onLanguage={setHeldLang}
+                  conditions={heldFacets.conditions}
+                  languages={heldFacets.languages}
+                />
+                {visibleHeld.length ? (
+                  <div className="collection-tile-grid" data-testid="collection-physical">
+                    {visibleHeld.map((entry) => (
                       <HoldingRow
                         key={entry.holding.id}
                         row={entry.holding}
                         ask={asks[entry.holding.id] || ''}
+                        currency={currency}
                         suggested={Boolean(suggestedAsks[entry.holding.id])}
                         onAsk={setAsk}
                         draggable
@@ -459,10 +539,12 @@ export default function CollectionHoldings() {
                     ))}
                   </div>
                 ) : (
-                  <p className="page-lede">Nothing held back. Drop a listed card here to stop selling it.</p>
+                  <p className="page-lede">
+                    {heldPhysical.length ? 'No cards match this search.' : 'Nothing held back. Drop a listed card here to stop selling it.'}
+                  </p>
                 )}
                 {heldNft.length ? (
-                  <div className="thread-list" data-testid="collection-nft">
+                  <div className="collection-tile-grid" data-testid="collection-nft">
                     <p className="page-lede">NFT · {heldNft.length} holding{heldNft.length === 1 ? '' : 's'}</p>
                     {heldNft.map((entry) => <HoldingRow key={entry.holding.id} row={entry.holding} />)}
                   </div>
@@ -478,18 +560,31 @@ export default function CollectionHoldings() {
             >
               <DeskPanel flush title="Listed" extra={<span className="thread-badge">{desk.listed.length}</span>}>
                 <p className="page-lede">For sale. Drag a card left when you want to hold it.</p>
-                {desk.listed.length ? (
-                  <div className="thread-list">
-                    {desk.listed.map((entry) => (
+                <ColumnTools
+                  query={listedQuery}
+                  onQuery={setListedQuery}
+                  condition={listedCond}
+                  onCondition={setListedCond}
+                  language={listedLang}
+                  onLanguage={setListedLang}
+                  conditions={listedFacets.conditions}
+                  languages={listedFacets.languages}
+                />
+                {visibleListed.length ? (
+                  <div className="collection-tile-grid">
+                    {visibleListed.map((entry) => (
                       <ListedRow
                         key={String(entry.listing.id)}
                         entry={entry}
+                        currency={currency}
                         onDragCard={dragListed}
                       />
                     ))}
                   </div>
                 ) : (
-                  <p className="page-lede">No cards listed. Drop one here to sell it.</p>
+                  <p className="page-lede">
+                    {desk.listed.length ? 'No cards match this search.' : 'No cards listed. Drop one here to sell it.'}
+                  </p>
                 )}
               </DeskPanel>
             </section>
