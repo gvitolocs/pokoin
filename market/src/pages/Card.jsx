@@ -12,6 +12,7 @@ import {
   createListing,
   updateListing,
   dropListing,
+  fetchSellerListings,
   fetchSellerSettings,
   saveSellerSettings,
   cardFromCatalogRow,
@@ -126,7 +127,8 @@ import { speciesFromCard, pokemonHref } from '../pokemon-hubs.js';
 import ShopList from '../components/ShopList.jsx';
 import ShopListingRow from '../components/ShopListing.jsx';
 import { listingSelectId, shopDragOffers } from '../shop-marquee.js';
-import { conditionChipSrc, conditionShort } from '../listing-meta.js';
+import { conditionChipSrc, conditionShort, publicListingSellerName, sellerHref } from '../listing-meta.js';
+import { continueBoxCursor, listingBox, liveInventoryListings, recentBoxes } from '../inventory-listings.js';
 import { listingExtraChips, listingFoilOptions } from '../listing-faces.js';
 import { game as currentGame } from '../game.js';
 import {
@@ -612,10 +614,24 @@ function matchDeal(rows, language, condition) {
 
 function preferredDeal(rows, nationality) {
   const lang = defaultCardLanguage(nationality);
-  return matchDeal(rows, lang, 'NM')
-    || matchDeal(rows, null, 'NM')
-    || matchDeal(rows, lang, null)
-    || matchDeal(rows);
+  // NM, then the next grade down. A cheaper MP must not beat an SP.
+  for (const cond of ['NM', 'SP', 'MP', 'PL', 'Poor']) {
+    const inLang = matchDeal(rows, lang, cond);
+    if (inLang) return inLang;
+    const anyLang = matchDeal(rows, null, cond);
+    if (anyLang) return anyLang;
+  }
+  return matchDeal(rows);
+}
+
+/** Next inventory slot for a box, or the bare box when it has no stack yet. */
+function nextBoxLocation(rows, box) {
+  const name = String(box || '').trim();
+  if (!name) return '';
+  const cursor = continueBoxCursor(rows, name, 80);
+  if (!cursor) return name;
+  if (cursor.stackSize <= 1) return `${name}·${cursor.stack}`;
+  return `${name}·${cursor.stack}·${cursor.startPosition}`;
 }
 
 function defaultFoil(card, foils = listingFoilOptions()) {
@@ -823,6 +839,10 @@ function ListingForm({
   const [foil, setFoil] = useState(blank.foil);
   const [chips, setChips] = useState(blank.chips);
   const [comment, setComment] = useState(blank.comment);
+  const [box, setBox] = useState('');
+  const [stockRows, setStockRows] = useState([]);
+  const [stockReady, setStockReady] = useState(false);
+  const boxTouched = useRef(false);
   const [photos, setPhotos] = useState(() => (Array.isArray(editing?.photoUrls) ? editing.photoUrls.slice(0, MAX_LISTING_PHOTOS) : []));
   const [company, setCompany] = useState(blank.company);
   const [grade, setGrade] = useState(blank.grade);
@@ -946,6 +966,50 @@ function ListingForm({
     return () => { cancelled = true; };
   }, [signedIn, getBearer]);
 
+  useEffect(() => {
+    if (!signedIn || !user?.uid) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getBearer();
+        const data = await fetchSellerListings(user.uid, token, { limit: 1000 });
+        if (cancelled) return;
+        setStockRows(liveInventoryListings(data.listings || data.items || []));
+        setStockReady(true);
+      } catch (_) {
+        if (!cancelled) {
+          setStockRows([]);
+          setStockReady(true);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [signedIn, user?.uid, getBearer, editingId]);
+
+  useEffect(() => {
+    if (editingId) {
+      const mine = stockRows.find((row) => row.id === editingId);
+      setBox(listingBox(mine?.location || editing?.location || ''));
+      return;
+    }
+    if (boxTouched.current) return;
+    const first = recentBoxes(stockRows)[0] || '';
+    if (first) setBox(first);
+  }, [editingId, stockRows, editing?.location]);
+
+  const boxOptions = (() => {
+    const names = recentBoxes(stockRows);
+    if (box && !names.some((name) => name.toLowerCase() === box.toLowerCase())) {
+      return [box, ...names];
+    }
+    return names;
+  })();
+  const keptLocation = editingId
+    ? (stockRows.find((row) => row.id === editingId)?.location || editing?.location || '')
+    : '';
+  const sameBox = box && listingBox(keptLocation).toLowerCase() === box.toLowerCase();
+  const locationValue = !box ? '' : (sameBox ? keptLocation : nextBoxLocation(stockRows, box));
+
   async function submit(targets = { pokoin: true, cardtrader: false }) {
     if (!signedIn) {
       navigate(authFrom(fromPath));
@@ -1015,6 +1079,7 @@ function ListingForm({
         reserveAvailable: false,
         nftAvailable: false,
         sellerComment: comment.trim(),
+        ...(!isEditing || stockReady ? { location: locationValue } : {}),
         source: 'pokoin_user_listing',
         cardName: card.name,
         cardImageUrl: card.heroImageUrl || card.imageUrl || '',
@@ -1176,6 +1241,26 @@ function ListingForm({
       ) : currency !== 'PKN' && listedPkn ? (
         <p className="sell-pkn-eq">Lists at {formatPkn(listedPkn)}</p>
       ) : null}
+      <div className="sell-location-row">
+        <label className="sell-field location-pick">
+          Location
+          <select
+            value={box}
+            onChange={(event) => {
+              boxTouched.current = true;
+              setBox(event.target.value);
+            }}
+          >
+            <option value="">None</option>
+            {boxOptions.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+        {locationValue && locationValue !== box ? (
+          <span className="sell-slot">{locationValue.slice(box.length)}</span>
+        ) : null}
+      </div>
       <div className="sell-options-row">
         <div className="sell-field sell-pick condition-pick">
           <span className="sr-only">Condition</span>
@@ -2686,6 +2771,16 @@ export default function Card() {
             <div className={canBuy ? 'prod-px' : 'prod-px oos'}>
               {offersReady && canBuy ? <PriceStack parts={buyer.parts(dealPick.pricePkn, dealPick.sellerAcceptsPkn)} /> : '—'}
             </div>
+            {offersReady && canBuy ? (
+              <p className="deal-sold-by">
+                Sold by{' '}
+                {sellerHref(dealPick, lang) ? (
+                  <Link to={sellerHref(dealPick, lang)}>{publicListingSellerName(dealPick) || 'seller'}</Link>
+                ) : (
+                  <span>{publicListingSellerName(dealPick) || 'seller'}</span>
+                )}
+              </p>
+            ) : null}
             {canBuy && offersReady ? null : (
               <p className="muted own-k">{dealCopy || '\u00a0'}</p>
             )}
