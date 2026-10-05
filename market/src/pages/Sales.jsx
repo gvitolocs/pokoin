@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { fetchSoldHistory, markMarketplaceShipped, refundMarketplaceOrder } from '../api.js';
+import { fetchSoldHistory, imageSrc, markMarketplaceShipped, refundMarketplaceOrder } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { inventoryListingHref } from '../inventory-listings.js';
@@ -11,8 +11,10 @@ import {
   refundAmountFromInput,
   refundInputFromAmount,
 } from '../order-status.js';
+import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 import StockNav from '../components/StockNav.jsx';
+import '../sales-row.css';
 
 const SOURCES = [
   { id: 'all', label: 'All sales' },
@@ -33,6 +35,16 @@ function saleTitle(row) {
 
 function unitCount(row) {
   return (row.items || []).reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+}
+
+function SaleThumb({ item }) {
+  if (!item) return null;
+  const name = item.cardName || 'Card';
+  const src = imageSrc({ id: item.cardId, name, imageUrl: item.imageUrl || '' }, 'grid');
+  const href = item.cardId ? inventoryListingHref(item) : '';
+  const art = src ? <CardArt src={src} alt="" /> : <span className="tile-ph" />;
+  if (!href) return <span className="sale-thumb">{art}</span>;
+  return <Link className="sale-thumb" to={href} aria-label={name}>{art}</Link>;
 }
 
 function lineMoney(item, currency) {
@@ -288,6 +300,7 @@ export default function Sales() {
                   key={`${row.source}-${row.orderId}-${row.items?.[0]?.listingId || ''}`}
                   id={`sale-${row.orderId}`}
                 >
+                  <SaleThumb item={row.items?.[0]} />
                   <span className="thread-main">
                     <strong className="thread-title">
                       {saleTitle(row)}

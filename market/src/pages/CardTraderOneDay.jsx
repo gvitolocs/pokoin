@@ -6,7 +6,10 @@ import { authFrom } from '../punchouts.js';
 import { inventoryListingHref } from '../inventory-listings.js';
 import { formatOrderMoney } from '../order-status.js';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
+import MiniCardTile from '../components/MiniCardTile.jsx';
 import StockNav from '../components/StockNav.jsx';
+import '../seller-home.css';
+import '../one-day.css';
 
 function day(value) {
   const parsed = value ? new Date(value) : null;
@@ -25,6 +28,17 @@ function facets(item) {
     item.altered ? 'Altered' : '',
     item.graded ? 'Graded' : '',
   ].filter(Boolean).join(' ');
+}
+
+function assetLabel(item) {
+  return [
+    item.cardName || 'Card',
+    item.setName,
+    item.collectorNumber ? `#${item.collectorNumber}` : '',
+    item.condition,
+    item.language,
+    item.quantity > 1 ? `Qty ${item.quantity}` : '',
+  ].filter(Boolean).join(' · ');
 }
 
 function SaleLine({ item }) {
@@ -61,6 +75,7 @@ export default function CardTraderOneDay() {
   const [error, setError] = useState('');
   const [notConnected, setNotConnected] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showStock, setShowStock] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -94,6 +109,10 @@ export default function CardTraderOneDay() {
   );
   const oneDayReady = sales?.oneDayReady === true || assets?.oneDayReady === true;
   const warehouseCards = Math.max(0, Number(assets?.totals?.cards) || 0);
+  const stockItems = useMemo(
+    () => (Array.isArray(assets?.items) ? assets.items : []),
+    [assets],
+  );
 
   if (!ready) return <SessionWait />;
   if (!signedIn) return <Navigate to={authFrom(location.pathname || '/mypokoin/1dr')} replace />;
@@ -126,7 +145,16 @@ export default function CardTraderOneDay() {
 
       {oneDayReady && sales ? (
         <MetricGrid>
-          <Metric value={warehouseCards} label="Cards at CardTrader" hint="Warehouse stock" />
+          <button
+            type="button"
+            className={`metric dr-stock-open${showStock ? ' is-open' : ''}`}
+            onClick={() => setShowStock((open) => !open)}
+            aria-expanded={showStock}
+          >
+            <strong className="metric-value">{warehouseCards}</strong>
+            <span className="metric-label">Cards at CardTrader</span>
+            <span className="metric-hint">{showStock ? 'Hide cards' : 'View all cards'}</span>
+          </button>
           <Metric
             value={sales.totals?.pending?.units || 0}
             label="Waiting at CardTrader"
@@ -149,6 +177,29 @@ export default function CardTraderOneDay() {
           title="No open 1-DR sales"
           lede="When CardTrader sells a card from your warehouse stock, it shows up here and in Sold history."
         />
+      ) : null}
+
+      {oneDayReady && showStock ? (
+        <DeskPanel flush title={`CardTrader 1-DR · ${stockItems.length} card${stockItems.length === 1 ? '' : 's'}`}>
+          {stockItems.length ? (
+            <div className="seller-listing-list" data-testid="cardtrader-1dr-all">
+              {stockItems.map((item) => (
+                <MiniCardTile
+                  key={item.ctProductId || item.cardId}
+                  imageUrl={item.imageUrl}
+                  name={item.cardName || 'Card'}
+                  title={assetLabel(item)}
+                  cardId={item.cardId || ''}
+                  pricePkn={item.pricePkn}
+                  href={item.cardId ? inventoryListingHref({ cardId: item.cardId }) : ''}
+                  badge={item.quantity > 1 ? `×${item.quantity}` : ''}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="dr-stock-empty">No warehouse cards yet. Run Sync CardTrader in Settings.</p>
+          )}
+        </DeskPanel>
       ) : null}
 
       {oneDayReady && pendingItems.length ? (
