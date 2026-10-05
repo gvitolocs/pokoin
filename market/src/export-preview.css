@@ -1,0 +1,36 @@
+.export-preview-note {
+  margin: 0.85rem 0 0.45rem;
+  color: var(--muted, #9a9a9a);
+  font-size: 0.82rem;
+}
+
+.export-preview-wrap {
+  overflow: auto;
+  max-height: 28rem;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+}
+
+.export-preview {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.export-preview th,
+.export-preview td {
+  padding: 0.4rem 0.65rem;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+}
+
+.export-preview th {
+  position: sticky;
+  top: 0;
+  background: var(--panel, #161616);
+  color: var(--gold, #e6c36a);
+  font-weight: 600;
+}
