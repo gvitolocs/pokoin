@@ -149,7 +149,9 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(cssSrc, /grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
   assert.match(cssSrc, /\.seller-listing-tile \{/);
   assert.doesNotMatch(cssSrc, /\.seller-listing-row \{/);
-  assert.match(homeSrc, /const LISTING_PREVIEW = 72/);
+  assert.match(homeSrc, /const LISTINGS_PAGE = 1000/);
+  assert.doesNotMatch(homeSrc, /LISTING_PREVIEW/);
+  assert.doesNotMatch(homeSrc, /live\.slice\(0,/);
   assert.match(cssSrc, /@media \(max-width: 900px\)/);
   assert.match(cssSrc, /repeat\(8, minmax\(0, 1fr\)\)/);
   assert.match(cssSrc, /repeat\(6, minmax\(0, 1fr\)\)/);
