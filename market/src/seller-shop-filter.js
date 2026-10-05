@@ -46,6 +46,8 @@ function matchesRarity(row, rarity) {
   if (key === 'ultra') return includes(text, 'ultra');
   if (key === 'illustration') return includes(text, 'illustration');
   if (key === 'secret') return includes(text, 'secret');
+  if (key === 'promo') return includes(text, 'promo');
+  if (key === 'no-rarity') return includes(text, 'no rarity');
   return true;
 }
 
