@@ -5,9 +5,8 @@ import {
   currencyFromLocale,
   formatLocalFromPkn,
   formatPkn,
-  localAndPknFromPkn,
 } from './pkn.js';
-import { buyerPrefersFiat } from './seller-currency.js';
+import { buyerPrefersFiat, buyerPriceParts } from './seller-currency.js';
 import { useSellerCurrency } from './use-seller-currency.js';
 
 /**
@@ -31,11 +30,11 @@ export function useBuyerCurrency(pinned = '') {
       ? formatLocalFromPkn(pricePkn, currency)
       : formatPkn(pricePkn)
   );
-  /** { local, pkn } for <PriceStack>: local is '' while the price stays PKN-only. */
-  const parts = (pricePkn, sellerAcceptsPkn = true) => (
-    forceFiat || fiat(pricePkn, sellerAcceptsPkn)
-      ? localAndPknFromPkn(pricePkn, currency)
-      : { local: '', pkn: formatPkn(pricePkn) || '' }
-  );
+  /**
+   * { local, pkn } for <PriceStack>: pinned currencies keep the two-line
+   * stack, unaffordable prices show local only, affordable prices PKN only.
+   */
+  const parts = (pricePkn, sellerAcceptsPkn = true) =>
+    buyerPriceParts({ pricePkn, currency, balancePkn, sellerAcceptsPkn, pinned: pin });
   return { currency, balancePkn, fiat, format, parts, pinned: pin };
 }

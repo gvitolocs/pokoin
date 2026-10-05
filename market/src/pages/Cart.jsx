@@ -11,7 +11,7 @@ import {
   reconcileRow,
   sellerKeyOf,
 } from '../cart-model.js';
-import { parcelNudge } from '../cart-shipping.js';
+import { nudgeFromParcels } from '../cart-shipping.js';
 import {
   useBuyAgain,
   useCardTiles,
@@ -87,7 +87,7 @@ export default function Cart() {
   const service = cart.shippingChoice.service;
   const liveShip = useLiveShipping({ groups, to: country, service });
   const { services, shipping, estimates } = liveShip;
-  const nudge = useMemo(() => parcelNudge(groups, country, service), [groups, country, service]);
+  const nudge = useMemo(() => nudgeFromParcels(groups, shipping.parcels), [groups, shipping.parcels]);
   const discount = useMemo(
     () => balanceDiscount({ balancePkn: signedIn ? availablePkn : 0, items, shippingCents: shipping.cents }),
     [signedIn, availablePkn, items, shipping.cents],
