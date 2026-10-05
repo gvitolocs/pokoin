@@ -1,0 +1,25 @@
+/* Current Zero pack: Pick row, then Picked row. */
+.zero-pack { display: grid; gap: 0.85rem; }
+.zero-pack-title {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.zero-line { align-items: flex-start; cursor: grab; }
+.zero-line:active { cursor: grabbing; }
+.zero-line.is-picked .zero-loc,
+.zero-line.is-picked .thread-main { opacity: 1; }
+.zero-place {
+  flex: 0 0 1.6rem;
+  color: var(--yellow);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.zero-move { flex: 0 0 auto; align-self: center; }
+.zero-drop { min-height: 3.2rem; }
+.zero-drop.is-over { outline: 1px dashed rgb(255 211 61 / 0.7); outline-offset: -6px; }
+.zero-drop-empty { margin: 0; padding: 0.85rem 1rem; color: var(--muted); }

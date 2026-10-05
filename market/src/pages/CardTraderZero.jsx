@@ -9,147 +9,12 @@ import {
 } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
-import { inventoryListingHref } from '../inventory-listings.js';
 import { formatOrderMoney } from '../order-status.js';
+import { ShipmentPanel } from '../zero-pack.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 import StockNav from '../components/StockNav.jsx';
 
-const PICKED_KEY = 'pokoin.ctZero.picked.';
-
-function day(value) {
-  const parsed = value ? new Date(value) : null;
-  return parsed && !Number.isNaN(parsed.getTime())
-    ? parsed.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
-    : '—';
-}
-
-/** Ticked lines per shipment, this browser only (a picking aid, not shared state). */
-function readPicked(orderId) {
-  try {
-    const raw = JSON.parse(window.localStorage.getItem(PICKED_KEY + orderId) || '[]');
-    return new Set(Array.isArray(raw) ? raw.map(String) : []);
-  } catch (_) {
-    return new Set();
-  }
-}
-
-function writePicked(orderId, picked) {
-  try {
-    if (picked.size) window.localStorage.setItem(PICKED_KEY + orderId, JSON.stringify([...picked]));
-    else window.localStorage.removeItem(PICKED_KEY + orderId);
-  } catch (_) {
-    /* private mode: ticks just don't survive a reload */
-  }
-}
-
-function facets(item) {
-  return [
-    item.condition,
-    item.language,
-    item.reverse ? 'Reverse' : '',
-    item.firstEdition ? '1st ed.' : '',
-    item.signed ? 'Signed' : '',
-    item.altered ? 'Altered' : '',
-    item.graded ? 'Graded' : '',
-  ].filter(Boolean).join(' ');
-}
-
-function powerToolsLine(pt) {
-  if (!pt) return '';
-  const parts = [];
-  if (pt.pickedQuantity != null) parts.push(`picked ${pt.pickedQuantity}`);
-  else if (pt.orderState) parts.push(pt.orderState);
-  if (pt.bin) parts.push(`bin ${pt.bin}`);
-  return parts.length ? `Power Tools: ${parts.join(' · ')}` : '';
-}
-
-function ZeroLine({ item, picked, onToggle }) {
-  const location = item.location || item.powerTools?.location || '';
-  const fromPowerTools = !item.location && Boolean(item.powerTools?.location);
-  const where = [item.expansion, item.collectorNumber ? `#${item.collectorNumber}` : ''].filter(Boolean).join(' · ');
-  const pt = powerToolsLine(item.powerTools);
-  return (
-    <div className={`thread zero-line${picked ? ' is-picked' : ''}`}>
-      {onToggle ? (
-        <input
-          type="checkbox"
-          className="zero-tick"
-          checked={picked}
-          onChange={onToggle}
-          aria-label={`Picked ${item.name}`}
-        />
-      ) : null}
-      <span className={`zero-loc${location ? '' : ' is-empty'}`} title={fromPowerTools ? 'Location from Power Tools' : 'MyPokoin location'}>
-        {location || 'No location'}
-        {fromPowerTools ? <small> PT</small> : null}
-      </span>
-      <span className="thread-main">
-        <strong className="thread-title">
-          {item.cardId ? <Link to={inventoryListingHref(item)}>{item.name}</Link> : item.name}
-          {item.quantity > 1 ? <span className="zero-qty"> ×{item.quantity}</span> : null}
-        </strong>
-        <span className="thread-meta">
-          {[where, facets(item), item.lineCents != null ? formatOrderMoney(item.lineCents, item.currency) : '']
-            .filter(Boolean)
-            .join(' · ')}
-          {pt ? <span className="zero-pt"> · {pt}</span> : null}
-        </span>
-      </span>
-    </div>
-  );
-}
-
-function ShipmentPanel({ order }) {
-  const [picked, setPicked] = useState(() => readPicked(order.orderId));
-  const units = order.items.reduce((sum, item) => sum + item.quantity, 0);
-  const done = order.items.filter((item) => picked.has(item.itemId)).length;
-
-  function toggle(itemId) {
-    setPicked((current) => {
-      const next = new Set(current);
-      if (next.has(itemId)) next.delete(itemId);
-      else next.add(itemId);
-      writePicked(order.orderId, next);
-      return next;
-    });
-  }
-
-  const title = [
-    `Shipment ${order.code || order.orderId}`,
-    order.packingNumber != null ? `packing #${order.packingNumber}` : '',
-    order.paidAt ? `merged ${day(order.paidAt)}` : '',
-  ].filter(Boolean).join(' · ');
-
-  return (
-    <DeskPanel
-      flush
-      title={title}
-      extra={(
-        <span className="zero-progress">
-          {done}/{order.items.length} picked · {units} card{units === 1 ? '' : 's'}
-          {done ? (
-            <button className="btn ghost" type="button" onClick={() => { writePicked(order.orderId, new Set()); setPicked(new Set()); }}>
-              Clear ticks
-            </button>
-          ) : null}
-        </span>
-      )}
-    >
-      <div className="thread-list">
-        {order.items.map((item) => (
-          <ZeroLine
-            key={item.itemId}
-            item={item}
-            picked={picked.has(item.itemId)}
-            onToggle={() => toggle(item.itemId)}
-          />
-        ))}
-      </div>
-    </DeskPanel>
-  );
-}
-
-function PowerToolsPanel({ overlay }) {
+function PowerToolsPanel({ overlay, onSession }) {
   const { getBearer } = useAuth();
   const [status, setStatus] = useState(null);
   const [mode, setMode] = useState('password');
@@ -179,6 +44,7 @@ function PowerToolsPanel({ overlay }) {
       setStatus(data.status || null);
       setPassword('');
       setSession('');
+      if (onSession) await onSession();
     } catch (err) {
       setError(err.message || 'Power Tools sign-in failed.');
       if (err.body?.code === 'powertools_two_factor') setMode('session');
@@ -194,6 +60,7 @@ function PowerToolsPanel({ overlay }) {
       const token = await getBearer();
       const data = await disconnectPowerTools(token);
       setStatus(data.status || null);
+      if (onSession) await onSession();
     } catch (err) {
       setError(err.message || 'Could not forget the Power Tools session.');
     } finally {
@@ -229,9 +96,9 @@ function PowerToolsPanel({ overlay }) {
       ) : status ? (
         <form className="ct-connect-form" onSubmit={submit}>
           <p className="page-lede">
-            Optional. Sign in with your Power Tools account to see its picking state and locations next to each card.
-            The list above always comes straight from CardTrader. Pokoin keeps only your encrypted Power Tools
-            session, never your password.
+            Optional. Sign in with your Power Tools account. Pokoin then checks this pack's location order
+            against the Power Tools position order, and shows its picking state next to each card.
+            Pokoin keeps only your encrypted Power Tools session, never your password.
           </p>
           <p className="ct-token-hint is-ok">
             Already signed in to Power Tools in Chrome? Open the{' '}
@@ -362,7 +229,7 @@ export default function CardTraderZero() {
       <PageHead
         kicker="Seller"
         title="CardTrader Zero"
-        lede="Every Thursday CardTrader merges your Zero sales into one order to send to the hub. This is that list, in picking order by MyPokoin location, read live from your CardTrader seller orders."
+        lede="Every Thursday CardTrader merges your Zero sales into one pack to send to the hub. That current pack is listed here in picking order: location box, then stock number from smaller to bigger."
       >
         <button className="btn ghost" type="button" onClick={load} disabled={loading || notConnected}>
           {loading ? 'Refreshing…' : 'Refresh'}
@@ -399,7 +266,9 @@ export default function CardTraderZero() {
         />
       ) : null}
 
-      {(data?.weekly || []).map((order) => <ShipmentPanel key={order.orderId} order={order} />)}
+      {(data?.weekly || []).map((order) => (
+        <ShipmentPanel key={order.orderId} order={order} powerTools={data.powerTools} />
+      ))}
 
       {pendingItems.length ? (
         <DeskPanel
@@ -419,7 +288,7 @@ export default function CardTraderZero() {
         </DeskPanel>
       ) : null}
 
-      {!notConnected ? <PowerToolsPanel overlay={data?.powerTools} /> : null}
+      {!notConnected ? <PowerToolsPanel overlay={data?.powerTools} onSession={load} /> : null}
     </div>
   );
 }
