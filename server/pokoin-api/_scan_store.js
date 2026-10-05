@@ -242,7 +242,22 @@ function createStore({
         batch = open.rows[0];
       }
       if (!batch) {
-        const defaults = { ...DEFAULT_BATCH_DEFAULTS };
+        // A new box starts where the seller left off: reuse the location and
+        // cards-per-stack of their most recent batch that had a location. The
+        // desk advances stack/startPosition from live stock (nextFreeSlot), so
+        // those stay at 1 and nothing else (condition, language, price) is copied.
+        const previous = await client.query(
+          `select defaults from public.scan_batches
+            where seller_uid = $1 and coalesce(defaults->>'location', '') <> ''
+            order by updated_at desc limit 1`,
+          [sellerUid],
+        );
+        const last = previous.rows[0]?.defaults;
+        // normalizeDefaults is the same clamp setDefaults applies, so a bad
+        // stackSize in an old row cannot reach the insert.
+        const defaults = last
+          ? rules.normalizeDefaults({ location: last.location, stackSize: last.stackSize })
+          : { ...DEFAULT_BATCH_DEFAULTS };
         const created = await client.query(
           `insert into public.scan_batches (seller_uid, defaults, defaults_history)
            values ($1, $2, $3) returning *`,
