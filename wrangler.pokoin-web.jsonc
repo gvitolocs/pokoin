@@ -1,5 +1,6 @@
 {
   "name": "pokoin-web",
+  "main": "workers/pokoin-web-assets.js",
   "compatibility_date": "2026-10-03",
   "workers_dev": true,
   "account_id": "e2620981465c01b9bf805522507d963a",
@@ -9,7 +10,28 @@
   ],
   "assets": {
     "directory": "./dist-web",
+    "binding": "ASSETS",
     "html_handling": "auto-trailing-slash",
-    "not_found_handling": "none"
+    "not_found_handling": "none",
+    "run_worker_first": [
+      "/api/*",
+      "/card-images/*",
+      "/__/auth/*",
+      "/__/firebase/*",
+      "/chain/*",
+      "/cardscan/identify",
+      "/marketplace/*/cards",
+      "/marketplace/*/cards/*",
+      "/*/marketplace/*/cards",
+      "/*/marketplace/*/cards/*",
+      "/marketplace/*/pokemon",
+      "/marketplace/*/pokemon/*",
+      "/marketplace/*/rarities",
+      "/marketplace/*/rarities/*",
+      "/marketplace/*/languages",
+      "/marketplace/*/languages/*",
+      "/marketplace/*/guides",
+      "/marketplace/*/guides/*"
+    ]
   }
 }

@@ -53,6 +53,12 @@ for (const board of testBoards) {
 lines.push('# SPA shell is /market/app.html. A rewrite to index.html loops in the assets router.');
 for (const prefix of spa) {
   if (testBoards.includes(prefix)) continue;
+  // /sitemap is the human graph. /sitemap.xml and /sitemap-cards-001.xml are files.
+  if (prefix === 'sitemap') {
+    lines.push('/sitemap /market/app 200');
+    lines.push('/sitemap/ /market/app 200');
+    continue;
+  }
   lines.push(`/${prefix}* /market/app 200`);
 }
 const rules = lines.filter((line) => line && !line.startsWith('#')).length;

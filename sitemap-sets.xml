@@ -28,6 +28,12 @@
     <loc>https://pokoin.com/marketplace/sets/30th-celebration-jp</loc>
   </url>
   <url>
+    <loc>https://pokoin.com/marketplace/sets/30th-celebration-premium-deck-set</loc>
+  </url>
+  <url>
+    <loc>https://pokoin.com/marketplace/sets/30th-celebration-simplified-chinese</loc>
+  </url>
+  <url>
     <loc>https://pokoin.com/marketplace/sets/adv-expansion-pack</loc>
   </url>
   <url>
@@ -77,6 +83,9 @@
   </url>
   <url>
     <loc>https://pokoin.com/marketplace/sets/astral-radiance</loc>
+  </url>
+  <url>
+    <loc>https://pokoin.com/marketplace/sets/aura-seeker</loc>
   </url>
   <url>
     <loc>https://pokoin.com/marketplace/sets/awakened-heroes</loc>
@@ -232,9 +241,6 @@
     <loc>https://pokoin.com/marketplace/sets/boundaries-crossed-promos</loc>
   </url>
   <url>
-    <loc>https://pokoin.com/marketplace/sets/box-topper</loc>
-  </url>
-  <url>
     <loc>https://pokoin.com/marketplace/sets/brilliant-stars</loc>
   </url>
   <url>
@@ -379,6 +385,9 @@
     <loc>https://pokoin.com/marketplace/sets/csmpdc-battle-party-combo-lightning-deck</loc>
   </url>
   <url>
+    <loc>https://pokoin.com/marketplace/sets/csmpec-battle-party-combo-psychic-deck</loc>
+  </url>
+  <url>
     <loc>https://pokoin.com/marketplace/sets/csmpec-battle-party-combo-water-deck</loc>
   </url>
   <url>
@@ -394,7 +403,28 @@
     <loc>https://pokoin.com/marketplace/sets/csmpic-battle-party-set-reward-pack</loc>
   </url>
   <url>
+    <loc>https://pokoin.com/marketplace/sets/csmpjc-grass-modification-pack</loc>
+  </url>
+  <url>
+    <loc>https://pokoin.com/marketplace/sets/csmpkc-fire-modification-pack</loc>
+  </url>
+  <url>
     <loc>https://pokoin.com/marketplace/sets/csmplc-water-modification-pack</loc>
+  </url>
+  <url>
+    <loc>https://pokoin.com/marketplace/sets/csmpmc-lightning-modification-pack</loc>
+  </url>
+  <url>
+    <loc>https://pokoin.com/marketplace/sets/csmpnc-psychic-modification-pack</loc>
+  </url>
+  <url>
+    <loc>https://pokoin.com/marketplace/sets/csmpoc-fighting-modification-pack</loc>
+  </url>
+  <url>
+    <loc>https://pokoin.com/marketplace/sets/csmppc-darkness-modification-pack</loc>
+  </url>
+  <url>
+    <loc>https://pokoin.com/marketplace/sets/csmpqc-metal-modification-pack</loc>
   </url>
   <url>
     <loc>https://pokoin.com/marketplace/sets/csmyc-eevee-gx-box-sets</loc>
@@ -431,6 +461,9 @@
   </url>
   <url>
     <loc>https://pokoin.com/marketplace/sets/csv8-brilliant-fantasy</loc>
+  </url>
+  <url>
+    <loc>https://pokoin.com/marketplace/sets/csv9-5-master-ball-reverse</loc>
   </url>
   <url>
     <loc>https://pokoin.com/marketplace/sets/csv9-5-poke-ball-reverse</loc>
@@ -817,9 +850,6 @@
     <loc>https://pokoin.com/marketplace/sets/fire-starter-set-v</loc>
   </url>
   <url>
-    <loc>https://pokoin.com/marketplace/sets/first-partner-pack</loc>
-  </url>
-  <url>
     <loc>https://pokoin.com/marketplace/sets/flashfire</loc>
   </url>
   <url>
@@ -1175,6 +1205,9 @@
   </url>
   <url>
     <loc>https://pokoin.com/marketplace/sets/mega-starter-set-zorua-and-zoroark-ex</loc>
+  </url>
+  <url>
+    <loc>https://pokoin.com/marketplace/sets/mega-x-mega-parade</loc>
   </url>
   <url>
     <loc>https://pokoin.com/marketplace/sets/mep-black-star-promos</loc>
@@ -1568,9 +1601,6 @@
   </url>
   <url>
     <loc>https://pokoin.com/marketplace/sets/pokemon-misprints</loc>
-  </url>
-  <url>
-    <loc>https://pokoin.com/marketplace/sets/pokemon-products</loc>
   </url>
   <url>
     <loc>https://pokoin.com/marketplace/sets/pokemon-rumble</loc>

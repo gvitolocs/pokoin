@@ -21,6 +21,12 @@ cp "$ROOT/sitemap.xml" "$OUT/sitemap.xml"
 cp "$ROOT/sitemap-hubs.xml" "$OUT/sitemap-hubs.xml"
 cp "$ROOT/sitemap-pokemon.xml" "$OUT/sitemap-pokemon.xml"
 cp "$ROOT/sitemap-sets.xml" "$OUT/sitemap-sets.xml"
+shopt -s nullglob
+card_sitemaps=("$ROOT"/sitemap-cards-*.xml)
+if ((${#card_sitemaps[@]})); then
+  cp "${card_sitemaps[@]}" "$OUT/"
+fi
+shopt -u nullglob
 cp "$ROOT/site.webmanifest" "$OUT/site.webmanifest"
 # The landing and marketplace both link to the official PokoinPOS audit. Keep
 # it in the deployment artifact so the published URL cannot regress to 404.

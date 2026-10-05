@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /** Canonical hub sitemaps. Card URLs stay on the desk; Google discovers them via hubs + internal links. */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import SPECIES from '../market/src/data/pokedex-species.js';
 import { TCG_ERA_ORDER } from '../market/src/tcg-eras.js';
 import { LANGUAGE_HUBS, RARITY_HUBS, SEO_GUIDES } from '../market/src/seo.js';
 import { speciesSlug, speciesLabel } from '../market/src/pokemon-hubs.js';
+import { existingCardSitemapNames } from './card-sitemap.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ORIGIN = 'https://pokoin.com';
@@ -91,9 +92,11 @@ if (!setUrls.length) {
 writeFileSync(join(ROOT, 'sitemap-pokemon.xml'), urlset(pokemon));
 writeFileSync(join(ROOT, 'sitemap-hubs.xml'), urlset(hubs));
 writeFileSync(join(ROOT, 'sitemap-sets.xml'), urlset(setUrls.length ? setUrls : [`${ORIGIN}/marketplace/sets`]));
+const cardSitemaps = existingCardSitemapNames(readdirSync(ROOT));
 writeFileSync(join(ROOT, 'sitemap.xml'), index([
   'sitemap-hubs.xml',
   'sitemap-pokemon.xml',
   'sitemap-sets.xml',
+  ...cardSitemaps,
 ]));
 console.log('sitemaps', pokemon.length, 'pokemon', setUrls.length, 'sets', speciesLabel('charizard'));

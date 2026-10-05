@@ -116,6 +116,7 @@ import { ShipFromCountryGate } from '../components/SellerShippingSettings.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatListingPrice, formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
+import { currencyFromSearch } from '../pkn.js';
 import PriceStack from '../components/PriceStack.jsx';
 import InventoryTargets from '../components/InventoryTargets.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
@@ -1593,11 +1594,12 @@ function DeskArtFrame({ card, art, offers, onZoom }) {
 }
 
 export default function Card() {
-  const buyer = useBuyerCurrency();
   const { lang = 'en', cardId: rawCardId, slug = '' } = useParams();
   const cardId = realPublicCardId(rawCardId);
   const navigate = useNavigate();
   const location = useLocation();
+  const pinnedCurrency = currencyFromSearch(location.search);
+  const buyer = useBuyerCurrency(pinnedCurrency);
   const { user, getBearer } = useAuth();
   const { addItem } = useCart();
   const stubCard = useMemo(() => {
@@ -2357,7 +2359,12 @@ export default function Card() {
         image={art}
         imageAlt={cardImageAlt(card)}
         jsonLd={[
-          productJsonLd(card, { url: `https://pokoin.com${cardPath}`, offers: nativeLive }),
+          productJsonLd(card, {
+            url: `https://pokoin.com${cardPath}`,
+            offers: nativeLive,
+            currency: pinnedCurrency && pinnedCurrency !== 'PKN' ? pinnedCurrency : '',
+            listingId: new URLSearchParams(location.search).get('listing') || '',
+          }),
           breadcrumbJsonLd(seoCrumbs.filter(Boolean).map((crumb) => ({
             name: crumb.name,
             href: crumb.href,

@@ -145,6 +145,74 @@ export function fiatFromPkn(pkn, currency = 'PKN') {
   return eur;
 }
 
+/** Same rounding as checkout `eurCentsFromPkn`: 1 PKN = €0.005. */
+export function eurCentsFromPkn(pkn) {
+  const amount = Number(pkn);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  return Math.round(amount * PKN_USDT_PRICE * 100);
+}
+
+/**
+ * Display money for a pinned currency. Minor units are EUR cents, or DKK øre
+ * from those cents × 7.5. Stripe still charges the EUR cents.
+ */
+export function moneyFromPkn(pkn, currency = 'EUR') {
+  const code = String(currency || 'EUR').trim().toUpperCase();
+  const eurCents = eurCentsFromPkn(pkn);
+  const pricePkn = Number(pkn);
+  if (code === 'PKN') {
+    return {
+      currency: 'PKN',
+      amount: formatPknNumber(pricePkn),
+      amountMicros: null,
+      eurCents,
+      pricePkn,
+    };
+  }
+  if (!['EUR', 'USD', 'DKK'].includes(code) || eurCents <= 0) return null;
+  const minor = code === 'DKK' ? Math.round(eurCents * DKK_PER_EUR) : eurCents;
+  return {
+    currency: code,
+    amount: (minor / 100).toFixed(2),
+    amountMicros: String(minor * 10000),
+    eurCents,
+    pricePkn,
+  };
+}
+
+/** Shipping quotes are already EUR cents. Convert with the same DKK peg. */
+export function moneyFromEurCents(cents, currency = 'EUR') {
+  const eurCents = Math.max(0, Math.round(Number(cents) || 0));
+  const code = String(currency || 'EUR').trim().toUpperCase();
+  if (eurCents <= 0) return null;
+  if (code === 'DKK') {
+    const minor = Math.round(eurCents * DKK_PER_EUR);
+    return {
+      currency: 'DKK',
+      amount: (minor / 100).toFixed(2),
+      amountMicros: String(minor * 10000),
+      eurCents,
+    };
+  }
+  if (code === 'EUR' || code === 'USD') {
+    return {
+      currency: code,
+      amount: (eurCents / 100).toFixed(2),
+      amountMicros: String(eurCents * 10000),
+      eurCents,
+    };
+  }
+  return null;
+}
+
+/** `?currency=EUR` pins the landing page. Empty when the param is absent or unknown. */
+export function currencyFromSearch(search = '') {
+  const raw = String(search || '');
+  const params = new URLSearchParams(raw.startsWith('?') ? raw.slice(1) : raw);
+  const code = String(params.get('currency') || '').trim().toUpperCase();
+  return LIST_CURRENCIES.includes(code) ? code : '';
+}
+
 export function listingPriceToPkn(amount, currency = 'PKN') {
   const value = parseListAmount(amount);
   const code = String(currency || 'PKN').trim().toUpperCase();

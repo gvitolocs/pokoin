@@ -1,5 +1,6 @@
 /** Titles, JSON-LD, related-card scoring, and hub paths for marketplace SEO. */
 import { cardDocumentTitle, displayName, printingIdentity } from './identity.js';
+import { productStructuredData } from './google-commerce.js';
 import { game } from './game.js';
 import { speciesFromCard, speciesFromSlug } from './pokemon-hubs.js';
 import { pokedexNumber } from './pokedex.js';
@@ -183,41 +184,8 @@ export function pickRelatedCards(card, pools = [], limit = 12) {
   return ranked.slice(0, limit).map((row) => row.card);
 }
 
-export function productJsonLd(card = {}, { url, offers } = {}) {
-  const identity = printingIdentity(card);
-  const listed = (offers || []).filter((row) => Number(row.pricePkn) > 0);
-  const prices = listed.map((row) => Number(row.pricePkn));
-  const offer = listed.length
-    ? {
-      '@type': 'AggregateOffer',
-      priceCurrency: 'PKN',
-      lowPrice: Math.min(...prices),
-      highPrice: Math.max(...prices),
-      offerCount: listed.length,
-      availability: 'https://schema.org/InStock',
-    }
-    : {
-      '@type': 'Offer',
-      priceCurrency: 'PKN',
-      availability: 'https://schema.org/OutOfStock',
-    };
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'Product',
-    name: displayName(card),
-    description: cardSeoDescription(card),
-    sku: String(card.id || ''),
-    image: card.heroImageUrl || card.imageUrl || '',
-    brand: { '@type': 'Brand', name: 'Pokémon TCG' },
-    url: url || '',
-    additionalProperty: [
-      identity.set ? { '@type': 'PropertyValue', name: 'set', value: identity.set } : null,
-      identity.number ? { '@type': 'PropertyValue', name: 'number', value: identity.number } : null,
-      identity.rarity ? { '@type': 'PropertyValue', name: 'rarity', value: identity.rarity } : null,
-      identity.artist ? { '@type': 'PropertyValue', name: 'artist', value: identity.artist } : null,
-    ].filter(Boolean),
-    offers: offer,
-  };
+export function productJsonLd(card = {}, options = {}) {
+  return productStructuredData(card, options);
 }
 
 export function breadcrumbJsonLd(crumbs = []) {

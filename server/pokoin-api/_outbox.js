@@ -105,8 +105,20 @@ async function claimOne(client) {
   return claimed.rows[0] || null;
 }
 
-async function finishClaim(client, id, { error, payload } = {}) {
+async function finishClaim(client, id, { error, payload, retrySeconds } = {}) {
   if (error) {
+    const delay = Number(retrySeconds);
+    if (Number.isFinite(delay) && delay > 0) {
+      await client.query(
+        `update public.marketplace_outbox
+         set last_error = $2,
+             payload = coalesce($3::jsonb, payload),
+             available_at = now() + make_interval(secs => $4)
+         where id = $1`,
+        [id, String(error).slice(0, 500), payload ? JSON.stringify(payload) : null, delay],
+      );
+      return;
+    }
     await client.query(
       `update public.marketplace_outbox set last_error = $2, payload = coalesce($3::jsonb, payload) where id = $1`,
       [id, String(error).slice(0, 500), payload ? JSON.stringify(payload) : null],

@@ -7,7 +7,9 @@ import {
   countryFromLocale,
   currencyForCountry,
   currencyFromLocale,
+  eurCentsFromPkn,
   fiatFromPkn,
+  moneyFromPkn,
   formatEurAndDkkFromPkn,
   formatFiatFromPkn,
   formatLocalFromEurCents,
@@ -95,4 +97,8 @@ test('last-day sold median fills version tiles that have no catalog price', () =
     idsMissingTilePrice(rows),
     ['612610'],
   );
+  assert.equal(eurCentsFromPkn(64000), 32000);
+  assert.equal(moneyFromPkn(64000, 'EUR').amount, '320.00');
+  assert.equal(moneyFromPkn(64000, 'DKK').amount, '2400.00');
+  assert.equal(moneyFromPkn(64000, 'DKK').eurCents, 32000);
 });

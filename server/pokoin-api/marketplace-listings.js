@@ -433,6 +433,35 @@ async function refreshPriceSummary(cardId) {
   ));
 }
 
+function merchantListingSnapshot(row) {
+  if (!row || row.id == null) return null;
+  const meta = row.source_metadata && typeof row.source_metadata === 'object' ? row.source_metadata : {};
+  return {
+    id: String(row.id),
+    cardId: String(row.cardId || row.card_id || ''),
+    sellerUid: String(row.sellerUid || row.seller_uid || ''),
+    sellerName: String(row.sellerName || row.seller_name || ''),
+    sellerCountry: String(row.sellerCountry || row.seller_country || '').toUpperCase(),
+    condition: String(row.condition || 'NM'),
+    language: String(row.language || ''),
+    pricePkn: Number(row.pricePkn ?? row.price_pkn ?? 0),
+    quantityAvailable: Number(row.quantityAvailable ?? row.quantity_available ?? 0),
+    status: String(row.status || 'active'),
+    sealed: row.sealed === true,
+    graded: row.graded === true,
+    shippingAvailable: row.shippingAvailable !== false && row.shipping_available !== false,
+    cardName: String(row.cardName || row.card_name || ''),
+    cardImageUrl: String(row.cardImageUrl || row.card_image_url || ''),
+    setName: String(row.setName || row.set_name || ''),
+    collectorNumber: String(row.collectorNumber || row.collector_number || ''),
+    canonicalPath: String(row.canonicalPath || row.canonical_path || ''),
+    source: String(row.source || ''),
+    reserveAvailable: row.reserveAvailable === true || row.reserve_available === true,
+    gtin: String(meta.gtin || meta.ean || meta.upc || row.gtin || ''),
+    productType: String(row.productType || row.product_type || meta.productType || ''),
+  };
+}
+
 function listingChangedEvent(listing, extra = {}) {
   if (!listing?.id) return null;
   return {
@@ -446,6 +475,8 @@ function listingChangedEvent(listing, extra = {}) {
       listingId: String(listing.id),
       quantityAvailable: listing.quantityAvailable ?? listing.quantity_available,
       status: listing.status || '',
+      mutation: extra.mutation || 'LISTING_UPDATED',
+      merchantListing: extra.merchantListing || merchantListingSnapshot(listing),
       wantsCardtrader: extra.wantsCardtrader === true,
       destroyCardtrader: extra.destroyCardtrader === true,
       sourceListingId: extra.sourceListingId || listing.sourceListingId || listing.source_listing_id || '',
@@ -453,6 +484,24 @@ function listingChangedEvent(listing, extra = {}) {
       steps: {},
     },
   };
+}
+
+function mutationForUpdate(existing, body, status, quantityValue) {
+  const nextQty = quantityValue !== undefined
+    ? Number(quantityValue)
+    : Number(existing?.quantity_available);
+  if (status === 'sold_out' || (quantityValue !== undefined && nextQty <= 0)) return 'LISTING_SOLD';
+  if (status === 'inactive') return 'LISTING_DELETED';
+  if (status === 'paused') return 'LISTING_DEACTIVATED';
+  if (existing?.status && existing.status !== 'active' && status === 'active') return 'LISTING_REACTIVATED';
+  if (body?.pricePkn !== undefined && Number(body.pricePkn) !== Number(existing?.price_pkn)) {
+    return 'LISTING_PRICE_CHANGED';
+  }
+  if (quantityValue !== undefined && Number(quantityValue) !== Number(existing?.quantity_available)) {
+    return 'LISTING_QUANTITY_CHANGED';
+  }
+  if (body?.shippingAvailable !== undefined) return 'LISTING_SHIPPING_ELIGIBILITY_CHANGED';
+  return 'LISTING_UPDATED';
 }
 
 async function sellerProfileForUsername(username, { listingsFirst = true } = {}) {
@@ -949,6 +998,7 @@ async function createListing(req, decoded) {
       return listingChangedEvent(raw, {
         game,
         sellerUid: decoded.uid,
+        mutation: 'LISTING_CREATED',
         wantsCardtrader: targets.cardtrader === true,
         cardtraderListing: targets.cardtrader ? {
           id: raw.id,
@@ -1105,6 +1155,7 @@ async function updateListing(req, decoded, id) {
     writeQuery: marketplaceWriteQuery,
     event: (queryResult) => listingChangedEvent(queryResult.rows[0], {
       sellerUid: decoded.uid,
+      mutation: mutationForUpdate(existingListing, body, status, quantityValue),
       destroyCardtrader: becameInactive && Boolean(existingListing.source_listing_id),
       sourceListingId: existingListing.source_listing_id,
     }),
@@ -1158,7 +1209,12 @@ async function decrementListing(req, id, sellerUid) {
     event: (queryResult) => {
       const outcome = queryResult.rows[0];
       if (outcome?.outcome !== 'updated' || !outcome.listing) return null;
-      return listingChangedEvent(outcome.listing, { sellerUid });
+      const qty = Number(outcome.listing.quantity_available ?? outcome.listing.quantityAvailable ?? 0);
+      const nextStatus = String(outcome.listing.status || '');
+      return listingChangedEvent(outcome.listing, {
+        sellerUid,
+        mutation: nextStatus === 'sold_out' || qty <= 0 ? 'LISTING_SOLD' : 'LISTING_QUANTITY_CHANGED',
+      });
     },
   }));
   const outcome = written.result.rows[0] || { outcome: 'missing', listing: null };
