@@ -1,0 +1,21 @@
+// pokoin-news — assets-only Worker for pokoin.com/news*.
+//
+// Route precedence: `pokoin.com/news*` is more specific than pokoin-web's
+// `pokoin.com/*`, so Cloudflare sends /news and /news-sitemap.xml here and the
+// SPA never catches them. There is no Worker script on page views: every
+// request is served directly from the uploaded static assets in ./dist-news,
+// so ordinary news traffic costs no Worker invocations.
+{
+  "name": "pokoin-news",
+  "compatibility_date": "2026-10-03",
+  "workers_dev": true,
+  "account_id": "e2620981465c01b9bf805522507d963a",
+  "routes": [
+    { "pattern": "pokoin.com/news*", "zone_name": "pokoin.com" }
+  ],
+  "assets": {
+    "directory": "./dist-news",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}

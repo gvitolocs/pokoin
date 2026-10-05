@@ -1,6 +1,7 @@
 // Site-wide constants for the Pokoin News renderer (W2).
 // Values that must be filled before launch are kept explicit and may be null;
 // null values are never rendered.
+import { readFileSync } from 'node:fs';
 
 export const SITE = {
   baseUrl: 'https://pokoin.com',
@@ -52,3 +53,27 @@ export const RESERVED_SLUGS = [
   'tags',
   'desk',
 ];
+
+const FALLBACK_MANIFEST_URL = new URL('../assets/art/manifest.json', import.meta.url);
+let fallbackManifest;
+
+function loadFallbackManifest() {
+  if (fallbackManifest === undefined) {
+    try {
+      fallbackManifest = JSON.parse(readFileSync(FALLBACK_MANIFEST_URL, 'utf8'));
+    } catch {
+      fallbackManifest = null;
+    }
+  }
+  return fallbackManifest;
+}
+
+// Branded fallback hero for a section, from news/assets/art/manifest.json.
+// Returns null when the manifest is missing so callers fall back gracefully.
+export function fallbackHero(section) {
+  const manifest = loadFallbackManifest();
+  if (!manifest) return null;
+  const entry = manifest[section] || manifest.industry;
+  return entry ? JSON.parse(JSON.stringify(entry)) : null;
+}
+

@@ -24,6 +24,7 @@ export default function CatalogMenu({ lang = 'en', onNavigate }) {
         {extras.map((row) => (
           <Link key={row.to} to={row.to} onClick={onNavigate}>{row.label}</Link>
         ))}
+        <a href="/news">News</a>
       </nav>
     </details>
   );

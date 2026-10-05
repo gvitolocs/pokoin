@@ -95,5 +95,6 @@ writeFileSync(join(ROOT, 'sitemap.xml'), index([
   'sitemap-hubs.xml',
   'sitemap-pokemon.xml',
   'sitemap-sets.xml',
+  'news/sitemap.xml',
 ]));
 console.log('sitemaps', pokemon.length, 'pokemon', setUrls.length, 'sets', speciesLabel('charizard'));
