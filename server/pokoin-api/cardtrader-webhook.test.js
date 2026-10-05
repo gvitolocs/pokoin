@@ -30,7 +30,7 @@ const LISTING_ROW = {
  * `onWrite(sql)` (return a row to emulate a successful guarded UPDATE).
  */
 function loadWebhook({ onWrite = () => ({ rows: [], rowCount: 0 }), onRead = () => ({ rows: [], rowCount: 0 }) } = {}) {
-  const calls = { read: [], write: [] };
+  const calls = { read: [], write: [], sales: [] };
   const firestore = createFirestore().firestore;
   const originalLoad = Module._load;
   delete require.cache[TARGET];
@@ -54,6 +54,11 @@ function loadWebhook({ onWrite = () => ({ rows: [], rowCount: 0 }), onRead = () 
       return {
         decryptIntegrationSharedSecret: async () => 'secret',
         decryptIntegrationToken: async () => 'token',
+        readIntegrationDoc: async (firestore, uid) => firestore.collection('seller_integrations').doc(`${uid}__cardtrader`).get(),
+        isOneDayReadyIntegration: (doc) => {
+          const data = doc?.exists ? doc.data() || {} : {};
+          return data.enabled === true && data.metadata?.oneDayReady === true;
+        },
       };
     }
     if (request === './_cardtrader_seller_listings') {
@@ -69,7 +74,10 @@ function loadWebhook({ onWrite = () => ({ rows: [], rowCount: 0 }), onRead = () 
       return { enqueueCardTraderInventorySync: async () => ({ started: true }) };
     }
     if (request === './_native_sales') {
-      return { SALES_COLLECTION: 'marketplace_sales', recordCardTraderSale: async () => ({}) };
+      return {
+        SALES_COLLECTION: 'marketplace_sales',
+        recordCardTraderSale: async (row) => { calls.sales.push(row); return {}; },
+      };
     }
     return originalLoad.call(this, request, parent, isMain);
   };
@@ -200,4 +208,41 @@ test('a writer-pool refresh failure is logged, not thrown: the sale result stays
   });
   assert.equal(results[0].ok, true, 'refresh failure must not fail the webhook item');
   assert.equal(calls.write.filter((call) => /refresh_marketplace_blueprint_price_summary/.test(call.sql)).length, 1);
+});
+
+test('a 1-Day Ready hub sale is recorded for Sold history and does not change Pokoin stock', async () => {
+  const { firestore } = createFirestore({
+    seller_integrations: {
+      'seller-1__cardtrader': { enabled: true, metadata: { oneDayReady: true } },
+    },
+  });
+  const { webhook, calls } = loadWebhook({
+    onRead: () => ({ rows: [], rowCount: 0 }),
+    onWrite: () => ({ rows: [], rowCount: 0 }),
+  });
+  const results = await webhook._test.handleOrderPayload({
+    admin: { firestore: { FieldValue: { serverTimestamp: () => new Date() } } },
+    firestore,
+    uid: 'seller-1',
+    cause: 'order.create',
+    order: {
+      id: '40716370',
+      state: 'hub_pending',
+      via_cardtrader_zero: true,
+      order_items: [{
+        id: '116728995',
+        product_id: 298998026,
+        blueprint_id: 112797,
+        quantity: 1,
+        name: 'Switch',
+      }],
+    },
+  });
+  assert.equal(results[0].ok, true);
+  assert.equal(results[0].channel, '1dr');
+  assert.equal(calls.write.length, 0);
+  assert.equal(calls.sales.length, 1);
+  assert.equal(calls.sales[0].channel, '1dr');
+  assert.equal(calls.sales[0].listing.card_id, '225594');
+  assert.equal(calls.sales[0].listing.id, 'ct:298998026');
 });

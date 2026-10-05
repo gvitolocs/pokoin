@@ -268,7 +268,12 @@ export default function Sales() {
             {shown.map((row) => {
               const ct = row.source === 'cardtrader';
               const status = ct
-                ? { label: row.paymentStatus === 'cancelled' ? 'Cancelled' : 'CardTrader', tone: row.paymentStatus === 'cancelled' ? 'muted' : 'ct' }
+                ? {
+                  label: row.paymentStatus === 'cancelled'
+                    ? 'Cancelled'
+                    : (row.channel === '1dr' ? 'CardTrader 1-DR' : 'CardTrader'),
+                  tone: row.paymentStatus === 'cancelled' ? 'muted' : 'ct',
+                }
                 : orderStatus(row);
               const open = openId === row.orderId && !ct;
               const shipping = shipId === row.orderId && !ct;

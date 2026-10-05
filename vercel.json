@@ -1063,6 +1063,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/mypokoin/1dr/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/1dr",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/mypokoin/location/:loc/",
       "destination": "/market/index.html"
     },

@@ -84,10 +84,12 @@ async function zeroList({ admin, firestore, uid, deps = {} }) {
   });
   sortForPicking(list);
   const ctDoc = await readIntegrationDoc(firestore, uid);
-  const ctUser = ctDoc?.exists ? ctDoc.data()?.metadata?.user || {} : {};
+  const ctData = ctDoc?.exists ? ctDoc.data() || {} : {};
+  const ctUser = ctData.metadata?.user || {};
   return {
     fetchedAt: new Date().toISOString(),
     cardtrader: { username: String(ctUser.username || ''), userId: String(ctUser.id || '') },
+    oneDayReady: ctData.enabled === true && ctData.metadata?.oneDayReady === true,
     ...list,
     powerTools,
   };

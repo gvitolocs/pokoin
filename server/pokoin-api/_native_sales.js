@@ -132,7 +132,7 @@ function cardTraderConditionCode(value) {
  * A real CardTrader sale of a linked Pokoin listing (seller order item),
  * keyed by CardTrader order + order item so webhook and backfill agree.
  */
-function cardTraderSaleDoc({ sellerUid, order = {}, item = {}, listing = {} }) {
+function cardTraderSaleDoc({ sellerUid, order = {}, item = {}, listing = {}, channel = '' }) {
   const orderId = cleanText(order.id, 40);
   const orderItemId = cleanText(item.id, 40);
   const properties = item.properties && typeof item.properties === 'object' ? item.properties : {};
@@ -156,14 +156,17 @@ function cardTraderSaleDoc({ sellerUid, order = {}, item = {}, listing = {} }) {
       ctOrderItemId: orderItemId,
       ctProductId: cleanText(item.product_id, 40),
       ctOrderState: cleanText(order.state, 40),
+      // 1-Day Ready sales are CardTrader's to ship. The sold-history pill
+      // says CardTrader 1-DR; a normal linked sale stays a plain CardTrader row.
+      channel: channel === '1dr' ? '1dr' : '',
       soldAt,
       voided: false,
     },
   };
 }
 
-async function recordCardTraderSale({ admin, firestore, sellerUid, order, item, listing }) {
-  const row = cardTraderSaleDoc({ sellerUid, order, item, listing });
+async function recordCardTraderSale({ admin, firestore, sellerUid, order, item, listing, channel = '' }) {
+  const row = cardTraderSaleDoc({ sellerUid, order, item, listing, channel });
   await firestore.collection(SALES_COLLECTION).doc(row.id).set({
     ...row.data,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -211,6 +214,7 @@ function sellerCardTraderRow(id, data = {}) {
     paymentStatus: data.voided ? 'cancelled' : 'paid',
     fulfillmentStatus: cleanText(data.ctOrderState, 40),
     ctOrderCode: cleanText(data.ctOrderCode, 40),
+    channel: data.channel === '1dr' ? '1dr' : '',
     soldAt: toIso(data.soldAt),
     items: [{
       listingId: cleanText(data.listingId, 160),

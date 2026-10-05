@@ -70,6 +70,10 @@ test('CardTrader sales show in seller history but are not refundable here', () =
   assert.equal(row.source, 'cardtrader');
   assert.equal(row.gross, 267);
   assert.equal(row.refundable, 0);
+  assert.equal(row.channel, '');
+  const ready = sellerCardTraderRow('ct_2__3', { channel: '1dr', cardName: 'Switch', quantity: 1, unitPriceEURCents: 2 });
+  assert.equal(ready.channel, '1dr');
+  assert.equal(ready.source, 'cardtrader');
 });
 
 test('desk endpoint keeps only live native sales, newest first', () => {
