@@ -16,15 +16,19 @@ cp "$ROOT/home/pokoin-192.png" "$OUT/pokoin-192.png"
 cp "$ROOT/home/logo.png" "$OUT/pokoin-512.png"
 cp "$ROOT/robots.txt" "$OUT/robots.txt"
 cp "$ROOT/llms.txt" "$OUT/llms.txt"
+node "$ROOT/scripts/build-catalog-discovery.mjs" || echo "warning: catalog discovery left the previous card sitemaps in place" >&2
 node "$ROOT/scripts/build-seo-sitemaps.mjs"
 cp "$ROOT/sitemap.xml" "$OUT/sitemap.xml"
 cp "$ROOT/sitemap-hubs.xml" "$OUT/sitemap-hubs.xml"
 cp "$ROOT/sitemap-pokemon.xml" "$OUT/sitemap-pokemon.xml"
 cp "$ROOT/sitemap-sets.xml" "$OUT/sitemap-sets.xml"
 shopt -s nullglob
-card_sitemaps=("$ROOT"/sitemap-cards-*.xml)
-if ((${#card_sitemaps[@]})); then
-  cp "${card_sitemaps[@]}" "$OUT/"
+discovery=("$ROOT"/sitemap-cards-*.xml "$ROOT"/google-shopping-*.xml)
+if [[ -f "$ROOT/google-shopping.txt" ]]; then
+  discovery+=("$ROOT/google-shopping.txt")
+fi
+if ((${#discovery[@]})); then
+  cp "${discovery[@]}" "$OUT/"
 fi
 shopt -u nullglob
 cp "$ROOT/site.webmanifest" "$OUT/site.webmanifest"

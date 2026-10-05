@@ -5,12 +5,14 @@ import {
   buildMerchantProduct,
   cardCanonicalUrl,
   cardLandingUrl,
+  catalogShoppingOffer,
   conditionMapping,
   explainListing,
   identifierFields,
   offerIdFor,
   productStructuredData,
   purchasableOffers,
+  shoppingCondition,
   validGtin,
 } from './google-commerce.js';
 import { eurCentsFromPkn, moneyFromPkn } from './pkn.js';
@@ -53,6 +55,36 @@ test('zero Pokoin listings stay indexable without a purchasable offer', () => {
   assert.equal(data.offers, undefined);
   assert.equal(JSON.stringify(data).includes('InStock'), false);
   assert.match(data.description, /No Pokoin listing is currently for sale/);
+});
+
+test('a market minimum is out of stock at the same EUR cents as checkout', () => {
+  const offer = catalogShoppingOffer({
+    nativePkn: 0,
+    marketPkn: 50108,
+    currency: 'EUR',
+  });
+  assert.equal(offer.availability, 'out_of_stock');
+  assert.equal(offer.money.amount, '250.54');
+  assert.equal(offer.money.eurCents, eurCentsFromPkn(50108));
+  const data = productStructuredData(card, {
+    offers: [],
+    currency: 'EUR',
+    referencePkn: 50108,
+  });
+  assert.equal(data.offers.availability, 'https://schema.org/OutOfStock');
+  assert.equal(data.offers.price, '250.54');
+  assert.equal(data.offers.priceCurrency, 'EUR');
+  assert.equal(data.offers.availability.endsWith('/OutOfStock'), true);
+  const stocked = catalogShoppingOffer({
+    nativePkn: 140,
+    nativeQty: 1,
+    marketPkn: 50108,
+    currency: 'DKK',
+  });
+  assert.equal(stocked.availability, 'in_stock');
+  assert.equal(stocked.money.amount, moneyFromPkn(140, 'DKK').amount);
+  assert.equal(shoppingCondition('card'), 'used');
+  assert.equal(shoppingCondition('booster_box'), 'new');
 });
 
 test('one active listing builds AggregateOffer, Offer, and a Merchant product', () => {

@@ -2364,6 +2364,7 @@ export default function Card() {
             offers: nativeLive,
             currency: pinnedCurrency && pinnedCurrency !== 'PKN' ? pinnedCurrency : '',
             listingId: new URLSearchParams(location.search).get('listing') || '',
+            referencePkn: card?.price || card?.pricePkn || 0,
           }),
           breadcrumbJsonLd(seoCrumbs.filter(Boolean).map((crumb) => ({
             name: crumb.name,

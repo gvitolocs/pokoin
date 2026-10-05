@@ -295,13 +295,46 @@ function offerNode(listing, currency, landing) {
   };
 }
 
-/** Product JSON-LD. No Offer and no InStock when nothing is purchasable on Pokoin. */
+/**
+ * Shopping row for one printing. In stock only when a Pokoin seller can fulfill it.
+ * Otherwise the market minimum is the price, with availability out of stock.
+ */
+export function shoppingCondition(productType) {
+  const kind = String(productType || 'card').trim().toLowerCase();
+  if (!kind || kind === 'card' || kind === 'single') return 'used';
+  return 'new';
+}
+
+export function catalogShoppingOffer({
+  nativePkn = 0,
+  nativeQty = 0,
+  marketPkn = 0,
+  currency = 'EUR',
+} = {}) {
+  const native = Number(nativePkn);
+  const qty = Number(nativeQty);
+  const market = Number(marketPkn);
+  const code = String(currency || '').trim().toUpperCase();
+  if (native > 0 && qty > 0) {
+    const money = moneyFromPkn(native, code);
+    if (!money || money.currency === 'PKN') return null;
+    return { availability: 'in_stock', pricePkn: native, money, source: 'pokoin' };
+  }
+  const price = market > 0 ? market : (native > 0 ? native : 0);
+  if (!(price > 0)) return null;
+  const money = moneyFromPkn(price, code);
+  if (!money || money.currency === 'PKN') return null;
+  return { availability: 'out_of_stock', pricePkn: price, money, source: market > 0 ? 'market' : 'pokoin' };
+}
+
+/** Product JSON-LD. In stock only for a purchasable Pokoin listing. */
 export function productStructuredData(card = {}, {
   url,
   offers,
   currency = '',
   listingId = '',
   origin = 'https://pokoin.com',
+  referencePkn = 0,
 } = {}) {
   const identity = printingIdentity(card);
   const canonical = cardCanonicalUrl({
@@ -346,7 +379,19 @@ export function productStructuredData(card = {}, {
   const priced = active
     .map((row) => moneyFromPkn(row.pricePkn ?? row.price_pkn, code))
     .filter(Boolean);
-  if (!priced.length) return product;
+  if (!priced.length) {
+    const market = moneyFromPkn(referencePkn || card.referencePkn || card.reference_pkn, code);
+    if (market && market.currency !== 'PKN') {
+      product.offers = {
+        '@type': 'Offer',
+        price: market.amount,
+        priceCurrency: market.currency,
+        availability: `${SCHEMA}/OutOfStock`,
+        url: canonical || url || '',
+      };
+    }
+    return product;
+  }
   const amounts = priced.map((row) => Number(row.amount));
   product.offers = {
     '@type': 'AggregateOffer',

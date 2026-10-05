@@ -122,6 +122,11 @@ test('card HTML carries the dated price snapshot and Pokoin attribution', () => 
   const html = renderCardOgHtml(payload);
   assert.match(html, /Market reference 2642 PKN · price snapshot \d{4}-\d{2}-\d{2}/);
   assert.match(html, /not a Pokoin offer/);
+  const eurHtml = renderCardOgHtml({ ...payload, currency: 'EUR' });
+  assert.match(eurHtml, /Out of stock · minimum 13.21 EUR/);
+  const eurLd = JSON.parse(eurHtml.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  assert.equal(eurLd.offers.availability, 'https://schema.org/OutOfStock');
+  assert.equal(eurLd.offers.price, '13.21');
   const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
   assert.equal(jsonLd['@type'], 'Product');
   assert.equal(jsonLd.dateModified, payload.snapshotDate);

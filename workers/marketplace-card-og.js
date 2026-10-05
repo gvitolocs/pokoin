@@ -9,7 +9,7 @@ import {
   productStructuredData,
   purchasableOffers,
 } from '../market/src/google-commerce.js';
-import { currencyFromSearch } from '../market/src/pkn.js';
+import { currencyFromSearch, moneyFromPkn } from '../market/src/pkn.js';
 
 export { realPublicCardId } from './public-card-id.js';
 
@@ -25,10 +25,10 @@ export function utcSnapshotDate(daysAhead = 0) {
 }
 
 const BOT_RE =
-  /Discordbot|Twitterbot|Slackbot|LinkedInBot|facebookexternalhit|Facebot|WhatsApp|TelegramBot|SkypeUriPreview|Pinterest|Applebot|Googlebot|Google-InspectionTool|bingbot|Baiduspider|DuckDuckBot|Slack-ImgProxy|Embedly|Quora Link Preview|Showyoubot|outbrain|vkShare|W3C_Validator|redditbot|Iframely/i;
+  /Discordbot|Twitterbot|Slackbot|LinkedInBot|facebookexternalhit|Facebot|WhatsApp|TelegramBot|SkypeUriPreview|Pinterest|Applebot|Googlebot|Google-InspectionTool|Storebot-Google|AdsBot-Google|bingbot|Baiduspider|DuckDuckBot|Slack-ImgProxy|Embedly|Quora Link Preview|Showyoubot|outbrain|vkShare|W3C_Validator|redditbot|Iframely/i;
 
 const SEARCH_BOT_RE =
-  /Googlebot|Google-InspectionTool|bingbot|DuckDuckBot|Baiduspider|YandexBot|Applebot/i;
+  /Googlebot|Google-InspectionTool|Storebot-Google|AdsBot-Google|bingbot|DuckDuckBot|Baiduspider|YandexBot|Applebot/i;
 
 const CARD_PATH_RE =
   /^\/(?:([a-z0-9-]+)\/)?marketplace\/([a-z]{2}(?:-[a-z]{2})?)\/cards\/(\d+)(?:\/[^/?#]*)?\/?$/i;
@@ -223,6 +223,7 @@ function productJsonLd(payload) {
     offers: payload.offers,
     currency: payload.currency,
     listingId: payload.listingId,
+    referencePkn: payload.referencePkn,
     origin: SITE,
   });
   data.dateModified = payload.snapshotDate;
@@ -274,11 +275,16 @@ export function renderCardOgHtml(payload) {
     payload.offers,
     payload.currency,
   );
+  const marketMoney = payload.referencePkn
+    ? moneyFromPkn(payload.referencePkn, payload.currency || 'EUR')
+    : null;
   const snapshotLine = offerLabel
-    ? `\n  <p>${escapeHtml(offerLabel)} · price snapshot ${escapeHtml(payload.snapshotDate)} · live prices on <a href="${SITE}">Pokoin</a></p>`
-    : payload.referencePkn
-      ? `\n  <p>Market reference ${payload.referencePkn} PKN · price snapshot ${escapeHtml(payload.snapshotDate)} · not a Pokoin offer</p>`
-      : `\n  <p>No Pokoin listing is currently for sale. Catalog prices stay on <a href="${SITE}">Pokoin</a>.</p>`;
+    ? `\n  <p>In stock · ${escapeHtml(offerLabel)} · price snapshot ${escapeHtml(payload.snapshotDate)} · live prices on <a href="${SITE}">Pokoin</a></p>`
+    : marketMoney && marketMoney.currency !== 'PKN' && payload.currency
+      ? `\n  <p>Out of stock · minimum ${escapeHtml(marketMoney.amount)} ${escapeHtml(marketMoney.currency)} · price snapshot ${escapeHtml(payload.snapshotDate)}</p>`
+      : payload.referencePkn
+        ? `\n  <p>Market reference ${payload.referencePkn} PKN · price snapshot ${escapeHtml(payload.snapshotDate)} · not a Pokoin offer</p>`
+        : `\n  <p>No Pokoin listing is currently for sale. Catalog prices stay on <a href="${SITE}">Pokoin</a>.</p>`;
   const robotsMeta = payload.indexable
     ? '\n  <meta name="robots" content="index, follow" />'
     : '';
