@@ -23,10 +23,17 @@ const spa = [
 ];
 
 const testBoards = ['tests', 'sanitize', 'espurr', 'ocr', 'artwork', 'jumbos', 'poko'];
+// The extension zip (~31 MB) is over the 25 MiB static-asset file limit and the
+// download Worker has no routes, so pokoin.com redirects to the Pi CDN copy at
+// objects/downloads/. Bump with each extension release after uploading the zip.
+const EXTENSION_ZIP = 'https://cdn.pokoin.com/downloads/pokemon-card-extension-12.0.36.zip';
 const lines = [
-  '# One wildcard per prefix. Workers Static Assets allow 100 redirect rules.',
+  '# Workers Static Assets allow 2,000 static and 100 dynamic (wildcard) rules.',
+  '# Static rules come first. One wildcard per prefix.',
   '# /news* is served by the separate assets-only pokoin-news Worker route; the SPA must never catch it.',
   '# External hosts (www, /card-images) are zone Redirect Rules, not _redirects.',
+  `/download/extension.zip ${EXTENSION_ZIP} 302`,
+  `/download/extention.zip ${EXTENSION_ZIP} 302`,
   '/pokemon* /marketplace/en/pokemon/:splat 301',
   '/sets* /marketplace/sets/:splat 301',
   '/eras* /marketplace/eras/:splat 301',
@@ -62,8 +69,11 @@ for (const prefix of spa) {
   }
   lines.push(`/${prefix}* /market/app 200`);
 }
-const rules = lines.filter((line) => line && !line.startsWith('#')).length;
-if (rules > 100) throw new Error(`_redirects has ${rules} rules; Workers Static Assets allow 100`);
+const rules = lines.filter((line) => line && !line.startsWith('#'));
+const dynamic = rules.filter((line) => /[*:]/.test(line.split(/\s+/)[0])).length;
+const fixed = rules.length - dynamic;
+if (dynamic > 100) throw new Error(`_redirects has ${dynamic} dynamic rules; Workers Static Assets allow 100`);
+if (fixed > 2000) throw new Error(`_redirects has ${fixed} static rules; Workers Static Assets allow 2,000`);
 fs.writeFileSync(path.join(root, '_redirects'), `${lines.join('\n')}\n`);
 
 const headers = `/*
