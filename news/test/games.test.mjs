@@ -93,3 +93,15 @@ test('a game\'s section nav only links pages that exist', () => {
   for (const href of links) assert.ok(existsSync(join(outDir, `${href.slice(1)}.html`)), `${href} must exist`);
   assert.ok(!hub.includes('href="/lorcana/news/market"'));
 });
+
+test('every game in the switcher has a hub page, even before its first story', () => {
+  const outDir = mkdtempSync(join(tmpdir(), 'news-pinned-'));
+  buildNewsSite({ records: fixtures.filter((record) => record.game === 'pokemon'), outDir, now, baseUrl });
+  for (const root of ['news', 'one-piece/news', 'magic/news', 'yugioh/news', 'lorcana/news', 'riftbound/news']) {
+    assert.ok(existsSync(join(outDir, `${root}.html`)), `${root} hub`);
+  }
+  const magic = readFileSync(join(outDir, 'magic/news.html'), 'utf8');
+  assert.match(magic, /No Magic: The Gathering stories yet/);
+  assert.match(magic, /<meta name="robots" content="noindex, follow">/);
+  assert.doesNotMatch(readFileSync(join(outDir, 'news.html'), 'utf8'), /noindex/);
+});

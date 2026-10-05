@@ -12,8 +12,9 @@ export const GAME_NAMES = Object.freeze({
   star_wars_destiny: 'Star Wars Destiny', the_spoils: 'The Spoils', my_little_pony: 'My Little Pony CCG', dragon_born: 'Dragoborne',
 });
 
-// Always shown in the switcher, in this order; other games appear once they have stories.
-const PINNED = ['pokemon', 'one_piece', 'magic', 'yugioh', 'lorcana', 'riftbound'];
+// Always shown in the switcher, in this order (and always built, even before
+// their first story); other games appear once they have stories.
+export const PINNED = ['pokemon', 'one_piece', 'magic', 'yugioh', 'lorcana', 'riftbound'];
 
 export function gameOf(record) {
   return (record && GAME_SLUGS[record.game] !== undefined) ? record.game : 'pokemon';
