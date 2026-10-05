@@ -3,7 +3,7 @@ import { albumShadeStyle } from '../art-shade.js';
 import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc, rememberCardId } from '../api.js';
 import { displayName, printingIdentity } from '../identity.js';
-import { localAndPknFromPkn, tilePricePkn } from '../pkn.js';
+import { tilePricePkn } from '../pkn.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
 import PriceStack from './PriceStack.jsx';
 import { cardReference, cardsReference, writeListingDrag } from '../chat-listing.js';
@@ -14,15 +14,15 @@ import ArtworkZoom from './ArtworkZoom.jsx';
 import CardArt from './CardArt.jsx';
 
 export default function CardTile({ card, action = Action.clickTile, rank, layout = 'grid', cut = false }) {
-  const { currency } = useBuyerCurrency();
+  const buyer = useBuyerCurrency();
   if (!card?.id) {
     return null;
   }
   const href = cardHref(card);
   const pricePkn = tilePricePkn(card);
   const price = formatPkn(pricePkn);
-  // Marketplace tiles show both: local currency (white) above the PKN price.
-  const priceLabel = price ? <PriceStack parts={localAndPknFromPkn(pricePkn, currency)} /> : 'Out of stock';
+  // Unaffordable tiles show the local amount only. Affordable ones stay PKN.
+  const priceLabel = price ? <PriceStack parts={buyer.parts(pricePkn)} /> : 'Out of stock';
   const identity = printingIdentity(card);
   const landscape = cut && isLandscapePrintName(card.name);
   const artLayout = cut ? resolveArtLayout(card) : 'window';

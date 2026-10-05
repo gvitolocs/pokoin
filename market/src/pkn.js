@@ -70,18 +70,15 @@ export function currencyFromLocale(locale = '') {
   return currencyForCountry(countryFromLocale(locale));
 }
 
-/** Fiat label: PKN converted at 1 PKN = €0.005 (DKK via 7.5). */
+/** Fiat label from the same minor units Stripe charges (EUR cents, DKK øre = cents × 7.5). */
 export function formatFiatFromPkn(pkn, currency = 'EUR') {
   const code = String(currency || 'EUR').trim().toUpperCase();
-  const amount = fiatFromPkn(pkn, code);
-  if (amount == null) return '';
-  if (code === 'DKK') {
-    return `${formatPknNumber(amount, { maximumFractionDigits: 2 })} DKK`;
-  }
-  if (code === 'USD') {
-    return `$${formatPknNumber(amount, { maximumFractionDigits: 2 })}`;
-  }
-  return `€${formatPknNumber(amount, { maximumFractionDigits: 2 })}`;
+  const money = moneyFromPkn(pkn, code === 'PKN' ? 'EUR' : code);
+  if (!money?.amount) return '';
+  const shown = formatPknNumber(Number(money.amount), { maximumFractionDigits: 2 });
+  if (money.currency === 'DKK') return `${shown} DKK`;
+  if (money.currency === 'USD') return `$${shown}`;
+  return `€${shown}`;
 }
 
 /**
@@ -103,18 +100,14 @@ export function localAndPknFromPkn(pkn, currency = 'EUR') {
   return { local: formatFiatFromPkn(pkn, currency) || '', pkn: formatPkn(pkn) || '' };
 }
 
-/** EUR Checkout Session line (cents) → buyer local display. */
+/** EUR Checkout Session cents → the buyer label for those same cents. */
 export function formatLocalFromEurCents(cents, currency = 'EUR') {
-  const eur = (Number(cents) || 0) / 100;
-  if (!(eur > 0)) return '';
-  const code = String(currency || 'EUR').trim().toUpperCase();
-  if (code === 'DKK') {
-    return `${formatPknNumber(eur * DKK_PER_EUR, { maximumFractionDigits: 2 })} DKK`;
-  }
-  if (code === 'USD') {
-    return `$${formatPknNumber(eur, { maximumFractionDigits: 2 })}`;
-  }
-  return `€${formatPknNumber(eur, { maximumFractionDigits: 2 })}`;
+  const money = moneyFromEurCents(cents, currency);
+  if (!money?.amount) return '';
+  const shown = formatPknNumber(Number(money.amount), { maximumFractionDigits: 2 });
+  if (money.currency === 'DKK') return `${shown} DKK`;
+  if (money.currency === 'USD') return `$${shown}`;
+  return `€${shown}`;
 }
 
 /** @deprecated prefer formatLocalFromPkn with currencyForCountry */

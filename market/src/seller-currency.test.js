@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buyerPriceParts, formatListingPrice, formatSellerPrice, pknFromPriceInput, priceInputFromPkn, sellerListCurrency } from './seller-currency.js';
+import { buyerPriceLabel, buyerPriceParts, formatListingPrice, formatSellerPrice, pknFromPriceInput, priceInputFromPkn, sellerListCurrency } from './seller-currency.js';
 
 test('opted-out sellers list in their ship-from currency', () => {
   assert.equal(sellerListCurrency(null), 'PKN');
@@ -33,6 +33,14 @@ test('unaffordable prices show the buyer local currency only', () => {
   const parts = buyerPriceParts({ pricePkn: 86, currency: 'DKK', balancePkn: 18 });
   assert.equal(parts.pkn, '');
   assert.ok(parts.local.endsWith('DKK'));
+  const label = buyerPriceLabel({ pricePkn: 86, currency: 'DKK', balancePkn: 18 });
+  assert.equal(label.includes('PKN'), false);
+  assert.match(label, /DKK$/);
+});
+
+test('a pinned currency label keeps PKN in parentheses', () => {
+  const label = buyerPriceLabel({ pricePkn: 86, currency: 'DKK', balancePkn: 18, pinned: 'DKK' });
+  assert.match(label, /DKK \(86 PKN\)$/);
 });
 
 test('affordable prices stay PKN only', () => {

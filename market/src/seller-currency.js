@@ -70,3 +70,13 @@ export function buyerPriceParts({ pricePkn, currency, balancePkn, sellerAcceptsP
   }
   return { local: '', pkn: formatPkn(pricePkn) || '' };
 }
+
+/**
+ * One-line buyer label. A pinned currency keeps "3.23 DKK (86 PKN)".
+ * An unaffordable price is the local amount only — no PKN in parentheses.
+ */
+export function buyerPriceLabel(opts) {
+  const parts = buyerPriceParts(opts);
+  if (parts.local && parts.pkn) return `${parts.local} (${parts.pkn})`;
+  return parts.local || parts.pkn || '';
+}

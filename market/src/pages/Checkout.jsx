@@ -17,7 +17,7 @@ import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
 import { checkoutFees, pknBalanceVoucher } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
 import { authFrom } from '../punchouts.js';
-import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
+import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatFiatFromPkn, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
 import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { brandSrc } from '../brand-assets.js';
 import { readPknDiscount } from '../shipping-choice.js';
@@ -250,9 +250,9 @@ export default function Checkout() {
     && !quote?.preview;
 
   function moneyFromPkn(pkn) {
-    return preferFiat || payMethod === 'stripe'
-      ? formatLocalFromPkn(pkn, displayCurrency)
-      : formatPkn(pkn);
+    if (preferFiat) return formatFiatFromPkn(pkn, displayCurrency);
+    if (payMethod === 'stripe') return formatLocalFromPkn(pkn, displayCurrency);
+    return formatPkn(pkn);
   }
 
   function moneyFromEurCents(cents) {

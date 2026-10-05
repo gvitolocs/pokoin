@@ -3926,8 +3926,11 @@ a.era-link:focus-visible {
 }
 .px-local { color: var(--text); font-size: 0.62em; font-weight: 700; letter-spacing: 0; }
 .px-pkn { color: var(--yellow); }
+.px-local.is-solo { color: var(--yellow); font-size: 1em; font-weight: 800; letter-spacing: -0.03em; }
+.px-pending { display: inline-block; min-width: 4.5rem; min-height: 1.15em; }
 .shop-px .px-stack { align-items: flex-end; text-align: right; }
 .shop-px .px-local { font-size: 0.82em; }
+.shop-px .px-local.is-solo { font-size: 1em; }
 .prod-stock { margin: 0.2rem 0 0.7rem; font-size: 0.85rem; }
 
 .watch-btn {
@@ -4001,6 +4004,7 @@ a.era-link:focus-visible {
 }
 
 .hero-deal .prod-px {
+  font-size: clamp(2.05rem, 3.6vw, 2.65rem);
   text-align: center;
   margin: 0.15rem 0;
 }
@@ -10861,6 +10865,11 @@ html:has(.wallet-page) .brand span {
     gap: 0.28rem;
   }
   .seller-shop-list .shop-row.is-profile:not(.shop-row-skel) .px-local { font-size: 0.7rem; }
+  .seller-shop-list .shop-row.is-profile:not(.shop-row-skel) .px-local.is-solo {
+    color: var(--yellow);
+    font-size: 1em;
+    font-weight: 800;
+  }
   .seller-shop-list .shop-row.is-profile:not(.shop-row-skel) .ct-qty.is-single { color: var(--muted); font-weight: 700; }
   .seller-shop-list .shop-row.is-profile:not(.shop-row-skel) .ct-qty.is-single::before { content: "×"; }
   .seller-shop-list .shop-row.is-profile:not(.shop-row-skel) .shop-row-actions,
