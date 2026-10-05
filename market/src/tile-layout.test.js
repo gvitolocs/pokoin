@@ -92,7 +92,7 @@ test('era names are gold links to the era setlist', () => {
   assert.match(css, /\.era-link \{[^}]*color:\s*var\(--yellow\)/);
   assert.match(versions, /className="era-link"/);
   assert.match(versions, /eraHref\(group\.label\)/);
-  assert.match(versions, /<h2>Rarity Lineup<\/h2>/);
+  assert.match(versions, /<h2>Others from the expansion<\/h2>/);
   assert.match(sets, /headingHref\(era\)/);
 });
 

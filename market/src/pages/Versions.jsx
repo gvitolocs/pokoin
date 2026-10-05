@@ -195,7 +195,7 @@ export default function Versions() {
       ) : null}
       {showRarity ? (
         <section className="versions-section" id="versions">
-          <h2>Rarity Lineup</h2>
+          <h2>Others from the expansion</h2>
           <TileGrid rows={pricedVersions} cardId={cardId} />
         </section>
       ) : null}
