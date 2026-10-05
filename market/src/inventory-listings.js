@@ -369,36 +369,61 @@ export function recentBoxes(rows) {
   return out;
 }
 
+function addedStamp(row) {
+  const ms = Date.parse(String(row?.createdAt || row?.created_at || '').trim());
+  return Number.isFinite(ms) ? ms : null;
+}
+
 /**
  * Where the next scan goes in a box the seller already uses.
- * Divider locations (`box·2·88`) continue on that stack. A size-1 batch
- * cannot write `·stack·position`, and a position past the configured size
- * is already on top of that stack — both stay there and grow the size so
- * the next card fits. A stack that is exactly full still opens the next
- * divider via nextFreeSlot. Flat `box·7` locations keep the size-1 walk.
+ * The cursor is the slot after the last card added to that box (same
+ * timestamp: the higher position). Stack size stays the seller's divider.
+ * A size-1 batch cannot write `·stack·position`, so it adopts the fullest
+ * earlier stack (the 80 already used) instead of growing the size to
+ * "last position + 1", which made that one card look like a full stack
+ * and opened the next divider. A position past the divider still opens
+ * the next stack. Flat `box·7` locations keep the size-1 walk.
  */
 export function continueBoxCursor(rows, box, stackSize = 1) {
-  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  const configured = Math.max(1, Math.trunc(Number(stackSize)) || 1);
   const wanted = String(box || '').trim();
-  let bestStack = 0;
-  let bestPos = 0;
-  let sawPosition = false;
+  const positioned = [];
+  const posByStack = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
     const end = listingSlotEnd(row?.location);
     if (!end.box || end.box !== wanted || end.stack == null || end.position == null) continue;
-    sawPosition = true;
-    if (end.stack > bestStack || (end.stack === bestStack && end.position > bestPos)) {
-      bestStack = end.stack;
-      bestPos = end.position;
-    }
+    positioned.push({ row, stack: end.stack, position: end.position, stamp: addedStamp(row) });
+    posByStack.set(end.stack, Math.max(posByStack.get(end.stack) || 0, end.position));
   }
-  if (sawPosition && (size === 1 || bestPos > size)) {
-    const startPosition = bestPos + 1;
-    return { stack: bestStack, startPosition, stackSize: Math.max(size, startPosition) };
+  if (!positioned.length) {
+    const next = nextFreeSlot(rows, box, configured);
+    if (!next) return null;
+    return { stack: next.stack, startPosition: next.startPosition, stackSize: configured };
   }
-  const next = nextFreeSlot(rows, box, size);
-  if (!next) return null;
-  return { stack: next.stack, startPosition: next.startPosition, stackSize: size };
+  const stacks = [...posByStack.keys()].sort((a, b) => a - b);
+  const openStack = stacks[stacks.length - 1];
+  let earlierMax = 0;
+  for (const stackNo of stacks) {
+    if (stackNo === openStack) continue;
+    earlierMax = Math.max(earlierMax, posByStack.get(stackNo));
+  }
+  const size = configured === 1 && earlierMax > 1 ? earlierMax : configured;
+  positioned.sort((a, b) => {
+    const as = a.stamp == null ? -1 : a.stamp;
+    const bs = b.stamp == null ? -1 : b.stamp;
+    if (as !== bs) return as - bs;
+    if (a.stack !== b.stack) return a.stack - b.stack;
+    if (a.position !== b.position) return a.position - b.position;
+    return String(a.row?.id || '').localeCompare(String(b.row?.id || ''));
+  });
+  const last = positioned[positioned.length - 1];
+  let stack = last.stack;
+  let startPosition = last.position + 1;
+  if (size > 1 && startPosition > size) {
+    stack += 1;
+    startPosition = 1;
+  }
+  return { stack, startPosition, stackSize: size };
 }
 
 /**

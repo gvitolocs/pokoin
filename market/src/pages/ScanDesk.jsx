@@ -49,8 +49,6 @@ import {
   applyItems,
   batchCounts,
   boxSlots,
-  stackPosToIndex,
-  indexToStackPos,
   candidateList,
   CONDITIONS,
   createPatchChain,
@@ -70,8 +68,6 @@ import {
   slotText,
   stepCandidate,
   submitLabel,
-  suggestedStartPosition,
-  suggestedStackCursor,
   STACK_SIZES,
   slotFilledStack,
   typeQuantity,
@@ -510,42 +506,8 @@ export default function ScanDesk() {
     if (Object.keys(patch).length) setDefaults(patch);
   }, [list, occupiedAbs]);
 
-  // Resume stack/position when the seller switches box (or opens a batch).
-  const prevLocationRef = useRef(undefined);
-  const prevBatchRef = useRef(undefined);
-  useEffect(() => {
-    const loc = String(defaults.location || '').trim();
-    if (closed || !batch?.id) {
-      prevLocationRef.current = loc;
-      prevBatchRef.current = batch?.id;
-      return;
-    }
-    const locationChanged = prevLocationRef.current !== loc;
-    const batchChanged = prevBatchRef.current !== batch.id;
-    prevLocationRef.current = loc;
-    prevBatchRef.current = batch.id;
-    if (!loc || (!locationChanged && !batchChanged)) return;
-    const suggested = suggestedStackCursor({
-      stored: loadStoppedPositions()[loc],
-      currentStack: defaults.stack ?? 1,
-      currentPosition: defaults.startPosition ?? 1,
-      stackSize: defaults.stackSize ?? 1,
-      locationChanged: true,
-    });
-    // A stored stop only moves the cursor forward. Stock that already sits
-    // further on (the last stack) must not be rewound to an older session.
-    if (suggested) {
-      const size = Math.max(1, Math.trunc(Number(defaults.stackSize)) || 1);
-      const hintAbs = stackPosToIndex(suggested.stack, suggested.startPosition, size);
-      const nowAbs = stackPosToIndex(defaults.stack ?? 1, defaults.startPosition ?? 1, size);
-      if (hintAbs > nowAbs) setDefaults(suggested);
-    }
-  }, [batch?.id, defaults.location, closed]);
-
-  // A batch never starts on top of stock already in the box: continue after
-  // the last slot the seller's live listings hold there (scan sessions, desk
-  // listings and PowerTools CSV imports all write `box·stack[·position]`).
-  // With stacks of N cards a half-full stack continues at its next position.
+  // A batch continues after the last card added to the box. That inventory
+  // slot wins even when a saved cursor ran ahead into an empty stack.
   const defaultsRef = useRef(defaults);
   defaultsRef.current = defaults;
   const boxStockRef = useRef({ key: '', box: '', rows: [] });
@@ -570,8 +532,13 @@ export default function ScanDesk() {
         const size = Math.max(1, Math.trunc(Number(d.stackSize)) || 1);
         const next = continueBoxCursor(rows, box, size);
         if (!next) return;
-        const nextIndex = stackPosToIndex(next.stack, next.startPosition, next.stackSize);
-        if (nextIndex > stackPosToIndex(d.stack ?? 1, d.startPosition ?? 1, size) || next.stackSize !== size) {
+        // Inventory is the cursor, including when a saved stop ran ahead of
+        // the last card actually added (that stop opened an empty stack).
+        if (
+          next.stack !== (d.stack ?? 1)
+          || (next.stackSize === 1 ? 1 : next.startPosition) !== (d.startPosition ?? 1)
+          || next.stackSize !== size
+        ) {
           setDefaults({
             stack: Math.min(9999, next.stack),
             startPosition: next.stackSize === 1 ? 1 : next.startPosition,
@@ -1802,13 +1769,9 @@ function DefaultsBar({ defaults, boxes = [], onChange, positionForStack, locatio
     if (!keepOpen) setSizeOpen(false);
     setSizeDraft(String(nextSize));
     if (nextSize === size) return;
-    const abs = stackPosToIndex(defaults.stack ?? 1, defaults.startPosition ?? 1, size);
-    const mapped = indexToStackPos(abs, nextSize);
-    onChange({
-      stackSize: nextSize,
-      stack: mapped.stack,
-      startPosition: nextSize === 1 ? 1 : mapped.position,
-    });
+    // Cards per stack is only the divider. Remapping the absolute index
+    // sent a stack-4 cursor back into an earlier stack.
+    onChange({ stackSize: nextSize });
   };
   return (
     <section className={`scan-defaults${stackFull ? ' is-stack-full' : ''}`} aria-labelledby="scan-defaults-title">

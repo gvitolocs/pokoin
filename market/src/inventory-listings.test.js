@@ -334,20 +334,36 @@ test('recent boxes follow listing order and keep the newest casing', () => {
   assert.deepEqual(recentBoxes(null), []);
 });
 
-test('a size-1 batch continues the last divider stack instead of a flat list', () => {
+test('the next slot follows the last card added and keeps the divider size', () => {
   const rows = [
-    { location: 'megaevoluzionietb·1·79' },
-    { location: 'megaevoluzionietb·2·56' },
-    { location: 'megaevoluzionietb·2·88' },
+    { location: 'megaevoluzionietb·1·80', createdAt: '2026-10-05T10:00:00Z' },
+    { location: 'megaevoluzionietb·2·80', createdAt: '2026-10-05T11:00:00Z' },
+    { location: 'megaevoluzionietb·3·30', createdAt: '2026-10-05T12:00:00Z' },
     { location: 'megaevoluzionietb·8' },
     { location: 'other·2·9' },
   ];
+  // A fresh batch is size 1. Adopt the earlier full stack (80) so position
+  // 31 stays on stack 3 instead of counting as a full 31-card stack.
   assert.deepEqual(continueBoxCursor(rows, 'megaevoluzionietb', 1), {
-    stack: 2, startPosition: 89, stackSize: 89,
+    stack: 3, startPosition: 31, stackSize: 80,
   });
-  // Position already past the configured size stays on that stack.
   assert.deepEqual(continueBoxCursor(rows, 'megaevoluzionietb', 80), {
-    stack: 2, startPosition: 89, stackSize: 89,
+    stack: 3, startPosition: 31, stackSize: 80,
+  });
+  // Same insert: the higher position is the last slot.
+  assert.deepEqual(continueBoxCursor([
+    { location: 'box·2·80', createdAt: '2026-10-05T11:00:00Z' },
+    { location: 'box·3·30', createdAt: '2026-10-05T12:00:00Z', id: 'a' },
+    { location: 'box·3·38', createdAt: '2026-10-05T12:00:00Z', id: 'b' },
+  ], 'box', 80), {
+    stack: 3, startPosition: 39, stackSize: 80,
+  });
+  // A position past the divider opens the next stack. It does not grow the size.
+  assert.deepEqual(continueBoxCursor([
+    { location: 'megaevoluzionietb·1·79' },
+    { location: 'megaevoluzionietb·2·88' },
+  ], 'megaevoluzionietb', 80), {
+    stack: 3, startPosition: 1, stackSize: 80,
   });
   // A half-full stack still continues inside it.
   assert.deepEqual(continueBoxCursor([{ location: 'box·2·40' }], 'box', 80), {
