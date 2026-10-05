@@ -725,12 +725,12 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 }
 
 .scan-queue.intent-collection .scan-row {
-  grid-template-columns: 2.4rem 6.6rem minmax(12rem, 1fr) 2.8rem 3.2rem 6.4rem 6rem 8.2rem 2.6rem 7rem 2.2rem;
+  grid-template-columns: 2.4rem minmax(12rem, 1fr) 2.8rem 3.2rem 6.4rem 6rem 8.2rem 2.6rem 7rem 2.2rem;
 }
 
 .scan-row {
   display: grid;
-  grid-template-columns: 2.4rem 6.6rem minmax(12rem, 1fr) 2.8rem 3.2rem 6.4rem 6rem 8.2rem 2.6rem 5.4rem 7rem 2.2rem;
+  grid-template-columns: 2.4rem minmax(12rem, 1fr) 2.8rem 3.2rem 6.4rem 6rem 8.2rem 2.6rem 5.4rem 7rem 2.2rem;
   align-items: center;
   gap: 0.45rem;
   min-height: var(--scan-row-h);
@@ -792,7 +792,20 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 
 .c-num { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; justify-content: flex-end; }
 
-.c-art { display: flex; gap: 0.25rem; align-items: center; justify-content: flex-start; }
+/* Picture and name share one column, so the title starts at the card's right edge. */
+.c-identity {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.scan-row-head .c-card-head {
+  justify-content: flex-start;
+  text-align: left;
+  padding-left: calc(0.35rem + 2.45rem + 0.4rem);
+}
+.c-art { display: flex; gap: 0.25rem; align-items: center; justify-content: flex-start; flex: none; padding: 0; background: none; }
 .c-art .thumb-zoom-host { display: inline-flex; flex: none; line-height: 0; }
 .c-flags { justify-content: center; }
 .c-lang,
@@ -871,11 +884,15 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 
 .c-card {
   position: relative;
+  display: flex;
   min-width: 0;
+  flex: 1;
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
   gap: 0.05rem;
+  padding: 0;
+  background: none;
 }
 .c-card strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .c-card em { font-style: normal; color: var(--muted); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1203,12 +1220,12 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 
 /* The desk is a desktop tool; phones get the connect flow on scan.pokoin.com. */
 @media (max-width: 1100px) {
-  .scan-row { grid-template-columns: 2rem 6.2rem minmax(9rem, 1fr) 2.6rem 3rem 5.6rem 5.4rem 5.6rem 2.2rem 4.6rem 5rem 2rem; font-size: 0.82rem; }
+  .scan-row { grid-template-columns: 2rem minmax(9rem, 1fr) 2.6rem 3rem 5.6rem 5.4rem 5.6rem 2.2rem 4.6rem 5rem 2rem; font-size: 0.82rem; }
 }
 
 @media (max-width: 720px) {
   .scan-connect { flex-direction: column; align-items: flex-start; }
-  .scan-row { grid-template-columns: 6.2rem minmax(0, 1fr) 2.6rem 3rem 2rem; }
+  .scan-row { grid-template-columns: minmax(0, 1fr) 2.6rem 3rem 2.4rem 2rem; }
   .scan-row > .c-num,
   .scan-row > .c-finish,
   .scan-row > .c-flags,

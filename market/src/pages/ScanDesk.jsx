@@ -1580,8 +1580,7 @@ export default function ScanDesk() {
       >
         <div className="scan-row scan-row-head" role="row">
           <span role="columnheader">#</span>
-          <span role="columnheader" />
-          <span role="columnheader">Card</span>
+          <span role="columnheader" className="c-card-head">Card</span>
           <span role="columnheader">Lang</span>
           <span role="columnheader">Cond</span>
           <span role="columnheader">Finish</span>
@@ -2205,6 +2204,7 @@ function QueueRow({
       }}
     >
       <span className="c-num">{index + 1}</span>
+      <span className="c-identity">
       <span
         className="c-art"
         draggable={Boolean(row.cardId || row.cardName)}
@@ -2246,6 +2246,7 @@ function QueueRow({
           <CandidateAlts row={row} preferredLanguage={remapLang} onPick={onPick} />
         ) : null}
         {replacing && !unidentified ? <ReplacePrinting onPick={(id) => { onPick(id); onReplaceDone(); }} onClose={onReplaceDone} seed={row.cardName} /> : null}
+      </span>
       </span>
       <span className="c-lang">
         {closed ? (
