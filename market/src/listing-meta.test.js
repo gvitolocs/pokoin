@@ -63,7 +63,12 @@ test('seller country flag sits next to the username', () => {
   assert.equal(sellerCountryFlag('IT').emoji, '🇮🇹');
   assert.equal(sellerCountryFlag('HU').short, 'HU');
   assert.equal(sellerCountryFlag('HU').emoji, '🇭🇺');
-  assert.equal(sellerCountryFlag('EU'), null);
+  assert.equal(sellerCountryFlag('EU').code, 'eu');
+  assert.equal(sellerCountryFlag('EU').short, 'EU');
+  assert.equal(sellerCountryFlag('EU').emoji, '🇪🇺');
+  assert.equal(sellerCountryFlag('EU').label, 'European Union');
+  assert.match(sellerCountryFlag('EU').src, /\/flags\/eu\.svg$/);
+  assert.equal(sellerCountryFlag('Europe').emoji, '🇪🇺');
   assert.equal(sellerCountryFlag('US').code, 'us');
 });
 
