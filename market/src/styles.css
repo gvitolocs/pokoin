@@ -4346,21 +4346,21 @@ a.era-link:focus-visible {
 /* Five grades always fit one line: columns shrink in the narrow desk rail, cap on wide panels. */
 .deal-facet-row[aria-label="Condition"] {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 5.6rem));
-  justify-content: center;
-  gap: 0.7rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  width: 100%;
+  gap: 0.4rem;
 }
 
 .deal-facet-row[aria-label="Condition"] .deal-chip {
   width: 100%;
   min-width: 0;
-  padding: 0.7rem 0.45rem;
+  padding: 0.28rem 0.15rem;
   border-radius: 14px;
 }
 
 .deal-facet-row[aria-label="Condition"] .shop-cond {
   width: 100%;
-  max-width: 4.4rem;
+  max-width: none;
   height: auto;
   aspect-ratio: 40 / 28;
 }
@@ -4718,8 +4718,21 @@ a.era-link:focus-visible {
 }
 
 .sell-field.location-pick {
-  flex: 1 1 12rem;
-  max-width: 18rem;
+  flex: 0 1 9rem;
+  width: 9rem;
+  max-width: 46%;
+  min-width: 0;
+}
+
+.sell-field.comment.comment-inline {
+  flex: 1 1 auto;
+  width: auto;
+  margin-top: 0;
+  min-width: 0;
+}
+
+.hero-center .sell-field.comment.comment-inline {
+  min-height: 0;
 }
 
 .sell-slot {

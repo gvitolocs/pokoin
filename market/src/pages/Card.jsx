@@ -1230,26 +1230,6 @@ function ListingForm({
       ) : currency !== 'PKN' && listedPkn ? (
         <p className="sell-pkn-eq">Lists at {formatPkn(listedPkn)}</p>
       ) : null}
-      <div className="sell-location-row">
-        <label className="sell-field location-pick">
-          Location
-          <select
-            value={box}
-            onChange={(event) => {
-              boxTouched.current = true;
-              setBox(event.target.value);
-            }}
-          >
-            <option value="">None</option>
-            {boxOptions.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-        </label>
-        {locationValue && locationValue !== box ? (
-          <span className="sell-slot">{locationValue.slice(box.length)}</span>
-        ) : null}
-      </div>
       <div className="sell-options-row">
         <div className="sell-field sell-pick condition-pick">
           <span className="sr-only">Condition</span>
@@ -1334,6 +1314,33 @@ function ListingForm({
           ) : null}
         </div>
       </div>
+      <div className="sell-location-row">
+        <label className="sell-field location-pick">
+          Location
+          <select
+            value={box}
+            onChange={(event) => {
+              boxTouched.current = true;
+              setBox(event.target.value);
+            }}
+          >
+            <option value="">None</option>
+            {boxOptions.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+        {locationValue && locationValue !== box ? (
+          <span className="sell-slot">{locationValue.slice(box.length)}</span>
+        ) : null}
+        <label className="sell-field comment comment-inline">
+          Seller comment
+          <input
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+          />
+        </label>
+      </div>
       {chips.graded ? (
         <div className="sell-row">
           <label className="sell-field grow">
@@ -1350,14 +1357,6 @@ function ListingForm({
           </label>
         </div>
       ) : null}
-      <label className="sell-field comment">
-        Seller comment
-        <textarea
-          rows={3}
-          value={comment}
-          onChange={(event) => setComment(event.target.value)}
-        />
-      </label>
       {error ? <p className="sell-msg error">{error}</p> : null}
       {done ? <p className="sell-msg ok">{done}</p> : null}
       {jump ? createPortal(
@@ -2335,13 +2334,6 @@ export default function Card() {
     card.nationality,
     [...new Set((payload?.offers || []).map((row) => String(row.language || '').toUpperCase()).filter(Boolean))],
   );
-  const dealCopy = !offersReady
-    ? null
-    : !nativeLive.length
-      ? 'No sellers yet. Be the first to list this card.'
-      : !dealPick
-        ? 'No listing matches this selection.'
-        : null;
   const collector = identity.number || '';
   const versionRows = rarityVersions(card, namePrintings);
   const versionLabel = versionOptionLabel(card) || collector;
@@ -2774,9 +2766,6 @@ export default function Card() {
                 )}
               </p>
             ) : null}
-            {canBuy && offersReady ? null : (
-              <p className="muted own-k">{dealCopy || '\u00a0'}</p>
-            )}
             <div className="deal-facets">
               <div className="deal-facet-row" role="radiogroup" aria-label="Condition">
                 {DEAL_CONDS.map((row) => {
