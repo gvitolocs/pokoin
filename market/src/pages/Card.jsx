@@ -2771,16 +2771,18 @@ export default function Card() {
                 {DEAL_CONDS.map((row) => {
                   const listed = listedCondSet.has(row.value);
                   const on = shownCond === row.value;
+                  const ring = offersReady && on && canBuy;
+                  const dim = offersReady && (on ? !canBuy : !listed);
                   return (
                     <button
                       key={row.value}
                       type="button"
                       role="radio"
-                      className={`deal-chip${on ? ' is-on' : ''}${listed || on ? '' : ' is-off'}`}
+                      className={`deal-chip${ring ? ' is-on' : ''}${dim ? ' is-off' : ''}`}
                       aria-checked={on}
                       aria-label={row.label}
-                      title={listed ? row.label : `${row.label} · none listed`}
-                      disabled={!listed}
+                      title={listed && (!on || canBuy) ? row.label : `${row.label} · none listed`}
+                      disabled={dim}
                       onClick={() => setDealCond(row.value)}
                     >
                       <img
@@ -2800,16 +2802,18 @@ export default function Card() {
                   {allDealLangs.map((code) => {
                     const listed = listedLangSet.has(code);
                     const on = shownLang === code;
+                    const ring = offersReady && on && canBuy;
+                    const dim = offersReady && (on ? !canBuy : !listed);
                     return (
                       <button
                         key={code}
                         type="button"
                         role="radio"
-                        className={`deal-chip${on ? ' is-on' : ''}${listed || on ? '' : ' is-off'}`}
+                        className={`deal-chip${ring ? ' is-on' : ''}${dim ? ' is-off' : ''}`}
                         aria-checked={on}
                         aria-label={code}
-                        title={listed ? code : `${code} · none listed`}
-                        disabled={!listed}
+                        title={listed && (!on || canBuy) ? code : `${code} · none listed`}
+                        disabled={dim}
                         onClick={() => {
                           setDealLang(code);
                           writeDealLanguage(code, user?.uid);
@@ -2838,10 +2842,6 @@ export default function Card() {
             ) : (
               <span className="btn ghost buy-btn">Unavailable</span>
             )}
-          </section>
-          <section className="panel reserve-blurb">
-            <h2>POKOIN CARD RESERVE</h2>
-            <p>Unified custody, seller aggregation and inspection-ready settlement for serious collectors.</p>
           </section>
         </div>
 

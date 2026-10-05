@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useMatch } from 'react-router-dom';
-import { exportStockCsv, fetchPricingStrategies, fetchSellerListings, importStockCsv } from '../api.js';
+import { exportStockCsv, fetchPricingStrategies, fetchSellerListings } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice } from '../seller-currency.js';
@@ -33,10 +33,6 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-function downloadText(text, filename) {
-  downloadBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), filename);
-}
-
 /**
  * Pokemon seller stock desk — live path is /mypokoin (legacy /inventory
  * redirects). The Collection tab holds what you own (legacy /collection and
@@ -60,13 +56,8 @@ export default function Inventory() {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [format, setFormat] = useState('powertools');
-  const [stackSize, setStackSize] = useState(1);
-  const [priceMode, setPriceMode] = useState('eur_to_pkn');
   const [busy, setBusy] = useState('');
-  const [preview, setPreview] = useState(null);
-  const [pendingCsv, setPendingCsv] = useState();
   const [message, setMessage] = useState('');
-  const fileRef = useRef(null);
   // Bumped by reload() so a stale background top-up stops writing rows.
   const inventorySeq = useRef(0);
 
@@ -110,7 +101,7 @@ export default function Inventory() {
       ? 'Settings · MyPokoin'
       : locationName
       ? `${locationName} · MyPokoin`
-      : (onImportTab ? 'Import / export · MyPokoin' : 'MyPokoin · Pokoin');
+      : (onImportTab ? 'Export · MyPokoin' : 'MyPokoin · Pokoin');
     const uid = user?.uid || profile?.uid;
     // The Collection tab loads holdings, not listings.
     if (!signedIn || !uid || onCollectionTab) return undefined;
@@ -159,45 +150,11 @@ export default function Inventory() {
     }
   }
 
-  async function runImport(fileText, { dryRun }) {
-    setError('');
-    setBusy(dryRun ? 'preview' : 'import');
-    try {
-      const token = await getBearer();
-      const result = await importStockCsv({
-        csv: fileText,
-        format,
-        stackSize,
-        priceMode,
-        dryRun,
-        token,
-      });
-      setPreview(result);
-      if (!dryRun) {
-        await reload();
-      }
-    } catch (err) {
-      setError(err.message || 'Import failed.');
-    } finally {
-      setBusy('');
-    }
-  }
-
-  async function onPickFile(event) {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    const text = await file.text();
-    setPendingCsv(text);
-    await runImport(text, { dryRun: true });
-  }
-
   if (!ready) return <SessionWait />;
   if (!signedIn) {
     return <Navigate to={`/auth?from=${encodeURIComponent(location.pathname || '/mypokoin')}`} replace />;
   }
 
-  const counts = preview?.counts;
   const onListings = !onImportTab && !onSettingsTab && !onCollectionTab;
 
   return (
@@ -214,7 +171,7 @@ export default function Inventory() {
       {message ? <p className="ct-connect-ok" role="status">{message}</p> : null}
 
       {onImportTab ? (
-        <DeskPanel title="Import / export stock">
+        <DeskPanel title="Export stock">
           <div className="stock-csv-bar">
             <label>
               Format
@@ -222,77 +179,11 @@ export default function Inventory() {
                 {FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
             </label>
-            <label title="Used when importing: size 1 = one card per divider (no stack-full UI)">
-              Stack size
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={stackSize}
-                onChange={(e) => setStackSize(Math.max(1, Number(e.target.value) || 1))}
-                disabled={Boolean(busy)}
-              />
-            </label>
-            <label>
-              Price
-              <select value={priceMode} onChange={(e) => setPriceMode(e.target.value)} disabled={Boolean(busy)}>
-                <option value="eur_to_pkn">EUR → PKN (×200)</option>
-                <option value="as_pkn">Already PKN</option>
-              </select>
-            </label>
             <button type="button" className="btn ghost" onClick={onExport} disabled={Boolean(busy)}>
               {busy === 'export' ? 'Exporting…' : 'Export CSV'}
             </button>
-            <button type="button" className="btn" onClick={() => fileRef.current?.click()} disabled={Boolean(busy)}>
-              {busy === 'preview' ? 'Reading…' : 'Import CSV…'}
-            </button>
-            <input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={onPickFile} />
+            <Link className="btn" to="/mypokoin/spreadsheet">Import in spreadsheet</Link>
           </div>
-          {preview ? (
-            <div className="stock-csv-preview">
-              <p>
-                {preview.dryRun ? 'Preview' : 'Import'} · {preview.format}
-                {counts ? ` · ${counts.total} rows · ${counts.preview || counts.created || 0} ok · ${counts.failed} failed · ${counts.skipped || 0} skipped` : ''}
-              </p>
-              {preview.dryRun && pendingCsv && (counts?.preview > 0) ? (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={Boolean(busy)}
-                  onClick={() => runImport(pendingCsv, { dryRun: false })}
-                >
-                  {busy === 'import' ? 'Importing…' : `Confirm import (${counts.preview})`}
-                </button>
-              ) : null}
-              {preview.failedCsv ? (
-                <button
-                  type="button"
-                  className="btn ghost"
-                  onClick={() => downloadText(preview.failedCsv, `pokoin-import-failed-${preview.format}.csv`)}
-                >
-                  Download failed rows
-                </button>
-              ) : null}
-              {preview.failed?.length ? (
-                <ul className="stock-csv-failed">
-                  {preview.failed.slice(0, 8).map((f) => (
-                    <li key={`${f.line}-${f.error}`}>Line {f.line}: {f.error}</li>
-                  ))}
-                  {preview.failed.length > 8 ? <li>…and {preview.failed.length - 8} more</li> : null}
-                </ul>
-              ) : null}
-              {preview.preview?.length ? (
-                <ul className="stock-csv-ok">
-                  {preview.preview.slice(0, 6).map((p) => (
-                    <li key={`${p.line}-${p.cardId}`}>
-                      {p.name} · {p.condition} {p.language} · {formatPrice(p.pricePkn)} · {p.location}
-                    </li>
-                  ))}
-                  {preview.preview.length > 6 ? <li>…and {preview.preview.length - 6} more</li> : null}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
           <WipeAllInventory
             disabled={Boolean(busy)}
             onError={(text) => {
@@ -332,10 +223,10 @@ export default function Inventory() {
       {onListings && rows && !rows.length ? (
         <EmptyDesk
           title={locationName ? `Nothing stored in ${locationName}` : 'No live listings'}
-          lede={locationName ? 'Move a listing into this location from its card desk, or scan a new pile.' : 'Scan a pile with your phone, import a CSV, or open a card and use List your card.'}>
+          lede={locationName ? 'Move a listing into this location from its card desk, or scan a new pile.' : 'Scan a pile with your phone, or import a spreadsheet.'}>
           <Link className="btn" to="/inventory/scan">Scan cards</Link>
           <Link className="btn ghost" to="/mypokoin/spreadsheet">Sell via spreadsheet</Link>
-          <Link className="btn ghost" to="/mypokoin/import">Import CSV</Link>
+          <Link className="btn ghost" to="/mypokoin/import">Export CSV</Link>
           <Link className="btn ghost" to="/marketplace">Find a card</Link>
         </EmptyDesk>
       ) : null}

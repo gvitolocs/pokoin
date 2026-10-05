@@ -1,0 +1,16 @@
+.sale-thumb {
+  flex: 0 0 2.7rem;
+  width: 2.7rem;
+  align-self: flex-start;
+  margin-top: 0.15rem;
+}
+
+.sale-thumb img,
+.sale-thumb .tile-ph {
+  width: 2.7rem;
+  height: calc(2.7rem * 88 / 63);
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+  background: #111;
+}

@@ -18,6 +18,9 @@ test('1-Day Ready has its own tab and Zero stays a separate tab', () => {
   assert.doesNotMatch(page, /title="CardTrader Zero"/);
   assert.doesNotMatch(page, /zero-tick/);
   assert.match(page, /Waiting at CardTrader/);
+  assert.match(page, /View all cards/);
+  assert.match(page, /MiniCardTile/);
+  assert.match(sales, /className="sale-thumb"/);
   assert.match(zero, /Navigate to="\/mypokoin\/1dr"/);
   assert.match(sales, /CardTrader 1-DR/);
 });

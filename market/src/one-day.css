@@ -1,0 +1,17 @@
+button.metric.dr-stock-open {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.metric.dr-stock-open:hover,
+button.metric.dr-stock-open.is-open {
+  border-color: rgb(255 211 61 / 0.55);
+}
+
+.dr-stock-empty {
+  margin: 0;
+  color: var(--muted);
+}
