@@ -25,6 +25,7 @@ const spa = [
 const testBoards = ['tests', 'sanitize', 'espurr', 'ocr', 'artwork', 'jumbos', 'poko'];
 const lines = [
   '# One wildcard per prefix. Workers Static Assets allow 100 redirect rules.',
+  '# /news* is served by the separate assets-only pokoin-news Worker route; the SPA must never catch it.',
   '# External hosts (www, /card-images) are zone Redirect Rules, not _redirects.',
   '/pokemon* /marketplace/en/pokemon/:splat 301',
   '/sets* /marketplace/sets/:splat 301',

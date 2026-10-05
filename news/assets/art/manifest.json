@@ -1,0 +1,122 @@
+{
+  "sets": {
+    "url": "/news/assets/art/fallback-sets-1600x900.jpg",
+    "width": 1600,
+    "height": 900,
+    "variants": [
+      { "url": "/news/assets/art/fallback-sets-1600x900.jpg", "width": 1600, "height": 900, "ratio": "16x9" },
+      { "url": "/news/assets/art/fallback-sets-1200x900.jpg", "width": 1200, "height": 900, "ratio": "4x3" },
+      { "url": "/news/assets/art/fallback-sets-1200x1200.jpg", "width": 1200, "height": 1200, "ratio": "1x1" }
+    ],
+    "alt": "Pokoin News — Sets",
+    "origin": "branded_fallback",
+    "rights": "owned",
+    "credit": "Pokoin",
+    "caption": ""
+  },
+  "cards": {
+    "url": "/news/assets/art/fallback-cards-1600x900.jpg",
+    "width": 1600,
+    "height": 900,
+    "variants": [
+      { "url": "/news/assets/art/fallback-cards-1600x900.jpg", "width": 1600, "height": 900, "ratio": "16x9" },
+      { "url": "/news/assets/art/fallback-cards-1200x900.jpg", "width": 1200, "height": 900, "ratio": "4x3" },
+      { "url": "/news/assets/art/fallback-cards-1200x1200.jpg", "width": 1200, "height": 1200, "ratio": "1x1" }
+    ],
+    "alt": "Pokoin News — Cards",
+    "origin": "branded_fallback",
+    "rights": "owned",
+    "credit": "Pokoin",
+    "caption": ""
+  },
+  "market": {
+    "url": "/news/assets/art/fallback-market-1600x900.jpg",
+    "width": 1600,
+    "height": 900,
+    "variants": [
+      { "url": "/news/assets/art/fallback-market-1600x900.jpg", "width": 1600, "height": 900, "ratio": "16x9" },
+      { "url": "/news/assets/art/fallback-market-1200x900.jpg", "width": 1200, "height": 900, "ratio": "4x3" },
+      { "url": "/news/assets/art/fallback-market-1200x1200.jpg", "width": 1200, "height": 1200, "ratio": "1x1" }
+    ],
+    "alt": "Pokoin News — Market",
+    "origin": "branded_fallback",
+    "rights": "owned",
+    "credit": "Pokoin",
+    "caption": ""
+  },
+  "competitive": {
+    "url": "/news/assets/art/fallback-competitive-1600x900.jpg",
+    "width": 1600,
+    "height": 900,
+    "variants": [
+      { "url": "/news/assets/art/fallback-competitive-1600x900.jpg", "width": 1600, "height": 900, "ratio": "16x9" },
+      { "url": "/news/assets/art/fallback-competitive-1200x900.jpg", "width": 1200, "height": 900, "ratio": "4x3" },
+      { "url": "/news/assets/art/fallback-competitive-1200x1200.jpg", "width": 1200, "height": 1200, "ratio": "1x1" }
+    ],
+    "alt": "Pokoin News — Competitive",
+    "origin": "branded_fallback",
+    "rights": "owned",
+    "credit": "Pokoin",
+    "caption": ""
+  },
+  "collectors": {
+    "url": "/news/assets/art/fallback-collectors-1600x900.jpg",
+    "width": 1600,
+    "height": 900,
+    "variants": [
+      { "url": "/news/assets/art/fallback-collectors-1600x900.jpg", "width": 1600, "height": 900, "ratio": "16x9" },
+      { "url": "/news/assets/art/fallback-collectors-1200x900.jpg", "width": 1200, "height": 900, "ratio": "4x3" },
+      { "url": "/news/assets/art/fallback-collectors-1200x1200.jpg", "width": 1200, "height": 1200, "ratio": "1x1" }
+    ],
+    "alt": "Pokoin News — Collectors",
+    "origin": "branded_fallback",
+    "rights": "owned",
+    "credit": "Pokoin",
+    "caption": ""
+  },
+  "fact-check": {
+    "url": "/news/assets/art/fallback-fact-check-1600x900.jpg",
+    "width": 1600,
+    "height": 900,
+    "variants": [
+      { "url": "/news/assets/art/fallback-fact-check-1600x900.jpg", "width": 1600, "height": 900, "ratio": "16x9" },
+      { "url": "/news/assets/art/fallback-fact-check-1200x900.jpg", "width": 1200, "height": 900, "ratio": "4x3" },
+      { "url": "/news/assets/art/fallback-fact-check-1200x1200.jpg", "width": 1200, "height": 1200, "ratio": "1x1" }
+    ],
+    "alt": "Pokoin News — Fact Check",
+    "origin": "branded_fallback",
+    "rights": "owned",
+    "credit": "Pokoin",
+    "caption": ""
+  },
+  "analysis": {
+    "url": "/news/assets/art/fallback-analysis-1600x900.jpg",
+    "width": 1600,
+    "height": 900,
+    "variants": [
+      { "url": "/news/assets/art/fallback-analysis-1600x900.jpg", "width": 1600, "height": 900, "ratio": "16x9" },
+      { "url": "/news/assets/art/fallback-analysis-1200x900.jpg", "width": 1200, "height": 900, "ratio": "4x3" },
+      { "url": "/news/assets/art/fallback-analysis-1200x1200.jpg", "width": 1200, "height": 1200, "ratio": "1x1" }
+    ],
+    "alt": "Pokoin News — Analysis",
+    "origin": "branded_fallback",
+    "rights": "owned",
+    "credit": "Pokoin",
+    "caption": ""
+  },
+  "industry": {
+    "url": "/news/assets/art/fallback-industry-1600x900.jpg",
+    "width": 1600,
+    "height": 900,
+    "variants": [
+      { "url": "/news/assets/art/fallback-industry-1600x900.jpg", "width": 1600, "height": 900, "ratio": "16x9" },
+      { "url": "/news/assets/art/fallback-industry-1200x900.jpg", "width": 1200, "height": 900, "ratio": "4x3" },
+      { "url": "/news/assets/art/fallback-industry-1200x1200.jpg", "width": 1200, "height": 1200, "ratio": "1x1" }
+    ],
+    "alt": "Pokoin News — Industry",
+    "origin": "branded_fallback",
+    "rights": "owned",
+    "credit": "Pokoin",
+    "caption": ""
+  }
+}

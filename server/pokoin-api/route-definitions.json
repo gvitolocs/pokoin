@@ -687,11 +687,24 @@
   {
     "path": "/api/marketplace-tcgplayer-history",
     "file": "marketplace-tcgplayer-history.js",
-    "methods": ["GET"],
+    "methods": [
+      "GET"
+    ],
     "purpose": "Daily TCGplayer aggregate price history with all explicitly mapped products and printing subtypes; USD, no condition-specific inference.",
     "auth": "Bearer required.",
-    "params": {"query": "cardId required; game context; from/to YYYY-MM-DD optional.", "body": "none"},
-    "dependencies": {"env": ["TCGCSV_DATABASE_URL", "TCGCSV_DATABASE_SSL"], "services": ["TCGCSV PostgreSQL on Nezopt 15TB"]}
+    "params": {
+      "query": "cardId required; game context; from/to YYYY-MM-DD optional.",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "TCGCSV_DATABASE_URL",
+        "TCGCSV_DATABASE_SSL"
+      ],
+      "services": [
+        "TCGCSV PostgreSQL on Nezopt 15TB"
+      ]
+    }
   },
   {
     "path": "/api/marketplace-pricing-strategies",
@@ -822,22 +835,43 @@
   {
     "path": "/api/client-country",
     "file": "client-country.js",
-    "methods": ["GET", "OPTIONS"],
+    "methods": [
+      "GET",
+      "OPTIONS"
+    ],
     "purpose": "Visitor IP country for local eBay and Vinted links. Not the shipping address.",
     "auth": "Public. Private, never cached. Vary CF-IPCountry.",
-    "params": { "query": "none", "body": "none" },
-    "dependencies": { "env": [], "services": ["Cloudflare CF-IPCountry"] }
+    "params": {
+      "query": "none",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [],
+      "services": [
+        "Cloudflare CF-IPCountry"
+      ]
+    }
   },
   {
     "path": "/api/tcgplayer-redirect",
     "file": "tcgplayer-redirect.js",
-    "methods": ["GET", "OPTIONS"],
+    "methods": [
+      "GET",
+      "OPTIONS"
+    ],
     "purpose": "TCGplayer product URL for a Pokoin card id, from pokoin_product_links. 404 when unlinked so the desk can open search.",
     "auth": "Public. No-store.",
-    "params": { "query": "id (public card id), format=json, optional game", "body": "none" },
+    "params": {
+      "query": "id (public card id), format=json, optional game",
+      "body": "none"
+    },
     "dependencies": {
-      "env": ["TCGCSV_DATABASE_URL"],
-      "services": ["TCGCSV PostgreSQL"]
+      "env": [
+        "TCGCSV_DATABASE_URL"
+      ],
+      "services": [
+        "TCGCSV PostgreSQL"
+      ]
     }
   },
   {
@@ -894,6 +928,29 @@
         "Marketplace replica PostgreSQL",
         "Firebase Admin (orders, seller profiles)",
         "Redis"
+      ]
+    }
+  },
+  {
+    "path": "/api/news-comments",
+    "file": "news-comments.js",
+    "methods": [
+      "GET",
+      "POST"
+    ],
+    "purpose": "Pokoin News reader comments: list visible comments for an article; signed-in users post comments that wait for moderation.",
+    "auth": "GET public (signed-in callers also get their own pending comments). POST requires a Firebase bearer token; 5 comments per 10 minutes per user.",
+    "params": {
+      "query": "articleId (art_…) for GET.",
+      "body": "POST { articleId, articlePath, body (2–1500 chars) }."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*"
+      ],
+      "services": [
+        "Firebase Admin (Firestore news_comments)",
+        "Redis/Valkey rate limit (best effort)"
       ]
     }
   }
