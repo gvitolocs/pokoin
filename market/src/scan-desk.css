@@ -638,13 +638,11 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 /* Queue */
 
 .scan-queue {
-  border: 1px solid var(--g5);
-  border-radius: 12px;
-  overflow: auto;
-  max-height: calc(100vh - 17rem);
-  min-height: 16rem;
+  overflow: visible;
+  max-height: none;
+  min-height: 0;
   outline: none;
-  background: #0b0a0e;
+  background: transparent;
 }
 
 .scan-queue:focus-visible { box-shadow: 0 0 0 2px var(--yellow); }
@@ -690,12 +688,12 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 }
 
 .scan-queue.intent-collection .scan-row {
-  grid-template-columns: 2.4rem 4.8rem minmax(12rem, 1fr) 2.8rem 3.2rem 6.4rem 6rem 8.2rem 2.6rem 7rem 2.2rem;
+  grid-template-columns: 2.4rem 6.6rem minmax(12rem, 1fr) 2.8rem 3.2rem 6.4rem 6rem 8.2rem 2.6rem 7rem 2.2rem;
 }
 
 .scan-row {
   display: grid;
-  grid-template-columns: 2.4rem 4.8rem minmax(12rem, 1fr) 2.8rem 3.2rem 6.4rem 6rem 8.2rem 2.6rem 5.4rem 7rem 2.2rem;
+  grid-template-columns: 2.4rem 6.6rem minmax(12rem, 1fr) 2.8rem 3.2rem 6.4rem 6rem 8.2rem 2.6rem 5.4rem 7rem 2.2rem;
   align-items: center;
   gap: 0.45rem;
   min-height: var(--scan-row-h);
@@ -706,7 +704,7 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 
 .scan-row-head {
   position: sticky;
-  top: 0;
+  top: var(--topbar-h);
   z-index: 2;
   min-height: 2rem;
   background: #16141a;
@@ -757,7 +755,8 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 
 .c-num { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; justify-content: flex-end; }
 
-.c-art { display: flex; gap: 0.2rem; align-items: center; }
+.c-art { display: flex; gap: 0.25rem; align-items: center; justify-content: flex-start; }
+.c-art .thumb-zoom-host { display: inline-flex; flex: none; line-height: 0; }
 .c-flags { justify-content: center; }
 .c-lang,
 .c-cond { justify-content: center; }
@@ -815,10 +814,21 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
   flex: none;
   pointer-events: none;
 }
-.c-art img { width: 2.2rem; aspect-ratio: 63 / 88; object-fit: cover; border-radius: 3px; background: var(--g3); }
+.c-art img,
+.art-empty {
+  width: 2.45rem;
+  height: calc(2.45rem * 88 / 63);
+  aspect-ratio: 63 / 88;
+  flex: none;
+  align-self: center;
+  object-fit: cover;
+  max-width: none;
+  border-radius: 3px;
+  background: var(--g3);
+}
 /* Photo the phone took, beside the catalog art of the current candidate. */
-.c-art .scan-shot { object-fit: contain; background: #000; outline: 1px solid var(--scan-warn); }
-.art-empty { width: 2.2rem; aspect-ratio: 63 / 88; border-radius: 3px; background: var(--g3); display: block; }
+.c-art .scan-shot { object-fit: cover; background: #000; outline: 1px solid var(--scan-warn); }
+.art-empty { display: block; }
 /* Hover zoom host wraps the catalog thumb; the floating full-res card is a body portal. */
 .thumb-zoom-host { display: inline-flex; }
 
@@ -1156,13 +1166,12 @@ button.chip { cursor: pointer; font: inherit; font-size: 0.8rem; font-weight: 70
 
 /* The desk is a desktop tool; phones get the connect flow on scan.pokoin.com. */
 @media (max-width: 1100px) {
-  .scan-row { grid-template-columns: 2rem 4.6rem minmax(9rem, 1fr) 2.6rem 3rem 5.6rem 5.4rem 5.6rem 2.2rem 4.6rem 5rem 2rem; font-size: 0.82rem; }
+  .scan-row { grid-template-columns: 2rem 6.2rem minmax(9rem, 1fr) 2.6rem 3rem 5.6rem 5.4rem 5.6rem 2.2rem 4.6rem 5rem 2rem; font-size: 0.82rem; }
 }
 
 @media (max-width: 720px) {
   .scan-connect { flex-direction: column; align-items: flex-start; }
-  .scan-queue { max-height: none; }
-  .scan-row { grid-template-columns: 4.6rem minmax(0, 1fr) 2.6rem 3rem 2rem; }
+  .scan-row { grid-template-columns: 6.2rem minmax(0, 1fr) 2.6rem 3rem 2rem; }
   .scan-row > .c-num,
   .scan-row > .c-finish,
   .scan-row > .c-flags,

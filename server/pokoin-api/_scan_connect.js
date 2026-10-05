@@ -600,6 +600,18 @@ function provisionalCandidate(candidates, language) {
   return list[0] || null;
 }
 
+/**
+ * Recognition margin is between printings the batch can list.
+ * An EN batch drops Abyss Eye when Pitch Black also scored; a scan with
+ * no hit in the batch family keeps every language.
+ */
+function scopeCandidatesToPrintFamily(candidates, language) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  const tiers = printFamily(language).tiers;
+  const inFamily = list.filter((c) => tiers.some((tier) => tier.includes(printBucket(c.nationality))));
+  return inFamily.length ? inFamily : list;
+}
+
 // PowerTools identity key mapped to Pokoin columns + location. Used for
 // merging consecutive scans. Keep in sync with market/src/scan-model.js.
 function stackKey(row = {}) {
@@ -954,6 +966,7 @@ module.exports = {
   resolvePrintings,
   listingLanguageForPrint,
   provisionalCandidate,
+  scopeCandidatesToPrintFamily,
   stackKey,
   shouldMerge,
   decodeImage,

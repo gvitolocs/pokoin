@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  candidatesForPrintFamily,
   artworkVersionLabel,
   artworkVersionShortLabel,
   batchDefaultRowPatch,
@@ -46,6 +47,16 @@ const KO = {
   card_number: '029/081',
   nationality: 'korean',
 };
+
+test('EN batch hides Abyss Eye when a western hit exists', () => {
+  const hits = [
+    { cardId: 'pb', setName: 'Pitch Black', nationality: 'western', score: 0.91 },
+    { cardId: 'ae', setName: 'Abyss Eye', nationality: 'japanese', score: 0.89 },
+    { cardId: 'cr', setName: 'Chaos Rising', nationality: 'western', score: 0.81 },
+  ];
+  assert.deepEqual(candidatesForPrintFamily(hits, 'EN').map((c) => c.cardId), ['pb', 'cr']);
+  assert.deepEqual(candidatesForPrintFamily([hits[1]], 'EN').map((c) => c.cardId), ['ae']);
+});
 
 test('preferredPrintBucket follows listing language', () => {
   assert.equal(preferredPrintBucket('EN'), 'western');
