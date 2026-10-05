@@ -1,0 +1,284 @@
+/* Sell via spreadsheet — CardTrader-style drop zones on a light desk. */
+
+.page.sell-sheet {
+  max-width: none;
+  margin: -1.25rem;
+  padding: 28px 22px 56px;
+  background: #e8e8e8;
+  color: #1a2744;
+  min-height: 70vh;
+}
+
+.sell-sheet-card {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+  padding: 22px;
+}
+
+.sell-sheet-card + .sell-sheet-card {
+  margin-top: 18px;
+}
+
+.sell-sheet-drops {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.sell-sheet-drop {
+  min-height: 168px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 28px 22px;
+  border-radius: 2px;
+  color: #4d5d76;
+  font: inherit;
+  font-size: 0.98rem;
+  line-height: 1.45;
+  text-align: center;
+  cursor: pointer;
+}
+
+.sell-sheet-drop:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.sell-sheet-drop.is-file {
+  color: #243044;
+  border: 1.5px dashed #243044;
+  background: repeating-linear-gradient(
+    -45deg,
+    #f6f6f6,
+    #f6f6f6 10px,
+    #ececec 10px,
+    #ececec 20px
+  );
+}
+
+.sell-sheet-drop.is-file.is-over {
+  border-color: #16325c;
+  background: #e7eef8;
+}
+
+.sell-sheet-drop.is-paste {
+  border: 1.5px solid #c5ceda;
+  background: #fff;
+}
+
+.sell-sheet-drop svg {
+  color: #1b2b4b;
+}
+
+.sell-sheet-note,
+.sell-sheet-error,
+.sell-sheet-failed {
+  margin: 14px 0 0;
+  font-size: 0.92rem;
+}
+
+.sell-sheet-note { color: #1a2744; }
+.sell-sheet-error,
+.sell-sheet-failed { color: #9b2330; }
+.sell-sheet-failed { padding-left: 1.1rem; }
+
+.sell-sheet-confirm,
+.sell-sheet-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.sell-sheet-go,
+.sell-sheet-dismiss {
+  font: inherit;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 0.55rem 0.95rem;
+  cursor: pointer;
+}
+
+.sell-sheet-go {
+  border: 0;
+  background: #1b2b4b;
+  color: #fff;
+}
+
+.sell-sheet-go:disabled,
+.sell-sheet-dismiss:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.sell-sheet-dismiss {
+  border: 1px solid #c5ceda;
+  background: #fff;
+  color: #1a2744;
+}
+
+.page.sell-sheet h2 {
+  margin: 0 0 16px;
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #1a2744;
+}
+
+.sell-sheet-table-wrap {
+  overflow-x: auto;
+}
+
+.sell-sheet-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.sell-sheet-table th {
+  background: #f2f3f5;
+  color: #5c6b82;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: 10px 8px;
+}
+
+.sell-sheet-table td {
+  padding: 10px 8px;
+  border-top: 1px solid #eceff3;
+  white-space: nowrap;
+  color: #243044;
+}
+
+.sell-sheet-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(10 16 28 / 0.55);
+}
+
+.sell-sheet-dialog {
+  width: min(40rem, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 10px;
+  background: #fff;
+  color: #1a2744;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.28);
+}
+
+.sell-sheet-dialog h2 { margin: 0; }
+
+.sell-sheet-dialog textarea {
+  width: 100%;
+  min-height: 14rem;
+  resize: vertical;
+  border: 1px solid #c5ceda;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font: inherit;
+  color: #1a2744;
+  background: #fff;
+}
+
+.sell-sheet-ct {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 14px 14px 12px;
+  border-radius: 8px;
+  border: 1px solid #e4c56a;
+  background: #fff8e8;
+  color: #1a2744;
+}
+
+.sell-sheet-ct h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.sell-sheet-ct p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.sell-sheet-warn {
+  color: #8a4b12;
+  font-weight: 650;
+}
+
+.sell-sheet-pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  color: #3d4d66;
+  font-size: 0.9rem;
+}
+
+.sell-sheet-hub {
+  margin-top: 16px;
+}
+
+.sell-sheet-hub > h2 {
+  margin: 0 0 12px;
+  font-size: 1.2rem;
+}
+
+.sell-sheet-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr));
+  gap: 12px;
+}
+
+.sell-sheet-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 9.25rem;
+  padding: 18px 16px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--g5);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.sell-sheet-tile:hover,
+.sell-sheet-tile:focus-visible {
+  border-color: rgb(255 211 61 / 0.55);
+}
+
+.sell-sheet-tile-icon {
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.sell-sheet-tile strong {
+  font-size: 1.02rem;
+  font-weight: 750;
+}
+
+.sell-sheet-tile > span:last-child {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 800px) {
+  .sell-sheet-drops { grid-template-columns: 1fr; }
+  .page.sell-sheet { padding: 16px 12px 40px; }
+}

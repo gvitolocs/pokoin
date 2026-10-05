@@ -29,6 +29,8 @@ import {
   withLiveToday,
 } from '../portfolio-history.js';
 import { DASHBOARD_SCAN, marketUrl, goMarket } from '../punchouts.js';
+import SellSpreadsheetTile from './SellSpreadsheetTile.jsx';
+import '../sell-spreadsheet.css';
 
 const CHART_W = 640;
 const CHART_H = 220;
@@ -861,6 +863,13 @@ export function SellerDashboardView({
           </div>
         </section>
       </div>
+
+      <section className="sell-sheet-hub" aria-labelledby="sell-and-buy-title">
+        <h2 id="sell-and-buy-title">Sell and Buy</h2>
+        <div className="sell-sheet-hub-grid">
+          <SellSpreadsheetTile />
+        </div>
+      </section>
 
       <section className="seller-panel seller-movers-panel" aria-labelledby="seller-movers-title">
         <header className="seller-panel-head">

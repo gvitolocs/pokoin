@@ -334,6 +334,7 @@ export default function Inventory() {
           title={locationName ? `Nothing stored in ${locationName}` : 'No live listings'}
           lede={locationName ? 'Move a listing into this location from its card desk, or scan a new pile.' : 'Scan a pile with your phone, import a CSV, or open a card and use List your card.'}>
           <Link className="btn" to="/inventory/scan">Scan cards</Link>
+          <Link className="btn ghost" to="/mypokoin/spreadsheet">Sell via spreadsheet</Link>
           <Link className="btn ghost" to="/mypokoin/import">Import CSV</Link>
           <Link className="btn ghost" to="/marketplace">Find a card</Link>
         </EmptyDesk>

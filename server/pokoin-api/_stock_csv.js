@@ -24,7 +24,15 @@ const CARDTRADER_HEADERS = Object.freeze([
   'comment', 'location',
 ]);
 
-const FORMATS = Object.freeze(['powertools', 'cardmarket', 'cardtrader']);
+/** TCGPlayer seller inventory export. */
+const TCGPLAYER_HEADERS = Object.freeze([
+  'TCGplayer Id', 'Product Line', 'Set Name', 'Product Name', 'Number', 'Rarity',
+  'Condition', 'TCG Market Price', 'TCG Direct Low', 'TCG Low Price With Shipping',
+  'TCG Low Price', 'Total Quantity', 'Add to Quantity', 'TCG Marketplace Price',
+  'Photo URL', 'Language', 'Printing', 'Location',
+]);
+
+const FORMATS = Object.freeze(['powertools', 'cardmarket', 'cardtrader', 'tcgplayer']);
 
 /** PT / CM condition scale → Pokoin listing conditions (scan desk set). */
 const CONDITION_FROM_CM = Object.freeze({
@@ -48,7 +56,7 @@ const CONDITION_FROM_CT = Object.freeze({
   'moderately played': 'MP', mp: 'MP',
   'lightly played': 'MP', lp: 'MP',
   played: 'PL', 'heavily played': 'PL', hp: 'PL', pl: 'PL',
-  poor: 'Poor', po: 'Poor',
+  poor: 'Poor', po: 'Poor', damaged: 'Poor',
 });
 
 const CONDITION_TO_CT = Object.freeze({
@@ -556,12 +564,32 @@ function toCsv(headers, rows) {
   return `${lines.join('\n')}\n`;
 }
 
+function headerKey(value) {
+  return String(value ?? '').trim().toLowerCase().replace(/[\s_]+/g, '');
+}
+
+function field(raw, ...names) {
+  if (!raw || typeof raw !== 'object') return '';
+  for (const name of names) {
+    if (raw[name] != null && String(raw[name]).trim() !== '') return raw[name];
+  }
+  const wanted = new Set(names.map(headerKey));
+  for (const [key, value] of Object.entries(raw)) {
+    if (wanted.has(headerKey(key)) && value != null && String(value).trim() !== '') return value;
+  }
+  return '';
+}
+
 function detectFormat(headers = []) {
-  const set = new Set((headers || []).map((h) => h.trim()));
-  if (set.has('cardmarketId') && set.has('finishType')) return 'powertools';
-  if (set.has('blueprint_id') || set.has('price_cents')) return 'cardtrader';
-  if (set.has('idProduct') || (set.has('expansion') && set.has('isFoil'))) return 'cardmarket';
-  if (set.has('cardmarketId')) return 'powertools';
+  const set = new Set((headers || []).map(headerKey));
+  if (set.has('cardmarketid') && (set.has('finishtype') || set.has('setcode'))) return 'powertools';
+  if (set.has('blueprintid') || set.has('pricecents')) return 'cardtrader';
+  if (set.has('idproduct') || (set.has('expansion') && set.has('isfoil'))) return 'cardmarket';
+  if (
+    set.has('tcgplayerid')
+    || (set.has('productname') && set.has('setname') && (set.has('tcgmarketplaceprice') || set.has('totalquantity') || set.has('tcgmarketprice')))
+  ) return 'tcgplayer';
+  if (set.has('cardmarketid')) return 'powertools';
   return null;
 }
 
@@ -646,6 +674,34 @@ function normalizeImportRow(format, raw, options = {}) {
       rarity: '',
     };
   }
+  if (format === 'tcgplayer') {
+    const printing = cleanText(field(raw, 'Printing'), 40).toLowerCase();
+    const reverse = /reverse/.test(printing);
+    const foil = /holo|foil/.test(printing);
+    const price = field(raw, 'TCG Marketplace Price', 'TCG Market Price', 'price');
+    return {
+      format,
+      externalId: cleanText(field(raw, 'TCGplayer Id'), 40),
+      tcgplayerId: cleanText(field(raw, 'TCGplayer Id'), 40),
+      quantity: clampInt(field(raw, 'Total Quantity', 'Quantity', 'Add to Quantity'), 1, 99, 1),
+      name: cleanText(field(raw, 'Product Name', 'Title', 'Name'), 240),
+      setName: cleanText(field(raw, 'Set Name', 'Set'), 240),
+      setCode: '',
+      collectorNumber: cleanText(field(raw, 'Number'), 40),
+      condition: mapConditionFromCt(field(raw, 'Condition')),
+      language: mapLanguageFromName(field(raw, 'Language') || 'English'),
+      firstEdition: /1st|first/.test(printing),
+      signed: false,
+      altered: false,
+      foilState: reverse ? 'reverse' : foil ? 'holo' : 'standard',
+      reverse,
+      variantState: '',
+      pricePkn: priceToPkn(price, { priceMode }),
+      sellerComment: '',
+      location: cleanText(field(raw, 'Location'), 120),
+      rarity: cleanText(field(raw, 'Rarity'), 80),
+    };
+  }
   throw Object.assign(new Error(`Unknown format: ${format}`), { statusCode: 400 });
 }
 
@@ -719,6 +775,30 @@ function listingToExportRow(format, listing = {}) {
       location,
     };
   }
+  if (format === 'tcgplayer') {
+    const finish = mapFinishToPowerTools(listing);
+    const printing = finish.isReverseHolo ? 'Reverse Holofoil' : finish.finishType === 'Holo' ? 'Holofoil' : 'Normal';
+    return {
+      'TCGplayer Id': cleanText(listing.tcgplayerId || listing.externalId, 40),
+      'Product Line': 'Pokemon',
+      'Set Name': cleanText(listing.setName, 240),
+      'Product Name': cleanText(listing.cardName || listing.name, 240),
+      Number: cleanText(listing.collectorNumber, 40),
+      Rarity: '',
+      Condition: mapConditionToCt(listing.condition),
+      'TCG Market Price': '',
+      'TCG Direct Low': '',
+      'TCG Low Price With Shipping': '',
+      'TCG Low Price': '',
+      'Total Quantity': String(qty),
+      'Add to Quantity': '',
+      'TCG Marketplace Price': pknToEur(listing.pricePkn),
+      'Photo URL': '',
+      Language: mapLanguageToName(listing.language),
+      Printing: printing,
+      Location: location,
+    };
+  }
   throw Object.assign(new Error(`Unknown format: ${format}`), { statusCode: 400 });
 }
 
@@ -726,6 +806,7 @@ function headersFor(format) {
   if (format === 'powertools') return [...POWERTOOLS_HEADERS];
   if (format === 'cardmarket') return [...CARDMARKET_HEADERS];
   if (format === 'cardtrader') return [...CARDTRADER_HEADERS];
+  if (format === 'tcgplayer') return [...TCGPLAYER_HEADERS];
   throw Object.assign(new Error(`Unknown format: ${format}`), { statusCode: 400 });
 }
 
@@ -739,7 +820,7 @@ function importCsvText(text, options = {}) {
   const { headers, records } = parseCsv(text);
   const format = options.format || detectFormat(headers);
   if (!format || !FORMATS.includes(format)) {
-    throw Object.assign(new Error('Unrecognized CSV format. Use powertools, cardmarket, or cardtrader.'), {
+    throw Object.assign(new Error('Unrecognized CSV format. Use powertools, cardmarket, cardtrader, or tcgplayer.'), {
       statusCode: 400,
     });
   }
@@ -757,7 +838,10 @@ function importCsvText(text, options = {}) {
   let occupancy = [];
   let suggestedStackSize = 1;
   let locationDetection = null;
-  if (options.powerToolsSync === true) {
+  if (options.preserveLocation === true) {
+    // Spreadsheet import keeps the file's location string, including Power Tools slots.
+    withSlots = okRows;
+  } else if (options.powerToolsSync === true) {
     let locationParse = cleanText(options.locationParse, 40) || 'auto';
     if (locationParse === 'auto' || options.detectLocation === true) {
       locationDetection = detectPowerToolsLocationStyle(
@@ -804,17 +888,20 @@ function importCsvText(text, options = {}) {
   };
 }
 
-function sourceForFormat(format) {
+function sourceForFormat(format, cardtraderIntent = '') {
+  if (cardtraderIntent === 'link') return 'cardtrader_csv_link';
+  if (cardtraderIntent === 'import') return 'cardtrader_csv_import';
   if (format === 'powertools') return 'powertools_csv_import';
   if (format === 'cardmarket') return 'cardmarket_csv_import';
   if (format === 'cardtrader') return 'cardtrader_csv_import';
+  if (format === 'tcgplayer') return 'tcgplayer_csv_import';
   return 'stock_csv_import';
 }
 
 function sourceListingIdFor(format, row) {
   const id = cleanText(row.externalId || row.cardmarketId || row.productId || row.blueprintId, 80);
   if (!id) return '';
-  const prefix = format === 'powertools' ? 'pt' : format === 'cardmarket' ? 'cm' : 'ct';
+  const prefix = format === 'powertools' ? 'pt' : format === 'cardmarket' ? 'cm' : format === 'tcgplayer' ? 'tp' : 'ct';
   return `${prefix}:${id}:${row.condition}:${row.language}:${row.foilState}:${row.location}`.slice(0, 160);
 }
 
@@ -822,6 +909,7 @@ module.exports = {
   POWERTOOLS_HEADERS,
   CARDMARKET_HEADERS,
   CARDTRADER_HEADERS,
+  TCGPLAYER_HEADERS,
   FORMATS,
   EUR_TO_PKN,
   cleanText,

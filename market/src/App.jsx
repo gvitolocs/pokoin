@@ -58,6 +58,7 @@ const Forum = lazy(() => import('./pages/Forum.jsx'));
 const Signal = lazy(() => import('./pages/Signal.jsx'));
 const Scan = lazy(() => import('./pages/Scan.jsx'));
 const Inventory = lazy(() => import('./pages/Inventory.jsx'));
+const SellSpreadsheet = lazy(() => import('./pages/SellSpreadsheet.jsx'));
 const ScanDesk = lazy(() => import('./pages/ScanDesk.jsx'));
 const SellerHome = lazy(() => import('./pages/SellerHome.jsx'));
 const Buy = lazy(() => import('./pages/Buy.jsx'));
@@ -231,6 +232,7 @@ function AppShell() {
       {both('/scancard', <Scan />)}
       {both('/dashboard/scan', <ScanDesk />)}
       {both('/mypokoin/import', <Inventory />)}
+      {both('/mypokoin/spreadsheet', <SellSpreadsheet />)}
       {both('/mypokoin/location/:location', <Inventory />)}
       {both('/mypokoin/settings', <Inventory />)}
       {both('/mypokoin/collection', <Inventory />)}

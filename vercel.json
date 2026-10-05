@@ -1031,6 +1031,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/mypokoin/spreadsheet/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/mypokoin/spreadsheet",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/mypokoin/collection/",
       "destination": "/market/index.html"
     },

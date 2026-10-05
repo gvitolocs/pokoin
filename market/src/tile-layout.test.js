@@ -247,7 +247,24 @@ test('artist tiles are still album photos of the leftover illustration, not hove
   assert.match(cardArt, /className="art-figure-layer art-figure-hover"/);
   assert.match(cardArt, /className="art-figure-layer art-figure-shadow"/);
   assert.match(cardArt, /--art-figure-mask/);
-  assert.match(css, /\.tile\.tile-album:hover \.art-cut img\.art-figure-hover \{[^}]*transform:\s*scale\(1\.12\) !important/);
+  assert.match(
+    css,
+    /\.tile\.tile-album\.tile-tall:hover \.art-cut img\.art-figure-hover,[\s\S]*?transform:\s*scale\(1\.12\) !important/,
+  );
+  assert.doesNotMatch(
+    css,
+    /\.tile\.tile-album\.tile-tall:hover \.art-cut img\.art-figure-hover,[\s\S]*?translateY\(-3%\)/,
+  );
+  assert.match(css, /@property --album-figure-w/);
+  assert.match(css, /\.tile-album\.tile-tall \.art-cut \{[^}]*container-type:\s*size/);
+  assert.match(
+    css,
+    /\.tile\.tile-album\.tile-tall \.tile-art \.art-cut img\.art-figure-layer,[\s\S]*?--album-figure-w:\s*max\(/,
+  );
+  assert.match(
+    css,
+    /\.tile\.tile-album\.tile-tall \.tile-art \.art-cut img\.art-figure-layer,[\s\S]*?transform-origin:[\s\S]*?var\(--art-height\) \* 0\.36/,
+  );
   assert.match(css, /mask-image:\s*var\(--art-figure-mask\)/);
   assert.match(css, /img\.art-figure-shadow \{[^}]*brightness\(0\) blur\(9px\)/);
   assert.match(css, /img:not\(\.art-figure-layer\)/);

@@ -1788,6 +1788,26 @@
   min-width: 0;
 }
 
+/* Set desk: a short search leaves the filter row on one line. */
+.set-desk .set-search {
+  flex: 0 1 18rem;
+  max-width: 18rem;
+}
+
+.set-desk .set-filters {
+  flex-wrap: nowrap;
+}
+
+.set-desk .set-filters .sort {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.set-desk .set-filters .sort select {
+  width: 100%;
+  max-width: none;
+}
+
 .set-search input {
   width: 100%;
   min-width: 0;
@@ -2290,7 +2310,16 @@
     gap: 0.5rem;
   }
 
-  .set-search { grid-area: search; }
+  .set-search { grid-area: search; max-width: none; flex: 1 1 auto; }
+
+  .set-desk .set-search {
+    max-width: none;
+    width: 100%;
+  }
+
+  .set-desk .set-filters {
+    flex-wrap: unset;
+  }
 
   .set-browse-bar > .sort {
     grid-area: sort;
