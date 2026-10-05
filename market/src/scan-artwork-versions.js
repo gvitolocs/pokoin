@@ -55,6 +55,18 @@ export function batchDefaultRowPatch(patch = {}) {
   return out;
 }
 
+/**
+ * Hits the batch language can list. Drop the other print universe when at
+ * least one hit is in-family (EN batch hides Abyss Eye beside Pitch Black).
+ * A foreign card with no in-family hit keeps every candidate.
+ */
+export function candidatesForPrintFamily(candidates, listingLanguage = '') {
+  const list = (Array.isArray(candidates) ? candidates : []).filter((row) => printingId(row));
+  const bucket = preferredPrintBucket(listingLanguage);
+  const inFamily = list.filter((row) => matchesPrintBucket(row, bucket));
+  return inFamily.length ? inFamily : list;
+}
+
 export function matchesPrintBucket(row, bucket) {
   const n = nationalityOf(row);
   if (bucket === 'western') return n === 'western';

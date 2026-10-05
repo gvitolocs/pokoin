@@ -634,11 +634,17 @@ function createStore({
       }
       const picked = rules.pickDefaults(batch.defaults_history, capturedMs);
       const snapshot = picked.defaults;
+      // Batch language first. A Japanese twin inside 0.08 of the English
+      // printing must not keep the row ambiguous.
+      const scoped = rules.scopeCandidatesToPrintFamily(candidates, snapshot.language);
+      const scopedHits = scoped.map((c) => ({ public_id: c.cardId, score: c.score, name: c.name }));
+      const scopedRecognition = rules.classifyRecognition(scopedHits);
+      const scopedCandidates = scopedRecognition.candidates.map((c) => scoped.find((row) => row.cardId === c.cardId) || c);
       // Complete artwork group across print languages. A phone
       // choice counts only if the server offers that printing too.
       const printing = printingRows.length
         ? rules.resolvePrintings({
-          hits: event.hits,
+          hits: scopedHits,
           rows: printingRows,
           language: snapshot.language,
           choice: event.printingChoice,
@@ -646,11 +652,11 @@ function createStore({
         : null;
       const decided = printing
         ? { state: printing.state, candidates: printing.candidates, topScore: printing.topScore, margin: printing.margin }
-        : { ...recognition, candidates };
+        : { ...scopedRecognition, candidates: scopedCandidates };
       let top = null;
       if (printing) top = { cardId: printing.cardId };
-      else if (decided.state === 'ambiguous') top = rules.provisionalCandidate(candidates, snapshot.language);
-      else if (decided.state === 'matched') top = candidates[0];
+      else if (decided.state === 'ambiguous') top = rules.provisionalCandidate(scopedCandidates, snapshot.language);
+      else if (decided.state === 'matched') top = scopedCandidates[0];
 
       const selectedRow = printing && printingRows.find(row => String(row.card_id) === String(top?.cardId));
       const listingLanguage = selectedRow

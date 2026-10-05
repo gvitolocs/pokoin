@@ -32,6 +32,7 @@ import {
   artworkVersionLabel,
   artworkVersionShortLabel,
   batchDefaultRowPatch,
+  candidatesForPrintFamily,
   currentMatchesLanguageBucket,
   draftArtworkBucket,
   listingLanguageForPrint,
@@ -439,6 +440,19 @@ export default function ScanDesk() {
     const el = queueRef.current.querySelector(`[data-row="${focusId}"]`);
     el?.scrollIntoView?.({ block: 'nearest' });
   }, [focusId]);
+
+  // The queue is part of the page. Follow new scans only while the seller
+  // is already at the bottom of that page.
+  useEffect(() => {
+    const onScroll = () => {
+      const el = queueRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      followTail.current = rect.bottom - window.innerHeight < 80;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   // Keep where the seller stopped per box (stack + position) so the next
   // session can resume at the same divider. An empty batch has not placed a
@@ -1518,10 +1532,6 @@ export default function ScanDesk() {
         aria-label="Scan queue"
         tabIndex={0}
         ref={queueRef}
-        onScroll={(event) => {
-          const el = event.currentTarget;
-          followTail.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-        }}
       >
         <div className="scan-row scan-row-head" role="row">
           <span role="columnheader">#</span>
@@ -2009,16 +2019,18 @@ function CandidateAlts({ row, preferredLanguage, onPick }) {
         name: preferred.name || cand.name,
         setName: preferred.set_name || preferred.setName || preferred.set || cand.setName,
         number: preferred.card_number || preferred.collector_number || preferred.number || cand.number,
+        nationality: preferred.nationality || cand.nationality || '',
       };
     })).then((next) => {
       if (cancelled) return;
       const seen = new Set();
-      setMapped(next.filter((c) => {
+      const unique = next.filter((c) => {
         const id = String(c.cardId || '');
         if (!id || seen.has(id)) return false;
         seen.add(id);
         return true;
-      }));
+      });
+      setMapped(candidatesForPrintFamily(unique, lang));
     });
     return () => { cancelled = true; };
   }, [row.id, lang, raw.map((c) => c.cardId).join(',')]);
@@ -2053,7 +2065,7 @@ function QueueRow({
       ? PROBLEM_LABEL[problem]
       : row.recognitionState === 'manual' ? 'Manual' : row.reviewed && row.recognitionState !== 'matched' ? 'Checked' : 'Matched';
   const tone = row.status === 'submitted' ? 'ok' : problem === 'no_printing' ? 'bad' : problem ? 'warn' : 'ok';
-  const showCandidates = !closed && (row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched') && !row.reviewed;
+  const showCandidates = !closed && (row.recognitionState === 'ambiguous' || row.recognitionState === 'unmatched');
   const unidentified = !closed && !row.cardId;
   // Full LANG list — expansion remaps when the language implies another print.
   // Card desk still restricts via languagesForNationality.
