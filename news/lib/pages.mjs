@@ -81,6 +81,22 @@ export function renderArticleCard(record, { size = 'm', showGame = false } = {})
   );
 }
 
+// Reader comments load client-side from the Pokoin API (moderated first);
+// the article itself never depends on them.
+function commentsSection(record) {
+  return (
+    `<section class="nx-comments" id="comments" aria-labelledby="nx-comments-h"` +
+    ` data-article-id="${esc(record.id)}" data-article-path="${esc(articlePath(record))}" data-api="${esc(SITE.commentsApi)}">` +
+    `<h2 id="nx-comments-h">Comments</h2>` +
+    `<p class="nx-comments__note">Comments are moderated before they appear. Be kind, stay on topic, ` +
+    `no selling or links to listings. Pokoin accounts only.</p>` +
+    `<ol class="nx-comments__list" aria-live="polite"></ol>` +
+    `<div class="nx-comments__form"></div>` +
+    `<noscript><p class="nx-comments__note">Comments need JavaScript.</p></noscript>` +
+    `</section>`
+  );
+}
+
 function relatedAside(record, all, ctx) {
   const cards = (record.related && record.related.cards) || [];
   const sets = (record.related && record.related.sets) || [];
@@ -142,7 +158,7 @@ export function renderArticlePage(record, all, ctx = {}) {
     ...(claimReview ? [claimReview] : []),
   ];
 
-  const body = renderArticleBody(record, { ...ctx, baseUrl }) + relatedAside(record, all, ctx);
+  const body = renderArticleBody(record, { ...ctx, baseUrl }) + commentsSection(record) + relatedAside(record, all, ctx);
 
   return renderPage({
     title: `${record.headline} — Pokoin News`,

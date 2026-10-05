@@ -1,16 +1,23 @@
-// Pokoin News share controls: copy link and native share. No analytics, no fetch.
+// Pokoin News page script: share controls and reader comments.
+// Comments: GET/POST https://api.pokoin.com/api/news-comments. The Pokoin
+// sign-in token is the host-only `pokoin.auth.token` cookie the marketplace
+// writes on pokoin.com; it is sent only to the Pokoin API. No analytics.
 (function () {
   'use strict';
 
   function ready(fn) {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', fn);
-    } else {
-      fn();
-    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+    else fn();
   }
 
-  ready(function () {
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function shareControls() {
     var buttons = document.querySelectorAll('.nx-share__copy');
     for (var i = 0; i < buttons.length; i += 1) {
       (function (button) {
@@ -22,26 +29,149 @@
             : Promise.reject(new Error('no clipboard'));
           copy.then(function () {
             button.textContent = 'Copied';
-            window.setTimeout(function () {
-              button.textContent = original;
-            }, 2000);
+            window.setTimeout(function () { button.textContent = original; }, 2000);
           });
         });
       }(buttons[i]));
     }
-
     if (navigator.share) {
       var share = document.querySelector('.nx-share');
       if (share) {
-        var button = document.createElement('button');
+        var button = el('button', 'nx-share__share', 'Share');
         button.type = 'button';
-        button.className = 'nx-share__share';
-        button.textContent = 'Share';
         button.addEventListener('click', function () {
           navigator.share({ title: document.title, url: window.location.href });
         });
         share.appendChild(button);
       }
     }
+  }
+
+  // { token, uid } from the marketplace sign-in cookie, or null when signed out/expired.
+  function session() {
+    var parts = document.cookie ? document.cookie.split(';') : [];
+    for (var i = 0; i < parts.length; i += 1) {
+      var at = parts[i].indexOf('=');
+      if (at < 0 || parts[i].slice(0, at).trim() !== 'pokoin.auth.token') continue;
+      try {
+        var value = JSON.parse(decodeURIComponent(parts[i].slice(at + 1).trim()));
+        if (value && value.token && Number(value.expiresAt) > Date.now() + 30000) return value;
+      } catch (error) { return null; }
+    }
+    return null;
+  }
+
+  function formatDate(iso) {
+    var date = new Date(iso);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  }
+
+  function commentItem(comment, pending) {
+    var item = el('li', 'nx-comment' + (pending ? ' nx-comment--pending' : ''));
+    var meta = el('p', 'nx-comment__meta');
+    meta.appendChild(el('strong', '', comment.authorName || 'Pokoin user'));
+    if (comment.createdAt) meta.appendChild(document.createTextNode(' · ' + formatDate(comment.createdAt)));
+    if (pending) meta.appendChild(el('span', 'nx-comment__status', comment.status === 'held' ? ' · Held for review' : ' · Awaiting moderation'));
+    item.appendChild(meta);
+    var paragraphs = String(comment.body || '').split(/\n{2,}/);
+    for (var i = 0; i < paragraphs.length; i += 1) item.appendChild(el('p', 'nx-comment__body', paragraphs[i]));
+    return item;
+  }
+
+  function comments() {
+    var root = document.querySelector('.nx-comments');
+    if (!root || !window.fetch) return;
+    var api = root.getAttribute('data-api');
+    var articleId = root.getAttribute('data-article-id');
+    var articlePath = root.getAttribute('data-article-path');
+    var list = root.querySelector('.nx-comments__list');
+    var formSlot = root.querySelector('.nx-comments__form');
+    var auth = session();
+    var heading = root.querySelector('h2');
+
+    function load() {
+      var headers = auth ? { Authorization: 'Bearer ' + auth.token } : {};
+      fetch(api + '?articleId=' + encodeURIComponent(articleId), { headers: headers, credentials: 'omit' })
+        .then(function (response) { return response.ok ? response.json() : Promise.reject(new Error(String(response.status))); })
+        .then(function (data) {
+          list.textContent = '';
+          (data.mine || []).forEach(function (comment) { list.appendChild(commentItem(comment, true)); });
+          (data.comments || []).forEach(function (comment) { list.appendChild(commentItem(comment, false)); });
+          heading.textContent = data.count ? 'Comments (' + data.count + ')' : 'Comments';
+          if (!list.children.length) list.appendChild(el('li', 'nx-comments__empty', 'No comments yet.'));
+        })
+        .catch(function () {
+          list.textContent = '';
+          list.appendChild(el('li', 'nx-comments__empty', 'Comments could not be loaded right now.'));
+        });
+    }
+
+    function signInPrompt() {
+      var prompt = el('p', 'nx-comments__signin');
+      var link = el('a', '', 'Sign in to Pokoin');
+      link.href = '/auth?from=' + encodeURIComponent(articlePath + '#comments');
+      prompt.appendChild(link);
+      prompt.appendChild(document.createTextNode(' to join the conversation.'));
+      formSlot.appendChild(prompt);
+    }
+
+    function form() {
+      var node = el('form', 'nx-comments__compose');
+      var label = el('label', 'nx-comments__label', 'Add a comment');
+      label.setAttribute('for', 'nx-comment-body');
+      var box = el('textarea');
+      box.id = 'nx-comment-body';
+      box.maxLength = 1500;
+      box.minLength = 2;
+      box.rows = 4;
+      box.required = true;
+      var row = el('div', 'nx-comments__row');
+      var status = el('p', 'nx-comments__status');
+      status.setAttribute('role', 'status');
+      var submit = el('button', 'nx-comments__submit', 'Post comment');
+      submit.type = 'submit';
+      row.appendChild(status);
+      row.appendChild(submit);
+      node.appendChild(label);
+      node.appendChild(box);
+      node.appendChild(row);
+      node.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var body = box.value.trim();
+        if (body.length < 2) return;
+        submit.disabled = true;
+        status.textContent = 'Sending…';
+        fetch(api, {
+          method: 'POST',
+          credentials: 'omit',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + auth.token },
+          body: JSON.stringify({ articleId: articleId, articlePath: articlePath, body: body }),
+        })
+          .then(function (response) {
+            return response.json().then(function (data) { return { ok: response.ok, data: data }; });
+          })
+          .then(function (result) {
+            if (!result.ok) throw new Error((result.data && result.data.error) || 'Could not post.');
+            box.value = '';
+            status.textContent = 'Thanks — your comment will appear once it is moderated.';
+            var empty = list.querySelector('.nx-comments__empty');
+            if (empty) empty.remove();
+            list.insertBefore(commentItem(result.data.comment, true), list.firstChild);
+          })
+          .catch(function (error) { status.textContent = error.message || 'Could not post.'; })
+          .then(function () { submit.disabled = false; });
+      });
+      formSlot.appendChild(node);
+    }
+
+    load();
+    if (auth) form();
+    else signInPrompt();
+  }
+
+  ready(function () {
+    shareControls();
+    comments();
   });
 }());

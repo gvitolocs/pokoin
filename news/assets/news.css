@@ -270,3 +270,25 @@ main { display: block; max-width: var(--wide); margin: 0 auto; padding: 22px 16p
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.001ms; transition-duration: 0.001ms; }
 }
+
+/* Reader comments ---------------------------------------------------------- */
+.nx-comments { max-width: var(--measure); margin: 40px auto 0; padding-top: 24px; border-top: 1px solid var(--line); }
+.nx-comments h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin: 0 0 8px; }
+.nx-comments__note { font-size: 14px; color: var(--muted); margin: 0 0 16px; }
+.nx-comments__list { list-style: none; margin: 0; padding: 0; }
+.nx-comment { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.nx-comment__meta { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+.nx-comment__meta strong { color: var(--text); }
+.nx-comment__body { margin: 0 0 6px; font-size: 16px; overflow-wrap: anywhere; white-space: pre-line; }
+.nx-comment--pending { opacity: 0.75; }
+.nx-comment__status { color: var(--unclear); }
+.nx-comments__empty { padding: 12px 0; color: var(--muted); font-size: 15px; }
+.nx-comments__compose { margin-top: 20px; display: grid; gap: 8px; }
+.nx-comments__label { font-size: 14px; font-weight: 600; }
+.nx-comments__compose textarea { width: 100%; box-sizing: border-box; min-height: 96px; padding: 10px 12px; background: var(--paper); color: var(--text); border: 1px solid var(--line); border-radius: 4px; font: inherit; font-size: 16px; resize: vertical; }
+.nx-comments__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.nx-comments__status { margin: 0; font-size: 13px; color: var(--muted); }
+.nx-comments__submit { padding: 8px 16px; border: 0; border-radius: 4px; background: var(--accent); color: #000; font-weight: 700; font-size: 14px; cursor: pointer; }
+.nx-comments__submit:disabled { opacity: 0.6; cursor: default; }
+.nx-comments__signin { margin: 16px 0 0; font-size: 15px; }
+.nx-comments__signin a { color: var(--accent); font-weight: 600; }

@@ -18,6 +18,8 @@ export const SITE = {
     address: null,
   },
   fontUrl: '/home/satoshi.woff2',
+  // Reader comments (GET/POST /api/news-comments); moderated before display.
+  commentsApi: 'https://api.pokoin.com/api/news-comments',
   sameAs: ['https://t.me/pokoincards'],
 };
 

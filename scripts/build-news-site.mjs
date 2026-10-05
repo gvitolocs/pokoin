@@ -29,7 +29,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MEDIA_PREFIX = '/news/media/';
 const CSP =
   "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; " +
-  "font-src 'self'; connect-src 'self'; base-uri 'self'; object-src 'none'; " +
+  "font-src 'self'; connect-src 'self' https://api.pokoin.com; base-uri 'self'; object-src 'none'; " +
   "frame-ancestors 'self'; form-action 'self'";
 
 function hash8(buffer) {
