@@ -16,7 +16,7 @@ export { realPublicCardId } from './public-card-id.js';
 
 export const OG_CACHE_TTL_SEC = 3600;
 export const OG_SEARCH_CACHE_TTL_SEC = 120;
-export const OG_CACHE_VERSION = 'v6';
+export const OG_CACHE_VERSION = 'v7';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
