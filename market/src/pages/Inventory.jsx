@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useMatch } from 'react-router-dom';
 import { exportStockCsv, fetchPricingStrategies, fetchSellerListings } from '../api.js';
+import './export-preview.css';
 import { useAuth } from '../auth.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatSellerPrice } from '../seller-currency.js';
@@ -33,6 +34,43 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+/** First rows of an export file, including quoted commas and line breaks. */
+function parseCsvPreview(text, limit = 8) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let quotes = false;
+  const src = String(text || '').replace(/^\uFEFF/, '');
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (quotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') {
+          cell += '"';
+          i += 1;
+        } else quotes = false;
+      } else cell += ch;
+    } else if (ch === '"') quotes = true;
+    else if (ch === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && src[i + 1] === '\n') i += 1;
+      row.push(cell);
+      cell = '';
+      if (row.some((value) => value !== '')) rows.push(row);
+      row = [];
+      if (rows.length > limit) break;
+    } else cell += ch;
+  }
+  if ((cell || row.length) && rows.length <= limit) {
+    row.push(cell);
+    if (row.some((value) => value !== '')) rows.push(row);
+  }
+  const [headers, ...body] = rows;
+  return { headers: headers || [], rows: body.slice(0, limit) };
+}
+
 /**
  * Pokemon seller stock desk — live path is /mypokoin (legacy /inventory
  * redirects). The Collection tab holds what you own (legacy /collection and
@@ -55,7 +93,9 @@ export default function Inventory() {
   const formatPrice = (pkn) => formatSellerPrice(pkn, priceCurrency);
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
-  const [askFormat, setAskFormat] = useState(false);
+  const [previewFormat, setPreviewFormat] = useState('powertools');
+  const [preview, setPreview] = useState(null);
+  const [previewBlob, setPreviewBlob] = useState(null);
   const [busy, setBusy] = useState('');
   // Bumped by reload() so a stale background top-up stops writing rows.
   const inventorySeq = useRef(0);
@@ -135,19 +175,36 @@ export default function Inventory() {
     return () => { cancelled = true; };
   }, [signedIn, getBearer, onImportTab, onSettingsTab, onCollectionTab]);
 
-  async function onExport(formatId) {
+  useEffect(() => {
+    if (!signedIn || !onImportTab) return undefined;
+    let cancelled = false;
+    setBusy(previewFormat);
     setError('');
-    setBusy(formatId);
-    try {
-      const token = await getBearer();
-      const blob = await exportStockCsv(formatId, token);
-      downloadBlob(blob, `pokoin-stock-${formatId}.csv`);
-      setAskFormat(false);
-    } catch (err) {
-      setError(err.message || 'Export failed.');
-    } finally {
-      setBusy('');
-    }
+    getBearer()
+      .then((token) => exportStockCsv(previewFormat, token))
+      .then(async (blob) => {
+        if (cancelled) return;
+        const text = await blob.text();
+        if (cancelled) return;
+        setPreview(parseCsvPreview(text));
+        setPreviewBlob(blob);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setPreview(null);
+          setPreviewBlob(null);
+          setError(err.message || 'Export preview failed.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBusy('');
+      });
+    return () => { cancelled = true; };
+  }, [signedIn, getBearer, onImportTab, previewFormat]);
+
+  function onDownload() {
+    if (!previewBlob) return;
+    downloadBlob(previewBlob, `pokoin-stock-${previewFormat}.csv`);
   }
 
   if (!ready) return <SessionWait />;
@@ -171,28 +228,53 @@ export default function Inventory() {
 
       {onImportTab ? (
         <DeskPanel title="Export stock">
-          <div className="stock-csv-bar">
-            {askFormat ? (
-              <div className="stock-csv-bar" role="group" aria-label="Export format">
-                {FORMATS.map((row) => (
-                  <button
-                    key={row.id}
-                    type="button"
-                    className="btn"
-                    disabled={Boolean(busy)}
-                    onClick={() => onExport(row.id)}
-                  >
-                    {busy === row.id ? 'Exporting…' : row.label}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <button type="button" className="btn ghost" onClick={() => setAskFormat(true)} disabled={Boolean(busy)}>
-                Export CSV
+          <div className="stock-csv-bar" role="group" aria-label="Export format">
+            {FORMATS.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                className={row.id === previewFormat ? 'btn' : 'btn ghost'}
+                aria-pressed={row.id === previewFormat}
+                disabled={Boolean(busy) && row.id !== previewFormat}
+                onClick={() => setPreviewFormat(row.id)}
+              >
+                {busy === row.id ? 'Loading…' : row.label}
               </button>
-            )}
-            <Link className="btn" to="/mypokoin/spreadsheet">Import in spreadsheet</Link>
+            ))}
+            <button type="button" className="btn ghost" onClick={onDownload} disabled={!previewBlob || Boolean(busy)}>
+              Download CSV
+            </button>
+            <Link className="btn ghost" to="/mypokoin/spreadsheet">Import in spreadsheet</Link>
           </div>
+          {preview ? (
+            <div className="export-preview-wrap">
+              <p className="export-preview-note">
+                {preview.rows.length
+                  ? `First ${preview.rows.length} ${preview.rows.length === 1 ? 'row' : 'rows'} of the ${FORMATS.find((row) => row.id === previewFormat)?.label || ''} file.`
+                  : 'No listings to export.'}
+              </p>
+              <table className="export-preview">
+                <thead>
+                  <tr>
+                    {preview.headers.map((header) => <th key={header}>{header}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.rows.length ? preview.rows.map((cells, index) => (
+                    <tr key={index}>
+                      {preview.headers.map((header, cellIndex) => (
+                        <td key={header}>{cells[cellIndex] || ''}</td>
+                      ))}
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={Math.max(preview.headers.length, 1)}>No listings to export.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ) : busy ? <p className="muted">Loading preview…</p> : null}
         </DeskPanel>
       ) : null}
 
