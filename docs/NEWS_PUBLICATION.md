@@ -6,10 +6,9 @@ crawlable HTML on pokoin.com, one section per game, laid out like the
 marketplace: Pokémon at `https://pokoin.com/news`, every other game at
 `https://pokoin.com/<game-slug>/news` (`/one-piece/news`, `/magic/news`, …).
 
-The older Hypemeter app at `news.pokoin.com` ([NEWS.md](NEWS.md)) is being
-retired. Hermes now scouts every game itself (`src/newsroom/tcg-feeds.js`,
-`POKO_NEWS_FEED=tcg`), so nothing in the newsroom depends on it. Retirement
-steps are at the end of this file.
+The Hypemeter app at `news.pokoin.com` ([NEWS.md](NEWS.md)) stays online as a
+separate hype dashboard. The newsroom scouts every game itself
+(`src/newsroom/tcg-feeds.js`), so the publication does not depend on it.
 
 ```
 Multi-TCG feed (Hermes) ─► Poko Newsroom (Hermes, nezopt)                       ──► Telegram / Discord flash (Pokémon;
@@ -100,18 +99,13 @@ Stories never cluster, relate or cross-post across games. Only Pokémon posts
 to the Pokémon Telegram/Discord channels; another game posts socially only
 when `POKO_NEWS_TARGETS_<GAME_ID>` is set in Hermes.
 
-## Retiring news.pokoin.com
+## news.pokoin.com stays
 
-Nothing is deleted until each step is verified:
-
-1. Deploy Hermes with `POKO_NEWS_FEED=tcg` (default on this branch) and check
-   Poko's Discord news context, the scout and the bot-hospital check work
-   without news.pokoin.com.
-2. Publish the news Worker and attach the `/news*` and `/<game>/news*` routes.
-3. Add a `news.pokoin.com/* → https://pokoin.com/news` 301 (zone redirect
-   rule) so old links keep working.
-4. Remove the Vercel project and the DNS record (production change, needs
-   explicit approval).
+Decision 2026-10-05 (Giuseppe): **news.pokoin.com is not deleted.** Hypemeter
+keeps running there as the hype dashboard and as the news context that Poko on
+peer1 reads. Pokoin News articles live only on pokoin.com (`/news`,
+`/<game>/news`); the newsroom scouts with its own multi-TCG feed and does not
+depend on Hypemeter.
 
 ## Running in production (since 2026-10-05)
 
@@ -130,7 +124,11 @@ Nothing is deleted until each step is verified:
   moderation.
 
 **Cadence:** Pokémon, One Piece, Magic, Yu-Gi-Oh!, Lorcana and Riftbound get up
-to 2 articles per UTC day (6 h apart, fresh stories). Every other game gets 1
+to 2 articles per UTC day (6 h apart, fresh stories; drafts waiting in review
+count). For these games a story carried by a single specialist outlet
+(PokeBeach, Star City Games, YGOrganization, MTGGoldfish, …) or a single
+official source is enough; specialist-only drafts wait for the desk, official
+ones may auto-publish. Every other game gets 1
 article per week, picked from stories at least 2 days old so evidence can build
 up. Generation attempts are capped per period.
 
