@@ -576,7 +576,8 @@ test('shop rows show message + cart icons; row click never adds to cart', () => 
   assert.match(src, /choices > 1/);
   assert.match(src, /className="ct-qty is-single"/);
   assert.equal(src.includes('of {stock'), false);
-  assert.match(src, /<ThumbZoom src=\{full\} full alt=\{name \|\| ''\} openOnClick>/);
+  assert.match(src, /<ThumbZoom src=\{full\} full alt=\{name \|\| ''\}>/);
+  assert.equal(src.includes("closest?.('.shop-art"), false);
   assert.match(src, /className="art-cut shop-art"/);
   assert.match(src, /qty: pick/);
   assert.match(src, /writeListingDrag\(event, \{ \.\.\.mixed, qty: pick/);

@@ -25,7 +25,7 @@ function ShopScan({ image, name, setName = '' }) {
   const full = preferFullImage(image) || image;
   const thumb = homepageDerivativeUrl(image) || image;
   return (
-    <ThumbZoom src={full} full alt={name || ''} openOnClick>
+    <ThumbZoom src={full} full alt={name || ''}>
       <span className="art-cut shop-art" style={artCutVars({ set: setName, name })}>
         <img
           src={thumb}
@@ -170,10 +170,6 @@ export default function ShopListingRow({
             to={cardPath}
             onClick={(event) => {
               event.stopPropagation();
-              // Card scan click opens the overlay; name text still navigates.
-              if (event.target?.closest?.('.shop-art, .thumb-zoom-host')) {
-                event.preventDefault();
-              }
             }}
           >
             {image ? <ShopScan image={image} name={cardName} setName={setName} /> : <span className="shop-card-ph" />}
