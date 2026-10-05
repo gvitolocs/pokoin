@@ -4,12 +4,13 @@ import {
   cancelListing,
   createListing,
   fetchOwnedCollection,
+  fetchPriceCheck,
   fetchSellerListings,
   removeCollectionItem,
   requestNftShipping,
 } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { isNftHolding, partitionHoldings, splitOwnedDesk } from '../collection-holdings.js';
+import { isNftHolding, partitionHoldings, splitOwnedDesk, suggestedHoldingAsk } from '../collection-holdings.js';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { Alert, DeskPanel, EmptyDesk } from './Desk.jsx';
 
@@ -48,7 +49,7 @@ function listingMeta(listing) {
   ].filter(Boolean);
 }
 
-function HoldingRow({ row, onRemove, removing, ask, onAsk, draggable = false, onDragCard }) {
+function HoldingRow({ row, onRemove, removing, ask, suggested = false, onAsk, draggable = false, onDragCard }) {
   const nft = isNftHolding(row);
   const meta = holdingMeta(row);
   return (
@@ -70,6 +71,7 @@ function HoldingRow({ row, onRemove, removing, ask, onAsk, draggable = false, on
           <span>Ask</span>
           <input
             inputMode="numeric"
+            className={suggested ? 'is-suggested' : ''}
             value={ask}
             placeholder="PKN"
             aria-label={`Ask price for ${cardLabel(row)}`}
@@ -145,7 +147,9 @@ export default function CollectionHoldings() {
   const [removingId, setRemovingId] = useState(null);
   const [over, setOver] = useState('');
   const [asks, setAsks] = useState({});
+  const [suggestedAsks, setSuggestedAsks] = useState({});
   const asksRef = useRef(asks);
+  const editedAsks = useRef(new Set());
   asksRef.current = asks;
 
   const loadCollection = useCallback(async () => {
@@ -193,8 +197,64 @@ export default function CollectionHoldings() {
     }, 0);
 
   function setAsk(id, value) {
+    editedAsks.current.add(id);
+    setSuggestedAsks((current) => {
+      if (!current[id]) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
     setAsks((current) => ({ ...current, [id]: value }));
   }
+
+  const heldKey = heldPhysical.map((entry) => [
+    entry.holding.id,
+    entry.holding.cardId || entry.holding.blueprintId || '',
+    entry.holding.condition || '',
+    entry.holding.language || '',
+  ].join(':')).join('|');
+
+  useEffect(() => {
+    if (!signedIn || !heldKey) return undefined;
+    const holdings = heldPhysical.map((entry) => entry.holding);
+    let cancelled = false;
+    (async () => {
+      try {
+        const items = holdings.map((holding) => ({
+          cardId: String(holding.cardId || holding.blueprintId || ''),
+          condition: String(holding.condition || 'NM').toUpperCase(),
+          language: String(holding.language || '').toUpperCase(),
+        })).filter((item) => /^\d+$/.test(item.cardId));
+        if (!items.length) return;
+        const token = await getBearer();
+        const data = await fetchPriceCheck(items.slice(0, 100), token);
+        if (cancelled) return;
+        const prices = data?.prices || {};
+        const marks = {};
+        setAsks((current) => {
+          const next = { ...current };
+          for (const holding of holdings) {
+            if (editedAsks.current.has(holding.id)) continue;
+            const ask = suggestedHoldingAsk(prices, holding);
+            if (!ask) continue;
+            next[holding.id] = ask;
+            marks[holding.id] = true;
+          }
+          return next;
+        });
+        if (Object.keys(marks).length) {
+          setSuggestedAsks((current) => ({ ...current, ...marks }));
+        }
+      } catch (err) {
+        console.error('collection price suggestion failed', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // heldKey is the holdings snapshot; heldPhysical is read from that render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn, heldKey, getBearer]);
 
   function dragHolding(event, row) {
     const payload = JSON.stringify({ side: 'held', id: row.id });
@@ -389,6 +449,7 @@ export default function CollectionHoldings() {
                         key={entry.holding.id}
                         row={entry.holding}
                         ask={asks[entry.holding.id] || ''}
+                        suggested={Boolean(suggestedAsks[entry.holding.id])}
                         onAsk={setAsk}
                         draggable
                         onDragCard={dragHolding}

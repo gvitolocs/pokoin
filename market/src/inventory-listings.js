@@ -132,6 +132,40 @@ export function sortInventoryRows(rows, sort = 'newest') {
   }
 }
 
+/**
+ * Titles view: one block per card name, in the order the rows were sorted.
+ * Price high → low therefore puts the name of the dearest listing first.
+ */
+export function groupInventoryTitles(rows) {
+  const groups = new Map();
+  const order = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const title = String(row?.cardName || row?.name || 'Listing');
+    let group = groups.get(title);
+    if (!group) {
+      group = {
+        title,
+        printings: new Set(),
+        postingCount: 0,
+        copies: 0,
+        askingPkn: 0,
+        postings: [],
+      };
+      groups.set(title, group);
+      order.push(group);
+    }
+    const id = String(row?.cardId || row?.card_id || '');
+    if (id) group.printings.add(id);
+    const qty = Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0);
+    const price = Number(row?.pricePkn ?? row?.price_pkn ?? 0) || 0;
+    group.postingCount += 1;
+    group.copies += qty;
+    group.askingPkn += qty * price;
+    group.postings.push(row);
+  }
+  return order.map((group) => ({ ...group, printings: group.printings.size }));
+}
+
 /** Distinct condition/language keys present in the rows, for the filter selects. */
 export function inventoryFacets(rows) {
   const list = Array.isArray(rows) ? rows : [];

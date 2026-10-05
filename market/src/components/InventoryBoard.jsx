@@ -14,6 +14,7 @@ import {
   inventoryListingHref,
   inventoryRowDate,
   sortInventoryRows,
+  groupInventoryTitles,
   summarizeLiveInventory,
 } from '../inventory-listings.js';
 
@@ -44,33 +45,6 @@ function MarketCell({ value, pending }) {
   if (pending) return <span className="inv-mkt is-pending">…</span>;
   if (value == null) return <span className="inv-mkt is-none">—</span>;
   return <span className="inv-mkt" title={value.title}>{inventoryMarketLabel(value)}</span>;
-}
-
-function titleGroups(rows) {
-  const groups = new Map();
-  for (const row of rows) {
-    const title = String(row?.cardName || row?.name || 'Listing');
-    const group = groups.get(title) || {
-      title,
-      printings: new Set(),
-      postingCount: 0,
-      copies: 0,
-      askingPkn: 0,
-      postings: [],
-    };
-    const id = String(row?.cardId || row?.card_id || '');
-    if (id) group.printings.add(id);
-    const qty = Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0);
-    const price = Number(row?.pricePkn ?? row?.price_pkn ?? 0) || 0;
-    group.postingCount += 1;
-    group.copies += qty;
-    group.askingPkn += qty * price;
-    group.postings.push(row);
-    groups.set(title, group);
-  }
-  return [...groups.values()]
-    .map((group) => ({ ...group, printings: group.printings.size }))
-    .sort((a, b) => b.postingCount - a.postingCount || a.title.localeCompare(b.title));
 }
 
 function StatTile({ value, label, tone = '' }) {
@@ -116,7 +90,6 @@ export default function InventoryBoard({ rows, formatPrice, defaultSource = '', 
   const [language, setLanguage] = useState('');
   const [sort, setSort] = useState('price-down');
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('pokoin.invView') || 'table');
-  const [openTitle, setOpenTitle] = useState('');
   const [pricerSource, setPricerSource] = useState(defaultSource);
   const pricerOn = Boolean(pricerSource) || autoMarketColumn;
   const [prices, setPrices] = useState({});
@@ -309,35 +282,48 @@ export default function InventoryBoard({ rows, formatPrice, defaultSource = '', 
         </div>
       ) : viewMode === 'titles' ? (
         <div className="loc-list">
-          {titleGroups(view).map((group) => (
+          {groupInventoryTitles(view).map((group) => (
             <div key={group.title} className="loc-stack">
-              <button
-                type="button"
-                className="loc-stack-head loc-title-head"
-                onClick={() => setOpenTitle(openTitle === group.title ? '' : group.title)}
-              >
-                <span className="inv-card-txt">
-                  <strong>{group.title}</strong>
-                  <span className="inv-card-sub">
-                    {group.printings} {group.printings === 1 ? 'printing' : 'printings'}
-                    {' · '}
-                    {group.postingCount} {group.postingCount === 1 ? 'posting' : 'postings'}
-                    {' · '}
-                    {group.copies} {group.copies === 1 ? 'copy' : 'copies'}
-                    {' · '}
-                    asking {formatPrice(group.askingPkn)}
+              <div className="loc-stack-head">
+                <span className="inv-card">
+                  <RowThumb row={group.postings[0]} />
+                  <span className="inv-card-txt">
+                    <strong>{group.title}</strong>
+                    <span className="inv-card-sub">
+                      {group.printings} {group.printings === 1 ? 'printing' : 'printings'}
+                      {' · '}
+                      {group.postingCount} {group.postingCount === 1 ? 'posting' : 'postings'}
+                      {' · '}
+                      {group.copies} {group.copies === 1 ? 'copy' : 'copies'}
+                      {' · '}
+                      asking {formatPrice(group.askingPkn)}
+                    </span>
                   </span>
                 </span>
-                <span className="loc-count">{openTitle === group.title ? '−' : '+'}</span>
-              </button>
-              {openTitle === group.title ? (
-                <div className="loc-postings">
-                  {group.postings.map((row) => (
+              </div>
+              <div className="loc-postings">
+                {group.postings.map((row) => {
+                  const setName = String(row?.setName || row?.set_name || '').trim();
+                  const collector = String(row?.collectorNumber || row?.collector_number || '').trim();
+                  const language = listingLanguageFlag(row?.language);
+                  return (
                     <Link key={row.id} className="loc-posting" to={inventoryListingHref(row)}>
-                      <span className="loc-posting-date">{inventoryRowDate(row) || '—'}</span>
-                      <span className="inv-card-sub">
-                        {row?.setName || ''}{row?.collectorNumber ? `${row?.setName ? ' · ' : ''}#${row.collectorNumber}` : ''}
+                      <RowThumb row={row} />
+                      <span className="inv-card-txt">
+                        <strong>{setName || group.title}</strong>
+                        <span className="inv-card-sub">
+                          {collector ? `#${collector}` : ''}
+                          {language ? `${collector ? ' · ' : ''}${language.code.toUpperCase()}` : ''}
+                        </span>
                       </span>
+                      <img
+                        className={`shop-cond is-${conditionTone(row?.condition)}`}
+                        src={conditionChipSrc(row?.condition)}
+                        alt={conditionShort(row?.condition) || 'NM'}
+                        width="34"
+                        height="24"
+                        loading="lazy"
+                      />
                       <span className="inv-qty num">{Math.max(0, Number(row?.quantityAvailable ?? row?.quantity_available ?? 0) || 0)}×</span>
                       <span className="inv-price num">{formatPrice(row?.pricePkn ?? row?.price_pkn)}</span>
                       {pricerOn ? (
@@ -347,9 +333,9 @@ export default function InventoryBoard({ rows, formatPrice, defaultSource = '', 
                         {String(row?.status || '').toLowerCase() === 'paused' ? 'Paused' : 'Live'}
                       </span>
                     </Link>
-                  ))}
-                </div>
-              ) : null}
+                  );
+                })}
+              </div>
             </div>
           ))}
         </div>

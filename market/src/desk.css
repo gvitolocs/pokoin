@@ -481,6 +481,10 @@
   color: inherit;
 }
 
+.collection-ask input.is-suggested {
+  color: var(--yellow);
+}
+
 @media (max-width: 800px) {
   .collection-split {
     grid-template-columns: 1fr;

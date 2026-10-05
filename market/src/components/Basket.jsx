@@ -277,7 +277,9 @@ export function BasketRow({ row, live, checking, onSelect, onQty, onDelete, onSa
               {language.label}
             </span>
           ) : null}
-          {tags.map((tag) => <em key={tag} className="bk-tag">{tag}</em>)}
+          {tags.map((tag) => (
+            <em key={tag} className={tag === 'Reverse' ? 'bk-tag is-reverse' : 'bk-tag'}>{tag}</em>
+          ))}
         </div>
         {row.nftAvailable || row.reserveAvailable ? (
           <div className="bk-digital">

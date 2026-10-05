@@ -390,6 +390,13 @@
   font-style: normal;
 }
 
+.bk-tag.is-reverse {
+  color: #1a1408;
+  background: var(--yellow);
+  border-color: transparent;
+  font-weight: 700;
+}
+
 .bk-digital { margin-top: 0.4rem; color: var(--muted); font-size: 0.78rem; }
 
 .bk-actions {

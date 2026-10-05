@@ -24,6 +24,7 @@ import {
   liveInventoryListings,
   sameListingBox,
   sortInventoryRows,
+  groupInventoryTitles,
   summarizeLiveInventory,
 } from './inventory-listings.js';
 
@@ -126,6 +127,19 @@ test('inventory sorts by date, price, qty and name', () => {
   assert.deepEqual(sortInventoryRows(rows, 'price-down').map((r) => r.id), ['a', 'c', 'b']);
   assert.deepEqual(sortInventoryRows(rows, 'qty-down').map((r) => r.id), ['a', 'c', 'b']);
   assert.deepEqual(sortInventoryRows(rows, 'name').map((r) => r.id), ['c', 'b', 'a']);
+});
+
+test('titles follow the sorted rows instead of posting count', () => {
+  const rows = sortInventoryRows([
+    { id: 'cheap', cardName: 'Bronzong', cardId: '1', pricePkn: 40, quantityAvailable: 4 },
+    { id: 'dear', cardName: 'Nest Ball', cardId: '2', pricePkn: 660, quantityAvailable: 1 },
+    { id: 'twin', cardName: 'Nest Ball', cardId: '3', pricePkn: 20, quantityAvailable: 1 },
+  ], 'price-down');
+  const titles = groupInventoryTitles(rows);
+  assert.deepEqual(titles.map((group) => group.title), ['Nest Ball', 'Bronzong']);
+  assert.equal(titles[0].postingCount, 2);
+  assert.equal(titles[0].printings, 2);
+  assert.deepEqual(titles[0].postings.map((row) => row.id), ['dear', 'twin']);
 });
 
 test('inventory facets list distinct conditions and languages', () => {
