@@ -27,10 +27,10 @@ import {
 import { APP, marketUrl } from '../punchouts.js';
 import '../seller-home.css';
 
-const LISTINGS_LIMIT = 200;
 const MOVER_LIMIT = 10;
-// The dashboard's visual inventory is a 12-by-6 sheet of card miniatures.
-const LISTING_PREVIEW = 72;
+// Owner reads come back cheapest-first and include cancelled rows. One page
+// of 200 was 146 inactive + 54 live, so the sheet hid the rest of the stock.
+const LISTINGS_PAGE = 1000;
 
 /** Dev/local layout fixtures — never presented as live production data. */
 const PREVIEW_FIXTURE = {
@@ -240,14 +240,30 @@ export default function SellerHome() {
       setListingRows([]);
     }
     getBearer()
-      .then((token) => fetchSellerListings(uid, token, { limit: LISTINGS_LIMIT }))
-      .then((data) => {
-        if (cancelled) return;
-        const live = liveInventoryListings(data.listings || data.items || []);
+      .then(async (token) => {
+        const live = [];
+        const seen = new Set();
+        let offset = 0;
+        for (;;) {
+          const data = await fetchSellerListings(uid, token, { limit: LISTINGS_PAGE, offset });
+          const raw = data.listings || data.items || [];
+          for (const row of liveInventoryListings(raw)) {
+            const id = String(row.id || row.listingId || '');
+            if (id && seen.has(id)) continue;
+            if (id) seen.add(id);
+            live.push(row);
+          }
+          if (raw.length < LISTINGS_PAGE) break;
+          offset += raw.length;
+        }
+        return live;
+      })
+      .then((live) => {
+        if (cancelled || !live) return;
         const summary = summarizeLiveInventory(live);
         writePortfolioTilesCache(uid, { listed: summary });
         setListed(summary);
-        setListingRows(live.slice(0, LISTING_PREVIEW));
+        setListingRows(live);
       })
       .catch(() => {
         if (cancelled) return;

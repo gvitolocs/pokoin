@@ -15,8 +15,10 @@ import {
   lastOccupiedIndex,
   listingSlotEnd,
   maxOccupiedStack,
+  continueBoxCursor,
   nextFreeSlot,
   nextPositionInStack,
+  recentBoxes,
   occupiedAbsForScanBoxes,
   parseListingLocation,
   liveInventoryListings,
@@ -319,4 +321,45 @@ test('flat scan batch stays in one box group with eight postings and nine copies
   assert.equal(groups[0].copies, 9);
   assert.deepEqual(groups[0].postings.map(row => row.slotPosition), [1,2,3,4,5,6,7,8]);
   assert.equal(groups[0].postings[7].slotPositionText, '8-9');
+});
+
+test('recent boxes follow listing order and keep the newest casing', () => {
+  assert.deepEqual(recentBoxes([
+    { location: 'megaevoluzionietb·2·88' },
+    { location: 'megaevoluzionietb·2·57' },
+    { location: 'OtherBox·1' },
+    { location: '' },
+    { location: 'MegaEvoluzioniETB·1·1' },
+  ]), ['megaevoluzionietb', 'OtherBox']);
+  assert.deepEqual(recentBoxes(null), []);
+});
+
+test('a size-1 batch continues the last divider stack instead of a flat list', () => {
+  const rows = [
+    { location: 'megaevoluzionietb·1·79' },
+    { location: 'megaevoluzionietb·2·56' },
+    { location: 'megaevoluzionietb·2·88' },
+    { location: 'megaevoluzionietb·8' },
+    { location: 'other·2·9' },
+  ];
+  assert.deepEqual(continueBoxCursor(rows, 'megaevoluzionietb', 1), {
+    stack: 2, startPosition: 89, stackSize: 89,
+  });
+  // Position already past the configured size stays on that stack.
+  assert.deepEqual(continueBoxCursor(rows, 'megaevoluzionietb', 80), {
+    stack: 2, startPosition: 89, stackSize: 89,
+  });
+  // A half-full stack still continues inside it.
+  assert.deepEqual(continueBoxCursor([{ location: 'box·2·40' }], 'box', 80), {
+    stack: 2, startPosition: 41, stackSize: 80,
+  });
+  // An exactly full stack opens the next divider.
+  assert.deepEqual(continueBoxCursor([{ location: 'box·2·80' }], 'box', 80), {
+    stack: 3, startPosition: 1, stackSize: 80,
+  });
+  // Flat locations keep the size-1 walk and skip a deleted hole via the max.
+  assert.deepEqual(continueBoxCursor([{ location: 'box·7' }, { location: 'box·9' }], 'box', 1), {
+    stack: 10, startPosition: 1, stackSize: 1,
+  });
+  assert.equal(continueBoxCursor([], 'box', 1), null);
 });

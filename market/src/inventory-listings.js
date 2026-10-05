@@ -352,6 +352,56 @@ export function nextFreeSlot(rows, box, stackSize = 1) {
 }
 
 /**
+ * Boxes in the order the rows are given (newest listing first). The first
+ * name is the box the seller used last. Casing is kept from that first row.
+ */
+export function recentBoxes(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const box = listingBox(row?.location);
+    if (!box) continue;
+    const key = box.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(box);
+  }
+  return out;
+}
+
+/**
+ * Where the next scan goes in a box the seller already uses.
+ * Divider locations (`box·2·88`) continue on that stack. A size-1 batch
+ * cannot write `·stack·position`, and a position past the configured size
+ * is already on top of that stack — both stay there and grow the size so
+ * the next card fits. A stack that is exactly full still opens the next
+ * divider via nextFreeSlot. Flat `box·7` locations keep the size-1 walk.
+ */
+export function continueBoxCursor(rows, box, stackSize = 1) {
+  const size = Math.max(1, Math.trunc(Number(stackSize)) || 1);
+  const wanted = String(box || '').trim();
+  let bestStack = 0;
+  let bestPos = 0;
+  let sawPosition = false;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const end = listingSlotEnd(row?.location);
+    if (!end.box || end.box !== wanted || end.stack == null || end.position == null) continue;
+    sawPosition = true;
+    if (end.stack > bestStack || (end.stack === bestStack && end.position > bestPos)) {
+      bestStack = end.stack;
+      bestPos = end.position;
+    }
+  }
+  if (sawPosition && (size === 1 || bestPos > size)) {
+    const startPosition = bestPos + 1;
+    return { stack: bestStack, startPosition, stackSize: Math.max(size, startPosition) };
+  }
+  const next = nextFreeSlot(rows, box, size);
+  if (!next) return null;
+  return { stack: next.stack, startPosition: next.startPosition, stackSize: size };
+}
+
+/**
  * Seed map for scan `boxSlots`: bare box location → last absolute index
  * already taken in live inventory. Uses each scan row's stackSize snapshot.
  */

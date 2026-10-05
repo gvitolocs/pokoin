@@ -235,6 +235,43 @@
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
+.sd-location-input input::placeholder {
+  color: var(--muted);
+  font-weight: 600;
+}
+.sd-box-menu {
+  position: absolute;
+  z-index: 41;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 2.4rem;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  border-radius: 0.75rem;
+  border: 1px solid var(--g5);
+  background: var(--surface, #16141a);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.sd-box-menu button {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--text, #fff);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.sd-box-menu button.on,
+.sd-box-menu button:hover {
+  background: rgb(255 211 61 / 0.14);
+  color: var(--yellow);
+}
 .sd-gear {
   display: inline-flex;
   align-items: center;
