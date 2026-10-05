@@ -257,9 +257,11 @@ function attachPowerToolsOrders(list, ptOrders = []) {
       matchedOrders += 1;
     }
     const articles = Array.isArray(order.articles) ? order.articles : [];
-    const article = articles.find((row) => cleanText(row?.sourceArticleId, 40) === item.itemId)
-      || articles.find((row) => item.productId && cleanText(row?.sourceArticleId, 40) === item.productId)
-      || null;
+    const index = articles.findIndex((row) => cleanText(row?.sourceArticleId, 40) === item.itemId);
+    const fallback = index < 0
+      ? articles.findIndex((row) => item.productId && cleanText(row?.sourceArticleId, 40) === item.productId)
+      : index;
+    const article = fallback >= 0 ? articles[fallback] : null;
     if (article) matchedItems += 1;
     item.powerTools = {
       orderState: cleanText(order.state?.state ?? order.state, 40),
@@ -268,6 +270,9 @@ function attachPowerToolsOrders(list, ptOrders = []) {
       pickedQuantity: article ? Math.max(0, Math.trunc(Number(article.pickedQuantity) || 0)) : null,
       location: article ? ptDisplayLocation(ptLocationName(article)) : '',
       bin: cleanText(article?.pickingId, 40),
+      // Power Tools list order. An explicit position wins; otherwise the
+      // article's place in the Power Tools order is the position.
+      position: article ? ptArticlePosition(article, fallback) : null,
     };
   }
   return { matchedOrders, matchedItems, ptOrderCount: orders.size };
@@ -279,12 +284,48 @@ function pickLocation(item) {
   return item.location || item.powerTools?.location || '';
 }
 
-/** Picking order: location (natural), then set, collector number, name. */
+/** Box name, then each stock number from smaller to bigger. */
+function locationRank(value) {
+  const raw = String(value || '').trim();
+  const nums = [];
+  const name = raw.replace(/\d+/g, (n) => {
+    nums.push(Number(n));
+    return ' ';
+  }).replace(/[·.\s]+/g, ' ').trim().toLowerCase();
+  return { name, nums };
+}
+
+function compareLocations(a, b) {
+  const ka = locationRank(a);
+  const kb = locationRank(b);
+  const name = COLLATOR.compare(ka.name, kb.name);
+  if (name) return name;
+  const len = Math.max(ka.nums.length, kb.nums.length);
+  for (let i = 0; i < len; i += 1) {
+    const da = ka.nums[i];
+    const db = kb.nums[i];
+    if (da == null) return -1;
+    if (db == null) return 1;
+    if (da !== db) return da - db;
+  }
+  return 0;
+}
+
+function ptArticlePosition(article, index) {
+  // Power Tools assigns `pos` as the 0-based place in its article list.
+  const pos = Number(article?.pos);
+  if (Number.isFinite(pos) && pos >= 0) return pos + 1;
+  const explicit = Number(article?.position ?? article?.pickingPosition ?? article?.sortIndex);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  return index + 1;
+}
+
+/** Picking order: location box, then stock numbers small to big, then set and name. */
 function comparePickingLines(a, b) {
   const la = pickLocation(a);
   const lb = pickLocation(b);
   if (!la !== !lb) return la ? -1 : 1;
-  return COLLATOR.compare(la, lb)
+  return compareLocations(la, lb)
     || COLLATOR.compare(a.expansion, b.expansion)
     || COLLATOR.compare(a.collectorNumber, b.collectorNumber)
     || COLLATOR.compare(a.name, b.name)
@@ -303,6 +344,7 @@ module.exports = {
   attachPokoinListings,
   attachPowerToolsOrders,
   buildZeroList,
+  compareLocations,
   comparePickingLines,
   isZeroOrder,
   linkedSourceIds,

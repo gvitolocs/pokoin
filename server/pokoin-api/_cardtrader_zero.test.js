@@ -93,6 +93,33 @@ test('Pokoin listings give each line its MyPokoin location', () => {
   assert.equal(second.location, 'Box 1 · 2 · 10');
 });
 
+test('picking order is the box, then stock numbers from smaller to bigger', () => {
+  const list = buildZeroList([{
+    id: 900,
+    state: 'paid',
+    via_cardtrader_zero: true,
+    order_items: [
+      item(1, 1),
+      item(2, 2),
+      item(3, 3),
+      item(4, 4),
+    ],
+  }]);
+  attachPokoinListings(list, [
+    { id: 'a', source_listing_id: 'ct:1', location: 'FUOCOBOMBA 004·47' },
+    { id: 'b', source_listing_id: 'ct:2', location: 'FUOCOBOMBA 004·7' },
+    { id: 'c', source_listing_id: 'ct:3', location: 'HYPERBEAM BINDER·1' },
+    { id: 'd', source_listing_id: 'ct:4', location: 'FUOCOBOMBA 007·1' },
+  ]);
+  sortForPicking(list);
+  assert.deepEqual(list.weekly[0].items.map((row) => row.location), [
+    'FUOCOBOMBA 004·7',
+    'FUOCOBOMBA 004·47',
+    'FUOCOBOMBA 007·1',
+    'HYPERBEAM BINDER·1',
+  ]);
+});
+
 test('lines without any location sort after located lines', () => {
   const list = buildZeroList(ORDERS);
   attachPokoinListings(list, [{ id: 'bbbb', source_listing_id: 'ct:502', location: 'Z9' }]);
@@ -124,8 +151,25 @@ test('Power Tools state joins by CardTrader order id and order-item id', () => {
     pickedQuantity: 1,
     location: 'AA03',
     bin: '3',
+    position: 1,
   });
   assert.equal(two.powerTools.location, '', 'Power Tools "unknown" location is not a place');
+  assert.equal(two.powerTools.position, 2);
+  const explicit = buildZeroList(ORDERS);
+  attachPowerToolsOrders(explicit, [{
+    source: 'Cardtrader',
+    sourceOrderId: '900',
+    articles: [{ sourceArticleId: '1', position: 8 }],
+  }]);
+  assert.equal(explicit.weekly[0].items[0].powerTools.position, 8);
+  const zeroBased = buildZeroList(ORDERS);
+  attachPowerToolsOrders(zeroBased, [{
+    source: 'Cardtrader',
+    sourceOrderId: '900',
+    articles: [{ sourceArticleId: '1', pos: 0 }, { sourceArticleId: '2', pos: 3 }],
+  }]);
+  assert.equal(zeroBased.weekly[0].items[0].powerTools.position, 1);
+  assert.equal(zeroBased.weekly[0].items[1].powerTools.position, 4);
   assert.equal(list.pending.items[0].powerTools, null, 'a Cardmarket order never matches a CT order');
 });
 
