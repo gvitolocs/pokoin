@@ -34,17 +34,19 @@ for i in "${!sections[@]}"; do
     w="${widths[$s]}"
     h="${heights[$s]}"
     out="$OUT_DIR/fallback-$section-${w}x${h}.jpg"
-    pointsize=$(( h * 11 / 100 ))
+    pointsize=$(( h * 11 / 100 )); maxsize=$(( w * 9 / 100 )); (( pointsize > maxsize )) && pointsize=$maxsize
     labelsize=$(( h * 7 / 100 ))
-    rule="$(( w * 52 / 100 )),$(( h * 60 / 100 + 3 ))"
+    # Text is placed with -gravity NorthWest, so offsets are the top-left of
+    # each line: title at 38 %, rule at 53 %, section label at 57 %.
+    rule="$(( w * 52 / 100 )),$(( h * 53 / 100 + 3 ))"
     convert -size "${w}x${h}" "xc:#0b0a10" \
       -fill 'rgba(255,211,61,0.12)' -draw "polygon 0,$(( h * 66 / 100 )) $w,$(( h * 30 / 100 )) $w,$(( h * 52 / 100 )) 0,$(( h * 88 / 100 ))" \
-      -fill '#ffd33d' -draw "rectangle $(( w * 7 / 100 )),$(( h * 60 / 100 )) $rule" \
+      -fill '#ffd33d' -draw "rectangle $(( w * 7 / 100 )),$(( h * 53 / 100 )) $rule" \
       \( "$LOGO" -resize 120x120 \) -gravity NorthWest -geometry "+$(( w * 7 / 100 ))+$(( h * 18 / 100 ))" -composite \
       -font DejaVu-Sans-Bold -fill white -pointsize "$pointsize" \
-      -annotate "+$(( w * 7 / 100 ))+$(( h * 48 / 100 ))" 'POKOIN NEWS' \
+      -annotate "+$(( w * 7 / 100 ))+$(( h * 38 / 100 ))" 'POKOIN NEWS' \
       -font DejaVu-Sans-Bold -fill '#ffd33d' -pointsize "$labelsize" \
-      -annotate "+$(( w * 7 / 100 ))+$(( h * 56 / 100 ))" "$label" \
+      -annotate "+$(( w * 7 / 100 ))+$(( h * 57 / 100 ))" "$label" \
       -strip -sampling-factor 4:2:0 -quality 82 "$out"
   done
 done

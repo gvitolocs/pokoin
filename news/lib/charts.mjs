@@ -122,13 +122,18 @@ export function renderChart(chart, { width = 720, height = 280 } = {}) {
   }
   if (values.length < 2) return '';
 
-  const ticks = niceTicks(Math.min(...values), Math.max(...values), 4);
+  // Bars encode magnitude by length, so their axis always starts at zero;
+  // lines may use a tight range.
+  const low = chart.kind === 'bar' ? Math.min(0, ...values) : Math.min(...values);
+  const ticks = niceTicks(low, Math.max(...values), 4);
   if (ticks.length < 2) return '';
   const y0 = ticks[0];
   const y1 = ticks[ticks.length - 1];
   const span = (y1 - y0) || 1;
 
-  const padL = 64;
+  // Left padding fits the longest y label (12 px axis text ≈ 7.2 px a glyph).
+  const longestTick = Math.max(...ticks.map((tick) => formatY(tick, chart.unit).length));
+  const padL = Math.max(48, Math.ceil(longestTick * 7.2) + 14);
   const padR = 16;
   const padT = 16;
   const padB = 36;
@@ -153,7 +158,8 @@ export function renderChart(chart, { width = 720, height = 280 } = {}) {
   const xLabels = labelIndices
     .map(
       (index) =>
-        `<text class="nx-chart__xlabel" x="${round(xAt(index))}" y="${height - 10}" text-anchor="middle">${esc(formatChartDate(xs[index]))}</text>`,
+        // First/last labels anchor inward so they never overflow the frame.
+        `<text class="nx-chart__xlabel" x="${round(xAt(index))}" y="${height - 10}" text-anchor="${index === 0 ? 'start' : index === n - 1 ? 'end' : 'middle'}">${esc(formatChartDate(xs[index]))}</text>`,
     )
     .join('');
 

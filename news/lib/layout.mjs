@@ -63,6 +63,7 @@ export function renderPage({
   assets,
   game = 'pokemon',
   games = [],
+  sections = null,
 } = {}) {
   const base = gameNewsBase(game);
   const css = (assets && assets.css) || '/news/assets/news.css';
@@ -110,7 +111,7 @@ export function renderPage({
       (entry) => `<li><a href="${esc(entry.href)}"${entry.id === game ? ' aria-current="true"' : ''}>${esc(entry.name)}</a></li>`,
     ).join('')}</ul></nav>`
     : '';
-  const nav = `<nav class="nx-nav" aria-label="Sections"><ul>${sectionNav(base).map(
+  const nav = `<nav class="nx-nav" aria-label="Sections"><ul>${sectionNav(base).filter((item) => item.id === 'latest' || !sections || sections.includes(item.id)).map(
     (item) =>
       `<li><a href="${esc(item.href)}"${item.id === activeNav ? ' aria-current="page"' : ''}>${esc(item.label)}</a></li>`,
   ).join('')}</ul></nav>`;

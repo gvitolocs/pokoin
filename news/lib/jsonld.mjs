@@ -146,7 +146,7 @@ export function authorPageJsonLd() {
       name: 'Poko — Pokoin News Desk',
       url,
       description:
-        "Poko is Pokoin's AI-assisted Pokémon TCG reporter. Every article is assembled from cited sources and labelled as AI-assisted.",
+        "Poko is Pokoin's AI-assisted trading card game reporter. Every article is assembled from cited sources and labelled as AI-assisted.",
     },
   };
 }

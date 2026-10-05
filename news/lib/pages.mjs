@@ -14,7 +14,7 @@ import {
   websiteJsonLd,
 } from './jsonld.mjs';
 import { relatedStories } from './related.mjs';
-import { SITE, STATIC_PAGES } from './site.mjs';
+import { SITE, STATIC_PAGES, fallbackHero } from './site.mjs';
 import { articlePath } from './schema.mjs';
 import { sectionsFor } from './feeds.mjs';
 import { gameOf, gameName, gameNewsBase, gameSwitcher, sectionHref } from './games.mjs';
@@ -69,7 +69,7 @@ export function renderArticleCard(record, { size = 'm', showGame = false } = {})
   const dek = size === 'l' || size === 'm' ? `<p class="nx-card__dek">${esc(record.dek)}</p>` : '';
   return (
     `<article class="nx-card nx-card--${esc(size)}">` +
-    cardImage(record.hero) +
+    cardImage(record.hero || fallbackHero(record.section)) +
     `<p class="nx-card__meta"><span class="nx-type nx-type--${esc(typeSlug(record.articleType))}">` +
     `${esc(record.articleType)}</span> ` +
     (showGame ? `<span class="nx-card__game">${esc(gameName(gameOf(record)))}</span> · ` : '') +
@@ -158,7 +158,13 @@ export function renderArticlePage(record, all, ctx = {}) {
     assets: ctx.assets,
     game,
     games: gameSwitcher(all),
+    sections: navSections(game, all),
   });
+}
+
+// Other games only link sections that have stories (no empty pages).
+function navSections(game, all) {
+  return game === 'pokemon' ? null : sectionsFor(game, all);
 }
 
 const HOME_DESCRIPTION = 'Pokémon TCG news, fact checks and market data from Poko, Pokoin\'s AI-assisted news desk.';
@@ -188,6 +194,7 @@ export function renderHome(all, ctx = {}) {
     assets: ctx.assets,
     game,
     games: gameSwitcher(all),
+    sections: navSections(game, all),
   };
 
   if (!published.length) {
@@ -213,23 +220,26 @@ export function renderHome(all, ctx = {}) {
     `</div>`;
 
   const rest = published.slice(5);
+  // Topical rails never repeat a story already on the front.
+  const onFront = new Set(published.slice(0, 5).map((record) => record.id));
+  const notOnFront = (record) => !onFront.has(record.id);
   const rails = [
     { title: 'Latest', href: base, records: rest.slice(0, 8) },
     {
       title: 'Market Pulse',
       href: `${base}/market`,
-      records: published.filter((record) => ['market_pulse', 'data_deep_dive'].includes(record.template)),
+      records: published.filter(notOnFront).filter((record) => ['market_pulse', 'data_deep_dive'].includes(record.template)),
     },
-    { title: 'Reveals', href: `${base}/cards`, records: published.filter((record) => record.template === 'reveal') },
+    { title: 'Reveals', href: `${base}/cards`, records: published.filter(notOnFront).filter((record) => record.template === 'reveal') },
     {
       title: 'Explainers',
       href: `${base}/cards`,
-      records: published.filter((record) => ['explainer', 'comparison'].includes(record.template)),
+      records: published.filter(notOnFront).filter((record) => ['explainer', 'comparison'].includes(record.template)),
     },
     {
       title: 'Fact Checks',
       href: `${base}/fact-check`,
-      records: published.filter((record) => record.template === 'fact_check'),
+      records: published.filter(notOnFront).filter((record) => record.template === 'fact_check'),
     },
     // Pokémon front page: latest from the other games, each linking to its own hub.
     ...(game === 'pokemon'
@@ -290,6 +300,7 @@ export function renderSection(sectionId, all, ctx = {}) {
     assets: ctx.assets,
     game,
     games: gameSwitcher(all),
+    sections: navSections(game, all),
   });
 }
 

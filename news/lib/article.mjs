@@ -101,7 +101,7 @@ function renderDisclosure(record) {
       : '';
   return (
     `<aside class="nx-disclosure"><h2>About this article</h2>` +
-    `<p>Poko is Pokoin's AI-assisted Pokémon TCG reporter. This article was assembled from the cited ` +
+    `<p>Poko is Pokoin's AI-assisted trading card game reporter. This article was assembled from the cited ` +
     `sources, compared across outlets and checked against the evidence before publication.</p>` +
     marketplaceLine +
     `<p><a href="/news/editorial-policy">Editorial policy</a> · ` +

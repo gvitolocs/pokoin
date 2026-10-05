@@ -83,3 +83,13 @@ test('related stories never cross games', () => {
   const related = relatedStories(pokemon[0], [...fixtures, twin]);
   assert.ok(related.every((record) => (record.game || 'pokemon') === 'pokemon'));
 });
+
+test('a game\'s section nav only links pages that exist', () => {
+  const { outDir, read } = build();
+  const hub = read('lorcana/news.html');
+  const links = [...hub.matchAll(/href="(\/lorcana\/news\/[a-z-]+)"/g)].map((match) => match[1])
+    .filter((href) => !href.endsWith(lorcana.slug));
+  assert.ok(links.length > 0);
+  for (const href of links) assert.ok(existsSync(join(outDir, `${href.slice(1)}.html`)), `${href} must exist`);
+  assert.ok(!hub.includes('href="/lorcana/news/market"'));
+});
