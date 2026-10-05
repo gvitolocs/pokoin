@@ -114,7 +114,7 @@ export default function InventoryBoard({ rows, formatPrice, defaultSource = '', 
   const [status, setStatus] = useState('');
   const [condition, setCondition] = useState('');
   const [language, setLanguage] = useState('');
-  const [sort, setSort] = useState('newest');
+  const [sort, setSort] = useState('price-down');
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('pokoin.invView') || 'table');
   const [openTitle, setOpenTitle] = useState('');
   const [pricerSource, setPricerSource] = useState(defaultSource);
