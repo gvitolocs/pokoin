@@ -672,6 +672,9 @@ function MoverCard({ card }) {
   );
 }
 
+// Same 12-by-6 miniature sheet as CardTrader 1-DR.
+const LISTING_PREVIEW = 72;
+
 function ListingPreviewTile({ row, href }) {
   // Your listings sheet: art-only miniatures. Name stays on aria-label; no
   // set / condition / qty / price chrome on the tile itself.
@@ -717,6 +720,7 @@ export function SellerDashboardView({
   historySeries = [],
   historyPending = false,
 }) {
+  const [showAllListings, setShowAllListings] = useState(false);
   const oneDayReadyCards = cardTraderAssets?.oneDayReady
     ? Math.max(0, Number(cardTraderAssets.totals?.cards) || 0)
     : 0;
@@ -738,6 +742,7 @@ export function SellerDashboardView({
   const oneDayReadyTotals = cardTraderAssets?.oneDayReady ? cardTraderAssets.totals || null : null;
   const oneDayReadyValue = Math.max(0, Number(oneDayReadyTotals?.valuePkn) || 0);
   const oneDayReadyPriced = Math.max(0, Number(oneDayReadyTotals?.pricedCards) || 0);
+  const shownListings = showAllListings ? listingRows : listingRows.slice(0, LISTING_PREVIEW);
   // Today's chart point is the wallet and 1-DR value shown on this tile.
   const historyLive = useMemo(() => ({
     currencyPkn: balance,
@@ -906,7 +911,7 @@ export function SellerDashboardView({
           ) : null}
           {!listed?.failed && listingRows.length ? (
             <div className="seller-listing-list" data-testid="your-listings">
-              {listingRows.map((row) => (
+              {shownListings.map((row) => (
                 <ListingPreviewTile
                   key={row.id || `${row.cardId}-${row.pricePkn}`}
                   row={row}
@@ -914,6 +919,11 @@ export function SellerDashboardView({
                 />
               ))}
             </div>
+          ) : null}
+          {!listed?.failed && listingRows.length > LISTING_PREVIEW ? (
+            <button type="button" className="seller-panel-link ct1dr-more" onClick={() => setShowAllListings((all) => !all)}>
+              {showAllListings ? 'Show fewer' : `Show all ${listingRows.length}`}
+            </button>
           ) : null}
           {!listed?.failed && !listingRows.length && !loading ? (
             <EmptyDesk nested title="No cards listed yet" lede="Scan a pile and list what you want to sell.">

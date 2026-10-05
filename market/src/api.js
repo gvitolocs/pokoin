@@ -2449,7 +2449,7 @@ export function fetchSellerShop(username, {
   rarity = '',
   reverse = false,
   firstEdition = false,
-  sort = 'price-asc',
+  sort = 'price-desc',
   game: marketplaceGame = game().apiGame,
   book = false,
   fresh = false,

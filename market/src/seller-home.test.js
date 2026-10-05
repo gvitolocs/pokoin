@@ -142,6 +142,9 @@ test('SellerHome Portfolio uses authenticated collection summary API', () => {
   assert.match(viewSrc, /Trending on Pokoin/);
   assert.match(viewSrc, /marketUrl\(cardHref\(card\)\)/);
   assert.match(viewSrc, /Your listings/);
+  assert.match(viewSrc, /const LISTING_PREVIEW = 72/);
+  assert.match(viewSrc, /listingRows\.slice\(0, LISTING_PREVIEW\)/);
+  assert.match(viewSrc, /Show all \$\{listingRows\.length\}/);
   assert.match(viewSrc, /ListingPreviewTile/);
   assert.doesNotMatch(viewSrc, /ListingPreviewRow/);
   assert.doesNotMatch(viewSrc, /seller-listing-copy/);
