@@ -31,7 +31,7 @@ node "$STAGE/scripts/collect-instant-api.js" --json >"$STAGE/artifact.json" \
 node --test \
   "$STAGE/scripts/collect-instant-api.test.js" \
   "$STAGE/server/pokoin-api/_listing_inventory.test.js" \
-  "$STAGE/server/pokoin-api/_valkey.test.js" \
+  "$STAGE/server/pokoin-api/_redis_cache.test.js" \
   "$STAGE/server/pokoin-api/_read_model_cache.test.js" \
   "$STAGE/server/pokoin-api/_instant_architecture.test.js" \
   "$STAGE/server/api/_suggest_catalog.test.js" \

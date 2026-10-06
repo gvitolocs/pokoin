@@ -18,6 +18,7 @@ import { collectPrintingThumbUrls, preloadSuggestThumbs } from './suggest-images
 import { realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
 export { artistNameFromSlug, artistSlug } from './artist-name.js';
 import { peekStoredCardPage, rememberStoredCardPage } from './card-page-cache.js';
+import { printingSlugFromCanonicalPath } from './card-path.js';
 import {
   clearListingsInflight,
   dropListing,
@@ -1427,9 +1428,7 @@ export function rememberNeighbors(center, neighbors) {
 }
 
 function slugFromCard(card) {
-  const path = String(card?.canonicalPath || card?.canonical_path || '');
-  const parts = path.split('/').filter(Boolean);
-  return parts[4] || '';
+  return printingSlugFromCanonicalPath(card?.canonicalPath || card?.canonical_path || '');
 }
 
 function preloadCardArt(card) {

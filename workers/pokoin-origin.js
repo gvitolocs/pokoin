@@ -1,7 +1,12 @@
+import { GAMES } from '../market/src/game.js';
 import { handleMarketplaceCardOgRequest } from './marketplace-card-og.js';
 import { handleMarketplaceHubOgRequest } from './marketplace-hub-og.js';
 import { handleMarketplaceHomeRequest } from './marketplace-home.js';
 import { fetchOriginOrWorking } from './working-page.js';
+
+const GAME_SLUG_RE = Object.values(GAMES).map((game) => game.slug).filter(Boolean).join('|');
+const GAME_PREFIX_RE = GAME_SLUG_RE ? `(?:(?:${GAME_SLUG_RE})/)?` : '';
+const DESK_LANG_RE = '[a-z]{2,3}(?:-[a-z]{2})?';
 
 const SATELLITE_HOSTS = {
   'onepiece.pokoin.com': { slug: 'one-piece', game: 'one_piece' },
@@ -42,11 +47,17 @@ export function withSatelliteMarketplaceGame(request) {
 }
 
 export function isMarketplaceDeskPath(pathname = '') {
-  return /^\/marketplace\/[a-z]{2}\/cards\/[^/]+/i.test(String(pathname || ''));
+  return new RegExp(
+    `^/${GAME_PREFIX_RE}marketplace/${DESK_LANG_RE}/cards/[^/]+`,
+    'i',
+  ).test(String(pathname || ''));
 }
 
 export function isMarketplaceSellerPath(pathname = '') {
-  return /^\/marketplace\/[a-z]{2}\/users\/[^/]+/i.test(String(pathname || ''));
+  return new RegExp(
+    `^/${GAME_PREFIX_RE}marketplace/${DESK_LANG_RE}/users/[^/]+`,
+    'i',
+  ).test(String(pathname || ''));
 }
 
 const EXTENSION_ACCOUNT_PATHS = new Set([

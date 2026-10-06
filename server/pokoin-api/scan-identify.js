@@ -5,6 +5,7 @@
  *
  *   POST /api/scan/identify?catalog=&top_k=&live=&multi=&album=   multipart `file`
  *   POST /api/scan/identify-album                                   multipart `file` ×N
+ *   GET  /api/scan/print?ids=&wait_ms=                               print strip (second pass)
  *   GET  /api/scan/catalogs                                         recognition catalogs
  *   GET  /api/scan/health                                           which workers answer
  *
@@ -28,7 +29,7 @@ const PRIMARY_TIMEOUT_MS = Number(process.env.SCAN_PRIMARY_TIMEOUT_MS || 6000);
 const FALLBACK_TIMEOUT_MS = Number(process.env.SCAN_FALLBACK_TIMEOUT_MS || 30000);
 // After a primary failure, skip it for a short while instead of paying its timeout on every scan.
 const PRIMARY_COOLDOWN_MS = Number(process.env.SCAN_PRIMARY_COOLDOWN_MS || 15000);
-const QUERY_KEYS = ['catalog', 'top_k', 'live', 'multi', 'album'];
+const QUERY_KEYS = ['catalog', 'top_k', 'live', 'multi', 'album', 'ids', 'wait_ms'];
 
 let primaryDownUntil = 0;
 
@@ -50,7 +51,18 @@ function clientIp(req) {
 function workerPath(route, query = {}) {
   const params = new URLSearchParams();
   for (const key of QUERY_KEYS) {
-    if (query[key] != null && query[key] !== '') params.set(key, String(query[key]).slice(0, 64));
+    if (query[key] == null || query[key] === '') continue;
+    const value = String(query[key]);
+    if (key === 'ids') {
+      if (!/^[0-9a-f,]{1,1200}$/.test(value)) continue;
+      params.set(key, value);
+    } else if (key === 'wait_ms') {
+      const n = Math.round(Number(value));
+      if (!Number.isFinite(n)) continue;
+      params.set(key, String(Math.min(3000, Math.max(0, n))));
+    } else {
+      params.set(key, value.slice(0, 64));
+    }
   }
   const qs = params.toString();
   return `${route}${qs ? `?${qs}` : ''}`;
@@ -185,6 +197,7 @@ async function health(req, res) {
 const identify = makeHandler('/identify', { method: 'POST' });
 module.exports = identify;
 module.exports.identify = identify;
+module.exports.printStrip = makeHandler('/print', { method: 'GET' });
 module.exports.identifyAlbum = makeHandler('/identify-album', { method: 'POST' });
 module.exports.catalogs = makeHandler('/catalogs', { method: 'GET' });
 module.exports.health = health;
