@@ -27,7 +27,7 @@ git -C "$REPO" merge-base --is-ancestor "$COMMIT" origin/main \
 say "stage exact origin/main commit $COMMIT"
 git -C "$REPO" archive "$COMMIT" server/pokoin-api server/scan scripts/pokoin-scan-pi-tunnel.service | tar -C "$STAGE" -xf -
 SRC="$STAGE/server/pokoin-api"
-FILES=(scan-identify.js scan-identify-album.js scan-catalogs.js scan-health.js)
+FILES=(scan-identify.js scan-identify-album.js scan-print.js scan-catalogs.js scan-health.js)
 for file in "${FILES[@]}"; do node --check "$SRC/$file"; done
 node --test "$SRC/scan-identify.test.js"
 
@@ -74,7 +74,7 @@ ssh pi-home "cat '/srv/pokoin/api/$release/server/api-route-manifest.js'" > "$ST
 node -e '
 const fs = require("node:fs");
 const rows = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).filter((r) => r.path.startsWith("/api/scan/"));
-if (rows.length !== 4) throw new Error(`expected 4 scan routes, got ${rows.length}`);
+if (rows.length !== 5) throw new Error(`expected 5 scan routes, got ${rows.length}`);
 fs.writeFileSync(process.argv[2], JSON.stringify(rows, null, 2));
 ' "$SRC/route-definitions.json" "$STAGE/scan-routes.json"
 node "$SRC/patch-route-manifest.js" "$STAGE/manifest.js" "$STAGE/scan-routes.json"
