@@ -20,10 +20,9 @@ API). Do not alias `api.pokoin.com` here.
 | Process | `node server/oracle-api-server.js` (full route manifest) |
 | `/healthz` `service` | `cardtrader-oracle-api` (`POKOIN_API_SERVICE_NAME`) |
 | Postgres | nezopt NVMe through reverse tunnel `127.0.0.1:15543` → `127.0.0.1:25432`. `MARKETPLACE_DATABASE_SSL=0` |
-| Health skips | `PIPELINE_HEALTH_SKIP=valkey,meili,cdn` — those belong to the Pi public API. `ok` follows **postgres** (NVMe via tunnel). |
+| Health skips | `PIPELINE_HEALTH_SKIP=redis,cdn` — cache and CDN belong to the Pi public API. `ok` follows **postgres** (NVMe via tunnel). |
 
-Valkey on this VM (`pokoin-valkey`) is optional local cache. It is not the Pi
-marketplace Valkey.
+Redis on this VM is optional local cache. It is separate from Pi `pokoin-redis`.
 
 ## What it is not
 
@@ -85,7 +84,7 @@ curl -sS http://127.0.0.1:18080/healthz
 ```
 
 `postgres.ok` must be true (tunnel + 15T). `ok` follows postgres only
-(`PIPELINE_HEALTH_SKIP=valkey,meili,cdn`). Under a live dump, `/healthz`
+(`PIPELINE_HEALTH_SKIP=redis,cdn`). Under a live dump, `/healthz`
 uses `PIPELINE_HEALTH_TIMEOUT_MS=4000`.
 
 ## Topology
@@ -115,7 +114,7 @@ Vercel pokoin.com SPA  /api/* rewrite
 | --- | --- | --- |
 | Oracle GET | Oracle RAM, then JSON copied to nezopt NVMe | Crawl CardTrader expansion products |
 | nezopt writer | NVMe Postgres (container `pokoin-marketplace-postgres-15t`; HDD rollback only) | Historicization: live book + sold diffs |
-| Pi | SSD replica of the writer | Public API + Meili/Valkey. No dump writes |
+| Pi | SSD replica of the writer | Public API + Meili/Redis. No dump writes |
 | SPA | none | `pokoin.com` → `api.pokoin.com` → Pi |
 
 Card desk last-median and gold graph use replica `cardtrader_sold_daily`,

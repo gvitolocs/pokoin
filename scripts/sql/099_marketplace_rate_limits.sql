@@ -3,7 +3,7 @@
 -- Backs limitSecurityCritical() in server/pokoin-api/_rate_limit.js: the same
 -- fail-closed Postgres window pattern as scan_rate_limits, for brute-force,
 -- payment, and paid-external-API paths that must never rely on the fail-open
--- Valkey limiter. Buckets are rl:{scope}:{sha256(identity)[0:32]} so raw IPs
+-- Redis limiter. Buckets are rl:{scope}:{sha256(identity)[0:32]} so raw IPs
 -- or tokens never land in the database.
 -- Apply on the nezopt writer:
 --   docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace \

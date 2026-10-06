@@ -29,7 +29,6 @@ SHOP_FILES=(
   _redis_ns.js
   _read_model_cache.js
   _marketplace_cache_invalidate.js
-  _valkey.js
 )
 for file in "${SHOP_FILES[@]}"; do
   [[ -f "$SRC/$file" ]] || die "commit is missing server/pokoin-api/$file"

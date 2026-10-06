@@ -56,7 +56,7 @@ namespace `pokoin-overflow`.
 | `meili` | Meilisearch **v1.53.1** (production pin) copy of `marketplace_cards` + `marketplace_name_tokens` |
 | `meili-delta` | CronJob every 2 min — the Pi's own `scripts/meili-sync-marketplace-delta.js` |
 | `meili-full` | CronJob 03:17 — full rebuild of both indexes (drift guard) |
-| `valkey` | Cache, 256 MB LRU, no persistence |
+| Redis | Stays on the Pi (`pokoin-redis` `:6380`). Overflow pods do not run a second cache. |
 
 Overflow pods **read from the writer Postgres** on nezopt (freshest data; the Pi
 reads its replica). UFW drops container → host traffic, so pods reach the writer

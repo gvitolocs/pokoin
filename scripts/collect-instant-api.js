@@ -103,21 +103,8 @@ function validate(root = repoRoot()) {
   const files = [];
   for (const name of shipNames) {
     const rel = [...walked.files].find((file) => path.basename(file) === name);
-    if (rel) {
-      files.push(rel);
-      continue;
-    }
-    // Compatibility shims (server/pokoin-api/_valkey.js re-exports Redis) are
-    // listed in ship so a deploy still overlays them for require() calls that
-    // live outside this closure. They are not handler entries.
-    const shim = ['server/pokoin-api', 'server/api']
-      .map((dir) => path.join(dir, name))
-      .find((candidate) => {
-        const full = path.join(root, candidate);
-        return fs.existsSync(full) && fs.statSync(full).isFile();
-      });
-    if (!shim) errors.push(`ship module ${name} is not in the require closure`);
-    else files.push(shim);
+    if (rel) files.push(rel);
+    else errors.push(`ship module ${name} is not in the require closure`);
   }
   files.sort();
 

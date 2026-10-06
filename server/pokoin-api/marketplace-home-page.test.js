@@ -44,14 +44,14 @@ function fakeRedisCache() {
  * lazily required inside defaultLoadHomeSnapshot.
  */
 async function withHomeHandler(run, { railsCardCount = 0, game = 'pokemon' } = {}) {
-  const valkey = fakeRedisCache();
+  const redis = fakeRedisCache();
   const calls = { newest: 0, hot: 0, readRails: 0 };
   let currentGame = game;
   const originalLoad = Module._load;
   delete require.cache[TARGET];
   delete require.cache[path.join(__dirname, '_read_model_cache.js')];
   Module._load = function load(request, parent, isMain) {
-    if (request === './_redis_cache') return valkey;
+    if (request === './_redis_cache') return redis;
     if (request === './_marketplace_game') {
       return {
         parseGameFromRequest: () => currentGame,
@@ -108,7 +108,7 @@ async function withHomeHandler(run, { railsCardCount = 0, game = 'pokemon' } = {
   };
   try {
     const handler = require(TARGET);
-    await run({ handler, valkey, calls });
+    await run({ handler, redis, calls });
   } finally {
     Module._load = originalLoad;
     delete require.cache[TARGET];
@@ -117,8 +117,8 @@ async function withHomeHandler(run, { railsCardCount = 0, game = 'pokemon' } = {
 }
 
 test('a cached non-empty snapshot is served without touching SQL or rails', async () => {
-  await withHomeHandler(async ({ handler, valkey, calls }) => {
-    valkey.store.set(`${HOME_KEY}:g0`, { cards: [{ id: '1' }], sections: {} });
+  await withHomeHandler(async ({ handler, redis, calls }) => {
+    redis.store.set(`${HOME_KEY}:g0`, { cards: [{ id: '1' }], sections: {} });
     const snapshot = await handler._test.defaultLoadHomeSnapshot({ limit: 36 });
     assert.deepEqual(snapshot.cards, [{ id: '1' }]);
     assert.equal(snapshot.cacheSource, 'redis');
@@ -128,8 +128,8 @@ test('a cached non-empty snapshot is served without touching SQL or rails', asyn
 });
 
 test('a cached EMPTY snapshot is a valid hit (no SQL fallback per request)', async () => {
-  await withHomeHandler(async ({ handler, valkey, calls }) => {
-    valkey.store.set(`${HOME_KEY}:g0`, { cards: [], sections: {} });
+  await withHomeHandler(async ({ handler, redis, calls }) => {
+    redis.store.set(`${HOME_KEY}:g0`, { cards: [], sections: {} });
     const snapshot = await handler._test.defaultLoadHomeSnapshot({ limit: 36 });
     assert.deepEqual(snapshot.cards, []);
     assert.equal(calls.newest, 0, 'empty snapshot must not re-run the SQL fallback');
@@ -138,8 +138,8 @@ test('a cached EMPTY snapshot is a valid hit (no SQL fallback per request)', asy
 });
 
 test('a malformed cache payload is treated as a miss and recomputed', async () => {
-  await withHomeHandler(async ({ handler, valkey, calls }) => {
-    valkey.store.set(`${HOME_KEY}:g0`, 'garbage');
+  await withHomeHandler(async ({ handler, redis, calls }) => {
+    redis.store.set(`${HOME_KEY}:g0`, 'garbage');
     const snapshot = await handler._test.defaultLoadHomeSnapshot({ limit: 36 });
     assert.equal(Array.isArray(snapshot.cards), true);
     assert.equal(calls.newest, 1, 'malformed value must fall through to SQL');
@@ -147,44 +147,44 @@ test('a malformed cache payload is treated as a miss and recomputed', async () =
 });
 
 test('a pokemon miss falls through empty rails to SQL and writes one snapshot with the normalized 20s TTL', async () => {
-  await withHomeHandler(async ({ handler, valkey, calls }) => {
+  await withHomeHandler(async ({ handler, redis, calls }) => {
     const snapshot = await handler._test.defaultLoadHomeSnapshot({ limit: 36 });
     assert.equal(calls.readRails, 1);
     assert.equal(snapshot.fromRails, undefined, 'an empty rails vector falls through to SQL');
     assert.equal(calls.newest > 0, true);
-    const writes = valkey.sets.filter((set) => set.key === `${HOME_KEY}:g0`);
+    const writes = redis.sets.filter((set) => set.key === `${HOME_KEY}:g0`);
     assert.equal(writes.length, 1);
     assert.equal(writes[0].ttlSeconds, 20, 'every game writes the same 20s TTL');
   });
 });
 
 test('an accepted rails vector is cached with the same 20s TTL', async () => {
-  await withHomeHandler(async ({ handler, valkey, calls }) => {
+  await withHomeHandler(async ({ handler, redis, calls }) => {
     const snapshot = await handler._test.defaultLoadHomeSnapshot({ limit: 36 });
     assert.equal(snapshot.fromRails, true);
     assert.equal(calls.newest, 0, 'accepted rails vector skips the SQL fallback');
-    const writes = valkey.sets.filter((set) => set.key === `${HOME_KEY}:g0`);
+    const writes = redis.sets.filter((set) => set.key === `${HOME_KEY}:g0`);
     assert.equal(writes.length, 1);
     assert.equal(writes[0].ttlSeconds, 20);
   }, { railsCardCount: 3 });
 });
 
 test('satellite games skip rails and write the same 20s TTL on the game-scoped key (no 60s branch)', async () => {
-  await withHomeHandler(async ({ handler, valkey, calls }) => {
+  await withHomeHandler(async ({ handler, redis, calls }) => {
     const snapshot = await handler._test.defaultLoadHomeSnapshot({ limit: 36 });
     assert.equal(Array.isArray(snapshot.cards), true);
     assert.equal(calls.readRails, 0, 'satellite games skip the pokemon rails');
-    const writes = valkey.sets.filter((set) => set.key === `${MAGIC_HOME_KEY}:g0`);
+    const writes = redis.sets.filter((set) => set.key === `${MAGIC_HOME_KEY}:g0`);
     assert.equal(writes.length, 1);
     assert.equal(writes[0].ttlSeconds, 20);
   }, { game: 'magic' });
 });
 
 test('an empty SQL result is cached so a catalog hiccup does not become one uncached query per request', async () => {
-  await withHomeHandler(async ({ handler, valkey }) => {
+  await withHomeHandler(async ({ handler, redis }) => {
     const snapshot = await handler._test.defaultLoadHomeSnapshot({ limit: 36 });
     assert.deepEqual(snapshot.cards, []);
-    const writes = valkey.sets.filter((set) => set.key === `${HOME_KEY}:g0`);
+    const writes = redis.sets.filter((set) => set.key === `${HOME_KEY}:g0`);
     assert.equal(writes.length, 1, 'empty snapshot must still be written');
     assert.equal(writes[0].value.cards.length, 0);
     assert.equal(writes[0].ttlSeconds, 20);

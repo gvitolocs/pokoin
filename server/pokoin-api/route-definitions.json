@@ -969,7 +969,7 @@
       ],
       "services": [
         "Firebase Admin (Firestore news_comments)",
-        "Redis/Valkey rate limit (best effort)"
+        "Redis rate limit (best effort)"
       ]
     }
   }

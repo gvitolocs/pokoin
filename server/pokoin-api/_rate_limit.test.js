@@ -6,8 +6,8 @@ const test = require('node:test');
 const redisCache = require('./_redis_cache');
 const rateLimit = require('./_rate_limit');
 
-const TEST_HOST = process.env.REDIS_CACHE_TEST_HOST || process.env.VALKEY_TEST_HOST || '127.0.0.1';
-const TEST_PORT = Number(process.env.REDIS_CACHE_TEST_PORT || process.env.VALKEY_TEST_PORT || 6390);
+const TEST_HOST = process.env.REDIS_CACHE_TEST_HOST || '127.0.0.1';
+const TEST_PORT = Number(process.env.REDIS_CACHE_TEST_PORT || 6390);
 
 function restoreServerConfig() {
   redisCache.configure({ host: TEST_HOST, port: TEST_PORT, timeoutMs: 400 });

@@ -213,7 +213,7 @@ Mechanics:
   (CORS) instead of the Vercel `/api` rewrite, because streaming through
   that rewrite is not verified.
 - The API runs as **one** process (`ecosystem.config.cjs instances: 1`).
-  Scaling out requires moving the bus to Valkey pub/sub; the cursor protocol
+  Scaling out requires moving the bus to Redis pub/sub; the cursor protocol
   does not change.
 
 ## Phone (`scan.pokoin.com/connect`)
