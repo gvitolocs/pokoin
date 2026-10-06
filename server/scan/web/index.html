@@ -1030,7 +1030,7 @@
       drawBoxes(data.boxes, data.img_w, data.img_h, opts?.roll || 0, opts?.frame?.w || 0, opts?.frame?.h || 0);
       if (scanConnect) {
         // Paired with the dashboard: never open the card page; the phone only reports scans.
-        if (livePass) scanConnect.onResult(data, { blob, capturedAt: opts.capturedAt, requestAt, respondedAt });
+        if (livePass) scanConnect.onResult(data, { blob, capturedAt: opts.capturedAt, requestAt, respondedAt, roll: Math.round(opts.roll || 0) });
         return data;
       }
       if (mode === "multi") {

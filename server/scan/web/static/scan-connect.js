@@ -447,7 +447,7 @@
       diagnosticQueue()?.record(kind, {
         capturedAt: context?.capturedAt, requestAt: context?.requestAt,
         respondedAt: context?.respondedAt, status: context?.status,
-        error: context?.error, detectMs: data?.detect_ms, identifyMs: data?.identify_ms,
+        error: context?.error, roll: context?.roll, detectMs: data?.detect_ms, identifyMs: data?.identify_ms,
         orientations: data?.orientations, busy: !!data?.busy, paused,
         emitted: !!result, gateBefore: before, gateAfter: gate.diagnostic,
         boxes: (data?.boxes || []).slice(0,8).map(b=>({xyxy:b.xyxy,conf:b.conf})),

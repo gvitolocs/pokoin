@@ -345,3 +345,10 @@ test('no unload handler frees the pairing: reloading the phone keeps the session
   assert.equal((src.match(/action=leave/g) || []).length, 1, 'only the Disconnect button sends leave');
   assert.match(src, /action=leave/);
 });
+
+test('diagnostics keep the capture roll so a real phone can confirm the tilt sign', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'web', 'static', 'scan-connect.js'), 'utf8');
+  assert.match(src, /roll: context\?\.roll/);
+  const page = fs.readFileSync(path.join(__dirname, '..', 'web', 'index.html'), 'utf8');
+  assert.match(page, /scanConnect\.onResult\(data, \{[^}]*roll: Math\.round\(opts\.roll \|\| 0\)/);
+});
