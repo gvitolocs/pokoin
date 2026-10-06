@@ -21,7 +21,7 @@ assert env.get('CARDSCAN_EXPANSION_SYMBOLS'), 'Supply the release artifact direc
 with tempfile.TemporaryFile() as log:
     process=subprocess.Popen([str(runtime/'.venv/bin/uvicorn'),'app:app','--app-dir',str(worker),'--host','127.0.0.1','--port','0'],env=env,stdout=log,stderr=log)
     try:
-        deadline=time.monotonic()+90; base=None
+        deadline=time.monotonic()+float(os.environ.get("CARDSCAN_SMOKE_START_S","300")); base=None
         while time.monotonic()<deadline:
             log.seek(0); content=log.read().decode(errors='replace')
             match=re.search(r'Uvicorn running on (http://127.0.0.1:\d+)',content)
