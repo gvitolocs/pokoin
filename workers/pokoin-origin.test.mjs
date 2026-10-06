@@ -7,11 +7,19 @@ test('marketplace desk paths are the Pokoin card pages', () => {
   assert.equal(isMarketplaceDeskPath('/marketplace/en/cards/548832/mew-ex'), true);
   assert.equal(isMarketplaceDeskPath('/marketplace/en'), false);
   assert.equal(isMarketplaceDeskPath('/api/marketplace-home'), false);
+  assert.equal(isMarketplaceDeskPath('/one-piece/marketplace/en/cards/598560'), true);
+  assert.equal(isMarketplaceDeskPath('/one-piece/marketplace/en/cards/598560/luffy'), true);
+  assert.equal(isMarketplaceDeskPath('/star-wars/marketplace/en/cards/795832/student'), true);
+  assert.equal(isMarketplaceDeskPath('/marketplace/zht/cards/42'), true);
+  assert.equal(isMarketplaceDeskPath('/not-a-game/marketplace/en/cards/1'), false);
+  assert.equal(isMarketplaceDeskPath('/one-piece/marketplace'), false);
 });
 
 test('side-panel iframe may open seller and account pages, not only card desks', () => {
   assert.equal(isMarketplaceSellerPath('/marketplace/en/users/giuseppe'), true);
   assert.equal(isExtensionFramePath('/marketplace/en/cards/548832'), true);
+  assert.equal(isExtensionFramePath('/star-wars/marketplace/en/cards/795832/student'), true);
+  assert.equal(isMarketplaceSellerPath('/one-piece/marketplace/en/users/redshakkio'), true);
   assert.equal(isExtensionFramePath('/marketplace/en/users/giuseppe'), true);
   assert.equal(isExtensionFramePath('/profile'), true);
   assert.equal(isExtensionFramePath('/auth'), true);
