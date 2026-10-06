@@ -23,7 +23,7 @@ sudo docker run -d --name "$NAME" --restart unless-stopped --network host \
   --env-file "$ENV_FILE" \
   -e POKOIN_API_SERVICE_NAME=cardtrader-oracle-api \
   -e MARKETPLACE_DATABASE_SSL=0 \
-  -e PIPELINE_HEALTH_SKIP=valkey,meili,cdn \
+  -e PIPELINE_HEALTH_SKIP=redis,cdn \
   -e PIPELINE_HEALTH_TIMEOUT_MS=4000 \
   -v "$CURRENT:/app" \
   -w /app \

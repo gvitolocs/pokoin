@@ -1069,16 +1069,16 @@ paint: [HOME_FIRST_PAINT.md](HOME_FIRST_PAINT.md).
 Pi `GET /api/marketplace-home-page` remains the fallback if the Worker is
 skipped; that handler prefers `marketplace_rails` then newest/hot SQL.
 
-**Redis on the Pi (not Valkey).** Marketplace cache and Redis Search share
+**Redis on the Pi.** Marketplace cache and Redis Search share
 `pokoin-redis` on the **Pi** (`127.0.0.1:6380`, `scripts/install-pokoin-redis.sh`).
-Canonical client: `server/pokoin-api/_redis_cache.js` (`REDIS_HOST`/`REDIS_PORT`;
-`VALKEY_*` is a temporary fallback). Namespaces:
+Canonical client: `server/pokoin-api/_redis_cache.js` (`REDIS_HOST`/`REDIS_PORT`).
+Namespaces:
 `pokoin:card:*` (search docs), `pokoin:marketplace:v1:*` (home/card/search/
 seller-shop/CT-live/gen), `pokoin:seller:v1:*` (public profile),
 `pokoin:rl:v1:*`, `pokoin:lock:v1:*`, `pokoin:reference:v1:*`. Listing mutations
 invalidate immediately via `_marketplace_cache_invalidate.js` (plus outbox
 sync). Eviction: `volatile-lru` / `maxmemory 1400mb` so search docs without TTL
-are not evicted. Valkey is retired (`retired: ['meili', 'valkey']` in readiness).
+are not evicted. Readiness reports `retired: ['meili']`.
 Do **not** put Redis on `pokoin-peer1`. Pi `marketplace_rails` is the SPA source
 of truth.
 

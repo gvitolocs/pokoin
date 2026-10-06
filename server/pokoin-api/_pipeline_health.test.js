@@ -104,7 +104,7 @@ for (const protocol of ['http', 'https']) {
     for (const dependency of ['postgres', 'redis']) {
       assert.equal(result.checks[dependency].ok, true);
     }
-    assert.equal(JSON.stringify(result.retired), JSON.stringify(['meili', 'valkey']));
+    assert.equal(JSON.stringify(result.retired), JSON.stringify(['meili']));
   });
 
   test(`${protocol} CDN connection errors remain visible`, async () => {
@@ -146,7 +146,6 @@ test('readiness requires postgres and redis; liveness does not probe them', asyn
     assert.equal(result.checks[dependency].ok, true);
   }
   assert.equal(result.checks.meili, undefined);
-  assert.equal(result.checks.valkey, undefined);
 });
 
 test('overflow manifest probes the remote CDN without skipping a dependency', () => {

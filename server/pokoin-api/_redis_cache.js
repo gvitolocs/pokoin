@@ -8,23 +8,19 @@
  *
  * Commands written while a reply is outstanding are pipelined on the same
  * socket. A timeout destroys the socket so the reply queue cannot desync.
- *
- * VALKEY_* env names remain read-only fallbacks for one release.
  */
 
 const net = require('node:net');
 
-let HOST = process.env.REDIS_HOST || process.env.VALKEY_HOST || '127.0.0.1';
+let HOST = process.env.REDIS_HOST || '127.0.0.1';
 let PORT = Number(
   process.env.REDIS_PORT
   || process.env.POKOIN_REDIS_PORT
-  || process.env.VALKEY_PORT
   || 6380,
 );
 let TIMEOUT_MS = Number(
   process.env.REDIS_CACHE_TIMEOUT_MS
   || process.env.REDIS_TIMEOUT_MS
-  || process.env.VALKEY_TIMEOUT_MS
   || 150,
 );
 const MAX_CONNECT_ATTEMPTS = 2;
@@ -345,11 +341,6 @@ function redisCacheStats() {
   return { ...stats };
 }
 
-/** @deprecated use redisCacheStats */
-function valkeyStats() {
-  return redisCacheStats();
-}
-
 function resetStats() {
   for (const key of Object.keys(stats)) stats[key] = 0;
 }
@@ -365,7 +356,6 @@ module.exports = {
   refreshLock,
   configure,
   redisCacheStats,
-  valkeyStats,
   resetStats,
   _test: { encode, parseOne, resetConnection },
 };

@@ -158,11 +158,6 @@ function redisCacheKey(base) {
     : marketplaceKey('game', game, logical);
 }
 
-/** @deprecated use redisCacheKey */
-function valkeyKey(base) {
-  return redisCacheKey(base);
-}
-
 function deriveDatabaseUrlFromMarketplace(pathname) {
   const base = process.env.MARKETPLACE_DATABASE_URL || '';
   if (!base) {
@@ -204,6 +199,5 @@ module.exports = {
   parseGameFromRequest,
   runWithGame,
   redisCacheKey,
-  valkeyKey,
   databaseUrlForGame,
 };

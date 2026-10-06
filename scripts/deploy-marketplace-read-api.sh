@@ -3,7 +3,7 @@
 # marketplace-home-page.js (TTL-unified, empty-snapshot-cacheable home snapshot),
 # the shared best-effort limiter versions of marketplace-image-log.js and
 # trainingai-card-classify.js, and the helpers they require (_redis_cache.js,
-# _valkey.js shim, _rate_limit.js). These files were CardVault api/ legacy
+# _rate_limit.js). These files were CardVault api/ legacy
 # copies; the Pokoin overlay replaces them on the Pi release.
 set -euo pipefail
 
@@ -31,7 +31,6 @@ READ_FILES=(
   _seller_shop_cache.test.js
   _marketplace_cache_invalidate.js
   _pipeline_health.js
-  _valkey.js
   _redis_cache.test.js
   _rate_limit.js
   _rate_limit.test.js

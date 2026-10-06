@@ -31,7 +31,6 @@ CART_FILES=(
   _seller_profile_cache.js
   _rate_limit.js
   _redis_cache.js
-  _valkey.js
 )
 
 git -C "$REPO" fetch -q origin || die "git fetch origin failed"
