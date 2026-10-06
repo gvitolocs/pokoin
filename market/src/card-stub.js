@@ -81,6 +81,10 @@ const RARITY_TAILS = [
   'gold-rare',
   'amazing-rare',
   'full-art',
+  'alternate-art',
+  'super-rare',
+  'uncommon',
+  'common',
   'alt-art',
   'cracked-ice-holo',
   'cosmos-holo',
@@ -144,6 +148,26 @@ export function leftoverUrlFromCard(card = {}) {
 
 function stripTrailingSetCode(nameSlug) {
   return String(nameSlug || '').replace(/-[a-z]{1,4}\d[a-z0-9]{0,4}$/i, '');
+}
+
+/** Collector printed after the name: OP08-007a, or a bare 115 before the set title. */
+function peelPrintedCollector(nameSlug) {
+  const raw = String(nameSlug || '');
+  const coded = raw.match(/^(.*?)-((?:op|st|eb|prb)\d{2}-\d{3}[a-z]?)(?:-|$)/i);
+  if (coded && coded[1]) {
+    return {
+      nameSlug: coded[1],
+      number: coded[2].toUpperCase(),
+      set: prettySetSlug(raw.slice(coded.index + coded[0].length).replace(/^-/, '')),
+    };
+  }
+  const bare = [...raw.matchAll(/-(\d{1,3})-/g)];
+  const last = bare[bare.length - 1];
+  if (!last || last.index <= 0) return null;
+  const name = raw.slice(0, last.index);
+  const set = prettySetSlug(raw.slice(last.index + last[0].length));
+  if (!name || !set) return null;
+  return { nameSlug: name, number: last[1], set };
 }
 
 function takeYearVersion(nameSlug) {
@@ -255,6 +279,14 @@ export function parseMarketplaceCardSlug(slug) {
   }
   if (rarity) {
     nameSlug = stripTrailingSetCode(nameSlug);
+  }
+  if (!number) {
+    const printed = peelPrintedCollector(nameSlug);
+    if (printed) {
+      nameSlug = printed.nameSlug;
+      number = printed.number;
+      if (!set) set = printed.set;
+    }
   }
   return {
     name: prettySlug(nameSlug),

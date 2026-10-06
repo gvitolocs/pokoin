@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { crawlableCardImage } from '../google-commerce.js';
 
 function upsertMeta(selector, attrs, content) {
   if (typeof document === 'undefined') {
@@ -77,7 +78,7 @@ export default function SeoHead({
     upsertMeta(
       'meta[name="robots"]',
       { name: 'robots' },
-      noindex ? 'noindex, follow' : 'index, follow',
+      noindex ? 'noindex, follow' : 'index, follow, max-image-preview:large',
     );
     const origin = window.location.origin;
     const url = canonical
@@ -89,12 +90,13 @@ export default function SeoHead({
     upsertMeta('meta[property="og:url"]', { property: 'og:url' }, url);
     upsertMeta('meta[property="og:type"]', { property: 'og:type' }, 'website');
     upsertMeta('meta[property="og:site_name"]', { property: 'og:site_name' }, 'Pokoin');
-    upsertMeta('meta[property="og:image"]', { property: 'og:image' }, image || '');
-    upsertMeta('meta[property="og:image:alt"]', { property: 'og:image:alt' }, imageAlt || title || '');
-    upsertMeta('meta[name="twitter:card"]', { name: 'twitter:card' }, image ? 'summary_large_image' : 'summary');
+    const scan = crawlableCardImage(image, origin);
+    upsertMeta('meta[property="og:image"]', { property: 'og:image' }, scan);
+    upsertMeta('meta[property="og:image:alt"]', { property: 'og:image:alt' }, scan ? (imageAlt || title || '') : '');
+    upsertMeta('meta[name="twitter:card"]', { name: 'twitter:card' }, scan ? 'summary_large_image' : 'summary');
     upsertMeta('meta[name="twitter:title"]', { name: 'twitter:title' }, title || '');
     upsertMeta('meta[name="twitter:description"]', { name: 'twitter:description' }, description || '');
-    upsertMeta('meta[name="twitter:image"]', { name: 'twitter:image' }, image || '');
+    upsertMeta('meta[name="twitter:image"]', { name: 'twitter:image' }, scan);
     const parsed = encodedLd ? JSON.parse(encodedLd) : null;
     upsertJsonLd(Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []));
     return () => {

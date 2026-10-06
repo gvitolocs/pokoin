@@ -280,6 +280,45 @@ test('theme-deck cosmos-holo / non-holo tails do not leak into the leftover stem
   );
 });
 
+test('One Piece and Star Wars slugs keep the name stem the CDN file uses', () => {
+  const chopper = parseMarketplaceCardSlug(
+    'alternate-art-tony-tony-chopper-op08-007a-op-08-two-legends',
+  );
+  assert.equal(chopper.name, 'Tony Tony Chopper');
+  assert.equal(chopper.nameSlug, 'tony-tony-chopper');
+  assert.equal(chopper.rarity, 'Alternate Art');
+  assert.equal(chopper.number, 'OP08-007A');
+  assert.equal(chopper.set, 'Op 08 Two Legends');
+  assert.equal(
+    cardStubFromRoute({
+      cardId: '598560',
+      slug: 'alternate-art-tony-tony-chopper-op08-007a-op-08-two-legends',
+    }).heroImageUrl,
+    '/card-images/299280_tony-tony-chopper.jpg',
+  );
+  const luffy = parseMarketplaceCardSlug(
+    'super-rare-monkey-d-luffy-op17-093-op-17-the-world-s-strongest-warriors',
+  );
+  assert.equal(luffy.nameSlug, 'monkey-d-luffy');
+  assert.equal(luffy.number, 'OP17-093');
+  assert.equal(luffy.set, "Op 17 The World's Strongest Warriors");
+  const student = parseMarketplaceCardSlug(
+    'uncommon-the-student-guides-the-master-115-ashes-of-the-empire',
+  );
+  assert.equal(student.name, 'The Student Guides The Master');
+  assert.equal(student.nameSlug, 'the-student-guides-the-master');
+  assert.equal(student.rarity, 'Uncommon');
+  assert.equal(student.number, '115');
+  assert.equal(student.set, 'Ashes Of The Empire');
+  assert.equal(
+    cardStubFromRoute({
+      cardId: '795832',
+      slug: 'uncommon-the-student-guides-the-master-115-ashes-of-the-empire',
+    }).heroImageUrl,
+    '/card-images/397916_the-student-guides-the-master.jpg',
+  );
+});
+
 test('canonical card paths keep the title-language segment', () => {
   assert.equal(
     rewriteCanonicalCardPath(

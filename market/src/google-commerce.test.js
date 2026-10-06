@@ -10,6 +10,7 @@ import {
   explainListing,
   identifierFields,
   offerIdFor,
+  crawlableCardImage,
   productStructuredData,
   purchasableOffers,
   shoppingCondition,
@@ -241,6 +242,30 @@ test('missing shipping or a dead listing is not eligible', () => {
   assert.equal(sold.offers, undefined);
   assert.equal(sold.review, undefined);
   assert.equal(sold.aggregateRating, undefined);
+});
+
+test('card photos are the CDN file, never the pokoin.com redirect or the site logo', () => {
+  assert.equal(
+    crawlableCardImage('/card-images/261377_charizard-ex-special-illustration-rare-199-165-151.jpg'),
+    'https://cdn.pokoin.com/261377_charizard-ex-special-illustration-rare-199-165-151.jpg',
+  );
+  assert.equal(
+    crawlableCardImage('https://pokoin.com/card-images/one-piece/299280_tony-tony-chopper.jpg'),
+    'https://cdn.pokoin.com/one-piece/299280_tony-tony-chopper.jpg',
+  );
+  assert.equal(crawlableCardImage('https://pokoin.com/pokoin-512.png'), '');
+  assert.equal(crawlableCardImage('/home/missing-card.webp'), '');
+  const data = productStructuredData({
+    ...card,
+    heroImageUrl: '/card-images/261377_charizard-ex.jpg',
+  }, { offers: [listing()], currency: 'EUR' });
+  assert.equal(data.image, 'https://cdn.pokoin.com/261377_charizard-ex.jpg');
+  const logo = productStructuredData({
+    ...card,
+    heroImageUrl: 'https://pokoin.com/pokoin-512.png',
+  }, { offers: [], currency: 'EUR' });
+  assert.equal(logo.image, undefined);
+  assert.equal(logo['@type'], 'ItemPage');
 });
 
 test('an unpinned PKN view still publishes the real EUR offer', () => {

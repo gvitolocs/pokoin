@@ -17,8 +17,8 @@ export { realPublicCardId } from './public-card-id.js';
 
 export const OG_CACHE_TTL_SEC = 3600;
 export const OG_SEARCH_CACHE_TTL_SEC = 120;
-/** Bump when card JSON-LD or canonical URLs change so the Cache API misses stale Product markup. */
-export const OG_CACHE_VERSION = 'v9';
+/** Bump when card JSON-LD, canonical URLs, or the crawlable scan URL change. */
+export const OG_CACHE_VERSION = 'v10';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
@@ -124,10 +124,14 @@ export function absoluteUrl(pathOrUrl, origin = SITE) {
   return `${origin.replace(/\/$/, '')}${path}`;
 }
 
-/** Scan URL Google can fetch. The handler overwrites the payload image, so both paths use this. */
+/** Scan URL Google can fetch. Empty, the site logo, and the missing-card coin are not a card photo. */
 export function cardOgImageUrl(imageUrl, cardId, origin = SITE) {
+  const raw = String(imageUrl || '').trim();
+  if (!raw || /pokoin-512\.png(?:$|\?)/i.test(raw) || /missing-card\.webp(?:$|\?)/i.test(raw)) {
+    return '';
+  }
   return crawlableCardImage(absoluteUrl(
-    rewriteLeftoverCatalogImage(imageUrl, cardId),
+    rewriteLeftoverCatalogImage(raw, cardId),
     origin,
   ));
 }
@@ -272,6 +276,12 @@ export function renderCardOgHtml(payload) {
   const descriptionMeta = description
     ? `\n  <meta name="description" content="${description}" />\n  <meta property="og:description" content="${description}" />\n  <meta name="twitter:description" content="${description}" />`
     : '';
+  const imageMeta = image
+    ? `\n  <meta property="og:image" content="${image}" />\n  <meta property="og:image:secure_url" content="${image}" />\n  <meta property="og:image:type" content="${imageType}" />\n  <meta property="og:image:alt" content="${imageAlt}" />\n  <meta name="twitter:image" content="${image}" />`
+    : '';
+  const figure = image
+    ? `\n  <img src="${image}" alt="${imageAlt}" width="630" height="880" />`
+    : '';
   const crumbs = [
     `<a href="${hrefFor('/marketplace')}">Marketplace</a>`,
     payload.setHref ? `<a href="${hrefFor(payload.setHref)}">${escapeHtml(payload.setName)}</a>` : '',
@@ -306,8 +316,8 @@ export function renderCardOgHtml(payload) {
     ? '\n  <meta name="robots" content="index, follow, max-image-preview:large" />'
     : '';
   const extra = payload.name
-    ? `\n  <h1>${h1}</h1>\n  <nav>${crumbs}</nav>${descriptionBody}${snapshotLine}${neighborLinks ? `\n  <ul>${neighborLinks}</ul>` : ''}`
-    : `\n  <p><a href="${path}">${title}</a></p>${descriptionBody}${snapshotLine}`;
+    ? `\n  <h1>${h1}</h1>${figure}\n  <nav>${crumbs}</nav>${descriptionBody}${snapshotLine}${neighborLinks ? `\n  <ul>${neighborLinks}</ul>` : ''}`
+    : `\n  <p><a href="${path}">${title}</a></p>${figure}${descriptionBody}${snapshotLine}`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -319,17 +329,11 @@ export function renderCardOgHtml(payload) {
   <meta property="og:site_name" content="Pokoin" />
   <meta property="og:locale" content="en_US" />
   <meta property="og:title" content="${title}" />
-  <meta property="og:url" content="${url}" />
-  <meta property="og:image" content="${image}" />
-  <meta property="og:image:secure_url" content="${image}" />
-  <meta property="og:image:type" content="${imageType}" />
-  <meta property="og:image:alt" content="${title}" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="${title}" />
-  <meta name="twitter:image" content="${image}" />${jsonLd}
+  <meta property="og:url" content="${url}" />${imageMeta}
+  <meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />
+  <meta name="twitter:title" content="${title}" />${jsonLd}
 </head>
 <body>${extra}
-  <img src="${image}" alt="${imageAlt}" width="400" height="560" />
 </body>
 </html>`;
 }
@@ -422,7 +426,7 @@ export async function handleMarketplaceCardOgRequest(request, env, ctx) {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': `public, max-age=60, s-maxage=${search ? OG_SEARCH_CACHE_TTL_SEC : OG_CACHE_TTL_SEC}`,
       'x-pokoin-og-cache': 'miss',
-      'x-robots-tag': search ? 'index, follow' : 'noindex',
+      'x-robots-tag': search ? 'index, follow, max-image-preview:large' : 'noindex',
     },
   });
   if (cache && ctx?.waitUntil) {

@@ -97,6 +97,7 @@ test('search-engine card HTML keeps description, ItemPage JSON-LD, and crawlable
         title: 'Charizard Base Set 4/102 Price & Cards for Sale | Pokoin',
         description: 'Charizard · 4/102 · Base Set',
         canonicalPath: '/marketplace/en/cards/239000/charizard',
+        imageUrl: '/card-images/119500_charizard.jpg',
       },
       card: { id: '239000', name: 'Charizard', set: 'Base Set', number: '4/102', artist: 'Mitsuhiro Arita' },
       neighbors: { prev: [{ id: '238998', name: 'Venusaur' }], next: [{ id: '239002', name: 'Clefairy' }] },
@@ -111,6 +112,8 @@ test('search-engine card HTML keeps description, ItemPage JSON-LD, and crawlable
   assert.equal(jsonLd['@type'], 'ItemPage');
   assert.equal(jsonLd.offers, undefined);
   assert.match(html, /href="\/marketplace\/sets\/base-set"/);
+  assert.match(html, /property="og:image" content="https:\/\/cdn\.pokoin\.com\/119500_charizard\.jpg"/);
+  assert.ok(html.indexOf('<img ') < html.indexOf('Venusaur'));
   assert.match(html, /Venusaur/);
 });
 
@@ -148,6 +151,11 @@ test('card HTML carries the dated price snapshot and Pokoin attribution', () => 
   );
   assert.match(bare, /No Pokoin listing is currently for sale/);
   assert.equal(bare.includes('InStock'), false);
+  assert.equal(bare.includes('pokoin-512.png'), false);
+  assert.equal(bare.includes('og:image'), false);
+  assert.equal(bare.includes('<img '), false);
+  assert.equal(cardOgImageUrl('', '248768'), '');
+  assert.equal(cardOgImageUrl('https://pokoin.com/pokoin-512.png', '248768'), '');
   const bareLd = JSON.parse(bare.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
   assert.equal(bareLd['@type'], 'ItemPage');
   assert.equal(bareLd.offers, undefined);
