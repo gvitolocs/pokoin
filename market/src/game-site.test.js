@@ -3,7 +3,38 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { GAMES, gameIconSrc, gameSiteHref } from './game.js';
+import { GAMES, gameIconSrc, gameSiteHref, publicGamePath, tcgBrandName } from './game.js';
+
+test('structured-data brand and public path follow the game', () => {
+  assert.equal(tcgBrandName('pokemon'), 'Pokémon TCG');
+  assert.equal(tcgBrandName(''), 'Pokémon TCG');
+  assert.equal(tcgBrandName('one_piece'), 'One Piece');
+  assert.equal(tcgBrandName('one-piece'), 'One Piece');
+  assert.equal(tcgBrandName('star_wars'), 'Star Wars');
+  assert.equal(tcgBrandName('star-wars-destiny'), 'Star Wars Destiny');
+  for (const row of Object.values(GAMES)) {
+    const brand = tcgBrandName(row.id);
+    if (row.id === 'pokemon') {
+      assert.equal(brand, 'Pokémon TCG');
+    } else {
+      assert.equal(brand, row.name);
+      assert.notEqual(brand, 'Pokémon TCG');
+    }
+  }
+  assert.equal(
+    publicGamePath('/marketplace/en/cards/812446/luffy', 'one_piece'),
+    '/one-piece/marketplace/en/cards/812446/luffy',
+  );
+  assert.equal(
+    publicGamePath('/one-piece/marketplace/en/cards/812446/luffy', 'one_piece'),
+    '/one-piece/marketplace/en/cards/812446/luffy',
+  );
+  assert.equal(publicGamePath('/marketplace/en/cards/1/x', 'pokemon'), '/marketplace/en/cards/1/x');
+  assert.equal(
+    publicGamePath('/marketplace/en/cards/795832/student', 'star_wars'),
+    '/star-wars/marketplace/en/cards/795832/student',
+  );
+});
 
 test('the game picker sends each TCG to its own site', () => {
   assert.equal(gameSiteHref('pokemon'), 'https://pokoin.com/marketplace');

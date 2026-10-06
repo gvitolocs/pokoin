@@ -10,13 +10,15 @@ import {
   productStructuredData,
   purchasableOffers,
 } from '../market/src/google-commerce.js';
+import { publicGamePath, tcgBrandName } from '../market/src/game.js';
 import { currencyFromSearch, moneyFromPkn } from '../market/src/pkn.js';
 
 export { realPublicCardId } from './public-card-id.js';
 
 export const OG_CACHE_TTL_SEC = 3600;
 export const OG_SEARCH_CACHE_TTL_SEC = 120;
-export const OG_CACHE_VERSION = 'v8';
+/** Bump when card JSON-LD or canonical URLs change so the Cache API misses stale Product markup. */
+export const OG_CACHE_VERSION = 'v9';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
@@ -159,6 +161,7 @@ export function buildCardOgPayload(cardPage, {
   cardId,
   requestUrl,
   includeDescription = false,
+  game = '',
 } = {}) {
   const seo = cardPage?.seo || {};
   const card = cardPage?.card || {};
@@ -176,11 +179,12 @@ export function buildCardOgPayload(cardPage, {
       card.tileImageUrl,
     cardId || card.id,
   );
-  const path =
+  const rawPath =
     seo.canonicalPath ||
     cardPage?.canonicalPath ||
     card.canonicalPath ||
     `/marketplace/${language}/cards/${cardId}`;
+  const path = publicGamePath(rawPath, game) || rawPath;
   const url = requestUrl || absoluteUrl(path);
   const setName = String(card.set || card.set_name || '').trim();
   const artist = String(card.artist || card.illustrator || cardPage?.artist?.name || '').trim();
@@ -213,6 +217,7 @@ export function buildCardOgPayload(cardPage, {
     setHref: setName ? `/marketplace/sets/${setSlug(setName)}` : '',
     artistHref: artist ? `/marketplace/${language}/artists/${artistSlug(artist)}` : '',
     neighbors,
+    game,
   };
 }
 
@@ -225,6 +230,7 @@ function productJsonLd(payload) {
     artist: payload.artist,
     canonicalPath: payload.path,
     heroImageUrl: payload.image,
+    game: payload.game,
   };
   const data = productStructuredData(card, {
     offers: payload.offers,
@@ -232,6 +238,7 @@ function productJsonLd(payload) {
     listingId: payload.listingId,
     referencePkn: payload.referencePkn,
     origin: SITE,
+    game: payload.game,
   });
   data.dateModified = payload.snapshotDate;
   if (payload.description) data.description = payload.description;
@@ -249,11 +256,14 @@ export function renderCardOgHtml(payload) {
     canonicalPath: payload.path,
     cardId: payload.cardId,
     origin: SITE,
+    game: payload.game,
   }));
   const url = canonical;
   const path = escapeHtml(payload.path || '/marketplace');
   const h1 = escapeHtml(payload.name || payload.title);
-  const imageAlt = escapeHtml([payload.name, payload.setName, payload.number, 'Pokemon card'].filter(Boolean).join(' ') || payload.title);
+  const cardLabel = payload.game ? `${tcgBrandName(payload.game)} card` : 'Pokemon card';
+  const imageAlt = escapeHtml([payload.name, payload.setName, payload.number, cardLabel].filter(Boolean).join(' ') || payload.title);
+  const hrefFor = (path) => escapeHtml(publicGamePath(path, payload.game) || path || '');
   const imageType = /\.webp(?:$|\?)/i.test(payload.image || '')
     ? 'image/webp'
     : /\.png(?:$|\?)/i.test(payload.image || '')
@@ -263,14 +273,14 @@ export function renderCardOgHtml(payload) {
     ? `\n  <meta name="description" content="${description}" />\n  <meta property="og:description" content="${description}" />\n  <meta name="twitter:description" content="${description}" />`
     : '';
   const crumbs = [
-    '<a href="/marketplace">Marketplace</a>',
-    payload.setHref ? `<a href="${escapeHtml(payload.setHref)}">${escapeHtml(payload.setName)}</a>` : '',
-    payload.artistHref ? `<a href="${escapeHtml(payload.artistHref)}">${escapeHtml(payload.artist)}</a>` : '',
+    `<a href="${hrefFor('/marketplace')}">Marketplace</a>`,
+    payload.setHref ? `<a href="${hrefFor(payload.setHref)}">${escapeHtml(payload.setName)}</a>` : '',
+    payload.artistHref ? `<a href="${hrefFor(payload.artistHref)}">${escapeHtml(payload.artist)}</a>` : '',
   ].filter(Boolean).join(' / ');
   const neighborLinks = (payload.neighbors || []).slice(0, 8).map((row) => {
     const id = String(row.id || row.card_id || '');
     const name = escapeHtml(row.name || id);
-    const href = escapeHtml(row.canonicalPath || row.canonical_path || `/marketplace/${payload.language || 'en'}/cards/${id}`);
+    const href = hrefFor(row.canonicalPath || row.canonical_path || `/marketplace/${payload.language || 'en'}/cards/${id}`);
     return `<li><a href="${href}">${name}</a></li>`;
   }).join('');
   const jsonLd = payload.name
@@ -392,6 +402,7 @@ export async function handleMarketplaceCardOgRequest(request, env, ctx) {
     cardId: parsed.cardId,
     requestUrl: `${site}${remappedPath}`,
     includeDescription: search,
+    game,
   });
   payload.currency = currency;
   payload.listingId = listingId;

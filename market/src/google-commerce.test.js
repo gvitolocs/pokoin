@@ -48,11 +48,17 @@ function listing(overrides = {}) {
   };
 }
 
-test('zero Pokoin listings stay indexable without a purchasable offer', () => {
+test('zero Pokoin listings stay indexable as an ItemPage, not a bare Product', () => {
   const data = productStructuredData(card, { offers: [], currency: 'EUR' });
-  assert.equal(data['@type'], 'Product');
+  assert.equal(data['@type'], 'ItemPage');
   assert.equal(data.url, 'https://pokoin.com/marketplace/en/cards/239000/card-charizard-4-102-base-set');
+  assert.equal(data.name, 'Charizard');
+  assert.equal(data.image, image);
   assert.equal(data.offers, undefined);
+  assert.equal(data.review, undefined);
+  assert.equal(data.aggregateRating, undefined);
+  assert.equal(data.brand, undefined);
+  assert.equal(JSON.stringify(data).includes('Product'), false);
   assert.equal(JSON.stringify(data).includes('InStock'), false);
   assert.match(data.description, /No Pokoin listing is currently for sale/);
 });
@@ -71,9 +77,15 @@ test('a market minimum is out of stock at the same EUR cents as checkout', () =>
     currency: 'EUR',
     referencePkn: 50108,
   });
+  assert.equal(data['@type'], 'Product');
+  assert.equal(data.brand.name, 'Pokémon TCG');
+  assert.equal(data.offers['@type'], 'Offer');
   assert.equal(data.offers.availability, 'https://schema.org/OutOfStock');
   assert.equal(data.offers.price, '250.54');
   assert.equal(data.offers.priceCurrency, 'EUR');
+  assert.equal(data.offers.url, data.url);
+  assert.equal(data.review, undefined);
+  assert.equal(data.aggregateRating, undefined);
   assert.equal(data.offers.availability.endsWith('/OutOfStock'), true);
   const stocked = catalogShoppingOffer({
     nativePkn: 140,
@@ -90,11 +102,15 @@ test('a market minimum is out of stock at the same EUR cents as checkout', () =>
 test('one active listing builds AggregateOffer, Offer, and a Merchant product', () => {
   const row = listing();
   const data = productStructuredData(card, { offers: [row], currency: 'EUR' });
+  assert.equal(data['@type'], 'Product');
+  assert.equal(data.brand.name, 'Pokémon TCG');
   assert.equal(data.offers['@type'], 'AggregateOffer');
   assert.equal(data.offers.lowPrice, '320.00');
   assert.equal(data.offers.highPrice, '320.00');
   assert.equal(data.offers.offerCount, 1);
   assert.equal(data.offers.priceCurrency, 'EUR');
+  assert.equal(data.offers.availability, 'https://schema.org/InStock');
+  assert.equal(data.offers.url, data.url);
   const single = productStructuredData(card, { offers: [row], currency: 'EUR', listingId: 'lst-a' });
   assert.equal(single.offers['@type'], 'Offer');
   assert.equal(single.offers.price, '320.00');
@@ -221,5 +237,82 @@ test('missing shipping or a dead listing is not eligible', () => {
     offers: [listing({ status: 'sold_out', quantityAvailable: 0 })],
     currency: 'EUR',
   });
+  assert.equal(sold['@type'], 'ItemPage');
   assert.equal(sold.offers, undefined);
+  assert.equal(sold.review, undefined);
+  assert.equal(sold.aggregateRating, undefined);
+});
+
+test('an unpinned PKN view still publishes the real EUR offer', () => {
+  const data = productStructuredData(card, { offers: [listing()], currency: '' });
+  assert.equal(data['@type'], 'Product');
+  assert.equal(data.offers.priceCurrency, 'EUR');
+  assert.equal(data.offers.lowPrice, '320.00');
+  assert.equal(data.offers.availability, 'https://schema.org/InStock');
+  assert.equal(data.offers.url, data.url);
+  const pinned = productStructuredData(card, {
+    offers: [],
+    currency: 'PKN',
+    referencePkn: 50108,
+  });
+  assert.equal(pinned.offers.priceCurrency, 'EUR');
+  assert.equal(pinned.offers.price, '250.54');
+  assert.equal(pinned.offers.availability, 'https://schema.org/OutOfStock');
+});
+
+test('a non-Pokémon card keeps its brand and game prefix, with or without an offer', () => {
+  const chopper = {
+    id: '598560',
+    name: 'Tony Tony.Chopper',
+    set: 'Two Legends',
+    number: 'OP08-007a',
+    canonicalPath: '/marketplace/en/cards/598560/alternate-art-tony-tony-chopper-op08-007a-op-08-two-legends',
+    heroImageUrl: 'https://cdn.pokoin.com/one-piece/chopper.jpg',
+  };
+  const bare = productStructuredData(chopper, { offers: [], currency: 'EUR', game: 'one_piece' });
+  assert.equal(bare['@type'], 'ItemPage');
+  assert.equal(bare.offers, undefined);
+  assert.equal(bare.review, undefined);
+  assert.equal(bare.aggregateRating, undefined);
+  assert.equal(
+    bare.url,
+    'https://pokoin.com/one-piece/marketplace/en/cards/598560/alternate-art-tony-tony-chopper-op08-007a-op-08-two-legends',
+  );
+  assert.equal(bare.image, chopper.heroImageUrl);
+  const priced = productStructuredData(chopper, {
+    offers: [],
+    currency: 'EUR',
+    game: 'one_piece',
+    referencePkn: 1000,
+  });
+  assert.equal(priced['@type'], 'Product');
+  assert.equal(priced.brand.name, 'One Piece');
+  assert.equal(priced.url, bare.url);
+  assert.equal(priced.offers.priceCurrency, 'EUR');
+  assert.equal(priced.offers.availability, 'https://schema.org/OutOfStock');
+  assert.equal(priced.offers.url, bare.url);
+  assert.ok(priced.offers.price);
+  const already = productStructuredData({
+    ...chopper,
+    canonicalPath: '/one-piece/marketplace/en/cards/598560/alternate-art-tony-tony-chopper-op08-007a-op-08-two-legends',
+  }, { offers: [], game: 'one-piece' });
+  assert.equal(already.url, bare.url);
+  const student = productStructuredData({
+    ...chopper,
+    id: '795832',
+    name: 'The Student Guides the Master',
+    canonicalPath: '/marketplace/en/cards/795832/uncommon-the-student-guides-the-master',
+  }, { offers: [listing()], currency: 'EUR', game: 'star_wars' });
+  assert.equal(student['@type'], 'Product');
+  assert.equal(student.brand.name, 'Star Wars');
+  assert.match(student.url, /^https:\/\/pokoin\.com\/star-wars\/marketplace\/en\/cards\/795832\//);
+  assert.equal(student.offers.url, student.url);
+  assert.equal(student.offers.priceCurrency, 'EUR');
+  const missingListing = productStructuredData(chopper, {
+    offers: [],
+    currency: 'EUR',
+    game: 'one_piece',
+    listingId: 'gone',
+  });
+  assert.equal(missingListing['@type'], 'ItemPage');
 });

@@ -3,6 +3,7 @@
  * Canonical card URLs stay /marketplace/{lang}/cards/{id}/{slug}.
  */
 
+import { publicGamePath, tcgBrandName } from './game.js';
 import { displayName, printingIdentity } from './identity.js';
 import {
   moneyFromEurCents,
@@ -116,8 +117,9 @@ export function countriesForCurrency(currency, countries = []) {
   return [];
 }
 
-export function cardCanonicalUrl({ origin = 'https://pokoin.com', canonicalPath, cardId } = {}) {
-  const path = String(canonicalPath || '').trim() || (cardId ? `/marketplace/en/cards/${cardId}` : '/marketplace');
+export function cardCanonicalUrl({ origin = 'https://pokoin.com', canonicalPath, cardId, game } = {}) {
+  const fallback = cardId ? `/marketplace/en/cards/${cardId}` : '/marketplace';
+  const path = publicGamePath(String(canonicalPath || '').trim() || fallback, game) || fallback;
   const url = new URL(path, origin);
   url.search = '';
   url.hash = '';
@@ -130,8 +132,9 @@ export function cardLandingUrl({
   cardId,
   currency,
   listingId,
+  game,
 } = {}) {
-  const url = new URL(cardCanonicalUrl({ origin, canonicalPath, cardId }));
+  const url = new URL(cardCanonicalUrl({ origin, canonicalPath, cardId, game }));
   const code = String(currency || '').trim().toUpperCase();
   if (code) url.searchParams.set('currency', code);
   if (listingId) url.searchParams.set('listing', String(listingId));
@@ -198,12 +201,14 @@ export function buildMerchantProduct({
   const diagnosis = explainListing(listing, { currency: code, shipping, currencies, image });
   const label = feedLabel || (code === 'DKK' ? 'DK' : 'EU');
   const canonicalPath = card.canonicalPath || listing?.canonicalPath || '';
+  const gameId = card.game || card.gameId || '';
   const link = cardLandingUrl({
     origin,
     canonicalPath,
     cardId: card.id || listing?.cardId,
     currency: code,
     listingId: listing?.id,
+    game: gameId,
   });
   if (diagnosis.reason !== 'ELIGIBLE') {
     return { eligible: false, reason: diagnosis.reason, offerId: diagnosis.offerId, feedLabel: label, input: null };
@@ -239,7 +244,7 @@ export function buildMerchantProduct({
         amountMicros: money.amountMicros,
         currencyCode: money.currency,
       },
-      brand: 'Pokemon',
+      brand: gameId && gameId !== 'pokemon' ? tcgBrandName(gameId) : 'Pokemon',
       identifierExists: identifiers.identifierExists,
       externalSellerId: diagnosis.externalSellerId,
       shipping: shipping.map((row) => ({
@@ -269,6 +274,7 @@ export function buildMerchantProduct({
       origin,
       canonicalPath,
       cardId: card.id || listing?.cardId,
+      game: gameId,
     }),
   };
 }
@@ -327,7 +333,26 @@ export function catalogShoppingOffer({
   return { availability: 'out_of_stock', pricePkn: price, money, source: market > 0 ? 'market' : 'pokoin' };
 }
 
-/** Product JSON-LD. In stock only for a purchasable Pokoin listing. */
+/** Checkout fiat for snippets when the desk is showing PKN or no pinned currency. */
+function schemaCurrency(currency) {
+  const code = String(currency || '').trim().toUpperCase();
+  if (!code || code === 'PKN') return 'EUR';
+  return code;
+}
+
+function pricedOffer(node) {
+  if (!node) return null;
+  const price = node.price || node.lowPrice;
+  if (!price || !node.priceCurrency || !node.availability || !node.url) return null;
+  return node;
+}
+
+/**
+ * Product JSON-LD only when a real listing or reference price becomes an offer
+ * (price, priceCurrency, availability, url). A catalog card with neither is an
+ * ItemPage — never a Product missing offers, review, and aggregateRating.
+ * Prices are converted PKN, never invented. Reviews and ratings are never invented.
+ */
 export function productStructuredData(card = {}, {
   url,
   offers,
@@ -335,73 +360,90 @@ export function productStructuredData(card = {}, {
   listingId = '',
   origin = 'https://pokoin.com',
   referencePkn = 0,
+  game = '',
 } = {}) {
+  const gameId = game || card.game || card.gameId || '';
   const identity = printingIdentity(card);
   const canonical = cardCanonicalUrl({
     origin,
     canonicalPath: card.canonicalPath || card.canonical_path,
     cardId: card.id,
+    game: gameId,
   });
+  const pageUrl = canonical || url || '';
   const image = absoluteImage(card.heroImageUrl || card.imageUrl || card.gridImageUrl || '', origin);
   const active = purchasableOffers(offers);
-  const code = String(currency || '').trim().toUpperCase();
-  const product = {
+  const code = schemaCurrency(currency);
+  const name = displayName(card) || card.name || '';
+  const description = catalogDescription(card, active.length);
+  const catalogPage = {
+    '@context': SCHEMA,
+    '@type': 'ItemPage',
+    name,
+    description,
+    url: pageUrl,
+  };
+  if (image) catalogPage.image = image;
+  const landingFor = (id) => cardLandingUrl({
+    origin,
+    canonicalPath: card.canonicalPath || card.canonical_path,
+    cardId: card.id,
+    currency: code,
+    listingId: id,
+    game: gameId,
+  });
+  let offer = null;
+  if (listingId) {
+    const one = active.find((row) => String(row.id) === String(listingId));
+    offer = pricedOffer(one ? offerNode(one, code, landingFor(listingId)) : null);
+  }
+  if (!offer) {
+    const priced = active
+      .map((row) => moneyFromPkn(row.pricePkn ?? row.price_pkn, code))
+      .filter(Boolean);
+    if (priced.length) {
+      const amounts = priced.map((row) => Number(row.amount));
+      offer = pricedOffer({
+        '@type': 'AggregateOffer',
+        priceCurrency: code,
+        lowPrice: Math.min(...amounts).toFixed(2),
+        highPrice: Math.max(...amounts).toFixed(2),
+        offerCount: priced.length,
+        availability: `${SCHEMA}/InStock`,
+        url: pageUrl,
+      });
+    }
+  }
+  if (!offer) {
+    const market = moneyFromPkn(referencePkn || card.referencePkn || card.reference_pkn, code);
+    if (market && market.currency !== 'PKN') {
+      offer = pricedOffer({
+        '@type': 'Offer',
+        price: market.amount,
+        priceCurrency: market.currency,
+        availability: `${SCHEMA}/OutOfStock`,
+        url: pageUrl,
+      });
+    }
+  }
+  if (!offer) return catalogPage;
+  return {
     '@context': SCHEMA,
     '@type': 'Product',
-    name: displayName(card) || card.name || '',
-    description: catalogDescription(card, active.length),
+    name,
+    description,
     sku: String(card.id || ''),
     image,
-    brand: { '@type': 'Brand', name: 'Pokémon TCG' },
-    url: canonical || url || '',
+    brand: { '@type': 'Brand', name: tcgBrandName(gameId) },
+    url: pageUrl,
     additionalProperty: [
       identity.set ? { '@type': 'PropertyValue', name: 'set', value: identity.set } : null,
       identity.number ? { '@type': 'PropertyValue', name: 'number', value: identity.number } : null,
       identity.rarity ? { '@type': 'PropertyValue', name: 'rarity', value: identity.rarity } : null,
       identity.artist ? { '@type': 'PropertyValue', name: 'artist', value: identity.artist } : null,
     ].filter(Boolean),
+    offers: offer,
   };
-  if (!code || code === 'PKN') return product;
-  if (listingId) {
-    const one = active.find((row) => String(row.id) === String(listingId));
-    const node = one
-      ? offerNode(one, code, cardLandingUrl({
-        origin,
-        canonicalPath: card.canonicalPath || card.canonical_path,
-        cardId: card.id,
-        currency: code,
-        listingId,
-      }))
-      : null;
-    if (node) product.offers = node;
-    return product;
-  }
-  const priced = active
-    .map((row) => moneyFromPkn(row.pricePkn ?? row.price_pkn, code))
-    .filter(Boolean);
-  if (!priced.length) {
-    const market = moneyFromPkn(referencePkn || card.referencePkn || card.reference_pkn, code);
-    if (market && market.currency !== 'PKN') {
-      product.offers = {
-        '@type': 'Offer',
-        price: market.amount,
-        priceCurrency: market.currency,
-        availability: `${SCHEMA}/OutOfStock`,
-        url: canonical || url || '',
-      };
-    }
-    return product;
-  }
-  const amounts = priced.map((row) => Number(row.amount));
-  product.offers = {
-    '@type': 'AggregateOffer',
-    priceCurrency: code,
-    lowPrice: Math.min(...amounts).toFixed(2),
-    highPrice: Math.max(...amounts).toFixed(2),
-    offerCount: priced.length,
-    availability: `${SCHEMA}/InStock`,
-  };
-  return product;
 }
 
 export function aggregateLabel(card, offers, currency) {

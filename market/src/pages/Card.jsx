@@ -100,7 +100,7 @@ import { MAX_LISTING_PHOTOS, photoFileToJpeg } from '../user-photos.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { deskClipCandidates, deskSetShortcuts, deskShowMoreVersions, mergePrintingRows, rarityVersions, versionOptionLabel } from '../card-versions.js';
 import { cardDocumentTitle, cardmarketSearchUrl, displayName, printingIdentity } from '../identity.js';
-import { game } from '../game.js';
+import { game, publicGamePath } from '../game.js';
 import { defaultCardLanguage, flagSrc, getSearchLang, languagesForNationality, rewriteCatalogLang, searchLangFromPath } from '../locale.js';
 import { sellLanguages, versionRedirects } from '../listing-languages.js';
 import ListingLangPick from '../components/ListingLangPick.jsx';
@@ -2358,6 +2358,7 @@ export default function Card() {
     neighborWindow.next,
   ], 12);
   const cardPath = card.canonicalPath || cardHref(card);
+  const publicCardPath = publicGamePath(cardPath, game().id) || cardPath;
   const seoCrumbs = [
     { name: 'Marketplace', href: '/marketplace' },
     species
@@ -2380,7 +2381,7 @@ export default function Card() {
   ].filter(Boolean);
 
   async function share() {
-    const url = `${window.location.origin}${card.canonicalPath || cardHref(card)}`;
+    const url = `${window.location.origin}${publicCardPath}`;
     track(Action.share, card);
     if (canUseNativeShare()) {
       try {
@@ -2432,20 +2433,21 @@ export default function Card() {
       <SeoHead
         title={cardDocumentTitle(card)}
         description={cardSeoDescription(card)}
-        canonical={cardPath}
+        canonical={publicCardPath}
         image={art}
         imageAlt={cardImageAlt(card)}
         jsonLd={[
           productJsonLd(card, {
-            url: `https://pokoin.com${cardPath}`,
+            url: `https://pokoin.com${publicCardPath}`,
             offers: nativeLive,
             currency: pinnedCurrency && pinnedCurrency !== 'PKN' ? pinnedCurrency : '',
             listingId: new URLSearchParams(location.search).get('listing') || '',
             referencePkn: card?.price || card?.pricePkn || 0,
+            game: game().id,
           }),
           breadcrumbJsonLd(seoCrumbs.filter(Boolean).map((crumb) => ({
-            name: crumb.name,
-            href: crumb.href,
+            name: crumb?.name,
+            href: crumb?.href ? publicGamePath(crumb.href, game().id) : undefined,
           }))),
         ]}
       />

@@ -128,6 +128,52 @@ export function gamePublicPath(gameId) {
   return `/${row.slug}/marketplace`;
 }
 
+function gameRecord(gameId) {
+  const raw = String(gameId || '').trim();
+  if (!raw || raw === 'pokemon') return GAMES.pokemon;
+  if (GAMES[raw]) return GAMES[raw];
+  const id = SLUG_TO_ID[raw];
+  return id ? GAMES[id] : null;
+}
+
+/** schema.org brand for a card page. Pokémon stays the TCG name already in snippets. */
+export function tcgBrandName(gameId) {
+  const row = gameRecord(gameId);
+  if (!row || row.id === 'pokemon') return 'Pokémon TCG';
+  return row.name;
+}
+
+/**
+ * Public site path. Router paths stay unprefixed (React Router basename adds
+ * the slug). Pokémon stays unprefixed. Already-prefixed paths are left alone.
+ */
+export function publicGamePath(path, gameId) {
+  const raw = String(path || '').trim();
+  if (!raw) return '';
+  const slug = gameRecord(gameId)?.slug || '';
+  const apply = (pathname) => {
+    const normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
+    if (!slug) return normalized;
+    if (normalized === `/${slug}` || normalized.startsWith(`/${slug}/`)) return normalized;
+    return `/${slug}${normalized}`;
+  };
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      url.pathname = apply(url.pathname);
+      return url.toString();
+    } catch {
+      return raw;
+    }
+  }
+  const queryIndex = raw.indexOf('?');
+  const hashIndex = raw.indexOf('#');
+  let cut = raw.length;
+  if (queryIndex >= 0) cut = Math.min(cut, queryIndex);
+  if (hashIndex >= 0) cut = Math.min(cut, hashIndex);
+  return `${apply(raw.slice(0, cut))}${raw.slice(cut)}`;
+}
+
 const SCAN_GAME_KEY = 'pokoin.scanGame';
 
 /** Optional desk override (dashboard host has no game subdomain). */
