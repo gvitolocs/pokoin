@@ -32,7 +32,7 @@ pokoin.com (Vercel SPA, market/)  ──/api/* rewrite──▶  api.pokoin.com 
                                                              · one Node process (pm2 fork, instances: 1)
                                                              · reads: Postgres streaming replica 127.0.0.1:5432
                                                              · writes: MARKETPLACE_WRITER_DATABASE_URL (nezopt NVMe primary)
-                                                             · Valkey 127.0.0.1:6379 (48 MB, cache only)
+                                                             · Redis 127.0.0.1:6380 (cache only)
                                                              · Firebase Admin (auth, Firestore)
 scan.pokoin.com  (peer1 FastAPI, BattleScan web/index.html)
 cardscan.pokoin.com/identify ──▶ nezopt battlescan-fast (YOLO + Milo, one global lock)
@@ -44,7 +44,7 @@ cardscan.pokoin.com/identify ──▶ nezopt battlescan-fast (YOLO + Milo, one 
 | API router | CardVault `server/oracle-api-server.js`, routes in `server/api-route-manifest.js`, families `server/api-route-families.js` | `/api/foo` → `api/foo.js`, Vercel-style `(req, res)`. New handlers must be registered in the manifest. Body is buffered and JSON-parsed unless the file is in `RAW_BODY_ROUTE_FILES`. After the handler resolves the server calls `res.end()` — a streaming handler must not resolve until the client disconnects. |
 | Auth | Firebase ID token, `verifyBearerToken` (CardVault `api/_firebase.js`); SPA `getBearer()` (`market/src/auth.jsx`) | Desktop calls reuse it. The phone has **no** Firebase session by design. |
 | DB split | `marketplaceQuery` (replica) vs `marketplaceWriteQuery` (primary) in CardVault `api/_marketplace_db.js` | Scan state must be **read from the writer** — replica lag would make a just-scanned card invisible to its own stream. |
-| Redis cache | `server/pokoin-api/_redis_cache.js` (Pi `:6380`) | Pipelined TCP, short timeout, **returns `null` on any error**. Fine for caches, wrong for security counters (fails open). Valkey retired. |
+| Redis cache | `server/pokoin-api/_redis_cache.js` (Pi `:6380`) | Pipelined TCP, short timeout, **returns `null` on any error**. Fine for caches, wrong for security counters (fails open). |
 | CORS | Per handler (`auth-login.js`, `cardtrader-live-listings.js`, …); none global | Phone origin `scan.pokoin.com` calls `api.pokoin.com` directly → scan handlers set their own allowlist. |
 
 ## 2. Catalog identity (do not add a second version system)
@@ -129,7 +129,7 @@ One card per page visit, mouse-driven, no batch, no keyboard.
 | Firestore `onSnapshot` | **Yes** — `auth.jsx` (profile/balance), `pages/Orders.jsx`, `pages/Nft.jsx` | Would need a **second copy** of every scan event (Postgres is where the batch and listings live), a Pi → Google → browser hop, new Firestore rules, and reconciliation when the Firestore write fails after the Postgres commit. The phone has no Firebase auth, so it would still post over HTTP. |
 | WebSocket | No (no `ws` dependency; PowerTools uses ActionCable, Pokoin does not) | New dependency + upgrade handling through the Cloudflare tunnel. |
 | SSE / streaming HTTP | No, but the Node `http` server streams fine (single process) | Postgres stays the only store; replay-from-cursor is the same code path as live delivery. |
-| Valkey pub/sub | Valkey exists; client has no subscribe mode | Not needed while the API is one process. |
+| Redis pub/sub | Redis is the cache; the client has no subscribe mode | Not needed while the API is one process. |
 | Redis sessions | None (auth is stateless Firebase JWT) | — |
 
 Decision (details in [SCAN_CONNECT.md](SCAN_CONNECT.md#realtime-transport)):

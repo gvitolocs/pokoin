@@ -164,7 +164,7 @@ Stopgap only (until Madrid exists): **one CardTrader refresh per day** at
 `01:00 UTC` (`pokoin-cardtrader-daily-market-refresh.timer` on the Pi writer);
 `GET /marketplace/products?blueprint_id=` (full listing book, qty-diff per
 listing, every language/condition/reverse/1st/graded combo). Do not cache
-empty home snapshots (Valkey `home:react` / `home:flutter` skip empty);
+empty home snapshots (Redis `home:react` / `home:flutter` skip empty);
 abort SQL on `withTimeout`. Listing sold/new stats
 roll up from `cardtrader_market_listing_removed_history` plus native
 `marketplace_user_listings` into `marketplace_card_weights` (small). Rails
@@ -243,10 +243,10 @@ and VCN are already in the Madrid deploy dir.
   homepage rails to Oracle Postgres primary (Pi replica follows) **with PKN** (`1 PKN = 0.005 USDT`,
   `PKN = EUR / 0.005`). Hub cache is ~868 hot blueprints; live English sets
   are not in it yet, so New cards overlay CardTrader NM/EN asks at publish
-  time and store them in **Valkey** (`pkn:ct:{blueprint}`, 6 h). New cards
+  time and store them in **Redis** (`pkn:ct:{blueprint}`, 6 h). New cards
   is a chase + in-set mix per live set, unique names. Recents merge PKN
   from rails instead of shadowing priced tiles. Snapshots
-  stay on Oracle. Install Valkey with `scripts/install-marketplace-valkey.sh`
+  stay on Oracle. Install Redis with `scripts/install-pokoin-redis.sh`
   (32 MB, localhost, not on peer1).
 
 ### 1 — Hunt Madrid (gvitolocs profile only)

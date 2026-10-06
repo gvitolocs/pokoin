@@ -2,7 +2,7 @@
 # Repair a down listener, then record livez/readyz.
 # A failed postgres, redis, or CDN check must not reboot the Pi.
 # Host reboot stays in pokoin-pi-ro-watch (USB root emergency_ro) and the
-# kernel watchdog. Meili and Valkey are retired.
+# kernel watchdog. Meili is retired.
 set -u
 LOG="${POKOIN_WATCHDOG_LOG:-/var/log/pokoin-watchdog.log}"
 # tmpfs so consecutive_fails still increments when USB root is emergency_ro.

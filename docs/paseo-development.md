@@ -104,7 +104,7 @@ repository.
 | Firebase Auth | No | `market/src/auth.jsx` uses the shared `pokoin` Firebase project |
 | Firestore | No | Account, order, collection, and wallet-related data use shared backend state |
 | Marketplace API/PostgreSQL | No | `/api` proxies to `api.pokoin.com` unless `POKOIN_API_PROXY` is explicitly set |
-| Meilisearch/Valkey/CDN | No | These are remote infrastructure behind the API/image proxies |
+| Meilisearch/Redis/CDN | No | These are remote infrastructure behind the API/image proxies |
 | CardTrader/Cardmarket/Vinted | No | Marketplace integrations are external services |
 | Stripe/webhooks | Not used by this frontend dev service | Payment integrations belong to the sibling CardVault/API service |
 | OAuth callbacks | Not configured here | No repository-local OAuth callback server was found |

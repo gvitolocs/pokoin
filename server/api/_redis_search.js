@@ -9,7 +9,7 @@
 const net = require('node:net');
 
 const INDEX = process.env.POKOIN_REDIS_INDEX || 'pokoin:cards';
-const HOST = process.env.REDIS_HOST || process.env.VALKEY_HOST || '127.0.0.1';
+const HOST = process.env.REDIS_HOST || '127.0.0.1';
 const PORT = Number(process.env.REDIS_PORT || process.env.POKOIN_REDIS_PORT || 6380);
 const TIMEOUT_MS = Number(process.env.REDIS_SEARCH_TIMEOUT_MS || 800);
 

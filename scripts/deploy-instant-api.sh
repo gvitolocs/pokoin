@@ -78,6 +78,18 @@ ssh "$PI" "set -e
   node /srv/pokoin/api/$release/api/patch-route-manifest.js \
     /srv/pokoin/api/$release/server/api-route-manifest.js \
     /srv/pokoin/api/$release/api/instant-routes.json
+  find /srv/pokoin/api/$release/api /srv/pokoin/api/$release/server -name '*.js' -print0 \
+    | xargs -0 sed -i \
+      -e \"s|require('./_valkey')|require('./_redis_cache')|g\" \
+      -e 's|require(\"./_valkey\")|require(\"./_redis_cache\")|g'
+  rm -f /srv/pokoin/api/$release/api/_valkey.js \
+    /srv/pokoin/api/$release/server/pokoin-api/_valkey.js \
+    /srv/pokoin/api/$release/server/api/_valkey.js
+  if grep -R --include='*.js' -n -E \"require\\((['\\\"])\\./_valkey\\1\\)\" \
+    /srv/pokoin/api/$release/api /srv/pokoin/api/$release/server; then
+    echo 'release still requires ./_valkey' >&2
+    exit 1
+  fi
   rm -f /srv/pokoin/api/$release/api/patch-route-manifest.js \
     /srv/pokoin/api/$release/api/instant-routes.json \
     /srv/pokoin/api/$release/api/*.test.js

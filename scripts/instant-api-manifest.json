@@ -32,7 +32,6 @@
     "_read_model_cache.js",
     "_seller_shop_cache.js",
     "_marketplace_cache_invalidate.js",
-    "_valkey.js",
     "_listing_inventory.js",
     "_request_timing.js",
     "_artist_summary.js",

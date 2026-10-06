@@ -40,7 +40,6 @@ test('instant API artifact closes over the new runtime modules', () => {
     result.files.map((file) => path.basename(file)).sort(),
     [...manifest.ship].sort(),
   );
-  assert.ok(result.files.includes('server/pokoin-api/_valkey.js'));
 });
 
 test('deploy-instant-api runs test files that exist', () => {
@@ -49,7 +48,6 @@ test('deploy-instant-api runs test files that exist', () => {
     .map((match) => match[1])
     .filter((file) => file.endsWith('.js'));
   assert.ok(files.includes('server/pokoin-api/_redis_cache.test.js'));
-  assert.equal(files.includes('server/pokoin-api/_valkey.test.js'), false);
   for (const file of files) {
     assert.equal(fs.existsSync(path.join(__dirname, '..', file)), true, file);
   }
