@@ -100,6 +100,41 @@ test('both workers down → 503; empty upload → 400; wrong method → 405', as
   assert.equal(res.headers['access-control-allow-origin'], '*');
 });
 
+test('workerPath carries print ids and clamps wait_ms', () => {
+  const mod = load({});
+  assert.equal(
+    mod._test.workerPath('/print', { ids: 'aabb,ccdd', wait_ms: '800' }),
+    '/print?ids=aabb%2Cccdd&wait_ms=800');
+  assert.equal(
+    mod._test.workerPath('/print', { ids: 'aabb,ccdd', wait_ms: '99999' }),
+    '/print?ids=aabb%2Cccdd&wait_ms=3000');
+  assert.equal(
+    mod._test.workerPath('/print', { ids: 'aabb', wait_ms: '-5' }),
+    '/print?ids=aabb&wait_ms=0');
+  assert.equal(
+    mod._test.workerPath('/print', { ids: 'zz; rm -rf', wait_ms: 'x' }),
+    '/print', 'malformed ids and wait_ms are dropped, not forwarded');
+  assert.equal(mod._test.workerPath('/print', {}), '/print');
+});
+
+test('print pass: ids poll through, unknown/expired ids answer 404', async () => {
+  const gpu = await worker('nezopt');
+  const mod = load({ SCAN_PRIMARY_URL: gpu.url, SCAN_FALLBACK_URL: 'http://127.0.0.1:2' });
+  const req = { method: 'GET', headers: { 'cf-connecting-ip': '203.0.113.7' }, query: { ids: 'aabb,ccdd', wait_ms: '250' } };
+  let res = response();
+  await mod.printStrip(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers['x-scan-worker'], 'nezopt');
+  assert.equal(gpu.seen[0].url, '/print?ids=aabb%2Cccdd&wait_ms=250');
+  assert.equal(gpu.seen[0].xff, '203.0.113.7');
+  gpu.server.close();
+
+  const dead = load({ SCAN_PRIMARY_URL: 'http://127.0.0.1:1', SCAN_FALLBACK_URL: 'http://127.0.0.1:2' });
+  res = response();
+  await dead.printStrip({ method: 'GET', headers: {}, query: { ids: 'aabb' } }, res);
+  assert.equal(res.statusCode, 503, 'no worker answering is 503');
+});
+
 test('health reports both workers without falling back', async () => {
   const pi = await worker('pi');
   const mod = load({ SCAN_PRIMARY_URL: 'http://127.0.0.1:1', SCAN_FALLBACK_URL: pi.url });
