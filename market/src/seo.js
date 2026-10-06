@@ -189,15 +189,29 @@ export function productJsonLd(card = {}, options = {}) {
 }
 
 export function breadcrumbJsonLd(crumbs = []) {
+  const items = [];
+  const list = Array.isArray(crumbs) ? crumbs : [];
+  for (const crumb of list) {
+    if (!crumb || typeof crumb !== 'object') continue;
+    const name = String(crumb.name || '').trim();
+    if (!name) continue;
+    const href = String(crumb.href || '').trim();
+    const entry = {
+      '@type': 'ListItem',
+      position: items.length + 1,
+      name,
+    };
+    if (href) {
+      entry.item = /^https?:\/\//i.test(href)
+        ? href
+        : `https://pokoin.com${href.startsWith('/') ? href : `/${href}`}`;
+    }
+    items.push(entry);
+  }
   return {
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
-    itemListElement: crumbs.map((crumb, index) => ({
-      '@type': 'ListItem',
-      position: index + 1,
-      name: crumb.name,
-      item: crumb.href ? `https://pokoin.com${crumb.href}` : undefined,
-    })),
+    itemListElement: items,
   };
 }
 

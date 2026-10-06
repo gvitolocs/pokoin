@@ -16,6 +16,8 @@ const {
   withTimeout,
 } = require('./_marketplace_react_card');
 const { parseGameFromRequest, runWithGame } = require('./_marketplace_game');
+const { INGEST_GAMES } = require('./_cardtrader_game_ingest');
+const { publicCanonicalPath } = require('./_public_canonical_path');
 const { visualThemeForShade } = require('./_card_visual_theme');
 const sql = require('./_marketplace_react_sql');
 const { beginRequest, finishRequest } = require('./_request_timing');
@@ -290,7 +292,7 @@ function createHandler(deps = {}) {
             .filter(Boolean)
             .join(' · '),
           imageUrl: card.heroImageUrl || card.imageUrl,
-          canonicalPath: card.canonicalPath,
+          canonicalPath: publicCanonicalPath(card.canonicalPath, INGEST_GAMES[game]?.slug || ''),
         },
         lookup: {
           cardId,

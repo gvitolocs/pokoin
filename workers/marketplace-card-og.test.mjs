@@ -90,7 +90,7 @@ test('builds absolute image and HTML with og tags', () => {
   assert.equal(html.includes('http-equiv="refresh"'), false);
 });
 
-test('search-engine card HTML keeps description, Product JSON-LD, and crawlable links', () => {
+test('search-engine card HTML keeps description, ItemPage JSON-LD, and crawlable links', () => {
   const payload = buildCardOgPayload(
     {
       seo: {
@@ -107,6 +107,9 @@ test('search-engine card HTML keeps description, Product JSON-LD, and crawlable 
   const html = renderCardOgHtml(payload);
   assert.match(html, /<h1>Charizard<\/h1>/);
   assert.match(html, /application\/ld\+json/);
+  const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  assert.equal(jsonLd['@type'], 'ItemPage');
+  assert.equal(jsonLd.offers, undefined);
   assert.match(html, /href="\/marketplace\/sets\/base-set"/);
   assert.match(html, /Venusaur/);
 });
@@ -135,13 +138,21 @@ test('card HTML carries the dated price snapshot and Pokoin attribution', () => 
   const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
   assert.equal(jsonLd['@type'], 'Product');
   assert.equal(jsonLd.dateModified, payload.snapshotDate);
-  assert.equal(jsonLd.offers, undefined);
-  assert.equal(html.includes('InStock'), false);
+  assert.equal(jsonLd.offers.availability, 'https://schema.org/OutOfStock');
+  assert.equal(jsonLd.offers.priceCurrency, 'EUR');
+  assert.equal(jsonLd.offers.price, '13.21');
+  assert.equal(jsonLd.offers.url, jsonLd.url);
+  assert.equal(html.includes('>In stock'), false);
   const bare = renderCardOgHtml(
     buildCardOgPayload({ card: { name: 'Drifloon' } }, { cardId: '248768', language: 'en' }),
   );
   assert.match(bare, /No Pokoin listing is currently for sale/);
   assert.equal(bare.includes('InStock'), false);
+  const bareLd = JSON.parse(bare.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  assert.equal(bareLd['@type'], 'ItemPage');
+  assert.equal(bareLd.offers, undefined);
+  assert.equal(bareLd.review, undefined);
+  assert.equal(bareLd.aggregateRating, undefined);
 });
 
 test('search HTML AggregateOffer uses only active Pokoin listings in the pinned currency', () => {
@@ -193,4 +204,65 @@ test('search HTML AggregateOffer uses only active Pokoin listings in the pinned 
   assert.equal(jsonLd.offers.offerCount, 1);
   assert.equal(jsonLd.offers.priceCurrency, 'EUR');
   assert.equal(jsonLd.offers.availability, 'https://schema.org/InStock');
+  assert.equal(jsonLd.offers.url, jsonLd.url);
+  assert.equal(jsonLd.brand.name, 'Pokémon TCG');
+});
+
+test('a catalog-only non-Pokémon card is an ItemPage on the game URL', () => {
+  const payload = buildCardOgPayload(
+    {
+      seo: {
+        title: 'Tony Tony.Chopper',
+        description: 'Tony Tony.Chopper · Alternate Art · OP08-007a · Two Legends',
+        canonicalPath: '/marketplace/en/cards/598560/alternate-art-tony-tony-chopper-op08-007a-op-08-two-legends',
+        imageUrl: 'https://cdn.pokoin.com/one-piece/chopper.jpg',
+      },
+      card: {
+        id: '598560',
+        name: 'Tony Tony.Chopper',
+        set: 'Two Legends',
+        number: 'OP08-007a',
+      },
+      offers: [],
+    },
+    { cardId: '598560', language: 'en', includeDescription: true, game: 'one_piece' },
+  );
+  payload.currency = 'EUR';
+  payload.indexable = true;
+  const html = renderCardOgHtml(payload);
+  const canonical = 'https://pokoin.com/one-piece/marketplace/en/cards/598560/alternate-art-tony-tony-chopper-op08-007a-op-08-two-legends';
+  assert.match(html, new RegExp(`rel="canonical" href="${canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+  assert.match(html, new RegExp(`property="og:url" content="${canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+  assert.match(html, /href="\/one-piece\/marketplace"/);
+  const jsonLd = JSON.parse(html.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  assert.equal(jsonLd['@type'], 'ItemPage');
+  assert.equal(jsonLd.url, canonical);
+  assert.equal(jsonLd.name, 'Tony Tony.Chopper');
+  assert.equal(jsonLd.image, 'https://cdn.pokoin.com/one-piece/chopper.jpg');
+  assert.equal(jsonLd.offers, undefined);
+  assert.equal(jsonLd.review, undefined);
+  assert.equal(jsonLd.aggregateRating, undefined);
+  assert.equal(JSON.stringify(jsonLd).includes('"Product"'), false);
+  const listed = renderCardOgHtml({
+    ...payload,
+    currency: 'EUR',
+    offers: [{
+      id: 'lst-op',
+      sellerUid: 'seller-a',
+      sellerName: 'Seller A',
+      condition: 'NM',
+      pricePkn: 2000,
+      quantityAvailable: 1,
+      status: 'active',
+      cardImageUrl: 'https://cdn.pokoin.com/one-piece/chopper.jpg',
+    }],
+  });
+  const listedLd = JSON.parse(listed.match(/<script type="application\/ld\+json">([^]+?)<\/script>/)[1]);
+  assert.equal(listedLd['@type'], 'Product');
+  assert.equal(listedLd.brand.name, 'One Piece');
+  assert.equal(listedLd.url, canonical);
+  assert.equal(listedLd.offers.lowPrice, '10.00');
+  assert.equal(listedLd.offers.priceCurrency, 'EUR');
+  assert.equal(listedLd.offers.availability, 'https://schema.org/InStock');
+  assert.equal(listedLd.offers.url, canonical);
 });
