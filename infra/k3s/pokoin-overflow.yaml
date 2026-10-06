@@ -105,6 +105,9 @@ spec:
             # Intentionally unreachable inside the pod: fail-open cache path.
             - { name: REDIS_HOST, value: "127.0.0.1" }
             - { name: REDIS_PORT, value: "6380" }
+            # No Redis here by design: /healthz must not report the overflow
+            # down for a cache it never had (Postgres stays required).
+            - { name: PIPELINE_HEALTH_SKIP, value: redis }
             - { name: POKOIN_OVERFLOW_NODE, value: nezopt }
             # The CDN runs on the Pi, not this pod's loopback interface.
             - { name: POKOIN_CDN_HEALTH_URL, value: "https://cdn.pokoin.com/health" }

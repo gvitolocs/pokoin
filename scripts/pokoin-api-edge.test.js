@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process');
 const http = require('node:http');
 const path = require('node:path');
 const test = require('node:test');
-const { cacheKey, cachePolicy, chooseApiOrigin, isApiPath, ResponseCache } = require('./pokoin-api-edge.js');
+const { cacheKey, cachePolicy, chooseApiOrigin, isApiPath, isHealthPath, ResponseCache } = require('./pokoin-api-edge.js');
 
 const base = { inFlight: 24, localMax: 24, overflowHealthy: true, overflowOrigin: 'http://nezopt:30880' };
 
@@ -28,6 +28,19 @@ test('only saturated GET/HEAD API calls overflow, and only to a healthy nezopt',
   assert.equal(cacheKey({ method: 'GET', headers: {} }, '/api/marketplace-live', '?cardId=1'), null);
   assert.equal(isApiPath('/api/marketplace-suggest'), true);
   assert.equal(isApiPath('/some-image.webp'), false);
+});
+
+test('health probes always stay on the Pi, even saturated or with rust routes', () => {
+  const rust = { origin: 'http://127.0.0.1:18082', routes: { suggest: 100, card_page: 100, listings_write: 100 } };
+  for (const pathname of ['/healthz', '/livez', '/readyz', '/api/healthz', '/api/livez', '/api/readyz']) {
+    assert.equal(isHealthPath(pathname), true, pathname);
+    assert.equal(chooseApiOrigin({ ...base, method: 'GET', pathname, inFlight: 999 }), 'local', pathname);
+    assert.equal(chooseApiOrigin({ ...base, method: 'HEAD', pathname, rust, clientKey: 'a' }), 'local', pathname);
+  }
+  for (const pathname of ['/api/health', '/api/marketplace-suggest', '/healthz/x', '/']) {
+    assert.equal(isHealthPath(pathname), false, pathname);
+  }
+  assert.equal(chooseApiOrigin({ ...base, method: 'GET', pathname: '/api/marketplace-suggest' }), 'overflow');
 });
 
 function server(name, delayMs, cacheControl = '') {

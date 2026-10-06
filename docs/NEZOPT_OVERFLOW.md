@@ -18,6 +18,7 @@ Cloudflare tunnel → Pi pokoin-api-edge :18079 ─┬─ Pi API :18080 (always 
 - At or above it: **GET/HEAD** API requests go to nezopt, but only while nezopt
   answers a real suggest probe every 5 s (2 s timeout).
 - **Writes, webhooks, uploads, checkout** (any other method) always stay on the Pi.
+- **Health probes** (`/healthz`, `/livez`, `/readyz` and their `/api/` forms) always go to the Pi and never fall back to nezopt, so the uptime mail measures the Pi.
 - If an overflow request cannot connect, it is retried on the Pi and nezopt is
   marked unhealthy until the next good probe.
 - Every response carries `x-pokoin-origin: pi` or `nezopt`.
@@ -56,7 +57,7 @@ namespace `pokoin-overflow`.
 | `meili` | Meilisearch **v1.53.1** (production pin) copy of `marketplace_cards` + `marketplace_name_tokens` |
 | `meili-delta` | CronJob every 2 min — the Pi's own `scripts/meili-sync-marketplace-delta.js` |
 | `meili-full` | CronJob 03:17 — full rebuild of both indexes (drift guard) |
-| `valkey` | Cache, 256 MB LRU, no persistence |
+| (no Valkey) | Cache helpers fail open to Postgres; the overflow's `/healthz` skips the redis check (`PIPELINE_HEALTH_SKIP=redis`) |
 
 Overflow pods **read from the writer Postgres** on nezopt (freshest data; the Pi
 reads its replica). UFW drops container → host traffic, so pods reach the writer

@@ -60,6 +60,13 @@ function isApiPath(pathname) {
   );
 }
 
+const HEALTH_PATHS = new Set(['/healthz', '/livez', '/readyz', '/api/healthz', '/api/livez', '/api/readyz']);
+
+/** Health/readiness probes always describe the Pi itself, never the overflow. */
+function isHealthPath(pathname) {
+  return HEALTH_PATHS.has(pathname);
+}
+
 function pickOrigin(pathname) {
   return isApiPath(pathname) ? API : CDN;
 }
@@ -135,7 +142,7 @@ function rustPercent(rust, id) {
 function chooseApiOrigin({
   method, pathname, inFlight, localMax, overflowHealthy, overflowOrigin, rust, clientKey,
 }) {
-  if (pathname === '/api/marketplace-live') return 'local';
+  if (pathname === '/api/marketplace-live' || isHealthPath(pathname)) return 'local';
   const id = routeId(pathname, method);
   const percent = rustPercent(rust, id);
   if (percent > 0 && stickyBucket(clientKey || 'anon') < percent) return 'rust';
@@ -405,7 +412,7 @@ function forwardApi(req, res, pathname, search) {
     forward(req, res, new URL(API), pathname, search, {
       body: retry ? Buffer.alloc(0) : null,
       onDone: () => { state.inFlight -= 1; },
-      onConnectError: idempotent && !retry && OVERFLOW && state.overflowHealthy
+      onConnectError: idempotent && !retry && OVERFLOW && state.overflowHealthy && !isHealthPath(pathname)
         ? () => { state.fallbacks += 1; toOverflow(true); }
         : null,
     });
@@ -502,7 +509,7 @@ function fetchEntry(req, pathname, search, leaderRes) {
           return;
         }
         const other = local ? 'overflow' : 'local';
-        const canRetry = !retried && (other === 'local' || (OVERFLOW && state.overflowHealthy));
+        const canRetry = !retried && (other === 'local' || (OVERFLOW && state.overflowHealthy && !isHealthPath(pathname)));
         if (route === 'overflow') state.overflowHealthy = false;
         if (canRetry) {
           if (local) state.fallbacks += 1;
@@ -648,6 +655,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  chooseApiOrigin, cachePolicy, cacheKey, ResponseCache, isApiPath, rewritePath,
+  chooseApiOrigin, cachePolicy, cacheKey, ResponseCache, isApiPath, isHealthPath, rewritePath,
   routeId, stickyBucket, rustPercent,
 };

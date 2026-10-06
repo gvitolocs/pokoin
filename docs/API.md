@@ -115,7 +115,7 @@ the Pi timer from the same exact origin/main commit with
 | URL | What |
 | --- | --- |
 | `GET /api/__contract` | React/Flutter identity, images, page BFFs, route families |
-| `GET /healthz` | Pipeline: Postgres, Valkey, Meili, Pi CDN. **503** if any is down. Not a Node liveness ping. Page BFFs never return `ECONNREFUSED` / `127.0.0.1:5432`; they return **503** `{error:"We are working on a solution."}`. SPA swaps to `WorkingOnIt`. Uptime mail from **nezopt** (`scripts/pokoin-uptime-mail.sh`) goes to `vitologiuseppe17@gmail.com` on down / recovery after **two consecutive** 2-minute samples (so a single CDN `/health` timeout does not spam Gmail). |
+| `GET /healthz` | Pipeline: Postgres, Valkey, Meili, Pi CDN. **503** if any is down. Not a Node liveness ping. Page BFFs never return `ECONNREFUSED` / `127.0.0.1:5432`; they return **503** `{error:"We are working on a solution."}`. SPA swaps to `WorkingOnIt`. Uptime mail from **nezopt** (`scripts/pokoin-uptime-mail.sh`) goes to `vitologiuseppe17@gmail.com` on down / recovery after **two consecutive** 2-minute samples (so a single CDN `/health` timeout does not spam Gmail). The Pi edge never sends health paths to the nezopt overflow; the mail body and log carry `origin:` (`x-pokoin-origin`). |
 | `GET /api/__routes` | Every hosted handler + `family` |
 | `GET /api/__routes?group=1` | Same list grouped |
 | `GET /api/__routes?family=page-bff` | One family |

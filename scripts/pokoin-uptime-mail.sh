@@ -34,13 +34,16 @@ ts() { date -u +'%Y-%m-%dT%H:%M:%SZ'; }
 log() { printf '%s %s\n' "$(ts)" "$*" | tee -a "$LOG" >/dev/null; }
 
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+hdr="$(mktemp)"
+trap 'rm -f "$tmp" "$hdr"' EXIT
 
-code="$(curl -sS -o "$tmp" -w '%{http_code}' --max-time 12 -A "$UA" "$HEALTH_URL" 2>/dev/null || true)"
+code="$(curl -sS -D "$hdr" -o "$tmp" -w '%{http_code}' --max-time 12 -A "$UA" "$HEALTH_URL" 2>/dev/null || true)"
 if [ -z "$code" ]; then
   code=000
 fi
 body="$(head -c 2000 "$tmp" 2>/dev/null || true)"
+origin="$(tr -d '\r' <"$hdr" 2>/dev/null | awk -F': *' 'tolower($1)=="x-pokoin-origin"{v=$2} END{print v}')"
+origin="${origin:-unknown}"
 
 ok=0
 if [ "$code" = "200" ] && grep -q '"ok":true' "$tmp" 2>/dev/null; then
@@ -180,7 +183,7 @@ maybe_mail() {
   fi
 }
 
-summary="$(printf 'time: %s\nurl: %s\nhttp: %s\nconfirmed: %s\nbody:\n%s\n' "$(ts)" "$HEALTH_URL" "$code" "$confirmed" "$body")"
+summary="$(printf 'time: %s\nurl: %s\nhttp: %s\norigin: %s\nconfirmed: %s\nbody:\n%s\n' "$(ts)" "$HEALTH_URL" "$code" "$origin" "$confirmed" "$body")"
 
 if [ "$ok" = "1" ]; then
   echo 0 >"$DOWN_STREAK_FILE"
@@ -192,10 +195,10 @@ if [ "$ok" = "1" ]; then
   elif [ "$confirmed" != "down" ]; then
     echo up >"$STATUS_FILE"
   else
-    log "up pending ${up_streak}/${CONFIRM} http=${code}"
+    log "up pending ${up_streak}/${CONFIRM} http=${code} origin=${origin}"
     exit 0
   fi
-  log "up http=${code}"
+  log "up http=${code} origin=${origin}"
   exit 0
 fi
 
@@ -209,9 +212,9 @@ if [ "$confirmed" != "down" ] && [ "$down_streak" -ge "$CONFIRM" ]; then
 elif [ "$confirmed" = "down" ]; then
   maybe_mail reminder "Pokoin is still down" "$(printf 'Pokoin /healthz is still not OK (since %s).\n\n%s\n' "${since:-unknown}" "$summary")" || exit 1
 else
-  log "down pending ${down_streak}/${CONFIRM} http=${code}"
+  log "down pending ${down_streak}/${CONFIRM} http=${code} origin=${origin}"
   echo up >"$STATUS_FILE"
   exit 0
 fi
-log "down http=${code}"
+log "down http=${code} origin=${origin}"
 exit 0
