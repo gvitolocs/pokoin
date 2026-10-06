@@ -19,7 +19,17 @@ Indexable landings:
 
 Do not index search or shop filters (`?seller=`, `?condition=`, `/marketplace/search`).
 Googlebot on a card URL is served indexable HTML by `workers/marketplace-card-og.js`
-(H1, crumbs, `Product` JSON-LD). Discord/Slack keep `noindex` and no leftover subtitle.
+(H1, the scan, crumbs, JSON-LD). `og:image`, the `<img>`, and JSON-LD `image` are
+the `https://cdn.pokoin.com/...` file. `pokoin.com/card-images/...` is a 301,
+and Google drops that hop, so the SPA `SeoHead` rewrites the same way and
+keeps `max-image-preview:large` after render. A card with no scan omits the
+image. The site logo and the missing-card coin are never the card photo.
+A card with a Pokoin listing or a reference price gets
+`Product` plus `offers` (price, priceCurrency, availability, url). A catalog
+card with neither gets `ItemPage` — never a `Product` that lacks offers,
+review, and aggregateRating. Reviews, ratings, and prices are never invented.
+Non-Pokémon canonical, `og:url`, and JSON-LD `url` keep the game prefix
+(`/one-piece/`, `/star-wars/`, …). Discord/Slack keep `noindex` and no leftover subtitle.
 Sitemaps: submit **`https://sitemap.pokoin.com/sitemap.xml`** in Search Console
 (index → hubs, Pokémon species, sets). That host is a grey-cloud Vercel
 CNAME (`proxied=false`) so Bot Fight never sees Google’s fetch. Page

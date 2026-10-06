@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { pokemonHref, speciesFromCard, speciesFromSlug, speciesLabel } from './pokemon-hubs.js';
 import {
+  breadcrumbJsonLd,
   cardSeoTitle,
   languageHrefFromNationality,
   pickRelatedCards,
@@ -43,4 +44,23 @@ test('rarity and language hubs stay on marketplace paths', () => {
   assert.equal(rarityHref('Holo Rare', 'en'), '/marketplace/en/rarities/holo-rare');
   assert.equal(languageHrefFromNationality('japanese', 'en'), '/marketplace/en/languages/japanese');
   assert.equal(languageHrefFromNationality('western', 'en'), '/marketplace/en/languages/english');
+});
+
+test('breadcrumb JSON-LD skips null crumbs and keeps a game-prefixed item URL', () => {
+  const data = breadcrumbJsonLd([
+    { name: 'Marketplace', href: '/one-piece/marketplace' },
+    null,
+    undefined,
+    { href: '/marketplace/sets/two-legends' },
+    { name: 'Two Legends', href: '/one-piece/marketplace/sets/two-legends' },
+    { name: 'Tony Tony.Chopper' },
+  ]);
+  assert.equal(data['@type'], 'BreadcrumbList');
+  assert.equal(data.itemListElement.length, 3);
+  assert.deepEqual(data.itemListElement.map((row) => row.position), [1, 2, 3]);
+  assert.equal(data.itemListElement[0].item, 'https://pokoin.com/one-piece/marketplace');
+  assert.equal(data.itemListElement[1].item, 'https://pokoin.com/one-piece/marketplace/sets/two-legends');
+  assert.equal(data.itemListElement[2].name, 'Tony Tony.Chopper');
+  assert.equal(data.itemListElement[2].item, undefined);
+  assert.deepEqual(breadcrumbJsonLd(null).itemListElement, []);
 });

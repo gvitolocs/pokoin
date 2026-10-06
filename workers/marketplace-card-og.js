@@ -10,13 +10,15 @@ import {
   productStructuredData,
   purchasableOffers,
 } from '../market/src/google-commerce.js';
+import { publicGamePath, tcgBrandName } from '../market/src/game.js';
 import { currencyFromSearch, moneyFromPkn } from '../market/src/pkn.js';
 
 export { realPublicCardId } from './public-card-id.js';
 
 export const OG_CACHE_TTL_SEC = 3600;
 export const OG_SEARCH_CACHE_TTL_SEC = 120;
-export const OG_CACHE_VERSION = 'v8';
+/** Bump when card JSON-LD, canonical URLs, or the crawlable scan URL change. */
+export const OG_CACHE_VERSION = 'v10';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
@@ -122,10 +124,14 @@ export function absoluteUrl(pathOrUrl, origin = SITE) {
   return `${origin.replace(/\/$/, '')}${path}`;
 }
 
-/** Scan URL Google can fetch. The handler overwrites the payload image, so both paths use this. */
+/** Scan URL Google can fetch. Empty, the site logo, and the missing-card coin are not a card photo. */
 export function cardOgImageUrl(imageUrl, cardId, origin = SITE) {
+  const raw = String(imageUrl || '').trim();
+  if (!raw || /pokoin-512\.png(?:$|\?)/i.test(raw) || /missing-card\.webp(?:$|\?)/i.test(raw)) {
+    return '';
+  }
   return crawlableCardImage(absoluteUrl(
-    rewriteLeftoverCatalogImage(imageUrl, cardId),
+    rewriteLeftoverCatalogImage(raw, cardId),
     origin,
   ));
 }
@@ -159,6 +165,7 @@ export function buildCardOgPayload(cardPage, {
   cardId,
   requestUrl,
   includeDescription = false,
+  game = '',
 } = {}) {
   const seo = cardPage?.seo || {};
   const card = cardPage?.card || {};
@@ -176,11 +183,12 @@ export function buildCardOgPayload(cardPage, {
       card.tileImageUrl,
     cardId || card.id,
   );
-  const path =
+  const rawPath =
     seo.canonicalPath ||
     cardPage?.canonicalPath ||
     card.canonicalPath ||
     `/marketplace/${language}/cards/${cardId}`;
+  const path = publicGamePath(rawPath, game) || rawPath;
   const url = requestUrl || absoluteUrl(path);
   const setName = String(card.set || card.set_name || '').trim();
   const artist = String(card.artist || card.illustrator || cardPage?.artist?.name || '').trim();
@@ -213,6 +221,7 @@ export function buildCardOgPayload(cardPage, {
     setHref: setName ? `/marketplace/sets/${setSlug(setName)}` : '',
     artistHref: artist ? `/marketplace/${language}/artists/${artistSlug(artist)}` : '',
     neighbors,
+    game,
   };
 }
 
@@ -225,6 +234,7 @@ function productJsonLd(payload) {
     artist: payload.artist,
     canonicalPath: payload.path,
     heroImageUrl: payload.image,
+    game: payload.game,
   };
   const data = productStructuredData(card, {
     offers: payload.offers,
@@ -232,6 +242,7 @@ function productJsonLd(payload) {
     listingId: payload.listingId,
     referencePkn: payload.referencePkn,
     origin: SITE,
+    game: payload.game,
   });
   data.dateModified = payload.snapshotDate;
   if (payload.description) data.description = payload.description;
@@ -249,11 +260,14 @@ export function renderCardOgHtml(payload) {
     canonicalPath: payload.path,
     cardId: payload.cardId,
     origin: SITE,
+    game: payload.game,
   }));
   const url = canonical;
   const path = escapeHtml(payload.path || '/marketplace');
   const h1 = escapeHtml(payload.name || payload.title);
-  const imageAlt = escapeHtml([payload.name, payload.setName, payload.number, 'Pokemon card'].filter(Boolean).join(' ') || payload.title);
+  const cardLabel = payload.game ? `${tcgBrandName(payload.game)} card` : 'Pokemon card';
+  const imageAlt = escapeHtml([payload.name, payload.setName, payload.number, cardLabel].filter(Boolean).join(' ') || payload.title);
+  const hrefFor = (path) => escapeHtml(publicGamePath(path, payload.game) || path || '');
   const imageType = /\.webp(?:$|\?)/i.test(payload.image || '')
     ? 'image/webp'
     : /\.png(?:$|\?)/i.test(payload.image || '')
@@ -262,15 +276,21 @@ export function renderCardOgHtml(payload) {
   const descriptionMeta = description
     ? `\n  <meta name="description" content="${description}" />\n  <meta property="og:description" content="${description}" />\n  <meta name="twitter:description" content="${description}" />`
     : '';
+  const imageMeta = image
+    ? `\n  <meta property="og:image" content="${image}" />\n  <meta property="og:image:secure_url" content="${image}" />\n  <meta property="og:image:type" content="${imageType}" />\n  <meta property="og:image:alt" content="${imageAlt}" />\n  <meta name="twitter:image" content="${image}" />`
+    : '';
+  const figure = image
+    ? `\n  <img src="${image}" alt="${imageAlt}" width="630" height="880" />`
+    : '';
   const crumbs = [
-    '<a href="/marketplace">Marketplace</a>',
-    payload.setHref ? `<a href="${escapeHtml(payload.setHref)}">${escapeHtml(payload.setName)}</a>` : '',
-    payload.artistHref ? `<a href="${escapeHtml(payload.artistHref)}">${escapeHtml(payload.artist)}</a>` : '',
+    `<a href="${hrefFor('/marketplace')}">Marketplace</a>`,
+    payload.setHref ? `<a href="${hrefFor(payload.setHref)}">${escapeHtml(payload.setName)}</a>` : '',
+    payload.artistHref ? `<a href="${hrefFor(payload.artistHref)}">${escapeHtml(payload.artist)}</a>` : '',
   ].filter(Boolean).join(' / ');
   const neighborLinks = (payload.neighbors || []).slice(0, 8).map((row) => {
     const id = String(row.id || row.card_id || '');
     const name = escapeHtml(row.name || id);
-    const href = escapeHtml(row.canonicalPath || row.canonical_path || `/marketplace/${payload.language || 'en'}/cards/${id}`);
+    const href = hrefFor(row.canonicalPath || row.canonical_path || `/marketplace/${payload.language || 'en'}/cards/${id}`);
     return `<li><a href="${href}">${name}</a></li>`;
   }).join('');
   const jsonLd = payload.name
@@ -296,8 +316,8 @@ export function renderCardOgHtml(payload) {
     ? '\n  <meta name="robots" content="index, follow, max-image-preview:large" />'
     : '';
   const extra = payload.name
-    ? `\n  <h1>${h1}</h1>\n  <nav>${crumbs}</nav>${descriptionBody}${snapshotLine}${neighborLinks ? `\n  <ul>${neighborLinks}</ul>` : ''}`
-    : `\n  <p><a href="${path}">${title}</a></p>${descriptionBody}${snapshotLine}`;
+    ? `\n  <h1>${h1}</h1>${figure}\n  <nav>${crumbs}</nav>${descriptionBody}${snapshotLine}${neighborLinks ? `\n  <ul>${neighborLinks}</ul>` : ''}`
+    : `\n  <p><a href="${path}">${title}</a></p>${figure}${descriptionBody}${snapshotLine}`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -309,17 +329,11 @@ export function renderCardOgHtml(payload) {
   <meta property="og:site_name" content="Pokoin" />
   <meta property="og:locale" content="en_US" />
   <meta property="og:title" content="${title}" />
-  <meta property="og:url" content="${url}" />
-  <meta property="og:image" content="${image}" />
-  <meta property="og:image:secure_url" content="${image}" />
-  <meta property="og:image:type" content="${imageType}" />
-  <meta property="og:image:alt" content="${title}" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="${title}" />
-  <meta name="twitter:image" content="${image}" />${jsonLd}
+  <meta property="og:url" content="${url}" />${imageMeta}
+  <meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />
+  <meta name="twitter:title" content="${title}" />${jsonLd}
 </head>
 <body>${extra}
-  <img src="${image}" alt="${imageAlt}" width="400" height="560" />
 </body>
 </html>`;
 }
@@ -392,6 +406,7 @@ export async function handleMarketplaceCardOgRequest(request, env, ctx) {
     cardId: parsed.cardId,
     requestUrl: `${site}${remappedPath}`,
     includeDescription: search,
+    game,
   });
   payload.currency = currency;
   payload.listingId = listingId;
@@ -411,7 +426,7 @@ export async function handleMarketplaceCardOgRequest(request, env, ctx) {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': `public, max-age=60, s-maxage=${search ? OG_SEARCH_CACHE_TTL_SEC : OG_CACHE_TTL_SEC}`,
       'x-pokoin-og-cache': 'miss',
-      'x-robots-tag': search ? 'index, follow' : 'noindex',
+      'x-robots-tag': search ? 'index, follow, max-image-preview:large' : 'noindex',
     },
   });
   if (cache && ctx?.waitUntil) {
