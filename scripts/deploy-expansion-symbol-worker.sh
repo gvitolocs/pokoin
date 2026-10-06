@@ -49,7 +49,8 @@ mv "$conf.new" "$conf"
 systemctl --user daemon-reload
 systemctl --user restart battlescan-fast.service
 healthy=0
-for _ in $(seq 1 90); do
+# All-games catalogs take minutes to load; wait up to DEPLOY_HEALTH_WAIT_S (default 360 s).
+for _ in $(seq 1 "${DEPLOY_HEALTH_WAIT_S:-360}"); do
   if curl -fsS http://127.0.0.1:8099/health 2>/dev/null | python3 -c 'import json,sys; h=json.load(sys.stdin); assert h["expansion_symbols"]["enabled"] and h["device"]=="rocm"' 2>/dev/null; then healthy=1; break; fi
   sleep 1
 done
