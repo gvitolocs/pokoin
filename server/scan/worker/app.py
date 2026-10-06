@@ -23,6 +23,7 @@ from PIL import Image, ImageOps
 from fastapi.concurrency import run_in_threadpool
 from catalogs import CatalogStore
 import card_quad
+import condition
 from expansion_symbols import ExpansionSymbols
 
 ROOT = Path(os.environ.get("CARDSCAN_ROOT", Path(__file__).resolve().parent))
@@ -908,6 +909,42 @@ async def identify(
     if album:
         return await run_in_threadpool(_identify_album_images, [blob], top_k, live)
     return await run_in_threadpool(_identify_image,blob,top_k,live,catalog,multi)
+
+
+def _condition_detect(rgb):
+    """YOLO card boxes for the condition grader; geometry only when models are absent or busy."""
+    if _vecs is None or not _lock.acquire(timeout=2):
+        return []
+    try:
+        return _detect(rgb)
+    finally:
+        _lock.release()
+
+
+def _condition_image(blob: bytes, back: bytes | None = None) -> dict:
+    for part in (blob, back):
+        if part is not None and (not part or len(part) > MAX_BYTES):
+            raise HTTPException(400, f"image must be 1–{MAX_BYTES} bytes")
+    started = time.perf_counter()
+    try:
+        result = condition.assess_bytes(blob, back, _condition_detect)
+    except ValueError:
+        raise HTTPException(400, "not an image")
+    result["ms"] = round(1000 * (time.perf_counter() - started))
+    return result
+
+
+@app.post("/condition")
+async def condition_grade(
+    request: Request,
+    file: UploadFile = File(...),
+    back: UploadFile | None = File(None),
+):
+    """Estimate NM/SP/MP/PL/PO from a front photo and, ideally, a back photo."""
+    _limit_identify(request, IDENTIFY_LIMIT_PER_MIN, "condition")
+    blob = await file.read(MAX_BYTES + 1)
+    back_blob = await back.read(MAX_BYTES + 1) if back is not None else None
+    return await run_in_threadpool(_condition_image, blob, back_blob)
 
 
 @app.post("/identify-album")
