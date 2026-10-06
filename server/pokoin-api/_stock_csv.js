@@ -34,12 +34,14 @@ const TCGPLAYER_HEADERS = Object.freeze([
 
 const FORMATS = Object.freeze(['powertools', 'cardmarket', 'cardtrader', 'tcgplayer']);
 
-/** PT / CM condition scale → Pokoin listing conditions (scan desk set). */
+/** PT / CM condition scale → Pokoin listing conditions (scan desk set).
+ * Per help.cardmarket.com/en/CardCondition: GD ≈ US Moderately Played, the
+ * European Light Played (LP) ≈ US Played, and the US "Lightly Played" ≈ EX. */
 const CONDITION_FROM_CM = Object.freeze({
   mt: 'NM', mint: 'NM', nm: 'NM', 'near mint': 'NM',
-  ex: 'SP', 'excellent': 'SP', sp: 'SP', 'slightly played': 'SP',
+  ex: 'SP', 'excellent': 'SP', sp: 'SP', 'slightly played': 'SP', 'lightly played': 'SP',
   gd: 'MP', good: 'MP', mp: 'MP', 'moderately played': 'MP',
-  lp: 'MP', 'lightly played': 'MP',
+  lp: 'PL', 'light played': 'PL',
   pl: 'PL', 'played': 'PL', hp: 'PL', 'heavily played': 'PL',
   po: 'Poor', poor: 'Poor',
 });
