@@ -40,6 +40,7 @@ cp "$HERE/server/pokoin-api/_pipeline_health.js" "$HERE/server/api/_pipeline_hea
 API_FILES=(
   api/marketplace-search-page.js
   api/marketplace-cards.js
+  api/_cardmarket_reverse.js
   api/marketplace-search-candidates.js
   api/marketplace-autocomplete.js
   api/_print_bucket.js

@@ -500,6 +500,23 @@ module.exports = async function handler(req, res) {
 
   try {
     const url = new URL(req.url, `https://${req.headers.host || 'pokoin.com'}`);
+    const cardmarketUrl = url.searchParams.get('cardmarketUrl');
+    if (cardmarketUrl) {
+      // Loaded only for this mode, so search requests never depend on them.
+      const { cardmarketPathKey, lookupCardmarketProduct } = require('./_cardmarket_reverse');
+      const { parseGameFromRequest, runWithGame } = require('./_marketplace_game');
+      if (!cardmarketPathKey(cardmarketUrl)) {
+        return res.status(400).json({
+          ok: false,
+          error: 'cardmarketUrl must be a Cardmarket Singles product URL.',
+        });
+      }
+      const game = parseGameFromRequest(req);
+      const match = await runWithGame(game, () =>
+        lookupCardmarketProduct(cardmarketUrl));
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.status(200).json({ ok: true, match });
+    }
     if (url.searchParams.get('facets') === 'products') {
       const products = await productFacetRows({
         query: url.searchParams.get('query') || url.searchParams.get('q'),
