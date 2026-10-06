@@ -15,8 +15,16 @@
 | Surface | LSD segments, not axis-aligned, not a foil family (≥ 10 parallel offsets in one 3° bin), ridge-shaped; collinear pieces chained | `creases` (≥ 12% W), `scratch_density` |
 | Score | 100 − centering(max 20) − wear; wear = worst side + 0.35 × other side when the back is sent | `score`, `grade` |
 
-Grades: ≥ 88 NM, ≥ 75 SP, ≥ 58 MP, ≥ 40 PL, else PO. A crease caps at MP.
-Flags: `back_not_seen`, `front_not_seen`, `sleeve_glare`, `low_resolution`, `no_card_outline`.
+Grades: ≥ 88 NM, ≥ 75 SP, ≥ 58 MP, ≥ 40 PL, else PO.
+
+Creases (Cardmarket, help.cardmarket.com/en/CardCondition): a crease that breaks the surface makes the
+card recognisable even sleeved, so it is not tournament legal = **Poor**.
+- `crease=confirmed` (query param, CLI `--crease confirmed`): the holder confirms it → grade PO, score < 40, flag `crease_confirmed`.
+- Crease detected in the photo only → grade capped at MP, flag `crease_suspected`, reason asks for a check in hand. Never PO on its own:
+  on the 25-listing Vinted dev set the 3 detections matched no seller-reported crease and missed the 2 that were reported.
+- `crease=none` overrides a false detection (no cap, no flag).
+
+Flags: `back_not_seen`, `front_not_seen`, `sleeve_glare`, `low_resolution`, `no_card_outline`, `crease_suspected`, `crease_confirmed`.
 
 ## Known limits (2026-10-06)
 - Seller-labelled Vinted dev set (25 listings, front+back): exact 11/25, within one grade 19/25, MAE 0.96 vs 1.04 for always-MP. Signal is weak; treat grades as advisory.

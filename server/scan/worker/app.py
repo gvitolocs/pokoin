@@ -921,13 +921,13 @@ def _condition_detect(rgb):
         _lock.release()
 
 
-def _condition_image(blob: bytes, back: bytes | None = None) -> dict:
+def _condition_image(blob: bytes, back: bytes | None = None, crease: str | None = None) -> dict:
     for part in (blob, back):
         if part is not None and (not part or len(part) > MAX_BYTES):
             raise HTTPException(400, f"image must be 1–{MAX_BYTES} bytes")
     started = time.perf_counter()
     try:
-        result = condition.assess_bytes(blob, back, _condition_detect)
+        result = condition.assess_bytes(blob, back, _condition_detect, crease)
     except ValueError:
         raise HTTPException(400, "not an image")
     result["ms"] = round(1000 * (time.perf_counter() - started))
@@ -939,12 +939,16 @@ async def condition_grade(
     request: Request,
     file: UploadFile = File(...),
     back: UploadFile | None = File(None),
+    crease: str | None = Query(None, pattern="^(confirmed|none)$"),
 ):
-    """Estimate NM/SP/MP/PL/PO from a front photo and, ideally, a back photo."""
+    """Estimate NM/SP/MP/PL/PO from a front photo and, ideally, a back photo.
+
+    `crease=confirmed` when the holder confirms a surface-breaking crease (Poor);
+    `crease=none` to override a false photo detection."""
     _limit_identify(request, IDENTIFY_LIMIT_PER_MIN, "condition")
     blob = await file.read(MAX_BYTES + 1)
     back_blob = await back.read(MAX_BYTES + 1) if back is not None else None
-    return await run_in_threadpool(_condition_image, blob, back_blob)
+    return await run_in_threadpool(_condition_image, blob, back_blob, crease)
 
 
 @app.post("/identify-album")

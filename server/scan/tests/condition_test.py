@@ -212,6 +212,37 @@ class ConditionTest(unittest.TestCase):
         self.assertIn("back", worn)
         self.assertLess(worn["score"], clean["score"] - 8, (clean["score"], worn["score"], worn["reasons"]))
 
+    def test_k_confirmed_crease_is_poor(self):
+        # Cardmarket: a surface-breaking crease marks the card even sleeved -> Poor.
+        blob = DIALGA.read_bytes()
+        r = C.assess_bytes(blob, None, APP._condition_detect, "confirmed")
+        self.assertEqual(r["grade"], "PO")
+        self.assertLess(r["score"], 40)
+        self.assertIn("crease_confirmed", r["flags"])
+        self.assertTrue(r["reasons"][0].startswith("Crease breaks the surface"))
+        self.assertEqual(APP._condition_image(blob, None, "confirmed")["grade"], "PO")
+        with self.assertRaises(ValueError):
+            C.assess_bytes(blob, None, None, "maybe")
+
+    def test_l_detected_crease_only_asks(self):
+        # A crease seen only in the photo never jumps to Poor on its own.
+        for name, card in clean_cards():
+            with self.subTest(name=name):
+                r = grade(crease(card))
+                if not r["surface"]["creases"]:
+                    continue
+                self.assertIn("crease_suspected", r["flags"])
+                self.assertNotIn("crease_confirmed", r["flags"])
+                # Not forced: the grade is the score's grade, at most MP.
+                expected = C._grade(r["score"])
+                if C.GRADE_ORDER.index(expected) < C.GRADE_ORDER.index("MP"):
+                    expected = "MP"
+                self.assertEqual(r["grade"], expected, (name, r["score"], r["reasons"]))
+                enc = cv2.imencode(".png", cv2.cvtColor(crease(card), cv2.COLOR_RGB2BGR))[1].tobytes()
+                cleared = C.assess_bytes(enc, None, APP._condition_detect, "none")
+                self.assertNotIn("crease_suspected", cleared["flags"])
+                self.assertFalse(any(x.startswith("Possible crease") for x in cleared["reasons"]))
+
 
 if __name__ == "__main__":
     unittest.main()

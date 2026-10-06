@@ -11,7 +11,7 @@ warp to 630x880 -> glare mask -> centering (outer edge to printed inner frame)
 surface creases (thin straight ridges that are not printed design lines or
 holo texture). Penalties add up to a 0..100 score mapped to CardTrader grades.
 
-CLI: python condition.py FRONT [--back BACK] | python condition.py --summary IMG...
+CLI: python condition.py FRONT [--back BACK] [--crease confirmed|none] | python condition.py --summary IMG...
 """
 from __future__ import annotations
 
@@ -629,9 +629,20 @@ def _side(rgb: np.ndarray, quad=None, box=None) -> tuple[dict, dict]:
     return m, info
 
 
+CREASE_HINTS = (None, "confirmed", "none")
+
+
 def assess(rgb: np.ndarray, quad=None, back_rgb: np.ndarray | None = None, back_quad=None,
-           box=None, back_box=None) -> dict:
-    """Grade one card. `box`/`back_box`: optional YOLO [x1,y1,x2,y2] hints."""
+           box=None, back_box=None, crease: str | None = None) -> dict:
+    """Grade one card. `box`/`back_box`: optional YOLO [x1,y1,x2,y2] hints.
+
+    `crease` is what the person holding the card says: "confirmed" means a crease
+    breaks the surface, which Cardmarket grades Poor (the card is recognisable
+    even sleeved, so it is not tournament legal); "none" overrides a false
+    detection. Photo detection alone only caps the grade at MP and asks for
+    confirmation: on real listings it is not reliable enough to call Poor."""
+    if crease not in CREASE_HINTS:
+        raise ValueError("crease must be 'confirmed', 'none' or omitted")
     front, _ = _side(rgb, quad, box)
     back = None
     if back_rgb is not None:
@@ -652,8 +663,15 @@ def assess(rgb: np.ndarray, quad=None, back_rgb: np.ndarray | None = None, back_
     total_wear = max(wear) + 0.35 * min(wear) if len(wear) == 2 else wear[0]
     score = max(0.0, 100.0 - cen - total_wear)
     grade = _grade(score)
-    if any(x["surface"]["creases"] for x in sides) and GRADE_ORDER.index(grade) < GRADE_ORDER.index("MP"):
-        grade = "MP"
+    detected = any(x["surface"]["creases"] for x in sides)
+    if crease == "confirmed":
+        grade = "PO"
+        score = min(score, 39.9)
+        flags.append("crease_confirmed")
+    elif detected and crease != "none":
+        if GRADE_ORDER.index(grade) < GRADE_ORDER.index("MP"):
+            grade = "MP"
+        flags.append("crease_suspected")
     confidence = 0.85
     for x in sides:
         if x["glare"] > 0.02:
@@ -675,6 +693,12 @@ def assess(rgb: np.ndarray, quad=None, back_rgb: np.ndarray | None = None, back_
             reasons.append(f"Off-centre front ({c['worst']:.0f}/{100 - c['worst']:.0f})")
     if back is not None:
         reasons += _reasons(back, " (back)")
+    if crease == "none":
+        reasons = [r for r in reasons if not r.startswith("Possible crease")]
+    if crease == "confirmed":
+        reasons.insert(0, "Crease breaks the surface: recognisable even sleeved, so Poor on Cardmarket")
+    elif "crease_suspected" in flags:
+        reasons.append("Check the possible crease in hand: if it breaks the surface the card is Poor")
     if not reasons:
         reasons.append("No visible wear on the photographed side(s)")
 
@@ -701,7 +725,7 @@ def assess(rgb: np.ndarray, quad=None, back_rgb: np.ndarray | None = None, back_
     return result
 
 
-def assess_bytes(blob: bytes, back: bytes | None = None, detect=None) -> dict:
+def assess_bytes(blob: bytes, back: bytes | None = None, detect=None, crease: str | None = None) -> dict:
     """`detect(rgb) -> [{"xyxy": [...], "conf": f}]` is the worker's YOLO detector when loaded."""
     front = decode(blob)
     back_rgb = decode(back) if back else None
@@ -725,7 +749,7 @@ def assess_bytes(blob: bytes, back: bytes | None = None, detect=None) -> dict:
         return max(boxes, key=key)["xyxy"]
 
     return assess(front, back_rgb=back_rgb, box=best_box(front),
-                  back_box=best_box(back_rgb) if back_rgb is not None else None)
+                  back_box=best_box(back_rgb) if back_rgb is not None else None, crease=crease)
 
 
 def _cli_detector():
@@ -746,6 +770,11 @@ def _main(argv: list[str]) -> int:
     summary = "--summary" in argv
     argv = [a for a in argv if a != "--summary"]
     back = None
+    crease = None
+    if "--crease" in argv:
+        i = argv.index("--crease")
+        crease = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
     if "--back" in argv:
         i = argv.index("--back")
         back = argv[i + 1]
@@ -755,7 +784,7 @@ def _main(argv: list[str]) -> int:
         with open(path, "rb") as fh:
             blob = fh.read()
         back_blob = open(back, "rb").read() if back else None
-        r = assess_bytes(blob, back_blob, _cli_detector())
+        r = assess_bytes(blob, back_blob, _cli_detector(), crease)
         r["ms"] = round(1000 * (time.perf_counter() - t))
         if summary:
             print(path, r["grade"], r["score"], r["card"]["detector"], ",".join(r["flags"]), "|", "; ".join(r["reasons"]))
