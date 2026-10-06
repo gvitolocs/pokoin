@@ -434,6 +434,9 @@
     let lastBoxes = null;
     let lastImgW = 0;
     let lastImgH = 0;
+    let lastRoll = 0;
+    let lastOrigW = 0;
+    let lastOrigH = 0;
     let camReady = false;
     let cameraViewVersion = 0;
 
@@ -701,19 +704,39 @@
       }
     }
 
-    function blobFromCanvas(source, max, quality = 0.72) {
-      const canvas = document.createElement("canvas");
+    function frameSize(source, max) {
       const w = source.videoWidth || source.naturalWidth || source.width;
       const h = source.videoHeight || source.naturalHeight || source.height;
-      if (!w || !h) return Promise.resolve(null);
-      // Preserve the complete sensor frame: preview and overlays both use contain.
-      const crop = { x: 0, y: 0, w, h };
-      const scale = Math.min(1, max / Math.max(crop.w, crop.h));
-      canvas.width = Math.max(1, Math.round(crop.w * scale));
-      canvas.height = Math.max(1, Math.round(crop.h * scale));
-      canvas.getContext("2d", { alpha: false }).drawImage(
-        source, crop.x, crop.y, crop.w, crop.h, 0, 0, canvas.width, canvas.height
-      );
+      if (!w || !h) return null;
+      const scale = Math.min(1, max / Math.max(w, h));
+      return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)) };
+    }
+
+    function blobFromCanvas(source, max, quality = 0.72, rollDeg = 0) {
+      const frame = frameSize(source, max);
+      if (!frame) return Promise.resolve(null);
+      const w = source.videoWidth || source.naturalWidth || source.width;
+      const h = source.videoHeight || source.naturalHeight || source.height;
+      const roll = Number(rollDeg) || 0;
+      const upright = Math.abs(roll) >= 3;
+      const cos = Math.abs(Math.cos(roll * Math.PI / 180));
+      const sin = Math.abs(Math.sin(roll * Math.PI / 180));
+      const canvas = document.createElement("canvas");
+      // The rotated bounding box keeps every frame pixel inside the upload.
+      canvas.width = upright ? Math.max(1, Math.round(frame.w * cos + frame.h * sin)) : frame.w;
+      canvas.height = upright ? Math.max(1, Math.round(frame.w * sin + frame.h * cos)) : frame.h;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      if (upright) {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(-roll * Math.PI / 180);
+        ctx.drawImage(source, 0, 0, w, h, -frame.w / 2, -frame.h / 2, frame.w, frame.h);
+        ctx.restore();
+      } else {
+        ctx.drawImage(source, 0, 0, w, h, 0, 0, canvas.width, canvas.height);
+      }
       const q = Math.min(0.92, Math.max(0.4, Number(quality) || 0.72));
       return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", q));
     }
@@ -749,11 +772,107 @@
       return { x: cx - w / 2, y: cy - h / 2, w, h };
     }
 
-    function drawBoxes(boxes, imgW, imgH) {
+    /** World-up in device axes, rotated into screen axes: the card roll in degrees. */
+    function uprightRoll(beta, gamma, screenAngleDeg) {
+      if (!Number.isFinite(beta) || !Number.isFinite(gamma)) return null;
+      const b = beta * Math.PI / 180;
+      const g = gamma * Math.PI / 180;
+      const ux = -Math.cos(b) * Math.sin(g);
+      const uy = Math.sin(b);
+      const strength = Math.hypot(ux, uy);
+      if (strength < 0.5) return null;
+      const a = (Number.isFinite(screenAngleDeg) ? screenAngleDeg : 0) * Math.PI / 180;
+      const sx = ux * Math.cos(a) - uy * Math.sin(a);
+      const sy = ux * Math.sin(a) + uy * Math.cos(a);
+      return { roll: Math.atan2(sx, sy) * 180 / Math.PI, strength };
+    }
+    window.uprightRoll = uprightRoll;
+
+    const TILT_ALPHA = 0.3;
+    const TILT_STALE_MS = 1000;
+    const TILT_CLAMP = 45;
+    let tiltVecX = 1;
+    let tiltVecY = 0;
+    let tiltHave = false;
+    let tiltReading = null;
+    let tiltAt = 0;
+    let tiltStrength = 0;
+    let tiltAsked = false;
+
+    function tiltDisabled() {
+      try { return new URL(location.href).searchParams.get("tilt") === "off"; }
+      catch (_) { return false; }
+    }
+
+    function screenAngle() {
+      const angle = screen && screen.orientation ? screen.orientation.angle : NaN;
+      if (Number.isFinite(angle)) return angle;
+      return Number.isFinite(window.orientation) ? window.orientation : 0;
+    }
+
+    function onDeviceOrientation(event) {
+      const reading = uprightRoll(event.beta, event.gamma, screenAngle());
+      tiltAt = Date.now();
+      if (!reading) { tiltReading = null; tiltStrength = 0; return; }
+      tiltStrength = reading.strength;
+      tiltReading = reading.roll;
+      // Circular EMA on the unit vector: averaging raw angles flips near ±180°.
+      const rad = reading.roll * Math.PI / 180;
+      const x = Math.cos(rad);
+      const y = Math.sin(rad);
+      if (tiltHave) {
+        tiltVecX = tiltVecX * (1 - TILT_ALPHA) + x * TILT_ALPHA;
+        tiltVecY = tiltVecY * (1 - TILT_ALPHA) + y * TILT_ALPHA;
+      } else {
+        tiltVecX = x;
+        tiltVecY = y;
+        tiltHave = true;
+      }
+    }
+
+    function currentRoll() {
+      if (tiltDisabled() || tiltReading === null) return 0;
+      if (Date.now() - tiltAt > TILT_STALE_MS) return 0;
+      const roll = Math.atan2(tiltVecY, tiltVecX) * 180 / Math.PI;
+      if (!Number.isFinite(roll) || Math.abs(roll) < 3) return 0;
+      return Math.max(-TILT_CLAMP, Math.min(TILT_CLAMP, roll));
+    }
+
+    function requestTiltPermission() {
+      if (tiltAsked) return;
+      const orientation = window.DeviceOrientationEvent;
+      if (!orientation || typeof orientation.requestPermission !== "function") return;
+      tiltAsked = true;
+      try {
+        const asked = orientation.requestPermission();
+        if (asked && typeof asked.catch === "function") asked.catch(() => {});
+      } catch (_) {}
+    }
+
+    function drawBoxes(boxes, imgW, imgH, roll = 0, origW = 0, origH = 0) {
       lastBoxes = boxes || null;
       lastImgW = imgW || 0;
       lastImgH = imgH || 0;
+      lastRoll = Number.isFinite(roll) ? roll : 0;
+      lastOrigW = origW || lastImgW;
+      lastOrigH = origH || lastImgH;
       paintOverlay();
+    }
+
+    /** Uploaded-image corner → original-frame point, un-rotating the capture roll. */
+    function unrollPoint(x, y) {
+      const rad = lastRoll * Math.PI / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const dx = x - lastImgW / 2;
+      const dy = y - lastImgH / 2;
+      const ox = dx * cos - dy * sin + lastOrigW / 2;
+      const oy = dx * sin + dy * cos + lastOrigH / 2;
+      const scale = Math.min(overlay.width / lastOrigW, overlay.height / lastOrigH);
+      return {
+        x: ox * scale + (overlay.width - lastOrigW * scale) / 2,
+        y: oy * scale + (overlay.height - lastOrigH * scale) / 2,
+      };
     }
 
     function paintOverlay() {
@@ -771,6 +890,21 @@
       for (let i = 0; i < limit; i += 1) {
         const xy = lastBoxes[i].xyxy || [];
         if (xy.length < 4) continue;
+        if (lastRoll) {
+          // The box lives in the rotated upload; fit it there, then un-rotate all
+          // four corners so the preview gets the true card polygon.
+          let r = { x: xy[0], y: xy[1], w: xy[2] - xy[0], h: xy[3] - xy[1] };
+          if (snapCard) r = fitPokemonCardRect(r);
+          const corners = [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
+          ctx.beginPath();
+          for (let c = 0; c < corners.length; c += 1) {
+            const p = unrollPoint(corners[c][0], corners[c][1]);
+            if (c === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+          }
+          ctx.closePath();
+          ctx.stroke();
+          continue;
+        }
         let r = mapContain(xy, lastImgW, lastImgH, overlay.width, overlay.height);
         if (snapCard) r = fitPokemonCardRect(r);
         ctx.strokeRect(r.x, r.y, r.w, r.h);
@@ -880,10 +1014,10 @@
         if (revision !== scanRevision || (livePass && (opts.viewVersion !== cameraViewVersion || live.hidden))) return null;
         if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Scan request failed");
         if (data.catalog !== selectedCatalog) throw new Error("Unexpected catalog response");
-        if (data.busy) { window.scanDiagnostics?.("worker-busy", data, { capturedAt:opts?.capturedAt, requestAt, respondedAt }); warming.textContent = "Scanner is busy — retrying…"; warming.hidden = false; return data; }
+        if (data.busy) { window.scanDiagnostics?.("worker-busy", data, { capturedAt:opts?.capturedAt, requestAt, respondedAt, roll: Math.round(opts?.roll || 0) }); warming.textContent = "Scanner is busy — retrying…"; warming.hidden = false; return data; }
         warming.hidden = true;
       } catch (err) {
-        window.scanDiagnostics?.("identify-error", null, { requestAt, error: err.name });
+        window.scanDiagnostics?.("identify-error", null, { requestAt, error: err.name, roll: Math.round(opts?.roll || 0) });
         if (revision === scanRevision) {
           warming.textContent = err.name === "AbortError" ? "Scan timed out. Please try again." : "Scan unavailable. Please try again.";
           warming.hidden = false;
@@ -893,7 +1027,7 @@
         clearTimeout(timeout);
         if (requestController === controller) requestController = null;
       }
-      drawBoxes(data.boxes, data.img_w, data.img_h);
+      drawBoxes(data.boxes, data.img_w, data.img_h, opts?.roll || 0, opts?.frame?.w || 0, opts?.frame?.h || 0);
       if (scanConnect) {
         // Paired with the dashboard: never open the card page; the phone only reports scans.
         if (livePass) scanConnect.onResult(data, { blob, capturedAt: opts.capturedAt, requestAt, respondedAt });
@@ -949,13 +1083,16 @@
         // Scan Connect on cellular: smaller JPEG so live identify finishes
         // instead of stacking 2–3 s uploads behind a global GPU lock.
         const connectMode = !!scanConnect;
-        const blob = await blobFromCanvas(live, connectMode ? 640 : 960, connectMode ? 0.5 : 0.72);
+        const maxSide = connectMode ? 640 : 960;
+        const roll = currentRoll();
+        const frame = frameSize(live, maxSide) || {};
+        const blob = await blobFromCanvas(live, maxSide, connectMode ? 0.5 : 0.72, roll);
         if (!blob || viewVersion !== cameraViewVersion) {
-          window.scanDiagnostics?.(!blob ? "capture-empty" : "view-changed", null, { capturedAt });
+          window.scanDiagnostics?.(!blob ? "capture-empty" : "view-changed", null, { capturedAt, roll: Math.round(roll) });
           scheduleLive(connectMode ? LIVE_MS_CONNECT : LIVE_MS);
           return;
         }
-        const data = await identify(blob, { live: true, viewVersion, capturedAt });
+        const data = await identify(blob, { live: true, viewVersion, capturedAt, roll, frame });
         if (locked) return;
         if (data && data.busy) {
           scheduleLive(250);
@@ -975,6 +1112,7 @@
     torchBtn.addEventListener("click", () => { toggleTorch(); });
     window.addEventListener("resize", cameraViewChanged);
     window.addEventListener("orientationchange", cameraViewChanged);
+    window.addEventListener("deviceorientation", onDeviceOrientation);
     if (screen.orientation && screen.orientation.addEventListener) {
       screen.orientation.addEventListener("change", cameraViewChanged);
     }
@@ -1089,10 +1227,12 @@
       scanConnect.captureNow = async () => {
         if (!camReady || live.hidden) return null;
         const capturedAt = Date.now();
-        const blob = await blobFromCanvas(live, 960, 0.72);
+        const roll = currentRoll();
+        const frame = frameSize(live, 960) || {};
+        const blob = await blobFromCanvas(live, 960, 0.72, roll);
         if (!blob) return null;
         const requestAt = Date.now();
-        const data = await identify(blob, { live: false, capturedAt });
+        const data = await identify(blob, { live: false, capturedAt, roll, frame });
         if (!data || data.busy) return null;
         return { data, context: { blob, capturedAt, requestAt, respondedAt: Date.now() } };
       };
@@ -1102,10 +1242,14 @@
     // prompt (2026-10-04). Phones that already granted the camera auto-start;
     // everyone else gets one obvious tap whose gesture unlocks the prompt.
     startCameraTap.addEventListener("click", () => {
+      requestTiltPermission();
       startCameraTap.hidden = true;
       warming.hidden = true;
       startCameraRaw();
     });
+    // iOS only grants motion access from a gesture; this covers a scan that never
+    // tapped the camera gate (already-granted camera).
+    window.addEventListener("pointerdown", requestTiltPermission, { once: true });
     if (!scanConnect) startCam();
   </script>
 </body>
