@@ -12,6 +12,7 @@ import {
 import { firestore, useAuth } from '../auth.jsx';
 import { useCart } from '../cart.jsx';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
+import { estimatedDeliveryDate, optInFields, showReviewsOptIn } from '../google-reviews.js';
 import { authFrom } from '../punchouts.js';
 import {
   canResumePayment,
@@ -143,6 +144,25 @@ export default function Orders() {
     settleCheckout({ listingIds });
     setSettleOrder('');
   }, [settleOrder, bought, settleCheckout]);
+
+  // Google Customer Reviews opt-in for the order Stripe just returned.
+  // Only the returned order, and only when something is actually mailed.
+  useEffect(() => {
+    if (!focusOrder) return;
+    const order = (bought || []).find((row) => row.id === focusOrder);
+    if (!order) return;
+    if (String(order.fulfillmentMode || '') === 'nft_only') return;
+    showReviewsOptIn(optInFields({
+      orderId: order.id,
+      email: order.buyerEmail || user?.email,
+      deliveryCountry: order.shippingAddressCountryCode,
+      estimatedDelivery: estimatedDeliveryDate({
+        orderedAt: order.createdAt,
+        shipments: order.shipments,
+        toCountry: order.shippingAddressCountryCode,
+      }),
+    }));
+  }, [focusOrder, bought, user?.email]);
 
   if (!ready) return <SessionWait />;
   if (!signedIn) {
