@@ -141,9 +141,36 @@ export function cardLandingUrl({
   return url.toString();
 }
 
+/** Direct scan URL. pokoin.com/card-images is a 301 to cdn.pokoin.com, and Google drops that hop. */
+export function crawlableCardImage(value, origin = 'https://pokoin.com') {
+  const raw = String(value || '').trim();
+  if (!raw || /pokoin-512\.png(?:$|\?)/i.test(raw) || /missing-card\.webp(?:$|\?)/i.test(raw)) {
+    return '';
+  }
+  try {
+    const url = /^https?:\/\//i.test(raw) ? new URL(raw) : new URL(raw, origin);
+    const host = url.hostname.toLowerCase();
+    if ((host === 'pokoin.com' || host === 'www.pokoin.com') && url.pathname.startsWith('/card-images/')) {
+      url.hostname = 'cdn.pokoin.com';
+      url.pathname = url.pathname.slice('/card-images'.length) || '/';
+    }
+    if (url.protocol !== 'https:') return '';
+    const finalHost = url.hostname.toLowerCase();
+    if (finalHost !== 'cdn.pokoin.com' && finalHost !== 'pokoin.com' && finalHost !== 'www.pokoin.com') {
+      return '';
+    }
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
 function absoluteImage(image, origin) {
   const raw = String(image || '').trim();
   if (!raw) return '';
+  const direct = crawlableCardImage(raw, origin);
+  if (direct) return direct;
+  if (/pokoin-512\.png(?:$|\?)/i.test(raw) || /missing-card\.webp(?:$|\?)/i.test(raw)) return '';
   if (/^https?:\/\//i.test(raw)) return raw;
   const path = raw.startsWith('/') ? raw : `/${raw}`;
   return `${String(origin || 'https://pokoin.com').replace(/\/$/, '')}${path}`;
@@ -433,7 +460,7 @@ export function productStructuredData(card = {}, {
     name,
     description,
     sku: String(card.id || ''),
-    image,
+    ...(image ? { image } : {}),
     brand: { '@type': 'Brand', name: tcgBrandName(gameId) },
     url: pageUrl,
     additionalProperty: [
