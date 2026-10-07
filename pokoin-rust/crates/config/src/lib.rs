@@ -27,8 +27,11 @@ impl Config {
             bind: std::env::var("POKOIN_RUST_BIND").unwrap_or_else(|_| "127.0.0.1:18082".into()),
             database_url: env_first(&["MARKETPLACE_DATABASE_URL", "DATABASE_URL"]),
             valkey_url: env_first(&["VALKEY_URL", "REDIS_URL"]).or_else(|| {
-                let host = std::env::var("VALKEY_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-                let port = std::env::var("VALKEY_PORT").unwrap_or_else(|_| "6379".into());
+                let host = env_first(&["VALKEY_HOST", "REDIS_HOST"])
+                    .unwrap_or_else(|| "127.0.0.1".into());
+                // Pi Redis is :6380. REDIS_PORT is what the Node container exports.
+                let port = env_first(&["VALKEY_PORT", "REDIS_PORT", "POKOIN_REDIS_PORT"])
+                    .unwrap_or_else(|| "6380".into());
                 Some(format!("redis://{host}:{port}"))
             }),
             meili_url: env_first(&["MEILI_HOST", "MEILISEARCH_HOST", "MEILI_URL"]),
