@@ -27,7 +27,7 @@ import {
 } from '../art-shade.js';
 import { prefersArtworkDelta, rarityRowTheme } from '../rarity-theme.js';
 import { pickSuggestHoverSrc, sameSuggestHoverBox, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
-import { compactQuery, resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
+import { compactQuery, rankNames, resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
 import { useProgressiveSuggest } from '../use-progressive-suggest.js';
 import { warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
 import { useSuggestFlip } from '../suggest-flip.js';
