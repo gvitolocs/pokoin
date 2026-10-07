@@ -38,31 +38,54 @@ const EXTENSION_ZIP = 'https://cdn.pokoin.com/downloads/pokemon-card-extension-1
 
 export function redirectLines() {
   const lines = [
-    '# Workers Static Assets allow 2,000 static and 100 dynamic (wildcard) rules.',
-    '# Static rules come first. One wildcard per prefix.',
+    '# Workers Static Assets allow 2,000 static and 100 dynamic redirects.',
+    '# parseRedirects flips canCreateStaticRule off at the first source with * or',
+    '# a :placeholder, then counts every later rule as dynamic — even exact paths.',
+    '# Exact 301s/200s must all come before the first splat, or the game-private',
+    '# 301s blow the 100 dynamic cap (wrangler versions upload rejects the file).',
     '# /news* is served by the separate assets-only pokoin-news Worker route; the SPA must never catch it.',
     '# External hosts (www, /card-images) are zone Redirect Rules, not _redirects.',
-    '# Game-prefixed account/marketing URLs are static 301s (one per game) so they',
-    '# stay under the 100 dynamic cap. Child paths share one /:game/{seg}/* splat.',
+    '# Game-prefixed account/marketing URLs are static 301s (one per game).',
+    '# Child paths share one /:game/{seg}/* splat, which stays ahead of /{game}*.',
     '# Not edge-redirected (budget): bare /{game}, /{game}/product/*, and',
     '# /{game}/careers|contact|privacy|sitemap. The SPA client-navigates those.',
     `# Game private segments: ${GAME_PRIVATE_SEGMENTS.join(', ')}`,
+    '# Static exact paths.',
     `/download/extension.zip ${EXTENSION_ZIP} 302`,
     `/download/extention.zip ${EXTENSION_ZIP} 302`,
-    '/pokemon* /marketplace/en/pokemon/:splat 301',
-    '/sets* /marketplace/sets/:splat 301',
-    '/eras* /marketplace/eras/:splat 301',
-    '/artists* /marketplace/en/artists/:splat 301',
-    '/rarities* /marketplace/en/rarities/:splat 301',
-    '/languages* /marketplace/en/languages/:splat 301',
-    '/guides* /marketplace/en/guides/:splat 301',
-    '/marketplace/pokemon* /marketplace/en/pokemon/:splat 301',
-    '/marketplace/rarities* /marketplace/en/rarities/:splat 301',
-    '/marketplace/languages* /marketplace/en/languages/:splat 301',
-    '/marketplace/guides* /marketplace/en/guides/:splat 301',
-    '/brand* /market/brand/:splat 200',
-    '/working* /working.html 200',
   ];
+  // Exact /{game}/{private} before any wildcard so they stay static and still
+  // win over the later /{game}* SPA catch-all (first match in this file).
+  lines.push('# /{game}/{private} and /{game}/{private}/ → unprefixed.');
+  for (const game of games) {
+    for (const segment of GAME_PRIVATE_SEGMENTS) {
+      lines.push(`/${game}/${segment} /${segment} 301`);
+      lines.push(`/${game}/${segment}/ /${segment} 301`);
+    }
+  }
+  // /sitemap is the human graph. /sitemap.xml and /sitemap-cards-001.xml are files.
+  // Leaf prefixes are two exact rewrites. A rewrite to index.html loops in the assets router.
+  lines.push('# Leaf SPA prefixes. Two exact rewrites; no splat.');
+  for (const prefix of spa) {
+    if (testBoards.includes(prefix) || SPA_WILDCARD.has(prefix)) continue;
+    lines.push(`/${prefix} /market/app 200`);
+    lines.push(`/${prefix}/ /market/app 200`);
+  }
+
+  lines.push('# Dynamic rules. The first * or :placeholder makes every following rule dynamic.');
+  lines.push('/pokemon* /marketplace/en/pokemon/:splat 301');
+  lines.push('/sets* /marketplace/sets/:splat 301');
+  lines.push('/eras* /marketplace/eras/:splat 301');
+  lines.push('/artists* /marketplace/en/artists/:splat 301');
+  lines.push('/rarities* /marketplace/en/rarities/:splat 301');
+  lines.push('/languages* /marketplace/en/languages/:splat 301');
+  lines.push('/guides* /marketplace/en/guides/:splat 301');
+  lines.push('/marketplace/pokemon* /marketplace/en/pokemon/:splat 301');
+  lines.push('/marketplace/rarities* /marketplace/en/rarities/:splat 301');
+  lines.push('/marketplace/languages* /marketplace/en/languages/:splat 301');
+  lines.push('/marketplace/guides* /marketplace/en/guides/:splat 301');
+  lines.push('/brand* /market/brand/:splat 200');
+  lines.push('/working* /working.html 200');
   // Numeric card short links (pokoin.com/239324, also /239324/slug): one rule per
   // leading digit, because _redirects has no digit-only pattern. The old Pi origin and
   // the pokoin-shortlink Worker served these; without them every shared or scanned
@@ -73,30 +96,14 @@ export function redirectLines() {
   for (const board of testBoards) {
     lines.push(`/${board}* https://test.pokoin.com/${board}/:splat 301`);
   }
-  lines.push('# /{game}/{private} → unprefixed, before the /{game}* SPA catch-all.');
-  for (const game of games) {
-    for (const segment of GAME_PRIVATE_SEGMENTS) {
-      lines.push(`/${game}/${segment} /${segment} 301`);
-      lines.push(`/${game}/${segment}/ /${segment} 301`);
-    }
-  }
+  // Child splats before /{game}* so /{game}/messages/ada still 301s.
+  lines.push('# /:game/{private}/* before /{game}* so child 301s win over the SPA catch-all.');
   for (const segment of GAME_PRIVATE_CHILD_SEGMENTS) {
     lines.push(`/:game/${segment}/* /${segment}/:splat 301`);
   }
-  lines.push('# SPA shell is /market/app.html. A rewrite to index.html loops in the assets router.');
+  lines.push('# SPA shell is /market/app.html. One wildcard per prefix that has child routes.');
   for (const prefix of spa) {
-    if (testBoards.includes(prefix)) continue;
-    // /sitemap is the human graph. /sitemap.xml and /sitemap-cards-001.xml are files.
-    if (prefix === 'sitemap') {
-      lines.push('/sitemap /market/app 200');
-      lines.push('/sitemap/ /market/app 200');
-      continue;
-    }
-    if (!SPA_WILDCARD.has(prefix)) {
-      lines.push(`/${prefix} /market/app 200`);
-      lines.push(`/${prefix}/ /market/app 200`);
-      continue;
-    }
+    if (testBoards.includes(prefix) || !SPA_WILDCARD.has(prefix)) continue;
     lines.push(`/${prefix}* /market/app 200`);
   }
   return lines;
@@ -139,10 +146,35 @@ export function ruleRows(lines = redirectLines()) {
   return lines.filter((line) => line && !line.startsWith('#'));
 }
 
+/**
+ * Source path is dynamic when it contains a splat or a `:placeholder`.
+ * Matches workers-shared `parseRedirects` (`SPLAT_REGEX` / `PLACEHOLDER_REGEX` on `from` only).
+ * A colon in the destination (`https://`, `:splat`) does not count.
+ */
+export function redirectSourceIsDynamic(source) {
+  return String(source || '').includes('*') || /:[A-Za-z]\w*/.test(source);
+}
+
+/**
+ * Cloudflare counts a `_redirects` file in order. `canCreateStaticRule` starts
+ * true and flips off permanently at the first dynamic source; every rule after
+ * that counts against the 100 dynamic cap, including exact paths.
+ */
 export function countRedirectRules(lines = redirectLines()) {
   const rules = ruleRows(lines);
-  const dynamic = rules.filter((line) => /[*:]/.test(line.split(/\s+/)[0])).length;
-  return { total: rules.length, dynamic, fixed: rules.length - dynamic };
+  let dynamic = 0;
+  let fixed = 0;
+  let canCreateStaticRule = true;
+  for (const line of rules) {
+    const source = line.split(/\s+/)[0] || '';
+    if (canCreateStaticRule && !redirectSourceIsDynamic(source)) {
+      fixed += 1;
+    } else {
+      dynamic += 1;
+      canCreateStaticRule = false;
+    }
+  }
+  return { total: rules.length, dynamic, fixed };
 }
 
 /** First matching `_redirects` line. Mirrors Workers Static Assets file order. */
