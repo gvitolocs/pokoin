@@ -359,6 +359,8 @@ export const TCG_ERA_ALIASES = [
     'Premium Trainer Box MEGA',
     '30th Anniversary Celebration First Partner Illustration Collection',
     '30th Anniversary Celebration',
+    '30th Celebration Premium Deck Set',
+    'MEGA x MEGA Parade',
   ]],
   ['Scarlet & Violet', [
     'Hot Wind Arena',

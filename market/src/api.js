@@ -1,6 +1,7 @@
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 import { createExpansionCardsFetcher } from './expansion-cards.js';
 import { createNamePrintingsFetcher } from './name-printings.js';
+import { resolveExpansionNationality } from './expansion-print.js';
 import { attachRecentsToHome, fetchCardTiles, fetchExpansionFromLists, fetchHomeFromLists, fetchSetIndexFromLists, isPublicRailsVector } from './lists.js';
 import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsMissingTilePrice, lastMedianFromSales, tilePricePkn } from './pkn.js';
 export { formatPkn, formatPknNumber };
@@ -1224,9 +1225,16 @@ function mapExpansionCards(data) {
   if (!data) {
     return data;
   }
-  const nationality = String(data.expansion?.nationality || '').trim();
+  const expansion = data.expansion
+    ? {
+      ...data.expansion,
+      nationality: resolveExpansionNationality(data.expansion) || String(data.expansion.nationality || '').trim(),
+    }
+    : data.expansion;
+  const nationality = String(expansion?.nationality || '').trim();
   return {
     ...data,
+    expansion,
     cards: (data.cards || []).map((row) => {
       const card = cardFromCatalogRow(row);
       if (!card.id) {
