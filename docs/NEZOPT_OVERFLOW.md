@@ -75,6 +75,8 @@ Connect requests (scan-stream / scan-batch use the writer pool) failed with
 
 - the secret `pokoin-api-env` is rebuilt from the **running Pi container's**
   environment (the Pi `.env` file misses keys set at run time) — never committed;
+  `NODE_TLS_REJECT_UNAUTHORIZED` is never copied (it would disable certificate checks;
+  every Postgres client already sets its own `ssl` options);
 - when the Pi's `/srv/pokoin/api/current` release changes, it is rsynced to
   `~/pokoin-overflow/data/api/releases/` and the pods restart.
 
