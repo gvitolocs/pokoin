@@ -27,7 +27,7 @@ import {
 } from '../art-shade.js';
 import { prefersArtworkDelta, rarityRowTheme } from '../rarity-theme.js';
 import { pickSuggestHoverSrc, sameSuggestHoverBox, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
-import { compactQuery, rankNames, resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
+import { compactQuery } from '../suggest-rank.js';
 import { useProgressiveSuggest } from '../use-progressive-suggest.js';
 import { warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
 import { useSuggestFlip } from '../suggest-flip.js';
@@ -41,7 +41,7 @@ import {
   suggestLiveReady,
 } from '../suggest-live.js';
 import { cardsWithCatalogArtist, catalogCacheKey, catalogIntent, groupsFromCards } from '../suggest-catalog.js';
-import { resolveSuggestQuery, serializeResolution } from '../suggest-resolve.js';
+import { resolveSuggestQuery } from '../suggest-resolve.js';
 import { earlySetPrefixName } from '../search-score.js';
 import {
   SUGGEST_THUMB_EAGER,
@@ -619,7 +619,7 @@ export default function Chrome({ children }) {
     if (!open || !isPokemonGame() || searchTab === 'users' || !suggestLiveReady(query)) {
       return undefined;
     }
-    const text = typedMeiliQuery(query).trim();
+    const text = query.trim();
     if (text.length < 2) {
       return undefined;
     }
@@ -939,22 +939,16 @@ export default function Chrome({ children }) {
   function goSearch(event) {
     event?.preventDefault?.();
     const next = query.trim();
-    const resolved = isPokemonGame() ? resolveSuggestQuery(next) : null;
-    const resolvedParam = resolved ? serializeResolution(resolved) : '';
-    const resolvedQuery = isPokemonGame()
-      ? resolveSearchQuery(next, rankNames(next))
-      : next;
-    const prefetchQuery = isPokemonGame() ? typedMeiliQuery(next) : resolved;
     setOpen(false);
     setMenu(false);
-    if (prefetchQuery) {
-      prefetchSearchPage(prefetchQuery, lang, {
+    if (next) {
+      prefetchSearchPage(next, lang, {
         fetchSearchPage: fetchSearch,
         tab: searchTab,
         printLang,
       });
     }
-    navigate(searchHref(resolvedQuery, searchTab, resolvedParam));
+    navigate(searchHref(next, searchTab));
   }
 
   function pick(card, rank) {
