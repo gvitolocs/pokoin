@@ -65,6 +65,20 @@ export default function Auth() {
   const verifyStartedRef = useRef('');
 
   useEffect(() => {
+    let el = document.head.querySelector('meta[name="robots"][data-pokoin-auth="1"]');
+    if (!el) {
+      el = document.createElement('meta');
+      el.setAttribute('name', 'robots');
+      el.setAttribute('data-pokoin-auth', '1');
+      document.head.appendChild(el);
+    }
+    el.setAttribute('content', 'noindex, nofollow');
+    return () => {
+      el.remove();
+    };
+  }, []);
+
+  useEffect(() => {
     document.title = mode === 'signup'
       ? 'Create account · Pokoin'
       : mode === 'pending'

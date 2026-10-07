@@ -10,6 +10,8 @@ import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
+import SeoHead from '../components/SeoHead.jsx';
+import { game, publicGamePath } from '../game.js';
 
 function TileGrid({ rows, cardId, flags }) {
   return (
@@ -162,9 +164,19 @@ export default function Versions() {
     : (cardName || 'Versions');
   const showRarity = pricedVersions.length > 1;
   const headCount = showRarity ? versionCount : eraCount;
+  const parentPath = String(location.pathname || '').replace(/\/versions\/?$/, '') || '/marketplace';
+  const canonical = current
+    ? cardHref(current)
+    : publicGamePath(parentPath, game().id);
 
   return (
     <div className="page desk versions-page">
+      <SeoHead
+        title={cardName ? `${cardName} versions` : 'Versions'}
+        description={cardName ? `Other printings of ${cardName}.` : 'Card versions.'}
+        canonical={canonical}
+        noindex
+      />
       <nav className="crumbs">
         <Link to="/marketplace">Marketplace</Link>
         <span>/</span>

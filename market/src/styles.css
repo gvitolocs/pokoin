@@ -1019,6 +1019,7 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 }
 
 .icon-nav a,
+.icon-nav button.signin-button,
 .icon-nav .lang-flag {
   display: grid;
   place-items: center;
@@ -1032,14 +1033,23 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   line-height: 1;
 }
 
-.icon-nav a svg {
+.icon-nav a svg,
+.icon-nav button.signin-button svg {
   display: block;
   width: var(--topbar-icon);
   height: var(--topbar-icon);
   overflow: visible;
 }
 
+.icon-nav button.signin-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
 .icon-nav a:hover,
+.icon-nav button.signin-button:hover,
 .icon-nav a.active {
   text-decoration: none;
   color: var(--yellow);

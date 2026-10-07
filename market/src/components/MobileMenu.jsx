@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { marketUrl } from '../punchouts.js';
+import { authAnchorRel, marketUrl } from '../punchouts.js';
 import { accountHeading } from '../auth-session.js';
 import { catalogLinks } from './CatalogHubs.jsx';
 import Avatar from './Avatar.jsx';
@@ -16,16 +16,18 @@ function Glyph({ d, size = 20 }) {
 }
 
 /** Same-origin NavLink, or an absolute <a> when the SPA is on another host. */
-function MenuLink({ to, href, className, onClick, children, ...rest }) {
+function MenuLink({ to, href, className, onClick, children, rel, ...rest }) {
   const external = href || (to ? marketUrl(to) : '');
+  const linkRel = [rel, authAnchorRel(to || href)].filter(Boolean).join(' ') || undefined;
   if (href || (to && String(external).startsWith('http'))) {
-    return <a className={className} href={external} onClick={onClick} {...rest}>{children}</a>;
+    return <a className={className} href={external} rel={linkRel} onClick={onClick} {...rest}>{children}</a>;
   }
   return (
     <NavLink
       className={({ isActive }) => `${className}${isActive ? ' is-active' : ''}`}
       to={to}
       end={to === '/marketplace'}
+      rel={linkRel}
       onClick={onClick}
       {...rest}
     >

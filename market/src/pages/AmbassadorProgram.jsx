@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import AuthLink from '../components/AuthLink.jsx';
 import { useAuth } from '../auth.jsx';
 import {
   AMBASSADOR_CONTACT,
@@ -38,7 +39,7 @@ export default function AmbassadorProgram() {
           </p>
           <div className="referral-cta-row">
             <a className="btn" href={applyMailto(code)}>Apply to be an Ambassador</a>
-            {signedIn ? <Link className="btn ghost" to="/invite">Your invite link</Link> : <Link className="btn ghost" to="/auth?from=%2Fambassadorprogram">Sign in to track progress</Link>}
+            {signedIn ? <Link className="btn ghost" to="/invite">Your invite link</Link> : <AuthLink className="btn ghost" to="/auth?from=%2Fambassadorprogram">Sign in to track progress</AuthLink>}
           </div>
         </div>
         <img className="referral-hero-art" src={brandSrc('pokoin-mascot.svg')} alt="" aria-hidden="true" />

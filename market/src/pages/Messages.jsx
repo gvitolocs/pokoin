@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import AuthLink from '../components/AuthLink.jsx';
 import { searchRecipientUsernames } from '../api.js';
 import { game } from '../game.js';
 import { warmSellerFromChat } from '../seller-seed.js';
@@ -48,7 +49,7 @@ function SignInGate() {
         <span className="messages-mark" aria-hidden="true">↔</span>
         <h1>Messages and payments</h1>
         <p>Sign in to talk, request PKN, and pay people you trust in one private conversation.</p>
-        <Link className="wallet-primary" to="/auth?from=%2Fmessages">Sign in</Link>
+        <AuthLink className="wallet-primary" to="/auth?from=%2Fmessages">Sign in</AuthLink>
       </div>
     </main>
   );

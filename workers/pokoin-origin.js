@@ -143,6 +143,28 @@ export function allowExtensionDeskFrame(response, env = {}) {
   });
 }
 
+/** /auth stays out of the index even when the SPA shell is served from assets. */
+export function withAuthRobots(response, pathname = '') {
+  const path = String(pathname || '').split(/[?#]/)[0].replace(/\/$/, '') || '/';
+  if (path !== '/auth') return response;
+  if (!response) return response;
+  const headers = new Headers(response.headers);
+  headers.set('x-robots-tag', 'noindex, nofollow');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function safeHandler(fn) {
+  try {
+    return await fn();
+  } catch (_) {
+    return null;
+  }
+}
+
 /** More-specific routes so SPA/API/assets skip the fat shortlink Worker. */
 export default {
   async fetch(request, env, ctx) {
@@ -156,28 +178,28 @@ export default {
       /* fall through */
     }
     const satelliteRequest = withSatelliteMarketplaceGame(request);
-    const og = await handleMarketplaceCardOgRequest(satelliteRequest, env, ctx);
-    if (og) {
-      return og;
-    }
-    const hub = await handleMarketplaceHubOgRequest(satelliteRequest, env, ctx);
-    if (hub) {
-      return hub;
-    }
-    const home = await handleMarketplaceHomeRequest(satelliteRequest, env, ctx);
-    if (home) {
-      return home;
-    }
+    const og = await safeHandler(() => handleMarketplaceCardOgRequest(satelliteRequest, env, ctx));
+    if (og) return og;
+    const hub = await safeHandler(() => handleMarketplaceHubOgRequest(satelliteRequest, env, ctx));
+    if (hub) return hub;
+    const home = await safeHandler(() => handleMarketplaceHomeRequest(satelliteRequest, env, ctx));
+    if (home) return home;
+    const assets = env?.ASSETS;
     let url;
     try {
       url = new URL(satelliteRequest.url);
     } catch (_) {
-      return fetchOriginOrWorking(satelliteRequest);
+      return fetchOriginOrWorking(satelliteRequest, satelliteRequest, { assets });
     }
+    let response;
     if (isExtensionFramePath(url.pathname)) {
-      const response = await fetchOriginOrWorking(originDeskRequest(satelliteRequest), satelliteRequest);
-      return allowExtensionDeskFrame(response, env);
+      response = allowExtensionDeskFrame(
+        await fetchOriginOrWorking(originDeskRequest(satelliteRequest), satelliteRequest, { assets }),
+        env,
+      );
+    } else {
+      response = await fetchOriginOrWorking(satelliteRequest, satelliteRequest, { assets });
     }
-    return fetchOriginOrWorking(satelliteRequest);
+    return withAuthRobots(response, url.pathname);
   },
 };

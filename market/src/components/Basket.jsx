@@ -11,6 +11,7 @@ import { gameBasename } from '../game.js';
 import { printingIdentity } from '../identity.js';
 import { homepageDerivativeUrl } from '../image-urls.js';
 import { authFrom } from '../punchouts.js';
+import AuthLink from './AuthLink.jsx';
 import {
   conditionChipSrc,
   conditionShort,
@@ -595,9 +596,11 @@ export function BasketSummary({
         This order contains a gift
       </label>
       {n > 0 ? (
-        <Link className="btn bk-checkout" to={signedIn ? '/checkout' : authFrom('/checkout')}>
-          {signedIn ? 'Proceed to checkout' : 'Sign in to check out'}
-        </Link>
+        signedIn ? (
+          <Link className="btn bk-checkout" to="/checkout">Proceed to checkout</Link>
+        ) : (
+          <AuthLink className="btn bk-checkout" to={authFrom('/checkout')}>Sign in to check out</AuthLink>
+        )
       ) : (
         <span className="btn bk-checkout is-disabled" aria-disabled="true">Proceed to checkout</span>
       )}

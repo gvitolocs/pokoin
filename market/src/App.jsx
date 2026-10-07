@@ -11,6 +11,8 @@ import WorkingOnIt from './components/WorkingOnIt.jsx';
 import { framedByChromeExtension } from './extension-auth-bridge.js';
 import { isDashboardHost } from './scan-api.js';
 import { legacyDashboardHref } from './punchouts.js';
+import { gameBasename } from './game.js';
+import { isGamePrivatePath } from './game-private-path.js';
 import { subscribeOriginDown } from './working-page.js';
 
 // Route-level code splitting: one chunk per page so the first marketplace
@@ -151,6 +153,18 @@ function AppShell() {
   // The legacy host never paints the SPA: / and /scan move under /dashboard.
   if (isDashboardHost() && !board) {
     return <DashboardMarketHandoff target={legacyDashboardHref(pathname, search)} />;
+  }
+  // /{game}/wallet is the wallet page under the game basename. Send it to /wallet.
+  const browserPath = typeof window !== 'undefined' ? window.location.pathname : '';
+  if (gameBasename(browserPath) && isGamePrivatePath(pathname)) {
+    if (typeof window !== 'undefined') {
+      window.location.replace(`${pathname}${search || ''}`);
+    }
+    return (
+      <div className="page desk" style={{ padding: '2.5rem 1.25rem', color: 'var(--muted)' }} role="status">
+        Opening Pokoin…
+      </div>
+    );
   }
   if (originDown && !board && !framed) {
     return <WorkingOnIt />;
