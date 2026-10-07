@@ -222,7 +222,6 @@ struct DbCard {
     nationality: Option<String>,
     product_variant: Option<String>,
     emoji: Option<String>,
-    search_weight: Option<f64>,
     price: Option<f64>,
     stock: Option<i64>,
     eligible_count: Option<i64>,
@@ -238,6 +237,11 @@ async fn hydrate(state: &AppState, hits: &[Hit]) -> Result<Vec<SearchRow>, sqlx:
     }
     let ids: Vec<i64> = hits.iter().map(|hit| hit.card_id).collect();
     let weights: HashMap<i64, f64> = hits.iter().map(|hit| (hit.card_id, hit.weight)).collect();
+    let redis_order: HashMap<i64, usize> = hits
+        .iter()
+        .enumerate()
+        .map(|(index, hit)| (hit.card_id, index))
+        .collect();
     let loaded = sqlx::query_as::<_, DbCard>(
         r#"
         select
@@ -265,7 +269,6 @@ async fn hydrate(state: &AppState, hits: &[Hit]) -> Result<Vec<SearchRow>, sqlx:
           ) as nationality,
           c.product_variant,
           c.emoji,
-          c.search_weight::float8 as search_weight,
           cache.cheapest_price_pkn::float8 as price,
           coalesce(cache.eligible_quantity, cache.eligible_listing_count, 0)::int8 as stock,
           case
@@ -301,8 +304,8 @@ async fn hydrate(state: &AppState, hits: &[Hit]) -> Result<Vec<SearchRow>, sqlx:
     Ok(loaded
         .into_iter()
         .map(|row| {
-            let weight = row.search_weight.unwrap_or(0.0);
             let fallback = weights.get(&row.card_id).copied().unwrap_or(0.0);
+            let order = redis_order.get(&row.card_id).copied().unwrap_or(usize::MAX);
             let provider = row.provider.unwrap_or_default();
             SearchRow {
                 card_id: row.card_id,
@@ -322,7 +325,8 @@ async fn hydrate(state: &AppState, hits: &[Hit]) -> Result<Vec<SearchRow>, sqlx:
                 nationality: row.nationality.unwrap_or_default(),
                 product_variant: row.product_variant.unwrap_or_default(),
                 emoji: row.emoji.unwrap_or_default(),
-                search_weight: if weight > 0.0 { weight } else { fallback },
+                search_weight: fallback,
+                redis_order: order,
                 price: row.price,
                 stock: row.stock.unwrap_or(0),
                 has_cardtrader: provider == "cardtrader" && row.eligible_count.unwrap_or(0) > 0,
