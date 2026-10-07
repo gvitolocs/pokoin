@@ -107,9 +107,9 @@ The Vercel project `web` (team `giuseppevitolo17s-projects`) and its environment
 
 ## Rust Suggest (Status)
 
-- `suggest` is 100% Rust at `127.0.0.1:18082` on the Pi.
-- **Search, card page, listings, inventory, collections, orders, and SSE are still 100% Node.**
-- Do **not** document Rust search as live. Live `rust-routes.json` has only `suggest` at 100.
+- `suggest` and `search` are 100% Rust at `127.0.0.1:18082` on the Pi edge.
+- Card page, listings, inventory, collections, orders, and SSE are still 100% Node. `card_page` and `listings_write` stay at 0 until those handlers match Node.
+- NEZ k3s has no Rust process. Its search uses the same Redis client as the Pi Node page.
 
 ---
 
