@@ -6,6 +6,7 @@ import {
   DASHBOARD_ORIGIN,
   DASHBOARD_SCAN,
   MARKET_ORIGIN,
+  authAnchorRel,
   authFrom,
   isDashboardDeskPath,
   legacyDashboardHref,
@@ -25,6 +26,9 @@ test('authFrom stays on /auth', () => {
   const href = authFrom('/marketplace/en/cards/1/foo');
   assert.equal(href.startsWith('/auth?from='), true);
   assert.equal(href.includes('app.pokoin.com'), false);
+  assert.equal(authAnchorRel(href), 'nofollow noopener');
+  assert.equal(authAnchorRel('/auth?mode=signup&from=%2Finvite'), 'nofollow noopener');
+  assert.equal(authAnchorRel('/marketplace'), '');
 });
 
 test('dashboard desk is /dashboard on pokoin.com, not a second origin', () => {

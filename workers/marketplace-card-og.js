@@ -18,7 +18,7 @@ export { realPublicCardId } from './public-card-id.js';
 export const OG_CACHE_TTL_SEC = 3600;
 export const OG_SEARCH_CACHE_TTL_SEC = 120;
 /** Bump when card JSON-LD, canonical URLs, or the crawlable scan URL change. */
-export const OG_CACHE_VERSION = 'v10';
+export const OG_CACHE_VERSION = 'v11';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
@@ -109,6 +109,57 @@ export function parseCardPath(pathname) {
     language: match[2].toLowerCase(),
     cardId: realPublicCardId(match[3]),
     game: slug ? GAME_SLUGS[slug] : '',
+  };
+}
+
+const SATELLITE_GAME_IDS = [...new Set(Object.values(GAME_SLUGS))];
+
+/** Card URL, including `/versions`. `parseCardPath` stays the printing path. */
+export function parseCardRequest(pathname) {
+  const raw = String(pathname || '').split(/[?#]/)[0];
+  const versions = /\/versions$/i.test(raw.replace(/\/$/, ''));
+  const stripped = versions ? raw.replace(/\/versions\/?$/i, '') : raw;
+  const parsed = parseCardPath(stripped || '/');
+  if (!parsed) return null;
+  return { ...parsed, versions };
+}
+
+export function normalizeSitePath(pathname) {
+  const raw = String(pathname || '').split(/[?#]/)[0];
+  if (!raw || raw === '/') return '/';
+  return raw.length > 1 && raw.endsWith('/') ? raw.slice(0, -1) : raw;
+}
+
+/** True when the printing URL includes a slug segment (not only the card id). */
+export function cardPathHasSlug(pathname) {
+  const parsed = parseCardRequest(pathname);
+  if (!parsed) return false;
+  const path = normalizeSitePath(String(pathname || '').replace(/\/versions\/?$/i, ''));
+  return path.split('/').filter(Boolean).pop() !== String(parsed.cardId);
+}
+
+/** 301 when the request path is not the catalog canonical. `/versions` stays put and is noindex. */
+export function cardCrawlDecision({
+  requestPath,
+  canonicalPath,
+  versions = false,
+  origin = SITE,
+} = {}) {
+  const canon = normalizeSitePath(canonicalPath);
+  if (versions) {
+    return { action: 'noindex', canonicalPath: canon, robots: 'noindex, follow' };
+  }
+  if (!canon.startsWith('/')) {
+    return { action: 'ok', canonicalPath: canon };
+  }
+  const here = normalizeSitePath(requestPath);
+  if (here === canon) {
+    return { action: 'ok', canonicalPath: canon };
+  }
+  return {
+    action: 'redirect',
+    canonicalPath: canon,
+    location: `${String(origin || SITE).replace(/\/$/, '')}${canon}`,
   };
 }
 
@@ -293,7 +344,7 @@ export function renderCardOgHtml(payload) {
     const href = hrefFor(row.canonicalPath || row.canonical_path || `/marketplace/${payload.language || 'en'}/cards/${id}`);
     return `<li><a href="${href}">${name}</a></li>`;
   }).join('');
-  const jsonLd = payload.name
+  const jsonLd = payload.name && !String(payload.robots || '').startsWith('noindex')
     ? `\n  <script type="application/ld+json">${JSON.stringify(productJsonLd(payload)).replace(/</g, '\\u003c')}</script>`
     : '';
   const descriptionBody = description ? `\n  <p>${description}</p>` : '';
@@ -312,9 +363,11 @@ export function renderCardOgHtml(payload) {
       : payload.referencePkn
         ? `\n  <p>Market reference ${payload.referencePkn} PKN · price snapshot ${escapeHtml(payload.snapshotDate)} · not a Pokoin offer</p>`
         : `\n  <p>No Pokoin listing is currently for sale. Catalog prices stay on <a href="${SITE}">Pokoin</a>.</p>`;
-  const robotsMeta = payload.indexable
-    ? '\n  <meta name="robots" content="index, follow, max-image-preview:large" />'
-    : '';
+  const robotsMeta = payload.robots
+    ? `\n  <meta name="robots" content="${escapeHtml(payload.robots)}" />`
+    : payload.indexable
+      ? '\n  <meta name="robots" content="index, follow, max-image-preview:large" />'
+      : '';
   const extra = payload.name
     ? `\n  <h1>${h1}</h1>${figure}\n  <nav>${crumbs}</nav>${descriptionBody}${snapshotLine}${neighborLinks ? `\n  <ul>${neighborLinks}</ul>` : ''}`
     : `\n  <p><a href="${path}">${title}</a></p>${figure}${descriptionBody}${snapshotLine}`;
@@ -338,99 +391,259 @@ export function renderCardOgHtml(payload) {
 </html>`;
 }
 
-async function fetchCardPage(cardId, language, game = '', { includeOffers = false } = {}) {
-  const params = new URLSearchParams({
-    cardId: String(cardId),
-    language: String(language || 'en'),
-    includeOffers: includeOffers ? '1' : '0',
-  });
-  if (game) {
-    params.set('game', game);
-  }
-  const response = await fetch(`${API_ORIGIN}/api/marketplace-card-page?${params}`, {
-    headers: { Accept: 'application/json', 'User-Agent': 'pokoin-origin-og/1' },
-  });
-  if (!response.ok) {
-    throw new Error(`card-page ${response.status}`);
-  }
-  return response.json();
+function canonCacheRequest(site, cardId) {
+  return new Request(`${site}/__og/${OG_CACHE_VERSION}/canon/${cardId}`, { method: 'GET' });
 }
 
-export async function handleMarketplaceCardOgRequest(request, env, ctx) {
-  const url = new URL(request.url);
-  const force = url.searchParams.get('og') === '1' || url.searchParams.get('bot') === '1';
-  const userAgent = request.headers.get('user-agent');
-  if (!isLinkPreviewBot(userAgent, force)) {
-    return null;
-  }
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    return null;
-  }
-  const parsed = parseCardPath(url.pathname);
-  if (!parsed) {
-    return null;
-  }
-
-  const search = isSearchEngineBot(userAgent) && !force;
-  const site = siteOriginFromHost(url.hostname);
-  const game = parsed.game || apiGameFromHost(url.hostname);
-  const cache = globalThis.caches?.default;
-  const currency = currencyFromSearch(url.search) || (search ? 'EUR' : '');
-  const listingId = String(url.searchParams.get('listing') || '').replace(/[^\w-]/g, '').slice(0, 80);
-  const cacheKey = new Request(
-    `${site}/__og/${OG_CACHE_VERSION}/card/${game || 'pokemon'}/${parsed.language}/${parsed.cardId}/${search ? 'search' : 'social'}/${currency || 'none'}/${listingId || 'card'}`,
-    { method: 'GET' },
-  );
-  if (cache) {
-    const hit = await cache.match(cacheKey);
-    if (hit && !force) {
-      const headers = new Headers(hit.headers);
-      headers.set('x-pokoin-og-cache', 'hit');
-      return new Response(hit.body, { status: hit.status, headers });
-    }
-  }
-
-  let page;
+async function cachedCanonical(cache, site, cardId) {
+  if (!cache?.match) return '';
   try {
-    page = await fetchCardPage(parsed.cardId, parsed.language, game, { includeOffers: search });
+    const hit = await cache.match(canonCacheRequest(site, cardId));
+    return hit?.headers.get('x-pokoin-canonical') || '';
+  } catch (_) {
+    return '';
+  }
+}
+
+async function storeCanonical(cache, site, cardId, canonicalPath) {
+  if (!cache?.put || !canonicalPath) return;
+  try {
+    await cache.put(canonCacheRequest(site, cardId), new Response(null, {
+      status: 204,
+      headers: {
+        'x-pokoin-canonical': canonicalPath,
+        'cache-control': `public, max-age=${OG_CACHE_TTL_SEC}`,
+      },
+    }));
+  } catch (_) {
+    /* cache is optional */
+  }
+}
+
+function redirectToCanonical(location, canonicalPath = '') {
+  return new Response(null, {
+    status: 301,
+    headers: {
+      location,
+      'cache-control': 'public, max-age=3600',
+      'x-pokoin-canonical': canonicalPath || '',
+    },
+  });
+}
+
+/**
+ * Pokemon lookup first. A 404 probes other games in parallel so an unprefixed
+ * One Piece URL can 301 to /one-piece/marketplace/…. A 5xx does not probe.
+ */
+export async function fetchCardPageForOg(cardId, language, game = '', {
+  includeOffers = false,
+  fetchImpl = globalThis.fetch,
+  probe = true,
+} = {}) {
+  async function once(gameId, signal) {
+    const params = new URLSearchParams({
+      cardId: String(cardId),
+      language: String(language || 'en'),
+      includeOffers: includeOffers ? '1' : '0',
+    });
+    if (gameId) params.set('game', gameId);
+    let response;
+    try {
+      response = await fetchImpl(`${API_ORIGIN}/api/marketplace-card-page?${params}`, {
+        headers: { Accept: 'application/json', 'User-Agent': 'pokoin-origin-og/1' },
+        signal,
+      });
+    } catch (error) {
+      if (error?.name === 'AbortError') return null;
+      throw error;
+    }
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      const error = new Error(`card-page ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    const page = await response.json();
+    if (!page?.card && !page?.seo) return null;
+    return { page, game: String(page.game || gameId || 'pokemon') || 'pokemon' };
+  }
+
+  if (game) return once(game);
+  const pokemon = await once('');
+  if (pokemon) return pokemon;
+  if (!probe) return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    return await Promise.any(SATELLITE_GAME_IDS.map(async (id) => {
+      const hit = await once(id, controller.signal);
+      if (!hit) throw new Error('miss');
+      return hit;
+    }));
   } catch (_) {
     return null;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
-  if (!page?.card && !page?.seo) {
-    return null;
-  }
+}
 
-  const remappedPath = url.pathname.replace(/\/$/, '').replace(/\/cards\/\d+/, `/cards/${parsed.cardId}`);
+function payloadFor(page, parsed, game, site, { includeDescription, currency, listingId, robots, indexable }) {
   const payload = buildCardOgPayload(page, {
     language: parsed.language,
     cardId: parsed.cardId,
-    requestUrl: `${site}${remappedPath}`,
-    includeDescription: search,
+    includeDescription,
     game,
   });
   payload.currency = currency;
   payload.listingId = listingId;
-  payload.indexable = search;
+  payload.indexable = indexable;
+  payload.robots = robots || '';
   payload.image = cardOgImageUrl(
-    page?.seo?.imageUrl ||
-      page?.card?.heroImageUrl ||
-      page?.card?.imageUrl ||
-      '',
+    page?.seo?.imageUrl || page?.card?.heroImageUrl || page?.card?.imageUrl || '',
     parsed.cardId,
     site,
   );
+  return payload;
+}
+
+export async function handleMarketplaceCardOgRequest(request, env, ctx) {
+  try {
+    return await handleCardOg(request, env, ctx);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function handleCardOg(request, env, ctx) {
+  const url = new URL(request.url);
+  const force = url.searchParams.get('og') === '1' || url.searchParams.get('bot') === '1';
+  const userAgent = request.headers.get('user-agent');
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  const parsed = parseCardRequest(url.pathname);
+  if (!parsed) return null;
+
+  const bot = isLinkPreviewBot(userAgent, force);
+  const search = isSearchEngineBot(userAgent) && !force;
+  const site = siteOriginFromHost(url.hostname);
+  const hintedGame = parsed.game || apiGameFromHost(url.hostname);
+  const cache = globalThis.caches?.default;
+  const currency = currencyFromSearch(url.search) || (search ? 'EUR' : '');
+  const listingId = String(url.searchParams.get('listing') || '').replace(/[^\w-]/g, '').slice(0, 80);
+
+  if (!bot) {
+    if (parsed.versions) return null;
+    const known = await cachedCanonical(cache, site, parsed.cardId);
+    if (known) {
+      const decision = cardCrawlDecision({
+        requestPath: url.pathname,
+        canonicalPath: known,
+        origin: SITE,
+      });
+      if (decision.action === 'redirect') return redirectToCanonical(decision.location, decision.canonicalPath);
+    }
+    if (cardPathHasSlug(url.pathname)) {
+      if (ctx?.waitUntil && !known) {
+        ctx.waitUntil(fetchCardPageForOg(parsed.cardId, parsed.language, hintedGame, { includeOffers: false })
+          .then((hit) => {
+            if (!hit?.page) return null;
+            const payload = payloadFor(hit.page, parsed, hit.game, site, {});
+            return storeCanonical(cache, site, parsed.cardId, payload.path);
+          })
+          .catch(() => {}));
+      }
+      return null;
+    }
+    const raced = await Promise.race([
+      fetchCardPageForOg(parsed.cardId, parsed.language, hintedGame, { includeOffers: false })
+        .then((hit) => ({ hit }))
+        .catch(() => ({ hit: null })),
+      new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 2500)),
+    ]);
+    if (!raced.hit?.page) return null;
+    const payload = payloadFor(raced.hit.page, parsed, raced.hit.game, site, {});
+    const decision = cardCrawlDecision({
+      requestPath: url.pathname,
+      canonicalPath: payload.path,
+      origin: SITE,
+    });
+    await storeCanonical(cache, site, parsed.cardId, payload.path);
+    if (decision.action === 'redirect') return redirectToCanonical(decision.location, decision.canonicalPath);
+    return null;
+  }
+
+  const cacheKey = new Request(
+    `${site}/__og/${OG_CACHE_VERSION}/card/${hintedGame || 'lookup'}/${parsed.language}/${parsed.cardId}/${parsed.versions ? 'versions' : 'card'}/${search ? 'search' : 'social'}/${currency || 'none'}/${listingId || 'card'}${normalizeSitePath(url.pathname)}`,
+    { method: 'GET' },
+  );
+  if (cache && !force) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) {
+        const headers = new Headers(hit.headers);
+        headers.set('x-pokoin-og-cache', 'hit');
+        const canon = headers.get('x-pokoin-canonical') || '';
+        const decision = cardCrawlDecision({
+          requestPath: url.pathname,
+          canonicalPath: canon,
+          versions: parsed.versions,
+          origin: SITE,
+        });
+        if (decision.action === 'redirect') return redirectToCanonical(decision.location, decision.canonicalPath);
+        return new Response(hit.body, { status: hit.status, headers });
+      }
+    } catch (_) {
+      /* miss */
+    }
+  }
+
+  let resolved;
+  try {
+    resolved = await fetchCardPageForOg(parsed.cardId, parsed.language, hintedGame, { includeOffers: search });
+  } catch (_) {
+    return null;
+  }
+  if (!resolved?.page) return null;
+
+  const decisionSeed = payloadFor(resolved.page, parsed, resolved.game, site, {
+    includeDescription: search,
+    currency,
+    listingId,
+  });
+  const decision = cardCrawlDecision({
+    requestPath: url.pathname,
+    canonicalPath: decisionSeed.path,
+    versions: parsed.versions,
+    origin: SITE,
+  });
+  await storeCanonical(cache, site, parsed.cardId, decision.canonicalPath || decisionSeed.path);
+  if (decision.action === 'redirect') {
+    const response = redirectToCanonical(decision.location, decision.canonicalPath);
+    if (cache?.put && ctx?.waitUntil) ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));
+    return response;
+  }
+
+  const payload = decisionSeed;
+  if (parsed.versions) {
+    payload.robots = 'noindex, follow';
+    payload.indexable = false;
+  } else {
+    payload.indexable = search;
+  }
   const html = renderCardOgHtml(payload);
+  const robotsHeader = payload.robots
+    || (search ? 'index, follow, max-image-preview:large' : 'noindex');
   const response = new Response(html, {
     status: 200,
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': `public, max-age=60, s-maxage=${search ? OG_SEARCH_CACHE_TTL_SEC : OG_CACHE_TTL_SEC}`,
       'x-pokoin-og-cache': 'miss',
-      'x-robots-tag': search ? 'index, follow, max-image-preview:large' : 'noindex',
+      'x-pokoin-canonical': payload.path || '',
+      'x-robots-tag': robotsHeader,
     },
   });
-  if (cache && ctx?.waitUntil) {
-    ctx.waitUntil(cache.put(cacheKey, response.clone()));
-  }
+  if (cache?.put && ctx?.waitUntil) ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));
   return response;
 }

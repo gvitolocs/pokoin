@@ -111,6 +111,7 @@
       var prompt = el('p', 'nx-comments__signin');
       var link = el('a', '', 'Sign in to Pokoin');
       link.href = '/auth?from=' + encodeURIComponent(articlePath + '#comments');
+      link.rel = 'nofollow noopener';
       prompt.appendChild(link);
       prompt.appendChild(document.createTextNode(' to join the conversation.'));
       formSlot.appendChild(prompt);

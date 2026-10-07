@@ -114,12 +114,44 @@ export async function replaceIfOriginDown(request, response) {
   return response;
 }
 
-export async function fetchOriginOrWorking(request, pageRequest = request) {
+/** SPA shell when static assets are up. 52x / tunnel HTML stays the 503 working page. */
+async function assetDocument(assets, request) {
+  if (!assets?.fetch || !wantsWorkingHtml(request)) return null;
+  try {
+    const response = await assets.fetch(request);
+    if (response && response.ok) {
+      const headers = new Headers(response.headers);
+      headers.set('x-pokoin-asset-fallback', '1');
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    }
+  } catch (_) {
+    /* assets are down with the origin */
+  }
+  return null;
+}
+
+export async function fetchOriginOrWorking(request, pageRequest = request, options = {}) {
+  const assets = options?.assets;
   let response;
   try {
     response = await fetch(request);
   } catch (_) {
+    const soft = await assetDocument(assets, pageRequest);
+    if (soft) return soft;
     return workingPageResponse(pageRequest);
+  }
+  if (isOriginDownStatus(response.status)) {
+    const soft = await assetDocument(assets, pageRequest);
+    if (soft) return soft;
+    return workingPageResponse(pageRequest);
+  }
+  if (response.status >= 500) {
+    const soft = await assetDocument(assets, pageRequest);
+    if (soft) return soft;
   }
   return replaceIfOriginDown(pageRequest, response);
 }

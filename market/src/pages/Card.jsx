@@ -94,6 +94,7 @@ import {
 import { rarityKindLabel, storedRarityKind } from '../rarity-theme.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '../sold-sales-cache.js';
 import { authFrom } from '../punchouts.js';
+import AuthLink from '../components/AuthLink.jsx';
 import { useAuth } from '../auth.jsx';
 import { saveListingPhotos, uploadChatPhoto } from '../chat-client.js';
 import { MAX_LISTING_PHOTOS, photoFileToJpeg } from '../user-photos.js';
@@ -1141,9 +1142,9 @@ function ListingForm({
             ) : null}
           </span>
         ) : (
-          <Link className="signin-link" to={authFrom(fromPath)} onClick={() => track(Action.sell, card)}>
+          <AuthLink className="signin-link" to={authFrom(fromPath)} onClick={() => track(Action.sell, card)}>
             Sign in
-          </Link>
+          </AuthLink>
         )}
       </div>
       <div className="sell-row">
@@ -1557,7 +1558,7 @@ function SilverHead({ card, fromPath }) {
           {busy ? 'Unlocking…' : `Unlock Silver · ${SILVER_PRICE_PKN} PKN`}
         </button>
       ) : (
-        <Link className="silver-link" to={authFrom(fromPath)}>Sign in to unlock</Link>
+        <AuthLink className="silver-link" to={authFrom(fromPath)}>Sign in to unlock</AuthLink>
       )}
       {message ? <p className="muted silver-note">{message}</p> : null}
     </div>

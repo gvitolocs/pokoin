@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import AuthLink from '../components/AuthLink.jsx';
 import { useAuth } from '../auth.jsx';
 import {
   extensionAuthTokenPayload,
@@ -71,7 +71,7 @@ export default function ExtensionAuthBridge() {
           ) : null}
           {ready && !signedIn ? (
             <p>
-              <Link className="btn" to={authFrom('/extension/auth-bridge')}>Sign in</Link>
+              <AuthLink className="btn" to={authFrom('/extension/auth-bridge')}>Sign in</AuthLink>
             </p>
           ) : null}
         </div>

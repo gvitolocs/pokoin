@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { allowExtensionDeskFrame, isExtensionFramePath, isMarketplaceDeskPath, isMarketplaceSellerPath, originDeskRequest } from './pokoin-origin.js';
+import { allowExtensionDeskFrame, isExtensionFramePath, isMarketplaceDeskPath, isMarketplaceSellerPath, originDeskRequest, withAuthRobots } from './pokoin-origin.js';
 
 test('marketplace desk paths are the Pokoin card pages', () => {
   assert.equal(isMarketplaceDeskPath('/marketplace/en/cards/548832'), true);
@@ -72,4 +72,15 @@ test('desk origin fetches drop chrome-extension iframe referers', () => {
   assert.equal(inbound.headers.get('Referer'), null);
   assert.equal(inbound.headers.get('Sec-Fetch-Dest'), null);
   assert.equal(inbound.headers.get('User-Agent'), 'Mozilla/5.0');
+});
+
+test('/auth responses carry noindex even when the body is the SPA shell', () => {
+  const page = new Response('<title>Pokoin marketplace</title>', {
+    status: 200,
+    headers: { 'content-type': 'text/html' },
+  });
+  const stamped = withAuthRobots(page, '/auth');
+  assert.equal(stamped.headers.get('x-robots-tag'), 'noindex, nofollow');
+  const card = withAuthRobots(page, '/marketplace/en/cards/1');
+  assert.equal(card.headers.get('x-robots-tag'), null);
 });
