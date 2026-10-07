@@ -115,25 +115,33 @@ function command(parts) {
   return new Promise((resolve, reject) => {
     const socket = net.connect({ host: HOST, port: PORT });
     const chunks = [];
-    const timer = setTimeout(() => {
+    let settled = false;
+    const settle = (fn) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       socket.destroy();
-      reject(new Error('redis search timeout'));
+      fn();
+    };
+    const timer = setTimeout(() => {
+      settle(() => reject(new Error('redis search timeout')));
     }, TIMEOUT_MS);
-    socket.on('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    socket.on('data', (chunk) => chunks.push(chunk));
-    socket.on('end', () => {
-      clearTimeout(timer);
+    // Never half-close before the reply: Redis 8 treats the client FIN as a
+    // disconnect and can drop the client before a background worker replies.
+    socket.on('connect', () => socket.write(encode(parts)));
+    socket.on('data', (chunk) => {
+      if (settled) return;
+      chunks.push(chunk);
       const parsed = parseOne(Buffer.concat(chunks));
-      if (!parsed || parsed.error) {
-        reject(new Error(parsed?.value || 'redis search failed'));
-        return;
-      }
-      resolve(parsed.value);
+      if (!parsed) return;
+      settle(() => {
+        if (parsed.error) reject(new Error(String(parsed.value || 'redis search failed')));
+        else resolve(parsed.value);
+      });
     });
-    socket.on('connect', () => socket.end(encode(parts)));
+    socket.on('end', () => settle(() => reject(new Error('redis search failed'))));
+    socket.on('close', () => settle(() => reject(new Error('redis search failed'))));
+    socket.on('error', (error) => settle(() => reject(error)));
   });
 }
 
