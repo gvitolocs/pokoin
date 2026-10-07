@@ -7,6 +7,9 @@ import {
   gcrStorageKey,
   optInFields,
   showReviewsOptIn,
+  GCR_BADGE_SRC,
+  GCR_BADGE_SCRIPT_ID,
+  showReviewsBadge,
 } from './google-reviews.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -232,3 +235,46 @@ test('storage that throws does not crash the opt-in', () => {
   assert.equal(showReviewsOptIn(optInFields(VALID), { win, doc, storage }), true);
   assert.equal(doc.scripts.length, 1);
 });
+
+function badgeDom() {
+  const scripts = [];
+  const doc = {
+    head: { appendChild: (node) => scripts.push(node) },
+    createElement: () => {
+      const listeners = {};
+      return { addEventListener: (type, fn) => { listeners[type] = fn; }, fire: (type) => listeners[type]?.() };
+    },
+    getElementById: (id) => scripts.find((node) => node.id === id) || null,
+  };
+  return { doc, scripts };
+}
+
+test('store badge loads merchantwidget.js once and starts it bottom-left with the merchant id', () => {
+  const { doc, scripts } = badgeDom();
+  const calls = [];
+  const win = { merchantwidget: { start: (opts) => calls.push(opts) } };
+  win.top = win;
+  assert.equal(showReviewsBadge({ win, doc }), true);
+  assert.equal(showReviewsBadge({ win, doc }), false);
+  assert.equal(scripts.length, 1);
+  assert.equal(scripts[0].id, GCR_BADGE_SCRIPT_ID);
+  assert.equal(scripts[0].src, GCR_BADGE_SRC);
+  assert.equal(scripts[0].defer, true);
+  scripts[0].fire('load');
+  assert.deepEqual(calls, [{ merchant_id: 5869935257, position: 'LEFT_BOTTOM' }]);
+});
+
+test('store badge stays out of frames (extension side panel) and survives a missing widget', () => {
+  const { doc, scripts } = badgeDom();
+  const framed = { top: {} };
+  assert.equal(showReviewsBadge({ win: framed, doc }), false);
+  const crossOrigin = {};
+  Object.defineProperty(crossOrigin, 'top', { get() { throw new Error('SecurityError'); } });
+  assert.equal(showReviewsBadge({ win: crossOrigin, doc }), false);
+  assert.equal(scripts.length, 0);
+  const win = {};
+  win.top = win;
+  assert.equal(showReviewsBadge({ win, doc }), true);
+  assert.doesNotThrow(() => scripts[0].fire('load'));
+});
+

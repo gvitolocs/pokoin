@@ -129,3 +129,37 @@ export function showReviewsOptIn(fields, { win = window, doc = document, storage
   doc.head.appendChild(script);
   return true;
 }
+
+/** Google's store widget (formerly the Customer Reviews badge) loader. */
+export const GCR_BADGE_SRC = 'https://www.gstatic.com/shopping/merchant/merchantwidget.js';
+export const GCR_BADGE_SCRIPT_ID = 'merchantWidgetScript';
+
+function insideFrame(win) {
+  try {
+    return win.top !== win;
+  } catch {
+    return true; // cross-origin parent: we are framed
+  }
+}
+
+/**
+ * Show Google's store rating badge on every page. Bottom-left on desktop:
+ * the chat button owns bottom-right (Google centres the badge on mobile).
+ * Skipped inside frames (extension side panel, embeds). Injected from JS for
+ * the same CSP reason as the opt-in; www.gstatic.com is already in script-src.
+ */
+export function showReviewsBadge({ win = window, doc = document } = {}) {
+  if (insideFrame(win)) return false;
+  if (typeof doc.getElementById === 'function' && doc.getElementById(GCR_BADGE_SCRIPT_ID)) return false;
+  const script = doc.createElement('script');
+  script.id = GCR_BADGE_SCRIPT_ID;
+  script.defer = true;
+  script.src = GCR_BADGE_SRC;
+  script.addEventListener('load', () => {
+    if (!win.merchantwidget || typeof win.merchantwidget.start !== 'function') return;
+    win.merchantwidget.start({ merchant_id: GCR_MERCHANT_ID, position: 'LEFT_BOTTOM' });
+  });
+  doc.head.appendChild(script);
+  return true;
+}
+

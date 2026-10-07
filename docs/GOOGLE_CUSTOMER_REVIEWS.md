@@ -70,3 +70,12 @@ Nothing here changes the CSP or `market/src/content-security.test.js`.
 3. The Google dialog appears once for that order; a refresh does not show it
    again. Confirm the payload in devtools by logging
    `gapi.surveyoptin.render` or checking the network call to Google.
+
+## Store badge (every page)
+
+`showReviewsBadge()` in `market/src/google-reviews.js`, called once from `market/src/main.jsx`, injects
+`<script id="merchantWidgetScript" defer src="https://www.gstatic.com/shopping/merchant/merchantwidget.js">`
+and on load calls `merchantwidget.start({ merchant_id: 5869935257, position: 'LEFT_BOTTOM' })`.
+Bottom-left because the chat button sits bottom-right; Google centres the widget on mobile.
+Not shown inside frames (extension side panel, embeds). With no ratings yet Google shows its "no ratings" text.
+
