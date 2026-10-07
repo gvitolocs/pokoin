@@ -35,6 +35,52 @@ test('collector 4/102 matches the number exactly', () => {
   assert.doesNotMatch(query, /@card_number:4\*/);
 });
 
+test('a delayed Redis reply is read without half-closing the socket', async () => {
+  const net = require('node:net');
+  const server = net.createServer((socket) => {
+    socket.on('data', () => {
+      setTimeout(() => {
+        socket.write([
+          '*3',
+          ':1',
+          '$18',
+          'pokoin:card:342318',
+          '*6',
+          '$7',
+          'card_id',
+          '$6',
+          '342318',
+          '$13',
+          'search_weight',
+          '$1',
+          '4',
+          '$22',
+          'effective_print_bucket',
+          '$7',
+          'western',
+          '',
+        ].join('\r\n'));
+      }, 50);
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const previousPort = process.env.REDIS_PORT;
+  process.env.REDIS_PORT = String(port);
+  delete require.cache[require.resolve('./_redis_search')];
+  try {
+    const { redisSearchCandidates } = require('./_redis_search');
+    const found = await redisSearchCandidates('pikachu', 4, 0, {});
+    assert.equal(found.estimatedTotalHits, 1);
+    assert.equal(found.hits[0].card_id, '342318');
+  } finally {
+    if (previousPort == null) delete process.env.REDIS_PORT;
+    else process.env.REDIS_PORT = previousPort;
+    delete require.cache[require.resolve('./_redis_search')];
+    server.close();
+  }
+});
+
 test('umbrean asks for a two-edit fuzzy match', () => {
   const query = redisSearchQuery('umbrean', 'all');
   assert.match(query, /@name_compact:%%umbrean%%/);
