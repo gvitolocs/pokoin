@@ -102,7 +102,7 @@ function createFirestore(seed = {}) {
           });
           if (ok) docs.push(snapshot(docRef(collectionName, id)));
         }
-        return { docs: docs.slice(0, max), size: Math.min(docs.length, max) };
+        return { docs: docs.slice(0, max), size: Math.min(docs.length, max), empty: docs.length === 0 };
       },
     };
   }

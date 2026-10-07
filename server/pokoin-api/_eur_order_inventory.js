@@ -301,6 +301,7 @@ async function fulfillPaidEurOrder({
   const steps = { ...(fulfillment.steps || {}) };
   const ownershipDone = new Set(fulfillment.ownershipDone || []);
   const cardTraderDone = new Set(fulfillment.cardTraderDone || []);
+  const platformDone = new Set(fulfillment.platformDone || []);
   const failures = [];
 
   // 2. Seller no longer owns the sold quantity (per line so retries never double-decrement).
@@ -327,11 +328,23 @@ async function fulfillPaidEurOrder({
       }
     }
   }
+  // 3b. Other linked platforms (Shopify, Cardmarket, …) lose the same quantity.
+  // Attempted once per line and marked done either way: a refusal stays on the
+  // link (last_error) and a retry must never subtract again where it worked.
+  if (typeof d.syncPlatformsAfterPokoinSale === 'function') {
+    for (const line of lines) {
+      if (platformDone.has(line.listingId)) continue;
+      await d.syncPlatformsAfterPokoinSale({ firestore, decremented: [line] })
+        .catch((error) => console.error('linked platform decrement failed', { message: error.message }));
+      platformDone.add(line.listingId);
+    }
+  }
   await markStep(ref, admin, {
     ...fulfillment,
     state: 'running',
     ownershipDone: [...ownershipDone],
     cardTraderDone: [...cardTraderDone],
+    platformDone: [...platformDone],
     steps,
   });
 

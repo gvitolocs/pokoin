@@ -61,6 +61,11 @@ databases. Pokemon stays on this Pi map. Plan: [MULTIGAME_REIMPORT.md](MULTIGAME
 | `POST /api/cardtrader-webhook/:uid` | Order sale stock gate → linked Pokoin qty (idempotent) |
 | `GET /api/cardtrader-assets` | Signed-in seller's CardTrader 1-Day Ready inventory as dashboard assets |
 | `GET /api/cardtrader-zero` | CardTrader Zero picking list: weekly merged `paid` Zero order + `hub_pending` Zero sales, with MyPokoin locations ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
+| `GET /api/platform-integrations` | Sync with other platforms: providers + seller's safe status ([PLATFORM_SYNC.md](PLATFORM_SYNC.md)) |
+| `POST/DELETE /api/platform-integrations/:provider` | Connect (fields / partner request / Cardmarket OAuth start) or revoke one platform |
+| `GET /api/platform-oauth/:provider/start` · `/callback` | Cardmarket widget-app login: state cookie → Cardmarket → encrypted access token |
+| `POST /api/platform-webhook/:provider/:uid` | Signed platform order webhook (Shopify/BinderPOS) → exactly-once decrement + fan-out |
+| `GET/POST/DELETE /api/platform-links` | Manual listing ↔ platform product links; `{ action: 'resync' }` re-runs link/import |
 | `GET/POST/DELETE /api/powertools-connect` | Optional Power Tools session (encrypted jwt only) for the Zero list's Power Tools overlay |
 
 Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings are

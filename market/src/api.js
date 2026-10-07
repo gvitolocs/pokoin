@@ -756,6 +756,49 @@ export function connectCardTrader(token, cardTraderToken) {
   });
 }
 
+/** Sync with other platforms: providers + this seller's safe status. */
+export function fetchPlatformIntegrations(token) {
+  return getJson('/api/platform-integrations', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/** Connect one platform (credential fields, partner request, or OAuth start → { redirectUrl }). */
+export function connectPlatform(token, provider, fields = {}) {
+  return getJson(`/api/platform-integrations/${encodeURIComponent(provider)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(fields || {}),
+  });
+}
+
+export function disconnectPlatform(token, provider) {
+  return getJson(`/api/platform-integrations/${encodeURIComponent(provider)}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+/** Re-run the link/import check of a connected platform's inventory. */
+export function resyncPlatform(token, provider) {
+  return getJson('/api/platform-links', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ action: 'resync', provider }),
+  });
+}
+
 /** CardTrader Zero picking list (weekly merged shipment + Zero sales waiting for the next merge). */
 export function fetchCardTraderZero(token) {
   return getJson('/api/cardtrader-zero', {

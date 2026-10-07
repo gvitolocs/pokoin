@@ -1425,6 +1425,7 @@ export default function Chrome({ children }) {
             <AppLink to="/sitemap">Site map</AppLink>
             <AppLink to={APP.careers}>Careers</AppLink>
             <AppLink to={APP.privacy}>Privacy</AppLink>
+            <AppLink to={APP.terms}>Terms</AppLink>
             <AppLink to={APP.emailPreferences}>Email preferences</AppLink>
             <AppLink to={APP.protection}>Buyer protection</AppLink>
             <AppLink to="/flex">Pokoin Flex</AppLink>

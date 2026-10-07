@@ -751,6 +751,37 @@ async function syncCardTraderAfterPokoinSale({ admin, firestore, decremented = [
   };
 }
 
+/**
+ * A paid Pokoin sale takes the same quantity off every other platform the
+ * listing is linked to (Shopify, Cardmarket, TCGplayer, …). CardTrader keeps
+ * its own path above. One best-effort attempt per line: a platform that
+ * refuses keeps its error on the link (last_error) instead of being retried,
+ * so a retry can never subtract twice on the platforms that succeeded.
+ */
+async function syncPlatformsAfterPokoinSale({ firestore, decremented = [], fanOut = null }) {
+  const push = fanOut || ((args) => require('./_platform_fanout').fanOutStockChange(args));
+  const results = [];
+  for (const entry of decremented) {
+    if (!entry || entry.external || !entry.listingId) {
+      results.push({ skipped: true, reason: 'not_native' });
+      continue;
+    }
+    const quantity = Math.max(1, Math.trunc(Number(entry.quantity) || 1));
+    const result = await push({
+      origin: 'pokoin',
+      sellerUid: entry.sellerUid,
+      listingId: entry.listingId,
+      delta: -quantity,
+      firestore,
+    }).catch((error) => ({ ok: false, error: error.message }));
+    results.push({ listingId: entry.listingId, ...result });
+  }
+  return {
+    ok: results.every((row) => row.ok !== false || row.skipped),
+    items: results,
+  };
+}
+
 async function syncSellerOwnershipAfterPhysicalSale({ admin, firestore, decremented = [] }) {
   const results = [];
   for (const entry of decremented) {
@@ -960,6 +991,9 @@ async function createPaidOrder({ admin, firestore, decoded, body }) {
     }).catch((error) => {
       console.error('linked CardTrader decrement failed', error);
       return { ok: false, error: error.message || 'cardtrader decrement failed' };
+    });
+    await syncPlatformsAfterPokoinSale({ firestore, decremented }).catch((error) => {
+      console.error('linked platform decrement failed', { message: error.message });
     });
   }
 
@@ -1572,6 +1606,7 @@ module.exports.fulfillment = {
   dropCheckoutHolds,
   restoreListingQuantities,
   syncCardTraderAfterPokoinSale,
+  syncPlatformsAfterPokoinSale,
   syncSellerOwnershipAfterPhysicalSale,
   verifyAndDecrementListings,
   verifyCardTraderLiveItems,

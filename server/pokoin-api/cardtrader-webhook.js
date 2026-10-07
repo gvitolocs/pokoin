@@ -14,6 +14,20 @@ const {
 const { decrementSellerOwnershipForSale } = require('./_user_card_collection');
 const { enqueueCardTraderInventorySync } = require('./_cardtrader_inventory_async');
 const { SALES_COLLECTION, recordCardTraderSale } = require('./_native_sales');
+
+// Indirection so tests can observe the fan-out without a database.
+const cardTraderWebhookDeps = { fanOut: (args) => fanOutFromCardTrader(args) };
+
+/** Push a CardTrader-originated stock change to the seller's other platforms (best-effort). */
+async function fanOutFromCardTrader({ firestore, uid, listingId, delta }) {
+  try {
+    const { fanOutStockChange } = require('./_platform_fanout');
+    return await fanOutStockChange({ origin: 'cardtrader', sellerUid: uid, listingId, delta, firestore });
+  } catch (error) {
+    console.error('cardtrader webhook platform fan-out failed', { uid, listingId, message: error.message });
+    return { ok: false, error: error.message };
+  }
+}
 const {
   cleanText,
   eventDocId,
@@ -159,6 +173,7 @@ async function restoreCancelledItem({ admin, firestore, uid, order, item }) {
     voidReason: 'cardtrader_order_cancelled',
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true }).catch(() => {});
+  await cardTraderWebhookDeps.fanOut({ firestore, uid, listingId: restore.listingId, delta: qty });
   return { orderItemId: currentOrderItemId, ok: true, restored: qty, listingId: restore.listingId };
 }
 
@@ -287,6 +302,7 @@ async function handleOrderPayload({ admin, firestore, uid, cause, order }) {
         message: error.message,
       });
     }
+    await cardTraderWebhookDeps.fanOut({ firestore, uid, listingId: updated.id, delta: -qty });
     results.push({
       orderItemId: currentOrderItemId,
       ok: true,
@@ -384,6 +400,7 @@ module.exports._test = {
   itemProductId,
   rawBodyBuffer,
   restoreCancelledItem,
+  cardTraderWebhookDeps,
   itemUserDataField,
   orderItemId,
   releaseWebhookEvent,

@@ -150,6 +150,7 @@ export default function About() {
         <div className="about-links">
           <Link to={APP.contact}>Contact</Link>
           <Link to={APP.privacy}>Privacy</Link>
+          <Link to={APP.terms}>Terms</Link>
           <Link to={APP.forum}>Forum</Link>
         </div>
       </section>

@@ -246,3 +246,54 @@ test('a 1-Day Ready hub sale is recorded for Sold history and does not change Po
   assert.equal(calls.sales[0].listing.card_id, '225594');
   assert.equal(calls.sales[0].listing.id, 'ct:298998026');
 });
+
+test('a linked CardTrader sale fans the decrement out to the other platforms; a failed decrement does not', async () => {
+  const { webhook } = loadWebhook({
+    onRead: (sql) => (/marketplace_user_listings/.test(sql)
+      ? { rows: [LISTING_ROW], rowCount: 1 }
+      : { rows: [], rowCount: 0 }),
+    onWrite: (sql) => decrementSucceeds(sql),
+  });
+  const fanned = [];
+  webhook._test.cardTraderWebhookDeps.fanOut = async (args) => { fanned.push(args); return { ok: true }; };
+  await webhook._test.handleOrderPayload({
+    admin: { firestore: { FieldValue: { serverTimestamp: () => new Date() } } },
+    firestore: createFirestore().firestore,
+    uid: 'seller-1',
+    cause: 'order.update',
+    order: SALE_ORDER,
+  });
+  assert.equal(fanned.length, 1);
+  assert.equal(fanned[0].uid, 'seller-1');
+  assert.equal(fanned[0].listingId, 'L1');
+  assert.equal(fanned[0].delta, -1);
+
+  const failing = loadWebhook({
+    onRead: (sql) => (/marketplace_user_listings/.test(sql)
+      ? { rows: [LISTING_ROW], rowCount: 1 }
+      : { rows: [], rowCount: 0 }),
+  });
+  const none = [];
+  failing.webhook._test.cardTraderWebhookDeps.fanOut = async (args) => { none.push(args); return { ok: true }; };
+  await failing.webhook._test.handleOrderPayload({
+    admin: { firestore: { FieldValue: { serverTimestamp: () => new Date() } } },
+    firestore: createFirestore().firestore,
+    uid: 'seller-1',
+    cause: 'order.update',
+    order: SALE_ORDER,
+  });
+  assert.equal(none.length, 0, 'nothing is fanned out when Pokoin stock did not move');
+});
+
+test('a cancelled CardTrader order puts the quantity back on the other platforms once', async () => {
+  const { webhook } = loadWebhook({ onWrite: () => ({ rows: [], rowCount: 1 }) });
+  const { firestore, admin } = createFirestore();
+  const eventId = webhook._test.eventDocId('seller-1', 'ord-1', 'item-1');
+  await firestore.collection('cardtrader_webhook_events').doc(eventId).set({ listingId: 'L1', quantity: 2 });
+  const fanned = [];
+  webhook._test.cardTraderWebhookDeps.fanOut = async (args) => { fanned.push(args); return { ok: true }; };
+  const order = { ...SALE_ORDER, state: 'canceled' };
+  await webhook._test.handleOrderPayload({ admin, firestore, uid: 'seller-1', cause: 'order.update', order });
+  await webhook._test.handleOrderPayload({ admin, firestore, uid: 'seller-1', cause: 'order.update', order });
+  assert.deepEqual(fanned.map((row) => [row.listingId, row.delta]), [['L1', 2]]);
+});

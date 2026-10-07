@@ -13,6 +13,7 @@ import { publishSellerSettings, useSellerCurrency } from '../use-seller-currency
 import { sellerListCurrency } from '../seller-currency.js';
 import CardTraderConnectPanel, { CT_TOKEN_DOCS } from '../components/CardTraderConnectPanel.jsx';
 import TelegramConnectPanel from '../components/TelegramConnectPanel.jsx';
+import PlatformSyncPanel from '../components/PlatformSyncPanel.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
 import { formatPknNumber } from '../pkn.js';
 import { sellerHref } from '../listing-meta.js';
@@ -396,6 +397,10 @@ export default function Profile() {
             </SetupRow>
           </ol>
           {setupError ? <p className="setup-error" role="alert">{setupError}</p> : null}
+        </DeskPanel>
+
+        <DeskPanel title="Sync with other platforms" className="profile-platform-sync">
+          <PlatformSyncPanel />
         </DeskPanel>
 
         <DeskPanel title="Poko on Telegram & Discord" className="profile-poko">

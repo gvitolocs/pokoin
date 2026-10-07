@@ -3828,3 +3828,108 @@
   width: 32px;
   height: 45px;
 }
+
+/* Profile → Sync with other platforms (PlatformSyncPanel.jsx) */
+.platform-sync { display: grid; gap: 0.9rem; min-width: 0; }
+.platform-lede { margin: 0; color: var(--muted); line-height: 1.5; }
+.platform-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--g5);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.platform-row { background: var(--g2); }
+.platform-row + .platform-row { border-top: 1px solid var(--g5); }
+.platform-head {
+  display: block;
+  width: 100%;
+  padding: 1.1rem 1.35rem;
+  border: 0;
+  background: transparent;
+  color: var(--ct-blue);
+  font: inherit;
+  font-size: 1.02rem;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.platform-head:hover, .platform-head[aria-expanded="true"] { background: var(--g3); }
+.platform-row.is-connected .platform-head { color: var(--text); }
+.platform-row.is-connected .platform-head::before {
+  content: "";
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-right: 0.55rem;
+  border-radius: 50%;
+  background: #7dcea0;
+  vertical-align: middle;
+}
+.platform-wait { padding: 1.1rem 1.35rem; color: var(--muted); }
+.platform-body {
+  padding: 0.25rem 1.35rem 1.35rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.platform-body > p { margin: 0 0 0.85rem; }
+.platform-form fieldset {
+  margin: 0.4rem 0 0;
+  padding: 0.6rem 1.1rem 1.1rem;
+  border: 1px solid var(--g5);
+  border-radius: 10px;
+  min-width: 0;
+}
+.platform-form legend { padding: 0 0.4rem; color: var(--ct-blue); font-size: 1rem; }
+.platform-help { margin: 0.25rem 0 0.85rem; color: var(--muted); font-size: 0.88rem; }
+.platform-field {
+  display: grid;
+  grid-template-columns: minmax(9rem, 30%) 1fr;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0 0 0.75rem;
+}
+.platform-field > span { text-align: right; }
+.platform-field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--g5);
+  border-radius: 8px;
+  background: var(--g3);
+  color: var(--text);
+  font: inherit;
+}
+.platform-consents { display: grid; gap: 0.6rem; margin: 0.9rem 0 0; }
+.platform-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+.platform-consent input { margin-top: 0.2rem; flex: 0 0 auto; }
+.platform-consent a { color: var(--ct-blue); }
+.platform-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: center;
+  margin-top: 1.1rem;
+}
+.platform-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.btn-revoke { background: #d9605a; color: #fff; border-radius: 8px; min-width: 9rem; }
+.platform-facts { display: grid; gap: 0.35rem; margin: 0 0 0.6rem; }
+.platform-facts > div { display: grid; grid-template-columns: minmax(8rem, 30%) 1fr; gap: 0.8rem; }
+.platform-facts dt { color: var(--muted); }
+.platform-facts dd { margin: 0; min-width: 0; }
+
+@media (max-width: 720px) {
+  .platform-head { padding: 0.95rem 1rem; }
+  .platform-body { padding: 0.25rem 1rem 1.1rem; }
+  .platform-form fieldset { padding: 0.5rem 0.75rem 0.9rem; }
+  .platform-field, .platform-facts > div { grid-template-columns: 1fr; gap: 0.3rem; }
+  .platform-field > span { text-align: left; }
+}

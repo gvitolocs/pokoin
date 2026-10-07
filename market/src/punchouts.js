@@ -108,6 +108,7 @@ export const APP = {
   careers: route('/careers'),
   contact: route('/contact'),
   privacy: route('/privacy'),
+  terms: route('/terms'),
   emailPreferences: route('/email-preferences'),
   protection: route('/protection'),
   whitepaper: route('/whitepaper'),

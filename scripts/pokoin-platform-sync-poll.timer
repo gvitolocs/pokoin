@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll connected selling platforms for orders every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=20s
+Persistent=true
+Unit=pokoin-platform-sync-poll.service
+
+[Install]
+WantedBy=timers.target

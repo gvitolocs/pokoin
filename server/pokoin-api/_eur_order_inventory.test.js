@@ -397,3 +397,29 @@ test('sweep dry run changes nothing', async () => {
   assert.equal(result.results[0].action, 'release_no_session');
   assert.equal(firestore.dump('orders/eur_ghost').paymentStatus, 'pending_stripe');
 });
+
+test('paid fulfilment fans each line out to the other platforms exactly once, even across retries', async () => {
+  const { admin, firestore } = createFirestore();
+  const deps = fakeDeps(mimikyuListing());
+  const platformCalls = [];
+  let throwOnce = true;
+  deps.syncPlatformsAfterPokoinSale = async ({ decremented }) => {
+    platformCalls.push(...decremented.map((row) => row.listingId));
+    if (throwOnce) { throwOnce = false; throw new Error('shopify down'); }
+    return { ok: true };
+  };
+  let failNotify = true;
+  const notify = deps.sendSellerSaleNotificationsForPaidOrder;
+  deps.sendSellerSaleNotificationsForPaidOrder = async (args) => {
+    if (failNotify) return { ok: false, error: 'smtp down' };
+    return notify(args);
+  };
+  await heldOrder(firestore, deps, { paymentStatus: 'paid' });
+  const first = await fulfillPaidEurOrder({ admin, firestore, orderId: 'eur_1', deps });
+  assert.deepEqual(first.failures, ['notifications'], 'a platform failure is not a fulfilment failure');
+  assert.deepEqual(firestore.dump('orders/eur_1').fulfillment.platformDone, [MIMIKYU]);
+  failNotify = false;
+  const second = await fulfillPaidEurOrder({ admin, firestore, orderId: 'eur_1', deps });
+  assert.equal(second.done, true);
+  assert.deepEqual(platformCalls, [MIMIKYU], 'never pushed twice, so platforms that worked are not decremented again');
+});

@@ -953,5 +953,157 @@
         "Redis/Valkey rate limit (best effort)"
       ]
     }
+  },
+  {
+    "path": "/api/platform-integrations",
+    "file": "platform-integrations.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Sync with other platforms: provider list with the seller's safe connection status.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDMARKET_APP_TOKEN",
+        "TCGPLAYER_PUBLIC_KEY",
+        "PLATFORM_*_API_BASE"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/platform-integrations/:provider",
+    "file": "platform-integrations.js",
+    "methods": [
+      "POST",
+      "DELETE"
+    ],
+    "purpose": "Connect (credentials, partner request, or Cardmarket OAuth start) / revoke one platform; registers webhooks and starts the link/import job.",
+    "auth": "Required Firebase bearer token.",
+    "params": {
+      "query": "none",
+      "body": "POST: the provider's declared fields; DELETE: none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDTRADER_TOKEN_ENCRYPTION_KEY",
+        "MARKETPLACE_WRITER_DATABASE_URL",
+        "POKOIN_PUBLIC_API_BASE"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Platform APIs",
+        "Postgres writer"
+      ]
+    }
+  },
+  {
+    "path": "/api/platform-oauth/:provider/start",
+    "file": "platform-oauth-callback.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Set the one-time OAuth state cookie and redirect to Cardmarket login.",
+    "auth": "Public; one-time state from POST /api/platform-integrations/cardmarket.",
+    "params": {
+      "query": "state",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDMARKET_APP_TOKEN",
+        "CARDMARKET_APP_SECRET"
+      ],
+      "services": [
+        "Firebase Admin"
+      ]
+    }
+  },
+  {
+    "path": "/api/platform-oauth/:provider/callback",
+    "file": "platform-oauth-callback.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Cardmarket widget-app callback: swap the request token for an encrypted access token, then redirect to /profile.",
+    "auth": "Public; requires the state cookie set by /start.",
+    "params": {
+      "query": "request_token",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDTRADER_TOKEN_ENCRYPTION_KEY",
+        "CARDMARKET_APP_TOKEN",
+        "CARDMARKET_APP_SECRET",
+        "POKOIN_WEB_BASE"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Cardmarket API"
+      ]
+    }
+  },
+  {
+    "path": "/api/platform-webhook/:provider/:uid",
+    "file": "platform-webhook.js",
+    "methods": [
+      "POST"
+    ],
+    "rawBody": true,
+    "purpose": "Signed order webhooks from a connected platform (Shopify/BinderPOS): exactly-once stock decrement + fan-out.",
+    "auth": "Public; HMAC of the raw body with the seller's stored secret.",
+    "params": {
+      "query": "none",
+      "body": "platform order payload"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDTRADER_TOKEN_ENCRYPTION_KEY",
+        "MARKETPLACE_WRITER_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres writer",
+        "Platform APIs"
+      ]
+    }
+  },
+  {
+    "path": "/api/platform-links",
+    "file": "platform-links.js",
+    "methods": [
+      "GET",
+      "POST",
+      "DELETE"
+    ],
+    "purpose": "List / manually link / unlink a listing to a product on another platform, or re-run the link/import job.",
+    "auth": "Required Firebase bearer token; listing must belong to the seller.",
+    "params": {
+      "query": "GET listingId",
+      "body": "POST { listingId, provider, externalId } or { action: resync, provider }; DELETE { listingId, provider }"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "CARDTRADER_TOKEN_ENCRYPTION_KEY",
+        "MARKETPLACE_WRITER_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres writer"
+      ]
+    }
   }
 ]

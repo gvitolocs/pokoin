@@ -39,6 +39,26 @@ const PAGES = {
       ['Contact', 'For privacy questions or requests, contact Pokoin at contact@pokoin.com.'],
     ],
   },
+  // Draft pending legal review.
+  '/terms': {
+    eyebrow: 'Last updated: 7 October 2026',
+    title: 'Terms of Service',
+    lead: 'These Terms of Service govern your use of Pokoin, including pokoin.com, Card Reserve marketplace features, Pokoin accounts, wallet tools, and connected-platform sync.',
+    body: [
+      ['Operator', 'Pokoin operates the service and marketplace described here. In these Terms, “Pokoin”, “we”, and “us” mean the operator of the Pokoin ecosystem.'],
+      ['Accounts and eligibility', 'You must provide accurate information, keep your account secure, and be legally able to enter these Terms. You are responsible for activity under your account and must not share access in a way that compromises it.'],
+      ['Buying and selling', <>Marketplace listings describe cards and other products offered by sellers. Prices are shown in PKN or EUR where indicated. You are responsible for reviewing the item, price, condition, language, shipping choice, and total before confirming a purchase. Payment is handled through the available checkout provider; shipping and buyer protection are explained in <Link to="/shipping">Shipping</Link> and <Link to="/protection">Buyer protection</Link>.</>],
+      ['Seller obligations', 'Sellers must keep listings accurate, including condition, language, edition, quantity, and images where relevant; dispatch sold items on time; package them appropriately; and sell only genuine products. Counterfeit, misrepresented, stolen, or unlawfully offered products are prohibited.'],
+      ['Fees', 'Pokoin keeps a 3% platform commission on the card prices on every order. Optional insurance is 5% where offered. Any applicable fees, taxes, payment-provider charges, and shipping charges are shown before you confirm a sale or purchase.'],
+      ['Connected platforms (sync)', 'When a seller connects CardTrader, Shopify, BinderPOS, Cardmarket, TCGplayer, or a partner platform, Pokoin stores an encrypted access token, never a password. Pokoin reads recent orders and adjusts stock quantities only by the sold or cancelled quantity. Pokoin never changes prices or deletes products on the other platform. You can revoke access at any time from Profile. Pokoin is not responsible for the other platform’s availability, outages, or its own terms and policies.'],
+      ['Prohibited conduct', 'Do not use Pokoin to break the law, infringe rights, manipulate listings or transactions, evade fees or limits, upload malicious code, scrape or overload the service, impersonate someone else, or offer counterfeit or stolen goods.'],
+      ['Termination', 'You may stop using Pokoin at any time. We may suspend or terminate access, remove listings, or hold activity for review when reasonably necessary for security, legal compliance, fraud prevention, abuse prevention, or a breach of these Terms. Terms that should continue by their nature, including payment obligations, disclaimers, and liability limits, survive termination.'],
+      ['Liability limits', 'Pokoin provides the service and marketplace on an as-available basis and cannot guarantee uninterrupted access, a particular sale, the accuracy of another user’s listing, delivery by a carrier, or the availability of a connected platform. To the extent permitted by law, Pokoin is not liable for indirect, incidental, special, consequential, or lost-profit damages arising from your use of the service. Nothing in these Terms limits liability that cannot legally be limited.'],
+      ['Governing law', 'These Terms are governed by the laws of Italy, without regard to conflict-of-law rules. The courts with jurisdiction under applicable Italian law will hear disputes, subject to any mandatory consumer protections.'],
+      ['Changes to these Terms', 'We may update these Terms as Pokoin and its marketplace or sync features evolve. We will post the updated version on this page with a new date. Your continued use after an update means you accept the revised Terms, except where applicable law requires another form of notice or consent.'],
+      ['Contact', <>For questions about these Terms, contact Pokoin at <Link to="/contact">contact@pokoin.com</Link>.</>],
+    ],
+  },
   '/earn': {
     eyebrow: 'PKN',
     title: 'Earn PKN',

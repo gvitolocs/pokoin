@@ -248,6 +248,7 @@ function AppShell() {
       {both('/careers', <Careers />)}
       {both('/contact', <Site />)}
       {both('/privacy', <Site />)}
+      {both('/terms', <Site />)}
       {both('/email-preferences', <EmailPreferences />)}
       {both('/protection', <Protection />)}
       {both('/flex', <Flex />)}

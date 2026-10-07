@@ -354,6 +354,19 @@ async function recordMissedCardTraderSales({ firestore, sellerUid, listing, sale
       item,
       listing: { id: listing.id, card_id: listing.card_id },
     });
+    // Claimed once above, so the other platforms lose this sale exactly once too.
+    try {
+      const { fanOutStockChange } = require('./_platform_fanout');
+      await fanOutStockChange({
+        origin: 'cardtrader',
+        sellerUid,
+        listingId: listing.id,
+        delta: -Math.max(1, Math.trunc(Number(item.quantity) || 1)),
+        firestore,
+      });
+    } catch (error) {
+      console.error('cardtrader reconcile platform fan-out failed', { listingId: listing.id, message: error.message });
+    }
     recorded += 1;
   }
   return recorded;
