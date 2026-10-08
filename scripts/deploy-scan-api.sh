@@ -86,11 +86,13 @@ ok=0
 for i in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
   scan="$(ssh pi-home "curl -s http://127.0.0.1:18080/api/scan/health" || true)"
-  if [[ "$health" == 200 && "$scan" == *'"nezopt":{"ok":true'* && "$scan" == *'"pi":{"ok":true'* ]]; then ok=1; break; fi
+  # A broken route manifest 500s on unknown paths instead of 404.
+  unknown="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/route-manifest-healthcheck" || true)"
+  if [[ "$health" == 200 && "$scan" == *'"nezopt":{"ok":true'* && "$scan" == *'"pi":{"ok":true'* && "$unknown" == 404 ]]; then ok=1; break; fi
   sleep 2
 done
 if [[ "$ok" != 1 ]]; then
-  echo "verification failed (health=$health scan=$scan) — rolling back API release" >&2
+  echo "verification failed (health=$health unknown=${unknown:-} scan=$scan) — rolling back API release" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .scan-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "API verification failed; previous release restored"
 fi
