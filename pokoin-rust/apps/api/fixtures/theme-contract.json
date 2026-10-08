@@ -1,0 +1,121 @@
+[
+  {
+    "shade": "#00ff00",
+    "expected": {
+      "version": "v1",
+      "artworkShade": "#00ff00",
+      "artworkIdentity": "artwork-1",
+      "hue": 142.495,
+      "chroma": 0.295,
+      "background": "#002000",
+      "surface": "#002b00",
+      "surfaceRaised": "#002f00",
+      "hero": "#3d7939",
+      "heroBorder": "#356232",
+      "border": "#2d3d2c",
+      "tint": "#587d54"
+    }
+  },
+  {
+    "shade": "#c4c4c4",
+    "expected": {
+      "version": "v1",
+      "artworkShade": "#c4c4c4",
+      "artworkIdentity": "artwork-1",
+      "hue": 0,
+      "chroma": 0,
+      "background": "#161616",
+      "surface": "#1f1f1f",
+      "surfaceRaised": "#232323",
+      "hero": "#696969",
+      "heroBorder": "#555555",
+      "border": "#383838",
+      "tint": "#717171"
+    }
+  },
+  {
+    "shade": "#ff0000",
+    "expected": {
+      "version": "v1",
+      "artworkShade": "#ff0000",
+      "artworkIdentity": "artwork-1",
+      "hue": 29.234,
+      "chroma": 0.258,
+      "background": "#3a0000",
+      "surface": "#490000",
+      "surfaceRaised": "#4f0000",
+      "hero": "#a04c41",
+      "heroBorder": "#804037",
+      "border": "#49312d",
+      "tint": "#996158"
+    }
+  },
+  {
+    "shade": "#010101",
+    "expected": {
+      "version": "v1",
+      "artworkShade": "#010101",
+      "artworkIdentity": "artwork-1",
+      "hue": 0,
+      "chroma": 0,
+      "background": "#0b0b0b",
+      "surface": "#141414",
+      "surfaceRaised": "#181818",
+      "hero": "#383838",
+      "heroBorder": "#555555",
+      "border": "#383838",
+      "tint": "#484848"
+    }
+  },
+  {
+    "shade": "#ffffff",
+    "expected": {
+      "version": "v1",
+      "artworkShade": "#ffffff",
+      "artworkIdentity": "artwork-1",
+      "hue": 0,
+      "chroma": 0,
+      "background": "#161616",
+      "surface": "#1f1f1f",
+      "surfaceRaised": "#232323",
+      "hero": "#696969",
+      "heroBorder": "#555555",
+      "border": "#383838",
+      "tint": "#717171"
+    }
+  },
+  {
+    "shade": "#ffdd22",
+    "expected": {
+      "version": "v1",
+      "artworkShade": "#ffdd22",
+      "artworkIdentity": "artwork-1",
+      "hue": 97.381,
+      "chroma": 0.18,
+      "background": "#241200",
+      "surface": "#301b00",
+      "surfaceRaised": "#341f00",
+      "hero": "#7b6800",
+      "heroBorder": "#635507",
+      "border": "#3d3823",
+      "tint": "#7e723c"
+    }
+  },
+  {
+    "shade": "#2641aa",
+    "expected": {
+      "version": "v1",
+      "artworkShade": "#2641aa",
+      "artworkIdentity": "artwork-1",
+      "hue": 267.326,
+      "chroma": 0.171,
+      "background": "#040a47",
+      "surface": "#081457",
+      "surfaceRaised": "#0a175e",
+      "hero": "#3d5599",
+      "heroBorder": "#3f5387",
+      "border": "#30384a",
+      "tint": "#546693"
+    }
+  }
+]

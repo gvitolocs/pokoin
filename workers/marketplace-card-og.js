@@ -18,7 +18,7 @@ export { realPublicCardId } from './public-card-id.js';
 export const OG_CACHE_TTL_SEC = 3600;
 export const OG_SEARCH_CACHE_TTL_SEC = 120;
 /** Bump when card JSON-LD, canonical URLs, or the crawlable scan URL change. */
-export const OG_CACHE_VERSION = 'v11';
+export const OG_CACHE_VERSION = 'v12';
 export const SITE = 'https://pokoin.com';
 export const API_ORIGIN = 'https://api.pokoin.com';
 
@@ -146,6 +146,13 @@ export function cardCrawlDecision({
   origin = SITE,
 } = {}) {
   const canon = normalizeSitePath(canonicalPath);
+  const requested = parseCardRequest(requestPath);
+  const target = parseCardRequest(canon);
+  if (!requested || !target || requested.cardId !== target.cardId
+      || (requested.game && requested.game !== target.game)) {
+    return { action: 'ok', canonicalPath: '' };
+  }
+
   if (versions) {
     return { action: 'noindex', canonicalPath: canon, robots: 'noindex, follow' };
   }
@@ -391,35 +398,6 @@ export function renderCardOgHtml(payload) {
 </html>`;
 }
 
-function canonCacheRequest(site, cardId) {
-  return new Request(`${site}/__og/${OG_CACHE_VERSION}/canon/${cardId}`, { method: 'GET' });
-}
-
-async function cachedCanonical(cache, site, cardId) {
-  if (!cache?.match) return '';
-  try {
-    const hit = await cache.match(canonCacheRequest(site, cardId));
-    return hit?.headers.get('x-pokoin-canonical') || '';
-  } catch (_) {
-    return '';
-  }
-}
-
-async function storeCanonical(cache, site, cardId, canonicalPath) {
-  if (!cache?.put || !canonicalPath) return;
-  try {
-    await cache.put(canonCacheRequest(site, cardId), new Response(null, {
-      status: 204,
-      headers: {
-        'x-pokoin-canonical': canonicalPath,
-        'cache-control': `public, max-age=${OG_CACHE_TTL_SEC}`,
-      },
-    }));
-  } catch (_) {
-    /* cache is optional */
-  }
-}
-
 function redirectToCanonical(location, canonicalPath = '') {
   return new Response(null, {
     status: 301,
@@ -464,7 +442,18 @@ export async function fetchCardPageForOg(cardId, language, game = '', {
       throw error;
     }
     const page = await response.json();
-    if (!page?.card && !page?.seo) return null;
+    const actual = String(page?.card?.id || page?.card?.card_id || '');
+    const expectedGame = gameId || 'pokemon';
+    const resolvedGame = String(page?.game || expectedGame);
+    const canonical = page?.seo?.canonicalPath || page?.canonicalPath || page?.card?.canonicalPath;
+    const target = canonical ? parseCardRequest(canonical) : null;
+    if (actual !== String(cardId) || resolvedGame !== expectedGame
+        || (canonical && (!target || target.cardId !== String(cardId)
+          || (target.game || 'pokemon') !== expectedGame))) {
+      const error = new Error('card-page identity mismatch');
+      error.status = 502;
+      throw error;
+    }
     return { page, game: String(page.game || gameId || 'pokemon') || 'pokemon' };
   }
 
@@ -532,46 +521,9 @@ async function handleCardOg(request, env, ctx) {
   const currency = currencyFromSearch(url.search) || (search ? 'EUR' : '');
   const listingId = String(url.searchParams.get('listing') || '').replace(/[^\w-]/g, '').slice(0, 80);
 
-  if (!bot) {
-    if (parsed.versions) return null;
-    const known = await cachedCanonical(cache, site, parsed.cardId);
-    if (known) {
-      const decision = cardCrawlDecision({
-        requestPath: url.pathname,
-        canonicalPath: known,
-        origin: SITE,
-      });
-      if (decision.action === 'redirect') return redirectToCanonical(decision.location, decision.canonicalPath);
-    }
-    if (cardPathHasSlug(url.pathname)) {
-      if (ctx?.waitUntil && !known) {
-        ctx.waitUntil(fetchCardPageForOg(parsed.cardId, parsed.language, hintedGame, { includeOffers: false })
-          .then((hit) => {
-            if (!hit?.page) return null;
-            const payload = payloadFor(hit.page, parsed, hit.game, site, {});
-            return storeCanonical(cache, site, parsed.cardId, payload.path);
-          })
-          .catch(() => {}));
-      }
-      return null;
-    }
-    const raced = await Promise.race([
-      fetchCardPageForOg(parsed.cardId, parsed.language, hintedGame, { includeOffers: false })
-        .then((hit) => ({ hit }))
-        .catch(() => ({ hit: null })),
-      new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 2500)),
-    ]);
-    if (!raced.hit?.page) return null;
-    const payload = payloadFor(raced.hit.page, parsed, raced.hit.game, site, {});
-    const decision = cardCrawlDecision({
-      requestPath: url.pathname,
-      canonicalPath: payload.path,
-      origin: SITE,
-    });
-    await storeCanonical(cache, site, parsed.cardId, payload.path);
-    if (decision.action === 'redirect') return redirectToCanonical(decision.location, decision.canonicalPath);
-    return null;
-  }
+  // Browser desks resolve identity and canonical links through the shared API.
+  // Never redirect them from a Worker cache populated by another API response.
+  if (!bot) return null;
 
   const cacheKey = new Request(
     `${site}/__og/${OG_CACHE_VERSION}/card/${hintedGame || 'lookup'}/${parsed.language}/${parsed.cardId}/${parsed.versions ? 'versions' : 'card'}/${search ? 'search' : 'social'}/${currency || 'none'}/${listingId || 'card'}${normalizeSitePath(url.pathname)}`,
@@ -617,7 +569,6 @@ async function handleCardOg(request, env, ctx) {
     versions: parsed.versions,
     origin: SITE,
   });
-  await storeCanonical(cache, site, parsed.cardId, decision.canonicalPath || decisionSeed.path);
   if (decision.action === 'redirect') {
     const response = redirectToCanonical(decision.location, decision.canonicalPath);
     if (cache?.put && ctx?.waitUntil) ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));

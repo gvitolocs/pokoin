@@ -218,7 +218,7 @@ fn reqwest_free_url(value: &str) -> Result<String, ()> {
     Ok(format!("/card-images{path}"))
 }
 
-fn has_collector(value: &str) -> bool {
+pub fn has_collector(value: &str) -> bool {
     COLLECTOR_ANY.is_match(&value.to_lowercase())
 }
 

@@ -1,17 +1,30 @@
 /** Desk identity from marketplace-card-page, keyed by public card id. */
 
-const PREFIX = 'pokoin.cardPage.v1.';
+import { cardPageMatchesId } from './card-response.js';
+import { game as currentGame } from './game.js';
+
+const PREFIX = 'pokoin.cardPage.v2.';
 export const CARD_PAGE_TTL_MS = 12 * 60 * 60 * 1000;
 const MEMORY_CAP = 24;
 /** localStorage copies (~20–40 KB each). Uncapped they filled the 5 MB quota,
  * after which every setItem on the site threw — the cart's crashed the app. */
 export const CARD_PAGE_STORE_CAP = 40;
 const memory = new Map();
+const cleanedStores = new WeakSet();
 
 function store() {
   try {
     const local = globalThis.localStorage;
     if (local && typeof local.getItem === 'function') {
+      if (!cleanedStores.has(local)) {
+        const retired = [];
+        for (let i = 0; i < local.length; i += 1) {
+          const key = local.key(i);
+          if (key?.startsWith("pokoin.cardPage.v1.")) retired.push(key);
+        }
+        retired.forEach((key) => local.removeItem(key));
+        cleanedStores.add(local);
+      }
       return local;
     }
   } catch {
@@ -20,20 +33,20 @@ function store() {
   return null;
 }
 
-function keyOf(cardId, lang = 'en') {
+function keyOf(cardId, lang = 'en', gameId = currentGame().id) {
   const id = String(cardId || '').trim();
   if (!/^\d+$/.test(id)) {
     return '';
   }
-  return `${PREFIX}${String(lang || 'en').toLowerCase()}:${id}`;
+  return `${PREFIX}${gameId}:${String(lang || 'en').toLowerCase()}:${id}`;
 }
 
 function isPayload(payload) {
   return Boolean(payload?.card && (payload.card.id || payload.card.card_id));
 }
 
-function isFresh(payload) {
-  return isPayload(payload) && Date.now() - Number(payload.savedAt || 0) <= CARD_PAGE_TTL_MS;
+function isFresh(payload, cardId, gameId) {
+  return cardPageMatchesId(cardId, payload, { gameId }) && Date.now() - Number(payload.savedAt || 0) <= CARD_PAGE_TTL_MS;
 }
 
 function slimPage(data) {
@@ -47,14 +60,14 @@ function slimPage(data) {
   };
 }
 
-export function peekStoredCardPage(cardId, { lang = 'en' } = {}) {
-  const key = keyOf(cardId, lang);
+export function peekStoredCardPage(cardId, { lang = 'en', gameId = currentGame().id } = {}) {
+  const key = keyOf(cardId, lang, gameId);
   if (!key) {
     return null;
   }
   if (memory.has(key)) {
     const hit = memory.get(key);
-    return isFresh(hit) ? hit : null;
+    return isFresh(hit, cardId, gameId) ? hit : null;
   }
   const storage = store();
   if (!storage) {
@@ -62,7 +75,7 @@ export function peekStoredCardPage(cardId, { lang = 'en' } = {}) {
   }
   try {
     const parsed = JSON.parse(storage.getItem(key) || 'null');
-    if (!isFresh(parsed)) {
+    if (!isFresh(parsed, cardId, gameId)) {
       storage.removeItem(key);
       return null;
     }
@@ -73,10 +86,10 @@ export function peekStoredCardPage(cardId, { lang = 'en' } = {}) {
   }
 }
 
-export function rememberStoredCardPage(cardId, data, { lang = 'en' } = {}) {
-  const key = keyOf(cardId, lang);
+export function rememberStoredCardPage(cardId, data, { lang = 'en', gameId = currentGame().id } = {}) {
+  const key = keyOf(cardId, lang, gameId);
   const page = slimPage(data);
-  if (!key || !page) {
+  if (!key || !page || !cardPageMatchesId(cardId, page, { gameId })) {
     return;
   }
   memory.delete(key);
