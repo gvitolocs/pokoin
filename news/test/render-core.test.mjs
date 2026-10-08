@@ -174,3 +174,15 @@ test('update notes: date-only notes show the day and never repeat "Update —"',
   const timed = renderBlock({ type: 'update_note', at: '2026-10-05T15:03:00.000Z', text: 'Pokémon confirmed the date.' }, record, {});
   assert.match(timed, /Update — 15:03 UTC<\/strong> Pokémon confirmed the date\./);
 });
+
+test('reading-stats hooks: cards and the article carry id and path; dashboard slug is reserved', async () => {
+  const { renderArticleCard } = await import('../lib/pages.mjs');
+  const { RESERVED_SLUGS, articlePath } = await import('../lib/schema.mjs');
+  const record = fixtures[0];
+  const card = renderArticleCard(record);
+  assert.ok(card.includes(`data-article-id="${esc(record.id)}"`));
+  assert.ok(card.includes(`data-article-path="${esc(articlePath(record))}"`));
+  const body = render(record);
+  assert.match(body, /<article class="nx-article[^>]* data-article-id="[^"]+" data-article-path="\/news\/[^"]+">/);
+  assert.ok(RESERVED_SLUGS.includes('dashboard'));
+});

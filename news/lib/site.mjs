@@ -20,6 +20,8 @@ export const SITE = {
   fontUrl: '/home/satoshi.woff2',
   // Reader comments (GET/POST /api/news-comments); moderated before display.
   commentsApi: 'https://api.pokoin.com/api/news-comments',
+  // Admin-only reading stats (GET /api/news-stats) behind /news/dashboard.
+  statsApi: 'https://api.pokoin.com/api/news-stats',
   sameAs: ['https://t.me/pokoincards'],
 };
 
@@ -54,6 +56,7 @@ export const RESERVED_SLUGS = [
   'page',
   'tags',
   'desk',
+  'dashboard',
 ];
 
 const FALLBACK_MANIFEST_URL = new URL('../assets/art/manifest.json', import.meta.url);

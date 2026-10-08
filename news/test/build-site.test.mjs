@@ -150,3 +150,23 @@ test('8. shell is mobile-safe: viewport, media query, no wide fixed containers',
     for (const width of widths) assert.ok(width <= 360, `${selector} has fixed width ${width}px`);
   }
 });
+
+test('admin dashboard: noindex shell with the published article index, outside every sitemap', () => {
+  const outDir = tmp();
+  const report = buildNewsSite({ records: fixtures, outDir, now, baseUrl });
+  const html = readFileSync(join(outDir, 'news/dashboard.html'), 'utf8');
+  assert.match(html, /<meta name="robots" content="noindex, nofollow">/);
+  assert.ok(html.includes('data-stats-api="https://api.pokoin.com/api/news-stats"'));
+  assert.match(report.dashboardJs, /^news-dashboard\.[0-9a-f]{8}\.js$/);
+  assert.ok(html.includes(`<script src="/news/assets/${report.dashboardJs}" defer></script>`));
+  assert.ok(existsSync(join(outDir, 'news/assets', report.dashboardJs)));
+  const json = html.match(/<script type="application\/json" id="nx-dash-articles">([\s\S]*?)<\/script>/)[1];
+  const ids = JSON.parse(json).map((entry) => entry.id);
+  for (const record of published) assert.ok(ids.includes(record.id), `missing ${record.id}`);
+  for (const record of fixtures.filter((entry) => entry.status !== 'published')) {
+    assert.ok(!ids.includes(record.id), `leaked ${record.status} ${record.id}`);
+  }
+  for (const file of ['news-sitemap.xml', 'news/sitemap.xml', 'news/rss.xml']) {
+    assert.ok(!readFileSync(join(outDir, file), 'utf8').includes('/news/dashboard'), `${file} lists the dashboard`);
+  }
+});
