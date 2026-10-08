@@ -38,8 +38,8 @@ focused. Ordinary inputs never receive a shortcut.
 | `q` | add article | condition = **MT** | condition = **NM** | Pokoin has no Mint grade | Bind to NM; the row chip shows NM at once |
 | `w` | add article | condition = **NM** | NM | — | same |
 | `e` | add article | condition = **EX** | **SP** | scale differs | Bind; Cardmarket EX ≈ Pokoin Slightly Played |
-| `r` | add article | condition = **GD** | **MP** | scale differs | Bind |
-| `t` | add article | condition = **LP** | **MP** | two PT grades → one Pokoin grade | Bind; lossy, shown on the chip |
+| `r` | add article | condition = **GD** | **MP** | scale differs | Bind; Cardmarket GD ≈ US Moderately Played |
+| `t` | add article | condition = **LP** | **PL** | two PT grades → one Pokoin grade | Bind; lossy, shown on the chip. Cardmarket's Light Played ≈ US Played |
 | `y` | add article | condition = **PL** | **PL** | — | Bind |
 | `u` | add article | condition = **PO** | **Poor** | — | Bind |
 | `i` | add article | toggle `finishType` Regular ↔ **ReverseHolo** | toggle `foil_state` standard ↔ **reverse** | — | Bind |

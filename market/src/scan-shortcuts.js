@@ -8,7 +8,7 @@ export const CONDITION_KEYS = {
   w: 'NM',
   e: 'SP', // EX
   r: 'MP', // GD
-  t: 'MP', // LP
+  t: 'PL', // LP: Cardmarket's Light Played is the US Played
   y: 'PL',
   u: 'Poor',
 };
