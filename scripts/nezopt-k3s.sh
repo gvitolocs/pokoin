@@ -47,11 +47,10 @@ up() {
     say "create $CONTAINER ($K3S_IMAGE)"
     docker run -d --name "$CONTAINER" --hostname nezopt-k3s --privileged --restart unless-stopped \
       --tmpfs /run --tmpfs /var/run \
-      -p "$LAN_IP:$NODE_PORT:$NODE_PORT" \
       -v "$BASE/k3s:/var/lib/rancher/k3s" \
       -v "$BASE/data:/srv/pokoin-overflow" \
       "$K3S_IMAGE" server --disable traefik --disable servicelb \
-      --write-kubeconfig-mode 644 --node-name nezopt >/dev/null
+      --write-kubeconfig-mode 600 --secrets-encryption --resolv-conf /var/lib/rancher/k3s/upstream-resolv.conf --node-name nezopt >/dev/null
   fi
   timeout 180 bash -c "until docker exec $CONTAINER kubectl get nodes 2>/dev/null | grep -q ' Ready'; do sleep 3; done" \
     || die "k3s did not become Ready"
@@ -77,14 +76,36 @@ import base64, json, sys
 env = json.load(sys.stdin)[0]["Config"]["Env"]
 # NODE_TLS_REJECT_UNAUTHORIZED=0 would switch off certificate checks for every
 # outbound TLS call in the pods; nothing needs it (every pg client sets its own ssl).
-skip = {"PATH", "NODE_VERSION", "YARN_VERSION", "PORT", "HOSTNAME", "HOME", "NODE_TLS_REJECT_UNAUTHORIZED"}
+skip = {"PATH", "NODE_VERSION", "YARN_VERSION", "PORT", "HOSTNAME", "HOME", "NODE_TLS_REJECT_UNAUTHORIZED",
+        # Pi-only: the Pi binds loopback and trusts its local edge; pods pin their own values.
+        "ORACLE_API_HOST", "POKOIN_TRUSTED_PROXY_CIDRS"}
 data = {}
 for row in env:
     key, _, value = row.partition("=")
-    if key and key not in skip:
+    if key and key not in skip and not key.startswith("VALKEY_"):
         data[key] = base64.b64encode(value.encode()).decode()
+# Pi Redis is loopback :6380. Overflow uses its own Redis service.
+data["REDIS_HOST"] = base64.b64encode(b"redis.pokoin-overflow.svc.cluster.local").decode()
+data["REDIS_PORT"] = base64.b64encode(b"6379").decode()
 # Same writer database, reached on the overflow Docker network (see NET).
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+PG_CA = "/etc/pokoin/pg-ca/ca.crt"  # secret pokoin-pg-ca, mounted in every DB pod
+
+def verified_query(query):
+    # TLS with full certificate + host verification against the Pokoin PG CA.
+    rows = [(k, v) for k, v in parse_qsl(query, keep_blank_values=True)
+            if k not in {"sslmode", "sslrootcert", "uselibpqcompat"}]
+    return urlencode(rows + [("uselibpqcompat", "true"), ("sslmode", "verify-full"), ("sslrootcert", PG_CA)])
+
+def point_loopback_at(value, host):
+    parts = urlsplit(value)
+    if (parts.hostname or "") not in {"127.0.0.1", "localhost", "::1"}:
+        return value
+    user = parts.netloc.rsplit("@", 1)[0] if "@" in parts.netloc else ""
+    netloc = f"{user}@{host}" if user else host
+    return urlunsplit(parts._replace(netloc=netloc, query=verified_query(parts.query)))
+
 writer = base64.b64decode(data.get("MARKETPLACE_WRITER_DATABASE_URL", "")).decode()
 if writer:
     parts = urlsplit(writer)
@@ -92,10 +113,18 @@ if writer:
     host = f"{sys.argv[1]}:5432"
     netloc = f"{netloc[0]}@{host}" if len(netloc) == 2 else host
     data["MARKETPLACE_OVERFLOW_DATABASE_URL"] = base64.b64encode(
-        urlunsplit(parts._replace(netloc=netloc)).encode()).decode()
+        urlunsplit(parts._replace(netloc=netloc, query=verified_query(parts.query))).encode()).decode()
     # Writes too: the Pi LAN writer URL times out from pods (UFW), which
     # surfaced as "Scan service error." on Scan Connect overflow requests.
     data["MARKETPLACE_WRITER_DATABASE_URL"] = data["MARKETPLACE_OVERFLOW_DATABASE_URL"]
+    # Pi game URLs are the localhost SSH tunnel. databaseUrlForGame prefers
+    # those explicit env vars, so a set desk for any other TCG connects to
+    # 127.0.0.1:5432 inside the pod and the page returns 503.
+    writer_host = f"{sys.argv[1]}:5432"
+    for key, encoded in list(data.items()):
+        if key in {"MARKETPLACE_DATABASE_URL", "MARKETPLACE_NAME_SEARCH_DATABASE_URL"} or key.endswith("_MARKETPLACE_DATABASE_URL"):
+            raw = base64.b64decode(encoded).decode()
+            data[key] = base64.b64encode(point_loopback_at(raw, writer_host).encode()).decode()
 # The Pi uses a localhost SSH tunnel; overflow pods reach the independent
 # quote database directly on the private Docker network instead.
 quotes = base64.b64decode(data.get("TCGCSV_DATABASE_URL", "")).decode()
@@ -148,6 +177,8 @@ sync() {
 
 apply() {
   kc apply -f - <"$MANIFEST"
+  # Security baseline (ServiceAccounts, PDBs, NetworkPolicies, cloudflared).
+  kc apply -f - <"$(dirname "$MANIFEST")/pokoin-security.yaml"
 }
 
 meili_full() {

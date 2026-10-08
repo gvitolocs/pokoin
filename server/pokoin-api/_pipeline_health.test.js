@@ -150,7 +150,8 @@ test('readiness requires postgres and redis; liveness does not probe them', asyn
 
 test('overflow manifest probes the remote CDN without skipping a dependency', () => {
   const manifest = fs.readFileSync(path.join(__dirname, '../../infra/k3s/pokoin-overflow.yaml'), 'utf8');
-  assert.match(manifest, /name: POKOIN_CDN_HEALTH_URL, value: "https:\/\/cdn\.pokoin\.com\/health"/);
-  assert.match(manifest, /name: PIPELINE_HEALTH_TIMEOUT_MS, value: "2000"/);
+  // Flow ({ name, value }) or block style YAML, same meaning.
+  assert.match(manifest, /name: POKOIN_CDN_HEALTH_URL,?\s+value: ["']?https:\/\/cdn\.pokoin\.com\/health["']?/);
+  assert.match(manifest, /name: PIPELINE_HEALTH_TIMEOUT_MS,?\s+value: ["']?2000["']?/);
   assert.doesNotMatch(manifest, /PIPELINE_HEALTH_SKIP/);
 });

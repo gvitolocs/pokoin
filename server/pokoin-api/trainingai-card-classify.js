@@ -1,3 +1,6 @@
+const { clientIp } = require('./_client_ip');
+const { limitGlobal } = require('./_rate_limit');
+
 const MAX_IMAGE_BYTES = Number(process.env.TRAININGAI_CLASSIFIER_MAX_IMAGE_BYTES || 8 * 1024 * 1024);
 const DEFAULT_TIMEOUT_MS = Number(process.env.TRAININGAI_CLASSIFIER_TIMEOUT_MS || 120000);
 
@@ -9,9 +12,7 @@ const CORS_HEADERS = {
 };
 
 async function classifyRateLimited(req) {
-  const forwarded = String(req.headers?.['x-forwarded-for'] || req.headers?.['X-Forwarded-For'] || '').split(',')[0].trim();
-  const ip = forwarded || String(req.socket?.remoteAddress || 'unknown');
-  const verdict = await limitBestEffort({ scope: 'trainingai-classify', identity: ip, limit: 30, windowSeconds: 60 });
+  const verdict = await limitGlobal({ scope: 'trainingai-classify', identity: clientIp(req), limit: 30, windowSeconds: 60 });
   return !verdict.allowed;
 }
 

@@ -3,6 +3,8 @@
 // HTTP helpers shared by the scan-* handlers: CORS allowlist, JSON replies,
 // client IP, bearer / phone credentials.
 
+const { clientIp: _clientIp } = require('./_client_ip');
+
 const ALLOWED_ORIGINS = new Set([
   'https://pokoin.com',
   'https://www.pokoin.com',
@@ -64,14 +66,8 @@ function sendError(res, error, label) {
   sendJson(res, statusCode, payload);
 }
 
-// Cloudflare tunnel sets CF-Connecting-IP. The global pair limit backstops a
-// spoofed header if the origin is ever reachable without Cloudflare.
 function clientIp(req) {
-  const cf = header(req, 'cf-connecting-ip').trim();
-  if (cf) return cf.slice(0, 64);
-  const forwarded = header(req, 'x-forwarded-for').split(',')[0].trim();
-  if (forwarded) return forwarded.slice(0, 64);
-  return String(req?.socket?.remoteAddress || 'unknown').slice(0, 64);
+  return _clientIp(req).slice(0, 64);
 }
 
 function phoneToken(req) {

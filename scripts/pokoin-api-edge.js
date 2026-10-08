@@ -9,6 +9,22 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 
+/**
+ * Shared policy modules. The Pi install lays them next to the edge file
+ * (pokoin-cors-policy.js / pokoin-client-ip.js); the repo layout keeps the
+ * canonical copies in server/pokoin-api (used by tests).
+ */
+function loadPolicyModule(names) {
+  for (const name of names) {
+    const file = path.join(__dirname, name);
+    if (fs.existsSync(file)) return require(file);
+  }
+  throw new Error(`policy module not found: ${names.join(' or ')}`);
+}
+
+const corsPolicy = loadPolicyModule(['pokoin-cors-policy.js', '../server/pokoin-api/_cors_policy.js']);
+const clientIpModule = loadPolicyModule(['pokoin-client-ip.js', '../server/pokoin-api/_client_ip.js']);
+
 const BIND = process.env.POKOIN_API_EDGE_BIND || '127.0.0.1';
 const PORT = Number(process.env.POKOIN_API_EDGE_PORT || 18079);
 const API = process.env.POKOIN_API_ORIGIN || 'http://127.0.0.1:18080';
@@ -231,9 +247,12 @@ function loadRustRoutes() {
   return rustRoutes;
 }
 
+/**
+ * The edge only listens on loopback (peer is cloudflared), so the shared
+ * client-IP resolver trusts cf-connecting-ip and ignores client XFF.
+ */
 function clientKey(req) {
-  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return forwarded || req.socket?.remoteAddress || 'anon';
+  return clientIpModule.resolveClientIp(req).ip;
 }
 
 function jsonPaths(left, right, path, out) {
@@ -587,13 +606,7 @@ function serveCacheable(req, res, key, pathname, search) {
 }
 
 function browserCors(req) {
-  const requested = String(req.headers['access-control-request-headers'] || 'authorization,content-type,accept,x-pokoin-game,x-pokoin-host');
-  return {
-    'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS',
-    'access-control-allow-headers': requested,
-    'access-control-max-age': '86400',
-  };
+  return corsPolicy.corsHeaders(req);
 }
 
 function proxy(req, res) {
@@ -606,7 +619,21 @@ function proxy(req, res) {
       return;
     }
     const writeHead = res.writeHead.bind(res);
-    res.writeHead = (status, headers, ...rest) => writeHead(status, { ...(headers && typeof headers === 'object' && !Array.isArray(headers) ? headers : {}), ...browserCors(req) }, ...rest);
+    res.writeHead = (status, headers, ...rest) => {
+      // The CORS policy is authoritative: drop anything the handler already
+      // set with setHeader before the merged headers replace it again.
+      for (const name of res.getHeaderNames()) {
+        const lower = name.toLowerCase();
+        if (lower.startsWith('access-control-') || lower === 'vary') res.removeHeader(name);
+      }
+      const merged = corsPolicy.mergeCorsIntoHeaders(headers, req);
+      for (const name of res.getHeaderNames()) {
+        const lower = name.toLowerCase();
+        if (lower.startsWith('access-control-') || lower === 'vary') res.removeHeader(name);
+      }
+      for (const [name, value] of Object.entries(merged)) res.setHeader(name, value);
+      return writeHead(status, ...rest);
+    };
   }
   const sitemap = sitemapFile(pathname);
   if (sitemap && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -648,6 +675,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  browserCors, clientKey,
   chooseApiOrigin, cachePolicy, cacheKey, ResponseCache, isApiPath, rewritePath,
   routeId, stickyBucket, rustPercent,
 };
