@@ -41,6 +41,7 @@ say "poko-market + poko-connect + poko-bets + poko-chat + personal-context tests
 node --test "$SRC/poko-market.test.js" "$SRC/poko-connect.test.js" "$SRC/poko-bets.test.js" "$SRC/poko-chat.test.js" "$SRC/poko-reply-cards.test.js" "$SRC/poko-personal-context.test.js"
 node --test "$SRC/news-comments.test.js"
 node --test "$SRC/news-event.test.js" "$SRC/news-stats.test.js"
+node --test "$SRC/patch-route-manifest.test.js"
 node --test "$SRC/marketplace-card-price-history.test.js" "$SRC/_tcgcsv_prices.test.js" "$SRC/marketplace-tcgplayer-history.test.js"
 node --check "$SRC/poko-market.js" "$SRC/poko-connect.js" "$SRC/poko-bets.js" "$SRC/poko-chat.js" "$SRC/_poko_reply_cards.js" "$SRC/poko-personal-context.js" "$SRC/_poko_personal_context.js" "$SRC/_rate_limit.js" "$SRC/_redis_cache.js"
 
@@ -49,7 +50,7 @@ say "Pi release $release"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .poko-market-previous; cp -a \$prev '$release'; mkdir -p '$release/api'"
 tar -C "$SRC" -cf - news-comments.js news-comments.test.js news-event.js news-event.test.js news-stats.js news-stats.test.js poko-market.js poko-market.test.js poko-connect.js poko-connect.test.js poko-bets.js poko-bets.test.js poko-chat.js poko-chat.test.js _poko_reply_cards.js poko-reply-cards.test.js poko-personal-context.js poko-personal-context.test.js _poko_personal_context.js _rate_limit.js _redis_cache.js route-definitions.json patch-route-manifest.js "${PRICE_FILES[@]}" \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
-ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'; rm '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'"
+ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json' && rm '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.poko-market-commit'"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
@@ -59,7 +60,11 @@ for _ in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
   unauth="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{\"tool\":\"market_snapshot\"}' http://127.0.0.1:18080/api/poko-market" || true)"
   comments="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/news-comments?articleId=art_healthcheck_en'" || true)"
-  if [[ "$health" == "200" && "$unauth" == "401" && "$comments" == "200" ]]; then
+  # New routes sit after every existing one: a broken manifest shows up here (and on unknown paths).
+  stats="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/news-stats" || true)"
+  events="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/news-event" || true)"
+  unknown="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/route-manifest-healthcheck" || true)"
+  if [[ "$health" == "200" && "$unauth" == "401" && "$comments" == "200" && "$stats" == "401" && "$events" == "405" && "$unknown" == "404" ]]; then
     healthy=1
     break
   fi
@@ -67,7 +72,7 @@ for _ in $(seq 1 45); do
 done
 
 if [[ "$healthy" != "1" ]]; then
-  echo "health failed (health=$health poko-market=$unauth news-comments=${comments:-}) — rolling back" >&2
+  echo "health failed (health=$health poko-market=$unauth news-comments=${comments:-} news-stats=${stats:-} news-event=${events:-} unknown=${unknown:-}) — rolling back" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .poko-market-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "Pi API verification failed; previous release restored"
 fi
