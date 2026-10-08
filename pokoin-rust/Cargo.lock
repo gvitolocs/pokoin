@@ -2027,6 +2027,8 @@ dependencies = [
  "http-body-util",
  "pokoin-accounts",
  "pokoin-api-common",
+ "pokoin-catalog-api",
+ "pokoin-search",
  "rand 0.8.8",
  "redis",
  "regex",

@@ -18,6 +18,8 @@ hex = { workspace = true }
 hmac = "0.12"
 pokoin-accounts = { path = "../accounts" }
 pokoin-api-common = { path = "../api-common" }
+pokoin-catalog-api = { path = "../catalog-api" }
+pokoin-search = { path = "../search" }
 rand = "0.8"
 redis = { workspace = true }
 regex = "1"
