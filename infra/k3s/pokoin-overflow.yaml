@@ -1,60 +1,83 @@
-# Pokoin Pi overflow on nezopt (k3s in Docker, see scripts/nezopt-k3s.sh).
-#
-# The Pi keeps serving api.pokoin.com. When its API has too many requests in
-# flight, pokoin-api-edge sends GET/HEAD requests here (NodePort 30880 on
-# nezopt's LAN address). This namespace runs the same API release as the Pi
-# with its own Meilisearch copy, reading the writer Postgres on
-# nezopt. The HPA keeps one API pod warm and adds pods under CPU load.
-#
-# Secret pokoin-api-env is created by scripts/nezopt-k3s.sh from the Pi
-# container's environment — never committed. It adds
-# MARKETPLACE_OVERFLOW_DATABASE_URL: the writer URL with its host swapped for
-# the writer container's address on the pokoin-overflow Docker network.
+# pokoin-overflow on nezopt k3s — exported from the LIVE cluster 2026-10-07 (kubectl diff = empty).
+# Security objects (ServiceAccounts, PDBs, NetworkPolicies, cloudflared) live in pokoin-security.yaml.
+# Secrets (pokoin-api-env, pokoin-api-nez-tunnel, pokoin-pg-ca) are created by scripts, never committed.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: pokoin-overflow
 ---
-# Meilisearch copy of marketplace_cards / marketplace_name_tokens.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: meili
   namespace: pokoin-overflow
 spec:
-  serviceName: meili
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
   replicas: 1
   selector:
-    matchLabels: { app: meili }
+    matchLabels:
+      app: meili
+  serviceName: meili
   template:
     metadata:
-      labels: { app: meili }
+      labels:
+        app: meili
     spec:
       containers:
-        - name: meili
-          # Production pin (D00000A): same version as the Pi.
-          image: getmeili/meilisearch:v1.53.1
-          env:
-            - { name: MEILI_ENV, value: production }
-            - { name: MEILI_HTTP_ADDR, value: "0.0.0.0:7700" }
-            - { name: MEILI_DB_PATH, value: /meili_data/data.ms }
-            - { name: MEILI_MAX_INDEXING_MEMORY, value: 1Gb }
-            - { name: MEILI_NO_ANALYTICS, value: "true" }
-            - name: MEILI_MASTER_KEY
-              valueFrom: { secretKeyRef: { name: pokoin-api-env, key: MEILI_API_KEY } }
-          ports:
-            - { containerPort: 7700, name: http }
-          readinessProbe:
-            httpGet: { path: /health, port: 7700 }
-            periodSeconds: 5
-          resources:
-            requests: { cpu: 250m, memory: 512Mi }
-            limits: { cpu: "2", memory: 3Gi }
-          volumeMounts:
-            - { name: data, mountPath: /meili_data }
+      - env:
+        - name: MEILI_ENV
+          value: production
+        - name: MEILI_HTTP_ADDR
+          value: 0.0.0.0:7700
+        - name: MEILI_DB_PATH
+          value: /meili_data/data.ms
+        - name: MEILI_MAX_INDEXING_MEMORY
+          value: 1Gb
+        - name: MEILI_NO_ANALYTICS
+          value: 'true'
+        - name: MEILI_MASTER_KEY
+          valueFrom:
+            secretKeyRef:
+              key: MEILI_API_KEY
+              name: pokoin-api-env
+        image: getmeili/meilisearch:v1.53.1
+        name: meili
+        ports:
+        - containerPort: 7700
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health
+            port: 7700
+            scheme: HTTP
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: '2'
+            memory: 3Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        volumeMounts:
+        - mountPath: /meili_data
+          name: data
+      securityContext: {}
       volumes:
-        - name: data
-          hostPath: { path: /srv/pokoin-overflow/meili, type: DirectoryOrCreate }
+      - hostPath:
+          path: /srv/pokoin-overflow/meili
+          type: DirectoryOrCreate
+        name: data
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
 ---
 apiVersion: v1
 kind: Service
@@ -62,71 +85,229 @@ metadata:
   name: meili
   namespace: pokoin-overflow
 spec:
-  selector: { app: meili }
   ports:
-    - { port: 7700, targetPort: 7700, name: http }
+  - name: http
+    port: 7700
+    protocol: TCP
+    targetPort: 7700
+  selector:
+    app: meili
+  type: ClusterIP
 ---
-# Shared cache/search Redis lives only on the Pi (:6380). Overflow pods do not
-# run a second Redis — cache helpers fail open to Postgres/Firestore.
-# The Pi API release (synced to /srv/pokoin-overflow/api/current).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: pokoin-overflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - args:
+        - --save
+        - ''
+        - --appendonly
+        - 'no'
+        - --maxmemory
+        - 512mb
+        - --maxmemory-policy
+        - volatile-lru
+        image: redis:8.10.2
+        name: redis
+        ports:
+        - containerPort: 6379
+          name: redis
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          periodSeconds: 5
+          successThreshold: 1
+          tcpSocket:
+            port: 6379
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 500m
+            memory: 640Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+      securityContext: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: pokoin-overflow
+spec:
+  ports:
+  - name: redis
+    port: 6379
+    protocol: TCP
+    targetPort: 6379
+  selector:
+    app: redis
+  type: ClusterIP
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: pokoin-api
   namespace: pokoin-overflow
 spec:
-  replicas: 1
+  replicas: 2
   selector:
-    matchLabels: { app: pokoin-api }
+    matchLabels:
+      app: pokoin-api
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
   template:
     metadata:
-      labels: { app: pokoin-api }
+      labels:
+        app: pokoin-api
     spec:
+      automountServiceAccountToken: false
       containers:
-        - name: api
-          image: node:20-bookworm
-          workingDir: /app
-          command: ["node", "server/oracle-api-server.js"]
-          envFrom:
-            - secretRef: { name: pokoin-api-env }
-          env:
-            - { name: PORT, value: "8080" }
-            - { name: NODE_ENV, value: production }
-            # Reads go to the writer Postgres on nezopt (not the Pi replica),
-            # over the pokoin-overflow Docker network — see scripts/nezopt-k3s.sh.
-            - name: MARKETPLACE_DATABASE_URL
-              valueFrom: { secretKeyRef: { name: pokoin-api-env, key: MARKETPLACE_OVERFLOW_DATABASE_URL } }
-            - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
-              valueFrom: { secretKeyRef: { name: pokoin-api-env, key: MARKETPLACE_OVERFLOW_DATABASE_URL } }
-            # _marketplace_db.js turns SSL off only for the exact string "0".
-            - { name: MARKETPLACE_DATABASE_SSL, value: "0" }
-            - { name: MARKETPLACE_DATABASE_POOL_MAX, value: "8" }
-            - { name: MEILI_HOST, value: "http://meili.pokoin-overflow.svc.cluster.local:7700" }
-            # Intentionally unreachable inside the pod: fail-open cache path.
-            - { name: REDIS_HOST, value: "127.0.0.1" }
-            - { name: REDIS_PORT, value: "6380" }
-            - { name: POKOIN_OVERFLOW_NODE, value: nezopt }
-            # The CDN runs on the Pi, not this pod's loopback interface.
-            - { name: POKOIN_CDN_HEALTH_URL, value: "https://cdn.pokoin.com/health" }
-            - { name: PIPELINE_HEALTH_TIMEOUT_MS, value: "2000" }
-          ports:
-            - { containerPort: 8080, name: http }
-          readinessProbe:
-            httpGet: { path: "/api/marketplace-suggest?q=pika&limit=1", port: 8080 }
-            periodSeconds: 5
-            timeoutSeconds: 3
-          livenessProbe:
-            tcpSocket: { port: 8080 }
-            periodSeconds: 10
-            failureThreshold: 6
-          resources:
-            requests: { cpu: 500m, memory: 384Mi }
-            limits: { cpu: "2", memory: 1536Mi }
-          volumeMounts:
-            - { name: app, mountPath: /app, readOnly: true }
+      - command:
+        - node
+        - server/oracle-api-server.js
+        env:
+        - name: ORACLE_API_HOST
+          value: 0.0.0.0
+        - name: POKOIN_TRUSTED_PROXY_CIDRS
+          value: 10.42.0.0/16
+        - name: PORT
+          value: '8080'
+        - name: NODE_ENV
+          value: production
+        - name: MARKETPLACE_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              key: MARKETPLACE_OVERFLOW_DATABASE_URL
+              name: pokoin-api-env
+        - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              key: MARKETPLACE_OVERFLOW_DATABASE_URL
+              name: pokoin-api-env
+        - name: MARKETPLACE_DATABASE_SSL
+          value: '1'
+        - name: MARKETPLACE_DATABASE_SSL_VERIFY
+          value: '1'
+        - name: MARKETPLACE_WRITER_DATABASE_SSL
+          value: '1'
+        - name: MARKETPLACE_WRITER_DATABASE_SSL_VERIFY
+          value: '1'
+        - name: MARKETPLACE_DATABASE_POOL_MAX
+          value: '8'
+        - name: MEILI_HOST
+          value: http://meili.pokoin-overflow.svc.cluster.local:7700
+        - name: REDIS_HOST
+          value: redis.pokoin-overflow.svc.cluster.local
+        - name: REDIS_PORT
+          value: '6379'
+        - name: POKOIN_OVERFLOW_NODE
+          value: nezopt
+        - name: POKOIN_CDN_HEALTH_URL
+          value: https://cdn.pokoin.com/health
+        - name: PIPELINE_HEALTH_TIMEOUT_MS
+          value: '2000'
+        - name: POKOIN_ORIGIN_NAME
+          value: nez-k3s
+        - name: PIPELINE_HEALTH_SAMPLE_MS
+          value: '5000'
+        - name: SCAN_PRIMARY_URL
+          value: http://172.31.250.12:18151
+        - name: SCAN_FALLBACK_URL
+          value: http://172.31.250.12:18151
+        envFrom:
+        - secretRef:
+            name: pokoin-api-env
+        image: node:20-bookworm
+        livenessProbe:
+          failureThreshold: 6
+          httpGet:
+            path: /livez
+            port: 8080
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 2
+        name: api
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /readyz
+            port: 8080
+            scheme: HTTP
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: '2'
+            memory: 1536Mi
+          requests:
+            cpu: 500m
+            memory: 384Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsGroup: 1000
+          runAsNonRoot: true
+          runAsUser: 1000
+        volumeMounts:
+        - mountPath: /etc/pokoin/pg-ca
+          name: pg-ca
+          readOnly: true
+        - mountPath: /app
+          name: app
+          readOnly: true
+        - mountPath: /tmp
+          name: tmp
+        workingDir: /app
+      securityContext:
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccount: pokoin-api
+      serviceAccountName: pokoin-api
       volumes:
-        - name: app
-          hostPath: { path: /srv/pokoin-overflow/api/current, type: Directory }
+      - name: pg-ca
+        secret:
+          defaultMode: 292
+          secretName: pokoin-pg-ca
+      - emptyDir:
+          sizeLimit: 256Mi
+        name: tmp
+      - hostPath:
+          path: /srv/pokoin-overflow/api/current
+          type: Directory
+        name: app
 ---
 apiVersion: v1
 kind: Service
@@ -134,10 +315,14 @@ metadata:
   name: pokoin-api
   namespace: pokoin-overflow
 spec:
-  type: NodePort
-  selector: { app: pokoin-api }
   ports:
-    - { port: 8080, targetPort: 8080, nodePort: 30880, name: http }
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: pokoin-api
+  type: ClusterIP
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -145,93 +330,174 @@ metadata:
   name: pokoin-api
   namespace: pokoin-overflow
 spec:
-  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: pokoin-api }
-  minReplicas: 1
+  behavior:
+    scaleDown:
+      policies:
+      - periodSeconds: 15
+        type: Percent
+        value: 100
+      selectPolicy: Max
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      policies:
+      - periodSeconds: 15
+        type: Pods
+        value: 2
+      selectPolicy: Max
+      stabilizationWindowSeconds: 0
   maxReplicas: 4
   metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target: { type: Utilization, averageUtilization: 60 }
-  behavior:
-    scaleUp:
-      stabilizationWindowSeconds: 0
-      policies:
-        - { type: Pods, value: 2, periodSeconds: 15 }
-    scaleDown:
-      stabilizationWindowSeconds: 300
+  - resource:
+      name: cpu
+      target:
+        averageUtilization: 60
+        type: Utilization
+    type: Resource
+  minReplicas: 2
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: pokoin-api
 ---
-# Keep the Meili copy fresh: same delta script the Pi timer runs every 2 min.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: meili-delta
   namespace: pokoin-overflow
 spec:
-  schedule: "*/2 * * * *"
   concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
   jobTemplate:
+    metadata: {}
     spec:
-      backoffLimit: 0
       activeDeadlineSeconds: 170
+      backoffLimit: 0
       template:
+        metadata: {}
         spec:
-          restartPolicy: Never
           containers:
-            - name: sync
-              image: node:20-bookworm
-              workingDir: /app
-              command: ["node", "scripts/meili-sync-marketplace-delta.js"]
-              envFrom:
-                - secretRef: { name: pokoin-api-env }
-              env:
-                - name: MARKETPLACE_DATABASE_URL
-                  valueFrom: { secretKeyRef: { name: pokoin-api-env, key: MARKETPLACE_OVERFLOW_DATABASE_URL } }
-                - { name: MEILI_HOST, value: "http://meili.pokoin-overflow.svc.cluster.local:7700" }
-              resources:
-                requests: { cpu: 100m, memory: 256Mi }
-                limits: { cpu: "1", memory: 1Gi }
-              volumeMounts:
-                - { name: app, mountPath: /app, readOnly: true }
+          - command:
+            - sh
+            - -c
+            - node scripts/meili-sync-marketplace-delta.js || NODE_PATH=/app/node_modules
+              node /opt/redis-search/redis-search-reindex.js
+            env:
+            - name: MARKETPLACE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: MARKETPLACE_OVERFLOW_DATABASE_URL
+                  name: pokoin-api-env
+            - name: MEILI_HOST
+              value: http://meili.pokoin-overflow.svc.cluster.local:7700
+            envFrom:
+            - secretRef:
+                name: pokoin-api-env
+            image: node:20-bookworm
+            name: sync
+            resources:
+              limits:
+                cpu: '1'
+                memory: 1Gi
+              requests:
+                cpu: 100m
+                memory: 256Mi
+            volumeMounts:
+            - mountPath: /etc/pokoin/pg-ca
+              name: pg-ca
+              readOnly: true
+            - mountPath: /app
+              name: app
+              readOnly: true
+            - mountPath: /opt/redis-search
+              name: redis-search
+              readOnly: true
+            workingDir: /app
+          restartPolicy: Never
+          securityContext: {}
           volumes:
-            - name: app
-              hostPath: { path: /srv/pokoin-overflow/api/current, type: Directory }
+          - name: pg-ca
+            secret:
+              defaultMode: 292
+              secretName: pokoin-pg-ca
+          - hostPath:
+              path: /srv/pokoin-overflow/api/current
+              type: Directory
+            name: app
+          - configMap:
+              defaultMode: 420
+              name: redis-search-scripts
+            name: redis-search
+  schedule: '*/2 * * * *'
+  successfulJobsHistoryLimit: 1
+  suspend: false
 ---
-# Nightly full rebuild of both indexes (drift guard; delta only covers 10 min).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: meili-full
   namespace: pokoin-overflow
 spec:
-  schedule: "17 3 * * *"
   concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
   jobTemplate:
+    metadata: {}
     spec:
       backoffLimit: 1
       template:
+        metadata: {}
         spec:
-          restartPolicy: Never
           containers:
-            - name: sync
-              image: node:20-bookworm
-              workingDir: /app
-              command: ["sh", "-c", "node scripts/meili-sync-marketplace-full.js && node scripts/meili-sync-name-tokens-full.js"]
-              envFrom:
-                - secretRef: { name: pokoin-api-env }
-              env:
-                - name: MARKETPLACE_DATABASE_URL
-                  valueFrom: { secretKeyRef: { name: pokoin-api-env, key: MARKETPLACE_OVERFLOW_DATABASE_URL } }
-                - { name: MEILI_HOST, value: "http://meili.pokoin-overflow.svc.cluster.local:7700" }
-              resources:
-                requests: { cpu: 250m, memory: 512Mi }
-                limits: { cpu: "2", memory: 2Gi }
-              volumeMounts:
-                - { name: app, mountPath: /app, readOnly: true }
+          - command:
+            - sh
+            - -c
+            - NODE_PATH=/app/node_modules node /opt/redis-search/redis-search-reindex.js
+              && node scripts/meili-sync-marketplace-full.js && node scripts/meili-sync-name-tokens-full.js
+            env:
+            - name: MARKETPLACE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: MARKETPLACE_OVERFLOW_DATABASE_URL
+                  name: pokoin-api-env
+            - name: MEILI_HOST
+              value: http://meili.pokoin-overflow.svc.cluster.local:7700
+            envFrom:
+            - secretRef:
+                name: pokoin-api-env
+            image: node:20-bookworm
+            name: sync
+            resources:
+              limits:
+                cpu: '2'
+                memory: 2Gi
+              requests:
+                cpu: 250m
+                memory: 512Mi
+            volumeMounts:
+            - mountPath: /etc/pokoin/pg-ca
+              name: pg-ca
+              readOnly: true
+            - mountPath: /app
+              name: app
+              readOnly: true
+            - mountPath: /opt/redis-search
+              name: redis-search
+              readOnly: true
+            workingDir: /app
+          restartPolicy: Never
+          securityContext: {}
           volumes:
-            - name: app
-              hostPath: { path: /srv/pokoin-overflow/api/current, type: Directory }
+          - name: pg-ca
+            secret:
+              defaultMode: 292
+              secretName: pokoin-pg-ca
+          - hostPath:
+              path: /srv/pokoin-overflow/api/current
+              type: Directory
+            name: app
+          - configMap:
+              defaultMode: 420
+              name: redis-search-scripts
+            name: redis-search
+  schedule: 17 3 * * *
+  successfulJobsHistoryLimit: 1
+  suspend: false

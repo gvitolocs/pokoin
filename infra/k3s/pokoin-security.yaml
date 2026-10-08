@@ -1,0 +1,359 @@
+# pokoin-overflow security baseline — exported from the LIVE cluster 2026-10-07 (kubectl diff = empty).
+# Default-deny NetworkPolicies (enforced by k3s kube-router), dedicated ServiceAccounts without tokens,
+# PodDisruptionBudgets and the hardened cloudflared connector.
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  name: pokoin-api
+  namespace: pokoin-overflow
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  name: pokoin-cloudflared
+  namespace: pokoin-overflow
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pokoin-api
+  namespace: pokoin-overflow
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: pokoin-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cloudflared
+  namespace: pokoin-overflow
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: cloudflared
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: pokoin-overflow
+spec:
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+  podSelector: {}
+  policyTypes:
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared
+  namespace: pokoin-overflow
+spec:
+  egress:
+  - ports:
+    - port: 8080
+      protocol: TCP
+    to:
+    - podSelector:
+        matchLabels:
+          app: pokoin-api
+  - ports:
+    - port: 7844
+      protocol: TCP
+    - port: 7844
+      protocol: UDP
+    - port: 443
+      protocol: TCP
+    to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 100.64.0.0/10
+        - 169.254.0.0/16
+        - 127.0.0.0/8
+        - 0.0.0.0/8
+        - 224.0.0.0/4
+  podSelector:
+    matchLabels:
+      app: cloudflared
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: pokoin-overflow
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: index-jobs
+  namespace: pokoin-overflow
+spec:
+  egress:
+  - ports:
+    - port: 6379
+      protocol: TCP
+    to:
+    - podSelector:
+        matchLabels:
+          app: redis
+  - ports:
+    - port: 7700
+      protocol: TCP
+    to:
+    - podSelector:
+        matchLabels:
+          app: meili
+  - ports:
+    - port: 5432
+      protocol: TCP
+    to:
+    - ipBlock:
+        cidr: 172.31.250.10/32
+  - ports:
+    - port: 443
+      protocol: TCP
+    to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 100.64.0.0/10
+        - 169.254.0.0/16
+        - 127.0.0.0/8
+        - 0.0.0.0/8
+        - 224.0.0.0/4
+  podSelector:
+    matchExpressions:
+    - key: job-name
+      operator: Exists
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: meili
+  namespace: pokoin-overflow
+spec:
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: pokoin-api
+    - podSelector:
+        matchExpressions:
+        - key: job-name
+          operator: Exists
+    ports:
+    - port: 7700
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      app: meili
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pokoin-api
+  namespace: pokoin-overflow
+spec:
+  egress:
+  - ports:
+    - port: 6379
+      protocol: TCP
+    to:
+    - podSelector:
+        matchLabels:
+          app: redis
+  - ports:
+    - port: 7700
+      protocol: TCP
+    to:
+    - podSelector:
+        matchLabels:
+          app: meili
+  - ports:
+    - port: 5432
+      protocol: TCP
+    to:
+    - ipBlock:
+        cidr: 172.31.250.10/32
+    - ipBlock:
+        cidr: 172.31.250.11/32
+  - ports:
+    - port: 18151
+      protocol: TCP
+    to:
+    - ipBlock:
+        cidr: 172.31.250.12/32
+  - ports:
+    - port: 443
+      protocol: TCP
+    to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 100.64.0.0/10
+        - 169.254.0.0/16
+        - 127.0.0.0/8
+        - 0.0.0.0/8
+        - 224.0.0.0/4
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: cloudflared
+    ports:
+    - port: 8080
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      app: pokoin-api
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis
+  namespace: pokoin-overflow
+spec:
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: pokoin-api
+    - podSelector:
+        matchExpressions:
+        - key: job-name
+          operator: Exists
+    ports:
+    - port: 6379
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: pokoin-overflow
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cloudflared
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - args:
+        - tunnel
+        - --no-autoupdate
+        - --metrics
+        - 0.0.0.0:20241
+        - run
+        env:
+        - name: TUNNEL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: token
+              name: pokoin-api-nez-tunnel
+        image: cloudflare/cloudflared:2026.6.1
+        livenessProbe:
+          failureThreshold: 6
+          httpGet:
+            path: /ready
+            port: 20241
+            scheme: HTTP
+          initialDelaySeconds: 20
+          periodSeconds: 20
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: cloudflared
+        ports:
+        - containerPort: 20241
+          name: metrics
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /ready
+            port: 20241
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+      securityContext:
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccount: pokoin-cloudflared
+      serviceAccountName: pokoin-cloudflared

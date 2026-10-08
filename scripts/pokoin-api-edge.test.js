@@ -5,7 +5,8 @@ const { spawn } = require('node:child_process');
 const http = require('node:http');
 const path = require('node:path');
 const test = require('node:test');
-const { cacheKey, cachePolicy, chooseApiOrigin, isApiPath, ResponseCache } = require('./pokoin-api-edge.js');
+const { browserCors, cacheKey, cachePolicy, chooseApiOrigin, isApiPath, ResponseCache } = require('./pokoin-api-edge.js');
+const nodeCorsPolicy = require('../server/pokoin-api/_cors_policy.js');
 
 const base = { inFlight: 24, localMax: 24, overflowHealthy: true, overflowOrigin: 'http://nezopt:30880' };
 
@@ -285,5 +286,42 @@ test('API responses carry x-robots-tag noindex; CDN responses do not', async () 
     child.kill();
     pi.close();
     cdn.close();
+  }
+});
+
+test('browserCors: allowed origin echoes with credentials, others get *', () => {
+  const allowed = browserCors({ headers: { origin: 'https://pokoin.com' } });
+  assert.equal(allowed['access-control-allow-origin'], 'https://pokoin.com');
+  assert.equal(allowed['access-control-allow-credentials'], 'true');
+  const evil = browserCors({ headers: { origin: 'https://evil.example' } });
+  assert.equal(evil['access-control-allow-origin'], '*');
+  assert.equal(evil['access-control-allow-credentials'], undefined);
+});
+
+test('browserCors: localhost is never allowed in production', () => {
+  process.env.NODE_ENV = 'production';
+  try {
+    const headers = browserCors({ headers: { origin: 'http://localhost:3000' } });
+    assert.equal(headers['access-control-allow-origin'], '*');
+    assert.equal(headers['access-control-allow-credentials'], undefined);
+  } finally {
+    delete process.env.NODE_ENV;
+  }
+});
+
+test('parity: edge browserCors deep-equals the shared Node CORS policy', () => {
+  const origins = [undefined, 'https://pokoin.com', 'https://onepiece.pokoin.com', 'https://evil.example', 'null', 'http://localhost:5173'];
+  const requestHeaders = [undefined, 'authorization,content-type', 'x-pokoin-game, bad header'];
+  for (const origin of origins) {
+    for (const requested of requestHeaders) {
+      const headers = {};
+      if (origin !== undefined) headers.origin = origin;
+      if (requested !== undefined) headers['access-control-request-headers'] = requested;
+      assert.deepEqual(
+        browserCors({ headers }),
+        nodeCorsPolicy.corsHeaders({ headers }),
+        `origin=${origin} requestHeaders=${requested}`,
+      );
+    }
   }
 });

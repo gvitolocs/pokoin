@@ -50,14 +50,73 @@ function assertActivePasswordAccount(decoded, { requireVerified }) {
   );
 }
 
-async function verifyBearerToken(req) {
+function markAuthFailure(req) {
+  try {
+    if (!req) return;
+    req.pokoinAuthFailure = true;
+    if (req.pokoinResponse && typeof req.pokoinResponse === 'object') {
+      req.pokoinResponse.pokoinAuthFailure = true;
+    }
+  } catch (_) {
+    // Never throw from an auth helper.
+  }
+}
+
+const JWT_LIKE_PATTERN = /[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g;
+
+function redactJwtForLog(text) {
+  return String(text == null ? '' : text)
+    .replace(JWT_LIKE_PATTERN, '[jwt]')
+    .slice(0, 80);
+}
+
+function requestLogPath(req) {
+  const raw = String(req?.url || '');
+  const queryIndex = raw.indexOf('?');
+  return queryIndex === -1 ? raw : raw.slice(0, queryIndex);
+}
+
+async function verifyBearerToken(req, { verifyIdToken } = {}) {
   const token = bearerTokenFromRequest(req);
   if (!token) {
+    markAuthFailure(req);
     const error = new Error('Missing Pokoin bearer token.');
     error.statusCode = 401;
+    error.code = 'auth/missing-token';
     throw error;
   }
-  const decoded = await getFirebaseAdmin().auth().verifyIdToken(token);
+  const verifier = verifyIdToken || ((candidate) => getFirebaseAdmin().auth().verifyIdToken(candidate));
+  let decoded;
+  try {
+    decoded = await verifier(token);
+  } catch (error) {
+    const firebaseCode = error && error.code != null ? String(error.code) : '';
+    const isAuthError = firebaseCode.startsWith('auth/') && firebaseCode !== 'auth/internal-error';
+    let status;
+    let code;
+    let message;
+    if (isAuthError) {
+      status = 401;
+      code = 'auth/invalid-token';
+      message = 'Invalid or expired sign-in token.';
+    } else {
+      status = 503;
+      code = 'auth/unavailable';
+      message = 'Sign-in could not be checked right now.';
+    }
+    if (isAuthError) markAuthFailure(req);
+    console.warn('pokoin auth token rejected', {
+      code: firebaseCode || 'none',
+      status,
+      reason: redactJwtForLog(error && error.message),
+      method: req?.method,
+      path: requestLogPath(req),
+    });
+    const wrapped = new Error(message);
+    wrapped.statusCode = status;
+    wrapped.code = code;
+    throw wrapped;
+  }
   // Off until the legacy-password-user backfill ran (scripts/backfill-password-email-verification.js).
   assertActivePasswordAccount(decoded, {
     requireVerified: process.env.POKOIN_REQUIRE_VERIFIED_PASSWORD === '1',
@@ -88,10 +147,15 @@ function bearerTokenFromRequest(req) {
 }
 
 function authErrorResponse(error, fallback = 'Pokoin authentication failed.') {
+  const statusCode = error.statusCode || 401;
+  let message = error.message || fallback;
+  if (statusCode === 401 && error.code !== 'auth/missing-token') {
+    message = 'Invalid or expired sign-in token.';
+  }
   return {
-    statusCode: error.statusCode || 401,
+    statusCode,
     body: {
-      error: error.message || fallback,
+      error: message,
     },
   };
 }
