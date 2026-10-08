@@ -1,0 +1,40 @@
+[package]
+name = "pokoin-commerce"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+sqlx = { workspace = true, features = ["chrono", "json", "uuid", "bigdecimal"] }
+reqwest = { workspace = true }
+redis = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+async-trait = "0.1"
+regex = "1"
+base64 = "0.22"
+hmac = "0.12"
+aes-gcm = "0.10"
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+jsonwebtoken = "9"
+k256 = { version = "0.13", features = ["ecdsa"] }
+sha3 = "0.10"
+ripemd = "0.1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+http-body-util = "0.1"
+
+[lints.rust]
+unsafe_code = "forbid"

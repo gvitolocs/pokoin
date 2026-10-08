@@ -1,0 +1,505 @@
+{
+  "workstream": "external-integrations",
+  "generated_by": "deepseek-flash (dsh), final executor",
+  "generated_at": "2026-10-08T08:00:00Z",
+  "crate": "pokoin-rust/crates/external",
+  "package": "pokoin-external",
+  "reference_inventory": "/home/nez/.paseo/worktrees/2n15xc8c/api-benchmark-20261008/api-route-inventory.json",
+  "reference_node_sources": "/home/nez/.paseo/worktrees/2n15xc8c/api-benchmark-20261008/.reference-node/api",
+  "live_manifest": "/app/server/api-route-manifest.js in docker pokoin-oracle-api (143 routes, read-only)",
+  "status_legend": {
+    "implemented": "route mounted; handler executes native domain logic; covered by unit and/or router tests",
+    "partial": "route mounted and its guard is implemented; the downstream data mutation is still 501 not_implemented",
+    "unresolved": "either not mounted or returns 501; a concrete unported dependency is named"
+  },
+  "verification": {
+    "build": "cargo check (crate-local workspace; standalone lockfile)",
+    "tests": "cargo test",
+    "unit_tests_passed": 129,
+    "integration_router_tests_passed": 7,
+    "doctests_ignored": 1,
+    "node_at_runtime": false,
+    "js_engine": false,
+    "rust_to_node_proxy": false
+  },
+  "counts": {
+    "implemented": 36,
+    "partial": 2,
+    "unresolved": 3
+  },
+  "endpoints": [
+    {
+      "path": "/api/cardtrader-connect",
+      "methods": [
+        "POST",
+        "DELETE"
+      ],
+      "reference_file": "cardtrader-connect.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::connect/disconnect + src/cardtrader/{client,integration}.rs",
+      "evidence": "token clean+validate via CardTrader /info, AES-GCM stored integration, best-effort webhook registration; unit tests in cardtrader::client/integration"
+    },
+    {
+      "path": "/api/cardtrader-status",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "cardtrader-status.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::status",
+      "evidence": "router_smoke asserts 401 without bearer and connected=false for an unconnected uid"
+    },
+    {
+      "path": "/api/cardtrader-disconnect",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "cardtrader-disconnect.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::disconnect",
+      "evidence": "integration::disconnect_integration covered by cardtrader::integration test cycle"
+    },
+    {
+      "path": "/api/cardtrader-import-dry-run",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "cardtrader-import-dry-run.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::import_dry_run",
+      "evidence": "uses client::fetch_products_export + import_dry_run_summary (redacted, no writes)"
+    },
+    {
+      "path": "/api/cardtrader-sync",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "reference_file": "cardtrader-sync.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::sync_status/sync_start + src/cardtrader/{async_sync,sync}.rs",
+      "evidence": "in-process + Redis lock idempotency test; reconcile planner tests"
+    },
+    {
+      "path": "/api/cardtrader-assets",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "cardtrader-assets.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::assets + sync::read_one_day_ready_assets"
+    },
+    {
+      "path": "/api/cardtrader-zero",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "cardtrader-zero.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::zero + src/cardtrader/zero.rs",
+      "evidence": "picking-order/location-rank/build-zero-list unit tests"
+    },
+    {
+      "path": "/api/cardtrader-clean-listings",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "cardtrader-clean-listings.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::clean_listings + sync::hide_imported_cardtrader_listings"
+    },
+    {
+      "path": "/api/cardtrader-webhook/:uid",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "cardtrader-webhook.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::webhook + src/cardtrader/webhook.rs",
+      "evidence": "HMAC gate returns 401 before DB work; unknown seller 404; destroy/cancel restock gate tests"
+    },
+    {
+      "path": "/api/cardtrader-blueprint-listings",
+      "methods": [
+        "GET",
+        "OPTIONS"
+      ],
+      "reference_file": "cardtrader-blueprint-listings.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::blueprint_listings + src/cardtrader_listings.rs",
+      "gap": "cursor timestamp param bound as ::text::timestamptz because DbPools binds JSON values (no native timestamptz binding).",
+      "evidence": "snapshot SQL + queryConditions/cursor paging ported verbatim; base64url cursor round-trip, metadata sanitization, listingRow shape and request parsing unit-tested; 42P01 -> 503 setupRequired"
+    },
+    {
+      "path": "/api/cardtrader-live-listings",
+      "methods": [
+        "GET",
+        "OPTIONS"
+      ],
+      "reference_file": "cardtrader-live-listings.js",
+      "status": "implemented",
+      "rust": "src/routes/cardtrader.rs::live_listings + src/cardtrader_live.rs",
+      "gap": "Promotional seller-comment filter (_seller_comment_filter) not ported; only the shipping-mode label suppression is applied.",
+      "evidence": "parse/resolve/blueprint-mapping SQL ported verbatim, live marketplace products fetch, normalizeLiveListing + eligibility + 60s L1 cache + optional Redis L2; request/condition/language/price/shipping unit-tested"
+    },
+    {
+      "path": "/api/cardtrader-daily-listings-refresh",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "reference_file": "cardtrader-daily-listings-refresh.js",
+      "status": "partial",
+      "rust": "src/routes/cardtrader.rs::daily_refresh",
+      "gap": "secret gate (CARDTRADER_DAILY_LISTINGS_SECRET / CARDTRADER_DAILY_REFRESH_SECRET / CRON_SECRET) implemented and tested (401/501); bounded global snapshot ingest + archiveMissing bookkeeping not ported."
+    },
+    {
+      "path": "/api/cardtrader-game-ingest",
+      "methods": [
+        "GET",
+        "POST",
+        "OPTIONS"
+      ],
+      "reference_file": "cardtrader-game-ingest.js",
+      "status": "partial",
+      "rust": "src/routes/cardtrader.rs::game_ingest",
+      "gap": "secret gate implemented; multi-game (One Piece/Riftbound) discover/apply importer SQL owned by the multigame workstream and not ported here."
+    },
+    {
+      "path": "/api/cardtrader-redirect",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "cardtrader-redirect.js",
+      "status": "implemented",
+      "rust": "src/routes/redirects.rs::cardtrader + src/redirects.rs",
+      "gap": "game resolution uses ?game= (default pokemon) instead of the request game context middleware.",
+      "evidence": "CATALOG_IDS_SQL ported verbatim from _marketplace_leftover.js; leftover hint short-circuit, any-game lookup, format=json variant; pure id/url tests"
+    },
+    {
+      "path": "/api/cardmarket-redirect",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "cardmarket-redirect.js",
+      "status": "unresolved",
+      "rust": "src/routes/redirects.rs::cardmarket (501)",
+      "gap": "845-line reference needs Cardmarket product/expansion mapping + scrape-observation store."
+    },
+    {
+      "path": "/api/tcgplayer-redirect",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "tcgplayer-redirect.js",
+      "status": "implemented",
+      "rust": "src/routes/redirects.rs::tcgplayer + src/redirects.rs",
+      "evidence": "TCGPLAYER_PRODUCT_SQL ported verbatim from _tcgcsv_prices.js; 400/404/302/JSON contract; pure id/url tests"
+    },
+    {
+      "path": "/api/powertools-connect",
+      "methods": [
+        "GET",
+        "POST",
+        "DELETE"
+      ],
+      "reference_file": "powertools-connect.js",
+      "status": "implemented",
+      "rust": "src/routes/powertools.rs + src/powertools.rs",
+      "evidence": "Outseta password login, pasted session cleanup, per-uid throttle (5/hour) and CardTrader account match; powertools unit tests"
+    },
+    {
+      "path": "/api/marketplace-pricing-strategies",
+      "methods": [
+        "GET",
+        "POST",
+        "DELETE"
+      ],
+      "reference_file": "marketplace-pricing-strategies.js",
+      "status": "implemented",
+      "rust": "src/routes/powertools.rs + src/pricing.rs",
+      "evidence": "sanitizeStrategy/sanitizeSettings/evaluateStrategyTarget unit tests mirror the reference validation messages and math"
+    },
+    {
+      "path": "/api/marketplace-price-check",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "marketplace-price-check.js",
+      "status": "implemented",
+      "rust": "src/routes/powertools.rs::price_check + src/price_check.rs",
+      "gap": "TCGplayer quotes report tcgplayerStatus=unconfigured (TCGCSV store not ported).",
+      "evidence": "parseItems/pickMatchedCt/cardtraderSource unit-tested; SQL ported verbatim for pokoin cheapest, CardTrader ask groups (condition/language key SQL + marketplace_price_pkn_from_cardtrader), 30-day sold median and bounded listed history"
+    },
+    {
+      "path": "/api/marketplace-listings-csv",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "reference_file": "marketplace-listings-csv.js",
+      "status": "unresolved",
+      "rust": "src/routes/powertools.rs::listings_csv_get/post (501)",
+      "gap": "CSV export + stock import matcher (PowerTools/Cardmarket/CardTrader) writes are not ported; powertools.rs already has parse_csv/stock_match_key/reconcile_power_tools_with_cardtrader building blocks."
+    },
+    {
+      "path": "/api/scan/identify",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "reference_file": "scan-identify.js",
+      "status": "implemented",
+      "rust": "src/routes/scan.rs::identify + src/scan.rs",
+      "evidence": "worker query sanitization test (64-char cap, ids hex, wait_ms clamp) and router test asserting 503 with no workers"
+    },
+    {
+      "path": "/api/scan/identify-album",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "reference_file": "scan-identify-album.js",
+      "status": "implemented",
+      "rust": "src/routes/scan.rs::identify_album"
+    },
+    {
+      "path": "/api/scan/print",
+      "methods": [
+        "GET",
+        "OPTIONS"
+      ],
+      "reference_file": "scan-print.js",
+      "status": "implemented",
+      "rust": "src/routes/scan.rs::print"
+    },
+    {
+      "path": "/api/scan/catalogs",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "scan-catalogs.js",
+      "status": "implemented",
+      "rust": "src/routes/scan.rs::catalogs"
+    },
+    {
+      "path": "/api/scan/health",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "scan-health.js",
+      "status": "implemented",
+      "rust": "src/routes/scan.rs::health + scan::RecognitionClient::health",
+      "evidence": "router test asserts 503 + ok:false when both workers are absent"
+    },
+    {
+      "path": "/api/scan-batch",
+      "methods": [
+        "GET",
+        "POST",
+        "OPTIONS"
+      ],
+      "reference_file": "scan-batch.js + _scan_store.js",
+      "status": "implemented",
+      "rust": "src/routes/scan.rs::batch + scan_store::{mutate_batch,set_defaults,patch_item,set_status,duplicate_item,unmerge_item,add_manual,discard_batch,submit_batch}",
+      "evidence": "snapshot/image/open-list GET; POST defaults|item|add|remove|restore|duplicate|unmerge|discard|submit. Non-purchasable listing upsert then activation+submitted in one tx; ownership via the ScanOwnership seam (accounts-owned)",
+      "gap": "CardTrader push on submit and the best-effort price-summary refresh are not ported (commerce-owned); ownership requires the accounts ScanOwnership impl (default fails closed 503)."
+    },
+    {
+      "path": "/api/scan-pair",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "reference_file": "scan-pair.js + _scan_store.js",
+      "status": "implemented",
+      "rust": "src/routes/scan.rs::pair + src/scan_store.rs",
+      "evidence": "public PIN/QR claim with per-IP + global failure limits and rate windows; session-scoped phone token (sha256) returned; invalid/expired/used codes share one 400"
+    },
+    {
+      "path": "/api/scan-phone",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "reference_file": "scan-phone.js + _scan_store.js",
+      "status": "implemented",
+      "rust": "src/routes/scan.rs::phone + scan_store::{heartbeat,ingest_scan,leave}",
+      "evidence": "Scan <phoneToken> auth, heartbeat/idle expiry, idempotent scanEventId ingest (merge-aware scan_items insert, bumpBatch seq/position, session counters), leave; parse_scan_event/decode_image/capturedAtServer unit-tested",
+      "gap": "Printing-choice layer (resolvePrintings) not ported: one printing per artwork, the reference's printingRows-empty fallback."
+    },
+    {
+      "path": "/api/scan-session",
+      "methods": [
+        "GET",
+        "POST",
+        "OPTIONS"
+      ],
+      "reference_file": "scan-session.js + _scan_store.js",
+      "status": "implemented",
+      "rust": "src/routes/scan.rs::session + scan_store::{start_session,get_session,update_session,regenerate_pairing}",
+      "evidence": "start/resume creates or reuses the open batch, live-session reconciliation, pairing regeneration with limits, disconnect/pause/end with session views"
+    },
+    {
+      "path": "/api/scan-stream",
+      "methods": [
+        "GET",
+        "OPTIONS"
+      ],
+      "reference_file": "scan-stream.js + _scan_store.js",
+      "status": "implemented",
+      "rust": "src/routes/scan.rs::stream + scan_store::{read_batch_snapshot,items_after,latest_session}",
+      "evidence": "SSE change stream with cursor replay, 1s poll, closes after 55s, keeps alive"
+    },
+    {
+      "path": "/api/user-photos/:kind/:uid/:file",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "user-photos.js",
+      "status": "implemented",
+      "rust": "src/routes/media.rs + src/r2.rs",
+      "evidence": "parsePhotoKey shape test; SigV4 R2 GET; chat requires auth/redirect, listing public; cache headers mirrored"
+    },
+    {
+      "path": "/api/upload-profile-picture",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "upload-profile-picture.js",
+      "status": "implemented",
+      "rust": "src/routes/media.rs::upload_profile_picture + src/r2.rs",
+      "gap": "sharp parity note: image 0.25 only encodes lossless WebP (reference sharp uses lossy q88), so bytes/size differ while path and content-type match; EXIF rotate() is not applied.",
+      "evidence": "base64 decode + 6MB cap, 256x256 cover, WebP into profile-pictures/<uid>/<uuid>.webp, public-URL assertion, previous-object delete, users/{uid} merge; avatar_webp test decodes the produced WebP back to 256x256"
+    },
+    {
+      "path": "/api/remove-profile-picture",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "remove-profile-picture.js",
+      "status": "implemented",
+      "rust": "src/routes/media.rs::remove_profile_picture + src/r2.rs",
+      "evidence": "deletes only profile-pictures/<uid>/ objects then clears photoUrl/photoStoragePath/photoInlineId/photoSource/googlePhotoUrlHash on users/{uid}"
+    },
+    {
+      "path": "/api/cache-google-profile-picture",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "cache-google-profile-picture.js",
+      "status": "implemented",
+      "rust": "src/routes/media.rs::cache_google_profile_picture + src/r2.rs",
+      "gap": "authUser.photoURL (Firebase Auth getUser REST) is not consulted; falls back to the ID-token picture or body.photoUrl.",
+      "evidence": "Google-host guard test, custom-picture skip, sha256[..20] cache key, 6MB download cap, R2 put + public check, users/{uid} photoSource=google"
+    },
+    {
+      "path": "/api/forum-upload-media",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "forum-upload-media.js",
+      "status": "implemented",
+      "rust": "src/routes/media.rs::forum_upload_media + src/supabase.rs + src/r2.rs",
+      "gap": "sharp uses lossy WebP q86; image 0.25 only encodes lossless (bytes/size differ, path/content-type match).",
+      "evidence": "8MB cap, resize-inside-1600 no-enlarge lossless WebP, R2 forum bucket put, Supabase service-role forum_media insert; transform + uuid unit-tested"
+    },
+    {
+      "path": "/api/client-country",
+      "methods": [
+        "GET"
+      ],
+      "reference_file": "client-country.js + _client_country.js",
+      "status": "implemented",
+      "rust": "src/routes/system.rs + src/geo.rs",
+      "evidence": "geo unit tests for header precedence, XX/T1/EU rejection, EU ship-from allowlist; router test reads CF-IPCountry"
+    },
+    {
+      "path": "/api/wpkn-pkn-quote",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "reference_file": "wpkn-pkn-quote.js + server/_wpkn_pkn_market_quote.js",
+      "status": "implemented",
+      "rust": "src/routes/system.rs::wpkn_pkn_quote + src/wpkn_quote.rs",
+      "gap": "Live GeckoTerminal call needs network; tests cover the deterministic math with injected prices.",
+      "evidence": "direction/amount validation, GeckoTerminal token-price fetch with override env, reference price + spread math, quote TTL; unit-tested quote math"
+    },
+    {
+      "path": "/api/social-autopost",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "social-autopost.js",
+      "status": "implemented",
+      "rust": "src/routes/social.rs::autopost + src/social.rs",
+      "evidence": "shared-secret/CRON/Firebase-admin auth (401/403 tested), target cleaning, deterministic composition, optional social-agent call, Telegram sendMessage/sendPhoto, X v2 tweet + media upload, dryRun never touches providers"
+    },
+    {
+      "path": "/api/social-autopost/hot-card",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "reference_file": "social-autopost-hot-card.js",
+      "status": "implemented",
+      "rust": "src/routes/social.rs::hot_card + social::select_hot_card",
+      "evidence": "HOT_CARD_SQL ported verbatim (marketplace_hot_blueprints + candidate/artist/price overlay), window 1h/24h/7d, 404 when no hot card"
+    },
+    {
+      "path": "/api/social-post-agent",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "social-post-agent.js",
+      "status": "implemented",
+      "rust": "src/routes/social.rs::post_agent + social::content_with_optional_agent",
+      "evidence": "same auth guard as autopost; returns agent + telegramText/xText without posting; 401/403 tested"
+    },
+    {
+      "path": "/api/pokoin-assistant",
+      "methods": [
+        "POST"
+      ],
+      "reference_file": "pokoin-assistant.js",
+      "status": "unresolved",
+      "rust": "not mounted",
+      "gap": "3451-line assistant with marketplace grounding + handoff; ownership lies with the Poko/accounts workstream per this workstream's brief ('if unassigned'). Not ported."
+    }
+  ],
+  "infrastructure_gaps": [
+    {
+      "area": "production fail-closed state",
+      "status": "implemented",
+      "detail": "DomainState::from_env(pool_max) requires FIREBASE_PROJECT_ID, Firebase Admin credentials and MARKETPLACE_DATABASE_URL, builds FirestoreRest + FirebaseJwksVerifier, and never falls back to MemoryFirestore. require_durable_firestore() returns 503 on the test store."
+    },
+    {
+      "area": "CDN HTTP edge",
+      "status": "unresolved",
+      "detail": "The external crate is a library mounted inside the root API; the CDN/edge worker (workers/pokoin-origin.js and CDN HTTP edge migration) is out of this crate's ownership and not migrated here."
+    },
+    {
+      "area": "native background jobs",
+      "status": "partial",
+      "detail": "CardTrader seller reconcile is a native tokio task with an in-process + Redis lock (cardtrader::async_sync, tested). Global daily-listings refresh, sales backfill and reconcile-all scheduled jobs remain on the Node host script and are not ported."
+    },
+    {
+      "area": "Firebase native helpers",
+      "status": "implemented",
+      "detail": "src/firebase.rs implements JWKS RS256 ID-token verification, Firestore REST (get/merge/create/delete/merge_if) and an in-memory fake; FirestoreStore::durable() is false for the fake, and DomainState::from_env refuses to build production state without FIREBASE_* + MARKETPLACE_DATABASE_URL, so MemoryFirestore can never answer a production success."
+    },
+    {
+      "area": "dependency isolation",
+      "status": "implemented",
+      "detail": "crates/external/Cargo.toml pins direct dependency versions and declares its own [workspace] root (with workspace.package fields) so it compiles independently of the root workspace; the integrator removes that block when adding the crate to pokoin-rust members."
+    }
+  ],
+  "preserved_contracts": [
+    "auth: every seller route derives uid only from the verified Firebase bearer token",
+    "cardtrader webhook HMAC verified against the raw body before any DB work",
+    "writer DB routing stays in DbPools::write; reads use DbPools::read",
+    "AES-256-GCM envelopes for CardTrader token/shared secret and Power Tools session",
+    "no Node subprocess, no JS engine, no Rust-to-Node proxy anywhere in the crate"
+  ]
+}

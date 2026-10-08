@@ -1,0 +1,739 @@
+{
+  "worker": "accounts",
+  "domain": "accounts/auth, Firebase+Firestore infra, wallets, forum/social, collection/portfolio, referral/associate/partner, news comments, Poko",
+  "worktree": "/home/nez/.paseo/worktrees/2n15xc8c/rust-accounts-20261008",
+  "branch": "codex/rust-accounts-20261008",
+  "crate": "pokoin-rust/crates/accounts",
+  "crate_lines_of_rust": 12730,
+  "rust_sources": [
+    "pokoin-rust/crates/accounts/src/config.rs",
+    "pokoin-rust/crates/accounts/src/domain/collection.rs",
+    "pokoin-rust/crates/accounts/src/domain/crypto.rs",
+    "pokoin-rust/crates/accounts/src/domain/mod.rs",
+    "pokoin-rust/crates/accounts/src/domain/pending_signup.rs",
+    "pokoin-rust/crates/accounts/src/email.rs",
+    "pokoin-rust/crates/accounts/src/error.rs",
+    "pokoin-rust/crates/accounts/src/firebase.rs",
+    "pokoin-rust/crates/accounts/src/firestore.rs",
+    "pokoin-rust/crates/accounts/src/handlers/auth.rs",
+    "pokoin-rust/crates/accounts/src/handlers/collection.rs",
+    "pokoin-rust/crates/accounts/src/handlers/forum.rs",
+    "pokoin-rust/crates/accounts/src/handlers/mod.rs",
+    "pokoin-rust/crates/accounts/src/handlers/news.rs",
+    "pokoin-rust/crates/accounts/src/handlers/wallet.rs",
+    "pokoin-rust/crates/accounts/src/http.rs",
+    "pokoin-rust/crates/accounts/src/identity.rs",
+    "pokoin-rust/crates/accounts/src/lib.rs",
+    "pokoin-rust/crates/accounts/src/r2.rs",
+    "pokoin-rust/crates/accounts/src/rate_limit.rs",
+    "pokoin-rust/crates/accounts/src/state.rs",
+    "pokoin-rust/crates/accounts/src/supabase.rs",
+    "pokoin-rust/crates/accounts/src/username.rs"
+  ],
+  "test_sources": [
+    "pokoin-rust/crates/accounts/tests/common/mod.rs",
+    "pokoin-rust/crates/accounts/tests/firebase_verification.rs",
+    "pokoin-rust/crates/accounts/tests/firestore_rest.rs",
+    "pokoin-rust/crates/accounts/tests/router_contract.rs"
+  ],
+  "generated_at": "2026-10-08T07:48:56.061773+00:00",
+  "runtime": "native Rust (axum 0.8 + reqwest/rustls HTTPS + redis). No Node process, no JS engine, no Rust-to-Node fallback.",
+  "not_pushed_not_deployed": true,
+  "summary": {
+    "assigned_routes": 36,
+    "implemented_and_verified": 11,
+    "implemented_not_exercised_live": 24,
+    "unresolved": 0,
+    "tests_passing": 470,
+    "external_routes_not_owned": [
+      "GET /api/user-photos/:kind/:uid/:file",
+      "POST /api/upload-profile-picture",
+      "POST /api/remove-profile-picture",
+      "POST /api/cache-google-profile-picture",
+      "POST /api/social-autopost",
+      "GET /api/social-autopost/hot-card",
+      "POST /api/social-autopost/hot-card",
+      "POST /api/social-post-agent",
+      "POST /api/pokoin-assistant"
+    ],
+    "ported_method_path_pairs": 38,
+    "unported_method_path_pairs": 1,
+    "crate_lines_of_rust": 33229,
+    "in_progress": 1
+  },
+  "contract": {
+    "router": "pub fn router(state: DomainState) -> axum::Router",
+    "state": "pub struct DomainState (Clone, single Arc); DomainState::from_env() or DomainState::with_transport(config, transport)",
+    "paths_already_prefixed": "/api/... inside the router, so merge or nest without adding a prefix",
+    "reusable_infrastructure": [
+      "pokoin_accounts::firebase::{TokenVerifier, FirebaseVerifier, ServiceAccount, Claims, bearer, optional_claims}",
+      "pokoin_accounts::firestore::{Firestore, DocumentRef, CollectionRef, Query, DocData, FieldValue, Value, Document, Transaction}",
+      "pokoin_accounts::identity::FirebaseAuth",
+      "pokoin_accounts::domain::collection (single source of truth for user_card_collections)",
+      "pokoin_accounts::supabase::SupabaseClient",
+      "pokoin_accounts::r2::{R2MediaStore, MediaStore}",
+      "pokoin_accounts::rate_limit::{RateLimiter, RedisRateLimiter, AllowAllRateLimiter}"
+    ]
+  },
+  "fidelity_notes": [
+    "Forum media: image 0.25 writes lossless WebP; the Node handler used sharp quality=86 (lossy). Pixels, mime_type, width and height match; byte size is larger.",
+    "ensure-username: the deployed Node module imported usernameForRequest from _username.js, where it does not exist (a latent TypeError). This port implements the documented contract: claim an explicit handle, otherwise repair/assign one.",
+    "Token verification rejects a non-RS256 alg, a missing kid, an unknown kid (after one forced JWKS refetch), a missing sub, a future iat and an expired exp, in addition to aud/iss.",
+    "A Firestore ABORTED is retried (including at commit time) up to 4 times with backoff; an exhausted conflict is surfaced as the same 500 the Node runtime produced.",
+    "Balances: wallet sign-in/link still seed and merge the Firestore balances document exactly as Node did (increment(0) seed, integer merge for a claimed wallet-only account). No new SQL ledger table was created in this crate; the commerce worker's pokoin_account_balances/pokoin_ledger_entries remain the single money writer."
+  ],
+  "verification": {
+    "command": "cargo test -p pokoin-accounts --all-targets",
+    "where": "standalone scratch workspace (/tmp/pokoin-accounts-check) with the crate symlinked, target dir outside the source tree; no change to pokoin-rust/Cargo.toml",
+    "result": "198 passed / 0 failed (117 lib unit tests, 23 firebase_verification, 15 firestore_rest, 42 router_contract, 1 doc test); cargo check --all-targets is warning-free",
+    "mocking": "a scripted HttpTransport; RS256 tokens and JWKS responses are produced from a throwaway 2048-bit RSA key embedded in tests/common/mod.rs",
+    "not_done": [
+      "no live Firebase Auth / Firestore / Supabase / R2 / Resend call was made",
+      "no live Postgres integration test (this crate talks to Firestore, not SQL)",
+      "no real-money, email-delivery, social-message or destructive live write was performed"
+    ]
+  },
+  "routes": [
+    {
+      "path": "/api/auth-login",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "node_file": "auth-login.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::auth_login_requires_a_bearer_token",
+        "router_contract::auth_login_returns_the_safe_auth_metadata",
+        "router_contract::auth_login_rejects_an_expired_token",
+        "router_contract::options_preflight_answers_204_with_the_node_cors_headers",
+        "firebase_verification::a_valid_id_token_verifies_to_its_claims",
+        "firebase_verification::the_password_gate_blocks_unverified_email_signups_only_when_enabled"
+      ],
+      "notes": "RS256 signature checked against the cached Google JWKS; exp/iat/aud/iss/sub enforced; the pok_email_verified password gate is applied exactly as assertActivePasswordAccount. Returns the same {ok,auth{...}} body with ISO expiresAt/authTime."
+    },
+    {
+      "path": "/api/ensure-username",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "ensure-username.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::ensure_username_requires_a_bearer_token",
+        "router_contract::ensure_username_returns_the_existing_handle_without_rewriting_it",
+        "username::tests::*",
+        "username::tests::display_name_assertions_match_the_node_messages",
+        "username::tests::requested_username_rules_match_the_node_regex",
+        "username::tests::base_username_strips_email_domain_and_accents",
+        "username::tests::generated_wallet_usernames_are_detected",
+        "username::tests::replacement_only_happens_for_generated_handles_with_force"
+      ],
+      "notes": "Ports usernameForRequest (claim an explicit handle, else repair/assign). The deployed Node module referenced an undefined usernameForRequest; this port implements the documented behaviour: POST {username} claims that exact handle (409 when taken), POST {} repairs or assigns one."
+    },
+    {
+      "path": "/api/register-email",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "node_file": "register-email.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::register_email_validates_the_address_before_any_network_call",
+        "router_contract::register_email_requires_a_six_character_password",
+        "router_contract::register_email_rejects_a_taken_username",
+        "router_contract::register_email_rejects_an_invalid_requested_username",
+        "pending_signup::tests::password_round_trips",
+        "pending_signup::tests::a_wrong_secret_fails_closed",
+        "pending_signup::tests::malformed_payloads_are_400",
+        "pending_signup::tests::a_tampered_payload_fails_closed",
+        "pending_signup::tests::encrypted_payloads_use_fresh_ivs",
+        "pending_signup::tests::signup_tokens_are_base64url_and_unique",
+        "pending_signup::tests::secret_resolution_follows_the_node_order",
+        "pending_signup::tests::redirect_paths_are_never_protocol_relative"
+      ],
+      "notes": "Full pending-signup flow ported: email validation, username availability, getUserByEmail conflict, AES-256-GCM password payload (iv.tag.ciphertext, base64url), pending_email_signups + by-email pointer, 60s resend cooldown and 10-send cap, fresh-token resend that supersedes the old link. NOT verified against live Firebase/Resend: the createUser + delivery half of the happy path was never exercised end to end."
+    },
+    {
+      "path": "/api/verify-email-signup",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "node_file": "verify-email-signup.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::verify_email_signup_rejects_a_missing_token",
+        "router_contract::verify_email_signup_reports_an_unknown_token",
+        "router_contract::verify_email_signup_reports_an_expired_token"
+      ],
+      "notes": "Status machine ported (pending -> completed / expired / superseded / email_exists) with the invalid_token, already_verified and expired_token codes; createUser is the atomicity point and any later failure deletes the identity again, preserving the retry contract. The createUser + setCustomUserClaims + claim/assign-username happy path is implemented but was NOT executed against live Firebase."
+    },
+    {
+      "path": "/api/signup-notification",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "signup-notification.js",
+      "status": "implemented",
+      "tests": [
+        "route_is_wired (mounted; requires a bearer before any work)"
+      ],
+      "notes": "Idempotent per account via users/{uid}.signupNotificationSentAt, with the exact admin message template. Delivery goes through the injectable EmailSender; with no RESEND_API_KEY it reports skipped rather than a fake success, and no live email was sent from tests."
+    },
+    {
+      "path": "/api/wallet-auth/nonce",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "node_file": "wallet-auth-nonce.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::wallet_auth_nonce_rejects_a_malformed_address",
+        "router_contract::wallet_auth_nonce_persists_a_single_use_message",
+        "crypto::tests::message_layout_matches_the_node_handler",
+        "crypto::tests::nonce_and_session_shapes_match_node"
+      ],
+      "notes": "Issues a 128-bit hex nonce and the exact Node sign-in message layout, stored unused in wallet_auth_nonces/{address}. The persisted payload was asserted on the wire."
+    },
+    {
+      "path": "/api/wallet-auth/verify",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "wallet-auth-verify.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::wallet_auth_verify_requires_a_full_signature",
+        "router_contract::wallet_auth_verify_reports_an_unusable_nonce",
+        "crypto::tests::recovers_the_signing_address",
+        "crypto::tests::a_different_message_does_not_match",
+        "crypto::tests::a_second_key_does_not_recover_to_the_first_address",
+        "crypto::tests::signatures_with_v_of_zero_or_one_also_recover",
+        "crypto::tests::malformed_signatures_are_rejected"
+      ],
+      "notes": "EIP-191 personal_sign recovery implemented natively (keccak256 framing + secp256k1 recovery + last-20-of-keccak address), replacing ethers.verifyMessage. The 10-minute single-use nonce, wallet_addresses registry, wallet-only uid (wallet:0x...), balances increment(0) seed, custom token and signup notification are all ported. Not exercised: the full success path against live Firebase Auth."
+    },
+    {
+      "path": "/api/wallet-link",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "wallet-link.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::wallet_link_requires_a_bearer_token",
+        "crypto::tests::recovers_the_signing_address"
+      ],
+      "notes": "Adds a second wallet to an existing account with the Node 409 guards (a different linked wallet is refused), plus claiming a wallet-only account and merging its available/locked PKN inside one transaction, and pausing the merged profile. Not exercised against live Firestore."
+    },
+    {
+      "path": "/api/wallet-link/session",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "wallet-link-session.js",
+      "status": "implemented",
+      "tests": [
+        "route_is_wired (mounted; requires a bearer first)"
+      ],
+      "notes": "Mints a 48-hex session id with the Node returnPath rule (must start with / and not //), 10-minute expiry in ms, and used=false."
+    },
+    {
+      "path": "/api/wallet-link/complete",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "wallet-link-complete.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::wallet_link_complete_validates_the_session_id_first",
+        "router_contract::wallet_link_complete_reports_an_expired_session_as_410"
+      ],
+      "notes": "Session + nonce + registry + user + wallet-only-account merge re-validated inside one transaction, exactly like Node, then a metamask_link custom token. The 400/410 session branches are verified."
+    },
+    {
+      "path": "/api/forum",
+      "methods": [
+        "GET"
+      ],
+      "node_file": "forum.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::forum_reports_unconfigured_supabase_truthfully",
+        "forum::tests::category_ids_follow_the_node_regex",
+        "forum::tests::uuid_cleaning_accepts_v1_to_v5_and_rejects_junk",
+        "forum::tests::default_categories_match_the_node_seed"
+      ],
+      "notes": "PostgREST reads ported with the identical select/order/limit strings, the 20s/60s cache header and the default-category fallback. Live Supabase was not called; the unconfigured path is verified."
+    },
+    {
+      "path": "/api/forum-create-topic",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "forum-create-topic.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::forum_create_topic_requires_a_bearer_token_before_validating_the_body",
+        "forum::tests::text_cleaning_trims_collapses_and_caps",
+        "forum::tests::author_name_preference_order_matches_node"
+      ],
+      "notes": "Same allowed-category set, 6/12-character minimums, up to 12 positive card ids, authorName preference (username -> displayName -> token name) and the best-effort forum_topic_cards write."
+    },
+    {
+      "path": "/api/forum-create-post",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "forum-create-post.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::forum_create_post_rejects_a_malformed_topic_id"
+      ],
+      "notes": "Same UUID validation, 3-character minimum, open-topic check (404 when closed) and author naming. Validation runs before Supabase is required, matching Node's lazy supabaseFetch."
+    },
+    {
+      "path": "/api/forum-upload-media",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "forum-upload-media.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::forum_upload_media_requires_image_data",
+        "router_contract::forum_upload_media_needs_a_topic_or_post",
+        "forum::tests::data_url_prefix_is_stripped_like_the_node_regex",
+        "forum::tests::base64_decoding_accepts_padded_and_unpadded",
+        "forum::tests::webp_encoding_produces_a_real_webp",
+        "forum::tests::oversized_images_are_rejected_at_the_handler_boundary",
+        "r2::tests::keys_encode_per_segment_only"
+      ],
+      "notes": "Native replacement for sharp + _r2.js: 8 MB cap, data-URL prefix strip, fit-inside-1600 resize and a real WebP encode, then a SigV4-signed PUT to R2 and the forum_media row. FIDELITY NOTE: image 0.25 writes lossless WebP while Node used sharp quality=86 (lossy), so stored bytes are larger; mime_type, width and height match. R2 SigV4 was not exercised against live R2."
+    },
+    {
+      "path": "/api/marketplace-collection",
+      "methods": [
+        "GET"
+      ],
+      "node_file": "marketplace-collection.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::marketplace_collection_requires_a_bearer_token",
+        "router_contract::marketplace_collection_returns_the_owners_holdings",
+        "router_contract::marketplace_collection_summary_returns_the_dashboard_shape",
+        "domain::collection::tests::public_item_maps_every_documented_field",
+        "domain::collection::tests::card_and_blueprint_ids_fall_back_to_each_other",
+        "domain::collection::tests::nft_rows_are_recognised_by_any_marker",
+        "domain::collection::tests::iso_timestamp_handles_every_input_shape",
+        "domain::collection::tests::collection_json_shapes_match_the_two_endpoints",
+        "router_contract::marketplace_collection_remove_refuses_another_owners_item_with_404",
+        "router_contract::marketplace_collection_remove_deletes_at_zero_quantity",
+        "router_contract::marketplace_collection_post_rejects_an_unknown_action"
+      ],
+      "notes": "Ownership is always the verified bearer uid, never a client value (D00006D/D00006E). Verified end to end against a scripted Firestore: the uid filter, the cross-owner defence-in-depth skip, the exact public item shape, ISO timestamps and the remove path (404 for another owner, delete at zero)."
+    },
+    {
+      "path": "/api/marketplace-collection?action=remove",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "marketplace-collection.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::marketplace_collection_remove_refuses_another_owners_item_with_404",
+        "router_contract::marketplace_collection_remove_deletes_at_zero_quantity",
+        "router_contract::marketplace_collection_post_rejects_an_unknown_action"
+      ],
+      "notes": "The collection red-cross. One copy by default, quantity decremented and the document deleted at zero. Another owner's item answers 404 so item ids never leak, and NFT rows are refused with the Node message. Verified end to end against a scripted Firestore, including the emitted delete write."
+    },
+    {
+      "path": "/api/marketplace-collection-summary",
+      "methods": [
+        "GET"
+      ],
+      "node_file": "marketplace-collection-summary.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::marketplace_collection_summary_returns_the_dashboard_shape"
+      ],
+      "notes": "Dashboard Portfolio totals, split physical vs NFT, verified end to end against a scripted Firestore."
+    },
+    {
+      "path": "/api/news-comments",
+      "methods": [
+        "GET"
+      ],
+      "node_file": "news-comments.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::news_comments_get_requires_a_valid_article_id",
+        "router_contract::news_comments_get_lists_only_visible_comments_for_anonymous_readers",
+        "router_contract::news_comments_get_shows_the_callers_own_pending_comments",
+        "news::tests::article_ids_match_the_node_regex",
+        "news::tests::article_paths_match_the_node_regex",
+        "news::tests::body_cleaning_matches_clean_body",
+        "news::tests::author_names_are_capped_at_forty_characters",
+        "news::tests::public_comment_defaults_the_author_name"
+      ],
+      "notes": "Public visible comments oldest-first plus the signed-in caller's own pending/held ones; the cache header flips to private,no-store when authenticated. Verified end to end against a scripted Firestore."
+    },
+    {
+      "path": "/api/news-comments",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "news-comments.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::news_comments_post_requires_sign_in",
+        "router_contract::news_comments_post_validates_the_article_and_body",
+        "router_contract::news_comments_post_stores_a_pending_comment_and_answers_202"
+      ],
+      "notes": "Stores status=pending and answers 202 with the public comment plus its status; the 5-per-600s best-effort limiter is Redis-backed and allows the request when Redis is unavailable, exactly like limitBestEffort."
+    },
+    {
+      "path": "/api/marketplace-portfolio",
+      "methods": [
+        "GET",
+        "OPTIONS"
+      ],
+      "node_file": "marketplace-portfolio.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::portfolio_is_get_only_with_a_day_long_preflight",
+        "router_contract::portfolio_reports_an_unconfigured_catalog_truthfully",
+        "router_contract::portfolio_resolves_a_per_game_catalog_url",
+        "domain::marketplace_game::tests::game_normalization_covers_ids_slugs_aliases_and_defaults",
+        "domain::marketplace_game::tests::request_game_precedence_is_query_then_header_then_host",
+        "domain::marketplace_game::tests::hosts_map_to_games_including_subdomains",
+        "domain::marketplace_game::tests::database_urls_follow_the_game",
+        "domain::portfolio_catalog::tests::rewrite_row_images_drops_a_foreign_full_image_and_keeps_the_tile",
+        "domain::portfolio_catalog::tests::a_clean_row_uses_the_full_image_and_keeps_previews_out_of_the_grid",
+        "domain::portfolio_catalog::tests::foreign_prefixes_drop_another_cards_picture",
+        "domain::portfolio_catalog::tests::cardtrader_hosts_are_blanked",
+        "domain::portfolio_catalog::tests::pokoin_cdn_urls_become_same_origin_paths",
+        "domain::portfolio_catalog::tests::holdings_render_the_react_shape",
+        "domain::portfolio_catalog::tests::payload_totals_and_set_rollups",
+        "domain::portfolio_catalog::tests::the_select_sql_adapts_to_the_available_relations",
+        "domain::portfolio_catalog::tests::limits_follow_the_game_and_clamp"
+      ],
+      "notes": "GET+OPTIONS. The React Portfolio/Explore BFF: Pokoin catalog rows plus the native listing overlay, PKN only, Pokoin CDN art only. Never CardTrader image hosts (blanked), never the candyext dump. Game scoping ported in full from _marketplace_game + the 23-game INGEST_GAMES table: query game/marketplaceGame, then the x-pokoin-game/x-marketplace-game header, then x-pokoin-host/x-forwarded-host/x-original-host/host/origin subdomain detection, and each non-Pokemon game resolves its OWN catalog database (explicit per-game env, else derived from the base URL host) through a lazily-created pool. Limits follow the game (Pokemon 400/500, others 2000/2500). The catalog query adapts to which relations exist (to_regclass probe for marketplace_user_listings and cheapest_homepage_cache_blueprint) and to whether the request is a by-id lookup, the Pokemon priced path, or the plain catalog list; a missing relation is an empty catalog (200) while any other error is a 500. Row shaping is byte-faithful to _marketplace_react_card: cdn.pokoin.com rewritten to same-origin /card-images, previews kept out of the grid image, a foreign leftover key (another card's picture, e.g. an old halved ct_id/2 prefix) dropped with the card's own homepage webp used as the tile, integral JS numbers serialized without a decimal point, and set rollups sorted by value. CORS is GET/OPTIONS with Content-Type+Authorization and Max-Age 86400; success carries public, max-age=15, s-maxage=30 (plus stale-while-revalidate=60 except for the by-id empty case). Reads only existing tables; no new SQL. Not exercised against live Postgres."
+    },
+    {
+      "path": "/api/marketplace-portfolio-history",
+      "methods": [
+        "GET"
+      ],
+      "node_file": "marketplace-portfolio-history.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::portfolio_history_is_get_only_and_requires_a_bearer",
+        "router_contract::portfolio_history_serves_a_fresh_stored_series_without_the_market",
+        "router_contract::portfolio_history_reports_an_empty_series_without_a_market_read_model",
+        "router_contract::portfolio_history_serves_the_last_good_series_when_the_market_is_down",
+        "domain::portfolio_history::tests::price_as_of_carries_the_last_sale_forward",
+        "domain::portfolio_history::tests::joke_listings_are_dropped_from_the_price_book",
+        "domain::portfolio_history::tests::holdings_are_valued_only_from_their_since_day",
+        "domain::portfolio_history::tests::the_basket_move_ignores_new_members",
+        "domain::portfolio_history::tests::frozen_days_only_protect_days_that_had_cards",
+        "domain::portfolio_history::tests::daily_series_walks_every_day_and_freezes_stored_days",
+        "domain::portfolio_history::tests::stored_freshness_requires_the_basis_revision_day_and_window",
+        "domain::portfolio_history::tests::compact_day_matches_the_stored_shape",
+        "domain::portfolio_history::tests::wallet_series_carries_the_balance_and_adds_a_zero_day",
+        "domain::portfolio_history::tests::condition_and_language_aliases_collapse"
+      ],
+      "notes": "The whole pricing core is ported and unit-tested: CardTrader sold medians only, sliced by blueprint+condition+language+reverse/1st-edition/graded with the CardTrader and Pokoin condition/language spellings collapsed onto one key; the 20x joke-listing outlier filter; last-sale carry-forward as a binary search; holdings counted from each slice's since day with unpriced slices excluded from the priced count; basket move restricted to slices priced on both days; the frozen-card-day protection that survives a 1-DR-only stock table but is discarded on a basis/revision change; and the 400-day day-by-day series with wallet carry-forward and a live today point. Handler behaviour verified: GET only with no-store on every response, 401 without a bearer, a fresh stored series served with zero SQL, a stale-but-current series served as the last good one when the market read model is missing, and an out-of-date basis discarded rather than served. Reads the existing marketplace_cardtrader_1dr_assets / marketplace_user_listings / marketplace_card_versions / cardtrader_sold_daily tables and writes portfolio_history/{uid}; no new tables. Not exercised against live Postgres/Firestore."
+    },
+    {
+      "path": "/api/marketplace-associate",
+      "methods": [
+        "GET",
+        "OPTIONS"
+      ],
+      "node_file": "marketplace-associate.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::marketplace_associate_is_get_only_with_cors",
+        "router_contract::marketplace_associate_requires_a_bearer",
+        "router_contract::marketplace_associate_refuses_a_non_associate_with_the_404_body_shape",
+        "router_contract::marketplace_associate_admin_claim_skips_the_profile_lookup",
+        "domain::associate::tests::classification_follows_the_it_to_it_rule",
+        "domain::associate::tests::summary_applies_royalty_then_share_and_splits_currencies",
+        "domain::associate::tests::summary_marks_unverified_orders_without_earning_from_them",
+        "domain::associate::tests::every_payout_is_conserved_for_a_range_of_books",
+        "domain::associate::tests::window_progress_clamps_and_reports_liveness"
+      ],
+      "notes": "The full Associates desk: roster lookup by lower(btrim(email)), the campaign-window progress, and live earnings folded from the orders whose createdAt falls in the window. The IT->IT rule is ported exactly: buyer country from shippingAddressCountryCode or the single distinct shipments.toCountry, seller country from shipments.fromCountry or the listing row's seller_country (a second SQL pass), with unresolvable countries counted as unverified rather than guessed into the pool; refunds net the royalty base down and a fully refunded order contributes zero. Admins (claim or users/{uid} profile role/roles) additionally get the roster overview with one order load per distinct window. The 403 body keeps `associate: null`, and the CORS set is GET/OPTIONS with Authorization+Content-Type. This is also the first user of the new composite AND filter and the plain-JSON document view. Not exercised against live Postgres/Firestore."
+    },
+    {
+      "path": "/api/marketplace-associate-suggest",
+      "methods": [
+        "GET"
+      ],
+      "node_file": "marketplace-associate-suggest.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::marketplace_associate_suggest_short_query_skips_the_roster",
+        "router_contract::marketplace_associate_suggest_reports_a_missing_database",
+        "router_contract::marketplace_associate_suggest_preflight_is_204",
+        "handlers::associate::tests::queries_are_compacted_and_capped",
+        "handlers::associate::tests::like_wildcards_are_stripped_from_the_prefix",
+        "handlers::associate::tests::usernames_are_lowercased"
+      ],
+      "notes": "Roster prefix search over public.marketplace_associates (display name or email), the LIKE-wildcard strip, the 5-row cap, and an auth+profile lookup per row that skips a roster entry without an account. Returns only public facts: display name, claimed username, role badge - never roster emails. Not exercised against live Postgres/Firebase."
+    },
+    {
+      "path": "/api/poko-chat",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "node_file": "poko-chat.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::poko_chat_is_get_post_only_and_requires_a_bearer",
+        "router_contract::poko_chat_history_is_the_default_get_action",
+        "router_contract::poko_chat_post_needs_a_message_card_or_image",
+        "router_contract::poko_chat_falls_back_truthfully_when_the_assistant_is_unreachable",
+        "domain::poko_chat::tests::the_marker_line_is_stripped_and_its_names_win",
+        "domain::poko_chat::tests::names_are_collected_from_bullets_bold_and_markers",
+        "domain::poko_chat::tests::attached_cards_are_cleaned_and_bounded",
+        "domain::poko_chat::tests::attached_images_are_http_only_and_bounded",
+        "domain::poko_chat::tests::page_context_falls_back_to_the_attached_desk_card",
+        "domain::poko_chat::tests::only_our_r2_user_photos_are_fetched",
+        "domain::poko_chat::tests::photo_hits_need_a_name_and_a_score_floor",
+        "domain::poko_chat::tests::identify_payloads_prefer_unique_hits_and_dedupe",
+        "domain::poko_chat::tests::the_market_first_directive_prefers_the_photo_branch",
+        "domain::poko_chat::tests::reply_cards_never_echo_the_open_or_attached_card",
+        "domain::poko_chat::tests::the_market_first_directive_prefers_the_photo_branch",
+        "domain::poko_chat::tests::event_serialization_matches_the_node_shape",
+        "domain::poko_chat::tests::client_turn_ids_are_bounded_slugs",
+        "domain::poko_chat::tests::hermes_url_and_token_resolution"
+      ],
+      "notes": "Both verbs. POST builds the enriched prompt (market-first directive, personal intent, the raw user message, multi-card photo context, attached cards/photos, the reply-card directive), proxies to the Poko service with the shared token, resolves the cards Poko names against the marketplace_search_candidates catalog by exact id (card_id::text = any) then exact case-insensitive name (most-traded printing), strips the hidden [[cards: ...]] marker, and drops the desk/attached card from the echoed images. GET pages poko_conversations/{uid}/events 20 at a time using the Node limitToLast equivalence (newest DESC page reversed). User and assistant rows are written in ONE commit with the reply strictly after the question. When the assistant is unreachable the stored reply is the documented fallback with ok:false, source:'unavailable' and the paired error string, and the turn is still persisted; there is no locally scripted answer. Chat photos are only fetched from our own *.r2.dev/user-photos/ URLs, JPEG-checked and size-bounded, then sent to the scan service's multi-card mode and deduped. Per-IP comfort limit 20/min via the shared best-effort limiter. The photo identify and Hermes proxy are native HTTP through the crate transport; the transcript is Firestore poko_conversations/{uid}/events. No new SQL tables. Not exercised against live Firestore/Hermes/scan."
+    },
+    {
+      "path": "/api/poko-connect",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "poko-connect.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::poko_connect_is_post_only",
+        "router_contract::poko_connect_firebase_actions_need_a_bearer",
+        "router_contract::poko_connect_service_token_flow",
+        "handlers::poko::tests::codes_use_the_unambiguous_alphabet",
+        "handlers::poko::tests::normalization_strips_punctuation_and_caps_length",
+        "handlers::poko::tests::code_hashes_are_salted_and_stable",
+        "handlers::poko::tests::service_authorization_is_exact_and_constant_time",
+        "handlers::poko::tests::timing_safe_compare_matches_bytes"
+      ],
+      "notes": "All six actions ported over the existing poko_telegram_link_codes / poko_telegram_links / poko_discord_links tables: create_code (8-char unambiguous alphabet, sha256 `poko-connect:{code}` never stores the raw code, 15-minute expiry, one live code per uid, expired rows pruned), redeem (single-use UPDATE guarded by `redeemed_at is null and expires_at > now()`, numeric-only Telegram/Discord ids, one Pokoin account per channel link), my_status, status, unlink and unlink_me with the Node back-compat quirks (no channel clears Telegram only; the default channel is reported as telegram). Service auth is a constant-time compare of POKO_MARKET_SERVICE_TOKEN/POKONTACT_SERVICE_TOKEN: no token -> 503, wrong token -> 401, unknown action -> 400 listing all six, and the Node `{error:'POST only'}` body for other verbs. Not exercised against live Postgres."
+    },
+    {
+      "path": "/api/poko-bets",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "poko-bets.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::poko_bets_is_post_only_and_needs_the_service_token",
+        "router_contract::poko_bets_stake_rejects_bad_input_before_touching_any_store",
+        "router_contract::poko_bets_settle_pays_the_pot_exactly_and_is_idempotent",
+        "domain::poko_bets::tests::every_payout_is_conserved_for_a_range_of_books",
+        "domain::poko_bets::tests::winners_share_pro_rata_and_the_escrow_pays_out_exactly",
+        "domain::poko_bets::tests::the_remainder_goes_to_the_first_largest_on_a_tie",
+        "domain::poko_bets::tests::no_winners_refunds_every_stake_exactly",
+        "domain::poko_bets::tests::closes_at_is_clamped_to_one_bet_window",
+        "domain::poko_bets::tests::discord_creation_time_comes_from_the_snowflake",
+        "handlers::poko_bets::tests::merge_wallet_caps_and_forfeits_are_pure_arithmetic",
+        "handlers::poko_bets::tests::stake_states_the_balance_precondition_correctly"
+      ],
+      "notes": "All nine actions: balances (25-id cap), set_consent, merge_wallet, stake, close, settle, refund, redeem_bonus, reward_game. PKN only moves user -> that round's escrow and escrow -> that round's stakers; the stake is checked against the balance INSIDE the transaction that debits it (available + previous >= amount, so raising a bet reuses the previous stake); closesAt is clamped to one 10-minute bet window and a closed/expired round is refused. The pari-mutuel split is a property-tested pure function: floors every winner share and gives the rounding remainder to the largest winning stake so sum(payouts) == sum(stakes) for every winner/loser/unit combination; no winners means a full refund; settle returns stored payouts with idempotent:true and writes nothing on a replay. A verified end-to-end test asserts the winner's balance is credited with the whole pot, the loser is untouched, the paired ledger entry is written, and the replay is a no-op. The Discord wallet merge is once per Discord account with the 200 PKN cap, the double-bonus forfeit and the frozen remainder. MONEY: writes the same balances/{key} + ledger_entries documents the platform uses, in ONE Firestore transaction, behind the public LedgerSink seam so the shared writer (commerce's store::apply) can be injected instead. No new SQL tables. Not exercised against live Firestore/Postgres."
+    },
+    {
+      "path": "/api/poko-personal-context",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "poko-personal-context.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::poko_personal_context_is_post_only",
+        "router_contract::poko_personal_context_requires_a_bearer_or_the_service_token",
+        "router_contract::poko_personal_context_validates_the_action",
+        "router_contract::poko_personal_context_requires_a_user_for_the_service_path",
+        "router_contract::poko_personal_context_reports_a_missing_database_as_a_build_failure",
+        "domain::personal_context::tests::cart_items_are_cleaned_and_dropped_when_unusable",
+        "domain::personal_context::tests::overlay_detection_matches_overlay_from_body",
+        "domain::personal_context::tests::intent_renders_every_section",
+        "domain::personal_context::tests::intent_is_empty_without_facts",
+        "domain::personal_context::tests::labels_fall_back_to_an_empty_card"
+      ],
+      "notes": "action=get|sync with both auth modes: the Poko service token may act for any firebaseUid (persistOverlay=false), a Firebase bearer only for its own uid (persistOverlay=true). Reads the existing marketplace_user_recents, marketplace_user_listings, poko_user_personal_snapshot and marketplace_search_candidates tables (42P01/42703 tolerated per section, exactly like Node) plus the Firestore collection summary. sync persists the client overlay via an ON CONFLICT upsert with bigint[] + jsonb params. formatPersonalIntent is ported line for line, including the 'never invent ownership' preamble, the 8-row caps and the '~N PKN' cart total. Error shapes match Node: auth/action failures are a bare {error}, build failures are {ok:false, error:'Could not load personal context.'}. Not exercised against live Postgres/Firestore."
+    },
+    {
+      "path": "/api/poko-market",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "poko-market.js",
+      "status": "in_progress_domain_layer",
+      "tests": [
+        "domain::poko_market_math::tests::conditions_normalize_and_vague_wear_becomes_a_range",
+        "domain::poko_market_math::tests::languages_normalize_with_a_letter_fallback",
+        "domain::poko_market_math::tests::sold_stats_are_unit_weighted_and_capped_per_row",
+        "domain::poko_market_math::tests::sold_estimates_carry_the_documented_fields",
+        "domain::poko_market_math::tests::resolve_facet_snaps_to_the_most_sold_variant",
+        "domain::poko_market_math::tests::variant_and_condition_breakdowns_sort_by_units",
+        "domain::poko_market_math::tests::liquidity_bands_prefer_weights_then_sell_through",
+        "domain::poko_market_math::tests::the_price_ladder_uses_card_liquidity_when_known",
+        "domain::poko_market_math::tests::deal_verdicts_cover_every_band",
+        "domain::poko_market_math::tests::ask_history_reports_series_fluctuations_and_trend",
+        "domain::poko_market_math::tests::query_variants_drop_chatter_but_keep_the_raw_phrase",
+        "domain::poko_market_math::tests::asking_prices_are_stripped_from_seller_lines",
+        "domain::poko_market_math::tests::parenthetical_sets_and_digit_codes",
+        "domain::poko_market_math::tests::sold_flags_accept_the_documented_vocabulary",
+        "domain::poko_market_math::tests::facets_default_to_standard_and_label_themselves",
+        "domain::poko_market_math::tests::facet_keys_and_row_matching",
+        "domain::poko_market_math::tests::percentiles_interpolate_like_the_node_helper",
+        "domain::poko_market_math::tests::candidates_and_dedupe",
+        "domain::poko_market_math::tests::live_asks_summarize_min_median_and_counts",
+        "domain::poko_market_math::tests::sold_summaries_roll_up_a_weights_row",
+        "domain::poko_market_math::tests::time_ranges_switch_to_weeks_past_three",
+        "domain::poko_market_math::tests::resolution_and_codes"
+      ],
+      "notes": "IN PROGRESS \u2014 step 1 of 3 done. `domain/poko_market_math.rs` is the complete pure decision layer every one of the fifteen tools shares: the condition/language tables and normalizers (vague wear becomes an MP range, never NM), cleanText/escapeLike/fuzzyArtistPattern, blueprintIdFromCatalogRow, confidenceForSample, round2, weightsAreFresh/todayIso/daysAgoIso, liquidityBands (weights days_of_supply then the sell-through heuristic), buildSoldSummary, timeRange, priceStrategies (the liquidity-banded sell ladder), candidateFromRow, dedupeArtworkVersions, queryVariants with the filler regex and stopword set, stripAskingPrices, singleParentheticalSet, digitSetCode, soldFlag/soldFacetFromParams/facetKey/facetLabel/rowMatchesFacet/rowMatchesSlice, dayOf, percentileOf, soldStats (unit-weighted, capped at 50 units per day slice), soldEstimateFromStats, resolveFacet (snap-back to the most-sold variant), variantsSold, soldByConditionLanguage, summarizeLiveAsks, dealVerdict and askHistoryFromSource \u2014 plus every documented constant. STILL MISSING: the SQL and actions (resolveCard's token-AND search with applySetAlias/expansionForSetCode, expansionForSetCode, cardOcr, cardQuote, cardSales, dealCheck, cardLiquidity, collectionQuote, suggestCards, marketSnapshot, topMovers, topSellers, setSales, recentSales, artistCards, setInfo, _card_price_history, recentPriceSources, askSignalForBlueprint, liveAsksForBlueprint) and the service-token TOOLS dispatch. The route stays UNMOUNTED so it 404s rather than answering a stub."
+    },
+    {
+      "path": "/api/search-recipient-emails",
+      "methods": [
+        "GET"
+      ],
+      "node_file": "search-recipient-emails.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::search_recipient_emails_requires_a_bearer_token",
+        "router_contract::search_recipient_emails_short_query_returns_empty_without_a_lookup",
+        "router_contract::search_recipient_emails_scans_both_indexes_and_filters_in_code",
+        "handlers::user::tests::push_match_applies_every_node_guard"
+      ],
+      "notes": "Handle-prefix (documentId) and displayNameSearch-prefix scans ported with the same 12-row limits, the <2-character short circuit, the self/duplicate/invalid-handle filters and the 8-result cap. The documentId range is emitted as a referenceValue cursor, which the test asserts on the wire."
+    },
+    {
+      "path": "/api/search-recipient-emails",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "search-recipient-emails.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::search_recipient_emails_requires_a_bearer_token",
+        "router_contract::ensure_username_returns_the_existing_handle_without_rewriting_it"
+      ],
+      "notes": "Claims or repairs the caller's handle through the same usernameForRequest path as ensure-username."
+    },
+    {
+      "path": "/api/user-current-page",
+      "methods": [
+        "GET"
+      ],
+      "node_file": "user-current-page.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::user_current_page_requires_a_session_id",
+        "router_contract::user_current_page_reports_a_missing_database_truthfully",
+        "handlers::user::tests::session_ids_follow_the_node_regex",
+        "handlers::user::tests::session_id_resolution_order_matches_node",
+        "handlers::user::tests::current_page_rows_are_reshaped",
+        "handlers::user::tests::missing_table_is_a_setup_required_503"
+      ],
+      "notes": "Reads public.assistant_user_current_pages (an existing table, migration 013) with the same session/uid precedence, the same row shape and the same 503 + setupRequired + migration body when the table is missing (42P01). A present but invalid bearer is a 401; a missing one is an anonymous session. Not exercised against live Postgres."
+    },
+    {
+      "path": "/api/user-current-page",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "user-current-page.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::user_current_page_requires_a_session_id",
+        "router_contract::user_current_page_post_rejects_an_unsafe_path_before_any_query",
+        "router_contract::user_current_page_rejects_a_bad_session_id_even_with_a_body",
+        "handlers::user::tests::internal_paths_reject_escapes",
+        "handlers::user::tests::clean_internal_path_accepts_only_pokoin_urls"
+      ],
+      "notes": "Upserts on (session_id, user_uid) with the same path/source cleaning. HARDENED: Node's isSafeInternalPath regex missed a fully percent-encoded `..` (/a/%2e%2e/b); this port decodes %2e before looking for a `.`/`..` segment, so that traversal is rejected too. No legitimate internal path is affected."
+    },
+    {
+      "path": "/api/marketplace-referral",
+      "methods": [
+        "GET"
+      ],
+      "node_file": "marketplace-referral.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::marketplace_referral_requires_a_bearer_token",
+        "router_contract::marketplace_referral_get_returns_the_invite_summary",
+        "domain::referral::tests::public_rows_match_the_node_shape",
+        "domain::ambassador::tests::*"
+      ],
+      "notes": "The full Invite & Earn summary: invite code (= own handle), rewardPkn 20, 14-day claim window, invited rows newest-first with a 100 cap, activated/pending/earned stats, referredBy, and the ambassador tier block. The roster/mission lookup tolerates 42P01/42703 (pre-migration) and a roster row without an account. Not exercised against live Firestore/Postgres."
+    },
+    {
+      "path": "/api/marketplace-referral",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "marketplace-referral.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::marketplace_referral_rejects_an_unknown_action",
+        "router_contract::marketplace_referral_rejects_an_unknown_invite_code",
+        "domain::referral::tests::invite_codes_are_usernames",
+        "domain::referral::tests::only_real_paid_orders_qualify",
+        "domain::referral::tests::order_qualifies_applies_the_time_and_counterparty_guards",
+        "domain::referral::tests::settle_outcome_statuses_match_node"
+      ],
+      "notes": "claimReferral with every Node guardrail: valid-code shape, unknown code (404 invalid_code), self-referral, the 14-day new-account window (409 not_new), no prior paid purchase/sale, circular invites, and the already-claimed short circuit. settleReferral pays both sides 20 PKN from the treasury with balanced ledger_entries in ONE Firestore transaction, enforces the 50-rewards-per-30-days referrer cap, returns treasury_low instead of overdrawing, and is idempotent through the pending status gate."
+    },
+    {
+      "path": "/api/chat",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "chat.js",
+      "status": "implemented",
+      "tests": [
+        "router_contract::chat_requires_a_bearer_token",
+        "domain::chat::tests::amounts_must_be_positive_whole_and_bounded",
+        "domain::chat::tests::operation_ids_are_per_user_and_token",
+        "domain::chat::tests::listings_are_sanitized",
+        "domain::chat::tests::owned_photos_are_scoped_to_the_caller_and_kind",
+        "handlers::chat::tests::listing_photo_ids_must_be_a_uuid"
+      ],
+      "notes": "action=message, action=pay, action=read, action=photo and action=listing-photos. message/pay write the conversation, the event and (for pay) both balances plus both ledger_entries plus a notification in ONE Firestore transaction. pay is idempotent through payment_operations/{sha256(uid\\0clientToken)}: a replay with the same peer and amount returns the original ledgerId, a different peer/amount is a 409, and an insufficient balance is a 400. Photos go to the user-photos R2 bucket through the crate's SigV4 client (private cache for chat, public for listing); listing-photos is an owner-scoped `photo_urls` UPDATE. Not exercised against live Firestore/R2/Postgres."
+    },
+    {
+      "path": "/api/pokoin-partner",
+      "methods": [
+        "POST"
+      ],
+      "node_file": "pokoin-partner.js",
+      "status": "implemented+verified",
+      "tests": [
+        "router_contract::pokoin_partner_mutations_are_coming_soon",
+        "router_contract::pokoin_partner_defaults_the_action_to_directory",
+        "handlers::partner::tests::coming_soon_is_the_honest_501_body",
+        "handlers::partner::tests::action_names_match_the_contract_order"
+      ],
+      "notes": "intake/bag/receive-hub/handoff and pending answer 501 `coming_soon`, which is exactly what the live Node handler returns because the Partner app is not launched - this is the real contract, not a stub of ours. Action resolution keeps Node's `cleanAction(query || body || 'directory')` order, so a whitespace action wins and cleans to empty instead of falling through. Unknown actions give 400 with the action list."
+    }
+  ]
+}

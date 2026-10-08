@@ -13,8 +13,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::routing::get;
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::response::IntoResponse;
+use axum::routing::{any, get};
 use axum::{Json, Router};
 use pokoin_config::Config;
 use serde_json::{json, Value};
@@ -74,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         warm_dependencies(warm).await;
     });
-    let app = router(state);
+    let app = build_full_router(state.clone());
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;
     tracing::info!(
         phase = "bind",
@@ -249,17 +250,212 @@ fn router(state: AppState) -> Router {
             "/api/marketplace-search-page",
             get(search_page::search_page).options(search_page::options),
         )
-        .route(
-            "/api/marketplace-listings",
-            axum::routing::any(native_pending),
-        )
         .layer(axum::middleware::from_fn_with_state(state.clone(),read_cache::read_cache))
         .layer(axum::middleware::from_fn(card_identity::guard))
         .layer(tower::limit::ConcurrencyLimitLayer::new(64))
-        .layer(axum::middleware::from_fn_with_state(state.clone(),request_log::log_request))
         .with_state(state)
 }
 
-async fn native_pending() -> (StatusCode, Json<Value>) {
-    (StatusCode::NOT_IMPLEMENTED, Json(json!({"error": "Native implementation is being migrated."})))
+fn build_full_router(state: AppState) -> Router {
+    let pool_max = std::env::var("POKOIN_RUST_DOMAIN_DB_POOL_MAX")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(6)
+        .max(1);
+    let read_url = std::env::var("MARKETPLACE_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+
+    let accounts = pokoin_accounts::router(pokoin_accounts::DomainState::from_env());
+    let (commerce, external, catalog_routes) = match read_url {
+        Some(read_url) => {
+            let write_url = std::env::var("MARKETPLACE_WRITER_DATABASE_URL")
+                .unwrap_or_else(|_| read_url.clone());
+            match (lazy_pool(&read_url, pool_max), lazy_pool(&write_url, pool_max)) {
+                (Ok(read_db), Ok(write_db)) => {
+                    let commerce = pokoin_commerce::router(pokoin_commerce::DomainState::with_pools(
+                        pokoin_commerce::CommerceConfig::from_env(),
+                        read_db.clone(),
+                        write_db.clone(),
+                        None,
+                        Arc::new(pokoin_commerce::FirebaseVerifier::new(
+                            std::env::var("FIREBASE_PROJECT_ID").unwrap_or_default(),
+                            reqwest::Client::new(),
+                        )),
+                        pokoin_commerce::FirestoreClient::from_env(reqwest::Client::new()).ok(),
+                    ));
+                    let external = match build_external_router(&read_db, &write_db) {
+                        Ok(router) => router,
+                        Err(error) => {
+                            tracing::error!(domain = "external", %error, "domain disabled");
+                            external_fallback_router()
+                        }
+                    };
+                    (commerce, external, pokoin_catalog_routes::router(read_db))
+                }
+                (Err(error), _) | (_, Err(error)) => {
+                    tracing::error!(domain = "commerce", %error, "domain disabled");
+                    (
+                        commerce_fallback_router(),
+                        external_fallback_router(),
+                        catalog_fallback_router(),
+                    )
+                }
+            }
+        }
+        None => {
+            let error = "MARKETPLACE_DATABASE_URL is not configured";
+            tracing::error!(domain = "commerce", %error, "domain disabled");
+            (
+                commerce_fallback_router(),
+                external_fallback_router(),
+                catalog_fallback_router(),
+            )
+        }
+    };
+
+    let core = router(state.clone());
+    core
+        .merge(accounts)
+        .merge(commerce)
+        .merge(external)
+        .merge(catalog_routes)
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            request_log::log_request,
+        ))
+}
+
+fn lazy_pool(url: &str, max: u32) -> anyhow::Result<PgPool> {
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(max)
+        .acquire_timeout(Duration::from_secs(3))
+        .connect_lazy(url)
+        .map_err(Into::into)
+}
+
+fn build_external_router(
+    read_db: &PgPool,
+    write_db: &PgPool,
+) -> anyhow::Result<Router> {
+    use pokoin_external::firebase::{FirestoreRest, FirebaseJwksVerifier, FirestoreStore, TokenVerifier};
+    let project_id = std::env::var("FIREBASE_PROJECT_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("FIREBASE_PROJECT_ID is not configured"))?;
+    let firestore = FirestoreRest::from_env()
+        .ok_or_else(|| anyhow::anyhow!("Firebase Admin credentials are not configured"))?;
+    let db = pokoin_external::db::DbPools::lazy(read_db.clone(), write_db.clone());
+    let state = pokoin_external::DomainState::new(
+        Arc::new(firestore) as Arc<dyn FirestoreStore>,
+        Arc::new(FirebaseJwksVerifier::new(project_id)) as Arc<dyn TokenVerifier>,
+        db,
+        None,
+    );
+    Ok(pokoin_external::router(state))
+}
+
+fn fallback_router(paths: &[&str]) -> Router {
+    paths.iter().fold(Router::new(), |router, path| {
+        router.route(path, any(domain_unavailable))
+    })
+}
+
+fn external_fallback_router() -> Router {
+    fallback_router(&[
+        "/api/cardtrader-connect", "/api/cardtrader-status", "/api/cardtrader-disconnect",
+        "/api/cardtrader-import-dry-run", "/api/cardtrader-sync", "/api/cardtrader-assets",
+        "/api/cardtrader-zero", "/api/cardtrader-clean-listings", "/api/cardtrader-webhook/{uid}",
+        "/api/cardtrader-blueprint-listings", "/api/cardtrader-live-listings",
+        "/api/cardtrader-daily-listings-refresh", "/api/cardtrader-game-ingest",
+        "/api/powertools-connect", "/api/marketplace-pricing-strategies",
+        "/api/marketplace-price-check", "/api/scan/identify", "/api/scan/identify-album",
+        "/api/scan/print", "/api/scan/catalogs", "/api/scan/health", "/api/scan-batch",
+        "/api/scan-pair", "/api/scan-phone", "/api/scan-session", "/api/scan-stream",
+        "/api/user-photos/{kind}/{uid}/{file}", "/api/upload-profile-picture",
+        "/api/remove-profile-picture", "/api/cache-google-profile-picture",
+        "/api/cardtrader-redirect", "/api/tcgplayer-redirect", "/api/cardmarket-redirect",
+        "/api/social-autopost", "/api/social-autopost/hot-card", "/api/social-post-agent",
+        "/api/client-country",
+    ])
+}
+
+fn commerce_fallback_router() -> Router {
+    fallback_router(&[
+        "/api/marketplace-listings", "/api/marketplace-listings-csv",
+        "/api/marketplace-cart", "/api/marketplace-watchlist", "/api/marketplace-cart-sync",
+        "/api/marketplace-recents", "/api/marketplace-event", "/api/marketplace-seller-shop",
+        "/api/marketplace-seller-settings", "/api/account-addresses",
+        "/api/marketplace-shipping-options", "/api/marketplace-checkout-quote",
+        "/api/marketplace-orders", "/api/marketplace-native-sales",
+        "/api/stripe-connect-onboard", "/api/create-order-checkout-session",
+        "/api/create-pkn-checkout-session", "/api/stripe-webhook",
+        "/api/crypto-pkn-purchase/{action}", "/api/crypto-pkn-sale/{action}",
+        "/api/wpkn-exchange/{action}", "/api/wpkn-pkn-quote", "/api/top-up-account-balance",
+        "/api/transfer-account-balance", "/api/request-pkn-withdraw", "/api/unlock-silver",
+        "/api/money-request", "/api/earn-pkn",
+    ])
+}
+
+fn catalog_fallback_router() -> Router {
+    fallback_router(&[
+        "/api/marketplace-card-sales",
+        "/api/marketplace-card-cheapest-price",
+        "/api/marketplace-card-price-history",
+    ])
+}
+
+async fn domain_unavailable() -> axum::response::Response {
+    let mut response = (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({"error": "Service temporarily unavailable."})),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store"),
+    );
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn full_router_builds() {
+        let read = lazy_pool("postgres://test@127.0.0.1:1/test", 6).unwrap();
+        let write = lazy_pool("postgres://test@127.0.0.1:1/test", 6).unwrap();
+        let commerce = pokoin_commerce::router(pokoin_commerce::DomainState::with_pools(
+            pokoin_commerce::CommerceConfig::default(),
+            read.clone(),
+            write,
+            None,
+            Arc::new(pokoin_commerce::FirebaseVerifier::new(
+                String::new(),
+                reqwest::Client::new(),
+            )),
+            None,
+        ));
+        let external = pokoin_external::router(pokoin_external::DomainState::for_test());
+        let catalog = pokoin_catalog_routes::router(read);
+        let _app = router(AppState {
+            config: Config::from_env(),
+            db: Arc::new(RwLock::new(None)),
+            http: reqwest::Client::new(),
+            game_dbs: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            redis: Arc::new(RwLock::new(None)),
+            read_cache: Arc::new(read_cache::Coordinator::default()),
+            requests: Arc::new(AtomicU64::new(0)),
+            meili_ms: Arc::new(AtomicU64::new(0)),
+            sql_ms: Arc::new(AtomicU64::new(0)),
+            errors: Arc::new(AtomicU64::new(0)),
+            booted: Instant::now(),
+        })
+        .merge(pokoin_accounts::router(pokoin_accounts::DomainState::default()))
+        .merge(commerce)
+        .merge(external)
+        .merge(catalog);
+    }
 }
