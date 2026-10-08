@@ -49,7 +49,7 @@ export function articlePath(record) {
   return `${gameNewsBase(record?.game || 'pokemon')}/${record?.slug || ''}`;
 }
 
-export const RESERVED_SLUGS = Object.freeze(['latest', 'sets', 'cards', 'market', 'competitive', 'collectors', 'fact-check', 'analysis', 'industry', 'authors', 'about', 'editorial-policy', 'corrections', 'methodology', 'contact', 'rss', 'sitemap', 'assets', 'media', 'page', 'tags', 'desk']);
+export const RESERVED_SLUGS = Object.freeze(['latest', 'sets', 'cards', 'market', 'competitive', 'collectors', 'fact-check', 'analysis', 'industry', 'authors', 'about', 'editorial-policy', 'corrections', 'methodology', 'contact', 'rss', 'sitemap', 'assets', 'media', 'page', 'tags', 'desk', 'dashboard']);
 
 export function slugify(text) {
   const raw = String(text || '');

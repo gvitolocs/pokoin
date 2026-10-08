@@ -4,6 +4,7 @@ import {
   WORKING_MESSAGE,
   isOriginDownStatus,
   isTunnelHtml,
+  fetchOriginOrWorking,
   replaceIfOriginDown,
   wantsWorkingHtml,
   workingPageHtml,
@@ -87,4 +88,42 @@ test('API 530 becomes JSON without the tunnel sentence', async () => {
   assert.equal(down.status, 503);
   assert.equal(down.headers.get('content-type'), 'application/json; charset=utf-8');
   assert.deepEqual(await down.json(), { error: WORKING_MESSAGE });
+});
+
+test('document 5xx uses the SPA when assets are up; a dead asset host stays 503', async () => {
+  const request = new Request('https://pokoin.com/marketplace/sets/151', {
+    headers: { Accept: 'text/html', 'Sec-Fetch-Dest': 'document' },
+  });
+  const original = globalThis.fetch;
+  const assets = {
+    fetch: async () => new Response('<title>151</title>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    }),
+  };
+  try {
+    globalThis.fetch = async () => new Response('bad gateway', {
+      status: 502,
+      headers: { 'content-type': 'text/html' },
+    });
+    const soft = await fetchOriginOrWorking(request, request, { assets });
+    assert.equal(soft.status, 200);
+    assert.equal(soft.headers.get('x-pokoin-asset-fallback'), '1');
+    assert.match(await soft.text(), /<title>151<\/title>/);
+
+    globalThis.fetch = async () => {
+      throw new Error('network');
+    };
+    const thrown = await fetchOriginOrWorking(request, request, { assets });
+    assert.equal(thrown.status, 200);
+    assert.equal(thrown.headers.get('x-pokoin-asset-fallback'), '1');
+
+    const outage = await fetchOriginOrWorking(request, request, {
+      assets: { fetch: async () => new Response('no', { status: 503 }) },
+    });
+    assert.equal(outage.status, 503);
+    assert.equal(outage.headers.get('x-pokoin-working'), '1');
+  } finally {
+    globalThis.fetch = original;
+  }
 });

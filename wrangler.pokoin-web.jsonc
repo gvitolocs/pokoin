@@ -31,7 +31,14 @@
       "/marketplace/*/languages",
       "/marketplace/*/languages/*",
       "/marketplace/*/guides",
-      "/marketplace/*/guides/*"
+      "/marketplace/*/guides/*",
+      "/marketplace",
+      "/marketplace/sets",
+      "/marketplace/sets/*",
+      "/marketplace/eras",
+      "/marketplace/eras/*",
+      "/marketplace/*/artists",
+      "/marketplace/*/artists/*"
     ]
   }
 }

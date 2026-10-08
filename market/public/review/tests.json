@@ -47,6 +47,12 @@
       "label": "Poko",
       "note": "Part 5 excited voice · EN/IT",
       "date": "2026-10-04"
+    },
+    {
+      "path": "/poko/archive",
+      "label": "newPoko archive",
+      "note": "Fenrir dataset + ep1–7 remakes",
+      "date": "2026-10-08"
     }
   ]
 }

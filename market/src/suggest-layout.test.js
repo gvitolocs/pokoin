@@ -82,7 +82,8 @@ test('desktop collector number is its own middle column; phone folds it into the
   const setGuide = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'components/SetGuideGrid.jsx'), 'utf8');
   const desk = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'desk.css'), 'utf8');
   assert.match(setGuide, /className="set-shortcut is-on"/);
-  assert.match(setGuide, /printFlagFromNationality\(row\.nationality\)/);
+  // Nationality goes through resolveExpansionNationality (pins for empty/unknown catalog values, PR 254).
+  assert.match(setGuide, /printFlagFromNationality\(resolveExpansionNationality\(row\)\)/);
   assert.match(setGuide, /set-guide-print-flag/);
   assert.match(desk, /\.set-guide-print-flag img \{[^}]*border-radius:\s*50%/);
   assert.match(desk, /\.set-guide-card strong\.has-print-flag \{[^}]*display:\s*flex/);

@@ -51,10 +51,18 @@ export default {
     if (pathname === '/cardscan/identify') {
       return proxy(request, 'https://api.pokoin.com', '/api/scan/identify');
     }
-    const cardHtml = await handleMarketplaceCardOgRequest(request, env, ctx);
-    if (cardHtml) return cardHtml;
-    const hubHtml = await handleMarketplaceHubOgRequest(request, env, ctx);
-    if (hubHtml) return hubHtml;
+    try {
+      const cardHtml = await handleMarketplaceCardOgRequest(request, env, ctx);
+      if (cardHtml) return cardHtml;
+    } catch (_) {
+      /* card API failure must not become a 5xx document */
+    }
+    try {
+      const hubHtml = await handleMarketplaceHubOgRequest(request, env, ctx);
+      if (hubHtml) return hubHtml;
+    } catch (_) {
+      /* hub API failure falls through to the SPA shell */
+    }
     if (env?.ASSETS?.fetch) return env.ASSETS.fetch(request);
     return new Response('Not Found', {
       status: 404,

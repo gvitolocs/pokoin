@@ -177,7 +177,8 @@ export function renderArticleBody(record, ctx = {}) {
   const body = `<div class="nx-body">${renderBlocks(record, ctx)}</div>`;
 
   return (
-    `<article class="nx-article nx-t-${esc(record.template)}" data-type="${esc(record.articleType)}">` +
+    `<article class="nx-article nx-t-${esc(record.template)}" data-type="${esc(record.articleType)}"` +
+    ` data-article-id="${esc(record.id)}" data-article-path="${esc(articlePath(record))}">` +
     header +
     renderHero(hero) +
     updatesHtml +

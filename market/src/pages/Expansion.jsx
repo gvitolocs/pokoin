@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigationType, useParams } from 'react-router-dom';
 import { EXPANSION_PAGE, fetchExpansion, fetchExpansionCards, peekExpansion, prettySlug } from '../api.js';
 import { Action, track } from '../track.js';
+import { resolveExpansionNationality } from '../expansion-print.js';
 import { printFlagFromNationality } from '../locale.js';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
@@ -225,7 +226,11 @@ export default function Expansion() {
   const cards = payload?.cards || [];
   const symbol = expansionSymbolSrc(payload?.expansion || { slug });
   const wordmark = expansionLogoSrc(payload?.expansion || { slug, name });
-  const printFlag = printFlagFromNationality(payload?.expansion?.nationality);
+  const printFlag = printFlagFromNationality(resolveExpansionNationality({
+    ...(payload?.expansion || {}),
+    slug,
+    name,
+  }));
   const fallbackLang = searchPrintLang({ nationality: payload?.expansion?.nationality });
   const deskCards = useMemo(() => cards.filter(isSetDeskCard), [cards]);
   const rarities = useMemo(() => uniqueSearchOptions(deskCards, searchRarity), [deskCards]);

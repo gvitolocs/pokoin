@@ -48,7 +48,7 @@ say "Pi release $release"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .ct-deal-scan-previous; cp -a \$prev '$release'; mkdir -p '$release/api'"
 tar -C "$SRC" -cf - "${FILES[@]}" \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
-ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'; rm '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json' '/srv/pokoin/api/$release/api/cardtrader-deal-scan.test.js'"
+ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json' '--api-dir=/srv/pokoin/api/$release/api' && rm '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json' '/srv/pokoin/api/$release/api/cardtrader-deal-scan.test.js'"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.ct-deal-scan-commit'"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
@@ -57,7 +57,9 @@ healthy=0
 for _ in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
   unauth="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/cardtrader-deal-scan?seller=x'" || true)"
-  if [[ "$health" == "200" && ( "$unauth" == "401" || "$unauth" == "503" ) ]]; then
+  # A broken route manifest 500s on unknown paths instead of 404.
+  unknown="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/route-manifest-healthcheck" || true)"
+  if [[ "$health" == "200" && ( "$unauth" == "401" || "$unauth" == "503" ) && "$unknown" == "404" ]]; then
     healthy=1
     break
   fi
@@ -65,7 +67,7 @@ for _ in $(seq 1 45); do
 done
 
 if [[ "$healthy" != "1" ]]; then
-  echo "health failed (health=$health deal-scan=$unauth) — rolling back" >&2
+  echo "health failed (health=$health deal-scan=$unauth unknown=${unknown:-}) — rolling back" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .ct-deal-scan-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "Pi API verification failed; previous release restored"
 fi

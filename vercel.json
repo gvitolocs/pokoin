@@ -799,6 +799,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/poko/archive/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/poko/archive",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/poko/",
       "destination": "/market/index.html"
     },

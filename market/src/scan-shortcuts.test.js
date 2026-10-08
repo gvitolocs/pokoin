@@ -21,7 +21,7 @@ test('PowerTools Pokémon hotkeys (verified map) drive the focused row', () => {
   // module ./Pokemon_hotkeys.json in candyext/dump main.1fff971d.chunk.js
   const verified = {
     q: ['condition', 'NM'], w: ['condition', 'NM'], e: ['condition', 'SP'], r: ['condition', 'MP'],
-    t: ['condition', 'MP'], y: ['condition', 'PL'], u: ['condition', 'Poor'],
+    t: ['condition', 'PL'], y: ['condition', 'PL'], u: ['condition', 'Poor'],
     a: ['language', 'EN'], s: ['language', 'ES'], d: ['language', 'DE'], f: ['language', 'FR'],
     g: ['language', 'IT'], h: ['language', 'RU'], j: ['language', 'JP'], k: ['language', 'KO'],
     l: ['language', 'PT'], m: ['language', 'ZHT'], n: ['language', 'NL'], p: ['language', 'PL'],

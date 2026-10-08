@@ -9,7 +9,7 @@
 const net = require('node:net');
 
 const INDEX = process.env.POKOIN_REDIS_INDEX || 'pokoin:cards';
-const HOST = process.env.REDIS_HOST || '127.0.0.1';
+const HOST = process.env.REDIS_HOST || process.env.VALKEY_HOST || '127.0.0.1';
 const PORT = Number(process.env.REDIS_PORT || process.env.POKOIN_REDIS_PORT || 6380);
 const TIMEOUT_MS = Number(process.env.REDIS_SEARCH_TIMEOUT_MS || 800);
 
@@ -113,10 +113,13 @@ function parseOne(buf) {
 
 function command(parts) {
   return new Promise((resolve, reject) => {
-    const socket = net.connect({ host: HOST, port: PORT });
-    const chunks = [];
+    // Half-closing with socket.end() makes Node drop the reply: Redis answers
+    // after the client FIN, and the readable side is already ended. Write the
+    // command and read until the RESP value is complete, then destroy.
+    const socket = net.connect({ host: HOST, port: PORT, allowHalfOpen: true });
+    let buf = Buffer.alloc(0);
     let settled = false;
-    const settle = (fn) => {
+    const finish = (fn) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -124,24 +127,31 @@ function command(parts) {
       fn();
     };
     const timer = setTimeout(() => {
-      settle(() => reject(new Error('redis search timeout')));
+      finish(() => reject(new Error('redis search timeout')));
     }, TIMEOUT_MS);
-    // Never half-close before the reply: Redis 8 treats the client FIN as a
-    // disconnect and can drop the client before a background worker replies.
-    socket.on('connect', () => socket.write(encode(parts)));
-    socket.on('data', (chunk) => {
-      if (settled) return;
-      chunks.push(chunk);
-      const parsed = parseOne(Buffer.concat(chunks));
-      if (!parsed) return;
-      settle(() => {
-        if (parsed.error) reject(new Error(String(parsed.value || 'redis search failed')));
-        else resolve(parsed.value);
-      });
+    socket.on('error', (error) => {
+      finish(() => reject(error));
     });
-    socket.on('end', () => settle(() => reject(new Error('redis search failed'))));
-    socket.on('close', () => settle(() => reject(new Error('redis search failed'))));
-    socket.on('error', (error) => settle(() => reject(error)));
+    // Redis closed before a full reply: fail now instead of waiting for the timeout.
+    socket.on('end', () => {
+      finish(() => reject(new Error('redis search failed')));
+    });
+    socket.on('close', () => {
+      finish(() => reject(new Error('redis search failed')));
+    });
+    socket.on('data', (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      const parsed = parseOne(buf);
+      if (!parsed) return;
+      if (parsed.error) {
+        finish(() => reject(new Error(parsed.value || 'redis search failed')));
+        return;
+      }
+      finish(() => resolve(parsed.value));
+    });
+    socket.on('connect', () => {
+      socket.write(encode(parts));
+    });
   });
 }
 

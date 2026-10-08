@@ -18,6 +18,21 @@ export function authFrom(path) {
   return route(`/auth?from=${encodeURIComponent(path || '/marketplace')}`);
 }
 
+/** Crawlers follow Sign in anchors. /auth stays Disallow'd; the link is nofollow. */
+export function authAnchorRel(href) {
+  const value = String(href || '');
+  let path = value.split(/[?#]/)[0];
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      path = new URL(value).pathname;
+    } catch (_) {
+      path = '';
+    }
+  }
+  if (path === '/auth' || path.startsWith('/auth/')) return 'nofollow noopener';
+  return '';
+}
+
 /**
  * Seller desk on pokoin.com. Same origin as the marketplace, so Chrome can
  * soft-navigate. dashboard.pokoin.com only redirects here.

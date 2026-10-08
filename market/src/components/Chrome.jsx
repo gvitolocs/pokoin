@@ -27,7 +27,7 @@ import {
 } from '../art-shade.js';
 import { prefersArtworkDelta, rarityRowTheme } from '../rarity-theme.js';
 import { pickSuggestHoverSrc, sameSuggestHoverBox, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
-import { compactQuery, resolveSearchQuery, typedMeiliQuery } from '../suggest-rank.js';
+import { compactQuery } from '../suggest-rank.js';
 import { useProgressiveSuggest } from '../use-progressive-suggest.js';
 import { warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
 import { useSuggestFlip } from '../suggest-flip.js';
@@ -41,7 +41,7 @@ import {
   suggestLiveReady,
 } from '../suggest-live.js';
 import { cardsWithCatalogArtist, catalogCacheKey, catalogIntent, groupsFromCards } from '../suggest-catalog.js';
-import { resolveSuggestQuery, serializeResolution } from '../suggest-resolve.js';
+import { resolveSuggestQuery } from '../suggest-resolve.js';
 import { earlySetPrefixName } from '../search-score.js';
 import {
   SUGGEST_THUMB_EAGER,
@@ -65,7 +65,7 @@ import SearchTabs from './SearchTabs.jsx';
 import { Action, track } from '../track.js';
 import { useAuth } from '../auth.jsx';
 import { framedByChromeExtension } from '../extension-auth-bridge.js';
-import { APP, DASHBOARD_HOME, authFrom, goMarket, marketUrl } from '../punchouts.js';
+import { APP, DASHBOARD_HOME, authAnchorRel, authFrom, goMarket, marketUrl } from '../punchouts.js';
 import { associateRoleLabel } from '../associate-roles.js';
 import { useCart } from '../cart.jsx';
 import { useDesktopHold } from '../desktop-hold.js';
@@ -130,8 +130,9 @@ const ICO = {
 };
 
 /** Same-origin NavLink, or absolute pokoin.com <a> when the SPA is on dashboard. */
-function AppLink({ to, className, title, 'aria-label': ariaLabel, children }) {
+function AppLink({ to, className, title, 'aria-label': ariaLabel, children, rel }) {
   const href = marketUrl(to);
+  const linkRel = [rel, authAnchorRel(to)].filter(Boolean).join(' ') || undefined;
   if (String(href).startsWith('http')) {
     return (
       <a
@@ -139,6 +140,7 @@ function AppLink({ to, className, title, 'aria-label': ariaLabel, children }) {
         href={href}
         title={title}
         aria-label={ariaLabel}
+        rel={linkRel}
         onClick={(event) => {
           event.preventDefault();
           goMarket(href);
@@ -149,7 +151,7 @@ function AppLink({ to, className, title, 'aria-label': ariaLabel, children }) {
     );
   }
   return (
-    <NavLink className={className} to={to} title={title} aria-label={ariaLabel}>
+    <NavLink className={className} to={to} title={title} aria-label={ariaLabel} rel={linkRel}>
       {children}
     </NavLink>
   );
@@ -617,7 +619,7 @@ export default function Chrome({ children }) {
     if (!open || !isPokemonGame() || searchTab === 'users' || !suggestLiveReady(query)) {
       return undefined;
     }
-    const text = typedMeiliQuery(query).trim();
+    const text = query.trim();
     if (text.length < 2) {
       return undefined;
     }
@@ -937,22 +939,16 @@ export default function Chrome({ children }) {
   function goSearch(event) {
     event?.preventDefault?.();
     const next = query.trim();
-    const resolved = isPokemonGame() ? resolveSuggestQuery(next) : null;
-    const resolvedParam = resolved ? serializeResolution(resolved) : '';
-    const resolvedQuery = isPokemonGame()
-      ? resolveSearchQuery(next, rankNames(next))
-      : next;
-    const prefetchQuery = isPokemonGame() ? typedMeiliQuery(next) : resolved;
     setOpen(false);
     setMenu(false);
-    if (prefetchQuery) {
-      prefetchSearchPage(prefetchQuery, lang, {
+    if (next) {
+      prefetchSearchPage(next, lang, {
         fetchSearchPage: fetchSearch,
         tab: searchTab,
         printLang,
       });
     }
-    navigate(searchHref(resolvedQuery, searchTab, resolvedParam));
+    navigate(searchHref(next, searchTab));
   }
 
   function pick(card, rank) {
@@ -1318,18 +1314,30 @@ export default function Chrome({ children }) {
               </AppLink>
             ) : null}
             <AppLink className="pkn-chip" to="/wallet" title="Wallet">{pknLabel}</AppLink>
-            <AppLink
-              className={showAvatar ? 'topbar-avatar' : undefined}
-              to={signedIn ? '/profile' : from}
-              title={signedIn ? 'Profile' : 'Sign in'}
-              aria-label={signedIn ? 'Profile' : 'Sign in'}
-            >
-              {showAvatar ? (
-                <Avatar src={profile?.photoUrl} seed={profile?.uid || user?.uid} name={profile?.username} size={32} silver={silver} variant="chip" />
-              ) : (
+            {signedIn ? (
+              <AppLink
+                className={showAvatar ? 'topbar-avatar' : undefined}
+                to="/profile"
+                title="Profile"
+                aria-label="Profile"
+              >
+                {showAvatar ? (
+                  <Avatar src={profile?.photoUrl} seed={profile?.uid || user?.uid} name={profile?.username} size={32} silver={silver} variant="chip" />
+                ) : (
+                  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" /></svg>
+                )}
+              </AppLink>
+            ) : (
+              <button
+                type="button"
+                className="signin-button"
+                title="Sign in"
+                aria-label="Sign in"
+                onClick={() => navigate(from)}
+              >
                 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" /></svg>
-              )}
-            </AppLink>
+              </button>
+            )}
             <span
               className="cart-anchor"
               onMouseEnter={() => setNavPop('cart')}

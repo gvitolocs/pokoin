@@ -35,3 +35,19 @@ test('card-page cache keeps artist and emoji on the public card id', () => {
   assert.equal(peeked.version, 'v321725');
   assert.equal(peeked.card.version, 'v321725');
 });
+
+test('a response for another printing is never stored under the requested id', () => {
+  globalThis.localStorage = memoryStorage();
+  rememberStoredCardPage('806342', { card: { id: '511164', name: 'Toedscruel ex' } });
+  assert.equal(peekStoredCardPage('806342'), null);
+  assert.equal(globalThis.localStorage.getItem('pokoin.cardPage.v2.pokemon:en:806342'), null);
+});
+
+test('cached identity and canonical URL must agree with the storage key', () => {
+  globalThis.localStorage = memoryStorage();
+  globalThis.localStorage.setItem('pokoin.cardPage.v2.pokemon:en:806370', JSON.stringify({
+    card: { id: '806370', canonicalPath: '/marketplace/en/cards/511164/other' },
+    savedAt: Date.now(),
+  }));
+  assert.equal(peekStoredCardPage('806370'), null);
+});
