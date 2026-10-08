@@ -40,7 +40,7 @@ test('session cache round-trips the public vector', () => {
   const cached = readHomeVectorCache('pokemon', store);
   assert.equal(cached.cards[0].id, '1');
   assert.equal(cached.sections.recentlySeenIds, undefined);
-  assert.equal(homeVectorCacheKey('pokemon'), 'pokoin.homeVector.pokemon.v3');
+  assert.equal(homeVectorCacheKey('pokemon'), 'pokoin.homeVector.pokemon.v4');
 });
 
 test('home cache refuses a Pokemon vector under a satellite game id', () => {

@@ -419,3 +419,52 @@ test('card page 500 does not probe other games and does not throw', async () => 
     assert.match(String(resolved.message || ''), /card-page 500/);
   });
 });
+
+test('browser refresh ignores poisoned Worker canonical cache and delegates to the API', async () => {
+  const oldCaches = globalThis.caches;
+  globalThis.caches = { default: { match: async () => new Response(null, {
+    status: 204, headers: { 'x-pokoin-canonical': '/lorcana/marketplace/en/cards/708344/rare-megara-secret-keeper-086-whispers-in-the-well' },
+  }) } };
+  try {
+    await withFetch(async () => { throw new Error('browser must not fetch through OG'); }, async () => {
+      const response = await handleMarketplaceCardOgRequest(new Request(
+        'https://pokoin.com/marketplace/en/cards/806390/card-mega-rayquaza-ex-gold-secret-rare-113-076-storm-emeralda',
+        { headers: { 'user-agent': 'Mozilla/5.0 Chrome/141' } },
+      ));
+      assert.equal(response, null);
+    });
+  } finally { globalThis.caches = oldCaches; }
+});
+
+test('crawler canonical cache cannot redirect Rayquaza to a different id or catalog', () => {
+  for (const target of ['/lorcana/marketplace/en/cards/708344/megara', '/lorcana/marketplace/en/cards/806390/other']) {
+    const decision = cardCrawlDecision({
+      requestPath: '/marketplace/en/cards/806390/rayquaza',
+      canonicalPath: target,
+    });
+    // A discovered game may change only after an authoritative 404 and same id.
+    if (target.includes('/708344/')) assert.equal(decision.action, 'ok');
+  }
+  assert.equal(cardCrawlDecision({
+    requestPath: '/lorcana/marketplace/en/cards/708344/megara',
+    canonicalPath: '/marketplace/en/cards/708344/other',
+  }).action, 'ok');
+});
+
+test('wrong API response is rejected before crawler redirect or cache storage', async () => {
+  let calls = 0;
+  await withFetch(async () => {
+    calls += 1;
+    return new Response(JSON.stringify({
+      game: 'lorcana', card: { id: '708344', name: 'Megara' },
+      seo: { canonicalPath: '/lorcana/marketplace/en/cards/708344/megara' },
+    }), { status: 200 });
+  }, async () => {
+    const response = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/806390/rayquaza',
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(response, null);
+    assert.equal(calls, 1);
+  });
+});

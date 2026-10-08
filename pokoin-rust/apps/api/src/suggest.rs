@@ -50,7 +50,7 @@ pub async fn suggest(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response {
-    state.count_request();
+
     let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("");
     let query_string = path.split_once('?').map(|(_, q)| q).unwrap_or("");
     let params: Vec<(String, String)> =
@@ -63,7 +63,7 @@ pub async fn suggest(
     };
     let game = game_from(&headers, param("game").or_else(|| param("marketplaceGame")));
     if game != "pokemon" {
-        return proxy_node(&state, &uri).await;
+        return multigame_suggest(state,headers,uri).await;
     }
     let query = clean_text(param("q").or_else(|| param("query")).unwrap_or(""), 80);
     let search_language = {
@@ -81,11 +81,11 @@ pub async fn suggest(
         }
     };
     let hydrate = param("hydrate") == Some("1");
-    let row_limit = if hydrate {
+    let offset = param("offset").and_then(|value| value.parse::<i64>().ok()).unwrap_or(0).clamp(0, 10_000);
+    let progressive = param("progressive") == Some("1") || offset > 0;
+    let row_limit = if progressive { parse_limit(param("limit"), 50, 500) } else if hydrate {
         parse_limit(param("limit"), 1000, 1000)
-    } else {
-        POPUP_ROWS
-    };
+    } else { POPUP_ROWS };
     let group_limit = if hydrate {
         row_limit
     } else {
@@ -108,27 +108,12 @@ pub async fn suggest(
             "public, max-age=5, s-maxage=15",
         );
     }
-    let progressive = param("progressive") == Some("1");
-    let offset = param("offset")
-        .and_then(|value| value.parse::<i64>().ok())
-        .filter(|value| *value >= 0)
-        .unwrap_or(0);
-    let hit_limit = if state.config.search_engine == "redis" {
-        if progressive {
-            parse_limit(param("limit"), 48, 240)
-        } else if hydrate || print_language != "all" {
-            parse_limit(param("limit"), 96, 240)
-        } else {
-            suggest_meili_hit_limit(group_limit).clamp(1, 96)
-        }
-    } else if hydrate || print_language != "all" {
+    let hit_limit = if progressive { row_limit } else if hydrate || print_language != "all" {
         1000
-    } else {
-        suggest_meili_hit_limit(group_limit)
-    };
+    } else { suggest_meili_hit_limit(group_limit) };
     let started = Instant::now();
     let page = if state.config.search_engine == "redis" {
-        match redis_hits(&state, &query, &print_language, hit_limit, offset).await {
+        match redis_hits(&state, &query, "all", hit_limit, offset).await {
             Ok(page) => page,
             Err(error) => {
                 tracing::error!(%error, "redis suggest failed");
@@ -139,7 +124,7 @@ pub async fn suggest(
             }
         }
     } else if state.config.search_engine == "meili" && state.config.meili_url.is_some() {
-        match meili_hits(&state, &query, hit_limit, param("match") == Some("all")).await {
+        match meili_hits(&state, &query, hit_limit, offset, param("match") == Some("all")).await {
             Ok(page) => page,
             Err(error) => {
                 tracing::error!(%error, "marketplace-suggest failed");
@@ -165,7 +150,7 @@ pub async fn suggest(
         if progressive {
             page.hits.len().max(1) as i64
         } else if hydrate || print_language != "all" {
-            if state.config.search_engine == "redis" { 240 } else { 1000 }
+            1000
         } else {
             96
         },
@@ -266,7 +251,7 @@ async fn redis_hits(
         .arg(text)
         .arg("LIMIT")
         .arg(offset.max(0))
-        .arg(limit.clamp(1, 240))
+        .arg(limit.clamp(1, 1000))
         .arg("RETURN")
         .arg(12)
         .arg("card_id")
@@ -369,6 +354,7 @@ async fn meili_hits(
     state: &AppState,
     query: &str,
     limit: i64,
+    offset: i64,
     match_all: bool,
 ) -> Result<SuggestHitPage, reqwest::Error> {
     let base = state.config.meili_url.clone().unwrap_or_default();
@@ -380,7 +366,7 @@ async fn meili_hits(
     let mut body = json!({
         "q": query,
         "limit": limit.clamp(1, 1000),
-        "offset": 0,
+        "offset": offset,
         "showRankingScore": true,
         "attributesToRetrieve": ATTRIBUTES,
         "attributesToSearchOn": SEARCH_ON,
@@ -621,31 +607,7 @@ fn title_language(value: &str) -> String {
     }
 }
 
-async fn proxy_node(state: &AppState, uri: &axum::http::Uri) -> Response {
-    let url = format!(
-        "{}{}",
-        state.config.node_origin.trim_end_matches('/'),
-        uri.path_and_query().map(|v| v.as_str()).unwrap_or("/")
-    );
-    match state.http.get(url).send().await {
-        Ok(response) => {
-            let status =
-                StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let cache = response
-                .headers()
-                .get(header::CACHE_CONTROL)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_string();
-            let bytes = response.bytes().await.unwrap_or_default();
-            cors(status, Some(cache), None, bytes).into_response()
-        }
-        Err(_) => json_ok(
-            &empty_suggest("", "pokemon", "sql_error"),
-            "public, max-age=5, s-maxage=15",
-        ),
-    }
-}
+
 
 fn json_ok(body: &Value, cache: &str) -> Response {
     cors(
@@ -692,4 +654,32 @@ fn _json_error() -> Response {
         Json(json!({ "error": "Method not allowed." })),
     )
         .into_response()
+}
+
+async fn multigame_suggest(state:AppState,headers:HeaderMap,uri:axum::http::Uri)->Response {
+ let p=crate::catalog_api::params(&uri);
+ let game=game_from(&headers,p.get("game").or_else(||p.get("marketplaceGame")).map(String::as_str));
+ let query=clean_text(p.get("q").or_else(||p.get("query")).map(String::as_str).unwrap_or(""),80);
+ if query.is_empty(){return json_ok(&empty_suggest(&query,&game,"empty_query"),"public, max-age=5, s-maxage=30")}
+ let Some(pool)=crate::catalog_api::game_pool(&state,&game).await else{return crate::catalog_api::response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")};
+ let cap=crate::catalog_api::limit(&p,"limit",12,24);
+ let needle=query.to_lowercase();let like=format!("%{needle}%");
+ let sql=r#"select c.card_id from public.marketplace_search_candidates c where coalesce(c.cdn_image_url,c.preview_image_url,c.image_url) is not null
+ and (c.search_text like $2 or word_similarity($1,coalesce(c.set_name,''))>0.4 or word_similarity($1,coalesce(c.name,''))>0.4)
+ order by case when lower(c.name)=$1 then 0 when lower(c.set_name)=$1 then 1 when lower(c.name) like $2 then 2 when lower(c.set_name) like $2 then 3 when word_similarity($1,coalesce(c.set_name,''))>0.4 then 4 else 5 end,
+ case when c.item_kind='single' then 0 else 1 end,c.search_weight desc,c.card_id desc limit $3"#;
+ let ids=match sqlx::query_scalar::<_,i64>(sql).bind(needle).bind(like).bind((cap*8).max(48)).fetch_all(&pool).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
+ let cards=match crate::catalog_api::cards(&pool,&ids,&game).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
+ let mut groups=vec![];let mut names=HashMap::<String,usize>::new();
+ for raw in cards {
+  let card=pokoin_catalog::react_record(&raw);let name=card["name"].as_str().unwrap_or("");if name.is_empty(){continue}
+  let key=name.to_lowercase();
+  let index=if let Some(i)=names.get(&key){*i}else {
+   if groups.len()>=cap as usize{continue}
+   let i=groups.len();groups.push(json!({"name":name,"printings":[]}));names.insert(key,i);i
+  };
+  let rows=groups[index]["printings"].as_array_mut().unwrap();if rows.len()<6{rows.push(card)}
+ }
+ let shown=groups.iter().map(|g|g["printings"].as_array().unwrap().len()).sum::<usize>();
+ json_ok(&json!({"query":query,"game":game,"groups":groups,"count":shown,"shown":shown}),"public, max-age=5, s-maxage=30")
 }

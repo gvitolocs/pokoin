@@ -3,8 +3,8 @@
 const MAX_AGE_MS = 10 * 60 * 1000;
 
 export function homeVectorCacheKey(gameId = 'pokemon') {
-  // v3: also stamp payload.game so a wrong-game vector cannot seed a satellite home.
-  return `pokoin.homeVector.${String(gameId || 'pokemon')}.v3`;
+  // v4 retires vectors cached before the native catalog identity guard.
+  return `pokoin.homeVector.${String(gameId || 'pokemon')}.v4`;
 }
 
 function store(override) {

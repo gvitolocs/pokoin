@@ -1,3 +1,8 @@
+mod read_cache;
+mod card_identity;
+mod request_log;
+mod catalog_api;
+mod visual_theme;
 mod search_page;
 mod suggest;
 
@@ -7,14 +12,11 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::RwLock;
 
-use axum::extract::{Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::State;
+use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
-use pokoin_auth::bearer_token;
 use pokoin_config::Config;
-use pokoin_listings::{DecrementOutcome, DECREMENT_SQL};
-use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
@@ -23,7 +25,9 @@ struct AppState {
     config: Config,
     db: Arc<RwLock<Option<PgPool>>>,
     http: reqwest::Client,
+    game_dbs: Arc<RwLock<std::collections::HashMap<String,PgPool>>>,
     redis: Arc<RwLock<Option<redis::aio::ConnectionManager>>>,
+    read_cache: Arc<read_cache::Coordinator>,
     requests: Arc<AtomicU64>,
     meili_ms: Arc<AtomicU64>,
     sql_ms: Arc<AtomicU64>,
@@ -33,6 +37,10 @@ struct AppState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().any(|s|s=="--version") {
+        println!("{}",json!({"service":"pokoin-rust","commit":env!("POKOIN_BUILD_COMMIT"),"dirty":env!("POKOIN_BUILD_DIRTY")=="true"}));
+        return Ok(())
+    }
     tracing_subscriber::fmt()
         .json()
         .with_env_filter(
@@ -50,10 +58,12 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         config: config.clone(),
         db: Arc::new(RwLock::new(None)),
+        game_dbs: Arc::new(RwLock::new(std::collections::HashMap::new())),
         http: reqwest::Client::builder()
-            .timeout(Duration::from_millis(800))
+            .timeout(Duration::from_secs(10))
             .build()?,
         redis: Arc::new(RwLock::new(None)),
+        read_cache: Arc::new(read_cache::Coordinator::default()),
         requests: Arc::new(AtomicU64::new(0)),
         meili_ms: Arc::new(AtomicU64::new(0)),
         sql_ms: Arc::new(AtomicU64::new(0)),
@@ -64,26 +74,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         warm_dependencies(warm).await;
     });
-    let app = Router::new()
-        .route("/livez", get(livez))
-        .route("/readyz", get(readyz))
-        .route("/health", get(readyz))
-        .route("/metrics", get(metrics))
-        .route(
-            "/api/marketplace-suggest",
-            get(suggest::suggest).options(suggest::options),
-        )
-        .route("/api/marketplace-card-page", get(card_page))
-        .route(
-            "/api/marketplace-search-page",
-            get(search_page::search_page).options(search_page::options),
-        )
-        .route(
-            "/api/marketplace-listings",
-            get(listings_probe).post(listings_write),
-        )
-        .layer(tower::limit::ConcurrencyLimitLayer::new(64))
-        .with_state(state);
+    let app = router(state);
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;
     tracing::info!(
         phase = "bind",
@@ -220,6 +211,7 @@ async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
             "db": db,
             "redis": redis_ok,
             "search": state.config.search_engine,
+            "release": state.config.release,
             "retired": ["meili", "valkey"],
         })),
     )
@@ -241,50 +233,33 @@ async fn metrics(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
-#[derive(Deserialize)]
-struct CardQuery {
-    #[serde(rename = "cardId")]
-    card_id: Option<String>,
-    lang: Option<String>,
+fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/livez", get(livez))
+        .route("/readyz", get(readyz))
+        .route("/health", get(readyz))
+        .route("/metrics", get(metrics))
+        .route(
+            "/api/marketplace-suggest",
+            get(suggest::suggest).options(suggest::options),
+        )
+        .route("/api/marketplace-card-page", get(catalog_api::card_page).options(search_page::options))
+        .route("/api/marketplace-card-tiles", get(catalog_api::card_tiles).options(search_page::options))
+        .route(
+            "/api/marketplace-search-page",
+            get(search_page::search_page).options(search_page::options),
+        )
+        .route(
+            "/api/marketplace-listings",
+            axum::routing::any(native_pending),
+        )
+        .layer(axum::middleware::from_fn_with_state(state.clone(),read_cache::read_cache))
+        .layer(axum::middleware::from_fn(card_identity::guard))
+        .layer(tower::limit::ConcurrencyLimitLayer::new(64))
+        .layer(axum::middleware::from_fn_with_state(state.clone(),request_log::log_request))
+        .with_state(state)
 }
 
-async fn card_page(Query(q): Query<CardQuery>) -> Json<Value> {
-    let card_id = q.card_id.unwrap_or_default();
-    let lang = q.lang.unwrap_or_else(|| "en".into());
-    let key = pokoin_marketplace::card_cache_key("pokemon", &card_id, &lang);
-    Json(json!({
-        "card": { "id": card_id },
-        "lookup": { "cardId": card_id, "lang": lang },
-        "cacheKey": key,
-        "source": "rust-miss",
-    }))
-}
-
-async fn listings_probe() -> Json<Value> {
-    Json(json!({ "listings": [], "source": "rust" }))
-}
-
-async fn listings_write(headers: HeaderMap) -> (StatusCode, Json<Value>) {
-    if bearer_token(headers.get("authorization").and_then(|v| v.to_str().ok())).is_err() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "bearer token required" })),
-        );
-    }
-    let _sql = DECREMENT_SQL;
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({ "error": "Quantity must be a positive integer." })),
-    )
-}
-
-impl AppState {
-    fn count_request(&self) {
-        self.requests.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
-#[allow(dead_code)]
-fn _outcome() -> u16 {
-    DecrementOutcome::Invalid.http_status()
+async fn native_pending() -> (StatusCode, Json<Value>) {
+    (StatusCode::NOT_IMPLEMENTED, Json(json!({"error": "Native implementation is being migrated."})))
 }

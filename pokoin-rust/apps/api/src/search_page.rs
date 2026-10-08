@@ -2,14 +2,13 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use axum::extract::State;
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use pokoin_search::{
-    clean_print_language, clean_text, page_body, print_matches, rank_rows, react_card,
+    clean_print_language, clean_text, page_body, rank_rows,
     redis_search_query, SearchRow,
 };
 use serde_json::json;
-use sqlx::FromRow;
 
 use crate::suggest::{cors, game_from};
 use crate::AppState;
@@ -23,7 +22,7 @@ pub async fn search_page(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Response {
-    state.count_request();
+
     let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("");
     let query_string = path.split_once('?').map(|(_, q)| q).unwrap_or("");
     let params: Vec<(String, String)> =
@@ -54,25 +53,19 @@ pub async fn search_page(
             .or_else(|| param("printLanguage"))
             .unwrap_or("all"),
     );
-    let delegate = game != "pokemon"
-        || product_search_only
-        || product_type == "jumbo"
-        || query.is_empty()
-        || include_facets
-        || state.config.search_engine != "redis"
-        || state.db.read().await.is_none()
-        || state.redis.read().await.is_none();
-    if delegate {
-        return proxy_node(&state, &uri).await;
+    let Some(pool)=crate::catalog_api::game_pool(&state,&game).await else {
+        return crate::catalog_api::response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")
+    };
+    if game!="pokemon" || product_search_only || product_type=="jumbo" || query.is_empty() {
+        return sql_search_page(&pool,&query,&game,&product_type,product_search_only,&lang,limit,offset,include_facets).await
     }
     let started = Instant::now();
-    let fetch_limit = (limit + 1).clamp(1, 100);
-    let found = match redis_candidates(&state, &query, &print_language, fetch_limit, offset).await {
+    let fetch_limit = (limit + 1).clamp(1, 101);
+    let found = match filtered_candidates(&state,&pool,&query,&print_language,&product_type,fetch_limit,offset).await {
         Ok(found) => found,
         Err(error) => {
             tracing::error!(%error, "redis search page failed");
-            state.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            return proxy_node(&state, &uri).await;
+            return crate::catalog_api::response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace search temporarily unavailable."}),"no-store");
         }
     };
     state.meili_ms.fetch_add(
@@ -80,14 +73,10 @@ pub async fn search_page(
         std::sync::atomic::Ordering::Relaxed,
     );
     let sql_started = Instant::now();
-    let mut rows = match hydrate(&state, &found.hits).await {
-        Ok(rows) => rows,
-        Err(error) => {
-            tracing::error!(%error, "search page hydrate failed");
-            state.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            return proxy_node(&state, &uri).await;
-        }
-    };
+    let ids=found.hits.iter().map(|h|h.card_id).collect::<Vec<_>>();
+    let raw=match crate::catalog_api::cards(&pool,&ids,&game).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
+    let raw_map:HashMap<i64,serde_json::Value>=raw.into_iter().filter_map(|r|Some((crate::catalog_api::positive_id(&pokoin_catalog::card::text(&r,&["card_id"]))?,r))).collect();
+    let mut rows=found.hits.iter().enumerate().filter_map(|(index,hit)|raw_map.get(&hit.card_id).map(|r|rank_record(r,hit.weight,index))).collect::<Vec<_>>();
     state.sql_ms.fetch_add(
         sql_started.elapsed().as_millis() as u64,
         std::sync::atomic::Ordering::Relaxed,
@@ -95,16 +84,11 @@ pub async fn search_page(
     if !product_type.is_empty() {
         rows.retain(|row| row.product_type == product_type);
     }
-    if print_language != "all" {
-        rows.retain(|row| print_matches(&print_language, &row.nationality));
-    }
     rank_rows(&mut rows, &query);
     let fetched = rows.len();
-    let cards = rows
-        .into_iter()
-        .take(limit as usize)
-        .map(|row| react_card(&row))
-        .collect::<Vec<_>>();
+    let mut page_rows=rows.into_iter().take(limit as usize).filter_map(|row|raw_map.get(&row.card_id).cloned()).collect::<Vec<_>>();
+    if let Err(error)=crate::catalog_api::localize(&pool,&mut page_rows,&lang,&game).await {return crate::catalog_api::failure(&error)}
+    let cards=page_rows.iter().map(pokoin_catalog::react_record).collect::<Vec<_>>();
     let mut body = page_body(
         &query,
         &game,
@@ -113,9 +97,12 @@ pub async fn search_page(
         &lang,
         limit,
         offset,
-        Some(found.total),
+        found.total,
         cards,
     );
+    if include_facets {
+        match facets(&pool,&query,&lang).await {Ok(products)=>body["facets"]["products"]=serde_json::json!(products),Err(e)=>return crate::catalog_api::failure(&e)}
+    }
     if let Some(flag) = body.get_mut("hasMore") {
         *flag = serde_json::json!(fetched as i64 > limit);
     }
@@ -138,7 +125,7 @@ pub async fn search_page(
 
 struct Found {
     hits: Vec<Hit>,
-    total: i64,
+    total: Option<i64>,
 }
 
 struct Hit {
@@ -161,14 +148,14 @@ async fn redis_candidates(
     };
     let text = redis_search_query(query, print_language);
     if text.is_empty() {
-        return Ok(Found { hits: Vec::new(), total: 0 });
+        return Ok(Found { hits: Vec::new(), total: Some(0) });
     }
     let reply: redis::Value = redis::cmd("FT.SEARCH")
         .arg(&state.config.redis_index)
         .arg(text)
         .arg("LIMIT")
         .arg(offset.max(0))
-        .arg(limit.clamp(1, 100))
+        .arg(limit.clamp(1, 1000))
         .arg("RETURN")
         .arg(3)
         .arg("card_id")
@@ -200,144 +187,40 @@ async fn redis_candidates(
         }
         index += 2;
     }
-    Ok(Found { hits, total })
+    Ok(Found { hits, total:Some(total) })
 }
 
-#[derive(FromRow)]
-struct DbCard {
-    card_id: i64,
-    ct_id: Option<i64>,
-    name: Option<String>,
-    set_name: Option<String>,
-    card_number: Option<String>,
-    rarity: Option<String>,
-    item_kind: Option<String>,
-    product_type: Option<String>,
-    image_url: Option<String>,
-    cdn_image_url: Option<String>,
-    preview_image_url: Option<String>,
-    homepage_image_url: Option<String>,
-    artist: Option<String>,
-    illustrator: Option<String>,
-    nationality: Option<String>,
-    product_variant: Option<String>,
-    emoji: Option<String>,
-    price: Option<f64>,
-    stock: Option<i64>,
-    eligible_count: Option<i64>,
-    provider: Option<String>,
+// Product constraints apply before pagination. The current Redis schema has
+// no product TAG, so filter narrow candidate-id batches in SQL, then page.
+async fn filtered_candidates(state:&AppState,pool:&sqlx::PgPool,query:&str,print_language:&str,product:&str,limit:i64,offset:i64)->Result<Found,redis::RedisError>{
+ if product.is_empty(){return redis_candidates(state,query,print_language,limit,offset).await}
+ let mut accepted=Vec::new();let mut next=0;let started=Instant::now();let mut complete=false;
+ loop {
+  let batch=redis_candidates(state,query,print_language,512,next).await?;
+  let ids=batch.hits.iter().map(|h|h.card_id).collect::<Vec<_>>();
+  let allowed=sqlx::query_scalar::<_,i64>("select card_id from public.marketplace_search_candidates where card_id=any($1::bigint[]) and product_type=$2").bind(&ids).bind(product).fetch_all(pool).await.map_err(|_|redis::RedisError::from((redis::ErrorKind::IoError,"product filter database query failed")))?;
+  let allowed:std::collections::HashSet<_>=allowed.into_iter().collect();
+  next+=ids.len() as i64;
+  accepted.extend(batch.hits.into_iter().filter(|h|allowed.contains(&h.card_id)));
+  if ids.is_empty() || next>=batch.total.unwrap_or(next){complete=true;break}
+  if accepted.len() as i64 >= offset+limit{break}
+  if started.elapsed()>std::time::Duration::from_secs(4){return Err(redis::RedisError::from((redis::ErrorKind::IoError,"product filter exceeded its request deadline")))}
+ }
+ let total=if complete{Some(accepted.len() as i64)}else{None};
+ Ok(Found{hits:accepted.into_iter().skip(offset.max(0) as usize).take(limit as usize).collect(),total})
 }
 
-async fn hydrate(state: &AppState, hits: &[Hit]) -> Result<Vec<SearchRow>, sqlx::Error> {
-    let Some(pool) = state.db.read().await.clone() else {
-        return Ok(Vec::new());
-    };
-    if hits.is_empty() {
-        return Ok(Vec::new());
-    }
-    let ids: Vec<i64> = hits.iter().map(|hit| hit.card_id).collect();
-    let weights: HashMap<i64, f64> = hits.iter().map(|hit| (hit.card_id, hit.weight)).collect();
-    let redis_order: HashMap<i64, usize> = hits
-        .iter()
-        .enumerate()
-        .map(|(index, hit)| (hit.card_id, index))
-        .collect();
-    let loaded = sqlx::query_as::<_, DbCard>(
-        r#"
-        select
-          c.card_id,
-          c.ct_id,
-          c.name,
-          c.set_name,
-          c.card_number,
-          c.rarity,
-          c.item_kind,
-          c.product_type,
-          c.image_url,
-          c.cdn_image_url,
-          c.preview_image_url,
-          c.homepage_image_url,
-          c.artist,
-          c.illustrator,
-          (
-            select e.nationality
-            from public.pokoin_pokemon_expansions e
-            where e.name = c.set_name
-               or e.normalized_name = public.marketplace_search_normalize(c.set_name)
-            order by case when e.name = c.set_name then 0 else 1 end
-            limit 1
-          ) as nationality,
-          c.product_variant,
-          c.emoji,
-          cache.cheapest_price_pkn::float8 as price,
-          coalesce(cache.eligible_quantity, cache.eligible_listing_count, 0)::int8 as stock,
-          case
-            when cache.provider = 'cardtrader' then coalesce(cache.eligible_listing_count, 0)
-            else 0
-          end::int8 as eligible_count,
-          cache.provider
-        from public.marketplace_search_candidates c
-        left join lateral (
-          select
-            cache.cheapest_price_pkn,
-            cache.eligible_quantity,
-            cache.eligible_listing_count,
-            cache.provider
-          from public.cheapest_homepage_cache_blueprint cache
-          where cache.provider in ('cardtrader', 'pokoin_native')
-            and cache.eligible_listing_count > 0
-            and cache.cheapest_price_pkn is not null
-            and (
-              cache.blueprint_id = c.ct_id
-              or cache.pokoin_card_id = c.card_id::text
-            )
-          order by case when cache.provider = 'cardtrader' then 0 else 1 end,
-            cache.cheapest_price_pkn
-          limit 1
-        ) cache on true
-        where c.card_id = any($1::bigint[])
-        "#,
-    )
-    .bind(&ids)
-    .fetch_all(&pool)
-    .await?;
-    Ok(loaded
-        .into_iter()
-        .map(|row| {
-            let fallback = weights.get(&row.card_id).copied().unwrap_or(0.0);
-            let order = redis_order.get(&row.card_id).copied().unwrap_or(usize::MAX);
-            let provider = row.provider.unwrap_or_default();
-            SearchRow {
-                card_id: row.card_id,
-                ct_id: row.ct_id,
-                name: row.name.unwrap_or_default(),
-                set_name: row.set_name.unwrap_or_default(),
-                card_number: row.card_number.unwrap_or_default(),
-                rarity: row.rarity.unwrap_or_default(),
-                item_kind: row.item_kind.unwrap_or_else(|| "single".into()),
-                product_type: row.product_type.unwrap_or_else(|| "card".into()),
-                image_url: row.image_url.unwrap_or_default(),
-                cdn_image_url: row.cdn_image_url.unwrap_or_default(),
-                preview_image_url: row.preview_image_url.unwrap_or_default(),
-                homepage_image_url: row.homepage_image_url.unwrap_or_default(),
-                artist: row.artist.unwrap_or_default(),
-                illustrator: row.illustrator.unwrap_or_default(),
-                nationality: row.nationality.unwrap_or_default(),
-                product_variant: row.product_variant.unwrap_or_default(),
-                emoji: row.emoji.unwrap_or_default(),
-                search_weight: fallback,
-                redis_order: order,
-                price: row.price,
-                stock: row.stock.unwrap_or(0),
-                has_cardtrader: provider == "cardtrader" && row.eligible_count.unwrap_or(0) > 0,
-                eligible_count: if provider == "cardtrader" {
-                    row.eligible_count.unwrap_or(0)
-                } else {
-                    0
-                },
-            }
-        })
-        .collect())
+fn rank_record(row:&serde_json::Value,weight:f64,order:usize)->SearchRow {
+ use pokoin_catalog::card::{text,number};
+ SearchRow{
+  card_id:number(row,&["card_id"]) as i64,ct_id:Some(number(row,&["ct_id"]) as i64).filter(|i|*i>0),
+  name:text(row,&["name"]),set_name:text(row,&["set_name"]),card_number:text(row,&["card_number"]),rarity:text(row,&["rarity"]),
+  item_kind:text(row,&["item_kind"]),product_type:text(row,&["product_type"]),image_url:text(row,&["image_url"]),cdn_image_url:text(row,&["cdn_image_url"]),
+  preview_image_url:text(row,&["preview_image_url"]),homepage_image_url:text(row,&["homepage_image_url"]),
+  artist:text(row,&["artist"]),illustrator:text(row,&["illustrator"]),nationality:text(row,&["nationality"]),product_variant:text(row,&["product_variant"]),emoji:text(row,&["emoji"]),
+  search_weight:weight,redis_order:order,price:Some(number(row,&["lowest_price_pkn"])).filter(|p|*p>0.),stock:number(row,&["listed_quantity"]) as i64,
+  has_cardtrader:row["has_cardtrader_listing"].as_bool().unwrap_or(false),eligible_count:number(row,&["cardtrader_eligible_listing_count"]) as i64
+ }
 }
 
 fn parse_limit(value: Option<&str>, fallback: i64, max: i64) -> i64 {
@@ -366,36 +249,6 @@ fn parse_offset(value: Option<&str>) -> i64 {
     (offset.trunc() as i64).min(10_000)
 }
 
-async fn proxy_node(state: &AppState, uri: &axum::http::Uri) -> Response {
-    let url = format!(
-        "{}{}",
-        state.config.node_origin.trim_end_matches('/'),
-        uri.path_and_query().map(|v| v.as_str()).unwrap_or("/")
-    );
-    match state.http.get(&url).send().await {
-        Ok(response) => {
-            let status =
-                StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let cache = response
-                .headers()
-                .get(header::CACHE_CONTROL)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_string();
-            let bytes = response.bytes().await.unwrap_or_default();
-            cors(status, Some(cache), Some("application/json; charset=utf-8"), bytes)
-                .into_response()
-        }
-        Err(error) => {
-            tracing::error!(%error, "search page node fallback failed");
-            json_response(
-                StatusCode::BAD_GATEWAY,
-                &json!({ "error": "Marketplace search page failed." }),
-                "",
-            )
-        }
-    }
-}
 
 fn json_response(status: StatusCode, body: &serde_json::Value, cache: &str) -> Response {
     cors(
@@ -437,4 +290,74 @@ fn redis_pairs(value: &redis::Value) -> HashMap<String, String> {
         index += 2;
     }
     out
+}
+
+pub(crate) async fn sql_search_page(pool:&sqlx::PgPool,query:&str,game:&str,product_type:&str,product_only:bool,lang:&str,limit:i64,offset:i64,include_facets:bool)->Response {
+ let phrase=query.trim().to_lowercase();
+ let like=format!("%{phrase}%");
+ let pokemon=game=="pokemon";
+ let sql=if pokemon {
+ r#"select c.card_id from public.marketplace_search_candidates c
+ where coalesce(c.cdn_image_url,c.preview_image_url,c.image_url) is not null
+ and ($1='' or c.search_text ilike $2 or word_similarity($1,coalesce(c.set_name,''))>0.4 or word_similarity($1,coalesce(c.name,''))>0.4)
+ and ($3='' or c.product_type=$3)
+ and (not $4 or c.item_kind='product' or c.product_type='jumbo')
+ order by case when lower(c.name)=$1 then 0 when lower(c.set_name)=$1 then 1 when lower(c.name) like $2 then 2 when lower(c.set_name) like $2 then 3 else 4 end,
+ c.search_weight desc,c.card_id desc limit $5 offset $6"#
+ } else {
+ r#"select c.card_id from public.marketplace_search_candidates c
+ where coalesce(c.cdn_image_url,c.preview_image_url,c.image_url) is not null
+ and ($1='' or c.search_text like $2 or word_similarity($1,coalesce(c.set_name,''))>0.4 or word_similarity($1,coalesce(c.name,''))>0.4)
+ and ($3='' or c.product_type=$3)
+ and (not $4 or c.item_kind='product' or c.product_type='jumbo')
+ and ($1<>'' or $3<>'' or $4 or (c.item_kind='single' and c.product_type='card'))
+ order by case when lower(c.name)=$1 then 0 when lower(c.set_name)=$1 then 1 when lower(c.name) like $2 then 2 when lower(c.set_name) like $2 then 3 when word_similarity($1,coalesce(c.set_name,''))>0.4 then 4 when word_similarity($1,coalesce(c.name,''))>0.4 then 5 else 6 end,
+ case when not $4 and $3<>'sealed' and c.item_kind='single' then 0 else 1 end,c.search_weight desc,c.imported_at desc nulls last,c.card_id desc limit $5 offset $6"#
+ };
+ let ids=match sqlx::query_scalar::<_,i64>(sql).bind(&phrase).bind(like).bind(product_type).bind(product_only).bind(limit+1).bind(offset).fetch_all(pool).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
+ let has_more=ids.len()>limit as usize;
+ let mut raw=match crate::catalog_api::cards(pool,&ids[..ids.len().min(limit as usize)],game).await {Ok(r)=>r,Err(e)=>return crate::catalog_api::failure(&e)};
+ if let Err(e)=crate::catalog_api::localize(pool,&mut raw,lang,game).await{return crate::catalog_api::failure(&e)}
+ let cards=raw.iter().map(pokoin_catalog::react_record).collect::<Vec<_>>();
+ let mut body=page_body(query,game,product_type,product_only,lang,limit,offset,None,cards);
+ body["hasMore"]=json!(has_more);
+ if include_facets && pokemon {
+  match facets(pool,query,lang).await {Ok(r)=>body["facets"]["products"]=json!(r),Err(e)=>return crate::catalog_api::failure(&e)}
+ }
+ json_response(StatusCode::OK,&body,"public, max-age=15, s-maxage=60, stale-while-revalidate=120")
+}
+fn facet_terms(query:&str)->Vec<String>{
+ query.chars().take(120).collect::<String>().to_lowercase().split(|c:char|!c.is_ascii_alphanumeric())
+ .filter(|s|!s.is_empty() && (s.len()>=2 || s.chars().all(|c|c.is_ascii_digit())))
+ .map(|s|format!("%{s}%")).collect()
+}
+async fn facets(pool:&sqlx::PgPool,query:&str,lang:&str)->Result<Vec<serde_json::Value>,sqlx::Error>{
+ let terms=facet_terms(query);
+ let fields=["name","set_name","trainer_name","card_type","rarity","card_number","product_variant"];
+ // Bind each term in a fixed OR predicate. A correlated unnest anti-join forced
+ // a full catalog scan and repeated translation scans for every candidate.
+ let clauses=terms.iter().enumerate().map(|(i,_)|{
+  let pattern=2*i+1;let language=2*i+2;
+  let mut tests=fields.iter().map(|f|format!("c.{f} ilike ${pattern}")).collect::<Vec<_>>();
+  tests.push(format!("c.name in (select t.name from public.marketplace_card_name_translations t where t.language=${language} and t.localized_name ilike ${pattern})"));
+  format!("({})",tests.join(" or "))
+ }).collect::<Vec<_>>();
+ let predicate=if clauses.is_empty(){String::new()}else{format!(" and {}",clauses.join(" and "))};
+ let sql=format!(r#"with product_facets as (
+ select case when c.item_kind='product' then coalesce(nullif(c.product_type,''),'sealed_product') else 'card' end product_type,count(*)::bigint count
+ from public.marketplace_search_candidates c
+ where coalesce(c.preview_image_url,c.cdn_image_url,c.image_url) is not null {predicate}
+ group by 1)
+ select product_type,count from product_facets order by case when product_type='card' then 0 when product_type='booster_box' then 10 when product_type='booster_pack' then 20 else 100 end,count desc,product_type asc"#);
+ let mut q=sqlx::query_as::<_,(String,i64)>(&sql);
+ for term in &terms {q=q.bind(term).bind(lang);}
+ let rows=q.fetch_all(pool).await?;
+ Ok(rows.into_iter().map(|(product,count)|json!({"productType":product,"count":count})).collect())
+}
+#[cfg(test)]mod facet_tests{
+ use super::*;
+ #[test]fn catalog_names_and_set_codes_keep_final_s(){
+  assert_eq!(facet_terms("Gyarados HGSS Tauros"),vec!["%gyarados%","%hgss%","%tauros%"]);
+  assert_eq!(facet_terms("Misty's 061"),vec!["%misty%","%061%"]);
+ }
 }

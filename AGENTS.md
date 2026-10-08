@@ -1,3 +1,11 @@
+## Production runtime — Rust only (Giuseppe, 2026-10-08)
+
+- The entire shared Pokoin backend must run as native Rust in production: catalog/search, accounts/auth, collection/inventory, listings, cart, checkout/orders, payments, integrations, jobs, and the HTTP edge/CDN services.
+- Do not introduce, restore, deploy, or retain a Node.js production runtime as the migration's completed state. Do not proxy Rust routes to Node or return placeholder success payloads for unfinished ports.
+- Node.js may be used for local builds, development tools, reference implementations, and isolated tests/benchmarks; it must not serve production requests or production backend jobs after cutover.
+- Complete native implementations and verify contract parity, authentication/authorization, persistence, and end-to-end flows before declaring migration complete. A partial Rust rollout does not satisfy this requirement.
+- Preserve service availability while the migration is being prepared. Production replacement/removal follows the existing explicit push/deploy authorization rule; this requirement is not permission to shut down live services prematurely.
+
 ## Worktree isolation (Paseo) — required, not optional
 
 ### Ownership (do not confuse)

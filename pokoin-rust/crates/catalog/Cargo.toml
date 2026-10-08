@@ -5,3 +5,6 @@ edition.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
+serde_json = { workspace = true }
+pokoin-search = { path = "../search" }
+unicode-segmentation = "1"
