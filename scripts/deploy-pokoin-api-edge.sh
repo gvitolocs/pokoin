@@ -54,8 +54,8 @@ scp -q "$STAGE/pokoin-cors-policy.js" "$PI:$CORS.new"
 scp -q "$STAGE/pokoin-client-ip.js" "$PI:$CLIENT_IP.new"
 ssh "$PI" "set -e
 cp -a $EDGE $EDGE.prev
-cp -a $CORS $CORS.prev
-cp -a $CLIENT_IP $CLIENT_IP.prev
+[ -f $CORS ] && cp -a $CORS $CORS.prev || true
+[ -f $CLIENT_IP ] && cp -a $CLIENT_IP $CLIENT_IP.prev || true
 install -o nes -g nes -m 0644 $EDGE.new $EDGE && rm -f $EDGE.new
 install -o nes -g nes -m 0644 $CORS.new $CORS && rm -f $CORS.new
 install -o nes -g nes -m 0644 $CLIENT_IP.new $CLIENT_IP && rm -f $CLIENT_IP.new
@@ -77,7 +77,7 @@ check() {
 
 if ! check; then
   say "edge not answering — rolling back"
-  ssh "$PI" "cp -a $EDGE.prev $EDGE && cp -a $CORS.prev $CORS && cp -a $CLIENT_IP.prev $CLIENT_IP && systemctl restart pokoin-api-edge.service"
+  ssh "$PI" "cp -a $EDGE.prev $EDGE && { [ -f $CORS.prev ] && cp -a $CORS.prev $CORS || true; } && { [ -f $CLIENT_IP.prev ] && cp -a $CLIENT_IP.prev $CLIENT_IP || true; } && systemctl restart pokoin-api-edge.service"
   die "rolled back to the previous edge"
 fi
 ssh "$PI" "journalctl -u pokoin-api-edge.service -n 1 --no-pager -o cat"
