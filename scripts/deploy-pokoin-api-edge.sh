@@ -32,7 +32,12 @@ git -C "$REPO" show "$COMMIT:scripts/pokoin-api-edge.test.js" >"$STAGE/pokoin-ap
 git -C "$REPO" show "$COMMIT:server/pokoin-api/_cors_policy.js" >"$STAGE/pokoin-cors-policy.js"
 git -C "$REPO" show "$COMMIT:server/pokoin-api/_client_ip.js" >"$STAGE/pokoin-client-ip.js"
 say "edge tests @ ${COMMIT:0:12}"
-node --test "$STAGE/pokoin-api-edge.test.js" | grep -E "^# (pass|fail)"
+# The tests import the shared policy modules from the repo layout.
+mkdir -p "$STAGE/repo"
+git -C "$REPO" archive "$COMMIT" scripts/pokoin-api-edge.js scripts/pokoin-api-edge.test.js \
+  server/pokoin-api/_cors_policy.js server/pokoin-api/_client_ip.js server/pokoin-api/_cardtrader_game_ingest.js \
+  | tar -C "$STAGE/repo" -xf -
+(cd "$STAGE/repo" && node --test scripts/pokoin-api-edge.test.js) | grep -E "^# (pass|fail)"
 node --check "$STAGE/pokoin-api-edge.js"
 node --check "$STAGE/pokoin-cors-policy.js"
 node --check "$STAGE/pokoin-client-ip.js"
