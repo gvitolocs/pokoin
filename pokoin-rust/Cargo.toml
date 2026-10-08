@@ -19,6 +19,7 @@ members = [
   "crates/external",
   "crates/catalog-routes",
   "crates/assistant-api",
+  "crates/edge",
   "crates/admin-api",
   "crates/search-api",
   "crates/catalog-api",

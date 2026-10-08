@@ -8,6 +8,7 @@ name = "pokoin-api"
 path = "src/main.rs"
 
 [dependencies]
+pokoin-edge = { path = "../../crates/edge" }
 pokoin-assistant-api = { path = "../../crates/assistant-api" }
 pokoin-admin-api = { path = "../../crates/admin-api" }
 pokoin-search-api = { path = "../../crates/search-api" }
