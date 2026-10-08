@@ -31,7 +31,6 @@ CART_FILES=(
   _seller_profile_cache.js
   _rate_limit.js
   _redis_cache.js
-  _valkey.js
 )
 
 git -C "$REPO" fetch -q origin || die "git fetch origin failed"
@@ -62,7 +61,7 @@ ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-cart-co
 # routes to the NEW release (a copy of the previous current).
 scp -q "$SRC/route-definitions.json" pi-home:/tmp/cart-routes.json
 scp -q "$SRC/patch-route-manifest.js" pi-home:/tmp/cart-patch-route-manifest.js
-ssh pi-home "node /tmp/cart-patch-route-manifest.js /srv/pokoin/api/$release/server/api-route-manifest.js /tmp/cart-routes.json && rm -f /tmp/cart-patch-route-manifest.js /tmp/cart-routes.json"
+ssh pi-home "node /tmp/cart-patch-route-manifest.js /srv/pokoin/api/$release/server/api-route-manifest.js /tmp/cart-routes.json --api-dir=/srv/pokoin/api/$release/api && rm -f /tmp/cart-patch-route-manifest.js /tmp/cart-routes.json"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
 say "verify health, cart auth guard, preflight, anonymous recommendations"
@@ -73,7 +72,9 @@ for _ in $(seq 1 45); do
   preflight="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -X OPTIONS http://127.0.0.1:18080/api/marketplace-cart-sync" || true)"
   recs="$(ssh pi-home "curl -s -o /tmp/cart-recs.json -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-recommendations?limit=6'" || true)"
   rails="$(ssh pi-home "node -e 'const b=JSON.parse(require(\"fs\").readFileSync(\"/tmp/cart-recs.json\",\"utf8\"));console.log(Array.isArray(b.rails)?b.rails.length:-1)' 2>/dev/null" || echo -1)"
-  if [[ "$health" == "200" && "$noauth" =~ ^(401|403)$ && "$preflight" == "204" && "$recs" == "200" && "$rails" -ge 1 ]]; then
+  # A broken route manifest 500s on unknown paths instead of 404.
+  unknown="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/route-manifest-healthcheck" || true)"
+  if [[ "$health" == "200" && "$noauth" =~ ^(401|403)$ && "$preflight" == "204" && "$recs" == "200" && "$rails" -ge 1 && "$unknown" == "404" ]]; then
     healthy=1
     break
   fi
@@ -82,7 +83,7 @@ done
 ssh pi-home "rm -f /tmp/cart-recs.json" || true
 
 if [[ "$healthy" != "1" ]]; then
-  echo "verification failed (health=$health cart-noauth=$noauth preflight=$preflight recs=$recs rails=$rails) — rolling back" >&2
+  echo "verification failed (health=$health cart-noauth=$noauth preflight=$preflight recs=$recs rails=$rails unknown=${unknown:-}) — rolling back" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .cart-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "Pi API verification failed; previous release restored"
 fi

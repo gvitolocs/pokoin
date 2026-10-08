@@ -48,10 +48,10 @@ test('card-page cache keeps only the newest CARD_PAGE_STORE_CAP pages in localSt
   for (let i = 1; i <= CARD_PAGE_STORE_CAP + 25; i += 1) {
     rememberStoredCardPage(String(i), cardPage(i, 1_000_000 + i));
   }
-  const kept = storage.keys().filter((key) => key.startsWith('pokoin.cardPage.v1.'));
+  const kept = storage.keys().filter((key) => key.startsWith('pokoin.cardPage.v2.'));
   assert.equal(kept.length, CARD_PAGE_STORE_CAP);
-  assert.ok(kept.includes(`pokoin.cardPage.v1.en:${CARD_PAGE_STORE_CAP + 25}`));
-  assert.ok(!kept.includes('pokoin.cardPage.v1.en:1'));
+  assert.ok(kept.includes(`pokoin.cardPage.v2.pokemon:en:${CARD_PAGE_STORE_CAP + 25}`));
+  assert.ok(!kept.includes('pokoin.cardPage.v2.pokemon:en:1'));
   assert.equal(pruneStoredCardPages(0), CARD_PAGE_STORE_CAP);
 });
 
@@ -70,13 +70,13 @@ test('a full localStorage clears card-page caches, and never snaps the Desktop b
   globalThis.localStorage = storage;
   clearDesktopHold();
   for (let i = 1; i <= 30; i += 1) {
-    storage.setItem(`pokoin.cardPage.v1.en:${i}`, JSON.stringify(cardPage(i, i, 1800)));
+    storage.setItem(`pokoin.cardPage.v2.pokemon:en:${i}`, JSON.stringify(cardPage(i, i, 1800)));
   }
   // Fits only once the stale card pages are dropped.
   addDesktopCards(Array.from({ length: 60 }, (_, i) => ({ id: String(i + 1), name: `Card ${i}` })));
   assert.equal(readDesktopHold().length, 60);
   assert.equal(desktopHoldMemoryOnly(), false);
-  assert.equal(storage.keys().filter((key) => key.startsWith('pokoin.cardPage.v1.')).length, 0);
+  assert.equal(storage.keys().filter((key) => key.startsWith('pokoin.cardPage.v2.')).length, 0);
   // Far past the quota: kept in memory for this tab instead of reading back [].
   addDesktopCards(Array.from({ length: 2000 }, (_, i) => ({ id: String(5000 + i), name: `Card ${i}` })));
   assert.equal(desktopHoldMemoryOnly(), true);

@@ -31,7 +31,6 @@ CT_FILES=(
   _cardtrader_inventory_sync.js
   _cardtrader_inventory_async.js
   _redis_cache.js
-  _valkey.js
   _seller_profile_cache.js
   _cardtrader_webhook_core.js
   _cardtrader_webhook_registration.js
@@ -112,7 +111,8 @@ tar -C "$SRC" -cf - \
 
 ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' \
   '/srv/pokoin/api/$release/server/api-route-manifest.js' \
-  '/srv/pokoin/api/$release/api/route-definitions.json'; \
+  '/srv/pokoin/api/$release/api/route-definitions.json' \
+  '--api-dir=/srv/pokoin/api/$release/api' && \
   rm -f '/srv/pokoin/api/$release/api/patch-route-manifest.js' \
         '/srv/pokoin/api/$release/api/route-definitions.json' \
         '/srv/pokoin/api/$release/api/'*.test.js"
@@ -121,7 +121,7 @@ ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf 
 
 say "verify health + CardTrader routes + shared marketplace listings"
 healthy=0
-health=""; status=""; sync=""; assets=""; history=""; webhook=""; zero=""; ptconnect=""
+health=""; status=""; sync=""; assets=""; history=""; webhook=""; zero=""; ptconnect=""; unknown=""
 for _ in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
   listings="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-listings?cardId=633380&limit=5'" || true)"
@@ -132,8 +132,10 @@ for _ in $(seq 1 45); do
   webhook="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18080/api/cardtrader-webhook/test-uid" || true)"
   zero="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/cardtrader-zero" || true)"
   ptconnect="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/powertools-connect" || true)"
+  # A broken route manifest 500s on unknown paths instead of 404.
+  unknown="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/route-manifest-healthcheck" || true)"
   # status/sync/assets/history/zero/powertools-connect require auth → 401/403; webhook missing secret → 401/404/400; health 200
-  if [[ "$health" == "200" && "$listings" == "200" && "$status" =~ ^(401|403)$ && "$sync" =~ ^(401|403)$ && "$assets" =~ ^(401|403)$ && "$history" =~ ^(401|403)$ && "$webhook" =~ ^(400|401|404)$ && "$zero" =~ ^(401|403)$ && "$ptconnect" =~ ^(401|403)$ ]]; then
+  if [[ "$health" == "200" && "$listings" == "200" && "$status" =~ ^(401|403)$ && "$sync" =~ ^(401|403)$ && "$assets" =~ ^(401|403)$ && "$history" =~ ^(401|403)$ && "$webhook" =~ ^(400|401|404)$ && "$zero" =~ ^(401|403)$ && "$ptconnect" =~ ^(401|403)$ && "$unknown" == "404" ]]; then
     healthy=1
     break
   fi
@@ -141,7 +143,7 @@ for _ in $(seq 1 45); do
 done
 
 if [[ "$healthy" != "1" ]]; then
-  echo "health failed (health=$health status=$status sync=$sync assets=$assets history=$history webhook=$webhook zero=$zero powertools-connect=$ptconnect) — rolling back" >&2
+  echo "health failed (health=$health status=$status sync=$sync assets=$assets history=$history webhook=$webhook zero=$zero powertools-connect=$ptconnect unknown=${unknown:-}) — rolling back" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .cardtrader-sync-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "Pi API verification failed; previous release restored"
 fi

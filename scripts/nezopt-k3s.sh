@@ -75,7 +75,9 @@ sync_secret() {
   ssh "$PI" "docker inspect pokoin-oracle-api" | python3 -c '
 import base64, json, sys
 env = json.load(sys.stdin)[0]["Config"]["Env"]
-skip = {"PATH", "NODE_VERSION", "YARN_VERSION", "PORT", "HOSTNAME", "HOME"}
+# NODE_TLS_REJECT_UNAUTHORIZED=0 would switch off certificate checks for every
+# outbound TLS call in the pods; nothing needs it (every pg client sets its own ssl).
+skip = {"PATH", "NODE_VERSION", "YARN_VERSION", "PORT", "HOSTNAME", "HOME", "NODE_TLS_REJECT_UNAUTHORIZED"}
 data = {}
 for row in env:
     key, _, value = row.partition("=")

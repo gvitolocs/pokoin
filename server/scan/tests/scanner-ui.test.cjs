@@ -6,10 +6,14 @@ const {test} = require('node:test');
 const html = fs.readFileSync(process.argv[2] || path.join(__dirname, '..', 'web', 'index.html'), 'utf8');
 const source = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
-function scanner() {
-  const draws = [], navigations = [], requests = [], timers = [];
-  const ctx = {clearRect(){}, strokeRect(){}, drawImage(...args){draws.push(args);}};
+function scanner(options={}) {
+  const draws = [], navigations = [], requests = [], timers = [], rects = [], paths = [], rotates = [], blobs = [];
+  const ctx = {clearRect(){}, strokeRect(...args){rects.push(args);}, drawImage(...args){draws.push(args);},
+    save(){}, restore(){}, translate(){}, rotate(...args){rotates.push(args);},
+    beginPath(){}, moveTo(...args){paths.push(['M', ...args]);}, lineTo(...args){paths.push(['L', ...args]);},
+    closePath(){}, stroke(){}, fillRect(){}};
   const elements = new Map();
+  const listeners = new Map();
   function node(id='') {
     const classes=new Set();
     return { hidden:id==='shot', clientWidth:390,clientHeight:680,videoWidth:1280,videoHeight:720,
@@ -17,7 +21,7 @@ function scanner() {
       classList:{add:k=>classes.add(k),remove:k=>classes.delete(k),contains:k=>classes.has(k),toggle(k,on){if(on)classes.add(k);else classes.delete(k)}},
       setAttribute(k,v){this.attributes[k]=v},getAttribute(k){return this.attributes[k]},removeAttribute(k){delete this.attributes[k]},
       append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},addEventListener(){},
-      getContext(){return ctx},toBlob(callback){callback({width:this.width,height:this.height})},
+      getContext(){return ctx},toBlob(callback){const size={width:this.width,height:this.height};blobs.push(size);callback(size);},
     };
   }
   function element(id) {
@@ -30,8 +34,9 @@ function scanner() {
     navigator: {mediaDevices:{getUserMedia: async constraints => {
       requests.push(constraints.video); return {getVideoTracks:()=>[track],getTracks:()=>[track]};
     }}},
-    window: {addEventListener(){}}, screen:{}, devicePixelRatio:1,
-    location:{hostname:'scan.pokoin.com',href:'https://scan.pokoin.com/',assign:url=>navigations.push(url)},
+    window: {addEventListener(type,fn,options){const list=listeners.get(type)||[];list.push({fn,once:!!(options&&options.once)});listeners.set(type,list);}},
+    screen:{}, devicePixelRatio:1,
+    location:{hostname:'scan.pokoin.com',href:options.href||'https://scan.pokoin.com/',assign:url=>navigations.push(url)},
     performance:{now:()=>0}, requestAnimationFrame:()=>1,
     setTimeout:callback=>{timers.push(callback); return timers.length;}, clearTimeout(){},
     AbortController, AbortSignal,
@@ -42,7 +47,14 @@ function scanner() {
   };
   const context = vm.createContext(sandbox);
   vm.runInContext(source,context);
-  return {run:code=>vm.runInContext(code,context),sandbox,elements,element,draws,navigations,requests,timers};
+  const dispatch=(type,event={})=>{
+    const list=listeners.get(type)||[];
+    for(const entry of list.slice()){
+      if(entry.once){const index=list.indexOf(entry);if(index>=0)list.splice(index,1);}
+      entry.fn(event);
+    }
+  };
+  return {run:code=>vm.runInContext(code,context),sandbox,elements,element,draws,navigations,requests,timers,rects,paths,rotates,blobs,listeners,dispatch};
 }
 
 // Card links open the full path; numeric pokoin.com/{id} short links 404 on the static host.
@@ -294,4 +306,82 @@ test('the Open in Chrome hop survives pairing and is removed only when the camer
  assert.match(html,/getElementById\("scOpenBrowser"\)/,'startCam removes the hop on stream success');
  assert.match(html,/id="startCameraTap"/,'the Start camera tap ships in the dock');
  assert.match(html,/Tap to start the camera\./);
+});
+
+// Device-orientation uprighting: the phone rolls, the YOLO box is axis-aligned
+// in a rotated upload, so the phone un-rotates the frame and the overlay polygon.
+test('uprightRoll reads world up in screen axes and returns nothing for a flat phone',()=>{
+  const s=scanner();
+  const upright=s.run('uprightRoll(90,0,0)');
+  assert.ok(Math.abs(upright.roll)<1e-9);assert.ok(Math.abs(upright.strength-1)<1e-9);
+  assert.equal(s.run('uprightRoll(0,0,0)'),null,'a flat phone says nothing about card rotation');
+  const landscape=s.run('uprightRoll(0,-90,90)');
+  assert.ok(Math.abs(landscape.roll)<1e-6);assert.ok(Math.abs(landscape.strength-1)<1e-6);
+  const upsideDown=s.run('uprightRoll(90,0,180)');
+  assert.ok(Math.abs(Math.abs(upsideDown.roll)-180)<1e-6);
+  assert.equal(s.run('uprightRoll(NaN,0,0)'),null);
+  assert.equal(s.run('uprightRoll(0,undefined,0)'),null);
+});
+test('tilt=off pins the roll to zero while an upright phone reports its tilt',()=>{
+  const off=scanner({href:'https://scan.pokoin.com/?tilt=off'});
+  off.dispatch('deviceorientation',{beta:70,gamma:-90});
+  assert.equal(off.run('currentRoll()'),0);
+  const on=scanner();
+  on.dispatch('deviceorientation',{beta:70,gamma:-90});
+  assert.ok(Math.abs(on.run('currentRoll()')-20)<0.5,'a 20 degree phone tilt becomes a 20 degree roll');
+});
+test('a rolled live tick uploads the rotated bounding box and rotates the canvas by -roll',async()=>{
+  const s=scanner();await turn();
+  s.dispatch('deviceorientation',{beta:70,gamma:-90});
+  assert.ok(Math.abs(s.run('currentRoll()')-20)<0.5);
+  await s.run('tick()');
+  const rotated=s.blobs.at(-1);
+  assert.equal(rotated.width,1087);assert.equal(rotated.height,836);
+  assert.equal(s.rotates.length,1);
+  assert.ok(Math.abs(s.rotates[0][0]-(-20*Math.PI/180))<1e-6);
+});
+test('a nearly upright frame stays on the plain full-frame upload',async()=>{
+  const s=scanner();await turn();
+  s.dispatch('deviceorientation',{beta:89,gamma:-90});
+  await s.run('tick()');
+  assert.deepEqual(s.blobs.at(-1),{width:960,height:540});
+  assert.equal(s.rotates.length,0);
+});
+test('a rolled overlay strokes the rotated card polygon instead of an axis-aligned rect',async()=>{
+  const s=scanner();await turn();
+  s.rects.length=0;s.paths.length=0;
+  s.run('drawBoxes([{xyxy:[100,100,300,380]}],1280,720,20,1280,720)');
+  assert.equal(s.rects.length,0,'a rolled box is never an axis-aligned strokeRect');
+  const move=s.paths.filter(p=>p[0]==='M'),line=s.paths.filter(p=>p[0]==='L');
+  assert.equal(move.length,1);assert.equal(line.length,3);
+  const pts=[move[0].slice(1),...line.map(p=>p.slice(1))];
+  const dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+  assert.ok(Math.abs(dist(pts[0],pts[1])-dist(pts[2],pts[3]))<0.5,'opposite long sides stay equal');
+  assert.ok(Math.abs(dist(pts[1],pts[2])-dist(pts[3],pts[0]))<0.5,'opposite short sides stay equal');
+});
+test('a late live response draws with the roll it was captured at, not the current sensor',async()=>{
+  const s=scanner();await turn();
+  s.dispatch('deviceorientation',{beta:70,gamma:-90});
+  let reply;
+  s.sandbox.fetch=()=>new Promise(resolve=>{reply=resolve;});
+  const pending=s.run('identify({}, {live:true, viewVersion:cameraViewVersion, roll:20, frame:{w:1280,h:720}})');
+  for(let i=0;i<20;i+=1)s.dispatch('deviceorientation',{beta:90,gamma:0});
+  assert.equal(s.run('currentRoll()'),0,'the smoothed sensor settles back to upright');
+  s.rects.length=0;s.paths.length=0;
+  reply({ok:true,json:async()=>({catalog:'pokemon_western',img_w:1280,img_h:720,boxes:[{xyxy:[100,100,300,380]}],hits:[],top1:null})});
+  assert.ok(await pending);
+  assert.equal(s.rects.length,0);
+  assert.equal(s.paths.filter(p=>p[0]==='M').length,1);
+  assert.equal(s.paths.filter(p=>p[0]==='L').length,3);
+});
+test('iOS orientation permission is requested once from the first pointerdown, never at load',()=>{
+  const s=scanner();
+  let asked=0;
+  s.sandbox.window.DeviceOrientationEvent=function(){};
+  s.sandbox.window.DeviceOrientationEvent.requestPermission=()=>{asked+=1;return Promise.resolve('granted');};
+  assert.equal(asked,0,'load must not prompt for motion access');
+  s.dispatch('pointerdown',{});
+  assert.equal(asked,1);
+  s.dispatch('pointerdown',{});
+  assert.equal(asked,1,'only the first gesture asks');
 });

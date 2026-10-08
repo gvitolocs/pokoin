@@ -113,27 +113,45 @@ function parseOne(buf) {
 
 function command(parts) {
   return new Promise((resolve, reject) => {
-    const socket = net.connect({ host: HOST, port: PORT });
-    const chunks = [];
-    const timer = setTimeout(() => {
+    // Half-closing with socket.end() makes Node drop the reply: Redis answers
+    // after the client FIN, and the readable side is already ended. Write the
+    // command and read until the RESP value is complete, then destroy.
+    const socket = net.connect({ host: HOST, port: PORT, allowHalfOpen: true });
+    let buf = Buffer.alloc(0);
+    let settled = false;
+    const finish = (fn) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       socket.destroy();
-      reject(new Error('redis search timeout'));
+      fn();
+    };
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error('redis search timeout')));
     }, TIMEOUT_MS);
     socket.on('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
+      finish(() => reject(error));
     });
-    socket.on('data', (chunk) => chunks.push(chunk));
+    // Redis closed before a full reply: fail now instead of waiting for the timeout.
     socket.on('end', () => {
-      clearTimeout(timer);
-      const parsed = parseOne(Buffer.concat(chunks));
-      if (!parsed || parsed.error) {
-        reject(new Error(parsed?.value || 'redis search failed'));
+      finish(() => reject(new Error('redis search failed')));
+    });
+    socket.on('close', () => {
+      finish(() => reject(new Error('redis search failed')));
+    });
+    socket.on('data', (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      const parsed = parseOne(buf);
+      if (!parsed) return;
+      if (parsed.error) {
+        finish(() => reject(new Error(parsed.value || 'redis search failed')));
         return;
       }
-      resolve(parsed.value);
+      finish(() => resolve(parsed.value));
     });
-    socket.on('connect', () => socket.end(encode(parts)));
+    socket.on('connect', () => {
+      socket.write(encode(parts));
+    });
   });
 }
 

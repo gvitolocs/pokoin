@@ -3,7 +3,7 @@
 # The Pi keeps serving api.pokoin.com. When its API has too many requests in
 # flight, pokoin-api-edge sends GET/HEAD requests here (NodePort 30880 on
 # nezopt's LAN address). This namespace runs the same API release as the Pi
-# with its own Meilisearch copy and Valkey, reading the writer Postgres on
+# with its own Meilisearch copy, reading the writer Postgres on
 # nezopt. The HPA keeps one API pod warm and adds pods under CPU load.
 #
 # Secret pokoin-api-env is created by scripts/nezopt-k3s.sh from the Pi
@@ -67,7 +67,7 @@ spec:
     - { port: 7700, targetPort: 7700, name: http }
 ---
 # Shared cache/search Redis lives only on the Pi (:6380). Overflow pods do not
-# run a second Redis/Valkey — cache helpers fail open to Postgres/Firestore.
+# run a second Redis — cache helpers fail open to Postgres/Firestore.
 # The Pi API release (synced to /srv/pokoin-overflow/api/current).
 apiVersion: apps/v1
 kind: Deployment

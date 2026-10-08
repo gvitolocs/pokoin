@@ -103,8 +103,8 @@ function validate(root = repoRoot()) {
   const files = [];
   for (const name of shipNames) {
     const rel = [...walked.files].find((file) => path.basename(file) === name);
-    if (!rel) errors.push(`ship module ${name} is not in the require closure`);
-    else files.push(rel);
+    if (rel) files.push(rel);
+    else errors.push(`ship module ${name} is not in the require closure`);
   }
   files.sort();
 

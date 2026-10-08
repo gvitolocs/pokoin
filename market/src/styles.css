@@ -1019,6 +1019,7 @@ html.is-card-dragging .zoom::backdrop { display: none; }
 }
 
 .icon-nav a,
+.icon-nav button.signin-button,
 .icon-nav .lang-flag {
   display: grid;
   place-items: center;
@@ -1032,14 +1033,23 @@ html.is-card-dragging .zoom::backdrop { display: none; }
   line-height: 1;
 }
 
-.icon-nav a svg {
+.icon-nav a svg,
+.icon-nav button.signin-button svg {
   display: block;
   width: var(--topbar-icon);
   height: var(--topbar-icon);
   overflow: visible;
 }
 
+.icon-nav button.signin-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
 .icon-nav a:hover,
+.icon-nav button.signin-button:hover,
 .icon-nav a.active {
   text-decoration: none;
   color: var(--yellow);
@@ -9471,6 +9481,84 @@ html.is-extension-desk select.collector-badge.version-badge {
 .poko-video { margin: 1.5rem 0 2rem; }
 .poko-video video { display: block; width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border-radius: 12px; }
 .poko-video p { margin: .5rem 0 0; }
+
+.poko-archive-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.25rem;
+  align-items: end;
+  margin: 1.25rem 0 1.5rem;
+}
+.poko-archive-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  font-size: .85rem;
+  color: #555;
+}
+.poko-archive-controls select,
+.poko-archive-controls input[type="search"] {
+  min-width: 16rem;
+  padding: .45rem .6rem;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+}
+.poko-archive-script {
+  align-self: end;
+  padding: .55rem .8rem;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  text-decoration: none;
+  color: inherit;
+}
+.poko-archive-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+}
+.poko-archive-row {
+  padding: .85rem 1rem;
+  border: 1px solid #e4e4e4;
+  border-radius: 12px;
+  background: #fafafa;
+}
+.poko-archive-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem .75rem;
+  align-items: center;
+  font-size: .85rem;
+  color: #666;
+  margin-bottom: .35rem;
+}
+.poko-archive-meta code {
+  font-size: .9rem;
+  color: #222;
+}
+.poko-archive-lang,
+.poko-archive-ep {
+  display: inline-block;
+  padding: .1rem .45rem;
+  border-radius: 999px;
+  background: #eee;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  font-size: .75rem;
+}
+.poko-archive-text {
+  margin: 0 0 .55rem;
+  line-height: 1.4;
+}
+.poko-archive-row audio {
+  display: block;
+  width: 100%;
+  max-width: 42rem;
+}
 .jumbos-grid figcaption {
   margin-top: 0.45rem;
   font-size: 0.72rem;

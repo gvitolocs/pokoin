@@ -158,3 +158,14 @@ are `pending` until the service's DeepSeek V4.1 Flash moderator sets them
 `visible`, `held` or `rejected` (criticism of Pokoin is allowed). Held
 comments stay visible to their author only; remove or approve by editing the
 Firestore document's `status`.
+
+**Reader analytics (first-party only):** `news.js` sends beacons to
+`POST https://api.pokoin.com/api/news-event` (`server/pokoin-api/news-event.js`)
+— list-card impressions and clicks with their position, article views,
+25/50/75/100% scroll milestones and active seconds before the tab hides. Rows
+go to Postgres `news_events` on the writer (`scripts/sql/111_news_events.sql`).
+No cookies and no third parties: a reader is a daily salted hash of ip + user
+agent (`NEWS_EVENT_SALT`), bots and Do Not Track / GPC browsers send nothing.
+`GET /api/news-stats` (`news-stats.js`) aggregates them for admins only
+(users/{uid} admin role, else 401/403); `pokoin.com/news/dashboard` is the
+noindex page that renders them. Both ship with `scripts/deploy-poko-market-api.sh`.

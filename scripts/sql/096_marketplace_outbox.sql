@@ -1,6 +1,6 @@
 -- Listing mutations commit this row in the same transaction as the stock change.
 -- A missing table must not be created on the replica. Apply on the nezopt writer.
--- Valkey, Meili, CardTrader, and SSE run after commit.
+-- Redis, Meili, CardTrader, and SSE run after commit.
 
 create table if not exists public.marketplace_outbox (
   id bigserial primary key,

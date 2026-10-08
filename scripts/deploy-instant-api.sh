@@ -31,7 +31,7 @@ node "$STAGE/scripts/collect-instant-api.js" --json >"$STAGE/artifact.json" \
 node --test \
   "$STAGE/scripts/collect-instant-api.test.js" \
   "$STAGE/server/pokoin-api/_listing_inventory.test.js" \
-  "$STAGE/server/pokoin-api/_valkey.test.js" \
+  "$STAGE/server/pokoin-api/_redis_cache.test.js" \
   "$STAGE/server/pokoin-api/_read_model_cache.test.js" \
   "$STAGE/server/pokoin-api/_instant_architecture.test.js" \
   "$STAGE/server/api/_suggest_catalog.test.js" \
@@ -77,7 +77,20 @@ scp -q "$STAGE/server/pokoin-api/instant-routes.json" "$STAGE/server/pokoin-api/
 ssh "$PI" "set -e
   node /srv/pokoin/api/$release/api/patch-route-manifest.js \
     /srv/pokoin/api/$release/server/api-route-manifest.js \
-    /srv/pokoin/api/$release/api/instant-routes.json
+    /srv/pokoin/api/$release/api/instant-routes.json \
+    --api-dir=/srv/pokoin/api/$release/api
+  find /srv/pokoin/api/$release/api /srv/pokoin/api/$release/server -name '*.js' -print0 \
+    | xargs -0 sed -i \
+      -e \"s|require('./_valkey')|require('./_redis_cache')|g\" \
+      -e 's|require(\"./_valkey\")|require(\"./_redis_cache\")|g'
+  rm -f /srv/pokoin/api/$release/api/_valkey.js \
+    /srv/pokoin/api/$release/server/pokoin-api/_valkey.js \
+    /srv/pokoin/api/$release/server/api/_valkey.js
+  if grep -R --include='*.js' -n -E \"require\\((['\\\"])\\./_valkey\\1\\)\" \
+    /srv/pokoin/api/$release/api /srv/pokoin/api/$release/server; then
+    echo 'release still requires ./_valkey' >&2
+    exit 1
+  fi
   rm -f /srv/pokoin/api/$release/api/patch-route-manifest.js \
     /srv/pokoin/api/$release/api/instant-routes.json \
     /srv/pokoin/api/$release/api/*.test.js
@@ -98,7 +111,9 @@ for _ in $(seq 1 45); do
   live_headers="$(ssh "$PI" "curl -s -D - -o /dev/null --max-time 2 -H 'accept: text/event-stream' 'http://127.0.0.1:18080/api/marketplace-live?cardId=693360'" || true)"
   live=000
   printf '%s' "$live_headers" | grep -q '200' && printf '%s' "$live_headers" | grep -qi 'text/event-stream' && live=200
-  if [[ "$health" == "200" && "$listings" == "200" && "$decrement" == "401" && "$card" == "200" && "$suggest" == "200" && "$live" == "200" ]]; then
+  # A broken route manifest 500s on unknown paths instead of 404.
+  unknown="$(ssh "$PI" "curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:18080/api/route-manifest-healthcheck" || true)"
+  if [[ "$health" == "200" && "$listings" == "200" && "$decrement" == "401" && "$card" == "200" && "$suggest" == "200" && "$live" == "200" && "$unknown" == "404" ]]; then
     healthy=1
     break
   fi
@@ -106,7 +121,7 @@ for _ in $(seq 1 45); do
 done
 
 if [[ "$healthy" != "1" ]]; then
-  echo "health failed health=$health listings=$listings decrement=$decrement card=$card suggest=$suggest live=$live — rolling back" >&2
+  echo "health failed health=$health listings=$listings decrement=$decrement card=$card suggest=$suggest live=$live unknown=${unknown:-} — rolling back" >&2
   ssh "$PI" "set -e; cd /srv/pokoin/api; prev=\$(cat .instant-api-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "previous release restored"
 fi

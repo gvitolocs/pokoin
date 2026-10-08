@@ -8,12 +8,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
+import uuid
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 
+import cv2
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +29,7 @@ from fastapi.concurrency import run_in_threadpool
 from catalogs import CatalogStore
 import card_quad
 import condition
+import rectify
 from expansion_symbols import ExpansionSymbols
 
 ROOT = Path(os.environ.get("CARDSCAN_ROOT", Path(__file__).resolve().parent))
@@ -62,6 +68,20 @@ ALBUM_UNIQUE_MIN_SCORE = 0.50
 ALBUM_EXTRA_MIN_SCORE = 0.80
 ALBUM_DENSE_BOX_COUNT = 6
 ALBUM_LOCK_TIMEOUT_S = 90.0
+RECTIFY = os.environ.get('CARDSCAN_RECTIFY', '0') == '1'
+PRINT_STRIP = os.environ.get('CARDSCAN_PRINT_STRIP', '0') == '1'
+_print_strip = None
+_print_strip_failed = False
+
+# Second pass: print strip OCR runs off the identify critical path. The
+# identify response carries print_id per ambiguous card; the client polls
+# GET /print?ids=... until the single worker thread finishes each read.
+PRINT_STORE_MAX = 2048
+PRINT_STORE_TTL_S = 180.0
+PRINT_IDS_RE = re.compile(r'^[0-9a-f,]{1,1200}$')
+_print_results: OrderedDict[str, dict] = OrderedDict()
+_print_condition = threading.Condition()
+_print_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="print-strip")
 
 _lock = threading.Lock()
 _yolo = None
@@ -696,6 +716,163 @@ def _merge_album_payloads(payloads: list[dict]) -> dict:
     }
 
 
+def _print_ambiguous(hits: list[dict], window: float = 0.06) -> bool:
+    """True when the top artwork (or name) has 2+ printings within `window` of top1.
+
+    The print strip costs ~80 ms of CPU OCR per card; a card with one possible
+    printing gains nothing from it, so only ambiguous cards pay for it."""
+    top = hits[0]
+    key = top.get("artwork") or top.get("name")
+    best = float(top.get("score") or 0)
+    ids = {
+        str(h.get("public_id") or h.get("id"))
+        for h in hits
+        if (h.get("artwork") or h.get("name")) == key and best - float(h.get("score") or 0) <= window
+    }
+    return len(ids) >= 2
+
+
+def _get_print_strip():
+    global _print_strip, _print_strip_failed
+    if _print_strip is not None or _print_strip_failed:
+        return _print_strip
+    try:
+        import print_strip
+        _print_strip = print_strip.PrintStrip()
+    except Exception as exc:
+        _print_strip_failed = True
+        print(json.dumps({
+            "cardscan": "print-strip",
+            "state": "unavailable",
+            "error": f"{type(exc).__name__}: {exc}",
+        }), flush=True)
+    return _print_strip
+
+
+def _print_store_put(print_id: str, now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    with _print_condition:
+        _print_results[print_id] = {"state": "pending", "print": None, "at": now}
+        _print_results.move_to_end(print_id)
+        while len(_print_results) > PRINT_STORE_MAX:
+            _print_results.popitem(last=False)
+        _print_condition.notify_all()
+
+
+def _print_store_finish(print_id: str, state: str, print_data: dict | None, now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    with _print_condition:
+        entry = _print_results.get(print_id)
+        if entry is not None:
+            entry["state"] = state
+            entry["print"] = print_data
+            entry["at"] = now
+            _print_results.move_to_end(print_id)
+        _print_condition.notify_all()
+
+
+def _print_store_wait(ids: list[str], wait_ms: float, now: float | None = None) -> dict:
+    """Wait until every known id is done/error or the deadline passes."""
+    now = time.time() if now is None else now
+    deadline = now + max(0.0, wait_ms) / 1000.0
+    wanted = list(dict.fromkeys(ids))
+    with _print_condition:
+        while True:
+            _print_store_prune_locked(now)
+            pending = [
+                i for i in wanted
+                if i in _print_results and _print_results[i]["state"] == "pending"
+            ]
+            if not pending or time.time() >= deadline:
+                break
+            _print_condition.wait(timeout=max(0.0, deadline - time.time()))
+    unknown = [i for i in wanted if i not in _print_results]
+    pending = [i for i in wanted if i in _print_results and _print_results[i]["state"] == "pending"]
+    prints = {}
+    for i in wanted:
+        entry = _print_results.get(i)
+        if entry is None:
+            continue
+        state = entry["state"]
+        if state == "done":
+            prints[i] = entry["print"]
+        else:
+            prints[i] = None
+    return {
+        "prints": prints,
+        "pending": pending,
+        "unknown": unknown,
+    }
+
+
+def _print_store_prune_locked(now: float | None = None) -> None:
+    """Drop entries older than the TTL. Caller holds _print_condition."""
+    now = time.time() if now is None else now
+    stale = [
+        k for k, v in _print_results.items()
+        if now - float(v.get("at") or 0) > PRINT_STORE_TTL_S
+    ]
+    for k in stale:
+        _print_results.pop(k, None)
+
+
+def _strip_card(source, game: str):
+    """Portrait 630x880 card for the print strip, built in the print thread.
+
+    `source` is (rgb, box, rectified-or-None) from identify; an ndarray is used as is."""
+    rgb, box, rectified = source
+    if game == "pokemon":
+        if rectified is not None:
+            return rectified
+        if 'quad' in box:
+            card = card_quad.crop(rgb, box)
+        else:
+            return rectify.rectify(rgb, box)['image']
+    else:
+        # Other games: warped quad when card_quad found one, else the box crop.
+        card = card_quad.crop(rgb, box)
+    if not card.size:
+        return None
+    if card.shape[1] > card.shape[0]:
+        card = np.ascontiguousarray(np.rot90(card, k=-1))
+    return cv2.resize(card, (630, 880), interpolation=cv2.INTER_AREA)
+
+
+def _print_job(print_id: str, card, game: str) -> None:
+    started = time.perf_counter()
+    try:
+        strip = _get_print_strip()
+        if strip is None:
+            raise RuntimeError("print strip OCR unavailable")
+        if isinstance(card, tuple):
+            card = _strip_card(card, game)
+            if card is None:
+                raise RuntimeError("empty card crop")
+        out = strip.read(card, game=game)
+        _print_store_finish(print_id, "done", out)
+        print(json.dumps({
+            "cardscan": "print-strip",
+            "print_id": print_id,
+            "ms": round((time.perf_counter() - started) * 1000, 1),
+            "collector": (out.get("collector") or {}).get("num") if isinstance(out, dict) else None,
+            "set_code": out.get("set_code") if isinstance(out, dict) else None,
+            "language": (out.get("language") or {}).get("code") if isinstance(out, dict) else None,
+        }), flush=True)
+    except Exception as exc:
+        _print_store_finish(print_id, "error", None)
+        print(json.dumps({
+            "cardscan": "print-strip",
+            "state": "error",
+            "print_id": print_id,
+            "error": f"{type(exc).__name__}: {exc}",
+        }), flush=True)
+
+
+def _enqueue_print(print_id: str, card, game: str) -> None:
+    _print_store_put(print_id)
+    _print_executor.submit(_print_job, print_id, card, game)
+
+
 def _identify_locked_image(blob, top_k, live, catalog, multi, box_limit=None):
     if _vecs is None or _catalogs is None:
         raise HTTPException(503, "models not loaded")
@@ -742,7 +919,20 @@ def _identify_locked_image(blob, top_k, live, catalog, multi, box_limit=None):
     if multi and game == "pokemon":
         boxes = sorted(boxes, key=_box_reading_key)
     for box in boxes[:limit]:
-        crop = card_quad.crop(rgb,box)
+        rectified = None
+        if game == "pokemon" and 'quad' not in box and RECTIFY:
+            r = rectify.rectify(rgb, box)
+            rectified = r['image']
+            # Only RECTIFY may change the embed crop: card_quad.crop warps any box
+            # carrying a quad, so the print strip alone must not leave one behind.
+            if RECTIFY:
+                box['rectified'] = r['method']
+                if r['quad'] is not None:
+                    box['quad'] = r['quad']
+        if rectified is not None and RECTIFY:
+            crop = rectified
+        else:
+            crop = card_quad.crop(rgb, box)
         if not crop.size: continue
         t1=time.perf_counter()
         hits, tried = _embed_best(crop,top_k,live=live,catalog=catalog,timings=timings)
@@ -763,7 +953,15 @@ def _identify_locked_image(blob, top_k, live, catalog, multi, box_limit=None):
                 flush=True,
             )
             continue
-        matches.append({"box":box,"hits":hits,"top1":hits[0] if hits else None})
+        match = {"box":box,"hits":hits,"top1":hits[0] if hits else None}
+        print_ms = None
+        if PRINT_STRIP and hits and float(hits[0].get("score") or 0) >= 0.60 and _print_ambiguous(hits):
+            # Second pass: rectify + OCR run in the print thread, off the identify
+            # critical path. The response carries print_id; the client polls GET /print.
+            if _get_print_strip() is not None:
+                match["print_id"] = uuid.uuid4().hex
+                _enqueue_print(match["print_id"], (rgb, dict(box), rectified), game)
+        matches.append(match)
         if hits:
             print(
                 json.dumps({
@@ -774,6 +972,7 @@ def _identify_locked_image(blob, top_k, live, catalog, multi, box_limit=None):
                     "collector_number": hits[0].get("collector_number"),
                     "artwork": hits[0].get("artwork"),
                     "card_back_score": hits[0].get("_card_back_score"),
+                    **({"print_ms": round(print_ms, 1)} if print_ms is not None else {}),
                 }),
                 flush=True,
             )
@@ -832,9 +1031,11 @@ def _identify_image(blob, top_k, live, catalog, multi, box_limit=None):
         _lock.release()
 
 
-def _identify_album_images(blobs, top_k, live):
+def _identify_album_images(blobs, top_k, live, catalog=ALBUM_CATALOG):
     if _vecs is None or _catalogs is None:
         raise HTTPException(503, "models not loaded")
+    if catalog != "tcgplayer" and catalog not in _catalogs.entries:
+        raise HTTPException(422, "unsupported catalog")
     if ALBUM_CATALOG not in _catalogs.entries:
         raise HTTPException(503, "album catalog not loaded")
     if not blobs:
@@ -852,7 +1053,7 @@ def _identify_album_images(blobs, top_k, live):
                 blob,
                 top_k,
                 live,
-                ALBUM_CATALOG,
+                catalog,
                 True,
                 box_limit=ALBUM_BOX_LIMIT,
             )
@@ -907,7 +1108,7 @@ async def identify(
         _limit_identify(request)
     blob = await file.read(MAX_BYTES + 1)
     if album:
-        return await run_in_threadpool(_identify_album_images, [blob], top_k, live)
+        return await run_in_threadpool(_identify_album_images, [blob], top_k, live, catalog)
     return await run_in_threadpool(_identify_image,blob,top_k,live,catalog,multi)
 
 
@@ -957,12 +1158,41 @@ async def identify_album(
     file: list[UploadFile] = File(...),
     top_k: int = Query(1, ge=1, le=8),
     live: bool = Query(True),
+    catalog: str = Query(ALBUM_CATALOG, max_length=64),
 ):
     _limit_identify(request)
     blobs = []
     for upload in file[:ALBUM_PHOTO_LIMIT]:
         blobs.append(await upload.read(MAX_BYTES + 1))
-    return await run_in_threadpool(_identify_album_images, blobs, top_k, live)
+    return await run_in_threadpool(_identify_album_images, blobs, top_k, live, catalog)
+
+
+@app.get("/print")
+async def print_result(
+    request: Request,
+    ids: str = Query(..., max_length=1200),
+    wait_ms: int = Query(400, ge=0, le=3000),
+):
+    forwarded = request.headers.get("x-forwarded-for", "")
+    ip = forwarded.split(",")[0].strip() if forwarded else ""
+    if not ip:
+        ip = request.client.host if request.client else "unknown"
+    key = (ip, "print")
+    now = time.time()
+    with _identify_hits_lock:
+        hits = [stamp for stamp in _identify_hits.get(key, []) if now - stamp < 60]
+        if len(hits) >= LIVE_IDENTIFY_LIMIT_PER_MIN:
+            _identify_hits[key] = hits
+            raise HTTPException(status_code=429, detail="Too many print requests.")
+        hits.append(now)
+        _identify_hits[key] = hits
+    if not PRINT_IDS_RE.match(ids):
+        raise HTTPException(404, "unknown print ids")
+    id_list = ids.split(",")
+    known = [i for i in id_list if i in _print_results]
+    if not known:
+        raise HTTPException(404, "unknown print ids")
+    return await run_in_threadpool(_print_store_wait, id_list, wait_ms)
 
 
 if WEB.is_dir():

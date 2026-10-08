@@ -51,9 +51,3 @@ test('one socket pipelines commands and a refused server fails open', async () =
     server.close();
   }
 });
-
-test('legacy _valkey shim re-exports the Redis cache client', () => {
-  const shim = require('./_valkey');
-  assert.equal(shim, redisCache);
-  assert.equal(typeof shim.redisCacheStats, 'function');
-});

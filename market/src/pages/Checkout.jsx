@@ -16,6 +16,7 @@ import { useAuth } from '../auth.jsx';
 import { CHECKOUT_SHIPPING_PKN, useCart } from '../cart.jsx';
 import { checkoutFees, pknBalanceVoucher } from '../checkout-fees.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
+import { estimatedDeliveryDate, optInFields, showReviewsOptIn } from '../google-reviews.js';
 import { authFrom } from '../punchouts.js';
 import { fiatFromPkn, currencyForCountry, currencyFromLocale, countryFromLocale, formatFiatFromPkn, formatLocalFromPkn, formatLocalFromEurCents } from '../pkn.js';
 import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
@@ -424,6 +425,19 @@ export default function Checkout() {
       }, token);
       const id = data?.order?.id || data?.id || '';
       setOrderId(id);
+      // Google Customer Reviews opt-in for a physical order (never NFT-only).
+      if (!nft) {
+        showReviewsOptIn(optInFields({
+          orderId: id,
+          email: user?.email,
+          deliveryCountry: buyerCountry,
+          estimatedDelivery: estimatedDeliveryDate({
+            orderedAt: Date.now(),
+            shipments: sellerParcels.map((group) => ({ fromCountry: group.from })),
+            toCountry: buyerCountry,
+          }),
+        }));
+      }
       removeItems(items.map((row) => row.id));
       setGift(false);
       setConfirm(false);

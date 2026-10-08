@@ -6,6 +6,7 @@ import { AppCrash } from './app-crash.jsx';
 import { gameBasename } from './game.js';
 import './styles.css';
 import './desk.css';
+import { showReviewsBadge } from './google-reviews.js';
 
 const shortLink = window.location.pathname.match(/^\/(?:marketplace\/)?(\d+)(?:\/[^/]+)?$/);
 if (shortLink) {
@@ -21,3 +22,6 @@ createRoot(document.getElementById('root')).render(
     </BrowserRouter>
   </StrictMode>,
 );
+
+// Google Customer Reviews store badge on every page (see docs/GOOGLE_CUSTOMER_REVIEWS.md).
+showReviewsBadge();

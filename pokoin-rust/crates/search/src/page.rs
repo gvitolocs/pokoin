@@ -37,6 +37,9 @@ pub struct SearchRow {
     pub product_variant: String,
     pub emoji: String,
     pub search_weight: f64,
+    /// Position in the Redis reply. Equal name scores keep this order, matching
+    /// Node's stable sort of the candidate ids.
+    pub redis_order: usize,
     pub price: Option<f64>,
     pub stock: i64,
     pub has_cardtrader: bool,
@@ -83,6 +86,7 @@ pub fn rank_rows(rows: &mut [SearchRow], query: &str) {
     rows.sort_by(|left, right| {
         local_name_score(&right.name, query, right.search_weight)
             .cmp(&local_name_score(&left.name, query, left.search_weight))
+            .then(left.redis_order.cmp(&right.redis_order))
     });
     let wanted = collector_key(query);
     if wanted.is_empty() || rows.len() < 2 {
@@ -214,7 +218,7 @@ fn reqwest_free_url(value: &str) -> Result<String, ()> {
     Ok(format!("/card-images{path}"))
 }
 
-fn has_collector(value: &str) -> bool {
+pub fn has_collector(value: &str) -> bool {
     COLLECTOR_ANY.is_match(&value.to_lowercase())
 }
 
@@ -339,6 +343,7 @@ mod tests {
             product_variant: String::new(),
             emoji: String::new(),
             search_weight: weight,
+            redis_order: 0,
             price: Some(12.0),
             stock: 1,
             has_cardtrader: true,
@@ -361,6 +366,20 @@ mod tests {
         rows[1].card_id = 2;
         rank_rows(&mut rows, "charizard 6/102");
         assert_eq!(rows[0].card_id, 2);
+    }
+
+    #[test]
+    fn equal_name_scores_keep_redis_order() {
+        let mut first = row("Snorlax GX", "1/100", 14.0);
+        let mut second = row("Snorlax GX", "2/100", 14.0);
+        first.card_id = 646130;
+        first.redis_order = 0;
+        second.card_id = 253490;
+        second.redis_order = 1;
+        let mut rows = vec![second.clone(), first.clone()];
+        rank_rows(&mut rows, "snorlax");
+        assert_eq!(rows[0].card_id, 646130);
+        assert_eq!(rows[1].card_id, 253490);
     }
 
     #[test]

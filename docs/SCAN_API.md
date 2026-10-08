@@ -7,8 +7,26 @@ One public API for recognizing cards from a photo, used by the website
 | --- | --- |
 | `POST /api/scan/identify?catalog=&top_k=&live=&multi=&album=` | multipart field `file` (≤ 4 MB) → matches |
 | `POST /api/scan/identify-album` | multipart `file` repeated (album page) |
+| `GET /api/scan/print?ids=&wait_ms=` | print strip (collector/language OCR), second pass |
 | `GET /api/scan/catalogs` | recognition catalogs (game × language) |
 | `GET /api/scan/health` | which workers answer |
+
+## Print strip second pass
+
+Ambiguous identify results (2+ printings within 0.06 of top1, score ≥ 0.60)
+carry a `print_id` per card. The worker OCRs the bottom strip on a dedicated
+one-thread pool **after** the identify response is sent, so identify latency
+no longer pays the ~80 ms CPU read.
+
+- `GET /api/scan/print?ids=<print_id>[,<print_id>…]&wait_ms=400` blocks up to
+  `wait_ms` (0–3000, default 400) for the results.
+- Response: `{prints: {id: {collector, language, set_code, …} | null}, pending: [id], unknown: [id]}`.
+  Poll with the `pending` ids until they clear; `unknown` ids are gone
+  (180 s TTL or another worker).
+- All `print_id`s are unknown → 404. No worker answers → 503.
+- The print store is per worker process: an identify answered by nezopt's
+  worker must be polled against the same worker, so the API pins the poll to
+  the same nezopt-first fallback chain.
 
 Clients that take a base URL use `https://api.pokoin.com/api/scan` (the
 scanner page's `window.CARDSCAN_API`: it appends `/identify` and derives

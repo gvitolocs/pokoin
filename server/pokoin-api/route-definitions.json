@@ -626,6 +626,25 @@
     }
   },
   {
+    "path": "/api/scan/print",
+    "file": "scan-print.js",
+    "methods": [
+      "GET",
+      "OPTIONS"
+    ],
+    "purpose": "Print strip second pass: collect the collector number + language OCR for print ids returned by /api/scan/identify.",
+    "params": {
+      "query": "ids (comma-separated print ids), wait_ms (0-3000, default 400)"
+    },
+    "auth": "Public; per-IP limit in the recognition worker.",
+    "dependencies": {
+      "services": [
+        "nezopt GPU recognition worker via SSH tunnel 127.0.0.1:18151",
+        "Pi CPU recognition container pokoin-scan 127.0.0.1:18150"
+      ]
+    }
+  },
+  {
     "path": "/api/scan/catalogs",
     "file": "scan-catalogs.js",
     "methods": [
@@ -950,7 +969,53 @@
       ],
       "services": [
         "Firebase Admin (Firestore news_comments)",
-        "Redis/Valkey rate limit (best effort)"
+        "Redis rate limit (best effort)"
+      ]
+    }
+  },
+  {
+    "path": "/api/news-event",
+    "file": "news-event.js",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Pokoin News first-party reading beacons (list impressions/clicks, article views, scroll depth, active seconds) into Postgres news_events.",
+    "auth": "Public, no cookies. Visitor is a daily salted ip+UA hash; bots dropped; 120 beacons per 10 minutes per visitor (best effort). Answers 204 before writing.",
+    "params": {
+      "query": "none",
+      "body": "POST { events: [{ type: impression|click|view|read|leave, articleId (art_…), articlePath, pv, source?, position?, depth?, seconds? }] } (max 40)."
+    },
+    "dependencies": {
+      "env": [
+        "MARKETPLACE_WRITER_DATABASE_URL",
+        "NEWS_EVENT_SALT (optional)"
+      ],
+      "services": [
+        "Postgres writer (news_events)",
+        "Redis rate limit (best effort)"
+      ]
+    }
+  },
+  {
+    "path": "/api/news-stats",
+    "file": "news-stats.js",
+    "methods": [
+      "GET"
+    ],
+    "purpose": "Admin-only Pokoin News reading stats for /news/dashboard: CTR, views, readers, scroll depth, time on page per article, per day and per card position.",
+    "auth": "Firebase bearer token of an admin (users/{uid} admin/isAdmin/role/roles, or admin claim). 401 signed out, 403 non-admin. Cache-Control private, no-store.",
+    "params": {
+      "query": "days (1–365, default 30).",
+      "body": "none"
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL"
+      ],
+      "services": [
+        "Firebase Admin (Firestore users)",
+        "Postgres replica (news_events)"
       ]
     }
   }

@@ -832,5 +832,9 @@ export default [
 {"display":"XY Trainer Kit","slug":"xy-trainer-kit","prior":1,"nationality":"western"},
 {"display":"XY Trainer Kit: Bisharp & Wigglytuff","slug":"xy-trainer-kit-bisharp-and-wigglytuff","prior":1,"nationality":"western"},
 {"display":"XY Trainer Kit: Latias & Latios","slug":"xy-trainer-kit-latias-and-latios","prior":1,"nationality":"western"},
-{"display":"XY Trainer Kit: Pikachu Libre & Suicune","slug":"xy-trainer-kit-pikachu-libre-and-suicune","prior":1,"nationality":"western"}
+{"display":"XY Trainer Kit: Pikachu Libre & Suicune","slug":"xy-trainer-kit-pikachu-libre-and-suicune","prior":1,"nationality":"western"},
+{"display":"30th Celebration Premium Deck Set","slug":"30th-celebration-premium-deck-set","prior":44,"nationality":"japanese"},
+{"display":"Aura Seeker","slug":"aura-seeker","prior":1,"nationality":"japanese"},
+{"display":"MEGA x MEGA Parade","slug":"mega-x-mega-parade","prior":4,"nationality":"japanese"},
+{"display":"CSV9.5: Master Ball Reverse","slug":"csv9-5-master-ball-reverse","prior":3,"nationality":"chinese"}
 ];

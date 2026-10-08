@@ -55,4 +55,6 @@ Bare names like `FUOCOBOMBA 006 - 16` stay the box name (not parsed as stack/pos
 
 ## Condition map (CM/PT → Pokoin)
 
-`MT/NM→NM`, `EX→SP`, `GD/LP→MP`, `PL/HP→PL`, `PO→Poor`.
+`MT/NM→NM`, `EX→SP`, `GD→MP`, `LP/PL/HP→PL`, `PO→Poor`. Cardmarket's own guide
+(help.cardmarket.com/en/CardCondition) puts GD at US Moderately Played and its
+European Light Played at US Played; the US "Lightly Played" is EX → SP.

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
+import AuthLink from '../components/AuthLink.jsx';
 import { useAuth } from '../auth.jsx';
 import { REFERRAL_CLAIM_WINDOW_DAYS, REFERRAL_REWARD_PKN, cleanReferralCode, rememberReferralCode } from '../referral.js';
 import { brandSrc } from '../brand-assets.js';
@@ -30,7 +31,7 @@ export default function Join() {
             You both get <strong>{REFERRAL_REWARD_PKN} PKN</strong>.
           </p>
           <div className="referral-cta-row">
-            <Link className="btn" to={`/auth?mode=signup&from=${encodeURIComponent('/invite')}`}>Create your account</Link>
+            <AuthLink className="btn" to={`/auth?mode=signup&from=${encodeURIComponent('/invite')}`}>Create your account</AuthLink>
             <Link className="btn ghost" to="/marketplace">Browse the marketplace</Link>
           </div>
           <p className="referral-fine">

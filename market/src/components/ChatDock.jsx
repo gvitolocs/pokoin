@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import AuthLink from './AuthLink.jsx';
 import { useAuth } from '../auth.jsx';
 import { listConversations, sendChatMessage, uploadChatPhoto } from '../chat-client.js';
 import { chatPersonName, chatPersonPhoto, chatTime } from '../chat-format.js';
@@ -88,7 +89,7 @@ function ConversationList({ signedIn, getBearer, onOpen, onPoko }) {
   if (!signedIn) {
     return (
       <p className="chat-dock-hint">
-        <Link to={`/auth?from=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in</Link>
+        <AuthLink to={`/auth?from=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in</AuthLink>
         {' '}to see your conversations.
       </p>
     );
@@ -529,7 +530,7 @@ export default function ChatDock() {
             </form>
           ) : (
             <p className="chat-dock-hint">
-              <Link to={`/auth?from=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in</Link>
+              <AuthLink to={`/auth?from=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in</AuthLink>
               {' '}to message {poko ? 'Poko' : 'this seller'}.
             </p>
           )}

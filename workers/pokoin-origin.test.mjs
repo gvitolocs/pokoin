@@ -1,17 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { allowExtensionDeskFrame, isExtensionFramePath, isMarketplaceDeskPath, isMarketplaceSellerPath, originDeskRequest } from './pokoin-origin.js';
+import { allowExtensionDeskFrame, isExtensionFramePath, isMarketplaceDeskPath, isMarketplaceSellerPath, originDeskRequest, withAuthRobots } from './pokoin-origin.js';
 
 test('marketplace desk paths are the Pokoin card pages', () => {
   assert.equal(isMarketplaceDeskPath('/marketplace/en/cards/548832'), true);
   assert.equal(isMarketplaceDeskPath('/marketplace/en/cards/548832/mew-ex'), true);
   assert.equal(isMarketplaceDeskPath('/marketplace/en'), false);
   assert.equal(isMarketplaceDeskPath('/api/marketplace-home'), false);
+  assert.equal(isMarketplaceDeskPath('/one-piece/marketplace/en/cards/598560'), true);
+  assert.equal(isMarketplaceDeskPath('/one-piece/marketplace/en/cards/598560/luffy'), true);
+  assert.equal(isMarketplaceDeskPath('/star-wars/marketplace/en/cards/795832/student'), true);
+  assert.equal(isMarketplaceDeskPath('/marketplace/zht/cards/42'), true);
+  assert.equal(isMarketplaceDeskPath('/not-a-game/marketplace/en/cards/1'), false);
+  assert.equal(isMarketplaceDeskPath('/one-piece/marketplace'), false);
 });
 
 test('side-panel iframe may open seller and account pages, not only card desks', () => {
   assert.equal(isMarketplaceSellerPath('/marketplace/en/users/giuseppe'), true);
   assert.equal(isExtensionFramePath('/marketplace/en/cards/548832'), true);
+  assert.equal(isExtensionFramePath('/star-wars/marketplace/en/cards/795832/student'), true);
+  assert.equal(isMarketplaceSellerPath('/one-piece/marketplace/en/users/redshakkio'), true);
   assert.equal(isExtensionFramePath('/marketplace/en/users/giuseppe'), true);
   assert.equal(isExtensionFramePath('/profile'), true);
   assert.equal(isExtensionFramePath('/auth'), true);
@@ -64,4 +72,15 @@ test('desk origin fetches drop chrome-extension iframe referers', () => {
   assert.equal(inbound.headers.get('Referer'), null);
   assert.equal(inbound.headers.get('Sec-Fetch-Dest'), null);
   assert.equal(inbound.headers.get('User-Agent'), 'Mozilla/5.0');
+});
+
+test('/auth responses carry noindex even when the body is the SPA shell', () => {
+  const page = new Response('<title>Pokoin marketplace</title>', {
+    status: 200,
+    headers: { 'content-type': 'text/html' },
+  });
+  const stamped = withAuthRobots(page, '/auth');
+  assert.equal(stamped.headers.get('x-robots-tag'), 'noindex, nofollow');
+  const card = withAuthRobots(page, '/marketplace/en/cards/1');
+  assert.equal(card.headers.get('x-robots-tag'), null);
 });

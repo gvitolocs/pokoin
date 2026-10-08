@@ -43,7 +43,7 @@ say "Pi release $release"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .messages-previous; cp -a \$prev '$release'; mkdir -p '$release/api'"
 tar -C "$SRC" -cf - chat.js money-request.js _chat_core.js _money_request_core.js user-photos.js route-definitions.json patch-route-manifest.js \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
-ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'; rm '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'"
+ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json' '--api-dir=/srv/pokoin/api/$release/api' && rm '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-messages-commit'"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
@@ -54,7 +54,9 @@ for _ in $(seq 1 45); do
   chat="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/chat?action=list'" || true)"
   requests="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/money-request?action=list'" || true)"
   photo="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -H 'Accept: text/html' 'http://127.0.0.1:18080/api/user-photos/chat/Ax7G1IOIOvZUd7mrIc5gsw0Fcgt2/5962f78b9aacb6bcf053abab.jpg'" || true)"
-  if [[ "$health" == "200" && "$chat" =~ ^(401|403)$ && "$requests" =~ ^(401|403)$ && "$photo" == "302" ]]; then
+  # A broken route manifest 500s on unknown paths instead of 404.
+  unknown="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/route-manifest-healthcheck" || true)"
+  if [[ "$health" == "200" && "$chat" =~ ^(401|403)$ && "$requests" =~ ^(401|403)$ && "$photo" == "302" && "$unknown" == "404" ]]; then
     healthy=1
     break
   fi
@@ -62,7 +64,7 @@ for _ in $(seq 1 45); do
 done
 
 if [[ "$healthy" != "1" ]]; then
-  echo "health failed (health=$health chat=$chat money-request=$requests photo=$photo) — rolling back" >&2
+  echo "health failed (health=$health chat=$chat money-request=$requests photo=$photo unknown=${unknown:-}) — rolling back" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .messages-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "Pi API verification failed; previous release restored"
 fi

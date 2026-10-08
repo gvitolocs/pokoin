@@ -10,7 +10,6 @@ import {
   isSetOnlyQuery,
   parseTypedQuery,
   printingMatchesNumberFilter,
-  typedMeiliQuery,
 } from '../suggest-rank.js';
 import { useSearchLang, usePrintLang } from '../locale.js';
 import { cardsForPrint, loadSearchPrintPage } from '../search-print.js';
@@ -60,11 +59,7 @@ export default function Search() {
   const setAware = isPokemonGame()
     && (isSetAwareQuery(parsed) || isSetOnlyQuery(parsed))
     && tab !== 'users';
-  const query = setAware
-    ? typedQuery
-    : (isPokemonGame()
-      ? typedMeiliQuery(typedQuery)
-      : typedQuery);
+  const query = typedQuery;
   const lang = useSearchLang();
   const printLang = usePrintLang();
   // Print filter is Pokémon-only (expansion nationality catalog). Satellite
@@ -104,9 +99,7 @@ export default function Search() {
     () => new Set(artistEntities.map((entity) => normalizeArtistName(entity.display))),
     [artistEntities],
   );
-  const fetchQuery = artistEntities.length && localResolved?.correctedQuery
-    ? localResolved.correctedQuery
-    : query;
+  const fetchQuery = query;
   const [cards, setCards] = useState([]);
   const [sellers, setSellers] = useState([]);
   const [hasMore, setHasMore] = useState(false);

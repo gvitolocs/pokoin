@@ -132,7 +132,7 @@ Pi.
 | --- | --- | --- |
 | `api.pokoin.com` | **pi-home** CF tunnel (edge `:18079` → API `:18080`) | Public marketplace API. Reads local Postgres replica `127.0.0.1:5432`. Listing/order writes use `MARKETPLACE_WRITER_DATABASE_URL` → nezopt LAN `192.168.178.55:25432`. Card desk sold graph: `GET /api/marketplace-card-sales` → replica `cardtrader_sold_daily`. |
 | `cdn.pokoin.com` | **pi-home** `:18081` | Leftover JPEG origin (`/srv/pokoin/card-images/objects`). |
-| Meili + Valkey | **pi-home** | English suggest + cache next to the API. Docker `pokoin-meili` is `getmeili/meilisearch:v1.53.1`, data `/srv/pokoin/meili`. |
+| Meili + Redis | **pi-home** | English suggest + cache next to the API. Docker `pokoin-meili` is `getmeili/meilisearch:v1.53.1`, data `/srv/pokoin/meili`. Cache is `pokoin-redis` on `:6380`. |
 
 ### API handler ownership (2026-10-02): CardVault api/ copies are deprecated
 
@@ -240,7 +240,7 @@ Probe:
 
 ```bash
 curl -sS https://api.pokoin.com/healthz
-# 200 only when postgres, valkey, meili, and Pi CDN all answer.
+# 200 when postgres and redis answer. CDN is degraded.
 curl -sSI "https://cdn.pokoin.com/one-piece/301338_burn-bazooka.jpg"
 curl -sS "https://api.pokoin.com/api/marketplace-suggest?game=one_piece&q=luffy&limit=2"
 curl -sS "https://pokoin.com/one-piece/marketplace" | head -c 80

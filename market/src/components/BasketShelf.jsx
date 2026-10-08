@@ -27,6 +27,7 @@ import {
 } from '../listing-meta.js';
 import { tilePricePkn } from '../pkn.js';
 import { authFrom } from '../punchouts.js';
+import AuthLink from './AuthLink.jsx';
 import { BigPrice } from './Basket.jsx';
 import CardArt from './CardArt.jsx';
 
@@ -538,7 +539,7 @@ export function YourItems({ saved, buyAgain, buyAgainLoading, signedIn, onMove, 
           )
         ) : !signedIn ? (
           <p className="bk-empty-note">
-            <Link className="bk-link" to={authFrom('/cart')}>Sign in</Link> to see the cards you bought before.
+            <AuthLink className="bk-link" to={authFrom('/cart')}>Sign in</AuthLink> to see the cards you bought before.
           </p>
         ) : buyAgainLoading ? (
           <p className="bk-empty-note">Loading your orders…</p>

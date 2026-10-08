@@ -5,11 +5,10 @@ import json
 import os
 import socket
 
-REDIS_HOST = os.environ.get("REDIS_HOST") or os.environ.get("VALKEY_HOST") or "127.0.0.1"
+REDIS_HOST = os.environ.get("REDIS_HOST") or "127.0.0.1"
 REDIS_PORT = int(
     os.environ.get("REDIS_PORT")
     or os.environ.get("POKOIN_REDIS_PORT")
-    or os.environ.get("VALKEY_PORT")
     or "6380"
 )
 

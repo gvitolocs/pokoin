@@ -48,4 +48,6 @@ test('HeartGold Collection suggest flag is Japanese when leftover nationality is
   assert.equal(expansionNationality('HeartGold Collection'), 'japanese');
   assert.equal(printFlagFromNationality(expansionNationality('HeartGold Collection'))?.code, 'jpko');
   assert.equal(expansionNationality('HeartGold & SoulSilver'), 'western');
+  assert.equal(expansionNationality('30th Celebration Premium Deck Set'), 'japanese');
+  assert.equal(expansionNationality('CSV9.5: Master Ball Reverse'), 'chinese');
 });

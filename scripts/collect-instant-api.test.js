@@ -2,7 +2,9 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { validate } = require('./collect-instant-api');
+const fs = require('node:fs');
+const path = require('node:path');
+const { validate, loadManifest } = require('./collect-instant-api');
 
 test('instant API artifact closes over the new runtime modules', () => {
   const result = validate();
@@ -33,4 +35,20 @@ test('instant API artifact closes over the new runtime modules', () => {
     'scripts/sql/097_marketplace_artist_summary.sql',
   ]);
   assert.ok(result.routes.some((route) => route.path === '/api/marketplace-live' && route.file === 'marketplace-live.js'));
+  const manifest = loadManifest();
+  assert.deepEqual(
+    result.files.map((file) => path.basename(file)).sort(),
+    [...manifest.ship].sort(),
+  );
+});
+
+test('deploy-instant-api runs test files that exist', () => {
+  const script = fs.readFileSync(path.join(__dirname, 'deploy-instant-api.sh'), 'utf8');
+  const files = [...script.matchAll(/"\$STAGE\/([^"]+)"/g)]
+    .map((match) => match[1])
+    .filter((file) => file.endsWith('.js'));
+  assert.ok(files.includes('server/pokoin-api/_redis_cache.test.js'));
+  for (const file of files) {
+    assert.equal(fs.existsSync(path.join(__dirname, '..', file)), true, file);
+  }
 });

@@ -12,7 +12,7 @@
  * query hot and paint the rest of the pool.
  *
  * This is process memory on pokoin-oracle-api (one container). Do **not**
- * put per-keystroke blobs in Valkey (homepage snapshot lives there).
+ * put per-keystroke blobs in Redis (homepage snapshot lives there).
  *
  * Revert (any one is enough):
  *   1. SUGGEST_HOT_QUERY=0

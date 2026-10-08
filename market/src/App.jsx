@@ -11,6 +11,8 @@ import WorkingOnIt from './components/WorkingOnIt.jsx';
 import { framedByChromeExtension } from './extension-auth-bridge.js';
 import { isDashboardHost } from './scan-api.js';
 import { legacyDashboardHref } from './punchouts.js';
+import { gameBasename } from './game.js';
+import { isGamePrivatePath } from './game-private-path.js';
 import { subscribeOriginDown } from './working-page.js';
 
 // Route-level code splitting: one chunk per page so the first marketplace
@@ -24,6 +26,7 @@ const ArtworkHover = lazy(() => import('./pages/ArtworkHover.jsx'));
 const TestsDashboard = lazy(() => import('./pages/TestsDashboard.jsx'));
 const JumbosBoard = lazy(() => import('./pages/JumbosBoard.jsx'));
 const PokoVideoBoard = lazy(() => import('./pages/PokoVideoBoard.jsx'));
+const PokoArchive = lazy(() => import('./pages/PokoArchive.jsx'));
 const Search = lazy(() => import('./pages/Search.jsx'));
 const Card = lazy(() => import('./pages/Card.jsx'));
 const Expansion = lazy(() => import('./pages/Expansion.jsx'));
@@ -145,12 +148,24 @@ function AppShell() {
     return () => document.documentElement.classList.remove('is-extension-desk');
   }, []);
   const stripped = pathname.replace(/\/$/, '');
-  const board = stripped === '/tests' || stripped === '/sanitize' || stripped === '/espurr' || stripped === '/ocr' || stripped === '/ocr/artists' || stripped === '/artwork' || stripped === '/jumbos' || stripped === '/poko' || stripped === '/extension/auth-bridge';
+  const board = stripped === '/tests' || stripped === '/sanitize' || stripped === '/espurr' || stripped === '/ocr' || stripped === '/ocr/artists' || stripped === '/artwork' || stripped === '/jumbos' || stripped === '/poko' || stripped === '/poko/archive' || stripped === '/extension/auth-bridge';
   const framed = framedByChromeExtension();
   // pokoin.com/scan stays the public photo page. Scan Connect is /dashboard/scan.
   // The legacy host never paints the SPA: / and /scan move under /dashboard.
   if (isDashboardHost() && !board) {
     return <DashboardMarketHandoff target={legacyDashboardHref(pathname, search)} />;
+  }
+  // /{game}/wallet is the wallet page under the game basename. Send it to /wallet.
+  const browserPath = typeof window !== 'undefined' ? window.location.pathname : '';
+  if (gameBasename(browserPath) && isGamePrivatePath(pathname)) {
+    if (typeof window !== 'undefined') {
+      window.location.replace(`${pathname}${search || ''}`);
+    }
+    return (
+      <div className="page desk" style={{ padding: '2.5rem 1.25rem', color: 'var(--muted)' }} role="status">
+        Opening Pokoin…
+      </div>
+    );
   }
   if (originDown && !board && !framed) {
     return <WorkingOnIt />;
@@ -166,6 +181,7 @@ function AppShell() {
       {both('/artwork', <ArtworkHover />)}
       {both('/jumbos', <JumbosBoard />)}
       {both('/poko', <PokoVideoBoard />)}
+      {both('/poko/archive', <PokoArchive />)}
       {both('/marketplace', <Home />)}
       {both('/marketplace/search', <Search />)}
       {both('/marketplace/explore', <Explore />)}

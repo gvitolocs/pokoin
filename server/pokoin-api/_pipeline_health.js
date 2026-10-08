@@ -181,7 +181,7 @@ async function readiness() {
       },
       cdn: { ...cdn, role: 'degraded' },
     },
-    retired: ['meili', 'valkey'],
+    retired: ['meili'],
   };
 }
 

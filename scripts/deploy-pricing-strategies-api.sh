@@ -43,17 +43,20 @@ ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.pokoin-pricing
 scp -q "$SRC/route-definitions.json" pi-home:/tmp/pricing-strategies-routes.json
 scp -q "$SRC/../../server/pokoin-api/patch-route-manifest.js" pi-home:/tmp/patch-route-manifest.js 2>/dev/null \
   || git -C "$REPO" show "$COMMIT":server/pokoin-api/patch-route-manifest.js | ssh pi-home 'cat > /tmp/patch-route-manifest.js'
-ssh pi-home "node /tmp/patch-route-manifest.js /srv/pokoin/api/$release/server/api-route-manifest.js /tmp/pricing-strategies-routes.json && rm -f /tmp/patch-route-manifest.js /tmp/pricing-strategies-routes.json"
+ssh pi-home "node /tmp/patch-route-manifest.js /srv/pokoin/api/$release/server/api-route-manifest.js /tmp/pricing-strategies-routes.json --api-dir=/srv/pokoin/api/$release/api && rm -f /tmp/patch-route-manifest.js /tmp/pricing-strategies-routes.json"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 
-say "verify health + recents auth guard (missing game → 400, missing auth → 401)"
+say "verify health + pricing-strategies and recents auth guards (missing game → 400, missing auth → 401)"
 healthy=0
 for _ in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
   noauth="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-recents?game=pokemon'" || true)"
   # No Authorization header → auth fails before game check (401). Explicit invalid game with no auth also 401.
   nogame="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-recents'" || true)"
-  if [[ "$health" == "200" && "$noauth" =~ ^(401|403)$ && "$nogame" =~ ^(400|401|403)$ ]]; then
+  strategies="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/marketplace-pricing-strategies" || true)"
+  # A broken route manifest 500s on unknown paths instead of 404.
+  unknown="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/route-manifest-healthcheck" || true)"
+  if [[ "$health" == "200" && "$noauth" =~ ^(401|403)$ && "$nogame" =~ ^(400|401|403)$ && "$strategies" =~ ^(401|403)$ && "$unknown" == "404" ]]; then
     healthy=1
     break
   fi
@@ -61,12 +64,12 @@ for _ in $(seq 1 45); do
 done
 
 if [[ "$healthy" != "1" ]]; then
-  echo "health failed (health=$health noauth=$noauth nogame=$nogame) — rolling back" >&2
+  echo "health failed (health=$health noauth=$noauth nogame=$nogame pricing-strategies=${strategies:-} unknown=${unknown:-}) — rolling back" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .price-check-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "Pi API verification failed; previous release restored"
 fi
 
 say "API live: $(ssh pi-home 'readlink /srv/pokoin/api/current')"
-say "health=$health marketplace-recents noauth=$noauth nogame=$nogame"
+say "health=$health marketplace-recents noauth=$noauth nogame=$nogame pricing-strategies=$strategies"
 say "Apply scripts/sql/090_marketplace_user_recents_game.sql on the nezopt writer before relying on game-scoped writes:"
 say "  docker exec -i pokoin-marketplace-postgres-15t psql -U pokoin_marketplace -d pokoin_marketplace -v ON_ERROR_STOP=1 < scripts/sql/090_marketplace_user_recents_game.sql"

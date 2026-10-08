@@ -1,6 +1,7 @@
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 import { createExpansionCardsFetcher } from './expansion-cards.js';
 import { createNamePrintingsFetcher } from './name-printings.js';
+import { resolveExpansionNationality } from './expansion-print.js';
 import { attachRecentsToHome, fetchCardTiles, fetchExpansionFromLists, fetchHomeFromLists, fetchSetIndexFromLists, isPublicRailsVector } from './lists.js';
 import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsMissingTilePrice, lastMedianFromSales, tilePricePkn } from './pkn.js';
 export { formatPkn, formatPknNumber };
@@ -18,6 +19,8 @@ import { collectPrintingThumbUrls, preloadSuggestThumbs } from './suggest-images
 import { realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
 export { artistNameFromSlug, artistSlug } from './artist-name.js';
 import { peekStoredCardPage, rememberStoredCardPage } from './card-page-cache.js';
+import { printingSlugFromCanonicalPath } from './card-path.js';
+import { assertCardPageIdentity } from './card-response.js';
 import {
   clearListingsInflight,
   dropListing,
@@ -366,7 +369,7 @@ const cardCache = new Map();
 const cardInflight = new Map();
 
 function cardCacheKey(cardId, lang = 'en') {
-  return `${String(lang || 'en')}:${String(cardId)}`;
+  return `${game().id}:${String(lang || 'en')}:${String(cardId)}`;
 }
 
 function rememberMap(map, key, value, max) {
@@ -422,6 +425,7 @@ export function fetchCanonicalPath(cardId, { lang = 'en' } = {}) {
   }
   const pending = getJson(`/api/marketplace-card-url?${params}`).then((data) => {
     const path = data?.canonicalPath || data?.canonical_path || '';
+    if (path) assertCardPageIdentity(id, { card: { id: data?.cardId || data?.card_id || id }, game: data?.game, canonicalPath: path }, { gameId: game().id });
     if (path) {
       rememberMap(canonicalPathCache, key, path, 48);
     }
@@ -588,6 +592,7 @@ export function fetchCard(cardId, { lang = 'en', slug = '', includeOffers = fals
     params.set('includeOffers', '1');
   }
   const pending = getJson(`/api/marketplace-card-page?${params}`).then((data) => {
+    assertCardPageIdentity(cardId, data, { gameId: game().id });
     if (!includeOffers) {
       let next = data;
       if (!hasNeighborArrows(data?.neighbors)) {
@@ -606,10 +611,11 @@ export function fetchCard(cardId, { lang = 'en', slug = '', includeOffers = fals
     cardInflight.delete(key);
     throw err;
   });
+  const settled = pending.finally(() => { cardInflight.delete(key); });
   if (!includeOffers) {
-    cardInflight.set(key, pending);
+    cardInflight.set(key, settled);
   }
-  return pending;
+  return settled;
 }
 
 export function fetchVersionSet(cardId) {
@@ -1223,9 +1229,16 @@ function mapExpansionCards(data) {
   if (!data) {
     return data;
   }
-  const nationality = String(data.expansion?.nationality || '').trim();
+  const expansion = data.expansion
+    ? {
+      ...data.expansion,
+      nationality: resolveExpansionNationality(data.expansion) || String(data.expansion.nationality || '').trim(),
+    }
+    : data.expansion;
+  const nationality = String(expansion?.nationality || '').trim();
   return {
     ...data,
+    expansion,
     cards: (data.cards || []).map((row) => {
       const card = cardFromCatalogRow(row);
       if (!card.id) {
@@ -1427,9 +1440,7 @@ export function rememberNeighbors(center, neighbors) {
 }
 
 function slugFromCard(card) {
-  const path = String(card?.canonicalPath || card?.canonical_path || '');
-  const parts = path.split('/').filter(Boolean);
-  return parts[4] || '';
+  return printingSlugFromCanonicalPath(card?.canonicalPath || card?.canonical_path || '');
 }
 
 function preloadCardArt(card) {

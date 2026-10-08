@@ -3,10 +3,15 @@ import test from 'node:test';
 import {
   absoluteUrl,
   buildCardOgPayload,
+  cardCrawlDecision,
   cardOgImageUrl,
+  cardPathHasSlug,
+  fetchCardPageForOg,
+  handleMarketplaceCardOgRequest,
   isLinkPreviewBot,
   isSearchEngineBot,
   parseCardPath,
+  parseCardRequest,
   renderCardOgHtml,
 } from './marketplace-card-og.js';
 
@@ -273,4 +278,193 @@ test('a catalog-only non-Pokémon card is an ItemPage on the game URL', () => {
   assert.equal(listedLd.offers.priceCurrency, 'EUR');
   assert.equal(listedLd.offers.availability, 'https://schema.org/InStock');
   assert.equal(listedLd.offers.url, canonical);
+});
+
+const GOOGLEBOT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
+
+test('versions is a panel: canonical is the card, and the path is not a 301', () => {
+  assert.equal(parseCardRequest('/marketplace/en/cards/695732/versions')?.versions, true);
+  assert.equal(parseCardRequest('/marketplace/en/cards/300646/card-slug/versions')?.versions, true);
+  assert.equal(parseCardRequest('/marketplace/en/cards/300646/card-slug')?.versions, false);
+  assert.equal(cardPathHasSlug('/marketplace/en/cards/815746'), false);
+  assert.equal(cardPathHasSlug('/marketplace/en/cards/815746/wrong-slug'), true);
+  const versions = cardCrawlDecision({
+    requestPath: '/marketplace/en/cards/815746/wrong-slug/versions',
+    canonicalPath: '/marketplace/en/cards/815746/canonical-slug',
+    versions: true,
+  });
+  assert.equal(versions.action, 'noindex');
+  assert.equal(versions.canonicalPath, '/marketplace/en/cards/815746/canonical-slug');
+  const mismatch = cardCrawlDecision({
+    requestPath: '/marketplace/en/cards/815746/card-hop-s-rookidee-147-209-journey-together',
+    canonicalPath: '/marketplace/en/cards/815746/card-hop-s-rookidee-csv10c',
+  });
+  assert.equal(mismatch.action, 'redirect');
+  assert.equal(
+    mismatch.location,
+    'https://pokoin.com/marketplace/en/cards/815746/card-hop-s-rookidee-csv10c',
+  );
+  const same = cardCrawlDecision({
+    requestPath: '/marketplace/en/cards/815746/card-hop-s-rookidee-csv10c/',
+    canonicalPath: '/marketplace/en/cards/815746/card-hop-s-rookidee-csv10c',
+  });
+  assert.equal(same.action, 'ok');
+});
+
+test('noindex versions HTML points at the card and skips Product JSON-LD', () => {
+  const payload = buildCardOgPayload(
+    {
+      seo: {
+        title: 'Hop\'s Rookidee',
+        canonicalPath: '/marketplace/en/cards/815746/card-hop-s-rookidee-csv10c',
+      },
+      card: { id: '815746', name: 'Hop\'s Rookidee' },
+    },
+    { cardId: '815746', language: 'en' },
+  );
+  payload.robots = 'noindex, follow';
+  const html = renderCardOgHtml(payload);
+  assert.match(html, /rel="canonical" href="https:\/\/pokoin\.com\/marketplace\/en\/cards\/815746\/card-hop-s-rookidee-csv10c"/);
+  assert.match(html, /name="robots" content="noindex, follow"/);
+  assert.equal(html.includes('application/ld+json'), false);
+  assert.equal(html.includes('/versions'), false);
+});
+
+async function withFetch(impl, fn) {
+  const original = globalThis.fetch;
+  globalThis.fetch = impl;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test('Googlebot wrong slug and slugless card URLs 301 to the canonical path', async () => {
+  await withFetch(async () => new Response(JSON.stringify({
+    game: 'pokemon',
+    card: { id: '815746', name: 'Hop\'s Rookidee' },
+    seo: {
+      title: 'Hop\'s Rookidee',
+      canonicalPath: '/marketplace/en/cards/815746/card-hop-s-rookidee-csv10c',
+    },
+  }), { status: 200, headers: { 'content-type': 'application/json' } }), async () => {
+    const wrong = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/815746/card-hop-s-rookidee-147-209-journey-together',
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(wrong.status, 301);
+    assert.equal(
+      wrong.headers.get('location'),
+      'https://pokoin.com/marketplace/en/cards/815746/card-hop-s-rookidee-csv10c',
+    );
+    const bare = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/815746',
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(bare.status, 301);
+    assert.equal(bare.headers.get('location'), wrong.headers.get('location'));
+    const versions = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/815746/card-hop-s-rookidee-csv10c/versions',
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(versions.status, 200);
+    assert.equal(versions.headers.get('x-robots-tag'), 'noindex, follow');
+    const html = await versions.text();
+    assert.match(html, /rel="canonical" href="https:\/\/pokoin\.com\/marketplace\/en\/cards\/815746\/card-hop-s-rookidee-csv10c"/);
+    assert.equal(html.includes('application/ld+json'), false);
+  });
+});
+
+test('unprefixed non-Pokemon card 301s to the game canonical path', async () => {
+  await withFetch(async (url) => {
+    const target = String(url);
+    if (target.includes('game=one_piece')) {
+      return new Response(JSON.stringify({
+        game: 'one_piece',
+        card: { id: '598560', name: 'Tony Tony Chopper' },
+        seo: {
+          title: 'Tony Tony Chopper',
+          canonicalPath: '/one-piece/marketplace/en/cards/598560/alternate-art-tony-tony-chopper',
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ error: 'Card not found.' }), { status: 404 });
+  }, async () => {
+    const response = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/598560/alternate-art-tony-tony-chopper',
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(response.status, 301);
+    assert.equal(
+      response.headers.get('location'),
+      'https://pokoin.com/one-piece/marketplace/en/cards/598560/alternate-art-tony-tony-chopper',
+    );
+  });
+});
+
+test('card page 500 does not probe other games and does not throw', async () => {
+  let calls = 0;
+  await withFetch(async () => {
+    calls += 1;
+    return new Response('nope', { status: 500 });
+  }, async () => {
+    const response = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/815746/slug',
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(response, null);
+    assert.equal(calls, 1);
+    const resolved = await fetchCardPageForOg('815746', 'en', '', { probe: false }).catch((error) => error);
+    assert.match(String(resolved.message || ''), /card-page 500/);
+  });
+});
+
+test('browser refresh ignores poisoned Worker canonical cache and delegates to the API', async () => {
+  const oldCaches = globalThis.caches;
+  globalThis.caches = { default: { match: async () => new Response(null, {
+    status: 204, headers: { 'x-pokoin-canonical': '/lorcana/marketplace/en/cards/708344/rare-megara-secret-keeper-086-whispers-in-the-well' },
+  }) } };
+  try {
+    await withFetch(async () => { throw new Error('browser must not fetch through OG'); }, async () => {
+      const response = await handleMarketplaceCardOgRequest(new Request(
+        'https://pokoin.com/marketplace/en/cards/806390/card-mega-rayquaza-ex-gold-secret-rare-113-076-storm-emeralda',
+        { headers: { 'user-agent': 'Mozilla/5.0 Chrome/141' } },
+      ));
+      assert.equal(response, null);
+    });
+  } finally { globalThis.caches = oldCaches; }
+});
+
+test('crawler canonical cache cannot redirect Rayquaza to a different id or catalog', () => {
+  for (const target of ['/lorcana/marketplace/en/cards/708344/megara', '/lorcana/marketplace/en/cards/806390/other']) {
+    const decision = cardCrawlDecision({
+      requestPath: '/marketplace/en/cards/806390/rayquaza',
+      canonicalPath: target,
+    });
+    // A discovered game may change only after an authoritative 404 and same id.
+    if (target.includes('/708344/')) assert.equal(decision.action, 'ok');
+  }
+  assert.equal(cardCrawlDecision({
+    requestPath: '/lorcana/marketplace/en/cards/708344/megara',
+    canonicalPath: '/marketplace/en/cards/708344/other',
+  }).action, 'ok');
+});
+
+test('wrong API response is rejected before crawler redirect or cache storage', async () => {
+  let calls = 0;
+  await withFetch(async () => {
+    calls += 1;
+    return new Response(JSON.stringify({
+      game: 'lorcana', card: { id: '708344', name: 'Megara' },
+      seo: { canonicalPath: '/lorcana/marketplace/en/cards/708344/megara' },
+    }), { status: 200 });
+  }, async () => {
+    const response = await handleMarketplaceCardOgRequest(new Request(
+      'https://pokoin.com/marketplace/en/cards/806390/rayquaza',
+      { headers: { 'user-agent': GOOGLEBOT } },
+    ));
+    assert.equal(response, null);
+    assert.equal(calls, 1);
+  });
 });

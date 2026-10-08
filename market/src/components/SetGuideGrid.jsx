@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { setSlug } from '../api.js';
+import { resolveExpansionNationality } from '../expansion-print.js';
 import { flagSrc, printFlagFromNationality } from '../locale.js';
 import { bundleReference, writeListingDrag } from '../chat-listing.js';
 import { expansionCode, expansionLogoSrc } from '../set-logos.js';
@@ -38,7 +39,7 @@ export default function SetGuideGrid({ rows = [] }) {
         const slug = row.slug || setSlug(row.name);
         const code = expansionCode({ ...row, slug });
         const count = row.cardCount || row.count || row.cards || '';
-        const printFlag = printFlagFromNationality(row.nationality);
+        const printFlag = printFlagFromNationality(resolveExpansionNationality(row));
         const logo = expansionLogoSrc({ ...row, slug });
         return (
           <Link

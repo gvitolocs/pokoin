@@ -58,6 +58,9 @@ test('dated products: WCD year, McDonald\'s, POP, Trick or Trade', () => {
   assert.equal(tcgEra({ slug: 'pop-series-9' }), 'Platinum');
   assert.equal(tcgEra({ slug: 'trick-or-trade' }), 'Sword & Shield');
   assert.equal(tcgEra({ slug: 'trick-or-trade-2024' }), 'Scarlet & Violet');
+  assert.equal(tcgEra({ name: '30th Celebration Premium Deck Set' }), 'Mega Evolution');
+  assert.equal(tcgEra({ name: 'MEGA x MEGA Parade' }), 'Mega Evolution');
+  assert.equal(tcgEra({ slug: 'csv9-5-master-ball-reverse' }), 'Scarlet & Violet');
 });
 
 test('deck and promo aliases from the Other pass', () => {

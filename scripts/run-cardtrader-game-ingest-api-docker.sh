@@ -31,7 +31,7 @@ sudo docker run -d --name "$NAME" --restart unless-stopped --network host \
   -e PORT="$PORT" \
   -e CARDTRADER_INGEST_PORT="$PORT" \
   -e ORACLE_API_HOST=127.0.0.1 \
-  -e PIPELINE_HEALTH_SKIP=valkey,meili,cdn \
+  -e PIPELINE_HEALTH_SKIP=redis,cdn \
   -v "$CURRENT:/app" \
   -w /app \
   "$IMAGE" \
