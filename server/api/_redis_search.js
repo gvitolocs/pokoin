@@ -132,6 +132,13 @@ function command(parts) {
     socket.on('error', (error) => {
       finish(() => reject(error));
     });
+    // Redis closed before a full reply: fail now instead of waiting for the timeout.
+    socket.on('end', () => {
+      finish(() => reject(new Error('redis search failed')));
+    });
+    socket.on('close', () => {
+      finish(() => reject(new Error('redis search failed')));
+    });
     socket.on('data', (chunk) => {
       buf = Buffer.concat([buf, chunk]);
       const parsed = parseOne(buf);
