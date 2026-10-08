@@ -123,12 +123,12 @@ badtoken_body="$(ssh pi-home "curl -s -H 'Authorization: Bearer eyJhbGciOiJSUzI1
 badtoken_code="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln' 'http://127.0.0.1:$STAGING_PORT/api/account-addresses'")"
 [[ "$badtoken_code" == "401" ]] || staging_fail
 [[ "$badtoken_body" != *aud* ]] || staging_fail
-preflight_headers="$(ssh pi-home "curl -s -o /dev/null -D - -X OPTIONS -H 'Origin: https://pokoin.com' -H 'Access-Control-Request-Method: POST' 'http://127.0.0.1:$STAGING_PORT/api/marketplace-listings'")"
+preflight_headers="$(ssh pi-home "curl -s -o /dev/null -D - -X OPTIONS -H 'Origin: https://pokoin.com' -H 'Access-Control-Request-Method: POST' 'http://127.0.0.1:$STAGING_PORT/api/marketplace-listings'" | tr -d '\r')"
 preflight_code="$(printf '%s' "$preflight_headers" | awk 'NR==1 {print $2}')"
 [[ "$preflight_code" == "204" ]] || staging_fail
 printf '%s' "$preflight_headers" | grep -qi '^access-control-allow-origin: https://pokoin.com$' || staging_fail
 printf '%s' "$preflight_headers" | grep -qi '^access-control-allow-credentials: true$' || staging_fail
-evil_headers="$(ssh pi-home "curl -s -o /dev/null -D - -H 'Origin: https://evil.example' 'http://127.0.0.1:$STAGING_PORT/api/marketplace-suggest?q=pika&limit=1'")"
+evil_headers="$(ssh pi-home "curl -s -o /dev/null -D - -H 'Origin: https://evil.example' 'http://127.0.0.1:$STAGING_PORT/api/marketplace-suggest?q=pika&limit=1'" | tr -d '\r')"
 printf '%s' "$evil_headers" | grep -qi '^access-control-allow-origin: \*$' || staging_fail
 if printf '%s' "$evil_headers" | grep -qi '^access-control-allow-credentials:'; then
   staging_fail
@@ -148,7 +148,7 @@ done
 printf '%s' "$last_body" | grep -q '"code":"rate_limited"' || staging_fail
 
 # Cache-poisoning guard: game selected by header (no ?game=) is not cacheable.
-poison_headers="$(ssh pi-home "curl -s -o /dev/null -D - -H 'x-pokoin-game: one_piece' 'http://127.0.0.1:$STAGING_PORT/api/marketplace-expansion-page?limit=1'")"
+poison_headers="$(ssh pi-home "curl -s -o /dev/null -D - -H 'x-pokoin-game: one_piece' 'http://127.0.0.1:$STAGING_PORT/api/marketplace-expansion-page?limit=1'" | tr -d '\r')"
 printf '%s' "$poison_headers" | grep -qi '^cache-control:.*no-store' || staging_fail
 printf '%s' "$poison_headers" | grep -qi '^cdn-cache-control: no-store' || staging_fail
 
