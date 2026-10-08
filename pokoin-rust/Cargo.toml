@@ -18,6 +18,11 @@ members = [
   "crates/commerce",
   "crates/external",
   "crates/catalog-routes",
+  "crates/assistant-api",
+  "crates/admin-api",
+  "crates/search-api",
+  "crates/catalog-api",
+  "crates/api-common",
 ]
 
 [workspace.package]

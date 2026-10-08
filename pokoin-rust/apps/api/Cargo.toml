@@ -8,6 +8,11 @@ name = "pokoin-api"
 path = "src/main.rs"
 
 [dependencies]
+pokoin-assistant-api = { path = "../../crates/assistant-api" }
+pokoin-admin-api = { path = "../../crates/admin-api" }
+pokoin-search-api = { path = "../../crates/search-api" }
+pokoin-catalog-api = { path = "../../crates/catalog-api" }
+pokoin-api-common = { path = "../../crates/api-common" }
 anyhow = { workspace = true }
 axum = { workspace = true }
 pokoin-auth = { path = "../../crates/auth" }

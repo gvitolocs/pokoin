@@ -315,12 +315,27 @@ fn build_full_router(state: AppState) -> Router {
         }
     };
 
+    let routes = match pokoin_api_common::RouteState::from_env() {
+        Ok(route_state) => Router::new()
+            .merge(pokoin_catalog_api::router(route_state.clone()))
+            .merge(pokoin_search_api::router(route_state.clone()))
+            .merge(pokoin_admin_api::router(route_state.clone()))
+            .merge(pokoin_assistant_api::router(route_state)),
+        Err(error) => {
+            tracing::error!(domain = "routes", %error, "domain disabled");
+            Router::new()
+        }
+    };
+
     let core = router(state.clone());
     core
+        .merge(routes)
         .merge(accounts)
         .merge(commerce)
         .merge(external)
         .merge(catalog_routes)
+        .layer(axum::extract::DefaultBodyLimit::max(pokoin_api_common::http::JSON_LIMIT_BYTES))
+        .layer(axum::middleware::from_fn(pokoin_api_common::public_error::sanitize_layer))
         .layer(axum::middleware::from_fn_with_state(
             state,
             request_log::log_request,
