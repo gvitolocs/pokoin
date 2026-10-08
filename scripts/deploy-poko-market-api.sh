@@ -50,7 +50,7 @@ say "Pi release $release"
 ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(readlink current); echo \$prev > .poko-market-previous; cp -a \$prev '$release'; mkdir -p '$release/api'"
 tar -C "$SRC" -cf - news-comments.js news-comments.test.js news-event.js news-event.test.js news-stats.js news-stats.test.js poko-market.js poko-market.test.js poko-connect.js poko-connect.test.js poko-bets.js poko-bets.test.js poko-chat.js poko-chat.test.js _poko_reply_cards.js poko-reply-cards.test.js poko-personal-context.js poko-personal-context.test.js _poko_personal_context.js _rate_limit.js _redis_cache.js route-definitions.json patch-route-manifest.js "${PRICE_FILES[@]}" \
   | ssh pi-home "tar -C '/srv/pokoin/api/$release/api' -xf -"
-ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json' && rm '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'"
+ssh pi-home "node '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/server/api-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json' '--api-dir=/srv/pokoin/api/$release/api' && rm '/srv/pokoin/api/$release/api/patch-route-manifest.js' '/srv/pokoin/api/$release/api/route-definitions.json'"
 ssh pi-home "printf '%s\n' '$COMMIT' > '/srv/pokoin/api/$release/.poko-market-commit'"
 ssh pi-home "set -e; cd /srv/pokoin/api; ln -sfn '$release' current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
 

@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
-const { addRoutes, manifestProblems } = require('./patch-route-manifest');
+const { execFileSync, spawnSync } = require('node:child_process');
+const { addRoutes, manifestProblems, routesWithHandlers } = require('./patch-route-manifest');
 
 function evaluate(source) {
   const module = { exports: {} };
@@ -34,6 +34,17 @@ test('manifestProblems reports holes and entries without path/file', () => {
   assert.deepEqual(manifestProblems([{ path: '/a', file: 'a.js' }, , { path: '/c' }]), ['hole at index 1', 'entry 2 lacks path/file']);
 });
 
+test('routesWithHandlers keeps routes whose handler file exists', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-manifest-'));
+  fs.writeFileSync(path.join(dir, 'a.js'), '');
+  const { kept, skipped } = routesWithHandlers([
+    { path: '/api/a', file: 'a.js' },
+    { path: '/api/b', file: 'b.js' },
+  ], dir);
+  assert.deepEqual(kept.map((route) => route.path), ['/api/a']);
+  assert.deepEqual(skipped.map((route) => route.path), ['/api/b']);
+});
+
 test('the CLI restores the original manifest and exits 1 when the result is broken', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-manifest-'));
   const manifest = path.join(dir, 'manifest.js');
@@ -52,6 +63,31 @@ test('the CLI writes a clean manifest', () => {
   fs.writeFileSync(manifest, 'module.exports = {\n  routeDefinitions: [\n  {\n    "path": "/api/a",\n    "file": "a.js"\n  },\n]\n};\n');
   fs.writeFileSync(routes, JSON.stringify([{ path: '/api/b', file: 'b.js' }]));
   execFileSync(process.execPath, [path.join(__dirname, 'patch-route-manifest.js'), manifest, routes], { stdio: 'pipe' });
+  const loaded = require(manifest).routeDefinitions;
+  assert.deepEqual(loaded.map((route) => route.path), ['/api/a', '/api/b']);
+});
+
+test('the CLI with --api-dir never registers a route without its handler', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-manifest-'));
+  const manifest = path.join(dir, 'manifest.js');
+  const apiDir = path.join(dir, 'api');
+  const routes = path.join(dir, 'routes.json');
+  fs.mkdirSync(apiDir);
+  fs.writeFileSync(manifest, 'module.exports = {\n  routeDefinitions: [\n  {\n    "path": "/api/a",\n    "file": "a.js"\n  },\n]\n};\n');
+  fs.writeFileSync(path.join(apiDir, 'b.js'), '');
+  fs.writeFileSync(routes, JSON.stringify([
+    { path: '/api/b', file: 'b.js' },
+    { path: '/api/c', file: 'c.js' },
+  ]));
+  const result = spawnSync(process.execPath, [
+    path.join(__dirname, 'patch-route-manifest.js'),
+    manifest,
+    routes,
+    `--api-dir=${apiDir}`,
+  ], { stdio: 'pipe', encoding: 'utf8' });
+  assert.equal(result.status, 0);
+  assert.match(result.stderr, /skipped \/api\/c/);
+  delete require.cache[require.resolve(manifest)];
   const loaded = require(manifest).routeDefinitions;
   assert.deepEqual(loaded.map((route) => route.path), ['/api/a', '/api/b']);
 });

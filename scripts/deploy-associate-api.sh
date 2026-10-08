@@ -60,14 +60,16 @@ for _ in $(seq 1 45); do
   health="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/healthz" || true)"
   anon="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/marketplace-associate" || true)"
   suggest="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:18080/api/marketplace-associate-suggest?q=gi'" || true)"
-  if [[ "$health" == "200" && "$anon" == "401" && "$suggest" == "200" ]]; then
+  # A broken route manifest 500s on unknown paths instead of 404.
+  unknown="$(ssh pi-home "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/route-manifest-healthcheck" || true)"
+  if [[ "$health" == "200" && "$anon" == "401" && "$suggest" == "200" && "$unknown" == "404" ]]; then
     healthy=1
     break
   fi
   sleep 2
 done
 if [[ "$healthy" != "1" ]]; then
-  echo "health failed (health=$health anon=$anon suggest=$suggest) — rolling back" >&2
+  echo "health failed (health=$health anon=$anon suggest=$suggest unknown=${unknown:-}) — rolling back" >&2
   ssh pi-home "set -e; cd /srv/pokoin/api; prev=\$(cat .associate-previous); ln -sfn \$prev current.new; mv -Tf current.new current; docker restart '$API_CONTAINER' >/dev/null"
   die "Pi API verification failed; previous release restored"
 fi
