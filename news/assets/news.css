@@ -292,3 +292,30 @@ main { display: block; max-width: var(--wide); margin: 0 auto; padding: 22px 16p
 .nx-comments__submit:disabled { opacity: 0.6; cursor: default; }
 .nx-comments__signin { margin: 16px 0 0; font-size: 15px; }
 .nx-comments__signin a { color: var(--accent); font-weight: 600; }
+
+/* Admin reader stats (/news/dashboard) --------------------------------------- */
+.nx-dash { max-width: var(--wide); margin: 0 auto; }
+.nx-dash__head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; }
+.nx-dash__head h1 { font-size: clamp(28px, 4.5vw, 42px); margin: 0.4em 0; }
+.nx-dash__range { font-size: 14px; color: var(--muted); }
+.nx-dash__range select { margin-left: 6px; padding: 6px 8px; background: var(--paper); color: var(--text); border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+.nx-dash__status { max-width: 40rem; margin: 40px auto; text-align: center; color: var(--muted); }
+.nx-dash__kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 8px 0 24px; }
+.nx-dash__kpi { padding: 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; }
+.nx-dash__kpi span { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.nx-dash__kpi strong { display: block; margin-top: 4px; font-size: 24px; font-variant-numeric: tabular-nums; }
+.nx-dash__chart { margin: 0 0 24px; padding: 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; }
+.nx-dash__chart svg { display: block; width: 100%; height: 180px; }
+.nx-dash__chart rect { fill: var(--accent); }
+.nx-dash__chart figcaption { margin-top: 8px; font-size: 13px; color: var(--muted); }
+.nx-dash__table { display: block; overflow-x: auto; }
+.nx-dash__table td { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nx-dash__table tbody th { font-weight: 500; min-width: 16rem; }
+.nx-dash th button { padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.nx-dash th button:hover { color: var(--text); }
+.nx-dash__note { font-size: 13px; color: var(--muted); }
+
+@media (max-width: 720px) {
+  .nx-dash__kpis { grid-template-columns: repeat(2, 1fr); }
+  .nx-dash__table tbody th { min-width: 12rem; }
+}

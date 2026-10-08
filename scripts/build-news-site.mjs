@@ -17,6 +17,7 @@ import { renderPage } from '../news/lib/layout.mjs';
 import {
   renderArticlePage,
   renderAuthorPage,
+  renderDashboard,
   renderHome,
   renderNotFound,
   renderSection,
@@ -162,15 +163,18 @@ export function buildNewsSite({
 
   const cssSource = readFileSync(join(ROOT, 'news/assets/news.css'));
   const jsSource = readFileSync(join(ROOT, 'news/assets/news.js'));
+  const dashboardSource = readFileSync(join(ROOT, 'news/assets/news-dashboard.js'));
   const cssName = `news.${hash8(cssSource)}.css`;
   const jsName = `news.${hash8(jsSource)}.js`;
-  const assets = { css: `/news/assets/${cssName}`, js: `/news/assets/${jsName}` };
+  const dashboardName = `news-dashboard.${hash8(dashboardSource)}.js`;
+  const assets = { css: `/news/assets/${cssName}`, js: `/news/assets/${jsName}`, dashboardJs: `/news/assets/${dashboardName}` };
   const ctx = { baseUrl, assets, preview };
 
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(join(outDir, 'news/assets'), { recursive: true });
   writeFileSync(join(outDir, 'news/assets', cssName), cssSource);
   writeFileSync(join(outDir, 'news/assets', jsName), jsSource);
+  writeFileSync(join(outDir, 'news/assets', dashboardName), dashboardSource);
 
   const artDir = join(ROOT, 'news/assets/art');
   if (existsSync(artDir)) cpSync(artDir, join(outDir, 'news/assets/art'), { recursive: true });
@@ -213,6 +217,8 @@ export function buildNewsSite({
   for (const game of games.filter((entry) => entry !== 'pokemon')) {
     writePage(`${gameNewsBase(game).slice(1)}/404.html`, renderNotFound(ctx));
   }
+  // Admin reading stats: a noindex shell; data comes from the admin-only API.
+  writePage('news/dashboard.html', renderDashboard(preview ? prepared : prepared.filter((record) => record.status === 'published'), ctx));
   if (preview) writePage('news/desk.html', renderDesk(valid, ctx));
 
   const urlSitemap = newsUrlSitemap(valid, { baseUrl, now: nowIso });
@@ -239,6 +245,7 @@ export function buildNewsSite({
     fallbacks,
     css: cssName,
     js: jsName,
+    dashboardJs: dashboardName,
   };
   writeFileSync(join(outDir, 'build-report.json'), `${JSON.stringify(report, null, 2)}\n`);
   return report;
