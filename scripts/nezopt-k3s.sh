@@ -156,8 +156,11 @@ sync_code() {
   rsync -a --delete --exclude '.env' "$PI:/srv/pokoin/api/$release/" "$BASE/data/api/releases/$name/"
   ln -sfn "releases/$name" "$BASE/data/api/current.new"
   mv -Tf "$BASE/data/api/current.new" "$BASE/data/api/current"
-  # Keep the three newest releases.
-  ls -1t "$BASE/data/api/releases" | tail -n +4 | while read -r old; do
+  # Keep the three newest releases, never the one just activated: Pi releases
+  # are cp -a copies, so their directory mtime is old and ls -t would sort the
+  # new release last and delete it.
+  touch "$BASE/data/api/releases/$name"
+  ls -1t "$BASE/data/api/releases" | grep -vxF "$name" | tail -n +3 | while read -r old; do
     rm -rf "$BASE/data/api/releases/$old"
   done
   return 0

@@ -146,3 +146,9 @@ test('allowedOrigins returns a Set of production plus dev origins', () => {
   assert.ok(dev.has('http://localhost:4173'));
   assert.ok(dev.has('http://127.0.0.1:5173'));
 });
+
+test('unset NODE_ENV is production: localhost is never echoed or credentialed', () => {
+  const h = corsHeaders({ headers: { origin: 'http://localhost:5173' } }, {});
+  assert.equal(h['access-control-allow-origin'], '*');
+  assert.equal(h['access-control-allow-credentials'], undefined);
+});

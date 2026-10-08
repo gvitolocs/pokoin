@@ -40,7 +40,9 @@ function allowedOrigins(env = process.env) {
       // Not a URL: ignore.
     }
   }
-  if ((env && env.NODE_ENV) !== 'production') {
+  // Fail safe: dev origins only when the environment says so explicitly. The Pi
+  // edge and the Pi API run without NODE_ENV, and they are production.
+  if (env && (env.NODE_ENV === 'development' || env.NODE_ENV === 'test')) {
     set.add('http://localhost:5173');
     set.add('http://localhost:4173');
     set.add('http://127.0.0.1:5173');
