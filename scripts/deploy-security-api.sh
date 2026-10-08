@@ -60,7 +60,7 @@ for pair in "${API_FILES[@]}"; do
 done
 
 say "security unit tests"
-(cd "$HERE" && NODE_PATH="${REPO}/server/node_modules" node --test \
+(cd "$HERE" && NODE_PATH="${REPO}/server/node_modules" node --test --test-force-exit \
   server/pokoin-api/_client_ip.test.js \
   server/pokoin-api/_cors_policy.test.js \
   server/pokoin-api/_http_security.test.js \
