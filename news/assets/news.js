@@ -1,7 +1,9 @@
 // Pokoin News page script: share controls and reader comments.
 // Comments: GET/POST https://api.pokoin.com/api/news-comments. The Pokoin
 // sign-in token is the host-only `pokoin.auth.token` cookie the marketplace
-// writes on pokoin.com; it is sent only to the Pokoin API. No analytics.
+// writes on pokoin.com; it is sent only to the Pokoin API.
+// Reading stats are first-party only (POST https://api.pokoin.com/api/news-event):
+// no cookies, no third parties, nothing personal; off under Do Not Track / GPC.
 (function () {
   'use strict';
 
@@ -171,8 +173,161 @@
     else signInPrompt();
   }
 
+  // Reading stats for the admin dashboard (/news/dashboard): list impressions
+  // and clicks by card position, article views, scroll milestones and active
+  // seconds before the tab hides. Batched beacons; never blocks the page.
+  var EVENTS_API = 'https://api.pokoin.com/api/news-event';
+
+  function pageViewId() {
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    var out = '';
+    var bytes = null;
+    if (window.crypto && window.crypto.getRandomValues) bytes = window.crypto.getRandomValues(new Uint8Array(16));
+    for (var i = 0; i < 16; i += 1) {
+      out += chars.charAt((bytes ? bytes[i] : Math.floor(Math.random() * 256)) % chars.length);
+    }
+    return out;
+  }
+
+  function analytics() {
+    var host = window.location.hostname;
+    if (host !== 'pokoin.com' && host !== 'www.pokoin.com') return;
+    if (navigator.webdriver === true || navigator.doNotTrack === '1' || navigator.globalPrivacyControl === true) return;
+
+    var pv = pageViewId();
+    var queue = [];
+
+    function send(body) {
+      var sent = false;
+      try {
+        if (navigator.sendBeacon) sent = navigator.sendBeacon(EVENTS_API, new Blob([body], { type: 'application/json' }));
+      } catch (error) { sent = false; }
+      if (!sent && window.fetch) {
+        fetch(EVENTS_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: body,
+          keepalive: true,
+          credentials: 'omit',
+        }).catch(function () {});
+      }
+    }
+
+    function flush() {
+      while (queue.length) send(JSON.stringify({ events: queue.splice(0, 40) }));
+    }
+
+    function track(event, now) {
+      event.pv = pv;
+      queue.push(event);
+      if (now || queue.length >= 20) flush();
+    }
+
+    window.setInterval(function () { if (queue.length) flush(); }, 5000);
+
+    // List cards: impression once ≥50% on screen, click on any card link.
+    var cards = document.querySelectorAll('.nx-card[data-article-id]');
+    var observer = window.IntersectionObserver
+      ? new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i += 1) {
+          if (!entries[i].isIntersecting) continue;
+          var card = entries[i].target;
+          observer.unobserve(card);
+          track(cardEvent('impression', card), false);
+        }
+      }, { threshold: 0.5 })
+      : null;
+
+    function cardEvent(type, card) {
+      return {
+        type: type,
+        articleId: card.getAttribute('data-article-id'),
+        articlePath: card.getAttribute('data-article-path'),
+        source: window.location.pathname,
+        position: Number(card.getAttribute('data-position')),
+      };
+    }
+
+    for (var c = 0; c < cards.length; c += 1) {
+      (function (card, position) {
+        card.setAttribute('data-position', String(position));
+        if (observer) observer.observe(card);
+        var links = card.querySelectorAll('a[href]');
+        for (var l = 0; l < links.length; l += 1) {
+          links[l].addEventListener('click', function () { track(cardEvent('click', card), true); });
+          links[l].addEventListener('auxclick', function (event) {
+            if (event.button === 1) track(cardEvent('click', card), true);
+          });
+        }
+      }(cards[c], c + 1));
+    }
+
+    // Article page: view, scroll milestones, active seconds before leaving.
+    var article = document.querySelector('article.nx-article[data-article-id]');
+    if (!article) return;
+    var articleId = article.getAttribute('data-article-id');
+    var articlePath = article.getAttribute('data-article-path');
+    var referrerHost = '';
+    try { referrerHost = document.referrer ? new URL(document.referrer).hostname : ''; } catch (error) { referrerHost = ''; }
+    track({ type: 'view', articleId: articleId, articlePath: articlePath, source: referrerHost }, true);
+
+    var milestones = [25, 50, 75, 100];
+    var reached = {};
+    var maxDepth = 0;
+    var pending = false;
+
+    function measure() {
+      pending = false;
+      var rect = article.getBoundingClientRect();
+      var seen = window.innerHeight - rect.top;
+      var pct = rect.height > 0 ? Math.max(0, Math.min(100, (seen / rect.height) * 100)) : 100;
+      if (pct > maxDepth) maxDepth = pct;
+      for (var m = 0; m < milestones.length; m += 1) {
+        var mark = milestones[m];
+        if (reached[mark] || maxDepth < (mark === 100 ? 98 : mark)) continue;
+        reached[mark] = true;
+        track({ type: 'read', articleId: articleId, articlePath: articlePath, depth: mark }, false);
+      }
+    }
+
+    function schedule() {
+      if (pending) return;
+      pending = true;
+      window.setTimeout(measure, 100);
+    }
+
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule, { passive: true });
+    measure();
+
+    var activeMs = 0;
+    var visibleSince = document.visibilityState === 'visible' ? Date.now() : null;
+    var lastSentSeconds = -1;
+
+    function leave() {
+      measure();
+      if (visibleSince !== null) {
+        activeMs += Date.now() - visibleSince;
+        visibleSince = null;
+      }
+      var seconds = Math.round(activeMs / 1000);
+      if (seconds !== lastSentSeconds) {
+        lastSentSeconds = seconds;
+        track({ type: 'leave', articleId: articleId, articlePath: articlePath, seconds: seconds, depth: Math.round(maxDepth) }, false);
+      }
+      flush();
+    }
+
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') leave();
+      else if (visibleSince === null) visibleSince = Date.now();
+    });
+    window.addEventListener('pagehide', leave);
+  }
+
   ready(function () {
     shareControls();
     comments();
+    try { analytics(); } catch (error) { /* stats must never break the page */ }
   });
 }());

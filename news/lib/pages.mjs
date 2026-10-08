@@ -68,7 +68,8 @@ export function renderArticleCard(record, { size = 'm', showGame = false } = {})
     : '';
   const dek = size === 'l' || size === 'm' ? `<p class="nx-card__dek">${esc(record.dek)}</p>` : '';
   return (
-    `<article class="nx-card nx-card--${esc(size)}">` +
+    `<article class="nx-card nx-card--${esc(size)}"` +
+    ` data-article-id="${esc(record.id)}" data-article-path="${esc(articlePath(record))}">` +
     cardImage(record.hero || fallbackHero(record.section)) +
     `<p class="nx-card__meta"><span class="nx-type nx-type--${esc(typeSlug(record.articleType))}">` +
     `${esc(record.articleType)}</span> ` +
@@ -370,6 +371,44 @@ export function renderNotFound(ctx = {}) {
     body,
     activeNav: 'latest',
     preview: ctx.preview === true,
+    assets: ctx.assets,
+  });
+}
+
+// Admin reading-stats shell. The numbers come only from the admin-gated
+// GET /api/news-stats (news-dashboard.js); the page itself carries nothing
+// but the public article index used to turn article ids into headlines.
+export function renderDashboard(records, ctx = {}) {
+  const index = (records || []).map((record) => ({
+    id: record.id,
+    path: articlePath(record),
+    headline: record.headline,
+    game: record.game || 'pokemon',
+    section: record.section,
+    datePublished: record.datePublished || null,
+  }));
+  const options = [7, 30, 90, 365]
+    .map((days) => `<option value="${days}"${days === 30 ? ' selected' : ''}>${days} days</option>`)
+    .join('');
+  const body =
+    `<section class="nx-dash" data-stats-api="${esc(SITE.statsApi)}">` +
+    `<header class="nx-dash__head"><h1>Reader stats</h1>` +
+    `<label class="nx-dash__range" hidden>Period <select id="nx-dash-days">${options}</select></label></header>` +
+    `<p class="nx-dash__status" role="status">Checking admin access…</p>` +
+    `<div class="nx-dash__body" hidden></div>` +
+    `<noscript><p class="nx-dash__status">The dashboard needs JavaScript.</p></noscript>` +
+    `<script type="application/json" id="nx-dash-articles">${JSON.stringify(index).replace(/</g, '\\u003c')}</script>` +
+    `</section>`;
+  const script = ctx.assets && ctx.assets.dashboardJs;
+  return renderPage({
+    title: 'Reader stats — Pokoin News',
+    description: 'Admin reader statistics for Pokoin News.',
+    canonicalPath: '/news/dashboard',
+    robots: 'noindex, nofollow',
+    body,
+    activeNav: 'dashboard',
+    preview: ctx.preview === true,
+    extraHead: script ? `<script src="${esc(script)}" defer></script>` : '',
     assets: ctx.assets,
   });
 }
