@@ -72,8 +72,10 @@ export default function CardArt(props) {
     props.onError?.();
   });
 
-  const figureMask = () => props.figureMask
-    ?? (props.cut && props.cutSurface === 'album' ? artworkFigureMaskSrc(props.card) : '');
+  // A memo, not a getter: onSettled below may not create primitives, and
+  // reading a compiled prop getter there would.
+  const figureMask = createMemo(() => props.figureMask
+    ?? (props.cut && props.cutSurface === 'album' ? artworkFigureMaskSrc(props.card) : ''));
   const [showFigure, setShowFigure] = createSignal(false);
   onSettled(() => {
     const node = img?.closest('.tile');
@@ -107,11 +109,13 @@ export default function CardArt(props) {
     <img
       ref={(node) => { img = node; }}
       class={props.class}
-      src={current()}
       alt={props.alt || ''}
       loading={props.loading}
       fetchpriority={props.fetchPriority}
       decoding={props.full ? 'sync' : 'async'}
+      // src last, like React DOM does for <img>: loading / decoding /
+      // fetchpriority must be on the element before the URL is.
+      src={current()}
       // Enumerated attribute, not boolean: "false" stops the native image ghost.
       draggable={props.dragCard ? 'true' : 'false'}
       onClick={(event) => props.onClick?.(event)}

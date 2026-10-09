@@ -4,6 +4,9 @@ import { gameBasename } from '@market/game.js';
 import Home from './pages/Home.jsx';
 import NotMigrated from './pages/NotMigrated.jsx';
 import RedirectTo from './pages/RedirectTo.jsx';
+import { preloadSearch } from './lib/search-preload.js';
+
+const Search = lazy(() => import('./pages/Search.jsx'));
 
 /**
  * Migrated routes only. Every other URL renders NotMigrated, which hands the
@@ -20,6 +23,7 @@ export const Router = createRouter({
   routes: [
     { path: '/', component: RedirectTo, info: { to: '/marketplace' } },
     { path: '/marketplace', component: Home },
+    { path: '/marketplace/search', component: Search, preload: preloadSearch },
     { path: '*404', component: NotMigrated },
   ],
 });

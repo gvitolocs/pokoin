@@ -57,6 +57,14 @@ const ROOTS = [
   'working-page.js',
   'card-select.js',
   'shop-marquee.js',
+  'scroll-memory.js',
+  'search-hot.js',
+  'search-kind.js',
+  'search-filters.js',
+  'search-print.js',
+  'suggest-resolve.js',
+  'listing-meta.js',
+  'associate-roles.js',
 ];
 
 const FORBIDDEN_PACKAGES = new Set([
