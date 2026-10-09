@@ -1,5 +1,7 @@
-import { Errored, Loading } from 'solid-js';
+import { createEffect, Errored, Loading, onSettled } from 'solid-js';
 import Chrome from './components/Chrome.jsx';
+import { signedIn, warmAuthWhenIdle } from './stores/auth.js';
+import { ensureSellerSettings } from './stores/buyer.js';
 
 /** Same placeholder as the React RouteSuspense: keeps the desk shell, no CLS. */
 function RoutePending() {
@@ -21,6 +23,11 @@ function RouteError(props) {
  * has rendered, revalidation keeps it visible (no spinner flash on back/forward).
  */
 export default function App(props) {
+  // Firebase Auth after the first paint; buyer currency once a session exists.
+  onSettled(() => warmAuthWhenIdle());
+  createEffect(() => signedIn(), (on) => {
+    if (on) ensureSellerSettings();
+  });
   return (
     <Chrome>
       <Errored fallback={(err, reset) => <RouteError error={err()} reset={reset} />}>

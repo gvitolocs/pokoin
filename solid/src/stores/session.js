@@ -16,7 +16,6 @@ if (typeof window !== 'undefined') {
 }
 
 export const authSession = session;
-export const signedIn = () => Boolean(session()?.uid);
 export const profile = () => profileFromSession(session());
 export function refreshSession() {
   setSession(readAuthSession());

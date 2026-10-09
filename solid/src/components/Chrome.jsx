@@ -6,7 +6,7 @@ import AppLink from './AppLink.jsx';
 import PokoinWordmark from './PokoinWordmark.jsx';
 import SearchBox from './SearchBox.jsx';
 import { cartCount } from '../stores/cart.js';
-import { signedIn } from '../stores/session.js';
+import { signedIn } from '../stores/auth.js';
 
 /** Icon paths shared with market/src/components/Chrome.jsx (ICO). */
 const ICO = {
