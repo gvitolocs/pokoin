@@ -9,6 +9,9 @@
 const COMPACT_MEMO = new Map();
 const COMPACT_MEMO_MAX = 20000;
 
+/** ASCII input needs no normalisation: NFKC/NFD/NFC are the identity and [^\p{L}\p{N}] is [^a-z0-9]. */
+const ASCII_ONLY = /^[\x00-\x7f]*$/;
+
 export function compactQuery(value) {
   const text = String(value || "");
   const hit = COMPACT_MEMO.get(text);
@@ -22,14 +25,16 @@ export function compactQuery(value) {
   // NFC recomposes voiced kana; then casefold and drop non-letter/number.
   // Invariant: NFC and NFD forms of the same string collapse to one compact,
   // but distinct kana stay distinct (compactQuery("ピ") !== compactQuery("ヒ")).
-  const compact = text
-    .normalize("NFKC")
-    .replace(/[δΔ]/g, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .normalize("NFC")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "");
+  const compact = ASCII_ONLY.test(text)
+    ? text.toLowerCase().replace(/[^a-z0-9]+/g, "")
+    : text
+      .normalize("NFKC")
+      .replace(/[δΔ]/g, "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .normalize("NFC")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, "");
   if (COMPACT_MEMO.size >= COMPACT_MEMO_MAX) {
     COMPACT_MEMO.clear();
   }

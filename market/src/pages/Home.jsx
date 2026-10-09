@@ -23,7 +23,7 @@ import {
   createEnglishBrowseState,
   fillEnglishBrowse,
 } from '../home-browse.js';
-import { readHomeVectorCache, writeHomeVectorCache } from '../home-cache.js';
+import { readHomeVectorCache, scheduleHomeVectorCacheWrite } from '../home-cache.js';
 import { tilePricePkn } from '../pkn.js';
 import { readRecentCardIds, readRecentTiles, rememberRecentTiles, pruneUnresolvedRecents, syncRemoteRecentCardIds } from '../recents.js';
 import { Action, track } from '../track.js';
@@ -158,7 +158,7 @@ export default function Home() {
       if (cancelled || !data) {
         return null;
       }
-      writeHomeVectorCache(site.id, data);
+      scheduleHomeVectorCacheWrite(site.id, data);
       const ids = readRecentCardIds();
       const painted = paintHome(data, ids, localExtras());
       commit(painted);
@@ -229,7 +229,7 @@ export default function Home() {
           return;
         }
         next = { ...next, cards: priced };
-        writeHomeVectorCache(site.id, next);
+        scheduleHomeVectorCacheWrite(site.id, next);
         commit(next);
       })
       .catch((err) => {

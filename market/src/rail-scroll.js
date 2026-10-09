@@ -59,10 +59,15 @@ export function bindRailControls(node) {
     return () => {};
   }
   const update = () => syncRailControls(node);
-  update();
-  node.addEventListener('scroll', update, { passive: true });
   const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
-  observer?.observe(node);
+  // The observer delivers an initial observation after layout, so the synchronous
+  // update only forces a layout when there is no observer to do it.
+  if (observer) {
+    observer.observe(node);
+  } else {
+    update();
+  }
+  node.addEventListener('scroll', update, { passive: true });
   return () => {
     node.removeEventListener('scroll', update);
     observer?.disconnect();

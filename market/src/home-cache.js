@@ -86,3 +86,53 @@ export function writeHomeVectorCache(gameId, payload, overrideStore) {
     /* quota / private mode */
   }
 }
+
+/**
+ * Coalesce the JSON.stringify of the whole home vector: keep only the latest
+ * payload per game and serialize once when the main thread is idle. Listeners
+ * flush on pagehide / hidden so a pending write is never lost on navigation.
+ */
+const PENDING_HOME_WRITES = new Map();
+let flushHandle = null;
+let flushIdle = false;
+let flushListeners = false;
+
+/** Idle-callback and timer ids are separate counters: cancel with the matching API. */
+function cancelScheduledFlush() {
+  if (flushHandle == null) return;
+  if (flushIdle) window.cancelIdleCallback?.(flushHandle);
+  else window.clearTimeout?.(flushHandle);
+  flushHandle = null;
+}
+
+export function flushHomeVectorCacheWrites() {
+  cancelScheduledFlush();
+  for (const [gameId, entry] of PENDING_HOME_WRITES) {
+    writeHomeVectorCache(gameId, entry.payload, entry.overrideStore);
+  }
+  PENDING_HOME_WRITES.clear();
+}
+
+export function scheduleHomeVectorCacheWrite(gameId, payload, overrideStore) {
+  if (typeof window === 'undefined') {
+    writeHomeVectorCache(gameId, payload, overrideStore);
+    return;
+  }
+  PENDING_HOME_WRITES.set(gameId, { payload, overrideStore });
+  if (!flushListeners) {
+    flushListeners = true;
+    window.addEventListener('pagehide', flushHomeVectorCacheWrites);
+    window.addEventListener('visibilitychange', () => {
+      if (document?.visibilityState === 'hidden') {
+        flushHomeVectorCacheWrites();
+      }
+    });
+  }
+  if (flushHandle != null) {
+    return;
+  }
+  flushIdle = typeof window.requestIdleCallback === 'function';
+  flushHandle = flushIdle
+    ? window.requestIdleCallback(flushHomeVectorCacheWrites, { timeout: 2000 })
+    : window.setTimeout(flushHomeVectorCacheWrites, 500);
+}

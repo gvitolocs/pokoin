@@ -17,7 +17,7 @@ import { fetchRail, RAIL, tileHasName } from '@market/lists.js';
 import { isSetDeskCard } from '@market/search-filters.js';
 import { game, isPokemonGame } from '@market/game.js';
 import { HOME_BROWSE_BLOCK, createEnglishBrowseState, fillEnglishBrowse } from '@market/home-browse.js';
-import { readHomeVectorCache, writeHomeVectorCache } from '@market/home-cache.js';
+import { readHomeVectorCache, scheduleHomeVectorCacheWrite } from '@market/home-cache.js';
 import { tilePricePkn } from '@market/pkn.js';
 import {
   pruneUnresolvedRecents,
@@ -146,7 +146,7 @@ export default function Home() {
 
   async function applyRailsVector(data) {
     if (disposed || !data) return null;
-    writeHomeVectorCache(site.id, data);
+    scheduleHomeVectorCacheWrite(site.id, data);
     const painted = paintHome(data, readRecentCardIds(), localExtras());
     commit(painted);
     return painted;
@@ -200,7 +200,7 @@ export default function Home() {
       const priced = await fillMissingLastMedianPrices(next.cards || []);
       if (disposed) return;
       next = { ...next, cards: priced };
-      writeHomeVectorCache(site.id, next);
+      scheduleHomeVectorCacheWrite(site.id, next);
       commit(next);
     } catch (err) {
       if (disposed) return;

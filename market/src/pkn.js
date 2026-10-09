@@ -17,13 +17,25 @@ export function parseListAmount(value) {
   return Number(String(value || '').replace(/,/g, '').trim());
 }
 
+/** toLocaleString builds a new Intl.NumberFormat per call; reuse one per digit setting. */
+const PKN_NUMBER_FORMATTERS = new Map();
+
+function pknNumberFormatter(maximumFractionDigits) {
+  let formatter = PKN_NUMBER_FORMATTERS.get(maximumFractionDigits);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat('en-US', { useGrouping: false, maximumFractionDigits });
+    PKN_NUMBER_FORMATTERS.set(maximumFractionDigits, formatter);
+  }
+  return formatter;
+}
+
 /** Digits only. A thousands comma looks like a decimal in EU locales (2642 not 2,642). */
 export function formatPknNumber(value, { maximumFractionDigits = 2 } = {}) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) {
     return '0';
   }
-  return amount.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits });
+  return pknNumberFormatter(maximumFractionDigits).format(amount);
 }
 
 export function formatPkn(value) {
