@@ -5,9 +5,8 @@ import CardArt from '../components/CardArt.jsx';
 import DumpNav from '../components/DumpNav.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import { dumpWatchIds, toggleDumpWatch } from '../catalog.js';
+import { EXPLORE_PAGE as PAGE, exploreLanguages, filterExploreItems } from '../explore-filter.js';
 import { rememberPageView, restoredPageView } from '../scroll-restore.js';
-
-const PAGE = 48;
 
 function money(value) {
   return formatPkn(value) || '—';
@@ -49,33 +48,13 @@ export default function Explore() {
     };
   }, []);
 
-  const langNames = useMemo(() => {
-    if (!catalog) return [];
-    return [...new Set((catalog.items || []).map((item) => item.language).filter(Boolean))].sort();
-  }, [catalog]);
+  const langNames = useMemo(() => exploreLanguages(catalog), [catalog]);
 
-  const filtered = useMemo(() => {
-    if (!catalog) return [];
-    const needle = query.trim().toLowerCase();
-    const minPkn = Number(min) || 0;
-    const maxPkn = Number(max) || Infinity;
-    const watched = new Set(dumpWatchIds());
-    const rows = (catalog.items || []).filter((item) => {
-      if (needle && !`${item.name} ${item.expansion} ${item.game}`.toLowerCase().includes(needle)) return false;
-      if (type === 'cards' && item.sealed) return false;
-      if (type === 'sealed' && !item.sealed) return false;
-      if ((item.pricePkn || 0) < minPkn || (item.pricePkn || 0) > maxPkn) return false;
-      if (watchOnly && !watched.has(String(item.id))) return false;
-      if (langs.size && item.language && !langs.has(item.language)) return false;
-      return true;
-    });
-    rows.sort((a, b) => {
-      if (sort === 'name') return a.name.localeCompare(b.name);
-      if (sort === 'qty') return (b.qty || 0) - (a.qty || 0) || (b.totalPkn || 0) - (a.totalPkn || 0);
-      return (b.totalPkn || 0) - (a.totalPkn || 0);
-    });
-    return rows;
-  }, [catalog, query, sort, type, min, max, watchOnly, langs, watchTick]);
+  const filtered = useMemo(
+    () => filterExploreItems(catalog, { query, sort, type, min, max, watchOnly, langs, watched: dumpWatchIds() }),
+    // watchTick: a saved-id toggle re-reads dumpWatchIds().
+    [catalog, query, sort, type, min, max, watchOnly, langs, watchTick],
+  );
 
   useEffect(() => {
     if (suppressShownReset.current) {

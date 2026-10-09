@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigationType, useParams } from 'react-router-dom';
 import { albumShadeStyle } from '../art-shade.js';
 import { fetchArtist, fetchArtistSummaries, imageSrc, peekArtist } from '../api.js';
+import { artistCardCount } from '../browse-hubs.js';
 import { addCatalogCards } from '../cart-add.js';
 import { useCart } from '../cart.jsx';
 import { bundleReference, preloadDragImage, writeListingDrag } from '../chat-listing.js';
@@ -31,10 +32,6 @@ const ALBUM_PAGE = 24;
 const PRELOAD_AHEAD = 20;
 /** First pokedex page. SQL already returns this order, so it can paint before the rest. */
 const ARTIST_FIRST = 48;
-
-function artistCardCount(row) {
-  return Number(row?.count || row?.cardCount || 0);
-}
 
 function ArtistsIndex() {
   const { lang = 'en' } = useParams();

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import { fetchSellerShop } from '../api.js';
-import { rewriteCanonicalCardPath } from '../card-stub.js';
 import { cartItemFromOffer, useCart } from '../cart.jsx';
 import { getSearchLang } from '../locale.js';
 import ShopList from '../components/ShopList.jsx';
@@ -16,37 +15,20 @@ import {
   sellerHandle,
 } from '../listing-meta.js';
 import { rememberSellerIdentity, seedSellerListings, sellerIdentitySeed } from '../seller-seed.js';
+import {
+  SELLER_CONDITION_FILTERS as CONDITION_FILTERS,
+  SELLER_LANG_FILTERS as LANG_FILTERS,
+  SELLER_PAGE_SIZE as PAGE_SIZE,
+  SELLER_RARITY_FILTERS as RARITY_FILTERS,
+  isOneDayReady,
+  sellerFiltersNarrow,
+  sellerFromPayload,
+  sellerOfferRow,
+} from '../seller-shop.js';
 import { game } from '../game.js';
 import { associateRoleLabel } from '../associate-roles.js';
 import Avatar from '../components/Avatar.jsx';
-import { safeAvatarUrl } from '../avatar.js';
 import { filterSellerBook } from '../seller-shop-filter.js';
-
-const PAGE_SIZE = 100;
-
-const CONDITION_FILTERS = [
-  { value: '', label: 'Any condition' },
-  { value: 'NM', label: 'Near Mint' },
-  { value: 'SP', label: 'Slightly Played' },
-  { value: 'MP', label: 'Moderately Played' },
-  { value: 'PL', label: 'Played' },
-  { value: 'Poor', label: 'Poor' },
-];
-
-const LANG_FILTERS = ['', 'EN', 'IT', 'JP', 'DE', 'FR', 'ES', 'KR', 'PT', 'NL', 'PL', 'RU', 'ZH'];
-
-const RARITY_FILTERS = [
-  { value: '', label: 'Any rarity' },
-  { value: 'holo', label: 'Holo' },
-  { value: 'common', label: 'Common' },
-  { value: 'uncommon', label: 'Uncommon' },
-  { value: 'rare', label: 'Rare' },
-  { value: 'ultra', label: 'Ultra Rare' },
-  { value: 'illustration', label: 'Illustration Rare' },
-  { value: 'secret', label: 'Secret Rare' },
-  { value: 'promo', label: 'Promo' },
-  { value: 'no-rarity', label: 'No Rarity' },
-];
 
 function ShopToggle({ label, pressed, onToggle }) {
   return (
@@ -60,41 +42,6 @@ function ShopToggle({ label, pressed, onToggle }) {
     </button>
   );
 }
-function isOneDayReady(offer) {
-  return Boolean(
-    offer?.oneDayReady ||
-      offer?.one_day_ready ||
-      offer?.shippingMode === 'one_day_ready',
-  );
-}
-
-function sellerFromPayload(data, handle, sample, previous = null) {
-  const row = data?.seller && typeof data.seller === 'object' ? data.seller : null;
-  const username = String(row?.username || sellerHandle(sample) || previous?.username || handle || '')
-    .trim()
-    .replace(/^@/, '');
-  const rawName = String(row?.displayName || publicListingSellerName(sample, username || handle) || '')
-    .trim();
-  const known = sellerIdentitySeed(handle);
-  const apiName = rawName && !rawName.includes('@') && rawName.toLowerCase() !== username.toLowerCase()
-    ? rawName
-    : '';
-  // Book/fresh paths often send sellerUid with an empty photo and the
-  // username as displayName — keep whatever the first page or chat already painted.
-  const displayName = apiName || known?.displayName || previous?.displayName || username || handle;
-  const associateRow = row?.associate && typeof row.associate === 'object' ? row.associate : null;
-  const associateRole = String(associateRow?.role || '').trim().toLowerCase();
-  return {
-    uid: row?.uid || sample?.sellerUid || known?.uid || previous?.uid || '',
-    username,
-    displayName,
-    photoUrl: safeAvatarUrl(row?.photoUrl) || known?.photoUrl || previous?.photoUrl || '',
-    associate: associateRole
-      ? { role: associateRole, displayName: String(associateRow.displayName || '').trim() }
-      : (previous?.associate || null),
-  };
-}
-
 export default function Seller() {
   const { username = '', lang: routeLang } = useParams();
   const [searchParams] = useSearchParams();
@@ -203,16 +150,7 @@ export default function Seller() {
   }, [book, handle, selectedGame, query, condition, language, rarity, reverse, firstEdition, sort]);
 
   useEffect(() => {
-    const filtersNarrow = Boolean(
-      query.trim()
-      || condition
-      || language
-      || rarity
-      || reverse
-      || firstEdition
-      || (sort && sort !== 'price-desc')
-      || page > 1
-    );
+    const filtersNarrow = sellerFiltersNarrow({ query, condition, language, rarity, reverse, firstEdition, sort, page });
     // First page still comes from the small query. A filter click while the
     // full shop is downloading waits for that book instead of asking again.
     if (!handle || book || (bookPhase === 'loading' && filtersNarrow)) {
@@ -267,16 +205,7 @@ export default function Seller() {
     };
   }, [book, bookPhase, handle, page, query, condition, language, rarity, reverse, firstEdition, sort, selectedGame]);
 
-  const filtersNarrow = Boolean(
-    query.trim()
-    || condition
-    || language
-    || rarity
-    || reverse
-    || firstEdition
-    || (sort && sort !== 'price-desc')
-    || page > 1
-  );
+  const filtersNarrow = sellerFiltersNarrow({ query, condition, language, rarity, reverse, firstEdition, sort, page });
   const bookView = useMemo(() => (
     book?.listings
       ? filterSellerBook(book.listings, {
@@ -483,24 +412,7 @@ export default function Seller() {
         ) : shown.length ? (
           <ShopList className="seller-shop-list" offers={shown}>
             {(selected) => shown.map((offer, index) => {
-              const cardId = String(offer.cardId || offer.card_id || '');
-              const path = rewriteCanonicalCardPath(
-                offer.canonicalPath || offer.canonical_path || '',
-                cardId,
-                lang,
-              );
-              const enriched = {
-                ...offer,
-                canonicalPath: path || offer.canonicalPath || '',
-              };
-              const cardStub = {
-                id: cardId,
-                name: offer.cardName || offer.name || 'Card',
-                canonicalPath: path || `/marketplace/${lang || 'en'}/cards/${cardId}`,
-                imageUrl: offer.cardImageUrl || offer.imageUrl || offer.image_url || '',
-                homepageImageUrl: offer.homepageImageUrl || offer.homepage_image_url || '',
-                gridImageUrl: offer.gridImageUrl || offer.grid_image_url || '',
-              };
+              const { cardId, enriched, cardStub } = sellerOfferRow(offer, lang);
               return (
                 <ShopListingRow
                   key={offer.id || `${cardId}-${index}`}
