@@ -72,8 +72,10 @@ export default function CardArt(props) {
     props.onError?.();
   });
 
-  const figureMask = () => props.figureMask
-    ?? (props.cut && props.cutSurface === 'album' ? artworkFigureMaskSrc(props.card) : '');
+  // A memo, not a getter: the onSettled below reads it, and reading a compiled
+  // prop expression there would create a primitive in a forbidden scope.
+  const figureMask = createMemo(() => props.figureMask
+    ?? (props.cut && props.cutSurface === 'album' ? artworkFigureMaskSrc(props.card) : ''));
   const [showFigure, setShowFigure] = createSignal(false);
   onSettled(() => {
     const node = img?.closest('.tile');
