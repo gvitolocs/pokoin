@@ -3,6 +3,7 @@ Description=Pokoin native job cardtrader-seller-reconcile (CardTrader seller rec
 
 [Timer]
 OnBootSec=2min
+OnActiveSec=1min
 OnUnitActiveSec=5min
 RandomizedDelaySec=20s
 Persistent=true

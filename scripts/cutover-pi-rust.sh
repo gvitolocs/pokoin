@@ -80,7 +80,8 @@ install -m 0644 "$STAGE/pokoin-rust-job@.service" /etc/systemd/system/
 install -m 0644 "$STAGE"/pokoin-rust-job-*.timer /etc/systemd/system/
 rm -f /etc/systemd/system/pokoin-rust-api.service.d/20-edge-cutover.conf
 # The Rust outbox worker owns listing sync once Node stops.
-sed -i '/^POKOIN_LISTING_SYNC_WORKER=0$/d' "$ENV"
+# Any spelling: 0, "0" or '0' (the Pi env file quotes every value).
+sed -i -E "/^POKOIN_LISTING_SYNC_WORKER=[\"']?0[\"']?[[:space:]]*\$/d" "$ENV"
 systemctl daemon-reload
 
 log "stop node"

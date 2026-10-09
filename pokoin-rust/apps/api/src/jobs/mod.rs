@@ -37,6 +37,7 @@ pub async fn run(name: &str) -> Result<()> {
         "referral-reconcile" => referral::run(&options).await,
         "cardtrader-seller-reconcile" => cardtrader::run(&options).await,
         "search-delta" => search::run(&options).await,
+        "search-reindex" => search::run_reindex(&options).await,
         _ => bail!("Unknown native job: {name}"),
     }
 }

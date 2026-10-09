@@ -136,6 +136,17 @@ pub fn clean_text(value: Option<&str>, max: usize) -> String {
 }
 
 /// cleanText over a serde value's string form (JS coerces everything).
+/// `String(value)` for a JSON scalar: CardTrader sends ids as numbers, so an
+/// `as_str()` read would turn every id into an empty string.
+pub fn scalar_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
+}
+
 pub fn clean_text_value(value: &Value, max: usize) -> String {
     match value {
         Value::Null => String::new(),

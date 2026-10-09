@@ -1002,7 +1002,7 @@ pub async fn search_rows_by_card_ids_with_database(
           and cardtrader_cache.cheapest_price_pkn is not null
           and (
             cardtrader_cache.blueprint_id = c.ct_id
-            or cardtrader_cache.pokoin_card_id = c.card_id::text
+            or (cardtrader_cache.pokoin_card_id = c.card_id::text and cardtrader_cache.pokoin_card_id <> '')
           )
         order by
           case when cardtrader_cache.blueprint_id = c.ct_id then 0 else 1 end,

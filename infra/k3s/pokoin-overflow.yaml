@@ -183,18 +183,29 @@ spec:
     spec:
       automountServiceAccountToken: false
       containers:
+      # The Pi's exact Rust release (same commit, x86_64 build) serving the full
+      # api.pokoin.com edge on :8080; the API router listens on pod loopback.
       - command:
-        - node
-        - server/oracle-api-server.js
+        - /app/pokoin-api
         env:
-        - name: ORACLE_API_HOST
-          value: 0.0.0.0
+        - name: POKOIN_EDGE_BIND
+          value: 0.0.0.0:8080
+        - name: POKOIN_RUST_BIND
+          value: 127.0.0.1:18082
         - name: POKOIN_TRUSTED_PROXY_CIDRS
           value: 10.42.0.0/16
-        - name: PORT
-          value: '8080'
-        - name: NODE_ENV
-          value: production
+        # The outbox worker runs on the Pi only.
+        - name: POKOIN_LISTING_SYNC_WORKER
+          value: '0'
+        - name: POKOIN_RUST_RELEASE
+          value: nez-k3s
+        # No card images here: CDN paths on api.pokoin.com go to the public CDN.
+        - name: POKOIN_CDN_ROOT
+          value: /srv/pokoin/card-images/objects
+        - name: POKOIN_CDN_NAME
+          value: nez-k3s
+        - name: POKOIN_CDN_FALLBACK_ORIGIN
+          value: https://cdn.pokoin.com
         - name: MARKETPLACE_DATABASE_URL
           valueFrom:
             secretKeyRef:
@@ -213,7 +224,7 @@ spec:
           value: '1'
         - name: MARKETPLACE_WRITER_DATABASE_SSL_VERIFY
           value: '1'
-        - name: MARKETPLACE_DATABASE_POOL_MAX
+        - name: POKOIN_RUST_DB_POOL_MAX
           value: '8'
         - name: MEILI_HOST
           value: http://meili.pokoin-overflow.svc.cluster.local:7700
@@ -221,24 +232,20 @@ spec:
           value: redis.pokoin-overflow.svc.cluster.local
         - name: REDIS_PORT
           value: '6379'
-        - name: POKOIN_OVERFLOW_NODE
-          value: nezopt
         - name: POKOIN_CDN_HEALTH_URL
           value: https://cdn.pokoin.com/health
         - name: PIPELINE_HEALTH_TIMEOUT_MS
           value: '2000'
-        - name: POKOIN_ORIGIN_NAME
-          value: nez-k3s
-        - name: PIPELINE_HEALTH_SAMPLE_MS
-          value: '5000'
         - name: SCAN_PRIMARY_URL
           value: http://172.31.250.12:18151
         - name: SCAN_FALLBACK_URL
           value: http://172.31.250.12:18151
+        - name: RUST_LOG
+          value: info
         envFrom:
         - secretRef:
             name: pokoin-api-env
-        image: node:20-bookworm
+        image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
         livenessProbe:
           failureThreshold: 6
           httpGet:
@@ -265,10 +272,10 @@ spec:
         resources:
           limits:
             cpu: '2'
-            memory: 1536Mi
+            memory: 768Mi
           requests:
             cpu: 500m
-            memory: 384Mi
+            memory: 128Mi
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -284,6 +291,9 @@ spec:
           readOnly: true
         - mountPath: /app
           name: app
+          readOnly: true
+        - mountPath: /srv/pokoin/seo
+          name: seo
           readOnly: true
         - mountPath: /tmp
           name: tmp
@@ -302,12 +312,16 @@ spec:
           defaultMode: 292
           secretName: pokoin-pg-ca
       - emptyDir:
-          sizeLimit: 256Mi
+          sizeLimit: 64Mi
         name: tmp
       - hostPath:
-          path: /srv/pokoin-overflow/api/current
+          path: /srv/pokoin-overflow/rust/current
           type: Directory
         name: app
+      - hostPath:
+          path: /srv/pokoin-overflow/seo
+          type: DirectoryOrCreate
+        name: seo
 ---
 apiVersion: v1
 kind: Service
@@ -362,45 +376,56 @@ spec:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: meili-delta
+  name: search-delta
   namespace: pokoin-overflow
 spec:
   concurrencyPolicy: Forbid
   failedJobsHistoryLimit: 3
   jobTemplate:
-    metadata: {}
     spec:
       activeDeadlineSeconds: 170
       backoffLimit: 0
       template:
-        metadata: {}
         spec:
+          automountServiceAccountToken: false
           containers:
           - command:
-            - sh
-            - -c
-            - node scripts/meili-sync-marketplace-delta.js || NODE_PATH=/app/node_modules
-              node /opt/redis-search/redis-search-reindex.js
+            - /app/pokoin-api
+            - job
+            - search-delta
             env:
             - name: MARKETPLACE_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
                   name: pokoin-api-env
-            - name: MEILI_HOST
-              value: http://meili.pokoin-overflow.svc.cluster.local:7700
+            - name: REDIS_HOST
+              value: redis.pokoin-overflow.svc.cluster.local
+            - name: REDIS_PORT
+              value: '6379'
+            - name: RUST_LOG
+              value: info
             envFrom:
             - secretRef:
                 name: pokoin-api-env
-            image: node:20-bookworm
-            name: sync
+            image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+            name: search-delta
             resources:
               limits:
                 cpu: '1'
-                memory: 1Gi
+                memory: 256Mi
               requests:
                 cpu: 100m
-                memory: 256Mi
+                memory: 64Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              readOnlyRootFilesystem: true
+              runAsGroup: 1000
+              runAsNonRoot: true
+              runAsUser: 1000
             volumeMounts:
             - mountPath: /etc/pokoin/pg-ca
               name: pg-ca
@@ -408,70 +433,81 @@ spec:
             - mountPath: /app
               name: app
               readOnly: true
-            - mountPath: /opt/redis-search
-              name: redis-search
-              readOnly: true
             workingDir: /app
           restartPolicy: Never
-          securityContext: {}
+          securityContext:
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
           volumes:
           - name: pg-ca
             secret:
               defaultMode: 292
               secretName: pokoin-pg-ca
           - hostPath:
-              path: /srv/pokoin-overflow/api/current
+              path: /srv/pokoin-overflow/rust/current
               type: Directory
             name: app
-          - configMap:
-              defaultMode: 420
-              name: redis-search-scripts
-            name: redis-search
   schedule: '*/2 * * * *'
   successfulJobsHistoryLimit: 1
   suspend: false
+# Drift guard: rebuild the Redis Search index from Postgres every night.
 ---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: meili-full
+  name: search-reindex
   namespace: pokoin-overflow
 spec:
   concurrencyPolicy: Forbid
   failedJobsHistoryLimit: 3
   jobTemplate:
-    metadata: {}
     spec:
+      activeDeadlineSeconds: 1800
       backoffLimit: 1
       template:
-        metadata: {}
         spec:
+          automountServiceAccountToken: false
           containers:
           - command:
-            - sh
-            - -c
-            - NODE_PATH=/app/node_modules node /opt/redis-search/redis-search-reindex.js
-              && node scripts/meili-sync-marketplace-full.js && node scripts/meili-sync-name-tokens-full.js
+            - /app/pokoin-api
+            - job
+            - search-reindex
             env:
             - name: MARKETPLACE_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: MARKETPLACE_OVERFLOW_DATABASE_URL
                   name: pokoin-api-env
-            - name: MEILI_HOST
-              value: http://meili.pokoin-overflow.svc.cluster.local:7700
+            - name: REDIS_HOST
+              value: redis.pokoin-overflow.svc.cluster.local
+            - name: REDIS_PORT
+              value: '6379'
+            - name: RUST_LOG
+              value: info
             envFrom:
             - secretRef:
                 name: pokoin-api-env
-            image: node:20-bookworm
-            name: sync
+            image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+            name: search-reindex
             resources:
               limits:
                 cpu: '2'
-                memory: 2Gi
+                memory: 1Gi
               requests:
                 cpu: 250m
-                memory: 512Mi
+                memory: 256Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              readOnlyRootFilesystem: true
+              runAsGroup: 1000
+              runAsNonRoot: true
+              runAsUser: 1000
             volumeMounts:
             - mountPath: /etc/pokoin/pg-ca
               name: pg-ca
@@ -479,25 +515,23 @@ spec:
             - mountPath: /app
               name: app
               readOnly: true
-            - mountPath: /opt/redis-search
-              name: redis-search
-              readOnly: true
             workingDir: /app
           restartPolicy: Never
-          securityContext: {}
+          securityContext:
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
           volumes:
           - name: pg-ca
             secret:
               defaultMode: 292
               secretName: pokoin-pg-ca
           - hostPath:
-              path: /srv/pokoin-overflow/api/current
+              path: /srv/pokoin-overflow/rust/current
               type: Directory
             name: app
-          - configMap:
-              defaultMode: 420
-              name: redis-search-scripts
-            name: redis-search
-  schedule: 17 3 * * *
+  schedule: '17 3 * * *'
   successfulJobsHistoryLimit: 1
   suspend: false
