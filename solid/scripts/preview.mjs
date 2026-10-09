@@ -10,6 +10,12 @@
  * route as the chosen UI's index.html, hashed assets immutable, brotli when
  * the browser asks. The browser talks to https://api.pokoin.com directly
  * (CORS allows non-pokoin origins without credentials), exactly as in production.
+ *
+ *   node solid/scripts/preview.mjs --dist-web <dir> --port 28520
+ *
+ * serves a full build-web.sh output instead (React/Solid switch shell): files
+ * from <dir>, SPA routes as market/app.html, and the `/*` headers of
+ * <dir>/_headers (CSP included) on HTML responses.
  */
 import fs from 'node:fs';
 import http from 'node:http';
@@ -31,7 +37,23 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const reactDist = path.resolve(arg('react-dist', path.join(repo, 'market/dist')));
 const solidDist = path.resolve(arg('solid-dist', path.join(repo, 'solid/dist')));
 const homeDir = path.join(repo, 'home');
-const shell = path.join(UI === 'react' ? reactDist : solidDist, 'index.html');
+const distWeb = arg('dist-web', '') ? path.resolve(arg('dist-web', '')) : '';
+const shell = distWeb
+  ? path.join(distWeb, 'market', 'app.html')
+  : path.join(UI === 'react' ? reactDist : solidDist, 'index.html');
+
+/** The `/*` block of a Cloudflare _headers file (applied to HTML responses). */
+function siteHeaders() {
+  if (!distWeb || !fs.existsSync(path.join(distWeb, '_headers'))) return {};
+  const lines = fs.readFileSync(path.join(distWeb, '_headers'), 'utf8').split('\n');
+  const start = lines.indexOf('/*');
+  const out = {};
+  for (let i = start + 1; start >= 0 && i < lines.length && /^\s+\S/.test(lines[i]); i += 1) {
+    const [name, ...value] = lines[i].trim().split(':');
+    out[name] = value.join(':').trim();
+  }
+  return out;
+}
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css',
@@ -47,6 +69,10 @@ const ROOT_ICONS = {
 const brCache = new Map();
 
 function resolveFile(pathname) {
+  if (distWeb) {
+    const file = path.join(distWeb, pathname);
+    return file.startsWith(distWeb) && path.extname(pathname) ? file : null;
+  }
   if (pathname.startsWith('/market/s/')) return path.join(solidDist, pathname.slice('/market/'.length));
   if (pathname.startsWith('/market/')) return path.join(reactDist, pathname.slice('/market/'.length));
   if (pathname.startsWith('/home/')) return path.join(homeDir, pathname.slice('/home/'.length));
@@ -60,6 +86,7 @@ function send(req, res, file, { immutable = false } = {}) {
   const type = TYPES[ext] || 'application/octet-stream';
   let body = fs.readFileSync(file);
   const headers = {
+    ...(ext === '.html' ? siteHeaders() : {}),
     'Content-Type': type,
     'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'public, max-age=0, must-revalidate',
   };
@@ -101,5 +128,5 @@ http.createServer((req, res) => {
   }
   send(req, res, shell);
 }).listen(PORT, HOST, () => {
-  console.log(`preview ${UI} on http://${HOST}:${PORT} (shell ${path.relative(repo, shell)})`);
+  console.log(`preview ${distWeb ? 'dist-web' : UI} on http://${HOST}:${PORT} (shell ${path.relative(repo, shell)})`);
 });

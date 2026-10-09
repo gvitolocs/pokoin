@@ -81,6 +81,12 @@ fi
 npm run build
 mkdir -p "$OUT/market"
 cp -a "$ROOT/market/dist/." "$OUT/market/"
+# React/Solid switch (docs/frontend-perf/PLAN.md). Off unless POKOIN_UI_SWITCH=1:
+# without it the shell and the deployed files are exactly the React build.
+if [[ "${POKOIN_UI_SWITCH:-0}" == "1" ]]; then
+  (cd "$ROOT/solid" && npm ci && npm run build)
+  node "$ROOT/scripts/build-ui-shell.mjs" "$OUT"
+fi
 # White-edge-pass dumps stay off the production SPA. Keep /review for
 # test.pokoin.com boards (sanitize, espurr, ocr).
 rm -rf "$OUT/market/review/white-edge-pass"
