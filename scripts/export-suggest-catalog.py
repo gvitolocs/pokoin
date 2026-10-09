@@ -104,6 +104,8 @@ def write_js(path: Path, rows: list[dict], label: str) -> None:
 def main() -> None:
     write_js(ARTISTS_OUT, psql(ARTIST_SQL), "artists")
     write_js(SETS_OUT, psql(SET_SQL), "sets")
+    # Derived first-paint table (market/src/expansion-nationality.js reads it).
+    subprocess.run(["node", str(ROOT / "scripts/export-expansion-nationality.mjs")], check=True)
 
 
 if __name__ == "__main__":
