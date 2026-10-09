@@ -89,3 +89,24 @@ three builds served the same way and calling the live `api.pokoin.com`.
   derivations recomputed on every read; addressed with per-row memos and a
   per-printing card/thumb cache. Era matching (`matchTcgEra`) is memoised for
   both UIs.
+
+## Run ab2 — 2026-10-09 19:08–19:11 UTC (typing only, after the Solid fixes)
+
+- Builds: optimised React = feature/frontend-perf market/ (before the hot-path
+  fixes in shared modules); Solid = feature/frontend-perf 229dad5+ solid/
+  (engine on intent, per-row memos, era memo, collator).
+- Mobile profile (390×844, CPU ×4), 3 interleaved runs per build (small n:
+  read p50 as indicative). Same host caveats as ab1.
+
+| journey | metric | optimised React p50 / p95 | Solid p50 / p95 |
+|---|---|---|---|
+| search | inp | 272 / 300.8 | 104 / 118.4 |
+| search | keys.toRowsMs | 831 / 1534 | 307.3 / 547.2 |
+| search | lt.blockingMs | 920 / 987.5 | 508 / 620.5 |
+| search | cpu.scriptMs | 1543.3 / 1628.3 | 977.8 / 1082.9 |
+| search | mem.heapPeakMB | 38.7 / 50.31 | 35 / 35.63 |
+| typo | inp | 312 / 333.6 | 152 / 152 |
+| typo | keys.toRowsMs | 646 / 1006.9 | 372.3 / 498.5 |
+| typo | lt.blockingMs | 889 / 1258.9 | 741 / 964.2 |
+| typo | cpu.scriptMs | 1888.8 / 2164.6 | 1429.5 / 1722.3 |
+| typo | mem.heapPeakMB | 43.9 / 60.46 | 34.8 / 36.6 |
