@@ -50,6 +50,26 @@ function serveLandingHome() {
   };
 }
 
+/**
+ * Rolldown splits every module shared by the entry and a lazy chunk into its
+ * own common chunk, so lazy trays / chat / previews turned the first paint
+ * into ~19 module requests. Everything statically reachable from the entry
+ * is loaded on the first paint anyway: keep it in one chunk, lazy-only code
+ * stays split.
+ */
+function entryGroup(id, ctx) {
+  const seen = new Set();
+  const walk = (moduleId) => {
+    if (seen.has(moduleId)) return false;
+    seen.add(moduleId);
+    const info = ctx.getModuleInfo(moduleId);
+    if (!info) return false;
+    if (info.isEntry) return true;
+    return info.importers.some(walk);
+  };
+  return walk(id) ? 'index' : null;
+}
+
 /** The Solid app must never bundle React. Shared modules come from market/src,
  * so a hook import there would silently drag react-dom in; fail the build instead. */
 const FORBIDDEN = /^(react|react-dom|react-router|react-router-dom)(\/|$)/;
@@ -81,6 +101,9 @@ export default defineConfig(({ command }) => ({
     target: 'es2022',
     assetsDir: 's',
     sourcemap: process.env.SOLID_SOURCEMAP === '1',
+    rolldownOptions: {
+      output: { codeSplitting: { groups: [{ name: entryGroup }] } },
+    },
   },
   server: {
     host: '0.0.0.0',
