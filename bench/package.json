@@ -1,0 +1,23 @@
+{
+  "name": "pokoin-bench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Repeatable browser performance benchmark for the Pokoin SPA (Playwright + Chrome DevTools Protocol)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "setup": "playwright install chromium",
+    "bench": "node run.mjs",
+    "bench:desktop": "node run.mjs --profile desktop --runs 10",
+    "bench:mobile": "node run.mjs --profile mobile --runs 10",
+    "compare": "node compare.mjs",
+    "bundle": "node bundle.mjs",
+    "profile": "node profile.mjs",
+    "test": "node --test lib/*.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.64.0"
+  }
+}
