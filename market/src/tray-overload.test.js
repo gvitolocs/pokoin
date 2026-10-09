@@ -86,10 +86,15 @@ test('a full localStorage clears card-page caches, and never snaps the Desktop b
 });
 
 test('cart writes never throw on a full localStorage (the black-screen crash)', () => {
+  // The guarded write lives in cart-rows.js, shared by the React and Solid carts.
   const src = fs.readFileSync(path.join(root, 'cart.jsx'), 'utf8');
   const body = src.slice(src.indexOf('function writeCart'), src.indexOf('export function peekCartItems'));
-  assert.match(body, /try \{\s*localStorage\.setItem\(CART_KEY, raw\);\s*\} catch/);
-  assert.match(body, /pruneStoredCardPages\(0\)/);
+  assert.match(body, /writeCartRows\(CART_KEY, items, CART_MAX\)/);
+  assert.match(body, /writeCartRows\(SAVED_KEY, items, SAVED_MAX\)/);
+  const rows = fs.readFileSync(path.join(root, 'cart-rows.js'), 'utf8');
+  const write = rows.slice(rows.indexOf('export function writeCartRows'), rows.indexOf('export function cartItemFromOffer'));
+  assert.match(write, /try \{\s*localStorage\.setItem\(key, raw\);\s*\} catch/);
+  assert.match(write, /pruneStoredCardPages\(0\)/);
 });
 
 test('cart and Desktop trays mount at most TRAY_VISIBLE thumbs and full scans only for a few cards', () => {
