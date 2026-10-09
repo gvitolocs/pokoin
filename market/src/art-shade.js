@@ -349,12 +349,23 @@ export function peekDeskIdentity(cardId) {
   };
 }
 
+/** One 24×32 canvas for every sample: a new canvas + 2D context per thumb cost more than the sample. */
+let sampleCanvas = null;
+
+function sampleContext() {
+  if (!sampleCanvas) {
+    sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = 24;
+    sampleCanvas.height = 32;
+  }
+  return sampleCanvas.getContext('2d', { willReadFrequently: true });
+}
+
 function averageArtHex(img) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 24;
-  canvas.height = 32;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const ctx = sampleContext();
   if (!ctx) return '';
+  // Transparent like a fresh canvas, so a reused one samples the same pixels.
+  ctx.clearRect(0, 0, 24, 32);
   ctx.drawImage(img, 0, 0, 24, 32);
   const data = ctx.getImageData(2, 4, 20, 12).data;
   let r = 0;
@@ -371,6 +382,27 @@ function averageArtHex(img) {
   return rgbToHex([r / n, g / n, b / n]);
 }
 
+/**
+ * Thumbs load while the user types; their canvas sampling waits for idle time
+ * (slices of at least 2 ms) instead of running inside each image onload.
+ */
+const sampleQueue = [];
+let sampleScheduled = false;
+
+function scheduleSamples() {
+  if (sampleScheduled || !sampleQueue.length) return;
+  sampleScheduled = true;
+  const run = (deadline) => {
+    sampleScheduled = false;
+    do {
+      sampleQueue.shift()();
+    } while (sampleQueue.length && (!deadline || deadline.timeRemaining() > 2));
+    scheduleSamples();
+  };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 500 });
+  else setTimeout(run, 16);
+}
+
 /** Sample a suggest thumb into the local 32 once. Later rows read the bucket. */
 export function warmCardBucket(cardId, imageUrl) {
   const id = String(cardId || '').trim();
@@ -381,13 +413,16 @@ export function warmCardBucket(cardId, imageUrl) {
   const img = new Image();
   img.crossOrigin = 'anonymous';
   img.onload = () => {
-    warmingBuckets.delete(id);
-    try {
-      const hex = averageArtHex(img);
-      if (hex) rememberCardBucket(id, hex);
-    } catch {
-      /* canvas blocked */
-    }
+    sampleQueue.push(() => {
+      warmingBuckets.delete(id);
+      try {
+        const hex = averageArtHex(img);
+        if (hex) rememberCardBucket(id, hex);
+      } catch {
+        /* canvas blocked */
+      }
+    });
+    scheduleSamples();
   };
   img.onerror = () => {
     warmingBuckets.delete(id);
