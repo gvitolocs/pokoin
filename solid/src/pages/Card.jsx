@@ -108,7 +108,7 @@ import {
   rarityHref,
 } from '@market/seo.js';
 import { eraHref, expansionLogoSrc, tcgEra } from '@market/set-logos.js';
-import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
+import { shopDragOffers } from '@market/shop-marquee.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '@market/sold-sales-cache.js';
 import { soldGraphView, soldTraitsForGraphDay } from '@market/sold-sales.js';
 import { Action, track } from '@market/track.js';
@@ -181,8 +181,16 @@ export default function Card() {
   });
 
   return (
+    // The callback must take the key: Show only remounts a keyed child that
+    // declares a parameter (a zero-arity function is rendered as-is).
     <Show when={deskKey()} keyed>
-      {() => <CardDesk cardId={untrack(cardId)} lang={untrack(lang)} slug={params.slug || ''} />}
+      {(key) => (
+        <CardDesk
+          lang={key.slice(0, key.indexOf(':'))}
+          cardId={key.slice(key.indexOf(':') + 1)}
+          slug={params.slug || ''}
+        />
+      )}
     </Show>
   );
 }

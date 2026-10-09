@@ -87,7 +87,11 @@ export default function Versions() {
 
   return (
     <Show when={pageKey()} keyed>
-      {() => <VersionsPage cardId={String(untrack(cardId))} lang={untrack(lang)} slug={untrack(() => params.slug || '')} />}
+      {(key) => {
+        // Keyed callbacks must declare the key parameter (see pages/Card.jsx).
+        const [keyLang, keyId, ...rest] = key.split(':');
+        return <VersionsPage cardId={keyId} lang={keyLang} slug={rest.join(':')} />;
+      }}
     </Show>
   );
 }
