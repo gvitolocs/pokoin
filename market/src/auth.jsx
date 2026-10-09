@@ -11,6 +11,7 @@ import {
   writeAuthToken,
   sellerNameOf,
 } from './auth-session.js';
+import { setBearerProvider } from './auth-bearer.js';
 import {
   EXTENSION_DESK_SESSION_REQUEST,
   framedByChromeExtension,
@@ -125,6 +126,8 @@ export async function getBearer(forceRefresh = false) {
   }
   return user.getIdToken(forceRefresh);
 }
+
+setBearerProvider(getBearer);
 
 function readDate(value) {
   if (!value) {
