@@ -11,7 +11,7 @@ import {
   parseTypedQuery,
   printingMatchesNumberFilter,
 } from '../suggest-rank.js';
-import { useSearchLang, usePrintLang } from '../locale.js';
+import { useSearchLang, usePrintLang } from '../locale-hooks.js';
 import { cardsForPrint, loadSearchPrintPage } from '../search-print.js';
 import { Action, track } from '../track.js';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
