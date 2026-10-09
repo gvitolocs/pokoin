@@ -3023,6 +3023,13 @@ html.is-card-banding * {
   margin-top: 0.25rem;
 }
 
+/* A bar inside a real tile-meta line box: the line box sets the height, not the bar. */
+.skel-inline {
+  display: inline-block;
+  vertical-align: middle;
+  margin-top: 0;
+}
+
 .skel-title {
   width: min(18rem, 70%);
   height: 1.5rem;

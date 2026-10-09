@@ -136,6 +136,10 @@ export default function Home() {
   const [browseHasMore, setBrowseHasMore] = useState(englishBrowse);
   const [browseLoading, setBrowseLoading] = useState(englishBrowse);
   const [browseMoreBusy, setBrowseMoreBusy] = useState(false);
+  // Every rail keeps its skeleton until ALL rail requests settle. Hiding an empty
+  // rail as soon as another one landed, then showing it again, shifted the page
+  // whenever the rails arrived out of order.
+  const [railsSettled, setRailsSettled] = useState(() => Boolean(payloadRef.current && railsReady(payloadRef.current)));
 
   function commit(next) {
     payloadRef.current = next;
@@ -190,6 +194,9 @@ export default function Home() {
         })),
       ]);
       await paintChain;
+      if (!cancelled) {
+        setRailsSettled(true);
+      }
       if (!any) {
         return fetchHome(localIds);
       }
@@ -202,6 +209,7 @@ export default function Home() {
         if (cancelled) {
           return;
         }
+        setRailsSettled(true);
         const painted = (await applyRailsVector(data)) || paintHome(data, readRecentCardIds(), localExtras());
         warmupSearchBar();
         let next = painted;
@@ -226,6 +234,7 @@ export default function Home() {
       })
       .catch((err) => {
         if (!cancelled) {
+          setRailsSettled(true);
           if (isOriginDownError(err, err?.status, err?.message)) {
             setError('Marketplace home failed.');
             setRecentPending(false);
@@ -374,6 +383,7 @@ export default function Home() {
   }, [payload]);
 
   const loading = !railsReady(payload) && !error;
+  const railPending = !railsSettled && !error;
   const newSet = sections.newCards[0]?.set || sections.newCards[0]?.set_name;
   const mega = sections.newCards[0] || sections.spotlight[0] || browseCards[0];
   const recentPlaceholders = recentPending && !sections.recentlySeen.length ? 8 : 0;
@@ -411,18 +421,18 @@ export default function Home() {
         title="New cards"
         cards={sections.newCards}
         href={newSet ? `/marketplace/sets/${setSlug(newSet)}` : undefined}
-        placeholders={!sections.newCards.length && loading ? 8 : 0}
+        placeholders={!sections.newCards.length && railPending ? 8 : 0}
         eagerLimit={8}
       />
       <Carousel
         title="Best sellers"
         cards={sections.bestSellers}
-        placeholders={!sections.bestSellers.length && loading ? 8 : 0}
+        placeholders={!sections.bestSellers.length && railPending ? 8 : 0}
       />
       <Carousel
         title="Spotlight"
         cards={sections.featured}
-        placeholders={!sections.featured.length && loading ? 8 : 0}
+        placeholders={!sections.featured.length && railPending ? 8 : 0}
       />
 
       <Link className="callout protect-callout" to="/protection">
