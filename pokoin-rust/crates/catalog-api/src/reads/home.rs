@@ -491,7 +491,7 @@ async fn hydrate_canonical_card_trader_cache(state: &RouteState, cards: Vec<Valu
           and cache.cheapest_price_pkn is not null
           and (
             cache.blueprint_id = c.ct_id
-            or cache.pokoin_card_id = c.card_id::text
+            or (cache.pokoin_card_id = c.card_id::text and cache.pokoin_card_id <> '')
           )
       ) matches
       order by

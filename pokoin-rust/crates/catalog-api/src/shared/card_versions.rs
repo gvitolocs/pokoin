@@ -535,6 +535,9 @@ pub fn clean_cheapest_homepage_cache_relation(value: String) -> String {
 
 /// `cardTraderAvailabilityJoin(candidateAlias, relation)`.
 pub fn card_trader_availability_join(candidate_alias: &str, relation: &str) -> String {
+    // `pokoin_card_id <> ''` is redundant for the result (card ids are never empty)
+    // but lets Postgres use the partial index on pokoin_card_id for that OR arm.
+    // Without it every row seq-scanned the 84k-row listing cache (~8 ms a row).
     let cache_relation = clean_cheapest_homepage_cache_relation(relation.to_string());
     let card_id_column = format!("{candidate_alias}.card_id");
     let ct_id_column = format!("{candidate_alias}.ct_id");
@@ -548,7 +551,7 @@ pub fn card_trader_availability_join(candidate_alias: &str, relation: &str) -> S
         and cardtrader_cache.cheapest_price_pkn is not null
         and (
           cardtrader_cache.blueprint_id = {ct_id_column}
-          or cardtrader_cache.pokoin_card_id = {card_id_column}::text
+          or (cardtrader_cache.pokoin_card_id = {card_id_column}::text and cardtrader_cache.pokoin_card_id <> '')
         )
       order by
         case when cardtrader_cache.blueprint_id = {ct_id_column} then 0 else 1 end,
@@ -1163,7 +1166,7 @@ mod tests {
         assert!(graded.contains("true as is_graded"));
         let join = card_trader_availability_join("c", "public.cheapest_homepage_cache_blueprint");
         assert!(join.contains("cardtrader_cache.blueprint_id = c.ct_id"));
-        assert!(join.contains("cardtrader_cache.pokoin_card_id = c.card_id::text"));
+        assert!(join.contains("(cardtrader_cache.pokoin_card_id = c.card_id::text and cardtrader_cache.pokoin_card_id <> '')"));
         assert!(card_trader_availability_join("v", "bogus")
             .contains("public.cheapest_homepage_cache_blueprint"));
         assert!(
