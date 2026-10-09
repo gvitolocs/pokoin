@@ -240,3 +240,10 @@ No license file was found in this repository. License details coming soon.
 
 Check each related module repository for its own license files or release
 packaging notes before reusing or redistributing code.
+
+## Recognition ownership
+
+The recognition worker, Pi fallback, embedding/training tools, phone scanner
+assets and their tests/deployment are in `/home/nez/Projects/pokoin-scanner`.
+This repository retains the shared native Rust Pi API gateway. Clients use
+`https://api.pokoin.com/api/scan`; see [docs/SCAN_API.md](docs/SCAN_API.md).

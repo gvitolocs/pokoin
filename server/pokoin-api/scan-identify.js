@@ -9,7 +9,7 @@
  *   GET  /api/scan/catalogs                                         recognition catalogs
  *   GET  /api/scan/health                                           which workers answer
  *
- * The work runs on a recognition worker (server/scan/app.py, YOLO + Milo):
+ * The work runs on a recognition worker (pokoin-scanner/service/app.py, YOLO + Milo):
  *   1. nezopt GPU  — SCAN_PRIMARY_URL, default 127.0.0.1:18151 (SSH tunnel
  *      pokoin-scan-pi-tunnel.service from nezopt :8099), ~0.2 s a photo;
  *   2. Pi CPU      — SCAN_FALLBACK_URL, default 127.0.0.1:18150 (container

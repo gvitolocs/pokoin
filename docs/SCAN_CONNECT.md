@@ -1,3 +1,5 @@
+> Recognition/phone assets moved to pokoin-scanner. Shared Scan Connect domain APIs remain here. See [SCAN_API.md](SCAN_API.md). Historical deployment examples below predate the native Rust Pi cutover; use scanner docs/OPERATIONS.md for phone/worker deployment.
+
 # Scan Connect (desktop ↔ phone pairing and realtime)
 
 A seller opens **Dashboard** on `pokoin.com/dashboard` (Portfolio overview of
@@ -324,7 +326,7 @@ The dev server's fake auth (`Bearer seller:<uid>`) only exists with
 
 The scan rules, persistence adapter and phone handler are now owned in
 `server/pokoin-api/{_scan_connect,_scan_store,_scan_http,_scan_diagnostics,scan-phone}.js`.
-The deployed phone source is `server/scan/web/`, imported from the deployed
+The deployed phone source is `pokoin-scanner/service/web/`, imported from the deployed
 phone baseline, including the printing picker and manual shutter. BattleScan
 continues to run the recognition worker; it is no longer the deploy source
 for this phone page. Existing unrelated production modules remain in place.
@@ -380,9 +382,9 @@ Validation:
 node --test server/pokoin-api/_scan_connect.test.js \
   server/pokoin-api/scan-printings-diagnostics.test.js \
   server/pokoin-api/scan-phone.test.js \
-  server/scan/tests/scan-connect.test.cjs server/scan/tests/scanner-ui.test.cjs
+  ../pokoin-scanner/service/tests/scan-connect.test.cjs ../pokoin-scanner/service/tests/scanner-ui.test.cjs
 PLAYWRIGHT_CORE=/home/nez/Projects/pokemon-card-extension/node_modules/playwright-core \
-  node --test server/scan/tests/scan-phone.browser.test.cjs
+  node --test ../pokoin-scanner/service/tests/scan-phone.browser.test.cjs
 ```
 
 The browser test serves an ephemeral test server and fake camera, exercises the
