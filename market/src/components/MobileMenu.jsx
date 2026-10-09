@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { authAnchorRel, marketUrl } from '../punchouts.js';
 import { accountHeading } from '../auth-session.js';
-import { catalogLinks } from './CatalogHubs.jsx';
+import { catalogLinks } from '../catalog-links.js';
 import Avatar from './Avatar.jsx';
 
 // Phone drawer behind the burger: account card, four quick actions, then

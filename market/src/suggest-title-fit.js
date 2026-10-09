@@ -1,5 +1,3 @@
-import { useLayoutEffect } from 'react';
-
 /**
  * Smallest share of the CSS title size a suggest name may shrink to. Past
  * this the `text-overflow: ellipsis` on `.suggest-copy strong` takes over,
@@ -66,37 +64,4 @@ export function fitSuggestTitles(root, { reset = false } = {}) {
       row.el.style.fontSize = `${row.px}px`;
     }
   }
-}
-
-/**
- * Fits suggest titles whenever the rows change (`key`), the list width
- * changes (rotation, desktop ↔ phone breakpoint), or a web font finishes
- * loading. Declare before useSuggestFlip so FLIP measures fitted rows.
- */
-export function useSuggestTitleFit(listRef, key) {
-  useLayoutEffect(() => {
-    const root = listRef?.current;
-    if (!root || !key) return undefined;
-    fitSuggestTitles(root);
-    let width = root.clientWidth;
-    let live = true;
-    const observer = typeof ResizeObserver === 'function'
-      ? new ResizeObserver(() => {
-        if (root.clientWidth === width) return;
-        width = root.clientWidth;
-        fitSuggestTitles(root, { reset: true });
-      })
-      : null;
-    observer?.observe(root);
-    const fonts = typeof document !== 'undefined' ? document.fonts : null;
-    if (fonts && fonts.status !== 'loaded') {
-      fonts.ready.then(() => {
-        if (live) fitSuggestTitles(root, { reset: true });
-      });
-    }
-    return () => {
-      live = false;
-      observer?.disconnect();
-    };
-  }, [listRef, key]);
 }

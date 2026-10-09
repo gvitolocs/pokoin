@@ -19,8 +19,11 @@ export function SkeletonTile({ layout = 'grid', album = false }) {
           <span className="skel-line skel-line-sm" />
         ) : (
           <>
-            <strong className="skel-line" />
-            <span className="skel-line skel-line-sm" />
+            {/* The real tile's line boxes (name, identity, price) around the bars, so
+                a rail that fills in keeps its height (no layout shift). */}
+            <strong><span className="skel-line skel-inline" /></strong>
+            <em className="tile-id"><span className="skel-line skel-line-sm skel-inline" /></em>
+            {layout === 'list' ? null : <span className="price"><span className="skel-line skel-line-sm skel-inline" /></span>}
           </>
         )}
       </div>

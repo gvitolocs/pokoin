@@ -86,8 +86,8 @@ test('a full localStorage clears card-page caches, and never snaps the Desktop b
 });
 
 test('cart writes never throw on a full localStorage (the black-screen crash)', () => {
-  const src = fs.readFileSync(path.join(root, 'cart.jsx'), 'utf8');
-  const body = src.slice(src.indexOf('function writeCart'), src.indexOf('export function peekCartItems'));
+  const src = fs.readFileSync(path.join(root, 'cart-rows.js'), 'utf8');
+  const body = src.slice(src.indexOf('export function writeCartRows'), src.indexOf('export function writeSavedRows'));
   assert.match(body, /try \{\s*localStorage\.setItem\(CART_KEY, raw\);\s*\} catch/);
   assert.match(body, /pruneStoredCardPages\(0\)/);
 });
@@ -100,12 +100,12 @@ test('cart and Desktop trays mount at most TRAY_VISIBLE thumbs and full scans on
     assert.doesNotMatch(src, /alt="" (card=\{row\} )?full \/>/, file);
     assert.match(src, /\{shown\.map\(/, file);
   }
-  const desktop = fs.readFileSync(path.join(root, 'components/DesktopDrop.jsx'), 'utf8');
+  const desktop = fs.readFileSync(path.join(root, 'desktop-drop-add.js'), 'utf8');
   assert.match(desktop, /fetchArtist\(bundle\.slug, \{ limit: DESKTOP_MAX \}\)/);
 });
 
 test('cart bundle drops add found cards in one burst, listed printings first', () => {
-  const src = fs.readFileSync(path.join(root, 'components/CartDrop.jsx'), 'utf8');
+  const src = fs.readFileSync(path.join(root, 'cart-drop-add.js'), 'utf8');
   assert.match(src, /for \(const item of found\) onAdd\(item\);/);
   assert.doesNotMatch(src, /if \(offer\) onAdd\(/);
   const add = fs.readFileSync(path.join(root, 'cart-add.js'), 'utf8');

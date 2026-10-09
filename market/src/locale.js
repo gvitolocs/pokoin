@@ -1,4 +1,3 @@
-import { useSyncExternalStore } from 'react';
 import {
   effectivePrintBucket,
   printBucket as canonicalPrintBucket,
@@ -94,10 +93,6 @@ export function setSearchLang(code) {
 export function subscribeSearchLang(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
-}
-
-export function useSearchLang() {
-  return useSyncExternalStore(subscribeSearchLang, getSearchLang, () => 'en');
 }
 
 export function searchLangFromPath(pathname) {
@@ -294,10 +289,6 @@ export function setPrintLang(code) {
 export function subscribePrintLang(fn) {
   printListeners.add(fn);
   return () => printListeners.delete(fn);
-}
-
-export function usePrintLang() {
-  return useSyncExternalStore(subscribePrintLang, getPrintLang, () => 'all');
 }
 
 export function printLangMeta(code) {

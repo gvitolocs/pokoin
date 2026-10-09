@@ -4,7 +4,7 @@
  */
 
 import { effectivePrintBucket, printingMatchesPrintLang } from './print-bucket.js';
-import { expansionNationality } from './suggest-catalog.js';
+import { expansionNationality } from './expansion-nationality.js';
 
 export function rowPrintBucket(row) {
   return effectivePrintBucket(row, expansionNationality);

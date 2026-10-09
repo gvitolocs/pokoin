@@ -1,5 +1,3 @@
-import { useLayoutEffect, useRef } from 'react';
-
 const MOVE_MS = 200;
 const EASING = 'cubic-bezier(0.2, 0.8, 0.2, 1)';
 
@@ -16,21 +14,27 @@ function retarget(node, keyframes) {
  * A keystroke cancels the in-flight motion and starts from the current
  * position, so rapid typing does not queue animations.
  * First paint does not animate (empty previous map).
+ *
+ * Framework-free: call `update(root)` after every list render (React
+ * useSuggestFlip in suggest-hooks.js, Solid SearchBox) and `dispose()` on unmount.
  */
-export function useSuggestFlip(listRef, ids) {
-  const prev = useRef(new Map());
-  const ghosts = useRef([]);
-  useLayoutEffect(() => {
-    const root = listRef?.current;
+export function createSuggestFlip() {
+  let prev = new Map();
+  let ghosts = [];
+  function dispose() {
+    for (const ghost of ghosts) ghost.remove();
+    ghosts = [];
+  }
+  function update(root) {
     if (!root) {
-      prev.current = new Map();
-      return undefined;
+      prev = new Map();
+      return;
     }
-    for (const ghost of ghosts.current) ghost.remove();
-    ghosts.current = [];
+    for (const ghost of ghosts) ghost.remove();
+    ghosts = [];
     const nodes = root.querySelectorAll('[data-suggest-id]');
     const next = new Map();
-    const hadPrev = prev.current.size > 0;
+    const hadPrev = prev.size > 0;
     const seen = new Set();
     nodes.forEach((node) => {
       const id = node.getAttribute('data-suggest-id');
@@ -39,7 +43,7 @@ export function useSuggestFlip(listRef, ids) {
       const rect = node.getBoundingClientRect();
       next.set(id, { top: rect.top, left: rect.left, width: rect.width, height: rect.height });
       if (!hadPrev) return;
-      const was = prev.current.get(id);
+      const was = prev.get(id);
       if (!was) {
         retarget(node, [
           { opacity: 0, transform: 'scale(0.96)' },
@@ -58,7 +62,7 @@ export function useSuggestFlip(listRef, ids) {
       ]);
     });
     if (hadPrev) {
-      for (const [id, was] of prev.current) {
+      for (const [id, was] of prev) {
         if (seen.has(id) || !was.node) continue;
         const ghost = was.node.cloneNode(true);
         ghost.removeAttribute('id');
@@ -72,14 +76,14 @@ export function useSuggestFlip(listRef, ids) {
         ghost.style.pointerEvents = 'none';
         ghost.style.zIndex = '4';
         document.body.appendChild(ghost);
-        ghosts.current.push(ghost);
+        ghosts.push(ghost);
         const animation = ghost.animate([
           { opacity: 1, transform: 'scale(1)' },
           { opacity: 0, transform: 'scale(0.97)' },
         ], { duration: MOVE_MS, easing: EASING, fill: 'both' });
         animation.onfinish = () => {
           ghost.remove();
-          ghosts.current = ghosts.current.filter((node) => node !== ghost);
+          ghosts = ghosts.filter((node) => node !== ghost);
         };
       }
     }
@@ -88,10 +92,7 @@ export function useSuggestFlip(listRef, ids) {
       if (!id || !next.has(id)) return;
       next.get(id).node = node;
     });
-    prev.current = next;
-    return () => {
-      for (const ghost of ghosts.current) ghost.remove();
-      ghosts.current = [];
-    };
-  }, [listRef, ids]);
+    prev = next;
+  }
+  return { update, dispose };
 }

@@ -603,6 +603,9 @@ function hasNeedle(hay, needle) {
   return hay.includes(`-${needle}-`);
 }
 
+/** localeCompare() with no arguments is this collator's compare (ECMA-402), built once instead of per call. */
+const COLLATOR = new Intl.Collator();
+
 function needlesFrom(groups) {
   const rows = [];
   for (const [era, names] of groups) {
@@ -612,7 +615,7 @@ function needlesFrom(groups) {
       rows.push({ needle, era, length: needle.length });
     }
   }
-  rows.sort((a, b) => b.length - a.length || a.needle.localeCompare(b.needle));
+  rows.sort((a, b) => b.length - a.length || COLLATOR.compare(a.needle, b.needle));
   return rows;
 }
 
@@ -727,7 +730,29 @@ const TCG_ERA_FALLBACK = [
   ['Original', /base-set|gym-heroes|gym-challenge|gym-booster|team-rocket|wizards|nintendo-black-star|(^|-)jungle($|-)|(^|-)fossil($|-)/],
 ];
 
+/**
+ * matchTcgEra is a pure function of its key and runs several times per row
+ * (art layout, art cut, set logos) over the same set names: memoise it.
+ */
+const ERA_MEMO = new Map();
+const ERA_MEMO_MAX = 5000;
+
 export function matchTcgEra(key) {
+  // Same coercion as eraHaystack, so equal memo keys mean equal inputs.
+  const memoKey = String(key || '');
+  if (ERA_MEMO.has(memoKey)) {
+    return ERA_MEMO.get(memoKey);
+  }
+  const era = matchTcgEraUncached(key);
+  if (ERA_MEMO.size >= ERA_MEMO_MAX) {
+    ERA_MEMO.clear();
+  }
+  ERA_MEMO.set(memoKey, era);
+  return era;
+}
+
+/** Uncached matcher (the memo's oracle in tcg-eras.test.js). */
+export function matchTcgEraUncached(key) {
   const hay = eraHaystack(key);
   if (!hay) return null;
   const coded = eraFromChineseCode(hay);

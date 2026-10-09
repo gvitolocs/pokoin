@@ -59,3 +59,46 @@ export function promoLogoSrc(banner, { pokemon = false } = {}) {
   }
   return '';
 }
+
+/** Current expansions on the home promo carousel (five slides). */
+export const PROMO_BANNERS = [
+  {
+    slug: 'storm-emeralda',
+    series: 'Mega Evolution',
+    title: 'Storm Emeralda',
+    lede: 'Japanese M6 is on the floor. Chase Mega Rayquaza ex.',
+    cta: 'Explore cards from this expansion',
+  },
+  {
+    slug: 'mega-evolution',
+    series: 'Mega Evolution',
+    title: 'Mega Evolution',
+    lede: 'The first Mega Evolution set is on the floor. Chase Mega Lucario ex.',
+    cta: 'Explore cards from this expansion',
+    western: true,
+  },
+  {
+    slug: 'phantasmal-flames',
+    series: 'Mega Evolution',
+    title: 'Phantasmal Flames',
+    lede: 'The second Mega Evolution set is on the floor. Chase Mega Charizard X ex.',
+    cta: 'Explore cards from this expansion',
+    western: true,
+  },
+  {
+    slug: 'black-bolt',
+    series: 'Black & White',
+    title: 'Black Bolt',
+    lede: 'Unova returns in black. Zekrom ex and the chase holos.',
+    cta: 'Explore cards from this expansion',
+    western: true,
+  },
+  {
+    slug: 'white-flare',
+    series: 'Black & White',
+    title: 'White Flare',
+    lede: 'Unova in white. Reshiram ex and the set’s secret rares.',
+    cta: 'Explore cards from this expansion',
+    western: true,
+  },
+];

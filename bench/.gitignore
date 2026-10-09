@@ -1,0 +1,7 @@
+node_modules/
+results/*.json
+*.cpuprofile
+# Playwright storageState files hold session cookies: never commit them.
+auth*.json
+*.storage.json
+results/*/

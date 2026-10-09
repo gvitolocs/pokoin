@@ -24,8 +24,7 @@ import { ebaySearchUrl, sanitizeCardName, tcgplayerSearchUrl, vintedSearchUrl } 
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { getSearchLang } from './locale.js';
 import { artistSlug } from './artist-name.js';
-import { rememberSuggestGroups } from './suggest-live.js';
-import { expansionNationality } from './suggest-catalog.js';
+import { expansionNationality } from './expansion-nationality.js';
 import { collectPrintingThumbUrls, preloadSuggestThumbs } from './suggest-images.js';
 import { realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
 export { artistNameFromSlug, artistSlug } from './artist-name.js';
@@ -341,9 +340,10 @@ let searchWarmupTimer = 0;
  * After marketplace home paints: wake the typeahead path so the first keystroke
  * is not a cold Meili/TLS hit. Same idea as Flutter `_ensureFirstCharWarmup`.
  * Token-predict warmup is Pokemon-only (name-token table). Best-effort; never
- * throws into UI.
+ * throws into UI. `engine: false` warms only the network (the Solid app loads
+ * the suggest engine on search intent, not on idle after the first paint).
  */
-export function warmupSearchBar() {
+export function warmupSearchBar({ engine = true } = {}) {
   if (typeof window === 'undefined') {
     return;
   }
@@ -357,9 +357,14 @@ export function warmupSearchBar() {
     searchWarmupTimer = 0;
     searchWarmupAt = Date.now();
     const lang = getSearchLang();
-    fetchSuggest('m', { limit: 4, lang })
-      .then((data) => {
-        rememberSuggestGroups(data.groups);
+    // The suggest engine (ranker + 10k-name catalog) loads here, on idle after
+    // the first paint, not with api.js: pages that never type do not pay for it.
+    Promise.all([fetchSuggest('m', { limit: 4, lang }), engine ? import('./suggest-live.js') : null])
+      .then(([data, live]) => {
+        if (!live) {
+          return;
+        }
+        live.rememberSuggestGroups(data.groups);
         preloadSuggestThumbs(collectPrintingThumbUrls(data.groups, (printing) => (
           imageSrc(cardFromAutocomplete(printing), 'suggest')
         )));

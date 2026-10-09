@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "canary": 0,
+  "patterns": [
+    "^/marketplace/?$",
+    "^/marketplace/search/?$",
+    "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/?$",
+    "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/versions/?$"
+  ]
+}

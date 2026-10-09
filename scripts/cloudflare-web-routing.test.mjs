@@ -104,3 +104,11 @@ test('auth responses ask crawlers not to index', () => {
   assert.match(headers, /\/auth\/\*\n {2}X-Robots-Tag: noindex, nofollow/);
   assert.doesNotMatch(headers, /Disallow/);
 });
+
+test('the CSP allows the React/Solid switch only when the build emitted it', () => {
+  const plain = headerLines();
+  assert.doesNotMatch(plain, /sha256-/);
+  const withSwitch = headerLines({ scriptHashes: ['sha256-abc='] });
+  assert.match(withSwitch, /script-src 'self' [^\n]*https:\/\/pokoin\.firebaseapp\.com 'sha256-abc='\n/);
+  assert.match(withSwitch, /\/market\/s\/\*\n {2}Cache-Control: public, max-age=31536000, immutable/);
+});

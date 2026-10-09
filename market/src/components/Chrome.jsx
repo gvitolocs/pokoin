@@ -27,22 +27,10 @@ import {
 } from '../art-shade.js';
 import { prefersArtworkDelta, rarityRowTheme } from '../rarity-theme.js';
 import { pickSuggestHoverSrc, sameSuggestHoverBox, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
-import { compactQuery } from '../suggest-rank.js';
+import { compactQuery, suggestLiveReady } from '../compact-query.js';
 import { useProgressiveSuggest } from '../use-progressive-suggest.js';
-import { warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
-import { useSuggestFlip } from '../suggest-flip.js';
-import { useSuggestTitleFit } from '../suggest-title-fit.js';
-import {
-  cachedPrintings,
-  isLiveStub,
-  paintCatalogGroups,
-  rememberPrintings,
-  rememberSuggestGroups,
-  suggestLiveReady,
-} from '../suggest-live.js';
-import { cardsWithCatalogArtist, catalogCacheKey, catalogIntent, groupsFromCards } from '../suggest-catalog.js';
-import { resolveSuggestQuery } from '../suggest-resolve.js';
-import { earlySetPrefixName } from '../search-score.js';
+import { useSuggestEngine, useSuggestFlip, useSuggestTitleFit } from '../suggest-hooks.js';
+import { loadSuggestEngineAfterPaint, peekSuggestEngine } from '../suggest-engine-loader.js';
 import {
   SUGGEST_THUMB_EAGER,
   SUGGEST_THUMB_HIGH,
@@ -68,7 +56,7 @@ import { framedByChromeExtension } from '../extension-auth-bridge.js';
 import { APP, DASHBOARD_HOME, authAnchorRel, authFrom, goMarket, marketUrl } from '../punchouts.js';
 import { associateRoleLabel } from '../associate-roles.js';
 import { useCart } from '../cart.jsx';
-import { useDesktopHold } from '../desktop-hold.js';
+import { useDesktopHold } from '../desktop-hold-hooks.js';
 import CartDrop from './CartDrop.jsx';
 import DesktopDrop from './DesktopDrop.jsx';
 import { DashboardPreview, MarketPreview, MessagesPreview, NavHover } from './NavPreviews.jsx';
@@ -90,9 +78,8 @@ import {
   searchLangFromPath,
   setPrintLang,
   setSearchLang,
-  usePrintLang,
-  useSearchLang,
 } from '../locale.js';
+import { usePrintLang, useSearchLang } from '../locale-hooks.js';
 
 function Icon({ d }) {
   return (
@@ -388,7 +375,9 @@ function GameSelect() {
 
 function suggestThumbSrc(printing) {
   const card = cardFromAutocomplete(printing);
-  if (isLiveStub(card) || isLiveStub(printing)) {
+  // Thumbs are only collected for rows, and rows only exist once the engine loaded.
+  const engine = peekSuggestEngine();
+  if (engine && (engine.isLiveStub(card) || engine.isLiveStub(printing))) {
     return '';
   }
   return imageSrc(card, 'suggest');
@@ -425,6 +414,8 @@ export default function Chrome({ children }) {
   const extensionDesk = framedByChromeExtension();
   const lang = useSearchLang();
   const printLang = usePrintLang();
+  // Ranker + 10k-name catalog: loaded on search intent (pointer down, focus, typing), not with the page.
+  const engine = useSuggestEngine();
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -492,7 +483,7 @@ export default function Chrome({ children }) {
       setHitCount(Number(data?.count) || 0);
     },
   });
-  const suggestPending = isPokemonGame() && searchTab !== 'users' ? progressive.pending : pending;
+  const suggestPending = isPokemonGame() && searchTab !== 'users' ? (progressive.pending || !engine) : pending;
   const visibleGroups = useMemo(() => {
     if (!isPokemonGame()) {
       return groups;
@@ -500,16 +491,17 @@ export default function Chrome({ children }) {
     if (!suggestLiveReady(query) || searchTab === 'users') {
       return [];
     }
+    if (!engine) return [];
     if (progressive.projected) return progressive.groups;
-    return paintCatalogGroups(query, { printLang, searchLang: lang, kind: catalogTab });
-  }, [groups, liveTick, printLang, lang, query, searchTab, catalogTab, progressive.projected, progressive.groups, progressive.epoch]);
+    return engine.paintCatalogGroups(query, { printLang, searchLang: lang, kind: catalogTab });
+  }, [groups, liveTick, printLang, lang, query, searchTab, catalogTab, progressive.projected, progressive.groups, progressive.epoch, engine]);
   const flat = flattenPrintings(visibleGroups);
   const activeOption = activeIndex >= 0 ? flat[activeIndex] : null;
   const previewOptionId = pointerHoverId || activeOption?.optionId || '';
   const hoverRow = previewOptionId
     ? flat.find((row) => row.optionId === previewOptionId)
     : null;
-  const hoverCard = hoverRow && !isLiveStub(hoverRow.card)
+  const hoverCard = hoverRow && engine && !engine.isLiveStub(hoverRow.card)
     ? cardFromAutocomplete(hoverRow.card)
     : null;
   const hoverHero = hoverCard ? imageSrc(hoverCard, 'hero') : '';
@@ -537,7 +529,7 @@ export default function Chrome({ children }) {
     for (const group of visibleGroups) {
       for (const printing of group.printings || []) {
         const card = cardFromAutocomplete(printing);
-        if (!card.id || isLiveStub(card)) continue;
+        if (!card.id || engine?.isLiveStub(card)) continue;
         rememberDeskIdentity(card);
         const shade = albumShade(card);
         if (shade) {
@@ -548,10 +540,6 @@ export default function Chrome({ children }) {
       }
     }
   }, [visibleGroups]);
-
-  useEffect(() => {
-    warmupSuggestRankWorkers();
-  }, []);
 
   // Language / print-family changes must refresh an already-typed query in that
   // universe immediately (no waiting for another keystroke). Empty query still
@@ -565,6 +553,7 @@ export default function Chrome({ children }) {
       query: typed,
       fetchSearchPage: fetchSearch,
       force: Boolean(typed),
+      remember: Boolean(peekSuggestEngine()),
     });
     return undefined;
   }, [lang, printLang, searchTab]);
@@ -669,11 +658,11 @@ export default function Chrome({ children }) {
 
     function hydrateCatalog(nextTerm) {
       const targets = [];
-      const prefixName = earlySetPrefixName(nextTerm, { lang });
+      const prefixName = engine.earlySetPrefixName(nextTerm, { lang });
       if (prefixName) {
         targets.push({ key: `prefix-name:${lang}:${prefixName}`, kind: 'name', name: prefixName });
       }
-      const resolved = resolveSuggestQuery(nextTerm);
+      const resolved = engine.resolveSuggestQuery(nextTerm);
       if (resolved?.best) {
         for (const entity of resolved.best.entities.artist) {
           const span = resolved.best.spans?.find((row) => row.candidate?.slug === entity.slug);
@@ -688,26 +677,26 @@ export default function Chrome({ children }) {
           }
         }
       }
-      const intent = catalogIntent(nextTerm);
-      const legacyKey = catalogCacheKey(intent);
+      const intent = engine.catalogIntent(nextTerm);
+      const legacyKey = engine.catalogCacheKey(intent);
       if (legacyKey && intent.slug) {
         targets.push({ key: legacyKey, kind: intent.kind, slug: intent.slug });
       }
       const seen = new Set();
       for (const target of targets) {
-        if (seen.has(target.key) || cachedPrintings(target.key).length) {
+        if (seen.has(target.key) || engine.cachedPrintings(target.key).length) {
           continue;
         }
         seen.add(target.key);
         const needsHydration = () => {
-          if (cachedPrintings(target.key).length) {
+          if (engine.cachedPrintings(target.key).length) {
             return;
           }
           if (target.kind === 'name') {
             fetchNamePrintings(target.name, { lang })
               .then((cards) => {
-                rememberPrintings(target.key, cards);
-                preloadSuggestThumbs(collectPrintingThumbUrls(groupsFromCards(cards), suggestThumbSrc));
+                engine.rememberPrintings(target.key, cards);
+                preloadSuggestThumbs(collectPrintingThumbUrls(engine.groupsFromCards(cards), suggestThumbSrc));
                 if (suggestLiveReady(String(queryRef.current || '').trim())) {
                   setLiveTick((tick) => tick + 1);
                 }
@@ -718,11 +707,11 @@ export default function Chrome({ children }) {
           if (target.kind === 'artist') {
             fetchArtist(target.slug, { limit: 80 })
               .then((data) => {
-                const cards = cardsWithCatalogArtist(data);
-                rememberPrintings(target.key, cards);
-                rememberSuggestGroups(groupsFromCards(cards));
+                const cards = engine.cardsWithCatalogArtist(data);
+                engine.rememberPrintings(target.key, cards);
+                engine.rememberSuggestGroups(engine.groupsFromCards(cards));
                 preloadSuggestThumbs(collectPrintingThumbUrls(
-                  groupsFromCards(cards),
+                  engine.groupsFromCards(cards),
                   suggestThumbSrc,
                 ));
                 const current = String(queryRef.current || '').trim();
@@ -738,10 +727,10 @@ export default function Chrome({ children }) {
           fetchExpansionCards({ slug: target.slug })
             .then((data) => {
               const cards = data?.cards || [];
-              rememberPrintings(target.key, cards);
-              rememberSuggestGroups(groupsFromCards(cards));
+              engine.rememberPrintings(target.key, cards);
+              engine.rememberSuggestGroups(engine.groupsFromCards(cards));
               preloadSuggestThumbs(collectPrintingThumbUrls(
-                groupsFromCards(cards),
+                engine.groupsFromCards(cards),
                 suggestThumbSrc,
               ));
               const current = String(queryRef.current || '').trim();
@@ -757,7 +746,8 @@ export default function Chrome({ children }) {
 
     if (isPokemonGame()) {
       if (ready) {
-        hydrateCatalog(term);
+        // Hydration needs the engine's caches; this effect re-runs when it loads.
+        if (engine) hydrateCatalog(term);
       } else {
         setGroups([]);
         setHitCount(0);
@@ -822,7 +812,7 @@ export default function Chrome({ children }) {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [query, lang, printLang, searchTab]);
+  }, [query, lang, printLang, searchTab, engine]);
 
   useEffect(() => {
     function onDoc(event) {
@@ -953,11 +943,11 @@ export default function Chrome({ children }) {
   }
 
   function pick(card, rank) {
-    if (isLiveStub(card)) {
+    if (engine?.isLiveStub(card)) {
       return;
     }
     const mapped = cardFromAutocomplete(card);
-    if (isLiveStub(mapped)) {
+    if (engine?.isLiveStub(mapped)) {
       return;
     }
     setOpen(false);
@@ -991,7 +981,7 @@ export default function Chrome({ children }) {
     }
     if (event.key === 'Enter' && activeOption) {
       event.preventDefault();
-      if (isLiveStub(activeOption.card)) {
+      if (engine?.isLiveStub(activeOption.card)) {
         goSearch(event);
         return;
       }
@@ -1068,10 +1058,15 @@ export default function Chrome({ children }) {
                 role="combobox"
                 value={query}
                 onChange={(event) => {
+                  loadSuggestEngineAfterPaint();
                   setQuery(event.target.value);
                   setOpen(true);
                 }}
-                onFocus={() => setOpen(true)}
+                onFocus={() => {
+                  setOpen(true);
+                  loadSuggestEngineAfterPaint();
+                }}
+                onPointerDown={loadSuggestEngineAfterPaint}
                 onKeyDown={onSearchKeyDown}
                 placeholder={extensionDesk ? 'Search cards' : 'Search cards, sets, products...'}
                 autoComplete="off"
@@ -1157,7 +1152,7 @@ export default function Chrome({ children }) {
                               const printFlag = printFlagFromNationality(
                                 bucket === 'unknown' ? '' : bucket,
                               );
-                            const live = isLiveStub(card) || isLiveStub(printing);
+                            const live = Boolean(engine?.isLiveStub(card)) || Boolean(engine?.isLiveStub(printing));
                             const special = rarityRowTheme(card);
                             const delta = !special && prefersArtworkDelta(card) ? deskTheme(card) : null;
                             const rowTheme = special?.shade

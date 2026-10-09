@@ -7,6 +7,7 @@
 
 import RAW_ARTISTS from './data/suggest-artists.js';
 import RAW_SETS from './data/suggest-sets.js';
+import { expansionNationality } from './expansion-nationality.js';
 import { compactQuery, isSetAwareQuery, isSetOnlyQuery, nameRow, parseTypedQuery, rankNames } from './suggest-rank.js';
 
 function catalogRow(row, kind, compact) {
@@ -43,15 +44,7 @@ function artistPool() {
 
 export const ARTIST_POOL = artistPool();
 export const SET_POOL = RAW_SETS.map((row) => catalogRow(row, 'set'));
-const SET_BY_COMPACT = new Map(SET_POOL.map((row) => [row.compact, row]));
-
-export function expansionNationality(setName) {
-  const compact = compactQuery(setName);
-  if (!compact) {
-    return '';
-  }
-  return String(SET_BY_COMPACT.get(compact)?.nationality || '').trim();
-}
+export { expansionNationality };
 
 function prefixHit(row, compact) {
   return Boolean(row?.compact && compact && (

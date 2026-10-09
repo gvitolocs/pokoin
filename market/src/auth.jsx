@@ -1,7 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, initializeAuth, inMemoryPersistence, onAuthStateChanged, onIdTokenChanged } from 'firebase/auth';
-import { doc, getFirestore, onSnapshot } from 'firebase/firestore';
+import { onAuthStateChanged, onIdTokenChanged } from 'firebase/auth';
 import {
   clearAuthSession,
   profileFromSession,
@@ -11,6 +9,7 @@ import {
   writeAuthToken,
   sellerNameOf,
 } from './auth-session.js';
+import { setBearerProvider } from './auth-bearer.js';
 import {
   EXTENSION_DESK_SESSION_REQUEST,
   framedByChromeExtension,
@@ -18,44 +17,11 @@ import {
   isTrustedDeskSessionEvent,
 } from './extension-auth-bridge.js';
 import { fetchDeskUserDocuments } from './firestore-rest.js';
+import { firebaseAuth, loadFirestore } from './firebase-client.js';
 import { safeAvatarUrl } from './avatar.js';
+import { profileFrom } from './auth-profile.js';
 
-export { sellerNameOf };
-
-/**
- * Sign-in stays on pokoin.firebaseapp.com. pokoin.com is static files and does
- * not proxy /__/auth. The app origin remains an authorized Firebase domain.
- */
-const FIRST_PARTY_AUTH_HOSTS = new Set();
-
-function firebaseAuthDomain() {
-  const host = typeof window === 'undefined' ? '' : String(window.location.hostname || '').toLowerCase();
-  return FIRST_PARTY_AUTH_HOSTS.has(host) ? host : 'pokoin.firebaseapp.com';
-}
-
-/** Same public web config as Flutter `DefaultFirebaseOptions.web`, except authDomain. */
-const firebaseApp = initializeApp({
-  apiKey: 'AIzaSyDlbKXeR0R3aAATZtCG6dhEPUw39DhXQpU',
-  authDomain: firebaseAuthDomain(),
-  projectId: 'pokoin',
-  storageBucket: 'pokoin.firebasestorage.app',
-  messagingSenderId: '36941064114',
-  appId: '1:36941064114:web:e6ca84f2723df9ee71e6ab',
-});
-
-function createFirebaseAuth(app) {
-  if (typeof window !== 'undefined' && framedByChromeExtension()) {
-    try {
-      return initializeAuth(app, { persistence: inMemoryPersistence });
-    } catch (_) {
-      return getAuth(app);
-    }
-  }
-  return getAuth(app);
-}
-
-export const firebaseAuth = createFirebaseAuth(firebaseApp);
-export const firestore = getFirestore(firebaseApp);
+export { firebaseAuth, sellerNameOf };
 
 let injectedDeskSession = { token: '', uid: '', expiresAt: 0 };
 
@@ -126,37 +92,7 @@ export async function getBearer(forceRefresh = false) {
   return user.getIdToken(forceRefresh);
 }
 
-function readDate(value) {
-  if (!value) {
-    return null;
-  }
-  if (typeof value.toDate === 'function') {
-    return value.toDate();
-  }
-  if (typeof value.seconds === 'number') {
-    return new Date(value.seconds * 1000);
-  }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function profileFrom(data = {}, uid = '') {
-  const role = String(data.role || '').trim().toLowerCase();
-  const roles = Array.isArray(data.roles) ? data.roles.map((row) => String(row).toLowerCase()) : [];
-  const admin = data.admin === true || data.isAdmin === true || role === 'admin' || roles.includes('admin');
-  const silverUntil = readDate(data.silverUntil);
-  const silver = admin || role === 'silver' || (silverUntil && silverUntil.getTime() > Date.now());
-  return {
-    uid,
-    username: data.username || '',
-    displayName: String(data.displayName || '').trim(),
-    role: data.role || '',
-    admin,
-    silver,
-    silverUntil,
-    photoUrl: safeAvatarUrl(data.photoUrl),
-  };
-}
+setBearerProvider(getBearer);
 
 const AuthContext = createContext({
   user: null,
@@ -388,38 +324,51 @@ export function AuthProvider({ children }) {
     if (!user?.uid) {
       return undefined;
     }
-    const unsubUser = onSnapshot(doc(firestore, 'users', user.uid), (snap) => {
-      const next = profileFrom(snap.data() || {}, user.uid);
-      setProfile(next);
-      persistSession({
-        uid: user.uid,
-        admin: next.admin,
-        silver: next.silver,
-        silverUntil: next.silverUntil,
-        photoUrl: next.photoUrl,
+    // Firestore loads lazily; the listeners attach once it resolves unless this
+    // effect was already cleaned up (sign-out, uid change, unmount).
+    let cancelled = false;
+    let unsubUser = null;
+    let unsubBal = null;
+    loadFirestore().then(({ firestore, doc, onSnapshot }) => {
+      if (cancelled) {
+        return;
+      }
+      unsubUser = onSnapshot(doc(firestore, 'users', user.uid), (snap) => {
+        const next = profileFrom(snap.data() || {}, user.uid);
+        setProfile(next);
+        persistSession({
+          uid: user.uid,
+          admin: next.admin,
+          silver: next.silver,
+          silverUntil: next.silverUntil,
+          photoUrl: next.photoUrl,
+        });
+      }, () => {
+        const next = profileFrom({}, user.uid);
+        setProfile(next);
+        persistSession({
+          uid: user.uid,
+          admin: next.admin,
+          silver: next.silver,
+          silverUntil: next.silverUntil,
+          photoUrl: next.photoUrl,
+        });
+      });
+      unsubBal = onSnapshot(doc(firestore, 'balances', user.uid), (snap) => {
+        const nextPkn = Number(snap.data()?.availablePkn || 0);
+        setAvailablePkn(nextPkn);
+        persistSession({ uid: user.uid, availablePkn: nextPkn });
+      }, () => {
+        setAvailablePkn(0);
+        persistSession({ uid: user.uid, availablePkn: 0 });
       });
     }, () => {
-      const next = profileFrom({}, user.uid);
-      setProfile(next);
-      persistSession({
-        uid: user.uid,
-        admin: next.admin,
-        silver: next.silver,
-        silverUntil: next.silverUntil,
-        photoUrl: next.photoUrl,
-      });
-    });
-    const unsubBal = onSnapshot(doc(firestore, 'balances', user.uid), (snap) => {
-      const nextPkn = Number(snap.data()?.availablePkn || 0);
-      setAvailablePkn(nextPkn);
-      persistSession({ uid: user.uid, availablePkn: nextPkn });
-    }, () => {
-      setAvailablePkn(0);
-      persistSession({ uid: user.uid, availablePkn: 0 });
+      /* chunk failed to load: keep the session hint, as when Firestore is offline */
     });
     return () => {
-      unsubUser();
-      unsubBal();
+      cancelled = true;
+      unsubUser?.();
+      unsubBal?.();
     };
   }, [user?.uid, extensionUid]);
 

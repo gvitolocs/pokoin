@@ -61,6 +61,7 @@
  */
 
 import RAW_NAMES from './data/suggest-names.js';
+import { compactQuery } from './compact-query.js';
 import RAW_SETS from './data/suggest-sets.js';
 import { suggestKind } from './identity.js';
 import { effectivePrintBucket, printLangMatchesBucket } from './print-bucket.js';
@@ -132,24 +133,26 @@ const KEY_NEIGHBORS = {
   '0': '9op',
 };
 
-export function compactQuery(value) {
-  // Unicode-safe compaction shared across search / suggest / cache keys.
-  // Order matters: NFKC folds full-width/compatibility and composes; strip
-  // Greek delta (delta-species shorthand); NFD exposes Latin diacritics as
-  // trailing combining marks; strip ONLY U+0300-U+036F so `é`->`e` while
-  // Japanese dakuten/handakuten (U+3099/U+309A, outside that range) survive;
-  // NFC recomposes voiced kana; then casefold and drop non-letter/number.
-  // Invariant: NFC and NFD forms of the same string collapse to one compact,
-  // but distinct kana stay distinct (compactQuery("ピ") !== compactQuery("ヒ")).
-  return String(value || "")
-    .normalize("NFKC")
-    .replace(/[δΔ]/g, "")
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .normalize("NFC")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "");
-}
+/** KEY_NEIGHBORS as a 128×128 lookup, both directions (same pairs substitutionCost accepts). */
+const KEY_ADJACENT = (() => {
+  const table = new Uint8Array(128 * 128);
+  for (const [key, near] of Object.entries(KEY_NEIGHBORS)) {
+    const a = key.charCodeAt(0);
+    for (const ch of near) {
+      const b = ch.charCodeAt(0);
+      table[a * 128 + b] = 1;
+      table[b * 128 + a] = 1;
+    }
+  }
+  return table;
+})();
+
+/** Reused DP rows for prefixEditDistance: grown on demand, never allocated per call. */
+let editPrev2 = new Float64Array(64);
+let editPrev = new Float64Array(64);
+let editCurr = new Float64Array(64);
+
+export { compactQuery };
 
 export function nameRow(display, prior = 1) {
   const text = String(display || '').trim();
@@ -587,7 +590,15 @@ export function maxDistance(queryLength) {
   return TWO_INSERT_KEYBOARD_COST;
 }
 
-export function prefixEditDistance(query, name) {
+/**
+ * Prefix Damerau-Levenshtein (query vs any prefix of name). With a finite
+ * `cutoff` the result is exact whenever it is <= cutoff and otherwise some
+ * value > cutoff: a prefix longer than rows + cutoff/INDEL already pays more
+ * than cutoff in indels, and a row minimum can only fall to the smaller of
+ * the two previous row minima (every cell is a prev/prev2 cell plus a
+ * non-negative cost), so two rows over the cutoff end the scan.
+ */
+export function prefixEditDistance(query, name, cutoff = Infinity) {
   const q = String(query || '');
   const n = String(name || '');
   const rows = q.length;
@@ -598,35 +609,68 @@ export function prefixEditDistance(query, name) {
   if (!cols) {
     return rows * INDEL_COST;
   }
-  let prev2 = new Float64Array(cols + 1);
-  let prev = new Float64Array(cols + 1);
-  let curr = new Float64Array(cols + 1);
-  for (let j = 0; j <= cols; j += 1) {
+  const bounded = Number.isFinite(cutoff);
+  const limit = bounded ? cutoff + 1e-9 : Infinity;
+  const width = bounded ? Math.min(cols, rows + Math.floor(cutoff / INDEL_COST + 1e-9)) : cols;
+  if (editPrev.length < width + 1) {
+    const size = Math.max(width + 1, editPrev.length * 2);
+    editPrev2 = new Float64Array(size);
+    editPrev = new Float64Array(size);
+    editCurr = new Float64Array(size);
+  }
+  let prev2 = editPrev2;
+  let prev = editPrev;
+  let curr = editCurr;
+  for (let j = 0; j <= width; j += 1) {
     prev[j] = j * INDEL_COST;
   }
+  let lastMin = 0;
   for (let i = 1; i <= rows; i += 1) {
     curr[0] = i * INDEL_COST;
-    const qc = q[i - 1];
-    for (let j = 1; j <= cols; j += 1) {
-      curr[j] = Math.min(
-        prev[j] + INDEL_COST,
-        curr[j - 1] + INDEL_COST,
-        prev[j - 1] + substitutionCost(qc, n[j - 1]),
-      );
-      if (i > 1 && j > 1 && qc === n[j - 2] && q[i - 2] === n[j - 1]) {
+    let rowMin = curr[0];
+    const qc = q.charCodeAt(i - 1);
+    const qp = i > 1 ? q.charCodeAt(i - 2) : -1;
+    for (let j = 1; j <= width; j += 1) {
+      const nc = n.charCodeAt(j - 1);
+      let sub;
+      if (qc === nc) {
+        sub = 0;
+      } else if (qc < 128 && nc < 128) {
+        sub = KEY_ADJACENT[qc * 128 + nc] ? KEYBOARD_COST : FAR_COST;
+      } else {
+        sub = substitutionCost(q[i - 1], n[j - 1]);
+      }
+      let best = prev[j] + INDEL_COST;
+      const left = curr[j - 1] + INDEL_COST;
+      if (left < best) {
+        best = left;
+      }
+      const diag = prev[j - 1] + sub;
+      if (diag < best) {
+        best = diag;
+      }
+      if (i > 1 && j > 1 && qc === n.charCodeAt(j - 2) && qp === nc) {
         const transposed = prev2[j - 2] + TRANSPOSE_COST;
-        if (transposed < curr[j]) {
-          curr[j] = transposed;
+        if (transposed < best) {
+          best = transposed;
         }
       }
+      curr[j] = best;
+      if (best < rowMin) {
+        rowMin = best;
+      }
     }
+    if (rowMin > limit && lastMin > limit) {
+      return Infinity;
+    }
+    lastMin = rowMin;
     const recycled = prev2;
     prev2 = prev;
     prev = curr;
     curr = recycled;
   }
   let best = prev[0];
-  for (let j = 1; j <= cols; j += 1) {
+  for (let j = 1; j <= width; j += 1) {
     if (prev[j] < best) {
       best = prev[j];
     }
@@ -826,10 +870,13 @@ export function emissionMultiplier(distance) {
   return Math.exp(-DISTANCE_LAMBDA * Number(distance || 0));
 }
 
+/** localeCompare() with no arguments is this collator's compare (ECMA-402), built once instead of per call. */
+const COLLATOR = new Intl.Collator();
+
 function compareRanked(left, right) {
   return right.score - left.score
     || left.compact.length - right.compact.length
-    || left.display.localeCompare(right.display);
+    || COLLATOR.compare(left.display, right.display);
 }
 
 const RANK_MEMO_MAX = 32;
@@ -844,6 +891,58 @@ function rankMemoKey(query, pool, fill) {
   return `${compact}|${tag}|${Math.max(1, Number(fill) || RANK_FILL)}`;
 }
 
+function rankedRow(row, compact, compactName, distance, cap, mods) {
+  const prior = Math.max(1, Number(row.prior) || 1);
+  const extra = Math.max(0, compactName.length - compact.length);
+  return {
+    display: row.display,
+    compact: compactName,
+    prior,
+    distance,
+    withinCap: distance <= cap + 1e-9,
+    score: (popularityPoints(prior) + perfectMatchPoints(row.display, mods))
+      * emissionMultiplier(distance)
+      / (1 + suffixWeight(compact.length) * extra)
+      * modifierPenalty(row.display, compact, mods),
+    kind: row.kind || 'name',
+    slug: row.slug || '',
+  };
+}
+
+/** Every row scored with its exact distance, best first. */
+function rankAll(compact, pool, cap, mods) {
+  const ranked = [];
+  for (const row of pool || []) {
+    const compactName = row.compact || compactQuery(row.display);
+    if (!compactName) {
+      continue;
+    }
+    ranked.push(rankedRow(row, compact, compactName, prefixEditDistance(compact, compactName), cap, mods));
+  }
+  ranked.sort(compareRanked);
+  return ranked;
+}
+
+/** The original full scan (no cap shortcut, no memo): rankNames must equal it. */
+export function rankNamesExhaustive(query, pool = NAME_POOL, { fill = RANK_FILL } = {}) {
+  const compact = compactQuery(query);
+  if (!compact) {
+    return [];
+  }
+  const { mods } = typedModifiers(query);
+  const cap = maxDistance(compact.length);
+  const limit = Math.max(1, Number(fill) || RANK_FILL);
+  const ranked = rankAll(compact, pool, cap, mods);
+  const within = ranked.filter((row) => row.withinCap);
+  return within.length ? within.slice(0, limit) : ranked.slice(0, limit);
+}
+
+/**
+ * Typeahead name rank. When any row is within the typo cap only those rows can
+ * be returned, so only they are scored (distance with a cutoff) and sorted;
+ * Array#sort is stable, so the subset keeps the full sort's order. Nothing
+ * within the cap falls back to the exhaustive scan.
+ */
 export function rankNames(query, pool = NAME_POOL, { fill = RANK_FILL } = {}) {
   const compact = compactQuery(query);
   if (!compact) {
@@ -857,32 +956,24 @@ export function rankNames(query, pool = NAME_POOL, { fill = RANK_FILL } = {}) {
   const { mods } = typedModifiers(query);
   const cap = maxDistance(compact.length);
   const limit = Math.max(1, Number(fill) || RANK_FILL);
-  const ranked = [];
+  const within = [];
   for (const row of pool || []) {
     const compactName = row.compact || compactQuery(row.display);
     if (!compactName) {
       continue;
     }
-    const distance = prefixEditDistance(compact, compactName);
-    const prior = Math.max(1, Number(row.prior) || 1);
-    const extra = Math.max(0, compactName.length - compact.length);
-    ranked.push({
-      display: row.display,
-      compact: compactName,
-      prior,
-      distance,
-      withinCap: distance <= cap + 1e-9,
-      score: (popularityPoints(prior) + perfectMatchPoints(row.display, mods))
-        * emissionMultiplier(distance)
-        / (1 + suffixWeight(compact.length) * extra)
-        * modifierPenalty(row.display, compact, mods),
-      kind: row.kind || 'name',
-      slug: row.slug || '',
-    });
+    const distance = prefixEditDistance(compact, compactName, cap);
+    if (distance <= cap + 1e-9) {
+      within.push(rankedRow(row, compact, compactName, distance, cap, mods));
+    }
   }
-  ranked.sort(compareRanked);
-  const within = ranked.filter((row) => row.withinCap);
-  const result = within.length ? within.slice(0, limit) : ranked.slice(0, limit);
+  let result;
+  if (within.length) {
+    within.sort(compareRanked);
+    result = within.slice(0, limit);
+  } else {
+    result = rankAll(compact, pool, cap, mods).slice(0, limit);
+  }
   rankMemo.set(key, result);
   if (rankMemo.size > RANK_MEMO_MAX) {
     rankMemo.delete(rankMemo.keys().next().value);

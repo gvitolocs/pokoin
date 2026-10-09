@@ -1,8 +1,8 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { firebaseAuth, firestore, getBearer, useAuth } from '../auth.jsx';
+import { firebaseAuth, getBearer, useAuth } from '../auth.jsx';
+import { loadFirestore } from '../firebase-client.js';
 import { endActiveScanSessionForSignOut } from '../scan-api.js';
 import { accountHeading, accountLede } from '../auth-session.js';
 import { useWallet, shortAddress } from '../wallet.jsx';
@@ -120,19 +120,31 @@ function useOrderRows(uid) {
       if (bought && sold) setRows([...bought, ...sold]);
     };
     const toRows = (snap) => snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    const unsubBuy = onSnapshot(
-      query(collection(firestore, 'orders'), where('uid', '==', uid)),
-      (snap) => { bought = toRows(snap); emit(); },
-      () => { bought = bought || []; emit(); },
-    );
-    const unsubSell = onSnapshot(
-      query(collection(firestore, 'orders'), where('sellerUids', 'array-contains', uid)),
-      (snap) => { sold = toRows(snap); emit(); },
-      () => { sold = sold || []; emit(); },
-    );
+    let cancelled = false;
+    let unsubBuy = null;
+    let unsubSell = null;
+    loadFirestore().then(({ firestore, collection, onSnapshot, query, where }) => {
+      if (cancelled) return;
+      unsubBuy = onSnapshot(
+        query(collection(firestore, 'orders'), where('uid', '==', uid)),
+        (snap) => { bought = toRows(snap); emit(); },
+        () => { bought = bought || []; emit(); },
+      );
+      unsubSell = onSnapshot(
+        query(collection(firestore, 'orders'), where('sellerUids', 'array-contains', uid)),
+        (snap) => { sold = toRows(snap); emit(); },
+        () => { sold = sold || []; emit(); },
+      );
+    }, () => {
+      if (cancelled) return;
+      bought = bought || [];
+      sold = sold || [];
+      emit();
+    });
     return () => {
-      unsubBuy();
-      unsubSell();
+      cancelled = true;
+      unsubBuy?.();
+      unsubSell?.();
     };
   }, [uid]);
 

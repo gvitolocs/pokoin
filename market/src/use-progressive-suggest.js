@@ -1,19 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchSuggest } from './api.js';
 import { isPokemonGame } from './game.js';
-import { rememberSuggestGroups } from './suggest-live.js';
-import {
-  buildScope,
-  catalogRecall,
-  chunkSize,
-  createGenerationClock,
-  emptyPool,
-  reuseDecision,
-  FIRST_CHUNK,
-  MAX_CHUNKS,
-  SAFETY_BUDGET,
-} from './suggest-pool.js';
-import { compactQuery } from './suggest-rank.js';
+import { compactQuery } from './compact-query.js';
+import { useSuggestEngine } from './suggest-hooks.js';
 
 const EMPTY_GROUPS = [];
 
@@ -31,27 +20,30 @@ export function useProgressiveSuggest({
   limit = 20,
   onPage,
 } = {}) {
+  const engine = useSuggestEngine();
   const onPageRef = useRef(onPage);
   onPageRef.current = onPage;
-  const pool = useRef(emptyPool());
-  const clock = useRef(createGenerationClock());
+  const pool = useRef(null);
+  const clock = useRef(null);
   const [epoch, setEpoch] = useState(0);
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || !engine) {
       setPending(false);
       return undefined;
     }
+    if (!pool.current) pool.current = engine.emptyPool();
+    if (!clock.current) clock.current = engine.createGenerationClock();
     const term = String(query || '').trim();
-    const nextScope = buildScope({
+    const nextScope = engine.buildScope({
       lang,
       printLang,
       kind,
       game: game || (isPokemonGame() ? 'pokemon' : 'other'),
       query: term,
     });
-    const decision = reuseDecision(pool.current.query, term, pool.current.scope, nextScope);
+    const decision = engine.reuseDecision(pool.current.query, term, pool.current.scope, nextScope);
     const generation = clock.current.next();
     pool.current.generation = generation;
     pool.current.scope = nextScope;
@@ -68,7 +60,7 @@ export function useProgressiveSuggest({
     const controller = new AbortController();
     let stopped = false;
     setPending(true);
-    const lookups = catalogRecall(term);
+    const lookups = engine.catalogRecall(term);
     (async () => {
       for (const lookup of lookups) {
         if (stopped || pool.current.generation !== generation) return;
@@ -77,7 +69,7 @@ export function useProgressiveSuggest({
         let fetched = 0;
         const compactLength = compactQuery(lookup).length;
         while (!stopped && pool.current.generation === generation) {
-          const size = chunkSize(chunks);
+          const size = engine.chunkSize(chunks);
           let page;
           try {
             page = await fetchSuggest(lookup, {
@@ -97,7 +89,7 @@ export function useProgressiveSuggest({
             pool.current.stale += 1;
             return;
           }
-          rememberSuggestGroups(page?.groups, { searchLang: lang });
+          engine.rememberSuggestGroups(page?.groups, { searchLang: lang });
           const incoming = (page?.groups || []).reduce(
             (sum, group) => sum + (group.printings || []).length,
             0,
@@ -112,7 +104,7 @@ export function useProgressiveSuggest({
           setEpoch((value) => value + 1);
           const exhaustive = page?.exhaustive === true || incoming < size;
           if (exhaustive || incoming === 0) break;
-          if (fetched >= SAFETY_BUDGET || chunks >= MAX_CHUNKS) break;
+          if (fetched >= engine.SAFETY_BUDGET || chunks >= engine.MAX_CHUNKS) break;
           // One letter prefetches a page. A real name keeps paging its printings.
           if (compactLength <= 2) break;
         }
@@ -125,18 +117,18 @@ export function useProgressiveSuggest({
       stopped = true;
       controller.abort();
     };
-  }, [query, lang, printLang, kind, game, enabled, limit]);
+  }, [query, lang, printLang, kind, game, enabled, limit, engine]);
 
   return {
     groups: EMPTY_GROUPS,
     projected: false,
     pending,
     epoch,
-    poolSize: pool.current.rows.length,
-    transferred: pool.current.transferred,
-    stale: pool.current.stale,
-    cancelled: pool.current.cancelled,
-    localMs: pool.current.lastLocalMs || 0,
-    firstChunk: FIRST_CHUNK,
+    poolSize: pool.current?.rows.length || 0,
+    transferred: pool.current?.transferred || 0,
+    stale: pool.current?.stale || 0,
+    cancelled: pool.current?.cancelled || 0,
+    localMs: pool.current?.lastLocalMs || 0,
+    firstChunk: engine?.FIRST_CHUNK ?? 0,
   };
 }

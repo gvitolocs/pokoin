@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
   cancelEurOrder,
   confirmMarketplaceDelivery,
   formatPkn,
   reportMarketplaceProblem,
 } from '../api.js';
-import { firestore, useAuth } from '../auth.jsx';
+import { useAuth } from '../auth.jsx';
+import { loadFirestore } from '../firebase-client.js';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { authFrom } from '../punchouts.js';
 import {
@@ -64,15 +64,25 @@ export default function Bought() {
       setRows(null);
       return undefined;
     }
-    const buys = query(collection(firestore, 'orders'), where('uid', '==', uid));
-    const unsub = onSnapshot(buys, (snap) => {
-      const list = snap.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .sort((a, b) => stamp(b.createdAt).localeCompare(stamp(a.createdAt)));
-      setRows(list);
-      setError('');
-    }, (err) => setError(err.message || 'Buy history failed.'));
-    return () => unsub();
+    let cancelled = false;
+    let unsub = null;
+    loadFirestore().then(({ firestore, collection, onSnapshot, query, where }) => {
+      if (cancelled) return;
+      const buys = query(collection(firestore, 'orders'), where('uid', '==', uid));
+      unsub = onSnapshot(buys, (snap) => {
+        const list = snap.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .sort((a, b) => stamp(b.createdAt).localeCompare(stamp(a.createdAt)));
+        setRows(list);
+        setError('');
+      }, (err) => setError(err.message || 'Buy history failed.'));
+    }, (err) => {
+      if (!cancelled) setError(err.message || 'Buy history failed.');
+    });
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, [user?.uid, profile?.uid]);
 
   useEffect(() => {
