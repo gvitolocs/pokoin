@@ -1,8 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { attachRecentsToHome, fetchCard, fetchCardTiles, fetchExpansion, fetchExpansions, fetchHome, fillMissingLastMedianPrices, setSlug, warmupSearchBar } from '../api.js';
+import {
+  attachRecentsToHome,
+  fetchCard,
+  fetchCardTiles,
+  fetchExpansion,
+  fetchExpansions,
+  fetchHome,
+  fetchHomeRail,
+  fillMissingLastMedianPrices,
+  mergeHomeRail,
+  setSlug,
+  warmupSearchBar,
+} from '../api.js';
 import { ASSET_COVERAGE_LINE } from '../buyer-protection.js';
-import { tileHasName } from '../lists.js';
+import { fetchRail, RAIL, tileHasName } from '../lists.js';
 import { isSetDeskCard } from '../search-filters.js';
 import { useAuth } from '../auth.jsx';
 import { game, isPokemonGame } from '../game.js';
@@ -53,7 +65,12 @@ function seedHome(cached) {
 }
 
 function railsReady(payload) {
-  return Boolean(payload?.sections?.newArrivalIds?.length);
+  const sections = payload?.sections || {};
+  return Boolean(
+    sections.newArrivalIds?.length
+    || sections.bestSellerIds?.length
+    || sections.featuredIds?.length,
+  );
 }
 
 function recentsNeedingTiles(payload, ids) {
@@ -132,18 +149,63 @@ export default function Home() {
     const seen = payloadRef.current?.sections?.recentlySeenIds || [];
     setRecentPending(localIds.length > 0 && seen.length < localIds.length);
 
-    // Public rails. Do not wait on Firebase or Firestore.
-    fetchHome(localIds)
+    // Three dedicated Rust rails paint as each arrives. Do not wait on Firebase.
+    async function applyRailsVector(data) {
+      if (cancelled || !data) {
+        return null;
+      }
+      writeHomeVectorCache(site.id, data);
+      const ids = readRecentCardIds();
+      const painted = paintHome(data, ids, localExtras());
+      commit(painted);
+      return painted;
+    }
+
+    async function loadPokemonRails() {
+      let vector = payloadRef.current && railsReady(payloadRef.current)
+        ? { source: 'pi', cards: payloadRef.current.cards || [], sections: { ...(payloadRef.current.sections || {}) } }
+        : { source: 'pi', cards: [], sections: {} };
+      let any = false;
+      // Serialize merges so parallel rail responses cannot clobber each other.
+      let paintChain = Promise.resolve();
+      const paintRail = (rail) => {
+        paintChain = paintChain.then(async () => {
+          if (cancelled || !rail?.cards?.length) {
+            return;
+          }
+          any = true;
+          vector = mergeHomeRail(vector, rail);
+          await applyRailsVector(vector);
+        });
+        return paintChain;
+      };
+      await Promise.all([
+        fetchHomeRail('newCards').then(paintRail),
+        fetchHomeRail('bestSellers').then(paintRail),
+        fetchHomeRail('spotlight').then(paintRail),
+        fetchRail(RAIL.spotlight).then((rail) => paintRail(rail && {
+          ...rail,
+          sectionKey: 'spotlightIds',
+          limit: 16,
+        })),
+      ]);
+      await paintChain;
+      if (!any) {
+        return fetchHome(localIds);
+      }
+      return vector;
+    }
+
+    const homePromise = isPokemonGame() ? loadPokemonRails() : fetchHome(localIds);
+    homePromise
       .then(async (data) => {
         if (cancelled) {
           return;
         }
-        writeHomeVectorCache(site.id, data);
-        const ids = readRecentCardIds();
-        const painted = paintHome(data, ids, localExtras());
-        commit(painted);
+        const painted = (await applyRailsVector(data)) || paintHome(data, readRecentCardIds(), localExtras());
         warmupSearchBar();
         let next = painted;
+        const ids = readRecentCardIds();
         if (!recentsNeedingTiles(painted, ids).length) {
           setRecentPending(false);
         } else {
@@ -349,11 +411,19 @@ export default function Home() {
         title="New cards"
         cards={sections.newCards}
         href={newSet ? `/marketplace/sets/${setSlug(newSet)}` : undefined}
-        placeholders={loading ? 8 : 0}
+        placeholders={!sections.newCards.length && loading ? 8 : 0}
         eagerLimit={8}
       />
-      <Carousel title="Best sellers" cards={sections.bestSellers} placeholders={loading ? 8 : 0} />
-      <Carousel title="Spotlight" cards={sections.featured} placeholders={loading ? 8 : 0} />
+      <Carousel
+        title="Best sellers"
+        cards={sections.bestSellers}
+        placeholders={!sections.bestSellers.length && loading ? 8 : 0}
+      />
+      <Carousel
+        title="Spotlight"
+        cards={sections.featured}
+        placeholders={!sections.featured.length && loading ? 8 : 0}
+      />
 
       <Link className="callout protect-callout" to="/protection">
         {ASSET_COVERAGE_LINE}

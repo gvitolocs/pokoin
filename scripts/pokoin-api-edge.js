@@ -120,6 +120,9 @@ const ROUTE_IDS = {
   '/api/marketplace-suggest': 'suggest',
   '/api/marketplace-card-page': 'card_page',
   '/api/marketplace-search-page': 'search',
+  '/api/marketplace-home/new-cards': 'home_new_cards',
+  '/api/marketplace-home/best-sellers': 'home_best_sellers',
+  '/api/marketplace-home/spotlight': 'home_spotlight',
 };
 
 function routeId(pathname, method) {

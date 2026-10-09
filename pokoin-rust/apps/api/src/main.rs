@@ -2,6 +2,7 @@ mod read_cache;
 mod card_identity;
 mod request_log;
 mod catalog_api;
+mod rails;
 mod visual_theme;
 mod search_page;
 mod suggest;
@@ -248,6 +249,18 @@ fn router(state: AppState) -> Router {
         .route(
             "/api/marketplace-search-page",
             get(search_page::search_page).options(search_page::options),
+        )
+        .route(
+            "/api/marketplace-home/new-cards",
+            get(rails::new_cards).options(rails::options),
+        )
+        .route(
+            "/api/marketplace-home/best-sellers",
+            get(rails::best_sellers).options(rails::options),
+        )
+        .route(
+            "/api/marketplace-home/spotlight",
+            get(rails::spotlight).options(rails::options),
         )
         .route(
             "/api/marketplace-listings",
