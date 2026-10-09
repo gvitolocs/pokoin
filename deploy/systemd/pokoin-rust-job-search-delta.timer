@@ -3,6 +3,7 @@ Description=Pokoin native job search-delta (Redis Search catalog delta)
 
 [Timer]
 OnBootSec=2min
+OnActiveSec=1min
 OnUnitActiveSec=2min
 RandomizedDelaySec=20s
 Persistent=true
