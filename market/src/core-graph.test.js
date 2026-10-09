@@ -21,6 +21,7 @@ const ROOTS = [
   'suggest-rank.js',
   'suggest-catalog.js',
   'cart-model.js',
+  'cart-rows.js',
   'auth-session.js',
   'recents.js',
   'game.js',
