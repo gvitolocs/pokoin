@@ -31,6 +31,7 @@ import { isOriginDownError, publicErrorMessage } from '@market/working-page.js';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
 import CardTile from '../components/CardTile.jsx';
 import Carousel, { SkeletonTile } from '../components/Carousel.jsx';
+import PromoCarousel from '../components/PromoCarousel.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import { loadAuth } from '../stores/auth.js';
 import { authSession } from '../stores/session.js';
@@ -323,6 +324,7 @@ export default function Home() {
         }}
       />
       <Show when={error()}><p class="status error">{error()}</p></Show>
+      <Show when={site.features?.promoCarousel}><PromoCarousel /></Show>
 
       <Carousel
         title="Recently seen"
@@ -362,7 +364,7 @@ export default function Home() {
         <div class="carousel-head">
           <h2>Marketplace</h2>
         </div>
-        <CardSelectGrid class="grid">
+        <CardSelectGrid class="grid" cards={gridLoading() ? [] : gridCards()}>
           <Show
             when={!gridLoading()}
             fallback={<Repeat count={englishBrowse ? HOME_BROWSE_BLOCK : 12}>{() => <SkeletonTile />}</Repeat>}
