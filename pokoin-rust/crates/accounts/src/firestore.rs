@@ -1126,8 +1126,13 @@ impl Firestore {
     }
 
     /// Full resource name for a document path (`users/abc`).
+    /// Firestore resource name (`projects/{p}/databases/(default)/documents/{path}`).
+    /// batchGet, commit writes, transactions and reference values reject the
+    /// REST URL form, so the `https://host/v1/` prefix of the base is dropped.
     pub fn document_name(&self, path: &str) -> String {
-        format!("{}/{}", self.inner.base, path.trim_matches('/'))
+        let base = self.inner.base.as_str();
+        let relative = base.find("/projects/").map(|at| &base[at + 1..]).unwrap_or(base);
+        format!("{}/{}", relative, path.trim_matches('/'))
     }
 
     pub fn doc(&self, path: impl Into<String>) -> DocumentRef {
@@ -1232,7 +1237,16 @@ impl Firestore {
         }
         let rows: Vec<BatchGetResult> = serde_json::from_slice(&response.body)
             .map_err(|error| ApiError::internal(error.to_string()))?;
-        Ok(rows.into_iter().map(|row| row.found).collect())
+        // batchGet does not promise request order: match results by name.
+        let mut found: std::collections::HashMap<String, Document> = rows
+            .into_iter()
+            .filter_map(|row| row.found)
+            .map(|document| (document.name.clone(), document))
+            .collect();
+        Ok(references
+            .iter()
+            .map(|reference| found.remove(&reference.name()))
+            .collect())
     }
 
     /// Run a structured query, returning documents in Firestore's order.

@@ -276,7 +276,7 @@ impl FirestoreClient {
         let url = format!("{}/../documents:batchGet", self.base);
         let request = self.authorized(self.http.post(&url)).await?;
         let response = request
-            .json(&json!({ "documents": [path], "transaction": transaction }))
+            .json(&json!({ "documents": [resource_name(path)], "transaction": transaction }))
             .timeout(Duration::from_secs(10))
             .send()
             .await
@@ -935,7 +935,7 @@ impl FieldTransform {
                 "increment": { "integerValue": amount.to_string() },
             }]),
         };
-        json!({ "document": document, "fieldTransforms": field_transforms })
+        json!({ "document": resource_name(document), "fieldTransforms": field_transforms })
     }
 }
 
@@ -967,7 +967,7 @@ impl FirestoreWrite {
                 let mut write = Map::new();
                 write.insert(
                     "update".into(),
-                    json!({ "name": path, "fields": value_to_fields(value) }),
+                    json!({ "name": resource_name(path), "fields": value_to_fields(value) }),
                 );
                 if let Some(mask) = update_mask {
                     write.insert(
@@ -978,15 +978,25 @@ impl FirestoreWrite {
                 Value::Object(write)
             }
             Self::Set { path, value } => json!({
-                "update": { "name": path, "fields": value_to_fields(value) }
+                "update": { "name": resource_name(path), "fields": value_to_fields(value) }
             }),
             Self::Create { path, value } => json!({
-                "update": { "name": path, "fields": value_to_fields(value) },
+                "update": { "name": resource_name(path), "fields": value_to_fields(value) },
                 "currentDocument": { "exists": false },
             }),
-            Self::Delete { path } => json!({ "delete": path }),
+            Self::Delete { path } => json!({ "delete": resource_name(path) }),
             Self::Transform { path, transform } => transform.to_json(path),
         }
+    }
+}
+
+/// Firestore resource name for a document path: commit writes, transform
+/// targets and transactional batchGet need `projects/{p}/databases/(default)/
+/// documents/...`, never the REST URL that `document_path` builds for GETs.
+pub fn resource_name(path: &str) -> String {
+    match path.find("/projects/") {
+        Some(at) if path.starts_with("http") => path[at + 1..].to_string(),
+        _ => path.trim_start_matches('/').to_string(),
     }
 }
 
@@ -1260,5 +1270,22 @@ mod tests {
     #[test]
     fn the_commit_write_limit_matches_firestore() {
         assert_eq!(MAX_WRITES_PER_COMMIT, 500);
+    }
+}
+
+#[cfg(test)]
+mod resource_name_tests {
+    use super::resource_name;
+
+    #[test]
+    fn rest_urls_become_resource_names() {
+        assert_eq!(
+            resource_name("https://firestore.googleapis.com/v1/projects/p/databases/(default)/documents/orders/o1"),
+            "projects/p/databases/(default)/documents/orders/o1"
+        );
+        assert_eq!(
+            resource_name("projects/p/databases/(default)/documents/orders/o1"),
+            "projects/p/databases/(default)/documents/orders/o1"
+        );
     }
 }
