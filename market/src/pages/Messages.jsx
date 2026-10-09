@@ -18,7 +18,7 @@ import { chatPersonName, chatPersonPhoto, chatTime, eventAriaLabel, requestActio
 import Avatar from '../components/Avatar.jsx';
 import { LISTING_DRAG_TYPE, readListingDrag, tagKey } from '../chat-listing.js';
 import { chatPreviewsLookSame, mergeChatPreviewRows, paintableChatPreviews, readChatPreviews, writeChatPreviews } from '../chat-history.js';
-import { useSearchLang } from '../locale.js';
+import { useSearchLang } from '../locale-hooks.js';
 import ChatListingTag from '../components/ChatListingTag.jsx';
 import ChatText from '../components/ChatText.jsx';
 import ChatPhotos from '../components/ChatPhotos.jsx';

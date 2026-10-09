@@ -224,8 +224,26 @@ fn writer_url_for_game(game: &str) -> String {
 }
 
 /// Bind a serde_json value the way node-postgres would bind the equivalent JS
-/// value: null, bool, number, string, or JSONB for objects/arrays.
+/// value: null, bool, number, string; an array of scalars is a Postgres
+/// array literal (text[], cast in SQL like `$1::bigint[]`), and objects or
+/// arrays of objects are JSONB.
 struct BindValue<'a>(&'a Value);
+
+/// `["1", 2, null]` -> `Some(vec![Some("1"), Some("2"), None])`; `None` when
+/// any element is an object or array (that value binds as JSONB).
+fn scalar_array(value: &Value) -> Option<Vec<Option<String>>> {
+    let items = value.as_array()?;
+    items
+        .iter()
+        .map(|item| match item {
+            Value::Null => Some(None),
+            Value::String(s) => Some(Some(s.clone())),
+            Value::Number(n) => Some(Some(n.to_string())),
+            Value::Bool(b) => Some(Some(b.to_string())),
+            _ => None,
+        })
+        .collect()
+}
 
 impl<'a> sqlx::Encode<'a, sqlx::Postgres> for BindValue<'a> {
     fn produces(&self) -> Option<sqlx::postgres::PgTypeInfo> {
@@ -237,6 +255,9 @@ impl<'a> sqlx::Encode<'a, sqlx::Postgres> for BindValue<'a> {
                 Some(_) => <i64 as sqlx::Type<sqlx::Postgres>>::type_info(),
                 None => <f64 as sqlx::Type<sqlx::Postgres>>::type_info(),
             },
+            array @ Value::Array(_) if scalar_array(array).is_some() => {
+                <Vec<Option<String>> as sqlx::Type<sqlx::Postgres>>::type_info()
+            }
             _ => <sqlx::types::Json<Value> as sqlx::Type<sqlx::Postgres>>::type_info(),
         })
     }
@@ -260,6 +281,10 @@ impl<'a> sqlx::Encode<'a, sqlx::Postgres> for BindValue<'a> {
                 }
             }
             Value::String(s) => s.encode_by_ref(buf),
+            array @ Value::Array(_) => match scalar_array(array) {
+                Some(items) => items.encode_by_ref(buf),
+                None => sqlx::types::Json(array).encode_by_ref(buf),
+            },
             other => sqlx::types::Json(other).encode_by_ref(buf),
         }
     }

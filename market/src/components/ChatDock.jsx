@@ -25,7 +25,7 @@ import {
   subscribeChatDock,
 } from '../chat-dock-store.js';
 import { chatPreviewsLookSame, mergeChatPreviewRows, paintableChatPreviews, readChatPreviews, writeChatPreviews } from '../chat-history.js';
-import { useSearchLang } from '../locale.js';
+import { useSearchLang } from '../locale-hooks.js';
 import { game } from '../game.js';
 import { warmSellerFromChat } from '../seller-seed.js';
 import { MESSAGES_UNREAD_EVENT, MESSAGES_UNREAD_REFRESH_MS, unreadMessagesCount } from '../messages-unread.js';

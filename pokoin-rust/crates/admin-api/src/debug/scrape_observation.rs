@@ -646,7 +646,7 @@ async fn promote_verified_link(
       set status = 'verified',
           notes = concat_ws(E'\n', nullif(notes, ''), 'Promoted to verified links.'),
           updated_at = now()
-      where id = $1
+      where id = $1::uuid
     "#,
     )
     .bind(super::value_get(saved, "id").as_str().unwrap_or(""))

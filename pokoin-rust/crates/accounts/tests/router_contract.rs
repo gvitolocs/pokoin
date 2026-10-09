@@ -401,7 +401,7 @@ async fn wallet_auth_nonce_persists_a_single_use_message() {
     assert_eq!(
         commit["writes"][0]["update"]["name"],
         serde_json::json!(format!(
-            "https://test.local/v1/projects/{TEST_PROJECT}{DOCS}/wallet_auth_nonces/{address}"
+            "projects/{TEST_PROJECT}{DOCS}/wallet_auth_nonces/{address}"
         ))
     );
 }

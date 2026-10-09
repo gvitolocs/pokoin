@@ -1,4 +1,5 @@
-import { PRINT_LANGS, setPrintLang, usePrintLang } from '../locale.js';
+import { PRINT_LANGS, setPrintLang } from '../locale.js';
+import { usePrintLang } from '../locale-hooks.js';
 
 function FieldLabel({ compact, children }) {
   if (compact) {

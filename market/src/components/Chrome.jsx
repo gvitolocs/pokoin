@@ -90,9 +90,8 @@ import {
   searchLangFromPath,
   setPrintLang,
   setSearchLang,
-  usePrintLang,
-  useSearchLang,
 } from '../locale.js';
+import { usePrintLang, useSearchLang } from '../locale-hooks.js';
 
 function Icon({ d }) {
   return (

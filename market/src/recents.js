@@ -1,4 +1,4 @@
-import { getBearer } from './auth.jsx';
+import { getBearer } from './auth-bearer.js';
 import { publicApiUrl } from './extension-auth-bridge.js';
 import { game as currentGame, gameRequestHeaders, withGameQuery } from './game.js';
 import {

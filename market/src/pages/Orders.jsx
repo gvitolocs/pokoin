@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
   cancelEurOrder,
   confirmMarketplaceDelivery,
@@ -9,7 +8,8 @@ import {
   reportMarketplaceProblem,
   revealMarketplaceShipping,
 } from '../api.js';
-import { firestore, useAuth } from '../auth.jsx';
+import { useAuth } from '../auth.jsx';
+import { loadFirestore } from '../firebase-client.js';
 import { useCart } from '../cart.jsx';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { estimatedDeliveryDate, optInFields, showReviewsOptIn } from '../google-reviews.js';
@@ -94,18 +94,27 @@ export default function Orders() {
       setSold(null);
       return undefined;
     }
-    const buys = query(collection(firestore, 'orders'), where('uid', '==', uid));
-    const sales = query(collection(firestore, 'orders'), where('sellerUids', 'array-contains', uid));
-    const unsubBuy = onSnapshot(buys, (snap) => {
-      setBought(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-      setError('');
-    }, (err) => setError(err.message || 'Orders failed.'));
-    const unsubSell = onSnapshot(sales, (snap) => {
-      setSold(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    }, (err) => setError(err.message || 'Orders failed.'));
+    let cancelled = false;
+    let unsubBuy = null;
+    let unsubSell = null;
+    loadFirestore().then(({ firestore, collection, onSnapshot, query, where }) => {
+      if (cancelled) return;
+      const buys = query(collection(firestore, 'orders'), where('uid', '==', uid));
+      const sales = query(collection(firestore, 'orders'), where('sellerUids', 'array-contains', uid));
+      unsubBuy = onSnapshot(buys, (snap) => {
+        setBought(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+        setError('');
+      }, (err) => setError(err.message || 'Orders failed.'));
+      unsubSell = onSnapshot(sales, (snap) => {
+        setSold(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+      }, (err) => setError(err.message || 'Orders failed.'));
+    }, (err) => {
+      if (!cancelled) setError(err.message || 'Orders failed.');
+    });
     return () => {
-      unsubBuy();
-      unsubSell();
+      cancelled = true;
+      unsubBuy?.();
+      unsubSell?.();
     };
   }, [user?.uid, profile?.uid]);
 

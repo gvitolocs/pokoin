@@ -13,7 +13,7 @@ import {
   imageSrc,
 } from './api.js';
 import { isPokemonGame } from './game.js';
-import { usePrintLang, useSearchLang } from './locale.js';
+import { usePrintLang, useSearchLang } from './locale-hooks.js';
 import { cardsWithCatalogArtist, catalogCacheKey, catalogIntent, groupsFromCards } from './suggest-catalog.js';
 import {
   collectPrintingThumbUrls,
