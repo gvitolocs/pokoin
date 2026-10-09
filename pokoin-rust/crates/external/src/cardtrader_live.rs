@@ -471,7 +471,7 @@ pub fn normalize_live_listing(product: &Value, fallback_blueprint_id: Option<&st
             .or_else(|| product.get("productId"))
             .or_else(|| product.get("listing_id"))
             .or_else(|| product.get("listingId"))
-            .and_then(Value::as_str),
+            .and_then(crate::error::scalar_text).as_deref(),
         160,
     );
     let blueprint_id = product
@@ -541,8 +541,13 @@ pub fn normalize_live_listing(product: &Value, fallback_blueprint_id: Option<&st
         "shippingLabel": shipping_label_for_mode(shipping_mode),
         "seller": {
             "accountId": clean_text(
-                user.get("id").or_else(|| user.get("user_id")).and_then(Value::as_str)
-                    .or_else(|| product.get("seller_id").and_then(Value::as_str)),
+                Some(crate::error::clean_text_value(
+                    user.get("id").filter(|v| !v.is_null())
+                        .or_else(|| user.get("user_id").filter(|v| !v.is_null()))
+                        .or_else(|| product.get("seller_id"))
+                        .unwrap_or(&Value::Null),
+                    160,
+                )).as_deref(),
                 160,
             ),
             "accountName": PKNRESERVE_SELLER_USERNAME,

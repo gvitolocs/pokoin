@@ -203,9 +203,10 @@ pub struct NormalizedProduct {
 
 pub fn normalize_product(product: &Value) -> NormalizedProduct {
     let props = properties_of(product);
-    let id = clean_text(product.get("id").and_then(Value::as_str), 80);
-    let blueprint_id = clean_text(
-        product.get("blueprint_id").or_else(|| product.get("blueprintId")).and_then(Value::as_str),
+    // CardTrader sends ids as JSON numbers: Node read them with String(value).
+    let id = crate::error::clean_text_value(product.get("id").unwrap_or(&Value::Null), 80);
+    let blueprint_id = crate::error::clean_text_value(
+        product.get("blueprint_id").or_else(|| product.get("blueprintId")).unwrap_or(&Value::Null),
         80,
     );
     let game_id = i64_field(product, &["game_id", "gameId"]);
@@ -550,6 +551,14 @@ pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_c
         }
     }
 
+    // Safety beyond Node: an export that is non-empty but yields no products
+    // was not understood, so nothing may be removed because of it.
+    let mut allow_destructive = allow_destructive;
+    let mut gate_reason = gate_reason;
+    if !products.is_empty() && normalized.is_empty() {
+        allow_destructive = false;
+        gate_reason = "unparsed_export";
+    }
     if allow_destructive {
         let linked: Vec<(String, ListingRow)> = index
             .by_source_id
@@ -573,6 +582,19 @@ pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_c
         }
     }
 
+    // Safety beyond Node: one run never removes most of a seller's linked
+    // listings. A real mass delisting needs a second look, not a timer.
+    let removals = actions.iter().filter(|a| matches!(a, PlannedAction::Remove { .. })).count();
+    let linked_total = index.by_source_id.len();
+    if removals > MASS_REMOVAL_MIN && removals * 2 > linked_total {
+        tracing::error!(removals, linked_total, "cardtrader reconcile mass removal blocked");
+        actions.retain(|a| !matches!(a, PlannedAction::Remove { .. }));
+        summary["removed"] = json!(0);
+        summary["massRemovalBlocked"] = json!(removals);
+        allow_destructive = false;
+        gate_reason = "mass_removal_guard";
+    }
+
     ReconcilePlan {
         allow_destructive,
         gate_reason,
@@ -581,6 +603,10 @@ pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_c
         pokoin_only_ids: pokoin_only_ids.into_iter().collect(),
     }
 }
+
+/// Above this many removals in one run, removing more than half of a seller's
+/// linked listings is refused (`mass_removal_guard`).
+pub const MASS_REMOVAL_MIN: usize = 100;
 
 /// Order states that are not a completed sale.
 pub fn order_is_sale(order: &Value) -> bool {
@@ -596,11 +622,11 @@ pub fn sale_items_by_product(orders: &[Value]) -> HashMap<String, Vec<(Value, Va
             continue;
         }
         for item in order.get("order_items").and_then(Value::as_array).unwrap_or(&Vec::new()) {
-            let product_id = clean_text(
+            let product_id = crate::error::clean_text_value(
                 item.get("product_id")
                     .or_else(|| item.get("productId"))
                     .or_else(|| item.pointer("/product/id"))
-                    .and_then(Value::as_str),
+                    .unwrap_or(&Value::Null),
                 80,
             );
             if product_id.is_empty() {
@@ -798,6 +824,46 @@ mod tests {
         assert_eq!(destructive_reconcile_gate(false, true, true), (false, "incomplete_snapshot"));
         assert_eq!(destructive_reconcile_gate(true, false, true), (false, "export_failed"));
         assert_eq!(destructive_reconcile_gate(true, true, false), (false, "invalid_products"));
+    }
+
+    fn removes(plan: &ReconcilePlan) -> usize {
+        plan.actions.iter().filter(|a| matches!(a, PlannedAction::Remove { .. })).count()
+    }
+
+    #[test]
+    fn numeric_cardtrader_ids_keep_every_linked_listing() {
+        // The real /products/export sends ids as JSON numbers (2026-10-09
+        // incident: as_str() emptied them and 12,918 listings were removed).
+        let products: Vec<Value> = (1..=150)
+            .map(|i| json!({
+                "id": i, "blueprint_id": 100 + i, "game_id": 5, "quantity": 1,
+                "price": 2.0, "price_currency": "EUR",
+                "properties": {"condition": "Near Mint", "pokemon_language": "en"},
+            }))
+            .collect();
+        let first = normalize_product(&products[0]);
+        assert_eq!((first.id.as_str(), first.blueprint_id.as_str()), ("1", "101"));
+        let listings: Vec<Value> = (1..=150)
+            .map(|i| listing(&format!("l{i}"), &((100 + i) * 2).to_string(), 1, &format!("ct:{i}"), "active"))
+            .collect();
+        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        assert_eq!(removes(&plan), 0);
+        assert_eq!(plan.gate_reason, "complete_ok");
+    }
+
+    #[test]
+    fn unparsed_exports_and_mass_removals_never_remove() {
+        let listings: Vec<Value> = (1..=150)
+            .map(|i| listing(&format!("l{i}"), "200", 1, &format!("ct:{i}"), "active"))
+            .collect();
+        let garbage = vec![json!({"unexpected": true})];
+        let plan = plan_inventory_reconcile(&garbage, &listings, true, true);
+        assert_eq!((plan.gate_reason, plan.allow_destructive, removes(&plan)), ("unparsed_export", false, 0));
+
+        let few: Vec<Value> = (1..=10).map(|i| product(&i.to_string(), "100", 1, 2.0)).collect();
+        let plan = plan_inventory_reconcile(&few, &listings, true, true);
+        assert_eq!((plan.gate_reason, plan.allow_destructive, removes(&plan)), ("mass_removal_guard", false, 0));
+        assert_eq!(plan.summary["massRemovalBlocked"], json!(140));
     }
 
     #[test]
