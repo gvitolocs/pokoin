@@ -1,0 +1,17 @@
+HTTP/2 204 
+date: Thu, 08 Oct 2026 22:52:30 GMT
+access-control-allow-credentials: true
+access-control-allow-headers: authorization,content-type,accept,x-pokoin-game,x-pokoin-host
+access-control-allow-methods: GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS
+access-control-allow-origin: https://pokoin.com
+access-control-max-age: 86400
+vary: Origin
+cf-cache-status: DYNAMIC
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+x-content-type-options: nosniff
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=WP7c%2BRx%2B1LAwZCJDvN7QxQJDEDjZlg5wRLrrzUHAcI1f0cY3xJ%2BwC1gw7VGZ7Hg%2BjDlDSSCXNf3l8XoFijP%2FR7bdvalaGx1dvQ02sKjsJcQCxjtdQrW3rqEqi6vH2%2F9Prw%3D%3D"}]}
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+server: cloudflare
+cf-ray: a478b7618bd58715-CPH
+alt-svc: h3=":443"; ma=86400
+

@@ -329,3 +329,13 @@ export function artistPrintRegion(nationality) {
   if (bucket === 'unknown') return 'unknown';
   return 'western';
 }
+
+// Search title language must not navigate or reload the open printing desk.
+// Its identity, collector number and Western set stay tied to the public ID.
+export function searchLanguageNavigationPath(pathname, language) {
+  const path = String(pathname || '');
+  if (/\/marketplace\/[^/]+\/cards\/\d+(?:\/[^/]+)?\/?$/.test(path) && !/\/versions\/?$/.test(path)) {
+    return path;
+  }
+  return rewriteCatalogLang(path, language);
+}

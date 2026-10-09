@@ -14,6 +14,15 @@ members = [
   "crates/sync",
   "crates/integrations",
   "crates/observability",
+  "crates/accounts",
+  "crates/commerce",
+  "crates/external",
+  "crates/assistant-api",
+  "crates/edge",
+  "crates/admin-api",
+  "crates/search-api",
+  "crates/catalog-api",
+  "crates/api-common",
 ]
 
 [workspace.package]

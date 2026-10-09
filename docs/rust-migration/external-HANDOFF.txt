@@ -1,0 +1,172 @@
+HANDOFF — pokoin-external (external-integrations native Rust domain)
+=====================================================================
+Worktree : /home/nez/.paseo/worktrees/2n15xc8c/rust-integrations-20261008
+Crate    : pokoin-rust/crates/external   (package `pokoin-external`)
+Owner    : external-integrations worker (started by zcodecli, finished by deepseek-flash)
+Status   : COMPILES + TESTS GREEN. Not deployed, not pushed, no production routing changed.
+Reference: api-benchmark-20261008/api-route-inventory.json (143 routes) and
+           api-benchmark-20261008/.reference-node/api, live manifest
+           /app/server/api-route-manifest.js in docker pokoin-oracle-api (read-only).
+
+--------------------------------------------------------------------------
+1. WHAT IS DONE
+--------------------------------------------------------------------------
+`cargo check` clean; `cargo test` = 129 unit + 7 router integration tests pass
+(1 doctest ignored). The crate is a standalone workspace (own lockfile) so it
+compiles independently until the root worker wires it into pokoin-rust.
+
+Production state is fail-closed: `DomainState::from_env(pool_max)` requires
+FIREBASE_PROJECT_ID + Firebase Admin credentials + MARKETPLACE_DATABASE_URL and
+builds FirestoreRest + FirebaseJwksVerifier. It never falls back to
+MemoryFirestore, `FirestoreStore::durable()` is false for the test store, and
+`require_durable_firestore()` returns 503 for it.
+
+Implemented natively (34 routes):
+  CardTrader  /api/cardtrader-connect (POST,DELETE), -status, -disconnect,
+              -import-dry-run, -sync (GET,POST), -assets, -zero,
+              -clean-listings, -webhook/{uid}, -blueprint-listings, -live-listings
+  PowerTools  /api/powertools-connect (GET,POST,DELETE),
+              /api/marketplace-pricing-strategies (GET,POST,DELETE),
+              /api/marketplace-price-check
+  Scan        /api/scan/identify, /api/scan/identify-album, /api/scan/print,
+              /api/scan/catalogs, /api/scan/health,
+              /api/scan-pair, /api/scan-phone, /api/scan-session,
+              /api/scan-stream, /api/scan-batch
+  R2 media    /api/user-photos/{kind}/{uid}/{file},
+              /api/upload-profile-picture, /api/remove-profile-picture,
+              /api/cache-google-profile-picture, /api/forum-upload-media
+  Redirects   /api/cardtrader-redirect, /api/tcgplayer-redirect
+  Social      /api/social-autopost, /api/social-autopost/hot-card,
+              /api/social-post-agent (private: shared secret / CRON / admin)
+  System      /api/client-country, /api/wpkn-pkn-quote
+
+Partial (guard implemented, downstream 501):
+  /api/cardtrader-daily-listings-refresh, /api/cardtrader-game-ingest
+  (secret gate + tests; ingest SQL not ported)
+
+Everything else assigned to this domain is mounted but answers
+HTTP 501 with { "code": "not_implemented" } and is enumerated with a concrete
+unported dependency in ./external-coverage.json. No route fakes success.
+
+Domain logic (all native, no Node/JS): HMAC webhook signature, AES-256-GCM
+secret envelopes, CardTrader client, inventory reconcile planner + sync,
+Power Tools/Outseta session + stock CSV helpers, pricing strategies, Firebase
+JWKS/ID-token verification, Firestore REST + in-memory fake, SQL/Redis pools,
+R2 SigV4, recognition-worker proxy, geo country headers.
+
+--------------------------------------------------------------------------
+2. CONSTRUCTOR CONTRACT (what the integrator must build)
+--------------------------------------------------------------------------
+The root API owns the listener. This crate only builds a router:
+
+    use std::sync::Arc;
+    use pokoin_external::{router, DomainState};
+
+    let state = DomainState::new(
+        firestore,   // Arc<dyn pokoin_external::firebase::FirestoreStore>
+        verifier,    // Arc<dyn pokoin_external::firebase::TokenVerifier>
+        db,          // pokoin_external::db::DbPools::from_env(pool_max).await?
+        redis,       // Option<pokoin_external::redis::RedisCache>  (None = degraded single instance)
+    );
+    let app = router(state);          // axum::Router, paths already include /api/...
+
+`DomainState` is public and Clone. It holds:
+  firestore, verifier, db, redis,
+  cardtrader: CardTraderClient,        // default ctor reads CARDTRADER_API_BASE_URL
+  powertools:  PowerToolsClient,       // default ctor reads the Power Tools/Outseta bases
+  recognition: RecognitionClient,      // SCAN_PRIMARY_URL / SCAN_FALLBACK_URL
+  sync_jobs: Arc<SyncJobs>,            // native background reconcile guard
+  r2_user_photos: Option<R2Client>,    // from_env("R2_USER_PHOTOS_BUCKET")
+  config: Arc<DomainConfig>            // cron/game secrets + webhook base URL
+
+Production wiring notes:
+  * `verifier` = Arc::new(FirebaseJwksVerifier::new(FIREBASE_PROJECT_ID)); tests
+    use StaticVerifier (accepts `Bearer test-<uid>`).
+  * `firestore` = Arc::new(FirestoreRest::from_env()?) in production;
+    MemoryFirestore for tests/no-Firestore degraded mode.
+  * `DomainState::for_test()` gives a fully deterministic instance
+    (MemoryFirestore + StaticVerifier + disconnected pools + no workers).
+
+Env read at route time (all optional unless noted):
+  FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY (FirestoreRest)
+  MARKETPLACE_DATABASE_URL, MARKETPLACE_WRITER_DATABASE_URL, *_DATABASE_URL
+  CARDTRADER_TOKEN_ENCRYPTION_KEY (64 hex chars = 32 bytes; required to store/read
+    any CardTrader or Power Tools secret — routes fail 500 without it)
+  CARDTRADER_API_BASE_URL, CARDTRADER_WEBHOOK_BASE_URL
+  CARDTRADER_DAILY_LISTINGS_SECRET | CARDTRADER_DAILY_REFRESH_SECRET | CRON_SECRET
+  CARDTRADER_GAME_INGEST_SECRET
+  SCAN_PRIMARY_URL (default http://127.0.0.1:18151),
+  SCAN_FALLBACK_URL (default http://127.0.0.1:18150), SCAN_*_TIMEOUT_MS, SCAN_PRIMARY_COOLDOWN_MS
+  CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+  R2_USER_PHOTOS_BUCKET (+ optional R2_USER_PHOTOS_PUBLIC_URL), POKOIN_PUBLIC_ORIGIN
+
+--------------------------------------------------------------------------
+3. INTEGRATION STEPS (root worker)
+--------------------------------------------------------------------------
+1. Add "crates/external" to pokoin-rust/Cargo.toml [workspace].members.
+2. In pokoin-rust/crates/external/Cargo.toml delete the local `[workspace]`,
+   `[workspace.package]` (version/edition/license) lines; the crate then
+   inherits the root workspace exactly like the other crates. (Those three
+   fields exist only so the crate can be its own workspace root until then.)
+3. Optionally repoint the crate's dependency versions at the root
+   [workspace.dependencies] entries (they are currently absolute pins so the
+   crate builds standalone; versions are compatible with the root list:
+   axum 0.8, axum multipart, reqwest 0.12 multipart).
+4. Build `DomainState` in apps/api and nest `router(state)` under the root
+   router. Nothing else is required: all paths are absolute /api/... .
+5. Do not add a second listener; this crate opens no sockets.
+
+--------------------------------------------------------------------------
+4. KNOWN GAPS (truthful; full table in external-coverage.json)
+--------------------------------------------------------------------------
+Large unported Node handlers (still 501):
+  * Scan Connect is DONE (pair/phone/session/stream/batch incl. submit) via
+    src/scan_connect.rs + src/scan_store.rs. Two documented sub-gaps: the
+    printing-choice layer (one printing per artwork for now) and submit's
+    CardTrader push / price-summary refresh (commerce-owned). Scan submit
+    ownership goes through the ScanOwnership seam; the default fails closed 503.
+  * CardTrader listings are DONE: -blueprint-listings (snapshot SQL + cursor
+    paging) and -live-listings (marketplace hydrate + 60 s L1 / optional Redis
+    L2). Sub-gap: the promotional seller-comment filter is not ported.
+  * cardmarket-redirect.js (845 lines: Cardmarket product/expansion mapping +
+    scrape observations). /api/cardtrader-redirect and /api/tcgplayer-redirect
+    are done (SQL ported verbatim); they take game from ?game= (default
+    pokemon) rather than the request game-context middleware.
+  * R2 media is DONE (user-photos, profile upload/remove/cache-google, forum
+    upload). Note: image 0.25 only encodes lossless WebP, so bytes/size differ
+    from sharp's lossy output while paths + content types match.
+  * marketplace-listings-csv SQL import/export (price-check is DONE).
+  * daily-listings-refresh / game-ingest ingest SQL (secret gates are done).
+  * pokoin-assistant: 3451-line assistant; external owns it per the latest brief
+    but the grounding/handoff core is not ported yet.
+  * social-autopost, /hot-card and social-post-agent are DONE (native, private
+    auth, dryRun never sends); live sends need TELEGRAM_*/X_* env and fail
+    closed without them.
+
+Infrastructure gaps:
+  * CDN HTTP edge worker migration is out of this crate; crate is library-only.
+  * Scheduled global jobs (daily listings refresh, sales backfill, reconcile-all)
+    still run on the Node host script. Only the per-seller reconcile is native
+    (tokio + in-process/Redis lock); a native worker binary is still to add.
+
+--------------------------------------------------------------------------
+5. VERIFY
+--------------------------------------------------------------------------
+  cd pokoin-rust/crates/external
+  PATH="$HOME/.cargo/bin:$PATH" cargo check
+  PATH="$HOME/.cargo/bin:$PATH" cargo test      # 129 + 7 pass
+
+Router tests (tests/router_smoke.rs) assert the deployed fail-closed contract:
+401 without a bearer, 405 for a wrong method, 501 for audited gaps, 503 when no
+recognition worker answers, and the admin secret gate.
+
+--------------------------------------------------------------------------
+6. SAFETY / SCOPE NOTES
+--------------------------------------------------------------------------
+* No push, no deploy, no production routing or live-service restart performed.
+* Canonical /home/nez/Projects/pokoin-web untouched.
+* No Node subprocess, no JS engine, no Rust-to-Node proxy in the crate.
+* Root workspace files (pokoin-rust/Cargo.toml, apps, other crates) untouched.
+* Files owned/created here: pokoin-rust/crates/external/**, ./external-coverage.json,
+  ./HANDOFF.txt. zcode's partial files were preserved and only repaired/compiled,
+  not rewritten wholesale.

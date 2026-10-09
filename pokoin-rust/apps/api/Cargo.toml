@@ -8,6 +8,12 @@ name = "pokoin-api"
 path = "src/main.rs"
 
 [dependencies]
+pokoin-edge = { path = "../../crates/edge" }
+pokoin-assistant-api = { path = "../../crates/assistant-api" }
+pokoin-admin-api = { path = "../../crates/admin-api" }
+pokoin-search-api = { path = "../../crates/search-api" }
+pokoin-catalog-api = { path = "../../crates/catalog-api" }
+pokoin-api-common = { path = "../../crates/api-common" }
 anyhow = { workspace = true }
 axum = { workspace = true }
 pokoin-auth = { path = "../../crates/auth" }
@@ -21,15 +27,20 @@ pokoin-observability = { path = "../../crates/observability" }
 pokoin-search = { path = "../../crates/search" }
 redis = { workspace = true }
 serde = { workspace = true }
+percent-encoding = "2"
+regex = "1"
 serde_urlencoded = "0.7"
 serde_json = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["io-util"] }
 tower = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 sqlx = { workspace = true, features = ["derive"] }
 reqwest = { workspace = true }
 pokoin-catalog = { path = "../../crates/catalog" }
+pokoin-accounts = { path = "../../crates/accounts" }
+pokoin-commerce = { path = "../../crates/commerce" }
+pokoin-external = { path = "../../crates/external" }
 
 sha2 = { workspace = true }
 hex = { workspace = true }

@@ -1,0 +1,526 @@
+HANDOFF — Pokoin accounts / auth / social / collection port (native Rust)
+=========================================================================
+
+Worker:    accounts
+Worktree:  /home/nez/.paseo/worktrees/2n15xc8c/rust-accounts-20261008
+Branch:    codex/rust-accounts-20261008
+Crate:     pokoin-rust/crates/accounts
+Coverage:  accounts-coverage.json        (the honest per-route ledger — read it)
+
+Not pushed. Not deployed. No production routing changed. No live service
+restarted. Nothing outside this crate was touched:
+
+    $ git status --porcelain
+    ?? pokoin-rust/crates/accounts/
+
+pokoin-rust/Cargo.toml, apps/api/src/main.rs, config, search, marketplace,
+listings and AGENTS.md are all untouched, as agreed.
+
+
+1. WHAT THIS IS
+---------------
+The native Rust replacement for the Node handlers that own accounts, identity,
+wallets, the forum, the collection/portfolio BFFs and news comments. Runtime is
+axum + reqwest/rustls + Redis, talking to Firebase, Firestore, Supabase
+PostgREST and Cloudflare R2 directly over HTTPS.
+
+Hard constraints honoured:
+  * no Node process at request time
+  * no JavaScript engine
+  * no Rust -> Node fallback (a route is either native or not mounted)
+  * no placeholder success: an unported route is NOT mounted (404), and a
+    missing credential produces a truthful `500 ... is not configured.`
+  * nothing in the unported 22 routes is advertised as working
+
+
+2. ROOT AGENT: HOW TO WIRE IT
+-----------------------------
+Add ONE line to pokoin-rust/Cargo.toml members (this crate deliberately has no
+`[workspace]` table and no `workspace = true` inheritance, so it also builds
+standalone):
+
+    "crates/accounts",
+
+Then, in apps/api/src/main.rs:
+
+    let accounts_state = pokoin_accounts::DomainState::from_env();
+    let app = pokoin_accounts::router(accounts_state)
+        .merge(existing_router);          // order does not matter
+
+Contract you can rely on:
+
+    pub fn router(state: DomainState) -> axum::Router
+    pub struct DomainState              // Clone; one Arc inside
+    impl DomainState {
+        pub fn from_env() -> Self;                                  // production
+        pub fn with_transport(AccountsConfig, SharedTransport) -> Self;
+        // test/DI builders:
+        pub fn with_verifier(Arc<dyn TokenVerifier>) -> Self;
+        pub fn with_firestore(Option<Firestore>) -> Self;
+        pub fn with_auth(Option<FirebaseAuth>) -> Self;
+        pub fn with_supabase(Option<SupabaseClient>) -> Self;
+        pub fn with_emails(Arc<dyn EmailSender>) -> Self;
+        pub fn with_limiter(Arc<dyn RateLimiter>) -> Self;
+        pub fn with_media_store(Option<Arc<dyn MediaStore>>) -> Self;
+        pub fn with_clock(Arc<dyn Clock>) -> Self;
+        pub fn with_email_config(EmailConfig) -> Self;
+    }
+
+The paths inside the router already carry the `/api/...` prefix, so `merge` or
+`nest` both work without adding a prefix.
+
+`DomainState::from_env()` NEVER panics. It reads:
+
+    FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY   (required for anything Firebase)
+    POKOIN_REQUIRE_VERIFIED_PASSWORD=1                                 (the password-email gate)
+    POKOIN_PENDING_SIGNUP_KEY | PENDING_SIGNUP_KEY                     (falls back to the SA key, exactly like Node)
+    PUBLIC_SITE_URL, EMAIL_FROM, NO_REPLY_EMAIL_FROM, ADMIN_SIGNUP_EMAIL, RESEND_API_KEY
+    SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
+    VALKEY_URL | REDIS_URL                                             (rate limiting; allow-all when absent)
+    R2_FORUM_MEDIA_{ENDPOINT,BUCKET,PUBLIC_URL,ACCESS_KEY_ID,SECRET_ACCESS_KEY}
+    POKOIN_FIREBASE_JWKS_URL, POKOIN_OAUTH_TOKEN_URL, POKOIN_IDENTITY_BASE,
+    POKOIN_FIRESTORE_BASE, POKOIN_ACCOUNTS_HTTP_TIMEOUT_MS
+
+If the service account is absent, `firestore()` / `auth()` / `supabase()` return
+`Err(ApiError)` and only the routes that need them fail — with a truthful 500.
+
+
+3. REUSABLE INFRASTRUCTURE (commerce worker: read this)
+--------------------------------------------------------
+Your `crates/commerce/src/auth.rs` implements its own `TokenVerifier` +
+`FirebaseVerifier` + `Claims` + `bearer`, and its own `Claim`/`TokenVerifier`
+port. This crate now offers the shared version. They are interface-compatible
+enough to collapse into one:
+
+    pokoin_accounts::firebase::TokenVerifier
+        async fn verify(&self, token: &str) -> Result<Claims, AuthError>;
+    pokoin_accounts::firebase::FirebaseVerifier::new(&AccountsConfig, SharedTransport)
+    pokoin_accounts::firebase::Claims {
+        uid, email, email_verified, pok_email_verified, name, picture, role,
+        exp, iat, auth_time, firebase: FirebaseInfo, extra: Map
+    }
+    pokoin_accounts::firebase::bearer(Option<&str>) -> Result<&str, AuthError>
+    pokoin_accounts::firebase::optional_claims(&Arc<dyn TokenVerifier>, Option<&str>)
+
+Differences from your version that you probably want:
+  * it rejects a non-RS256 `alg` and a missing `kid` explicitly;
+  * it refetches the JWKS once when the `kid` is unknown (Google key rotation);
+  * it validates `iat` is not in the future, in addition to `exp`;
+  * it exposes the Node password gate as
+    `Claims::password_account_requires_verification()` and
+    `Claims::assert_active_password_account(require_verified)`, which returns
+    the Node 403 + `auth/pokoin-email-not-verified` code;
+  * `ServiceAccount` gives you a cached OAuth 2.0 access token and
+    `create_custom_token(uid, claims)`.
+
+Firestore (this is what you asked for):
+
+    pokoin_accounts::firestore::Firestore::new(&AccountsConfig, SharedTransport,
+                                               Arc<ServiceAccount>, RetryPolicy)
+    firestore.doc("users/u1").get() / .set(DocData, merge) / .create(..) / .update(..) / .delete()
+    firestore.run_query(&Query::collection("x").where_eq("uid", uid).limit(2)).await?
+    firestore.run_transaction(|tx| Box::pin(async move { ... })).await?
+        // tx.get_doc(&ref) / tx.get_query(&q) / tx.set / tx.update / tx.create / tx.delete
+    DocData::new().string(..).int(..).bool(..).server_timestamp(..).increment(..).array(..)
+    Value::{Null,Boolean,Integer,Double,Timestamp,String,Bytes,Reference,GeoPoint,Array,Map}
+
+Semantics that were preserved on purpose: int64 travels as a string; `set(merge)`
+sends an `updateMask`; `serverTimestamp`/`increment`/array union-remove become a
+second `transform` write in the same commit; `create` uses
+`currentDocument.exists=false`; a transaction with no writes is rolled back
+(releasing read locks); `ABORTED` at either the body or the **commit** retries
+the whole body up to 4 times with backoff, then surfaces the same 500 Node did.
+
+MONEY (round 2): the referral rewards, the chat payments and the wallet merges
+all write `balances/{uid}` + `ledger_entries` inside ONE Firestore transaction
+with an idempotency gate (`referrals/{uid}.status`, or
+`payment_operations/{sha256(uid\0clientToken)}`) — the same contract
+`store::apply` implements. There is a `LedgerSink`-shaped seam at each call site
+(handlers/referral.rs `settle_referral`, handlers/chat.rs the `action=pay`
+transaction) if you would rather route them through the commerce worker's
+`store::apply`; the two call sites are small and already inside a transaction.
+
+MONEY: I did NOT create any SQL ledger table and did NOT fork money persistence.
+Wallet sign-in/link still seed and merge the Firestore `balances` document
+exactly as Node did (`increment(0)` seed on first sign-in, integer merge for a
+claimed `wallet:0x...` account). Your `store.rs` (`LedgerOp` + `apply` over
+`pokoin_account_balances` / `pokoin_ledger_entries`) stays the single money
+writer. If you want those two Firestore writes to go through your ledger
+instead, the call sites are `handlers/wallet.rs` inside the two transactions —
+they are small and isolated.
+
+Also public and reusable without pulling in the router:
+  * `pokoin_accounts::domain::collection` — the single source of truth for
+    `user_card_collections`: `list_owned_collection`, `summarize_owned_collection`,
+    `remove_owned_collection_item`, `set_owned_collection_trade`,
+    `scan_ownership_doc_id`, `physical_payload_from_scan_row`,
+    `is_nft_document`, `iso_timestamp`. The scan/listing workers should use this
+    instead of writing their own ownership doc math (it keeps the "absolute
+    quantity, never increment" and "an existing scan doc keeps its quantity"
+    invariants from D000069/D00006A).
+  * `pokoin_accounts::identity::FirebaseAuth` — Identity Toolkit admin
+    (`get_user`, `get_user_by_email`, `create_user`, `update_user`,
+    `delete_user`, `set_custom_user_claims`) with Admin-SDK-shaped error codes
+    (`auth/user-not-found`, `auth/email-already-exists`).
+  * `pokoin_accounts::domain::crypto` — native EIP-191 `personal_sign`
+    recovery (replaces `ethers.verifyMessage`), address/nonce/session rules.
+  * `pokoin_accounts::supabase::SupabaseClient` — PostgREST with the Node
+    `encodeFilterValue` escaping and status mapping.
+  * `pokoin_accounts::r2::{R2MediaStore, MediaStore}` — SigV4 `PUT`.
+  * `pokoin_accounts::rate_limit::{RateLimiter, RedisRateLimiter, AllowAllRateLimiter}`
+    — `limitBestEffort` semantics (allow on store failure).
+  * `pokoin_accounts::email::{EmailSender, ResendEmailSender, EmailConfig}` —
+    the Verification/Welcome/Admin-signup templates, and a sender that reports
+    `skipped` instead of pretending when `RESEND_API_KEY` is unset.
+  * `pokoin_accounts::http::{HttpTransport, ReqwestTransport, RetryPolicy}` —
+    every outbound call goes through one injectable seam, which is how the tests
+    run without a network.
+
+
+4. WHAT IS PORTED (38 of the 39 assigned method/path pairs)
+----------------------------------------------------------------------
+Accounts / identity / wallets / forum / collection / news (round 1):
+  auth-login, ensure-username, register-email, verify-email-signup,
+  signup-notification, wallet-auth/nonce, wallet-auth/verify, wallet-link,
+  wallet-link/session, wallet-link/complete, forum, forum-create-topic,
+  forum-create-post, forum-upload-media, marketplace-collection (GET +
+  POST ?action=remove), marketplace-collection-summary, news-comments (GET, POST).
+
+Identity-adjacent + referral + Poko + chat (round 2):
+  search-recipient-emails (GET, POST), user-current-page (GET, POST),
+  marketplace-referral (GET, POST), marketplace-associate-suggest,
+  poko-connect, pokoin-partner (GET, POST), chat (GET, POST),
+  poko-personal-context.
+
+Round 2b (the goal round): marketplace-associate (GET, OPTIONS), poko-bets,
+marketplace-portfolio-history, poko-chat (GET, POST).
+Round 3: marketplace-portfolio (GET, OPTIONS).
+
+Route totals as (method, path) pairs:
+  PORTED_ROUTES    38
+  UNPORTED_ROUTES   1   (poko-market POST)
+  EXTERNAL_ROUTES   9   (photos/R2/social/pokoin-assistant — another worker)
+
+New infrastructure added in round 2 (all public and reusable):
+  * `sql::MarketplaceDb` — a thin client for the EXISTING Postgres read model
+    (`marketplace_search_candidates`, `marketplace_user_listings`,
+    `marketplace_user_recents`, `poko_user_personal_snapshot`,
+    `marketplace_associates`, `marketplace_ambassador_contributions`,
+    `assistant_user_current_pages`, `poko_telegram_link_codes`,
+    `poko_telegram_links`, `poko_discord_links`). It creates NO tables and holds
+    no DDL; `sql/` is empty. Rows decode generically (including arrays).
+  * `firestore::Firestore::get_all` (Node `getAll`) and Query startAt/endAt
+    cursors with the `\uf8ff` prefix helper.
+  * `r2::R2MediaStore::put_object` (signed Cache-Control) and
+    `R2MediaStore::for_user_photos` for the chat/listing photo bucket.
+  * `domain::{referral, ambassador, chat, personal_context}` — pure, tested
+    domain cores.
+  * handler modules `poko`, `chat`, `referral`, `associate`, `partner`, `user`,
+    `poko_bets`, `portfolio`.
+  * `firestore::Firestore::get_all` (Node `getAll`), composite AND `where`
+    chains, and `Document::to_plain_json()` for the pure domain modules.
+  * `domain::{associate, poko_bets, portfolio_history}` — pure, tested cores.
+  * `LedgerSink` (in `domain::poko_bets`) — the money seam for bet escrow. The
+    default `NodeLedgerSink` reproduces the Node writes into
+    `balances/{key}` + `ledger_entries` in ONE Firestore transaction. Point it
+    at the commerce worker's `store::apply` and the handlers do not change.
+
+See accounts-coverage.json for the per-route status, the exact test names behind
+each claim, and the notes. `lib.rs` exports the lists so you can generate routing
+from code:
+
+    pokoin_accounts::PORTED_ROUTES     // mounted today
+    pokoin_accounts::UNPORTED_ROUTES   // assigned, deliberately NOT mounted
+    pokoin_accounts::EXTERNAL_ROUTES   // owned by another worker
+
+
+5. WHAT IS NOT PORTED (assigned to this worker, still open)
+----------------------------------------------------------
+poko-market (POST) — 1 row / 1 method+path pair. THE LAST GAP.
+
+STATUS AFTER ROUND 3: step 1 (the pure layer) is DONE and tested —
+`src/domain/poko_market_math.rs`, ~1000 lines with 22 test functions, covering
+every shared rule: condition/language normalisation, the sold-slice maths,
+variant snap-back, liquidity bands, the sell-price ladder, live-ask
+summarisation, deal verdicts and ask history, plus all the constants. It
+compiles warning-free and nothing else depends on it yet.
+
+STILL TO DO: step 2 (below) and step 3.
+
+SCOPING ALREADY DONE (do not re-derive): `api/poko-market.js` is 2185 lines
+plus `_card_price_history.js` (83). It is a service-token tool API, one POST
+with a `tool` field, dispatching through a `TOOLS` table to **15 actions**:
+
+  resolve_card, card_quote, card_ocr, card_liquidity, collection_quote,
+  suggest_cards, market_snapshot, top_movers, top_sellers, card_sales,
+  deal_check, set_sales, recent_sales, artist_cards, set_info
+
+Suggested split, in this order (each step compiles and tests on its own):
+
+1. DONE — `domain/poko_market_math.rs`, the PURE layer, no SQL:
+   conditions/languages tables (CONDITIONS, LANGUAGES, CONDITION_MAP,
+   VAGUE_CONDITION_RES, LANGUAGE_MAP, normalizeCondition, normalizeLanguage),
+   cleanText/escapeLike/fuzzyArtistPattern, blueprintIdFromCatalogRow,
+   confidenceForSample, round2, weightsAreFresh/todayIso/daysAgoIso,
+   liquidityBands, buildSoldSummary, timeRange, priceStrategies,
+   candidateFromRow, dedupeArtworkVersions, queryVariants (QUERY_FILLER_RE +
+   STOPWORDS), stripAskingPrices, singleParentheticalSet, digitSetCode,
+   soldFlag/soldFacetFromParams/facetKey/facetLabel/rowMatchesFacet/
+   rowMatchesSlice/dayOf/percentileOf/soldStats/soldEstimateFromStats,
+   resolveFacet, variantsSold, soldByConditionLanguage, summarizeLiveAsks,
+   dealVerdict, askHistoryFromSource, normalizeRarity, setTokens,
+   eraForCode (ERA_BY_CODE), nationalityForLanguage
+   (NATIONALITY_BY_LANGUAGE), and the movers/sellers constants
+   (PKN_EUR_RATE = 0.005, MOVERS_MIN_PRICE_PKN = 400,
+   MOVERS_MAX_CANDIDATES = 300, RARITY_ALIASES,
+   TOP_SELLERS_MAX_SOLD_TO_ASK = 20, SOLD_REFERENCE_ASK_DAYS = 180,
+   SOLD_UNVERIFIED_MAX_PKN = 200000, SOLD_HIGH_VALUE_PKN = 100000,
+   SOLD_HIGH_VALUE_MAX_TO_ASK = 3, plausibleSold, RECENT_SALE_VERIFY_RATIO = 3,
+   SOLD_ROWS_LIMIT = 3000, MAX_UNITS_PER_ROW = 50, DEAL_MIN_COMPS = 2,
+   FLUCTUATION_PCT = 15, MAX_COLLECTION_CARDS = 500,
+   FRESH_WEIGHTS_MAX_AGE_DAYS = 3).
+   (already ported; skip straight to step 2)
+2. `handlers/poko_market.rs` — the SQL + service-token plumbing: the TOOLS
+   dispatch, `isAuthorized`, `sendJson`, `queryRows`, per-action SQL
+   (soldRowsForBlueprint, liveAsksForBlueprint, recentPriceSources,
+   askSignalForBlueprint, requireCard, expansionForSetCode, applySetAlias,
+   resolveCard, collectionQuote's bulk read), and `_card_price_history`
+   (readCardPriceHistory, cardtraderSource, tcgplayerSource) as native
+   Postgres reads.
+3. Wire the route exactly like the other Poko routes: service token first
+   (503 when unset, 401 when wrong) — see `handlers::poko_bets` for the
+   established shape — then mount it and move
+   `"POST /api/poko-market"` from UNPORTED_ROUTES to PORTED_ROUTES.
+
+REUSE, do not rewrite: `domain::marketplace_game` (game scoping + the 23-game
+table; `currentGame()` is already threaded as a parameter everywhere else) and
+`domain::portfolio_catalog` (cleanText, parseLimit, parsePublicCardId and the
+React card/image shaping). `domain::poko_chat::clean_text` is the same
+whitespace-collapsing helper poko-market's `cleanText` uses for queries, but
+poko-market's own is trim+slice, so keep them separate.
+
+NOTE: `_card_price_history.js` is the same source the market/desk API uses, so
+check whether the root agent (catalog work) is porting it before duplicating.
+
+Each is listed with a reason in accounts-coverage.json. They are NOT mounted, so
+they answer 404 rather than a stub that would look like a success, and
+`router_contract::every_ported_route_is_reachable_and_every_unported_one_is_not`
+asserts that. Notes for whoever picks them up:
+  * portfolio + portfolio-history need the Postgres read model
+    (marketplace_search_candidates, marketplace_user_listings,
+    cheapest_homepage_cache_blueprint, marketplace_card_urls,
+    marketplace_cardtrader_1dr_assets, cardtrader_sold_daily) plus
+    `_portfolio_history_core`; `sql::MarketplaceDb` is already wired for it.
+  * marketplace-associate (533 lines) is the affiliate dashboard.
+  * poko-bets and poko-chat touch balances/limits; route their money through the
+    same ledger seam described in section 10.
+  * poko-market (2185 lines) and poko-chat (743 lines) are the two largest
+    remaining surfaces.
+
+Routes owned by the external photos/R2/social/assistant worker (do NOT port
+these here): user-photos, upload-profile-picture, remove-profile-picture,
+cache-google-profile-picture, social-autopost, social-autopost/hot-card,
+social-post-agent, pokoin-assistant. They are listed in EXTERNAL_ROUTES.
+
+
+6. VERIFICATION
+---------------
+    $ cd /tmp/pokoin-accounts-check          # standalone scratch workspace
+    $ CARGO_TARGET_DIR=/tmp/pokoin-accounts-target cargo test -p pokoin-accounts --all-targets
+    470 passed / 0 failed
+      338 lib unit tests
+       23 tests/firebase_verification.rs
+       15 tests/firestore_rest.rs
+       93 tests/router_contract.rs
+        1 doc test
+    cargo check -p pokoin-accounts --all-targets   -> warning-free
+
+The scratch workspace is /tmp/pokoin-accounts-check with
+`accounts -> <this crate>` symlinked and a two-line Cargo.toml. It exists only so
+the crate can be built standalone without touching pokoin-rust/Cargo.toml; the
+delivered manifest has no `[workspace]` table, so adding the crate to the real
+workspace just works. The target directory is outside the source tree, so
+nothing generated leaked into the worktree.
+
+What the tests actually cover (genuine behaviour, not route presence):
+  * round 1 (unchanged): RS256/JWKS verification and caching, the password-email
+    gate, OAuth jwt-bearer + token caching, custom tokens, Firestore typed
+    values / updateMask / transform writes / ABORTED retry, EIP-191 wallet
+    recovery, collection ownership, news-comments moderation, CORS preflight and
+    the per-route status codes;
+  * search-recipient-emails: the documentId reference cursor and the
+    displayNameSearch cursor on the wire, the <2-character short circuit, the
+    self/duplicate/invalid-handle filters and the 8-result cap;
+  * user-current-page: session-id precedence (body -> query -> header), the
+    `^[a-zA-Z0-9_.:-]{8,160}$` rule, safe-internal-path cleaning, and the
+    503 + setupRequired body when the presence table is missing;
+  * referral: invite-code shaping, the new-account window, self/circular
+    referral, the qualifying-order predicate (status, time, counterparty), the
+    double-sided reward with the 30-day referrer cap, treasury-low short circuit
+    and the JS `||` secret/empty-string semantics;
+  * ambassador: every tier transition, the roster role gating and the
+    founder title;
+  * poko-connect: the unambiguous alphabet (no 0/O/1/I/L), salted code hashing,
+    constant-time service-token comparison, the 503/401/400 action matrix and the
+    `{error:'POST only'}` verb body;
+  * chat: pair-key determinism, the ARRAY_CONTAINS member filter, the
+    newest-first list with a single batchGet for peer profiles, the DESC+reverse
+    page that stands in for limitToLast, the dotted `unread.<uid>` updateMask
+    write, unread bookkeeping, listing/photo sanitising, the payment idempotency
+    id and the 14-day money-request expiry;
+  * pokoin-partner: the static directory and contract (asserted to make zero
+    outbound calls), the 501 coming_soon bodies and the action-resolution order;
+  * poko-personal-context: card-id parsing/dedupe/caps, cart-line cleaning and
+    drops, desk id-or-name rules, the overlay detection matrix (alias keys,
+    explicit empty vs explicit null), the ON CONFLICT snapshot upsert params
+    (bigint[] + jsonb + nullable desk columns), and every line of
+    formatPersonalIntent including the "never invent ownership" preamble;
+  * marketplace-associate: the IT->IT qualification rule across every branch
+    (qualifying / clean refusal / unverified / zero-volume refund), the royalty
+    then share math split per currency, the newest-first recent list with the
+    30-row cap and masked buyer email, and the window-progress clamp;
+  * poko-bets: the pari-mutuel split property-tested for conservation across
+    every winner/loser/unit combination, the first-largest tie-break, the full
+    refund path, the 10-minute closesAt clamp, the Discord snowflake creation
+    time, the wallet-merge cap/forfeit/freeze table, and an END-TO-END settle
+    over a scripted Firestore asserting the winner is credited the whole pot,
+    the loser is untouched, the paired ledger entry is written, and a replay
+    writes nothing;
+  * poko-market (partial, step 1 of 3): the condition/language tables, the
+    unit-weighted sold percentiles with the 50-unit per-row cap, the facet
+    tables and snap-back, the liquidity bands (weights then sell-through), the
+    liquidity-banded price ladder, the deal-verdict bands including the
+    far-below caution, ask-history fluctuations/trend, query-variant cleaning,
+    asking-price stripping, parenthetical/digit set codes and the sold-flag
+    vocabulary;
+  * marketplace-portfolio: the game-precedence chain (query > header > host,
+    including x-forwarded-host/origin subdomains), the 23-game alias table and
+    per-game database URL derivation, the foreign-leftover-key drop with the
+    homepage-webp tile fallback, cdn.pokoin.com -> /card-images rewriting,
+    previews kept out of grid/hero, CardTrader host blanking, the holding row
+    shape and set rollups, and each of the four SELECT variants the relation
+    probe can pick;
+  * poko-chat: the [[cards: ...]] marker strip, bullet/bold/inline name
+    collection, the plausible-name matrix, the photo score floor and uniqueHits
+    preference, the R2-only photo allowlist, the market-first directive branches
+    (photo vs desk vs nothing), the attached-card/image cleaning and caps, the
+    client-turn-id slug rule, event serialization, the open-card de-duplication,
+    and an END-TO-END unavailable-assistant turn proving the reply is the
+    documented fallback and BOTH transcript rows are still committed;
+  * marketplace-portfolio-history: the condition/language alias table, slice
+    keys, the 20x joke-listing filter, last-sale carry-forward, since-day
+    gating, the both-days basket move, frozen-card-day protection, the 400-day
+    series with wallet carry-forward, and stored-series freshness (basis,
+    revision, UTC day, 15-minute window);
+  * router: both route-list invariants plus a disjointness assertion across
+    PORTED/UNPORTED/EXTERNAL.
+
+NOT verified (stated plainly, also in accounts-coverage.json):
+  * no live Firebase Auth, Firestore, Supabase, R2, Resend or Postgres call was
+    made; the round-2 SQL routes (user-current-page, associate-suggest, the
+    poko-connect actions, chat listing-photos) are asserted on their wire shape,
+    not against a database
+  * register-email/verify-email-signup/wallet success paths are implemented but
+    their live createUser + delivery half was never executed
+  * forum media uses lossless WebP where Node used sharp quality=86 (lossy)
+  * chat photo upload is exercised for validation only; no R2 PUT was performed
+  * the 1 route in section 5 remains unported
+
+
+7. FIDELITY NOTES (differences you should know about)
+-----------------------------------------------------
+* Forum media: `image` 0.25 writes lossless WebP; Node used
+  `sharp(...).webp({quality: 86})` (lossy). Pixels, `mime_type`, `width` and
+  `height` match; byte size is larger. Switch to a lossy encoder if that matters.
+* `ensure-username`: the deployed Node module imported `usernameForRequest` from
+  `_username.js`, where it does not exist — it would have thrown a TypeError. The
+  port implements the documented contract (claim an explicit handle, else repair
+  or assign one). Flagging it because it is a live bug, not a porting choice.
+* A Firestore `ABORTED` is retried up to 4 times (including at commit time); an
+  exhausted conflict still surfaces as the 500 the Node runtime produced.
+* `verify-email-signup` keeps Node's redirect rule (`startsWith('/')` only), which
+  does let `//host` through — preserved as-is rather than silently tightened.
+
+
+8. ROLLBACK
+-----------
+Nothing to roll back in production: the crate is a new, unmounted directory. To
+drop the work entirely, delete `pokoin-rust/crates/accounts/`,
+`accounts-coverage.json` and this file on this branch. Nothing else was modified,
+so no revert of shared files is needed. The scratch workspace at
+`/tmp/pokoin-accounts-check` and `/tmp/pokoin-accounts-target` can be removed at
+any time.
+
+
+9. BLOCKERS / OPEN QUESTIONS FOR THE COORDINATOR
+------------------------------------------------
+1. Mount prefix: the router paths include `/api/...`. If you nest under a prefix,
+   strip it there rather than changing these paths, so the manifest stays 1:1.
+2. There are now two `FirebaseVerifier`/`TokenVerifier`/`Claims` implementations
+   (here and in `crates/commerce`). They are interface-compatible; collapsing
+   commerce onto `pokoin_accounts::firebase` is a small, mechanical change and
+   would remove the duplication. Recommend doing it before the first deploy.
+3. Unported routes: confirm the routing for them stays on Node until a follow-up
+   pass. Do not point production at their Rust paths — they are not mounted.
+4. Rate limiting uses a Redis fixed window keyed
+   `pokoin:ratelimit:{scope}:{identity}:{window}` with `limitBestEffort`
+   semantics (allow when the store is unavailable). If Node used a different key
+   shape or a sliding window, the limits will differ slightly at window edges.
+5. Honcho preflight/postflight: the MCP bridge at 127.0.0.1:18787 requires a
+   bearer key I could not obtain, so I queried Honcho through its direct API
+   (`http://127.0.0.1:8000/v3/workspaces/cursor-global/search`). No prior memory
+   contradicted this work. The relevant standing decisions I honoured are
+   D000021/D000040/D000055 (Firebase/session and listing boundaries) and
+   D00006D/D00006E (collection ownership only through authenticated BFFs with the
+   verified uid).
+
+
+10. ADDENDUM — COMMERCE RECONCILIATION (written after reading the commerce
+    worker's Honcho revisions rev2/rev4/rev5 on 2026-10-08)
+--------------------------------------------------------------------------
+The coordinator corrected the commerce worker to keep every Node-era contract in
+Firestore and to stop migrating money to new SQL tables. That matches this crate:
+no SQL ledger was created here, and wallet sign-in/link still seed and merge
+`balances/{uid}` exactly as Node did. The two crates therefore agree on the money
+contract. Three concrete integration points remain:
+
+(a) DUPLICATE FIRESTORE CLIENT. `crates/commerce/src/firestore.rs` now exposes
+    `FirestoreClient`, `encode_value`/`decode_value`, `FirestoreWrite`,
+    `FieldTransform`, `commit_body` and `MAX_WRITES_PER_COMMIT = 500`, while this
+    crate exposes `Firestore`, `Value`, `DocData`, `FieldValue` and
+    `Transaction`. Two clients over the same REST API is the main duplication to
+    remove. Recommended: keep `pokoin_accounts::firestore` (it has transactional
+    reads via `batchGet`/`runQuery` sharing one transaction id, `ABORTED` retry
+    at commit time, per-request retry policy, cached OAuth with 401
+    invalidation) and delete commerce's, or vice versa — but do it in one pass,
+    not route by route, so the two do not drift. Adding `MAX_WRITES_PER_COMMIT`
+    style batching to the accounts client is a small follow-up if commerce needs
+    it (this crate currently issues one write pair per document).
+
+(b) SAME BALANCE DOCUMENTS, DIFFERENT DISCIPLINE. `commerce/src/store.rs`
+    `LedgerOp` + `apply` moves PKN through `balances/{uid}` +
+    `ledger_entries/{id}` + `commerce_idempotency/{sha256(key)}` inside one
+    Firestore transaction, which Firestore serialises against any concurrent
+    transaction touching those documents. The accounts wallet flows
+    (`handlers/wallet.rs`, `wallet-auth/verify` and `wallet-link/complete`) also
+    read and write `balances/{uid}` inside `run_transaction`, and — exactly like
+    Node — they are NOT idempotency-keyed: they compute a source amount and then
+    `increment` it onto the target. Two concurrent claims of the same wallet-only
+    account are still safe (the registry precondition plus Firestore transaction
+    retry), but a *simultaneous* transfer out of the source wallet-only account
+    could interleave with the merge. Node had the same window. If you want it
+    closed, move the merge in `wallet-link`/`wallet-link/complete` behind
+    `commerce::store::apply` (a Transfer from `wallet:0x...` to the account uid
+    with an idempotency key like `wallet_merge:{address}:{uid}`) once the two
+    Firestore clients are unified. The call sites are two small blocks, both
+    already inside a transaction, so the change is contained.
+
+(c) THE `bank` / IDEMPOTENCY COLLECTIONS THIS CRATE WRITES are only
+    `pending_email_signups`, `pending_email_signups_by_email`,
+    `wallet_auth_nonces`, `wallet_addresses`, `wallet_link_sessions`, `users`,
+    `usernames`, `balances`, `user_card_collections`, `news_comments` — the same
+    names Node used, and the same names commerce now uses for `users`,
+    `usernames`, `wallet_addresses` and `balances`. No new collection name was
+    invented by this crate. If you unify on one Firestore client, assert these
+    document shapes in a shared test so a change in either crate cannot silently
+    break the other.

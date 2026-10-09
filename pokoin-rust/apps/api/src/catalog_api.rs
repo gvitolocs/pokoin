@@ -130,9 +130,9 @@ pub async fn card_tiles(State(state):State<AppState>,headers:HeaderMap,uri:axum:
 pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::http::Uri)->Response{
 
  let p=params(&uri);let game=game_from(&headers,p.get("game").map(String::as_str));
- let Some(id)=positive_id(p.get("cardId").or_else(||p.get("id")).map(String::as_str).unwrap_or("")) else{return response(StatusCode::BAD_REQUEST,json!({"error":"cardId is required (public marketplace id)."}),"no-store")};
+ let Some(id)=positive_id(p.get("cardId").or_else(||p.get("id")).map(String::as_str).unwrap_or("")) else{return response(StatusCode::BAD_REQUEST,json!({"error":"cardId is required (public marketplace id)."}),"")};
  let Some(pool)=game_pool(&state,&game).await else{return response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")};
- let primary=match cards(&pool,&[id],&game).await{Ok(mut r)=>match r.pop(){Some(r)=>r,None=>return response(StatusCode::NOT_FOUND,json!({"error":"Card not found.","cardId":id.to_string()}),"no-store")},Err(e)=>return failure(&e)};
+ let primary=match cards(&pool,&[id],&game).await{Ok(mut r)=>match r.pop(){Some(r)=>r,None=>return response(StatusCode::NOT_FOUND,json!({"error":"Card not found.","cardId":id.to_string()}),"")},Err(e)=>return failure(&e)};
  let name=text(&primary,&["name"]);let set=text(&primary,&["set_name"]);
  let version=text(&primary,&["version"]);
  let (version_ids,rarity_ids,neighbors,meta)=tokio::join!(
@@ -160,19 +160,34 @@ pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::
  let lang=p.get("lang").or_else(||p.get("language")).or_else(||p.get("search_language")).map(String::as_str).unwrap_or("en");
  let slug=p.get("cardSlug").or_else(||p.get("slug")).map(String::as_str).unwrap_or("");
  let cheapest=if card["price"].is_null(){Value::Null}else{json!({"cardId":id.to_string(),"pricePkn":card["price"],"available":true,"cardtrader":{"available":card["hasCardTraderListing"]}})};
- // Optional commerce sections are integrated through native commerce helpers;
- // never silently return empty success for an explicitly requested section.
- if ["includeOffers","includeSales","includeSameAs"].iter().any(|k|p.get(*k).is_some_and(|v|["1","true","yes"].contains(&v.as_str()))) {
-  return response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Requested card section is awaiting native commerce integration."}),"no-store")
- }
+ let requested = |key: &str| p.get(key).is_some_and(|v| ["1", "true", "yes"].contains(&v.trim().to_lowercase().as_str()));
+ let offers = if requested("includeOffers") {
+  let Some(commerce) = state.commerce.read().await.clone() else { return response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Service temporarily unavailable."}),"no-store") };
+  let native_only = !requested("liveOffers");
+  let budget = std::time::Duration::from_millis(if native_only {800} else {8000});
+  match tokio::time::timeout(budget,pokoin_commerce::handlers::listings::read_public_offers_for_card(&commerce,&id.to_string(),limit(&p,"offerLimit",40,80),&game,native_only)).await {
+   Ok(Ok(rows))=>rows,
+   Ok(Err(e))=>{tracing::warn!(card_id=id,error=%e,"card offers fallback");vec![]},
+   Err(_)=>{tracing::warn!(card_id=id,"card offers timeout fallback");vec![]},
+  }
+ } else {vec![]};
+ let sales = if requested("includeSales") {
+  let slice = pokoin_catalog_api::sales::core::SoldSlice::default();
+  let mut rows = match pokoin_catalog_api::sales::core::read_oracle_card_sales(&pool,id,limit(&p,"salesLimit",40,120),&slice).await {Ok(r)=>r,Err(e)=>return failure(&e)};
+  rows.sort_by_key(|r|text(r,&["soldAt"]));rows
+ } else {vec![]};
+ let same_as = if requested("includeSameAs") {
+  let args = pokoin_catalog_api::shared::card_versions::RowsForVersionsArgs {query:String::new(),expansion_name:String::new(),card_id:String::new(),card_slug:String::new(),same_as_card_id:id.to_string(),limit:24,product_type:text(&card,&["productType"]),product_category:String::new(),search_language:"en".into()};
+  match pokoin_catalog_api::shared::card_versions::rows_for_versions(&pool,&args).await {Ok(rows)=>rows.iter().map(pokoin_catalog::react_record).filter(|r|text(r,&["id"])!=id.to_string()).collect::<Vec<_>>(),Err(e)=>return failure(&e)}
+ } else {vec![]};
  let path=text(&card,&["canonicalPath"]);
  let title=[text(&card,&["name"]),text(&card,&["set"]),text(&card,&["number"])].into_iter().filter(|s|!s.is_empty()).collect::<Vec<_>>().join(" ");
  let description=[text(&card,&["name"]),text(&card,&["rarity"]),text(&card,&["number"]),text(&card,&["set"])].into_iter().filter(|s|!s.is_empty()).collect::<Vec<_>>().join(" · ");
  let theme=crate::visual_theme::visual_theme(primary.get("visual_theme_row").unwrap_or(&Value::Null),&text(&primary,&["art_shade"]),&text(&primary,&["current_artwork_identity"]));
  response(StatusCode::OK,json!({
   "card":card,"game":game,"version":version,"visualTheme":theme,"versions":versions,"rarities":rarities,"versionCount":version_count,
-  "sameAs":[],"neighbors":{"prev":prev.iter().filter_map(|(_,id)|map.get(id)).collect::<Vec<_>>(),"next":next.iter().filter_map(|(_,id)|map.get(id)).collect::<Vec<_>>()},
-  "offers":[],"sales":[],"cheapest":cheapest,"artist":{"name":card["artist"],"illustrator":card["illustrator"]},
+  "sameAs":same_as,"neighbors":{"prev":prev.iter().filter_map(|(_,id)|map.get(id)).collect::<Vec<_>>(),"next":next.iter().filter_map(|(_,id)|map.get(id)).collect::<Vec<_>>()},
+  "offers":offers,"sales":sales,"cheapest":cheapest,"artist":{"name":card["artist"],"illustrator":card["illustrator"]},
   "canonicalPath":path,"seo":{"title":format!("{title} Price & Cards for Sale | Pokoin"),"description":description,"imageUrl":card["heroImageUrl"],"canonicalPath":path},
   "lookup":{"cardId":id.to_string(),"lang":lang,"slug":slug}
  }),"public, max-age=10, s-maxage=30, stale-while-revalidate=60")

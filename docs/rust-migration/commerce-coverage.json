@@ -1,0 +1,520 @@
+{
+  "worker": "commerce",
+  "worktree": "/home/nez/.paseo/worktrees/2n15xc8c/rust-commerce-20261008",
+  "branch": "codex/rust-commerce-20261008",
+  "crate": "pokoin-rust/crates/commerce",
+  "generatedAt": "2026-10-08 (rev 17 \u2014 encrypted checkout shipping snapshot)",
+  "policy": {
+    "runtime": "native Rust only; Postgres (sqlx, Pi read replica + nezopt 15T writer), Firestore (native OAuth/documents/queries/transactions), Redis, direct HTTPS/JSON-RPC",
+    "nodeAtRequestTime": false,
+    "jsEngine": false,
+    "rustToNodeFallback": false,
+    "placeholderSuccess": false,
+    "liveMutationsPerformed": false,
+    "note": "No live database, Stripe, chain or SMTP call was made while building or testing. Verification below is unit/domain/router level unless stated otherwise.",
+    "firestoreState": "balances, ledger, users, orders, addresses, deposits, withdrawals, money requests, notifications, native sales and PKN purchases stay in their real Firestore collections; nothing was migrated to empty SQL tables"
+  },
+  "artifacts": {
+    "router": "pub fn router(DomainState) -> axum::Router (crates/commerce/src/lib.rs)",
+    "state": "pub struct DomainState (Clone, one Arc) + AuthedUser/OptionalUser extractors (crates/commerce/src/state.rs)",
+    "sqlSchema": "pokoin-rust/crates/commerce/sql/001_commerce.sql",
+    "vendoredRates": "pokoin-rust/crates/commerce/assets/shipping-rates.json (sha256 8dcce1ef4ae431bd2d2678893db25f3426c4f29a2cfacffd0ae5685f50811ae7, identical to server/pokoin-api/shipping-rates.json)",
+    "workspaceMemberAdded": "pokoin-rust/Cargo.toml members += crates/commerce (single additive line; root owns the final wiring)",
+    "firestore": "pokoin-rust/crates/commerce/src/firestore.rs (public FirestoreClient/ServiceAccount/StructuredQuery/FirestoreWrite/encode_value/decode_value)",
+    "auth": "pokoin-rust/crates/commerce/src/auth.rs (TokenVerifier trait + public FirebaseVerifier RS256/JWKS)",
+    "ledger": "pokoin-rust/crates/commerce/src/store.rs (LedgerOp + store::apply, one Firestore transaction per movement)",
+    "pools": "DomainState::read_db() = MARKETPLACE_DATABASE_URL (Pi replica), write_db() = MARKETPLACE_WRITER_DATABASE_URL (nezopt 15T)",
+    "cardPageInterfaces": [
+      "handlers::listings::read_public_offers_for_card(state, card_id, limit, game, native_only)",
+      "handlers::orders::read_card_sales(state, card_id, limit) + public_sale_row"
+    ],
+    "games": "crates/commerce/src/game.rs (SATELLITE_GAMES env contract) + DomainState::game_pools(game)",
+    "evm": "crates/commerce/src/evm.rs (RLP, keccak256, ERC-20 calldata, EIP-155 sign + signer recovery); ChainClient::send_evm_payout/send_bank_pkn/send_reserve_pkn/send_wpkn",
+    "bitcoin": "crates/commerce/src/bitcoin.rs (base58check, bech32/bech32m, HASH160, WIF, UTXO selection, BIP143 P2WPKH signing); ChainClient::bitcoin_payout / bitcoin_payout_liquidity",
+    "integrationTests": "pokoin-rust/crates/commerce/tests/firestore_flow.rs",
+    "cardtraderBoundary": "crates/commerce/src/cardtrader.rs (CardTraderPort, CardTraderSaleSync, CardTraderBuyThrough, CardTraderOutcome, UnavailableCardTrader) + DomainState::with_cardtrader"
+  },
+  "tests": {
+    "command": "cargo test -p pokoin-commerce (includes tests/firestore_flow.rs)",
+    "result": "229 unit + 31 integration = 260 passed / 0 failed",
+    "covers": [
+      "Firestore value/field encoding round-trip and ISO-8601 -> timestampValue",
+      "Firestore document decode (id from resource name) and balance field names",
+      "Firestore single vs composite (AND) queries, IN filter, orderBy/limit, sub-collection parent",
+      "Firestore commit writes: Update+updateMask, Create(currentDocument.exists=false), Delete, ServerTimestamp, Increment; commit body carries the txn id",
+      "Firestore OAuth assertion construction (fails closed without a real private key)",
+      "ledger modes: transfer both sides, insufficient refusal, lock, unlock-burn, unlock-release, mint, burn, record-only",
+      "ledger write shapes: balance docs plus signed ledger entries with the Node field names; idempotency ids Firestore-safe/stable",
+      "money math (PKN<->EUR, checkout packages, balance discount floor)",
+      "crypto + wPKN quote math (fees, inventory BPS, size impact cap, expiry)",
+      "AES-256-GCM address envelope round-trip and Node-shaped envelope decrypt",
+      "shipping catalog load, tiers, tracked selection, untracked cap, insurance",
+      "stock CSV parse/emit, format detection, condition/language/finish mapping, location assignment, import/export round-trip",
+      "cart row cleaning, dedupe, rev derivation, empty-cart contract",
+      "recents game resolution, dedupe/cap; event metadata allowlist + weights",
+      "money-request state machine (pay/decline/cancel guards, 14-day expiry)",
+      "Stripe webhook HMAC signature accept/tamper/stale-ts",
+      "ERC-20 Transfer log decoding, hex/unit conversion",
+      "every assigned route is present in router(DomainState) (no 404)",
+      "crypto/wPKN request serialization matches the Node serialize() shapes",
+      "order ownership predicates + public sale rows never leaking buyer/order identity",
+      "seller-share / refund arithmetic (EUR parcel vs PKN item total, failed refunds excluded, refund ceiling, per-currency wording)",
+      "native sale-doc ids and the marketplace_sales document shape for PKN and EUR orders",
+      "seller sold-history row shape",
+      "marketplace game scoping: Pokemon shared pools, per-game satellite URLs, unknown/unconfigured games, stable 503 codes",
+      "EVM payout encoding: RLP spec vectors, ERC-20 transfer calldata, EIP-155 signing hash, v derivation, tx hash = keccak256(raw), signer recovery from (r,s,v)",
+      "payouts without a key return manual_pending with no tx hash; Bitcoin signing is an explicit 501",
+      "Bitcoin: base58check/bech32/bech32m vectors, HASH160, WIF, fee estimate, UTXO selection, P2WPKH script, BIP143 sighash + signature recovery",
+      "ERC-20 balanceOf calldata; EVM/wPKN payout liquidity unconfigured without a key; wPKN contract resolution",
+      "integration: real router + Firestore client against a mock Firestore (transfer/lock/withdraw/insufficient refusal/money-request/notifications/public sales privacy)",
+      "seller Transfer planning (refund-adjusted amounts, sub-cent skip, READY-account resolution, Stripe form shape)",
+      "integration: seller Transfer release (pending Connect accounts, released-order idempotency, unpaid refusal)",
+      "seller ownership decrement (delete at zero, no-linked-row, NFT skip, scan: doc ids)",
+      "integration: ownership decrement against mock Firestore incl. NFT and scan: rows",
+      "Stripe Connect state on users/{uid} (Firestore), not a profile table",
+      "seller sale notifications: real order_seller_sale_notifications marker claimed in a transaction, Node doc ids, wallet aliases and unpaid orders skipped, replay returns 'already claimed'",
+      "wallet_addresses registry read from Firestore document ids with the strict /^0x[a-f0-9]{40}$/ rule",
+      "optional visual tables degrade (missing relation) while other SQL errors stay strict",
+      "Pancake pair reserve orientation and the pool spot-price formula",
+      "CardTrader boundary: outcome completeness, default port reports not_configured, per-seller sync grouping and buy-through totals",
+      "integration: fulfilment drives the CardTrader port (applied completes the steps; not_configured leaves them pending; a retry does not re-call the integration)",
+      "releaseEurReservation: releasable-status guard, cancelled status, reserved -> released inventory, single held-PKN return, not_releasable/closed/missing outcomes, restoreError on a failed listing restore",
+      "seller profile cache: Node key namespace (profile + hashed slug), TTL, fail-open on cache miss/hit, invalidation, junk entries read as a miss",
+      "image diagnostics: URL prefix extraction and prefixKind classification (ct_id/public_id/other/none incl. the doubled-id rule)",
+      "encrypted checkout shipping snapshot: address_required, source address decrypted and re-encrypted with countryCode+sourceAddressId, opaque at rest, 404 for an unknown address, plaintext never stored",
+      "reveal-shipping: paid/escrow/released guard, missing-snapshot 404, flattened address + per-seller shipment summary"
+    ],
+    "integration": "tests/firestore_flow.rs: in-process mock Firestore REST server + the real router"
+  },
+  "routes": [
+    {
+      "path": "/api/marketplace-listings",
+      "methods": [
+        "GET",
+        "POST",
+        "PATCH"
+      ],
+      "status": "implemented",
+      "implementation": "Public/owner read with cardId/id/sellerUid/sellerUsername/game filters and offset pagination; create with the full 32-column INSERT; PATCH field update; POST?action=decrement uses the ported DECREMENT_SQL (owner + quantity guarded, atomic). Reads use the Pi replica, writes the 15T writer. Also exposes handlers::listings::read_public_offers_for_card for the native card-page.",
+      "verification": "Pure helpers unit-tested (limit/offset/uuid/cleanText); router wiring tested; SQL strings ported 1:1 from server/pokoin-api/marketplace-listings.js and _listing_inventory.js.",
+      "unresolved": [
+        "CardTrader mirror push on create (targets.cardtrader) - not ported; create reports cardtrader.skipped (external integrations worker owns CardTrader HTTP)",
+        "live CardTrader listing merge on public card-desk reads (the CT half of readPublicOffersForCard) - external integrations worker",
+        "NFT ownership verification for reserve listings and price-summary refresh",
+        "no live Postgres integration test"
+      ]
+    },
+    {
+      "path": "/api/marketplace-listings-csv",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "GET exports the seller's active/paused/inactive rows in powertools|cardmarket|cardtrader|tcgplayer shape. POST imports with dryRun default true, stack-size/location assignment, catalog resolution against marketplace_cards, idempotent skip on source_listing_id, and a failedCsv of rejected rows.",
+      "verification": "Full CSV mapper test suite (17 tests) incl. export->import round-trip; router wiring tested.",
+      "unresolved": [
+        "cardtraderIntent link/import only changes the stored source label; the CardTrader product push itself is outside this crate",
+        "integration test against a live Postgres"
+      ]
+    },
+    {
+      "path": "/api/marketplace-cart",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Anonymous-or-authenticated cart analytics; holder key uid:<uid> | anon:<id>; single-statement membership+aggregate upsert; 204 on invalid/auth-less payload exactly like Node.",
+      "verification": "Payload validation and blueprint-id tests; SQL ported 1:1 from _marketplace_cart_analytics.js.",
+      "unresolved": [
+        "integration test against a live Postgres"
+      ]
+    },
+    {
+      "path": "/api/marketplace-cart-sync",
+      "methods": [
+        "GET",
+        "PUT",
+        "OPTIONS"
+      ],
+      "status": "implemented",
+      "implementation": "One row per account in marketplace_user_carts; GET returns the cleaned cart; PUT is revision-checked (baseRev) and returns 409 {code:CART_REV, cart} on a lost race; Redis INCR best-effort rate limit of 120 writes/min with a bounded in-process fallback.",
+      "verification": "Cart cleaning/dedupe/rev tests; router wiring tested.",
+      "unresolved": [
+        "integration test against a live Postgres",
+        "the local fallback window is per-instance (Node's is the same bounded in-process table seeded only when Redis is unavailable)"
+      ]
+    },
+    {
+      "path": "/api/marketplace-watchlist",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Authenticated watchlist analytics against marketplace_card_watchlist_users / marketplace_card_watchlist_analytics.",
+      "verification": "Payload validation tests; SQL ported from _marketplace_watchlist_analytics.js.",
+      "unresolved": [
+        "integration test against a live Postgres"
+      ]
+    },
+    {
+      "path": "/api/marketplace-recents",
+      "methods": [
+        "GET",
+        "PUT",
+        "POST",
+        "OPTIONS"
+      ],
+      "status": "implemented",
+      "implementation": "Game-scoped recently seen; explicit game required (headers/query/body/origin host), max 24 ids, catalog assertion against marketplace_search_candidates before write.",
+      "verification": "Game alias/resolution tests, dedupe/cap tests, router wiring tested.",
+      "unresolved": [
+        "no live Postgres integration test",
+        "satellite catalogs answer 503 GAME_CATALOG_UNCONFIGURED unless <GAME>_MARKETPLACE_DATABASE_URL is exported"
+      ]
+    },
+    {
+      "path": "/api/marketplace-event",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "204 before writing; allowlisted metadata, per-event weights, card-id resolution through marketplace_cards, and record_marketplace_query_chunks for searches.",
+      "verification": "Metadata allowlist and weight tests; router wiring tested.",
+      "unresolved": [
+        "integration test against a live Postgres"
+      ]
+    },
+    {
+      "path": "/api/marketplace-seller-shop",
+      "methods": [
+        "GET"
+      ],
+      "status": "implemented",
+      "implementation": "Seller resolved from pokoin_profiles.username then the denormalized listing seller_name; Pokemon Singles where-clause (candidate product_type=card/item_kind=single or even blueprint of category 73); q/condition/language/reverse/firstEdition/rarity filters; sort modes; totals/unique/copies; offset pagination; book mode.",
+      "verification": "Condition-code, sort, pagination, username and flag tests; router wiring tested.",
+      "unresolved": [
+        "printed-rarity expression (collector-line prefix + CardTrader fixed_properties.pokemon_rarity) is approximated as a candidate-rarity equality filter",
+        "associated-seller badge and profile photo URL are not resolved (the cached fields are displayName/username/acceptsPkn)",
+        "seller resolution falls back to the listing seller_name in Postgres when usernames/{username} has no uid",
+        "satellite shops answer 503 GAME_CATALOG_UNCONFIGURED unless <GAME>_MARKETPLACE_DATABASE_URL is exported",
+        "no live Firestore/Postgres integration test"
+      ]
+    },
+    {
+      "path": "/api/marketplace-seller-settings",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Reads/writes shipFromCountry (+source), acceptsPkn and Stripe Connect status on the Firestore users/{uid} document; GET seeds ship-from from CF/Vercel/CloudFront headers when unset and stamps seller_country on listings (Postgres writer); GET ?sellers= returns pknRefused from users/{uid}.acceptsPkn.",
+      "verification": "Country header/normalization tests (country module); router wiring tested.",
+      "unresolved": [
+        "no live Firestore integration test"
+      ]
+    },
+    {
+      "path": "/api/account-addresses",
+      "methods": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE"
+      ],
+      "status": "implemented",
+      "implementation": "Encrypted buyer addresses in Firestore users/{uid}/shipping_addresses; countryCode stays a plain field; payload is the Node-compatible AES-256-GCM envelope {version:1,algorithm:'aes-256-gcm',iv,tag,ciphertext}; reveal=1 decrypts for the owner; the default flag is exclusive across the user's addresses.",
+      "verification": "Key parsing (hex/base64/utf8), round-trip, Node-shaped envelope decrypt, algorithm rejection and field validation tests; router wiring tested.",
+      "unresolved": [
+        "no live Firestore integration test (the crate has no emulator/project configured)",
+        "historical Firestore rows decrypt only if ADDRESS_ENCRYPTION_KEY is the same key"
+      ]
+    },
+    {
+      "path": "/api/marketplace-shipping-options",
+      "methods": [
+        "GET"
+      ],
+      "status": "implemented",
+      "implementation": "Seeded letter options from the vendored 1719-rate catalog merged with a live Packlink quote when PACKLINK_API_KEY is set; reports sources.packlinkError on failure exactly like Node.",
+      "verification": "Seed option tests against the vendored catalog; router wiring tested.",
+      "unresolved": [
+        "Packlink REST request/response mapping is implemented from the documented endpoint but could not be exercised (no API key, and live external calls were out of scope)",
+        "the full _packlink.js package-tier/insurance heuristics are approximated"
+      ]
+    },
+    {
+      "path": "/api/marketplace-checkout-quote",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Resolves seller origins from pokoin_profiles then the listing row, decrypts the saved address owner-only, groups by seller, quotes per tier, caps untracked letters at EUR 20 and applies 5% insurance.",
+      "verification": "Quote/total/guard tests, tier tests; router wiring tested.",
+      "unresolved": [
+        "live Packlink quotes inside the quote (only seeded tables are used)",
+        "integration test against a live Postgres"
+      ]
+    },
+    {
+      "path": "/api/marketplace-orders",
+      "methods": [
+        "POST"
+      ],
+      "status": "partially_implemented",
+      "implementation": "Full POST action surface (plus GET ?action=sold-history). create/checkout (default): validates items, atomically decrements listings in Postgres with rollback, credits sellers minus the 3% commission through the Firestore ledger, routes commission to the treasury, writes marketplace_sales rows with the Node doc-id scheme and an orders/{orderId} document (clientOrderId idempotency). mark-shipped, confirm-delivery (records delivered and, for EUR orders, releases each seller's Stripe Transfer), reveal-shipping, report-problem, cancel-eur/cancel (releases the hold and the held PKN discount), notify-sellers (outbox docs), nft-shipping-request (user_card_collections + nft_shipping_requests documents) and refund (PKN moves through the Firestore ledger inside the refund; EUR calls Stripe refunds + Transfer reversal, idempotent by client token and bounded by the seller's remaining share). notify-sellers now claims the real `order_seller_sale_notifications` marker and delivers through Resend, reusing the same idempotent path as EUR fulfilment. cancel-eur/cancel and the expired/failed webhook branches share the ported `releaseEurReservation` contract. reveal-shipping requires a paid/escrow/released order, 404s without an encrypted snapshot, and returns the decrypted flattened address plus the seller's shipment summary.",
+      "verification": "Item validation and router wiring tested; decrement SQL ported 1:1 from marketplace-orders.js.",
+      "unresolved": [
+        "CardTrader sync/buy-through run through the CardTraderPort boundary; until the integrations crate installs an implementation they report not_configured and the fulfilment stays pending",
+        "no live Firestore/Postgres/Stripe integration test"
+      ]
+    },
+    {
+      "path": "/api/marketplace-native-sales",
+      "methods": [
+        "GET"
+      ],
+      "status": "implemented",
+      "implementation": "Public Sold-on-Pokoin rows for a card id from Firestore marketplace_sales (no buyer identity, non-voided, source != cardtrader, quantity > 0). Also exposed as handlers::orders::read_card_sales for the native card-page.",
+      "verification": "Router wiring tested; query shape ported from marketplace-native-sales.js + _native_sales.js.",
+      "unresolved": [
+        "no live Firestore integration test"
+      ]
+    },
+    {
+      "path": "/api/stripe-connect-onboard",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Firestore `users/{uid}` holds `stripeConnectAccountId`/`stripeConnectStatus`/`shipFromCountry`/`shipFromCountrySource`. GET syncs the live Stripe account flags (READY when charges+payouts are enabled, pending when details are submitted, else onboarding) and reports `not_started` without an account. POST creates an Express account with card_payments+transfers capabilities and a `pokoinUid` metadata tag, resolving the country from the profile or the request IP, then returns an `account_onboarding` link.",
+      "verification": "connect_status mapping tests; router wiring tested.",
+      "unresolved": [
+        "no live Stripe integration test"
+      ]
+    },
+    {
+      "path": "/api/create-order-checkout-session",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Requires `shippingAddressId`, loads the saved address from `users/{uid}/shipping_addresses`, decrypts it, derives `toCountry` from `countryCode`, prices the shipment server-side from the rate catalog, reserves the stock atomically, holds an opted-in PKN discount, writes the order with `shippingAddressSnapshotEncrypted`/`shippingAddressCountryCode`/`shippingAddressId` (never plaintext) and creates the Stripe Checkout session for the discounted charge.",
+      "verification": "Quote/guard/discount/floors unit-tested; router wiring tested.",
+      "unresolved": [
+        "live Stripe session creation not exercised"
+      ]
+    },
+    {
+      "path": "/api/stripe-webhook",
+      "methods": [
+        "POST"
+      ],
+      "status": "partially_implemented",
+      "implementation": "Verifies the Stripe-Signature HMAC (t + v1 over 't.payload', 300s tolerance) before parsing; per-event-id idempotency; checkout.session.completed routes to PKN credit or marketplace-order paid (marks paid, validates the amount, consumes the held PKN discount, then runs the idempotent EUR fulfilment: commit stock hold, write Sold-on-Pokoin rows, queue seller notifications, record pending_worker steps); a Stripe retry resumes a half-finished fulfilment; expired/failed releases the stock hold. `checkout.session.expired` and `checkout.session.async_payment_failed` run the full `releaseEurReservation` contract (cancelled status, inventory released, held discount returned once, listings restored), with the failed-payment case also releasing an order Stripe left `processing`.",
+      "verification": "Signature accept/tamper/stale-timestamp tests, router wiring tested.",
+      "unresolved": [
+        "CardTrader sync/buy-through inside EUR fulfilment run through the CardTraderPort boundary (recorded as not_configured until the integrations worker wires its client); seller ownership, notifications and Transfers are implemented"
+      ]
+    },
+    {
+      "path": "/api/create-pkn-checkout-session",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Three allowed packages (500/2500/10000 cents -> 1000/5000/20000 PKN at the configured reference price), optional Stripe price lookup_key with amount+currency verification, Checkout Session creation, and checkoutSessionId reconciliation that credits the balance idempotently.",
+      "verification": "Package/lookup-key and pricing tests; router wiring tested.",
+      "unresolved": [
+        "live Stripe session creation/reconcile not exercised"
+      ]
+    },
+    {
+      "path": "/api/crypto-pkn-purchase/:action",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "quote/request/status on the Firestore crypto_pkn_purchase_quotes|_requests|_deposits collections (quote stores quoteExpiresAtMs; request validates quote ownership/status/expiry, verifies the on-chain deposit (native, ERC-20 Transfer logs, or Bitcoin explorer), claims the funding hash and credits PKN idempotently).",
+      "verification": "Quote math (stablecoin 30 bps vs 100 bps), deposit-log decoding, address/tx normalization, expiry and dust rejection tests.",
+      "unresolved": [
+        "live chain RPC and a real deposit were not exercised",
+        "no live Firestore integration test"
+      ]
+    },
+    {
+      "path": "/api/crypto-pkn-sale/:action",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "status": "partially_implemented",
+      "implementation": "quote/request/status on Firestore crypto_pkn_sale_quotes|_requests|_payouts; the quote fails closed (503) when no payout wallet is configured and measures real payout liquidity (Bitcoin confirmed UTXOs; EVM native balance / ERC-20 balanceOf), rejecting a quote larger than what the wallet can pay (409 payout_liquidity_low); the request verifies the native PKN funding deposit from the linked wallet, claims the funding hash, records the request/payout documents, re-asserts liquidity and signs + submits the payout (EIP-155 EVM transaction or BIP143 P2WPKH Bitcoin transaction; manual_pending when no key is configured).",
+      "verification": "Sale quote math/rounding tests, payout-liquidity fail-closed test, zero-address zip test.",
+      "unresolved": [
+        "live chain RPC / explorer not exercised",
+        "no live Firestore integration test"
+      ]
+    },
+    {
+      "path": "/api/wpkn-exchange/:action",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "status": "partially_implemented",
+      "implementation": "quote/request/status on Firestore wpkn_exchange_quotes|_requests|_deposits with the reserve snapshot in wpkn_exchange_config/reserves; quote applies spread + inventory + size-impact BPS; request locks PKN for pkn_to_wpkn (then sends wPKN from the settlement wallet, asserting the key/address pair and measured wPKN balance first) or finds and claims a wPKN deposit for wpkn_to_pkn (then signs and submits the reserve PKN payout).",
+      "verification": "Spread/inventory/size-impact math tests, public quote contract test.",
+      "unresolved": [
+        "live chain RPC not exercised"
+      ]
+    },
+    {
+      "path": "/api/wpkn-pkn-quote",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Public wPKN/PKN market quote from the GeckoTerminal token price and the configured PKN USD price, with spread, min/max amount validation, 30s default TTL and no-store headers.",
+      "verification": "Market-quote formula, bounds and reference-price tests.",
+      "unresolved": [
+        "live GeckoTerminal call not exercised (WPKN_USD_PRICE_OVERRIDE is honoured)"
+      ]
+    },
+    {
+      "path": "/api/top-up-account-balance",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Credits verified native PKN deposits. Ownership comes from the original `wallet_addresses` Firestore collection (query by uid, limit 5, document id or `address` field, strict `/^0x[a-f0-9]{40}$/`), the deposit is verified against the chain through direct RPC, and the credit plus the `native_pkn_deposits/{hash}` claim run in one Firestore transaction (idempotent by funding hash).",
+      "verification": "Ledger/credit idempotency design tested at the store layer; router wiring tested.",
+      "unresolved": [
+        "no live chain RPC integration test"
+      ]
+    },
+    {
+      "path": "/api/transfer-account-balance",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Recipient lookup through Firestore usernames/{username} then users.usernameLower, self-transfer guard, atomic two-entry Firestore ledger transfer with the sender balance check, and a queued outbox document instead of SMTP.",
+      "verification": "Username/amount validation and money-request username regex tests; router wiring tested.",
+      "unresolved": [
+        "integration test against a live Postgres",
+        "no live Resend delivery test"
+      ]
+    },
+    {
+      "path": "/api/request-pkn-withdraw",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Locks the PKN (available->locked) and records a pending withdraw request; on an automatic bank payout it burns the locked amount and completes the request, otherwise it stays pending with payout_mode manual_pending and never claims a payout that did not happen.",
+      "verification": "Address/amount validation; unlock/burn ledger semantics unit-tested at the store layer.",
+      "unresolved": [
+        "live chain RPC and a real payout were not exercised",
+        "no live Firestore/Postgres integration test"
+      ]
+    },
+    {
+      "path": "/api/unlock-silver",
+      "methods": [
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "Admin/role/active-silver short-circuit; otherwise requires the 20 PKN price, refuses self-treasury, transfers to the Pokoin treasury with matching ledger entries, sets role=silver and silver_until=now+365d, and returns the remaining balance.",
+      "verification": "Admin-access predicate tests; treasury resolution and price guards unit-level.",
+      "unresolved": [
+        "integration test against a live Postgres"
+      ]
+    },
+    {
+      "path": "/api/money-request",
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "status": "implemented",
+      "implementation": "create (recipient-only, clientToken idempotency, notification), pay (only the recipient, never self, idempotent by request id), decline/cancel (recipient/requester only), list, notifications and read-notifications, all on the Firestore money_requests/notifications collections with the 14-day lazy expiry.",
+      "verification": "Full state-machine test suite (validate/create, doc id, expiry, pay/decline/cancel guards).",
+      "unresolved": [
+        "the chat conversation event mirror (conversations/events, unread bumps) is owned by the chat worker and is not ported here",
+        "integration test against a live Postgres"
+      ]
+    },
+    {
+      "path": "/api/earn-pkn",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "status": "implemented",
+      "implementation": "Submits an Earn PKN inquiry through the real Resend path (`EARN_PKN_EMAIL_FROM`/`EARN_PKN_EMAIL_TO`, defaulting like Node). When the provider is not configured the route answers 503 (`earn_pkn_email_unconfigured`) instead of reporting a submission nobody will receive.",
+      "verification": "Form validation test; router wiring tested.",
+      "unresolved": [
+        "no live email delivery test"
+      ]
+    }
+  ],
+  "summary": {
+    "assignedRoutes": 28,
+    "implemented": 24,
+    "partiallyImplemented": 4,
+    "notImplemented": 0,
+    "routesWiredInRouter": 28,
+    "tests": "260 passed / 0 failed (229 unit + 31 integration)",
+    "unresolvedItemCount": 47
+  },
+  "notClaimedComplete": [
+    "CardTrader HTTP integration (owned by the integrations worker; commerce exposes and drives CardTraderPort)",
+    "Live (non-mock) Firestore/Postgres/Stripe/RPC integration tests and live satellite catalogs"
+  ],
+  "storage": {
+    "firestore": [
+      "balances/{uid}",
+      "ledger_entries/{id}",
+      "commerce_idempotency/{hash}",
+      "native_pkn_deposits/{txHash}",
+      "withdraw_requests/{id}",
+      "pkn_purchases/{stripeSessionId}",
+      "orders/{orderId}",
+      "marketplace_sales/{id}",
+      "money_requests/{id}",
+      "notifications/{id}",
+      "users/{uid}",
+      "usernames/{username}",
+      "wallet_addresses/{...}",
+      "users/{uid}/shipping_addresses/{id}",
+      "outbox/{id}",
+      "crypto_pkn_purchase_quotes/{id}",
+      "crypto_pkn_purchase_requests/{id}",
+      "crypto_pkn_purchase_deposits/{txHash}",
+      "crypto_pkn_sale_quotes/{id}",
+      "crypto_pkn_sale_requests/{id}",
+      "crypto_pkn_sale_payouts/{requestId}",
+      "wpkn_exchange_quotes/{id}",
+      "wpkn_exchange_requests/{id}",
+      "wpkn_exchange_deposits/{txHash}",
+      "wpkn_exchange_config/reserves"
+    ],
+    "postgres_read": "MARKETPLACE_DATABASE_URL (Pi replica) for marketplace tables",
+    "postgres_write": "MARKETPLACE_WRITER_DATABASE_URL (nezopt 15T) for every marketplace write",
+    "postgres_new_quote_tables": [],
+    "notMigrated": "no Firestore state was re-created in SQL",
+    "postgres_new_tables": "none (001_commerce.sql creates no tables; it is a preflight plus two optional indexes on existing marketplace tables)"
+  },
+  "storageContract": {
+    "firestore": "balances, ledger_entries, commerce_idempotency, native_pkn_deposits, withdraw_requests, pkn_purchases, orders, marketplace_sales, money_requests, notifications, users, usernames, wallet_addresses, user_card_collections, nft_shipping_requests, order_seller_sale_notifications, crypto_pkn_*, wpkn_exchange_*, users/{uid}/shipping_addresses",
+    "postgres": "marketplace_user_listings, marketplace_user_carts, marketplace_user_recents, marketplace_checkout_holds, marketplace_search_candidates, marketplace_cards, marketplace_card_{cart,watchlist}_{users,analytics}, marketplace_card_events, cardtrader_pokemon_blueprints (optional visual, degrades)",
+    "inventedAndRemoved": [
+      "public.pokoin_profiles",
+      "outbox"
+    ]
+  }
+}

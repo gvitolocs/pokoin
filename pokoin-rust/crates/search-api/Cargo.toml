@@ -1,0 +1,45 @@
+[package]
+name = "pokoin-search-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native search endpoints (autocomplete, search candidates, searchbar, extension search)."
+
+# Dependencies are preset for the porting workers. Ask the coordinator before adding any.
+[dependencies]
+anyhow = { workspace = true }
+async-stream = "0.3"
+axum = { workspace = true }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+hex = { workspace = true }
+hmac = "0.12"
+pokoin-accounts = { path = "../accounts" }
+pokoin-api-common = { path = "../api-common" }
+pokoin-catalog-api = { path = "../catalog-api" }
+pokoin-search = { path = "../search" }
+rand = "0.8"
+redis = { workspace = true }
+regex = "1"
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha1 = "0.10"
+sha2 = { workspace = true }
+sqlx = { workspace = true, features = ["json", "chrono", "uuid", "bigdecimal"] }
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tracing = { workspace = true }
+unicode-normalization = "0.1"
+unicode-segmentation = "1"
+urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { workspace = true, features = ["util"] }
+
+[lints.rust]
+unsafe_code = "forbid"

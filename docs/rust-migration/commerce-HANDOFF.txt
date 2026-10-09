@@ -1,0 +1,291 @@
+HANDOFF — Pokoin commerce port (native Rust)
+=============================================
+
+Worker:        commerce
+Worktree:      /home/nez/.paseo/worktrees/2n15xc8c/rust-commerce-20261008
+Branch:        codex/rust-commerce-20261008
+Crate:         pokoin-rust/crates/commerce  (24 files, ~16k lines of Rust)
+Coverage:      commerce-coverage.json (honest per-route implemented/verified/unresolved)
+Not pushed, not deployed, no production routing changed, no live service restarted.
+
+
+1. PUBLIC CONSTRUCTOR AND API  (root agent: wire with these)
+------------------------------------------------------------
+Crate path: pokoin-rust/crates/commerce  (added to workspace members)
+Dependencies already present in [workspace.dependencies]; the crate also adds
+async-trait, regex, base64, hmac, aes-gcm, rand, uuid, chrono, jsonwebtoken.
+
+-- Router -------------------------------------------------------------------
+    pub fn pokoin_commerce::router(state: DomainState) -> axum::Router
+        // mounts all 28 assigned route entries; merge with the search router
+    pub fn pokoin_commerce::commerce_router(state: DomainState) -> axum::Router  // alias
+
+-- State --------------------------------------------------------------------
+    pub struct pokoin_commerce::DomainState   // Clone (one Arc)
+
+    // simplest (one pool for read+write):
+    DomainState::new(config: CommerceConfig, db: PgPool,
+                     redis: Option<redis::aio::ConnectionManager>,
+                     verifier: Arc<dyn TokenVerifier>) -> DomainState
+
+    // recommended for production (Pi replica read, 15T writer write):
+    DomainState::with_pools(config, read_db: PgPool, write_db: PgPool,
+                            redis, verifier, firestore: Option<FirestoreClient>)
+    DomainState::from_env(db: PgPool) -> DomainState
+    DomainState::pools_from_env() -> Result<(PgPool, Option<PgPool>), sqlx::Error>
+
+    // accessors
+    state.read_db()  -> &PgPool   // Pi replica, reads only
+    state.write_db() -> &PgPool   // nezopt 15T writer, every SQL write
+    state.firestore() -> Result<&FirestoreClient, ApiError>
+    state.verifier() -> &Arc<dyn TokenVerifier>
+    state.config() / state.clock() / state.stripe() / state.chain() / state.prices()
+    state.with_clock(Arc<dyn Clock>)   // tests
+
+    // extractors
+    pub struct pokoin_commerce::state::AuthedUser(pub Claims)   // 401 on bad token
+    pub struct pokoin_commerce::state::OptionalUser(pub Option<Claims>)
+
+-- Auth (public reusable infrastructure) -------------------------------------
+    pub trait pokoin_commerce::TokenVerifier: Send + Sync + 'static {
+        async fn verify(&self, token: &str) -> Result<Claims, AuthError>;
+    }
+    pub struct pokoin_commerce::FirebaseVerifier   // native RS256 + Google JWKS
+        FirebaseVerifier::new(project_id, reqwest::Client)
+    pub struct pokoin_commerce::Claims { uid, email, role, admin, is_admin }
+        Claims::has_admin_access()   // same predicate as the Node helper
+
+-- Firestore (public reusable infrastructure) --------------------------------
+    pub struct pokoin_commerce::FirestoreClient
+        FirestoreClient::new(http, ServiceAccount)
+        FirestoreClient::from_env(http)          // FIREBASE_* env
+        FirestoreClient::with_base(http, acct, base)   // tests / emulator
+        document_path(collection, id) / nested_path((parent,col),col,id)
+        collection_url(collection)
+        access_token()                            // cached OAuth2 service-account JWT
+        get_document(path) / get_document_in_transaction(path, txn)
+        list_documents(collection, page_size)
+        run_query(&StructuredQuery)               // Filter/OrderBy/parent scope
+        create_document(col, id, v) / create_document_in_parent(parent, col, id, v)
+        update_document(path, v, update_mask) / set_document(path, v) / upsert_document
+        delete_document(path)
+        begin_transaction() / rollback(txn) / commit(Some(txn), &writes)
+        run_transaction(|txn| async { Ok(vec![FirestoreWrite...]) })  // one retry on abort
+    pub enum pokoin_commerce::FirestoreWrite { Update, Set, Create, Delete, Transform }
+    pub enum pokoin_commerce::firestore::FieldTransform { ServerTimestamp, Increment }
+    pub fn encode_value / decode_value / value_to_fields / fields_to_value
+    pub fn document_to_value / commit_body / balance_document
+    pub const MAX_WRITES_PER_COMMIT: usize = 500
+
+-- Ledger (Firestore, one transaction per movement) --------------------------
+    pub enum pokoin_commerce::store::MoveMode {
+        Transfer, Mint, Burn, Lock, UnlockBurn, UnlockRelease, RecordOnly }
+    pub struct pokoin_commerce::store::LedgerOp
+        LedgerOp::transfer/mint/lock/unlock/burn/record(...)
+            .with_idempotency(key) .with_ref(id) .with_meta(json) .with_counterparty(uid,name)
+    pub async fn store::apply(fs, &LedgerOp) -> Result<LedgerOutcome, StoreError>
+    pub async fn store::balance(fs, uid) -> Result<FirestoreBalance, StoreError>
+    pub async fn store::claim_idempotency(fs, key, uid, result) -> Result<bool, _>
+    pub async fn store::idempotency_result(fs, key) -> Result<Option<Value>, _>
+    pub async fn store::read_user / write_user / uid_for_username
+    pub const store::{BALANCES, LEDGER_ENTRIES, IDEMPOTENCY, NATIVE_DEPOSITS,
+        WITHDRAW_REQUESTS, PKN_PURCHASES, ORDERS, SALES_COLLECTION, MONEY_REQUESTS,
+        NOTIFICATIONS, USERS, USERNAMES, WALLET_ADDRESSES, CRYPTO_*, WPKN_EXCHANGE_*}
+
+-- Card-page interfaces the native card-page handler needs -------------------
+    pub async fn pokoin_commerce::handlers::listings::read_public_offers_for_card(
+        state: &DomainState, card_id: &str, limit: i64, game: &str, native_only: bool,
+    ) -> Result<Vec<Value>, ApiError>
+        // active native offers for a card desk, price-ascending; reads the Pi
+        // replica. `native_only` mirrors the Node `nativeOnly=1` switch.
+
+    pub async fn pokoin_commerce::handlers::orders::read_card_sales(
+        state: &DomainState, card_id: &str, limit: i64,
+    ) -> Result<Vec<Value>, ApiError>
+        // public Sold-on-Pokoin rows from Firestore `marketplace_sales`
+        // (non-voided, source != cardtrader). Never returns buyer identity.
+    pub fn pokoin_commerce::handlers::orders::public_sale_row(data: &Value) -> Value
+
+
+2. STORAGE CONTRACT  (corrected per coordinator 2026-10-08)
+-----------------------------------------------------------
+Firestore owns every contract the Node runtime kept there. Nothing was migrated
+to new empty SQL tables.
+
+  balances/{uid}                    availablePkn, lockedPkn, updatedAt
+  ledger_entries/{id}               uid, type, amountPkn, counterpartyUid,
+                                    counterpartyUsername, ref, ...meta, createdAt
+  commerce_idempotency/{sha256}     replay guard (original key stored inside)
+  native_pkn_deposits/{txHash}      uid, txHash, fromAddress, amountPkn, purpose
+  withdraw_requests/{id}            uid, email, toAddress, amountPkn, status, ...
+  pkn_purchases/{stripeSessionId}   Stripe PKN checkout credit record
+  orders/{orderId}                  buyerUid, paymentStatus, status, items,
+                                    shipments, totalPkn/totalEURCents, pknDiscount
+  marketplace_sales/{id}            orderId, cardId, sellerUid, quantity, pricePkn
+  money_requests/{id}               fromUid/fromUsername/toUid/toUsername/status
+  notifications/{id}                uid, type, requestId, actorUsername, read
+  users/{uid}, usernames/{username}, wallet_addresses/{...}
+  users/{uid}/shipping_addresses/{id}   countryCode + AES-256-GCM envelope
+  outbox/{id}                       queued email (no SMTP at request time)
+  crypto_pkn_purchase_quotes|_requests|_deposits/{id}
+  crypto_pkn_sale_quotes|_requests|_payouts/{id}
+  wpkn_exchange_quotes|_requests|_deposits/{id}
+  wpkn_exchange_config/reserves          availableLiquidityPkn,
+                                         settlementWpknPkn, lockedPkn
+
+Every money movement is one Firestore transaction (`store::apply`): read the
+balance docs inside the transaction, apply the delta, then commit balance
+writes + ledger entries + the idempotency marker together. A replayed key
+returns the recorded result.
+
+Postgres owns the marketplace read model, which already exists in scripts/sql
+and is used as-is:
+    READ  -> state.read_db()   (MARKETPLACE_DATABASE_URL, the Pi replica)
+    WRITE -> state.write_db()  (MARKETPLACE_WRITER_DATABASE_URL, nezopt 15T)
+marketplace_user_listings, marketplace_user_carts, marketplace_user_recents,
+marketplace_checkout_holds, shipping_rates, marketplace_rate_limits,
+marketplace_search_candidates, marketplace_cards, marketplace_card_versions,
+marketplace_card_cart_*/watchlist_analytics, marketplace_card_events,
+cardtrader_pokemon_blueprints.
+
+SQL to apply:
+    pokoin-rust/crates/commerce/sql/001_commerce.sql
+This file creates NO new tables. It is a preflight check that the existing
+marketplace read model is present plus two optional, re-runnable indexes on
+existing marketplace tables. Target: the nezopt writer (and the Pi replica
+already streams it). There are no wallet/user/ledger/order/quote tables.
+
+ACCOUNTS WORKER INTERFACE:
+    `store::LedgerOp` + `store::apply` are the seam. Balances/ledger live in the
+    Firestore collections above; when pokoin-accounts lands it can back the same
+    LedgerOp call sites without touching the handlers.
+
+
+3. VERIFICATION
+---------------
+    cd pokoin-rust
+    cargo test -p pokoin-commerce          # 229 unit + 31 integration = 260 passed / 0 failed
+                                      #   (cargo test -p pokoin-commerce --test firestore_flow)
+    cargo check --workspace --all-targets  # green, no warnings from this crate
+
+Hermetic coverage (genuine behaviour, not route presence):
+  * Firestore value/field encoding round-trip, ISO-8601 -> timestampValue
+  * Firestore document decode (id from name), balance field names
+  * single vs composite (AND) queries, IN filter, orderBy/limit
+  * commit writes: Update+updateMask, Create(currentDocument.exists=false),
+    Delete, ServerTimestamp, Increment; commit body carries the txn id
+  * OAuth assertion construction (fails closed without a real key)
+  * ledger modes: transfer (both sides), insufficient refusal, lock,
+    unlock-burn, unlock-release, mint, burn, record-only
+  * ledger write shapes: balance docs + matching signed ledger entries with the
+    Node field names; idempotency doc ids are Firestore-safe and stable
+  * crypto/wPKN request serialization matches the Node `serialize()` shapes
+  * order ownership predicates (buyer owns order, seller on order via items or
+    shipments) and public sale rows never leaking buyer/order identity
+  * seller-share / refund arithmetic: EUR parcel vs PKN item total, failed
+    refunds excluded, refund ceiling, per-currency amount wording
+  * native sale-doc ids (`{orderId}__{listingId}`) and the
+    marketplace_sales document shape for PKN and EUR orders
+  * marketplace game scoping: Pokémon reuses the shared pools, each satellite
+    game maps to its own `<GAME>_MARKETPLACE_DATABASE_URL`, unknown/unconfigured
+    games get no pool, and the 503 error codes are stable
+  * EVM payout encoding: RLP spec vectors, ERC-20 `transfer` calldata, EIP-155
+    signing hash, `v = chainId*2 + 35 + recid`, the tx hash equals
+    keccak256(raw), and the signing address is recovered from (r, s, v)
+  * payouts without a key stay `manual_pending` and never report a tx hash
+  * EVM payout liquidity is unconfigured (not a fabricated zero) without a key;
+    the wPKN contract is resolved from configuration; ERC-20 `balanceOf`
+    calldata matches the ABI
+  * integration (tests/firestore_flow.rs): an in-process mock Firestore over
+    HTTP drives the REAL router and client — PKN transfer (balances + signed
+    ledger entries + idempotent replay), lock/unlock-burn withdrawal,
+    insufficient-transfer refusal, money-request create/list/unauthorised,
+    notifications, public sale rows never leaking buyer/order identity, and
+    seller Transfer release (pending Connect accounts, fully-refunded sellers
+    skipped, released-order idempotency, unpaid refusal), and seller ownership
+    decrement (row decremented then deleted at zero, no linked row reported,
+    NFT rows untouched, `scan:` rows keyed by their full document id)
+  * seller Transfer planning: partial refunds shrink the payout, sub-cent
+    amounts are skipped, READY Connect accounts resolve at payout time, and the
+    Stripe form carries transfer_group + source_transaction
+  * ownership eligibility: another seller's row and any NFT row
+    (`ownershipType: nft` / `fulfillmentMode: nft_only` / `nftStatus: owned`)
+    are never decremented; `scan:` ids and quantity math
+  * a configured bank key whose derived address does not match the configured
+    wallet fails before any RPC call
+  * Bitcoin: base58check (Bitcoin-wiki vector), bech32/bech32m (BIP173 BIP350
+    vectors), HASH160/SHA256d vectors, address output scripts, WIF round-trip
+    (incl. the Node `label:WIF` form), fee estimation, UTXO selection,
+    P2WPKH script + address, and a signed payout whose BIP143 sighash recovers
+    the signing key
+  * money math / crypto + wPKN quote math / shipping catalog / stock CSV /
+    cart revision / recents gaming / event metadata / money-request guards /
+    Stripe webhook HMAC accept-tamper-stale / ERC-20 Transfer decoding
+  * router test: all 28 assigned route entries are wired (no 404)
+
+NOT verified (stated plainly, also in commerce-coverage.json):
+  * no live Firestore / Postgres / Stripe / chain RPC / Packlink call was made
+  * the order lifecycle beyond `create` is not ported
+  * automatic on-chain payout signing is not ported
+
+
+4. UNRESOLVED (do not claim these are done)
+-------------------------------------------
+* Crypto/wPKN quotes, requests, deposits, payouts and the exchange reserve
+  snapshot now live in the Firestore collection names the Node writers used
+  (`crypto_pkn_purchase_quotes|_requests|_deposits`, `crypto_pkn_sale_quotes|
+  _requests|_payouts`, `wpkn_exchange_quotes|_requests|_deposits`,
+  `wpkn_exchange_config/reserves`); no SQL quote tables remain.
+* CardTrader: mirror push on listing create, live CT read merge on public card
+  desks, CT buy-through on orders, CT link/import intents.
+* Orders: mark_shipped / confirm_delivery / report_problem / reveal_address /
+  cancel / refund / seller sold-history return 501 ORDER_ACTION_NOT_PORTED.
+* EUR fulfilment after a paid Stripe session (ownership, linked CardTrader,
+  seller emails, seller Transfers, native sold rows) is not ported; the webhook
+  marks the order paid, validates the amount, consumes the held PKN discount
+  and releases stock on expiry/failure.
+* Payout signing is ported for both chains.
+  EVM (`crates/commerce/src/evm.rs`): RLP + keccak256 + secp256k1 (k256),
+  EIP-155 legacy transactions, used for Pokoin bank/reserve PKN, EVM native
+  coins, ERC-20 transfers and wPKN settlement.
+  Bitcoin (`crates/commerce/src/bitcoin.rs`): base58check, bech32/bech32m,
+  HASH160, WIF keys, UTXO selection, conservative fee estimation and BIP143
+  P2WPKH signing, broadcast to the configured explorer.
+  Without a key the behaviour stays manual (`manual_pending` /
+  `bitcoin_manual_pending`) exactly like Node; a key on the wrong network or a
+  bank key whose derived address does not match the configured wallet fails
+  before any request; a rejected broadcast is an error, never a fabricated hash.
+  `assertPayoutLiquidity` is enforced both in the sale quote (409 before a quote
+  larger than the measured payout liquidity) and immediately before signing.
+  wPKN is the Pokoin-wrapped BEP-20 token rather than a `CHAIN_CONFIG` asset, so
+  `send_wpkn` signs an ERC-20 transfer directly against the configured contract
+  and checks the settlement key/address pair first.
+* The only remaining 501 is the `ORDER_ACTION_NOT_PORTED` guard for an
+  unrecognized `action` value on `/api/marketplace-orders`; every documented
+  action is implemented.
+* Satellite-game catalogs (24 TCGs) are wired through per-game pools
+  (`<GAME>_MARKETPLACE_DATABASE_URL`, the Node `databaseUrlEnv` contract) for
+  Recently Seen catalog validation and seller shops. When a game's URL is not
+  exported the route answers 503 GAME_CATALOG_UNCONFIGURED (or
+  GAME_CATALOG_UNAVAILABLE when the pool cannot be reached) instead of reading
+  another game's rows. Marketplace events stay on the shared writer, matching
+  the Node handler.
+* Seller shop printed-rarity expression is approximated; associate badge, photo
+  URL and cached-read layer are not ported.
+* Chat conversation mirror for money requests (conversations/events) is owned by
+  the chat worker.
+* Outbound email is a Firestore `outbox` document; the delivery worker is not
+  part of this crate.
+
+
+5. NOTES FOR THE NEXT AGENT
+---------------------------
+* Vendored shipping catalog (assets/shipping-rates.json) is byte-identical to
+  server/pokoin-api/shipping-rates.json; refresh both together.
+* WPKN_USD_PRICE_OVERRIDE / CRYPTO_PKN_<ASSET>_USD_PRICE / WPKN_EXCHANGE_* are
+  honoured, so quotes are testable without network access.
+* Stripe webhook verification uses the documented scheme
+  (v1 = HMAC_SHA256(secret, "{t}.{payload}"), 300 s tolerance) with tests.
+* Address envelopes are byte-format compatible with the Node writer.
+* Firestore env contract: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL,
+  FIREBASE_PRIVATE_KEY (literal \n escapes are normalized).
