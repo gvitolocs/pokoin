@@ -69,17 +69,26 @@ export default function PokoArchive() {
               {catalog.total_files} clips · {catalog.voice} · speaker {catalog.speaker}
             </p>
 
+            <div className="poko-tiles poko-groups" role="tablist" aria-label="Catalog groups">
+              {(catalog.groups || []).map((g) => {
+                const on = g.id === groupId;
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    className={on ? 'on' : undefined}
+                    onClick={() => setGroupId(g.id)}
+                  >
+                    <strong>{g.title}</strong>
+                    <span>{g.count} clips</span>
+                  </button>
+                );
+              })}
+            </div>
+
             <div className="poko-archive-controls" role="group" aria-label="Archive filters">
-              <label>
-                Group
-                <select value={groupId} onChange={(e) => setGroupId(e.target.value)}>
-                  {(catalog.groups || []).map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.title} ({g.count})
-                    </option>
-                  ))}
-                </select>
-              </label>
               <label>
                 Search
                 <input
@@ -94,18 +103,25 @@ export default function PokoArchive() {
                   Open script
                 </a>
               ) : null}
+              <span className="poko-controls-count">{files.length} of {group?.count ?? 0} clips</span>
             </div>
 
-            <ol className="poko-archive-list">
+            <ol className="poko-tiles poko-clips">
               {files.map((f) => (
-                <li key={f.id} className="poko-archive-row">
-                  <div className="poko-archive-meta">
+                <li key={f.id} className="poko-tile">
+                  <div className="poko-tile-meta">
                     <code>{f.id}</code>
-                    {f.lang ? <span className="poko-archive-lang">{f.lang}</span> : null}
-                    {f.episode ? <span className="poko-archive-ep">{f.episode}</span> : null}
-                    {f.duration_s != null ? <span>{Number(f.duration_s).toFixed(2)}s</span> : null}
+                    {f.lang ? <span className="poko-chip">{f.lang}</span> : null}
+                    {f.episode ? <span className="poko-chip">{f.episode}</span> : null}
+                    {f.duration_s != null ? (
+                      <span className="poko-tile-duration">{Number(f.duration_s).toFixed(2)}s</span>
+                    ) : null}
                   </div>
-                  <p className="poko-archive-text">{f.text || '—'}</p>
+                  {f.text ? (
+                    <p className="poko-tile-text" title={f.text}>{f.text}</p>
+                  ) : (
+                    <p className="poko-tile-text is-empty">no transcript yet</p>
+                  )}
                   <audio controls preload="none" src={f.src} />
                 </li>
               ))}
