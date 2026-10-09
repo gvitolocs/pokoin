@@ -1,5 +1,5 @@
 //! Native global CardTrader snapshot refresh. No request-time JS or subprocess.
-use std::collections::{HashSet, BTreeMap};
+use std::collections::HashSet;
 use axum::http::{HeaderMap, Uri};
 use serde_json::{json, Value};
 use sqlx::Row;

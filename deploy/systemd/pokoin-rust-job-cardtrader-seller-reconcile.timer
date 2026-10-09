@@ -1,0 +1,12 @@
+[Unit]
+Description=Pokoin native job cardtrader-seller-reconcile (CardTrader seller reconcile)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=20s
+Persistent=true
+Unit=pokoin-rust-job@cardtrader-seller-reconcile.service
+
+[Install]
+WantedBy=timers.target

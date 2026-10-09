@@ -1,20 +1,30 @@
 [Unit]
-Description=Pokoin Rust marketplace API
-After=network.target
+Description=Pokoin native Rust API, edge, CDN and ct-deals
+After=network.target docker.service
+Wants=docker.service
 
 [Service]
 Type=simple
 User=nes
 Group=nes
 ExecStart=/srv/pokoin/rust/current
-Restart=on-failure
+Restart=always
 RestartSec=2
 Environment=POKOIN_RUST_BIND=127.0.0.1:18082
+# Public listeners (cloudflared: api.pokoin.com -> 18079, cdn.pokoin.com -> 18081).
+Environment=POKOIN_EDGE_BIND=127.0.0.1:18079
+Environment=POKOIN_CDN_BIND=127.0.0.1:18081
+Environment=POKOIN_CT_DEALS_BIND=127.0.0.1:18090
+Environment=POKOIN_CDN_ROOT=/srv/pokoin/card-images/objects
+Environment=POKOIN_CDN_NAME=pi-local
+Environment=POKOIN_CDN_FALLBACK_ORIGIN=http://192.168.178.55:18088
+Environment=POKOIN_SEO_DIR=/srv/pokoin/seo
+Environment=CT_DEALS_ROOT=/srv/pokoin/ct-deals/current/dist
 Environment=RUST_LOG=info
 EnvironmentFile=-/srv/pokoin/rust/pokoin-api.env
-MemoryHigh=400M
-MemoryMax=700M
-CPUQuota=150%
+MemoryHigh=900M
+MemoryMax=1300M
+CPUQuota=300%
 LimitNOFILE=65535
 KillSignal=SIGTERM
 TimeoutStopSec=20

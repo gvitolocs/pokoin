@@ -1118,9 +1118,11 @@ pub async fn wpkn_pkn_quote(
         .or_else(|| query.get("amountIn").and_then(|value| value.parse::<f64>().ok()))
         .unwrap_or(0.0);
 
-    let direction = wpkn::normalize_direction(&direction_input)?;
+    // Node fetches the market price before validating the request, so a
+    // missing GeckoTerminal price answers 503 even for an empty query.
     let wpkn_usd = state.prices().wpkn_usd().await?;
     let pkn_usd = state.config().pkn_usd_price();
+    let direction = wpkn::normalize_direction(&direction_input)?;
     let quote = wpkn::calculate_wpkn_pkn_market_quote(
         direction,
         amount_input,
