@@ -1,3 +1,3 @@
 /** Silver membership price in site PKN (one year). The server charges
- * server/pokoin-api/unlock-silver.js SILVER_PRICE_PKN — keep them equal. */
+ * pokoin-rust/crates/commerce/src/config.rs SILVER_PRICE_PKN (a Rust test pins it) — keep them equal. */
 export const SILVER_PRICE_PKN = 100;
