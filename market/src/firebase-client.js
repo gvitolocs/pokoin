@@ -6,6 +6,9 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, initializeAuth, inMemoryPersistence } from 'firebase/auth';
 import { framedByChromeExtension } from './extension-auth-bridge.js';
 
+// One firebase/auth copy for every UI: the Solid app subscribes through these re-exports.
+export { onAuthStateChanged, onIdTokenChanged } from 'firebase/auth';
+
 /**
  * Sign-in stays on pokoin.firebaseapp.com. pokoin.com is static files and does
  * not proxy /__/auth. The app origin remains an authorized Firebase domain.

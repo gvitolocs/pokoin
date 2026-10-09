@@ -24,7 +24,6 @@ import { ebaySearchUrl, sanitizeCardName, tcgplayerSearchUrl, vintedSearchUrl } 
 import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { getSearchLang } from './locale.js';
 import { artistSlug } from './artist-name.js';
-import { rememberSuggestGroups } from './suggest-live.js';
 import { expansionNationality } from './expansion-nationality.js';
 import { collectPrintingThumbUrls, preloadSuggestThumbs } from './suggest-images.js';
 import { realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
@@ -357,9 +356,11 @@ export function warmupSearchBar() {
     searchWarmupTimer = 0;
     searchWarmupAt = Date.now();
     const lang = getSearchLang();
-    fetchSuggest('m', { limit: 4, lang })
-      .then((data) => {
-        rememberSuggestGroups(data.groups);
+    // The suggest engine (ranker + 10k-name catalog) loads here, on idle after
+    // the first paint, not with api.js: pages that never type do not pay for it.
+    Promise.all([fetchSuggest('m', { limit: 4, lang }), import('./suggest-live.js')])
+      .then(([data, live]) => {
+        live.rememberSuggestGroups(data.groups);
         preloadSuggestThumbs(collectPrintingThumbUrls(data.groups, (printing) => (
           imageSrc(cardFromAutocomplete(printing), 'suggest')
         )));
