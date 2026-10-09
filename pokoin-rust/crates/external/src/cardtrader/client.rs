@@ -103,12 +103,12 @@ pub fn normalize_info(info: &Value) -> Value {
     let app_id_source = ["app_id", "id"]
         .iter()
         .find_map(|key| app.get(*key).or_else(|| info.get(*key)))
-        .and_then(Value::as_str)
+        .and_then(crate::error::scalar_text)
         .unwrap_or_default();
     let user_id_source = user
         .get("id")
         .or_else(|| info.get("user_id"))
-        .and_then(Value::as_str)
+        .and_then(crate::error::scalar_text)
         .unwrap_or_default();
     let email = user
         .get("email")
@@ -133,21 +133,23 @@ pub fn normalize_info(info: &Value) -> Value {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let seller_id = info
+    let seller_id_text = info
         .get("seller_id")
-        .and_then(Value::as_str)
-        .or_else(|| user.get("seller_id").and_then(Value::as_str))
+        .filter(|v| !v.is_null())
+        .or_else(|| user.get("seller_id"))
+        .map(|v| crate::error::clean_text_value(v, 80))
         .unwrap_or_default();
+    let seller_id = seller_id_text.as_str();
     let seller_name = info
         .get("seller_name")
         .and_then(Value::as_str)
         .or_else(|| user.get("seller_name").and_then(Value::as_str))
         .unwrap_or_default();
     json!({
-        "app": { "id": clean_text(Some(app_id_source), 80), "name": app_name.clone() },
+        "app": { "id": clean_text(Some(&app_id_source), 80), "name": app_name.clone() },
         "oneDayReady": is_one_day_ready_name(&app_name),
         "user": {
-            "id": clean_text(Some(user_id_source), 80),
+            "id": clean_text(Some(&user_id_source), 80),
             "email": clean_text(Some(&email), 320),
             "username": clean_text(Some(username), 160),
         },
@@ -402,9 +404,9 @@ pub fn import_dry_run_summary(products: &[Value]) -> Value {
 fn safe_product_sample(row: &Value) -> Value {
     let blueprint = row.get("blueprint").filter(|v| v.is_object()).cloned().unwrap_or_default();
     json!({
-        "id": clean_text(row.get("id").and_then(Value::as_str), 80),
+        "id": crate::error::clean_text_value(row.get("id").unwrap_or(&Value::Null), 80),
         "blueprintId": clean_text(
-            Some(row.get("blueprint_id").or_else(|| row.get("blueprintId")).and_then(Value::as_str).unwrap_or_default()), 80),
+            Some(&crate::error::clean_text_value(row.get("blueprint_id").or_else(|| row.get("blueprintId")).unwrap_or(&Value::Null), 80)), 80),
         "name": clean_text(
             Some(
                 row.get("name")

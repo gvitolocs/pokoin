@@ -64,13 +64,13 @@ pub fn zero_item_row(order: &Value, item: &Value) -> Value {
         item.get("product_id")
             .or_else(|| item.get("productId"))
             .or_else(|| item.pointer("/product/id"))
-            .and_then(Value::as_str),
+            .and_then(crate::error::scalar_text).as_deref(),
         80,
     );
     let blueprint_id = clean_text(
         item.get("blueprint_id")
             .or_else(|| item.get("blueprintId"))
-            .and_then(Value::as_str),
+            .and_then(crate::error::scalar_text).as_deref(),
         80,
     );
     let unit_cents = money_cents(item.get("seller_price").unwrap_or(&Value::Null));

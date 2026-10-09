@@ -50,7 +50,7 @@ pub fn order_item_id(item: &Value) -> String {
         item.get("id")
             .or_else(|| item.get("order_item_id"))
             .or_else(|| item.get("orderItemId"))
-            .and_then(Value::as_str),
+            .and_then(crate::error::scalar_text).as_deref(),
         80,
     );
     if !direct.is_empty() {
@@ -359,8 +359,8 @@ pub async fn handle_order_payload(
                 let card_id = item
                     .get("blueprint_id")
                     .or_else(|| item.get("blueprintId"))
-                    .and_then(Value::as_str)
-                    .and_then(public_card_id_from_blueprint)
+                    .and_then(crate::error::scalar_text)
+                    .and_then(|id| public_card_id_from_blueprint(&id))
                     .unwrap_or_default();
                 let _ = firestore
                     .merge_doc(

@@ -868,7 +868,7 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
                                     "cause": "reconcile",
                                     "listingId": listing.id,
                                     "quantity": i64_field(&item, &["quantity"]).unwrap_or(1).max(1),
-                                    "productId": clean_text(item.get("product_id").and_then(Value::as_str), 80),
+                                    "productId": crate::error::clean_text_value(item.get("product_id").unwrap_or(&Value::Null), 80),
                                     "createdAt": crate::time_util::iso_from_ms(crate::time_util::now_ms()),
                                 }),
                             )
@@ -1084,7 +1084,7 @@ async fn reconcile_one_day_ready_assets(
                         "orderId": clean_text_value(order.get("id").unwrap_or(&Value::Null), 40),
                         "orderItemId": crate::cardtrader::webhook::order_item_id(&item),
                         "cause": "1dr",
-                        "productId": clean_text(item.get("product_id").or_else(|| item.get("productId")).and_then(Value::as_str), 80),
+                        "productId": clean_text(item.get("product_id").or_else(|| item.get("productId")).and_then(crate::error::scalar_text).as_deref(), 80),
                         "createdAt": crate::time_util::iso_from_ms(crate::time_util::now_ms()),
                     }),
                 )
@@ -1094,7 +1094,7 @@ async fn reconcile_one_day_ready_assets(
                     let blueprint_id = item
                         .get("blueprint_id")
                         .or_else(|| item.get("blueprintId"))
-                        .and_then(Value::as_str)
+                        .and_then(crate::error::scalar_text)
                         .unwrap_or_default();
                     let _ = crate::cardtrader::webhook::record_cardtrader_sale(
                         firestore,
@@ -1102,8 +1102,8 @@ async fn reconcile_one_day_ready_assets(
                         &order,
                         &item,
                         &json!({
-                            "id": format!("ct:{}", clean_text(item.get("product_id").or_else(|| item.get("productId")).and_then(Value::as_str), 80)),
-                            "card_id": public_card_id_from_blueprint(blueprint_id).unwrap_or_default(),
+                            "id": format!("ct:{}", clean_text(item.get("product_id").or_else(|| item.get("productId")).and_then(crate::error::scalar_text).as_deref(), 80)),
+                            "card_id": public_card_id_from_blueprint(&blueprint_id).unwrap_or_default(),
                         }),
                         "1dr",
                     )
@@ -1148,9 +1148,8 @@ async fn reconcile_one_day_ready_assets(
 pub async fn with_last_sold(db: &DbPools, rows: Vec<Value>) -> Vec<Value> {
     let ids: Vec<String> = rows
         .iter()
-        .filter_map(|row| row.get("blueprint_id").and_then(Value::as_str))
+        .filter_map(|row| row.get("blueprint_id").map(|v| crate::error::clean_text_value(v, 40)))
         .filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()))
-        .map(str::to_string)
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
