@@ -66,7 +66,7 @@ import { framedByChromeExtension } from '../extension-auth-bridge.js';
 import { APP, DASHBOARD_HOME, authAnchorRel, authFrom, goMarket, marketUrl } from '../punchouts.js';
 import { associateRoleLabel } from '../associate-roles.js';
 import { useCart } from '../cart.jsx';
-import { useDesktopHold } from '../desktop-hold.js';
+import { useDesktopHold } from '../desktop-hold-hooks.js';
 import CartDrop from './CartDrop.jsx';
 import DesktopDrop from './DesktopDrop.jsx';
 import { DashboardPreview, MarketPreview, MessagesPreview, NavHover } from './NavPreviews.jsx';

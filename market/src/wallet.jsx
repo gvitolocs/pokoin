@@ -1,37 +1,18 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  POKOIN_CHAIN_ID,
+  POKOIN_RPC,
+  WALLET_ADDRESS_KEY,
+  fetchWalletBalance,
+} from './wallet-chain.js';
 
-export const POKOIN_CHAIN_ID = 26062026;
-export const POKOIN_RPC = 'https://rpc.pokoin.com/rpc';
+export { POKOIN_CHAIN_ID, POKOIN_RPC };
 export const SWAP_ROUTER = '0x0000000000000000000000000000000000002606';
 export const SWAP_PREFIX = 'pokoinswap:v1:';
-const ADDRESS_KEY = 'pokoin.walletAddress';
+const ADDRESS_KEY = WALLET_ADDRESS_KEY;
 
 function hexChain(id) {
   return `0x${Number(id).toString(16)}`;
-}
-
-async function rpc(method, params = []) {
-  const response = await fetch(POKOIN_RPC, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  const data = await response.json();
-  if (data.error) {
-    throw new Error(data.error.message || 'RPC failed');
-  }
-  return data.result;
-}
-
-function fromWei(hex) {
-  if (!hex) {
-    return 0;
-  }
-  try {
-    return Number(BigInt(hex)) / 1e18;
-  } catch (_) {
-    return 0;
-  }
 }
 
 const WalletContext = createContext({
@@ -56,12 +37,9 @@ export function WalletProvider({ children }) {
       return;
     }
     try {
-      const [wei, id] = await Promise.all([
-        rpc('eth_getBalance', [account, 'latest']),
-        rpc('eth_chainId'),
-      ]);
-      setBalance(fromWei(wei));
-      setChainId(Number.parseInt(id, 16));
+      const next = await fetchWalletBalance(account);
+      setBalance(next.balance);
+      setChainId(next.chainId);
     } catch (_) {
       setBalance(0);
     }

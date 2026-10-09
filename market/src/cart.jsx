@@ -1,8 +1,24 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { pruneStoredCardPages } from './card-page-cache.js';
-import { cartImageFor, repairCartImage } from './cart-image.js';
 import { cartTotals, isSelected, moveRow, reconcileRow, settleCheckoutRows } from './cart-model.js';
 import { listingStock, nextCartQty } from './cart-qty.js';
+import {
+  CART_KEY,
+  CART_MAX,
+  GIFT_KEY,
+  SAVED_KEY,
+  SAVED_MAX,
+  addCartRow,
+  cartItemFromOffer,
+  dropSavedRow,
+  fromAccountRows,
+  readCartGift,
+  readCartRows,
+  removeCartRow,
+  setCartRowQty,
+  writeCartFlag,
+  writeCartRows,
+  writeSavedRows,
+} from './cart-rows.js';
 import { useAccountCartSync } from './cart-sync.js';
 import {
   readInsurance,
@@ -15,88 +31,19 @@ import {
   writeShippingService,
 } from './shipping-choice.js';
 
-const CART_KEY = 'pokoin.cartItems';
-const SAVED_KEY = 'pokoin.cartSaved';
-const GIFT_KEY = 'pokoin.cartGift';
+export { cartItemFromOffer };
+
 const PENDING_KEY = 'pokoin.cartCheckout';
-const CART_MAX = 400;
-const SAVED_MAX = 200;
 const PENDING_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 
-function readRows(key) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) || '[]');
-    return Array.isArray(parsed)
-      ? parsed.filter((row) => row && row.id).map((row) => ({
-        ...row,
-        image: repairCartImage(row) || row.image || '',
-        // Rows saved before price tracking: today's price is the reference.
-        addedPricePkn: Number(row.addedPricePkn) || Number(row.pricePkn) || 0,
-      }))
-      : [];
-  } catch (_) {
-    return [];
-  }
-}
+const readRows = readCartRows;
+const writeCart = writeCartRows;
+const writeSaved = writeSavedRows;
+const writeFlag = writeCartFlag;
+const readGift = readCartGift;
 
 function readCart() {
   return readRows(CART_KEY);
-}
-
-/** Account-cart rows from the API back into the browser's row shape. */
-function fromAccountRows(rows) {
-  return (Array.isArray(rows) ? rows : []).filter((row) => row && row.id).map((row) => ({
-    ...row,
-    card: { id: String(row.cardId || ''), name: row.name || 'Card' },
-    image: repairCartImage(row) || row.image || '',
-  }));
-}
-
-/** Never throws: an uncaught quota error here unmounted the app (black screen). */
-function writeCart(items) {
-  const raw = JSON.stringify(items.slice(0, CART_MAX));
-  try {
-    localStorage.setItem(CART_KEY, raw);
-  } catch (_) {
-    pruneStoredCardPages(0);
-    try {
-      localStorage.setItem(CART_KEY, raw);
-    } catch (__) {
-      /* storage full or private mode: the cart lives in memory this session */
-    }
-  }
-}
-
-/** Saved for later: same row shape as the cart, same quota guard. */
-function writeSaved(items) {
-  const raw = JSON.stringify(items.slice(0, SAVED_MAX));
-  try {
-    localStorage.setItem(SAVED_KEY, raw);
-  } catch (_) {
-    pruneStoredCardPages(0);
-    try {
-      localStorage.setItem(SAVED_KEY, raw);
-    } catch (__) {
-      /* storage full or private mode: the list lives in memory this session */
-    }
-  }
-}
-
-function writeFlag(key, value) {
-  try {
-    if (value) localStorage.setItem(key, value);
-    else localStorage.removeItem(key);
-  } catch (_) {
-    /* private mode: the flag lives in memory this session */
-  }
-}
-
-function readGift() {
-  try {
-    return localStorage.getItem(GIFT_KEY) === '1';
-  } catch (_) {
-    return false;
-  }
 }
 
 /** Row ids a Stripe checkout took to the payment page; settled on /orders?eur_session. */
@@ -162,46 +109,6 @@ const CartContext = createContext({
 });
 
 export const CHECKOUT_SHIPPING_PKN = 2000;
-
-export function cartItemFromOffer(card, offer) {
-  const stock = listingStock(offer);
-  const pricePkn = Number(offer?.pricePkn) || 0;
-  return {
-    id: String(offer?.id || `${card.id}-${offer?.sellerName || 'listing'}`),
-    listingId: String(offer?.id || offer?.listingId || ''),
-    sellerUid: String(offer?.sellerUid || offer?.seller_uid || ''),
-    cardId: String(card.id),
-    name: card.name || 'Card',
-    image: cartImageFor(card, offer),
-    pricePkn,
-    // Amazon "Was:" — the price when this copy first went in the cart.
-    addedPricePkn: pricePkn,
-    addedAt: Date.now(),
-    // false = seller takes card payments only (local currency first in the bag).
-    sellerAcceptsPkn: offer?.sellerAcceptsPkn !== false,
-    qty: Math.min(stock, Math.max(1, Math.trunc(Number(offer?.qty) || 1))),
-    stock,
-    selected: true,
-    condition: offer?.condition || 'NM',
-    language: offer?.language || '',
-    reverse: Boolean(offer?.reverse),
-    firstEdition: Boolean(offer?.firstEdition),
-    graded: Boolean(offer?.graded),
-    gradingCompany: offer?.gradingCompany || '',
-    grade: offer?.grade || '',
-    signed: Boolean(offer?.signed),
-    sealed: Boolean(offer?.sealed),
-    setName: String(offer?.setName || card?.set || card?.expansion || ''),
-    collectorNumber: String(offer?.collectorNumber || offer?.publicNumber || ''),
-    sellerName: offer?.sellerName || offer?.sellerDisplayName || 'Pokoin',
-    sellerUsername: String(offer?.sellerUsername || '').replace(/^@/, ''),
-    sellerCountry: String(offer?.sellerCountry || offer?.seller_country || offer?.shipFromCountry || '').trim().toUpperCase(),
-    nftAvailable: Boolean(offer?.nftAvailable || offer?.isNftEligible),
-    reserveAvailable: Boolean(offer?.reserveAvailable),
-    href: card.canonicalPath || `/marketplace/en/cards/${card.id}`,
-    card: { id: String(card.id), name: card.name || 'Card' },
-  };
-}
 
 function patchRows(rows, cardId, entry, options) {
   const id = String(cardId || '');
@@ -286,35 +193,15 @@ export function CartProvider({ children }) {
         if (!next?.id) {
           return;
         }
-        setItems((current) => {
-          const match = current.find((row) => row.id === next.id);
-          if (match) {
-            const stock = listingStock(next.stock != null ? next : match);
-            return current.map((row) => (
-              row.id === next.id
-                ? { ...row, stock, qty: nextCartQty(row.qty, next.qty, stock), selected: true }
-                : row
-            ));
-          }
-          return [next, ...current].slice(0, CART_MAX);
-        });
+        setItems((current) => addCartRow(current, next));
         // Adding a saved copy moves it back rather than keeping it in both lists.
-        setSaved((current) => (current.some((row) => row.id === next.id)
-          ? current.filter((row) => row.id !== next.id)
-          : current));
+        setSaved((current) => dropSavedRow(current, next.id));
       },
       setQty(id, qty) {
-        setItems((current) => {
-          const row = current.find((item) => item.id === id);
-          const cap = row ? listingStock(row) : 99;
-          const next = Math.max(0, Math.min(cap, Number.parseInt(qty, 10) || 0));
-          return next < 1
-            ? current.filter((item) => item.id !== id)
-            : current.map((item) => (item.id === id ? { ...item, qty: next } : item));
-        });
+        setItems((current) => setCartRowQty(current, id, qty));
       },
       removeItem(id) {
-        setItems((current) => current.filter((row) => row.id !== id));
+        setItems((current) => removeCartRow(current, id));
       },
       removeItems(ids) {
         const drop = new Set((ids || []).map(String));

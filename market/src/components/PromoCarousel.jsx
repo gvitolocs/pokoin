@@ -3,54 +3,13 @@ import { Link } from 'react-router-dom';
 import { cardHref, fetchExpansion, fetchPromoFanPool, getJson, imageSrc, peekPromoFanPool } from '../api.js';
 import { game, isPokemonGame } from '../game.js';
 import { FAN_POOL, fillFan, pickFan } from '../promo-fan.js';
-import { promoLogoIsName, promoLogoSrc, satellitePromoBanners } from '../promo-banners.js';
+import { PROMO_BANNERS, promoLogoIsName, promoLogoSrc, satellitePromoBanners } from '../promo-banners.js';
 import { Action, track } from '../track.js';
 import CardArt from './CardArt.jsx';
 
 const PROMO_INTERVAL_MS = 5500;
 
-/** Current expansions on the home promo carousel (five slides). */
-export const PROMO_BANNERS = [
-  {
-    slug: 'storm-emeralda',
-    series: 'Mega Evolution',
-    title: 'Storm Emeralda',
-    lede: 'Japanese M6 is on the floor. Chase Mega Rayquaza ex.',
-    cta: 'Explore cards from this expansion',
-  },
-  {
-    slug: 'mega-evolution',
-    series: 'Mega Evolution',
-    title: 'Mega Evolution',
-    lede: 'The first Mega Evolution set is on the floor. Chase Mega Lucario ex.',
-    cta: 'Explore cards from this expansion',
-    western: true,
-  },
-  {
-    slug: 'phantasmal-flames',
-    series: 'Mega Evolution',
-    title: 'Phantasmal Flames',
-    lede: 'The second Mega Evolution set is on the floor. Chase Mega Charizard X ex.',
-    cta: 'Explore cards from this expansion',
-    western: true,
-  },
-  {
-    slug: 'black-bolt',
-    series: 'Black & White',
-    title: 'Black Bolt',
-    lede: 'Unova returns in black. Zekrom ex and the chase holos.',
-    cta: 'Explore cards from this expansion',
-    western: true,
-  },
-  {
-    slug: 'white-flare',
-    series: 'Black & White',
-    title: 'White Flare',
-    lede: 'Unova in white. Reshiram ex and the set’s secret rares.',
-    cta: 'Explore cards from this expansion',
-    western: true,
-  },
-];
+export { PROMO_BANNERS };
 
 function PromoFanCard({ card, role, index, onPointerEnter, onFail }) {
   const [ready, setReady] = useState(false);

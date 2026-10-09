@@ -1,6 +1,6 @@
-/** Cards parked on the Desktop hold tray (not the cart). */
+/** Cards parked on the Desktop hold tray (not the cart). Framework-free:
+ * React reads it through desktop-hold-hooks.js, Solid through its store. */
 
-import { useSyncExternalStore } from 'react';
 import { pruneStoredCardPages } from './card-page-cache.js';
 import { gameBasename } from './game.js';
 import { printingIdentity } from './identity.js';
@@ -18,7 +18,7 @@ let memoryOnly = false;
 const EMPTY = [];
 const listeners = new Set();
 
-/** Stable getSnapshot for useSyncExternalStore — a fresh [] each call black-screens React. */
+/** Stable snapshot for subscribers — a fresh [] each call black-screens React. */
 let cachedItems = EMPTY;
 let cachedRaw = null;
 
@@ -264,6 +264,7 @@ export function subscribeDesktopHold(listener) {
   return () => listeners.delete(listener);
 }
 
-export function useDesktopHold() {
-  return useSyncExternalStore(subscribeDesktopHold, readDesktopHold, () => EMPTY);
+/** Server-render / first-snapshot value for subscribers. */
+export function emptyDesktopHold() {
+  return EMPTY;
 }
