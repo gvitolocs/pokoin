@@ -41,3 +41,10 @@ export function compactQuery(value) {
   COMPACT_MEMO.set(text, compact);
   return compact;
 }
+
+/** The typeahead popup opens at this many compact characters (moved from suggest-live.js). */
+export const SUGGEST_LIVE_MIN_CHARS = 3;
+
+export function suggestLiveReady(query) {
+  return compactQuery(query).length >= SUGGEST_LIVE_MIN_CHARS;
+}

@@ -1,6 +1,7 @@
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { createSuggestFlip } from './suggest-flip.js';
 import { fitSuggestTitles } from './suggest-title-fit.js';
+import { peekSuggestEngine, subscribeSuggestEngine } from './suggest-engine-loader.js';
 
 /** React binding of createSuggestFlip (suggest-flip.js): run after every row change. */
 export function useSuggestFlip(listRef, ids) {
@@ -43,4 +44,9 @@ export function useSuggestTitleFit(listRef, key) {
       observer?.disconnect();
     };
   }, [listRef, key]);
+}
+
+/** The lazily loaded suggest engine module, or null until it has loaded. */
+export function useSuggestEngine() {
+  return useSyncExternalStore(subscribeSuggestEngine, peekSuggestEngine, () => null);
 }

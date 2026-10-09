@@ -47,15 +47,12 @@ import { suggestKind } from './identity.js';
 import { filterSuggestByPrintLang } from './locale.js';
 import { mergePrintingFields } from './print-bucket.js';
 import { earlySetPrefixName, rankFreeText, scoreGroups, tokenizeQuery } from './search-score.js';
+import { SUGGEST_LIVE_MIN_CHARS, suggestLiveReady } from './compact-query.js';
+export { SUGGEST_LIVE_MIN_CHARS, suggestLiveReady };
 
-export const SUGGEST_LIVE_MIN_CHARS = 3;
 const TTL_MS = 30 * 60 * 1000;
 const MAX_NAMES = 2500;
 const byCompact = new Map();
-
-export function suggestLiveReady(query) {
-  return compactQuery(query).length >= SUGGEST_LIVE_MIN_CHARS;
-}
 
 export function resetSuggestLive() {
   byCompact.clear();
