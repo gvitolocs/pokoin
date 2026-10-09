@@ -70,8 +70,8 @@ impl FirebaseJwksVerifier {
 
     async fn decode(&self, token: &str) -> ApiResult<DecodedToken> {
         let header = jsonwebtoken::decode_header(token)
-            .map_err(|_| ApiError::new(401, "Invalid bearer token."))?;
-        let kid = header.kid.ok_or_else(|| ApiError::new(401, "Invalid bearer token."))?;
+            .map_err(|_| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?;
+        let kid = header.kid.ok_or_else(|| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?;
         {
             let keys = self.keys.read().await;
             if !keys.contains_key(&kid) {
@@ -84,20 +84,20 @@ impl FirebaseJwksVerifier {
             let keys = self.keys.read().await;
             keys.get(&kid).cloned()
         };
-        let jwk = key_json.ok_or_else(|| ApiError::new(401, "Invalid bearer token."))?;
-        let decoding_key = DecodingKey::from_jwk(&serde_json::from_value::<jsonwebtoken::jwk::Jwk>(jwk.clone()).map_err(|_| ApiError::new(401, "Invalid bearer token."))?)
-            .map_err(|_| ApiError::new(401, "Invalid bearer token."))?;
+        let jwk = key_json.ok_or_else(|| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?;
+        let decoding_key = DecodingKey::from_jwk(&serde_json::from_value::<jsonwebtoken::jwk::Jwk>(jwk.clone()).map_err(|_| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?)
+            .map_err(|_| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?;
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_audience(&[&self.project_id]);
         validation.iss = Some(HashSet::from([format!("{ISSUER_PREFIX}{}", self.project_id)]));
         let claims = jsonwebtoken::decode::<Map<String, Value>>(token, &decoding_key, &validation)
-            .map_err(|_| ApiError::new(401, "Invalid bearer token."))?
+            .map_err(|_| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?
             .claims;
         let uid = claims
             .get("sub")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| ApiError::new(401, "Invalid bearer token."))?
+            .ok_or_else(|| ApiError::new(401, "Invalid or expired sign-in token.").with_code("auth/invalid-token"))?
             .to_string();
         let pick = |key: &str| claims.get(key).and_then(Value::as_str).map(str::to_string);
         Ok(DecodedToken { uid, email: pick("email"), name: pick("name"), picture: pick("picture") })
@@ -119,7 +119,7 @@ impl TokenVerifier for FirebaseJwksVerifier {
                 .trim()
                 .to_string();
             if token.is_empty() {
-                return Err(ApiError::new(401, "Missing bearer token."));
+                return Err(ApiError::new(401, "Missing Pokoin bearer token.").with_code("auth/missing-token"));
             }
             self.decode(&token).await
 })
@@ -139,7 +139,7 @@ impl TokenVerifier for StaticVerifier {
         Box::pin(async move {
             let token = header.strip_prefix("Bearer ").unwrap_or_default().trim().to_string();
             if token.is_empty() {
-                return Err(ApiError::new(401, "Missing bearer token."));
+                return Err(ApiError::new(401, "Missing Pokoin bearer token.").with_code("auth/missing-token"));
             }
             let uid = token.strip_prefix("test-").unwrap_or(&token).to_string();
             let email = map.get(&uid).cloned();

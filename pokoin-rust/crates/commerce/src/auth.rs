@@ -50,27 +50,30 @@ impl Claims {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
-    #[error("Missing or malformed Authorization header.")]
+    #[error("Missing Pokoin bearer token.")]
     Missing,
-    #[error("Invalid sign-in token: {0}")]
+    #[error("Invalid or expired sign-in token.")]
     Invalid(String),
     #[error("Sign-in verification is not configured: {0}")]
     Unconfigured(String),
-    #[error("Sign-in verification is temporarily unavailable.")]
+    #[error("Sign-in could not be checked right now.")]
     Unavailable,
 }
 
 impl From<AuthError> for ApiError {
     fn from(error: AuthError) -> Self {
+        let message = error.to_string();
         match error {
-            AuthError::Unavailable => {
-                ApiError::unavailable("Sign-in verification is temporarily unavailable.")
+            AuthError::Missing => ApiError::unauthorized(message).with_code("auth/missing-token"),
+            AuthError::Invalid(reason) => {
+                tracing::warn!(reason = %reason, "auth token rejected");
+                ApiError::unauthorized(message).with_code("auth/invalid-token")
             }
+            AuthError::Unavailable => ApiError::unavailable(message).with_code("auth/unavailable"),
             AuthError::Unconfigured(message) => {
                 tracing::error!(%message, "auth not configured");
                 ApiError::internal("Sign-in verification is not configured.")
             }
-            other => ApiError::unauthorized(other.to_string()),
         }
     }
 }
@@ -267,6 +270,26 @@ mod tests {
         assert!(bearer(Some("token")).is_err());
         assert!(bearer(Some("Bearer ")).is_err());
         assert_eq!(bearer(Some("Bearer abc")).unwrap(), "abc");
+    }
+
+    #[test]
+    fn auth_errors_match_the_node_api_shape() {
+        use axum::http::StatusCode;
+
+        let missing: ApiError = AuthError::Missing.into();
+        assert_eq!(missing.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(missing.message, "Missing Pokoin bearer token.");
+        assert_eq!(missing.code.as_deref(), Some("auth/missing-token"));
+
+        let invalid: ApiError = AuthError::Invalid("unknown signing key".into()).into();
+        assert_eq!(invalid.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(invalid.message, "Invalid or expired sign-in token.");
+        assert_eq!(invalid.code.as_deref(), Some("auth/invalid-token"));
+
+        let unavailable: ApiError = AuthError::Unavailable.into();
+        assert_eq!(unavailable.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(unavailable.message, "Sign-in could not be checked right now.");
+        assert_eq!(unavailable.code.as_deref(), Some("auth/unavailable"));
     }
 
     #[test]

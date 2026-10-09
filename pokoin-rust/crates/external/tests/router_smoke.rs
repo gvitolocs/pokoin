@@ -45,8 +45,10 @@ async fn authenticated_routes_require_a_bearer_token() {
         "/api/powertools-connect",
         "/api/marketplace-pricing-strategies",
     ] {
-        let (status, _) = call(DomainState::for_test(), get(uri)).await;
+        let (status, body) = call(DomainState::for_test(), get(uri)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{uri}");
+        assert_eq!(body["error"], "Missing Pokoin bearer token.", "{uri}");
+        assert_eq!(body["code"], "auth/missing-token", "{uri}");
     }
     // The test verifier accepts any non-empty bearer as `uid`, so a valid
     // header reaches the handler instead of the 401 gate.

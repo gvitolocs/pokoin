@@ -124,7 +124,12 @@ pub async fn run_query(
     for bind in binds {
         query = match bind {
             Bind::S(value) => query.bind(value),
-            Bind::I(value) => query.bind(value),
+            // node-pg sends numbers untyped, so Postgres resolves them as
+            // integer: bind int4 when it fits (function lookup by signature).
+            Bind::I(value) => match i32::try_from(value) {
+                Ok(small) => query.bind(small),
+                Err(_) => query.bind(value),
+            },
             Bind::F(value) => query.bind(value),
             Bind::B(value) => query.bind(value),
             Bind::SA(values) => query.bind(values),
@@ -179,9 +184,10 @@ pub fn pg_row_to_json(row: &sqlx::postgres::PgRow) -> Value {
                         .unwrap_or(Value::Null)
                 })
                 .unwrap_or(Value::Null),
+            // node-pg returns int8 as a string.
             "INT8" | "BIGINT" => row
                 .try_get::<Option<i64>, _>(index)
-                .map(|value| value.map(Value::from).unwrap_or(Value::Null))
+                .map(|value| value.map(|v| Value::String(v.to_string())).unwrap_or(Value::Null))
                 .unwrap_or(Value::Null),
             "FLOAT4" | "REAL" => row
                 .try_get::<Option<f32>, _>(index)
@@ -253,7 +259,7 @@ pub fn pg_row_to_json(row: &sqlx::postgres::PgRow) -> Value {
                         values
                             .unwrap_or_default()
                             .into_iter()
-                            .map(|value| value.map(Value::from).unwrap_or(Value::Null))
+                            .map(|value| value.map(|v| Value::String(v.to_string())).unwrap_or(Value::Null))
                             .collect(),
                     )
                 })
@@ -8164,7 +8170,7 @@ pub async fn rows_for_autocomplete_search_term_with_query(
 }
 
 fn js_value_number_of(value: &Value) -> Option<f64> {
-    value.as_f64()
+    super::normalize::js_value_number(value)
 }
 
 // --- engine tests ---
