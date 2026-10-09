@@ -13,6 +13,28 @@ export const RAIL = {
   setIndex: 'set_index',
 };
 
+/** Dedicated Rust homepage rails (one URL each). SPA fetches them in parallel. */
+export const HOME_RAIL = {
+  newCards: {
+    path: '/api/marketplace-home/new-cards',
+    legacyId: RAIL.newCards,
+    sectionKey: 'newArrivalIds',
+    limit: 20,
+  },
+  bestSellers: {
+    path: '/api/marketplace-home/best-sellers',
+    legacyId: RAIL.bestSellers,
+    sectionKey: 'bestSellerIds',
+    limit: 12,
+  },
+  spotlight: {
+    path: '/api/marketplace-home/spotlight',
+    legacyId: RAIL.featured,
+    sectionKey: 'featuredIds',
+    limit: 30,
+  },
+};
+
 export const NEW_CARDS_LIMIT = 20;
 export const FEATURED_LIMIT = 30;
 
@@ -102,21 +124,7 @@ function collapseTiles(cards) {
   return [...byId.values()];
 }
 
-export async function fetchRail(id) {
-  if (!id) {
-    return null;
-  }
-  const response = await fetch(publicApiUrl(`/api/marketplace-rails?id=${encodeURIComponent(id)}`), {
-    headers: { Accept: 'application/json' },
-  });
-  if (!response.ok) {
-    const raw = await response.text().catch(() => '');
-    if (isOriginDownStatus(response.status) || isOriginDownError({ message: raw }, response.status, raw)) {
-      return null;
-    }
-    return null;
-  }
-  const row = await response.json();
+function railFromResponse(row) {
   if (!row?.id) {
     return null;
   }
@@ -125,6 +133,82 @@ export async function fetchRail(id) {
     cards: asCards(row.cards),
     meta: row.meta && typeof row.meta === 'object' ? row.meta : {},
     updatedAt: row.updated_at || '',
+    sections: row.sections && typeof row.sections === 'object' ? row.sections : {},
+    pknUsdt: Number(row.pknUsdt) > 0 ? Number(row.pknUsdt) : undefined,
+  };
+}
+
+async function fetchJsonRail(url) {
+  const response = await fetch(publicApiUrl(url), {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    if (isOriginDownStatus(response.status) || isOriginDownError({ message: raw }, response.status, raw)) {
+      noteOriginDown();
+    }
+    return null;
+  }
+  return railFromResponse(await response.json());
+}
+
+export async function fetchRail(id) {
+  if (!id) {
+    return null;
+  }
+  return fetchJsonRail(`/api/marketplace-rails?id=${encodeURIComponent(id)}`);
+}
+
+/** One homepage carousel via its dedicated Rust API, with Node ?id= fallback. */
+export async function fetchHomeRail(kind) {
+  const spec = HOME_RAIL[kind];
+  if (!spec) {
+    return null;
+  }
+  const dedicated = await fetchJsonRail(spec.path).catch(() => null);
+  if (dedicated?.cards?.length) {
+    return { ...dedicated, kind, sectionKey: spec.sectionKey, limit: spec.limit };
+  }
+  const legacy = await fetchRail(spec.legacyId).catch(() => null);
+  if (!legacy) {
+    return null;
+  }
+  return { ...legacy, kind, sectionKey: spec.sectionKey, limit: spec.limit };
+}
+
+/** Merge one dedicated rail into a home vector (progressive paint). */
+export function mergeHomeRail(payload, rail) {
+  if (!rail?.cards?.length) {
+    return payload || { source: 'pi', cards: [], sections: {} };
+  }
+  const base = payload && typeof payload === 'object'
+    ? payload
+    : { source: 'pi', cards: [], sections: {} };
+  const byId = new Map();
+  for (const card of collapseTiles(asHomeCards(base.cards))) {
+    const id = cardId(card);
+    if (id) {
+      byId.set(id, card);
+    }
+  }
+  for (const card of collapseTiles(asHomeCards(rail.cards))) {
+    const id = cardId(card);
+    const merged = mergeTile(byId.get(id), card);
+    if (merged) {
+      byId.set(id, merged);
+    }
+  }
+  const ids = asHomeCards(rail.cards).map(cardId).filter(Boolean).slice(0, rail.limit || 48);
+  const rate = Number(rail.pknUsdt ?? rail.meta?.pknUsdt);
+  return {
+    ...base,
+    source: 'pi',
+    cards: [...byId.values()],
+    pknUsdt: Number.isFinite(rate) && rate > 0 ? rate : base.pknUsdt,
+    sections: {
+      ...(base.sections || {}),
+      [rail.sectionKey]: ids,
+    },
   };
 }
 
@@ -185,40 +269,31 @@ export async function fetchHomeFromLists(recentIds = []) {
   if (!listsConfigured()) {
     return null;
   }
-  const [newCards, featured, bestSellers, spotlight] = await Promise.all([
-    fetchRail(RAIL.newCards),
-    fetchRail(RAIL.featured),
-    fetchRail(RAIL.bestSellers),
+  // Three dedicated Rust homepage rails first; Marketplace grid still uses the
+  // spotlight rail via legacy ?id= (not one of the three carousel lines).
+  const [newCards, bestSellers, featured, spotlight] = await Promise.all([
+    fetchHomeRail('newCards'),
+    fetchHomeRail('bestSellers'),
+    fetchHomeRail('spotlight'),
     fetchRail(RAIL.spotlight),
   ]);
-  const rails = [newCards, featured, bestSellers, spotlight].filter(Boolean);
-  if (!rails.length) {
-    return attachRecentsToHome({ source: 'pi', cards: [], sections: {} }, recentIds);
-  }
-
-  const byId = new Map();
-  for (const rail of rails) {
-    for (const card of collapseTiles(asHomeCards(rail.cards))) {
-      const id = cardId(card);
-      const merged = mergeTile(byId.get(id), card);
-      if (merged) {
-        byId.set(id, merged);
-      }
+  let payload = { source: 'pi', cards: [], sections: {} };
+  for (const rail of [newCards, bestSellers, featured]) {
+    if (rail) {
+      payload = mergeHomeRail(payload, rail);
     }
   }
-
-  const idsOf = (rail, n) => asHomeCards(rail?.cards).map(cardId).filter(Boolean).slice(0, n);
-
-  return attachRecentsToHome({
-    source: 'pi',
-    cards: [...byId.values()],
-    sections: {
-      newArrivalIds: idsOf(newCards, NEW_CARDS_LIMIT),
-      featuredIds: idsOf(featured, FEATURED_LIMIT),
-      bestSellerIds: idsOf(bestSellers, 12),
-      spotlightIds: idsOf(spotlight, 16),
-    },
-  }, recentIds);
+  if (spotlight) {
+    payload = mergeHomeRail(payload, {
+      ...spotlight,
+      sectionKey: 'spotlightIds',
+      limit: 16,
+    });
+  }
+  if (!(payload.cards || []).length && !payload.sections?.newArrivalIds?.length) {
+    return attachRecentsToHome({ source: 'pi', cards: [], sections: {} }, recentIds);
+  }
+  return attachRecentsToHome(payload, recentIds);
 }
 
 export async function fetchSetIndexFromLists() {

@@ -2,7 +2,18 @@ import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 import { createExpansionCardsFetcher } from './expansion-cards.js';
 import { createNamePrintingsFetcher } from './name-printings.js';
 import { resolveExpansionNationality } from './expansion-print.js';
-import { attachRecentsToHome, fetchCardTiles, fetchExpansionFromLists, fetchHomeFromLists, fetchSetIndexFromLists, isPublicRailsVector } from './lists.js';
+import {
+  attachRecentsToHome,
+  fetchCardTiles,
+  fetchExpansionFromLists,
+  fetchHomeFromLists,
+  fetchHomeRail,
+  fetchSetIndexFromLists,
+  isPublicRailsVector,
+  mergeHomeRail,
+} from './lists.js';
+
+export { fetchHomeRail, mergeHomeRail };
 import { applyLastMedianPrices, applyTilePrice, formatPkn, formatPknNumber, idsMissingTilePrice, lastMedianFromSales, tilePricePkn } from './pkn.js';
 export { formatPkn, formatPknNumber };
 import { readRecentCardIds, rememberCardId, peekRecentTile } from './recents.js';
@@ -149,12 +160,23 @@ function isViteDev() {
 }
 
 export async function fetchHome(recentIds = []) {
-  // Pokemon SPA wants the public rails vector (New + Rising + Featured).
-  // `GET /api/marketplace-home` on api.pokoin.com is Flutter hydrate (~170 KB,
-  // no newArrivalIds). On pokoin.com the origin Worker serves the rails vector
-  // instead. Vite proxies /api to api.pokoin.com, so skip that hop in dev.
+  // Pokemon SPA: three dedicated Rust rails (New / Best sellers / Spotlight)
+  // load in parallel via fetchHomeFromLists. The Worker marketplace-home vector
+  // remains a fallback when those rails are empty. Vite proxies /api to
+  // api.pokoin.com, so skip the Worker hop in dev.
   // Recents attach synchronously. Missing tiles are Home's job after paint.
   if (isPokemonGame()) {
+    try {
+      const listed = await fetchHomeFromLists(recentIds);
+      if (listed?.cards?.length || listed?.sections?.newArrivalIds?.length) {
+        return listed;
+      }
+    } catch (err) {
+      if (isOriginDownError(err, err?.status, err?.message)) {
+        throw err;
+      }
+      /* Worker / oracle below */
+    }
     if (!isViteDev()) {
       try {
         const payload = await getJson('/api/marketplace-home?v=rising-month', { cache: 'no-store' });
@@ -165,19 +187,8 @@ export async function fetchHome(recentIds = []) {
         if (isOriginDownError(err, err?.status, err?.message)) {
           throw err;
         }
-        /* lists / oracle below */
+        /* oracle below */
       }
-    }
-    try {
-      const listed = await fetchHomeFromLists(recentIds);
-      if (listed?.cards?.length || listed?.sections?.newArrivalIds?.length) {
-        return listed;
-      }
-    } catch (err) {
-      if (isOriginDownError(err, err?.status, err?.message)) {
-        throw err;
-      }
-      /* oracle below */
     }
   }
   // Satellite catalogs use home-page + ?game= (withGameQuery inside getJson).
