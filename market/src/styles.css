@@ -11494,3 +11494,10 @@ html:has(.wallet-page) .brand span {
     transform: translateY(7px) scale(1.12) !important;
   }
 }
+
+/* Set desk renders every loaded card. Off-screen tiles skip layout and paint
+   until they scroll near the viewport (thousand-card sets stay smooth). */
+.set-desk .grid > .tile {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 360px;
+}

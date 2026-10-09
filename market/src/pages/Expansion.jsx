@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigationType, useParams } from 'react-router-dom';
 import { EXPANSION_PAGE, fetchExpansion, fetchExpansionCards, peekExpansion, prettySlug } from '../api.js';
 import { Action, track } from '../track.js';
@@ -13,11 +13,7 @@ import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import { filterExpansionCards, isSetDeskCard, searchPrintLang, searchRarity, uniqueSearchOptions } from '../search-filters.js';
 import { defaultExpansionSort, expansionTilesReady, hasOfficialSetList } from '../set-official-lists.js';
-import {
-  firstSetPreviewCount,
-  nextSetPreviewCount,
-  setDeskSkeletonCount,
-} from '../set-desk-preview.js';
+import { setDeskSkeletonCount } from '../set-desk-preview.js';
 import { bundleReference, writeListingDrag } from '../chat-listing.js';
 import { expansionLogoSrc, expansionSymbolSrc, eraHref, tcgEra } from '../set-logos.js';
 import { setSeoTitle } from '../seo.js';
@@ -80,8 +76,6 @@ export default function Expansion() {
   const [firstEdition, setFirstEdition] = useState(() => restoredHere?.firstEdition || 'any');
   const [listed, setListed] = useState(() => restoredHere?.listed || 'any');
   const [view, setView] = useState(readView);
-  const [previewCount, setPreviewCount] = useState(() => Number(restoredHere?.previewCount) || 0);
-  const suppressPreviewReset = useRef(Boolean(restoredHere));
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +84,6 @@ export default function Expansion() {
     const saved = restoredPageView(navType, location.key, `${location.pathname}${location.search}`);
     const hydrate = saved?.slug === slug ? saved : null;
     if (hydrate) {
-      suppressPreviewReset.current = true;
       setQuery(String(hydrate.query || ''));
       setSort(hydrate.sort || defaultExpansionSort(slug));
       setRarity(String(hydrate.rarity || ''));
@@ -98,9 +91,7 @@ export default function Expansion() {
       setReverse(hydrate.reverse || 'any');
       setFirstEdition(hydrate.firstEdition || 'any');
       setListed(hydrate.listed || 'any');
-      setPreviewCount(Number(hydrate.previewCount) || 0);
     } else {
-      suppressPreviewReset.current = false;
       setQuery('');
       setSort(defaultExpansionSort(slug));
       setRarity('');
@@ -275,32 +266,10 @@ export default function Expansion() {
   const lede = loading
     ? 'Loading cards…'
     : `${(deskTotal || shown.length).toLocaleString()} cards${eraName ? ` in ${eraName}` : ''}.`;
-  const walkSkeletons = setDeskSkeletonCount(payload?.expansion);
-  const previewCards = loading ? [] : shown.slice(0, previewCount);
-  const pendingSkeletons = loading
-    ? walkSkeletons
-    : Math.max(0, shown.length - previewCards.length);
-
-  useEffect(() => {
-    if (suppressPreviewReset.current) {
-      return;
-    }
-    setPreviewCount(firstSetPreviewCount(shown.length));
-  }, [slug, sort, query, rarity, language, reverse, firstEdition, listed]);
-
-  useEffect(() => {
-    if (!tilesReady || !shown.length) {
-      return;
-    }
-    setPreviewCount((current) => {
-      const saved = suppressPreviewReset.current ? Number(restoredHere?.previewCount) || 0 : 0;
-      const next = Math.max(current, saved, firstSetPreviewCount(shown.length));
-      return Math.min(next, shown.length);
-    });
-    if (suppressPreviewReset.current) {
-      suppressPreviewReset.current = false;
-    }
-  }, [tilesReady, shown.length, restoredHere?.previewCount]);
+  // Skeletons only while the set is really loading, at most three rows. Loaded
+  // cards always render (images are loading="lazy"); off-screen tiles skip
+  // layout via content-visibility (.set-desk .grid > .tile).
+  const walkSkeletons = Math.min(21, setDeskSkeletonCount(payload?.expansion, 14));
 
   useEffect(() => {
     rememberPageView(location.key, {
@@ -312,23 +281,8 @@ export default function Expansion() {
       reverse,
       firstEdition,
       listed,
-      previewCount,
     });
-  }, [location.key, slug, query, sort, rarity, language, reverse, firstEdition, listed, previewCount]);
-
-  useEffect(() => {
-    if (loading || previewCount >= shown.length) {
-      return undefined;
-    }
-    const advance = () => {
-      setPreviewCount((current) => nextSetPreviewCount(current, shown.length));
-    };
-    // Sentinel sits in the first rows after the current batch. Observing it
-    // with a fat rootMargin mounted the rest of the set in one frame. One
-    // extra batch per scroll; skeletons stay until the user moves.
-    window.addEventListener('scroll', advance, { passive: true, once: true });
-    return () => window.removeEventListener('scroll', advance);
-  }, [loading, previewCount, shown.length]);
+  }, [location.key, slug, query, sort, rarity, language, reverse, firstEdition, listed]);
 
   return (
     <div className="page desk set-desk" aria-busy={loading ? 'true' : undefined}>
@@ -492,24 +446,15 @@ export default function Expansion() {
           <button className="btn" type="button" onClick={clearFilters}>Clear filters</button>
         </EmptyDesk>
       ) : (
-        <CardSelectGrid className={view === 'list' ? 'grid is-list' : 'grid'} cards={loading ? [] : previewCards}>
+        <CardSelectGrid className={view === 'list' ? 'grid is-list' : 'grid'} cards={loading ? [] : shown}>
           {loading
             ? Array.from({ length: walkSkeletons }, (_, index) => (
                 <SkeletonTile key={`walk-${index}`} layout={view} />
               ))
             : (
               <>
-                {previewCards.map((card, index) => (
-                  <CardTile key={card.id} card={card} rank={index} layout={view} />
-                ))}
-                {previewCount < shown.length ? (
-                  <div className="set-preview-sentinel" aria-hidden="true" />
-                ) : null}
-                {Array.from({ length: pendingSkeletons }, (_, index) => (
-                  <SkeletonTile
-                    key={`preview-${shown[previewCount + index]?.id || index}`}
-                    layout={view}
-                  />
+                {shown.map((card, index) => (
+                  <CardTile key={card.id} card={card} rank={index} layout={view} eagerLimit={14} />
                 ))}
               </>
             )}
