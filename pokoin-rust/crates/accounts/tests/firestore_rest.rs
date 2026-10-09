@@ -68,7 +68,7 @@ async fn a_merge_set_sends_an_update_mask_and_the_bearer_token() {
     assert_eq!(
         write["update"]["name"],
         serde_json::json!(format!(
-            "https://test.local/v1/projects/{TEST_PROJECT}{DOCS}/users/u1"
+            "projects/{TEST_PROJECT}{DOCS}/users/u1"
         ))
     );
     assert_eq!(
@@ -200,7 +200,7 @@ async fn delete_sends_a_delete_write() {
     assert_eq!(
         body["writes"][0]["delete"],
         serde_json::json!(format!(
-            "https://test.local/v1/projects/{TEST_PROJECT}{DOCS}/usernames/ash"
+            "projects/{TEST_PROJECT}{DOCS}/usernames/ash"
         ))
     );
 }
