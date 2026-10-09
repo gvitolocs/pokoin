@@ -123,6 +123,10 @@ export default function Home() {
   const [browseHasMore, setBrowseHasMore] = createSignal(englishBrowse);
   const [browseLoading, setBrowseLoading] = createSignal(englishBrowse);
   const [browseMoreBusy, setBrowseMoreBusy] = createSignal(false);
+  // Every rail keeps its skeleton until ALL rail requests settle: hiding an empty
+  // rail as soon as another one lands, then showing it again, shifted the page
+  // whenever rails arrived out of order (React Home has the same latent CLS).
+  const [railsSettled, setRailsSettled] = createSignal(Boolean(payload && railsReady(payload)));
   let browseState = null;
   let disposed = false;
 
@@ -171,6 +175,7 @@ export default function Home() {
       fetchRail(RAIL.spotlight).then((rail) => paintRail(rail && { ...rail, sectionKey: 'spotlightIds', limit: 16 })),
     ]);
     await paintChain;
+    setRailsSettled(true);
     if (!any) return fetchHome(readRecentCardIds());
     return vector;
   }
@@ -178,6 +183,7 @@ export default function Home() {
   async function loadHome() {
     try {
       const data = await (englishBrowse ? loadPokemonRails() : fetchHome(readRecentCardIds()));
+      setRailsSettled(true);
       if (disposed) return;
       const painted = (await applyRailsVector(data)) || paintHome(data, readRecentCardIds(), localExtras());
       warmupSearchBar();
@@ -201,6 +207,7 @@ export default function Home() {
         ? 'Marketplace home failed.'
         : publicErrorMessage(err, 'Marketplace home failed.'));
       setRecentPending(false);
+      setRailsSettled(true);
     }
   }
 
@@ -291,6 +298,7 @@ export default function Home() {
   });
 
   const loading = () => !railsReady(home) && !error();
+  const railPending = () => !railsSettled() && !error();
   const newSet = () => sections().newCards[0]?.set || sections().newCards[0]?.set_name;
   const mega = () => sections().newCards[0] || sections().spotlight[0] || browse.cards[0];
   const gridCards = () => (englishBrowse ? browse.cards : sections().spotlight);
@@ -326,18 +334,18 @@ export default function Home() {
         title="New cards"
         cards={sections().newCards}
         href={newSet() ? `/marketplace/sets/${setSlug(newSet())}` : undefined}
-        placeholders={!sections().newCards.length && loading() ? 8 : 0}
+        placeholders={!sections().newCards.length && railPending() ? 8 : 0}
         eagerLimit={8}
       />
       <Carousel
         title="Best sellers"
         cards={sections().bestSellers}
-        placeholders={!sections().bestSellers.length && loading() ? 8 : 0}
+        placeholders={!sections().bestSellers.length && railPending() ? 8 : 0}
       />
       <Carousel
         title="Spotlight"
         cards={sections().featured}
-        placeholders={!sections().featured.length && loading() ? 8 : 0}
+        placeholders={!sections().featured.length && railPending() ? 8 : 0}
       />
 
       <a class="callout protect-callout" href="/protection">

@@ -11,7 +11,20 @@ export function SkeletonTile(props) {
     >
       <span class="tile-art"><span class="tile-ph" /></span>
       <div class="tile-meta">
-        <Show when={props.album} fallback={<><strong class="skel-line" /><span class="skel-line skel-line-sm" /></>}>
+        <Show
+          when={props.album}
+          fallback={(
+            // The real tile's line boxes (name, identity, price) around the bars, so a
+            // rail that fills in keeps its height (market Carousel.jsx SkeletonTile).
+            <>
+              <strong><span class="skel-line skel-inline" /></strong>
+              <em class="tile-id"><span class="skel-line skel-line-sm skel-inline" /></em>
+              <Show when={props.layout !== 'list'}>
+                <span class="price"><span class="skel-line skel-line-sm skel-inline" /></span>
+              </Show>
+            </>
+          )}
+        >
           <span class="skel-line skel-line-sm" />
         </Show>
       </div>
