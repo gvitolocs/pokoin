@@ -227,7 +227,7 @@ impl CommerceConfig {
             bitcoin_settlement_address: env_first(&["BITCOIN_SETTLEMENT_ADDRESS"]),
             bitcoin_min_confirmations: env_i64("BITCOIN_MIN_CONFIRMATIONS", 1),
             packlink_api_key: env_first(&["PACKLINK_API_KEY"]),
-            silver_price_pkn: env_i64("SILVER_PRICE_PKN", 20),
+            silver_price_pkn: env_i64("SILVER_PRICE_PKN", SILVER_PRICE_PKN),
             pokoin_treasury_username: env_first(&["POKOIN_TREASURY_USERNAME"])
                 .unwrap_or_else(|| "pokoin".into()),
             earn_pkn_inbox: env_first(&["EARN_PKN_INBOX"])
@@ -248,8 +248,23 @@ impl CommerceConfig {
     }
 }
 
+/// Silver membership price in site PKN (one year). Node `unlock-silver.js`
+/// and `market/src/silver.js` charge 100; keep them equal.
+pub const SILVER_PRICE_PKN: i64 = 100;
+
 impl Default for CommerceConfig {
     fn default() -> Self {
         Self::from_env()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn silver_price_matches_the_spa() {
+        let spa = include_str!("../../../../market/src/silver.js");
+        assert!(spa.contains(&format!("SILVER_PRICE_PKN = {SILVER_PRICE_PKN};")));
     }
 }
