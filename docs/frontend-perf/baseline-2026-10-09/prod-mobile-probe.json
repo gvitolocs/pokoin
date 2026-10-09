@@ -1,0 +1,136 @@
+{
+ "base": "https://pokoin.com",
+ "profile": "mobile",
+ "runs": 2,
+ "at": "2026-10-09T15:06:38.526Z",
+ "results": {
+  "cold": [
+   {
+    "ttfb": 52.5,
+    "fcp": 1172,
+    "lcp": 1692,
+    "cls": 0,
+    "dcl": 795.5,
+    "load": 3377.599999964237,
+    "longtaskCount": 12,
+    "longtaskTotal": 1749,
+    "tbt": 1149,
+    "script": 1673.9440000000002,
+    "task": 2666.947,
+    "layout": 66.683,
+    "style": 124.49000000000001,
+    "heapMB": 31.481266021728516,
+    "nodes": 1393,
+    "requests": 90,
+    "apiRequests": 16,
+    "kb": 2479.4287109375,
+    "byType": {
+     "Document": 15,
+     "Font": 64,
+     "Image": 1314,
+     "Stylesheet": 57,
+     "Script": 954,
+     "Fetch": 75,
+     "XHR": 1,
+     "Preflight": 0
+    },
+    "wall": 6463
+   },
+   {
+    "ttfb": 50.39999997615814,
+    "fcp": 1104,
+    "lcp": 1816,
+    "cls": 0,
+    "dcl": 769.5,
+    "load": 2557,
+    "longtaskCount": 13,
+    "longtaskTotal": 1666,
+    "tbt": 1016,
+    "script": 1626.0049999999999,
+    "task": 2956.9139999999998,
+    "layout": 54.403,
+    "style": 201.123,
+    "heapMB": 35.3244743347168,
+    "nodes": 1486,
+    "requests": 93,
+    "apiRequests": 21,
+    "kb": 2612.763671875,
+    "byType": {
+     "Document": 15,
+     "Script": 954,
+     "Font": 64,
+     "Image": 1443,
+     "Stylesheet": 57,
+     "Fetch": 79,
+     "XHR": 1,
+     "Preflight": 0
+    },
+    "wall": 5699
+   }
+  ],
+  "search": [
+   {
+    "rows": 20,
+    "perKeyMs": [
+     null,
+     null,
+     541.7,
+     749.7,
+     1039.6,
+     null,
+     null
+    ],
+    "keyToListP50": 749.6999999880791,
+    "keyToListMax": 1039.6000000238419,
+    "inpMax": 1232,
+    "inpP50": 784,
+    "interactions": 7,
+    "worstEvent": {
+     "name": "keydown",
+     "start": 15185.800000011921,
+     "dur": 1232,
+     "delay": 9.5,
+     "proc": 0.5,
+     "pres": 1222,
+     "id": 1659
+    },
+    "longtasks": 41,
+    "longtaskTotal": 8918,
+    "scriptMs": 9956.005000000001,
+    "taskMs": 12004.861,
+    "requests": 457
+   },
+   {
+    "rows": 20,
+    "perKeyMs": [
+     null,
+     null,
+     528.9,
+     666.4,
+     null,
+     null,
+     null
+    ],
+    "keyToListP50": 666.4000000357628,
+    "keyToListMax": 666.4000000357628,
+    "inpMax": 1048,
+    "inpP50": 864,
+    "interactions": 7,
+    "worstEvent": {
+     "name": "keydown",
+     "start": 12970.800000011921,
+     "dur": 1048,
+     "delay": 1.0999999642372131,
+     "proc": 0.7000000476837158,
+     "pres": 1046.199999988079,
+     "id": 3988
+    },
+    "longtasks": 41,
+    "longtaskTotal": 8431,
+    "scriptMs": 9461.666000000001,
+    "taskMs": 11245.030999999999,
+    "requests": 458
+   }
+  ]
+ }
+}
