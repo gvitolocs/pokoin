@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, createStore, For, Match, reconcile, Repeat, Show, Switch, untrack } from 'solid-js';
 import { useLocation, useNavigate } from '@solidjs/router';
-import { fetchSearch, fetchSellerSearchWithAssociates, fetchSuggest } from '@market/api.js';
+import { fetchSearch, fetchSellerSearchWithAssociates } from '@market/api.js';
+import { fetchSearchRecall } from '@market/search-recall.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
 import { isPokemonGame } from '@market/game.js';
 import { sellerHref } from '@market/listing-meta.js';
@@ -357,7 +358,7 @@ export default function Search() {
       const next = printFiltered ? cardsForPrint(raw, req.print) : raw;
       apiOffset = data?.nextOffset != null ? data.nextOffset : raw.length;
       putCards(next);
-      putHasMore(aware ? false : Boolean(data?.hasMore));
+      putHasMore(aware && req.tab !== 'singles' ? false : Boolean(data?.hasMore));
       setError('');
       // The total travels with the results: totalHits is either the hot
       // payload's total or this response's own total — the same predicate
@@ -382,7 +383,7 @@ export default function Search() {
     }
 
     function fetchPage(offset) {
-      return fetchSearch({ query: req.query, offset, limit: PAGE, lang: req.lang, ...fetchOpts });
+      return fetchSearchRecall({ query: req.query, offset, limit: PAGE, lang: req.lang, ...fetchOpts });
     }
 
     function deliver(data, totalHits, retried = false) {
@@ -418,24 +419,17 @@ export default function Search() {
       setLoading(true);
       putCards([]);
       putTotal(hot?.count || 0);
-      const pending = aware
+      // Singles: the resolved set's rows lead, then the popup's recall union
+      // (search-recall.js), so "View all N" lists the N printings it counted.
+      const setOnly = aware && req.tab !== 'singles';
+      const pending = setOnly
         ? rank.fetchSetAwareCards(queryParts, { fetchSearch, lang: req.lang }).then((rows) => ({ cards: rows, hasMore: false }))
-        : (hot?.promise || fetchPage(0));
+        : aware
+          ? fetchSearchRecall({ query: req.query, offset: 0, limit: PAGE, lang: req.lang, ...fetchOpts, head: () => rank.fetchSetAwareCards(queryParts, { fetchSearch, lang: req.lang }) })
+          : (hot?.promise || fetchPage(0));
       pending
-        .then((data) => deliver(data, aware ? data?.cards?.length : (payloadTotal(data) ?? hot?.count)))
+        .then((data) => deliver(data, setOnly ? data?.cards?.length : (payloadTotal(data) ?? hot?.count)))
         .catch(fail);
-    }
-    if (!printFiltered && !aware && req.tab === 'singles' && req.query.length >= 2 && !(hot?.count > 0)) {
-      // No search-page total for this universe yet (singles rides the Meili
-      // candidates window) and no cached count: keep the suggest estimate so
-      // the results page still shows a query-scoped number.
-      fetchSuggest(req.query, { limit: 1, lang: req.lang, printLang: req.print })
-        .then((suggest) => {
-          if (state.cancelled) return;
-          putTotal(Number(suggest?.count) || 0);
-          if (state.applied) saveEntry(state);
-        })
-        .catch(() => {});
     }
     return cleanup;
   });
@@ -502,10 +496,13 @@ export default function Search() {
 
   async function loadMore() {
     const state = run;
-    if (!state || state.cancelled || busyNow || state.req.tab === 'users' || untrack(setAware)) return;
+    const aware = untrack(setAware);
+    if (!state || state.cancelled || busyNow || state.req.tab === 'users' || (aware && state.req.tab !== 'singles')) return;
     const { query, tab: kind, lang, print } = state.req;
     const printFiltered = Boolean(print && print !== 'all');
-    const page = (offset) => fetchSearch({ query, offset, limit: PAGE, lang, printLang: print, ...searchFetchOptions(kind) });
+    const queryParts = untrack(parsed);
+    const head = aware ? () => rankModule().fetchSetAwareCards(queryParts, { fetchSearch, lang }) : undefined;
+    const page = (offset) => fetchSearchRecall({ query, offset, limit: PAGE, lang, printLang: print, ...searchFetchOptions(kind), head });
     putBusy(true);
     try {
       const data = await page(apiOffset);

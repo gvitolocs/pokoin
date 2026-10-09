@@ -1,5 +1,5 @@
 import { createSignal, untrack } from 'solid-js';
-import { fetchSearch } from '@market/api.js';
+import { fetchSearchRecall } from '@market/search-recall.js';
 import { isPokemonGame } from '@market/game.js';
 import { prefetchSearchPage } from '@market/search-hot.js';
 import { normalizeSearchTab } from '@market/search-kind.js';
@@ -87,7 +87,7 @@ export function preloadSearch({ location }) {
   if (req.query.length < 2) return;
   if (peekEntryData(`${location.pathname}${location.search}`)) return;
   prefetchSearchPage(req.query, req.lang, {
-    fetchSearchPage: fetchSearch,
+    fetchSearchPage: fetchSearchRecall,
     tab: req.tab,
     printLang: req.printLang,
   }).catch(() => {});

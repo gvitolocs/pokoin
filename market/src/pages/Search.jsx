@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router-dom';
-import { fetchSearch, fetchSellerSearchWithAssociates, fetchSuggest } from '../api.js';
+import { fetchSearch, fetchSellerSearchWithAssociates } from '../api.js';
+import { fetchSearchRecall } from '../search-recall.js';
 import { isPokemonGame } from '../game.js';
 import { takeHotSearchPage } from '../search-hot.js';
 import {
@@ -164,7 +165,7 @@ export default function Search() {
         apiOffset.current = raw.length;
       }
       setCards(next);
-      setHasMore(setAware || tab === 'users' ? false : Boolean(data?.hasMore));
+      setHasMore((setAware && tab !== 'singles') || tab === 'users' ? false : Boolean(data?.hasMore));
       setError('');
       // The total travels with the results: totalHits is either the hot
       // payload's total or this response's own total — the same predicate
@@ -219,7 +220,7 @@ export default function Search() {
       };
     }
     function fetchPage(offset) {
-      return fetchSearch({ query: fetchQuery, offset, limit: 48, lang, ...fetchOpts });
+      return fetchSearchRecall({ query: fetchQuery, offset, limit: 48, lang, ...fetchOpts });
     }
     function deliver(data, totalHits, retried = false) {
       if (cancelled) {
@@ -259,32 +260,25 @@ export default function Search() {
       setLoading(true);
       setCards([]);
       setTotal(hot?.count || 0);
-      const pending = setAware
+      // Singles: the resolved set's rows lead, then the popup's recall union
+      // (search-recall.js), so "View all N" lists the N printings it counted.
+      const setOnly = setAware && tab !== 'singles';
+      const pending = setOnly
         ? fetchSetAwareCards(parsed, { fetchSearch, lang }).then((rows) => ({
           cards: rows,
           hasMore: false,
         }))
-        : (hot?.promise || fetchPage(0));
+        : setAware
+          ? fetchSearchRecall({ query: fetchQuery, offset: 0, limit: 48, lang, ...fetchOpts, head: () => fetchSetAwareCards(parsed, { fetchSearch, lang }) })
+          : (hot?.promise || fetchPage(0));
       pending
-        .then((data) => deliver(data, setAware ? data?.cards?.length : (payloadTotal(data) ?? hot?.count)))
+        .then((data) => deliver(data, setOnly ? data?.cards?.length : (payloadTotal(data) ?? hot?.count)))
         .catch((err) => {
           if (!cancelled) {
             setError(err.message || 'Search failed.');
             setLoading(false);
           }
         });
-    }
-    if (!printFiltered && !setAware && tab === 'singles' && fetchQuery.length >= 2 && !(hot?.count > 0)) {
-      // No search-page total for this universe yet (singles rides the Meili
-      // candidates window) and no cached count: keep the suggest estimate so
-      // the results page still shows a query-scoped number.
-      fetchSuggest(fetchQuery, { limit: 1, lang, printLang: activePrintLang })
-        .then((suggest) => {
-          if (!cancelled) {
-            setTotal(Number(suggest?.count) || 0);
-          }
-        })
-        .catch(() => {});
     }
     return () => {
       cancelled = true;
@@ -328,11 +322,13 @@ export default function Search() {
   }
 
   async function loadMore() {
-    if (setAware || tab === 'users') {
+    if ((setAware && tab !== 'singles') || tab === 'users') {
       return;
     }
     const printFiltered = Boolean(activePrintLang && activePrintLang !== 'all');
-    const data = await fetchSearch({
+    const head = setAware ? () => fetchSetAwareCards(parsed, { fetchSearch, lang }) : undefined;
+    const data = await fetchSearchRecall({
+      head,
       query,
       offset: apiOffset.current,
       limit: 48,
@@ -348,7 +344,8 @@ export default function Search() {
       const rest = await loadSearchPrintPage({
         printLang: activePrintLang,
         offset: apiOffset.current,
-        fetchPage: (offset) => fetchSearch({
+        fetchPage: (offset) => fetchSearchRecall({
+          head,
           query,
           offset,
           limit: 48,

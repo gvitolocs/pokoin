@@ -37,6 +37,7 @@ import {
   collectPrintingThumbUrls,
   preloadSuggestThumbs,
 } from '../suggest-images.js';
+import { fetchSearchRecall } from '../search-recall.js';
 import { prefetchSearchPage } from '../search-hot.js';
 import { warmupSearchUniverse } from '../search-warmup.js';
 import { SelectBandProvider } from '../select-band.jsx';
@@ -422,6 +423,7 @@ export default function Chrome({ children }) {
   const [groups, setGroups] = useState([]);
   const [liveTick, setLiveTick] = useState(0);
   const [hitCount, setHitCount] = useState(0);
+  const countedQuery = useRef('');
   const [pending, setPending] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const box = useRef(null);
@@ -479,8 +481,10 @@ export default function Chrome({ children }) {
     kind: catalogTab,
     enabled: isPokemonGame() && searchTab !== 'users',
     limit: 20,
+    // A placeholder until the search-page total for this query lands below:
+    // "View all N" must equal the rows the results page then lists.
     onPage: (data) => {
-      setHitCount(Number(data?.count) || 0);
+      if (countedQuery.current !== query.trim()) setHitCount(Number(data?.count) || 0);
     },
   });
   const suggestPending = isPokemonGame() && searchTab !== 'users' ? (progressive.pending || !engine) : pending;
@@ -551,7 +555,7 @@ export default function Chrome({ children }) {
       lang,
       printLang,
       query: typed,
-      fetchSearchPage: fetchSearch,
+      fetchSearchPage: fetchSearchRecall,
       force: Boolean(typed),
       remember: Boolean(peekSuggestEngine()),
     });
@@ -617,7 +621,7 @@ export default function Chrome({ children }) {
     const printUsed = printLang;
     let cancelled = false;
     prefetchSearchPage(text, lang, {
-      fetchSearchPage: fetchSearch,
+      fetchSearchPage: fetchSearchRecall,
       tab: tabUsed,
       printLang: printUsed,
     })
@@ -634,6 +638,7 @@ export default function Chrome({ children }) {
         }
         const total = Number(payload?.total);
         if (Number.isFinite(total) && total > 0) {
+          countedQuery.current = text;
           setHitCount(total);
         }
       })
@@ -791,7 +796,7 @@ export default function Chrome({ children }) {
           setHitCount(data.count);
           setActiveIndex(-1);
           prefetchSearchPage(data.resolvedQuery, lang, {
-            fetchSearchPage: fetchSearch,
+            fetchSearchPage: fetchSearchRecall,
             signal: controller.signal,
             tab: searchTabRef.current,
             printLang: 'all',
@@ -934,7 +939,7 @@ export default function Chrome({ children }) {
     setMenu(false);
     if (next) {
       prefetchSearchPage(next, lang, {
-        fetchSearchPage: fetchSearch,
+        fetchSearchPage: fetchSearchRecall,
         tab: searchTab,
         printLang,
       });
