@@ -6,6 +6,7 @@ pub mod shared;
 pub mod pages;
 pub mod reads;
 pub mod market;
+pub mod sales;
 
 use pokoin_api_common::RouteState;
 
@@ -15,5 +16,6 @@ pub fn router(state: RouteState) -> axum::Router {
         .merge(pages::routes())
         .merge(reads::routes())
         .merge(market::routes())
+        .merge(sales::routes())
         .with_state(state)
 }

@@ -13,6 +13,7 @@ axum = { workspace = true }
 base64 = "0.22"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+fancy-regex = "0.14"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hex = { workspace = true }
 hmac = "0.12"
@@ -24,6 +25,7 @@ regex = "1"
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_urlencoded = "0.7"
 sha1 = "0.10"
 sha2 = { workspace = true }
 sqlx = { workspace = true, features = ["json", "chrono", "uuid", "bigdecimal"] }

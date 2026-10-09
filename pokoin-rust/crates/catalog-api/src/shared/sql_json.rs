@@ -19,32 +19,23 @@ pub(crate) enum SqlBind {
     BigIntArray(Vec<i64>),
 }
 
-/// Execute `sql` (verbatim) and return one JSON object per row.
+/// Execute `sql` (verbatim) and return one JSON object per row, typed the way
+/// node-pg typed `result.rows` (int8/numeric strings, ISO dates, parsed json).
 pub(crate) async fn rows_json(
     pool: &PgPool,
     sql: &str,
     binds: &[SqlBind],
 ) -> Result<Vec<Value>, sqlx::Error> {
-    let wrapped = format!("select to_jsonb(q) as row from ({sql}) q");
-    let mut query = sqlx::query(&wrapped);
-    for bind in binds {
-        query = match bind {
-            SqlBind::Text(value) => query.bind(value.as_str()),
-            SqlBind::Int(value) => query.bind(*value),
-            SqlBind::TextArray(value) => query.bind(value.as_slice()),
-            SqlBind::BigIntArray(value) => query.bind(value.as_slice()),
-        };
-    }
-    let rows = query.fetch_all(pool).await?;
-    let mut values = Vec::with_capacity(rows.len());
-    for row in &rows {
-        // pg handed every jsonb number to JS as a double; mirror that round
-        // trip so `22.0` serializes as `22` exactly like the reference.
-        values.push(crate::shared::js::js_normalize(
-            &row.try_get::<Value, _>("row")?,
-        ));
-    }
-    Ok(values)
+    let binds: Vec<pokoin_api_common::pg::Bind> = binds
+        .iter()
+        .map(|bind| match bind {
+            SqlBind::Text(value) => pokoin_api_common::pg::Bind::Text(value.clone()),
+            SqlBind::Int(value) => pokoin_api_common::pg::Bind::Int(*value),
+            SqlBind::TextArray(value) => pokoin_api_common::pg::Bind::TextArray(value.clone()),
+            SqlBind::BigIntArray(value) => pokoin_api_common::pg::Bind::BigIntArray(value.clone()),
+        })
+        .collect();
+    pokoin_api_common::pg::pool_rows(pool, sql, &binds).await
 }
 
 /// Execute `sql` and return the first row, if any.

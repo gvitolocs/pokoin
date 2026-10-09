@@ -283,7 +283,7 @@ async fn build_full_router(state: AppState) -> Router {
         Some(url) => tokio::time::timeout(Duration::from_secs(2), connect_redis(url)).await.ok().and_then(Result::ok),
         None => None,
     };
-    let (commerce, external, catalog_routes) = match read_url {
+    let (commerce, external) = match read_url {
         Some(read_url) => {
             let write_url = std::env::var("MARKETPLACE_WRITER_DATABASE_URL")
                 .unwrap_or_else(|_| read_url.clone());
@@ -311,26 +311,18 @@ async fn build_full_router(state: AppState) -> Router {
                             external_fallback_router()
                         }
                     };
-                    (commerce, external, pokoin_catalog_routes::router(read_db))
+                    (commerce, external)
                 }
                 (Err(error), _) | (_, Err(error)) => {
                     tracing::error!(domain = "commerce", %error, "domain disabled");
-                    (
-                        commerce_fallback_router(),
-                        external_fallback_router(),
-                        catalog_fallback_router(),
-                    )
+                    (commerce_fallback_router(), external_fallback_router())
                 }
             }
         }
         None => {
             let error = "MARKETPLACE_DATABASE_URL is not configured";
             tracing::error!(domain = "commerce", %error, "domain disabled");
-            (
-                commerce_fallback_router(),
-                external_fallback_router(),
-                catalog_fallback_router(),
-            )
+            (commerce_fallback_router(), external_fallback_router())
         }
     };
 
@@ -353,7 +345,6 @@ async fn build_full_router(state: AppState) -> Router {
         .merge(accounts)
         .merge(commerce)
         .merge(external)
-        .merge(catalog_routes)
         .merge(system::router(state.clone()))
         .fallback(system::not_found)
         .layer(axum::extract::DefaultBodyLimit::max(
@@ -533,14 +524,6 @@ fn commerce_fallback_router() -> Router {
     ])
 }
 
-fn catalog_fallback_router() -> Router {
-    fallback_router(&[
-        "/api/marketplace-card-sales",
-        "/api/marketplace-card-cheapest-price",
-        "/api/marketplace-card-price-history",
-    ])
-}
-
 async fn domain_unavailable() -> axum::response::Response {
     let mut response = (
         StatusCode::SERVICE_UNAVAILABLE,
@@ -573,7 +556,6 @@ mod tests {
             None,
         ));
         let external = pokoin_external::router(pokoin_external::DomainState::for_test());
-        let catalog = pokoin_catalog_routes::router(read);
         let _app = router(AppState {
             config: Config::from_env(),
             db: Arc::new(RwLock::new(None)),
@@ -592,6 +574,6 @@ mod tests {
         ))
         .merge(commerce)
         .merge(external)
-        .merge(catalog);
+        ;
     }
 }

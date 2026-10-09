@@ -56,19 +56,20 @@ pub async fn rows_for_expansions(
     slug: Option<&str>,
     limit: i64,
 ) -> Result<Vec<Value>, sqlx::Error> {
-    let mut values: Vec<String> = Vec::new();
+    let mut values: Vec<super::sql_json::SqlBind> = Vec::new();
     let mut where_clause = "where versions.expansion_name is not null and versions.expansion_name <> '' and versions.product_type = 'card'".to_string();
     let slug_value = slug.map(|s| Value::String(s.to_string()));
     let normalized_slug = clean_text(slug_value.as_ref(), 180);
     if !normalized_slug.is_empty() {
-        values.push(normalized_slug);
+        values.push(super::sql_json::SqlBind::Text(normalized_slug));
         where_clause += &format!(
             " and {} = ${}",
             super::react_sql::expansion_slug_sql("versions.expansion_name"),
             values.len()
         );
     }
-    values.push(clean_limit(limit).to_string());
+    // node-pg sent the limit untyped; sqlx binds it as bigint for `limit $n`.
+    values.push(super::sql_json::SqlBind::Int(clean_limit(limit)));
 
     let rep_col = normalized_collector_number_sql("versions.expansion_number");
     let sql = format!(
@@ -111,11 +112,7 @@ pub async fn rows_for_expansions(
         values.len()
     );
 
-    let binds: Vec<super::sql_json::SqlBind> = values
-        .iter()
-        .map(|value| super::sql_json::SqlBind::Text(value.clone()))
-        .collect();
-    let rows = super::sql_json::rows_json(pool, &sql, &binds).await?;
+    let rows = super::sql_json::rows_json(pool, &sql, &values).await?;
 
     Ok(rows
         .iter()

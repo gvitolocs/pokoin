@@ -41,7 +41,6 @@ pokoin-catalog = { path = "../../crates/catalog" }
 pokoin-accounts = { path = "../../crates/accounts" }
 pokoin-commerce = { path = "../../crates/commerce" }
 pokoin-external = { path = "../../crates/external" }
-pokoin-catalog-routes = { path = "../../crates/catalog-routes" }
 
 sha2 = { workspace = true }
 hex = { workspace = true }
