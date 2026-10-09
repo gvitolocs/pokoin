@@ -183,7 +183,12 @@ export default function Search() {
   let apiOffset = seed?.apiOffset || 0;
   let run = null;
   let lastHref = null;
-  let moreBusy = false;
+  const [moreBusy, setMoreBusy] = createSignal(false);
+  let busyNow = false;
+  const putBusy = (value) => {
+    busyNow = value;
+    setMoreBusy(value);
+  };
   let stopRestore = () => {};
 
   function putCards(next) {
@@ -267,7 +272,7 @@ export default function Search() {
     const state = { cancelled: false, href: current, req };
     run = state;
     apiOffset = 0;
-    moreBusy = false;
+    putBusy(false);
     const pop = navigated && isPopArrival(current);
     const restored = firstRun ? arrival.view : (pop ? restoredView(current) : null);
     putFilters({
@@ -497,11 +502,11 @@ export default function Search() {
 
   async function loadMore() {
     const state = run;
-    if (!state || state.cancelled || moreBusy || state.req.tab === 'users' || untrack(setAware)) return;
+    if (!state || state.cancelled || busyNow || state.req.tab === 'users' || untrack(setAware)) return;
     const { query, tab: kind, lang, print } = state.req;
     const printFiltered = Boolean(print && print !== 'all');
     const page = (offset) => fetchSearch({ query, offset, limit: PAGE, lang, printLang: print, ...searchFetchOptions(kind) });
-    moreBusy = true;
+    putBusy(true);
     try {
       const data = await page(apiOffset);
       if (state.cancelled) return;
@@ -530,7 +535,7 @@ export default function Search() {
     } catch (err) {
       if (!state.cancelled) setError(err?.message || 'Search failed.');
     } finally {
-      if (run === state) moreBusy = false;
+      if (run === state) putBusy(false);
     }
   }
 
@@ -652,7 +657,9 @@ export default function Search() {
         </Match>
       </Switch>
       <Show when={hasMore() && tab() !== 'users'}>
-        <button class="more" type="button" onClick={loadMore}>Load more</button>
+        {/* A tap while a page is in flight is ignored (React fetched the same
+            offset twice); the label stays React's. */}
+        <button class="more" type="button" onClick={loadMore} aria-busy={moreBusy() ? 'true' : undefined}>Load more</button>
       </Show>
     </div>
   );
