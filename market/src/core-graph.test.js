@@ -27,6 +27,14 @@ const ROOTS = [
   'pkn.js',
   'set-logos.js',
   'art-shade.js',
+  'scroll-memory.js',
+  'search-hot.js',
+  'search-kind.js',
+  'search-filters.js',
+  'search-print.js',
+  'suggest-resolve.js',
+  'listing-meta.js',
+  'associate-roles.js',
 ];
 
 const FORBIDDEN_PACKAGES = new Set([
