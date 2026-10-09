@@ -4,3 +4,4 @@ results/*.json
 # Playwright storageState files hold session cookies: never commit them.
 auth*.json
 *.storage.json
+results/*/
