@@ -29,9 +29,7 @@ import { prefersArtworkDelta, rarityRowTheme } from '../rarity-theme.js';
 import { pickSuggestHoverSrc, sameSuggestHoverBox, suggestHoverAllowed, suggestHoverBox } from '../suggest-hover.js';
 import { compactQuery } from '../suggest-rank.js';
 import { useProgressiveSuggest } from '../use-progressive-suggest.js';
-import { warmupSuggestRankWorkers } from '../suggest-rank-runtime.js';
-import { useSuggestFlip } from '../suggest-flip.js';
-import { useSuggestTitleFit } from '../suggest-title-fit.js';
+import { useSuggestFlip, useSuggestTitleFit } from '../suggest-hooks.js';
 import {
   cachedPrintings,
   isLiveStub,
@@ -547,10 +545,6 @@ export default function Chrome({ children }) {
       }
     }
   }, [visibleGroups]);
-
-  useEffect(() => {
-    warmupSuggestRankWorkers();
-  }, []);
 
   // Language / print-family changes must refresh an already-typed query in that
   // universe immediately (no waiting for another keystroke). Empty query still

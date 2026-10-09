@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import test from 'node:test';
+import { publicApiUrl } from './extension-auth-bridge.js';
 import { GAMES, gameRequestHeaders, withGameQuery } from './game.js';
 
 const source = readFileSync(new URL('../public/card-url-boot.js', import.meta.url), 'utf8');
@@ -37,6 +38,8 @@ function appCardRequest(pathname, hostname) {
 
 function assertSameRequest(pathname, hostname) {
   const expected = appCardRequest(pathname, hostname);
+  // The desk fetches publicApiUrl(path); the boot script fetches API_ORIGIN + path.
+  assert.equal(`https://api.pokoin.com${expected.plan.pageUrl}`, publicApiUrl(expected.pageUrl), pathname);
   assert.equal(expected.plan.pageUrl, expected.pageUrl, pathname);
   assert.equal(expected.plan.urlUrl, expected.urlUrl, pathname);
   // Headers are created inside the boot script's vm; copy them into this realm.
@@ -148,19 +151,19 @@ test('a card URL starts exactly one card-page prefetch and one canonical prefetc
     },
   });
   runInContext(source, context);
-  const pages = calls.filter((call) => String(call.url).startsWith('/api/marketplace-card-page?'));
-  const urls = calls.filter((call) => String(call.url).startsWith('/api/marketplace-card-url?'));
+  const pages = calls.filter((call) => String(call.url).startsWith(publicApiUrl('/api/marketplace-card-page?')));
+  const urls = calls.filter((call) => String(call.url).startsWith(publicApiUrl('/api/marketplace-card-url?')));
   assert.equal(calls.length, 2);
   assert.equal(pages.length, 1);
   assert.equal(urls.length, 1);
   assert.equal(
     pages[0].url,
-    '/api/marketplace-card-page?cardId=598560&lang=en&slug=luffy&game=one_piece',
+    publicApiUrl('/api/marketplace-card-page?cardId=598560&lang=en&slug=luffy&game=one_piece'),
   );
   assert.equal(pages[0].headers['x-pokoin-game'], 'one_piece');
   assert.equal(
     urls[0].url,
-    '/api/marketplace-card-url?cardId=598560&language=en&game=one_piece',
+    publicApiUrl('/api/marketplace-card-url?cardId=598560&language=en&game=one_piece'),
   );
 
   const pokemon = [];
@@ -185,7 +188,7 @@ test('a card URL starts exactly one card-page prefetch and one canonical prefetc
   );
   assert.equal(
     pokemon.find((call) => call.url.includes('marketplace-card-page')).url,
-    '/api/marketplace-card-page?cardId=342436&lang=en&slug=card-charizard',
+    publicApiUrl('/api/marketplace-card-page?cardId=342436&lang=en&slug=card-charizard'),
   );
   assert.equal(pokemon[0].headers['x-pokoin-game'], undefined);
 

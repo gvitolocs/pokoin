@@ -91,11 +91,16 @@ function cardBootPlan(pathname, hostname) {
   };
 }
 
+// The SPA calls api.pokoin.com (extension-auth-bridge.js PUBLIC_API_ORIGIN), not
+// same-origin /api: prefetch that exact URL so the desk read is a browser-cache
+// hit (card-page max-age=10) instead of a second request through the Worker.
+var API_ORIGIN = "https://api.pokoin.com";
+
 function startCardUrlBoot() {
   if (typeof location === "undefined" || typeof fetch !== "function") return;
   var plan = cardBootPlan(location.pathname, location.hostname);
   if (!plan) return;
-  fetch(plan.urlUrl, {
+  fetch(API_ORIGIN + plan.urlUrl, {
     headers: plan.headers
   }).then(function (res) {
     return res.ok ? res.json() : null;
@@ -110,7 +115,7 @@ function startCardUrlBoot() {
   // One card-page prefetch. The desk's fetchCard uses this same URL and
   // the same game headers, so the edge serves that response instead of
   // building the page again.
-  fetch(plan.pageUrl, {
+  fetch(API_ORIGIN + plan.pageUrl, {
     headers: plan.headers
   }).catch(function () {});
 }
