@@ -1,0 +1,12 @@
+[Unit]
+Description=Pokoin native job eur-orders-sweep (EUR Stripe order sweep)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=20s
+Persistent=true
+Unit=pokoin-rust-job@eur-orders-sweep.service
+
+[Install]
+WantedBy=timers.target

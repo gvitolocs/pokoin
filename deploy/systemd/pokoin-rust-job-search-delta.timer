@@ -1,0 +1,12 @@
+[Unit]
+Description=Pokoin native job search-delta (Redis Search catalog delta)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+RandomizedDelaySec=20s
+Persistent=true
+Unit=pokoin-rust-job@search-delta.service
+
+[Install]
+WantedBy=timers.target

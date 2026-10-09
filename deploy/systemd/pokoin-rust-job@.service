@@ -1,0 +1,16 @@
+[Unit]
+Description=Pokoin native job %i
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=nes
+Group=nes
+EnvironmentFile=-/srv/pokoin/rust/pokoin-api.env
+Environment=RUST_LOG=info
+# The lock lives as long as the native job process: runs never overlap.
+ExecStart=/usr/bin/flock -n /run/lock/pokoin-rust-job-%i.lock /srv/pokoin/rust/current job %i
+Nice=10
+TimeoutStartSec=20min
+MemoryMax=300M
+NoNewPrivileges=true

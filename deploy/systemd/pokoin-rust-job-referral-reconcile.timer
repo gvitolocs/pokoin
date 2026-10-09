@@ -1,0 +1,12 @@
+[Unit]
+Description=Pokoin native job referral-reconcile (Invite & Earn safety net)
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=10min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=pokoin-rust-job@referral-reconcile.service
+
+[Install]
+WantedBy=timers.target
