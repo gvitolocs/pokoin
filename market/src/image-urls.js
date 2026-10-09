@@ -218,6 +218,33 @@ export function homepageDerivativeUrl(value) {
   return full.replace(/\.(jpe?g|png|webp)(\?|$)/i, '_homepage.webp$2');
 }
 
+/** Live pokoin.com zone Redirect Rule turns `/card-images/*` into a 301 to
+ * `cdn.pokoin.com`. Point `<img>` / fetch at the CDN host directly so refresh
+ * does not pay one redirect RTT per tile. */
+export const CDN_ORIGIN = 'https://cdn.pokoin.com';
+
+export function cdnFetchUrl(value) {
+  const text = String(value || '').trim();
+  if (!text || text.startsWith('data:') || text.startsWith('blob:')) {
+    return text;
+  }
+  try {
+    const url = new URL(text, 'https://pokoin.com');
+    if (url.hostname === 'cdn.pokoin.com') {
+      return `${CDN_ORIGIN}${url.pathname}${url.search}`;
+    }
+    if (url.pathname.startsWith('/card-images/')) {
+      return `${CDN_ORIGIN}${url.pathname.slice('/card-images'.length)}${url.search}`;
+    }
+  } catch (_) {
+    /* fall through */
+  }
+  if (text.startsWith('/card-images/')) {
+    return `${CDN_ORIGIN}${text.slice('/card-images'.length)}`;
+  }
+  return text;
+}
+
 export function rewritePublicImage(value, { allowPreview = false } = {}) {
   const text = String(value || '').trim();
   if (!text) {

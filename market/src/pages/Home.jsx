@@ -339,12 +339,18 @@ export default function Home() {
       {error ? <p className="status error">{error}</p> : null}
       {site.features.promoCarousel ? <PromoCarousel /> : null}
 
-      <Carousel title="Recently seen" cards={sections.recentlySeen} placeholders={recentPlaceholders} />
+      <Carousel
+        title="Recently seen"
+        cards={sections.recentlySeen}
+        placeholders={recentPlaceholders}
+        eagerLimit={6}
+      />
       <Carousel
         title="New cards"
         cards={sections.newCards}
         href={newSet ? `/marketplace/sets/${setSlug(newSet)}` : undefined}
         placeholders={loading ? 8 : 0}
+        eagerLimit={8}
       />
       <Carousel title="Best sellers" cards={sections.bestSellers} placeholders={loading ? 8 : 0} />
       <Carousel title="Spotlight" cards={sections.featured} placeholders={loading ? 8 : 0} />
@@ -367,7 +373,7 @@ export default function Home() {
           {gridLoading
             ? Array.from({ length: gridPlaceholders }, (_, index) => <SkeletonTile key={index} />)
             : gridCards.map((card, index) => (
-                <CardTile key={card.id} card={card} rank={index} />
+                <CardTile key={card.id} card={card} rank={index} eagerLimit={0} />
               ))}
         </CardSelectGrid>
         {englishBrowse && browseHasMore ? (

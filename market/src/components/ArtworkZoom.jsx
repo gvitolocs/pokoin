@@ -1,5 +1,5 @@
 import { artCutVars } from '../art-cut.js';
-import { homepageDerivativeUrl, preferFullImage } from '../image-urls.js';
+import { cdnFetchUrl, homepageDerivativeUrl, preferFullImage } from '../image-urls.js';
 import ThumbZoom from './ThumbZoom.jsx';
 
 /**
@@ -14,14 +14,14 @@ export default function ArtworkZoom({ src, name = '', set = '', alt = '' }) {
     <ThumbZoom src={full} full alt={alt || name}>
       <span className="art-cut" style={artCutVars({ name, set, expansion: set }, 'album')}>
         <img
-          src={thumb}
+          src={cdnFetchUrl(thumb)}
           alt=""
           draggable={false}
           onError={(event) => {
             const img = event.currentTarget;
             if (!img || img.dataset.fallback) return;
             img.dataset.fallback = '1';
-            img.src = full;
+            img.src = cdnFetchUrl(full);
           }}
         />
       </span>

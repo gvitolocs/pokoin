@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { artCutVars } from '../art-cut.js';
 import { artworkFigureMaskSrc } from '../art-figure-mask.js';
 import { cardReference, writeListingDrag } from '../chat-listing.js';
-import { rasterSiblings } from '../image-urls.js';
+import { cdnFetchUrl, rasterSiblings } from '../image-urls.js';
 import { isCardTraderPlaceholderSize, MISSING_CARD_SRC } from '../missing-card.js';
 
 function artDebugEnabled() {
@@ -41,7 +41,10 @@ export default function CardArt({
   onError,
   dragCard,
 }) {
-  const urls = useMemo(() => rasterSiblings(src, { full }), [src, full]);
+  const urls = useMemo(
+    () => rasterSiblings(src, { full }).map(cdnFetchUrl).filter(Boolean),
+    [src, full],
+  );
   const [index, setIndex] = useState(0);
   const [dead, setDead] = useState(false);
   const imgRef = useRef(null);
@@ -206,7 +209,7 @@ export default function CardArt({
         <>
           <img
             className="art-figure-layer art-figure-shadow"
-            src={figureMask}
+            src={cdnFetchUrl(figureMask)}
             alt=""
             aria-hidden="true"
             loading="lazy"
@@ -219,7 +222,7 @@ export default function CardArt({
             aria-hidden="true"
             loading="lazy"
             decoding="async"
-            style={{ '--art-figure-mask': `url("${figureMask}")` }}
+            style={{ '--art-figure-mask': `url("${cdnFetchUrl(figureMask)}")` }}
           />
         </>
       ) : null}

@@ -28,7 +28,7 @@ export function SkeletonTile({ layout = 'grid', album = false }) {
   );
 }
 
-export default function Carousel({ title, subtitle, cards, href, placeholders = 0 }) {
+export default function Carousel({ title, subtitle, cards, href, placeholders = 0, eagerLimit = 0 }) {
   const scroller = useRef(null);
   const ready = Boolean(cards?.length);
 
@@ -59,7 +59,7 @@ export default function Carousel({ title, subtitle, cards, href, placeholders = 
           <CardSelectGrid className="carousel-track" cards={ready ? cards : []}>
             {ready
               ? cards.map((card, index) => (
-                  <CardTile key={card.id} card={card} rank={index} />
+                  <CardTile key={card.id} card={card} rank={index} eagerLimit={eagerLimit} />
                 ))
               : Array.from({ length: placeholders }, (_, index) => (
                   <SkeletonTile key={index} />
