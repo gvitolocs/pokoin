@@ -90,6 +90,28 @@ three builds served the same way and calling the live `api.pokoin.com`.
   per-printing card/thumb cache. Era matching (`matchTcgEra`) is memoised for
   both UIs.
 
+## Run ab7nav — 2026-10-09 20:18–20:19 UTC (card click, after the desk fixes)
+
+- Card journey: home → 8 tile clicks → desk → back, mobile profile (390×844, CPU ×4),
+  3 interleaved rounds per build, React = optimised React, Solid = feature/frontend-perf 3447554.
+- Before the fixes (ab6nav, same journey): Solid INP 152 ms p50, presentation 111 ms —
+  Router 2 navigated inside the click, so the click waited for the whole desk render.
+
+| metric | optimised React p50 / p95 | Solid p50 / p95 |
+|---|---|---|
+| inp | 64 / 78.4 | 56 / 56 |
+| nav.toHeadingMs | 128 / 250 | 136 / 229 |
+| nav.toImageMs | 164 / 305 | 178 / 270 |
+| nav.toUrlMs | 44.1 / 51.8 | 136 / 229 |
+| nav.backMs | 142 / 162 | 154 / 209 |
+| lt.blockingMs | 689 / 691 | 802 / 1102 |
+| mem.heapPeakMB | 49.5 / 56.1 | 39 / 40.6 |
+
+- `nav.toUrlMs` is router behaviour: Router 2 commits the URL with the new page.
+- `dom.nodes` (Performance.getMetrics) is inflated by Playwright element handles in both
+  builds: a forced-GC heap trace showed unmounted pages retained only by DevTools handles,
+  so it is not reported here.
+
 ## Run ab2 — 2026-10-09 19:08–19:11 UTC (typing only, after the Solid fixes)
 
 - Builds: optimised React = feature/frontend-perf market/ (before the hot-path

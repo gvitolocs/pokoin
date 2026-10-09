@@ -35,9 +35,9 @@ Read `node_modules/solid-js/CHEATSHEET.md` before writing Solid code. The
 
 ## Phase C/D — Solid 2 app (`solid/`), critical path first
 - [x] C1 Scaffold: Vite 8 + Solid 2 rc.14 + router 2, shares `market/src` via `@market`, React guard, chunks in `/market/s/`.
-- [x] C2 Coexistence switch (`scripts/build-ui-shell.mjs`, off unless `POKOIN_UI_SWITCH=1`; canary `POKOIN_UI_CANARY`; CSP hash; e2e verified).
+- [x] C2 Coexistence switch (`scripts/build-ui-shell.mjs`; on/off and canary in `solid/owned-routes.json`, env `POKOIN_UI_SWITCH` / `POKOIN_UI_CANARY` override locally; CSP hash; e2e verified).
 - [x] D1 header + typeahead (parity 10/10 queries), D2 Home rails.
-- [ ] D1/D2 parity extras, D3 Search, D4 Card desk + versions: cloud sessions (`cloud/solid-chrome-home`, `cloud/solid-search`, `cloud/solid-card-desk`), to merge.
+- [x] D3 Search, D4 Card desk + versions merged; smoke parity with React on home, search (singles + product), desk, slugless desk, versions.
 - [ ] D5 Sets/Expansion/Era/hubs, then collections/listings/cart/checkout/profile.
 
 ## Phase E — local-first search
@@ -49,7 +49,15 @@ Read `node_modules/solid-js/CHEATSHEET.md` before writing Solid code. The
 
 ## Phase G/H — parity, regression, rollout
 - [ ] Playwright parity tests React vs Solid on the migrated routes.
-- [ ] Release gates + canary + rollback (Cloudflare versions; React entry stays default).
+- [x] Stage 1 rollout: switch shipped with canary 0 — React stays the default; Solid owns home, search, card desk, versions for visitors who opt in.
+- [ ] Stage 2: raise `canary` in `solid/owned-routes.json` (e.g. 5 → 25 → 100) after Stage 1 is verified live.
+
+### Rollout and rollback
+- Opt in: any owned URL with `?ui=solid` (sticky in localStorage `pokoin.ui`); opt out with `?ui=react`.
+- Canary: `canary` (percent) in `solid/owned-routes.json`; visitors are sampled once and remembered.
+- Kill switch: set `canary` back to 0 and deploy — sampled visitors return to React, explicit opt-ins stay.
+  Full off: `"enabled": false` (the shell is then exactly the React build). Fastest: `wrangler versions deploy <previous>@100%`.
+- Solid hands any route it does not own back to React at the same URL (sessionStorage `pokoin.ui.once=react`).
 
 ## Measurement notes
 - nezopt is shared (load avg 4–16, swap full on 2026-10-09): use CPU-time metrics
