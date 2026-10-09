@@ -46,7 +46,7 @@ impl Config {
             db_pool_max: std::env::var("POKOIN_RUST_DB_POOL_MAX")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(4),
+                .unwrap_or(16),
         }
     }
 }

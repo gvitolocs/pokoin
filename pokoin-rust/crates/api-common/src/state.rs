@@ -63,7 +63,7 @@ impl ApiState {
         let pool_max = std::env::var("POKOIN_RUST_DOMAIN_DB_POOL_MAX")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(6);
+            .unwrap_or(12);
         let read_url = env_first(&["MARKETPLACE_DATABASE_URL", "DATABASE_URL"])
             .ok_or_else(|| "MARKETPLACE_DATABASE_URL is not set".to_owned())?;
         let write_url = env_first(&["MARKETPLACE_WRITER_DATABASE_URL"]).unwrap_or_else(|| read_url.clone());
