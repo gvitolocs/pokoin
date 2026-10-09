@@ -42,6 +42,8 @@ pub async fn handler(
 
 async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
     let q = Query::from_uri(&uri);
+    // Opt-in compact encoding; the default representation is unchanged.
+    let wanted = support::wanted(&headers, &q);
     let game = support::resolve_game(&headers, q.first("game"), q.first("marketplaceGame"));
     let is_pokemon = pokoin_api_common::game::is_pokemon_game(&game);
     let pool = match support::game_pool(&state, &game).await {
@@ -97,7 +99,8 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
                 return support::node_error_response(&error, "Marketplace expansion page failed.")
             }
         };
-        return support::json_with_cache_control(
+        return support::json_with_cache_control_c1(
+            wanted,
             StatusCode::OK,
             no_slug_body(expansions, &game, limit),
             "public, max-age=60, s-maxage=300",
@@ -215,7 +218,8 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
     } else {
         fetched.len() as i64 > offset + limit
     };
-    support::json_with_cache_control(
+    support::json_with_cache_control_c1(
+        wanted,
         StatusCode::OK,
         success_body(
             expansion,

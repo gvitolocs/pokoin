@@ -4,8 +4,10 @@
 //! a shared Redis connection and per-game catalog pools. `http` mirrors the
 //! request/response conventions of the retired Node runtime
 //! (`server/oracle-api-server.js`): query maps, body decoding, JSON responses.
-//! `public_error` is the port of `api/_public_error.js`.
+//! `public_error` is the port of `api/_public_error.js`. `compact` is the
+//! opt-in `c1` response encoding and the append-only code dictionary behind it.
 
+pub mod compact;
 pub mod game;
 pub mod http;
 pub mod limits;

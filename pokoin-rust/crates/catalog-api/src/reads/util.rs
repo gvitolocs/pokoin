@@ -1,8 +1,8 @@
 //! Handler plumbing of the catalog read routes (Node `res.status().json()` shapes).
 
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use pokoin_api_common::http;
+use pokoin_api_common::{compact, http};
 use serde_json::{json, Value};
 
 /// `Math.min(Math.max(Math.trunc(Number(value)), 1), max)` with `NaN -> fallback`.
@@ -37,6 +37,29 @@ pub fn json_cache(status: StatusCode, body: Value, cache_control: &str) -> Respo
         return http::json(status, body);
     }
     http::json_with(status, body, &[("cache-control", cache_control)])
+}
+
+/// [`json_cache`] in whichever representation the request asked for.
+///
+/// With the default representation the bytes are exactly what [`json_cache`]
+/// produces, plus `Vary: Accept` so a shared cache keeps the two apart.
+pub fn json_cache_c1(
+    wanted: compact::Wanted,
+    status: StatusCode,
+    body: Value,
+    cache_control: &str,
+) -> Response {
+    let headers: Vec<(&str, &str)> = if cache_control.is_empty() {
+        Vec::new()
+    } else {
+        vec![("cache-control", cache_control)]
+    };
+    compact::json_with(wanted, status, body, &headers)
+}
+
+/// What the request asked for, from its `Accept` header and `?format=`.
+pub fn wanted(headers: &HeaderMap, q: &http::Query) -> compact::Wanted {
+    compact::Wanted::from_request(headers, q)
 }
 
 /// `res.setHeader('Allow', allow); res.status(405).json({ error: 'Method not allowed.' })`.

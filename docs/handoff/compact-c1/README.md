@@ -1,5 +1,12 @@
 # Handoff: compact c1 encoding
 
+> **Done.** Implemented as an opt-in encoding; see
+> [`docs/rust-migration/COMPACT_ENCODING.md`](../../rust-migration/COMPACT_ENCODING.md)
+> for the design, the research and the measurements. The fixtures below are
+> still live: `measure-sizes.py` measures against them, and `c1/` holds the
+> Rust-encoded test vectors the `market/src/compact.test.js` cross-language
+> round trip decodes. The task text is kept as written, for history.
+
 Saved from the nezopt session "Compact c1 JSON dictionary encoding" (stopped 2026-10-09 to move the work to a cloud session).
 
 ## Progress

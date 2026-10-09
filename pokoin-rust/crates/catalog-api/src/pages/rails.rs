@@ -3,7 +3,7 @@
 
 use axum::extract::State;
 use axum::http::Uri;
-use axum::http::{Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
 use pokoin_api_common::http::Query;
 use pokoin_api_common::RouteState;
@@ -13,15 +13,27 @@ use super::support;
 use crate::shared::{js, rails, react_card};
 
 /// Route handler (GET; OPTIONS is answered by the preflight route).
-pub async fn handler(method: Method, State(state): State<RouteState>, uri: Uri) -> Response {
+pub async fn handler(
+    method: Method,
+    State(state): State<RouteState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
     if method != Method::GET {
         return support::method_not_allowed_get_options().await;
     }
-    support::timing_scope("/api/marketplace-rails", "GET", handle(state, uri)).await
+    support::timing_scope(
+        "/api/marketplace-rails",
+        "GET",
+        handle(state, headers, uri),
+    )
+    .await
 }
 
-async fn handle(state: RouteState, uri: Uri) -> Response {
+async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
     let q = Query::from_uri(&uri);
+    // Opt-in compact encoding; the default representation is unchanged.
+    let wanted = support::wanted(&headers, &q);
     let pool = match support::game_pool(&state, "pokemon").await {
         Ok(pool) => pool,
         Err(response) => return response,
@@ -44,7 +56,8 @@ async fn handle(state: RouteState, uri: Uri) -> Response {
             .iter()
             .filter_map(|id| by_id.get(id).cloned().cloned())
             .collect();
-        return support::json_with_cache_control(
+        return support::json_with_cache_control_c1(
+            wanted,
             StatusCode::OK,
             tiles_body(ordered),
             "public, max-age=30, s-maxage=120",
@@ -76,7 +89,8 @@ async fn handle(state: RouteState, uri: Uri) -> Response {
         Some(at) => Value::String(at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
         None => Value::Null,
     };
-    support::json_with_cache_control(
+    support::json_with_cache_control_c1(
+        wanted,
         StatusCode::OK,
         rail_body(&row.id, cards, row.meta.clone(), updated_at),
         "public, max-age=30, s-maxage=120",

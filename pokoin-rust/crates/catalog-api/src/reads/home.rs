@@ -735,7 +735,7 @@ pub async fn handler(method: Method, State(state): State<RouteState>, headers: H
         Ok(snapshot) => {
             let mut body = snapshot.as_object().cloned().unwrap_or_default();
             body.insert("game".into(), json!("pokemon"));
-            util::json_cache(StatusCode::OK, Value::Object(body), "public, max-age=10, s-maxage=30, stale-while-revalidate=60")
+            util::json_cache_c1(util::wanted(&headers, &q), StatusCode::OK, Value::Object(body), "public, max-age=10, s-maxage=30, stale-while-revalidate=60")
         }
         Err(error) => {
             tracing::error!(%error, "marketplace-home failed");

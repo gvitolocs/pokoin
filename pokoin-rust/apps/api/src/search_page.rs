@@ -33,6 +33,8 @@ pub async fn search_page(
             .find(|(key, _)| key == name)
             .map(|(_, value)| value.as_str())
     };
+    // Opt-in compact encoding; the default representation is unchanged.
+    let wanted = crate::catalog_api::wanted(&headers, &uri);
     let game = game_from(&headers, param("game").or_else(|| param("marketplaceGame")));
     let query = clean_text(param("query").or_else(|| param("q")).unwrap_or(""), 180);
     let product_type = clean_text(param("productType").unwrap_or(""), 60);
@@ -57,7 +59,7 @@ pub async fn search_page(
         return crate::catalog_api::response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")
     };
     if game!="pokemon" || product_search_only || product_type=="jumbo" || query.is_empty() {
-        return sql_search_page(&pool,&query,&game,&product_type,product_search_only,&lang,limit,offset,include_facets).await
+        return sql_search_page(wanted,&pool,&query,&game,&product_type,product_search_only,&lang,limit,offset,include_facets).await
     }
     let started = Instant::now();
     let fetch_limit = (limit + 1).clamp(1, 101);
@@ -111,9 +113,10 @@ pub async fn search_page(
         rows = fetched,
         "search page"
     );
-    let mut response = json_response(
+    let mut response = crate::catalog_api::response_c1(
+        wanted,
         StatusCode::OK,
-        &body,
+        body,
         "public, max-age=15, s-maxage=60, stale-while-revalidate=120",
     );
     response.headers_mut().insert(
@@ -250,16 +253,6 @@ fn parse_offset(value: Option<&str>) -> i64 {
 }
 
 
-fn json_response(status: StatusCode, body: &serde_json::Value, cache: &str) -> Response {
-    cors(
-        status,
-        if cache.is_empty() { None } else { Some(cache.to_string()) },
-        Some("application/json; charset=utf-8"),
-        serde_json::to_vec(body).unwrap_or_default(),
-    )
-    .into_response()
-}
-
 fn redis_int(value: Option<&redis::Value>) -> Option<i64> {
     match value {
         Some(redis::Value::Int(number)) => Some(*number),
@@ -292,7 +285,7 @@ fn redis_pairs(value: &redis::Value) -> HashMap<String, String> {
     out
 }
 
-pub(crate) async fn sql_search_page(pool:&sqlx::PgPool,query:&str,game:&str,product_type:&str,product_only:bool,lang:&str,limit:i64,offset:i64,include_facets:bool)->Response {
+pub(crate) async fn sql_search_page(wanted:pokoin_api_common::compact::Wanted,pool:&sqlx::PgPool,query:&str,game:&str,product_type:&str,product_only:bool,lang:&str,limit:i64,offset:i64,include_facets:bool)->Response {
  let phrase=query.trim().to_lowercase();
  let like=format!("%{phrase}%");
  let pokemon=game=="pokemon";
@@ -324,7 +317,7 @@ pub(crate) async fn sql_search_page(pool:&sqlx::PgPool,query:&str,game:&str,prod
  if include_facets && pokemon {
   match facets(pool,query,lang).await {Ok(r)=>body["facets"]["products"]=json!(r),Err(e)=>return crate::catalog_api::failure(&e)}
  }
- json_response(StatusCode::OK,&body,"public, max-age=15, s-maxage=60, stale-while-revalidate=120")
+ crate::catalog_api::response_c1(wanted,StatusCode::OK,body,"public, max-age=15, s-maxage=60, stale-while-revalidate=120")
 }
 fn facet_terms(query:&str)->Vec<String>{
  query.chars().take(120).collect::<String>().to_lowercase().split(|c:char|!c.is_ascii_alphanumeric())
