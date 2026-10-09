@@ -65,10 +65,12 @@ function send(req, res, file, { immutable = false } = {}) {
   };
   const compressible = /^(text\/|application\/(json|manifest))/.test(type) || ext === '.svg';
   if (compressible && /\bbr\b/.test(String(req.headers['accept-encoding'] || ''))) {
-    let packed = brCache.get(file);
+    // Keyed by mtime too: a rebuild rewrites index.html under the same path.
+    const key = `${file}:${fs.statSync(file).mtimeMs}`;
+    let packed = brCache.get(key);
     if (!packed) {
       packed = zlib.brotliCompressSync(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } });
-      brCache.set(file, packed);
+      brCache.set(key, packed);
     }
     body = packed;
     headers['Content-Encoding'] = 'br';

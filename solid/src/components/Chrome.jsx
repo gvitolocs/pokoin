@@ -52,7 +52,7 @@ export default function Chrome(props) {
             class="burger"
             type="button"
             aria-label="Menu"
-            aria-expanded={menu()}
+            aria-expanded={menu() ? 'true' : 'false'}
             aria-controls="mobile-menu"
             onClick={() => setMenu((v) => !v)}
           >
