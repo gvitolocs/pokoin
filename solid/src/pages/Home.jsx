@@ -186,7 +186,8 @@ export default function Home() {
       setRailsSettled(true);
       if (disposed) return;
       const painted = (await applyRailsVector(data)) || paintHome(data, readRecentCardIds(), localExtras());
-      warmupSearchBar();
+      // Network-only warmup: the suggest engine loads on search intent, not here.
+      warmupSearchBar({ engine: false });
       let next = painted;
       if (!recentsNeedingTiles(painted, readRecentCardIds()).length) {
         setRecentPending(false);

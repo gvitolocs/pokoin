@@ -66,13 +66,54 @@ function forbidReact() {
   };
 }
 
+/**
+ * Prefetch (idle priority, no evaluation) the chunks only the typeahead engine
+ * needs, so the first search focus evaluates them without waiting on the
+ * network — and the cold page load never evaluates them at all.
+ */
+function prefetchSuggestEngine() {
+  let base = '/';
+  return {
+    name: 'pokoin-prefetch-suggest-engine',
+    apply: 'build',
+    configResolved(config) {
+      base = config.base;
+    },
+    transformIndexHtml: {
+      order: 'post',
+      handler(_html, ctx) {
+        const bundle = ctx.bundle;
+        if (!bundle) return undefined;
+        const chunks = Object.values(bundle).filter((item) => item.type === 'chunk');
+        const engine = chunks.find((chunk) => chunk.facadeModuleId?.endsWith('/src/lib/suggest-engine.js'));
+        const entry = chunks.find((chunk) => chunk.isEntry);
+        if (!engine) return undefined;
+        const walk = (name, seen) => {
+          if (seen.has(name)) return seen;
+          seen.add(name);
+          for (const dep of bundle[name]?.imports || []) walk(dep, seen);
+          return seen;
+        };
+        const eager = entry ? walk(entry.fileName, new Set()) : new Set();
+        return [...walk(engine.fileName, new Set())]
+          .filter((file) => !eager.has(file))
+          .map((file) => ({
+            tag: 'link',
+            attrs: { rel: 'prefetch', href: `${base}${file}`, as: 'script', crossorigin: '' },
+            injectTo: 'head',
+          }));
+      },
+    },
+  };
+}
+
 export default defineConfig(({ command }) => ({
   // Same base as the React build: shared modules build asset URLs from
   // import.meta.env.BASE_URL (flags, game icons, data/catalog.json) that the
   // React build already publishes under /market/. Only Solid chunks move to /market/s/.
   base: command === 'build' ? '/market/' : '/',
   publicDir: command === 'build' ? false : path.join(marketDir, 'public'),
-  plugins: [forbidReact(), solid(), serveLandingHome()],
+  plugins: [forbidReact(), solid(), serveLandingHome(), prefetchSuggestEngine()],
   resolve: {
     alias: { '@market': path.join(marketDir, 'src') },
     dedupe: ['solid-js', '@solidjs/web', '@solidjs/signals'],

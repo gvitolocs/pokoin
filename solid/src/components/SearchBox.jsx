@@ -65,12 +65,14 @@ export function loadSuggestEngine() {
   return enginePromise;
 }
 
-/** Warm the engine once the page is idle (typing usually starts later). */
-export function loadSuggestEngineWhenIdle() {
-  if (typeof window === 'undefined' || enginePromise) return;
-  const run = () => loadSuggestEngine().catch(() => {});
-  if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 3000 });
-  else window.setTimeout(run, 1200);
+/**
+ * Evaluate the engine on search intent (pointer down, focus, first key), after
+ * the browser paints that interaction. Its chunks are already in the HTTP
+ * cache: index.html prefetches them at idle priority (vite.config.js).
+ */
+function loadSuggestEngineOnIntent() {
+  if (enginePromise) return;
+  afterPaint(() => loadSuggestEngine().catch(() => {}));
 }
 
 /** Same minimum as suggest-live SUGGEST_LIVE_MIN_CHARS (the popup opens at 3 compact chars). */
@@ -86,11 +88,32 @@ function afterPaint(fn) {
   return requestAnimationFrame(() => setTimeout(fn, 0));
 }
 
+// The same printing object is mapped by flat(), every row memo and the thumb
+// effect: map it once. Keys are the objects paintCatalogGroups returned.
+const cardCache = new WeakMap();
+function cardOf(printing) {
+  let card = cardCache.get(printing);
+  if (!card) {
+    card = cardFromAutocomplete(printing);
+    cardCache.set(printing, card);
+  }
+  return card;
+}
+const thumbCache = new WeakMap();
+function thumbOf(card) {
+  let src = thumbCache.get(card);
+  if (src === undefined) {
+    src = imageSrc(card, 'suggest');
+    thumbCache.set(card, src);
+  }
+  return src;
+}
+
 function suggestThumbSrc(printing) {
   const live = engine();
-  const card = cardFromAutocomplete(printing);
+  const card = cardOf(printing);
   if (live && (live.isLiveStub(card) || live.isLiveStub(printing))) return '';
-  return imageSrc(card, 'suggest');
+  return thumbOf(card);
 }
 
 function flattenPrintings(groups) {
@@ -98,7 +121,7 @@ function flattenPrintings(groups) {
   (groups || []).forEach((group) => {
     (group.printings || []).forEach((printing) => {
       if (!printing || typeof printing !== 'object') return;
-      const card = cardFromAutocomplete(printing);
+      const card = cardOf(printing);
       if (!card.id) return;
       rows.push({ card, printing, group, optionId: `suggest-${card.id}` });
     });
@@ -150,10 +173,7 @@ export default function SearchBox(props) {
     });
   }
 
-  onSettled(() => {
-    loadSuggestEngineWhenIdle();
-    return subscribeShadeBuckets(() => setShadeTick((n) => n + 1));
-  });
+  onSettled(() => subscribeShadeBuckets(() => setShadeTick((n) => n + 1)));
 
   // /marketplace/search?q= keeps the box in sync with the results page.
   createEffect(() => [location.pathname, location.search], ([pathname, search]) => {
@@ -171,7 +191,10 @@ export default function SearchBox(props) {
   createEffect(() => [searchLang(), printLang(), searchTab()], ([lang, print, tab]) => {
     if (!pokemon || tab === 'users') return;
     const typed = untrack(term).trim();
-    warmupSearchUniverse({ lang, printLang: print, query: typed, fetchSearchPage: fetchSearch, force: Boolean(typed) });
+    // Network-only until the engine is loaded on search intent (no engine eval on mount).
+    warmupSearchUniverse({
+      lang, printLang: print, query: typed, fetchSearchPage: fetchSearch, force: Boolean(typed), remember: Boolean(untrack(engine)),
+    });
   });
 
   // Progressive network pool (use-progressive-suggest.js): pages of printings for
@@ -408,7 +431,7 @@ export default function SearchBox(props) {
     const live = engine();
     for (const group of groups) {
       for (const printing of group.printings || []) {
-        const card = cardFromAutocomplete(printing);
+        const card = cardOf(printing);
         if (!card.id || (live && live.isLiveStub(card))) continue;
         rememberDeskIdentity(card);
         const shade = albumShade(card);
@@ -416,7 +439,7 @@ export default function SearchBox(props) {
           rememberCardBucket(card.id, shade);
           continue;
         }
-        warmCardBucket(card.id, imageSrc(card, 'suggest'));
+        warmCardBucket(card.id, thumbOf(card));
       }
     }
   });
@@ -573,14 +596,16 @@ export default function SearchBox(props) {
           role="combobox"
           value={query()}
           onInput={(event) => {
+            loadSuggestEngineOnIntent();
             const value = event.currentTarget.value;
             setQuery(value);
             setOpen(true);
             commitTerm(value);
           }}
+          onPointerDown={loadSuggestEngineOnIntent}
           onFocus={() => {
             setOpen(true);
-            loadSuggestEngine().catch(() => {});
+            loadSuggestEngineOnIntent();
           }}
           onKeyDown={onKeyDown}
           placeholder={props.extensionDesk ? 'Search cards' : 'Search cards, sets, products...'}
@@ -661,6 +686,7 @@ export default function SearchBox(props) {
                         <For each={group().printings || []} keyed={(printing) => String(printing?.id || printing?.card_id || '')}>
                           {(printing) => (
                             <SuggestRow
+                              pokemon={pokemon}
                               printing={printing()}
                               groupName={group().name}
                               flat={flat()}
@@ -710,31 +736,33 @@ export default function SearchBox(props) {
 
 /** One printing row of the popup (same markup as the React row). */
 function SuggestRow(props) {
-  const card = () => cardFromAutocomplete(props.printing);
-  const identity = () => printingIdentity(card());
-  const englishName = () => suggestCardName(card(), props.groupName);
-  const artLayout = () => (isPokemonGame() ? resolveArtLayout({ ...card(), name: englishName() }) : 'window');
+  // Derived once per printing change: each read below used to re-run the
+  // card mapping, image URL and era matching for every attribute that used it.
+  const card = createMemo(() => cardOf(props.printing));
+  const identity = createMemo(() => printingIdentity(card()));
+  const englishName = createMemo(() => suggestCardName(card(), props.groupName));
+  const artLayout = createMemo(() => (props.pokemon ? resolveArtLayout({ ...card(), name: englishName() }) : 'window'));
   const landscapePrint = () => artLayout() === 'landscape';
   const bleedPrint = () => artLayout() === 'bleed' || artLayout() === 'item';
-  const number = () => clipSuggestCollector(identity().number);
-  const translation = () => suggestTranslatedLine(card(), englishName(), number());
+  const number = createMemo(() => clipSuggestCollector(identity().number));
+  const translation = createMemo(() => suggestTranslatedLine(card(), englishName(), number()));
   const optionId = () => `suggest-${card().id}`;
   const active = () => props.activeId === optionId();
-  const thumb = () => imageSrc(card(), 'suggest');
-  const printFlag = () => {
+  const thumb = createMemo(() => thumbOf(card()));
+  const printFlag = createMemo(() => {
     const bucket = rowPrintBucket(card());
     return printFlagFromNationality(bucket === 'unknown' ? '' : bucket);
-  };
-  const live = () => Boolean(props.live && (props.live.isLiveStub(card()) || props.live.isLiveStub(props.printing)));
-  const rowTheme = () => {
+  });
+  const live = createMemo(() => Boolean(props.live && (props.live.isLiveStub(card()) || props.live.isLiveStub(props.printing))));
+  const rowTheme = createMemo(() => {
     void props.shadeTick;
     const special = rarityRowTheme(card());
     const delta = !special && prefersArtworkDelta(card()) ? deskTheme(card()) : null;
     if (special?.shade) return special;
     if (delta) return { kind: 'delta', shade: delta.surface, raised: delta.surfaceRaised };
     return special;
-  };
-  const rowIndex = () => props.flat.findIndex((row) => row.optionId === optionId());
+  });
+  const rowIndex = createMemo(() => props.flat.findIndex((row) => row.optionId === optionId()));
   const thumbLoading = () => (rowIndex() >= SUGGEST_THUMB_EAGER ? 'lazy' : undefined);
   const thumbPriority = () => (rowIndex() < SUGGEST_THUMB_HIGH ? 'high' : 'low');
   const choose = () => {
@@ -791,7 +819,7 @@ function SuggestRow(props) {
               </span>
             </span>
           </button>
-          <Show when={isPokemonGame() && (thumb() || printFlag())}>
+          <Show when={props.pokemon && (thumb() || printFlag())}>
             <div class="suggest-art-cluster">
               <Show when={printFlag()}>
                 <span class="suggest-print-flag">
