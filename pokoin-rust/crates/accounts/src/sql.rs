@@ -247,12 +247,34 @@ fn decode_column(row: &sqlx::postgres::PgRow, index: usize, type_name: &str) -> 
                 return json!(value);
             }
         }
-        "INT2" | "INT4" | "INT8" => {
+        // sqlx only decodes a column into its exact width: an i64 read of an
+        // int4 column fails, so each integer/float width decodes as itself.
+        "INT2" => {
+            if let Ok(Some(value)) = row.try_get::<Option<i16>, _>(index) {
+                return json!(value);
+            }
+        }
+        "INT4" => {
+            if let Ok(Some(value)) = row.try_get::<Option<i32>, _>(index) {
+                return json!(value);
+            }
+        }
+        "INT8" => {
             if let Ok(Some(value)) = row.try_get::<Option<i64>, _>(index) {
                 return json!(value);
             }
         }
-        "FLOAT4" | "FLOAT8" => {
+        "FLOAT4" => {
+            if let Ok(Some(value)) = row.try_get::<Option<f32>, _>(index) {
+                // f32 -> shortest decimal, like node-pg's parseFloat of the text form.
+                return value
+                    .to_string()
+                    .parse::<f64>()
+                    .map(|number| json!(number))
+                    .unwrap_or(Json::Null);
+            }
+        }
+        "FLOAT8" => {
             if let Ok(Some(value)) = row.try_get::<Option<f64>, _>(index) {
                 return json!(value);
             }

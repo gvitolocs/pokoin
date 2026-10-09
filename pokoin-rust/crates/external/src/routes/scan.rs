@@ -15,7 +15,12 @@ use crate::state::DomainState;
 /// Node verifyDesktop intentionally gives the same response for every failed
 /// verification. The underlying verifier still checks signature, issuer and expiry.
 fn scan_error(mut error: ApiError) -> ApiError {
-    if error.status >= 500 { error.message = "Scan service error.".into(); error.code = None; }
+    if error.status >= 500 {
+        // The client only sees the generic text; keep the cause in the log.
+        tracing::error!(status = error.status, code = ?error.code, message = %error.message, "scan route failed");
+        error.message = "Scan service error.".into();
+        error.code = None;
+    }
     error
 }
 

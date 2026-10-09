@@ -1850,8 +1850,9 @@ impl StripeClient {
         secret: &str,
         tolerance_seconds: i64,
     ) -> ApiResult<()> {
-        let header = signature_header.ok_or_else(|| {
-            ApiError::bad_request("Webhook Error: No signatures found matching the expected signature for payload.")
+        // Stripe SDK `constructEvent` text for a missing or empty header.
+        let header = signature_header.filter(|value| !value.trim().is_empty()).ok_or_else(|| {
+            ApiError::bad_request("Webhook Error: No stripe-signature header value was provided.")
         })?;
         let mut timestamp: Option<i64> = None;
         let mut signatures: Vec<String> = Vec::new();

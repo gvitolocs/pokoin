@@ -225,7 +225,7 @@ pub async fn stripe_webhook(state: State<DomainState>, headers: HeaderMap, body:
     }
 }
 fn stripe_text(status: StatusCode, message: &str) -> Response {
-    (status, [("content-type", "text/plain")], message.to_string()).into_response()
+    (status, [("content-type", "text/plain; charset=utf-8")], message.to_string()).into_response()
 }
 pub async fn stripe_webhook_method_not_allowed() -> Response {
     let mut response = stripe_text(StatusCode::METHOD_NOT_ALLOWED, "Method not allowed");
@@ -654,7 +654,7 @@ mod contract_tests {
     }
     #[test] fn webhook_errors_are_plain_text() {
         let response = stripe_text(StatusCode::BAD_REQUEST, "Webhook Error: signature rejected.");
-        assert_eq!(response.headers()["content-type"], "text/plain");
+        assert_eq!(response.headers()["content-type"], "text/plain; charset=utf-8");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

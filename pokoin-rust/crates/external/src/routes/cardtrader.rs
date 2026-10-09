@@ -231,14 +231,9 @@ pub async fn live_listings(
     )
     .await?;
     let mut response = json_response(200, payload);
-    let expose = response
-        .headers()
-        .get("Access-Control-Expose-Headers")
-        .cloned();
-    let _ = expose;
-    response
-        .headers_mut()
-        .insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+    let headers = response.headers_mut();
+    headers.insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+    headers.insert("Cache-Control", "public, max-age=30, s-maxage=60".parse().unwrap());
     Ok(response)
 }
 

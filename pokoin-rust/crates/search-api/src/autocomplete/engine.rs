@@ -172,8 +172,8 @@ pub fn pg_row_to_json(row: &sqlx::postgres::PgRow) -> Value {
                 .try_get::<Option<String>, _>(index)
                 .map(|value| value.map(Value::String).unwrap_or(Value::Null))
                 .unwrap_or(Value::Null),
-            "INT2" | "SMALLINT" | "INT2[]" => row
-                .try_get::<Option<i64>, _>(index)
+            "INT2" | "SMALLINT" => row
+                .try_get::<Option<i16>, _>(index)
                 .map(|value| value.map(Value::from).unwrap_or(Value::Null))
                 .unwrap_or(Value::Null),
             "INT4" | "INT" => row

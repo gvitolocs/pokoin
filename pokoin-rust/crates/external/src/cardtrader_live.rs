@@ -707,7 +707,8 @@ pub async fn read_live_listings(
         },
         "mapping": {
             "cardtraderBlueprintId": mapping.get("cardtraderBlueprintId"),
-            "pokoinCardId": mapping.get("pokoinCardId").filter(|value| !value.is_null()),
+            // `mapping.pokoinCardId || null`: an empty id is null.
+            "pokoinCardId": mapping.get("pokoinCardId").filter(|value| !value.is_null() && value.as_str() != Some("")),
             "source": mapping.get("mappingSource"),
             "warning": mapping.get("warning").filter(|value| !value.as_str().unwrap_or("").is_empty()),
         },
