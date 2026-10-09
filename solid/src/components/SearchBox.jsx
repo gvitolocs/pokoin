@@ -43,6 +43,7 @@ import CardArt from './CardArt.jsx';
 import ExpansionMark from './ExpansionMark.jsx';
 import SearchTabs from './SearchTabs.jsx';
 import { GameSelect, LangToggle, PrintLangToggle } from './SearchToggles.jsx';
+import { afterPaint as navigateAfterPaint } from '../lib/yield-nav.js';
 
 // ---------------------------------------------------------------------------
 // Lazy engine: one chunk (ranker + catalog), loaded on focus or idle.
@@ -541,7 +542,7 @@ export default function SearchBox(props) {
     setOpen(false);
     props.onNavigate?.();
     if (next) prefetchSearchPage(next, searchLang(), { fetchSearchPage: fetchSearch, tab: searchTab(), printLang: printLang() });
-    navigate(searchHref(next, searchTab()));
+    navigateAfterPaint(() => navigate(searchHref(next, searchTab())));
   }
 
   function pick(card, rank) {
@@ -555,7 +556,7 @@ export default function SearchBox(props) {
     // Warm the card-page payload so the desk paints themed on arrival.
     warmupCard(mapped, { lang: searchLang() });
     handOffCard(mapped);
-    navigate(cardHref(mapped));
+    navigateAfterPaint(() => navigate(cardHref(mapped)));
   }
 
   function onKeyDown(event) {
@@ -645,7 +646,7 @@ export default function SearchBox(props) {
                           class="suggest-user"
                           onClick={() => {
                             setOpen(false);
-                            navigate(sellerHref({ sellerName: seller.username }));
+                            navigateAfterPaint(() => navigate(sellerHref({ sellerName: seller.username })));
                           }}
                         >
                           <span class="suggest-user-mark" aria-hidden="true">{seller.name.slice(0, 1).toUpperCase()}</span>

@@ -31,6 +31,35 @@ export const Action = {
   loadMore: { eventType: 'click', type: 'load_more' },
 };
 
+// Beacons leave after the next paint so a click's own frame never waits on
+// JSON/Blob/sendBeacon; pagehide flushes whatever is still queued.
+const pending = [];
+let flushQueued = false;
+
+function flushEvents() {
+  flushQueued = false;
+  for (const event of pending.splice(0)) {
+    postEvent(event);
+  }
+}
+
+function queueEvent(event) {
+  pending.push(event);
+  if (flushQueued) {
+    return;
+  }
+  flushQueued = true;
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => setTimeout(flushEvents, 0));
+  } else {
+    setTimeout(flushEvents, 0);
+  }
+}
+
+if (typeof addEventListener === 'function') {
+  addEventListener('pagehide', flushEvents);
+}
+
 export function track(action, card = {}, extra = {}) {
   if (!action?.eventType) {
     return;
@@ -40,7 +69,7 @@ export function track(action, card = {}, extra = {}) {
   if (!Number.isSafeInteger(id) || id <= 0) {
     return;
   }
-  postEvent({
+  queueEvent({
     cardId: id,
     eventType: action.eventType,
     metadata: {

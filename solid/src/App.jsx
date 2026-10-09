@@ -1,5 +1,5 @@
 import { createEffect, createSignal, Errored, getOwner, Loading, onSettled, runWithOwner, Show, untrack } from 'solid-js';
-import { useLocation } from '@solidjs/router';
+import { useLocation, useNavigate } from '@solidjs/router';
 import { framedByChromeExtension } from '@market/extension-auth-bridge.js';
 import { legacyDashboardHref } from '@market/punchouts.js';
 import { isDashboardHost } from '@market/scan-api.js';
@@ -9,6 +9,8 @@ import CookieBanner from './components/CookieBanner.jsx';
 import WorkingOnIt from './components/WorkingOnIt.jsx';
 import { chatDock } from './lib/chat-dock-loader.js';
 import { whenIdle } from './lib/idle.js';
+import { warmLikelyRoutes } from './lib/route-warmup.js';
+import { setLinkNavigator } from './lib/yield-nav.js';
 import { watchAccount } from './stores/account.js';
 import { signedIn, warmAuthWhenIdle } from './stores/auth.js';
 import { ensureSellerSettings } from './stores/buyer.js';
@@ -48,6 +50,7 @@ function DashboardMarketHandoff(props) {
  * and the chat dock — its own chunk, loaded when the page goes idle.
  */
 export default function App(props) {
+  setLinkNavigator(useNavigate());
   const location = useLocation();
   const framed = framedByChromeExtension();
   const [originDown, setOriginDown] = createSignal(typeof window !== 'undefined' && Boolean(window.__pokoinOriginDown));
@@ -61,6 +64,7 @@ export default function App(props) {
     const unsubscribe = subscribeOriginDown(() => setOriginDown(true));
     document.documentElement.classList.toggle('is-extension-desk', framed);
     const cancelIdle = whenIdle(() => {
+      warmLikelyRoutes();
       chatDock.warm();
       startCartSync();
       import('./lib/referral-claim.js')

@@ -130,6 +130,7 @@ import { authUser, getBearer } from '../stores/auth.js';
 import { buyerFormat, buyerParts, buyerPending, sellerSettings } from '../stores/buyer.js';
 import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
+import { afterPaint } from '../lib/yield-nav.js';
 
 const DESK_VARS = ['--desk-bg', '--desk-surface', '--desk-raised', '--desk-hero', '--desk-hero-border', '--desk-border', '--desk-tint'];
 
@@ -246,6 +247,11 @@ function CardDesk(props) {
   const [setNationality, setSetNationality] = createSignal('');
   const [artistCover, setArtistCover] = createSignal('');
   let disposed = false;
+  // Related tiles and the catalog fold sit below the desk on every layout: they
+  // mount one frame after the desk paints, so a tile click paints sooner.
+  const [later, setLater] = createSignal(false);
+  let laterFrame = 0;
+  let laterTimer = 0;
   let listingsSeq = 0;
   let copiedTimer = 0;
   let zoomEl;
@@ -348,6 +354,9 @@ function CardDesk(props) {
   }
 
   onSettled(() => {
+    laterFrame = requestAnimationFrame(() => {
+      laterTimer = window.setTimeout(() => setLater(true), 0);
+    });
     const unsubscribe = subscribeListingLive(cardId, (event) => {
       if (!shop.offers.length) return;
       const plain = snapshot(shop.offers);
@@ -356,6 +365,8 @@ function CardDesk(props) {
     });
     return () => {
       disposed = true;
+      cancelAnimationFrame(laterFrame);
+      window.clearTimeout(laterTimer);
       unsubscribe?.();
       window.clearTimeout(copiedTimer);
     };
@@ -542,7 +553,7 @@ function CardDesk(props) {
     versionCount: page()?.versionCount,
   }));
   const species = createMemo(() => speciesFromCard(card()));
-  const eraName = () => tcgEra(card());
+  const eraName = createMemo(() => tcgEra(card()));
   const eraPath = () => (eraName() ? eraHref(eraName()) : '');
   const rarityPath = () => (identity().rarity ? rarityHref(identity().rarity, lang) : '');
   const related = createMemo(() => pickRelatedCards(card(), [
@@ -692,7 +703,7 @@ function CardDesk(props) {
     if (!row || String(row.id) === String(card().id)) return;
     track(Action.clickVersion, row);
     handOffCard(row);
-    navigate(cardHref(row));
+    afterPaint(() => navigate(cardHref(row)));
   }
 
   function openZoom() {
@@ -1176,29 +1187,31 @@ function CardDesk(props) {
               </section>
             </div>
 
-            <RelatedCards
-              card={card()}
-              related={related()}
-              speciesName={species()?.name}
-              speciesHref={speciesHref()}
-              embedded
-            />
-            <details class="catalog-fold">
-              <summary>More in the catalog</summary>
-              <SeoCrumbs items={seoCrumbs()} />
-              <Show when={relatedHubs().length}>
-                <p class="related-hubs">
-                  <For each={relatedHubs()}>
-                    {(hub, index) => (
-                      <span>
-                        {index() ? ' · ' : ''}
-                        <a href={hub.href}>{hub.name}</a>
-                      </span>
-                    )}
-                  </For>
-                </p>
-              </Show>
-            </details>
+            <Show when={later()}>
+              <RelatedCards
+                card={card()}
+                related={related()}
+                speciesName={species()?.name}
+                speciesHref={speciesHref()}
+                embedded
+              />
+              <details class="catalog-fold">
+                <summary>More in the catalog</summary>
+                <SeoCrumbs items={seoCrumbs()} />
+                <Show when={relatedHubs().length}>
+                  <p class="related-hubs">
+                    <For each={relatedHubs()}>
+                      {(hub, index) => (
+                        <span>
+                          {index() ? ' · ' : ''}
+                          <a href={hub.href}>{hub.name}</a>
+                        </span>
+                      )}
+                    </For>
+                  </p>
+                </Show>
+              </details>
+            </Show>
 
             <Show when={zoom()}>
               <dialog

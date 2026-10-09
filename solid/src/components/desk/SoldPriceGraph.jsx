@@ -181,7 +181,8 @@ export default function SoldPriceGraph(props) {
       const h = Math.max(120, Math.round(height));
       setSize((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
     };
-    apply(wrap.clientWidth, wrap.clientHeight);
+    // No clientWidth read here: it forced a layout of the whole new desk inside
+    // the click task. The observer's first callback runs after layout, before paint.
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
       if (rect) apply(rect.width, rect.height);
