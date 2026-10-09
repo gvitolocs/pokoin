@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "canary": 0,
+  "canary": 100,
   "patterns": [
     "^/marketplace/?$",
     "^/marketplace/search/?$",
