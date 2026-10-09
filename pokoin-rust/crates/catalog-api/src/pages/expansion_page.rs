@@ -83,7 +83,14 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
 
     if slug.is_empty() && expansion_name.is_empty() {
         let expansions_limit = react_card::parse_limit(q.search_param("limit"), 500, 2000);
-        let expansions = match expansions::rows_for_expansions(&pool, None, expansions_limit).await
+        // `listExpansions`: satellite games list from their set counts, not
+        // the Pokemon-only marketplace_card_versions table.
+        let listed = if is_pokemon {
+            expansions::rows_for_expansions(&pool, None, expansions_limit).await
+        } else {
+            react_sql::read_expansions_from_set_counts(&pool, expansions_limit).await
+        };
+        let expansions = match listed
         {
             Ok(expansions) => expansions,
             Err(error) => {

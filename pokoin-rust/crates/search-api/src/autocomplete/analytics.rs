@@ -105,10 +105,8 @@ pub async fn analytics_boosts_for_rows(
         on s.blueprint_id = h.blueprint_id
       where h.blueprint_id = any($1::bigint[])
     "#;
-    let mut query = sqlx::query(site_sql);
-    for id in &ids {
-        query = query.bind(*id);
-    }
+    // One `bigint[]` parameter, like node-pg's `[ids]`.
+    let query = sqlx::query(site_sql).bind(ids.clone());
     let mut boosts = empty_analytics_boosts();
     let rows = query
         .fetch_all(pool)
@@ -139,11 +137,7 @@ pub async fn analytics_boosts_for_rows(
             and e.occurred_at >= now() - interval '30 days'
           group by e.card_id
         "#;
-        let mut query = sqlx::query(user_sql);
-        for id in &ids {
-            query = query.bind(*id);
-        }
-        query = query.bind(user_uid);
+        let query = sqlx::query(user_sql).bind(ids.clone()).bind(user_uid);
         match query.fetch_all(pool).await {
             Ok(rows) => {
                 for row in &rows {

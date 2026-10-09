@@ -17,6 +17,8 @@ use sqlx::{Arguments, Column, PgPool, Row, TypeInfo, ValueRef};
 pub enum Bind {
     Text(String),
     Int(i64),
+    /// int4 parameter, for functions node-pg resolved from untyped text (`make_date($1, 1, 1)`).
+    Int4(i32),
     Float(f64),
     Bool(bool),
     Json(Value),
@@ -32,6 +34,7 @@ fn arguments(binds: &[Bind]) -> PgArguments {
         let _ = match bind {
             Bind::Text(v) => args.add(v.clone()),
             Bind::Int(v) => args.add(*v),
+            Bind::Int4(v) => args.add(*v),
             Bind::Float(v) => args.add(*v),
             Bind::Bool(v) => args.add(*v),
             Bind::Json(v) => args.add(sqlx::types::Json(v.clone())),

@@ -675,18 +675,21 @@ fn auth_error_payload(error: pokoin_accounts::firebase::AuthError) -> Value {
             "code": "auth/missing-token",
             "statusCode": 401,
         }),
-        pokoin_accounts::firebase::AuthError::Invalid(message) => json!({
-            "message": format!("Invalid sign-in token: {message}"),
+        pokoin_accounts::firebase::AuthError::Invalid(message) => {
+            tracing::warn!(reason = %message, "search auth token rejected");
+            json!({
+            "message": "Invalid or expired sign-in token.",
             "code": "auth/invalid-token",
             "statusCode": 401,
-        }),
+        })
+        },
         pokoin_accounts::firebase::AuthError::Unconfigured(message) => json!({
             "message": format!("Sign-in verification is not configured: {message}"),
             "code": "auth/unconfigured",
             "statusCode": 500,
         }),
         pokoin_accounts::firebase::AuthError::Unavailable => json!({
-            "message": "Sign-in verification is temporarily unavailable.",
+            "message": "Sign-in could not be checked right now.",
             "code": "auth/unavailable",
             "statusCode": 503,
         }),
@@ -694,6 +697,11 @@ fn auth_error_payload(error: pokoin_accounts::firebase::AuthError) -> Value {
 }
 
 /// `optionalDebugUser(req, wantsDebug)` + `authorizeSearchDebugRequest`.
+/// Shared with the search lookups (`authorizeSearchDebugRequest`).
+pub async fn debug_user(state: &RouteState, headers: &HeaderMap, wants_debug: bool) -> (Option<Value>, Option<Value>) {
+    optional_debug_user(state, headers, wants_debug).await
+}
+
 async fn optional_debug_user(
     state: &RouteState,
     headers: &HeaderMap,

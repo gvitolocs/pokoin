@@ -4360,7 +4360,7 @@ pub async fn predicted_name_tokens_from_supabase(
 }
 
 impl Ctx {
-    fn api_http(&self) -> &reqwest::Client {
+    pub fn api_http(&self) -> &reqwest::Client {
         &HTTP
     }
 }

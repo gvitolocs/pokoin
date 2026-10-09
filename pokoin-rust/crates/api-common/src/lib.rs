@@ -9,6 +9,7 @@
 pub mod game;
 pub mod http;
 pub mod limits;
+pub mod live;
 pub mod pg;
 pub mod public_error;
 pub mod route_state;
