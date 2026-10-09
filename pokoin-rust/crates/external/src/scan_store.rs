@@ -100,7 +100,7 @@ pub async fn create_pairing(
     session_id: &str,
     now: OffsetDateTime,
 ) -> ApiResult<Value> {
-    sqlx::query("delete from public.scan_pairings where session_id = $1")
+    sqlx::query("delete from public.scan_pairings where session_id = $1::uuid")
         .bind(session_id)
         .execute(&mut *conn)
         .await?;
@@ -114,7 +114,7 @@ pub async fn create_pairing(
             .await?;
         let inserted = sqlx::query(
             "insert into public.scan_pairings (pin, session_id, qr_secret, expires_at)
-             values ($1, $2, $3, $4)
+             values ($1, $2::uuid, $3, $4)
              on conflict (pin) do nothing
              returning pin, qr_secret, expires_at",
         )
@@ -139,7 +139,7 @@ pub async fn create_pairing(
 /// `pairingForSession`.
 pub async fn pairing_for_session(conn: &mut sqlx::PgConnection, session_id: &str) -> ApiResult<Option<Value>> {
     let row = sqlx::query(
-        "select pin, qr_secret, expires_at from public.scan_pairings where session_id = $1 and expires_at > now()",
+        "select pin, qr_secret, expires_at from public.scan_pairings where session_id = $1::uuid and expires_at > now()",
     )
     .bind(session_id)
     .fetch_optional(&mut *conn)
@@ -160,14 +160,14 @@ pub async fn end_session_row(
     session_id: &str,
     reason: &str,
 ) -> ApiResult<Option<Value>> {
-    sqlx::query("delete from public.scan_pairings where session_id = $1")
+    sqlx::query("delete from public.scan_pairings where session_id = $1::uuid")
         .bind(session_id)
         .execute(&mut *conn)
         .await?;
     let row = sqlx::query(
         "update public.scan_sessions
            set status = 'ended', end_reason = $2, ended_at = now(), phone_token_hash = null, version = version + 1
-         where id = $1 and status <> 'ended'
+         where id = $1::uuid and status <> 'ended'
          returning *",
     )
     .bind(session_id)
@@ -187,7 +187,7 @@ pub async fn disconnect_phone_row(
         "update public.scan_sessions
            set status = 'waiting', phone_token_hash = null, phone_label = '', phone_connected_at = null,
                phone_last_seen_at = null, last_scan_at = null, last_activity_at = now(), version = version + 1
-         where id = $1 and status = 'connected'
+         where id = $1::uuid and status = 'connected'
          returning *",
     )
     .bind(session_id)
@@ -209,7 +209,7 @@ pub async fn live_session_for_batch(
 ) -> ApiResult<Option<Value>> {
     let rows = sqlx::query(
         "select * from public.scan_sessions
-         where seller_uid = $1 and batch_id = $2 and status <> 'ended'
+         where seller_uid = $1 and batch_id = $2::uuid and status <> 'ended'
          order by created_at desc
          for update",
     )
@@ -248,7 +248,7 @@ pub async fn start_session(db: &DbPools, seller_uid: &str, batch_id: &str) -> Ap
         if !rules::is_uuid(batch_id) {
             return Err(ApiError::not_found("Batch not found."));
         }
-        let row = sqlx::query("select * from public.scan_batches where id = $1 and seller_uid = $2 for update")
+        let row = sqlx::query("select * from public.scan_batches where id = $1::uuid and seller_uid = $2 for update")
             .bind(batch_id)
             .bind(seller_uid)
             .fetch_optional(&mut *tx)
@@ -309,7 +309,7 @@ pub async fn start_session(db: &DbPools, seller_uid: &str, batch_id: &str) -> Ap
     if session.is_none() {
         enforce_limit(&mut tx, &format!("start:{seller_uid}"), rules::LIMIT_SESSION_START_PER_SELLER, now_ms).await?;
         let inserted = sqlx::query(
-            "insert into public.scan_sessions (seller_uid, batch_id) values ($1, $2) returning *",
+            "insert into public.scan_sessions (seller_uid, batch_id) values ($1, $2::uuid) returning *",
         )
         .bind(seller_uid)
         .bind(batch["id"].as_str().unwrap_or_default())
@@ -344,7 +344,7 @@ pub async fn lock_session(
     if !rules::is_uuid(session_id) {
         return Err(ApiError::not_found("Session not found."));
     }
-    let row = sqlx::query("select * from public.scan_sessions where id = $1 and seller_uid = $2 for update")
+    let row = sqlx::query("select * from public.scan_sessions where id = $1::uuid and seller_uid = $2 for update")
         .bind(session_id)
         .bind(seller_uid)
         .fetch_optional(&mut *conn)
@@ -371,7 +371,7 @@ pub async fn regenerate_pairing(db: &DbPools, seller_uid: &str, session_id: &str
         return Err(ApiError::new(410, "Session expired.").with_code("session_expired"));
     }
     enforce_limit(&mut tx, &format!("regen:{session_id}"), rules::LIMIT_PAIRING_REGEN_PER_SESSION, now_ms).await?;
-    sqlx::query("update public.scan_sessions set last_activity_at = now() where id = $1")
+    sqlx::query("update public.scan_sessions set last_activity_at = now() where id = $1::uuid")
         .bind(session_id)
         .execute(&mut *tx)
         .await?;
@@ -439,7 +439,7 @@ pub async fn update_session(
                 "update public.scan_sessions
                    set status = 'waiting', phone_token_hash = null, phone_label = '', phone_connected_at = null,
                        phone_last_seen_at = null, last_scan_at = null, last_activity_at = now(), version = version + 1
-                 where id = $1",
+                 where id = $1::uuid",
             )
             .bind(session_id)
             .execute(&mut *tx)
@@ -449,7 +449,7 @@ pub async fn update_session(
         "pause" => {
             sqlx::query(
                 "update public.scan_sessions set paused = $2, last_activity_at = now(), version = version + 1
-                 where id = $1",
+                 where id = $1::uuid",
             )
             .bind(session_id)
             .bind(paused)
@@ -552,7 +552,7 @@ pub async fn claim_pairing(
         let row = sqlx::query(
             "select s.* from public.scan_sessions s
              join public.scan_batches b on b.id = s.batch_id and b.status = 'open'
-             where s.id = $1 for update of s",
+             where s.id = $1::uuid for update of s",
         )
         .bind(session_id)
         .fetch_optional(&mut *tx)
@@ -581,7 +581,7 @@ pub async fn claim_pairing(
         "update public.scan_sessions
            set status = 'connected', phone_token_hash = $2, phone_label = $3, phone_connected_at = now(),
                phone_last_seen_at = now(), last_scan_at = null, last_activity_at = now(), version = version + 1
-         where id = $1 returning *",
+         where id = $1::uuid returning *",
     )
     .bind(&session_id)
     .bind(rules::sha256(&phone_token))
@@ -590,7 +590,7 @@ pub async fn claim_pairing(
     .await?;
     let updated = row_value(&updated);
     let batch_id = updated["batch_id"].as_str().unwrap_or_default().to_string();
-    let batch_row = sqlx::query("select defaults from public.scan_batches where id = $1")
+    let batch_row = sqlx::query("select defaults from public.scan_batches where id = $1::uuid")
         .bind(&batch_id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -639,7 +639,7 @@ pub async fn heartbeat(db: &DbPools, token: &str) -> ApiResult<Value> {
         .and_then(crate::time_util::ms_from_iso)
         .unwrap_or(0);
     let was_lost = last_seen == 0 || now_ms - last_seen >= rules::PHONE_LOST_MS;
-    sqlx::query("update public.scan_sessions set phone_last_seen_at = now() where id = $1")
+    sqlx::query("update public.scan_sessions set phone_last_seen_at = now() where id = $1::uuid")
         .bind(session["id"].as_str().unwrap_or_default())
         .execute(&mut *tx)
         .await?;
@@ -678,7 +678,7 @@ pub async fn leave(db: &DbPools, token: &str) -> ApiResult<Value> {
         "update public.scan_sessions
            set status = 'waiting', phone_token_hash = null, phone_label = '', phone_connected_at = null,
                phone_last_seen_at = null, last_scan_at = null, version = version + 1
-         where id = $1",
+         where id = $1::uuid",
     )
     .bind(&session_id)
     .execute(&mut *tx)
@@ -694,14 +694,14 @@ pub async fn read_batch_snapshot(db: &DbPools, seller_uid: &str, batch_id: &str)
         return Err(ApiError::not_found("Batch not found."));
     }
     let pool = writer(db).await?;
-    let batch = sqlx::query("select * from public.scan_batches where id = $1 and seller_uid = $2")
+    let batch = sqlx::query("select * from public.scan_batches where id = $1::uuid and seller_uid = $2")
         .bind(batch_id)
         .bind(seller_uid)
         .fetch_optional(&pool)
         .await?
         .map(|row| row_value(&row))
         .ok_or_else(|| ApiError::not_found("Batch not found."))?;
-    let items = sqlx::query("select * from public.scan_items where batch_id = $1 order by seq asc limit 10000")
+    let items = sqlx::query("select * from public.scan_items where batch_id = $1::uuid order by seq asc limit 10000")
         .bind(batch_id)
         .fetch_all(&pool)
         .await?;
@@ -717,7 +717,7 @@ pub async fn read_batch_snapshot(db: &DbPools, seller_uid: &str, batch_id: &str)
 pub async fn items_after(db: &DbPools, batch_id: &str, cursor: i64, limit: i64) -> ApiResult<Value> {
     let pool = writer(db).await?;
     let rows = sqlx::query(
-        "select * from public.scan_items where batch_id = $1 and seq > $2 order by seq asc limit $3",
+        "select * from public.scan_items where batch_id = $1::uuid and seq > $2 order by seq asc limit $3",
     )
     .bind(batch_id)
     .bind(cursor)
@@ -731,7 +731,7 @@ pub async fn items_after(db: &DbPools, batch_id: &str, cursor: i64, limit: i64) 
 pub async fn latest_session(db: &DbPools, batch_id: &str) -> ApiResult<Option<Value>> {
     let pool = writer(db).await?;
     let row = sqlx::query(
-        "select * from public.scan_sessions where batch_id = $1 order by created_at desc limit 1",
+        "select * from public.scan_sessions where batch_id = $1::uuid order by created_at desc limit 1",
     )
     .bind(batch_id)
     .fetch_optional(&pool)
@@ -762,7 +762,7 @@ pub async fn read_image(db: &DbPools, seller_uid: &str, item_id: &str) -> ApiRes
         return Ok(None);
     }
     let pool = writer(db).await?;
-    let row = sqlx::query("select image from public.scan_items where id = $1 and seller_uid = $2")
+    let row = sqlx::query("select image from public.scan_items where id = $1::uuid and seller_uid = $2")
         .bind(item_id)
         .bind(seller_uid)
         .fetch_optional(&pool)
@@ -779,7 +779,7 @@ pub async fn bump_batch(
     let row = sqlx::query(
         "update public.scan_batches
            set item_seq = item_seq + 1, item_position = item_position + $2, updated_at = now()
-         where id = $1
+         where id = $1::uuid
          returning item_seq, item_position",
     )
     .bind(batch_id)
@@ -918,7 +918,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
     };
 
     let prior = sqlx::query(
-        "select id, seller_uid, status, merged_into from public.scan_items where scan_event_id = $1",
+        "select id, seller_uid, status, merged_into from public.scan_items where scan_event_id = $1::uuid",
     )
     .bind(&event.scan_event_id)
     .fetch_optional(&mut *tx)
@@ -995,7 +995,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
         return Err(ApiError::conflict("This batch is closed.").with_code("batch_closed"));
     }
     let batch_id = session["batch_id"].as_str().unwrap_or_default().to_string();
-    let batch_row = sqlx::query("select * from public.scan_batches where id = $1 for update")
+    let batch_row = sqlx::query("select * from public.scan_batches where id = $1::uuid for update")
         .bind(&batch_id)
         .fetch_one(&mut *tx)
         .await?;
@@ -1029,7 +1029,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
     listing_snapshot["language"] = json!(listing_language);
 
     let last_row = sqlx::query(
-        "select * from public.scan_items where batch_id = $1 and status <> 'removed'
+        "select * from public.scan_items where batch_id = $1::uuid and status <> 'removed'
          order by position desc limit 1",
     )
     .bind(&batch_id)
@@ -1042,7 +1042,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
             Some("active") => head = Some(last.clone()),
             Some("merged") => {
                 if let Some(merged_into) = last.get("merged_into").and_then(Value::as_str) {
-                    head = sqlx::query("select * from public.scan_items where id = $1 and status = $2 for update")
+                    head = sqlx::query("select * from public.scan_items where id = $1::uuid and status = $2 for update")
                         .bind(merged_into)
                         .bind("active")
                         .fetch_optional(&mut *tx)
@@ -1053,7 +1053,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
             _ => {}
         }
     }
-    let last_event_id = sqlx::query("select id from public.scan_items where batch_id = $1 order by position desc limit 1")
+    let last_event_id = sqlx::query("select id from public.scan_items where batch_id = $1::uuid order by position desc limit 1")
         .bind(&batch_id)
         .fetch_optional(&mut *tx)
         .await?
@@ -1104,7 +1104,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
            seq, position, status, merged_into, card_id, card_name, set_name, collector_number, image_url,
            nationality, condition, language, foil_state, first_edition, signed, altered, location, quantity
          ) values (
-           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31
+           $1::uuid,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::uuid,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31
          ) returning {ITEM_COLUMNS}"
     ))
     .bind(&batch_id)
@@ -1148,7 +1148,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
         let (head_seq, _) = bump_batch(&mut tx, &batch_id, 0).await?;
         let updated = sqlx::query(&format!(
             "update public.scan_items set quantity = quantity + $2, seq = $3, updated_at = now()
-             where id = $1 returning {ITEM_COLUMNS}"
+             where id = $1::uuid returning {ITEM_COLUMNS}"
         ))
         .bind(&head_id)
         .bind(quantity)
@@ -1161,7 +1161,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
         "update public.scan_sessions
            set phone_last_seen_at = now(), last_scan_at = now(), last_activity_at = now(),
                phone_scans = phone_scans + 1, version = version + 1
-         where id = $1",
+         where id = $1::uuid",
     )
     .bind(session.get("id").and_then(Value::as_str).unwrap_or_default())
     .execute(&mut *tx)
@@ -1169,7 +1169,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
     let active_rows = sqlx::query(
         "select id, location, quantity, defaults_snapshot
            from public.scan_items
-          where batch_id = $1 and status = 'active'
+          where batch_id = $1::uuid and status = 'active'
           order by position",
     )
     .bind(&batch_id)
@@ -1273,7 +1273,7 @@ async fn lock_batch(
     if !rules::is_uuid(batch_id) {
         return Err(ApiError::not_found("Batch not found."));
     }
-    let row = sqlx::query("select * from public.scan_batches where id = $1 and seller_uid = $2 for update")
+    let row = sqlx::query("select * from public.scan_batches where id = $1::uuid and seller_uid = $2 for update")
         .bind(batch_id)
         .bind(seller_uid)
         .fetch_optional(&mut *conn)
@@ -1289,7 +1289,7 @@ async fn lock_batch(
 }
 
 async fn touch_sessions(conn: &mut sqlx::PgConnection, batch_id: &str) -> ApiResult<()> {
-    sqlx::query("update public.scan_sessions set last_activity_at = now() where batch_id = $1 and status <> 'ended'")
+    sqlx::query("update public.scan_sessions set last_activity_at = now() where batch_id = $1::uuid and status <> 'ended'")
         .bind(batch_id)
         .execute(&mut *conn)
         .await?;
@@ -1307,7 +1307,7 @@ async fn lock_item(
     let row = sqlx::query(
         "select i.*, b.status as batch_status from public.scan_items i
          join public.scan_batches b on b.id = i.batch_id
-         where i.id = $1 and i.seller_uid = $2 for update of i, b",
+         where i.id = $1::uuid and i.seller_uid = $2 for update of i, b",
     )
     .bind(item_id)
     .bind(seller_uid)
@@ -1347,7 +1347,7 @@ pub async fn set_defaults(db: &DbPools, seller_uid: &str, batch_id: &str, defaul
     let updated = sqlx::query(
         "update public.scan_batches
            set defaults = $2, defaults_version = $3, defaults_history = $4, updated_at = now()
-         where id = $1 returning *",
+         where id = $1::uuid returning *",
     )
     .bind(batch_id)
     .bind(sqlx::types::Json(&next))
@@ -1457,7 +1457,7 @@ pub async fn patch_item(
         values.push(value.clone());
         sets.push(format!("{column} = ${}", values.len()));
     }
-    let sql = format!("update public.scan_items set {} where id = $1 returning {}", sets.join(", "), ITEM_COLUMNS);
+    let sql = format!("update public.scan_items set {} where id = $1::uuid returning {}", sets.join(", "), ITEM_COLUMNS);
     let mut query = sqlx::query(&sql);
     for value in &values {
         query = query.bind(value.clone());
@@ -1486,7 +1486,7 @@ pub async fn set_status(
     }
     let (seq, _) = bump_batch(&mut tx, &batch_id, 0).await?;
     let updated = sqlx::query(&format!(
-        "update public.scan_items set status = $2, seq = $3, updated_at = now() where id = $1 returning {}",
+        "update public.scan_items set status = $2, seq = $3, updated_at = now() where id = $1::uuid returning {}",
         ITEM_COLUMNS
     ))
     .bind(item_id)
@@ -1510,7 +1510,7 @@ pub async fn duplicate_item(db: &DbPools, seller_uid: &str, item_id: &str) -> Ap
     }
     let position = row.get("position").and_then(Value::as_f64).unwrap_or(0.0);
     let next = sqlx::query(
-        "select position from public.scan_items where batch_id = $1 and position > $2 order by position limit 1",
+        "select position from public.scan_items where batch_id = $1::uuid and position > $2 order by position limit 1",
     )
     .bind(&batch_id)
     .bind(position)
@@ -1533,7 +1533,7 @@ pub async fn duplicate_item(db: &DbPools, seller_uid: &str, item_id: &str) -> Ap
            true, card_id, card_name, set_name, collector_number, image_url, nationality, condition, language,
            foil_state, first_edition, signed, altered, graded, grading_company, grade, certification_id, location,
            1, price_pkn, price_suggested, seller_comment
-         from public.scan_items where id = $1
+         from public.scan_items where id = $1::uuid
          returning {}",
         ITEM_COLUMNS
     ))
@@ -1560,7 +1560,7 @@ pub async fn unmerge_item(db: &DbPools, seller_uid: &str, item_id: &str) -> ApiR
     }
     let mut out: Vec<Value> = Vec::new();
     let head_id = row.get("merged_into").and_then(Value::as_str).unwrap_or_default().to_string();
-    let head = sqlx::query("select * from public.scan_items where id = $1 for update")
+    let head = sqlx::query("select * from public.scan_items where id = $1::uuid for update")
         .bind(&head_id)
         .fetch_optional(&mut *tx)
         .await?
@@ -1570,7 +1570,7 @@ pub async fn unmerge_item(db: &DbPools, seller_uid: &str, item_id: &str) -> ApiR
             let (head_seq, _) = bump_batch(&mut tx, &batch_id, 0).await?;
             let updated = sqlx::query(&format!(
                 "update public.scan_items set quantity = greatest(1, quantity - $2), seq = $3, updated_at = now()
-                 where id = $1 returning {}",
+                 where id = $1::uuid returning {}",
                 ITEM_COLUMNS
             ))
             .bind(&head_id)
@@ -1584,7 +1584,7 @@ pub async fn unmerge_item(db: &DbPools, seller_uid: &str, item_id: &str) -> ApiR
     let (seq, _) = bump_batch(&mut tx, &batch_id, 0).await?;
     let updated = sqlx::query(&format!(
         "update public.scan_items set status = 'active', merged_into = null, seq = $2, updated_at = now()
-         where id = $1 returning {}",
+         where id = $1::uuid returning {}",
         ITEM_COLUMNS
     ))
     .bind(item_id)
@@ -1616,7 +1616,7 @@ pub async fn add_manual(db: &DbPools, seller_uid: &str, batch_id: &str, body: &V
            batch_id, seller_uid, recognition_state, defaults_version, defaults_snapshot, seq, position, status, reviewed,
            card_id, card_name, set_name, collector_number, image_url, nationality,
            condition, language, foil_state, first_edition, signed, altered, location, quantity
-         ) values ($1,$2,'manual',$3,$4,$5,$6,'active',true,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+         ) values ($1::uuid,$2,'manual',$3,$4,$5,$6,'active',true,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
          returning {}",
         ITEM_COLUMNS
     ))
@@ -1652,7 +1652,7 @@ pub async fn discard_batch(db: &DbPools, seller_uid: &str, batch_id: &str) -> Ap
     let pool = writer(db).await?;
     let mut tx = pool.begin().await?;
     let _ = lock_batch(&mut tx, seller_uid, batch_id, true).await?;
-    let sessions = sqlx::query("select id from public.scan_sessions where batch_id = $1 and status <> 'ended'")
+    let sessions = sqlx::query("select id from public.scan_sessions where batch_id = $1::uuid and status <> 'ended'")
         .bind(batch_id)
         .fetch_all(&mut *tx)
         .await?;
@@ -1661,7 +1661,7 @@ pub async fn discard_batch(db: &DbPools, seller_uid: &str, batch_id: &str) -> Ap
         let _ = end_session_row(&mut tx, &id, "discarded").await?;
     }
     let updated = sqlx::query(
-        "update public.scan_batches set status = 'discarded', updated_at = now() where id = $1 returning *",
+        "update public.scan_batches set status = 'discarded', updated_at = now() where id = $1::uuid returning *",
     )
     .bind(batch_id)
     .fetch_one(&mut *tx)
@@ -1706,7 +1706,7 @@ pub async fn submit_batch(
     if batch.get("status").and_then(Value::as_str) != Some("open") {
         return Err(ApiError::conflict("This batch is closed.").with_code("batch_closed"));
     }
-    let rows = sqlx::query("select * from public.scan_items where batch_id = $1 and status = 'active' order by position for update")
+    let rows = sqlx::query("select * from public.scan_items where batch_id = $1::uuid and status = 'active' order by position for update")
         .bind(batch_id)
         .fetch_all(&mut *tx)
         .await?;
@@ -1895,7 +1895,7 @@ pub async fn submit_batch(
                 let activated = sqlx::query(
                     "update public.marketplace_user_listings
                        set status = 'active', updated_at = now()
-                     where id = $1 and source = 'pokoin_scan_batch' and source_listing_id = $2 and status = 'inactive'
+                     where id = $1::uuid and source = 'pokoin_scan_batch' and source_listing_id = $2 and status = 'inactive'
                      returning id",
                 )
                 .bind(listing_id)
@@ -1910,7 +1910,7 @@ pub async fn submit_batch(
         }
         let (seq, _) = bump_batch(&mut tx, batch_id, 0).await?;
         sqlx::query(
-            "update public.scan_items set status = 'submitted', listing_id = $2, seq = $3, updated_at = now() where id = $1",
+            "update public.scan_items set status = 'submitted', listing_id = $2::uuid, seq = $3, updated_at = now() where id = $1::uuid",
         )
         .bind(&entry.item_id)
         .bind(&entry.listing_id)
@@ -1941,14 +1941,14 @@ pub async fn submit_batch(
     let updated = sqlx::query(
         "update public.scan_batches
            set status = 'submitted', submit_key = $2, submit_result = $3, submitted_at = now(), updated_at = now()
-         where id = $1 returning *",
+         where id = $1::uuid returning *",
     )
     .bind(batch_id)
     .bind(&key)
     .bind(sqlx::types::Json(&result))
     .fetch_one(&mut *tx)
     .await?;
-    let sessions = sqlx::query("select id from public.scan_sessions where batch_id = $1 and status <> 'ended'")
+    let sessions = sqlx::query("select id from public.scan_sessions where batch_id = $1::uuid and status <> 'ended'")
         .bind(batch_id)
         .fetch_all(&mut *tx)
         .await?;
@@ -1962,7 +1962,7 @@ pub async fn submit_batch(
     let cardtrader = if intent == "list" && targets.get("cardtrader") == Some(&Value::Bool(true)) {
         let pushed = push_created_to_cardtrader(&pool, seller_uid, &created_rows).await;
         result["cardtrader"] = pushed.clone();
-        if let Err(error) = sqlx::query("update public.scan_batches set submit_result = $2, updated_at = now() where id = $1")
+        if let Err(error) = sqlx::query("update public.scan_batches set submit_result = $2, updated_at = now() where id = $1::uuid")
             .bind(batch_id)
             .bind(sqlx::types::Json(&result))
             .execute(&pool)
@@ -2050,7 +2050,7 @@ async fn active_items(db: &DbPools, batch_id: &str) -> ApiResult<Vec<Value>> {
     let pool = writer(db).await?;
     let rows = sqlx::query(
         "select id, location, quantity, defaults_snapshot from public.scan_items
-          where batch_id = $1 and status = 'active' order by position",
+          where batch_id = $1::uuid and status = 'active' order by position",
     )
     .bind(batch_id)
     .fetch_all(&pool)

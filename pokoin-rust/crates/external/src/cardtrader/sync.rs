@@ -110,7 +110,7 @@ const APPLY_CT_QUANTITY_SQL: &str = r#"
           else listing.status
         end,
         updated_at = now()
-      where listing.id = $1
+      where listing.id = $1::uuid
         and listing.source_listing_id like 'ct:%'
       returning listing.id, listing.quantity_available, listing.status, listing.card_id, listing.source_listing_id
 "#;
@@ -118,7 +118,7 @@ const APPLY_CT_QUANTITY_SQL: &str = r#"
 const DELIST_CT_LISTING_SQL: &str = r#"
       update public.marketplace_user_listings
       set quantity_available = 0, status = 'inactive', updated_at = now()
-      where id = $1
+      where id = $1::uuid
         and source_listing_id like 'ct:%'
         and status in ('active', 'paused', 'sold_out')
       returning id, quantity_available, status, card_id, source_listing_id
@@ -143,7 +143,7 @@ const LINK_EXISTING_LISTING_SQL: &str = r#"
         end,
         updated_at = now()
         {price_sql}
-      where listing.id = $1
+      where listing.id = $1::uuid
       returning listing.id, listing.source_listing_id, listing.quantity_available, listing.status, listing.card_id
 "#;
 
@@ -175,14 +175,14 @@ const REACTIVATE_HIDDEN_SQL: &str = r#"
               else coalesce(location, '')
             end,
             updated_at = now()
-        where id = $1
+        where id = $1::uuid
         returning id, source_listing_id, quantity_available, status, card_id, location
 "#;
 
 const PATCH_LOCATION_IF_EMPTY_SQL: &str = r#"
           update public.marketplace_user_listings
           set location = $2, updated_at = now()
-          where id = $1
+          where id = $1::uuid
           returning id, source_listing_id, quantity_available, status, card_id, location
 "#;
 

@@ -85,7 +85,7 @@ pub fn is_cancelled_order(order: &Value) -> bool {
 const FIND_LINKED_BY_ID_SQL: &str = r#"
   select id, card_id, quantity_available, status, source_listing_id, seller_uid
   from public.marketplace_user_listings
-  where id = $1 and seller_uid = $2
+  where id = $1::uuid and seller_uid = $2
   limit 1
 "#;
 
@@ -149,7 +149,7 @@ const DECREMENT_SQL: &str = r#"
     quantity_available = quantity_available - $2,
     status = case when quantity_available - $2 <= 0 then 'sold_out' else status end,
     updated_at = now()
-  where id = $1
+  where id = $1::uuid
     and seller_uid = $3
     and status in ('active', 'paused')
     and quantity_available >= $2
@@ -298,7 +298,7 @@ pub async fn restore_cancelled_item(
         quantity_available = quantity_available + $2,
         status = case when status = 'sold_out' then 'active' else status end,
         updated_at = now()
-      where id = $1 and seller_uid = $3
+      where id = $1::uuid and seller_uid = $3
     "#,
         &[json!(listing_id), json!(qty), json!(uid)],
     )
