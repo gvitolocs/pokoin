@@ -299,7 +299,7 @@ async fn build_full_router(state: AppState) -> Router {
     let pool_max = std::env::var("POKOIN_RUST_DOMAIN_DB_POOL_MAX")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(6)
+        .unwrap_or(12)
         .max(1);
     let read_url = std::env::var("MARKETPLACE_DATABASE_URL")
         .or_else(|_| std::env::var("DATABASE_URL"))
