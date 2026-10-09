@@ -542,3 +542,9 @@ mod tests {
         assert_eq!(options[0]["packageTier"], json!("SMALL"));
     }
 }
+
+pub async fn account_addresses_method_not_allowed() -> Response {
+    let mut response = (StatusCode::METHOD_NOT_ALLOWED, Json(json!({"error": "Method not allowed."}))).into_response();
+    response.headers_mut().insert("allow", axum::http::HeaderValue::from_static("GET, POST, PUT, DELETE"));
+    response
+}

@@ -2,17 +2,21 @@
 
 use axum::body::Bytes;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, Uri};
-use axum::response::Response;
+use axum::http::{HeaderMap, Method, Uri};
+use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
 
 use crate::cardtrader::{client, integration, sync, webhook, zero};
 use crate::cardtrader_live;
 use crate::cardtrader_listings;
 use crate::error::{clean_text, header_value, json_response, ApiError, ApiResult};
-use crate::routes::util::{body_json, not_implemented, query_first, query_pairs, require_token};
+use crate::routes::util::{body_json, query_first, query_pairs, require_token};
 use crate::state::DomainState;
 
+#[path = "../daily_refresh.rs"]
+mod daily_refresh;
+#[path = "../game_ingest.rs"]
+mod game_ingest;
 const IMPORT_DRY_RUN_LIMIT: i64 = 5;
 
 /// `POST /api/cardtrader-connect` — validate + store a seller API token and
@@ -242,30 +246,60 @@ pub async fn live_listings(
 pub async fn daily_refresh(
     State(state): State<DomainState>,
     headers: HeaderMap,
-) -> ApiResult<Response> {
-    let provided = secret_from(&headers);
-    if !state.config.secret_matches(&provided) {
-        return Err(ApiError::new(401, "Invalid refresh secret.").with_code("invalid_secret"));
+    uri: Uri,
+    body: Bytes,
+) -> Response {
+    let result = async {
+        daily_refresh::authorize(&headers)?;
+        let payload = body_json(&body).await?;
+        let options = daily_refresh::request_options(&uri, &payload);
+        let result = daily_refresh::run(&state, &options).await?;
+        Ok::<_, ApiError>(daily_refresh::response_metadata(&options, result))
+    }.await;
+    match result {
+        Ok(payload) => json_response(200, payload),
+        Err(error) => {
+            if matches!(error.code.as_deref(), Some("42P01" | "42883")) {
+                return json_response(503, json!({
+                    "error": "CardTrader global market listing Oracle tables/functions are not installed yet.",
+                    "setupRequired": true,
+                    "migration": "oracle-postgres/schema/012_cardtrader_market_listings.sql",
+                    "code": error.code,
+                }));
+            }
+            let mut payload = json!({"error": error.message});
+            if let Some(code) = error.code { payload["code"] = json!(code); }
+            json_response(error.status, payload)
+        }
     }
-    not_implemented(
-        "/api/cardtrader-daily-listings-refresh",
-        "Secret gate is implemented; the bounded global snapshot ingest SQL/worker is not ported yet.",
-    )
 }
 
 /// `GET|POST /api/cardtrader-game-ingest` — satellite-game ingest control.
 pub async fn game_ingest(
     State(state): State<DomainState>,
     headers: HeaderMap,
-) -> ApiResult<Response> {
-    let provided = secret_from(&headers);
-    if !state.config.game_secret_matches(&provided) {
-        return Err(ApiError::new(401, "Invalid game ingest secret.").with_code("invalid_secret"));
+    uri: Uri,
+    method: Method,
+    body: Bytes,
+) -> Response {
+    // The service guard precedes method dispatch, auth and JSON body access.
+    let result = async {
+        game_ingest::service_guard()?;
+        let payload = body_json(&body).await?;
+        game_ingest::handle(&state, &headers, &uri, &method, &payload).await
+    }.await;
+    match result {
+        Ok((status, payload, allow)) => {
+            let mut response = if status == 204 {
+                crate::error::no_store(axum::http::StatusCode::NO_CONTENT.into_response())
+            } else { json_response(status, payload) };
+            if let Some(allow) = allow {
+                response.headers_mut().insert("allow", axum::http::HeaderValue::from_static(allow));
+            }
+            response
+        }
+        Err(error) => json_response(error.status, json!({"error": error.message, "code": error.code.unwrap_or_default()})),
     }
-    not_implemented(
-        "/api/cardtrader-game-ingest",
-        "Secret gate is implemented; multi-game discover/apply importer SQL is owned by another workstream.",
-    )
 }
 
 /// Accept either `Authorization: Bearer <secret>` or `x-cron-secret`.

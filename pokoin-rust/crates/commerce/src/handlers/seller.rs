@@ -334,10 +334,12 @@ pub async fn marketplace_seller_shop(
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, ApiError> {
     let username = query
-        .get("username")
-        .or_else(|| query.get("seller"))
+        .get("sellerUsername")
         .cloned()
         .unwrap_or_default();
+    if username.trim().is_empty() {
+        return Err(ApiError::bad_request("sellerUsername is required."));
+    }
     let seller = seller_profile_for_username(&state, &username).await?;
     let game = query
         .get("game")

@@ -13,7 +13,7 @@ pub fn lock_key(scope: &str, id: &str) -> String {
 
 /// Namespace for shared counters (`_redis_ns.js` marketplaceKey).
 pub fn marketplace_key(parts: &[&str]) -> String {
-    let mut key = String::from("pokoin:");
+    let mut key = String::from("pokoin:marketplace:v1:");
     key.push_str(&parts.join(":"));
     key
 }
@@ -93,11 +93,10 @@ impl RedisCache {
         let key = marketplace_key(&["ratelimit", scope, identity]);
         let window = crate::time_util::now_ms() as u64 / (window_seconds * 1000);
         let key = format!("{key}:{window}");
-        let count: Result<i64, _> = redis::cmd("INCR")
-            .arg(&key)
-            .arg("EX")
+        let count: Result<i64, _> = redis::Script::new("local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n")
+            .key(&key)
             .arg(window_seconds)
-            .query_async(&mut connection)
+            .invoke_async(&mut connection)
             .await;
         // Redis down or error → 0 means "unknown, allow" (best effort).
         match count {

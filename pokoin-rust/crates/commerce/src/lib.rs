@@ -18,6 +18,7 @@
 pub mod auth;
 /// The CardTrader boundary the integrations crate implements.
 pub mod cardtrader;
+pub mod cardtrader_adapter;
 /// Native Bitcoin P2WPKH payout transactions (BIP143).
 pub mod bitcoin;
 pub mod config;
@@ -33,6 +34,8 @@ pub mod firestore;
 /// Marketplace game scoping (Pokémon shared DB + satellite per-game DBs).
 pub mod game;
 pub mod handlers;
+pub mod listing_live;
+pub mod listing_sync;
 pub mod ports;
 /// Redis read-through cache for public seller profile fields.
 pub mod seller_cache;
@@ -54,13 +57,16 @@ use axum::Router;
 /// `DomainState` is `Clone` (one `Arc` inside), so the same state can be shared
 /// with the search/catalog routers via `Router::with_state`.
 pub fn router(state: DomainState) -> Router {
+    listing_sync::start(&state);
     Router::new()
         // listings + inventory + stock CSV
         .route(
             "/api/marketplace-listings",
             get(handlers::listings::marketplace_listings_get)
                 .post(handlers::listings::marketplace_listings_post)
-                .patch(handlers::listings::marketplace_listings_patch),
+                .patch(handlers::listings::marketplace_listings_patch)
+                .head(handlers::listings::marketplace_listings_other)
+                .fallback(handlers::listings::marketplace_listings_other),
         )
         .route(
             "/api/marketplace-listings-csv",
@@ -77,7 +83,8 @@ pub fn router(state: DomainState) -> Router {
             "/api/marketplace-cart-sync",
             get(handlers::cart::marketplace_cart_sync_get)
                 .put(handlers::cart::marketplace_cart_sync_put)
-                .options(cart_sync_options),
+                .options(cart_sync_options)
+                .fallback(handlers::cart::cart_sync_method_not_allowed),
         )
         .route(
             "/api/marketplace-recents",
@@ -106,7 +113,8 @@ pub fn router(state: DomainState) -> Router {
             get(handlers::addresses::account_addresses_get)
                 .post(handlers::addresses::account_addresses_post)
                 .put(handlers::addresses::account_addresses_put)
-                .delete(handlers::addresses::account_addresses_delete),
+                .delete(handlers::addresses::account_addresses_delete)
+                .fallback(handlers::addresses::account_addresses_method_not_allowed),
         )
         .route(
             "/api/marketplace-shipping-options",
@@ -142,7 +150,7 @@ pub fn router(state: DomainState) -> Router {
         )
         .route(
             "/api/stripe-webhook",
-            post(handlers::stripe::stripe_webhook),
+            post(handlers::stripe::stripe_webhook).fallback(handlers::stripe::stripe_webhook_method_not_allowed),
         )
         // crypto + wPKN
         .route(

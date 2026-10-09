@@ -407,7 +407,9 @@ async fn wallet_auth_nonce_persists_a_single_use_message() {
 }
 
 #[tokio::test]
-async fn wallet_auth_verify_requires_a_full_signature() {
+async fn wallet_auth_verify_rejects_a_non_hex_signature() {
+    // Node (wallet-auth-verify.js) only checks the signature is 0x-hex before
+    // reading the nonce; a short hex signature fails later in recovery.
     let transport = ScriptedTransport::new();
     let app = router(test_state(&transport));
     let (status, body, _) = call(
@@ -417,15 +419,12 @@ async fn wallet_auth_verify_requires_a_full_signature() {
         None,
         Some(serde_json::json!({
             "address": "0xabcdef0123456789abcdef0123456789abcdef01",
-            "signature": "0xdeadbeef"
+            "signature": "0xnothex"
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        body,
-        serde_json::json!({ "error": "Wallet signature did not match address." })
-    );
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, serde_json::json!({ "error": "Missing wallet signature." }));
 }
 
 #[tokio::test]
@@ -474,7 +473,8 @@ async fn wallet_link_requires_a_bearer_token() {
 }
 
 #[tokio::test]
-async fn wallet_link_complete_validates_the_session_id_first() {
+async fn wallet_link_complete_validates_address_signature_then_session() {
+    // Node (wallet-link-complete.js) order: address, signature, session id.
     let transport = ScriptedTransport::new();
     let app = router(test_state(&transport));
     let (status, body, _) = call(
@@ -483,6 +483,20 @@ async fn wallet_link_complete_validates_the_session_id_first() {
         "/api/wallet-link/complete",
         None,
         Some(serde_json::json!({ "sessionId": "short" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, serde_json::json!({ "error": "Enter a valid wallet address." }));
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/wallet-link/complete",
+        None,
+        Some(serde_json::json!({
+            "sessionId": "short",
+            "address": "0xabcdef0123456789abcdef0123456789abcdef01",
+            "signature": "0xdeadbeef"
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);

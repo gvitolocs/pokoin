@@ -1927,6 +1927,9 @@ dependencies = [
  "http-body-util",
  "jsonwebtoken",
  "k256",
+ "pokoin-accounts",
+ "pokoin-api-common",
+ "pokoin-external",
  "rand 0.8.8",
  "redis",
  "regex",
@@ -1941,6 +1944,8 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "unicode-normalization",
+ "urlencoding",
  "uuid",
 ]
 

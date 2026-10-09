@@ -302,8 +302,12 @@ async fn use_analytics(
     user_uid: Option<&str>,
     kind: AnalyticsKind,
 ) -> Result<Response, ApiError> {
+    let invalid_payload = match kind {
+        AnalyticsKind::Cart => "Invalid cart analytics payload.",
+        AnalyticsKind::Watchlist => "Invalid watchlist analytics payload.",
+    };
     let blueprint_id = clean_blueprint_id(body.get("cardId").or_else(|| body.get("blueprintId")))
-        .ok_or_else(|| ApiError::bad_request("Invalid cart analytics payload."))?;
+        .ok_or_else(|| ApiError::bad_request(invalid_payload))?;
     let (add_verbs, remove_verbs): (&[&str], &[&str]) = match kind {
         AnalyticsKind::Cart => (
             &["add", "added", "cart_add", "add_to_cart"],
@@ -328,7 +332,7 @@ async fn use_analytics(
         ""
     };
     if action.is_empty() {
-        return Ok(StatusCode::NO_CONTENT.into_response());
+        return Err(ApiError::bad_request(invalid_payload));
     }
 
     let holder_key = match kind {
@@ -552,15 +556,18 @@ const CART_WRITES_PER_MINUTE: i64 = 120;
 
 pub async fn marketplace_cart_sync_get(
     State(state): State<DomainState>,
-    AuthedUser(claims): AuthedUser,
+    super::CartAuthedUser(claims): super::CartAuthedUser,
 ) -> Result<Response, ApiError> {
-    let cart = read_cart(&state, &claims.uid).await?;
+    let cart = match read_cart(&state, &claims.uid).await {
+        Ok(cart) => cart,
+        Err(error) => return Ok(cart_error_response(ApiError::new(error.status, "Cart sync failed."))),
+    };
     Ok(private_json(cart))
 }
 
 pub async fn marketplace_cart_sync_put(
     State(state): State<DomainState>,
-    AuthedUser(claims): AuthedUser,
+    super::CartAuthedUser(claims): super::CartAuthedUser,
     Json(body): Json<Value>,
 ) -> Result<Response, ApiError> {
     let (allowed, _count) = limit_best_effort(
@@ -577,13 +584,16 @@ pub async fn marketplace_cart_sync_put(
         response
             .headers_mut()
             .insert("retry-after", axum::http::HeaderValue::from_static("60"));
-        return Ok(response);
+        return Ok(cart_private_response(response));
     }
-    let saved = write_cart(&state, &claims.uid, &body, cart::base_rev(body.get("baseRev"))).await?;
+    let saved = match write_cart(&state, &claims.uid, &body, cart::base_rev(body.get("baseRev"))).await {
+        Ok(saved) => saved,
+        Err(error) => return Ok(cart_error_response(ApiError::new(error.status, "Cart sync failed."))),
+    };
     if saved.0 {
         Ok(private_json(saved.1))
     } else {
-        Ok((
+        Ok(cart_private_response((
             StatusCode::CONFLICT,
             Json(json!({
                 "error": "The cart changed on another device.",
@@ -591,7 +601,7 @@ pub async fn marketplace_cart_sync_put(
                 "cart": saved.1,
             })),
         )
-            .into_response())
+            .into_response()))
     }
 }
 
@@ -1195,4 +1205,15 @@ mod tests {
         assert_eq!(clean_blueprint_id(Some(&json!(1.5))), None);
         assert_eq!(clean_blueprint_id(None), None);
     }
+}
+
+fn cart_private_response(mut response: Response) -> Response {
+    response.headers_mut().insert("cache-control", axum::http::HeaderValue::from_static("private, no-store"));
+    response
+}
+fn cart_error_response(error: ApiError) -> Response { cart_private_response(error.into_response()) }
+pub async fn cart_sync_method_not_allowed() -> Response {
+    let mut response = cart_private_response((StatusCode::METHOD_NOT_ALLOWED, Json(serde_json::json!({"error":"GET or PUT only."}))).into_response());
+    response.headers_mut().insert("allow", axum::http::HeaderValue::from_static("GET, PUT, OPTIONS"));
+    response
 }

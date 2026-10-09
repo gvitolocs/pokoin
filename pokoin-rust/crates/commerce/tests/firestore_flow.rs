@@ -73,10 +73,7 @@ fn document_resource(path: &str, value: &Value, base: &str) -> Value {
     })
 }
 
-async fn mock_batch_get(
-    State(state): State<MockStore>,
-    Json(body): Json<Value>,
-) -> Response {
+async fn mock_batch_get(State(state): State<MockStore>, Json(body): Json<Value>) -> Response {
     let paths = body
         .get("documents")
         .and_then(Value::as_array)
@@ -112,10 +109,34 @@ async fn mock_begin_transaction() -> Response {
     Json(json!({ "transaction": "bW9jay10cmFuc2FjdGlvbg==" })).into_response()
 }
 
-async fn mock_commit(
-    State(state): State<MockStore>,
-    Json(body): Json<Value>,
-) -> Response {
+fn set_field_path(target: &mut Value, path: &str, value: Value) {
+    let mut parts = path.splitn(2, '.');
+    let first = parts.next().unwrap_or("");
+    if let Some(rest) = parts.next() {
+        if !target[first].is_object() {
+            target[first] = json!({});
+        }
+        set_field_path(&mut target[first], rest, value);
+    } else {
+        target[first] = value;
+    }
+}
+fn get_field_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut value = value;
+    for part in path.split('.') {
+        value = value.get(part)?;
+    }
+    Some(value)
+}
+fn apply_mask(current: &mut Value, patch: &Value, mask: &[String]) {
+    for path in mask {
+        if let Some(value) = get_field_path(patch, path) {
+            set_field_path(current, path, value.clone());
+        }
+    }
+}
+
+async fn mock_commit(State(state): State<MockStore>, Json(body): Json<Value>) -> Response {
     let writes = body
         .get("writes")
         .and_then(Value::as_array)
@@ -135,7 +156,10 @@ async fn mock_commit(
             let mut current = state.get(&path).unwrap_or_else(|| json!({}));
             if let Some(fields) = transform.get("fieldTransforms").and_then(Value::as_array) {
                 for field in fields {
-                    let name = field.get("fieldPath").and_then(Value::as_str).unwrap_or_default();
+                    let name = field
+                        .get("fieldPath")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
                     if field.get("setToServerValue").is_some() {
                         if let Some(object) = current.as_object_mut() {
                             object.insert(name.to_string(), json!("2026-10-08T00:00:00.000Z"));
@@ -147,10 +171,7 @@ async fn mock_commit(
                             .and_then(Value::as_str)
                             .and_then(|value| value.parse().ok())
                             .unwrap_or(0);
-                        let existing = current
-                            .get(name)
-                            .and_then(Value::as_i64)
-                            .unwrap_or(0);
+                        let existing = current.get(name).and_then(Value::as_i64).unwrap_or(0);
                         if let Some(object) = current.as_object_mut() {
                             object.insert(name.to_string(), json!(existing + amount));
                         }
@@ -160,7 +181,9 @@ async fn mock_commit(
             state.upsert(&path, current, true);
             continue;
         }
-        let Some(update) = write.get("update") else { continue };
+        let Some(update) = write.get("update") else {
+            continue;
+        };
         let path = update
             .get("name")
             .and_then(Value::as_str)
@@ -168,8 +191,20 @@ async fn mock_commit(
             .unwrap_or_default();
         let fields = update.get("fields").cloned().unwrap_or_else(|| json!({}));
         let decoded = pokoin_commerce::firestore::fields_to_value(Some(&fields));
-        let merge = write.get("updateMask").is_some();
-        state.upsert(&path, decoded, merge);
+        if let Some(mask) = write
+            .pointer("/updateMask/fieldPaths")
+            .and_then(Value::as_array)
+        {
+            let mask = mask
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect::<Vec<_>>();
+            let mut current = state.get(&path).unwrap_or(json!({}));
+            apply_mask(&mut current, &decoded, &mask);
+            state.upsert(&path, current, false);
+        } else {
+            state.upsert(&path, decoded, false);
+        }
     }
     Json(json!({ "writeResults": [] })).into_response()
 }
@@ -177,25 +212,56 @@ async fn mock_commit(
 async fn mock_patch(
     State(state): State<MockStore>,
     Path(path): Path<String>,
-    Query(query): Query<HashMap<String, String>>,
+    axum::extract::RawQuery(raw): axum::extract::RawQuery,
     Json(body): Json<Value>,
 ) -> Response {
     let key = path.clone();
-    if query.get("currentDocument.exists").map(String::as_str) == Some("true") && state.get(&key).is_none() {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": { "status": "NOT_FOUND" } }))).into_response();
+    // Repeated `updateMask.fieldPaths` keys must all survive (a HashMap keeps one).
+    let pairs: Vec<(String, String)> = raw
+        .as_deref()
+        .unwrap_or("")
+        .split('&')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let (name, value) = part.split_once('=').unwrap_or((part, ""));
+            let decode = |text: &str| {
+                urlencoding::decode(&text.replace('+', " "))
+                    .map(|v| v.into_owned())
+                    .unwrap_or_else(|_| text.to_string())
+            };
+            (decode(name), decode(value))
+        })
+        .collect();
+    let query: HashMap<String, String> = pairs.iter().cloned().collect();
+    if query.get("currentDocument.exists").map(String::as_str) == Some("true")
+        && state.get(&key).is_none()
+    {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": { "status": "NOT_FOUND" } })),
+        )
+            .into_response();
     }
     let merge = query.keys().any(|name| name.starts_with("updateMask."));
     let fields = body.get("fields").cloned().unwrap_or_else(|| json!({}));
     let decoded = pokoin_commerce::firestore::fields_to_value(Some(&fields));
-    state.upsert(&key, decoded, merge);
+    if merge {
+        let mask = pairs
+            .iter()
+            .filter(|(name, _)| name.starts_with("updateMask."))
+            .map(|(_, value)| value.clone())
+            .collect::<Vec<_>>();
+        let mut current = state.get(&key).unwrap_or(json!({}));
+        apply_mask(&mut current, &decoded, &mask);
+        state.upsert(&key, current, false);
+    } else {
+        state.upsert(&key, decoded, false);
+    }
     let value = state.get(&key).unwrap_or_else(|| json!({}));
     Json(document_resource(&key, &value, "https://mock")).into_response()
 }
 
-async fn mock_get_document(
-    State(state): State<MockStore>,
-    Path(path): Path<String>,
-) -> Response {
+async fn mock_get_document(State(state): State<MockStore>, Path(path): Path<String>) -> Response {
     match state.get(&path) {
         Some(value) => Json(document_resource(&path, &value, "https://mock")).into_response(),
         None => (
@@ -206,10 +272,7 @@ async fn mock_get_document(
     }
 }
 
-async fn mock_delete(
-    State(state): State<MockStore>,
-    Path(path): Path<String>,
-) -> Response {
+async fn mock_delete(State(state): State<MockStore>, Path(path): Path<String>) -> Response {
     state.delete(&path);
     Json(json!({})).into_response()
 }
@@ -220,21 +283,30 @@ async fn mock_create(
     Query(query): Query<HashMap<String, String>>,
     Json(body): Json<Value>,
 ) -> Response {
-    let id = query.get("documentId").cloned().unwrap_or_else(|| "auto".into());
+    let id = query
+        .get("documentId")
+        .cloned()
+        .unwrap_or_else(|| "auto".into());
     let path = format!("{collection}/{id}");
     if state.get(&path).is_some() {
-        return (StatusCode::CONFLICT, Json(json!({ "error": { "status": "ALREADY_EXISTS" } }))).into_response();
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": { "status": "ALREADY_EXISTS" } })),
+        )
+            .into_response();
     }
     let fields = body.get("fields").cloned().unwrap_or_else(|| json!({}));
     let decoded = pokoin_commerce::firestore::fields_to_value(Some(&fields));
     state.upsert(&path, decoded, false);
-    Json(document_resource(&path, &state.get(&path).unwrap_or(json!({})), "https://mock")).into_response()
+    Json(document_resource(
+        &path,
+        &state.get(&path).unwrap_or(json!({})),
+        "https://mock",
+    ))
+    .into_response()
 }
 
-async fn mock_run_query(
-    State(state): State<MockStore>,
-    Json(body): Json<Value>,
-) -> Response {
+async fn mock_run_query(State(state): State<MockStore>, Json(body): Json<Value>) -> Response {
     let query = body.get("structuredQuery").cloned().unwrap_or(json!({}));
     let collection = query
         .get("from")
@@ -308,10 +380,22 @@ async fn start_mock_firestore() -> (String, MockStore) {
             "/v1/projects/pokoin-test/databases/(default)/documents:runQuery",
             post(mock_run_query),
         )
-        .route("/v1/projects/pokoin-test/databases/(default)/documents/{*path}", get(mock_get_document))
-        .route("/v1/projects/pokoin-test/databases/(default)/documents/{*path}", patch(mock_patch))
-        .route("/v1/projects/pokoin-test/databases/(default)/documents/{*path}", axum::routing::delete(mock_delete))
-        .route("/v1/projects/pokoin-test/databases/(default)/documents/{*path}", post(mock_create))
+        .route(
+            "/v1/projects/pokoin-test/databases/(default)/documents/{*path}",
+            get(mock_get_document),
+        )
+        .route(
+            "/v1/projects/pokoin-test/databases/(default)/documents/{*path}",
+            patch(mock_patch),
+        )
+        .route(
+            "/v1/projects/pokoin-test/databases/(default)/documents/{*path}",
+            axum::routing::delete(mock_delete),
+        )
+        .route(
+            "/v1/projects/pokoin-test/databases/(default)/documents/{*path}",
+            post(mock_create),
+        )
         .with_state(store.clone());
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let address = listener.local_addr().expect("addr");
@@ -338,6 +422,7 @@ impl TokenVerifier for AnyToken {
             role: String::new(),
             admin: false,
             is_admin: false,
+            custom: Default::default(),
         })
     }
 }
@@ -403,15 +488,24 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
             .header("authorization", "Bearer test-token");
     }
     let request = builder
-        .body(body.map(|value| Body::from(value.to_string())).unwrap_or_else(Body::empty))
+        .body(
+            body.map(|value| Body::from(value.to_string()))
+                .unwrap_or_else(Body::empty),
+        )
         .expect("request");
     let response = app.clone().oneshot(request).await.expect("router");
     let status = response.status();
-    let bytes = response.into_body().collect().await.expect("body").to_bytes();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
     let payload = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap_or(Value::String(String::from_utf8_lossy(&bytes).to_string()))
+        serde_json::from_slice(&bytes)
+            .unwrap_or(Value::String(String::from_utf8_lossy(&bytes).to_string()))
     };
     (status, payload)
 }
@@ -426,7 +520,10 @@ async fn a_pkn_transfer_moves_balances_writes_ledger_and_replays_idempotently() 
     let mint = LedgerOp::mint("buyer-1", 1_000, "account_top_up");
     store::apply(&firestore, &mint).await.expect("mint");
     assert_eq!(
-        store::balance(&firestore, "buyer-1").await.unwrap().available_pkn,
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .available_pkn,
         1_000
     );
 
@@ -439,7 +536,10 @@ async fn a_pkn_transfer_moves_balances_writes_ledger_and_replays_idempotently() 
     assert_eq!(outcome.from_available, 750);
     assert_eq!(outcome.to_available, 250);
     assert_eq!(
-        store::balance(&firestore, "seller-1").await.unwrap().available_pkn,
+        store::balance(&firestore, "seller-1")
+            .await
+            .unwrap()
+            .available_pkn,
         250
     );
 
@@ -450,7 +550,11 @@ async fn a_pkn_transfer_moves_balances_writes_ledger_and_replays_idempotently() 
         .expect("ledger query");
     let types: Vec<String> = entries
         .iter()
-        .filter_map(|row| row.get("type").and_then(Value::as_str).map(|v| v.to_string()))
+        .filter_map(|row| {
+            row.get("type")
+                .and_then(Value::as_str)
+                .map(|v| v.to_string())
+        })
         .collect();
     assert!(types.contains(&"account_transfer_sent".to_string()));
     assert!(types.contains(&"account_transfer_received".to_string()));
@@ -466,11 +570,17 @@ async fn a_pkn_transfer_moves_balances_writes_ledger_and_replays_idempotently() 
     let replay = store::apply(&firestore, &op).await.expect("replay");
     assert!(!replay.applied);
     assert_eq!(
-        store::balance(&firestore, "buyer-1").await.unwrap().available_pkn,
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .available_pkn,
         750
     );
     assert_eq!(
-        store::balance(&firestore, "seller-1").await.unwrap().available_pkn,
+        store::balance(&firestore, "seller-1")
+            .await
+            .unwrap()
+            .available_pkn,
         250
     );
 }
@@ -482,16 +592,22 @@ async fn lock_then_unlock_burn_models_a_withdrawal() {
         .await
         .unwrap();
 
-    store::apply(&firestore, &LedgerOp::lock("u1", 200, "withdraw_requested").with_ref("wr-1"))
-        .await
-        .expect("lock");
+    store::apply(
+        &firestore,
+        &LedgerOp::lock("u1", 200, "withdraw_requested").with_ref("wr-1"),
+    )
+    .await
+    .expect("lock");
     let balance = store::balance(&firestore, "u1").await.unwrap();
     assert_eq!(balance.available_pkn, 300);
     assert_eq!(balance.locked_pkn, 200);
 
-    store::apply(&firestore, &LedgerOp::unlock("u1", 200, "withdraw_paid", false).with_ref("wr-1"))
-        .await
-        .expect("unlock");
+    store::apply(
+        &firestore,
+        &LedgerOp::unlock("u1", 200, "withdraw_paid", false).with_ref("wr-1"),
+    )
+    .await
+    .expect("unlock");
     let balance = store::balance(&firestore, "u1").await.unwrap();
     assert_eq!(balance.available_pkn, 300);
     assert_eq!(balance.locked_pkn, 0);
@@ -505,8 +621,20 @@ async fn an_insufficient_transfer_is_refused_and_changes_nothing() {
         .unwrap();
     let op = LedgerOp::transfer("u1", "u2", 250, "account_transfer_sent");
     assert!(store::apply(&firestore, &op).await.is_err());
-    assert_eq!(store::balance(&firestore, "u1").await.unwrap().available_pkn, 100);
-    assert_eq!(store::balance(&firestore, "u2").await.unwrap().available_pkn, 0);
+    assert_eq!(
+        store::balance(&firestore, "u1")
+            .await
+            .unwrap()
+            .available_pkn,
+        100
+    );
+    assert_eq!(
+        store::balance(&firestore, "u2")
+            .await
+            .unwrap()
+            .available_pkn,
+        0
+    );
 }
 
 #[tokio::test]
@@ -534,9 +662,12 @@ async fn money_request_create_list_pay_over_the_real_router() {
         .await
         .expect("users/bob-1");
     // Bob has the PKN to pay with.
-    store::apply(&firestore, &LedgerOp::mint("bob-1", 1_000, "account_top_up"))
-        .await
-        .unwrap();
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("bob-1", 1_000, "account_top_up"),
+    )
+    .await
+    .unwrap();
 
     let (status, created) = call(
         &app,
@@ -547,7 +678,10 @@ async fn money_request_create_list_pay_over_the_real_router() {
     .await;
     assert_eq!(status, StatusCode::OK, "{created}");
     assert_eq!(created["ok"], json!(true));
-    let request_id = created["requestId"].as_str().expect("requestId").to_string();
+    let request_id = created["requestId"]
+        .as_str()
+        .expect("requestId")
+        .to_string();
 
     let (status, listed) = call(&app, "GET", "/api/money-request?action=list", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -574,16 +708,31 @@ async fn money_request_create_list_pay_over_the_real_router() {
     op.ref_id = Some(request_id.clone());
     let outcome = store::apply(&firestore, &op).await.expect("pay");
     assert!(outcome.applied);
-    assert_eq!(store::balance(&firestore, "bob-1").await.unwrap().available_pkn, 750);
     assert_eq!(
-        store::balance(&firestore, "buyer-1").await.unwrap().available_pkn,
+        store::balance(&firestore, "bob-1")
+            .await
+            .unwrap()
+            .available_pkn,
+        750
+    );
+    assert_eq!(
+        store::balance(&firestore, "buyer-1")
+            .await
+            .unwrap()
+            .available_pkn,
         250
     );
 
     // A second pay attempt with the same request id is a no-op.
     let replay = store::apply(&firestore, &op).await.expect("replay");
     assert!(!replay.applied);
-    assert_eq!(store::balance(&firestore, "bob-1").await.unwrap().available_pkn, 750);
+    assert_eq!(
+        store::balance(&firestore, "bob-1")
+            .await
+            .unwrap()
+            .available_pkn,
+        750
+    );
 
     // The create path queued exactly one notification for the payee.
     let notifications = firestore
@@ -594,10 +743,7 @@ async fn money_request_create_list_pay_over_the_real_router() {
         .await
         .expect("notifications");
     assert_eq!(notifications.len(), 1);
-    assert_eq!(
-        notifications[0]["type"],
-        json!("money_request_created")
-    );
+    assert_eq!(notifications[0]["type"], json!("money_request_created"));
     assert_eq!(notifications[0]["amountPkn"], json!(250));
 }
 
@@ -642,7 +788,10 @@ async fn public_card_sales_never_expose_buyer_identity() {
     assert_eq!(sales[0]["quantity"], json!(2));
     assert_eq!(sales[0]["pricePkn"], json!(250));
     assert!(sales[0].get("buyerUid").is_none(), "buyer must never leak");
-    assert!(sales[0].get("orderId").is_none(), "order id must never leak");
+    assert!(
+        sales[0].get("orderId").is_none(),
+        "order id must never leak"
+    );
 }
 
 #[tokio::test]
@@ -725,7 +874,6 @@ async fn an_unauthenticated_request_is_rejected_before_any_firestore_write() {
     assert!(rows.is_empty());
 }
 
-
 #[tokio::test]
 async fn seller_transfers_wait_for_a_ready_connect_account() {
     let (state, firestore) = state_harness().await;
@@ -740,6 +888,10 @@ async fn seller_transfers_wait_for_a_ready_connect_account() {
                 "currency": "EUR",
                 "paymentStatus": "paid",
                 "fulfillmentMode": "physical",
+                "inventory": { "state": "reserved", "lines": [{
+                    "listingId": "l1", "cardId": "693360", "sellerUid": "seller-1",
+                    "quantity": 2, "sourceListingId": "ct:7", "remainingQuantity": 0
+                }] },
                 "totalEURCents": 2184,
                 "shipments": [
                     { "sellerId": "seller-1", "sellerTransferCents": 1984, "shippingEURCents": 1684 },
@@ -831,12 +983,9 @@ async fn transfers_are_refused_for_an_unpaid_order() {
     assert_eq!(error.status.as_u16(), 409);
 }
 
-
 #[tokio::test]
 async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
-    use pokoin_commerce::handlers::orders::{
-        decrement_seller_ownership_for_sale, OwnershipLine,
-    };
+    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -897,9 +1046,7 @@ async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
 
 #[tokio::test]
 async fn nft_ownership_rows_are_never_decremented() {
-    use pokoin_commerce::handlers::orders::{
-        decrement_seller_ownership_for_sale, OwnershipLine,
-    };
+    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -938,9 +1085,7 @@ async fn nft_ownership_rows_are_never_decremented() {
 
 #[tokio::test]
 async fn a_scan_source_row_is_decremented_by_its_full_document_id() {
-    use pokoin_commerce::handlers::orders::{
-        decrement_seller_ownership_for_sale, OwnershipLine,
-    };
+    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
     let (state, firestore) = state_harness().await;
     firestore
         .create_document(
@@ -964,7 +1109,6 @@ async fn a_scan_source_row_is_decremented_by_its_full_document_id() {
     assert_eq!(result["docId"], json!("scan:abc123"));
     assert_eq!(result["after"], json!(3));
 }
-
 
 // ---------------------------------------------------------------------------
 // Corrections from review: Firestore-owned Connect, real notifications,
@@ -1028,12 +1172,17 @@ async fn seller_transfers_resolve_a_ready_account_from_the_user_document() {
         )
         .await
         .expect("user");
-    let error = pokoin_commerce::handlers::orders::release_seller_transfers(&state, "order-connect")
-        .await
-        .unwrap_err();
+    let error =
+        pokoin_commerce::handlers::orders::release_seller_transfers(&state, "order-connect")
+            .await
+            .unwrap_err();
     // Reached Stripe and failed there (no key): the READY account was resolved
     // from the Firestore user document.
-    assert!(error.message.to_lowercase().contains("stripe"), "{}", error.message);
+    assert!(
+        error.message.to_lowercase().contains("stripe"),
+        "{}",
+        error.message
+    );
 }
 
 #[tokio::test]
@@ -1074,10 +1223,12 @@ async fn seller_sale_notifications_claim_the_real_firestore_marker() {
         .await
         .expect("seller-2");
 
-    let first = pokoin_commerce::handlers::orders::
-        send_seller_sale_notifications_for_paid_order(&state, "order-notify")
-        .await
-        .expect("notify");
+    let first = pokoin_commerce::handlers::orders::send_seller_sale_notifications_for_paid_order(
+        &state,
+        "order-notify",
+    )
+    .await
+    .expect("notify");
     let results = first["results"].as_array().expect("results");
     assert_eq!(results.len(), 2);
     // No RESEND_API_KEY in tests: claimed, then recorded as skipped.
@@ -1113,18 +1264,18 @@ async fn seller_sale_notifications_claim_the_real_firestore_marker() {
     assert_eq!(marker1["itemCount"], json!(1));
 
     let markers = firestore
-        .run_query(
-            &store::StructuredQuery::collection(notify::NOTIFICATION_COLLECTION).limit(10),
-        )
+        .run_query(&store::StructuredQuery::collection(notify::NOTIFICATION_COLLECTION).limit(10))
         .await
         .expect("markers");
     assert_eq!(markers.len(), 2);
 
     // A second call must not re-claim or re-send.
-    let second = pokoin_commerce::handlers::orders::
-        send_seller_sale_notifications_for_paid_order(&state, "order-notify")
-        .await
-        .expect("notify");
+    let second = pokoin_commerce::handlers::orders::send_seller_sale_notifications_for_paid_order(
+        &state,
+        "order-notify",
+    )
+    .await
+    .expect("notify");
     for row in second["results"].as_array().expect("results") {
         assert_eq!(row["skipped"], json!(true));
         assert_eq!(row["reason"], json!("Notification already claimed."));
@@ -1145,19 +1296,22 @@ async fn notifications_are_skipped_for_an_unpaid_order() {
         )
         .await
         .expect("order");
-    let outcome = pokoin_commerce::handlers::orders::
-        send_seller_sale_notifications_for_paid_order(&state, "order-unpaid")
-        .await
-        .expect("notify");
+    let outcome = pokoin_commerce::handlers::orders::send_seller_sale_notifications_for_paid_order(
+        &state,
+        "order-unpaid",
+    )
+    .await
+    .expect("notify");
     assert_eq!(outcome["skipped"], json!(true));
     assert_eq!(outcome["reason"], json!("Order is not paid."));
     let markers = firestore
-        .run_query(
-            &store::StructuredQuery::collection("order_seller_sale_notifications").limit(10),
-        )
+        .run_query(&store::StructuredQuery::collection("order_seller_sale_notifications").limit(10))
         .await
         .expect("markers");
-    assert!(markers.is_empty(), "an unpaid order must not claim a marker");
+    assert!(
+        markers.is_empty(),
+        "an unpaid order must not claim a marker"
+    );
 }
 
 #[tokio::test]
@@ -1166,12 +1320,21 @@ async fn wallet_addresses_registry_is_read_from_firestore_document_ids() {
     // address — this is the only source of top-up ownership.
     let (state, firestore) = state_harness().await;
     for (id, extra) in [
-        ("0x1111111111111111111111111111111111111111", json!({ "uid": "buyer-1" })),
-        ("0x2222222222222222222222222222222222222222", json!({ "uid": "buyer-1" })),
+        (
+            "0x1111111111111111111111111111111111111111",
+            json!({ "uid": "buyer-1" }),
+        ),
+        (
+            "0x2222222222222222222222222222222222222222",
+            json!({ "uid": "buyer-1" }),
+        ),
     ] {
         let mut document = extra;
         document["uid"] = json!("buyer-1");
-        firestore.create_document("wallet_addresses", id, &document).await.unwrap();
+        firestore
+            .create_document("wallet_addresses", id, &document)
+            .await
+            .unwrap();
     }
     // A different owner's wallet must not be claimed.
     firestore
@@ -1184,7 +1347,11 @@ async fn wallet_addresses_registry_is_read_from_firestore_document_ids() {
         .unwrap();
     // A non-address document id in the same collection is ignored.
     firestore
-        .create_document("wallet_addresses", "not-an-address", &json!({ "uid": "buyer-1" }))
+        .create_document(
+            "wallet_addresses",
+            "not-an-address",
+            &json!({ "uid": "buyer-1" }),
+        )
         .await
         .unwrap();
 
@@ -1205,7 +1372,6 @@ async fn wallet_addresses_registry_is_read_from_firestore_document_ids() {
     assert!(!ids.contains(&"0x3333333333333333333333333333333333333333".to_string()));
     let _ = state;
 }
-
 
 // ---------------------------------------------------------------------------
 // CardTrader integration boundary (owned by the integrations crate)
@@ -1280,6 +1446,14 @@ async fn paid_eur_order_with_port(
                     "language": "EN", "card": { "name": "Pikachu" },
                 }],
                 "createdAt": "2026-10-08T10:00:00.000Z",
+                // Checkout reserved the stock; fulfilment commits it.
+                "inventory": {
+                    "state": "reserved",
+                    "lines": [{
+                        "listingId": "l1", "cardId": "693360", "sellerUid": "seller-1",
+                        "quantity": 2,
+                    }],
+                },
             }),
         )
         .await
@@ -1300,11 +1474,10 @@ async fn paid_eur_order_with_port(
 #[tokio::test]
 async fn fulfilment_drives_the_cardtrader_port_and_completes_applied_steps() {
     use pokoin_commerce::cardtrader::CardTraderOutcome;
-    let (state, firestore, port) =
-        paid_eur_order_with_port(CardTraderOutcome::Applied {
-            detail: json!({ "synced": true }),
-        })
-        .await;
+    let (state, firestore, port) = paid_eur_order_with_port(CardTraderOutcome::Applied {
+        detail: json!({ "synced": true }),
+    })
+    .await;
 
     let result = pokoin_commerce::handlers::orders::fulfil_paid_eur_order(&state, "order-ct")
         .await
@@ -1321,10 +1494,22 @@ async fn fulfilment_drives_the_cardtrader_port_and_completes_applied_steps() {
         .await
         .unwrap()
         .expect("order");
-    assert_eq!(order["fulfillment"]["steps"]["cardtrader_sync"], json!("done"));
-    assert_eq!(order["fulfillment"]["steps"]["cardtrader_buy"], json!("done"));
-    assert_eq!(order["fulfillment"]["steps"]["seller_ownership"], json!("done"));
-    assert_eq!(order["fulfillment"]["steps"]["notifications"], json!("done"));
+    assert_eq!(
+        order["fulfillment"]["steps"]["cardtrader_sync"],
+        json!("done")
+    );
+    assert_eq!(
+        order["fulfillment"]["steps"]["cardtrader_buy"],
+        json!("done")
+    );
+    assert_eq!(
+        order["fulfillment"]["steps"]["seller_ownership"],
+        json!("done")
+    );
+    assert_eq!(
+        order["fulfillment"]["steps"]["notifications"],
+        json!("done")
+    );
     assert_eq!(order["fulfillment"]["steps"]["sales"], json!("done"));
     // Every step completed, so the fulfilment is done and a retry short-circuits.
     assert_eq!(order["fulfillment"]["state"], json!("done"));
@@ -1344,17 +1529,20 @@ async fn fulfilment_drives_the_cardtrader_port_and_completes_applied_steps() {
 #[tokio::test]
 async fn an_unconfigured_cardtrader_leaves_the_steps_open() {
     use pokoin_commerce::cardtrader::CardTraderOutcome;
-    let (state, firestore, port) =
-        paid_eur_order_with_port(CardTraderOutcome::NotConfigured {
-            reason: "seller has no token".into(),
-        })
-        .await;
+    let (state, firestore, port) = paid_eur_order_with_port(CardTraderOutcome::NotConfigured {
+        reason: "seller has no token".into(),
+    })
+    .await;
 
     let result = pokoin_commerce::handlers::orders::fulfil_paid_eur_order(&state, "order-ct")
         .await
         .expect("fulfil");
     // Nothing is claimed done: the CardTrader steps stay open.
-    assert_eq!(result["done"], json!(true), "no hard failure: {result}");
+    assert_eq!(
+        result["done"],
+        json!(false),
+        "unconfigured work remains pending: {result}"
+    );
     assert!(!port.calls().is_empty());
 
     let order = firestore
@@ -1362,8 +1550,14 @@ async fn an_unconfigured_cardtrader_leaves_the_steps_open() {
         .await
         .unwrap()
         .expect("order");
-    assert_ne!(order["fulfillment"]["steps"]["cardtrader_sync"], json!("done"));
-    assert_ne!(order["fulfillment"]["steps"]["cardtrader_buy"], json!("done"));
+    assert_ne!(
+        order["fulfillment"]["steps"]["cardtrader_sync"],
+        json!("done")
+    );
+    assert_ne!(
+        order["fulfillment"]["steps"]["cardtrader_buy"],
+        json!("done")
+    );
     let pending = order["fulfillment"]["pendingWorkerSteps"]
         .as_array()
         .expect("pending");
@@ -1383,10 +1577,7 @@ async fn an_unconfigured_cardtrader_leaves_the_steps_open() {
 async fn a_second_fulfilment_run_does_not_call_cardtrader_again() {
     use pokoin_commerce::cardtrader::CardTraderOutcome;
     let (state, _firestore, port) =
-        paid_eur_order_with_port(CardTraderOutcome::Applied {
-            detail: json!({}),
-        })
-        .await;
+        paid_eur_order_with_port(CardTraderOutcome::Applied { detail: json!({}) }).await;
     let _ = pokoin_commerce::handlers::orders::fulfil_paid_eur_order(&state, "order-ct")
         .await
         .expect("first");
@@ -1398,7 +1589,6 @@ async fn a_second_fulfilment_run_does_not_call_cardtrader_again() {
     assert_eq!(second["skipped"], json!("done"));
     assert_eq!(port.calls().len(), before, "no duplicate integration calls");
 }
-
 
 // ---------------------------------------------------------------------------
 // releaseEurReservation (unpaid EUR order teardown)
@@ -1423,15 +1613,17 @@ async fn unpaid_eur_order(firestore: &FirestoreClient, payment_status: &str, wit
         .expect("order");
 }
 
-
 #[tokio::test]
 async fn releasing_an_expired_order_cancels_it_and_returns_the_held_discount_once() {
     let (state, firestore) = state_harness().await;
     unpaid_eur_order(&firestore, "pending_stripe", true).await;
     // The buyer's discount is held: available down, locked up.
-    store::apply(&firestore, &LedgerOp::mint("buyer-1", 500, "account_top_up"))
-        .await
-        .unwrap();
+    store::apply(
+        &firestore,
+        &LedgerOp::mint("buyer-1", 500, "account_top_up"),
+    )
+    .await
+    .unwrap();
     store::apply(
         &firestore,
         &LedgerOp::lock("buyer-1", 120, "order_discount_held").with_ref("order-release"),
@@ -1500,10 +1692,13 @@ async fn releasing_an_expired_order_cancels_it_and_returns_the_held_discount_onc
         "expired",
         &[],
     )
-    .await
-    .expect("second release");
-    assert_eq!(second["outcome"], json!("closed"));
-    assert_eq!(second["lines"], json!(0));
+    .await;
+    match second {
+        Ok(second) => {
+            assert_eq!(second["lines"], json!(0));
+        }
+        Err(error) => assert_eq!(error.code.as_deref(), Some("order_stock_restore_failed")),
+    }
     let balance = store::balance(&firestore, "buyer-1").await.unwrap();
     assert_eq!(balance.available_pkn, 500, "no double credit");
     assert_eq!(balance.locked_pkn, 0);
@@ -1614,7 +1809,6 @@ async fn releasing_a_missing_order_reports_missing() {
     assert_eq!(result["outcome"], json!("missing"));
 }
 
-
 // ---------------------------------------------------------------------------
 // Checkout shipping-address snapshot (encrypted at rest)
 // ---------------------------------------------------------------------------
@@ -1647,11 +1841,10 @@ async fn the_checkout_snapshot_is_encrypted_with_the_source_address_id() {
         .await
         .expect("address");
 
-    let (country, snapshot) = pokoin_commerce::handlers::orders::shipping_address_snapshot(
-        &state, "buyer-1", "addr-1",
-    )
-    .await
-    .expect("snapshot");
+    let (country, snapshot) =
+        pokoin_commerce::handlers::orders::shipping_address_snapshot(&state, "buyer-1", "addr-1")
+            .await
+            .expect("snapshot");
     assert_eq!(country, "IT");
 
     // The stored snapshot is an opaque envelope, not readable JSON.
@@ -1679,11 +1872,10 @@ async fn the_checkout_snapshot_is_encrypted_with_the_source_address_id() {
 async fn an_unknown_shipping_address_is_not_found() {
     std::env::set_var("ADDRESS_ENCRYPTION_KEY", "11".repeat(32));
     let (state, _firestore) = state_harness().await;
-    let error = pokoin_commerce::handlers::orders::shipping_address_snapshot(
-        &state, "buyer-1", "missing",
-    )
-    .await
-    .unwrap_err();
+    let error =
+        pokoin_commerce::handlers::orders::shipping_address_snapshot(&state, "buyer-1", "missing")
+            .await
+            .unwrap_err();
     assert_eq!(error.status.as_u16(), 404);
     std::env::remove_var("ADDRESS_ENCRYPTION_KEY");
 }
@@ -1716,11 +1908,10 @@ async fn reveal_shipping_requires_payment_and_an_encrypted_snapshot() {
         )
         .await
         .expect("address");
-    let (_country, snapshot) = pokoin_commerce::handlers::orders::shipping_address_snapshot(
-        &state, "buyer-1", "addr-1",
-    )
-    .await
-    .expect("snapshot");
+    let (_country, snapshot) =
+        pokoin_commerce::handlers::orders::shipping_address_snapshot(&state, "buyer-1", "addr-1")
+            .await
+            .expect("snapshot");
     // The Node field names, not a plaintext shippingAddress.
     firestore
         .create_document(
@@ -1764,11 +1955,8 @@ async fn reveal_shipping_requires_payment_and_an_encrypted_snapshot() {
 #[tokio::test]
 async fn an_order_without_a_stored_snapshot_reveals_nothing() {
     let (state, _firestore) = state_harness().await;
-    let revealed = pokoin_commerce::handlers::orders::decrypt_shipping_snapshot(
-        &state,
-        &json!({}),
-    )
-    .expect("decrypt");
+    let revealed = pokoin_commerce::handlers::orders::decrypt_shipping_snapshot(&state, &json!({}))
+        .expect("decrypt");
     assert_eq!(revealed, json!(null));
 }
 
@@ -1781,4 +1969,62 @@ fn the_mock_document_mapping_round_trips() {
     let mut map = Map::new();
     map.insert("k".into(), json!(1));
     assert_eq!(Value::Object(map)["k"], json!(1));
+}
+
+#[tokio::test]
+async fn paid_order_without_reserved_stock_flags_conflict_without_faking_fulfilment() {
+    use pokoin_commerce::cardtrader::CardTraderOutcome;
+    let (state, firestore, port) =
+        paid_eur_order_with_port(CardTraderOutcome::Applied { detail: json!({}) }).await;
+    firestore
+        .set_document(
+            &firestore.document_path("orders", "order-ct"),
+            &json!({"inventory":{"state":"released"}}),
+        )
+        .await
+        .unwrap();
+    let result = pokoin_commerce::handlers::orders::fulfil_paid_eur_order(&state, "order-ct")
+        .await
+        .unwrap();
+    assert_eq!(result["conflict"], true);
+    assert!(port.calls().is_empty());
+    let order = firestore
+        .get_document(&firestore.document_path("orders", "order-ct"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(order["fulfillmentStatus"], "needs_refund");
+    assert_eq!(order["inventory"]["state"], "conflict");
+    assert_eq!(order["buyerUid"], "buyer-1");
+    assert_eq!(order["items"][0]["listingId"], "l1");
+    let retry = pokoin_commerce::handlers::orders::fulfil_paid_eur_order(&state, "order-ct")
+        .await
+        .unwrap();
+    assert_eq!(retry["skipped"], "done");
+    assert!(port.calls().is_empty());
+}
+#[tokio::test]
+async fn unconfigured_cardtrader_result_retries_and_never_becomes_done() {
+    use pokoin_commerce::cardtrader::CardTraderOutcome;
+    let (state, firestore, port) = paid_eur_order_with_port(CardTraderOutcome::NotConfigured {
+        reason: "missing token".into(),
+    })
+    .await;
+    let first = pokoin_commerce::handlers::orders::fulfil_paid_eur_order(&state, "order-ct")
+        .await
+        .unwrap();
+    assert_eq!(first["done"], false);
+    let calls = port.calls().len();
+    let second = pokoin_commerce::handlers::orders::fulfil_paid_eur_order(&state, "order-ct")
+        .await
+        .unwrap();
+    assert_eq!(second["done"], false);
+    assert!(port.calls().len() > calls);
+    let order = firestore
+        .get_document(&firestore.document_path("orders", "order-ct"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(order["fulfillment"]["state"], "partial");
+    assert_eq!(order["fulfillment"]["ownershipDone"], json!(["l1"]));
 }

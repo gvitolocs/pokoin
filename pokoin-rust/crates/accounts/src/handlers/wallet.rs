@@ -13,7 +13,7 @@ use axum::response::Response;
 use serde_json::{json, Value as Json};
 
 use crate::domain::crypto::{
-    is_full_signature, is_session_id, is_signature_shaped, normalize_address, random_nonce,
+    is_session_id, is_signature_shaped, normalize_address, random_nonce,
     random_session_id, recover_address, wallet_sign_in_message,
 };
 use crate::error::{ApiError, Result};
@@ -98,7 +98,7 @@ async fn load_verified_nonce(
         return Err(expired());
     }
     let issued_at_ms = issued_at_millis(&document).ok_or_else(expired)?;
-    if (chrono::Utc::now().timestamp_millis() - issued_at_ms).abs() > NONCE_TTL_MS {
+    if chrono::Utc::now().timestamp_millis() - issued_at_ms > NONCE_TTL_MS {
         return Err(expired());
     }
     let recovered = recover_address(&message, signature)
@@ -143,11 +143,6 @@ pub async fn wallet_auth_verify(State(state): State<DomainState>, body: Bytes) -
 async fn wallet_auth_verify_inner(state: &DomainState, body: &Bytes) -> Result<Response> {
     let body = parse_body(body);
     let (normalized, signature) = validate_wallet_inputs(&body)?;
-    if !is_full_signature(&signature) {
-        return Err(ApiError::unauthorized(
-            "Wallet signature did not match address.",
-        ));
-    }
 
     let auth = state.auth()?;
     let firestore = state.firestore()?;
@@ -350,11 +345,6 @@ async fn wallet_link_inner(
     let claims = require_claims(state, headers).await?;
     let body = parse_body(body);
     let (normalized, signature) = validate_wallet_inputs(&body)?;
-    if !is_full_signature(&signature) {
-        return Err(ApiError::unauthorized(
-            "Wallet signature did not match address.",
-        ));
-    }
 
     let firestore = state.firestore()?;
     load_verified_nonce(&firestore, &normalized, &signature).await?;
@@ -594,14 +584,9 @@ pub async fn wallet_link_complete(State(state): State<DomainState>, body: Bytes)
 async fn wallet_link_complete_inner(state: &DomainState, body: &Bytes) -> Result<Response> {
     let body = parse_body(body);
     let session_id = string_field(&body, "sessionId").trim().to_string();
+    let (normalized, signature) = validate_wallet_inputs(&body)?;
     if !is_session_id(&session_id) {
         return Err(ApiError::bad_request("Wallet link session is invalid."));
-    }
-    let (normalized, signature) = validate_wallet_inputs(&body)?;
-    if !is_full_signature(&signature) {
-        return Err(ApiError::unauthorized(
-            "Wallet signature did not match address.",
-        ));
     }
 
     let firestore = state.firestore()?;

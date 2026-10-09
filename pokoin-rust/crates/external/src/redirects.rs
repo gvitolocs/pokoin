@@ -114,17 +114,19 @@ pub async fn catalog_ids_for_any_game(
     id: &str,
 ) -> ApiResult<Option<(String, CatalogHit)>> {
     let start = crate::db::normalize_game(requested_game);
-    let mut games = vec![start.clone()];
-    games.extend(INGEST_GAMES.iter().map(|(game, _, _)| game.to_string()));
-    games.dedup();
-    for game in games {
-        if let Ok(Some(hit)) = catalog_ids_for(db, &game, id).await {
-            if !hit.ct_id.is_empty() {
-                return Ok(Some((game, hit)));
-            }
+    // The requested catalog failure is significant. Only unavailable satellite
+    // catalogs are ignored, exactly like catalogIdsForAnyGame in Node.
+    let first = catalog_ids_for(db, &start, id).await?;
+    if let Some(hit)=first.as_ref().filter(|hit|!hit.ct_id.is_empty()) {
+        return Ok(Some((start,hit.clone())));
+    }
+    for (game,_,_) in INGEST_GAMES {
+        if game==start {continue}
+        if let Ok(Some(hit))=catalog_ids_for(db,game,id).await {
+            if !hit.ct_id.is_empty(){return Ok(Some((game.into(),hit)))}
         }
     }
-    Ok(None)
+    Ok(first.map(|hit|(start,hit)))
 }
 
 /// `readTcgplayerProductId` — best active product link for a card.
@@ -134,18 +136,20 @@ pub async fn read_tcgplayer_product_id(db: &DbPools, game: &str, card_id: &str) 
         return Ok(String::new());
     }
     let numeric: i64 = id.parse().unwrap_or(0);
-    let normalized = crate::db::normalize_game(game);
-    let rows = db
-        .query(
-            &normalized,
-            TCGPLAYER_PRODUCT_SQL,
-            &[json!(normalized), json!(numeric)],
-        )
-        .await?;
-    Ok(rows
-        .first()
-        .map(|row| row_string(row, "product_id"))
-        .unwrap_or_default())
+    use std::{str::FromStr,sync::OnceLock,time::Duration};
+    use sqlx::postgres::{PgConnectOptions,PgPoolOptions,PgSslMode};
+    static POOL:OnceLock<Option<sqlx::PgPool>>=OnceLock::new();
+    let pool=POOL.get_or_init(|| {
+        let url=std::env::var("TCGCSV_DATABASE_URL").ok().filter(|v|!v.trim().is_empty())?;
+        let options=PgConnectOptions::from_str(&url).ok()?;
+        let options=options.ssl_mode(if std::env::var("TCGCSV_DATABASE_SSL").as_deref()==Ok("0"){PgSslMode::Disable}else{PgSslMode::VerifyFull})
+            .options([("statement_timeout","5000")]).application_name("pokoin-tcgcsv-prices");
+        Some(PgPoolOptions::new().max_connections(2).acquire_timeout(Duration::from_secs(5)).connect_lazy_with(options))
+    }).as_ref().ok_or_else(||crate::error::ApiError::new(503,"TCGCSV_DATABASE_URL is not configured."))?;
+    let _=db;
+    let normalized=crate::db::normalize_game(game);
+    let product:Option<String>=sqlx::query_scalar(TCGPLAYER_PRODUCT_SQL).bind(normalized).bind(numeric).fetch_optional(pool).await?;
+    Ok(product.unwrap_or_default())
 }
 
 #[cfg(test)]

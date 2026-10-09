@@ -689,7 +689,7 @@ async fn crypto_sale_request(
 
 pub async fn wpkn_exchange(
     State(state): State<DomainState>,
-    AuthedUser(claims): AuthedUser,
+    super::PublicAuthedUser(claims): super::PublicAuthedUser,
     Query(query): Query<QueryMap>,
     body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {

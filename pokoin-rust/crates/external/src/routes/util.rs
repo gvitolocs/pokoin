@@ -71,11 +71,6 @@ pub async fn preflight() -> Response {
     response
 }
 
-/// Explicit, honest 501 for an audited gap. Never a fake success.
-pub fn not_implemented(route: &str, reason: &str) -> ApiResult<Response> {
-    let _ = route;
-    Err(ApiError::new(501, reason).with_code("not_implemented"))
-}
 
 #[cfg(test)]
 mod tests {

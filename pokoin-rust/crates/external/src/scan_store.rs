@@ -1933,6 +1933,11 @@ pub async fn submit_batch(
         })).collect::<Vec<_>>(),
         "submitKey": key,
     });
+    // (item id, listing id, scan row) for the CardTrader push after commit.
+    let created_rows: Vec<(String, Option<String>, Value)> = created
+        .iter()
+        .map(|entry| (entry.item_id.clone(), entry.listing_id.clone(), entry.row.clone()))
+        .collect();
     let updated = sqlx::query(
         "update public.scan_batches
            set status = 'submitted', submit_key = $2, submit_result = $3, submitted_at = now(), updated_at = now()
@@ -1953,16 +1958,75 @@ pub async fn submit_batch(
     }
     tx.commit().await?;
 
+    let mut result = result;
+    let cardtrader = if intent == "list" && targets.get("cardtrader") == Some(&Value::Bool(true)) {
+        let pushed = push_created_to_cardtrader(&pool, seller_uid, &created_rows).await;
+        result["cardtrader"] = pushed.clone();
+        if let Err(error) = sqlx::query("update public.scan_batches set submit_result = $2, updated_at = now() where id = $1")
+            .bind(batch_id)
+            .bind(sqlx::types::Json(&result))
+            .execute(&pool)
+            .await
+        {
+            tracing::error!(message = %error, "scan submit cardtrader result persist skipped");
+        }
+        pushed
+    } else {
+        json!({"ok": true, "skipped": true, "reason": "not_requested"})
+    };
     Ok(json!({
         "batch": rules::batch_view(&row_value(&updated)),
         "result": result,
         "alreadySubmitted": false,
-        "cardtrader": if targets.get("cardtrader") == Some(&Value::Bool(true)) {
-            json!({"ok": true, "skipped": true, "reason": "commerce_not_ported"})
-        } else {
-            json!({"ok": true, "skipped": true, "reason": "not_requested"})
-        },
+        "cardtrader": cardtrader,
     }))
+}
+
+/// Node `submitBatch` CardTrader step: push every created scan listing with the
+/// seller's integration, linking it when a Pokoin listing exists.
+async fn push_created_to_cardtrader(writer: &PgPool, seller_uid: &str, created: &[(String, Option<String>, Value)]) -> Value {
+    use crate::cardtrader::{client::CardTraderClient, push};
+    let Some(fs) = crate::firebase::FirestoreRest::from_env() else {
+        return json!({"ok": false, "productIds": [], "errors": [{"itemId": Value::Null, "error": "Firebase Admin credentials are not configured."}]});
+    };
+    let ct = CardTraderClient::new();
+    let mut product_ids = Vec::new();
+    let mut errors = Vec::new();
+    for (item_id, listing_id, row) in created {
+        let mut listing = json!({
+            "cardId": row.get("card_id").cloned().unwrap_or(Value::Null),
+            "pricePkn": row.get("price_pkn").cloned().unwrap_or(Value::Null),
+            "quantityAvailable": row.get("quantity").cloned().unwrap_or(Value::Null),
+            "condition": row.get("condition").cloned().unwrap_or(Value::Null),
+            "language": row.get("language").cloned().unwrap_or(Value::Null),
+            "signed": row.get("signed").cloned().unwrap_or(Value::Null),
+            "reverse": row.get("foil_state").and_then(Value::as_str) == Some("reverse"),
+            "firstEdition": row.get("first_edition").cloned().unwrap_or(Value::Null),
+            "foilState": row.get("foil_state").cloned().unwrap_or(Value::Null),
+            "graded": row.get("graded").cloned().unwrap_or(Value::Null),
+            "altered": row.get("altered").cloned().unwrap_or(Value::Null),
+            "sellerComment": row.get("seller_comment").cloned().unwrap_or(Value::Null),
+        });
+        let outcome = match listing_id {
+            Some(id) => {
+                listing["id"] = json!(id);
+                push::push_and_link(&fs, &ct, writer, seller_uid, &listing).await
+            }
+            None => push::push_product(&fs, &ct, seller_uid, &listing).await,
+        };
+        match outcome {
+            Ok(pushed) => product_ids.push(pushed.get("productId").cloned().unwrap_or(Value::Null)),
+            Err(error) => errors.push(json!({
+                "itemId": item_id,
+                "error": if error.message.is_empty() { "CardTrader create failed.".to_string() } else { error.message },
+            })),
+        }
+    }
+    let mut out = json!({"ok": errors.is_empty(), "productIds": product_ids});
+    if !errors.is_empty() {
+        out["errors"] = Value::Array(errors);
+    }
+    out
 }
 
 /// Listing location with the box slot suffix (`listingLocationOf`).

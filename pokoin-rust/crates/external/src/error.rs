@@ -89,12 +89,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         let mut payload = json!({
-            "error": if self.status >= 500 {
-                // 5xx bodies never leak internals (scan-http sendError parity).
-                "Scan service error.".to_string()
-            } else {
-                self.message.clone()
-            },
+            "error": self.message.clone(),
         });
         let obj = payload.as_object_mut().unwrap();
         if let Some(code) = &self.code {
@@ -109,7 +104,7 @@ impl IntoResponse for ApiError {
                 response.headers_mut().insert("Retry-After", value);
             }
         }
-        response
+        no_store(response)
     }
 }
 
@@ -203,26 +198,12 @@ pub fn header_value(headers: &HeaderMap, name: &str) -> String {
 
 /// `clientIp(req)` from `_scan_http.js`: CF first, then XFF first hop, then peer.
 pub fn scan_client_ip(headers: &HeaderMap) -> String {
-    let cf = header_value(headers, "cf-connecting-ip").trim().to_string();
-    if !cf.is_empty() {
-        return cf.chars().take(64).collect();
-    }
-    let forwarded = header_value(headers, "x-forwarded-for");
-    let first = forwarded.split(',').next().unwrap_or("").trim().to_string();
-    if !first.is_empty() {
-        return first.chars().take(64).collect();
-    }
-    "unknown".to_string()
+    header_value(headers, "x-pokoin-client-ip").chars().take(64).collect::<String>()
 }
 
-/// The image-log family uses XFF first, then x-real-ip.
+/// Only the trusted global middleware may interpret forwarding headers.
 pub fn xff_client_ip(headers: &HeaderMap) -> String {
-    let forwarded = header_value(headers, "x-forwarded-for");
-    let first = forwarded.split(',').next().unwrap_or("").trim().to_string();
-    if !first.is_empty() {
-        return first;
-    }
-    header_value(headers, "x-real-ip")
+    header_value(headers, "x-pokoin-client-ip")
 }
 
 pub fn set_cors_open(response: &mut Response) {

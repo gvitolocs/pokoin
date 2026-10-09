@@ -2379,19 +2379,12 @@ async fn rows_for_search_term_base(
     let engine_language_active = use_meili_search_for_language(search_language);
     if engine_language_active {
         let started = now_ms();
-        let attempt = with_timeout(
-            rows_for_meili_search_term(
-                ctx,
-                redis.clone(),
-                search_term,
-                result_limit,
-                result_offset,
-                None,
-            ),
-            ladder::name_search_timeout_ms(),
-            "redis candidate search",
-        )
-        .await;
+        // Node times out FT.SEARCH, not the subsequent PostgreSQL hydration.
+        // Applying the name-tier budget to both stages discarded valid Redis
+        // results and exposed unhydrated fallback rows (no artist/palette).
+        let attempt = rows_for_meili_search_term(
+            ctx, redis.clone(), search_term, result_limit, result_offset, None,
+        ).await;
         match attempt {
             Ok((rows, _total)) => {
                 let _ = started;

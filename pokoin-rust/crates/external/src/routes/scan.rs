@@ -7,10 +7,23 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
 
-use crate::error::{header_value, json_response, scan_client_ip, set_cors_open, ApiError, ApiResult};
+use crate::error::{no_store, header_value, json_response, scan_client_ip, set_cors_open, ApiError, ApiResult};
 use crate::routes::util::{body_json, query_first, query_pairs, require_token};
 use crate::scan::WorkerReply;
 use crate::state::DomainState;
+
+/// Node verifyDesktop intentionally gives the same response for every failed
+/// verification. The underlying verifier still checks signature, issuer and expiry.
+fn scan_error(mut error: ApiError) -> ApiError {
+    if error.status >= 500 { error.message = "Scan service error.".into(); error.code = None; }
+    error
+}
+
+async fn require_desktop(state: &DomainState, headers: &HeaderMap) -> ApiResult<crate::firebase::DecodedToken> {
+    require_token(state, headers).await
+        .and_then(|identity| if identity.uid.is_empty() { Err(ApiError::new(401, "Sign in again to use Scan.").with_code("auth")) } else { Ok(identity) })
+        .map_err(|_| ApiError::new(401, "Sign in again to use Scan.").with_code("auth"))
+}
 
 const MAX_UPLOAD_BYTES: usize = 12 * 1024 * 1024;
 
@@ -30,7 +43,7 @@ fn worker_response(reply: WorkerReply) -> Response {
         .body(axum::body::Body::from(reply.body))
         .unwrap_or_else(|_| json_response(502, json!({ "error": "Recognition worker reply failed." })));
     set_cors_open(&mut response);
-    response
+    no_store(response)
 }
 
 /// `POST /api/scan/identify` — forward one multipart photo to the worker.
@@ -76,7 +89,7 @@ async fn forward_upload(
             content_type(headers).as_deref(),
             &scan_client_ip(headers),
         )
-        .await?;
+        .await.map_err(|_| ApiError::unavailable("Card recognition is unavailable right now. Try again in a moment."))?;
     Ok(worker_response(reply))
 }
 
@@ -107,7 +120,7 @@ async fn forward_get(
     let reply = state
         .recognition
         .forward(route, "GET", &query_pairs(uri), None, None, &scan_client_ip(headers))
-        .await?;
+        .await.map_err(|_| ApiError::unavailable("Card recognition is unavailable right now. Try again in a moment."))?;
     Ok(worker_response(reply))
 }
 
@@ -127,13 +140,17 @@ pub async fn preflight() -> Response {
 }
 
 /// `GET|POST /api/scan-batch` — staged batch snapshot, image and row actions.
-pub async fn batch(
+pub async fn batch(state: State<DomainState>, headers: HeaderMap, uri: Uri, body: Bytes) -> ApiResult<Response> {
+    batch_inner(state, headers, uri, body).await.map_err(scan_error)
+}
+
+async fn batch_inner(
     State(state): State<DomainState>,
     headers: HeaderMap,
     uri: Uri,
     body: Bytes,
 ) -> ApiResult<Response> {
-    let identity = require_token(&state, &headers).await?;
+    let identity = require_desktop(&state, &headers).await?;
     let method_post = !body.is_empty() || query_first(&uri, "action").is_some() && query_first(&uri, "batchId").is_none();
     let payload = if body.is_empty() { json!({}) } else { body_json(&body).await? };
     let batch_id = query_first(&uri, "batchId")
@@ -176,7 +193,11 @@ pub async fn batch(
 }
 
 /// `POST /api/scan-pair` — phone claims a PIN/QR and receives a phone token.
-pub async fn pair(
+pub async fn pair(state: State<DomainState>, headers: HeaderMap, body: Bytes) -> ApiResult<Response> {
+    pair_inner(state, headers, body).await.map_err(scan_error)
+}
+
+async fn pair_inner(
     State(state): State<DomainState>,
     headers: HeaderMap,
     body: Bytes,
@@ -194,7 +215,11 @@ pub async fn pair(
 }
 
 /// `POST /api/scan-phone` — heartbeat / idempotent scan event / leave.
-pub async fn phone(
+pub async fn phone(state: State<DomainState>, headers: HeaderMap, uri: Uri, body: Bytes) -> ApiResult<Response> {
+    phone_inner(state, headers, uri, body).await.map_err(scan_error)
+}
+
+async fn phone_inner(
     State(state): State<DomainState>,
     headers: HeaderMap,
     uri: Uri,
@@ -217,7 +242,7 @@ pub async fn phone(
         "heartbeat" => crate::scan_store::heartbeat(&state.db, &token).await?,
         "scan" => crate::scan_store::ingest_scan(&state.db, &token, &payload).await?,
         "leave" => crate::scan_store::leave(&state.db, &token).await?,
-        _ => return Err(ApiError::bad_request("Unknown scan action.")),
+        _ => return Err(ApiError::bad_request("Unknown action.")),
     };
     let mut response = json_response(200, out);
     set_cors_open(&mut response);
@@ -225,13 +250,17 @@ pub async fn phone(
 }
 
 /// `GET|POST /api/scan-session` — desktop session lifecycle.
-pub async fn session(
+pub async fn session(state: State<DomainState>, headers: HeaderMap, uri: Uri, body: Bytes) -> ApiResult<Response> {
+    session_inner(state, headers, uri, body).await.map_err(scan_error)
+}
+
+async fn session_inner(
     State(state): State<DomainState>,
     headers: HeaderMap,
     uri: Uri,
     body: Bytes,
 ) -> ApiResult<Response> {
-    let identity = require_token(&state, &headers).await?;
+    let identity = require_desktop(&state, &headers).await?;
     if body.is_empty() && query_first(&uri, "action").is_none() {
         let session_id = query_first(&uri, "sessionId").unwrap_or_default();
         let out = crate::scan_store::get_session(&state.db, &identity.uid, &session_id).await?;
@@ -255,13 +284,17 @@ pub async fn session(
             let paused = payload.get("paused") == Some(&Value::Bool(true));
             crate::scan_store::update_session(&state.db, &identity.uid, &session_id, &action, reason, paused).await?
         }
-        _ => return Err(ApiError::bad_request("Unknown session action.")),
+        _ => return Err(ApiError::bad_request("Unknown action.")),
     };
     Ok(json_response(200, out))
 }
 
 /// `GET /api/scan-stream` — SSE change stream, closes after 55 s.
-pub async fn stream(
+pub async fn stream(state: State<DomainState>, headers: HeaderMap, uri: Uri) -> ApiResult<Response> {
+    stream_inner(state, headers, uri).await.map_err(scan_error)
+}
+
+async fn stream_inner(
     State(state): State<DomainState>,
     headers: HeaderMap,
     uri: Uri,
@@ -270,7 +303,7 @@ pub async fn stream(
     use std::convert::Infallible;
     use std::time::{Duration, Instant};
 
-    let identity = require_token(&state, &headers).await?;
+    let identity = require_desktop(&state, &headers).await?;
     let batch_id = query_first(&uri, "batchId").unwrap_or_default();
     if batch_id.is_empty() {
         return Err(ApiError::bad_request("batchId is required."));

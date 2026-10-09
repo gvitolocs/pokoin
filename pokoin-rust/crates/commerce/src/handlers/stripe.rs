@@ -211,12 +211,34 @@ pub async fn create_pkn_checkout_session(
 // /api/stripe-webhook
 // ---------------------------------------------------------------------------
 
-pub async fn stripe_webhook(
+pub async fn stripe_webhook(state: State<DomainState>, headers: HeaderMap, body: Bytes) -> Response {
+    match stripe_webhook_inner(state, headers, body).await {
+        Ok(response) => response,
+        Err(error) => {
+            let signature_error = error.status == StatusCode::BAD_REQUEST && error.message.starts_with("Webhook Error:");
+            let configuration_error = error.message == "Stripe webhook is not configured.";
+            let (status, message) = if signature_error { (StatusCode::BAD_REQUEST, error.message) }
+                else if configuration_error { (StatusCode::INTERNAL_SERVER_ERROR, error.message) }
+                else { tracing::error!(%error, "Stripe webhook handling failed"); (StatusCode::INTERNAL_SERVER_ERROR, "Webhook handling failed.".to_string()) };
+            stripe_text(status, &message)
+        }
+    }
+}
+fn stripe_text(status: StatusCode, message: &str) -> Response {
+    (status, [("content-type", "text/plain")], message.to_string()).into_response()
+}
+pub async fn stripe_webhook_method_not_allowed() -> Response {
+    let mut response = stripe_text(StatusCode::METHOD_NOT_ALLOWED, "Method not allowed");
+    response.headers_mut().insert("allow", axum::http::HeaderValue::from_static("POST"));
+    response
+}
+
+async fn stripe_webhook_inner(
     State(state): State<DomainState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    let stripe = state.stripe()?;
+    let stripe = state.stripe().map_err(|_| ApiError::internal("Stripe webhook is not configured."))?;
     let signature = headers
         .get("stripe-signature")
         .and_then(|value| value.to_str().ok());
@@ -321,10 +343,7 @@ async fn handle_marketplace_order_paid(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let total_cents = order
-        .get("totalEURCents")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
+    let total_cents = expected_eur_charge(&order);
     let discount_pkn = order
         .get("pknDiscount")
         .and_then(|discount| discount.get("pkn"))
@@ -431,7 +450,7 @@ fn connect_status(account: &Value) -> (&'static str, bool) {
 }
 pub async fn stripe_connect_onboard_get(
     State(state): State<DomainState>,
-    AuthedUser(claims): AuthedUser,
+    super::PublicAuthedUser(claims): super::PublicAuthedUser,
 ) -> Result<Response, ApiError> {
     let stripe = state.stripe()?;
     // Connect state lives on the Firestore user document (`users/{uid}`), exactly
@@ -472,7 +491,7 @@ pub async fn stripe_connect_onboard_get(
 
 pub async fn stripe_connect_onboard_post(
     State(state): State<DomainState>,
-    AuthedUser(claims): AuthedUser,
+    super::PublicAuthedUser(claims): super::PublicAuthedUser,
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Result<Response, ApiError> {
@@ -617,5 +636,25 @@ mod tests {
             ("pending", false)
         );
         assert_eq!(connect_status(&json!({})), ("onboarding", false));
+    }
+}
+
+/// Stripe collects the EUR total after consuming the buyer's PKN discount.
+fn expected_eur_charge(order: &Value) -> i64 {
+    let numeric = |value: Option<&Value>| value.and_then(|value| value.as_f64().or_else(|| value.as_str().and_then(|s| s.parse::<f64>().ok()))).filter(|n| n.is_finite()).unwrap_or(0.0);
+    (numeric(order.get("totalEURCents")) - numeric(order.get("pknDiscount").and_then(|d| d.get("eurCents")))) as i64
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    #[test] fn stripe_eur_total_subtracts_discount() {
+        assert_eq!(expected_eur_charge(&json!({"totalEURCents": 1000, "pknDiscount":{"pkn":100,"eurCents":50}})), 950);
+        assert_eq!(expected_eur_charge(&json!({"totalEURCents":"800"})), 800);
+    }
+    #[test] fn webhook_errors_are_plain_text() {
+        let response = stripe_text(StatusCode::BAD_REQUEST, "Webhook Error: signature rejected.");
+        assert_eq!(response.headers()["content-type"], "text/plain");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

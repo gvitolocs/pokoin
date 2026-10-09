@@ -8,6 +8,7 @@ pub mod orders;
 pub mod seller;
 pub mod stripe;
 pub mod wallet;
+pub mod earn_pkn;
 
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -116,4 +117,29 @@ pub fn parse_json_body(bytes: &[u8]) -> Result<Value, ApiError> {
     }
     serde_json::from_slice(bytes)
         .map_err(|_| ApiError::bad_request("Invalid JSON body.").with_code("invalid_json"))
+}
+
+/// Public auth responses expose verifier messages without internal codes.
+pub struct PublicAuthedUser(pub crate::auth::Claims);
+impl axum::extract::FromRequestParts<crate::state::DomainState> for PublicAuthedUser {
+    type Rejection = ApiError;
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &crate::state::DomainState) -> Result<Self, Self::Rejection> {
+        crate::state::AuthedUser::from_request_parts(parts, state).await
+            .map(|user| Self(user.0))
+            .map_err(|mut error| { error.code = None; error })
+    }
+}
+/// Cart auth and failures carry private caching too.
+pub struct CartAuthedUser(pub crate::auth::Claims);
+impl axum::extract::FromRequestParts<crate::state::DomainState> for CartAuthedUser {
+    type Rejection = Response;
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &crate::state::DomainState) -> Result<Self, Self::Rejection> {
+        PublicAuthedUser::from_request_parts(parts, state).await
+            .map(|user| Self(user.0))
+            .map_err(|error| {
+                let mut response = error.into_response();
+                response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
+                response
+            })
+    }
 }

@@ -130,9 +130,9 @@ pub async fn card_tiles(State(state):State<AppState>,headers:HeaderMap,uri:axum:
 pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::http::Uri)->Response{
 
  let p=params(&uri);let game=game_from(&headers,p.get("game").map(String::as_str));
- let Some(id)=positive_id(p.get("cardId").or_else(||p.get("id")).map(String::as_str).unwrap_or("")) else{return response(StatusCode::BAD_REQUEST,json!({"error":"cardId is required (public marketplace id)."}),"no-store")};
+ let Some(id)=positive_id(p.get("cardId").or_else(||p.get("id")).map(String::as_str).unwrap_or("")) else{return response(StatusCode::BAD_REQUEST,json!({"error":"cardId is required (public marketplace id)."}),"")};
  let Some(pool)=game_pool(&state,&game).await else{return response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")};
- let primary=match cards(&pool,&[id],&game).await{Ok(mut r)=>match r.pop(){Some(r)=>r,None=>return response(StatusCode::NOT_FOUND,json!({"error":"Card not found.","cardId":id.to_string()}),"no-store")},Err(e)=>return failure(&e)};
+ let primary=match cards(&pool,&[id],&game).await{Ok(mut r)=>match r.pop(){Some(r)=>r,None=>return response(StatusCode::NOT_FOUND,json!({"error":"Card not found.","cardId":id.to_string()}),"")},Err(e)=>return failure(&e)};
  let name=text(&primary,&["name"]);let set=text(&primary,&["set_name"]);
  let version=text(&primary,&["version"]);
  let (version_ids,rarity_ids,neighbors,meta)=tokio::join!(

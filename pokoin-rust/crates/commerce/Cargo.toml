@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+pokoin-accounts = { path = "../accounts" }
+unicode-normalization = "0.1"
+pokoin-api-common = { path = "../api-common" }
+pokoin-external = { path = "../external" }
 anyhow = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
@@ -35,6 +39,8 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }
 http-body-util = "0.1"
+urlencoding = "2"
 
 [lints.rust]
 unsafe_code = "forbid"
+

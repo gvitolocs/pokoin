@@ -35,6 +35,9 @@ pub struct Claims {
     pub admin: bool,
     #[serde(default, rename = "isAdmin")]
     pub is_admin: bool,
+    /// Verified custom claims used by reserve authorization and integration roles.
+    #[serde(flatten)]
+    pub custom: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Claims {
@@ -97,6 +100,8 @@ struct RawClaims {
     admin: bool,
     #[serde(default, rename = "isAdmin")]
     is_admin: bool,
+    #[serde(flatten)]
+    custom: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -220,6 +225,7 @@ impl TokenVerifier for FirebaseVerifier {
             role: data.claims.role,
             admin: data.claims.admin,
             is_admin: data.claims.is_admin,
+            custom: data.claims.custom,
         })
     }
 }
@@ -262,6 +268,20 @@ mod tests {
                 Err(AuthError::Invalid("bad token".into()))
             }
         }
+    }
+
+    #[test]
+    fn signed_role_claims_survive_verification_mapping() {
+        let raw: RawClaims = serde_json::from_value(serde_json::json!({
+            "sub":"u", "email":"e", "role":"seller", "reserve":true,
+            "roles":["reserve"], "customClaims":{"hasReserveAccess":true}
+        })).unwrap();
+        let claims = Claims { uid:raw.sub, email:raw.email, role:raw.role,
+            admin:raw.admin,is_admin:raw.is_admin,custom:raw.custom };
+        let value=serde_json::to_value(claims).unwrap();
+        assert_eq!(value["reserve"],true);
+        assert_eq!(value["roles"][0],"reserve");
+        assert_eq!(value["customClaims"]["hasReserveAccess"],true);
     }
 
     #[test]

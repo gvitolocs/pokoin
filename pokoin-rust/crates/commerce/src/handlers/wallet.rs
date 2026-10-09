@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
 
@@ -1006,26 +1006,9 @@ pub async fn earn_pkn(
     State(state): State<DomainState>,
     axum::Json(body): axum::Json<Value>,
 ) -> Result<Response, ApiError> {
-    let name = text_field(&body, &["name", "fullName"], 120);
-    let email = text_field(&body, &["email"], 200);
-    if name.is_empty() || !email.contains('@') {
-        return Err(ApiError::bad_request("Name and a valid email are required."));
-    }
-    let summary: String = body
-        .get("message")
-        .or_else(|| body.get("inquiry"))
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(4000)
-        .collect();
-    let subject = format!("Earn PKN inquiry from {name}");
-    let text = format!("{summary}\n\nReply-to: {email}");
-    let html = format!(
-        "<p>{}</p><p>Reply-to: {}</p>",
-        crate::domain::notify::escape_html(&summary),
-        crate::domain::notify::escape_html(&email),
-    );
+    let submission = super::earn_pkn::normalize(&body)?;
+    let submitted_at = store::now_iso();
+    let (subject, text, html) = super::earn_pkn::email(&submission, &submitted_at);
     let delivery = crate::email::send_email(
         state.http(),
         &crate::email::earn_pkn_email_from(),
@@ -1038,17 +1021,11 @@ pub async fn earn_pkn(
     // Node answers 503 when the provider is not configured: a submission the
     // team will never see must not look accepted.
     if delivery.skipped {
-        return Err(ApiError::unavailable("Earn PKN email delivery is not configured.")
-            .with_code("earn_pkn_email_unconfigured")
-            .with_meta(json!({
-                "reason": delivery.reason.unwrap_or_else(|| "Email provider is not configured.".into()),
-            })));
+        return Ok((axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(json!({
+            "error":"Earn PKN email delivery is not configured.",
+            "reason":delivery.reason.unwrap_or_else(|| "Email provider is not configured.".into()),
+        }))).into_response());
     }
-    Ok(private_json(json!({
-        "ok": true,
-        "email": {
-            "sent": true,
-            "deliveryId": delivery.id,
-        },
-    })))
+    Ok(axum::Json(json!({ "ok": true, "email": {"ok": true, "id": delivery.id} })).into_response())
+
 }

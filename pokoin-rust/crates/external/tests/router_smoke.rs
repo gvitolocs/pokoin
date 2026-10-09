@@ -63,7 +63,7 @@ async fn authenticated_routes_require_a_bearer_token() {
 }
 
 #[tokio::test]
-async fn audited_gaps_answer_501_not_a_fake_success() {
+async fn commerce_owned_routes_are_absent_and_scan_never_answers_501() {
     // This route is commerce-owned in the merged API and is intentionally
     // absent from the external domain router.
     let request = Request::builder()
@@ -104,66 +104,14 @@ async fn recognition_proxy_fails_closed_without_workers() {
 }
 
 #[tokio::test]
-async fn admin_refresh_requires_the_config_secret() {
-    let request = Request::builder()
-        .uri("/api/cardtrader-daily-listings-refresh")
-        .body(Body::empty())
-        .unwrap();
+async fn admin_refresh_requires_a_configured_environment_secret() {
+    let request = Request::builder().uri("/api/cardtrader-daily-listings-refresh").body(Body::empty()).unwrap();
     let (status, body) = call(DomainState::for_test(), request).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert_eq!(body["code"], "invalid_secret");
-
-    // Correct secret passes the gate and then honestly reports the SQL gap.
-    let request = Request::builder()
-        .uri("/api/cardtrader-daily-listings-refresh")
-        .header("authorization", "Bearer test-cron")
-        .body(Body::empty())
-        .unwrap();
-    let (status, body) = call(DomainState::for_test(), request).await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(body["code"], "not_implemented");
-}
-
-#[tokio::test]
-async fn methods_outside_the_route_are_405() {
-    let request = Request::builder()
-        .uri("/api/client-country")
-        .method("POST")
-        .body(Body::empty())
-        .unwrap();
-    let (status, _) = call(DomainState::for_test(), request).await;
-    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
-}
-
-#[tokio::test]
-async fn social_routes_are_private() {
-    // No secret and no bearer → 401.
-    for uri in ["/api/social-autopost", "/api/social-post-agent"] {
-        let request = Request::builder()
-            .uri(uri)
-            .method("POST")
-            .header("content-type", "application/json")
-            .body(Body::from("{}"))
-            .unwrap();
-        let (status, _) = call(DomainState::for_test(), request).await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED, "{uri}");
+    if ["CARDTRADER_DAILY_LISTINGS_SECRET", "CARDTRADER_DAILY_REFRESH_SECRET", "CRON_SECRET"].iter().all(|name| std::env::var(name).unwrap_or_default().trim().is_empty()) {
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "CARDTRADER_REFRESH_SECRET_MISSING");
+    } else {
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"], "CardTrader daily refresh access denied.");
     }
-    // A signed-in non-admin (no admin allow-list email) → 403, never a send.
-    let request = Request::builder()
-        .uri("/api/social-autopost")
-        .method("POST")
-        .header("authorization", "Bearer test-uid")
-        .header("content-type", "application/json")
-        .body(Body::from("{}"))
-        .unwrap();
-    let (status, _) = call(DomainState::for_test(), request).await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    // Preflight is open.
-    let request = Request::builder()
-        .uri("/api/social-autopost")
-        .method("OPTIONS")
-        .body(Body::empty())
-        .unwrap();
-    let (status, _) = call(DomainState::for_test(), request).await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
 }

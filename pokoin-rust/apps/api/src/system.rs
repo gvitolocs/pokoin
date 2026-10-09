@@ -304,6 +304,14 @@ pub(crate) fn router(state: AppState) -> Router {
 }
 
 /// Node: `sendJson(res, 404, { error: 'API route not found.' })`.
+pub(crate) async fn fallback(uri: Uri) -> Response {
+    if uri.path().starts_with("/api/") || uri.path()=="/api" { return not_found().await; }
+    let mut response=Response::new(axum::body::Body::empty());
+    *response.status_mut()=StatusCode::NOT_FOUND;
+    response.headers_mut().insert("cache-control",axum::http::HeaderValue::from_static("private, no-store"));
+    response
+}
+
 pub(crate) async fn not_found() -> Response {
     json(StatusCode::NOT_FOUND, json!({"error": "API route not found."}))
 }

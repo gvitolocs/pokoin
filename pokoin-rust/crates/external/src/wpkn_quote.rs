@@ -97,7 +97,7 @@ pub async fn gecko_terminal_wpkn_usd(http: &reqwest::Client) -> ApiResult<f64> {
     let payload: Value = response.json().await.unwrap_or_else(|_| json!({}));
     let price = payload
         .pointer(&format!("/data/attributes/token_prices/{token}"))
-        .and_then(Value::as_f64)
+        .and_then(|value| value.as_f64().or_else(|| value.as_str().and_then(|text| text.parse::<f64>().ok())))
         .unwrap_or(0.0);
     if !price.is_finite() || price <= 0.0 {
         return Err(ApiError::unavailable("GeckoTerminal returned an invalid wPKN price."));
@@ -160,7 +160,9 @@ pub async fn handle(
     amount_in: f64,
 ) -> ApiResult<Value> {
     let now_ms = crate::time_util::now_ms();
-    let quote = calculate_quote(http, direction, amount_in, None, None, now_ms).await?;
+    // The route obtains prices before validating the requested amount/direction.
+    let wpkn_usd = gecko_terminal_wpkn_usd(http).await?;
+    let quote = calculate_quote(http, direction, amount_in, Some(wpkn_usd), Some(pkn_usd_price()), now_ms).await?;
     Ok(json!({
         "direction": quote["direction"],
         "fromAsset": quote["fromAsset"],

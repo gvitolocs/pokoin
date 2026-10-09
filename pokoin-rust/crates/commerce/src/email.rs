@@ -12,7 +12,7 @@ pub const DEFAULT_FROM: &str = "Pokoin <verify@pokoin.com>";
 pub const DEFAULT_NO_REPLY_FROM: &str = "Pokoin <no-reply@pokoin.com>";
 pub const MARKETPLACE_FROM: &str = "market@pokoin.com";
 pub const DEFAULT_EARN_PKN_FROM: &str = "Pokoin <no-reply@pokoin.com>";
-pub const DEFAULT_EARN_PKN_TO: &str = "pokoinpos@gmail.com";
+pub const DEFAULT_EARN_PKN_TO: &str = "contact@pokoin.com";
 
 pub fn email_from() -> String {
     std::env::var("EMAIL_FROM")

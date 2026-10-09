@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::error::{clean_text, json_response, ApiError, ApiResult};
 use crate::powertools as pt;
 use crate::pricing;
-use crate::routes::util::{body_json, not_implemented, query_first, require_token};
+use crate::routes::util::{body_json, query_first, require_token};
 use crate::state::DomainState;
 use crate::time_util;
 
@@ -215,18 +215,3 @@ pub async fn price_check(
     Ok(response)
 }
 
-/// `GET /api/marketplace-listings-csv` — PowerTools/Cardmarket/CardTrader export.
-pub async fn listings_csv_get(State(_state): State<DomainState>) -> ApiResult<Response> {
-    not_implemented(
-        "/api/marketplace-listings-csv",
-        "CSV export/import needs the listing CSV serializer + stock matcher SQL wiring that is not ported yet.",
-    )
-}
-
-/// `POST /api/marketplace-listings-csv` — preview/import a stock CSV.
-pub async fn listings_csv_post(State(_state): State<DomainState>, _body: Bytes) -> ApiResult<Response> {
-    not_implemented(
-        "/api/marketplace-listings-csv",
-        "CSV import needs the stock_csv matcher + marketplace writer path that is not ported yet.",
-    )
-}

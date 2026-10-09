@@ -32,12 +32,17 @@ fn wants_json(uri: &Uri) -> bool {
     query_first(uri, "format").as_deref() == Some("json")
 }
 
+#[cfg(test)]
 fn requested_game(uri: &Uri) -> String {
     query_first(uri, "game").unwrap_or_else(|| "pokemon".to_string())
 }
 
+fn game_from_headers(headers:&HeaderMap,uri:&Uri)->String {
+    pokoin_api_common::game::parse_game_from_request(&pokoin_api_common::http::header_pairs(headers),query_first(uri,"game").as_deref(),query_first(uri,"marketplaceGame").as_deref())
+}
+
 /// `GET /api/cardtrader-redirect` — public card id or leftover ct_id → CT page.
-pub async fn cardtrader(State(state): State<DomainState>, uri: Uri) -> ApiResult<Response> {
+pub async fn cardtrader(State(state): State<DomainState>, headers: HeaderMap, uri: Uri) -> ApiResult<Response> {
     let id = redirects::clean_marketplace_id(
         &query_first(&uri, "id")
             .or_else(|| query_first(&uri, "cardId"))
@@ -62,18 +67,18 @@ pub async fn cardtrader(State(state): State<DomainState>, uri: Uri) -> ApiResult
         );
     }
     let lookup = if id.is_empty() { &hinted } else { &id };
-    let game = requested_game(&uri);
+    let game = game_from_headers(&headers,&uri);
     if let Some((_game, hit)) = redirects::catalog_ids_for_any_game(&state.db, &game, lookup).await? {
         if !hit.ct_id.is_empty() {
             let url = redirects::cardtrader_url(&hit.ct_id);
             return send_redirect(&url, json, json!({ "url": url, "ct_id": hit.ct_id }));
         }
     }
-    Err(ApiError::not_found("CardTrader leftover id not found."))
+    Ok(json_response(404,json!({"error":"CardTrader leftover id not found.","id":lookup})))
 }
 
 /// `GET /api/tcgplayer-redirect` — public card id → TCGplayer product page.
-pub async fn tcgplayer(State(state): State<DomainState>, uri: Uri) -> ApiResult<Response> {
+pub async fn tcgplayer(State(state): State<DomainState>, headers: HeaderMap, uri: Uri) -> ApiResult<Response> {
     let id = redirects::clean_card_id(
         &query_first(&uri, "id")
             .or_else(|| query_first(&uri, "cardId"))
@@ -82,10 +87,10 @@ pub async fn tcgplayer(State(state): State<DomainState>, uri: Uri) -> ApiResult<
     if id.is_empty() {
         return Err(ApiError::bad_request("Missing or invalid card id."));
     }
-    let game = requested_game(&uri);
+    let game = game_from_headers(&headers,&uri);
     let product_id = redirects::read_tcgplayer_product_id(&state.db, &game, &id).await?;
     if product_id.is_empty() {
-        return Err(ApiError::not_found("No TCGplayer product for this card."));
+        return Ok(json_response(404,json!({"error":"No TCGplayer product for this card.","id":id})));
     }
     let url = redirects::tcgplayer_product_url(&product_id);
     send_redirect(
@@ -102,7 +107,11 @@ pub async fn cardmarket(State(state): State<DomainState>, headers: HeaderMap, ur
     if id.is_empty()&&hint.is_empty(){return Err(ApiError::bad_request("Missing or invalid blueprint id."))}
     let game=pokoin_api_common::game::parse_game_from_request(&pokoin_api_common::http::header_pairs(&headers),query_first(&uri,"game").as_deref(),query_first(&uri,"marketplaceGame").as_deref());
     let locale=query_first(&uri,"locale").filter(|s|s.len()==2&&s.chars().all(|c|c.is_ascii_lowercase())).unwrap_or_else(||"en".into());
-    let target=crate::cardmarket::resolve(&state.db,&game,&id,&hint,&locale).await?;
+    let target=match crate::cardmarket::resolve(&state.db,&game,&id,&hint,&locale).await{
+        Ok(url)=>url,
+        Err(error)if error.status==409=>return Ok(json_response(409,json!({"code":error.code.unwrap_or_default(),"message":error.message}))),
+        Err(error)=>return Err(error),
+    };
     let mut response=send_redirect(&target,wants_json(&uri),json!({"url":target}))?;
     for (k,v) in [("cache-control","no-store"),("referrer-policy","no-referrer"),("x-robots-tag","noindex, nofollow")] {response.headers_mut().insert(axum::http::HeaderName::from_static(k),axum::http::HeaderValue::from_static(v));}
     Ok(response)

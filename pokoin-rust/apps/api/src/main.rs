@@ -1,5 +1,7 @@
 mod body_validation;
 mod card_identity;
+mod ct_deals;
+mod jobs;
 mod catalog_api;
 mod read_cache;
 mod request_log;
@@ -48,6 +50,23 @@ async fn main() -> anyhow::Result<()> {
         );
         return Ok(());
     }
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("job") {
+        // `pokoin-api job <name> [--dry-run] [--since=...]`: one-shot timer job,
+        // no listeners; a failure exits non-zero for systemd.
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            )
+            .init();
+        let name = args.get(2).cloned().unwrap_or_default();
+        if let Err(error) = jobs::run(&name).await {
+            tracing::error!(job = %name, error = %format!("{error:#}"), "job failed");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     tracing_subscriber::fmt()
         .json()
         .with_env_filter(
@@ -79,8 +98,8 @@ async fn main() -> anyhow::Result<()> {
         warm_dependencies(warm).await;
     });
     let app = build_full_router(state.clone()).await;
-    spawn_edge_listeners(app.clone()).await;
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;
+    spawn_edge_listeners(app.clone()).await?;
     tracing::info!(
         phase = "bind",
         bind = %config.bind,
@@ -306,6 +325,15 @@ async fn build_full_router(state: AppState) -> Router {
                             )),
                             pokoin_commerce::FirestoreClient::from_env(reqwest::Client::new()).ok(),
                         );
+                    // Paid-order fulfilment drives CardTrader inline like Node's
+                    // webhook; without credentials the steps stay retryable.
+                    let commerce_state = match pokoin_commerce::cardtrader_adapter::NativeCardTrader::from_env() {
+                        Ok(adapter) => commerce_state.with_cardtrader(Arc::new(adapter)),
+                        Err(error) => {
+                            tracing::warn!(error = %error.message, "CardTrader fulfilment adapter not configured");
+                            commerce_state
+                        }
+                    };
                     *state.commerce.write().await = Some(commerce_state.clone());
                     let commerce = pokoin_commerce::router(commerce_state);
                     let external = match build_external_router(&read_db, &write_db) {
@@ -330,6 +358,7 @@ async fn build_full_router(state: AppState) -> Router {
         }
     };
 
+    let security_api = api_state.as_ref().ok().cloned();
     let routes = match api_state.map(|api| pokoin_api_common::RouteState::new(api, accounts_state)) {
         Ok(route_state) => Router::new()
             .merge(pokoin_catalog_api::router(route_state.clone()))
@@ -342,7 +371,6 @@ async fn build_full_router(state: AppState) -> Router {
         }
     };
 
-    let security_api = pokoin_api_common::ApiState::from_env().ok();
     let core = router(state.clone());
     let mut inner = core
         .merge(routes)
@@ -350,7 +378,7 @@ async fn build_full_router(state: AppState) -> Router {
         .merge(commerce)
         .merge(external)
         .merge(system::router(state.clone()))
-        .fallback(system::not_found)
+        .fallback(system::fallback)
         .layer(axum::extract::DefaultBodyLimit::max(
             pokoin_api_common::http::JSON_LIMIT_BYTES,
         ))
@@ -382,42 +410,30 @@ async fn security_middleware(
 /// The public edge (api.pokoin.com origin, `POKOIN_EDGE_BIND`, Pi :18079) and the
 /// disk CDN (cdn.pokoin.com origin, `POKOIN_CDN_BIND`, Pi :18081). Both are off
 /// unless their bind variable is set, so the binary can run beside the Node edge.
-async fn spawn_edge_listeners(api: Router) {
-    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
-    let (edge_bind, cdn_bind) = (env("POKOIN_EDGE_BIND"), env("POKOIN_CDN_BIND"));
-    if edge_bind.is_none() && cdn_bind.is_none() {
-        return;
+async fn spawn_edge_listeners(api: Router) -> anyhow::Result<()> {
+    let env=|key:&str|std::env::var(key).ok().filter(|v|!v.trim().is_empty());
+    let edge_bind=env("POKOIN_EDGE_BIND");let cdn_bind=env("POKOIN_CDN_BIND");
+    // Bind every requested listener before announcing startup. A failed edge/CDN
+    // must fail the service, so health can never claim a successful cutover.
+    let mut listeners=Vec::new();
+    if edge_bind.is_some()||cdn_bind.is_some(){
+        let cdn=pokoin_edge::Cdn::start(pokoin_edge::CdnConfig::from_env()).await;
+        if let Some(bind)=cdn_bind{let listener=tokio::net::TcpListener::bind(&bind).await?;listeners.push(("cdn",bind,listener,cdn.router()));}
+        if let Some(bind)=edge_bind{let listener=tokio::net::TcpListener::bind(&bind).await?;let edge=pokoin_edge::edge_router(pokoin_edge::EdgeConfig::from_env(),api.clone(),cdn.router());listeners.push(("edge",bind,listener,edge));}
     }
-    let cdn = pokoin_edge::Cdn::start(pokoin_edge::CdnConfig::from_env()).await;
-    if let Some(bind) = cdn_bind {
-        match tokio::net::TcpListener::bind(&bind).await {
-            Ok(listener) => {
-                tracing::info!(phase = "bind", listener = "cdn", %bind, "startup");
-                let app = cdn.router();
-                tokio::spawn(async move {
-                    if let Err(error) = axum::serve(listener, app).await {
-                        tracing::error!(%error, "cdn listener stopped");
-                    }
-                });
+    if let Some(bind)=env("POKOIN_CT_DEALS_BIND"){
+        let listener=tokio::net::TcpListener::bind(&bind).await?;listeners.push(("ct-deals",bind,listener,ct_deals::router(api)));
+    }
+    for (name,bind,listener,app) in listeners{
+        tracing::info!(phase="bind",listener=name,%bind,"startup");
+        tokio::spawn(async move{
+            if let Err(error)=axum::serve(listener,app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await{
+                tracing::error!(listener=name,%error,"required listener stopped");
+                std::process::exit(1);
             }
-            Err(error) => tracing::error!(%error, %bind, "cdn bind failed"),
-        }
+        });
     }
-    if let Some(bind) = edge_bind {
-        match tokio::net::TcpListener::bind(&bind).await {
-            Ok(listener) => {
-                tracing::info!(phase = "bind", listener = "edge", %bind, "startup");
-                let app = pokoin_edge::edge_router(pokoin_edge::EdgeConfig::from_env(), api, cdn.router());
-                tokio::spawn(async move {
-                    let service = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
-                    if let Err(error) = axum::serve(listener, service).await {
-                        tracing::error!(%error, "edge listener stopped");
-                    }
-                });
-            }
-            Err(error) => tracing::error!(%error, %bind, "edge bind failed"),
-        }
-    }
+    Ok(())
 }
 
 fn lazy_pool(url: &str, max: u32) -> anyhow::Result<PgPool> {

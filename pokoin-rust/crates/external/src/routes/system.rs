@@ -4,7 +4,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::Uri;
 use axum::http::HeaderMap;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
 
 use crate::error::json_response;
@@ -42,8 +42,10 @@ pub async fn wpkn_pkn_quote(
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|_| crate::error::ApiError::new(500, "Quote client failed."))?;
-    let out = crate::wpkn_quote::handle(&client, &direction, amount_in).await?;
-    let mut response = json_response(200, out);
+    let mut response = match crate::wpkn_quote::handle(&client, &direction, amount_in).await {
+        Ok(out) => json_response(200, out),
+        Err(error) => (axum::http::StatusCode::from_u16(error.status).unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR), axum::Json(json!({"error": error.message}))).into_response(),
+    };
     let headers = response.headers_mut();
     headers.insert("Cache-Control", "no-store, max-age=0".parse().unwrap());
     headers.insert("Pragma", "no-cache".parse().unwrap());
