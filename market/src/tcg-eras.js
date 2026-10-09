@@ -603,6 +603,9 @@ function hasNeedle(hay, needle) {
   return hay.includes(`-${needle}-`);
 }
 
+/** localeCompare() with no arguments is this collator's compare (ECMA-402), built once instead of per call. */
+const COLLATOR = new Intl.Collator();
+
 function needlesFrom(groups) {
   const rows = [];
   for (const [era, names] of groups) {
@@ -612,7 +615,7 @@ function needlesFrom(groups) {
       rows.push({ needle, era, length: needle.length });
     }
   }
-  rows.sort((a, b) => b.length - a.length || a.needle.localeCompare(b.needle));
+  rows.sort((a, b) => b.length - a.length || COLLATOR.compare(a.needle, b.needle));
   return rows;
 }
 

@@ -35,6 +35,9 @@ export const SHIP_FROM_COUNTRIES = [
  * worldwide destinations scripts/sync-shipping-rates.py quotes
  * (WORLD_DESTINATIONS there; shipping-coverage.test.js keeps them in step).
  */
+/** localeCompare() with no arguments is this collator's compare (ECMA-402), built once instead of per call. */
+const COLLATOR = new Intl.Collator();
+
 export const SHIP_TO_COUNTRIES = [
   ...SHIP_FROM_COUNTRIES,
   { code: 'GB', name: 'United Kingdom' },
@@ -66,7 +69,7 @@ export const SHIP_TO_COUNTRIES = [
   { code: 'IL', name: 'Israel' },
   { code: 'TR', name: 'Türkiye' },
   { code: 'ZA', name: 'South Africa' },
-].sort((a, b) => a.name.localeCompare(b.name));
+].sort((a, b) => COLLATOR.compare(a.name, b.name));
 
 const NAME_BY_CODE = Object.fromEntries(
   SHIP_TO_COUNTRIES.map((row) => [row.code, row.name]),

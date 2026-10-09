@@ -870,10 +870,13 @@ export function emissionMultiplier(distance) {
   return Math.exp(-DISTANCE_LAMBDA * Number(distance || 0));
 }
 
+/** localeCompare() with no arguments is this collator's compare (ECMA-402), built once instead of per call. */
+const COLLATOR = new Intl.Collator();
+
 function compareRanked(left, right) {
   return right.score - left.score
     || left.compact.length - right.compact.length
-    || left.display.localeCompare(right.display);
+    || COLLATOR.compare(left.display, right.display);
 }
 
 const RANK_MEMO_MAX = 32;
