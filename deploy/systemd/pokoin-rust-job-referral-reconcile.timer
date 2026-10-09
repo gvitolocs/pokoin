@@ -3,6 +3,7 @@ Description=Pokoin native job referral-reconcile (Invite & Earn safety net)
 
 [Timer]
 OnBootSec=4min
+OnActiveSec=1min
 OnUnitActiveSec=10min
 RandomizedDelaySec=30s
 Persistent=true

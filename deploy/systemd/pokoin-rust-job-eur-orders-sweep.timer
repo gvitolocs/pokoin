@@ -3,6 +3,7 @@ Description=Pokoin native job eur-orders-sweep (EUR Stripe order sweep)
 
 [Timer]
 OnBootSec=3min
+OnActiveSec=1min
 OnUnitActiveSec=5min
 RandomizedDelaySec=20s
 Persistent=true
