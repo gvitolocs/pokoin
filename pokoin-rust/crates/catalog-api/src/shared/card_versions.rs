@@ -421,15 +421,18 @@ pub fn search_clause(
             .iter()
             .map(|field| format!("{field} ilike ${placeholder}"))
             .collect();
+        // One group per term, like Node: `(fields or exists (...))`. Without the
+        // outer parentheses AND binds tighter than OR, so only the first term
+        // filtered and the query scanned and sorted every first-term match.
         clauses.push(format!(
-            "({})
+            "({}
       or exists (
         select 1
         from public.marketplace_card_name_translations translations
         where translations.language = ${language_placeholder}
           and translations.name = versions.name
           and translations.localized_name ilike ${placeholder}
-      )",
+      ))",
             field_clauses.join(" or "),
             placeholder = placeholder,
             language_placeholder = language_placeholder,
@@ -1130,6 +1133,15 @@ mod tests {
         assert!(clause.contains("translations.language = $2"));
         assert!(clause.contains("translations.localized_name ilike $1"));
         assert!(matches!(values[1], SqlParam::Text(ref t) if t == "ja"));
+        // Every term is its own group, so a later term still filters.
+        let mut two = Vec::new();
+        let grouped = search_clause("pikachu ex", "card", "en", &mut two);
+        assert!(grouped.starts_with(" and (versions.name ilike $1 or"), "{grouped}");
+        assert!(grouped.contains("ilike $1
+      )) and (versions.name ilike $3 or"), "{grouped}");
+        assert!(grouped.ends_with("ilike $3
+      ))"), "{grouped}");
+        assert_eq!(grouped.matches('(').count(), grouped.matches(')').count());
         let mut none = Vec::new();
         assert_eq!(search_clause("", "", "en", &mut none), "");
         assert!(none.is_empty());
