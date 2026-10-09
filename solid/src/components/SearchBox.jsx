@@ -30,6 +30,7 @@ import { sellerHref } from '@market/listing-meta.js';
 import { flagSrc, printFlagFromNationality, rowPrintBucket } from '@market/locale.js';
 import { prefersArtworkDelta, rarityRowTheme } from '@market/rarity-theme.js';
 import { prefetchSearchPage } from '@market/search-hot.js';
+import { fetchSearchRecall } from '@market/search-recall.js';
 import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '@market/search-kind.js';
 import { warmupSearchUniverse } from '@market/search-warmup.js';
 import { createSuggestFlip } from '@market/suggest-flip.js';
@@ -149,6 +150,7 @@ export default function SearchBox(props) {
   const [pointerHoverId, setPointerHoverId] = createSignal(null);
   const [hoverBox, setHoverBox] = createSignal(null);
   const [hitCount, setHitCount] = createSignal(0);
+  let countedQuery = '';
   const [liveTick, setLiveTick] = createSignal(0);
   const [epoch, setEpoch] = createSignal(0);
   const [shadeTick, setShadeTick] = createSignal(0);
@@ -194,7 +196,7 @@ export default function SearchBox(props) {
     const typed = untrack(term).trim();
     // Network-only until the engine is loaded on search intent (no engine eval on mount).
     warmupSearchUniverse({
-      lang, printLang: print, query: typed, fetchSearchPage: fetchSearch, force: Boolean(typed), remember: Boolean(untrack(engine)),
+      lang, printLang: print, query: typed, fetchSearchPage: fetchSearchRecall, force: Boolean(typed), remember: Boolean(untrack(engine)),
     });
   });
 
@@ -252,7 +254,8 @@ export default function SearchBox(props) {
             live.rememberSuggestGroups(page?.groups, { searchLang: lang });
             const incoming = (page?.groups || []).reduce((sum, group) => sum + (group.printings || []).length, 0);
             pool.transferred = (pool.transferred || 0) + incoming;
-            setHitCount(Number(page?.count) || 0);
+            // Placeholder until the search-page total lands: "View all N" = rows the page lists.
+            if (countedQuery !== text) setHitCount(Number(page?.count) || 0);
             fetched += incoming;
             chunks += 1;
             offset = Number.isFinite(Number(page?.nextOffset)) ? Number(page.nextOffset) : offset + incoming;
@@ -314,7 +317,7 @@ export default function SearchBox(props) {
             setOtherGroups(groups);
             setHitCount(groups.reduce((sum, group) => sum + group.printings.length, 0));
             setActiveIndex(-1);
-            prefetchSearchPage(text, lang, { fetchSearchPage: fetchSearch, signal: controller.signal, tab, printLang: 'all' });
+            prefetchSearchPage(text, lang, { fetchSearchPage: fetchSearchRecall, signal: controller.signal, tab, printLang: 'all' });
           })
           .catch((error) => {
             if (error.name !== 'AbortError') setActiveIndex(-1);
@@ -396,10 +399,13 @@ export default function SearchBox(props) {
   createEffect(() => [open(), term().trim(), searchTab(), searchLang(), printLang()], ([isOpen, text, tab, lang, print]) => {
     if (!isOpen || !pokemon || tab === 'users' || !liveReady(text) || text.length < 2) return undefined;
     let cancelled = false;
-    prefetchSearchPage(text, lang, { fetchSearchPage: fetchSearch, tab, printLang: print })
+    prefetchSearchPage(text, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print })
       .then((payload) => {
         const total = Number(payload?.total);
-        if (!cancelled && Number.isFinite(total) && total > 0) setHitCount(total);
+        if (!cancelled && Number.isFinite(total) && total > 0) {
+          countedQuery = text;
+          setHitCount(total);
+        }
       })
       .catch(() => {});
     return () => {
@@ -541,7 +547,7 @@ export default function SearchBox(props) {
     const next = query().trim();
     setOpen(false);
     props.onNavigate?.();
-    if (next) prefetchSearchPage(next, searchLang(), { fetchSearchPage: fetchSearch, tab: searchTab(), printLang: printLang() });
+    if (next) prefetchSearchPage(next, searchLang(), { fetchSearchPage: fetchSearchRecall, tab: searchTab(), printLang: printLang() });
     navigateAfterPaint(() => navigate(searchHref(next, searchTab())));
   }
 

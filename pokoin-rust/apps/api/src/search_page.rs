@@ -84,8 +84,12 @@ pub async fn search_page(
     if !product_type.is_empty() {
         rows.retain(|row| row.product_type == product_type);
     }
-    rank_rows(&mut rows, &query);
+    // The window holds limit + 1 rows to detect hasMore. Rank only this page:
+    // ranking the look-ahead row in would show it here and again on the next
+    // page, and push one of this page's rows out of both.
     let fetched = rows.len();
+    rows.truncate(limit as usize);
+    rank_rows(&mut rows, &query);
     let mut page_rows=rows.into_iter().take(limit as usize).filter_map(|row|raw_map.get(&row.card_id).cloned()).collect::<Vec<_>>();
     if let Err(error)=crate::catalog_api::localize(&pool,&mut page_rows,&lang,&game).await {return crate::catalog_api::failure(&error)}
     let cards=page_rows.iter().map(pokoin_catalog::react_record).collect::<Vec<_>>();
@@ -190,24 +194,74 @@ async fn redis_candidates(
     Ok(Found { hits, total:Some(total) })
 }
 
+/// Candidate cap for a product-filtered page: one Redis call, then SQL.
+const PRODUCT_CANDIDATES: i64 = 5000;
+
+/// Every candidate for `query` with its relevance score, in one FT.SEARCH.
+async fn redis_scored_candidates(state:&AppState,query:&str,print_language:&str,cap:i64)->Result<(Vec<(Hit,f64)>,i64),redis::RedisError>{
+ let Some(mut conn)=state.redis.read().await.clone() else {
+  return Err(redis::RedisError::from((redis::ErrorKind::IoError,"redis is not configured")));
+ };
+ let text=redis_search_query(query,print_language);
+ if text.is_empty(){return Ok((Vec::new(),0))}
+ let reply:redis::Value=redis::cmd("FT.SEARCH").arg(&state.config.redis_index).arg(text)
+  .arg("WITHSCORES").arg("LIMIT").arg(0).arg(cap.clamp(1,10_000))
+  .arg("RETURN").arg(2).arg("card_id").arg("search_weight")
+  .arg("DIALECT").arg(2).arg("TIMEOUT").arg(1500)
+  .query_async(&mut conn).await?;
+ let rows=match reply {redis::Value::Array(rows)=>rows,_=>Vec::new()};
+ let total=redis_int(rows.first()).unwrap_or(0);
+ let mut hits=Vec::new();
+ let mut index=1;
+ // WITHSCORES: key, score, fields per document.
+ while index+2<rows.len(){
+  let score=match &rows[index+1]{
+   redis::Value::BulkString(bytes)=>String::from_utf8_lossy(bytes).parse::<f64>().unwrap_or(0.0),
+   redis::Value::Double(value)=>*value,
+   redis::Value::SimpleString(text)=>text.parse::<f64>().unwrap_or(0.0),
+   _=>0.0,
+  };
+  let fields=redis_pairs(&rows[index+2]);
+  if let Some(card_id)=fields.get("card_id").and_then(|value|value.parse().ok()){
+   let weight=fields.get("search_weight").and_then(|value|value.parse().ok()).unwrap_or(0.0);
+   hits.push((Hit{card_id,weight},score));
+  }
+  index+=3;
+ }
+ Ok((hits,total))
+}
+
+/// Score desc, then card id: FT.SEARCH breaks score ties differently on each
+/// call, so offset pages must be cut from one deterministic order (otherwise a
+/// card can show on two pages while another never shows).
+fn stable_candidate_order(hits:&mut [(Hit,f64)]){
+ hits.sort_by(|a,b|b.1.total_cmp(&a.1).then(a.0.card_id.cmp(&b.0.card_id)));
+}
+
 // Product constraints apply before pagination. The current Redis schema has
-// no product TAG, so filter narrow candidate-id batches in SQL, then page.
+// no product TAG, so read every candidate once, filter the ids in SQL, then page.
 async fn filtered_candidates(state:&AppState,pool:&sqlx::PgPool,query:&str,print_language:&str,product:&str,limit:i64,offset:i64)->Result<Found,redis::RedisError>{
  if product.is_empty(){return redis_candidates(state,query,print_language,limit,offset).await}
- let mut accepted=Vec::new();let mut next=0;let started=Instant::now();let mut complete=false;
- loop {
-  let batch=redis_candidates(state,query,print_language,512,next).await?;
-  let ids=batch.hits.iter().map(|h|h.card_id).collect::<Vec<_>>();
-  let allowed=sqlx::query_scalar::<_,i64>("select card_id from public.marketplace_search_candidates where card_id=any($1::bigint[]) and product_type=$2").bind(&ids).bind(product).fetch_all(pool).await.map_err(|_|redis::RedisError::from((redis::ErrorKind::IoError,"product filter database query failed")))?;
-  let allowed:std::collections::HashSet<_>=allowed.into_iter().collect();
-  next+=ids.len() as i64;
-  accepted.extend(batch.hits.into_iter().filter(|h|allowed.contains(&h.card_id)));
-  if ids.is_empty() || next>=batch.total.unwrap_or(next){complete=true;break}
-  if accepted.len() as i64 >= offset+limit{break}
-  if started.elapsed()>std::time::Duration::from_secs(4){return Err(redis::RedisError::from((redis::ErrorKind::IoError,"product filter exceeded its request deadline")))}
+ let (mut scored,redis_total)=redis_scored_candidates(state,query,print_language,PRODUCT_CANDIDATES).await?;
+ let ids=scored.iter().map(|(hit,_)|hit.card_id).collect::<Vec<_>>();
+ let allowed=sqlx::query_scalar::<_,i64>("select card_id from public.marketplace_search_candidates where card_id=any($1::bigint[]) and product_type=$2").bind(&ids).bind(product).fetch_all(pool).await.map_err(|_|redis::RedisError::from((redis::ErrorKind::IoError,"product filter database query failed")))?;
+ let allowed:std::collections::HashSet<_>=allowed.into_iter().collect();
+ let mut seen=std::collections::HashSet::new();
+ scored.retain(|(hit,_)|allowed.contains(&hit.card_id)&&seen.insert(hit.card_id));
+ stable_candidate_order(&mut scored);
+ let total=if redis_total<=PRODUCT_CANDIDATES {Some(scored.len() as i64)} else {None};
+ Ok(Found{hits:scored.into_iter().map(|(hit,_)|hit).skip(offset.max(0) as usize).take(limit as usize).collect(),total})
+}
+
+#[cfg(test)]
+mod stable_order_tests {
+ use super::*;
+ #[test]
+ fn ties_order_by_card_id_and_scores_stay_first(){
+  let mut hits=vec![(Hit{card_id:9,weight:0.0},1.0),(Hit{card_id:3,weight:0.0},2.0),(Hit{card_id:5,weight:0.0},1.0),(Hit{card_id:1,weight:0.0},1.0)];
+  stable_candidate_order(&mut hits);
+  assert_eq!(hits.iter().map(|(h,_)|h.card_id).collect::<Vec<_>>(),vec![3,1,5,9]);
  }
- let total=if complete{Some(accepted.len() as i64)}else{None};
- Ok(Found{hits:accepted.into_iter().skip(offset.max(0) as usize).take(limit as usize).collect(),total})
 }
 
 fn rank_record(row:&serde_json::Value,weight:f64,order:usize)->SearchRow {
