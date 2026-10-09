@@ -3,7 +3,12 @@ const assert=require('node:assert/strict');
 const test=require('node:test');
 const rules=require('./_scan_connect');
 const {recordDiagnostics,DIAGNOSTICS_VERSION}=require('./_scan_diagnostics');
-const {create}=require('../scan/web/static/scan-diagnostics');
+const path=require('node:path');
+const fs=require('node:fs');
+// Optional cross-repository protocol test: the phone queue is scanner-owned.
+const scannerRoot=process.env.POKOIN_SCANNER_REPO || path.resolve(__dirname,'../../../pokoin-scanner');
+const diagnosticsPath=path.join(scannerRoot,'service/web/static/scan-diagnostics.js');
+const create=fs.existsSync(diagnosticsPath) ? require(diagnosticsPath).create : null;
 const crispin=[
   ['596880','Stellar Crown','133/142'],['633460','Prismatic Evolutions','105/131'],
   ['636054','Prismatic Evolutions - Poké Ball Reverse Holo','Poké Ball Reverse Holo | 105/131'],
@@ -89,7 +94,8 @@ test('large artwork groups are complete instead of silently suppressing the pick
  assert.equal(answer.printings.length,130);
 });
 function memory(){const map=new Map();return {getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v)};}
-test('diagnostics survive loss, reload and partial acknowledgment, and reach the server without truncation',()=>{
+test('diagnostics survive loss, reload and partial acknowledgment, and reach the server without truncation',
+ {skip:!create && 'Set POKOIN_SCANNER_REPO for the scanner/client protocol integration'},()=>{
  const storage=memory(),opts={storage,sessionId:'session-a',uuid:()=> '12345678-1234-1234-1234-123456789012',now:()=>123};
  let queue=create(opts);
  for(let i=0;i<40;i++)queue.record('gate',{hits:[hit('633460',.92)],gateAfter:{armed:false,emittedId:'633460'},offered:crispin.map(p=>p.card_id)});

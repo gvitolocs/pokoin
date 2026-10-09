@@ -35,3 +35,8 @@ on-device adapters consume versioned exports or use the Pi API.
 Legacy worker deployment scripts delegate to pokoin-scanner. Their revision
 argument is a **scanner commit**, not a Pokoin Web commit. API-only changes
 use this repository's native Rust deployment procedure.
+
+The optional phone diagnostics protocol test uses the scanner-owned client:
+`POKOIN_SCANNER_REPO=/home/nez/Projects/pokoin-scanner node --test
+server/pokoin-api/scan-printings-diagnostics.test.js`. Domain tests still run
+when that separate checkout is absent; only the cross-repository test skips.
