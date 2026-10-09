@@ -50,7 +50,7 @@ Read `node_modules/solid-js/CHEATSHEET.md` before writing Solid code. The
 ## Phase G/H — parity, regression, rollout
 - [ ] Playwright parity tests React vs Solid on the migrated routes.
 - [x] Stage 1 rollout: switch shipped with canary 0 — React stays the default; Solid owns home, search, card desk, versions for visitors who opt in.
-- [ ] Stage 2: raise `canary` in `solid/owned-routes.json` (e.g. 5 → 25 → 100) after Stage 1 is verified live.
+- [x] Stage 2 (2026-10-09, Giuseppe: 100% now): `canary` 100 — every visitor gets Solid on the owned routes; explicit `?ui=react` opt-outs and framed pages stay React.
 
 ### Rollout and rollback
 - Opt in: any owned URL with `?ui=solid` (sticky in localStorage `pokoin.ui`); opt out with `?ui=react`.
