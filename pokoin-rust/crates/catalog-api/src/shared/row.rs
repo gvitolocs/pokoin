@@ -37,10 +37,47 @@ pub fn rewrite_cdn_key_prefix(url: &str, from_id: &str, to_id: &str) -> String {
     if !from.bytes().all(|b| b.is_ascii_digit()) || !to.bytes().all(|b| b.is_ascii_digit()) {
         return url.to_string();
     }
-    let pattern = format!(r"(^|/)(previews/)?{from}_");
-    let re = key_prefix_re(&pattern);
-    re.replace_all(url, format!("${{1}}${{2}}{to}_"))
-        .into_owned()
+    // Same result as replace_all of `(^|/)(previews/)?{from}_`, without
+    // compiling a regex per URL (six URLs a card made a 250-card set page
+    // compile ~1,500 regexes, most of its Rust time on the Pi).
+    let key = format!("{from}_");
+    let mut out = String::with_capacity(url.len() + 8);
+    let mut copied = 0;
+    let mut p = 0;
+    while p < url.len() {
+        if let Some((keep, end)) = key_prefix_at(url, p, &key) {
+            out.push_str(&url[copied..p + keep]);
+            out.push_str(to);
+            out.push('_');
+            p = end;
+            copied = end;
+        } else {
+            p += 1;
+        }
+    }
+    out.push_str(&url[copied..]);
+    out
+}
+
+/// A `(^|/)(previews/)?{key}` match starting at byte `p`: (bytes kept before
+/// the id, end of the match). Only `p == 0` and `/` positions can start one.
+fn key_prefix_at(url: &str, p: usize, key: &str) -> Option<(usize, usize)> {
+    let from = |lead: usize| -> Option<(usize, usize)> {
+        let rest = &url[p + lead..];
+        if rest.strip_prefix("previews/").is_some_and(|r| r.starts_with(key)) {
+            return Some((lead + 9, p + lead + 9 + key.len()));
+        }
+        rest.starts_with(key).then(|| (lead, p + lead + key.len()))
+    };
+    if p == 0 {
+        if let Some(found) = from(0) {
+            return Some(found);
+        }
+    }
+    if url.as_bytes().get(p) == Some(&b'/') {
+        return from(1);
+    }
+    None
 }
 
 /// `rewriteCdnPokoinPrefix(url, row)` — prefixed multi-game keys stay raw
@@ -191,10 +228,6 @@ fn multigame_re() -> &'static regex::Regex {
         )
         .expect("valid regex")
     })
-}
-
-fn key_prefix_re(pattern: &str) -> regex::Regex {
-    regex::Regex::new(pattern).expect("valid regex")
 }
 
 fn fragile_preview_webp_re() -> &'static regex::Regex {
@@ -402,5 +435,42 @@ mod tests {
             row["preview_image_url"],
             json!("https://cdn.pokoin.com/previews/5_card.webp")
         );
+    }
+}
+
+#[cfg(test)]
+mod key_prefix_tests {
+    use super::rewrite_cdn_key_prefix;
+
+    fn by_regex(url: &str, from: &str, to: &str) -> String {
+        regex::Regex::new(&format!(r"(^|/)(previews/)?{from}_"))
+            .unwrap()
+            .replace_all(url, format!("${{1}}${{2}}{to}_"))
+            .into_owned()
+    }
+
+    #[test]
+    fn string_rewrite_matches_the_regex() {
+        for url in [
+            "123_a.jpg",
+            "previews/123_a.webp",
+            "/123_a.jpg",
+            "/previews/123_a.webp",
+            "https://cdn.pokoin.com/123_mega_homepage.webp",
+            "/card-images/previews/123_a_homepage.webp?v=2",
+            "a123_x",
+            "/1234_x",
+            "/0123_x",
+            "123_123_x",
+            "/123_/123_/previews/123_",
+            "previews/previews/123_x",
+            "//123_x",
+            "/ü/123_x",
+            "",
+            "123",
+            "/123",
+        ] {
+            assert_eq!(rewrite_cdn_key_prefix(url, "123", "456"), by_regex(url, "123", "456"), "{url}");
+        }
     }
 }
