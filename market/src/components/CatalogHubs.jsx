@@ -1,22 +1,10 @@
 import { Link } from 'react-router-dom';
+import { catalogLinks, catalogMenuLinks } from '../catalog-links.js';
 
-export function catalogLinks(lang = 'en') {
-  const language = String(lang || 'en').toLowerCase() || 'en';
-  return [
-    { to: `/marketplace/${language}/pokemon`, label: 'Pokémon' },
-    { to: '/marketplace/sets', label: 'Sets' },
-    { to: '/marketplace/eras', label: 'Eras' },
-    { to: `/marketplace/${language}/artists`, label: 'Artists' },
-    { to: `/marketplace/${language}/rarities`, label: 'Rarities' },
-    { to: `/marketplace/${language}/languages`, label: 'Languages' },
-    { to: `/marketplace/${language}/guides`, label: 'Guides' },
-  ];
-}
-
-const EXTRA = new Set(['Eras', 'Rarities', 'Languages', 'Guides']);
+export { catalogLinks };
 
 export default function CatalogMenu({ lang = 'en', onNavigate }) {
-  const extras = catalogLinks(lang).filter((row) => EXTRA.has(row.label));
+  const extras = catalogMenuLinks(lang);
   return (
     <details className="foot-catalog">
       <summary>Catalog</summary>

@@ -11,13 +11,16 @@ import { Action, track } from '@market/track.js';
 import { handOffCard } from '../lib/card-handoff.js';
 import { buyerParts } from '../stores/buyer.js';
 import CardArt from './CardArt.jsx';
+import { useCardSelect } from './CardSelectGrid.jsx';
 import PriceStack from './PriceStack.jsx';
 
 /**
  * Grid / rail / list tile (market/src/components/CardTile.jsx). A plain anchor:
  * the router claims the click and intent-preloads the desk chunk + data on
- * hover, focus or touchstart. Not ported yet: multi-select (CardSelectGrid)
- * and the list layout's ArtworkZoom, which falls back to CardArt here.
+ * hover, focus or touchstart. Inside a CardSelectGrid, Ctrl/Cmd/Shift-click
+ * selects instead of opening, and dragging a selected tile carries the whole
+ * selection. Not ported yet: the list layout's ArtworkZoom, which falls back
+ * to CardArt here.
  */
 export default function CardTile(props) {
   const card = () => props.card;
@@ -34,6 +37,8 @@ export default function CardTile(props) {
   const art = () => (cut() ? hero() : imageSrc(card(), list() ? 'hero' : 'grid'));
   const eagerLimit = () => props.eagerLimit ?? 8;
   const eager = () => eagerLimit() > 0 && props.rank != null && props.rank < eagerLimit();
+  const select = useCardSelect();
+  const picked = () => Boolean(select?.isSelected(card()?.id));
 
   let warmed = false;
   function prepare() {
@@ -53,13 +58,25 @@ export default function CardTile(props) {
       <a
         class={[
           list() ? 'tile tile-row' : 'tile',
-          { 'tile-cut tile-album': cut(), 'tile-tall': tall(), 'tile-item': item(), 'is-landscape': landscape() },
+          {
+            'tile-cut tile-album': cut(),
+            'tile-tall': tall(),
+            'tile-item': item(),
+            'is-landscape': landscape(),
+            'is-selected': picked(),
+          },
         ]}
         href={cardHref(card())}
         data-card-id={card().id}
+        aria-selected={picked() ? 'true' : undefined}
         draggable="true"
-        onDragStart={(event) => writeListingDrag(event, cardReference(card()))}
-        onClick={() => {
+        onDragStart={(event) => writeListingDrag(event, select?.dragPayload(card()) || cardReference(card()))}
+        onClick={(event) => {
+          if (select && (event.metaKey || event.ctrlKey || event.shiftKey)) {
+            event.preventDefault();
+            select.click(card().id, event);
+            return;
+          }
           handOffCard(card());
           rememberCardId(card());
           track(props.action || Action.clickTile, card(), { resultRank: props.rank });

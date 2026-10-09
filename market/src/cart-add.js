@@ -1,5 +1,5 @@
 import { fetchListings } from './api.js';
-import { cartItemFromOffer } from './cart.jsx';
+import { cartItemFromOffer } from './cart-rows.js';
 import { pickCartOffer } from './cart-offer.js';
 
 /** Same cheapest-listing cascade as dropping one card on the cart, for a selected group. */

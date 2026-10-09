@@ -54,7 +54,9 @@ test('Chrome defers Cart/Desktop mount so title/set/artist HTML5 drag is not abo
   assert.match(page, /kind: 'expansion'/);
   assert.match(page, /kind: 'artist'/);
   assert.match(page, /event\.stopPropagation\(\)/);
-  const desk = fs.readFileSync(path.join(market, 'components/DesktopDrop.jsx'), 'utf8');
+  // The drop rules moved out of DesktopDrop.jsx so the Solid tray shares them.
+  const desk = fs.readFileSync(path.join(market, 'desktop-drop-add.js'), 'utf8');
+  assert.match(fs.readFileSync(path.join(market, 'components/DesktopDrop.jsx'), 'utf8'), /addDesktopDrop/);
   assert.match(desk, /bundle\.kind === 'expansion'/);
   assert.match(desk, /expansion:\$\{bundle\.slug\}/);
   assert.doesNotMatch(desk, /fetchExpansionCards/);

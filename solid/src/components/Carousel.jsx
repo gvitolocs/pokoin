@@ -59,7 +59,7 @@ export default function Carousel(props) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15.75 19.5-7.5-7.5 7.5-7.5" /></svg>
           </button>
           <div class="rail-scroll" ref={(node) => { scroller = node; }}>
-            <CardSelectGrid class="carousel-track">
+            <CardSelectGrid class="carousel-track" cards={ready() ? props.cards : []}>
               <Show when={ready()} fallback={<Repeat count={props.placeholders || 0}>{() => <SkeletonTile />}</Repeat>}>
                 <For each={props.cards}>
                   {(card, index) => <CardTile card={card} rank={index()} eagerLimit={props.eagerLimit || 0} />}
