@@ -3,7 +3,6 @@
 // the rails — recently viewed, watchlist, Buy it again, more from sellers.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
 import {
   fetchAccountAddresses,
   fetchCardTiles,
@@ -13,8 +12,9 @@ import {
   readRecentCardIds,
   readWatchlistIds,
 } from './api.js';
-import { firestore, useAuth } from './auth.jsx';
+import { useAuth } from './auth.jsx';
 import { fetchRecommendations } from './cart-api.js';
+import { loadFirestore } from './firebase-client.js';
 import { buyAgainCards, isSelected, liveMessages } from './cart-model.js';
 import { sellerHandle } from './listing-meta.js';
 import { countryFromLocale } from './pkn.js';
@@ -228,7 +228,10 @@ export function useBuyAgain(uid) {
       return undefined;
     }
     let cancelled = false;
-    getDocs(query(collection(firestore, 'orders'), where('uid', '==', uid)))
+    loadFirestore()
+      .then(({ firestore, collection, getDocs, query, where }) => (
+        getDocs(query(collection(firestore, 'orders'), where('uid', '==', uid)))
+      ))
       .then((snap) => {
         if (cancelled) return;
         const orders = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
