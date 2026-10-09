@@ -1,0 +1,53 @@
+[
+ {
+  "card_id": "276450",
+  "name": "Charizard EX",
+  "set_name": "Expansion Pack 20th Anniversary",
+  "card_number": "Secret Rare | 090/087",
+  "rarity": "Card",
+  "item_kind": "single",
+  "db_rank": 24,
+  "score": 22525,
+  "relevanceScore": 8830,
+  "analyticsBoost": 0,
+  "depthWeight": 11,
+  "latestDepth": 11,
+  "latestOrder": 2,
+  "depthBoost": 13695,
+  "textRelevance": 8830
+ },
+ {
+  "card_id": "276294",
+  "name": "Charizard EX",
+  "set_name": "Expansion Pack 20th Anniversary",
+  "card_number": "Holo Rare | 012/087",
+  "rarity": "Card",
+  "item_kind": "single",
+  "db_rank": 24,
+  "score": 22525,
+  "relevanceScore": 8830,
+  "analyticsBoost": 0,
+  "depthWeight": 11,
+  "latestDepth": 11,
+  "latestOrder": 3,
+  "depthBoost": 13695,
+  "textRelevance": 8830
+ },
+ {
+  "card_id": "232324",
+  "name": "Charizard ex",
+  "set_name": "EX FireRed & LeafGreen",
+  "card_number": "Holo Rare | 105/112",
+  "rarity": "Card",
+  "item_kind": "single",
+  "db_rank": 24,
+  "score": 22525,
+  "relevanceScore": 8830,
+  "analyticsBoost": 0,
+  "depthWeight": 11,
+  "latestDepth": 11,
+  "latestOrder": 6,
+  "depthBoost": 13695,
+  "textRelevance": 8830
+ }
+]

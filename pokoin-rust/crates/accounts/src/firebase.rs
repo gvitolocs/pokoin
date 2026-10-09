@@ -55,14 +55,17 @@ impl From<AuthError> for ApiError {
         match error {
             AuthError::Missing => ApiError::unauthorized("Missing Pokoin bearer token."),
             AuthError::Invalid(message) => {
-                ApiError::unauthorized(format!("Invalid sign-in token: {message}"))
+                // Node (_firebase.verifyBearerToken since the 2026-10-08 security release)
+                // never echoes the decoder reason; it is logged instead.
+                tracing::warn!(reason = %message.chars().take(80).collect::<String>(), "pokoin auth token rejected");
+                ApiError::unauthorized("Invalid or expired sign-in token.")
             }
             AuthError::Unconfigured(message) => {
                 tracing::error!(%message, "auth not configured");
                 ApiError::internal("Sign-in verification is not configured.")
             }
             AuthError::Unavailable => {
-                ApiError::unavailable("Sign-in verification is temporarily unavailable.")
+                ApiError::unavailable("Sign-in could not be checked right now.")
             }
         }
     }

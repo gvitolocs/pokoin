@@ -137,7 +137,7 @@ async fn auth_login_rejects_an_expired_token() {
     let token = sign_id_token(claims);
     let (status, body, _) = call(&app, "POST", "/api/auth-login", Some(&token), None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert!(body["error"].as_str().unwrap().contains("Invalid sign-in token"));
+    assert!(body["error"].as_str().unwrap().contains("Invalid or expired sign-in token."));
 }
 
 #[tokio::test]
@@ -1043,19 +1043,90 @@ async fn the_wrong_method_is_rejected_with_an_allow_header() {
 }
 
 #[tokio::test]
-async fn unported_routes_are_absent_rather_than_stubbed() {
+async fn poko_market_requires_a_service_token_and_valid_tool() {
+    let _guard = SERVICE_TOKEN_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    std::env::remove_var("POKO_MARKET_SERVICE_TOKEN");
+    std::env::remove_var("POKONTACT_SERVICE_TOKEN");
+
     let transport = ScriptedTransport::new();
     let app = router(test_state(&transport));
-    // The one route this worker has NOT ported yet: poko-market. It must 404
-    // rather than answer a stub.
-    for (method, path) in [("POST", "/api/poko-market")] {
-        let (status, _body, _) = call(&app, method, path, None, None).await;
-        assert_eq!(
-            status,
-            StatusCode::NOT_FOUND,
-            "{method} {path} must not be mounted until it is ported (got {status})"
-        );
+
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/poko-market",
+        None,
+        Some(serde_json::json!({ "tool": "resolve_card", "params": {"query": "charizard"} })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        body,
+        serde_json::json!({ "error": "poko-market not configured: POKO_MARKET_SERVICE_TOKEN missing" })
+    );
+
+    std::env::set_var("POKO_MARKET_SERVICE_TOKEN", "s3cret");
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/poko-market",
+        Some("wrong-token"),
+        Some(serde_json::json!({ "tool": "resolve_card", "params": {"query": "charizard"} })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body, serde_json::json!({ "error": "unauthorized" }));
+
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/poko-market",
+        Some("s3cret"),
+        Some(serde_json::json!({ "tool": "drop_table" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body["error"].as_str().unwrap(),
+        "unknown tool; expected one of resolve_card, card_quote, card_ocr, card_liquidity, collection_quote, suggest_cards, market_snapshot, top_movers, top_sellers, card_sales, deal_check, set_sales, recent_sales, artist_cards, set_info"
+    );
+    std::env::remove_var("POKO_MARKET_SERVICE_TOKEN");
+    std::env::remove_var("POKONTACT_SERVICE_TOKEN");
+}
+
+#[tokio::test]
+async fn poko_market_validates_input_before_querying_the_database() {
+    let _guard = SERVICE_TOKEN_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    std::env::set_var("POKO_MARKET_SERVICE_TOKEN", "s3cret");
+
+    let transport = ScriptedTransport::new();
+    let app = router(test_state_with_db(&transport));
+
+    for (tool, params, expected) in [
+        (
+            "resolve_card",
+            serde_json::json!({}),
+            "query or artist required",
+        ),
+        (
+            "set_info",
+            serde_json::json!({}),
+            "setName, era or nationality required",
+        ),
+    ] {
+        let (status, body, _) = call(
+            &app,
+            "POST",
+            "/api/poko-market",
+            Some("s3cret"),
+            Some(serde_json::json!({ "tool": tool, "params": params })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "tool={tool}");
+        assert_eq!(body["error"], expected, "tool={tool}");
     }
+    std::env::remove_var("POKO_MARKET_SERVICE_TOKEN");
+    std::env::remove_var("POKONTACT_SERVICE_TOKEN");
 }
 
 #[tokio::test]

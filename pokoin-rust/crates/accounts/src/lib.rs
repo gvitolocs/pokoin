@@ -93,6 +93,7 @@ pub const PORTED_ROUTES: &[&str] = &[
     "GET /api/marketplace-portfolio",
     "GET /api/marketplace-referral",
     "POST /api/marketplace-referral",
+    "POST /api/poko-market",
     "POST /api/poko-connect",
     "POST /api/poko-personal-context",
     "POST /api/poko-bets",
@@ -107,9 +108,7 @@ pub const PORTED_ROUTES: &[&str] = &[
 /// `(method, path)` pairs assigned to this worker that are **not** implemented
 /// yet. They are deliberately not mounted, so a request 404s instead of hitting
 /// a stub that would look like a success. See `accounts-coverage.json`.
-pub const UNPORTED_ROUTES: &[&str] = &[
-    "POST /api/poko-market",
-];
+pub const UNPORTED_ROUTES: &[&str] = &[];
 
 /// Routes owned by another worker (photos/R2/social/assistant). Listed so the
 /// split is explicit and asserted, rather than silently dropped.
@@ -232,6 +231,10 @@ pub fn router(state: DomainState) -> Router {
                 .options(handlers::referral::marketplace_referral_options),
         )
         .route(
+            "/api/poko-market",
+            post(handlers::poko_market::poko_market),
+        )
+        .route(
             "/api/poko-connect",
             post(handlers::poko::poko_connect).fallback(handlers::poko::poko_connect_other),
         )
@@ -282,10 +285,10 @@ mod tests {
 
     #[test]
     fn every_assigned_route_is_accounted_for() {
-        // 23 ported + 16 unported = the 39 (method, path) pairs assigned to this
+        // 39 ported + 0 unported = the 39 (method, path) pairs assigned to this
         // worker; 9 more belong to the external photos/R2/social assistant worker.
-        assert_eq!(PORTED_ROUTES.len(), 38);
-        assert_eq!(UNPORTED_ROUTES.len(), 1);
+        assert_eq!(PORTED_ROUTES.len(), 39);
+        assert_eq!(UNPORTED_ROUTES.len(), 0);
         assert_eq!(EXTERNAL_ROUTES.len(), 9);
     }
 

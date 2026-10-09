@@ -6,8 +6,11 @@ license.workspace = true
 description = "Shared runtime pieces for native Pokoin API route crates: pools, Redis, game scoping, Node-compatible request/response helpers."
 
 [dependencies]
+async-trait = "0.1"
 axum = { workspace = true }
 bytes = "1"
+hex = { workspace = true }
+sha2 = { workspace = true }
 pokoin-accounts = { path = "../accounts" }
 pokoin-config = { path = "../config" }
 redis = { workspace = true }

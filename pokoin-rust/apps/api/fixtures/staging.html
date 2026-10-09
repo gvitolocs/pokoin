@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pokoin Oracle API</title>
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; line-height: 1.5; color: #172033; }
+    main { max-width: 860px; }
+    code, pre { background: #f5f7fb; border-radius: 6px; padding: 0.15rem 0.35rem; }
+    a { color: #2457c5; }
+    .badge { display: inline-block; background: #e8f0ff; border: 1px solid #b7c9f4; border-radius: 999px; padding: 0.2rem 0.65rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="badge">Oracle API</p>
+    <h1>Pokoin Oracle API</h1>
+    <p>This host serves JSON under <code>/api/…</code>. It does not serve the marketplace SPA (that is <code>https://pokoin.com</code>). Omitting <code>/api</code> returns <code>{"error":"API route not found."}</code>.</p>
+    <h2>Useful checks</h2>
+    <ul>
+      <li><a href="/livez">/livez</a> - process is up</li>
+      <li><a href="/readyz">/readyz</a> - postgres and redis (cdn is degraded; meili and valkey are retired)</li>
+      <li><a href="/healthz">/healthz</a> - same as readyz</li>
+      <li><a href="/api/__contract">/api/__contract</a> - React/JS client contract</li>
+      <li><a href="/api/marketplace-suggest?q=pika&amp;limit=8">/api/marketplace-suggest?q=pika</a> - pokoin-web typeahead (Meili)</li>
+      <li><a href="/api/marketplace-search-page?query=pika&amp;limit=3">/api/marketplace-search-page?query=pika</a> - search page BFF</li>
+      <li><a href="/api/marketplace-expansion-page?slug=white-flare&amp;limit=1">/api/marketplace-expansion-page?slug=white-flare</a> - set desk (<code>expansion.cardCount</code> is stored catalog size)</li>
+      <li><a href="/api/marketplace-blueprint-price?blueprintId=274416">/api/marketplace-blueprint-price?blueprintId=274416</a> - read-only price lookup</li>
+    </ul>
+    <h2>Families</h2>
+    <ul>
+      __FAMILIES__
+    </ul>
+    <h2>Example</h2>
+    <pre>curl https://__HOST__/healthz
+curl 'https://__HOST__/api/marketplace-suggest?q=pika&limit=8'</pre>
+    <p>Public site: <a href="https://pokoin.com/marketplace">https://pokoin.com/marketplace</a></p>
+  </main>
+</body>
+</html>

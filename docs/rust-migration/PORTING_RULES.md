@@ -4,7 +4,7 @@ Production rule (AGENTS.md, Codevira D00008C): the shared Pokoin API runs as nat
 No Node at request time, no proxy to Node, no JS engine, no placeholder success payloads.
 
 ## Reference = the live production Node code
-- Snapshot of the running container: `~/.local/share/rust-port-ref/live-node-ref/api/*.js` and `.../server/*.js`.
+- Snapshot of the running container: ``.reference-node/api/*.js` and `.reference-node/server/*.js` (inside this worktree, git-ignored).
   These are the exact files production runs. Port THOSE, not repo copies.
 - Read the handler AND every helper it requires (`./_*.js`). Port only what the route uses.
 
@@ -77,3 +77,16 @@ unavailable), `PIPELINE_HEALTH_SKIP=meili`, `USE_ORACLE_API=0`, `PUBLIC_SITE_URL
 are present in the Rust service environment under the same names — read them with `std::env::var` exactly like Node.
 The Redis search index (RediSearch `FT.SEARCH` on `pokoin:cards`) is what the redis engine queries; see
 `api/_redis_search.js` and the existing Rust port in `pokoin-rust/crates/search` (`redis_query.rs`) — reuse it where it fits.
+
+## Security release (live since 2026-10-08 22:39 UTC, PR #266) — already handled globally
+The Rust app applies, around every route, the ports of `_http_security.prepareRequest`, `_cors_policy`,
+`_client_ip.applyTrustedClientIp` and `_route_limits`. Consequences for handler ports:
+- Read the client IP ONLY via `pokoin_api_common::security::client_ip(&headers)` (the middleware stamps the trusted
+  value into `x-pokoin-client-ip`); never parse `x-forwarded-for` yourself.
+- Do not set CORS headers for correctness — the global policy replaces them — but keeping the Node calls is harmless.
+- Rate limits: `limitGlobal` = `pokoin_api_common::limits::limit_global(&state.api, scope, identity, limit, window)`
+  (Postgres `marketplace_rate_limits` via the writer, Redis fallback with halved limit, else fail closed);
+  `limitBestEffort` = `pokoin_api_common::limits::limit_best_effort(...)`; `limitSecurityCritical` =
+  `pokoin_api_common::limits::limit_security_critical(...)`. Use exactly the class the Node handler uses.
+- Auth: invalid token -> 401 `{"error":"Invalid or expired sign-in token."}`, verifier unavailable -> 503
+  `{"error":"Sign-in could not be checked right now."}` (handled by `state.require_user`).

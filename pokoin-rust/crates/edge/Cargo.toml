@@ -7,6 +7,7 @@ description = "Native public edge (api.pokoin.com origin) and disk CDN (cdn.poko
 
 # Dependencies are preset for the porting worker. Ask the coordinator before adding any.
 [dependencies]
+pokoin-api-common = { path = "../api-common" }
 axum = { workspace = true }
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
