@@ -10,7 +10,8 @@
  * as Vite emitted them. React is the default. Solid is chosen only for routes listed
  * in solid/owned-routes.json, in a top-level window, when the visitor opted in
  * (?ui=solid, sticky; ?ui=react opts out) or was sampled into the canary percentage
- * (POKOIN_UI_CANARY, default 0). With the canary back at 0, sampled visitors return
+ * (`canary` in solid/owned-routes.json, so origin/main decides what production
+ * runs; POKOIN_UI_CANARY overrides it for a local build). With the canary back at 0, sampled visitors return
  * to React (kill switch); explicit opt-ins stay. Solid hands routes it does not own
  * back with sessionStorage pokoin.ui.once=react (solid/src/lib/ui-switch.js).
  *
@@ -52,6 +53,12 @@ export function bootScript({ owned = [], canary = 0, tags }) {
     + '}catch(e){}w.__POKOIN_UI__=ui;w.__POKOIN_UI_SWITCH__=1;document.write(c.tags[ui])})();';
 }
 
+/** Canary percentage: the env override when set, else the committed config; clamped to 0–100. */
+export function canaryPercent(envValue, configValue) {
+  const raw = envValue != null && envValue !== '' ? envValue : configValue;
+  return Math.min(100, Math.max(0, Number(raw) || 0));
+}
+
 export function cspHash(script) {
   return `sha256-${crypto.createHash('sha256').update(script, 'utf8').digest('base64')}`;
 }
@@ -77,8 +84,9 @@ function main(outRoot) {
   const out = path.resolve(outRoot || path.join(repo, 'dist-web'));
   const marketIndex = path.join(out, 'market', 'index.html');
   const solidDist = path.join(repo, 'solid', 'dist');
-  const { patterns: owned } = JSON.parse(fs.readFileSync(path.join(repo, 'solid', 'owned-routes.json'), 'utf8'));
-  const canary = Math.min(100, Math.max(0, Number(process.env.POKOIN_UI_CANARY) || 0));
+  const config = JSON.parse(fs.readFileSync(path.join(repo, 'solid', 'owned-routes.json'), 'utf8'));
+  const owned = config.patterns;
+  const canary = canaryPercent(process.env.POKOIN_UI_CANARY, config.canary);
   const shell = buildShell(
     fs.readFileSync(marketIndex, 'utf8'),
     fs.readFileSync(path.join(solidDist, 'index.html'), 'utf8'),

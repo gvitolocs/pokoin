@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createContext, runInContext } from 'node:vm';
-import { bootScript, buildShell, cspHash, entryTags } from './build-ui-shell.mjs';
+import { readFileSync } from 'node:fs';
+import { bootScript, buildShell, canaryPercent, cspHash, entryTags } from './build-ui-shell.mjs';
 
 const REACT = `<!DOCTYPE html><html><head><meta charset="utf-8" />
 <script src="/market/card-url-boot.js"></script>
@@ -116,4 +117,42 @@ test('storage failures fall back to React and still write the tags', () => {
   }));
   assert.equal(window.__POKOIN_UI__, 'react');
   assert.ok(written.join('').includes('index-R.js'));
+});
+
+test('canary comes from the committed config unless the env overrides it', () => {
+  assert.equal(canaryPercent(undefined, 5), 5);
+  assert.equal(canaryPercent('', 5), 5);
+  assert.equal(canaryPercent('0', 5), 0);
+  assert.equal(canaryPercent('250', 0), 100);
+  assert.equal(canaryPercent(undefined, undefined), 0);
+  assert.equal(canaryPercent('-3', 1), 0);
+});
+
+test('owned routes cover the Solid pages and nothing React still serves', () => {
+  const config = JSON.parse(readFileSync(new URL('../solid/owned-routes.json', import.meta.url), 'utf8'));
+  assert.equal(typeof config.enabled, 'boolean');
+  const owns = (pathname) => config.patterns.some((re) => new RegExp(re).test(pathname));
+  for (const pathname of [
+    '/marketplace',
+    '/marketplace/',
+    '/marketplace/search',
+    '/marketplace/en/cards/806390',
+    '/marketplace/en/cards/806390/card-mega-rayquaza-ex-gold-secret-rare-113-076-storm-emeralda',
+    '/marketplace/zht/cards/806390/versions',
+    '/marketplace/it/cards/806390/some-slug/versions',
+  ]) assert.ok(owns(pathname), pathname);
+  for (const pathname of [
+    '/',
+    '/cart',
+    '/checkout',
+    '/orders',
+    '/profile',
+    '/marketplace/eras/ex',
+    '/marketplace/sets',
+    '/marketplace/en/artists/mitsuhiro-arita',
+    '/marketplace/en/users/seller',
+    '/marketplace/search/extra',
+    '/marketplace/en/cards/806390/slug/other',
+    '/cyberpunk/marketplace',
+  ]) assert.ok(!owns(pathname), pathname);
 });
