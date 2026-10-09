@@ -5,6 +5,7 @@
  * the shared best-effort limiter (Redis counter, bounded local fallback).
  */
 const { limitBestEffort } = require('./_rate_limit');
+const { clientIp } = require('./_client_ip');
 const {
   listMarketplaceImages,
   recordMarketplaceImage,
@@ -17,11 +18,6 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Max-Age': '86400',
 };
-
-function clientIp(req) {
-  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return forwarded || String(req.socket?.remoteAddress || req.headers['x-real-ip'] || '');
-}
 
 async function rateLimited(ip) {
   const verdict = await limitBestEffort({ scope: 'image-log', identity: ip, limit: 40, windowSeconds: 60 });

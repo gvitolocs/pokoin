@@ -1,7 +1,37 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { leftoverUrlFromCard } from './card-stub.js';
-import { catalogSlugMatchesCard, homepageDerivativeUrl, homepageMatchesCatalog, leftoverKeyMatchesCard, ownCatalogImage, preferFullImage, rasterSiblings, rewriteCatalogImageId } from './image-urls.js';
+import {
+  catalogSlugMatchesCard,
+  cdnFetchUrl,
+  homepageDerivativeUrl,
+  homepageMatchesCatalog,
+  leftoverKeyMatchesCard,
+  ownCatalogImage,
+  preferFullImage,
+  rasterSiblings,
+  rewriteCatalogImageId,
+} from './image-urls.js';
+
+test('cdnFetchUrl skips the pokoin.com /card-images 301 hop', () => {
+  assert.equal(
+    cdnFetchUrl('/card-images/403195_mega-rayquaza-ex_homepage.webp'),
+    'https://cdn.pokoin.com/403195_mega-rayquaza-ex_homepage.webp',
+  );
+  assert.equal(
+    cdnFetchUrl('/card-images/403195_mega-rayquaza-ex.jpg?v=ct1'),
+    'https://cdn.pokoin.com/403195_mega-rayquaza-ex.jpg?v=ct1',
+  );
+  assert.equal(
+    cdnFetchUrl('/card-images/one-piece/301338_burn-bazooka.jpg'),
+    'https://cdn.pokoin.com/one-piece/301338_burn-bazooka.jpg',
+  );
+  assert.equal(
+    cdnFetchUrl('https://cdn.pokoin.com/403195_mega-rayquaza-ex_homepage.webp'),
+    'https://cdn.pokoin.com/403195_mega-rayquaza-ex_homepage.webp',
+  );
+  assert.equal(cdnFetchUrl('data:image/png;base64,xx'), 'data:image/png;base64,xx');
+});
 
 test('Scarlet Violet 312px leftovers bust after CardTrader full ingest', () => {
   assert.equal(

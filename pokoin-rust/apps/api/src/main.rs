@@ -3,6 +3,7 @@ mod card_identity;
 mod ct_deals;
 mod jobs;
 mod catalog_api;
+mod rails;
 mod read_cache;
 mod request_log;
 mod search_page;
@@ -272,6 +273,18 @@ fn router(state: AppState) -> Router {
         .route(
             "/api/marketplace-search-page",
             get(search_page::search_page).options(search_page::options),
+        )
+        .route(
+            "/api/marketplace-home/new-cards",
+            get(rails::new_cards).options(rails::options),
+        )
+        .route(
+            "/api/marketplace-home/best-sellers",
+            get(rails::best_sellers).options(rails::options),
+        )
+        .route(
+            "/api/marketplace-home/spotlight",
+            get(rails::spotlight).options(rails::options),
         )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

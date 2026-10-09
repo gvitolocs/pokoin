@@ -14,7 +14,7 @@
  */
 
 const path = require('path');
-const { limitBestEffort } = require('./_rate_limit');
+const { limitGlobal } = require('./_rate_limit');
 
 const COLLECTION = 'news_comments';
 const ARTICLE_ID_RE = /^art_[A-Za-z0-9_-]{4,120}$/;
@@ -62,7 +62,7 @@ function publicComment(id, data) {
 function createHandler({
   firestore = () => requireHelper('_firebase').getFirebaseAdmin().firestore(),
   verify = (req) => requireHelper('_firebase').verifyBearerToken(req),
-  limit = limitBestEffort,
+  limit = limitGlobal,
   now = () => new Date(),
 } = {}) {
   async function optionalUid(req) {

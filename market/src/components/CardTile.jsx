@@ -3,6 +3,7 @@ import { albumShadeStyle } from '../art-shade.js';
 import { Link } from 'react-router-dom';
 import { cardHref, formatPkn, imageSrc, rememberCardId } from '../api.js';
 import { displayName, printingIdentity } from '../identity.js';
+import { cdnFetchUrl } from '../image-urls.js';
 import { tilePricePkn } from '../pkn.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
 import PriceStack from './PriceStack.jsx';
@@ -13,7 +14,14 @@ import { Action, track } from '../track.js';
 import ArtworkZoom from './ArtworkZoom.jsx';
 import CardArt from './CardArt.jsx';
 
-export default function CardTile({ card, action = Action.clickTile, rank, layout = 'grid', cut = false }) {
+export default function CardTile({
+  card,
+  action = Action.clickTile,
+  rank,
+  layout = 'grid',
+  cut = false,
+  eagerLimit = 8,
+}) {
   const buyer = useBuyerCurrency();
   if (!card?.id) {
     return null;
@@ -47,9 +55,10 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
   function prefetch() {
     if (hero) {
       const img = new Image();
-      img.src = hero;
+      img.src = cdnFetchUrl(hero);
     }
   }
+  const eager = eagerLimit > 0 && rank != null && rank < eagerLimit;
 
   return (
     <Link
@@ -95,8 +104,8 @@ export default function CardTile({ card, action = Action.clickTile, rank, layout
             cutSurface="album"
             full={cut}
             card={cut ? card : undefined}
-            loading={rank != null && rank < 8 ? 'eager' : 'lazy'}
-            fetchPriority={rank != null && rank < 4 ? 'high' : undefined}
+            loading={eager ? 'eager' : 'lazy'}
+            fetchPriority={eager && rank < Math.min(4, eagerLimit) ? 'high' : undefined}
           />
         ) : <span className="tile-ph" />}
       </span>

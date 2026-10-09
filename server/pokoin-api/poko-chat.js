@@ -14,7 +14,8 @@ const path = require('path');
 
 const EVENT_PAGE = 20;
 const { REPLY_CARDS_DIRECTIVE, attachReplyCards } = require('./_poko_reply_cards');
-const { limitBestEffort } = require('./_rate_limit');
+const { clientIp } = require('./_client_ip');
+const { limitGlobal } = require('./_rate_limit');
 
 function requireHelper(name) {
   try {
@@ -410,13 +411,11 @@ async function hermesReply({
   };
 }
 
-// Per-IP comfort limit shared across API instances through Redis, with a
-// bounded local fallback when Redis is down: 20 msgs / minute, same shape as
-// the legacy assistant. The IP is hashed before it reaches any key.
+// Per-IP GLOBAL limit (20 msgs / minute) counted in the shared Postgres
+// store so Pi and k3s pods share one budget; the IP is hashed before it
+// reaches any key.
 async function chatRateLimited(req) {
-  const forwarded = String(req.headers?.['x-forwarded-for'] || req.headers?.['X-Forwarded-For'] || '').split(',')[0].trim();
-  const ip = forwarded || String(req.socket?.remoteAddress || 'unknown');
-  const verdict = await limitBestEffort({ scope: 'poko-chat', identity: ip, limit: 20, windowSeconds: 60 });
+  const verdict = await limitGlobal({ scope: 'poko-chat', identity: clientIp(req), limit: 20, windowSeconds: 60 });
   return !verdict.allowed;
 }
 

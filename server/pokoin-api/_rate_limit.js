@@ -1,15 +1,19 @@
 'use strict';
 
 /**
- * Shared rate limiting with two explicit classes. The call site chooses the
+ * Shared rate limiting with three explicit classes. The call site chooses the
  * semantics; a future route must never reach for the fail-open limiter by
  * accident on a money or security path.
  *
  * - limitBestEffort: comfort throttling for expensive-but-harmless routes
  *   (chat, assistants, image logging, AI classification). Atomic Redis
- *   counter shared by every API instance (Pi + k3s overflow pods). If Redis
- *   is unavailable it degrades to a bounded in-process fixed window on the
- *   local instance — availability over precision. FAIL-OPEN by design.
+ *   counter shared by every API instance of ONE origin. Redis is shared only
+ *   within an origin (the Pi has its own, the k3s overflow pods have their
+ *   own), so this is a PER-ORIGIN comfort limiter (class B): across the two
+ *   origins the effective budget doubles, which is acceptable for comfort
+ *   routes. If Redis is unavailable it degrades to a bounded in-process
+ *   fixed window on the local instance — availability over precision.
+ *   FAIL-OPEN by design.
  *
  * - limitSecurityCritical: durable fail-closed fixed window in Postgres
  *   (public.marketplace_rate_limits, same shape as scan_rate_limits) for
@@ -17,6 +21,13 @@
  *   NO local fallback: if the durable store cannot answer, the request is
  *   rejected, because a per-instance memory limit would silently multiply
  *   across overflow pods and an unavailable store must not look like consent.
+ *
+ * - limitGlobal: the GLOBAL comfort limiter. Both origins write
+ *   public.marketplace_rate_limits through the same writer pool, so Postgres
+ *   is the one store every origin counts in. On a store outage it degrades to
+ *   the origin store (limitBestEffort with a HALVED limit, so two origins
+ *   counting separately still bound the worst case); when that origin store
+ *   is down too it FAILS CLOSED. A per-process memory window is never used.
  *
  * Keys: pokoin:rl:v1:{scope}:{sha256(identity)[0:32]} — identities (IP, uid)
  * are hashed so raw credentials/PII never appear in Redis keys or Postgres
@@ -33,6 +44,7 @@ const LOCAL_MAX_IDENTITIES = 10_000;
 
 const REJECTION_LOG_INTERVAL_MS = 30_000;
 const lastRejectionLogAt = new Map();
+const lastDegradedLogAt = new Map();
 
 function cleanScope(scope) {
   return String(scope || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 40) || 'scope';
@@ -53,6 +65,14 @@ function noteRejection(scope, backend) {
   if (now - (lastRejectionLogAt.get(stamp) || 0) < REJECTION_LOG_INTERVAL_MS) return;
   lastRejectionLogAt.set(stamp, now);
   console.warn('rate limit rejected', { scope: cleanScope(scope), backend });
+}
+
+/** Sampled degradation log: at most one line per scope per interval. */
+function noteDegraded(scope) {
+  const now = Date.now();
+  if (now - (lastDegradedLogAt.get(cleanScope(scope)) || 0) < REJECTION_LOG_INTERVAL_MS) return;
+  lastDegradedLogAt.set(cleanScope(scope), now);
+  console.warn('global rate limit degraded to the origin store', { scope: cleanScope(scope) });
 }
 
 // --- Best-effort class -------------------------------------------------------
@@ -102,10 +122,33 @@ async function limitBestEffort({ scope, identity, limit, windowSeconds }) {
   return { allowed, backend: 'local', count: localCount, retryAfterSec: allowed ? 0 : window };
 }
 
-// --- Security-critical class -------------------------------------------------
+// --- Shared Postgres store ---------------------------------------------------
 
 function defaultSecurityQuery(sql, values) {
   return require('./_marketplace_db').marketplaceWriteQuery(sql, values);
+}
+
+/**
+ * The one durable fixed-window upsert, shared by limitSecurityCritical and
+ * limitGlobal so the SQL never drifts between the two.
+ * Returns { hits, windowStart } or throws (store unavailable / malformed).
+ */
+async function postgresConsume(bucket, windowStart, query) {
+  const result = await query(
+    `
+      insert into public.marketplace_rate_limits (bucket, window_start, hits)
+      values ($1, $2, 1)
+      on conflict (bucket, window_start)
+        do update set hits = public.marketplace_rate_limits.hits + 1
+      returning hits
+    `,
+    [bucket, windowStart],
+  );
+  const hits = Number(result?.rows?.[0]?.hits);
+  if (!Number.isFinite(hits) || hits < 1) {
+    throw new Error('rate limit row returned no usable hit count');
+  }
+  return { hits, windowStart };
 }
 
 /**
@@ -119,20 +162,7 @@ async function limitSecurityCritical({ scope, identity, limit, windowSeconds }, 
   const max = Math.max(1, Math.trunc(limit));
   const windowStart = Math.floor(Date.now() / (window * 1000));
   try {
-    const result = await query(
-      `
-        insert into public.marketplace_rate_limits (bucket, window_start, hits)
-        values ($1, $2, 1)
-        on conflict (bucket, window_start)
-          do update set hits = public.marketplace_rate_limits.hits + 1
-        returning hits
-      `,
-      [bucket, windowStart],
-    );
-    const hits = Number(result?.rows?.[0]?.hits);
-    if (!Number.isFinite(hits) || hits < 1) {
-      throw new Error('rate limit row returned no usable hit count');
-    }
+    const { hits } = await postgresConsume(bucket, windowStart, query);
     const allowed = hits <= max;
     if (!allowed) noteRejection(scope, 'postgres');
     return { allowed, backend: 'postgres', count: hits, retryAfterSec: allowed ? 0 : window };
@@ -145,11 +175,54 @@ async function limitSecurityCritical({ scope, identity, limit, windowSeconds }, 
   }
 }
 
-/** Remove fully-expired windows once any security route is wired (cron/sweep). */
-async function purgeExpiredSecurityRateLimits({ olderThanEpoch = Math.floor(Date.now() / 1000) - 3600, query = defaultSecurityQuery } = {}) {
+/**
+ * GLOBAL limit: both origins count in public.marketplace_rate_limits, so the
+ * window is one budget for Pi + k3s combined.
+ *
+ * On a store outage the writer is unreachable only when nezopt is down or
+ * partitioned; then the Pi is normally the only serving origin, so its own
+ * Redis is effectively global, and the halved origin limit bounds the worst
+ * case of two origins counting separately. When the origin store is down too
+ * (backend 'local') there is nothing left that can count, so the request is
+ * REJECTED (backend 'error'). A per-process memory window is never used.
+ */
+async function limitGlobal({ scope, identity, limit, windowSeconds }, { query = defaultSecurityQuery, degraded = limitBestEffort } = {}) {
+  const bucket = rateLimitBucket(scope, identity);
+  const window = Math.max(1, Math.trunc(windowSeconds || 60));
+  const max = Math.max(1, Math.trunc(limit));
+  const windowStart = Math.floor(Date.now() / (window * 1000));
+  try {
+    const { hits } = await postgresConsume(bucket, windowStart, query);
+    const allowed = hits <= max;
+    if (!allowed) noteRejection(scope, 'postgres');
+    if (Math.random() < 0.005) {
+      // Opportunistic sweep of fully-expired windows; fire-and-forget.
+      purgeExpiredSecurityRateLimits({ olderThanWindow: windowStart - 2, query }).catch(() => {});
+    }
+    return { allowed, backend: 'postgres', count: hits, retryAfterSec: allowed ? 0 : window };
+  } catch (error) {
+    noteDegraded(scope);
+    const originVerdict = await degraded({ scope, identity, limit: Math.max(1, Math.floor(limit / 2)), windowSeconds });
+    if (originVerdict?.backend === 'redis') {
+      return { ...originVerdict, backend: 'redis-degraded' };
+    }
+    // Origin Redis is down too: the local memory fallback would multiply per
+    // pod and the store cannot answer, so fail closed.
+    return { allowed: false, backend: 'error', count: null, retryAfterSec: window };
+  }
+}
+
+/**
+ * Remove fully-expired windows. window_start stores the window INDEX
+ * (Math.floor(Date.now() / (windowSeconds * 1000))), not epoch seconds, so
+ * callers pass the current window index minus a grace of 2.
+ */
+async function purgeExpiredSecurityRateLimits({ olderThanWindow, query = defaultSecurityQuery } = {}) {
+  const index = Math.trunc(olderThanWindow);
+  if (!Number.isFinite(index)) return 0;
   const result = await query(
     'delete from public.marketplace_rate_limits where window_start < $1',
-    [olderThanEpoch],
+    [index],
   );
   return result?.rowCount || 0;
 }
@@ -166,6 +239,7 @@ function resetLocalWindows() {
 module.exports = {
   limitBestEffort,
   limitSecurityCritical,
+  limitGlobal,
   purgeExpiredSecurityRateLimits,
   rateLimitBucket,
   localWindowSize,

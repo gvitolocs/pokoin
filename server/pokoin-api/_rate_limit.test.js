@@ -91,6 +91,83 @@ test('security limiter fails CLOSED when the durable store is unavailable', asyn
   assert.equal(malformed.allowed, false, 'malformed store answer must reject');
 });
 
+test('global limiter: postgres allows up to the limit then rejects', async () => {
+  let hits = 0;
+  const fakeQuery = async () => {
+    hits += 1;
+    return { rows: [{ hits }], rowCount: 1 };
+  };
+  const verdicts = [];
+  for (let i = 0; i < 4; i += 1) {
+    verdicts.push(await rateLimit.limitGlobal(
+      { scope: 'test-global', identity: '4.4.4.4', limit: 3, windowSeconds: 60 },
+      { query: fakeQuery },
+    ));
+  }
+  assert.deepEqual(verdicts.map((v) => v.allowed), [true, true, true, false]);
+  assert.ok(verdicts.every((v) => v.backend === 'postgres'));
+  assert.equal(verdicts[3].retryAfterSec, 60);
+});
+
+test('global limiter: store down degrades to the origin store with a halved limit', async () => {
+  const degradedCalls = [];
+  const degraded = async (opts) => {
+    degradedCalls.push(opts);
+    return { allowed: true, backend: 'redis', count: 1, retryAfterSec: 0 };
+  };
+  const verdict = await rateLimit.limitGlobal(
+    { scope: 'test-global-down', identity: '5.5.5.5', limit: 9, windowSeconds: 60 },
+    {
+      query: async () => { throw new Error('writer unreachable'); },
+      degraded,
+    },
+  );
+  assert.equal(verdict.allowed, true);
+  assert.equal(verdict.backend, 'redis-degraded');
+  assert.equal(degradedCalls.length, 1);
+  assert.equal(degradedCalls[0].scope, 'test-global-down');
+  assert.equal(degradedCalls[0].limit, 4, 'degraded limit must be floor(limit/2)');
+});
+
+test('global limiter: store down AND origin redis down fails closed', async () => {
+  const verdict = await rateLimit.limitGlobal(
+    { scope: 'test-global-down2', identity: '6.6.6.6', limit: 10, windowSeconds: 60 },
+    {
+      query: async () => { throw new Error('writer unreachable'); },
+      degraded: async () => ({ allowed: true, backend: 'local', count: 1, retryAfterSec: 0 }),
+    },
+  );
+  assert.equal(verdict.allowed, false);
+  assert.equal(verdict.backend, 'error');
+  assert.equal(verdict.count, null);
+  assert.equal(verdict.retryAfterSec, 60);
+});
+
+test('global limiter purge uses the window index, not epoch seconds', async () => {
+  const calls = [];
+  const query = async (sql, values) => {
+    calls.push({ sql, values });
+    return { rows: [{ hits: 1 }], rowCount: 1 };
+  };
+  // Force the opportunistic purge branch deterministically.
+  const random = Math.random;
+  let randomCalls = 0;
+  globalThis.Math.random = () => { randomCalls += 1; return randomCalls === 1 ? 0 : 1; };
+  try {
+    await rateLimit.limitGlobal(
+      { scope: 'test-global-purge', identity: '7.7.7.7', limit: 5, windowSeconds: 3600 },
+      { query },
+    );
+  } finally {
+    globalThis.Math.random = random;
+  }
+  const purge = calls.find((call) => /delete from/i.test(call.sql));
+  assert.ok(purge, 'the opportunistic purge must run once in 100 calls');
+  assert.match(purge.sql, /where window_start < \$1/);
+  const expectedWindow = Math.floor(Date.now() / 3600000) - 2;
+  assert.equal(purge.values[0], expectedWindow, 'purge must take the current window index minus 2');
+});
+
 test('shared comfort limiter: two simulated instances consume ONE shared redis window', async (t) => {
   const ping = await redisCache.command(['PING']);
   if (ping !== 'PONG') return t.skip(`no local test Redis on ${TEST_HOST}:${TEST_PORT}`);

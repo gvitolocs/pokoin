@@ -1,5 +1,7 @@
 # Pi overflow on nezopt (k3s)
 
+> **Superseded in part (2026-10-07):** the edge overflow and NodePort `:30880` are retired. nezopt is a Cloudflare Load Balancer origin (Pi 0.9 / NEZ 0.1) behind its own tunnel; the Service is ClusterIP. Security baseline: [SECURITY_HARDENING.md](SECURITY_HARDENING.md).
+
 `api.pokoin.com` is served by the Raspberry Pi. When many people search at
 once, the Pi's single Node API saturates (~65 suggest req/s, ~25 search-page
 req/s on 2026-09-29). nezopt now carries the overflow.

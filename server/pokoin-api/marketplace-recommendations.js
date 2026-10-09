@@ -22,6 +22,7 @@
  */
 
 const { marketplaceQuery } = require('./_marketplace_db');
+const { clientIp } = require('./_client_ip');
 const { getFirebaseAdmin, requestHeader, verifyBearerToken } = require('./_firebase');
 const { normalizeGame, parseGameFromRequest, runWithGame } = require('./_marketplace_game');
 const { setCorsHeaders, toReactCard } = require('./_marketplace_react_card');
@@ -83,13 +84,6 @@ function isMissingRelation(error) {
 /** Pokémon DB for listings, catalog and every per-user table. */
 function db(fn) {
   return runWithGame('pokemon', fn);
-}
-
-function clientIp(req) {
-  return requestHeader(req, 'cf-connecting-ip')
-    || String(requestHeader(req, 'x-forwarded-for') || '').split(',')[0].trim()
-    || req.socket?.remoteAddress
-    || 'unknown';
 }
 
 async function optionalUid(req) {

@@ -56,6 +56,7 @@ function PromoFanCard({ card, role, index, onPointerEnter, onFail }) {
   const [ready, setReady] = useState(false);
   const [wide, setWide] = useState(false);
   const art = imageSrc(card, 'hero');
+  const center = role === 'center';
   useEffect(() => {
     if (!art) {
       onFail?.();
@@ -80,8 +81,8 @@ function PromoFanCard({ card, role, index, onPointerEnter, onFail }) {
           fallback="hide"
           full
           dragCard={card}
-          loading="eager"
-          fetchPriority="high"
+          loading={center ? 'eager' : 'lazy'}
+          fetchPriority={center ? 'high' : 'low'}
           onLoad={(img) => {
             if (img && img.naturalWidth > img.naturalHeight) {
               setWide(true);

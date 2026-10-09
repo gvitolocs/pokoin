@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Deploy scripts/pokoin-api-edge.js to the Pi from an exact origin/main commit
-# and turn on nezopt overflow (docs/NEZOPT_OVERFLOW.md).
+# Deploy scripts/pokoin-api-edge.js plus the shared CORS/client-IP policy
+# modules to the Pi from an exact origin/main commit. The nezopt overflow
+# model is retired (the NodePort is being removed), so overflow defaults to
+# off; set POKOIN_API_OVERFLOW_ORIGIN explicitly to re-enable it.
 #
 #   scripts/deploy-pokoin-api-edge.sh [commit]
-#   POKOIN_API_OVERFLOW_ORIGIN= scripts/deploy-pokoin-api-edge.sh   # overflow off
 #
-# Rolls back to the previous edge file if :18079 does not answer afterwards.
+# Rolls back to the previous edge + policy files if :18079 does not answer.
 set -euo pipefail
 
 die() { echo "deploy-pokoin-api-edge: $*" >&2; exit 1; }
@@ -15,7 +16,9 @@ REPO="$(git rev-parse --show-toplevel)"
 COMMIT="$(git -C "$REPO" rev-parse "${1:-HEAD}^{commit}")"
 PI="${PI_HOST:-pi-home}"
 EDGE=/srv/pokoin/card-images/tools/pokoin-api-edge.js
-OVERFLOW="${POKOIN_API_OVERFLOW_ORIGIN-http://192.168.178.55:30880}"
+CORS=/srv/pokoin/card-images/tools/pokoin-cors-policy.js
+CLIENT_IP=/srv/pokoin/card-images/tools/pokoin-client-ip.js
+OVERFLOW="${POKOIN_API_OVERFLOW_ORIGIN-}"
 LOCAL_MAX="${POKOIN_API_LOCAL_MAX:-16}"
 
 git -C "$REPO" fetch -q origin || die "git fetch origin failed"
@@ -26,9 +29,18 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 git -C "$REPO" show "$COMMIT:scripts/pokoin-api-edge.js" >"$STAGE/pokoin-api-edge.js"
 git -C "$REPO" show "$COMMIT:scripts/pokoin-api-edge.test.js" >"$STAGE/pokoin-api-edge.test.js"
+git -C "$REPO" show "$COMMIT:server/pokoin-api/_cors_policy.js" >"$STAGE/pokoin-cors-policy.js"
+git -C "$REPO" show "$COMMIT:server/pokoin-api/_client_ip.js" >"$STAGE/pokoin-client-ip.js"
 say "edge tests @ ${COMMIT:0:12}"
-node --test "$STAGE/pokoin-api-edge.test.js" | grep -E "^# (pass|fail)"
+# The tests import the shared policy modules from the repo layout.
+mkdir -p "$STAGE/repo"
+git -C "$REPO" archive "$COMMIT" scripts/pokoin-api-edge.js scripts/pokoin-api-edge.test.js \
+  server/pokoin-api/_cors_policy.js server/pokoin-api/_client_ip.js server/pokoin-api/_cardtrader_game_ingest.js \
+  | tar -C "$STAGE/repo" -xf -
+(cd "$STAGE/repo" && node --test scripts/pokoin-api-edge.test.js) | grep -E "^# (pass|fail)"
 node --check "$STAGE/pokoin-api-edge.js"
+node --check "$STAGE/pokoin-cors-policy.js"
+node --check "$STAGE/pokoin-client-ip.js"
 
 if [[ -n "$OVERFLOW" ]]; then
   say "overflow origin reachable from the Pi?"
@@ -38,9 +50,15 @@ fi
 
 say "install on $PI (previous kept as .prev)"
 scp -q "$STAGE/pokoin-api-edge.js" "$PI:$EDGE.new"
+scp -q "$STAGE/pokoin-cors-policy.js" "$PI:$CORS.new"
+scp -q "$STAGE/pokoin-client-ip.js" "$PI:$CLIENT_IP.new"
 ssh "$PI" "set -e
 cp -a $EDGE $EDGE.prev
+[ -f $CORS ] && cp -a $CORS $CORS.prev || true
+[ -f $CLIENT_IP ] && cp -a $CLIENT_IP $CLIENT_IP.prev || true
 install -o nes -g nes -m 0644 $EDGE.new $EDGE && rm -f $EDGE.new
+install -o nes -g nes -m 0644 $CORS.new $CORS && rm -f $CORS.new
+install -o nes -g nes -m 0644 $CLIENT_IP.new $CLIENT_IP && rm -f $CLIENT_IP.new
 mkdir -p /etc/systemd/system/pokoin-api-edge.service.d
 cat >/etc/systemd/system/pokoin-api-edge.service.d/overflow.conf <<CONF
 [Service]
@@ -59,7 +77,7 @@ check() {
 
 if ! check; then
   say "edge not answering — rolling back"
-  ssh "$PI" "cp -a $EDGE.prev $EDGE && systemctl restart pokoin-api-edge.service"
+  ssh "$PI" "cp -a $EDGE.prev $EDGE && { [ -f $CORS.prev ] && cp -a $CORS.prev $CORS || true; } && { [ -f $CLIENT_IP.prev ] && cp -a $CLIENT_IP.prev $CLIENT_IP || true; } && systemctl restart pokoin-api-edge.service"
   die "rolled back to the previous edge"
 fi
 ssh "$PI" "journalctl -u pokoin-api-edge.service -n 1 --no-pager -o cat"
