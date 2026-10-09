@@ -59,6 +59,9 @@ export async function getBearer(forceRefresh = false) {
 
 setBearerProvider(getBearer);
 
+/** The Firebase user: undefined until the SDK answered, then a user or null. */
+export const authUser = firebaseUser;
+
 /** True once Firebase confirmed a user; before that, the cached session decides. */
 export function signedIn() {
   const user = firebaseUser();
