@@ -20,34 +20,32 @@ Read `node_modules/solid-js/CHEATSHEET.md` before writing Solid code. The
       suggest name/set/artist data 537 KB (30%), Firestore + re2js + webchannel ~430 KB (24%),
       react-dom/router/react ~234 KB (13%), Firebase Auth ~100 KB.
 - [x] First production probes (Playwright, nezopt Ryzen 5 7600; noisy host, see below).
-- [ ] Repeatable benchmark suite in `bench/` (journeys A–J; K/L need a test account).
-- [ ] Baselines saved under `bench/results/` with distributions (≥10 runs per cell).
+- [x] Repeatable benchmark suite in `bench/` (journeys A–J; K/L need a test account) + `interleave.sh`/`merge.mjs`.
+- [x] Baselines and comparisons in `docs/frontend-perf/RESULTS.md` (ab1: 6 runs/cell, ab2: 3 runs/cell; more runs on a quiet host still to do).
 
 ## Phase B — optimise the React app (fair optimised-React baseline)
-- [ ] B1 Typeahead ranking: prefix Damerau-Levenshtein + rankNames + compactQuery memo,
-      byte-identical results (oracle test). (in progress)
-- [ ] B2 Firestore off the entry chunk (auth.jsx, cart-rails.js import it eagerly).
-- [ ] B3 Suggest catalog data off the entry chunk (load on idle / search focus).
-- [ ] B4 Expansion symbols: stop the `pokoin.com/card-images/…` → cdn.pokoin.com double hop
-      (Worker invocation + redirect per symbol; 45 per typed query).
-- [ ] B5 Duplicate image requests in the suggest popup (each thumb requested 3×).
+- [x] B1 Typeahead ranking: byte-identical (35,604-query oracle vs the original module, 0 diffs), 18.5× faster in Node.
+- [x] B2 Firestore off the entry chunk (cloud/fp-decouple, merged).
+- [x] B3 (Solid) engine off the entry, evaluated on search intent, chunks prefetched. React: spec queued for Qwen (`useSuggestEngine`).
+- [x] B4 Expansion symbols load cdn.pokoin.com directly (no 301 per symbol).
+- [ ] B5 Duplicate image requests in the suggest popup — the bench counts real downloads; verify on the next run.
 - [ ] B6 art-shade canvas sampling (getImageData per image) off the input path.
+- [x] B7 No idle rank workers on mount (up to 8 catalog copies per page load); card-url-boot prefetches the exact desk URL; Home CLS (rails unmounting, short skeletons); era-match memo; shared Intl.Collator.
+- [ ] B8 (Qwen, in progress) formatPknNumber formatter cache, compactQuery ASCII path, rail controls from ResizeObserver, idle home-cache writes.
 
 ## Phase C/D — Solid 2 app (`solid/`), critical path first
-- [ ] C1 Scaffold: Vite + Solid 2 + router 2, shares `market/src/*.js` pure modules and
-      `styles.css`; builds to `dist-web/market-solid/` without touching the React build.
-- [ ] C2 Coexistence switch: one HTML boot script picks React or Solid entry
-      (`?ui=solid` / localStorage flag, optional % canary); URLs unchanged.
-- [ ] D1 Chrome (header, search, typeahead), D2 Home, D3 Search, D4 Card desk,
-      D5 Back navigation + scroll restore, D6 Sets/Expansion, then collections/listings.
+- [x] C1 Scaffold: Vite 8 + Solid 2 rc.14 + router 2, shares `market/src` via `@market`, React guard, chunks in `/market/s/`.
+- [x] C2 Coexistence switch (`scripts/build-ui-shell.mjs`, off unless `POKOIN_UI_SWITCH=1`; canary `POKOIN_UI_CANARY`; CSP hash; e2e verified).
+- [x] D1 header + typeahead (parity 10/10 queries), D2 Home rails.
+- [ ] D1/D2 parity extras, D3 Search, D4 Card desk + versions: cloud sessions (`cloud/solid-chrome-home`, `cloud/solid-search`, `cloud/solid-card-desk`), to merge.
+- [ ] D5 Sets/Expansion/Era/hubs, then collections/listings/cart/checkout/profile.
 
 ## Phase E — local-first search
 - [ ] Ranking in a worker with a compact name-pool shard (needs a Rust endpoint, see requests).
 - [ ] IndexedDB cache for name pool + hot suggest groups, print/language pre-warm.
 
 ## Phase F — backend requests (Rust session)
-- [ ] ETag + Cache-Control/SWR on public reads, Server-Timing (edge/app/db), compact
-      catalog/name-pool shard endpoint. Send with measured targets.
+- [x] Requests sent and accepted by the Rust session (Server-Timing + TAO, weak ETag/304 on 9 routes, cold p95 < 300 ms for search-page/expansions, `/api/catalog/names` + `/api/catalog/version`): draft PR feature/cache-sync-engine.
 
 ## Phase G/H — parity, regression, rollout
 - [ ] Playwright parity tests React vs Solid on the migrated routes.
