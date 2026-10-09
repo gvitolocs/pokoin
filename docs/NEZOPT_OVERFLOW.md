@@ -1,5 +1,7 @@
 # Pi overflow on nezopt (k3s)
 
+> **2026-10-09:** the overflow runs the native Rust binary (see *What runs on nezopt*); no Node.
+>
 > **Superseded in part (2026-10-07):** the edge overflow and NodePort `:30880` are retired. nezopt is a Cloudflare Load Balancer origin (Pi 0.9 / NEZ 0.1) behind its own tunnel; the Service is ClusterIP. Security baseline: [SECURITY_HARDENING.md](SECURITY_HARDENING.md).
 
 `api.pokoin.com` is served by the Raspberry Pi. When many people search at
@@ -45,63 +47,61 @@ at 300 s) plus `stale-while-revalidate`:
 - Header `x-pokoin-edge-cache: HIT | MISS | STALE | COALESCED | BYPASS`;
   a per-minute summary line goes to `journalctl -u pokoin-api-edge`.
 
-## What runs on nezopt
+## What runs on nezopt (Rust, since 2026-10-09)
 
 k3s runs **inside Docker** (container `pokoin-k3s`, image `rancher/k3s`), so
 nothing is installed on the host: `docker rm -f pokoin-k3s` removes it.
 Data lives in `~/pokoin-overflow/`. Manifest: `infra/k3s/pokoin-overflow.yaml`,
-namespace `pokoin-overflow`.
+namespace `pokoin-overflow`. No Node runs here.
 
 | Piece | What |
 | --- | --- |
-| `pokoin-api` | The Pi's exact API release (`node server/oracle-api-server.js`), HPA **1 → 4** pods at 60 % CPU, NodePort **30880** on `192.168.178.55` |
-| `meili` | Meilisearch **v1.53.1** (production pin) copy of `marketplace_cards` + `marketplace_name_tokens` |
-| `meili-delta` | CronJob every 2 min — the Pi's own `scripts/meili-sync-marketplace-delta.js` |
-| `meili-full` | CronJob 03:17 — full rebuild of both indexes (drift guard) |
-| Redis | Stays on the Pi (`pokoin-redis` `:6380`). Overflow pods do not run a second cache. |
+| `pokoin-api` | The Pi's exact Rust release (same commit, **x86_64** build) in `gcr.io/distroless/cc-debian12:nonroot`, HPA **2 → 4** pods at 60 % CPU. Each pod serves the full api.pokoin.com **edge** on `:8080` (micro-cache, sitemaps, API on pod loopback `:18082`). Reached only through the in-cluster `cloudflared` (Cloudflare LB origin, Pi 0.9 / NEZ 0.1). |
+| `search-delta` | CronJob every 2 min: `pokoin-api job search-delta`, the Redis Search delta (same job as the Pi timer). A missing index (Redis restarted) is rebuilt in full. |
+| `search-reindex` | CronJob 03:17: `pokoin-api job search-reindex`, full rebuild of the `pokoin:cards` index (drift guard). |
+| `redis` | Redis 8 with Search: the overflow's own search index and cache. |
+| `meili` | Rollback-only Meilisearch copy. Search runs on Redis (`MARKETPLACE_SEARCH_ENGINE=redis`); nothing syncs Meili any more. |
 
-Overflow pods **read from the writer Postgres** on nezopt (freshest data; the Pi
-reads its replica). UFW drops container → host traffic, so pods reach the writer
-*container* on the user-defined Docker network `pokoin-overflow`
-(writer `172.31.250.10`, k3s `172.31.250.20`); the secret key
-`MARKETPLACE_OVERFLOW_DATABASE_URL` is the writer URL with that host, and
-`MARKETPLACE_WRITER_DATABASE_URL` is rewritten to the same URL — the Pi's LAN
-writer URL (`192.168.178.55:25432`) times out from pods, so overflowed Scan
-Connect requests (scan-stream / scan-batch use the writer pool) failed with
-"Scan service error.".
+Pods differ from the Pi only where they must:
+
+- **Database:** they read and write the **writer Postgres** on nezopt (the Pi reads its replica), on the private Docker network `pokoin-overflow` (writer `172.31.250.10`, k3s `172.31.250.20`), TLS `verify-full` with the Pokoin PG CA. UFW drops container → host traffic, which is why the host LAN URL is not used.
+- **Redis:** `redis.pokoin-overflow.svc.cluster.local:6379`.
+- **Outbox worker:** off (`POKOIN_LISTING_SYNC_WORKER=0`). It runs on the Pi only.
+- **CDN:** no card images on nezopt. Non-Pokémon game image paths on api.pokoin.com proxy to `https://cdn.pokoin.com`. Pokémon image paths 404 here, as they did with the Node overflow. Images normally load from cdn.pokoin.com, which is not load-balanced.
 
 ## Staying in sync with the Pi
 
 `pokoin-overflow-sync.timer` (user systemd on nezopt, every 5 min) runs
-`~/pokoin-overflow/bin/nezopt-k3s.sh sync`:
+`~/pokoin-overflow/bin/nezopt-k3s.sh sync`. It does three things:
 
-- the secret `pokoin-api-env` is rebuilt from the **running Pi container's**
-  environment (the Pi `.env` file misses keys set at run time) — never committed;
-  `NODE_TLS_REJECT_UNAUTHORIZED` is never copied (it would disable certificate checks;
-  every Postgres client already sets its own `ssl` options);
-- when the Pi's `/srv/pokoin/api/current` release changes, it is rsynced to
-  `~/pokoin-overflow/data/api/releases/` and the pods restart.
+1. **Secret.** `pokoin-api-env` is rebuilt from the **running Pi Rust service**: `/proc/<MainPID>/environ` of `pokoin-rust-api`, which is the env file after systemd unquoting. Pi-only keys (listeners, CDN/SEO paths, trusted proxies, Valkey, the outbox worker flag) are dropped. Loopback database URLs point at the writer as described above.
+2. **Sitemaps.** `/srv/pokoin/seo` is rsynced to `~/pokoin-overflow/data/seo`, which is mounted at `/srv/pokoin/seo` in the pods.
+3. **Release.** The Pi's commit is read from `/srv/pokoin/rust/current --version`. If `~/pokoin-overflow/data/rust/current` is a different commit, the script builds that commit for x86_64 and rolls the pods:
+   - The build runs in a detached worktree of `~/Projects/pokoin-web` at `~/pokoin-overflow/src`, with target dir `~/pokoin-overflow/build/target`, `--locked`.
+   - The binary's `--version` must report the same commit.
+   - The script keeps 3 releases.
 
-So an API deploy to the Pi reaches nezopt within ~5 minutes.
-
-The overflow API's pipeline health probe uses
-`POKOIN_CDN_HEALTH_URL=https://cdn.pokoin.com/health` with a 2-second timeout.
-The Pi keeps its local HTTP probe on `127.0.0.1:18081`; that address is not a
-CDN inside a Kubernetes API pod. The shared `_pipeline_health.js` supports
-both HTTP and HTTPS. All four dependency checks remain active.
+So a Rust deploy to the Pi reaches nezopt on the next timer run, plus build time: about 1 minute incremental, longer on a cold target dir.
 
 ## Commands
 
 ```bash
-scripts/nezopt-k3s.sh status        # pods, HPA, overflow health
-scripts/nezopt-k3s.sh sync          # force a release/env sync now
-scripts/nezopt-k3s.sh apply         # after editing the manifest
-scripts/nezopt-k3s.sh meili-full    # rebuild the Meili copy now
-scripts/nezopt-k3s.sh install       # (re)install the sync timer
-scripts/nezopt-k3s.sh down          # stop k3s (Pi keeps serving alone)
-scripts/deploy-pokoin-api-edge.sh   # ship the edge from origin/main (overflow on)
-POKOIN_API_OVERFLOW_ORIGIN= scripts/deploy-pokoin-api-edge.sh   # overflow off
+scripts/nezopt-k3s.sh status        # pods, HPA, CronJobs, release vs Pi commit, a pod's /readyz
+scripts/nezopt-k3s.sh sync          # force a secret/sitemap/release sync now
+scripts/nezopt-k3s.sh secret        # only rebuild the env secret from the Pi Rust service
+scripts/nezopt-k3s.sh apply         # after editing the manifest (also deletes the retired meili-* CronJobs)
+scripts/nezopt-k3s.sh reindex       # rebuild the Redis Search index now
+scripts/nezopt-k3s.sh install       # (re)install the sync timer and its script copy
+scripts/nezopt-k3s.sh down          # stop k3s (the Pi keeps serving alone)
 ```
+
+Rollback to the previous ReplicaSet: `docker exec pokoin-k3s kubectl -n pokoin-overflow rollout undo deploy/pokoin-api`.
+
+## History: the Node overflow (2026-09-29 → 2026-10-09)
+
+The sections above **How requests are routed** and **Edge micro-cache** describe the
+retired Node edge on the Pi. The Rust edge keeps the same micro-cache rules
+(`crates/edge`), and the measurements below are from the Node overflow.
 
 ## Measured (2026-09-29)
 
