@@ -1,8 +1,18 @@
 import { createSignal } from 'solid-js';
 import { cartTotals } from '@market/cart-model.js';
+import {
+  addCartRow,
+  CART_KEY as SHARED_CART_KEY,
+  CART_MAX,
+  dropSavedRow,
+  readCartRows,
+  SAVED_KEY,
+  SAVED_MAX,
+  writeCartRows,
+} from '@market/cart-rows.js';
 
 /** Same browser keys as market/src/cart.jsx — both UIs read one cart. */
-export const CART_KEY = 'pokoin.cartItems';
+export const CART_KEY = SHARED_CART_KEY;
 
 function readRows(key) {
   try {
@@ -23,9 +33,25 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Read side of the cart for the header (count) and drops. Writes (add, qty,
- * account sync) move here with the Cart page migration; until then the React
- * cart owns mutations and this store follows it through `storage`.
+ * Read side of the cart for the header (count) and drops, plus the desk's
+ * add-to-cart. The rest of the mutations (qty, remove, account sync) move
+ * here with the Cart page migration; until then the React cart owns them and
+ * this store follows it through `storage`.
  */
 export const cartItems = items;
 export const cartCount = () => cartTotals(items()).count;
+
+/**
+ * React CartProvider.addItem on the same storage: the row lands in
+ * `pokoin.cartItems` (qty topped up for the same listing) and leaves
+ * `pokoin.cartSaved`. The React cart merges it with the account cart on load.
+ */
+export function addCartItem(next) {
+  if (!next?.id) return;
+  const rows = addCartRow(readCartRows(CART_KEY), next, CART_MAX);
+  writeCartRows(CART_KEY, rows, CART_MAX);
+  const saved = readCartRows(SAVED_KEY);
+  const kept = dropSavedRow(saved, next.id);
+  if (kept !== saved) writeCartRows(SAVED_KEY, kept, SAVED_MAX);
+  setItems(rows);
+}

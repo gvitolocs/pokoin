@@ -59,6 +59,17 @@ export async function getBearer(forceRefresh = false) {
 
 setBearerProvider(getBearer);
 
+/** The Firebase user once the SDK answered (null when signed out); undefined before. */
+export const authUser = firebaseUser;
+
+/**
+ * React useAuth().ready: Firebase answered, or there is no cached session to
+ * confirm (signed-out visitors never load the SDK here, so they are settled).
+ */
+export function authReady() {
+  return firebaseUser() !== undefined || !authSession()?.uid;
+}
+
 /** True once Firebase confirmed a user; before that, the cached session decides. */
 export function signedIn() {
   const user = firebaseUser();
