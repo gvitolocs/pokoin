@@ -25,7 +25,7 @@ import { publicIdFromScanHit, scanCatalogId } from './scan-id.js';
 import { getSearchLang } from './locale.js';
 import { artistSlug } from './artist-name.js';
 import { rememberSuggestGroups } from './suggest-live.js';
-import { expansionNationality } from './suggest-catalog.js';
+import { expansionNationality } from './expansion-nationality.js';
 import { collectPrintingThumbUrls, preloadSuggestThumbs } from './suggest-images.js';
 import { realPublicCardId, rewriteCanonicalCardPath } from './card-stub.js';
 export { artistNameFromSlug, artistSlug } from './artist-name.js';
