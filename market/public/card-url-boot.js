@@ -59,6 +59,9 @@ function cardBootPlan(pathname, hostname) {
   var lang = match[2].toLowerCase();
   var id = match[3];
   var slug = match[4] || "";
+  // /cards/{id}/versions is the versions page, not a card with the slug "versions":
+  // canonicalising it replaced the URL with the card desk.
+  if (slug.toLowerCase() === "versions") return null;
   var apiGame = gameSlug ? GAME_API[gameSlug] : hostApiGame(hostname);
   var host = String(hostname || "").toLowerCase().split(":")[0];
   var pageParams = new URLSearchParams();

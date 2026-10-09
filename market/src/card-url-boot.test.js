@@ -131,6 +131,10 @@ test('non-card and unknown prefixes do not prefetch', () => {
   assert.equal(cardBootPlan('/api/marketplace-card-page', 'pokoin.com'), null);
   assert.equal(cardBootPlan('/not-a-game/marketplace/en/cards/1/x', 'pokoin.com'), null);
   assert.equal(cardBootPlan('/one-piece/marketplace/en/cards/598560/luffy/versions', 'pokoin.com'), null);
+  // Slug-less versions URL: the boot must not treat "versions" as the card slug.
+  assert.equal(cardBootPlan('/marketplace/en/cards/806390/versions', 'pokoin.com'), null);
+  assert.equal(cardBootPlan('/marketplace/en/cards/806390/versions/', 'pokoin.com'), null);
+  assert.equal(cardBootPlan('/one-piece/marketplace/en/cards/598560/versions', 'pokoin.com'), null);
   assert.equal(cardBootPlan('/marketplace/en/sets/base-set', 'pokoin.com'), null);
 });
 
