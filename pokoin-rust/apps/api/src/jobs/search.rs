@@ -3,6 +3,27 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
 const PREFIX: &str = "pokoin:card:";
+/// Every row passes `coalesce(projected_at, imported_at, now()) >= since`.
+const FULL_SINCE: &str = "1970-01-01T00:00:00.000Z";
+const BATCH: usize = 500;
+// Verbatim FT.CREATE arguments from redis-search-reindex.js.
+const INDEX_SCHEMA: &[&str] = &[
+    "ON", "HASH", "PREFIX", "1", PREFIX, "STOPWORDS", "0", "SCHEMA",
+    "name", "TEXT", "WEIGHT", "5",
+    "name_normalized", "TEXT", "WEIGHT", "4",
+    "name_compact", "TEXT", "WEIGHT", "5", "NOSTEM",
+    "nicknames", "TEXT", "WEIGHT", "3",
+    "card_number", "TEXT", "WEIGHT", "2", "NOSTEM",
+    "set_name", "TEXT", "WEIGHT", "0.4",
+    "expansion_name", "TEXT", "WEIGHT", "0.4",
+    "language", "TAG",
+    "effective_print_bucket", "TAG",
+    "nationality", "TAG",
+    "search_weight", "NUMERIC", "SORTABLE",
+    "card_id", "TAG",
+    "rarity", "TEXT", "NOINDEX",
+    "cdn_image_url", "TEXT", "NOINDEX",
+];
 // Verbatim SELECT from the running redis-search-delta.js.
 const DELTA_SQL: &str = r#"
     select
@@ -115,31 +136,67 @@ trait Backend {
     async fn index_exists(&mut self, index: &str) -> bool;
     async fn rows(&mut self, since: &str) -> Result<Vec<Value>>;
     async fn write(&mut self, key: &str, fields: &[(String, String)]) -> Result<()>;
+    /// FT.DROPINDEX (keeping the hashes) then FT.CREATE with `INDEX_SCHEMA`.
+    async fn recreate_index(&mut self, index: &str) -> Result<()>;
+    async fn write_batch(&mut self, docs: &[(String, Vec<(String, String)>)]) -> Result<()> {
+        for (key, fields) in docs {
+            self.write(key, fields).await?;
+        }
+        Ok(())
+    }
 }
+async fn ping(backend: &mut impl Backend) -> Result<()> {
+    let ping = backend.ping().await?;
+    if ping != "PONG" {
+        bail!("redis ping {}", clipped(&ping, 100));
+    }
+    Ok(())
+}
+/// HSET every row from `since` in pipelined batches; returns the document count.
+async fn load(backend: &mut impl Backend, since: &str, dry_run: bool) -> Result<usize> {
+    let mut written = 0;
+    let mut batch = Vec::with_capacity(BATCH);
+    for row in backend.rows(since).await? {
+        let Some(doc) = hash_fields(&row) else {
+            continue;
+        };
+        written += 1;
+        if dry_run {
+            continue;
+        }
+        batch.push(doc);
+        if batch.len() >= BATCH {
+            backend.write_batch(&batch).await?;
+            batch.clear();
+        }
+    }
+    if !batch.is_empty() {
+        backend.write_batch(&batch).await?;
+    }
+    Ok(written)
+}
+/// Redis is disposable: a missing index (Redis restarted) is rebuilt in full
+/// instead of failing, which the overflow CronJob used to do with `|| reindex`.
 async fn delta(
     backend: &mut impl Backend,
     index: &str,
     since: &str,
     dry_run: bool,
 ) -> Result<usize> {
-    let ping = backend.ping().await?;
-    if ping != "PONG" {
-        bail!("redis ping {}", clipped(&ping, 100));
-    }
+    ping(backend).await?;
     if !backend.index_exists(index).await {
-        bail!("redis index {index} is missing; run redis-search-reindex.js");
+        tracing::warn!(%index, "redis index missing; rebuilding it in full");
+        return reindex(backend, index, dry_run).await;
     }
-    let mut written = 0;
-    for row in backend.rows(since).await? {
-        let Some((key, fields)) = hash_fields(&row) else {
-            continue;
-        };
-        if !dry_run {
-            backend.write(&key, &fields).await?;
-        }
-        written += 1;
+    load(backend, since, dry_run).await
+}
+/// `redis-search-reindex.js`: recreate the index and load every candidate.
+async fn reindex(backend: &mut impl Backend, index: &str, dry_run: bool) -> Result<usize> {
+    ping(backend).await?;
+    if !dry_run {
+        backend.recreate_index(index).await?;
     }
-    Ok(written)
+    load(backend, FULL_SINCE, dry_run).await
 }
 struct Native {
     pool: PgPool,
@@ -176,6 +233,52 @@ impl Backend for Native {
         command.query_async::<i64>(&mut self.redis).await?;
         Ok(())
     }
+    async fn recreate_index(&mut self, index: &str) -> Result<()> {
+        // Unknown index is fine: this is the first build or Redis restarted.
+        let _ = redis::cmd("FT.DROPINDEX")
+            .arg(index)
+            .query_async::<redis::Value>(&mut self.redis)
+            .await;
+        let mut create = redis::cmd("FT.CREATE");
+        create.arg(index);
+        for part in INDEX_SCHEMA {
+            create.arg(*part);
+        }
+        create
+            .query_async::<redis::Value>(&mut self.redis)
+            .await
+            .context("FT.CREATE failed")?;
+        Ok(())
+    }
+    async fn write_batch(&mut self, docs: &[(String, Vec<(String, String)>)]) -> Result<()> {
+        let mut pipe = redis::pipe();
+        for (key, fields) in docs {
+            pipe.cmd("HSET").arg(key);
+            for (name, value) in fields {
+                pipe.arg(name).arg(value);
+            }
+            pipe.ignore();
+        }
+        pipe.query_async::<()>(&mut self.redis).await?;
+        Ok(())
+    }
+}
+fn index_name() -> String {
+    std::env::var("POKOIN_REDIS_INDEX").unwrap_or_else(|_| "pokoin:cards".into())
+}
+pub(super) async fn run_reindex(options: &Options) -> Result<()> {
+    let index = index_name();
+    let mut backend = Native {
+        pool: read_pool().await?,
+        redis: redis_connection().await?,
+    };
+    let started = std::time::Instant::now();
+    let indexed = reindex(&mut backend, &index, options.dry_run).await?;
+    println!(
+        "{}",
+        serde_json::json!({"indexed": indexed, "ms": started.elapsed().as_millis() as u64, "index": index, "dryRun": options.dry_run})
+    );
+    Ok(())
 }
 pub(super) async fn run(options: &Options) -> Result<()> {
     let since = since_iso(
@@ -183,7 +286,7 @@ pub(super) async fn run(options: &Options) -> Result<()> {
         std::env::var("REDIS_DELTA_SINCE").ok().as_deref(),
         now_ms(),
     )?;
-    let index = std::env::var("POKOIN_REDIS_INDEX").unwrap_or_else(|_| "pokoin:cards".into());
+    let index = index_name();
     let mut backend = Native {
         pool: read_pool().await?,
         redis: redis_connection().await?,
@@ -205,6 +308,7 @@ mod tests {
         docs: HashMap<String, Vec<(String, String)>>,
         failure: bool,
         missing: bool,
+        recreated: usize,
     }
     impl Backend for Mock {
         async fn ping(&mut self) -> Result<String> {
@@ -224,6 +328,11 @@ mod tests {
                 bail!("Redis write failed");
             }
             self.docs.insert(key.into(), fields.to_vec());
+            Ok(())
+        }
+        async fn recreate_index(&mut self, _: &str) -> Result<()> {
+            self.recreated += 1;
+            self.missing = false;
             Ok(())
         }
     }
@@ -286,14 +395,30 @@ mod tests {
         assert_eq!(backend.docs, first);
     }
     #[tokio::test]
-    async fn missing_index_and_write_failure_are_errors() {
+    async fn missing_index_is_rebuilt_and_write_failure_is_an_error() {
         let mut backend = Mock {
             missing: true,
             ..Default::default()
         };
-        assert!(delta(&mut backend, "x", "since", false).await.is_err());
-        backend.missing = false;
+        assert_eq!(delta(&mut backend, "x", "since", true).await.unwrap(), 1);
+        assert_eq!(backend.recreated, 0, "dry run never touches the index");
+        assert_eq!(delta(&mut backend, "x", "since", false).await.unwrap(), 1);
+        assert_eq!(backend.recreated, 1);
+        assert!(backend.docs.contains_key("pokoin:card:42"));
         backend.failure = true;
         assert!(delta(&mut backend, "x", "since", false).await.is_err());
+    }
+    #[tokio::test]
+    async fn reindex_recreates_then_loads_every_row() {
+        let mut backend = Mock::default();
+        assert_eq!(reindex(&mut backend, "x", false).await.unwrap(), 1);
+        assert_eq!(backend.recreated, 1);
+        assert_eq!(backend.docs.len(), 1);
+    }
+    #[test]
+    fn schema_matches_the_node_reindex() {
+        assert_eq!(&INDEX_SCHEMA[..5], &["ON", "HASH", "PREFIX", "1", "pokoin:card:"]);
+        assert_eq!(INDEX_SCHEMA.len(), 55);
+        assert_eq!(INDEX_SCHEMA.last(), Some(&"NOINDEX"));
     }
 }

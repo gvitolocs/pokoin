@@ -3,24 +3,26 @@
 # so nothing is installed on the host and `down` removes it cleanly.
 #
 #   scripts/nezopt-k3s.sh up             # start / create the k3s container
-#   scripts/nezopt-k3s.sh sync           # Pi API release + env → nezopt, restart pods if changed
+#   scripts/nezopt-k3s.sh sync           # Pi Rust release (x86 build) + env + sitemaps → nezopt, restart pods if changed
 #   scripts/nezopt-k3s.sh apply          # kubectl apply infra/k3s/pokoin-overflow.yaml
-#   scripts/nezopt-k3s.sh meili-full     # one-off full Meili build (first run / repair)
+#   scripts/nezopt-k3s.sh secret         # only rebuild the env secret from the Pi Rust service
+#   scripts/nezopt-k3s.sh reindex        # one-off full Redis Search rebuild (first run / repair)
 #   scripts/nezopt-k3s.sh status         # nodes, pods, HPA, overflow health
 #   scripts/nezopt-k3s.sh install        # user timer: `sync` every 5 min (follows Pi API deploys)
 #   scripts/nezopt-k3s.sh down           # stop the container (data kept in ~/pokoin-overflow)
 #
-# See docs/NEZOPT_OVERFLOW.md. The Pi edge (scripts/pokoin-api-edge.js) sends
-# GET/HEAD API requests to http://192.168.178.55:30880 only when the Pi API is
-# saturated and this cluster answers its health probe.
+# See docs/NEZOPT_OVERFLOW.md. Cloudflare's load balancer sends part of
+# api.pokoin.com here through the in-cluster cloudflared; pods run the same
+# native Rust binary as the Pi (no Node).
 set -euo pipefail
 
 K3S_IMAGE="${K3S_IMAGE:-rancher/k3s:v1.36.4-k3s1}"
 CONTAINER="${K3S_CONTAINER:-pokoin-k3s}"
-LAN_IP="${NEZOPT_LAN_IP:-192.168.178.55}"
-NODE_PORT=30880
 BASE="${POKOIN_OVERFLOW_HOME:-$HOME/pokoin-overflow}"
 PI="${PI_HOST:-pi-home}"
+PI_UNIT="${PI_RUST_UNIT:-pokoin-rust-api}"
+# Builds come from this repository's objects (a detached worktree, never a checkout someone works in).
+REPO="${POKOIN_REPO:-$HOME/Projects/pokoin-web}"
 NS=pokoin-overflow
 # UFW drops container → host traffic, so pods reach the writer Postgres
 # container directly on a user-defined Docker network with fixed addresses.
@@ -40,7 +42,7 @@ die() { echo "nezopt-k3s: $*" >&2; exit 1; }
 kc() { docker exec -i "$CONTAINER" kubectl "$@"; }
 
 up() {
-  mkdir -p "$BASE/k3s" "$BASE/data/api/releases" "$BASE/data/meili"
+  mkdir -p "$BASE/k3s" "$BASE/data/rust/releases" "$BASE/data/seo" "$BASE/data/meili"
   if docker inspect "$CONTAINER" >/dev/null 2>&1; then
     docker start "$CONTAINER" >/dev/null
   else
@@ -69,16 +71,29 @@ network() {
   fi
 }
 
-# The Pi container's real environment (the .env file misses keys set at run time).
+# The running Pi Rust service's real environment (/proc/<pid>/environ: the
+# EnvironmentFile after systemd unquoting, plus the unit's own Environment=).
 sync_secret() {
-  ssh "$PI" "docker inspect pokoin-oracle-api" | python3 -c '
+  ssh "$PI" "pid=\$(systemctl show -p MainPID --value $PI_UNIT); [ \"\$pid\" -gt 0 ] && cat /proc/\$pid/environ" \
+    | python3 -c '
 import base64, json, sys
-env = json.load(sys.stdin)[0]["Config"]["Env"]
-# NODE_TLS_REJECT_UNAUTHORIZED=0 would switch off certificate checks for every
-# outbound TLS call in the pods; nothing needs it (every pg client sets its own ssl).
-skip = {"PATH", "NODE_VERSION", "YARN_VERSION", "PORT", "HOSTNAME", "HOME", "NODE_TLS_REJECT_UNAUTHORIZED",
-        # Pi-only: the Pi binds loopback and trusts its local edge; pods pin their own values.
-        "ORACLE_API_HOST", "POKOIN_TRUSTED_PROXY_CIDRS"}
+env = [row.decode() for row in sys.stdin.buffer.read().split(b"\0") if row]
+if not any(row.startswith("MARKETPLACE_DATABASE_URL=") for row in env):
+    sys.exit("Pi Rust service environment not readable (is it running?)")
+skip = {
+    # systemd / login session
+    "PATH", "HOME", "LANG", "LOGNAME", "USER", "SHELL", "INVOCATION_ID", "JOURNAL_STREAM",
+    "SYSTEMD_EXEC_PID", "MEMORY_PRESSURE_WATCH", "MEMORY_PRESSURE_WRITE", "NOTIFY_SOCKET",
+    # never: it would switch off certificate checks for outbound TLS
+    "NODE_TLS_REJECT_UNAUTHORIZED",
+    # Pi-only listeners, paths and roles; pods pin their own values
+    "ORACLE_API_HOST", "POKOIN_TRUSTED_PROXY_CIDRS", "POKOIN_RUST_BIND", "POKOIN_EDGE_BIND",
+    "POKOIN_CDN_BIND", "POKOIN_CT_DEALS_BIND", "POKOIN_CDN_ROOT", "POKOIN_CDN_NAME",
+    "POKOIN_CDN_FALLBACK_ORIGIN", "POKOIN_SEO_DIR", "CT_DEALS_ROOT", "POKOIN_LISTING_SYNC_WORKER",
+    # POKOIN_API_SERVICE_NAME stays: pods are the same public API as the Pi
+    # (pokoin-oracle-api), which keeps e.g. the non-Pokemon game ingest guard on.
+    "POKOIN_RUST_RELEASE", "MEILI_HOST",
+}
 data = {}
 for row in env:
     key, _, value = row.partition("=")
@@ -139,37 +154,68 @@ print(json.dumps({"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
                   "metadata": {"name": "pokoin-api-env", "namespace": "pokoin-overflow"},
                   "data": data}))
 ' "$WRITER_NET_IP" "$TCGCSV_NET_IP" | kc apply -f - >/dev/null
-  say "secret pokoin-api-env synced from the Pi container ($(kc -n "$NS" get secret pokoin-api-env -o jsonpath='{.data}' | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') keys)"
+  say "secret pokoin-api-env synced from the Pi Rust service ($(kc -n "$NS" get secret pokoin-api-env -o jsonpath='{.data}' | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') keys)"
 }
 
-# Copy the Pi's live API release (code + node_modules; sharp ships x64 too).
+# The Pi runs the aarch64 build of one commit; pods run the x86_64 build of the
+# same commit, compiled here from a detached worktree of $REPO.
+pi_commit() {
+  ssh "$PI" /srv/pokoin/rust/current --version \
+    | python3 -c 'import json, sys; d = json.load(sys.stdin); assert not d["dirty"], "dirty Pi build"; print(d["commit"])'
+}
+
+build_release() {
+  local commit="$1" out="$2" src="$BASE/src" target="$BASE/build/target"
+  if ! git -C "$src" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$REPO" worktree add -q --detach "$src" "$commit" 2>/dev/null \
+      || { git -C "$REPO" fetch -q origin && git -C "$REPO" worktree add -q --detach "$src" "$commit"; }
+  fi
+  git -C "$src" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$src" fetch -q origin
+  git -C "$src" checkout -q --detach --force "$commit"
+  say "cargo build pokoin-api ${commit:0:12} (x86_64)"
+  ( # shellcheck disable=SC1091
+    source "$HOME/.cargo/env"
+    cd "$src/pokoin-rust"
+    POKOIN_BUILD_COMMIT="$commit" POKOIN_BUILD_DIRTY=false CARGO_TARGET_DIR="$target" \
+      nice -n 10 cargo build -q --release --locked -p pokoin-api )
+  mkdir -p "$out"
+  install -m 0755 "$target/release/pokoin-api" "$out/pokoin-api.new"
+  "$out/pokoin-api.new" --version | grep -q "\"commit\":\"$commit\"" || die "built binary is not $commit"
+  mv -f "$out/pokoin-api.new" "$out/pokoin-api"
+}
+
 sync_code() {
-  local release name current
-  release="$(ssh "$PI" 'readlink /srv/pokoin/api/current')" || die "cannot read Pi release"
-  name="$(basename "$release")"
-  current="$(readlink "$BASE/data/api/current" 2>/dev/null || true)"
-  if [[ "$current" == "releases/$name" && -d "$BASE/data/api/releases/$name" ]]; then
-    say "api release $name already current"
+  local commit name current
+  commit="$(pi_commit)" || die "cannot read the Pi Rust release"
+  name="${commit:0:12}"
+  current="$(readlink "$BASE/data/rust/current" 2>/dev/null || true)"
+  if [[ "$current" == "releases/$name" && -x "$BASE/data/rust/releases/$name/pokoin-api" ]]; then
+    say "rust release $name already current"
     return 1
   fi
-  say "rsync Pi release $name"
-  rsync -a --delete --exclude '.env' "$PI:/srv/pokoin/api/$release/" "$BASE/data/api/releases/$name/"
-  ln -sfn "releases/$name" "$BASE/data/api/current.new"
-  mv -Tf "$BASE/data/api/current.new" "$BASE/data/api/current"
-  # Keep the three newest releases, never the one just activated: Pi releases
-  # are cp -a copies, so their directory mtime is old and ls -t would sort the
-  # new release last and delete it.
-  touch "$BASE/data/api/releases/$name"
-  ls -1t "$BASE/data/api/releases" | grep -vxF "$name" | tail -n +3 | while read -r old; do
-    rm -rf "$BASE/data/api/releases/$old"
+  [[ -x "$BASE/data/rust/releases/$name/pokoin-api" ]] || build_release "$commit" "$BASE/data/rust/releases/$name"
+  ln -sfn "releases/$name" "$BASE/data/rust/current.new"
+  mv -Tf "$BASE/data/rust/current.new" "$BASE/data/rust/current"
+  touch "$BASE/data/rust/releases/$name"
+  # Keep the three newest releases, never the one just activated.
+  ls -1t "$BASE/data/rust/releases" | grep -vxF "$name" | tail -n +3 | while read -r old; do
+    rm -rf "${BASE:?}/data/rust/releases/$old"
   done
+  say "rust release $name active"
   return 0
+}
+
+# Sitemaps the edge serves on api.pokoin.com (POKOIN_SEO_DIR on the Pi).
+sync_seo() {
+  mkdir -p "$BASE/data/seo"
+  rsync -a --delete "$PI:/srv/pokoin/seo/" "$BASE/data/seo/"
 }
 
 sync() {
   network
   kc get ns "$NS" >/dev/null 2>&1 || kc create namespace "$NS" >/dev/null
   sync_secret
+  sync_seo
   if sync_code; then
     if kc -n "$NS" get deploy pokoin-api >/dev/null 2>&1; then
       kc -n "$NS" rollout restart deploy/pokoin-api >/dev/null
@@ -180,16 +226,19 @@ sync() {
 
 apply() {
   kc apply -f - <"$MANIFEST"
+  # Retired Node CronJobs (now search-delta / search-reindex) and their scripts.
+  kc -n "$NS" delete cronjob meili-delta meili-full --ignore-not-found
+  kc -n "$NS" delete configmap redis-search-scripts --ignore-not-found
   # Security baseline (ServiceAccounts, PDBs, NetworkPolicies, cloudflared).
   kc apply -f - <"$(dirname "$MANIFEST")/pokoin-security.yaml"
 }
 
-meili_full() {
-  kc -n "$NS" delete job meili-full-now --ignore-not-found >/dev/null
-  kc -n "$NS" create job meili-full-now --from=cronjob/meili-full >/dev/null
-  say "full Meili build started (job meili-full-now)"
-  kc -n "$NS" wait --for=condition=complete job/meili-full-now --timeout=1800s
-  kc -n "$NS" logs job/meili-full-now | tail -5
+reindex() {
+  kc -n "$NS" delete job search-reindex-now --ignore-not-found >/dev/null
+  kc -n "$NS" create job search-reindex-now --from=cronjob/search-reindex >/dev/null
+  say "full Redis Search rebuild started (job search-reindex-now)"
+  kc -n "$NS" wait --for=condition=complete job/search-reindex-now --timeout=1800s
+  kc -n "$NS" logs job/search-reindex-now | tail -5
 }
 
 # A copy outside any git checkout, so the timer never runs someone's WIP.
@@ -200,13 +249,14 @@ install_timer() {
   mkdir -p "$BASE/bin/infra/k3s" && cp "$MANIFEST" "$BASE/bin/infra/k3s/"
   cat >"$unit_dir/pokoin-overflow-sync.service" <<UNIT
 [Unit]
-Description=Pokoin overflow: follow the Pi API release and env into k3s on nezopt
+Description=Pokoin overflow: follow the Pi Rust release and env into k3s on nezopt
 
 [Service]
 Type=oneshot
 Environment=HOME=$HOME
 ExecStart=$BASE/bin/nezopt-k3s.sh sync
-TimeoutStartSec=600
+# A release change compiles the Rust binary (minutes on a cold target dir).
+TimeoutStartSec=2400
 UNIT
   cat >"$unit_dir/pokoin-overflow-sync.timer" <<UNIT
 [Unit]
@@ -227,20 +277,26 @@ UNIT
 
 status() {
   kc get nodes
-  kc -n "$NS" get pods,hpa,svc -o wide
+  kc -n "$NS" get pods,hpa,svc,cronjob -o wide
   kc top pods -n "$NS" 2>/dev/null || true
-  printf 'overflow health %s: ' "http://$LAN_IP:$NODE_PORT/healthz"
-  curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' --max-time 5 "http://$LAN_IP:$NODE_PORT/healthz" || echo down
+  echo "rust release: $(readlink "$BASE/data/rust/current" 2>/dev/null || echo none), Pi: $(pi_commit 2>/dev/null | cut -c1-12)"
+  # ClusterIP only (cloudflared is the way in): probe a pod from the k3s node.
+  local ip
+  ip="$(kc -n "$NS" get pods -l app=pokoin-api -o jsonpath='{.items[0].status.podIP}')"
+  printf 'overflow readyz %s: ' "$ip"
+  docker exec "$CONTAINER" wget -q -T 5 -O - "http://$ip:8080/readyz" || echo down
+  echo
 }
 
 case "${1:-status}" in
   up) up ;;
   network) network ;;
   sync) sync ;;
+  secret) network; sync_secret ;;
   apply) apply ;;
-  meili-full) meili_full ;;
+  reindex) reindex ;;
   status) status ;;
   install) install_timer ;;
   down) docker stop "$CONTAINER" ;;
-  *) die "usage: $0 up|network|sync|apply|meili-full|install|status|down" ;;
+  *) die "usage: $0 up|network|sync|secret|apply|reindex|install|status|down" ;;
 esac
