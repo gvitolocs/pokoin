@@ -5,35 +5,42 @@
 
 use std::collections::HashMap;
 
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
-use sqlx::{Column, Row, TypeInfo};
+
 
 use crate::error::{ApiError, ApiResult};
 
 /// The ingest-game table from `_cardtrader_game_ingest.js` (id → env / db).
-pub const INGEST_GAMES: [(&str, &str, &str); 8] = [
-    // (id, databaseUrlEnv, database)
-    ("magic", "MARKETPLACE_MAGIC_DATABASE_URL", "marketplace_magic"),
-    ("yugioh", "MARKETPLACE_YUGIOH_DATABASE_URL", "marketplace_yugioh"),
-    ("flesh_and_blood", "MARKETPLACE_FAB_DATABASE_URL", "marketplace_fab"),
-    ("one_piece", "MARKETPLACE_ONE_PIECE_DATABASE_URL", "marketplace_one_piece"),
-    ("lorcana", "MARKETPLACE_LORCANA_DATABASE_URL", "marketplace_lorcana"),
-    ("star_wars", "MARKETPLACE_STAR_WARS_DATABASE_URL", "marketplace_star_wars"),
-    ("union_arena", "MARKETPLACE_UNION_ARENA_DATABASE_URL", "marketplace_union_arena"),
-    ("digimon", "MARKETPLACE_DIGIMON_DATABASE_URL", "marketplace_digimon"),
+pub const INGEST_GAMES: [(&str, &str, &str); 24] = [
+    ("magic", "MAGIC_MARKETPLACE_DATABASE_URL", "pokoin_magic"),
+    ("yugioh", "YUGIOH_MARKETPLACE_DATABASE_URL", "pokoin_yugioh"),
+    ("flesh_and_blood", "FLESH_AND_BLOOD_MARKETPLACE_DATABASE_URL", "pokoin_flesh_and_blood"),
+    ("digimon", "DIGIMON_MARKETPLACE_DATABASE_URL", "pokoin_digimon"),
+    ("dragon_ball_super", "DRAGON_BALL_SUPER_MARKETPLACE_DATABASE_URL", "pokoin_dragon_ball_super"),
+    ("vanguard", "VANGUARD_MARKETPLACE_DATABASE_URL", "pokoin_vanguard"),
+    ("one_piece", "ONE_PIECE_MARKETPLACE_DATABASE_URL", "pokoin_one_piece"),
+    ("lorcana", "LORCANA_MARKETPLACE_DATABASE_URL", "pokoin_lorcana"),
+    ("star_wars", "STAR_WARS_MARKETPLACE_DATABASE_URL", "pokoin_star_wars"),
+    ("union_arena", "UNION_ARENA_MARKETPLACE_DATABASE_URL", "pokoin_union_arena"),
+    ("riftbound", "RIFTBOUND_MARKETPLACE_DATABASE_URL", "pokoin_riftbound"),
+    ("gundam", "GUNDAM_MARKETPLACE_DATABASE_URL", "pokoin_gundam"),
+    ("sorcery", "SORCERY_MARKETPLACE_DATABASE_URL", "pokoin_sorcery"),
+    ("palworld", "PALWORLD_MARKETPLACE_DATABASE_URL", "pokoin_palworld"),
+    ("cyberpunk", "CYBERPUNK_MARKETPLACE_DATABASE_URL", "pokoin_cyberpunk"),
+    ("weiss_schwarz", "WEISS_SCHWARZ_MARKETPLACE_DATABASE_URL", "pokoin_weiss_schwarz"),
+    ("final_fantasy", "FINAL_FANTASY_MARKETPLACE_DATABASE_URL", "pokoin_final_fantasy"),
+    ("force_of_will", "FORCE_OF_WILL_MARKETPLACE_DATABASE_URL", "pokoin_force_of_will"),
+    ("world_of_warcraft", "WORLD_OF_WARCRAFT_MARKETPLACE_DATABASE_URL", "pokoin_world_of_warcraft"),
+    ("battle_spirits_saga", "BATTLE_SPIRITS_SAGA_MARKETPLACE_DATABASE_URL", "pokoin_battle_spirits_saga"),
+    ("star_wars_destiny", "STAR_WARS_DESTINY_MARKETPLACE_DATABASE_URL", "pokoin_star_wars_destiny"),
+    ("dragon_born", "DRAGON_BORN_MARKETPLACE_DATABASE_URL", "pokoin_dragon_born"),
+    ("my_little_pony", "MY_LITTLE_PONY_MARKETPLACE_DATABASE_URL", "pokoin_my_little_pony"),
+    ("the_spoils", "THE_SPOILS_MARKETPLACE_DATABASE_URL", "pokoin_the_spoils"),
 ];
 
-/// `normalizeGame` — unknown/blank maps to pokemon, dashes fold to underscores.
 pub fn normalize_game(value: &str) -> String {
-    let raw: String = value.trim().to_lowercase().replace('-', "_");
-    if raw.is_empty() || raw == "pokemon" || raw == "poke" || raw == "default" {
-        return "pokemon".into();
-    }
-    if INGEST_GAMES.iter().any(|(id, _, _)| *id == raw) {
-        return raw;
-    }
-    "pokemon".into()
+    pokoin_api_common::game::normalize_game(value)
 }
 
 pub fn is_pokemon_game(game: &str) -> bool {
@@ -120,7 +127,7 @@ fn strip_sslmode(url: &str) -> String {
 pub struct DbPools {
     reads: std::sync::Arc<tokio::sync::Mutex<HashMap<String, PgPool>>>,
     writer: Option<PgPool>,
-    writer_game: std::sync::Arc<std::sync::OnceLock<PgPool>>,
+    writer_game: std::sync::Arc<tokio::sync::Mutex<HashMap<String, PgPool>>>,
 }
 
 impl DbPools {
@@ -182,17 +189,18 @@ impl DbPools {
     /// URL derived the same way as reads).
     pub async fn write(&self, game: &str, sql: &str, params: &[Value]) -> ApiResult<Vec<Value>> {
         let normalized = normalize_game(game);
+        let cached = self.writer_game.lock().await.get(&normalized).cloned();
         let pool = if normalized == "pokemon" {
             self.writer()?
-        } else if let Some(pool) = self.writer_game.get() {
-            pool.clone()
+        } else if let Some(pool) = cached {
+            pool
         } else {
             let url = writer_url_for_game(&normalized);
             if url.is_empty() {
                 return Err(ApiError::new(503, "marketplace writer database is not configured."));
             }
             let pool = build_pool(&url, 4).await?;
-            let _ = self.writer_game.set(pool.clone());
+            self.writer_game.lock().await.insert(normalized.clone(), pool.clone());
             pool
         };
         let rows = bound_query(sql, params).fetch_all(&pool).await?;
@@ -220,6 +228,18 @@ fn writer_url_for_game(game: &str) -> String {
 struct BindValue<'a>(&'a Value);
 
 impl<'a> sqlx::Encode<'a, sqlx::Postgres> for BindValue<'a> {
+    fn produces(&self) -> Option<sqlx::postgres::PgTypeInfo> {
+        Some(match self.0 {
+            Value::Null | Value::String(_) => <String as sqlx::Type<sqlx::Postgres>>::type_info(),
+            Value::Bool(_) => <bool as sqlx::Type<sqlx::Postgres>>::type_info(),
+            Value::Number(n) => match n.as_i64() {
+                Some(i) if i32::try_from(i).is_ok() => <i32 as sqlx::Type<sqlx::Postgres>>::type_info(),
+                Some(_) => <i64 as sqlx::Type<sqlx::Postgres>>::type_info(),
+                None => <f64 as sqlx::Type<sqlx::Postgres>>::type_info(),
+            },
+            _ => <sqlx::types::Json<Value> as sqlx::Type<sqlx::Postgres>>::type_info(),
+        })
+    }
     fn encode_by_ref(
         &self,
         buf: &mut <sqlx::Postgres as sqlx::Database>::ArgumentBuffer<'a>,
@@ -254,74 +274,19 @@ impl<'a> sqlx::Type<sqlx::Postgres> for BindValue<'a> {
 /// Convert a pg row to a serde_json object like node-postgres would hand back
 /// a JS object: strings, numbers, booleans, nulls, and JSONB passthrough.
 pub fn rows_to_json(rows: &[PgRow]) -> Vec<Value> {
-    rows.iter()
-        .map(|row| {
-            let mut object = Map::new();
-            for column in row.columns() {
-                let name = column.name();
-                let value = column_to_json(row, column.type_info().clone(), name);
-                object.insert(name.to_string(), value);
-            }
-            Value::Object(object)
-        })
-        .collect()
-}
-
-fn column_to_json(row: &PgRow, info: sqlx::postgres::PgTypeInfo, name: &str) -> Value {
-    let kind = info.name().to_uppercase();
-    macro_rules! get {
-        ($ty:ty) => {
-            match row.try_get::<Option<$ty>, _>(name) {
-                Ok(Some(value)) => value,
-                Ok(None) => return Value::Null,
-                Err(_) => return Value::Null,
-            }
-        };
-    }
-    match kind.as_str() {
-        "BOOL" => Value::Bool(get!(bool)),
-        "INT2" | "SMALLINT" => json!(get!(i16)),
-        "INT4" | "INTEGER" => json!(get!(i32)),
-        "INT8" | "BIGINT" => json!(get!(i64)),
-        "FLOAT4" | "REAL" => json!(get!(f32)),
-        "FLOAT8" | "DOUBLE PRECISION" => json!(get!(f64)),
-        "NUMERIC" => {
-            // NUMERIC comes back as string in node-postgres only for big values;
-            // sqlx gives f64 with the rust_decimal feature off — parse text form.
-            match row.try_get::<Option<String>, _>(name) {
-                Ok(Some(text)) => text.parse::<f64>().map(|n| json!(n)).unwrap_or(Value::String(text)),
-                _ => Value::Null,
-            }
-        }
-        "JSON" | "JSONB" => match row.try_get::<Option<sqlx::types::Json<Value>>, _>(name) {
-            Ok(Some(value)) => value.0,
-            _ => Value::Null,
-        },
-        "TIMESTAMPTZ" | "TIMESTAMP WITH TIME ZONE" => {
-            match row.try_get::<Option<time::OffsetDateTime>, _>(name) {
-                Ok(Some(stamp)) => Value::String(crate::time_util::iso_from_offset(stamp)),
-                _ => Value::Null,
-            }
-        }
-        "TIMESTAMP" | "TIMESTAMP WITHOUT TIME ZONE" => {
-            match row.try_get::<Option<time::PrimitiveDateTime>, _>(name) {
-                Ok(Some(stamp)) => Value::String(crate::time_util::iso_from_primitive(stamp)),
-                _ => Value::Null,
-            }
-        }
-        "UUID" => match row.try_get::<Option<uuid::Uuid>, _>(name) {
-            Ok(Some(value)) => Value::String(value.to_string()),
-            _ => Value::Null,
-        },
-        _ => match row.try_get::<Option<String>, _>(name) {
-            Ok(Some(text)) => Value::String(text),
-            _ => Value::Null,
-        },
-    }
+    rows.iter().map(pokoin_api_common::pg::row_to_node_json).collect()
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn binary_bind_types_match_the_encoded_value() {
+        use sqlx::{Encode, TypeInfo};
+        for (value, ty) in [(json!(239324),"INT4"),(json!(9007199254740991_i64),"INT8"),(json!(true),"BOOL"),(json!(1.5),"FLOAT8"),(json!("119662"),"TEXT"),(json!({"x":1}),"JSONB")] {
+            assert_eq!(BindValue(&value).produces().unwrap().name(),ty);
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -345,7 +310,7 @@ mod tests {
     fn writer_url_falls_back_to_derived_path() {
         std::env::remove_var("MARKETPLACE_YUGIOH_DATABASE_URL");
         std::env::set_var("MARKETPLACE_WRITER_DATABASE_URL", "postgres://w:5432/marketplace");
-        assert_eq!(writer_url_for_game("yugioh"), "postgres://w:5432/marketplace_yugioh");
+        assert_eq!(writer_url_for_game("yugioh"), "postgres://w:5432/pokoin_yugioh");
         std::env::remove_var("MARKETPLACE_WRITER_DATABASE_URL");
     }
 }

@@ -1,3 +1,4 @@
+mod body_validation;
 mod card_identity;
 mod catalog_api;
 mod read_cache;
@@ -25,6 +26,7 @@ use sqlx::PgPool;
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) config: Config,
+    pub(crate) commerce: Arc<RwLock<Option<pokoin_commerce::DomainState>>>,
     pub(crate) db: Arc<RwLock<Option<PgPool>>>,
     pub(crate) http: reqwest::Client,
     pub(crate) game_dbs: Arc<RwLock<std::collections::HashMap<String, PgPool>>>,
@@ -58,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(phase = "config", elapsed_ms = elapsed_ms(booted), "startup");
     let state = AppState {
         config: config.clone(),
+        commerce: Arc::new(RwLock::new(None)),
         db: Arc::new(RwLock::new(None)),
         game_dbs: Arc::new(RwLock::new(std::collections::HashMap::new())),
         http: reqwest::Client::builder()
@@ -292,8 +295,7 @@ async fn build_full_router(state: AppState) -> Router {
                 lazy_pool(&write_url, pool_max),
             ) {
                 (Ok(read_db), Ok(write_db)) => {
-                    let commerce =
-                        pokoin_commerce::router(pokoin_commerce::DomainState::with_pools(
+                    let commerce_state = pokoin_commerce::DomainState::with_pools(
                             pokoin_commerce::CommerceConfig::from_env(),
                             read_db.clone(),
                             write_db.clone(),
@@ -303,7 +305,9 @@ async fn build_full_router(state: AppState) -> Router {
                                 reqwest::Client::new(),
                             )),
                             pokoin_commerce::FirestoreClient::from_env(reqwest::Client::new()).ok(),
-                        ));
+                        );
+                    *state.commerce.write().await = Some(commerce_state.clone());
+                    let commerce = pokoin_commerce::router(commerce_state);
                     let external = match build_external_router(&read_db, &write_db) {
                         Ok(router) => router,
                         Err(error) => {
@@ -353,6 +357,7 @@ async fn build_full_router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(
             pokoin_api_common::public_error::sanitize_layer,
         ));
+    inner = inner.layer(axum::middleware::from_fn(body_validation::validate));
     // _http_security.prepareRequest + _route_limits: trusted client IP, preflight,
     // the authoritative CORS pass and the global route limits wrap every route.
     if let Some(api) = security_api {
@@ -563,6 +568,7 @@ mod tests {
             game_dbs: Arc::new(RwLock::new(std::collections::HashMap::new())),
             redis: Arc::new(RwLock::new(None)),
             read_cache: Arc::new(read_cache::Coordinator::default()),
+            commerce: Arc::new(RwLock::new(None)),
             requests: Arc::new(AtomicU64::new(0)),
             meili_ms: Arc::new(AtomicU64::new(0)),
             sql_ms: Arc::new(AtomicU64::new(0)),

@@ -6,6 +6,8 @@ license.workspace = true
 description = "Native Rust port of the Pokoin external-integrations API domain (CardTrader, PowerTools, Scan Connect, R2 photos, system endpoints)."
 
 [dependencies]
+pokoin-api-common = { path = "../api-common" }
+unicode-normalization = "0.1"
 anyhow = "1"
 axum = { version = "0.8", features = ["json", "multipart"] }
 serde = { version = "1", features = ["derive"] }

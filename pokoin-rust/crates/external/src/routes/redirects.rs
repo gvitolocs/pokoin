@@ -1,18 +1,22 @@
 //! Outbound marketplace redirect routes.
 
 use axum::extract::State;
-use axum::http::{StatusCode, Uri};
+use axum::http::{StatusCode, Uri, HeaderMap};
 use axum::response::Response;
 use serde_json::json;
 
 use crate::error::{json_response, ApiError, ApiResult};
 use crate::redirects;
-use crate::routes::util::{not_implemented, query_first};
+use crate::routes::util::query_first;
 use crate::state::DomainState;
 
 fn send_redirect(url: &str, wants_json: bool, payload: serde_json::Value) -> ApiResult<Response> {
     if wants_json {
-        return Ok(json_response(200, payload));
+        let mut response=json_response(200, payload);
+        response.headers_mut().insert("cache-control",axum::http::HeaderValue::from_static("no-store"));
+        response.headers_mut().insert("referrer-policy",axum::http::HeaderValue::from_static("no-referrer"));
+        response.headers_mut().insert("x-robots-tag",axum::http::HeaderValue::from_static("noindex, nofollow"));
+        return Ok(response);
     }
     Response::builder()
         .status(StatusCode::FOUND)
@@ -91,12 +95,17 @@ pub async fn tcgplayer(State(state): State<DomainState>, uri: Uri) -> ApiResult<
     )
 }
 
-/// `GET /api/cardmarket-redirect` — audited gap.
-pub async fn cardmarket(State(_state): State<DomainState>) -> ApiResult<Response> {
-    not_implemented(
-        "/api/cardmarket-redirect",
-        "845-line reference needs Cardmarket product/expansion mapping + scrape observations; not ported yet.",
-    )
+/// `GET /api/cardmarket-redirect` — printing/verified links and native candidate fallback.
+pub async fn cardmarket(State(state): State<DomainState>, headers: HeaderMap, uri: Uri) -> ApiResult<Response> {
+    let id=redirects::clean_marketplace_id(&query_first(&uri,"id").or_else(||query_first(&uri,"cardId")).unwrap_or_default());
+    let hint=redirects::clean_marketplace_id(&query_first(&uri,"blueprintId").or_else(||query_first(&uri,"ct_id")).or_else(||query_first(&uri,"ctId")).unwrap_or_default());
+    if id.is_empty()&&hint.is_empty(){return Err(ApiError::bad_request("Missing or invalid blueprint id."))}
+    let game=pokoin_api_common::game::parse_game_from_request(&pokoin_api_common::http::header_pairs(&headers),query_first(&uri,"game").as_deref(),query_first(&uri,"marketplaceGame").as_deref());
+    let locale=query_first(&uri,"locale").filter(|s|s.len()==2&&s.chars().all(|c|c.is_ascii_lowercase())).unwrap_or_else(||"en".into());
+    let target=crate::cardmarket::resolve(&state.db,&game,&id,&hint,&locale).await?;
+    let mut response=send_redirect(&target,wants_json(&uri),json!({"url":target}))?;
+    for (k,v) in [("cache-control","no-store"),("referrer-policy","no-referrer"),("x-robots-tag","noindex, nofollow")] {response.headers_mut().insert(axum::http::HeaderName::from_static(k),axum::http::HeaderValue::from_static(v));}
+    Ok(response)
 }
 
 #[cfg(test)]

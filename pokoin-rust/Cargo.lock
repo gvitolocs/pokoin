@@ -1993,6 +1993,7 @@ dependencies = [
  "image",
  "jsonwebtoken",
  "percent-encoding",
+ "pokoin-api-common",
  "rand 0.8.8",
  "redis",
  "regex",
@@ -2007,6 +2008,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "unicode-normalization",
  "url",
  "uuid",
 ]

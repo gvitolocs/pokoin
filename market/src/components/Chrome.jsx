@@ -85,6 +85,7 @@ import {
   printFlagFromNationality,
   printLangMeta,
   rewriteCatalogLang,
+  searchLanguageNavigationPath,
   rowPrintBucket,
   searchLangFromPath,
   setPrintLang,
@@ -194,7 +195,7 @@ function LangToggle() {
   function pick(code) {
     setSearchLang(code);
     setOpen(false);
-    const nextPath = rewriteCatalogLang(location.pathname, code);
+    const nextPath = searchLanguageNavigationPath(location.pathname, code);
     if (nextPath !== location.pathname) {
       navigate(`${nextPath}${location.search || ''}`);
     }

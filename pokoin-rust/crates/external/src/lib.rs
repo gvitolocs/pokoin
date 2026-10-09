@@ -52,3 +52,5 @@ pub mod cardtrader {
 pub use error::{ApiError, ApiResult};
 pub use routes::router;
 pub use state::{DomainConfig, DomainState};
+
+pub mod cardmarket;
