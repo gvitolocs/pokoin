@@ -340,9 +340,10 @@ let searchWarmupTimer = 0;
  * After marketplace home paints: wake the typeahead path so the first keystroke
  * is not a cold Meili/TLS hit. Same idea as Flutter `_ensureFirstCharWarmup`.
  * Token-predict warmup is Pokemon-only (name-token table). Best-effort; never
- * throws into UI.
+ * throws into UI. `engine: false` warms only the network (the Solid app loads
+ * the suggest engine on search intent, not on idle after the first paint).
  */
-export function warmupSearchBar() {
+export function warmupSearchBar({ engine = true } = {}) {
   if (typeof window === 'undefined') {
     return;
   }
@@ -358,8 +359,11 @@ export function warmupSearchBar() {
     const lang = getSearchLang();
     // The suggest engine (ranker + 10k-name catalog) loads here, on idle after
     // the first paint, not with api.js: pages that never type do not pay for it.
-    Promise.all([fetchSuggest('m', { limit: 4, lang }), import('./suggest-live.js')])
+    Promise.all([fetchSuggest('m', { limit: 4, lang }), engine ? import('./suggest-live.js') : null])
       .then(([data, live]) => {
+        if (!live) {
+          return;
+        }
         live.rememberSuggestGroups(data.groups);
         preloadSuggestThumbs(collectPrintingThumbUrls(data.groups, (printing) => (
           imageSrc(cardFromAutocomplete(printing), 'suggest')

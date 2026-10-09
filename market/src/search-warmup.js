@@ -47,6 +47,8 @@ export function resetSearchWarmupForTests() {
 /**
  * Fire-and-forget warmup for the current (or provided) language + print family.
  * Pass `query` when the user already typed — refreshes that universe immediately.
+ * `remember: false` warms only the network path and does not load the suggest
+ * engine (ranker + 10k-name catalog) just to cache the warm page.
  */
 export async function warmupSearchUniverse({
   lang,
@@ -54,19 +56,20 @@ export async function warmupSearchUniverse({
   query = '',
   fetchSearchPage,
   force = false,
+  remember = true,
 } = {}) {
   const [
     { fetchSuggest },
     { isPokemonGame },
     locale,
     { prefetchSearchPage },
-    { rememberSuggestGroups },
+    live,
   ] = await Promise.all([
     import('./api.js'),
     import('./game.js'),
     import('./locale.js'),
     import('./search-hot.js'),
-    import('./suggest-live.js'),
+    remember ? import('./suggest-live.js') : null,
   ]);
   const resolvedLang = lang || locale.getSearchLang();
   const resolvedPrint = printLang || locale.getPrintLang();
@@ -102,7 +105,7 @@ export async function warmupSearchUniverse({
     printLang: requestPrint,
   }).then((page) => {
     if (gen !== generation) return null;
-    rememberSuggestGroups(page?.groups, { searchLang: requestLang });
+    live?.rememberSuggestGroups(page?.groups, { searchLang: requestLang });
     return page;
   }).catch((error) => {
     if (error?.name === 'AbortError') return null;

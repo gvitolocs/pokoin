@@ -176,3 +176,20 @@ test('eras/platinum is the 2008–2009 block, not a title that contains Arceus',
     'Sun & Moon',
   );
 });
+
+test('matchTcgEra memo returns the uncached match for every catalog set and odd keys', async () => {
+  const { TCG_ERA_CATALOG, matchTcgEraUncached } = await import('./tcg-eras.js');
+  const { default: RAW_SETS } = await import('./data/suggest-sets.js');
+  const keys = [0, '0', '', null, undefined, false, '151', 'base set', 'BASE SET', 'Base Set 2', 'p-promos', 'm-p-promos'];
+  for (const row of RAW_SETS) {
+    keys.push(row.display, row.slug, `${row.slug} ${row.display}`, row.display.toUpperCase());
+  }
+  for (const era of TCG_ERA_CATALOG) {
+    for (const label of [...(era.en || []), ...(era.jp || []), ...(era.cn || [])]) keys.push(label);
+  }
+  for (const key of keys) {
+    const first = matchTcgEra(key);
+    assert.equal(first, matchTcgEraUncached(key), String(key));
+    assert.equal(matchTcgEra(key), first, String(key));
+  }
+});
