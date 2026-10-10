@@ -13,8 +13,11 @@ pub fn matches(raw:&[u8],expected:&str,game:&str)->bool {
   let Some(id)=path.split("/cards/").nth(1).and_then(|s|s.split('/').next()) else{return false};
   if catalog_api::positive_id(id)!=catalog_api::positive_id(expected){return false}
   let prefix=path.split("/marketplace/").next().unwrap_or("");
+  // The API emits game-less paths (the SPA adds the game slug with
+  // publicGamePath), so a satellite card may carry either form; another
+  // game's prefix is still rejected.
   let wanted=if game=="pokemon"{String::new()}else{format!("/{}",game.replace('_',"-"))};
-  if prefix!=wanted{return false}
+  if !prefix.is_empty() && prefix!=wanted{return false}
  }
  true
 }
@@ -46,5 +49,12 @@ pub async fn guard(req:Request,next:Next)->Response {
   assert!(!matches(br#"{"card":{"id":"511164"},"canonicalPath":"/marketplace/en/cards/511164/toedscruel"}"#,"806342","pokemon"));
   assert!(!matches(br#"{"card":{"id":"403171"}}"#,"806342","pokemon"));
   assert!(!matches(br#"{"card":{"id":"806342","canonicalPath":"/marketplace/en/cards/511164/other"}}"#,"806342","pokemon"));
+ }
+ #[test]fn satellite_cards_accept_game_less_or_own_game_paths(){
+  assert!(matches(br#"{"game":"yugioh","card":{"id":"831228","canonicalPath":"/marketplace/en/cards/831228/dark-magician"}}"#,"831228","yugioh"));
+  assert!(matches(br#"{"card":{"id":"200074182","canonicalPath":"/weiss-schwarz/marketplace/en/cards/200074182/x"}}"#,"200074182","weiss_schwarz"));
+  assert!(!matches(br#"{"card":{"id":"831228","canonicalPath":"/one-piece/marketplace/en/cards/831228/x"}}"#,"831228","yugioh"));
+  assert!(!matches(br#"{"game":"one_piece","card":{"id":"831228"}}"#,"831228","yugioh"));
+  assert!(!matches(br#"{"card":{"id":"806342","canonicalPath":"/yugioh/marketplace/en/cards/806342/x"}}"#,"806342","pokemon"));
  }
 }
