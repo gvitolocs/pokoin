@@ -128,13 +128,16 @@ async fn card_ids_in_catalog(
     ids: &[String],
     game: &str,
 ) -> Result<Option<Vec<String>>, ApiError> {
-    if ids.is_empty() {
+    // card_id is bigint: compare as bigint so the primary key serves the
+    // lookup (a text cast scanned the whole catalog on every MyPokoin load).
+    let numeric: Vec<i64> = ids.iter().filter_map(|id| id.trim().parse().ok()).collect();
+    if numeric.is_empty() {
         return Ok(Some(vec![]));
     }
     let Some(pools) = state.game_pools(game).await else {
         return Err(DomainState::game_catalog_unconfigured(game));
     };
-    let rows=sqlx::query_scalar::<_,String>("select card_id::text as card_id from public.marketplace_search_candidates where card_id::text = any($1::text[])").bind(ids).fetch_all(&pools.read).await;
+    let rows=sqlx::query_scalar::<_,String>("select card_id::text as card_id from public.marketplace_search_candidates where card_id = any($1::bigint[])").bind(&numeric).fetch_all(&pools.read).await;
     match rows {
         Ok(ids) => Ok(Some(ids)),
         Err(e)
