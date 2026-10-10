@@ -105,6 +105,15 @@ async function fillMissingRecents(payload, ids, already = []) {
 }
 
 /**
+ * The landing as the visitor left it, kept for a short while: Back from a card
+ * desk repaints the same rails and the same browse grid from memory instead of
+ * fetching every rail again and drawing a different grid under the restored
+ * scroll position. After HOME_KEEP_MS the next visit loads fresh.
+ */
+const HOME_KEEP_MS = 120_000;
+let kept = null;
+
+/**
  * Marketplace landing (market/src/pages/Home.jsx). The home vector lives in a
  * store reconciled by card id: a priced refresh or a late rail patches the
  * tiles whose fields changed instead of re-rendering every rail.
@@ -112,7 +121,11 @@ async function fillMissingRecents(payload, ids, already = []) {
 export default function Home() {
   const site = game();
   const englishBrowse = isPokemonGame();
-  let payload = seedHome(readHomeVectorCache(site.id));
+  const restored = kept && kept.site === site.id && Date.now() - kept.at < HOME_KEEP_MS ? kept : null;
+  let payload = restored
+    ? paintHome(restored.payload, readRecentCardIds(), localExtras())
+    : seedHome(readHomeVectorCache(site.id));
+  let loadedAt = restored?.at || 0;
   const [home, setHome] = createStore({ cards: payload?.cards || [], sections: payload?.sections || {} });
   const [error, setError] = createSignal('');
   const [recentPending, setRecentPending] = createSignal((() => {
@@ -120,15 +133,17 @@ export default function Home() {
     const seen = payload?.sections?.recentlySeenIds || [];
     return ids.length > 0 && seen.length < ids.length;
   })());
-  const [browse, setBrowse] = createStore({ cards: [] });
-  const [browseHasMore, setBrowseHasMore] = createSignal(englishBrowse);
-  const [browseLoading, setBrowseLoading] = createSignal(englishBrowse);
+  const restoredBrowse = restored?.browse || null;
+  const [browse, setBrowse] = createStore({ cards: restoredBrowse?.cards || [] });
+  const [browseHasMore, setBrowseHasMore] = createSignal(restoredBrowse ? restoredBrowse.hasMore : englishBrowse);
+  const [browseLoading, setBrowseLoading] = createSignal(restoredBrowse ? false : englishBrowse);
   const [browseMoreBusy, setBrowseMoreBusy] = createSignal(false);
   // Every rail keeps its skeleton until ALL rail requests settle: hiding an empty
   // rail as soon as another one lands, then showing it again, shifted the page
   // whenever rails arrived out of order (React Home has the same latent CLS).
   const [railsSettled, setRailsSettled] = createSignal(Boolean(payload && railsReady(payload)));
-  let browseState = null;
+  let browseState = restoredBrowse?.state || null;
+  let browseLoaded = Boolean(restoredBrowse);
   let disposed = false;
 
   function commit(next) {
@@ -203,6 +218,7 @@ export default function Home() {
       next = { ...next, cards: priced };
       scheduleHomeVectorCacheWrite(site.id, next);
       commit(next);
+      loadedAt = Date.now();
     } catch (err) {
       if (disposed) return;
       setError(isOriginDownError(err, err?.status, err?.message)
@@ -244,6 +260,7 @@ export default function Home() {
       setBrowseCards(filled);
       setBrowseHasMore(next.hasMore && next.cards.length > 0);
       if (!filled.length) return;
+      browseLoaded = next.cards.length > 0;
       const priced = await fillMissingLastMedianPrices(filled);
       if (!disposed) setBrowseCards(priced);
     } catch (_) {
@@ -277,12 +294,34 @@ export default function Home() {
     }
   }
 
+  /** A restored landing only needs the cards opened since (Recently seen). */
+  async function refreshRecents() {
+    const ids = readRecentCardIds();
+    if (!recentsNeedingTiles(payload, ids).length) {
+      setRecentPending(false);
+      return;
+    }
+    const filled = await fillMissingRecents(payload, ids).catch(() => null);
+    if (disposed) return;
+    if (filled) commit(filled);
+    setRecentPending(false);
+  }
+
   onSettled(() => {
-    loadHome();
+    if (restored) refreshRecents();
+    else loadHome();
     syncAccountRecents();
-    if (englishBrowse) loadEnglishBrowse();
+    if (englishBrowse && !restoredBrowse) loadEnglishBrowse();
     return () => {
       disposed = true;
+      kept = loadedAt && payload ? {
+        site: site.id,
+        at: loadedAt,
+        payload,
+        browse: browseLoaded && browseState
+          ? { cards: snapshot(browse.cards).map((card) => ({ ...card })), state: browseState, hasMore: browseHasMore() }
+          : null,
+      } : null;
     };
   });
 

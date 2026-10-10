@@ -36,6 +36,7 @@ import {
   clearListingsInflight,
   dropListing,
   invalidateListings,
+  listingsAgeMs,
   listingsFetchEpoch,
   listingsInflightFor,
   mergeCreatedListing,
@@ -55,6 +56,7 @@ import {
   leftoverKeyMatchesCard,
   ownCatalogImage,
   preferFullImage,
+  cdnFetchUrl,
   rasterSiblings,
   rewritePublicImage,
 } from './image-urls.js';
@@ -690,8 +692,22 @@ export {
   rememberCreatedListing,
 };
 
-export function fetchListings(cardId, { limit = 40, fresh = false } = {}) {
+/**
+ * `fresh` skips the cache. `maxAgeMs` relaxes that for a desk mount: a request
+ * already in flight, or rows fetched within that window (the hover / intent
+ * prefetch), are the fresh read, so the mount does not fetch them again.
+ */
+export function fetchListings(cardId, { limit = 40, fresh = false, maxAgeMs = 0 } = {}) {
   const id = String(cardId || '');
+  if (fresh && maxAgeMs > 0) {
+    const inflight = listingsInflightFor(id);
+    if (inflight) {
+      return inflight;
+    }
+    if (listingsAgeMs(id) <= maxAgeMs) {
+      return Promise.resolve(peekListings(id));
+    }
+  }
   if (!fresh) {
     const cached = peekListings(id);
     if (cached) {
@@ -1563,14 +1579,31 @@ function slugFromCard(card) {
   return printingSlugFromCanonicalPath(card?.canonicalPath || card?.canonical_path || '');
 }
 
-function preloadCardArt(card) {
+const preloadedArt = new Set();
+
+/** The URL the desk scan requests first (CardArt `full`): preloading any other
+ * spelling of it, or its fallback siblings, is a second download. */
+export function deskArtUrl(card) {
   const src = imageSrc(card, 'hero') || imageSrc(card, 'grid');
-  for (const url of rasterSiblings(src)) {
-    const img = new Image();
-    img.decoding = 'async';
-    img.fetchPriority = 'low';
-    img.src = url;
+  return cdnFetchUrl(rasterSiblings(src, { full: true })[0] || '');
+}
+
+function preloadCardArt(card) {
+  const url = deskArtUrl(card);
+  if (!url || preloadedArt.has(url)) {
+    return;
   }
+  preloadedArt.add(url);
+  if (preloadedArt.size > 256) {
+    preloadedArt.delete(preloadedArt.values().next().value);
+  }
+  if (typeof Image !== 'function') {
+    return;
+  }
+  const img = new Image();
+  img.decoding = 'async';
+  img.fetchPriority = 'low';
+  img.src = url;
 }
 
 export function warmupCard(card, { lang = 'en', listings = false } = {}) {

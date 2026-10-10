@@ -98,6 +98,7 @@ import { pokemonHref, speciesFromCard } from '@market/pokemon-hubs.js';
 import { clearActiveDeskCard, setActiveDeskCard } from '@market/poko-chat.js';
 import { authFrom } from '@market/punchouts.js';
 import { rarityKindLabel, storedRarityKind } from '@market/rarity-theme.js';
+import { preloadRelatedThumbs, relatedFromPage } from '@market/related-cards.js';
 import {
   breadcrumbJsonLd,
   cardImageAlt,
@@ -131,6 +132,9 @@ import { buyerFormat, buyerParts, buyerPending, sellerSettings } from '../stores
 import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
 import { afterPaint } from '../lib/yield-nav.js';
+
+/** A hover / intent prefetch this recent counts as the desk's own first read. */
+const PREFETCH_FRESH_MS = 10_000;
 
 const DESK_VARS = ['--desk-bg', '--desk-surface', '--desk-raised', '--desk-hero', '--desk-hero-border', '--desk-border', '--desk-tint'];
 
@@ -247,6 +251,7 @@ function CardDesk(props) {
   const [setNationality, setSetNationality] = createSignal('');
   const [artistCover, setArtistCover] = createSignal('');
   let disposed = false;
+  let viewed = false;
   // Related tiles and the catalog fold sit below the desk on every layout: they
   // mount one frame after the desk paints, so a tile click paints sooner.
   const [later, setLater] = createSignal(false);
@@ -263,8 +268,8 @@ function CardDesk(props) {
   }
 
   /** Same freshness rule as React: an empty refetch never wipes painted rows. */
-  function refreshListings(seq) {
-    return fetchListings(cardId, { fresh: true }).then((list) => {
+  function refreshListings(seq, maxAgeMs = 0) {
+    return fetchListings(cardId, { fresh: true, maxAgeMs }).then((list) => {
       if (disposed || seq !== listingsSeq) return;
       const rows = list.listings || [];
       if (rows.length || !shop.offers.length) setOffers(rows);
@@ -298,13 +303,16 @@ function CardDesk(props) {
     const rarities = catalogPrintings(data.rarities);
     if (rarities.length) setNamePrintings((rows) => mergePrintingRows(rows, rarities));
     setWatched(readWatchlistIds().includes(String(card.id)));
-    track(Action.viewCard, card);
+    // One view per desk, however many times its page payload lands.
+    if (!viewed) track(Action.viewCard, card);
+    viewed = true;
     if (card.canonicalPath) replaceToCanonical(card.canonicalPath);
   }
 
   // Network starts with the component, not after the first paint.
+  // The tile's intent prefetch is this desk's listings read: adopt it.
   listingsSeq += 1;
-  refreshListings(listingsSeq).catch(() => {
+  refreshListings(listingsSeq, PREFETCH_FRESH_MS).catch(() => {
     if (!disposed) setOffersReady(true);
   });
   fetchCard(cardId, { lang, slug: untrack(() => props.slug || ''), includeOffers: false, fresh: Boolean(cached) })
@@ -562,12 +570,22 @@ function CardDesk(props) {
   const eraName = createMemo(() => tcgEra(card()));
   const eraPath = () => (eraName() ? eraHref(eraName()) : '');
   const rarityPath = () => (identity().rarity ? rarityHref(identity().rarity, lang) : '');
-  const related = createMemo(() => pickRelatedCards(card(), [
+  // Precomputed neighbours ride on card-page: the panel paints from them as
+  // soon as the page is there (prefetch cache included). The client-side picker
+  // and its name / version-set pools are only the fallback.
+  const serverRelated = createMemo(() => relatedFromPage(page(), cardId), {
+    equals: (a, b) => a.length === b.length && a.every((row, index) => String(row.id) === String(b[index].id)),
+  });
+  createEffect(serverRelated, (rows) => {
+    // Low priority, behind the desk scan; the tiles reuse these downloads.
+    if (rows.length) preloadRelatedThumbs(rows);
+  });
+  const related = createMemo(() => (serverRelated().length ? serverRelated() : pickRelatedCards(card(), [
     clipPrintings(),
     namePrintings(),
     neighborWindow().prev,
     neighborWindow().next,
-  ], 12));
+  ], 12)));
   const cardPath = createMemo(() => card().canonicalPath || cardHref(card()));
   const publicCardPath = createMemo(() => publicGamePath(cardPath(), game().id) || cardPath());
   const speciesHref = () => (species() ? pokemonHref(card(), lang) : '');

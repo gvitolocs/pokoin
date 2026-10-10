@@ -9,6 +9,7 @@
 const listingsCache = new Map();
 const listingsInflight = new Map();
 const listingsEpoch = new Map();
+const listingsAt = new Map();
 const sellerListingsCache = new Map();
 
 const SELLER_SHOP_STORAGE = 'pokoin.seller.shop.v1';
@@ -140,6 +141,7 @@ export function peekHasListingRows(listed) {
 export function invalidateListings(cardId) {
   const id = String(cardId || '');
   listingsCache.delete(id);
+  listingsAt.delete(id);
   listingsInflight.delete(id);
   listingsEpoch.set(id, (listingsEpoch.get(id) || 0) + 1);
 }
@@ -166,7 +168,14 @@ export function rememberListings(cardId, data, epochAtStart) {
     return listingsCache.get(id) || data;
   }
   rememberMap(listingsCache, id, data, 24);
+  rememberMap(listingsAt, id, Date.now(), 24);
   return data;
+}
+
+/** Milliseconds since this card's listings were fetched; Infinity when not cached. */
+export function listingsAgeMs(cardId, now = Date.now()) {
+  const id = String(cardId || '');
+  return listingsCache.has(id) && listingsAt.has(id) ? Math.max(0, now - listingsAt.get(id)) : Infinity;
 }
 
 export function mergeListingRows(rows, created) {

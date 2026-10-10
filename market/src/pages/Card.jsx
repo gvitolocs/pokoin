@@ -114,6 +114,7 @@ import { clearActiveDeskCard, setActiveDeskCard } from '../poko-chat.js';
 import CardArt from '../components/CardArt.jsx';
 import { isLandscapePrintName } from '../art-cut-landscape.js';
 import RelatedCards from '../components/RelatedCards.jsx';
+import { preloadRelatedThumbs, relatedFromPage } from '../related-cards.js';
 import { ShipFromCountryGate } from '../components/SellerShippingSettings.jsx';
 import { useSellerCurrency } from '../use-seller-currency.js';
 import { formatListingPrice, formatSellerPrice, priceInputFromPkn } from '../seller-currency.js';
@@ -2013,6 +2014,15 @@ export default function Card() {
   }, [payload?.card]);
 
   const themeCard = payload?.card || stubCard || { id: cardId, card_id: cardId };
+  // Precomputed neighbours ride on card-page: paint them as soon as it lands
+  // (prefetch cache included), and start their thumbs behind the desk scan.
+  const serverRelated = useMemo(() => relatedFromPage(payload, cardId), [payload?.related, cardId]);
+  useEffect(() => {
+    if (serverRelated.length) {
+      preloadRelatedThumbs(serverRelated);
+    }
+  }, [serverRelated]);
+
   const pageTheme = useMemo(
     () => deskTheme(themeCard),
     [themeCard],
@@ -2146,7 +2156,8 @@ export default function Card() {
   const eraName = tcgEra(card);
   const eraPath = eraName ? eraHref(eraName) : '';
   const rarityPath = identity.rarity ? rarityHref(identity.rarity, lang) : '';
-  const related = pickRelatedCards(card, [
+  // The client-side picker is only the fallback for a page without `related`.
+  const related = serverRelated.length ? serverRelated : pickRelatedCards(card, [
     clipPrintings,
     namePrintings,
     neighborWindow.prev,

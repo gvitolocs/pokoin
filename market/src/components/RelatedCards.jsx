@@ -39,7 +39,8 @@ export default function RelatedCards({
     return null;
   }
   const tiles = priced.slice(0, 12).map((row, index) => (
-    <CardTile key={row.id} card={row} rank={index} />
+    // Every tile starts loading with the panel, behind the desk scan.
+    <CardTile key={row.id} card={row} rank={index} eagerLimit={12} artPriority="low" />
   ));
   return (
     <section className="panel related-panel">
