@@ -663,7 +663,7 @@ spec:
   successfulJobsHistoryLimit: 1
   suspend: false
 ---
-# Artist desks (all cards, no cap): hourly.
+# Artist desks (all cards, no cap) and versions name lineups: weekly (catalog data).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -684,7 +684,7 @@ spec:
             - /app/pokoin-api
             - job
             - build-lists
-            - --kind=artist
+            - --kind=artist,name
             env:
             - name: POKOIN_RUST_BIND
               value: 127.0.0.1:18082
@@ -783,7 +783,7 @@ spec:
               path: /srv/pokoin-overflow/rust/current
               type: Directory
             name: app
-  schedule: 7 * * * *
+  schedule: 30 4 * * 0
   successfulJobsHistoryLimit: 1
   suspend: false
 ---

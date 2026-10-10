@@ -50,7 +50,7 @@ create table if not exists public.marketplace_card_daily_median (
 );
 ";
 
-const KINDS: [&str; 2] = ["set", "artist"];
+const KINDS: [&str; 3] = ["set", "artist", "name"];
 /// Static between builds; the builder runs every 15 min (sets) / hourly (artists).
 const LIST_CACHE: &str = "public, max-age=120, s-maxage=900, stale-while-revalidate=86400";
 /// The SPA's set-desk page size; a set is complete when a page comes back short.
@@ -60,7 +60,7 @@ const ARTIST_LIMIT: usize = 20_000;
 fn clean_key(raw: Option<&str>) -> Option<String> {
     let key = raw.unwrap_or("").trim().to_ascii_lowercase();
     let ok = !key.is_empty()
-        && key.len() <= 200
+        && key.len() <= 400
         && key.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'));
     ok.then_some(key)
 }
@@ -141,7 +141,7 @@ fn options(args: &[String]) -> Options {
         }
     }
     if o.kinds.is_empty() {
-        o.kinds = vec!["median".into(), "set".into(), "artist".into()];
+        o.kinds = vec!["median".into(), "set".into(), "artist".into(), "name".into()];
     }
     o
 }
@@ -208,6 +208,10 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
         if o.kinds.iter().any(|k| k == "set") {
             let n = build_sets(app, &pool, game, o.key.as_deref()).await?;
             tracing::info!(%game, sets = n, "build-lists sets");
+        }
+        if o.kinds.iter().any(|k| k == "name") && game == "pokemon" {
+            let n = build_names(app, &pool, game).await?;
+            tracing::info!(%game, names = n, "build-lists names");
         }
         if o.kinds.iter().any(|k| k == "artist") && game == "pokemon" {
             let n = build_artists(app, &pool, game, o.key.as_deref()).await?;
@@ -283,6 +287,101 @@ async fn build_artists(app: &Router, pool: &PgPool, game: &str, only: Option<&st
         }
     }).collect();
     store_all(pool, "artist", game, jobs, 2).await
+}
+
+/// `kind=name` key: hex of the trimmed, lowercased card name. Collision-free
+/// (Nidoran♀ / Nidoran♂) and the SPA derives it with TextEncoder.
+pub fn name_key(name: &str) -> String {
+    hex::encode(name.trim().to_lowercase().as_bytes())
+}
+
+/// `namesEqual` (exact-name.js): trimmed, case-insensitive.
+fn names_equal(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
+/// Every printing named exactly `name`: the versions desk's name lineup, the
+/// rows `fetchExactNameCards` paged out of /api/marketplace-search-page.
+async fn build_names(app: &Router, pool: &PgPool, game: &str) -> anyhow::Result<usize> {
+    let names: Vec<String> = sqlx::query_scalar(
+        "select distinct name from public.marketplace_search_candidates where coalesce(trim(name), '') <> ''",
+    )
+    .fetch_all(pool)
+    .await?;
+    let jobs: Vec<_> = names.into_iter().filter(|n| n.chars().count() <= 90).map(|name| {
+        let app = app.clone();
+        let game = game.to_owned();
+        async move {
+            let quoted = format!("\"{}\"", name.trim().replace('"', ""));
+            let query: String = form_urlencoded_byte_serialize(&quoted);
+            let mut cards: Vec<Value> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for page in 0..8 {
+                let data = get(&app, &game, &format!(
+                    "/api/marketplace-search-page?query={query}&limit=96&offset={}&includeFacets=0&lang=en&search_language=en", page * 96
+                )).await?;
+                let rows = data.get("cards").and_then(Value::as_array).cloned().unwrap_or_default();
+                let mut exact = 0;
+                for row in rows {
+                    let id = row.get("id").or_else(|| row.get("card_id")).map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string())).unwrap_or_default();
+                    if id.is_empty() || !names_equal(row.get("name").and_then(Value::as_str).unwrap_or(""), &name) || !seen.insert(id) {
+                        continue;
+                    }
+                    exact += 1;
+                    cards.push(row);
+                }
+                if data.get("hasMore").and_then(Value::as_bool) != Some(true) || exact == 0 {
+                    break;
+                }
+            }
+            anyhow::Ok((name_key(&name), json!({ "name": name.trim(), "cards": cards })))
+        }
+    }).collect();
+    store_all(pool, "name", game, jobs, 6).await
+}
+
+/// application/x-www-form-urlencoded value encoding (search queries carry
+/// spaces, quotes, accents and symbols).
+fn form_urlencoded_byte_serialize(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() * 3);
+    for b in value.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'*' => out.push(b as char),
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// `GET /api/marketplace-daily-medians?ids=1,2,3` — the stored display median
+/// per card (`marketplace_card_daily_median`), one read for a whole page.
+pub async fn daily_medians(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
+    let q = pokoin_api_common::http::Query::from_uri(&uri);
+    let ids: Vec<i64> = q.first("ids").unwrap_or("").split(',').filter_map(|s| s.trim().parse::<i64>().ok()).filter(|n| *n > 0).take(500).collect();
+    if ids.is_empty() {
+        return catalog_api::response(StatusCode::OK, json!({"medians": {}}), "public, max-age=300, s-maxage=3600");
+    }
+    let game = crate::suggest::game_from(&headers, q.first("game"));
+    let Some(pool) = catalog_api::game_pool(&state, &game).await else {
+        return catalog_api::response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": "Marketplace database unavailable."}), "no-store");
+    };
+    let rows = sqlx::query_as::<_, (i64, f64)>(
+        "select card_id, last_median_pkn::float8 from public.marketplace_card_daily_median where card_id = any($1)",
+    )
+    .bind(&ids)
+    .fetch_all(&pool)
+    .await;
+    match rows {
+        Ok(rows) => {
+            let medians: serde_json::Map<String, Value> = rows.into_iter().filter(|r| r.1 > 0.0).map(|(id, pkn)| (id.to_string(), json!(pkn))).collect();
+            catalog_api::response(StatusCode::OK, json!({ "medians": medians }), "public, max-age=300, s-maxage=3600")
+        }
+        Err(error) if error.to_string().contains("marketplace_card_daily_median") => {
+            catalog_api::response(StatusCode::OK, json!({"medians": {}}), "public, max-age=60")
+        }
+        Err(error) => catalog_api::failure(&error),
+    }
 }
 
 /// Run builders with bounded concurrency; fill price gaps from the daily median
@@ -457,7 +556,7 @@ mod tests {
     #[test]
     fn options_default_to_every_kind() {
         let o = options(&["--game=magic".into(), "--key=Alpha".into()]);
-        assert_eq!(o.kinds, vec!["median", "set", "artist"]);
+        assert_eq!(o.kinds, vec!["median", "set", "artist", "name"]);
         assert_eq!(o.games, vec!["magic"]);
         assert_eq!(o.key.as_deref(), Some("alpha"));
     }
@@ -476,6 +575,15 @@ mod tests {
         let c1 = compact::encode::encode_to_vec(&canon).len();
         assert!(c1 * 2 < raw, "c1 {c1} vs json {raw}");
         assert_eq!(compact::decode::decode(&compact::encode::encode(&canon)).unwrap(), canon);
+    }
+
+    #[test]
+    fn name_keys_are_hex_of_the_lowercased_name() {
+        assert_eq!(name_key(" Mewtwo "), hex::encode("mewtwo"));
+        assert_ne!(name_key("Nidoran♀"), name_key("Nidoran♂"));
+        assert!(clean_key(Some(&name_key("Flabébé"))).is_some());
+        assert_eq!(form_urlencoded_byte_serialize("\"Mr. Mime\""), "%22Mr.+Mime%22");
+        assert!(names_equal(" pikachu", "Pikachu "));
     }
 
     #[test]
