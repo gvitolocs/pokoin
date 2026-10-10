@@ -1,0 +1,12 @@
+[package]
+name = "pokoin-sort"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+description = "Total-order f64 comparators for sort_by: NaN sorts last instead of panicking the sort."
+
+# No `workspace = true` inheritance and no dependencies: pokoin-accounts
+# depends on this and must compile standalone (see its Cargo.toml).
+
+[lints.rust]
+unsafe_code = "forbid"

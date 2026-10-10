@@ -1698,6 +1698,7 @@ dependencies = [
  "image",
  "jsonwebtoken",
  "k256",
+ "pokoin-sort",
  "rand 0.8.8",
  "redis",
  "regex",
@@ -1731,6 +1732,7 @@ dependencies = [
  "http-body-util",
  "pokoin-accounts",
  "pokoin-api-common",
+ "pokoin-sort",
  "rand 0.8.8",
  "redis",
  "regex",
@@ -1799,6 +1801,7 @@ dependencies = [
  "axum",
  "bytes",
  "chrono",
+ "futures-util",
  "hex",
  "pokoin-accounts",
  "pokoin-config",
@@ -1811,6 +1814,7 @@ dependencies = [
  "sha2",
  "sqlx",
  "tokio",
+ "tower",
  "tracing",
 ]
 
@@ -1891,6 +1895,7 @@ dependencies = [
  "http-body-util",
  "pokoin-accounts",
  "pokoin-api-common",
+ "pokoin-sort",
  "rand 0.8.8",
  "redis",
  "regex",
@@ -1999,6 +2004,7 @@ dependencies = [
  "jsonwebtoken",
  "percent-encoding",
  "pokoin-api-common",
+ "pokoin-sort",
  "rand 0.8.8",
  "redis",
  "regex",
@@ -2062,6 +2068,7 @@ version = "0.1.0"
 dependencies = [
  "icu_collator",
  "icu_locale_core",
+ "pokoin-sort",
  "regex",
  "serde_json",
  "unicode-normalization",
@@ -2085,6 +2092,7 @@ dependencies = [
  "pokoin-api-common",
  "pokoin-catalog-api",
  "pokoin-search",
+ "pokoin-sort",
  "rand 0.8.8",
  "redis",
  "regex",
@@ -2103,6 +2111,10 @@ dependencies = [
  "urlencoding",
  "uuid",
 ]
+
+[[package]]
+name = "pokoin-sort"
+version = "0.1.0"
 
 [[package]]
 name = "pokoin-sync"

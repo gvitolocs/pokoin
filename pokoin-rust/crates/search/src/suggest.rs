@@ -578,9 +578,7 @@ fn group_order(query: &str, left: &Value, right: &Value) -> std::cmp::Ordering {
         .cmp(&right_tier)
         .then(left_len.cmp(&right_len))
         .then(
-            left_weight
-                .partial_cmp(&right_weight)
-                .unwrap_or(std::cmp::Ordering::Equal),
+            pokoin_sort::cmp_f64(left_weight, right_weight),
         )
         .then(locale_cmp(left_name, right_name))
 }

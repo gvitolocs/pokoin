@@ -1669,10 +1669,7 @@ pub async fn search_name_only_autocomplete_with_card_name_fanout(
         .map(|(name, score)| (name.clone(), *score))
         .collect();
     scored.sort_by(|left, right| {
-        right
-            .1
-            .partial_cmp(&left.1)
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(left.1, right.1)
             .then_with(|| locale_cmp(&left.0, &right.0))
     });
     let mut selected_names: Vec<String> = if !exact_shared_names.is_empty() {
@@ -1722,9 +1719,7 @@ pub async fn search_name_only_autocomplete_with_card_name_fanout(
         ranked.push(row);
     }
     ranked.sort_by(|left, right| {
-        num_field(right, &["search_rank"])
-            .partial_cmp(&num_field(left, &["search_rank"]))
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(num_field(left, &["search_rank"]), num_field(right, &["search_rank"]))
             .then_with(|| locale_cmp(&str_field(left, &["name"]), &str_field(right, &["name"])))
             .then_with(|| {
                 locale_cmp(
@@ -2218,9 +2213,7 @@ pub async fn rows_for_meili_search_term(
         }
     }
     ranked.sort_by(|left, right| {
-        local_name_score(right, search_term)
-            .partial_cmp(&local_name_score(left, search_term))
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(local_name_score(left, search_term), local_name_score(right, search_term))
     });
     rank_rows_by_query_collector_number(&mut ranked, search_term);
     ranked.truncate(page_size.max(0) as usize);
@@ -3006,9 +2999,7 @@ pub async fn search_non_name_with_database(
                         })
                         .collect();
                     matched.sort_by(|left, right| {
-                        num_field(right, &["search_rank"])
-                            .partial_cmp(&num_field(left, &["search_rank"]))
-                            .unwrap_or(Ordering::Equal)
+                        pokoin_sort::cmp_f64_desc(num_field(left, &["search_rank"]), num_field(right, &["search_rank"]))
                             .then_with(|| {
                                 locale_cmp(
                                     &str_field(left, &["name"]),
@@ -3763,9 +3754,7 @@ pub async fn supabase_rest_name_index_candidate_rows(
     }
     let mut rows: Vec<Value> = best_by_card_id.into_values().collect();
     rows.sort_by(|left, right| {
-        num_field(right, &["search_rank"])
-            .partial_cmp(&num_field(left, &["search_rank"]))
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(num_field(left, &["search_rank"]), num_field(right, &["search_rank"]))
             .then_with(|| locale_cmp(&str_field(left, &["name"]), &str_field(right, &["name"])))
             .then_with(|| {
                 locale_cmp(
@@ -4035,9 +4024,7 @@ pub async fn rows_from_supabase_name_index(
         })
         .collect();
     rows.sort_by(|left, right| {
-        num_field(right, &["search_rank"])
-            .partial_cmp(&num_field(left, &["search_rank"]))
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(num_field(left, &["search_rank"]), num_field(right, &["search_rank"]))
     });
     debug_set(
         ctx,
@@ -6330,9 +6317,7 @@ pub async fn sharded_name_prefix_rows_for_one_character_search(
     }
     let mut rows: Vec<Value> = merged.into_values().collect();
     rows.sort_by(|left, right| {
-        num_field(right, &["search_rank"])
-            .partial_cmp(&num_field(left, &["search_rank"]))
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(num_field(left, &["search_rank"]), num_field(right, &["search_rank"]))
             .then_with(|| locale_cmp(&str_field(left, &["name"]), &str_field(right, &["name"])))
             .then_with(|| {
                 locale_cmp(
@@ -6702,9 +6687,7 @@ pub async fn search_structured_autocomplete_with_context(
         ranked.push(row);
     }
     ranked.sort_by(|left, right| {
-        num_field(right, &["search_rank"])
-            .partial_cmp(&num_field(left, &["search_rank"]))
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(num_field(left, &["search_rank"]), num_field(right, &["search_rank"]))
             .then_with(|| locale_cmp(&str_field(left, &["name"]), &str_field(right, &["name"])))
             .then_with(|| {
                 locale_cmp(
@@ -6756,10 +6739,7 @@ pub async fn search_structured_autocomplete_with_context(
                 .map(|(name, score)| (name.clone(), *score))
                 .collect();
             pairs.sort_by(|left, right| {
-                right
-                    .1
-                    .partial_cmp(&left.1)
-                    .unwrap_or(Ordering::Equal)
+                pokoin_sort::cmp_f64_desc(left.1, right.1)
                     .then_with(|| locale_cmp(&left.0, &right.0))
             });
             let canonical_names: Vec<String> =
@@ -6805,9 +6785,7 @@ pub async fn search_structured_autocomplete_with_context(
                 seeded_ranked.push(row);
             }
             seeded_ranked.sort_by(|left, right| {
-                num_field(right, &["search_rank"])
-                    .partial_cmp(&num_field(left, &["search_rank"]))
-                    .unwrap_or(Ordering::Equal)
+                pokoin_sort::cmp_f64_desc(num_field(left, &["search_rank"]), num_field(right, &["search_rank"]))
                     .then_with(|| {
                         locale_cmp(&str_field(left, &["name"]), &str_field(right, &["name"]))
                     })
@@ -6910,10 +6888,7 @@ pub async fn search_structured_autocomplete_with_candidate_fanout(
         });
     }
     combinations.sort_by(|left, right| {
-        right
-            .score
-            .partial_cmp(&left.score)
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(left.score, right.score)
     });
     combinations.truncate(12);
     let candidate_started = now_ms();
@@ -6960,10 +6935,7 @@ pub async fn search_structured_autocomplete_with_candidate_fanout(
             .map(|(k, v)| (k.clone(), *v))
             .collect();
         pairs.sort_by(|left, right| {
-            right
-                .1
-                .partial_cmp(&left.1)
-                .unwrap_or(Ordering::Equal)
+            pokoin_sort::cmp_f64_desc(left.1, right.1)
                 .then_with(|| locale_cmp(&left.0, &right.0))
         });
         let canonical_names: Vec<String> =
@@ -7005,9 +6977,7 @@ pub async fn search_structured_autocomplete_with_candidate_fanout(
             ranked.push(row);
         }
         ranked.sort_by(|left, right| {
-            num_field(right, &["search_rank"])
-                .partial_cmp(&num_field(left, &["search_rank"]))
-                .unwrap_or(Ordering::Equal)
+            pokoin_sort::cmp_f64_desc(num_field(left, &["search_rank"]), num_field(right, &["search_rank"]))
                 .then_with(|| locale_cmp(&str_field(left, &["name"]), &str_field(right, &["name"])))
                 .then_with(|| {
                     locale_cmp(
@@ -7041,9 +7011,7 @@ pub async fn search_structured_autocomplete_with_candidate_fanout(
                     .first()
                     .map(|row| num_field(row, &["search_rank"]))
                     .unwrap_or(0.0);
-                right_rank
-                    .partial_cmp(&left_rank)
-                    .unwrap_or(Ordering::Equal)
+                pokoin_sort::cmp_f64_desc(left_rank, right_rank)
             })
     });
     let Some(best) = best else {

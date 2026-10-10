@@ -796,9 +796,7 @@ pub fn intersect_rows(row_groups: &[Vec<Value>], limit: usize) -> Vec<Value> {
 fn rank_sort_cmp(left: &Value, right: &Value) -> Ordering {
     let left_rank = num_field(left, &["search_rank"]);
     let right_rank = num_field(right, &["search_rank"]);
-    right_rank
-        .partial_cmp(&left_rank)
-        .unwrap_or(Ordering::Equal)
+    pokoin_sort::cmp_f64_desc(left_rank, right_rank)
 }
 
 fn default_rank_cmp(left: &Value, right: &Value) -> Ordering {
@@ -1591,20 +1589,12 @@ trait SortAndLimit {
 impl SortAndLimit for Vec<RankedEntry> {
     fn sort_and_limit(mut self, limit: usize) -> Self {
         self.sort_by(|left, right| {
-            right
-                .latest_depth
-                .partial_cmp(&left.latest_depth)
-                .unwrap_or(Ordering::Equal)
+            pokoin_sort::cmp_f64_desc(left.latest_depth, right.latest_depth)
                 .then_with(|| {
-                    right
-                        .score
-                        .partial_cmp(&left.score)
-                        .unwrap_or(Ordering::Equal)
+                    pokoin_sort::cmp_f64_desc(left.score, right.score)
                 })
                 .then_with(|| {
-                    left.latest_order
-                        .partial_cmp(&right.latest_order)
-                        .unwrap_or(Ordering::Equal)
+                    pokoin_sort::cmp_f64(left.latest_order, right.latest_order)
                 })
                 .then_with(|| {
                     locale_cmp(
@@ -1693,10 +1683,7 @@ pub fn name_seed_scores(entities: &[(String, f64)]) -> Vec<(String, f64)> {
     }
     let mut pairs: Vec<(String, f64)> = by_name.into_iter().collect();
     pairs.sort_by(|left, right| {
-        right
-            .1
-            .partial_cmp(&left.1)
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(left.1, right.1)
             .then_with(|| locale_cmp(&left.0, &right.0))
     });
     pairs
@@ -1949,13 +1936,9 @@ pub fn merge_predictive_pool_rows(
         }
     }
     rows.sort_by(|left, right| {
-        num_field(right, &["search_rank"])
-            .partial_cmp(&num_field(left, &["search_rank"]))
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(num_field(left, &["search_rank"]), num_field(right, &["search_rank"]))
             .then_with(|| {
-                num_field(left, &["predictive_best_rank"])
-                    .partial_cmp(&num_field(right, &["predictive_best_rank"]))
-                    .unwrap_or(Ordering::Equal)
+                pokoin_sort::cmp_f64(num_field(left, &["predictive_best_rank"]), num_field(right, &["predictive_best_rank"]))
             })
             .then_with(|| locale_cmp(&str_field(left, &["name"]), &str_field(right, &["name"])))
             .then_with(|| {

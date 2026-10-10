@@ -787,7 +787,7 @@ pub fn sold_stats(rows: &[Json]) -> Option<SoldStats> {
     if sold_qty == 0 {
         return None;
     }
-    prices.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    prices.sort_by(|a, b| pokoin_sort::cmp_f64(*a, *b));
     Some(SoldStats {
         sold_qty,
         sale_days: days.len(),
@@ -846,9 +846,7 @@ pub fn resolve_facet(rows: &[Json], params: &Json) -> (Facet, bool) {
             let right = units.get(*b).copied().unwrap_or(0.0);
             // `max_by` keeps the LAST on ties, so compare reversed and keep the
             // first-seen key for equal unit counts.
-            right
-                .partial_cmp(&left)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            pokoin_sort::cmp_f64_desc(left, right)
                 .then_with(|| {
                     let left_index = order.iter().position(|key| key == *a).unwrap_or(0);
                     let right_index = order.iter().position(|key| key == *b).unwrap_or(0);
@@ -1101,7 +1099,7 @@ pub fn summarize_live_asks(groups: &[Json]) -> Option<Json> {
             medians.push(median);
         }
     }
-    medians.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    medians.sort_by(|a, b| pokoin_sort::cmp_f64(*a, *b));
     Some(json!({
         "min": round2_or_none(min).map(js_num),
         "minEur": round2_or_none(min * PKN_EUR_RATE).map(js_num),
