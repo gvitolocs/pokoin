@@ -211,7 +211,7 @@ test('holdings are the MyPokoin Collection tab; /collection and /nft redirect th
   assert.match(stockNavSrc, /\{ to: '\/mypokoin\/collection', label: 'Collection', end: true \}/);
   assert.match(inventorySrc, /onCollectionTab \? <CollectionHoldings \/> : null/);
   // The tab loads holdings only: no listings or pricer round trip.
-  assert.match(inventorySrc, /if \(!signedIn \|\| !uid \|\| onCollectionTab\) return undefined;/);
+  assert.match(inventorySrc, /if \(!listingsUid \|\| onCollectionTab\) return undefined;/);
   assert.match(inventorySrc, /if \(!signedIn \|\| onImportTab \|\| onCollectionTab\) return undefined;/);
   // MyPokoin owns the page head and the sign-in gate.
   assert.doesNotMatch(collectionSrc, /PageHead|<Navigate/);

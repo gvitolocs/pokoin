@@ -24,6 +24,9 @@ const FORMATS = [
 // background — one round trip to first row instead of the full inventory.
 const INVENTORY_FIRST_PAGE = 200;
 const INVENTORY_PAGE_LIMIT = 1000;
+// A first page still missing after this long is asked for again; whichever
+// answer lands first fills the board.
+const INVENTORY_RETRY_MS = 12000;
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -133,6 +136,11 @@ export default function Inventory() {
     setRows(liveInventoryListings(data.listings || data.items || []));
   }
 
+  // One identity for the listings load: the cached session uid and the
+  // restored Firebase uid are the same seller, so their arrival in either
+  // order must not cancel a request already in flight.
+  const listingsUid = signedIn ? (user?.uid || profile?.uid || '') : '';
+
   useEffect(() => {
     document.title = onCollectionTab
       ? 'Collection · MyPokoin'
@@ -141,25 +149,32 @@ export default function Inventory() {
       : locationName
       ? `${locationName} · MyPokoin`
       : (onImportTab ? 'Export · MyPokoin' : 'MyPokoin · Pokoin');
-    const uid = user?.uid || profile?.uid;
     // The Collection tab loads holdings, not listings.
-    if (!signedIn || !uid || onCollectionTab) return undefined;
+    if (!listingsUid || onCollectionTab) return undefined;
     let cancelled = false;
+    let settled = false;
     const gen = ++inventorySeq.current;
-    getBearer()
-      .then(async (token) => {
-        const data = await fetchSellerListings(uid, token, { limit: INVENTORY_FIRST_PAGE });
-        if (cancelled) return;
-        setRows(liveInventoryListings(data.listings || data.items || []));
-        topUpInventory(uid, token, gen).catch(() => {});
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message || 'Listings failed.');
-      });
+    const attempt = () => getBearer().then(async (token) => {
+      const data = await fetchSellerListings(listingsUid, token, { limit: INVENTORY_FIRST_PAGE });
+      if (cancelled || settled) return;
+      settled = true;
+      setError('');
+      setRows(liveInventoryListings(data.listings || data.items || []));
+      topUpInventory(listingsUid, token, gen).catch(() => {});
+    });
+    const fail = (err) => {
+      if (!cancelled && !settled) setError(err.message || 'Listings failed.');
+    };
+    attempt().catch(fail);
+    // A stalled token refresh or request must not leave the skeleton up for good.
+    const retry = setTimeout(() => {
+      if (!cancelled && !settled) attempt().catch(fail);
+    }, INVENTORY_RETRY_MS);
     return () => {
       cancelled = true;
+      clearTimeout(retry);
     };
-  }, [signedIn, user?.uid, profile?.uid, getBearer, onImportTab, locationName, onSettingsTab, onCollectionTab]);
+  }, [listingsUid, getBearer, onImportTab, locationName, onSettingsTab, onCollectionTab]);
 
   // Pricer defaults feed the board's market column and source preselect.
   const [pricerDefaults, setPricerDefaults] = useState(null);
