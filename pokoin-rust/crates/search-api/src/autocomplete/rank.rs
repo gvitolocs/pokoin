@@ -11,8 +11,8 @@ use std::sync::LazyLock;
 
 use super::ladder::AUTOCOMPLETE_SQL_SAFE_POOL_CAP;
 use super::normalize::{
-    bounded_distance, compact, expansion_alias_targets, is_expansion_alias_term, is_rarity_term,
-    is_variation_intent_term, is_variation_term, js_num_or, locale_cmp,
+    bounded_distance, cmp_f64_nan_last, compact, expansion_alias_targets, is_expansion_alias_term,
+    is_rarity_term, is_variation_intent_term, is_variation_term, js_num_or, locale_cmp,
     normalize_variation_phrases, search_terms, variation_term_targets,
 };
 use super::row::{get, get_any, num_field, str_field};
@@ -2462,21 +2462,74 @@ pub fn representative_labels_from_name_token_row(row: &Value, limit: usize) -> V
     labels
 }
 
-fn compare_prediction_token_family(left: &Value, right: &Value) -> Ordering {
-    let left_token = str_field(left, &["normalized"]);
-    let right_token = str_field(right, &["normalized"]);
-    if left_token.is_empty() || right_token.is_empty() || left_token == right_token {
-        return Ordering::Equal;
+/// Score/confidence order of `normalizePredictionRows`, without the prefix
+/// family rule: a total order, safe for `sort_by`.
+fn compare_prediction_token_rank(left: &Value, right: &Value, broad_prefix: bool) -> Ordering {
+    let by = |key: &str| cmp_f64_nan_last(num_field(left, &[key]), num_field(right, &[key]), true);
+    let (first, second) = if broad_prefix {
+        ("score", "confidence")
+    } else {
+        ("confidence", "score")
+    };
+    by(first).then_with(|| by(second)).then_with(|| {
+        locale_cmp(
+            &str_field(left, &["display"]),
+            &str_field(right, &["display"]),
+        )
+    })
+}
+
+/// The JS comparator put a prefix token before its extensions when the prefix
+/// is at least as confident (`pika` before `pikachu`) but answered 0 for
+/// unrelated tokens and fell through to score. That is not transitive (pika <
+/// pikachu by family, pikachu < zz and zz < pika by score), and Rust's
+/// `sort_by` panics on it. Apply the family rule as a pass over the rank order
+/// instead: each entry is emitted right after any not-yet-emitted prefix that
+/// is at least as confident, those in rank order too.
+fn order_prediction_token_families(entries: Vec<Value>) -> Vec<Value> {
+    let tokens: Vec<String> = entries
+        .iter()
+        .map(|entry| str_field(entry, &["normalized"]))
+        .collect();
+    let confidence: Vec<f64> = entries
+        .iter()
+        .map(|entry| num_field(entry, &["confidence"]))
+        .collect();
+    let is_family_parent = |parent: usize, child: usize| {
+        let (p, c) = (&tokens[parent], &tokens[child]);
+        !p.is_empty()
+            && p != c
+            && c.starts_with(p.as_str())
+            && confidence[parent] >= confidence[child]
+    };
+    fn emit(
+        index: usize,
+        emitted: &mut [bool],
+        order: &mut Vec<usize>,
+        is_parent: &dyn Fn(usize, usize) -> bool,
+    ) {
+        // Marked before the parents so a (impossible: strict prefixes) cycle
+        // could never recurse forever.
+        emitted[index] = true;
+        for parent in 0..emitted.len() {
+            if !emitted[parent] && is_parent(parent, index) {
+                emit(parent, emitted, order, is_parent);
+            }
+        }
+        order.push(index);
     }
-    let left_confidence = num_field(left, &["confidence"]);
-    let right_confidence = num_field(right, &["confidence"]);
-    if right_token.starts_with(&left_token) && left_confidence >= right_confidence {
-        return Ordering::Less;
+    let mut emitted = vec![false; entries.len()];
+    let mut order = Vec::with_capacity(entries.len());
+    for index in 0..entries.len() {
+        if !emitted[index] {
+            emit(index, &mut emitted, &mut order, &is_family_parent);
+        }
     }
-    if left_token.starts_with(&right_token) && right_confidence >= left_confidence {
-        return Ordering::Greater;
-    }
-    Ordering::Equal
+    let mut slots: Vec<Option<Value>> = entries.into_iter().map(Some).collect();
+    order
+        .into_iter()
+        .filter_map(|index| slots[index].take())
+        .collect()
 }
 
 /// `normalizePredictionRows(rows, compactQuery, searchLanguage, limit)`.
@@ -2676,36 +2729,8 @@ pub fn normalize_prediction_rows(
         }
     }
     let mut entries: Vec<Value> = by_token.into_iter().map(|(_, value)| value).collect();
-    entries.sort_by(|left, right| {
-        compare_prediction_token_family(left, right)
-            .then_with(|| {
-                if broad_prefix {
-                    num_field(right, &["score"])
-                        .partial_cmp(&num_field(left, &["score"]))
-                        .unwrap_or(Ordering::Equal)
-                        .then_with(|| {
-                            num_field(right, &["confidence"])
-                                .partial_cmp(&num_field(left, &["confidence"]))
-                                .unwrap_or(Ordering::Equal)
-                        })
-                } else {
-                    num_field(right, &["confidence"])
-                        .partial_cmp(&num_field(left, &["confidence"]))
-                        .unwrap_or(Ordering::Equal)
-                        .then_with(|| {
-                            num_field(right, &["score"])
-                                .partial_cmp(&num_field(left, &["score"]))
-                                .unwrap_or(Ordering::Equal)
-                        })
-                }
-            })
-            .then_with(|| {
-                locale_cmp(
-                    &str_field(left, &["display"]),
-                    &str_field(right, &["display"]),
-                )
-            })
-    });
+    entries.sort_by(|left, right| compare_prediction_token_rank(left, right, broad_prefix));
+    let mut entries = order_prediction_token_families(entries);
     entries.truncate(limit);
     entries
         .into_iter()
@@ -3296,6 +3321,90 @@ mod tests {
         assert!(predictions[0]["confidence"].as_f64().unwrap() > 100.0 - 0.001);
         let ids = card_ids_from_name_token_row(&predictions[0], 64);
         assert_eq!(ids, vec!["1", "2", "3"]);
+    }
+
+    fn token_row(name: &str, score: f64) -> Value {
+        json!({
+            "compact_name": compact(name), "display_name": name, "canonical_name": name,
+            "name_tokens": [compact(name)], "confidence": 90, "score": score, "language": "en",
+        })
+    }
+
+    #[test]
+    fn prefix_family_cycle_keeps_prefix_first() {
+        // Old comparator: pika < pikachu (prefix family), pikachu < psyduck and
+        // psyduck < pika (score) — a cycle, so the order was undefined.
+        let rows = vec![
+            token_row("Pika", 10.0),
+            token_row("Pikachu", 100.0),
+            token_row("Psyduck", 50.0),
+        ];
+        let names: Vec<String> = normalize_prediction_rows(&rows, "p", "en", 20)
+            .iter()
+            .map(|p| str_field(p, &["normalized"]))
+            .collect();
+        assert_eq!(names, vec!["pika", "pikachu", "psyduck"]);
+    }
+
+    #[test]
+    fn first_char_warmup_rows_sort_without_panicking() {
+        // The REST first-char warmup sorts up to 500 unordered rows for one
+        // letter; prefix families plus unrelated scores tripped the sort's
+        // total-order check on the Pi about once an hour.
+        let stems = [
+            "pi",
+            "pika",
+            "pikachu",
+            "pikachuex",
+            "pid",
+            "pidge",
+            "pidgey",
+            "pidgeotto",
+            "po",
+            "pon",
+            "ponyta",
+        ];
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut rows = Vec::new();
+        for i in 0..500 {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            let stem = stems[(seed >> 33) as usize % stems.len()];
+            let name = if i % 3 == 0 {
+                stem.to_owned()
+            } else {
+                format!("{stem}{}", (b'a' + (i % 26) as u8) as char)
+            };
+            rows.push(token_row(&name, ((seed >> 40) % 1000) as f64 + 1.0));
+        }
+        let predictions = normalize_prediction_rows(&rows, "p", "en", 500);
+        let tokens: Vec<String> = predictions
+            .iter()
+            .map(|p| str_field(p, &["normalized"]))
+            .collect();
+        let confidence: Vec<f64> = predictions
+            .iter()
+            .map(|p| num_field(p, &["confidence"]))
+            .collect();
+        for (child, token) in tokens.iter().enumerate() {
+            for (parent, prefix) in tokens.iter().enumerate() {
+                if prefix != token
+                    && token.starts_with(prefix.as_str())
+                    && confidence[parent] >= confidence[child]
+                {
+                    assert!(parent < child, "{prefix} should precede {token}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nan_sorts_last_in_a_total_order() {
+        let mut values = vec![3.0, f64::NAN, 1.0, f64::NAN, 2.0];
+        values.sort_by(|a, b| cmp_f64_nan_last(*a, *b, true));
+        assert_eq!(&values[..3], &[3.0, 2.0, 1.0]);
+        assert!(values[3].is_nan() && values[4].is_nan());
     }
 
     #[test]
