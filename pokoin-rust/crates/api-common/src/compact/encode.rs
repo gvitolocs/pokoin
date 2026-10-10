@@ -178,7 +178,13 @@ fn encode_object_table(items: &[Value]) -> Option<Value> {
     // from the column order, so such a table is left alone rather than
     // silently reordered.
     if !rows.iter().all(|row| is_subsequence(row.keys(), &keys)) {
-        return None;
+        // Rows whose keys are each sorted (list snapshots canonicalise them)
+        // still fit the sorted union when an optional key, present only on
+        // later rows, sorts before the first row's keys.
+        keys.sort_unstable();
+        if !rows.iter().all(|row| is_subsequence(row.keys(), &keys)) {
+            return None;
+        }
     }
 
     let mut builder = Builder::new(rows.len());
@@ -617,6 +623,22 @@ mod tests {
         assert!(is_subsequence(owned(&[]).iter(), &keys));
         assert!(!is_subsequence(owned(&["c", "a"]).iter(), &keys));
         assert!(!is_subsequence(owned(&["a", "d"]).iter(), &keys));
+    }
+
+    #[test]
+    fn sorted_rows_with_an_early_optional_key_still_form_a_table() {
+        let rows: Vec<Value> = (0..12)
+            .map(|i| if i % 3 == 0 {
+                serde_json::json!({"emoji": "x", "id": i.to_string(), "name": "Mew"})
+            } else {
+                serde_json::json!({"id": i.to_string(), "name": "Mew"})
+            })
+            .collect();
+        let rows: Vec<Value> = std::iter::once(serde_json::json!({"id": "99", "name": "Mew"})).chain(rows).collect();
+        let body = serde_json::json!({ "cards": rows });
+        let encoded = super::encode(&body);
+        assert_eq!(encoded["t"].as_array().map(Vec::len), Some(1), "{encoded}");
+        assert_eq!(super::super::decode::decode(&encoded).unwrap(), body);
     }
 
     #[test]

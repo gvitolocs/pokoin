@@ -339,7 +339,8 @@ async fn artist_cards_for_slug(state: &RouteState, artist_slug: Option<&str>, ar
     } else {
         return Ok(json!({ "artist": null, "cards": [] }));
     }
-    binds.push(Bind::Int(util::js_limit(limit_raw, 240, 5000)));
+    // No cap below a whole artist: the list builder stores every card (5ban: 5,175).
+    binds.push(Bind::Int(util::js_limit(limit_raw, 240, 20_000)));
     let limit_placeholder = format!("${}", binds.len());
     let number_sql = projected_expansion_number_sql();
     let number_int_sql = projected_expansion_number_int_sql(&number_sql);

@@ -11,8 +11,9 @@ const end = source.indexOf('export const fetchExpansionCards', start);
 assert.ok(start >= 0 && end > start, 'the expansion adapter is present');
 const adapterSource = source.slice(start, end).replace('export function', 'function');
 
-function expansionAdapter(getJson, fetchExpansionFromLists = async () => null) {
+function expansionAdapter(getJson, fetchExpansionFromLists = async () => null, fetchListSnapshot = async () => null) {
   const dependencies = {
+    fetchListSnapshot,
     expansionCache: new Map(),
     expansionInflight: new Map(),
     expansionCacheKey: (identity) => JSON.stringify(identity),
@@ -74,4 +75,20 @@ test('an empty rail cannot turn a failed SQL page into a complete catalog', asyn
 test('an empty first page still rejects an unknown set', async () => {
   const fetchPage = expansionAdapter(async () => ({ cards: [] }));
   await assert.rejects(fetchPage({ slug: 'unknown-set' }), /Expansion failed/);
+});
+
+test('a built set snapshot is the whole set and skips the live routes', async () => {
+  const live = [];
+  const fetchPage = expansionAdapter(
+    async (path) => { live.push(path); return { cards: [] }; },
+    async () => null,
+    async (kind, key) => (kind === 'set' && key === 'storm-emeralda'
+      ? { cards: Array.from({ length: 113 }, (_, i) => ({ id: String(i + 1) })), expansion: { name: 'Storm Emeralda' }, hasMore: false }
+      : null),
+  );
+  const data = await fetchPage({ slug: 'storm-emeralda', limit: 400, offset: 0 });
+  assert.equal(data.cards.length, 113);
+  assert.equal(data.hasMore, false);
+  assert.equal(data.fromSnapshot, true);
+  assert.deepEqual(live, []);
 });

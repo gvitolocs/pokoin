@@ -2,6 +2,7 @@ mod body_validation;
 mod card_identity;
 mod ct_deals;
 mod jobs;
+mod lists;
 mod catalog_api;
 mod rails;
 mod read_cache;
@@ -62,7 +63,12 @@ async fn main() -> anyhow::Result<()> {
             )
             .init();
         let name = args.get(2).cloned().unwrap_or_default();
-        if let Err(error) = jobs::run(&name).await {
+        let result = if name == "build-lists" {
+            build_lists(&args[3.min(args.len())..]).await
+        } else {
+            jobs::run(&name).await
+        };
+        if let Err(error) = result {
             tracing::error!(job = %name, error = %format!("{error:#}"), "job failed");
             std::process::exit(1);
         }
@@ -78,22 +84,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(phase = "process", elapsed_ms = 0, "startup");
     let config = Config::from_env();
     tracing::info!(phase = "config", elapsed_ms = elapsed_ms(booted), "startup");
-    let state = AppState {
-        config: config.clone(),
-        commerce: Arc::new(RwLock::new(None)),
-        db: Arc::new(RwLock::new(None)),
-        game_dbs: Arc::new(RwLock::new(std::collections::HashMap::new())),
-        http: reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()?,
-        redis: Arc::new(RwLock::new(None)),
-        read_cache: Arc::new(read_cache::Coordinator::default()),
-        requests: Arc::new(AtomicU64::new(0)),
-        meili_ms: Arc::new(AtomicU64::new(0)),
-        sql_ms: Arc::new(AtomicU64::new(0)),
-        errors: Arc::new(AtomicU64::new(0)),
-        booted,
-    };
+    let state = new_state(config.clone(), booted)?;
     let warm = state.clone();
     tokio::spawn(async move {
         warm_dependencies(warm).await;
@@ -128,6 +119,44 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
     Ok(())
+}
+
+fn new_state(config: Config, booted: Instant) -> anyhow::Result<AppState> {
+    Ok(AppState {
+        config,
+        commerce: Arc::new(RwLock::new(None)),
+        db: Arc::new(RwLock::new(None)),
+        game_dbs: Arc::new(RwLock::new(std::collections::HashMap::new())),
+        http: reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?,
+        redis: Arc::new(RwLock::new(None)),
+        read_cache: Arc::new(read_cache::Coordinator::default()),
+        requests: Arc::new(AtomicU64::new(0)),
+        meili_ms: Arc::new(AtomicU64::new(0)),
+        sql_ms: Arc::new(AtomicU64::new(0)),
+        errors: Arc::new(AtomicU64::new(0)),
+        booted,
+    })
+}
+
+/// `pokoin-api job build-lists ...`: the list builder calls the full API
+/// router in-process, so it needs the server state with its pools connected.
+async fn build_lists(args: &[String]) -> anyhow::Result<()> {
+    let mut config = Config::from_env();
+    // A batch job, not a server: few connections per game database.
+    config.db_pool_max = config.db_pool_max.min(3);
+    let state = new_state(config, Instant::now())?;
+    if let Some(url) = state.config.database_url.clone() {
+        *state.db.write().await = Some(pokoin_db::pool(&url, state.config.db_pool_max).await?);
+    }
+    if let Some(url) = state.config.valkey_url.clone() {
+        if let Ok(Ok(conn)) = tokio::time::timeout(Duration::from_secs(3), connect_redis(&url)).await {
+            *state.redis.write().await = Some(conn);
+        }
+    }
+    let app = build_full_router(state.clone()).await;
+    lists::build(app, state, args).await
 }
 
 fn elapsed_ms(booted: Instant) -> u64 {
@@ -286,6 +315,7 @@ fn router(state: AppState) -> Router {
             "/api/marketplace-home/spotlight",
             get(rails::spotlight).options(rails::options),
         )
+        .route("/api/marketplace-list", get(lists::list).options(rails::options))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             read_cache::read_cache,
