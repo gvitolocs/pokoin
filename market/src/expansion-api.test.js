@@ -19,6 +19,8 @@ function expansionAdapter(getJson, fetchExpansionFromLists = async () => null, f
     expansionCacheKey: (identity) => JSON.stringify(identity),
     fetchExpansionFromLists,
     getJson,
+    // The adapter reads its pages through the c1 reader; same payloads here.
+    getJsonC1: getJson,
     mapExpansionCards: (payload) => payload && { ...payload, cards: payload.cards || [] },
     overlayCatalogTilePrices: async (cards) => cards,
     mergeExpansionPayload: (_, page) => page,
