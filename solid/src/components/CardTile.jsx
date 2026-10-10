@@ -1,10 +1,9 @@
 import { Show } from 'solid-js';
 import { isFeatureAlbumArt, isLandscapePrintName, resolveArtLayout } from '@market/art-cut.js';
 import { albumShadeStyle } from '@market/art-shade.js';
-import { cardHref, formatPkn, imageSrc, rememberCardId } from '@market/api.js';
+import { cardHref, deskArtUrl, formatPkn, imageSrc, rememberCardId } from '@market/api.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { displayName, printingIdentity } from '@market/identity.js';
-import { cdnFetchUrl } from '@market/image-urls.js';
 import { tilePricePkn } from '@market/pkn.js';
 import { cardImageAlt } from '@market/seo.js';
 import { Action, track } from '@market/track.js';
@@ -45,9 +44,11 @@ export default function CardTile(props) {
     handOffCard(card());
     if (warmed) return;
     warmed = true;
-    if (hero()) {
+    // The exact URL the desk scan asks for, so the desk reuses this download.
+    const url = deskArtUrl(card());
+    if (url) {
       const img = new Image();
-      img.src = cdnFetchUrl(hero());
+      img.src = url;
     }
   }
 
@@ -95,7 +96,7 @@ export default function CardTile(props) {
               full={cut() || list()}
               card={cut() ? card() : undefined}
               loading={eager() ? 'eager' : 'lazy'}
-              fetchPriority={eager() && props.rank < Math.min(4, eagerLimit()) ? 'high' : undefined}
+              fetchPriority={props.artPriority || (eager() && props.rank < Math.min(4, eagerLimit()) ? 'high' : undefined)}
             />
           </Show>
         </span>

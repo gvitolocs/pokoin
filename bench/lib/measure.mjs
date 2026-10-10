@@ -268,6 +268,16 @@ export function armDesk(page, expectId,{ until = 'image', startNow = false, time
   });
 }
 
+/** Desk start event -> first "Related cards" tile image decoded (ms), or null. */
+export function relatedImageMs(page, startAt, timeoutMs = TIMING.relatedTimeoutMs) {
+  if (startAt == null) return Promise.resolve(null);
+  return page.evaluate((args) => window.__benchApi.firstImageDecoded(args), {
+    selector: SELECTORS.relatedImage,
+    startAt,
+    timeoutMs,
+  });
+}
+
 export function awaitWatcher(page, id) {
   return page.evaluate((wid) => window.__benchApi.awaitWatcher(wid), id);
 }

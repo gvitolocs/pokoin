@@ -42,9 +42,10 @@ export default function RelatedCards(props) {
     };
   });
 
+  // Every tile starts loading with the panel, behind the desk scan.
   const grid = () => (
     <For each={tiles.list}>
-      {(row, index) => <CardTile card={row} rank={index()} />}
+      {(row, index) => <CardTile card={row} rank={index()} eagerLimit={12} artPriority="low" />}
     </For>
   );
 

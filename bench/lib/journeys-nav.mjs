@@ -3,7 +3,7 @@
 import { AUTH, QUERIES, ROUTES, SELECTORS, TIMING } from '../config.mjs';
 import {
   armDesk, armPage, awaitWatcher, beginWindow, cardIdFromHref, endWindow, gotoPath,
-  historyBack, loadMetrics, pageNow, settle, sleep, waitForCount, waitLoadTail, wallNow,
+  historyBack, loadMetrics, pageNow, relatedImageMs, settle, sleep, waitForCount, waitLoadTail, wallNow,
 } from './measure.mjs';
 
 const tileByHref = (page, href) => page.locator(`${SELECTORS.tile}[href=${JSON.stringify(href)}]`).first();
@@ -30,6 +30,7 @@ const navDetail = (navs) => navs.map((n) => ({
   urlMs: n.urlMs,
   headingMs: n.headingMs,
   imageMs: n.imageMs,
+  relatedMs: n.relatedMs,
   backMs: n.backMs,
   heading: n.heading,
   timedOut: n.timedOut,
@@ -58,6 +59,7 @@ export async function card(env) {
     const tile = tileByHref(page, href);
     await tile.scrollIntoViewIfNeeded({ timeout: 10000 });
     const nav = await openDesk(env, page, tile, href);
+    nav.relatedMs = await relatedImageMs(page, nav.startAt);
     const back = await historyBack(page, {
       exactPath: ROUTES.home,
       readySel: SELECTORS.tile,
@@ -75,7 +77,12 @@ export async function card(env) {
   }
   const win = await endWindow(page, cdp, handle, { interactive: true });
   return {
-    metrics: { ...win.metrics, ...navArrays(navs), 'nav.backMs': navs.map((n) => n.backMs) },
+    metrics: {
+      ...win.metrics,
+      ...navArrays(navs),
+      'nav.toRelatedImageMs': navs.map((n) => n.relatedMs ?? null),
+      'nav.backMs': navs.map((n) => n.backMs),
+    },
     detail: { ...win.detail, navs: navDetail(navs) },
   };
 }

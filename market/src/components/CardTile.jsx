@@ -21,6 +21,8 @@ export default function CardTile({
   layout = 'grid',
   cut = false,
   eagerLimit = 8,
+  /** Overrides the rank-based fetch priority of the tile image. */
+  artPriority,
 }) {
   const buyer = useBuyerCurrency();
   if (!card?.id) {
@@ -105,7 +107,7 @@ export default function CardTile({
             full={cut}
             card={cut ? card : undefined}
             loading={eager ? 'eager' : 'lazy'}
-            fetchPriority={eager && rank < Math.min(4, eagerLimit) ? 'high' : undefined}
+            fetchPriority={artPriority || (eager && rank < Math.min(4, eagerLimit) ? 'high' : undefined)}
           />
         ) : <span className="tile-ph" />}
       </span>

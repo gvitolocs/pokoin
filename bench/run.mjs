@@ -35,7 +35,8 @@ const JOURNEYS = {
 /** Metrics printed in progress lines and the final console table, when present. */
 const HEADLINE = [
   'vitals.ttfb', 'vitals.fcp', 'vitals.lcp', 'vitals.cls', 'tbt', 'inp', 'inp.inputDelay',
-  'keys.toRowsMs', 'keys.lastToFinalRowsMs', 'lang.toRowsMs', 'nav.toHeadingMs', 'nav.toImageMs', 'back.toResultsMs',
+  'keys.toRowsMs', 'keys.lastToFinalRowsMs', 'lang.toRowsMs', 'nav.toHeadingMs', 'nav.toImageMs', 'nav.toRelatedImageMs',
+  'back.toResultsMs',
   'back.scrollRestored', 'rapid.totalMs', 'scroll.gapsOver33', 'lt.count', 'lt.blockingMs',
   'cpu.scriptMs', 'mem.heapPeakMB', 'net.downloads', 'net.bytes', 'net.apiCalls',
 ];

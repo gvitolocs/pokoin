@@ -288,6 +288,7 @@ export function installBenchObservers(opts) {
       id: w.id,
       kind: w.kind,
       startEvent: w.startEvent,
+      startAt: w.startAt,
       urlMs: since(w, w.urlAt),
       headingMs: since(w, w.headingAt),
       imageMs: since(w, w.imageAt),
@@ -299,6 +300,32 @@ export function installBenchObservers(opts) {
     });
     return register(w, args);
   };
+
+  /**
+   * First image matching `selector` that is loaded and decoded, in ms since `startAt`
+   * (a desk watcher's start event). null when none decodes within timeoutMs.
+   */
+  const firstImageDecoded = ({ selector, startAt, timeoutMs }) => new Promise((resolve) => {
+    const armed = performance.now();
+    let pending = false;
+    const step = () => {
+      if (pending) return;
+      if (performance.now() - armed > timeoutMs) {
+        resolve(null);
+        return;
+      }
+      const img = [...document.querySelectorAll(selector)].find((el) => el.complete && el.naturalWidth > 0);
+      if (!img) {
+        requestAnimationFrame(step);
+        return;
+      }
+      pending = true;
+      const done = () => resolve(performance.now() - startAt);
+      if (typeof img.decode === 'function') img.decode().then(done, done);
+      else done();
+    };
+    step();
+  });
 
   /** Page watcher: path matches (exactPath / pathPrefix), readySel count >= minCount, absentSel gone. */
   const armPage = (args) => {
@@ -392,6 +419,7 @@ export function installBenchObservers(opts) {
     rowsSignature,
     armRows,
     armDesk,
+    firstImageDecoded,
     armPage,
     awaitWatcher,
     startFrames,
