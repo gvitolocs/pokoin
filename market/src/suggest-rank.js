@@ -1925,23 +1925,39 @@ export function resolveSearchQuery(query, ranked) {
   return top.display;
 }
 
-export function absorbNames(pool, groups, fallbackPrior = 8) {
-  const byCompact = new Map();
-  for (const row of pool || []) {
-    const next = nameRow(row.display, row.prior);
-    if (next.compact) {
-      byCompact.set(next.compact, next);
+// absorbNames runs on every popup re-rank: the 10k pool rows are normalised once
+// per pool array, and only names the pool lacks are added per call.
+const absorbedPools = new WeakMap();
+
+function absorbedPool(pool) {
+  const rows = pool || [];
+  let base = absorbedPools.get(rows);
+  if (!base || base.length !== rows.length) {
+    const byCompact = new Map();
+    for (const row of rows) {
+      const next = nameRow(row.display, row.prior);
+      if (next.compact) {
+        byCompact.set(next.compact, next);
+      }
     }
+    base = { length: rows.length, byCompact, rows: [...byCompact.values()] };
+    absorbedPools.set(rows, base);
   }
+  return base;
+}
+
+export function absorbNames(pool, groups, fallbackPrior = 8) {
+  const base = absorbedPool(pool);
+  const extra = new Map();
   for (const group of groups || []) {
     const display = String(group?.name || '').trim();
     const compact = compactQuery(display);
-    if (!compact || byCompact.has(compact)) {
+    if (!compact || base.byCompact.has(compact) || extra.has(compact)) {
       continue;
     }
-    byCompact.set(compact, nameRow(display, fallbackPrior));
+    extra.set(compact, nameRow(display, fallbackPrior));
   }
-  return [...byCompact.values()];
+  return [...base.rows, ...extra.values()];
 }
 
 export function mergeSuggestGroups(groupLists) {
