@@ -13,7 +13,7 @@
 //! A missing snapshot answers 404 `{"missing":true}` and the SPA falls back to
 //! the live routes, so a new set is never blank.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use axum::{
     body::Body,
@@ -30,6 +30,16 @@ use tower::ServiceExt;
 
 use crate::{catalog_api, AppState};
 use pokoin_api_common::compact;
+use pokoin_shared_dictionary::SharedDictionary;
+
+/// The RFC 9842 shared dictionary for `c1v2` list snapshots: raw content
+/// trained on every list snapshot (128 KB). A new dictionary is a new file and
+/// id; snapshots carry the id they were compressed with.
+static DICTIONARY: LazyLock<SharedDictionary> =
+    LazyLock::new(|| SharedDictionary::new(include_bytes!("../assets/c1-shared-d30efab9dda40a4b.dict").to_vec()));
+/// Browsers keep the dictionary a day, then revalidate it (ETag is its id), so
+/// a new dictionary reaches them without a new URL.
+const DICTIONARY_CACHE: &str = "public, max-age=86400";
 
 const DDL: &str = "
 create table if not exists public.marketplace_list_snapshots (
@@ -47,6 +57,9 @@ alter table public.marketplace_list_snapshots add column if not exists c1v2 byte
 alter table public.marketplace_list_snapshots add column if not exists br_json bytea;
 alter table public.marketplace_list_snapshots add column if not exists br_c1 bytea;
 alter table public.marketplace_list_snapshots add column if not exists br_c1v2 bytea;
+-- RFC 9842 dcb of c1v2 against the shared dictionary `dcb_dict` (its id).
+alter table public.marketplace_list_snapshots add column if not exists dcb_c1v2 bytea;
+alter table public.marketplace_list_snapshots add column if not exists dcb_dict text;
 create table if not exists public.marketplace_card_daily_median (
   card_id bigint primary key,
   last_day date,
@@ -85,10 +98,17 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
         return catalog_api::response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": "Marketplace database unavailable."}), "no-store");
     };
     let wanted = catalog_api::wanted(&headers, &uri);
-    let brotli = accepts_brotli(&headers);
-    type Row = (String, Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>, String);
+    let brotli = accepts_coding(&headers, "br");
+    // dcb needs the browser to hold our dictionary: it says so with its hash.
+    let dictionary = &*DICTIONARY;
+    let dcb_ready = accepts_coding(&headers, "dcb")
+        && headers
+            .get("available-dictionary")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| dictionary.matches(value));
+    type Row = (String, Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>, Option<String>, String);
     let row = sqlx::query_as::<_, Row>(
-        "select body, c1, c1v2, br_json, br_c1, br_c1v2, version
+        "select body, c1, c1v2, br_json, br_c1, br_c1v2, dcb_c1v2, dcb_dict, version
          from public.marketplace_list_snapshots where kind = $1 and key = $2",
     )
     .bind(&kind)
@@ -96,31 +116,47 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
     .fetch_optional(&pool)
     .await;
     match row {
-        Ok(Some((body, c1, c1v2, br_json, br_c1, br_c1v2, version))) => {
+        Ok(Some((body, c1, c1v2, br_json, br_c1, br_c1v2, dcb_c1v2, dcb_dict, version))) => {
             // c1v2 only for clients that read template columns; a snapshot
             // built before format 2 falls back to c1.
+            let has_v2 = c1v2.is_some();
             let (format, plain, compressed) = match (wanted.c1(), wanted.templates(), c1v2) {
                 (true, true, Some(c1v2)) => ("c1v2", c1v2, br_c1v2),
                 (true, _, _) => ("c1", c1, br_c1),
                 _ => ("json", body.into_bytes(), br_json),
             };
-            // A brotli-11 copy, served as-is: Cloudflare passes origin
-            // brotli through, and its own on-the-fly level is far lower.
-            let (bytes, encoded) = match compressed {
-                Some(br) if brotli => (br, true),
-                _ => (plain, false),
+            let dcb = (format == "c1v2" && dcb_ready && dcb_dict.as_deref() == Some(dictionary.id().as_str()))
+                .then_some(dcb_c1v2)
+                .flatten();
+            // dcb when the browser holds our dictionary, else a brotli-11 copy
+            // served as-is (Cloudflare passes origin encodings through; its own
+            // on-the-fly level is far lower).
+            let (bytes, coding) = match (dcb, compressed) {
+                (Some(dcb), _) => (dcb, Some("dcb")),
+                (None, Some(br)) if brotli => (br, Some("br")),
+                _ => (plain, None),
             };
-            let tag = format!("\"{version}-{format}{}\"", if encoded { "-br" } else { "" });
+            let tag = format!("\"{version}-{format}{}\"", coding.map(|c| format!("-{c}")).unwrap_or_default());
             // application/json, not the c1 media type: Cloudflare only
             // brotli-compresses known types. The payload marks itself c1.
             let mut response = crate::suggest::cors(StatusCode::OK, Some(LIST_CACHE.to_owned()), Some("application/json; charset=utf-8"), bytes).into_response();
             let h = response.headers_mut();
-            h.insert(axum::http::header::VARY, HeaderValue::from_static("Accept, Accept-Encoding"));
+            h.insert(axum::http::header::VARY, HeaderValue::from_static("Accept, Accept-Encoding, Available-Dictionary"));
             if format != "json" {
                 h.insert("x-pokoin-format", HeaderValue::from_static(if format == "c1v2" { "c1v2" } else { "c1" }));
             }
-            if encoded {
-                h.insert(axum::http::header::CONTENT_ENCODING, HeaderValue::from_static("br"));
+            if let Some(coding) = coding {
+                h.insert(axum::http::header::CONTENT_ENCODING, HeaderValue::from_static(coding));
+            }
+            // Where a c1v2 client fetches the shared dictionary (once).
+            if wanted.templates() && has_v2 {
+                if let Ok(v) = HeaderValue::from_str(&dictionary.id()) {
+                    h.insert("x-pokoin-dictionary", v);
+                }
+                h.insert(
+                    axum::http::header::ACCESS_CONTROL_EXPOSE_HEADERS,
+                    HeaderValue::from_static("x-pokoin-dictionary, x-pokoin-format"),
+                );
             }
             if let Ok(v) = HeaderValue::from_str(&tag) {
                 h.insert(axum::http::header::ETAG, v);
@@ -134,7 +170,7 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
     }
 }
 
-fn accepts_brotli(headers: &HeaderMap) -> bool {
+fn accepts_coding(headers: &HeaderMap, wanted: &str) -> bool {
     headers
         .get_all(axum::http::header::ACCEPT_ENCODING)
         .iter()
@@ -143,9 +179,32 @@ fn accepts_brotli(headers: &HeaderMap) -> bool {
         .any(|entry| {
             let mut parts = entry.split(';');
             let coding = parts.next().unwrap_or("").trim();
-            coding.eq_ignore_ascii_case("br")
+            coding.eq_ignore_ascii_case(wanted)
                 && !parts.any(|param| param.trim().replace(' ', "") == "q=0")
         })
+}
+
+/// `GET /api/c1-dictionary`: the raw RFC 9842 dictionary for c1v2
+/// list snapshots. `Use-As-Dictionary` makes the browser keep it and offer it
+/// (`Available-Dictionary`) on later `/api/marketplace-list` requests.
+pub async fn dictionary() -> Response {
+    let dictionary = &*DICTIONARY;
+    let mut response = crate::suggest::cors(
+        StatusCode::OK,
+        Some(DICTIONARY_CACHE.to_owned()),
+        Some("application/octet-stream"),
+        dictionary.raw().to_vec(),
+    )
+    .into_response();
+    let h = response.headers_mut();
+    let rule = format!("match=\"/api/marketplace-list?*\", id=\"{}\"", dictionary.id());
+    if let Ok(v) = HeaderValue::from_str(&rule) {
+        h.insert("use-as-dictionary", v);
+    }
+    if let Ok(v) = HeaderValue::from_str(&format!("\"{}\"", dictionary.id())) {
+        h.insert(axum::http::header::ETAG, v);
+    }
+    response
 }
 
 /// Brotli quality 11, 4 MiB window: the snapshot is built once and served
@@ -531,10 +590,12 @@ async fn upsert(pool: &PgPool, kind: &str, key: &str, body: &Value) -> anyhow::R
     // (brotli 11 is the expensive part of a build).
     let current: Option<(String, bool)> = sqlx::query_as(
         "select version, c1v2 is not null and br_c1v2 is not null and br_c1 is not null and br_json is not null
+                and dcb_c1v2 is not null and dcb_dict is not distinct from $3
          from public.marketplace_list_snapshots where kind = $1 and key = $2",
     )
     .bind(kind)
     .bind(key)
+    .bind(DICTIONARY.id())
     .fetch_optional(pool)
     .await?;
     if current.as_ref().is_some_and(|(v, complete)| *v == version && *complete) {
@@ -543,15 +604,18 @@ async fn upsert(pool: &PgPool, kind: &str, key: &str, body: &Value) -> anyhow::R
     let c1 = compact::encode::encode_to_vec(body);
     let c1v2 = compact::encode::encode_to_vec_with(body, compact::encode::EncodeOptions { templates: true });
     let (br_json, br_c1, br_c1v2) = (brotli11(text.as_bytes()), brotli11(&c1), brotli11(&c1v2));
+    let dictionary = &*DICTIONARY;
+    let dcb_c1v2 = dictionary.compress(&c1v2, 11);
+    let dcb_dict = dcb_c1v2.as_ref().map(|_| dictionary.id());
     let count = body.get("cards").and_then(Value::as_array).map_or(0, Vec::len) as i32;
     sqlx::query(
         "insert into public.marketplace_list_snapshots
-           (kind, key, body, c1, c1v2, br_json, br_c1, br_c1v2, card_count, version, built_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+           (kind, key, body, c1, c1v2, br_json, br_c1, br_c1v2, dcb_c1v2, dcb_dict, card_count, version, built_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
          on conflict (kind, key) do update set body = excluded.body, c1 = excluded.c1,
            c1v2 = excluded.c1v2, br_json = excluded.br_json, br_c1 = excluded.br_c1,
-           br_c1v2 = excluded.br_c1v2, card_count = excluded.card_count,
-           version = excluded.version, built_at = now()",
+           br_c1v2 = excluded.br_c1v2, dcb_c1v2 = excluded.dcb_c1v2, dcb_dict = excluded.dcb_dict,
+           card_count = excluded.card_count, version = excluded.version, built_at = now()",
     )
     .bind(kind)
     .bind(key)
@@ -561,6 +625,8 @@ async fn upsert(pool: &PgPool, kind: &str, key: &str, body: &Value) -> anyhow::R
     .bind(nonempty(br_json))
     .bind(nonempty(br_c1))
     .bind(nonempty(br_c1v2))
+    .bind(dcb_c1v2)
+    .bind(dcb_dict)
     .bind(count)
     .bind(version)
     .execute(pool)
@@ -670,5 +736,26 @@ mod tests {
         assert!(tile_price_missing(&json!({"id": "1", "price": 0})));
         assert!(!tile_price_missing(&json!({"id": "1", "price": 12})));
         assert!(!tile_price_missing(&json!({"id": "1", "lowest_price_pkn": 3.5})));
+    }
+}
+
+#[cfg(test)]
+mod dcb_tests {
+    use super::*;
+
+    #[test]
+    fn the_shipped_dictionary_round_trips_a_c1v2_snapshot() {
+        let body = serde_json::json!({
+            "cards": (0..40).map(|i| serde_json::json!({
+                "id": 600_000 + i,
+                "name": format!("Pikachu {i}"),
+                "canonicalPath": format!("/marketplace/en/cards/{}/card-pikachu-{i}-{i}-151", 600_000 + i),
+            })).collect::<Vec<_>>()
+        });
+        let c1v2 = compact::encode::encode_to_vec_with(&body, compact::encode::EncodeOptions { templates: true });
+        let dcb = DICTIONARY.compress(&c1v2, 11).expect("dcb");
+        assert_eq!(DICTIONARY.decompress(&dcb).expect("decode"), c1v2);
+        assert!(dcb.len() < brotli11(&c1v2).len() + 36);
+        assert_eq!(DICTIONARY.id(), "d30efab9dda40a4b");
     }
 }

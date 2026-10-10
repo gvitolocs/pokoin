@@ -5,6 +5,7 @@ members = [
   "crates/config",
   "crates/db",
   "crates/cache",
+  "crates/shared-dictionary",
   "crates/auth",
   "crates/catalog",
   "crates/search",

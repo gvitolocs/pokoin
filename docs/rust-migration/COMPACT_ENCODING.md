@@ -423,9 +423,33 @@ byte in Rust, and 639 of them through `market/src/compact.js` in Node:
 Encode p50 rises from 0.33 ms to 1.2 ms per payload (template planning), decode
 p50 from 0.37 ms to 0.44 ms; snapshots pay the encode once per build.
 
-Not in format 2 yet (measured, follow-ups): numeric split, front coding and a
-trained value dictionary (about 7 more points), and RFC 9842 shared brotli
-dictionaries (`dcb`, −14.6% on `c1`, Chromium only).
+Not in format 2 yet (measured, follow-up): numeric split, front coding and a
+trained value dictionary (about 7 more points).
+
+#### Shared brotli dictionary (`dcb`, RFC 9842)
+
+`c1v2` list snapshots also ship a `dcb` copy: brotli 11 against a 128 KB raw
+dictionary trained on every list snapshot
+(`pokoin-rust/apps/api/assets/c1-shared-<id>.dict`, id = first 8 bytes of its
+SHA-256). The `pokoin-shared-dictionary` crate wraps Google's C brotli (vendored
+by `brotlic-sys`) because the pure-Rust crate has no raw shared dictionary.
+
+- `GET /api/c1-dictionary` serves the dictionary with
+  `Use-As-Dictionary: match="/api/marketplace-list?*", id="<id>"` (CORS, one day,
+  ETag = id). The SPA adds `<link rel="compression-dictionary">` once, after its
+  first list snapshot, only where the browser supports it (Chromium 130+).
+- `/api/marketplace-list` answers `Content-Encoding: dcb` when the client asked
+  for `c1v2`, accepts `dcb`, its `Available-Dictionary` is our hash and the row's
+  `dcb_dict` is the current id; otherwise `br`, otherwise identity.
+  `Vary: Accept, Accept-Encoding, Available-Dictionary`; `x-pokoin-dictionary`
+  names the current id.
+- Snapshots record `dcb_c1v2` and `dcb_dict`; a row built with an older
+  dictionary is rebuilt by the next list job and falls back to `br` meanwhile.
+- Cloudflare zone setting `shared_dictionary_mode` is `passthrough`, so the edge
+  forwards `Available-Dictionary` and keeps the origin's `dcb` body.
+
+On the benchmark's 469-payload test subset `dcb` on top of `c1v2` is a further
+−18.3% (−36.6% vs `c1` + brotli 11).
 
 ## 4. Measurements
 

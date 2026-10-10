@@ -1360,8 +1360,31 @@ export function fetchListSnapshot(kind, key) {
     return Promise.resolve(null);
   }
   return getJson(`/api/marketplace-list?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(k)}&format=c1v2`)
-    .then((payload) => (isC1(payload) ? decodeC1(payload) : payload))
+    .then((payload) => {
+      primeListDictionary();
+      return isC1(payload) ? decodeC1(payload) : payload;
+    })
     .catch(() => null);
+}
+
+let listDictionaryPrimed = false;
+
+/** Once per page: let browsers with RFC 9842 shared dictionaries (Chromium
+ * 130+) fetch the c1v2 list dictionary at idle. Later list snapshots then come
+ * back as `Content-Encoding: dcb`, decoded natively. Others skip it. */
+export function primeListDictionary(doc = typeof document === 'undefined' ? null : document) {
+  if (listDictionaryPrimed || !doc?.head) {
+    return false;
+  }
+  listDictionaryPrimed = true;
+  const link = doc.createElement('link');
+  if (!link.relList?.supports?.('compression-dictionary')) {
+    return false;
+  }
+  link.rel = 'compression-dictionary';
+  link.href = publicApiUrl('/api/c1-dictionary');
+  doc.head.appendChild(link);
+  return true;
 }
 
 /** Set desk page: the whole set from its snapshot, else the live routes. */

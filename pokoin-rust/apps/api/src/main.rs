@@ -364,6 +364,7 @@ fn router(state: AppState) -> Router {
             get(rails::spotlight).options(rails::options),
         )
         .route("/api/marketplace-list", get(lists::list).options(rails::options))
+        .route("/api/c1-dictionary", get(lists::dictionary).options(rails::options))
         .route("/api/marketplace-daily-medians", get(lists::daily_medians).options(rails::options))
         .route("/api/client-error", axum::routing::post(request_log::client_error).options(rails::options))
         .layer(axum::middleware::from_fn_with_state(
