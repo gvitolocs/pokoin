@@ -479,6 +479,10 @@ export function tokenEvidence(token, doc, langs = ['en'], {
     }
     const nameEvidence = fieldEvidence(compact, text.name, NAME_TIERS);
     consider(nameEvidence, lang);
+    // A typed `mega` names the XY Mega titles by their leading `M` (`M Rayquaza EX`).
+    if (compact === 'mega' && text.name?.[0] === 'm') {
+      consider({ quality: Q_NAME_EXACT, distance: 0, via: 'name-exact', matchedToken: 'm' }, lang);
+    }
     if (shortNamePrefixTokens) {
       const namePrefix = fieldEvidence(compact, shortNamePrefixTokens.get(lang),
         { ...NAME_TIERS, prefix: Q_NAME_SHORT_PREFIX }, { allowShortPrefix: true });
