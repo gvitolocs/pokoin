@@ -71,6 +71,7 @@ import {
   listedDealConditions,
   listedDealLanguages,
   matchDeal,
+  shownDealCondition,
   moodCondition,
   pricedOffers,
   sortOffers,
@@ -527,18 +528,22 @@ function CardDesk(props) {
   const nextNav = () => neighborWindow().next?.[0] || null;
   const nativeLive = createMemo(() => pricedOffers(shop.offers));
   const listedDealLangs = createMemo(() => listedDealLanguages(shop.offers, card()));
-  const shownCond = () => dealCond() || 'NM';
   const shownLang = createMemo(() => resolveDealLanguage({
     selected: dealLang() || 'EN',
     listed: offersReady() ? listedDealLangs() : [],
     country: sellerSettings()?.shipFromCountry,
   }));
-  const dealPick = createMemo(() => (offersReady() ? matchDeal(nativeLive(), shownLang(), shownCond()) : null));
+  // The chosen grade when it is listed in the shown language, else the best one that is.
+  const shownCond = createMemo(() => {
+    const wanted = dealCond() || 'NM';
+    return offersReady() ? shownDealCondition(nativeLive(), shownLang(), wanted, card()) : wanted;
+  });
+  const dealPick = createMemo(() => (offersReady() ? matchDeal(nativeLive(), shownLang(), shownCond(), card()) : null));
   const lastDayPkn = () => buyerFormat(salesSeries()?.lastMedianPkn, true, pinnedCurrency());
   const pricePending = () => !pinnedCurrency() && buyerPending();
   const change72h = () => formatChange72h(salesSeries()?.change24hPct);
   const canBuy = () => Boolean(dealPick());
-  const listedCondSet = createMemo(() => new Set(listedDealConditions(shop.offers).map((row) => row.value)));
+  const listedCondSet = createMemo(() => new Set(listedDealConditions(nativeLive(), shownLang(), card()).map((row) => row.value)));
   const listedLangSet = createMemo(() => new Set(listedDealLangs()));
   const allDealLangs = createMemo(() => {
     const row = card();

@@ -1398,7 +1398,9 @@ function mergeExpansionPayload(base, page) {
 
 /**
  * Prebuilt list snapshot (`kind` set or artist): the whole desk with prices,
- * built on nezopt every 15 min / hourly and served as c1 from one key read.
+ * built on nezopt every 15 min / daily and served from one key read as c1
+ * format 2 (template columns; a snapshot built before format 2 answers c1),
+ * pre-compressed with brotli 11.
  * Null when that list is not built yet; callers then use the live routes.
  */
 export function fetchListSnapshot(kind, key) {
@@ -1406,9 +1408,37 @@ export function fetchListSnapshot(kind, key) {
   if (!k) {
     return Promise.resolve(null);
   }
-  return getJson(`/api/marketplace-list?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(k)}&format=c1`)
-    .then((payload) => (isC1(payload) ? decodeC1(payload) : payload))
+  return getJson(`/api/marketplace-list?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(k)}&format=c1v2`)
+    .then((payload) => {
+      primeListDictionary();
+      return isC1(payload) ? decodeC1(payload) : payload;
+    })
     .catch(() => null);
+}
+
+let listDictionaryPrimed = false;
+
+/** Off while Cloudflare cannot cache `dcb` per dictionary: its passthrough mode
+ * replays one cached `dcb` body to every client, so the zone setting stays
+ * disabled and the edge never forwards `dcb` (docs/rust-migration/COMPACT_ENCODING.md). */
+export const LIST_DICTIONARY_ENABLED = false;
+
+/** Once per page: let browsers with RFC 9842 shared dictionaries (Chromium
+ * 130+) fetch the c1v2 list dictionary at idle. Later list snapshots then come
+ * back as `Content-Encoding: dcb`, decoded natively. Others skip it. */
+export function primeListDictionary(doc = typeof document === 'undefined' ? null : document, enabled = LIST_DICTIONARY_ENABLED) {
+  if (!enabled || listDictionaryPrimed || !doc?.head) {
+    return false;
+  }
+  listDictionaryPrimed = true;
+  const link = doc.createElement('link');
+  if (!link.relList?.supports?.('compression-dictionary')) {
+    return false;
+  }
+  link.rel = 'compression-dictionary';
+  link.href = publicApiUrl('/api/c1-dictionary');
+  doc.head.appendChild(link);
+  return true;
 }
 
 /** Set desk page: the whole set from its snapshot, else the live routes. */

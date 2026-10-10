@@ -148,6 +148,7 @@ import {
   listedDealLanguages,
   listingFormFromOffer,
   matchDeal,
+  shownDealCondition,
   moodCondition,
   nextBoxLocation,
   pricedOffers,
@@ -2112,13 +2113,16 @@ export default function Card() {
   const nextCard = neighborWindow.next?.[0] || null;
   const nativeLive = pricedOffers(payload?.offers);
   const listedDealLangs = listedDealLanguages(payload?.offers, card);
-  const shownCond = dealCond || 'NM';
   const shownLang = resolveDealLanguage({
     selected: dealLang || 'EN',
     listed: offersReady ? listedDealLangs : [],
     country: sellerSettings?.shipFromCountry,
   });
-  const dealPick = offersReady ? matchDeal(nativeLive, shownLang, shownCond) : null;
+  // The chosen grade when it is listed in the shown language, else the best one that is.
+  const shownCond = offersReady
+    ? shownDealCondition(nativeLive, shownLang, dealCond || 'NM', card)
+    : (dealCond || 'NM');
+  const dealPick = offersReady ? matchDeal(nativeLive, shownLang, shownCond, card) : null;
   const lastDayPkn = buyer.format(salesSeries?.lastMedianPkn);
   const change72h = formatChange72h(salesSeries?.change24hPct);
   const canBuy = Boolean(dealPick);
@@ -2127,7 +2131,7 @@ export default function Card() {
     setName: identity.set || card.set,
     releaseLanguages: card.releaseLanguages,
   });
-  const listedDealConds = listedDealConditions(payload?.offers);
+  const listedDealConds = listedDealConditions(nativeLive, shownLang, card);
   // Best Deal shows every grade and every language of this printing; unlisted ones grey out.
   const listedCondSet = new Set(listedDealConds.map((row) => row.value));
   const listedLangSet = new Set(listedDealLangs);

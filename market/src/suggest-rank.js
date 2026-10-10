@@ -170,6 +170,8 @@ const MODIFIER_COMPACT = [
   'prime', 'mega', 'gx', 'ex', 'v',
 ];
 const MODIFIER_WORD = new Set(MODIFIER_COMPACT);
+/** XY-era Mega Evolutions are titled `M Rayquaza EX`, not `Mega Rayquaza`. */
+const XY_MEGA_TITLE = /^M\s+[A-Z]/;
 const PAIR_JOIN_RE = /^(?:&|and)$/i;
 
 /** Mechanic words (`gx` / `vmax` / `mega`) for the protected-syntax pass. */
@@ -206,12 +208,18 @@ function popularityPoints(prior) {
   return Math.min(POPULARITY_POINTS, scaled);
 }
 
-function perfectMatchPoints(display, mods) {
+/**
+ * A bare `mega` is a keyword, but also the start of Meganium: Mega names get only
+ * a small edge over that completion instead of the full mechanic bonus.
+ */
+export const BARE_MEGA_POINTS = 1.25;
+
+function perfectMatchPoints(display, mods, points = PERFECT_MATCH_POINTS) {
   if (!mods?.length) {
     return 0;
   }
   if (mods.every((mod) => displayHasModifier(display, mod))) {
-    return PERFECT_MATCH_POINTS;
+    return points;
   }
   return 0;
 }
@@ -243,7 +251,7 @@ function displayHasModifier(display, mod) {
     return /\bprime\b/i.test(text) && !/primeape|prime catcher/i.test(text);
   }
   if (mod === 'mega') {
-    return /\bmega\b/i.test(text);
+    return /\bmega\b/i.test(text) || XY_MEGA_TITLE.test(text);
   }
   return new RegExp(`\\b${mod}\\b`, 'i').test(text);
 }
@@ -302,6 +310,35 @@ export function typedModifiers(query) {
     mods,
     nameCompact: compactQuery(nameWords.join(' ')),
   };
+}
+
+/**
+ * `mega <name>` also reads as the XY title `M <Name>`: compact `m<name>`, or ''
+ * when the query is not a leading `mega` followed by a name word.
+ */
+export function megaAliasCompact(query) {
+  const words = String(query || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2 || compactQuery(words[0]) !== 'mega') {
+    return '';
+  }
+  const rest = compactQuery(words.slice(1).join(' '));
+  return rest ? `m${rest}` : '';
+}
+
+/**
+ * Distance of a pool name from the query, and the query length it was
+ * measured with. Only XY Mega titles try the `mega` alias, so `mega r` reaches
+ * M Rayquaza EX and never Mr. Mime, and a typed name never drifts to Meganium.
+ */
+function nameDistance(row, compactName, compact, alias, cutoff = Infinity) {
+  const direct = prefixEditDistance(compact, compactName, cutoff);
+  if (!alias || !XY_MEGA_TITLE.test(String(row.display || ''))) {
+    return { distance: direct, length: compact.length };
+  }
+  const viaAlias = prefixEditDistance(alias, compactName, cutoff);
+  return viaAlias < direct
+    ? { distance: viaAlias, length: alias.length }
+    : { distance: direct, length: compact.length };
 }
 
 function modifierPenalty(display, queryCompact = '', mods = []) {
@@ -883,7 +920,7 @@ const RANK_MEMO_MAX = 32;
 const rankMemo = new Map();
 
 function rankMemoKey(query, pool, fill) {
-  const compact = compactQuery(query);
+  const compact = `${compactQuery(query)}~${megaAliasCompact(query)}`;
   const rows = pool || NAME_POOL;
   const tag = rows === NAME_POOL
     ? 'names'
@@ -891,18 +928,24 @@ function rankMemoKey(query, pool, fill) {
   return `${compact}|${tag}|${Math.max(1, Number(fill) || RANK_FILL)}`;
 }
 
-function rankedRow(row, compact, compactName, distance, cap, mods) {
+/** Mechanic bonus for this query: reduced when it is the bare word `mega`. */
+function matchPointsFor(query) {
+  const { mods, nameCompact } = typedModifiers(query);
+  return mods.length === 1 && mods[0] === 'mega' && !nameCompact ? BARE_MEGA_POINTS : PERFECT_MATCH_POINTS;
+}
+
+function rankedRow(row, compact, compactName, distance, cap, mods, queryLength = compact.length, matchPoints = PERFECT_MATCH_POINTS) {
   const prior = Math.max(1, Number(row.prior) || 1);
-  const extra = Math.max(0, compactName.length - compact.length);
+  const extra = Math.max(0, compactName.length - queryLength);
   return {
     display: row.display,
     compact: compactName,
     prior,
     distance,
     withinCap: distance <= cap + 1e-9,
-    score: (popularityPoints(prior) + perfectMatchPoints(row.display, mods))
+    score: (popularityPoints(prior) + perfectMatchPoints(row.display, mods, matchPoints))
       * emissionMultiplier(distance)
-      / (1 + suffixWeight(compact.length) * extra)
+      / (1 + suffixWeight(queryLength) * extra)
       * modifierPenalty(row.display, compact, mods),
     kind: row.kind || 'name',
     slug: row.slug || '',
@@ -910,14 +953,15 @@ function rankedRow(row, compact, compactName, distance, cap, mods) {
 }
 
 /** Every row scored with its exact distance, best first. */
-function rankAll(compact, pool, cap, mods) {
+function rankAll(compact, pool, cap, mods, alias = '', matchPoints = PERFECT_MATCH_POINTS) {
   const ranked = [];
   for (const row of pool || []) {
     const compactName = row.compact || compactQuery(row.display);
     if (!compactName) {
       continue;
     }
-    ranked.push(rankedRow(row, compact, compactName, prefixEditDistance(compact, compactName), cap, mods));
+    const { distance, length } = nameDistance(row, compactName, compact, alias);
+    ranked.push(rankedRow(row, compact, compactName, distance, cap, mods, length, matchPoints));
   }
   ranked.sort(compareRanked);
   return ranked;
@@ -932,7 +976,7 @@ export function rankNamesExhaustive(query, pool = NAME_POOL, { fill = RANK_FILL 
   const { mods } = typedModifiers(query);
   const cap = maxDistance(compact.length);
   const limit = Math.max(1, Number(fill) || RANK_FILL);
-  const ranked = rankAll(compact, pool, cap, mods);
+  const ranked = rankAll(compact, pool, cap, mods, megaAliasCompact(query), matchPointsFor(query));
   const within = ranked.filter((row) => row.withinCap);
   return within.length ? within.slice(0, limit) : ranked.slice(0, limit);
 }
@@ -954,6 +998,8 @@ export function rankNames(query, pool = NAME_POOL, { fill = RANK_FILL } = {}) {
     return cached;
   }
   const { mods } = typedModifiers(query);
+  const alias = megaAliasCompact(query);
+  const matchPoints = matchPointsFor(query);
   const cap = maxDistance(compact.length);
   const limit = Math.max(1, Number(fill) || RANK_FILL);
   const within = [];
@@ -962,9 +1008,9 @@ export function rankNames(query, pool = NAME_POOL, { fill = RANK_FILL } = {}) {
     if (!compactName) {
       continue;
     }
-    const distance = prefixEditDistance(compact, compactName, cap);
+    const { distance, length } = nameDistance(row, compactName, compact, alias, cap);
     if (distance <= cap + 1e-9) {
-      within.push(rankedRow(row, compact, compactName, distance, cap, mods));
+      within.push(rankedRow(row, compact, compactName, distance, cap, mods, length, matchPoints));
     }
   }
   let result;
@@ -972,7 +1018,7 @@ export function rankNames(query, pool = NAME_POOL, { fill = RANK_FILL } = {}) {
     within.sort(compareRanked);
     result = within.slice(0, limit);
   } else {
-    result = rankAll(compact, pool, cap, mods).slice(0, limit);
+    result = rankAll(compact, pool, cap, mods, alias, matchPoints).slice(0, limit);
   }
   rankMemo.set(key, result);
   if (rankMemo.size > RANK_MEMO_MAX) {

@@ -25,7 +25,7 @@ pub fn response(status:StatusCode,body:Value,cache:&str)->Response{
 /// so a shared cache keeps the two apart.
 pub fn response_c1(wanted:Wanted,status:StatusCode,body:Value,cache:&str)->Response{
  let (content_type,bytes)=if wanted.c1(){
-  (compact::C1_CONTENT_TYPE,compact::encode::encode_to_vec(&body))
+  (compact::C1_CONTENT_TYPE,compact::encode::encode_to_vec_with(&body,wanted.encode_options()))
  }else{
   ("application/json; charset=utf-8",serde_json::to_vec(&body).unwrap_or_default())
  };

@@ -298,3 +298,82 @@ fn an_infrastructure_error_is_sanitised_in_both_representations() {
         );
     }
 }
+
+/// A set page shaped like production rows: `canonicalPath` and the image URLs
+/// are built from `id`, `name`, `number` and `set`; `canonical_path` is a twin;
+/// one optional key; a few rows break the pattern.
+fn templated_page() -> Value {
+    let names = ["Levincia", "Mega Lucario ex", "Pikachu", "Team Rocket\u{2019}s Mewtwo", "N\u{2019}s Zekrom", "Ho-Oh"];
+    let cards: Vec<Value> = (0..24)
+        .map(|i| {
+            let id = 668_100 + i * 3;
+            let name = names[i as usize % names.len()];
+            let number = format!("Holo Rare | {:03}/182", i + 1);
+            let slug = |s: &str| super::template::slug(s);
+            let path = if i % 11 == 7 {
+                format!("/marketplace/en/cards/{id}/legacy-{i}")
+            } else {
+                format!("/marketplace/en/cards/{id}/card-{}-{}-destined-rivals", slug(name), slug(&number))
+            };
+            let mut row = json!({
+                "id": id.to_string(),
+                "name": name,
+                "number": number,
+                "set": "Destined Rivals",
+                "canonicalPath": path,
+                "canonical_path": path,
+                "imageUrl": format!("/card-images/{id}_{}.jpg", slug(name)),
+            });
+            if i % 3 == 0 {
+                row["artist"] = json!(format!("Artist {}", i % 4));
+            }
+            row
+        })
+        .collect();
+    json!({"cards": cards, "total": 24})
+}
+
+#[test]
+fn templates_round_trip_and_mark_format_two() {
+    let body = templated_page();
+    let options = encode::EncodeOptions { templates: true };
+    let document = encode::encode_with(&body, options);
+    assert_eq!(document["c1"], json!(2));
+    let decoded = decode::decode(&document).expect("c1v2 decodes");
+    assert_eq!(serde_json::to_string(&decoded).unwrap(), serde_json::to_string(&body).unwrap());
+    let columns = document["t"][0]["c"].as_array().unwrap();
+    let keys: Vec<&str> = document["t"][0]["k"].as_array().unwrap().iter().map(|k| k.as_str().unwrap()).collect();
+    let at = |key: &str| &columns[keys.iter().position(|k| *k == key).unwrap()];
+    assert_eq!(at("canonicalPath")["c"], json!(5));
+    // The twin refs the template instead of repeating it.
+    assert_eq!(at("canonical_path")["c"], json!(4));
+    // v2 is smaller than v1 on this shape.
+    let v1 = serde_json::to_vec(&encode::encode(&body)).unwrap().len();
+    let v2 = serde_json::to_vec(&document).unwrap().len();
+    assert!(v2 < v1, "v2 {v2} >= v1 {v1}");
+}
+
+#[test]
+fn without_templates_the_document_stays_format_one() {
+    let body = templated_page();
+    let document = encode::encode(&body);
+    assert_eq!(document["c1"], json!(1));
+    assert!(!serde_json::to_string(&document).unwrap().contains("\"c\":5"));
+    let options = encode::EncodeOptions { templates: true };
+    // Nothing worth templating: still format 1.
+    let small = json!({"rows": [{"a": 1}, {"a": 2}, {"a": 3}, {"a": 4}]});
+    assert_eq!(encode::encode_with(&small, options)["c1"], json!(1));
+}
+
+#[test]
+fn a_template_column_is_never_larger_than_its_ordinary_encoding() {
+    let body = templated_page();
+    let v2 = encode::encode_with(&body, encode::EncodeOptions { templates: true });
+    let v1 = encode::encode(&body);
+    let size = |doc: &Value, i: usize| serde_json::to_vec(&doc["t"][0]["c"][i]).unwrap().len();
+    for i in 0..v1["t"][0]["c"].as_array().unwrap().len() {
+        if v2["t"][0]["c"][i]["c"] == json!(5) {
+            assert!(size(&v2, i) < size(&v1, i));
+        }
+    }
+}
