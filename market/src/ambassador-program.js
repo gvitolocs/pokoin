@@ -1,7 +1,7 @@
 /**
  * Pokoin Ambassador program copy + progression, shared by /ambassadorprogram
  * and the ambassador desk on /associate. Tier rules mirror
- * server/pokoin-api/_ambassador_core.js — the API owns the verdict.
+ * pokoin-rust/crates/accounts/src/domain/ambassador.rs — the API owns the verdict.
  */
 import { REFERRAL_REWARD_PKN } from './referral.js';
 

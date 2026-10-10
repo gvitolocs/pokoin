@@ -213,7 +213,7 @@ SKU lookup when the raw full-text response is empty.
 
 The SPA's candidate request is `hydrate=1&limit=1000&print_language=all` for
 lookups of three or more compact characters; shorter prefetches stay small.
-The maintained `server/api/marketplace-suggest.js` returns this bounded Meili
+The Rust suggest route (`pokoin-rust/apps/api/src/suggest.rs`) returns this bounded
 window before the popup cap. Its normal response remains twenty rows for
 other clients. Canonical expansion nationality hydrates before filtering;
 an incomplete indexed `effective_print_bucket` must not shrink the name
@@ -257,9 +257,9 @@ The **20-row cap is server-side**. After nationality is attached, `applySuggestP
 
 While the popup is open the SPA **prefetches** the first search page (`search-hot.js`,
 60s TTL, query length ≥ 2, `limit=48`, keyed by **tab**) so Enter paints the rest of the cards
-from that query. The API keeps the Meili ID pool in process memory
-(CardVault API repo `_suggest_hot_query.js`). Revert: `SUGGEST_HOT_QUERY=0` and/or stop calling
-`prefetchSearchPage` in `Chrome.jsx`.
+from that query. The Node API also kept the Meili ID pool in process memory
+(`_suggest_hot_query.js`); the Rust search page runs on Redis Search and has no such pool.
+Revert: stop calling `prefetchSearchPage` in `Chrome.jsx`.
 
 ### Desktop vs phone (test both)
 

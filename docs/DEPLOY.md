@@ -87,12 +87,12 @@ dashboard/CLI, then fix `main` before the next deploy.
 
 | Surface | Host | How |
 | --- | --- | --- |
-| Shared Pokoin API (`api.pokoin.com`) | Pi native `pokoin-rust-api.service`, `/srv/pokoin/rust/current`, loopback 18082 | Use this repo's native Rust deployment procedure. The old Node container is retired. Scanner workers deploy separately from `pokoin-scanner`; see `SCAN_API.md`. |
+| Shared Pokoin API (`api.pokoin.com`) | Pi native `pokoin-rust-api.service`, `/srv/pokoin/rust/current`, loopback 18082 | `scripts/deploy-pokoin-rust.sh` from the exact `origin/main` commit ([RUST_RUNTIME.md](RUST_RUNTIME.md)). The old Node container is retired and its sources are removed. Scanner workers deploy separately from `pokoin-scanner`; see `SCAN_API.md`. |
 | Marketplace Postgres **writer** | nezopt Docker `pokoin-marketplace-postgres-15t` (`192.168.178.55:25432`) | Schema migrations **here only**; Pi replica follows. Never migrate on the replica. |
 | Phone scanner (`scan.pokoin.com`) | Oracle peer1 Caddy `file_server` over `/opt/pokoin-cardscan/web` | Source is `pokoin-scanner/service/web`; deploy exact scanner commits with `deploy/deploy.py phone`, with backup and byte verification. Recognition calls the Pi API. |
 | Extension download (`pokoin.com/download/extension.zip`) | Static `_redirects` 302 on `pokoin-web` to `https://cdn.pokoin.com/downloads/pokemon-card-extension-<version>.zip` (Pi `/srv/pokoin/card-images/objects/downloads/`, owner `nes`) | Copy the new zip to that Pi directory and check it downloads with a matching sha256, bump `EXTENSION_ZIP` in `scripts/write-cloudflare-web-routing.mjs`, then publish `origin/main` as usual. Keep `download/extension.zip` (Vercel fallback) and the `vercel.json` header version in step. The R2 Worker `pokoin-extension-download` has had no routes since the Cloudflare cutover; on 2026-10-05 the URL was a 404. |
 
-### Recently Seen API (example shared overlay)
+### Shared API change (example: Recently Seen)
 
 ```bash
 # 1) Writer migration (nezopt primary — verify writer host first)
@@ -100,24 +100,13 @@ docker exec -i pokoin-marketplace-postgres-15t \
   psql -U pokoin_marketplace -d pokoin_marketplace -v ON_ERROR_STOP=1 \
   < scripts/sql/090_marketplace_user_recents_game.sql
 
-# 2) Pi API overlay from origin/main
-scripts/deploy-recents-api.sh
+# 2) Rust API release from origin/main (build steps: RUST_RUNTIME.md)
+scripts/deploy-pokoin-rust.sh
 
 # 3) Web SPA (separate)
 scripts/deploy-web.sh
 ```
 
-### Marketplace read overlays (2026-10-02)
-
-Handlers vendored from CardVault into `server/api/` / `server/pokoin-api/`
-are the source of truth for the shared marketplace API — CardVault's
-`pokemon_card_vault/api/` copies are deprecated for API work (ownership and
-the transitional list: [GAMES.md](GAMES.md) "API handler ownership").
-
-```bash
-# Artist desk: tiles=1 identity-once payload + vendored handler/helpers
-scripts/deploy-artist-cards-api.sh
-
-# Seller listings: offset pagination, owner reads skip the Firestore enrich
-scripts/deploy-live-listings-api.sh        # also ships cardtrader-live-listings.js
-```
+Every shared API handler is native Rust in `pokoin-rust/`; the per-handler
+Node overlay scripts were removed with the Node backend (`deploy-scan-api.sh`
+stays as a pokoin-scanner wrapper).

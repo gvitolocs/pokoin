@@ -92,7 +92,7 @@ export function stackPosToIndex(stack, position, stackSize) {
  * Slots inside a box: Location → Stack (divider) → Position.
  * Each row's capture-time snapshot supplies stack, stackSize, and startPosition.
  * Quantity claims consecutive positions; overflowing a stack spills into the next.
- * Mirrors CardVault `_scan_store.js` listing locations.
+ * Mirrors `pokoin-rust/crates/external/src/scan_store.rs` listing locations.
  *
  * `occupiedAbs` (Map of bare box → last absolute index already taken in live
  * inventory) seeds the counter so a late-assigned location continues after

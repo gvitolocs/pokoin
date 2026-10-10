@@ -44,7 +44,7 @@ Schema: CardVault `oracle-postgres/schema/082_scan_connect.sql`.
 | Phone | `scan.pokoin.com/connect` — Oracle peer1 Caddy `file_server` over `/opt/pokoin-cardscan/web` with `rewrite /connect /index.html`; `web/static/scan-connect.js` switches that page to connect mode | Reuses the tuned camera loop, detection and orientation fixes. `scan.pokoin.com/` keeps redirecting accepted scans to the card page. Recognition paths (`/identify`, `/catalogs`, `/health`) proxy to `127.0.0.1:8100` → nezopt worker. The FastAPI `/connect` route in BattleScan `server/app.py` only matters when the app serves `web/` itself (local). |
 | QR | `https://scan.pokoin.com/connect#c=<4 digits>&k=<secret>` | [QR link](#qr-link). Fragment is never sent to a server log. |
 
-## API (CardVault, registered in `server/api-route-manifest.js`, family `scan`)
+## API (native Rust, `pokoin-rust/crates/external`, family `scan`)
 
 | Method + path | Caller / auth | Does |
 | --- | --- | --- |
@@ -238,7 +238,7 @@ Mechanics:
 | --- | --- | --- |
 | Desk SPA | Vercel project `web`; aliases `pokoin.com`, `dashboard.pokoin.com` (+ `onepiece.`, `riftbound.`, …) | `vercel inspect pokoin.com` |
 | `dashboard.pokoin.com` DNS | Cloudflare DNS-only CNAME → `00dae56389d2f4d1.vercel-dns-017.com`; Firebase Auth authorized domain | Cloudflare API; identitytoolkit config |
-| Oracle API | Pi `pi-home`, Docker `pokoin-oracle-api` (`node server/oracle-api-server.js`, net host, port 18080), bind mount `/srv/pokoin/api/current` → `releases/…`; public via `pokoin-api-edge.service` :18079 and the Cloudflare tunnel | `docker inspect`, `ss -ltnp` |
+| API | Pi `pi-home`, native Rust `pokoin-rust-api.service` (`/srv/pokoin/rust/current`; API `127.0.0.1:18082`, public via the Rust edge `:18079` and the Cloudflare tunnel). The Node container `pokoin-oracle-api` is retired. | `systemctl status pokoin-rust-api`, `ss -ltnp` |
 | API reads | `MARKETPLACE_DATABASE_URL` = `127.0.0.1:5432/pokoin_marketplace` — Pi Docker `pokoin-marketplace-postgres-replica`, **hot standby** (`pg_is_in_recovery() = t`) | container env (names/hosts only), psql |
 | API writes (all scan tables) | `MARKETPLACE_WRITER_DATABASE_URL` = `192.168.178.55:25432/pokoin_marketplace` — nezopt Docker `pokoin-marketplace-postgres-15t`, **primary** (`pg_is_in_recovery() = f`) | same |
 | Replication | nezopt → Pi, streaming async, slot `pokoin_pi_replica` | `pg_stat_replication`, `pg_stat_wal_receiver` |
@@ -246,7 +246,7 @@ Mechanics:
 | Phone page | Oracle peer1 (`scan.pokoin.com` A 92.5.153.117), Caddy | `/etc/caddy/Caddyfile` |
 | Recognition | nezopt `battlescan-fast` 127.0.0.1:8099, reached from peer1 via 127.0.0.1:8100 | `cardscan.pokoin.com/health` → worker `nezopt` |
 
-Scan state is read and written on the **writer** (`_scan_store.js` uses the
+Scan state is read and written on the **writer** (`scan_store.rs` uses the
 writer pool for every query): a stream reading the replica would miss the row
 it was just told about. The 6 Sep 2026 note that the Pi became primary is
 superseded by this table.
@@ -257,7 +257,7 @@ All from nezopt, in order; each step verifies itself.
 
 ```bash
 scripts/deploy-scan-connect.sh migrate   # 082 + grants on the primary, waits for the Pi replica
-scripts/deploy-scan-connect.sh api       # Pi release = live release + scan files, restart, health, auto-rollback
+scripts/deploy-pokoin-rust.sh            # Rust release (scan APIs included), health-checked, auto-rollback
 scripts/deploy-scan-connect.sh scanner   # peer1 backup, files, Caddy /connect rewrite, public check
 scripts/deploy-web.sh                    # pokoin-web from origin/main (docs/DEPLOY.md)
 ```
@@ -265,7 +265,7 @@ scripts/deploy-web.sh                    # pokoin-web from origin/main (docs/DEP
 | Step | What it touches | Rollback |
 | --- | --- | --- |
 | migrate | `scan_batches`, `scan_sessions`, `scan_pairings`, `scan_rate_limits`, `scan_items`; `marketplace_user_listings.location`, `.altered`, unique index `marketplace_user_listings_scan_row_uidx`. Idempotent (`if not exists`). | Additive; leave in place. |
-| api | 13 files: `api/_scan_*.js`, `api/scan-*.js`, `api/marketplace-listings.js`, `server/api-route-manifest.js`, the 082 SQL; `server/api-route-families.js` keeps the live file plus the scan rule only | `scripts/deploy-scan-connect.sh rollback-api` (symlink back to `.scan-connect-previous`) |
+| api | The Rust release (`pokoin-rust/crates/external`: `scan_connect.rs`, `scan_store.rs`, `routes/scan.rs`) | `scripts/install-pokoin-rust.py` restores the previous binary on a failed health check ([RUST_RUNTIME.md](RUST_RUNTIME.md#rollback)) |
 | scanner | peer1 `web/index.html`, `web/static/scan-connect.js`, `server/app.py`; Caddy rewrite in the `scan.` and `cardscan.` blocks | `rollback-scanner` (backup in `/opt/pokoin-cardscan/.backups/<stamp>-scan-connect`); Caddy backup `/etc/caddy/Caddyfile.bak-scan-connect-*` |
 | web | Vercel production | [DEPLOY.md](DEPLOY.md#commands) |
 
@@ -281,7 +281,7 @@ scripts/deploy-web.sh                    # pokoin-web from origin/main (docs/DEP
 | Desk stuck on "Connection lost" | Phone heartbeat not arriving: phone offline or token revoked (`scan_sessions.status`) |
 | Rows never appear on the desk | `GET https://api.pokoin.com/api/scan-stream?batchId=…&after=0` with the bearer; `scan_items.seq` vs stream cursor |
 | `scan.pokoin.com/connect` 404 | Caddy rewrite missing — `grep "rewrite /connect" /etc/caddy/Caddyfile` on peer1 |
-| API 500 on scan routes | `docker logs pokoin-oracle-api` on the Pi; writer reachable from the Pi (`192.168.178.55:25432`) |
+| API 500 on scan routes | `journalctl -u pokoin-rust-api` on the Pi; writer reachable from the Pi (`192.168.178.55:25432`) |
 
 ## Local development
 
@@ -308,12 +308,10 @@ The dev server's fake auth (`Bearer seller:<uid>`) only exists with
 | Path | Role |
 | --- | --- |
 | CardVault `oracle-postgres/schema/082_scan_connect.sql` | Tables, trigger, listing columns |
-| CardVault `api/_scan_connect.js` | Pure rules: PIN, tokens, classification, snapshot pick, merge key, validation |
-| CardVault `api/_scan_store.js` | SQL (writer), transactions, rate limits |
-| CardVault `api/_scan_bus.js` | In-process change bus |
-| CardVault `api/_scan_http.js` | CORS, auth helpers, client IP |
-| CardVault `api/scan-session.js`, `scan-pair.js`, `scan-phone.js`, `scan-batch.js`, `scan-stream.js` | Handlers |
-| CardVault `api/_scan_connect.test.js`, `api/scan-connect.integration.test.js` | Tests |
+| `pokoin-rust/crates/external/src/scan_connect.rs` | Pure rules: PIN, tokens, classification, snapshot pick, merge key, validation (ported from CardVault `api/_scan_connect.js`) |
+| `pokoin-rust/crates/external/src/scan_store.rs` | SQL (writer), transactions, rate limits |
+| `pokoin-rust/crates/external/src/routes/scan.rs` | Handlers: `scan-session`, `scan-pair`, `scan-phone`, `scan-batch`, `scan-stream` |
+| `cargo test -p pokoin-external` (in `pokoin-rust/`) | Tests |
 | `market/src/pages/ScanDesk.jsx`, `market/src/scan-*.js`, `market/src/scan-desk.css` | Desktop |
 | BattleScan `web/static/scan-connect.js`, `web/index.html`, `server/app.py` (`/connect`) | Phone |
 | CardVault `oracle-postgres/schema/082_scan_connect.grants.sql` | Grants for the API writer role |
@@ -324,8 +322,9 @@ The dev server's fake auth (`Bearer seller:<uid>`) only exists with
 
 ## Complete artwork printing choices and acknowledged diagnostics
 
-The scan rules, persistence adapter and phone handler are now owned in
-`server/pokoin-api/{_scan_connect,_scan_store,_scan_http,_scan_diagnostics,scan-phone}.js`.
+The scan rules, persistence adapter and phone handler are native Rust in
+`pokoin-rust/crates/external/src/` (`scan_connect.rs`, `scan_store.rs`,
+`routes/scan.rs`); the diagnostics half described below is not ported yet.
 The deployed phone source is `pokoin-scanner/service/web/`, imported from the deployed
 phone baseline, including the printing picker and manual shutter. BattleScan
 continues to run the recognition worker; it is no longer the deploy source
@@ -359,6 +358,11 @@ an explicit field allowlist, logs `scan-diagnostic` JSON and acknowledges record
 sequences. Retry batches are deduplicated by session + client run + sequence.
 No image bytes, credentials or request bodies are logged.
 
+**Since the Rust cutover (2026-10-09) the server side of this is not running:**
+the native heartbeat does not log or acknowledge diagnostics, so the phone shows
+**Logs unavailable** and keeps records pending (see
+[rust-migration/NODE_REMAINING.md](rust-migration/NODE_REMAINING.md)).
+
 Pending records survive reloads in `pokoin.scanDiagnostics.v2` (bounded to 2048
 pending records); heartbeat acknowledgment removes only received records.
 The connected phone shows **Logs active** after server confirmation,
@@ -368,21 +372,17 @@ previous 30-minute image-log experiment. Reload the phone to load the versioned
 scripts. A canvas exception also logs the failure and schedules the next live
 scan instead of stopping the loop.
 
-After explicit push/deploy authorization, integrate the fix onto origin/main
-and run `scripts/deploy-scan-printings-diagnostics.sh all <commit>` on nezopt.
-It requires the exact pushed origin/main commit, stages its files from Git,
-ships only the owned scan API files into a copy of the live API release, and
-backs up the phone files before installing versioned scripts. API/scanner
-verification failures restore their respective previous release/files.
-`deploy-scan-connect.sh api|scanner` delegates to this guarded deployment.
+After explicit push/deploy authorization, the API side ships in the Rust
+release (`scripts/deploy-pokoin-rust.sh`) and the phone side with
+`scripts/deploy-scan-printings-diagnostics.sh scanner <scanner-commit>`, which
+delegates to pokoin-scanner's guarded deployment (backup, versioned scripts,
+restore on failed verification).
 
 Validation:
 
 ```bash
-node --test server/pokoin-api/_scan_connect.test.js \
-  server/pokoin-api/scan-printings-diagnostics.test.js \
-  server/pokoin-api/scan-phone.test.js \
-  ../pokoin-scanner/service/tests/scan-connect.test.cjs ../pokoin-scanner/service/tests/scanner-ui.test.cjs
+(cd pokoin-rust && cargo test -p pokoin-external)
+node --test ../pokoin-scanner/service/tests/scan-connect.test.cjs ../pokoin-scanner/service/tests/scanner-ui.test.cjs
 PLAYWRIGHT_CORE=/home/nez/Projects/pokemon-card-extension/node_modules/playwright-core \
   node --test ../pokoin-scanner/service/tests/scan-phone.browser.test.cjs
 ```

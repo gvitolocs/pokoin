@@ -27,15 +27,15 @@ collision stamped fake rarities on artist desks until artist rarity joined
   pages (`scripts/fill-missing-artists-from-pkmncards.js`), CLIP same-art copy
   (`marketplace_copy_same_art_artists` in `scripts/sql/068_same_art_copy_artists.sql`)
   **insert here**. Never write `candidates.artist` from those jobs.
-- Artist desk SQL (`server/api/marketplace-artist-cards.js` here — the
-  CardVault `pokemon_card_vault/api/` copy is deprecated; see
-  [GAMES.md](GAMES.md) API ownership) groups by `normalized_artist` and
+- Artist desk SQL (`pokoin-rust/crates/catalog-api/src/reads/artist_cards.rs`
+  — the Node handlers are retired; see [GAMES.md](GAMES.md) API ownership)
+  groups by `normalized_artist` and
   leftover `versions.blueprint_id = artist.blueprint_id`.
 - `GET /api/marketplace-artist-cards?tiles=1` (the SPA artist desk) serves
   the artist/profile identity once via a one-row lookup and drops the
   per-row identity columns and the profiles join — the desk payload drops
   from ~6.2 MB to ~3.7 MB decoded. `summaries=1` answers the artists index.
-  Deploy with `scripts/deploy-artist-cards-api.sh`.
+  Ships in the Rust release (`scripts/deploy-pokoin-rust.sh`).
 
 **`marketplace_search_candidates.artist` / `.illustrator`** — display cache
 (`scripts/sql/073_candidates_artist.sql`).

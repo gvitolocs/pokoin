@@ -280,8 +280,9 @@ NOT verified (stated plainly, also in commerce-coverage.json):
 
 5. NOTES FOR THE NEXT AGENT
 ---------------------------
-* Vendored shipping catalog (assets/shipping-rates.json) is byte-identical to
-  server/pokoin-api/shipping-rates.json; refresh both together.
+* Vendored shipping catalog (assets/shipping-rates.json) was byte-identical to
+  the Node copy; since the Node backend's removal, scripts/sync-shipping-rates.py
+  writes it directly (with the SPA copy).
 * WPKN_USD_PRICE_OVERRIDE / CRYPTO_PKN_<ASSET>_USD_PRICE / WPKN_EXCHANGE_* are
   honoured, so quotes are testable without network access.
 * Stripe webhook verification uses the documented scheme

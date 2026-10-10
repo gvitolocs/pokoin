@@ -33,10 +33,9 @@ matching, fabricated condition prices or synthetic sales are introduced.
 
 Validation: six API/helper tests, compiled inventory JSX, real read-only latest
 and historical database queries for Mew (2 variants, 1,858 observations), and
-rejected reader UPDATE. The deployment script includes the helper and history
-handler, and the route manifest declares the new endpoint. Deploy the API with
-`scripts/deploy-price-check-api.sh` and the SPA with `scripts/deploy-web.sh`
-from the exact pushed `origin/main` commit.
+rejected reader UPDATE. The history handlers are native Rust
+(`pokoin-rust/crates/catalog-api/src/sales`; price check in `crates/external`). Deploy the API with `scripts/deploy-pokoin-rust.sh`
+and the SPA with `scripts/deploy-web.sh` from the exact pushed `origin/main` commit.
 
 The existing card desk and its CardTrader inferred-sale graph retain their
 layout and source contract from `docs/MARKET.md`. Imported listing asks and
@@ -75,9 +74,8 @@ USD decimal strings. It reuses the existing explicit product crosswalk and
 point. Existing `marketplace-card-sales` behavior is unchanged. The authenticated
 TCGplayer inventory history route remains available independently.
 
-Deploy through `scripts/deploy-price-check-api.sh` from the exact integrated
-`origin/main` commit; it includes both helpers, the public handler, route manifest
-and their tests. TCGCSV reader configuration is optional to the CardTrader feed.
+Deploy through `scripts/deploy-pokoin-rust.sh` from the exact integrated
+`origin/main` commit. TCGCSV reader configuration is optional to the CardTrader feed.
 
 The inventory pricer also resolves CardTrader identities through the exact public
 candidate mapping. Its listed-ask and sold-median queries use mapped blueprint

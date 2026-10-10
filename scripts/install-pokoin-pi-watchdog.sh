@@ -23,8 +23,7 @@ StartLimitIntervalSec=0
 EOF
 }
 
-dropin pokoin-api-edge.service
-dropin pokoin-card-images.service
+dropin pokoin-rust-api.service
 dropin cloudflared.service
 dropin ssh.service
 dropin docker.service
@@ -54,7 +53,7 @@ sysctl -p /etc/sysctl.d/99-pokoin-panic.conf >/dev/null 2>&1 || true
 
 if command -v docker >/dev/null; then
   systemctl enable docker.service >/dev/null 2>&1 || true
-  for name in pokoin-marketplace-postgres-replica pokoin-oracle-api pokoin-redis pokoin-rust-api; do
+  for name in pokoin-marketplace-postgres-replica pokoin-redis; do
     docker update --restart always "$name" 2>/dev/null || true
   done
 fi
@@ -64,7 +63,7 @@ systemctl enable ssh.service >/dev/null 2>&1 || systemctl enable sshd.service >/
 systemctl enable --now pokoin-pi-watchdog.timer
 systemctl enable --now pokoin-pi-ro-watch.service
 systemctl start pokoin-pi-watchdog.service || true
-for unit in pokoin-api-edge.service pokoin-card-images.service cloudflared.service; do
+for unit in pokoin-rust-api.service cloudflared.service; do
   systemctl reset-failed "$unit" 2>/dev/null || true
   systemctl start "$unit" 2>/dev/null || true
 done

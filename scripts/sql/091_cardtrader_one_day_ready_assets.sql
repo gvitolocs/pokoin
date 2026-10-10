@@ -1,7 +1,7 @@
 -- CardTrader 1-Day Ready inventory: seller dashboard assets, never Pokoin listings.
 -- A 1-Day Ready account's stock sits in CardTrader's warehouse and CardTrader
--- sells and ships it, so the inventory sync (server/pokoin-api/
--- _cardtrader_inventory_sync.js) mirrors it here instead of creating
+-- sells and ships it, so the inventory sync (pokoin-rust/crates/external/
+-- src/cardtrader/sync.rs) mirrors it here instead of creating
 -- marketplace_user_listings rows. Additive; applied on the nezopt writer
 -- (pokoin-marketplace-postgres-15t), Pi replica follows. Owned by
 -- gvitolocs/pokoin (scripts/sql), like 089.

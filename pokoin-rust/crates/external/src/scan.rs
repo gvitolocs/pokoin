@@ -1,6 +1,6 @@
 //! HTTP adapter to the Pokoin recognition workers (YOLO + Milo).
 //!
-//! Faithful port of `server/pokoin-api/scan-identify.js`: nezopt GPU first
+//! Faithful port of the retired Node `scan-identify.js`: nezopt GPU first
 //! (`SCAN_PRIMARY_URL`, default `http://127.0.0.1:18151`), then the Pi CPU
 //! worker (`SCAN_FALLBACK_URL`, default `http://127.0.0.1:18150`). A primary
 //! failure starts a cooldown so every later scan does not pay its timeout.

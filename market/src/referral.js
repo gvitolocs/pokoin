@@ -1,7 +1,7 @@
 /**
  * Invite & Earn (everyone): share pokoin.com/join/<username>; when the invited
  * collector registers and completes a first purchase or first sale, both sides
- * get REFERRAL_REWARD_PKN. The server (server/pokoin-api/_referral_core.js)
+ * get REFERRAL_REWARD_PKN. The server (pokoin-rust/crates/accounts/src/domain/referral.rs)
  * owns the rules and pays from the Pokoin treasury; this module only carries
  * the invite code from the link to the signed-in claim.
  */

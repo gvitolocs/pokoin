@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import test from 'node:test';
 import {
   albumShade,
@@ -16,8 +15,17 @@ import {
   themeForBucket,
 } from './art-shade.js';
 
-const require = createRequire(import.meta.url);
-const { buildVisualTheme } = require('../../server/api/_card_visual_theme.js');
+// The API's color matrix (pokoin-rust/apps/api/src/visual_theme.rs tests it too).
+const SERVER_THEMES = new Map(
+  JSON.parse(fs.readFileSync(new URL('../../pokoin-rust/apps/api/fixtures/theme-contract.json', import.meta.url), 'utf8'))
+    .map((row) => [row.shade, row.expected]),
+);
+
+function buildVisualTheme(hex) {
+  const theme = SERVER_THEMES.get(hex);
+  assert.ok(theme, `${hex} is not in theme-contract.json`);
+  return theme;
+}
 
 function luminance(hex) {
   const body = hex.slice(1);
@@ -25,6 +33,15 @@ function luminance(hex) {
   const linear = channels.map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
   return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
 }
+
+test('every desk theme matches the API color matrix', () => {
+  for (const [hex, server] of SERVER_THEMES) {
+    const theme = deskThemeFromShade(hex);
+    for (const field of ['background', 'surface', 'surfaceRaised', 'hero', 'heroBorder', 'border', 'tint']) {
+      assert.equal(theme[field], server[field], `${hex} ${field}`);
+    }
+  }
+});
 
 test('album shade only accepts a saved leftover hex', () => {
   assert.equal(albumShade({ art_shade: '#3a2c18' }), '#3a2c18');

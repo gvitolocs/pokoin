@@ -12,7 +12,7 @@ PRIMARY_CONTAINER="${PRIMARY_CONTAINER:-pokoin-marketplace-postgres-15t}"
 REPLICA_CONTAINER="${REPLICA_CONTAINER:-pokoin-marketplace-postgres-replica}"
 DB_USER="${DB_USER:-pokoin_marketplace}"
 DB_NAME="${DB_NAME:-pokoin_marketplace}"
-API_CONTAINER="${API_CONTAINER:-pokoin-oracle-api}"
+API_UNIT="${API_UNIT:-pokoin-rust-api.service}"
 STAGE="$(mktemp -d /tmp/pokoin-ct-sale-dedupe-XXXXXX)"
 trap 'rm -rf "$STAGE"' EXIT
 
@@ -27,9 +27,10 @@ replica_sql() {
 }
 
 writer_url_parts() {
-  # Container name is a trusted local deployment parameter expanded locally.
+  # The running Rust API's environment (the env file after systemd unquoting).
+  # Unit name is a trusted local deployment parameter expanded locally.
   # shellcheck disable=SC2029
-  ssh pi-home "tr '\0' '\n' < /proc/\$(docker inspect -f '{{.State.Pid}}' '$API_CONTAINER')/environ" \
+  ssh pi-home "pid=\$(systemctl show -p MainPID --value '$API_UNIT'); [ \"\$pid\" -gt 0 ] && tr '\0' '\n' < /proc/\$pid/environ" \
     | sed -nE 's#^MARKETPLACE_WRITER_DATABASE_URL=[a-z]+://([^:@/]+)[^@]*@([^/?]+)/([^?]*).*#\1 \2 \3#p' \
     | head -1
 }

@@ -1,5 +1,7 @@
 # Meili `effective_print_bucket` (print-universe filter)
 
+> **Rollback only.** Production search runs on Redis Search (`MARKETPLACE_SEARCH_ENGINE=redis`); the Meili containers are kept for rollback and nothing syncs them. The Meili sync scripts lived in the retired Node release and are not in this repository.
+
 ## Why
 
 Typeahead / search print chips (Western / Japanese / Korean / Chinese) are a
@@ -46,9 +48,9 @@ node -e "const {meiliRequest}=require('./api/_meili_client'); const {meiliMarket
 node scripts/meili-sync-marketplace-full.js
 ```
 
-Delta sync (`meili-sync-marketplace-delta.js`) also uses
+The retired Node delta sync also used
 `MARKETPLACE_MEILI_SYNC_SELECT` / `mapMarketplaceMeiliDoc`, so ongoing updates
-pick up the new fields after the full pass.
+picked up the new fields after the full pass.
 
 ## Revert
 

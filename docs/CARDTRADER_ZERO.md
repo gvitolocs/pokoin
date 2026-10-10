@@ -77,6 +77,6 @@ is encrypted and why it can be deleted.
 
 ## Deploy
 
-All four runtime files ship in `scripts/deploy-cardtrader-sync-api.sh` (with
-`_cardtrader_zero.test.js` and `powertools-connect.test.js`). The script health-checks
-both new routes for `401` without a bearer. The SPA page ships with the web deploy.
+Both routes ship in the Rust release (`pokoin-rust/crates/external`: `cardtrader/zero.rs`,
+`powertools.rs`; `scripts/deploy-pokoin-rust.sh`). Without a bearer each answers `401`.
+The SPA page ships with the web deploy.

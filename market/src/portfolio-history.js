@@ -3,7 +3,7 @@
  *
  * The API stores one point per UTC day: wallet PKN (liquidity) plus the
  * seller's cards marked at each printing slice's last sold median, carried
- * forward on days without a sale (server/pokoin-api/_portfolio_history_core.js).
+ * forward on days without a sale (pokoin-rust/crates/accounts/src/domain/portfolio_history.rs).
  * This module slices that series into a window, lays the window out on a
  * day scale with a projection third, and fits the projection.
  */

@@ -16,7 +16,7 @@
 | Seller country | Profile `shipFromCountry` (ISO-2). Empty profiles are seeded from request IP (`CF-IPCountry` / Vercel / CloudFront) when that code is an allowed EU sell-from country; otherwise the seller must set it on Profile before listing. Native listing insert rejects `EU`. |
 | Saved addresses | `users/{uid}/shipping_addresses/{id}` with `countryCode` plaintext + AES-GCM `encryptedPayload`. |
 | Encryption | `ADDRESS_ENCRYPTION_KEY` (32 bytes) on API host; ops mirror on InPhysical — never Firebase. Pattern matches CardTrader token crypto. |
-| Shipping tables | `server/pokoin-api/shipping-rates.json` (+ SPA copy). Built by `scripts/sync-shipping-rates.py` from **PackZoo** + **porto-data** + **dao.as/brev** letter grids (smoke-tested each run; cheapest non-express wins; no manual overrides). Quote **fails closed** when no row matches. `EXTRA_LARGE` is the ~20 kg Flex bag/trunk tier; seller packs up to 200 cards use `LARGE`. `/flex` models N sellers sharing one bag; home delivery is one warehouse hop. |
+| Shipping tables | `pokoin-rust/crates/commerce/assets/shipping-rates.json` (compiled into the API) + SPA copy. Built by `scripts/sync-shipping-rates.py` from **PackZoo** + **porto-data** + **dao.as/brev** letter grids (smoke-tested each run; cheapest non-express wins; no manual overrides). Quote **fails closed** when no row matches. `EXTRA_LARGE` is the ~20 kg Flex bag/trunk tier; seller packs up to 200 cards use `LARGE`. `/flex` models N sellers sharing one bag; home delivery is one warehouse hop. |
 
 | Orders | Firestore `orders` with `shipments[]`, `totalEURCents`, encrypted immutable address snapshot. |
 | Connect | Sellers can finish Stripe Connect later. Buyer EUR pay only needs seller `shipFromCountry`. Connect Transfers run after delivery when the seller is `READY` (account resolved at payout time). |
@@ -44,7 +44,7 @@ card stayed on Shop. A cancelled Stripe tab also left a forever-open `eur_*` ord
 | Paid after the hold was released | Stock is taken again; if it's gone, `fulfillmentStatus: needs_refund` (ops refunds). |
 | `completed` with `payment_status: unpaid` | `processing`; hold kept until `async_payment_succeeded` / `async_payment_failed`. |
 | `checkout.session.expired`, buyer Cancel, `async_payment_failed` | Hold released exactly once; order `expired` / `cancelled` / `failed`; Orders says "not charged". |
-| `pokoin-eur-orders-sweep.timer` (5 min) | Expires stale sessions and releases (also pre-hold legacy sessions with Stripe's 24 h default), recovers paid sessions whose webhook was missed, resumes partial fulfilment. |
+| `pokoin-rust-job-eur-orders-sweep.timer` (5 min) | Expires stale sessions and releases (also pre-hold legacy sessions with Stripe's 24 h default), recovers paid sessions whose webhook was missed, resumes partial fulfilment. |
 
 Stripe must send `checkout.session.expired`, `checkout.session.async_payment_succeeded`
 and `checkout.session.async_payment_failed` to `/api/stripe-webhook` (the sweep
@@ -80,7 +80,7 @@ covers them if it doesn't).
 Buyers keep their PKN even when paying by card: on an EUR checkout, a buyer's
 `balances/{uid}.availablePkn` applies as a discount against the card charge —
 but only against lines from sellers who accept PKN (PKN-refusing sellers'
-lines and their shipping share are card-only, `_seller_pkn_policy.js`).
+lines and their shipping share are card-only, `pokoin-rust/crates/commerce/src/handlers/seller.rs`).
 
 | | |
 | --- | --- |
@@ -93,8 +93,8 @@ lines and their shipping share are card-only, `_seller_pkn_policy.js`).
 ## Deploy## Deploy
 
 - SPA: normal `scripts/deploy-web.sh` after merge to `origin/main`.
-- API: `scripts/deploy-checkout-eur-api.sh` (addresses, quote, Connect, order session, webhook/orders overlay + route manifest patch).
-- Sweep timer: `scripts/deploy-eur-orders-sweep-timer.sh` after the API deploy (runs a `--dry-run` first).
-- Ensure `ADDRESS_ENCRYPTION_KEY` is set on `pokoin-oracle-api` before first address write.
+- API: the Rust release (`scripts/deploy-pokoin-rust.sh`; addresses, quote, Connect, order session, webhook and orders live in `pokoin-rust/crates/commerce`).
+- Sweep: the native job `pokoin-rust-job@eur-orders-sweep` every five minutes ([RUST_RUNTIME.md](RUST_RUNTIME.md)).
+- Ensure `ADDRESS_ENCRYPTION_KEY` is set in the Pi Rust env (`/srv/pokoin/rust/pokoin-api.env`) before first address write.
 
-Refresh rates with `scripts/sync-shipping-rates.py` (PackZoo + porto-data + dao letters; writes API + SPA JSON). Daily timer: `pokoin-shipping-rates-sync.timer`. Then redeploy checkout API + web.
+Refresh rates with `scripts/sync-shipping-rates.py` (PackZoo + porto-data + dao letters; writes API + SPA JSON). Daily timer: `pokoin-shipping-rates-sync.timer`. The API copy is compiled in, so new rates need a Rust release plus the web deploy.

@@ -14,7 +14,7 @@ Browser (Messages / chat dock)
   → Firebase bearer
   → GET  /api/poko-chat?action=history&before=   (last 20 events; scroll-up loads older)
   → POST /api/poko-chat   { message, cards?, images?, sessionId?, pageContext? }
-  → Pi BFF server/pokoin-api/poko-chat.js
+  → Pi BFF pokoin-rust/crates/accounts/src/handlers/poko_chat.rs
        1) POST Hermes peer1  {POKONTACT_SERVICE_URL}/chat
        2) append user+assistant events to Firestore
   → response includes `events[]` (server ids) and `source`
@@ -52,7 +52,7 @@ loads `docs/poko-knowledge.md` + `docs/poko-behavior-seed.jsonl`, plans with
 the LLM, and may call `POST /api/poko-market` for sold/ask/liquidity tools
 (see [POKO_MARKET.md](./POKO_MARKET.md)).
 
-## Env (Pi `pokoin-oracle-api`)
+## Env (Pi Rust API, `/srv/pokoin/rust/pokoin-api.env`)
 
 | Variable | Role |
 |---|---|
@@ -115,7 +115,7 @@ ssh oracle-peer1 'systemctl restart hermes-poko.service'
 ## Deploy
 
 ```bash
-scripts/deploy-poko-market-api.sh   # ships poko-chat.js + route + poko-market
+scripts/deploy-pokoin-rust.sh       # Rust release: poko-chat + poko-market
 scripts/deploy-web.sh               # Messages / ChatDock SPA
 ```
 

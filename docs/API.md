@@ -1,9 +1,12 @@
 # Pokoin API map
 
-Public marketplace API runtime is **Pi** Docker `pokoin-oracle-api`
-(`/srv/pokoin/api/current` → release overlay). `pokoin.com/api/*` rewrites to
-`https://api.pokoin.com/api/*` — **not** Vercel serverless. Do not add
-`api/*.js` serverless functions in this repo.
+Public marketplace API runtime is one **native Rust** binary on the **Pi**
+(`pokoin-rust-api.service`, `/srv/pokoin/rust/current`): the edge on
+`127.0.0.1:18079` (api.pokoin.com), the API on `127.0.0.1:18082`, the CDN on
+`:18081` and ct-deals on `:18090`. Source: `pokoin-rust/`. Runtime, release
+and rollback: [RUST_RUNTIME.md](RUST_RUNTIME.md). `pokoin.com/api/*` goes to
+`https://api.pokoin.com/api/*` — **not** serverless functions. The Node API
+(`pokoin-oracle-api`) is retired; do not add Node handlers.
 
 ## Clients vs shared backend
 
@@ -32,19 +35,15 @@ runtime does not imply every database lives on the Pi.
 
 | Layer | Location | Notes |
 | --- | --- | --- |
-| Runtime host | Pi `pokoin-oracle-api` | Atomic release dirs under `/srv/pokoin/api/releases/` |
-| Legacy base handlers | Historically shipped from `cardvault/pokemon_card_vault/api` onto the Pi image | **Legacy / transitional.** Inspect as reference; do not add new Pokoin domain features there. |
-| **Shared Pokoin domain APIs (canonical for new work)** | **this repo** `server/pokoin-api/` (+ some `server/api/`) | Overlays onto the live Pi release from `origin/main` |
-| CardTrader market dump | Oracle `cardtrader-oracle-api` | Global marketplace snapshots — not seller inventory |
+| Runtime host | Pi `pokoin-rust-api.service` | Releases under `/srv/pokoin/rust/releases/`, `current` symlink; installer `scripts/install-pokoin-rust.py` |
+| Overflow | nezopt k3s `pokoin-overflow` | Same Rust commit built for x86_64; Cloudflare LB origin (Pi 0.9 / NEZ 0.1). [NEZOPT_OVERFLOW.md](NEZOPT_OVERFLOW.md) |
+| **Shared Pokoin domain APIs** | **this repo** `pokoin-rust/` (route crates under `crates/`, app and jobs in `apps/api`) | Deployed with `scripts/deploy-pokoin-rust.sh` from the exact `origin/main` commit |
+| Retired | Node `pokoin-oracle-api` (CardVault `pokemon_card_vault/api` base + this repo's former `server/` overlays) | Stopped and disabled on 2026-10-09; sources removed from this repo |
+| CardTrader market dump | Oracle `cardtrader-oracle-api` | Global marketplace snapshots — not seller inventory. Still Node: [rust-migration/NODE_REMAINING.md](rust-migration/NODE_REMAINING.md) |
 
-**New shared API functionality belongs in this repo’s `server/pokoin-api/` (or
-`server/api/` for search-style overlays), deployed with the matching
-`scripts/deploy-*-api.sh`.** Do not implement or deploy shared backend
-features from the CardVault app project.
-
-Overlay examples: `scripts/deploy-messages-api.sh`,
-`scripts/deploy-cardtrader-sync-api.sh`, `scripts/deploy-search-api.sh`,
-`scripts/deploy-recents-api.sh`.
+**New shared API functionality belongs in `pokoin-rust/`**, deployed with
+`scripts/deploy-pokoin-rust.sh`. Do not implement or deploy shared backend
+features from the CardVault app project, and do not add Node handlers.
 
 Oracle `pokoin-marketplace` is the CardTrader dump / Postgres **writer**, not the
 public first hop. Topology: [GAMES.md](GAMES.md). Non-Pokemon **ingest** APIs
@@ -67,14 +66,15 @@ Invariant: **CardTrader inventory ⊆ Pokoin inventory**. Pokoin-only listings a
 never modified by reconcile. Incomplete/failed CT exports never trigger
 destructive “missing product” removal (CT has no product-delete webhook).
 Order webhook is the immediate path; the Pi
-`pokoin-cardtrader-seller-reconcile.timer` repairs webhook registration and
+`pokoin-rust-job-cardtrader-seller-reconcile.timer` repairs webhook registration and
 runs a complete-export safety reconcile every five minutes. Full incident,
 idempotency, formal model, and operations:
 [CARDTRADER_SELLER_SYNC.md](CARDTRADER_SELLER_SYNC.md).
 Linked `ct:` quantity changes emit `cardtrader_synced`, not native sold events;
 the CardTrader sold-comps pipeline is the sole sale-price evidence.
 
-Tokens: CardTrader app tokens are RS256 JWTs. `cleanToken` (server) and
+Tokens: CardTrader app tokens are RS256 JWTs. `clean_token`
+(`pokoin-rust/crates/external/src/cardtrader/client.rs`) and
 `market/src/cardtrader-token.js` (Profile panel) drop whitespace, a `Bearer `
 prefix, quotes, and text a password manager filled in before the paste; the
 panel is a masked `type="text"` field (not `type="password"`) and names the
@@ -100,14 +100,9 @@ dashboard shows them as **CardTrader 1-DR** (Portfolio line + panel via
 account (`409 cardtrader_one_day_ready`; the desk disables the CardTrader
 target). Switching back to a normal token re-activates hidden imports.
 
-Deploy note: `scripts/deploy-cardtrader-sync-api.sh` overlays only
-`server/pokoin-api/`. The live E2E harness
-(`scripts/e2e-cardtrader-inventory-sync.sh`) is repo tooling and is **not** part
-of the Pi runtime artifact — a main tip that changes only that script does not
-require an API redeploy.
-After deploying a runtime that includes the periodic runner, install/update
-the Pi timer from the same exact origin/main commit with
-`scripts/deploy-cardtrader-reconcile-timer.sh`.
+Deploy note: the seller sync ships in the Rust release
+(`scripts/deploy-pokoin-rust.sh`); the periodic reconcile is the native job
+`pokoin-rust-job@cardtrader-seller-reconcile` (`deploy/systemd/`).
 
 
 **Navigate live**
@@ -115,22 +110,23 @@ the Pi timer from the same exact origin/main commit with
 | URL | What |
 | --- | --- |
 | `GET /api/__contract` | React/Flutter identity, images, page BFFs, route families |
-| `GET /healthz` | Pipeline: Postgres and Redis are required; Pi CDN is degraded. **503** if Postgres or Redis is down. Not a Node liveness ping. Page BFFs never return `ECONNREFUSED` / `127.0.0.1:5432`; they return **503** `{error:"We are working on a solution."}`. SPA swaps to `WorkingOnIt`. Uptime mail from **nezopt** (`scripts/pokoin-uptime-mail.sh`) goes to `vitologiuseppe17@gmail.com` on down / recovery after **two consecutive** 2-minute samples (so a single CDN `/health` timeout does not spam Gmail). |
+| `GET /healthz` | Pipeline: Postgres and Redis are required; Pi CDN is degraded. **503** if Postgres or Redis is down. Not a liveness ping (that is `/livez`). Page BFFs never return `ECONNREFUSED` / `127.0.0.1:5432`; they return **503** `{error:"We are working on a solution."}`. SPA swaps to `WorkingOnIt`. Uptime mail from **nezopt** (`scripts/pokoin-uptime-mail.sh`) goes to `vitologiuseppe17@gmail.com` on down / recovery after **two consecutive** 2-minute samples (so a single CDN `/health` timeout does not spam Gmail). |
 | `GET /api/__routes` | Every hosted handler + `family` |
 | `GET /api/__routes?group=1` | Same list grouped |
 | `GET /api/__routes?family=page-bff` | One family |
 
-Do not move CardVault `api/*.js` into subfolders. The Pi API maps
-`/api/foo` → `api/foo.js`. Families are `server/api-route-families.js`.
+Routes are registered in `pokoin-rust/apps/api/src/main.rs` and the route
+crates; the opt-in manifest served by `/api/__routes` is
+`pokoin-rust/apps/api/fixtures/route-manifest.json`. `/api/__routes` answers
+only with `POKOIN_EXPOSE_ROUTE_MANIFEST=1`.
 
 **Human docs (contracts; some still live under the legacy CardVault tree)**
 
 - CardVault `pokemon_card_vault/docs/react-api-architecture.md` — contract (legacy location)
 - CardVault `pokemon_card_vault/docs/react-page-apis.md` — home / search / card / set BFFs
-- CardVault `pokemon_card_vault/docs/oracle-api-migration.md` — generated from `server/api-route-manifest.js`
-- CardVault `pokemon_card_vault/docs/api-route-catalog.json` — machine catalog (now includes `family`)
 - CardVault `pokemon_card_vault/docs/pokoin-api.md` — auth examples
-- This repo [GAMES.md](GAMES.md) / [DEPLOY.md](DEPLOY.md) — topology and how to ship overlays
+- This repo [rust-migration/api-route-inventory.json](rust-migration/api-route-inventory.json) — every route the Node runtime served, with params and dependencies
+- This repo [GAMES.md](GAMES.md) / [DEPLOY.md](DEPLOY.md) — topology and how to deploy
 - pokoin-web `docs/ARTISTS.md` — leftover artists PK vs public `card_id` display cache
 
 **Recently Seen (shared)**
@@ -138,8 +134,8 @@ Do not move CardVault `api/*.js` into subfolders. The Pi API maps
 | | |
 | --- | --- |
 | Contract | `GET/PUT/POST /api/marketplace-recents` with **explicit** `game` (`pokemon` \| `one_piece` \| `riftbound`) |
-| Source | `server/pokoin-api/marketplace-recents.js` |
-| Deploy | `scripts/deploy-recents-api.sh` (Pi overlay) |
+| Source | `pokoin-rust/crates/commerce` (`/api/marketplace-recents`) |
+| Deploy | `scripts/deploy-pokoin-rust.sh` |
 | Schema | `scripts/sql/090_marketplace_user_recents_game.sql` on **nezopt writer** only |
 | Auth | Firebase bearer → server uid; never client uid |
 | Isolation | SQL `WHERE user_uid AND game`; cards validated in that game’s catalog |
@@ -195,5 +191,5 @@ the walk completes. [MARKET.md](MARKET.md#set-desk-first-paint). Schema:
 
 - `market/src/api.js` — SPA client
 - `vercel.json` — SPA routes + `/api/*` rewrite
-- `server/pokoin-api/` — shared Pokoin API overlays (messages, CardTrader seller sync, recents, …)
+- `pokoin-rust/` — the shared Pokoin API (native Rust: routes, edge, CDN, jobs)
 - `scripts/sql/` — marketplace SQL applied on the **nezopt writer** primary (`pokoin-marketplace-postgres-15t`). The Pi API reads a streaming replica (`127.0.0.1:5432`). Never migrate or dump-write on the replica.

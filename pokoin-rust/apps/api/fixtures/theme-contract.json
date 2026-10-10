@@ -117,5 +117,56 @@
       "border": "#30384a",
       "tint": "#546693"
     }
+  },
+  {
+    "shade": "#8a8680",
+    "expected": {
+      "version": "v1",
+      "artworkShade": "#8a8680",
+      "artworkIdentity": "artwork-1",
+      "hue": 0,
+      "chroma": 0.01,
+      "background": "#161616",
+      "surface": "#1f1f1f",
+      "surfaceRaised": "#232323",
+      "hero": "#696969",
+      "heroBorder": "#555555",
+      "border": "#383838",
+      "tint": "#717171"
+    }
+  },
+  {
+    "shade": "#4a4244",
+    "expected": {
+      "version": "v1",
+      "artworkShade": "#4a4244",
+      "artworkIdentity": "artwork-1",
+      "hue": 0,
+      "chroma": 0.011,
+      "background": "#151515",
+      "surface": "#1e1e1e",
+      "surfaceRaised": "#222222",
+      "hero": "#4f4f4f",
+      "heroBorder": "#555555",
+      "border": "#383838",
+      "tint": "#5d5d5d"
+    }
+  },
+  {
+    "shade": "#3a5c8a",
+    "expected": {
+      "version": "v1",
+      "artworkShade": "#3a5c8a",
+      "artworkIdentity": "artwork-1",
+      "hue": 256.302,
+      "chroma": 0.085,
+      "background": "#000f46",
+      "surface": "#001956",
+      "surfaceRaised": "#001c5d",
+      "hero": "#3767a7",
+      "heroBorder": "#38567f",
+      "border": "#2c394a",
+      "tint": "#54739d"
+    }
   }
 ]

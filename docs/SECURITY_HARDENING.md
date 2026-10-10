@@ -1,9 +1,10 @@
 # API security hardening (2026-10-07)
 
 Live system: Cloudflare Load Balancer `api.pokoin.com` (pool `pokoin-api`, origins
-`pi` 0.9 / `nez` 0.1, monitor `GET /readyz`). Pi tunnel → edge `127.0.0.1:18079`
-→ Node `127.0.0.1:18080`. NEZ tunnel → cloudflared pods → ClusterIP Service
-`pokoin-api:8080` → API pods. Postgres: NEZ primary `:25433`, Pi streaming
+`pi` 0.9 / `nez` 0.1, monitor `GET /readyz`). Pi tunnel → Rust edge `127.0.0.1:18079`
+→ in-process Rust API (`pokoin-rust-api.service`; the Node API on `127.0.0.1:18080`
+was retired on 2026-10-09). NEZ tunnel → cloudflared pods → ClusterIP Service
+`pokoin-api:8080` → Rust API pods. Postgres: NEZ primary `:25433`, Pi streaming
 replica `127.0.0.1:5432`. Topology and weights were not changed.
 
 ## Transport
@@ -48,12 +49,13 @@ least-privilege role needs a per-route migration (some handlers run
 | Entry | Before | Now |
 | --- | --- | --- |
 | NEZ NodePort `:30880` (old overflow) | LAN-reachable | Service is ClusterIP; k3s no longer publishes the port |
-| Pi Node `:18080` | `0.0.0.0` | `127.0.0.1` (`ORACLE_API_HOST`) |
+| Pi Node `:18080` | `0.0.0.0` | `127.0.0.1` (`ORACLE_API_HOST`); retired 2026-10-09 — every Rust listener (`18079`, `18081`, `18082`, `18090`) binds `127.0.0.1` |
 | Pi Postgres `:5432` | `0.0.0.0` | `127.0.0.1` |
 | Pi LAN surface | 22, 5432, 18080 | 22 only |
 
-The Pi API container is created from `/srv/pokoin/api/container.env` (root, 0600) with
-`-v /etc/pokoin/pg-ca:/etc/pokoin/pg-ca:ro`; deploy scripts keep using `docker restart`.
+The Pi Rust API reads `/srv/pokoin/rust/pokoin-api.env` (root:nes, 0640), seeded from the
+retired container's environment, so its database URLs carry the TLS settings above; releases
+go through `scripts/deploy-pokoin-rust.sh` ([RUST_RUNTIME.md](RUST_RUNTIME.md)).
 
 ## Kubernetes (namespace pokoin-overflow)
 
@@ -74,12 +76,12 @@ The Pi API container is created from `/srv/pokoin/api/container.env` (root, 0600
 
 ## Application
 
-- One client-IP implementation (`server/pokoin-api/_client_ip.js`): proxy headers are honoured
-  only from trusted peers (`POKOIN_TRUSTED_PROXY_CIDRS`: Pi loopback; NEZ pod CIDR, reachable only
-  by cloudflared because of NetworkPolicy). The server entry rewrites the headers so every legacy
-  handler sees the trusted value.
-- One CORS allowlist (`server/pokoin-api/_cors_policy.js`) used by the Pi edge and the Node server on
-  every status code; credentials only for exact Pokoin origins; never `*` with credentials.
+- One client-IP implementation (`pokoin-rust/crates/api-common/src/security.rs`): proxy headers are
+  honoured only from trusted peers (`POKOIN_TRUSTED_PROXY_CIDRS`: Pi loopback; NEZ pod CIDR, reachable
+  only by cloudflared because of NetworkPolicy). The security layer stamps the trusted value into
+  `x-pokoin-client-ip` so every handler sees it.
+- One CORS allowlist (same module) applied around every route on every status code; credentials only
+  for exact Pokoin origins; never `*` with credentials.
 - Invalid Firebase tokens → 401 `Invalid or expired sign-in token.`; verifier outages → 503.
 - `/api/__routes` is off unless `POKOIN_EXPOSE_ROUTE_MANIFEST=1`.
 - Rate limits: security/cost limiters are global in Postgres (`marketplace_rate_limits`), degrade to

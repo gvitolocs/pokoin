@@ -1,6 +1,6 @@
 //! PowerTools-style pricer: strategy validation and target math.
 //!
-//! Faithful port of `server/pokoin-api/marketplace-pricing-strategies.js`
+//! Faithful port of the retired Node `marketplace-pricing-strategies.js`
 //! (sanitizeStrategy / sanitizeSettings / evaluateStrategyTarget /
 //! strategyMatchesRow). Pure functions, no I/O, so the SPA and the server can
 //! share exactly one implementation.

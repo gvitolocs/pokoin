@@ -28,11 +28,10 @@ Every account with a username has an invite link: `pokoin.com/join/<username>`
 
 Settlement runs on every `GET /api/marketplace-referral` for the caller's own
 referrals, and for everyone every 10 minutes from
-`pokoin-referral-reconcile.timer` on the Pi
-(`docker exec pokoin-oracle-api node /app/api/referral-reconcile.js`,
-`--dry-run` counts pending).
+`pokoin-rust-job-referral-reconcile.timer` on the Pi
+(`/srv/pokoin/rust/current job referral-reconcile`; `--dry-run` counts pending).
 
-Guardrails (`server/pokoin-api/_referral_core.js`):
+Guardrails (`pokoin-rust/crates/accounts/src/domain/referral.rs`):
 
 - The invited account must be new: created within **14 days** and no
   qualifying order yet. Old accounts get 409 `not_new`.
@@ -43,15 +42,15 @@ Guardrails (`server/pokoin-api/_referral_core.js`):
 - A treasury balance short of the payout leaves the referral pending (retried next run).
 
 Pages: `/invite` (link, stats, invite list), `/join/:code` (landing →
-Create account). Tests: `server/pokoin-api/_referral_core.test.js`,
-`marketplace-referral.test.js`, `market/src/referral.test.js`.
+Create account). Tests: `cargo test -p pokoin-accounts` (in `pokoin-rust/`)
+and `market/src/referral.test.js`.
 
 ## Ambassador program
 
 Public page: `pokoin.com/ambassadorprogram`. Signed-in visitors see their
 trainer card (tier, mission meter, next unlock).
 
-Missions (`server/pokoin-api/_ambassador_core.js`, copy in
+Missions (`pokoin-rust/crates/accounts/src/domain/ambassador.rs`, copy in
 `market/src/ambassador-program.js`):
 
 | Key | Mission | Verified by |
@@ -96,6 +95,6 @@ royalty desk.
 
 1. Apply `scripts/sql/096_ambassador_program.sql` on the writer (the Pi
    replica streams it).
-2. `scripts/deploy-referral-api.sh <origin/main commit>` — API overlay
-   (referral + associate city), route manifest, reconcile timer.
+2. `scripts/deploy-pokoin-rust.sh` — the Rust release (referral, associate
+   city, reconcile job; [RUST_RUNTIME.md](RUST_RUNTIME.md)).
 3. `scripts/deploy-web.sh <commit>` for the pages.

@@ -17,7 +17,7 @@ API). Do not alias `api.pokoin.com` here.
 | Code | `/home/ubuntu/cardtrader-oracle-api/current` ← rsync of `cardvault/pokemon_card_vault` |
 | Env | `/home/ubuntu/cardtrader-oracle-api/.env` (mode 600, not in git) |
 | Listen | `0.0.0.0:18080` on the Oracle VM only |
-| Process | `node server/oracle-api-server.js` (full route manifest) |
+| Process | `node server/oracle-api-server.js` from the CardVault tree (full route manifest). Still Node: [rust-migration/NODE_REMAINING.md](rust-migration/NODE_REMAINING.md) |
 | `/healthz` `service` | `cardtrader-oracle-api` (`POKOIN_API_SERVICE_NAME`) |
 | Postgres | nezopt NVMe through reverse tunnel `127.0.0.1:15543` → `127.0.0.1:25432`. `MARKETPLACE_DATABASE_SSL=0` |
 | Health skips | `PIPELINE_HEALTH_SKIP=redis,cdn` — cache and CDN belong to the Pi public API. `ok` follows **postgres** (NVMe via tunnel). |
@@ -26,8 +26,8 @@ Redis on this VM is optional local cache. It is separate from Pi `pokoin-redis`.
 
 ## What it is not
 
-- Not the SPA first hop. Vercel `/api/*` → `api.pokoin.com` → Pi
-  `pokoin-oracle-api` `:18080` reading the replica at `127.0.0.1:5432`.
+- Not the SPA first hop. `/api/*` → `api.pokoin.com` → Pi native Rust
+  (`pokoin-rust-api`, edge `:18079`) reading the replica at `127.0.0.1:5432`.
 - Not Oracle Docker Postgres. Persist/SQL is the nezopt NVMe writer
   (the container keeps the historical `15t` name; HDD is rollback only).
 - Not a second CardTrader crawl. One flocked dump at a time.
@@ -50,7 +50,7 @@ JPEGs land on the NVMe leftover tree, not Pi `/srv/pokoin/card-images`. Map:
 Per-game ingest HTTP APIs: Docker `cardtrader-game-ingest-api` on Oracle
 `127.0.0.1:18082` (`/api/ingest/magic`, `/api/ingest/one-piece`, …). They
 write isolated writer DBs. Pokemon is 404 there — public Pokemon stays
-`pokoin-oracle-api` on the Pi. Install:
+on the Pi (native Rust `pokoin-rust-api`). Install:
 `scripts/install-cardtrader-game-ingest-api.sh`. Does not restart a dump.
 
 Wrapper: `/home/ubuntu/pokoin-oracle-api/run-cardtrader-daily-market-refresh-docker.sh`
@@ -102,7 +102,7 @@ nezopt NVMe Postgres :25432     historicization
                        ↓ streaming slot pokoin_pi_replica
 Pi replica :5432               read-only, LAN 192.168.178.55:25432
                        ↓
-api.pokoin.com  (container pokoin-oracle-api)
+api.pokoin.com  (Pi native Rust, pokoin-rust-api)
   GET /api/marketplace-card-sales  →  cardtrader_sold_daily
                        ↓
 Vercel pokoin.com SPA  /api/* rewrite

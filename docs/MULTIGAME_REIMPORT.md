@@ -103,7 +103,7 @@ every new prefix so leftover-id remapping never halves `magic/1234_…`.
 
 ## Per-game ingest APIs (Oracle → 15T writer)
 
-Pokemon public API stays on the Pi (`api.pokoin.com` / `pokoin-oracle-api`).
+Pokemon public API stays on the Pi (`api.pokoin.com`, native Rust `pokoin-rust-api`).
 It is not these routes.
 
 Oracle `cardtrader-game-ingest-api` listens on **127.0.0.1:18082**. Each

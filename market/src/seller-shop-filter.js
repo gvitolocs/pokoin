@@ -1,4 +1,4 @@
-/** Local shop filters. Same rules as marketplace-seller-shop.js, applied to a
+/** Local shop filters. Same rules as the seller-shop API (pokoin-rust/crates/commerce/src/handlers/seller.rs), applied to a
  * book already downloaded for this seller. */
 
 const CONDITION_CODES = {

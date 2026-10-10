@@ -39,7 +39,7 @@ Reads the dump, downloads **missing** files only, rsyncs to `/home/ubuntu/pokoin
 | Card scans | Limitless TPCI PNG | `competitive/scans/{SET}_{NNN}_R_EN.png` |
 | Country flags | HatScripts circle-flags SVG | `competitive/flags/{cc}.svg` |
 
-`pokoin-oracle-cdn-server.js` and the `pokoin-cdn-card-images` Worker
+The Rust CDN (`pokoin-rust/crates/edge/src/cdn.rs`) and the `pokoin-cdn-card-images` Worker
 `keepRawObjectKey` include `competitive/` so those PNG/SVG files are **not**
 rewritten to leftover JPEG. `pokoin.com/card-images/*` is that Worker, which
 fetches the Pi (`cdn.pokoin.com`).

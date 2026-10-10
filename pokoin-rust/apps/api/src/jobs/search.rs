@@ -6,7 +6,7 @@ const PREFIX: &str = "pokoin:card:";
 /// Every row passes `coalesce(projected_at, imported_at, now()) >= since`.
 const FULL_SINCE: &str = "1970-01-01T00:00:00.000Z";
 const BATCH: usize = 500;
-// Verbatim FT.CREATE arguments from redis-search-reindex.js.
+// Verbatim FT.CREATE arguments from the retired Node redis-search-reindex.js.
 const INDEX_SCHEMA: &[&str] = &[
     "ON", "HASH", "PREFIX", "1", PREFIX, "STOPWORDS", "0", "SCHEMA",
     "name", "TEXT", "WEIGHT", "5",
@@ -24,7 +24,7 @@ const INDEX_SCHEMA: &[&str] = &[
     "rarity", "TEXT", "NOINDEX",
     "cdn_image_url", "TEXT", "NOINDEX",
 ];
-// Verbatim SELECT from the running redis-search-delta.js.
+// Verbatim SELECT from the retired Node redis-search-delta.js.
 const DELTA_SQL: &str = r#"
     select
       c.card_id::text as card_id,
@@ -190,7 +190,7 @@ async fn delta(
     }
     load(backend, since, dry_run).await
 }
-/// `redis-search-reindex.js`: recreate the index and load every candidate.
+/// Port of the retired Node `redis-search-reindex.js`: recreate the index and load every candidate.
 async fn reindex(backend: &mut impl Backend, index: &str, dry_run: bool) -> Result<usize> {
     ping(backend).await?;
     if !dry_run {

@@ -4,48 +4,37 @@
 >
 > **Superseded in part (2026-10-07):** the edge overflow and NodePort `:30880` are retired. nezopt is a Cloudflare Load Balancer origin (Pi 0.9 / NEZ 0.1) behind its own tunnel; the Service is ClusterIP. Security baseline: [SECURITY_HARDENING.md](SECURITY_HARDENING.md).
 
-`api.pokoin.com` is served by the Raspberry Pi. When many people search at
-once, the Pi's single Node API saturates (~65 suggest req/s, ~25 search-page
-req/s on 2026-09-29). nezopt now carries the overflow.
+`api.pokoin.com` is a Cloudflare Load Balancer (pool `pokoin-api`, monitor
+`GET /readyz`) with two origins, both running the same native Rust release:
 
 ```
-Cloudflare tunnel → Pi pokoin-api-edge :18079 ─┬─ Pi API :18080 (always first)
-                                               └─ nezopt :30880 (k3s) — GET/HEAD only,
-                                                  when the Pi has ≥ LOCAL_MAX in flight
+Cloudflare LB ─┬─ pi  (0.9) → Pi tunnel → Rust edge 127.0.0.1:18079 → in-process API
+               └─ nez (0.1) → NEZ tunnel → cloudflared pods → Service pokoin-api:8080
+                                          → Rust edge in each pod → in-process API
 ```
 
-## How requests are routed
-
-`scripts/pokoin-api-edge.js` on the Pi counts requests in flight to the Pi API.
-
-- Below `POKOIN_API_LOCAL_MAX` (16 — the Pi's p95 stays ≈ 400 ms there): everything goes to the Pi, as before.
-- At or above it: **GET/HEAD** API requests go to nezopt, but only while nezopt
-  answers a real suggest probe every 5 s (2 s timeout).
-- **Writes, webhooks, uploads, checkout** (any other method) always stay on the Pi.
-- If an overflow request cannot connect, it is retried on the Pi and nezopt is
-  marked unhealthy until the next good probe.
-- Every response carries `x-pokoin-origin: pi` or `nezopt`.
-- If nezopt is off, the Pi behaves exactly as before the overflow existed.
-- If the **Pi API refuses the connection** (restart, crash), GET/HEAD requests
-  go to nezopt when it is healthy instead of answering 502.
+The Pi does not forward to nezopt any more; the load balancer splits traffic.
+Writes, webhooks and checkout can land on either origin: both write to the
+nezopt writer Postgres. Runtime details: [RUST_RUNTIME.md](RUST_RUNTIME.md).
 
 ## Edge micro-cache
 
-The edge also caches public GET responses in memory (64 MB LRU,
-`POKOIN_API_CACHE_MB`), for the API's own `s-maxage` (else `max-age`, capped
-at 300 s) plus `stale-while-revalidate`:
+The Rust edge (`pokoin-rust/crates/edge`) caches public GET responses in memory
+(64 MB LRU, `POKOIN_API_CACHE_MB`), for the API's own `s-maxage` (else
+`max-age`, capped at 300 s, `POKOIN_API_CACHE_MAX_TTL`) plus
+`stale-while-revalidate`:
 
 - Only GETs without `Authorization`/`Cookie`; only `200`, `public`, no
   `private`/`no-store`/`no-cache`/`Set-Cookie`, not `text/event-stream`, ≤ 2 MB.
-- Key: path + query + `x-pokoin-game` + `x-pokoin-host`. API responses carry
-  `Access-Control-Allow-Origin: *`, no `Vary` and no compression.
+- Key: path + query + `x-pokoin-game` + `x-pokoin-host`.
 - **Coalescing**: concurrent misses for one key make one upstream request;
   the rest get `COALESCED`. Expired entries inside the SWR window are served
   `STALE` while one refresh runs. This removes the home-feed stampede.
 - Responses that must not be stored are streamed straight through
   (`BYPASS`), and their path skips coalescing for 5 min.
-- Header `x-pokoin-edge-cache: HIT | MISS | STALE | COALESCED | BYPASS`;
-  a per-minute summary line goes to `journalctl -u pokoin-api-edge`.
+- Headers `x-pokoin-edge-cache: HIT | MISS | STALE | COALESCED | BYPASS` and
+  `x-pokoin-origin: rust`; a per-minute `pokoin-api-edge minute` log line
+  (`journalctl -u pokoin-rust-api` on the Pi).
 
 ## What runs on nezopt (Rust, since 2026-10-09)
 
@@ -99,9 +88,10 @@ Rollback to the previous ReplicaSet: `docker exec pokoin-k3s kubectl -n pokoin-o
 
 ## History: the Node overflow (2026-09-29 → 2026-10-09)
 
-The sections above **How requests are routed** and **Edge micro-cache** describe the
-retired Node edge on the Pi. The Rust edge keeps the same micro-cache rules
-(`crates/edge`), and the measurements below are from the Node overflow.
+Until the Rust cutover the Pi ran a Node edge that sent GET/HEAD requests to
+nezopt (NodePort `:30880`, retired 2026-10-07) only when 16 or more requests
+were in flight to the Pi's Node API, and the pods ran the Pi's Node release.
+The measurements below are from that setup.
 
 ## Measured (2026-09-29)
 

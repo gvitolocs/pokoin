@@ -18,7 +18,7 @@ export function cardShadeStyle(card) {
   return shade ? { '--card-shade': shade } : undefined;
 }
 
-// Same OKLCH ladder as server/api/_card_visual_theme.js. The page background
+// Same OKLCH ladder as the API (pokoin-rust/apps/api/src/visual_theme.rs). The page background
 // is the darkest step; panels sit above it; the header is the most chromatic.
 const SRGB_TO_LMS = [
   [0.4122214708, 0.5363325363, 0.0514459929],

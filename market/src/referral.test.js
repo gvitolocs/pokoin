@@ -20,9 +20,9 @@ function memoryStore() {
 }
 
 test('web reward and window match the server', () => {
-  const server = readFileSync(new URL('../../server/pokoin-api/_referral_core.js', import.meta.url), 'utf8');
-  assert.equal(Number(/REWARD_PKN = (\d+)/.exec(server)[1]), REFERRAL_REWARD_PKN);
-  assert.equal(Number(/CLAIM_WINDOW_DAYS = (\d+)/.exec(server)[1]), REFERRAL_CLAIM_WINDOW_DAYS);
+  const server = readFileSync(new URL('../../pokoin-rust/crates/accounts/src/domain/referral.rs', import.meta.url), 'utf8');
+  assert.equal(Number(/pub const REWARD_PKN: i64 = (\d+);/.exec(server)[1]), REFERRAL_REWARD_PKN);
+  assert.equal(Number(/pub const CLAIM_WINDOW_DAYS: i64 = (\d+);/.exec(server)[1]), REFERRAL_CLAIM_WINDOW_DAYS);
 });
 
 test('codes come from /join/<code> or ?ref=', () => {

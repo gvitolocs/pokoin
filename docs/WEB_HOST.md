@@ -10,7 +10,7 @@ subdomains**. DNS records for `onepiece.pokoin.com`, `riftbound.pokoin.com` and
 pokoin-scanner `docs/dns-backup-2026-10-04-retired-subdomains.json`). Links, scan
 catalogs (`pokoin_url`), robots/sitemap and llms.txt all use `https://pokoin.com/...`.
 Old `/{game}/{id}` short links open the card (SPA catch-all, `market/src/shortlink.js`).
-Host checks for those names left in code (`game.js`, `marketplace-recents.js`,
+Host checks for those names left in code (`game.js`, the recents API,
 `workers/*`) are dead paths, not link sources. The vanity redirects `cards.`,
 `cardcaveau.`, `cardvault.`, `forum.`, `wallet.`, `sitemap.` (301 → pokoin.com) remain.
 
@@ -85,9 +85,9 @@ The Cloudflare account is over the 100,000 Worker-script daily cap until **2026-
 
 | Host | Current Target | Notes |
 | --- | --- | --- |
-| `api.pokoin.com` | Pi tunnel → `127.0.0.1:18079` | Unchanged |
+| `api.pokoin.com` | Cloudflare LB: Pi tunnel → Rust edge `127.0.0.1:18079` (0.9), nezopt k3s (0.1) | Native Rust since 2026-10-09 ([RUST_RUNTIME.md](RUST_RUNTIME.md)) |
 | `api2.pokoin.com` | Same Pi origin as `api.pokoin.com` | Unchanged |
-| `cdn.pokoin.com` | Pi → `127.0.0.1:18081` | Unchanged |
+| `cdn.pokoin.com` | Pi → Rust CDN `127.0.0.1:18081` | Native Rust since 2026-10-09 |
 | `test.pokoin.com` | Vercel A `76.76.21.21` (project `web`) | Unchanged; manual alias, not a project domain |
 | `rpc.pokoin.com` | PokoinPoS RPC (health, bootstrap peers, `eth_chainId`) | Unchanged |
 | `explorer.pokoin.com` | Vercel `web` via host rewrite → `/explorer/*` | DNS must be CNAME to `cname.vercel-dns.com` |
@@ -105,19 +105,11 @@ The Vercel project `web` (team `giuseppevitolo17s-projects`) and its environment
 
 ---
 
-## Rust Suggest (Status)
+## API runtime (2026-10-09)
 
-- `suggest` and `search` are 100% Rust at `127.0.0.1:18082` on the Pi edge.
-- Card page, listings, inventory, collections, orders, and SSE are still 100% Node. `card_page` and `listings_write` stay at 0 until those handlers match Node.
-- NEZ k3s has no Rust process. Its search uses the same Redis client as the Pi Node page.
-
----
-
-## nezopt k3s Overflow (Status)
-
-- Extra API pods stayed `ContainerCreating` because the `hostPath` `current` symlink is not a directory.
-- Do **not** document a 4-pod capacity number.
-- Overflow threshold remains **16**. Do not change it in docs as if it were retuned.
+- Every `api.pokoin.com` route, the edge, the CDN, ct-deals and the backend jobs are native Rust on the Pi (`pokoin-rust-api.service`). The Node API, edge and CDN are stopped and their sources were removed from this repo. [RUST_RUNTIME.md](RUST_RUNTIME.md)
+- The nezopt k3s overflow runs the same Rust commit (x86_64) as a Cloudflare Load Balancer origin with weight 0.1. [NEZOPT_OVERFLOW.md](NEZOPT_OVERFLOW.md)
+- The same-origin `/api/*` proxy in `scripts/pokoin-web-origin.mjs` (the stopped Pi web host above) still points at `127.0.0.1:18079`, now the Rust edge.
 
 ---
 

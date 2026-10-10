@@ -58,9 +58,10 @@ catalogs from free public sources. Every Wayback row that matches a source card
 ## Going live
 
 1. Catalog + images imported (table above).
-2. Registry: the game is in `server/pokoin-api/_cardtrader_game_ingest.js`
-   (`source: 'cardmarket'`, `table: 'cardmarket_products'`) and its prefix in
-   `_marketplace_row.js`; ship with `scripts/deploy-multigame-registry-api.sh`.
+2. Registry: the game is in the Rust game registry
+   (`pokoin-rust/crates/api-common/src/game.rs`; CDN prefixes in
+   `crates/catalog-api/src/shared/row.rs`; `git grep -i <an existing game>` in
+   `pokoin-rust/` lists every copy); ship with `scripts/deploy-pokoin-rust.sh`.
 3. Site: add the game to `market/src/game.js` (picker), and keep the slug in the
    `vercel.json`, `image-urls.js`, worker and CDN prefix lists; ship with
    `scripts/deploy-web.sh`. A game is added to `game.js` only once its catalog

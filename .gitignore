@@ -26,5 +26,3 @@ __pycache__/
 # TLC
 specs/states/
 specs/*_TTrace_*
-
-server/node_modules/

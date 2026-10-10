@@ -1,6 +1,6 @@
 //! Client IP country from edge/proxy headers.
 //!
-//! Port of `server/pokoin-api/_client_country.js`: Cloudflare, Vercel,
+//! Port of the retired Node `_client_country.js`: Cloudflare, Vercel,
 //! CloudFront, Fastly and generic geo headers, in that order. `XX`, `T1` and
 //! the EU continent code stay empty so the client opens the international
 //! marketplace instead of guessing.
