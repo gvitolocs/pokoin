@@ -179,6 +179,21 @@ export default function SearchBox(props) {
 
   onSettled(() => subscribeShadeBuckets(() => setShadeTick((n) => n + 1)));
 
+  // The print family the rows are ranked for. It trails the chip by one paint,
+  // like `term` trails the input: the click closes the menu and flips the flag
+  // in a short task, the old rows stay up, and the re-rank runs after that frame.
+  const [rankPrint, setRankPrint] = createSignal(untrack(printLang));
+  createEffect(printLang, (print) => {
+    if (print === untrack(rankPrint)) return undefined;
+    let live = true;
+    afterPaint(() => {
+      if (live) setRankPrint(print);
+    });
+    return () => {
+      live = false;
+    };
+  });
+
   // /marketplace/search?q= keeps the box in sync with the results page.
   createEffect(() => [location.pathname, location.search], ([pathname, search]) => {
     if (pathname !== '/marketplace/search') return;
@@ -206,7 +221,7 @@ export default function SearchBox(props) {
   let pool = null;
   let clock = null;
   createEffect(
-    () => [engine(), term(), searchLang(), printLang(), catalogTab(), pokemon && searchTab() !== 'users'],
+    () => [engine(), term(), searchLang(), rankPrint(), catalogTab(), pokemon && searchTab() !== 'users'],
     ([live, typed, lang, print, kind, enabled]) => {
       if (!live || !enabled) {
         setProgressivePending(false);
@@ -281,7 +296,7 @@ export default function SearchBox(props) {
   // Catalog hydration (name / artist / set printings the local resolver points
   // at), and the satellite-game suggest path (no local catalog).
   createEffect(
-    () => [engine(), term().trim(), searchLang(), printLang(), searchTab()],
+    () => [engine(), term().trim(), searchLang(), rankPrint(), searchTab()],
     ([live, text, lang, , tab]) => {
       if (!text) {
         setOtherPending(false);
@@ -421,14 +436,14 @@ export default function SearchBox(props) {
     if (!live || !live.suggestLiveReady(text) || searchTab() === 'users') return [];
     epoch();
     liveTick();
-    return live.paintCatalogGroups(text, { printLang: printLang(), searchLang: searchLang(), kind: catalogTab() });
+    return live.paintCatalogGroups(text, { printLang: rankPrint(), searchLang: searchLang(), kind: catalogTab() });
   });
   const flat = createMemo(() => flattenPrintings(visibleGroups()));
   // Groups keyed by name: a re-rank inside a group keeps its rows mounted.
   const keyedGroups = createMemo(() => withGroupKeys(visibleGroups()));
   // The one frame where `term` trails the input also reads as pending, never as "no match".
   const suggestPending = () => (pokemon && searchTab() !== 'users'
-    ? progressivePending() || !engine() || term() !== query()
+    ? progressivePending() || !engine() || term() !== query() || rankPrint() !== printLang()
     : otherPending() || term() !== query());
   const suggestVisible = () => open() && liveReady(query()) && (pokemon || visibleGroups().length > 0 || suggestPending());
   const activeOption = () => (activeIndex() >= 0 ? flat()[activeIndex()] : null);

@@ -36,6 +36,7 @@ import {
   clearListingsInflight,
   dropListing,
   invalidateListings,
+  listingsAgeMs,
   listingsFetchEpoch,
   listingsInflightFor,
   mergeCreatedListing,
@@ -55,6 +56,7 @@ import {
   leftoverKeyMatchesCard,
   ownCatalogImage,
   preferFullImage,
+  cdnFetchUrl,
   rasterSiblings,
   rewritePublicImage,
 } from './image-urls.js';
@@ -151,6 +153,39 @@ export async function getJson(path, options = {}) {
   }
 }
 
+/**
+ * Off until the edge compresses c1. Production serves it as
+ * `application/vnd.pokoin.c1+json`, which Cloudflare does not brotli: on
+ * 2026-10-10 the expansion index was 57.7 KB as c1 vs 15.3 KB as brotli JSON
+ * (search-page 13.8 vs 6.2 KB). c1 only wins once the server sends it
+ * compressed (origin brotli, or an `application/json` content type).
+ */
+const C1_READS = false;
+
+/**
+ * Read a big catalogue route in the compact `c1` encoding
+ * (docs/rust-migration/COMPACT_ENCODING.md): 20-45% fewer bytes after brotli,
+ * decoded back to exactly the default JSON, so callers do not change.
+ * `?format=c1` rather than the Accept header: the URL is the cache key at the
+ * edge. Safe either way: a plain JSON answer passes through, and a document
+ * this build cannot decode (a newer dictionary) is read again as JSON.
+ * Decoded rows share interned objects: treat them as read-only.
+ */
+export async function getJsonC1(path, options = {}) {
+  if (!C1_READS) {
+    return getJson(path, options);
+  }
+  const payload = await getJson(`${path}${path.includes('?') ? '&' : '?'}format=c1`, options);
+  if (!isC1(payload)) {
+    return payload;
+  }
+  try {
+    return decodeC1(payload);
+  } catch (_) {
+    return getJson(path, options);
+  }
+}
+
 function isViteDev() {
   try {
     return Boolean(typeof import.meta !== 'undefined' && import.meta.env?.DEV);
@@ -235,7 +270,7 @@ export function fetchSearch({
   // nationality and unknown is not western/japanese/chinese. The page filters
   // the unfiltered window with rowPrintBucket (search-print.js).
   void printLang;
-  return getJson(`/api/marketplace-search-page?${params}`, { signal });
+  return getJsonC1(`/api/marketplace-search-page?${params}`, { signal });
 }
 
 /** Live graded native listings only — not a Meili text search for "graded". */
@@ -244,7 +279,7 @@ export async function fetchGradedCards({ limit = 48, signal } = {}) {
     productCategory: 'graded',
     limit: String(Math.min(240, Math.max(1, Number(limit) || 48))),
   });
-  const rows = await getJson(`/api/marketplace-card-versions?${params}`, { signal });
+  const rows = await getJsonC1(`/api/marketplace-card-versions?${params}`, { signal });
   const cards = (Array.isArray(rows) ? rows : [])
     .map(cardFromCatalogRow)
     .filter((card) => card.id);
@@ -312,7 +347,7 @@ export const fetchNamePrintings = createNamePrintingsFetcher({
   fetchRows: ({ name, lang, limit }) => {
     const params = new URLSearchParams({ query: name, limit: String(limit),
       productType: 'card', search_language: lang });
-    return getJson(`/api/marketplace-card-versions?${params}`);
+    return getJsonC1(`/api/marketplace-card-versions?${params}`);
   },
   mapCard: cardFromCatalogRow,
 });
@@ -690,8 +725,22 @@ export {
   rememberCreatedListing,
 };
 
-export function fetchListings(cardId, { limit = 40, fresh = false } = {}) {
+/**
+ * `fresh` skips the cache. `maxAgeMs` relaxes that for a desk mount: a request
+ * already in flight, or rows fetched within that window (the hover / intent
+ * prefetch), are the fresh read, so the mount does not fetch them again.
+ */
+export function fetchListings(cardId, { limit = 40, fresh = false, maxAgeMs = 0 } = {}) {
   const id = String(cardId || '');
+  if (fresh && maxAgeMs > 0) {
+    const inflight = listingsInflightFor(id);
+    if (inflight) {
+      return inflight;
+    }
+    if (listingsAgeMs(id) <= maxAgeMs) {
+      return Promise.resolve(peekListings(id));
+    }
+  }
   if (!fresh) {
     const cached = peekListings(id);
     if (cached) {
@@ -1098,7 +1147,7 @@ export function fetchArtist(slug, { limit = 240 } = {}) {
     params.set('limit', '20000');
   }
   const pending = fromSnapshot
-    .then((snapshot) => (snapshot?.cards?.length ? snapshot : getJson(`/api/marketplace-artist-cards?${params}`)))
+    .then((snapshot) => (snapshot?.cards?.length ? snapshot : getJsonC1(`/api/marketplace-artist-cards?${params}`)))
     .then((data) => {
       const mapped = {
         ...data,
@@ -1126,7 +1175,7 @@ export function fetchArtistSummaries({ limit = 1000 } = {}) {
     summaries: '1',
     limit: String(limit),
   });
-  return getJson(`/api/marketplace-artist-cards?${params}`).then((data) => {
+  return getJsonC1(`/api/marketplace-artist-cards?${params}`).then((data) => {
     artistSummariesCache = data;
     return data;
   });
@@ -1150,7 +1199,7 @@ export async function fetchExpansions({ limit = 500 } = {}) {
     /* Oracle fallback below */
   }
   try {
-    return await getJson(`/api/marketplace-expansion-page?limit=${encodeURIComponent(String(cap))}`);
+    return await getJsonC1(`/api/marketplace-expansion-page?limit=${encodeURIComponent(String(cap))}`);
   } catch (err) {
     if (cached?.expansions?.length) {
       return { ...cached, expansions: cached.expansions.slice(0, cap) };
@@ -1215,7 +1264,7 @@ export function fetchPrintNationality(slug) {
     return printNationalityInflight.get(key);
   }
   const params = new URLSearchParams({ slug: key, limit: '1' });
-  const pending = getJson(`/api/marketplace-expansion-page?${params}`)
+  const pending = getJsonC1(`/api/marketplace-expansion-page?${params}`)
     .then((data) => {
       const value = String(data?.expansion?.nationality || '').trim();
       printNationalityCache.set(key, value);
@@ -1274,7 +1323,7 @@ export function fetchPromoFanPool(slug) {
         offset: '0',
         productType: 'card',
       });
-      const page = mapExpansionCards(await getJson(`/api/marketplace-expansion-page?${params}`).catch(() => null));
+      const page = mapExpansionCards(await getJsonC1(`/api/marketplace-expansion-page?${params}`).catch(() => null));
       const cards = (page?.cards || []).filter((card) => card?.id);
       promoFanCache.set(key, cards);
       return cards;
@@ -1456,7 +1505,7 @@ function fetchExpansionLive({ slug = '', expansionName = '', limit = 48, offset 
   const pageSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
     ? AbortSignal.timeout(6000)
     : undefined;
-  const fromPage = getJson(`/api/marketplace-expansion-page?${params}`, { signal: pageSignal }).catch(() => null);
+  const fromPage = getJsonC1(`/api/marketplace-expansion-page?${params}`, { signal: pageSignal }).catch(() => null);
   const pending = fromLists.then(async (cached) => {
     // Rail / first SQL page is metadata only. The set desk waits for
     // fetchExpansionCards (hasMore false) before painting tiles.
@@ -1594,14 +1643,31 @@ function slugFromCard(card) {
   return printingSlugFromCanonicalPath(card?.canonicalPath || card?.canonical_path || '');
 }
 
-function preloadCardArt(card) {
+const preloadedArt = new Set();
+
+/** The URL the desk scan requests first (CardArt `full`): preloading any other
+ * spelling of it, or its fallback siblings, is a second download. */
+export function deskArtUrl(card) {
   const src = imageSrc(card, 'hero') || imageSrc(card, 'grid');
-  for (const url of rasterSiblings(src)) {
-    const img = new Image();
-    img.decoding = 'async';
-    img.fetchPriority = 'low';
-    img.src = url;
+  return cdnFetchUrl(rasterSiblings(src, { full: true })[0] || '');
+}
+
+function preloadCardArt(card) {
+  const url = deskArtUrl(card);
+  if (!url || preloadedArt.has(url)) {
+    return;
   }
+  preloadedArt.add(url);
+  if (preloadedArt.size > 256) {
+    preloadedArt.delete(preloadedArt.values().next().value);
+  }
+  if (typeof Image !== 'function') {
+    return;
+  }
+  const img = new Image();
+  img.decoding = 'async';
+  img.fetchPriority = 'low';
+  img.src = url;
 }
 
 export function warmupCard(card, { lang = 'en', listings = false } = {}) {
