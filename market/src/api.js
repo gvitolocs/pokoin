@@ -1,4 +1,5 @@
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
+import { decodeC1, isC1 } from './compact.js';
 import { createExpansionCardsFetcher } from './expansion-cards.js';
 import { createNamePrintingsFetcher } from './name-printings.js';
 import { resolveExpansionNationality } from './expansion-print.js';
@@ -1053,7 +1054,13 @@ export function fetchArtist(slug, { limit = 240 } = {}) {
     // to send before the API ships.
     tiles: '1',
   });
-  const pending = getJson(`/api/marketplace-artist-cards?${params}`)
+  // The whole artist (no cap) comes from its snapshot; the live route is the fallback.
+  const fromSnapshot = limit >= 1000 ? fetchListSnapshot('artist', slug) : Promise.resolve(null);
+  if (limit >= 5000) {
+    params.set('limit', '20000');
+  }
+  const pending = fromSnapshot
+    .then((snapshot) => (snapshot?.cards?.length ? snapshot : getJson(`/api/marketplace-artist-cards?${params}`)))
     .then((data) => {
       const mapped = {
         ...data,
@@ -1302,7 +1309,49 @@ function mergeExpansionPayload(base, page) {
   };
 }
 
-export function fetchExpansion({ slug = '', expansionName = '', limit = 48, offset = 0, onUpdate } = {}) {
+/**
+ * Prebuilt list snapshot (`kind` set or artist): the whole desk with prices,
+ * built on nezopt every 15 min / hourly and served as c1 from one key read.
+ * Null when that list is not built yet; callers then use the live routes.
+ */
+export function fetchListSnapshot(kind, key) {
+  const k = String(key || '').trim().toLowerCase();
+  if (!k) {
+    return Promise.resolve(null);
+  }
+  return getJson(`/api/marketplace-list?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(k)}&format=c1`)
+    .then((payload) => (isC1(payload) ? decodeC1(payload) : payload))
+    .catch(() => null);
+}
+
+/** Set desk page: the whole set from its snapshot, else the live routes. */
+export function fetchExpansion(opts = {}) {
+  const { slug = '', expansionName = '', limit = 48, offset = 0 } = opts;
+  if (offset !== 0 || !slug) {
+    return fetchExpansionLive(opts);
+  }
+  const key = expansionCacheKey({ slug, expansionName, limit, offset });
+  if (expansionCache.has(key)) {
+    return Promise.resolve(expansionCache.get(key));
+  }
+  if (expansionInflight.has(key)) {
+    return expansionInflight.get(key);
+  }
+  const pending = fetchListSnapshot('set', slug).then((snapshot) => {
+    const page = snapshot?.cards?.length ? mapExpansionCards(snapshot) : null;
+    expansionInflight.delete(key);
+    if (!page?.cards?.length) {
+      return fetchExpansionLive(opts);
+    }
+    const data = { ...page, hasMore: false, fromSnapshot: true };
+    expansionCache.set(key, data);
+    return data;
+  });
+  expansionInflight.set(key, pending);
+  return pending;
+}
+
+function fetchExpansionLive({ slug = '', expansionName = '', limit = 48, offset = 0, onUpdate } = {}) {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
