@@ -19,7 +19,7 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 
 use crate::autocomplete::engine::{self, Ctx, EngineError};
-use crate::autocomplete::normalize::{self, compact, locale_cmp};
+use crate::autocomplete::normalize::{self, cmp_f64_nan_last, compact, locale_cmp};
 
 const ENDPOINT: &str = "/api/searchbar-token-predict";
 const DEFAULT_LIMIT: i64 = 5;
@@ -645,11 +645,13 @@ fn display_of(v: &Value) -> String {
     str_or(v, &["display_token", "display"])
 }
 
+/// `num` is NaN for a non-numeric string (client `previous_prediction_context`
+/// can carry one), so the keys sort NaN-last to stay a total order.
 fn compare_tokens(left: &Value, right: &Value, tie: &str) -> std::cmp::Ordering {
-    let diff = |a: f64, b: f64| a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal);
-    diff(num(right.get("confidence")), num(left.get("confidence")))
-        .then_with(|| diff(num(right.get("score")), num(left.get("score"))))
-        .then_with(|| diff(num(left.get(tie)), num(right.get(tie))))
+    let by = |key: &str, descending: bool| cmp_f64_nan_last(num(left.get(key)), num(right.get(key)), descending);
+    by("confidence", true)
+        .then_with(|| by("score", true))
+        .then_with(|| by(tie, false))
         .then_with(|| locale_cmp(&display_of(left), &display_of(right)))
 }
 
@@ -1350,6 +1352,23 @@ mod tests {
         assert_eq!(alias.confidence, 96.0);
         let token = prediction_from_expansion_alias(Some(&alias)).unwrap();
         assert_eq!(token["score"], json!(603000));
+    }
+
+    #[test]
+    fn merge_sorts_non_numeric_confidence_last() {
+        // `num("high")` is NaN; NaN compared Equal to everything made the
+        // comparator non-transitive, which panics `sort_by`.
+        let tokens: Vec<Value> = (0..64)
+            .map(|i| {
+                let confidence = if i % 2 == 0 { json!("high") } else { json!(i) };
+                json!({ "display_token": format!("Token{i}"), "normalized_token": format!("token{i}"), "confidence": confidence, "score": 64 - i })
+            })
+            .collect();
+        let merged = merge_prediction_tokens(&tokens, &[]);
+        assert_eq!(merged.len(), PREDICTION_CONTEXT_MAX_CANDIDATES.min(64));
+        assert_eq!(merged[0]["display_token"], "Token63");
+        let first_nan = merged.iter().position(|t| num(t.get("confidence")).is_nan()).unwrap_or(merged.len());
+        assert!(merged[first_nan..].iter().all(|t| num(t.get("confidence")).is_nan()));
     }
 
     #[test]
