@@ -1,5 +1,6 @@
-const MOVE_MS = 200;
-const EASING = 'cubic-bezier(0.2, 0.8, 0.2, 1)';
+// Slow enough to read as a row climbing the ranking (200 ms looked like a jump).
+export const MOVE_MS = 420;
+const EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 /**
  * How far a row slides after a re-rank: the distance it moved up, or null.
