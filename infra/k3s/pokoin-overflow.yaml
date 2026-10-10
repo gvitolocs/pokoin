@@ -663,7 +663,7 @@ spec:
   successfulJobsHistoryLimit: 1
   suspend: false
 ---
-# Artist desks (all cards, no cap) and versions name lineups: hourly.
+# Artist desks (all cards, no cap) and versions name lineups: weekly (catalog data).
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -783,7 +783,7 @@ spec:
               path: /srv/pokoin-overflow/rust/current
               type: Directory
             name: app
-  schedule: 7 * * * *
+  schedule: 30 4 * * 0
   successfulJobsHistoryLimit: 1
   suspend: false
 ---
