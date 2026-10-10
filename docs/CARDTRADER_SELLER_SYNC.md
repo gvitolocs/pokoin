@@ -46,9 +46,10 @@ Registration health is stored as non-secret `webhookRegistration` metadata on
 the seller integration. Failures do not discard a valid encrypted token, but
 they are no longer silently forgotten. Every periodic run retries registration.
 
-`pokoin-cardtrader-seller-reconcile.timer` runs on `pi-home` every five
-minutes. Its oneshot service uses `flock` to prevent overlap and runs
-`/app/api/cardtrader-reconcile-all.js` inside `pokoin-oracle-api`. Each run:
+`pokoin-rust-job-cardtrader-seller-reconcile.timer` runs on `pi-home` every
+five minutes. Its oneshot service (`pokoin-rust-job@cardtrader-seller-reconcile`)
+uses `flock` to prevent overlap and runs the native job
+`/srv/pokoin/rust/current job cardtrader-seller-reconcile`. Each run:
 
 1. reads enabled CardTrader integrations;
 2. repairs/verifies each seller-scoped webhook URL; and
@@ -56,12 +57,10 @@ minutes. Its oneshot service uses `flock` to prevent overlap and runs
 
 Unchanged product links are not rewritten, keeping frequent safety runs cheap.
 
-Deploy the API first, then the timer:
-
-```bash
-bash scripts/deploy-cardtrader-sync-api.sh <origin-main-commit>
-bash scripts/deploy-cardtrader-reconcile-timer.sh <origin-main-commit>
-```
+The sync ships in the Rust release (`scripts/deploy-pokoin-rust.sh`). The
+five-minute run is the native job `pokoin-rust-job@cardtrader-seller-reconcile`
+(`deploy/systemd/pokoin-rust-job-cardtrader-seller-reconcile.timer`, installed
+by `scripts/cutover-pi-rust.sh`); see [RUST_RUNTIME.md](RUST_RUNTIME.md).
 
 ## Webhook idempotency
 
@@ -119,11 +118,9 @@ the quantity back and voids that row, once, via the claimed event.
 Historic sales are backfilled from CardTrader's seller orders — never from
 "vanished from the export":
 
-```bash
-# dry run (read-only), then --apply
-docker exec -w /app pokoin-oracle-api node /app/api/cardtrader-sales-backfill.js --uid <firebaseUid>
-docker exec -w /app pokoin-oracle-api node /app/api/cardtrader-sales-backfill.js --uid <firebaseUid> --apply
-```
+The backfill was an operator CLI inside the retired Node container
+(`cardtrader-sales-backfill.js --uid <firebaseUid> [--apply]`). It has no Rust
+port yet; see [rust-migration/NODE_REMAINING.md](rust-migration/NODE_REMAINING.md).
 
 Only items sold after the listing was imported count. Linked listings that left
 CardTrader with no seller order are delistings, not sales: `--apply` sets them
@@ -177,8 +174,8 @@ See [`../specs/README.md`](../specs/README.md) for the commands.
 ## Operations
 
 ```bash
-ssh pi-home 'systemctl status pokoin-cardtrader-seller-reconcile.timer --no-pager'
-ssh pi-home 'journalctl -u pokoin-cardtrader-seller-reconcile.service -n 100 --no-pager'
+ssh pi-home 'systemctl status pokoin-rust-job-cardtrader-seller-reconcile.timer --no-pager'
+ssh pi-home 'journalctl -u pokoin-rust-job@cardtrader-seller-reconcile.service -n 100 --no-pager'
 ```
 
 A manual seller sync remains available from the Profile UI or authenticated

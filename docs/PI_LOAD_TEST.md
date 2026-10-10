@@ -1,5 +1,7 @@
 # Pi load test (2026-09-29)
 
+> Measured on the retired Node runtime. The Pi now runs native Rust (`pokoin-rust-api`: edge `:18079`, API `:18082`); the edge micro-cache below carried over into `pokoin-rust/crates/edge`. [RUST_RUNTIME.md](RUST_RUNTIME.md)
+
 Read endpoints hit straight on the Pi API (`127.0.0.1:18080`, bypassing the
 edge), random real card ids / set / artist slugs so no cache helps, 8
 concurrent for 6 s each (`CONC=1` for intrinsic cost). Script and id lists
@@ -33,12 +35,12 @@ Other findings:
 
 Fixes:
 
-1. `scripts/pokoin-api-edge.js`: micro-cache + request coalescing +
+1. The Node edge: micro-cache + request coalescing +
    stale-while-revalidate for public GETs, and GET fallback to nezopt when the
-   Pi API is down (docs/NEZOPT_OVERFLOW.md). Deploy: `scripts/deploy-pokoin-api-edge.sh`.
-2. `server/pokoin-api/marketplace-event.js`: writes via the writer pool,
-   answers 204 before writing, rate-limited failure log.
-   Deploy: `scripts/deploy-marketplace-event-api.sh`.
+   Pi API is down. Now the Rust edge (`pokoin-rust/crates/edge`), without the
+   fallback: the Cloudflare LB splits traffic ([NEZOPT_OVERFLOW.md](NEZOPT_OVERFLOW.md)).
+2. `marketplace-event`: writes via the writer pool, answers 204 before
+   writing, rate-limited failure log. Now in `pokoin-rust/crates/commerce`.
 3. `scripts/pokoin-docker-logrotate.conf`: 50 MB × 3 compressed per container
    log, copytruncate, logrotate hourly. Deploy: `scripts/deploy-pi-logrotate.sh`.
 

@@ -505,7 +505,7 @@ those contradict the live contract. Page BFFs are **GET**.
 | `GET /api/marketplace-expansion-page?limit=` | Sets index (SPA asks 2000). `?slug=` is one set desk. |
 | `POST /api/marketplace-event` | Actions above |
 | `GET/PUT /api/marketplace-cart-sync` | Signed-in `/cart`: cart lines, Saved for later and the gift flag as one account cart (`public.marketplace_user_carts`, nezopt writer, Pi replica reads). PUT carries `baseRev`; a lost race is `409 CART_REV` with the current cart, which the SPA merges and saves once more (`cart-sync.js`). Private, never cached. Signed out or unreachable, the cart stays in the browser. |
-| `GET /api/marketplace-recommendations?cart=&recent=&watch=&sellers=&listings=` | `/cart` carousels for every buyer: Buy it again, More from each cart seller (same parcel), Customers who carried these also carried, Inspired by your browsing history (same artwork / species / name), From artists you like, Trending, watchlist and recently viewed. Only buyable cards, each with the native offer to add. A Bearer adds the account's synced cart, Recently Seen, Poko watchlist snapshot and paid orders. Private, never cached. Pokémon only for now; the SPA keeps its client rails when this fails. Deploy: `scripts/deploy-cart-api.sh` (+ `scripts/sql/101_marketplace_user_carts.sql` on the writer). |
+| `GET /api/marketplace-recommendations?cart=&recent=&watch=&sellers=&listings=` | `/cart` carousels for every buyer: Buy it again, More from each cart seller (same parcel), Customers who carried these also carried, Inspired by your browsing history (same artwork / species / name), From artists you like, Trending, watchlist and recently viewed. Only buyable cards, each with the native offer to add. A Bearer adds the account's synced cart, Recently Seen, Poko watchlist snapshot and paid orders. Private, never cached. Pokémon only for now; the SPA keeps its client rails when this fails. Deploy: the Rust release, `scripts/deploy-pokoin-rust.sh` (+ `scripts/sql/101_marketplace_user_carts.sql` on the writer). |
 
 Same-origin `https://pokoin.com/api/marketplace-suggest` rewrites to
 `https://api.pokoin.com/api/marketplace-suggest`. Omitting `/api` 404s. Do not
@@ -621,8 +621,8 @@ Recently seen is **not** in that cache. Recents are 24 public ids **per
 game**: guest `localStorage pokoin.recentCardIds.{game}` for the list,
 signed-in `GET/PUT/POST /api/marketplace-recents?game=` on the shared Pi
 API (`marketplace_user_recents` PK `(user_uid, game)` on the **nezopt
-writer**). Handler source: `server/pokoin-api/marketplace-recents.js`
-(deploy `scripts/deploy-recents-api.sh`). A Riftbound GET never loads
+writer**). Handler source: `pokoin-rust/crates/commerce`
+(deploy `scripts/deploy-pokoin-rust.sh`). A Riftbound GET never loads
 Pokémon rows. Unscoped legacy localStorage / Firestore lists are **not**
 reseeding. Migration `090` deletes ambiguous unscoped SQL rows (does not
 label them pokemon). Compact tiles:
@@ -1071,13 +1071,13 @@ skipped; that handler prefers `marketplace_rails` then newest/hot SQL.
 
 **Redis on the Pi.** Marketplace cache and Redis Search share
 `pokoin-redis` on the **Pi** (`127.0.0.1:6380`, `scripts/install-pokoin-redis.sh`).
-Canonical client: `server/pokoin-api/_redis_cache.js` (`REDIS_HOST`/`REDIS_PORT`).
+Canonical client: `pokoin-rust/crates/cache` plus the read cache in `pokoin-rust/apps/api/src/read_cache.rs` (`REDIS_HOST`/`REDIS_PORT`).
 Namespaces:
 `pokoin:card:*` (search docs), `pokoin:marketplace:v1:*` (home/card/search/
 seller-shop/CT-live/gen), `pokoin:seller:v1:*` (public profile),
 `pokoin:rl:v1:*`, `pokoin:lock:v1:*`, `pokoin:reference:v1:*`. Listing mutations
-invalidate immediately via `_marketplace_cache_invalidate.js` (plus outbox
-sync). Eviction: `volatile-lru` / `maxmemory 1400mb` so search docs without TTL
+invalidate immediately via `invalidate` in
+`pokoin-rust/crates/commerce/src/listing_sync.rs` (plus outbox sync). Eviction: `volatile-lru` / `maxmemory 1400mb` so search docs without TTL
 are not evicted. Readiness reports `retired: ['meili']`.
 Do **not** put Redis on `pokoin-peer1`. Pi `marketplace_rails` is the SPA source
 of truth.

@@ -56,7 +56,7 @@ id. Live `/scan` uses leftover-JPEG catalogs (`pokemon_generic` /
 | `GET /api/marketplace-suggest` | Meili/Postgres | Multigame suggest |
 | `GET /api/marketplace-portfolio` | Catalog + native PKN overlay | Same handler, isolated DB |
 
-Game resolution order (`cardvault/.../api/_marketplace_game.js`):
+Game resolution order (`pokoin-rust/crates/api-common/src/game.rs`, ported from CardVault `api/_marketplace_game.js`):
 
 1. `?game=` / `marketplaceGame`
 2. `x-pokoin-game` / `x-marketplace-game`
@@ -130,31 +130,22 @@ Pi.
 
 | Piece | Where | Role |
 | --- | --- | --- |
-| `api.pokoin.com` | **pi-home** CF tunnel (edge `:18079` → API `:18080`) | Public marketplace API. Reads local Postgres replica `127.0.0.1:5432`. Listing/order writes use `MARKETPLACE_WRITER_DATABASE_URL` → nezopt LAN `192.168.178.55:25432`. Card desk sold graph: `GET /api/marketplace-card-sales` → replica `cardtrader_sold_daily`. |
+| `api.pokoin.com` | **pi-home** CF tunnel (Rust edge `:18079` → in-process API; Cloudflare LB also sends ~10% to the nezopt k3s overflow) | Public marketplace API. Reads local Postgres replica `127.0.0.1:5432`. Listing/order writes use `MARKETPLACE_WRITER_DATABASE_URL` → nezopt LAN `192.168.178.55:25432`. Card desk sold graph: `GET /api/marketplace-card-sales` → replica `cardtrader_sold_daily`. |
 | `cdn.pokoin.com` | **pi-home** `:18081` | Leftover JPEG origin (`/srv/pokoin/card-images/objects`). |
 | Meili + Redis | **pi-home** | English suggest + cache next to the API. Docker `pokoin-meili` is `getmeili/meilisearch:v1.53.1`, data `/srv/pokoin/meili`. Cache is `pokoin-redis` on `:6380`. |
 
-### API handler ownership (2026-10-02): CardVault api/ copies are deprecated
+### API handler ownership (2026-10-09): native Rust only
 
-The Pi runtime (`/srv/pokoin/api/current/api/`) started as a CardVault
-release, but the **source of truth for shared marketplace handlers is this
-repository**: `server/api/` and `server/pokoin-api/`. CardVault's
-`pokemon_card_vault/api/` copies are **deprecated for the marketplace
-webpage/API** — never edit them for API behavior; vendor the handler into
-`server/api/` and ship it with a `scripts/deploy-*-api.sh` overlay instead.
-The CardVault **app (Flutter) is a separate product and not covered by this
-deprecation.**
-
-Pokoin-web-owned so far: the search/suggest family (`marketplace-cards`,
-`marketplace-search-page`, `marketplace-suggest`, candidates/autocomplete,
-`deploy-search-api.sh`), `marketplace-listings` (via
-`deploy-live-listings-api.sh`; `offset` pagination + owner reads skip the
-Firestore profile enrich), and `marketplace-artist-cards` (via
-`deploy-artist-cards-api.sh`; `tiles=1` serves the artist/profile identity
-once instead of repeating it on every card row — [ARTISTS.md](ARTISTS.md)).
-Still served by legacy CardVault copies (transitional until vendored):
-`marketplace-card-page`, `marketplace-expansion-page`,
-`marketplace-home-page`, and the remaining read handlers.
+Every shared marketplace handler is native Rust in this repository
+(`pokoin-rust/`), served on the Pi by `pokoin-rust-api.service` and deployed
+with `scripts/deploy-pokoin-rust.sh` ([RUST_RUNTIME.md](RUST_RUNTIME.md)).
+The Node runtime it replaced — the CardVault `pokemon_card_vault/api/` base
+release plus this repo's former `server/` overlays — is stopped, and its
+sources are no longer in this repository. Never edit CardVault's `api/` copies
+for API behavior. The CardVault **app (Flutter) is a separate product and not
+covered by this.** `marketplace-artist-cards?tiles=1` still serves the
+artist/profile identity once instead of on every card row
+([ARTISTS.md](ARTISTS.md)).
 | CardTrader **GET** + API | Oracle `pokoin-marketplace` `130.61.251.250` | Docker **`cardtrader-oracle-api`** (`:18080`, `/home/ubuntu/cardtrader-oracle-api/current`). Full `oracle-api-server` plus the daily GET dump. Not `api.pokoin.com`. [CARDTRADER_ORACLE_API.md](CARDTRADER_ORACLE_API.md). |
 | Dump **JSON** | nezopt **NVMe** (`/`, ~1.2T free) | Raw CardTrader expansion GET bodies / crawl artifacts. Not the 15T. Not the Pi. |
 | Leftover **JPEGs** (edge) | nezopt **NVMe** `/home/nez/data/pokoin-leftovers` | Classify, OCR, CLIP artcut, ingest write. One-time `scripts/sync-nvme-leftovers-from-15t.sh`. |
@@ -183,11 +174,11 @@ onto NVMe 2026-09-14 (`scripts/install-pokoin-postgres-nvme.sh`); host port
 
 | Host | Role |
 | --- | --- |
-| `api.pokoin.com` | Marketplace API + leftover image keys on **pi-home** (edge `:18079` → API `:18080` / CDN `:18081`). No Worker in front (2026-10-01): public GET reads are edge-cached by zone Cache Rules; tunnel 1033 reaches clients as Cloudflare's page and the SPA shows “We are working on a solution.” itself. |
+| `api.pokoin.com` | Marketplace API + leftover image keys on **pi-home** (native Rust: edge `:18079` → in-process API / CDN `:18081`). No Worker in front (2026-10-01): public GET reads are edge-cached by zone Cache Rules; tunnel 1033 reaches clients as Cloudflare's page and the SPA shows “We are working on a solution.” itself. |
 | `api2.pokoin.com` | Same origin as `api.pokoin.com`. Oracle api2 CDN is removed. |
 | `cdn.pokoin.com` | Card-image origin on **pi-home** (`:18081`, same tunnel, disk `/srv/pokoin/card-images/objects`) |
 
-Server: `scripts/pokoin-oracle-cdn-server.js` on the Pi (`pokoin-card-images.service` → `/srv/pokoin/card-images/tools/pokoin-pi-cdn-server.js`), root `/srv/pokoin/card-images/objects`, port `18081`. SPA image URLs are leftover `ct_id` (`public / 2`). CDN remaps a **public-id** key to leftover only when dumps at that id belong to another card (Lost Thunder Net Ball `245292` vs Cyndaquil leftover `245292`). It must not half an even leftover key again (Meloetta `122490` is leftover; `61245` is stale leftover/4). Desk paths stay public id. `pokoin-id-check` rejects a public-id prefix on an image URL — the old checker treated `{publicId}_*` as success and `--audit-urls` ok when leftover prefixes were 0.
+Server: the Rust CDN (`pokoin-rust/crates/edge/src/cdn.rs`) inside `pokoin-rust-api.service` on the Pi, root `/srv/pokoin/card-images/objects`, port `18081`. SPA image URLs are leftover `ct_id` (`public / 2`). CDN remaps a **public-id** key to leftover only when dumps at that id belong to another card (Lost Thunder Net Ball `245292` vs Cyndaquil leftover `245292`). It must not half an even leftover key again (Meloetta `122490` is leftover; `61245` is stale leftover/4). Desk paths stay public id. `pokoin-id-check` rejects a public-id prefix on an image URL — the old checker treated `{publicId}_*` as success and `--audit-urls` ok when leftover prefixes were 0.
 
 ## nezopt NVMe leftovers — edge image jobs
 
@@ -260,8 +251,8 @@ contains `emergency_ro`, it writes `b` to sysrq (20s). Hardware
 `RuntimeWatchdogSec=180s` only helps when systemd **stops petting**; a USB
 stall that leaves the CPU idle does not trip it. Hung USB tasks panic after
 120s (`kernel.hung_task_panic=1`) when there is a D-state hang — I/O
-`emergency_ro` is not that. Edge is `scripts/pokoin-api-edge.js`
-(`:18079` → API `:18080` / CDN `:18081`). Install:
+`emergency_ro` is not that. Edge, API and CDN are one Rust unit,
+`pokoin-rust-api` (`:18079` edge, `:18082` API, `:18081` CDN). Install:
 `scripts/install-pokoin-pi-watchdog.sh`. USB-NVMe root quirks:
 `scripts/install-pi-usb-root.sh`. Deploy helper:
 `scripts/deploy-pokoin-pi-watchdog.sh`.

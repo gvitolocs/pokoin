@@ -142,7 +142,7 @@ Publisher: `/srv/pokoin/scripts/sync-marketplace-rails.py` (timer
 | `market/src/lists.js` | `fetchHomeFromLists` (Pi `/api/marketplace-rails` only, no `Promise.all` with tiles). `attachRecentsToHome` is sync and returns `missingRecentIds`. |
 | `market/src/api.js` | `fetchHome`: Worker (prod) → lists → home-page. Never treat Flutter hydrate as success. |
 | `market/src/home-cache.js` | `sessionStorage pokoin.homeVector.{game}.rising`, 10 min, recents stripped. |
-| `market/src/recents.js` | Local 24 ids **per game**. Signed-in list is shared Pi API `/api/marketplace-recents?game=` (`server/pokoin-api/marketplace-recents.js`). Compact rail tiles live in `localStorage pokoin.recentCardTiles.{game}`. **Do not** dump desk `card-page` JSON there. Desk identity is `pokoin.cardPage.v1.` (`card-page-cache.js`). `syncRemoteRecentCardIds` is the account merge for the current host game — do not call it on LCP. Unscoped legacy storage is ignored. |
+| `market/src/recents.js` | Local 24 ids **per game**. Signed-in list is shared Pi API `/api/marketplace-recents?game=` (`pokoin-rust/crates/commerce`). Compact rail tiles live in `localStorage pokoin.recentCardTiles.{game}`. **Do not** dump desk `card-page` JSON there. Desk identity is `pokoin.cardPage.v1.` (`card-page-cache.js`). `syncRemoteRecentCardIds` is the account merge for the current host game — do not call it on LCP. Unscoped legacy storage is ignored. |
 | `market/src/auth-session.js` | Last uid / Silver / site PKN snapshot. **Not** on LCP. Paints CT/CM/VT from `pokoin.auth.session` after first paint while Firebase catches up. |
 | `market/src/image-urls.js` | `homepageDerivativeUrl` for grid. `preferFullImage` for desk (strips `_homepage.webp` → JPEG). `rasterSiblings` only falls back webp→JPEG, never upgrades a JPEG src. |
 | `market/src/components/CardTile.jsx` | `imageSrc(card, 'grid')`. First 8 `loading=eager`, first 4 `fetchPriority=high`. Full 63:88 scan — never `cut`. Map: [CARD_ART.md](CARD_ART.md). |
@@ -204,8 +204,8 @@ node --test market/src/home-cache.test.js market/src/lists.recents.test.js \
 
 # Pi
 python3 /usr/local/bin/pokoin-id-check 668126
-curl -fsS http://127.0.0.1:18080/api/marketplace-rails?id=home-new-cards | jq '.source,.cards|length'
-curl -fsS http://127.0.0.1:18080/api/marketplace-home-page | jq '.source,.sections|keys'
+curl -fsS http://127.0.0.1:18082/api/marketplace-rails?id=home-new-cards | jq '.source,.cards|length'
+curl -fsS http://127.0.0.1:18082/api/marketplace-home-page | jq '.source,.sections|keys'
 
 # local SPA (Vite 5174). First paint must not request Flutter home.
 # Network: /api/marketplace-rails (and set rails for the promo), then _homepage.webp.

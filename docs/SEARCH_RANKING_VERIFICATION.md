@@ -224,8 +224,8 @@ indexed print restriction. Canonical nationality and title-language overlays
 hydrate before the cap. Name-only English popup queries use the established
 probability pool and accepted correction; mixed metadata queries retain
 individual printing relevance. Existing default suggest clients still
-receive twenty rows. The search handler and its helper closure now live in
-`server/api/` and are included in the existing deployment overlay.
+receive twenty rows. The search handler then lived in the Node overlay; it is
+now native Rust (`pokoin-rust/apps/api/src/suggest.rs`, `search_page.rs`).
 
 The expanded formal model adds **3,072 popup executions**: four typo names
 (transposed names, a compact multiword name and a sparse keyboard typo),

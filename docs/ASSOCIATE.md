@@ -32,9 +32,9 @@ inside their campaign window.
 | Piece | Where |
 | --- | --- |
 | Roster + deal terms | `public.marketplace_associates` on the nezopt NVMe writer — `scripts/sql/092_marketplace_associates.sql` (email PK, role, share_pct, royalty_pct, window_start/end, active); `city` from `096_ambassador_program.sql`) |
-| API | `server/pokoin-api/marketplace-associate.js` — `GET /api/marketplace-associate`, Firebase bearer; 403 for non-associates |
+| API | `pokoin-rust/crates/accounts` (`handlers/associate.rs`, `domain/associate.rs`) — `GET /api/marketplace-associate`, Firebase bearer; 403 for non-associates |
 | Page | `market/src/pages/Associate.jsx` + `market/src/associate.css`, route `/associate` (`market/src/App.jsx`) |
-| Deploy | `scripts/deploy-associate-api.sh <commit>` after the commit is on origin/main |
+| Deploy | `scripts/deploy-pokoin-rust.sh` after the commit is on origin/main |
 
 ## Seeding an associate
 
@@ -55,4 +55,4 @@ fall back to the generic associate desk). The signed-in Firebase account
 matches the roster by **email**, so the associate must sign in with the exact
 seeded address.
 
-Tests: `node --test server/pokoin-api/marketplace-associate.test.js`.
+Tests: `cargo test -p pokoin-accounts` in `pokoin-rust/`.

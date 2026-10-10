@@ -111,13 +111,13 @@ All math stays server-side.
 
 ```bash
 # No token provisioning needed: the handler accepts POKONTACT_SERVICE_TOKEN,
-# already present in the Pi container env. Hermes callers reuse POKO_API_TOKEN.
-scripts/deploy-poko-market-api.sh   # from an origin/main commit; verifies 401 + health, auto-rollback
+# already present in the Pi Rust env. Hermes callers reuse POKO_API_TOKEN.
+scripts/deploy-pokoin-rust.sh       # Rust release from an origin/main commit; health-checked, auto-rollback
 ```
 
 No new SQL/migrations for quotes/movers. Card text needs
 `scripts/sql/093_marketplace_card_ocr.sql` on the writer plus
 `scripts/import-marketplace-card-ocr.py --apply` before `card_ocr` returns
-rows. **Do not** run `deploy-poko-market-api.sh` while Honcho workspaces
-`hermes-peer1` / `poko-peer1` share the Pi API container unless deploy is
-explicitly approved — that script restarts `pokoin-oracle-api`.
+rows. **Do not** deploy the API while Honcho workspaces
+`hermes-peer1` / `poko-peer1` depend on it unless deploy is explicitly
+approved — a release restarts `pokoin-rust-api`.
