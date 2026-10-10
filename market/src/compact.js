@@ -30,6 +30,11 @@
 /** The `c1` version this decoder understands. */
 export const C1_FORMAT_VERSION = 1;
 
+/** A document with template columns (codec 5); requested with `format=c1v2`. */
+export const C1_FORMAT_VERSION_TEMPLATES = 2;
+
+const C1_VERSIONS = new Set([C1_FORMAT_VERSION, C1_FORMAT_VERSION_TEMPLATES]);
+
 /** The media type that opts a request into `c1`. */
 export const C1_MEDIA_TYPE = 'application/vnd.pokoin.c1+json';
 
@@ -127,7 +132,7 @@ function isPlainObject(value) {
 
 /** True when a parsed response body is a `c1` document rather than plain JSON. */
 export function isC1(payload) {
-  return isPlainObject(payload) && payload.c1 === C1_FORMAT_VERSION;
+  return isPlainObject(payload) && C1_VERSIONS.has(payload.c1);
 }
 
 /**
@@ -142,7 +147,7 @@ export function decodeC1(payload, dictionary = C1_DICTIONARY) {
   if (!isPlainObject(payload)) {
     fail('document is not an object');
   }
-  if (payload.c1 !== C1_FORMAT_VERSION) {
+  if (!C1_VERSIONS.has(payload.c1)) {
     fail(`unsupported c1 version ${JSON.stringify(payload.c1)}`);
   }
   if (!isPlainObject(dictionary) || !isPlainObject(dictionary.tables)) {
@@ -204,10 +209,22 @@ function decodeTable(table, dictionary) {
   if (!Array.isArray(table.c)) {
     fail('table has no columns');
   }
-  const columns = [];
-  for (const column of table.c) {
-    columns.push(decodeColumn(column, rows, columns, dictionary));
-  }
+  // Plain columns first (a ref only points backwards), then templates, which
+  // read plain columns of the same row, then refs to templates.
+  const columns = new Array(table.c.length);
+  const deferred = new Array(table.c.length).fill(false);
+  table.c.forEach((column, index) => {
+    const waits = column?.c === 5
+      || (column?.c === 4 && Number.isInteger(column.r) && deferred[column.r] === true);
+    deferred[index] = waits;
+    if (!waits) columns[index] = decodeColumn(column, rows, columns, dictionary);
+  });
+  table.c.forEach((column, index) => {
+    if (column?.c === 5) columns[index] = decodeTemplate(column, rows, columns, dictionary);
+  });
+  table.c.forEach((column, index) => {
+    if (columns[index] === undefined) columns[index] = decodeColumn(column, rows, columns, dictionary);
+  });
 
   // No `k`: the table stood in for a flat array of scalars.
   if (table.k === undefined) {
@@ -274,7 +291,7 @@ function decodeColumn(column, rows, earlier, dictionary) {
   let residuals;
   if (codec === 4) {
     const target = column.r;
-    if (!Number.isInteger(target) || target < 0 || target >= earlier.length) {
+    if (!Number.isInteger(target) || target < 0 || target >= earlier.length || earlier[target] === undefined) {
       fail('ref column points forward or out of range');
     }
     // Residuals and presence both come from the referenced column.
@@ -367,6 +384,115 @@ function residualsFor(codec, column, present, dictionary) {
     return values;
   }
   return fail(`unknown codec ${JSON.stringify(codec)}`);
+}
+
+/** ASCII slug, identical to `compact::template::slug` in Rust. */
+export function c1Slug(text) {
+  let out = '';
+  let gap = false;
+  for (const ch of text) {
+    if (/^[A-Za-z0-9]$/.test(ch)) {
+      if (gap && out) out += '-';
+      gap = false;
+      out += ch.toLowerCase();
+    } else {
+      gap = true;
+    }
+  }
+  return out;
+}
+
+/** The text a cell offers a template: a string, or a safe integer. */
+function cellText(value) {
+  if (typeof value === 'string') return value;
+  if (Number.isSafeInteger(value)) return String(value);
+  return null;
+}
+
+/** Codec 5: a template over plain columns of the same row. */
+function decodeTemplate(column, rows, columns, dictionary) {
+  if (!isPlainObject(column)) {
+    fail('column is not an object');
+  }
+  let slots = null;
+  let present = rows;
+  const presentRows = [];
+  if (column.m !== undefined) {
+    if (!Array.isArray(column.m) || column.m.length !== rows) {
+      fail('template presence mask does not match the row count');
+    }
+    slots = new Array(rows);
+    present = 0;
+    for (let row = 0; row < rows; row += 1) {
+      if (column.m[row]) {
+        slots[row] = present++;
+        presentRows.push(row);
+      } else {
+        slots[row] = -1;
+      }
+    }
+  } else {
+    for (let row = 0; row < rows; row += 1) presentRows.push(row);
+  }
+  if (!Array.isArray(column.s) || !Array.isArray(column.h) || !Array.isArray(column.l)) {
+    fail('template is missing slots, shapes or literals');
+  }
+  const sources = column.s.map((slot) => {
+    const [index, form] = Array.isArray(slot) ? slot : [];
+    const source = Number.isInteger(index) ? columns[index] : undefined;
+    if (!source) {
+      fail('template slot points at a column that is not decoded');
+    }
+    return { source, slug: form === 1 };
+  });
+  const shapes = column.h.map((shape) => {
+    if (!Array.isArray(shape) || shape.some((slot) => !Number.isInteger(slot) || slot < 0 || slot >= sources.length)) {
+      fail('template shape points at an unknown slot');
+    }
+    return shape;
+  });
+  let shapeOf;
+  if (column.x === undefined) {
+    if (shapes.length !== 1) fail('template shape indices are missing');
+    shapeOf = new Array(present).fill(0);
+  } else {
+    if (!Array.isArray(column.x) || column.x.length !== present) {
+      fail('template shape indices do not match the presence count');
+    }
+    shapeOf = column.x;
+  }
+  if (column.l.length !== shapes.length) {
+    fail('template literal groups do not match the shapes');
+  }
+  const literals = shapes.map((shape, index) => {
+    const gaps = column.l[index];
+    if (!Array.isArray(gaps) || gaps.length !== shape.length + 1) {
+      fail('template literal count does not match the shape');
+    }
+    const count = shapeOf.reduce((n, s) => (s === index ? n + 1 : n), 0);
+    return gaps.map((gap) => ({ values: decodeColumn(gap, count, [], dictionary).values, next: 0 }));
+  });
+  const values = new Array(present);
+  for (let index = 0; index < present; index += 1) {
+    const row = presentRows[index];
+    const shapeIndex = shapeOf[index];
+    const shape = shapes[shapeIndex];
+    if (!shape) fail('template row points at an unknown shape');
+    const gaps = literals[shapeIndex];
+    let text = '';
+    for (let gap = 0; gap < shape.length; gap += 1) {
+      text += gaps[gap].values[gaps[gap].next++];
+      const { source, slug } = sources[shape[gap]];
+      const slot = source.slots === null ? row : source.slots[row];
+      const cell = slot >= 0 ? cellText(source.values[slot]) : null;
+      if (cell === null) fail('template slot has no text in this row');
+      text += slug ? c1Slug(cell) : cell;
+    }
+    const last = gaps[shape.length];
+    text += last.values[last.next++];
+    values[index] = text;
+  }
+  return { slots, residuals: values, values };
 }
 
 function paletteEntries(column, dictionary) {

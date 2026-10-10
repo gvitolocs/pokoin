@@ -42,6 +42,11 @@ create table if not exists public.marketplace_list_snapshots (
   built_at timestamptz not null default now(),
   primary key (kind, key)
 );
+-- c1 format 2 (template columns) and brotli-11 copies served as-is.
+alter table public.marketplace_list_snapshots add column if not exists c1v2 bytea;
+alter table public.marketplace_list_snapshots add column if not exists br_json bytea;
+alter table public.marketplace_list_snapshots add column if not exists br_c1 bytea;
+alter table public.marketplace_list_snapshots add column if not exists br_c1v2 bytea;
 create table if not exists public.marketplace_card_daily_median (
   card_id bigint primary key,
   last_day date,
@@ -80,27 +85,42 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
         return catalog_api::response(StatusCode::SERVICE_UNAVAILABLE, json!({"error": "Marketplace database unavailable."}), "no-store");
     };
     let wanted = catalog_api::wanted(&headers, &uri);
-    let row = sqlx::query_as::<_, (String, Vec<u8>, String)>(
-        "select body, c1, version from public.marketplace_list_snapshots where kind = $1 and key = $2",
+    let brotli = accepts_brotli(&headers);
+    type Row = (String, Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>, String);
+    let row = sqlx::query_as::<_, Row>(
+        "select body, c1, c1v2, br_json, br_c1, br_c1v2, version
+         from public.marketplace_list_snapshots where kind = $1 and key = $2",
     )
     .bind(&kind)
     .bind(&key)
     .fetch_optional(&pool)
     .await;
     match row {
-        Ok(Some((body, c1, version))) => {
-            let (content_type, bytes, tag) = if wanted.c1() {
-                // application/json, not the c1 media type: Cloudflare only
-                // brotli-compresses known types. The payload marks itself c1.
-                ("application/json; charset=utf-8", c1, format!("\"{version}-c1\""))
-            } else {
-                ("application/json; charset=utf-8", body.into_bytes(), format!("\"{version}\""))
+        Ok(Some((body, c1, c1v2, br_json, br_c1, br_c1v2, version))) => {
+            // c1v2 only for clients that read template columns; a snapshot
+            // built before format 2 falls back to c1.
+            let (format, plain, compressed) = match (wanted.c1(), wanted.templates(), c1v2) {
+                (true, true, Some(c1v2)) => ("c1v2", c1v2, br_c1v2),
+                (true, _, _) => ("c1", c1, br_c1),
+                _ => ("json", body.into_bytes(), br_json),
             };
-            let mut response = crate::suggest::cors(StatusCode::OK, Some(LIST_CACHE.to_owned()), Some(content_type), bytes).into_response();
+            // A brotli-11 copy, served as-is: Cloudflare passes origin
+            // brotli through, and its own on-the-fly level is far lower.
+            let (bytes, encoded) = match compressed {
+                Some(br) if brotli => (br, true),
+                _ => (plain, false),
+            };
+            let tag = format!("\"{version}-{format}{}\"", if encoded { "-br" } else { "" });
+            // application/json, not the c1 media type: Cloudflare only
+            // brotli-compresses known types. The payload marks itself c1.
+            let mut response = crate::suggest::cors(StatusCode::OK, Some(LIST_CACHE.to_owned()), Some("application/json; charset=utf-8"), bytes).into_response();
             let h = response.headers_mut();
-            h.insert(axum::http::header::VARY, HeaderValue::from_static("Accept"));
-            if wanted.c1() {
-                h.insert("x-pokoin-format", HeaderValue::from_static("c1"));
+            h.insert(axum::http::header::VARY, HeaderValue::from_static("Accept, Accept-Encoding"));
+            if format != "json" {
+                h.insert("x-pokoin-format", HeaderValue::from_static(if format == "c1v2" { "c1v2" } else { "c1" }));
+            }
+            if encoded {
+                h.insert(axum::http::header::CONTENT_ENCODING, HeaderValue::from_static("br"));
             }
             if let Ok(v) = HeaderValue::from_str(&tag) {
                 h.insert(axum::http::header::ETAG, v);
@@ -112,6 +132,31 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
         Err(error) if error.to_string().contains("marketplace_list_snapshots") => missing(),
         Err(error) => catalog_api::failure(&error),
     }
+}
+
+fn accepts_brotli(headers: &HeaderMap) -> bool {
+    headers
+        .get_all(axum::http::header::ACCEPT_ENCODING)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|entry| {
+            let mut parts = entry.split(';');
+            let coding = parts.next().unwrap_or("").trim();
+            coding.eq_ignore_ascii_case("br")
+                && !parts.any(|param| param.trim().replace(' ', "") == "q=0")
+        })
+}
+
+/// Brotli quality 11, 4 MiB window: the snapshot is built once and served
+/// many times, so the slowest, smallest setting pays off.
+fn brotli11(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len() / 4 + 64);
+    let params = brotli::enc::BrotliEncoderParams { quality: 11, lgwin: 22, ..Default::default() };
+    if brotli::BrotliCompress(&mut &bytes[..], &mut out, &params).is_err() {
+        out.clear();
+    }
+    out
 }
 
 fn missing() -> Response {
@@ -481,25 +526,50 @@ fn canonical_rows(body: &Value) -> Value {
 async fn upsert(pool: &PgPool, kind: &str, key: &str, body: &Value) -> anyhow::Result<()> {
     let body = &canonical_rows(body);
     let text = serde_json::to_string(body)?;
-    let c1 = compact::encode::encode_to_vec(body);
     let version = hex::encode(&Sha256::digest(text.as_bytes())[..8]);
+    // Unchanged and already carrying every representation: nothing to redo
+    // (brotli 11 is the expensive part of a build).
+    let current: Option<(String, bool)> = sqlx::query_as(
+        "select version, c1v2 is not null and br_c1v2 is not null and br_c1 is not null and br_json is not null
+         from public.marketplace_list_snapshots where kind = $1 and key = $2",
+    )
+    .bind(kind)
+    .bind(key)
+    .fetch_optional(pool)
+    .await?;
+    if current.as_ref().is_some_and(|(v, complete)| *v == version && *complete) {
+        return Ok(());
+    }
+    let c1 = compact::encode::encode_to_vec(body);
+    let c1v2 = compact::encode::encode_to_vec_with(body, compact::encode::EncodeOptions { templates: true });
+    let (br_json, br_c1, br_c1v2) = (brotli11(text.as_bytes()), brotli11(&c1), brotli11(&c1v2));
     let count = body.get("cards").and_then(Value::as_array).map_or(0, Vec::len) as i32;
     sqlx::query(
-        "insert into public.marketplace_list_snapshots (kind, key, body, c1, card_count, version, built_at)
-         values ($1, $2, $3, $4, $5, $6, now())
+        "insert into public.marketplace_list_snapshots
+           (kind, key, body, c1, c1v2, br_json, br_c1, br_c1v2, card_count, version, built_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
          on conflict (kind, key) do update set body = excluded.body, c1 = excluded.c1,
-           card_count = excluded.card_count, version = excluded.version, built_at = now()
-         where marketplace_list_snapshots.version <> excluded.version",
+           c1v2 = excluded.c1v2, br_json = excluded.br_json, br_c1 = excluded.br_c1,
+           br_c1v2 = excluded.br_c1v2, card_count = excluded.card_count,
+           version = excluded.version, built_at = now()",
     )
     .bind(kind)
     .bind(key)
     .bind(text)
     .bind(c1)
+    .bind(c1v2)
+    .bind(nonempty(br_json))
+    .bind(nonempty(br_c1))
+    .bind(nonempty(br_c1v2))
     .bind(count)
     .bind(version)
     .execute(pool)
     .await?;
     Ok(())
+}
+
+fn nonempty(bytes: Vec<u8>) -> Option<Vec<u8>> {
+    (!bytes.is_empty()).then_some(bytes)
 }
 
 /// One display median per sold card: the last day of the card-sales series.
