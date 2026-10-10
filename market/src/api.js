@@ -251,6 +251,12 @@ export async function fetchGradedCards({ limit = 48, signal } = {}) {
   return { cards, hasMore: false, count: cards.length };
 }
 
+/** `kind=name` snapshot key: hex of the trimmed, lowercased name (lists.rs name_key). */
+export function nameListKey(name) {
+  const bytes = new TextEncoder().encode(String(name || '').trim().toLowerCase());
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export async function fetchExactNameCards(name, {
   excludeId,
   signal,
@@ -260,6 +266,15 @@ export async function fetchExactNameCards(name, {
   const query = exactNameQuery(name);
   if (!query) {
     return [];
+  }
+  // Every exact-name printing is prebuilt (English titles); one read.
+  if (!lang || lang === 'en') {
+    const snapshot = await fetchListSnapshot('name', nameListKey(name));
+    if (snapshot?.cards?.length) {
+      return filterExactNameRows(snapshot.cards, name, { excludeId })
+        .map(cardFromCatalogRow)
+        .filter((card) => card.id);
+    }
   }
   const pageSize = Math.min(96, Math.max(12, Number(limit) || 96));
   let offset = 0;
@@ -501,12 +516,30 @@ export function fetchCardSales(cardId, {
   return getJson(`/api/marketplace-card-sales?${params}`);
 }
 
-/** Tile / versions last-median: series only, never `slices=1`. */
+/** Tile / versions last-median: one read of the stored daily medians
+ * (marketplace_card_daily_median, the card-sales series' last day). Falls back
+ * to one card-sales request per card only when that route is unavailable. */
 export async function fetchLastMedianPknMap(cardIds) {
-  const ids = [...new Set((cardIds || []).map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id)))].slice(0, 48);
-  if (!ids.length) {
+  const all = [...new Set((cardIds || []).map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id)))].slice(0, 500);
+  if (!all.length) {
     return {};
   }
+  try {
+    const data = await getJson(`/api/marketplace-daily-medians?ids=${all.join(',')}`);
+    if (data?.medians && typeof data.medians === 'object') {
+      const byId = {};
+      for (const [id, value] of Object.entries(data.medians)) {
+        const pkn = Number(value);
+        if (Number.isFinite(pkn) && pkn > 0) {
+          byId[id] = pkn;
+        }
+      }
+      return byId;
+    }
+  } catch (_) {
+    /* older API: per-card fallback below */
+  }
+  const ids = all.slice(0, 48);
   const pairs = await Promise.all(ids.map(async (id) => {
     try {
       const data = await fetchCardSales(id);

@@ -316,6 +316,7 @@ fn router(state: AppState) -> Router {
             get(rails::spotlight).options(rails::options),
         )
         .route("/api/marketplace-list", get(lists::list).options(rails::options))
+        .route("/api/marketplace-daily-medians", get(lists::daily_medians).options(rails::options))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             read_cache::read_cache,
