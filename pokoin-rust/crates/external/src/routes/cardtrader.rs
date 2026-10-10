@@ -184,6 +184,15 @@ pub async fn webhook(
         payload.as_ref(),
     )
     .await?;
+    if webhook::wants_fallback_sync(&out) {
+        // Best-effort, like Node: the 5-minute timer is the backstop.
+        let state = state.clone();
+        tokio::spawn(async move {
+            if let Err(error) = state.enqueue_cardtrader_sync(&uid).await {
+                tracing::warn!(uid, "cardtrader-webhook fallback sync enqueue failed: {}", error.message);
+            }
+        });
+    }
     Ok(json_response(200, out))
 }
 

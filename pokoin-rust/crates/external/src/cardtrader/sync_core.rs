@@ -140,6 +140,13 @@ pub fn public_card_id_from_blueprint(blueprint_id: &str) -> Option<String> {
     Some((value * 2).to_string())
 }
 
+/// A CardTrader product id as the export must carry it: a positive integer.
+/// Anything else (`""` from an unread id, `"12.0"`, `"abc"`) means the export
+/// row was not understood and must never count as "present" or "absent".
+pub fn is_ct_product_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_digit())
+}
+
 pub fn ct_source_listing_id(product_id: &str) -> String {
     let id = clean_text(Some(product_id), 80);
     if id.is_empty() { String::new() } else { format!("{CT_PREFIX}{id}") }
@@ -466,6 +473,9 @@ pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_c
     set_count("inventory", products.len() as i64);
 
     let mut index = AttachmentIndex::build(listings);
+    // Listings linked before this run: the mass-removal guard's denominator.
+    // Planned imports and links must not dilute it (specs/tla/ct-reconcile).
+    let linked_before = index.by_source_id.len();
     let mut pokoin_only_ids: HashSet<String> = HashSet::new();
     for value in listings {
         let row = listing_row(value);
@@ -479,11 +489,15 @@ pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_c
     let normalized: Vec<NormalizedProduct> = products
         .iter()
         .map(normalize_product)
-        .filter(|p| !p.id.is_empty())
+        .filter(|p| is_ct_product_id(&p.id))
         .collect();
+    let unparsed_rows = products.len() - normalized.len();
     set_count("inventory", normalized.len() as i64);
 
     for product in &normalized {
+        // Present in the export, whatever its game: a skipped product is not
+        // a vanished one, so its linked listing must never be removed.
+        seen_product_ids.insert(product.id.clone());
         let game = marketplace_game_for_product(product);
         if game.is_empty() {
             summary["skippedNonPokemon"].incr(1);
@@ -493,7 +507,6 @@ pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_c
         if game == "pokemon" {
             summary["pokemonInventory"].incr(1);
         }
-        seen_product_ids.insert(product.id.clone());
         let source_id = ct_source_listing_id(&product.id);
         let decision = resolve_product_attachment(product, &mut index);
         match decision {
@@ -551,13 +564,15 @@ pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_c
         }
     }
 
-    // Safety beyond Node: an export that is non-empty but yields no products
-    // was not understood, so nothing may be removed because of it.
+    // Safety beyond Node: an export with any row whose id was not understood
+    // cannot say which products are absent, so nothing may be removed
+    // because of it (2026-10-09: numeric ids read as "" removed 12,918).
     let mut allow_destructive = allow_destructive;
     let mut gate_reason = gate_reason;
-    if !products.is_empty() && normalized.is_empty() {
+    if unparsed_rows > 0 {
         allow_destructive = false;
         gate_reason = "unparsed_export";
+        summary["unparsedRows"] = json!(unparsed_rows);
     }
     if allow_destructive {
         let linked: Vec<(String, ListingRow)> = index
@@ -585,7 +600,7 @@ pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_c
     // Safety beyond Node: one run never removes most of a seller's linked
     // listings. A real mass delisting needs a second look, not a timer.
     let removals = actions.iter().filter(|a| matches!(a, PlannedAction::Remove { .. })).count();
-    let linked_total = index.by_source_id.len();
+    let linked_total = linked_before;
     if removals > MASS_REMOVAL_MIN && removals * 2 > linked_total {
         tracing::error!(removals, linked_total, "cardtrader reconcile mass removal blocked");
         actions.retain(|a| !matches!(a, PlannedAction::Remove { .. }));
@@ -864,6 +879,73 @@ mod tests {
         let plan = plan_inventory_reconcile(&few, &listings, true, true);
         assert_eq!((plan.gate_reason, plan.allow_destructive, removes(&plan)), ("mass_removal_guard", false, 0));
         assert_eq!(plan.summary["massRemovalBlocked"], json!(140));
+    }
+
+    fn numeric_product(id: Value, blueprint: i64, game: i64) -> Value {
+        json!({
+            "id": id, "blueprint_id": blueprint, "game_id": game, "quantity": 1,
+            "price": 2.0, "price_currency": "EUR",
+            "properties": {"condition": "Near Mint", "pokemon_language": "en"},
+        })
+    }
+
+    #[test]
+    fn partially_unread_export_never_removes() {
+        // specs/tla/ct-reconcile bugs/empty-ids-partial.cfg: one row's id is
+        // unreadable, the other is fine. Before the fix the unreadable row's
+        // listing was "absent" and got deactivated.
+        let listings = vec![
+            listing("l1", "202", 1, "ct:1", "active"),
+            listing("l2", "204", 1, "ct:2", "active"),
+        ];
+        let products = vec![numeric_product(json!(null), 101, 5), numeric_product(json!(2), 102, 5)];
+        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        assert_eq!((plan.gate_reason, plan.allow_destructive, removes(&plan)), ("unparsed_export", false, 0));
+        assert_eq!(plan.summary["unparsedRows"], json!(1));
+    }
+
+    #[test]
+    fn non_integer_ids_are_unparsed_not_new_products() {
+        // bugs/alien-ids.cfg: an id read in another format ("1.0") is neither
+        // the linked product nor a new one to import.
+        let listings = vec![
+            listing("l1", "202", 1, "ct:1", "active"),
+            listing("l2", "204", 1, "ct:2", "active"),
+        ];
+        let products = vec![numeric_product(json!(1.0), 101, 5), numeric_product(json!(2), 102, 5)];
+        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        assert_eq!((plan.gate_reason, removes(&plan)), ("unparsed_export", 0));
+        assert_eq!(plan.summary["imported"], json!(0));
+        assert!(is_ct_product_id("42") && !is_ct_product_id("") && !is_ct_product_id("4.0") && !is_ct_product_id("-4"));
+    }
+
+    #[test]
+    fn skipped_game_products_are_still_present() {
+        // bugs/nogame-not-seen.cfg: a product whose game is not supported is
+        // skipped, but it is in the export, so its linked listing stays.
+        let listings = vec![
+            listing("l1", "202", 1, "ct:1", "active"),
+            listing("l2", "204", 1, "ct:2", "active"),
+        ];
+        let products = vec![numeric_product(json!(1), 101, 2), numeric_product(json!(2), 102, 5)];
+        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        assert_eq!(plan.summary["skippedNonPokemon"], json!(1));
+        assert_eq!(removes(&plan), 0);
+        assert!(plan.allow_destructive);
+    }
+
+    #[test]
+    fn planned_imports_do_not_dilute_the_mass_removal_guard() {
+        // bugs/guard-dilution.cfg: every id misread as a different (valid)
+        // number. 150 linked listings vanish and 150 "new" products would be
+        // imported; dividing by linked+imports (300) let all 150 go.
+        let listings: Vec<Value> = (1..=150)
+            .map(|i| listing(&format!("l{i}"), &((100 + i) * 2).to_string(), 1, &format!("ct:{i}"), "active"))
+            .collect();
+        let products: Vec<Value> = (1..=150).map(|i| numeric_product(json!(10_000 + i), 100 + i, 5)).collect();
+        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        assert_eq!((plan.gate_reason, plan.allow_destructive, removes(&plan)), ("mass_removal_guard", false, 0));
+        assert_eq!(plan.summary["massRemovalBlocked"], json!(150));
     }
 
     #[test]

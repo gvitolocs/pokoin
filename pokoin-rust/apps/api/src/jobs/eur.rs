@@ -121,6 +121,23 @@ fn paid_plan(order: &Value, session: &Value, at: &str) -> Result<PaidPlan> {
     }
     Ok(PaidPlan::New(patch))
 }
+/// Orders whose fulfilment must be (re)run: half done, or paid while the
+/// fulfilment never took its lease (the fulfil call failed early, or the
+/// process died between the paid write and the call). The second kind was
+/// never resumed (specs/tla/eur-fulfilment bugs/paid-never-fulfilled.cfg).
+fn unfinished_queries() -> Vec<Query> {
+    vec![
+        Query::collection("orders").where_op(
+            "fulfillment.state",
+            FilterOp::In,
+            FireValue::from_plain_json(&json!(["running", "partial"])),
+        ),
+        Query::collection("orders")
+            .where_eq("channel", "eur")
+            .where_eq("paymentStatus", "paid")
+            .where_eq("fulfillment.state", "pending"),
+    ]
+}
 trait Backend {
     async fn pending(&mut self) -> Result<Vec<(String, Value)>>;
     async fn unfinished(&mut self) -> Result<Vec<(String, Value)>>;
@@ -212,18 +229,15 @@ impl Backend for Native {
             .collect())
     }
     async fn unfinished(&mut self) -> Result<Vec<(String, Value)>> {
-        let query = Query::collection("orders").where_op(
-            "fulfillment.state",
-            FilterOp::In,
-            FireValue::from_plain_json(&json!(["running", "partial"])),
-        );
-        Ok(self
-            .firestore
-            .run_query(&query)
-            .await?
-            .iter()
-            .map(|d| (d.id(), d.to_plain_json()))
-            .collect())
+        let mut rows: Vec<(String, Value)> = Vec::new();
+        for query in unfinished_queries() {
+            for doc in self.firestore.run_query(&query).await? {
+                if !rows.iter().any(|(id, _)| *id == doc.id()) {
+                    rows.push((doc.id(), doc.to_plain_json()));
+                }
+            }
+        }
+        Ok(rows)
     }
     async fn session(&mut self, id: &str) -> Result<Value> {
         let session = self.state.stripe()?.retrieve_checkout_session(id).await?;
@@ -441,6 +455,15 @@ mod tests {
                 ("open".into(), json!({"status":"open","expires_at":999999})),
             ]),
             ..Default::default()
+        }
+    }
+    #[test]
+    fn sweep_resumes_paid_orders_whose_fulfilment_never_started() {
+        let queries = unfinished_queries();
+        assert_eq!(queries.len(), 2);
+        let never_started = format!("{:?}", queries[1].filters);
+        for needle in ["paymentStatus", "paid", "fulfillment.state", "pending", "channel", "eur"] {
+            assert!(never_started.contains(needle), "{needle} missing from {never_started}");
         }
     }
     #[test]

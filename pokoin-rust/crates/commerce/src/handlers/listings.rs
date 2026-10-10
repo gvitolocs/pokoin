@@ -865,6 +865,19 @@ async fn update_listing(
             && live::number(&body["quantityAvailable"]) == 0.0);
     let sql=format!("with written as (update public.marketplace_user_listings set {} where id = $1::uuid and seller_uid = ${} returning *) select to_jsonb(written) as listing from written",sets.join(", "),values.len());
     let mut tx = state.write_db().begin().await?;
+    // The CardTrader product this listing is linked to right now, read on the
+    // writer under the row lock. `existing` comes from the replica and can
+    // predate the push that linked it: the product then outlived the listing
+    // (specs/tla/listing-outbox NoGhostProduct).
+    let source = sqlx::query_scalar::<_, String>(
+        "select source_listing_id from public.marketplace_user_listings where id = $1 and seller_uid = $2 for update",
+    )
+    .bind(uuid)
+    .bind(&claims.uid)
+    .fetch_optional(&mut *tx)
+    .await?
+    .map(|s| s.trim().chars().take(160).collect::<String>())
+    .unwrap_or_default();
     let mut builder = sqlx::query(&sql);
     for value in &values {
         builder = bind_json(builder, value);
@@ -874,7 +887,6 @@ async fn update_listing(
         .await?
         .ok_or_else(|| ApiError::not_found("Listing not found for this seller."))?;
     let row: Value = row.try_get("listing")?;
-    let source = live::field(&existing, "source_listing_id", 160);
     let queued=sync::enqueue(&mut tx,sync::event(&row,&json!({"sellerUid":claims.uid,"mutation":sync::mutation(&existing,body,&status),"destroyCardtrader":inactive&&!source.is_empty(),"sourceListingId":source}),state.now_ms())).await?;
     tx.commit().await?;
     let game = live::field(&row, "marketplace_game", 40);

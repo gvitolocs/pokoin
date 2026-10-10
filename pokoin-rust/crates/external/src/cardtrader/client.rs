@@ -229,7 +229,11 @@ impl CardTraderClient {
                 .header("Content-Type", "application/json")
                 .json(&payload);
         }
-        let response = request.send().await.map_err(|e| ApiError::new(502, format!("CardTrader request failed: {e}")))?;
+        // No answer: CardTrader may still have applied a write (TRANSPORT_ERROR).
+        let response = request
+            .send()
+            .await
+            .map_err(|e| ApiError::new(502, format!("CardTrader request failed: {e}")).with_code(TRANSPORT_ERROR))?;
         let status = response.status().as_u16();
         let text = response.text().await.unwrap_or_default();
         let payload: Option<Value> = if text.trim().is_empty() { None } else { serde_json::from_str(&text).ok() };
@@ -376,7 +380,25 @@ fn cardtrader_response_error(status: u16, payload: Option<&Value>, path: &str, t
             .with_code("cardtrader_token_rejected");
     }
     tracing::warn!(path, status, "cardtrader request failed");
-    ApiError::new(502, format!("CardTrader request failed with HTTP {status}."))
+    ApiError::new(502, format!("CardTrader request failed with HTTP {status}.")).with_code(format!("{HTTP_ERROR_PREFIX}{status}"))
+}
+
+/// Error code of a request that got no HTTP answer.
+pub const TRANSPORT_ERROR: &str = "cardtrader_transport";
+/// Error code prefix of an HTTP error answer (`cardtrader_http_422`).
+pub const HTTP_ERROR_PREFIX: &str = "cardtrader_http_";
+
+/// Whether a failed write may still have happened on CardTrader: no answer at
+/// all, or a 5xx. A 4xx answer, a rejected token or an edge block did nothing.
+pub fn write_in_doubt(error: &ApiError) -> bool {
+    match error.code.as_deref() {
+        Some(TRANSPORT_ERROR) => true,
+        Some(code) => code
+            .strip_prefix(HTTP_ERROR_PREFIX)
+            .and_then(|status| status.parse::<u16>().ok())
+            .is_some_and(|status| status >= 500),
+        None => false,
+    }
 }
 
 /// `cardTraderWebhookUrlForUid`.

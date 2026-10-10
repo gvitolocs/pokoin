@@ -1007,6 +1007,7 @@ async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
         seller_uid: "seller-1".into(),
         quantity: 1,
         source_listing_id: String::new(),
+        ..Default::default()
     };
     let result = decrement_seller_ownership_for_sale(&state, &line)
         .await
@@ -1045,6 +1046,43 @@ async fn a_sale_decrements_the_sellers_ownership_row_and_deletes_it_at_zero() {
 }
 
 #[tokio::test]
+async fn a_sale_key_decrements_the_ownership_row_once() {
+    // specs/tla/eur-fulfilment bugs/ownership-twice.cfg: a fulfilment that
+    // died after the decrement but before ownershipDone, retried.
+    use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
+    let (state, firestore) = state_harness().await;
+    firestore
+        .create_document(
+            "user_card_collections",
+            "row-k",
+            &json!({"uid": "seller-1", "listingId": "l1", "quantity": 3, "ownershipType": "physical"}),
+        )
+        .await
+        .expect("row");
+    let line = OwnershipLine {
+        listing_id: "l1".into(),
+        seller_uid: "seller-1".into(),
+        quantity: 1,
+        sale_key: "order-1:l1".into(),
+        ..Default::default()
+    };
+    let first = decrement_seller_ownership_for_sale(&state, &line).await.expect("first");
+    assert_eq!(first["after"], json!(2));
+    let replay = decrement_seller_ownership_for_sale(&state, &line).await.expect("replay");
+    assert_eq!(replay["reason"], json!("already_decremented"));
+    let other = OwnershipLine { sale_key: "order-2:l1".into(), ..line.clone() };
+    let second = decrement_seller_ownership_for_sale(&state, &other).await.expect("second sale");
+    assert_eq!(second["after"], json!(1));
+    let row = firestore
+        .get_document(&firestore.document_path("user_card_collections", "row-k"))
+        .await
+        .unwrap()
+        .expect("row");
+    assert_eq!(row["quantity"], json!(1));
+    assert_eq!(row["saleKeys"], json!(["order-1:l1", "order-2:l1"]));
+}
+
+#[tokio::test]
 async fn nft_ownership_rows_are_never_decremented() {
     use pokoin_commerce::handlers::orders::{decrement_seller_ownership_for_sale, OwnershipLine};
     let (state, firestore) = state_harness().await;
@@ -1068,6 +1106,7 @@ async fn nft_ownership_rows_are_never_decremented() {
             seller_uid: "seller-1".into(),
             quantity: 1,
             source_listing_id: String::new(),
+            ..Default::default()
         },
     )
     .await
@@ -1102,6 +1141,7 @@ async fn a_scan_source_row_is_decremented_by_its_full_document_id() {
             seller_uid: "seller-1".into(),
             quantity: 2,
             source_listing_id: "scan:abc123".into(),
+            ..Default::default()
         },
     )
     .await

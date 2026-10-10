@@ -1597,6 +1597,12 @@ impl StripeClient {
         Ok(payload)
     }
 
+    /// `POST /v1/checkout/sessions/{id}/expire`: an expired session can never
+    /// be paid. Fails once the buyer completed it.
+    pub async fn expire_checkout_session(&self, session_id: &str) -> ApiResult<Value> {
+        self.form(reqwest::Method::POST, &format!("/v1/checkout/sessions/{session_id}/expire"), &[]).await
+    }
+
     pub async fn create_checkout_session(&self, form: Vec<(String, String)>) -> ApiResult<Value> {
         self.form(reqwest::Method::POST, "/v1/checkout/sessions", &form).await
     }
