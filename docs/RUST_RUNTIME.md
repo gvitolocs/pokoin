@@ -53,6 +53,23 @@ Timer or job-unit changes are installed with `scripts/cutover-pi-rust.sh` (it co
 - **Rust release:** a failed install restores itself. To go back by hand, point `/srv/pokoin/rust/current` at the `previous` target and restart `pokoin-rust-api`.
 - **Back to Node (emergency only):** `scripts/cutover-pi-rust.sh --rollback` re-enables the Node edge, CDN, ct-deals and API container and the Node timers that are still installed (disabled) on the Pi. It needs no Node sources from this repository; it works as long as the Pi keeps `/srv/pokoin/api` and those units. The cutover takes `pokoin-card-images.service` out of the data-disk udev rule (`/etc/udev/rules.d/99-pokoin-data.rules`, `SYSTEMD_WANTS`), because at boot the Node CDN took `:18081` and the Rust unit crash-looped; `--rollback` puts it back.
 
+## Prebuilt pages
+
+The slow public desks answer from `marketplace_page_snapshots` (migration `scripts/sql/114_marketplace_page_snapshots.sql`): one primary-key read, the page window cut by Postgres (`rows[a:b]`), the body assembled from stored JSON bytes, byte-identical to the live route. A snapshot the builder has not confirmed within its kind's window falls back to the live query.
+
+| kind | route | built by (nezopt k3s CronJob, `job build-lists`) | servable for |
+| --- | --- | --- | --- |
+| `set`, `set-index` | `marketplace-expansion-page` (`productType=card`, and the set index) | `build-lists-sets`, every 15 min | 2 h |
+| `artist` | `marketplace-artist-cards?tiles=1` | `build-lists-artists`, daily 04:30 | 2 days |
+| `version` | `marketplace-version-set` | `build-lists-versions`, hourly | 6 h |
+| `related` | `marketplace-related`, `related` in `marketplace-card-page` | `build-lists-related` daily 05:10, `build-lists-related-delta` every 30 min | 3 days |
+
+`related` is a nearest-neighbour index: for every single, the 12 best cards by the SPA's `scoreRelated` weights plus same CLIP artwork, Pokédex ±2 (evolution-line proxy), era, release proximity and print language, ties broken by listed availability and popularity. Rows are list-snapshot tile rows (`cardFromCatalogRow`). Contract: `related` is an array of at most 12 tile rows, best first; absent or empty means the client uses its own picker.
+
+`marketplace-native-sales` answers `sales: []` from an in-memory set of card ids that have any Sold-on-Pokoin row (`crates/commerce/src/sales_index.rs`, Firestore delta every 30 s, full reload every 6 h) instead of one Firestore query per desk.
+
+Every public cacheable `GET /api/*` 200 carries a strong `ETag` and answers `304` to `If-None-Match`; every response carries `Server-Timing` (`sql`, `ser`, `build`, `src`, `total`, plus `edge` at the edge listener).
+
 ## Catalog identity and caching
 
 Catalog responses bind the public Pokoin id, game and canonical URL to the request. Browser card pages resolve identity through the shared API; the legacy OG Worker no longer resolves or redirects browser desks from its canonical cache. Provider blueprint ids are used only for provider joins. The native read cache isolates query case, facets, optional sections, limits, language, game, catalog generation and release. A Redis generation-read failure bypasses caching. Catalog identity mismatches are rejected before persistence and logged without private request data.
