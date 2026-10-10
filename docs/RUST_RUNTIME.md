@@ -17,10 +17,12 @@ Native jobs run as `pokoin-rust-job@<name>.service` (`/srv/pokoin/rust/current j
 
 | Timer | Job | Every |
 | --- | --- | --- |
-| `pokoin-rust-job-cardtrader-seller-reconcile.timer` | connected-seller CardTrader reconcile and webhook repair | 5 min |
+| `pokoin-rust-job-cardtrader-seller-reconcile.timer` | connected-seller CardTrader reconcile and webhook repair | 10 min after the last run ends |
 | `pokoin-rust-job-eur-orders-sweep.timer` | expire stale Stripe holds, recover missed payments | 5 min |
 | `pokoin-rust-job-referral-reconcile.timer` | Invite & Earn payouts | 10 min |
 | `pokoin-rust-job-search-delta.timer` | Redis Search `pokoin:cards` delta | 2 min |
+
+`MemoryMax=300M` in `pokoin-rust-job@.service` is not enforced on the Pi: its kernel command line has `cgroup_disable=memory`, so a job that grows only shows up as swap.
 
 `job search-reindex` rebuilds the Redis Search index in full; run it by hand on the Pi, or let the nezopt `search-reindex` CronJob do it for the overflow.
 

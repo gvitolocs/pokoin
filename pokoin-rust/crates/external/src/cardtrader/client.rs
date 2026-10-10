@@ -10,6 +10,7 @@ use regex::Regex;
 use reqwest::Method;
 use serde_json::{json, Value};
 
+use crate::cardtrader::sync_core::{slim_sale_order, ProductsExport};
 use crate::error::{clean_text, ApiError, ApiResult};
 use crate::firebase::decode_jwt_segment;
 
@@ -217,6 +218,17 @@ impl CardTraderClient {
 
     /// `cardTraderRequest` — one JSON call with the reference error ladder.
     pub async fn request(&self, path: &str, token: &str, method: Method, body: Option<Value>) -> ApiResult<Value> {
+        let sent = self.send(path, token, method, body).await?;
+        let status = sent.response.status().as_u16();
+        let text = sent.response.text().await.unwrap_or_default();
+        let payload: Option<Value> = if text.trim().is_empty() { None } else { serde_json::from_str(&text).ok() };
+        if status >= 400 {
+            return Err(cardtrader_response_error(status, payload.as_ref(), &sent.path, &sent.token));
+        }
+        Ok(payload.unwrap_or(Value::Null))
+    }
+
+    async fn send(&self, path: &str, token: &str, method: Method, body: Option<Value>) -> ApiResult<Sent> {
         let clean_path = if path.starts_with('/') { path.to_string() } else { format!("/{path}") };
         let token = clean_token(token);
         let mut request = self
@@ -234,13 +246,7 @@ impl CardTraderClient {
             .send()
             .await
             .map_err(|e| ApiError::new(502, format!("CardTrader request failed: {e}")).with_code(TRANSPORT_ERROR))?;
-        let status = response.status().as_u16();
-        let text = response.text().await.unwrap_or_default();
-        let payload: Option<Value> = if text.trim().is_empty() { None } else { serde_json::from_str(&text).ok() };
-        if status >= 400 {
-            return Err(cardtrader_response_error(status, payload.as_ref(), &clean_path, &token));
-        }
-        Ok(payload.unwrap_or(Value::Null))
+        Ok(Sent { response, path: clean_path, token })
     }
 
     pub async fn get(&self, path: &str, token: &str) -> ApiResult<Value> {
@@ -256,12 +262,44 @@ impl CardTraderClient {
         Ok(normalize_info(&info))
     }
 
-    /// `fetchProductsExport` — never coerce a non-array into [].
-    pub async fn fetch_products_export(&self, token: &str) -> ApiResult<Vec<Value>> {
-        let payload = self.get("/products/export", token).await?;
-        match payload {
-            Value::Array(rows) => Ok(rows),
-            _ => Err(ApiError::new(502, "CardTrader products/export did not return an array.")),
+    /// `fetchProductsExport` — never coerce a non-array into []. The body is
+    /// parsed while it downloads, one row at a time, into the slim
+    /// [`ProductsExport`]: read whole into a `Value`, a 12,523-product export
+    /// took the reconcile job from 25 MB to 1.77 GB on the Pi (2026-10-10).
+    pub async fn fetch_products_export(&self, token: &str) -> ApiResult<ProductsExport> {
+        let sent = self.send("/products/export", token, Method::GET, None).await?;
+        let status = sent.response.status().as_u16();
+        if status >= 400 {
+            let text = sent.response.text().await.unwrap_or_default();
+            let payload: Option<Value> = if text.trim().is_empty() { None } else { serde_json::from_str(&text).ok() };
+            return Err(cardtrader_response_error(status, payload.as_ref(), &sent.path, &sent.token));
+        }
+        let mut response = sent.response;
+        let (chunks, reader) = tokio::sync::mpsc::channel(EXPORT_CHUNKS_IN_FLIGHT);
+        let parser = tokio::task::spawn_blocking(move || {
+            let reader = ChunkReader { chunks: reader, current: bytes::Bytes::new() };
+            ProductsExport::from_reader(std::io::BufReader::with_capacity(64 * 1024, reader))
+        });
+        loop {
+            let chunk = match response.chunk().await {
+                Ok(Some(chunk)) => Ok(chunk),
+                Ok(None) => break,
+                Err(error) => Err(error.to_string()),
+            };
+            let failed = chunk.is_err();
+            // A closed channel means the parser already gave up on the body.
+            if chunks.send(chunk).await.is_err() || failed {
+                break;
+            }
+        }
+        drop(chunks);
+        match parser.await {
+            Ok(Ok(export)) => Ok(export),
+            Ok(Err(error)) => {
+                tracing::warn!("cardtrader products/export unreadable: {error}");
+                Err(ApiError::new(502, "CardTrader products/export did not return an array."))
+            }
+            Err(error) => Err(ApiError::new(502, format!("CardTrader products/export parser failed: {error}"))),
         }
     }
 
@@ -280,6 +318,25 @@ impl CardTraderClient {
         page_size: u32,
         max_pages: u32,
     ) -> ApiResult<Vec<Value>> {
+        self.fetch_order_pages(token, from, state, page_size, max_pages, |order| order).await
+    }
+
+    /// Seller orders of every state cut page by page to what sale evidence
+    /// and sale records read ([`slim_sale_order`]): up to 50 pages of full
+    /// orders (buyer, addresses, totals) were held for the whole reconcile.
+    pub async fn fetch_seller_sale_orders(&self, token: &str, from: &str, page_size: u32, max_pages: u32) -> ApiResult<Vec<Value>> {
+        self.fetch_order_pages(token, from, "", page_size, max_pages, slim_sale_order).await
+    }
+
+    async fn fetch_order_pages(
+        &self,
+        token: &str,
+        from: &str,
+        state: &str,
+        page_size: u32,
+        max_pages: u32,
+        keep: fn(Value) -> Value,
+    ) -> ApiResult<Vec<Value>> {
         let mut orders = Vec::new();
         for page in 1..=max_pages {
             let mut suffix = format!("?order_as=seller&sort=date.desc&limit={page_size}&page={page}");
@@ -295,7 +352,7 @@ impl CardTraderClient {
                 _ => return Err(ApiError::new(502, "CardTrader orders did not return an array.")),
             };
             let filled = rows.len();
-            orders.extend(rows);
+            orders.extend(rows.into_iter().map(keep));
             if filled < page_size as usize {
                 break;
             }
@@ -346,6 +403,38 @@ impl CardTraderClient {
     pub async fn fetch_cart(&self, token: &str) -> ApiResult<Value> {
         let payload = self.get("/cart", token).await?;
         Ok(if payload.is_object() { payload } else { json!({}) })
+    }
+}
+
+/// A sent request, with the cleaned path and token the error ladder reports.
+struct Sent {
+    response: reqwest::Response,
+    path: String,
+    token: String,
+}
+
+/// Body chunks the download may run ahead of the export parser.
+const EXPORT_CHUNKS_IN_FLIGHT: usize = 16;
+
+/// Blocking `Read` over body chunks sent by the async download, so the
+/// export parser never needs the whole body in memory.
+struct ChunkReader {
+    chunks: tokio::sync::mpsc::Receiver<Result<bytes::Bytes, String>>,
+    current: bytes::Bytes,
+}
+
+impl std::io::Read for ChunkReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        while self.current.is_empty() {
+            match self.chunks.blocking_recv() {
+                Some(Ok(chunk)) => self.current = chunk,
+                Some(Err(error)) => return Err(std::io::Error::other(error)),
+                None => return Ok(0),
+            }
+        }
+        let n = buf.len().min(self.current.len());
+        buf[..n].copy_from_slice(&self.current.split_to(n));
+        Ok(n)
     }
 }
 
@@ -416,10 +505,10 @@ pub fn cardtrader_webhook_url_for_uid(uid: &str) -> String {
 }
 
 /// `importDryRunSummary`.
-pub fn import_dry_run_summary(products: &[Value]) -> Value {
+pub fn import_dry_run_summary(export: &ProductsExport) -> Value {
     json!({
-        "productCount": products.len(),
-        "sample": products.iter().take(10).map(safe_product_sample).collect::<Vec<_>>(),
+        "productCount": export.rows(),
+        "sample": export.sample.iter().take(10).map(safe_product_sample).collect::<Vec<_>>(),
     })
 }
 
@@ -496,6 +585,50 @@ mod tests {
         assert_eq!(fingerprint["jwt"], true);
         assert_eq!(fingerprint["complete"], true);
         assert_eq!(fingerprint["signatureBytes"], 256);
+    }
+
+    /// A one-route CardTrader stand-in answering every path with `body`.
+    async fn serve(status: u16, body: Vec<u8>) -> CardTraderClient {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = axum::Router::new().fallback(move || {
+            let body = body.clone();
+            async move { (axum::http::StatusCode::from_u16(status).unwrap(), body) }
+        });
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        CardTraderClient::with_base(format!("http://{address}"))
+    }
+
+    #[tokio::test]
+    async fn products_export_is_parsed_while_it_streams() {
+        let rows: Vec<Value> = (1..=3000)
+            .map(|i| json!({
+                "id": 105_000_000 + i, "blueprint_id": 100 + i, "game_id": 5, "quantity": 1 + i % 3,
+                "price_cents": 120, "price_currency": "EUR", "name_en": format!("Card {i}"),
+                "properties_hash": {"condition": "Near Mint", "pokemon_language": "en"},
+                "uploaded_images": [{"url": format!("https://img.example.test/{i}.jpg"), "blob": "x".repeat(512)}],
+            }))
+            .collect();
+        let ct = serve(200, serde_json::to_vec(&rows).unwrap()).await;
+        let export = ct.fetch_products_export("token").await.unwrap();
+        assert_eq!((export.products.len(), export.unparsed_rows), (3000, 0));
+        assert_eq!(export.products[2999].id, "105003000");
+        assert_eq!(export.products[0].price_pkn, Some(240.0));
+        let summary = import_dry_run_summary(&export);
+        assert_eq!(summary["productCount"], 3000);
+        assert_eq!(summary["sample"].as_array().unwrap().len(), 10);
+        assert_eq!(summary["sample"][0]["priceCents"], 120.0);
+    }
+
+    #[tokio::test]
+    async fn products_export_never_coerces_or_hides_errors() {
+        for body in [&b"{\"products\": []}"[..], b"", b"[{\"id\": 1},"] {
+            let error = serve(200, body.to_vec()).await.fetch_products_export("token").await.unwrap_err();
+            assert_eq!((error.status, error.message.as_str()), (502, "CardTrader products/export did not return an array."));
+        }
+        let rejected = serve(401, br#"{"error_code":"unauthorized"}"#.to_vec()).await;
+        let error = rejected.fetch_products_export("token").await.unwrap_err();
+        assert_eq!((error.status, error.code.as_deref()), (400, Some("cardtrader_token_rejected")));
     }
 
     #[test]
