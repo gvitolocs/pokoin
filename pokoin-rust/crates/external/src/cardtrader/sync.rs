@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use crate::cardtrader::client::CardTraderClient;
 use crate::cardtrader::integration as ct_integration;
 use crate::cardtrader::sync_core::*;
-use crate::db::DbPools;
+use crate::db::{bound_query, rows_to_json, DbPools};
 use crate::error::{clean_text, clean_text_value, i64_field, ApiError, ApiResult, ValueExt};
 use crate::firebase::FirestoreStore;
 
@@ -112,6 +112,15 @@ const APPLY_CT_QUANTITY_SQL: &str = r#"
         updated_at = now()
       where listing.id = $1::uuid
         and listing.source_listing_id like 'ct:%'
+        and (
+          $3::timestamptz is null
+          or listing.updated_at <= $3::timestamptz
+          or greatest(0, $2 - coalesce((
+            select sum(hold.quantity)::int
+            from public.marketplace_checkout_holds as hold
+            where hold.listing_id = listing.id
+          ), 0)) <= listing.quantity_available
+        )
       returning listing.id, listing.quantity_available, listing.status, listing.card_id, listing.source_listing_id
 "#;
 
@@ -376,11 +385,46 @@ pub async fn card_metadata_many(db: &DbPools, card_ids: &[String], game: &str) -
 
 /// `applyCtQuantity` — absolute CT quantity minus checkout holds.
 pub async fn apply_ct_quantity(db: &DbPools, listing_id: &str, quantity: i64) -> ApiResult<Option<Value>> {
+    apply_ct_quantity_since(db, listing_id, quantity, None).await
+}
+
+/// `apply_ct_quantity` for a quantity read from an export fetched at
+/// `export_started_at` (writer clock). A row written after that instant (a
+/// webhook decrement, a checkout) may only go down: raising it would put back
+/// stock the export never saw sold (specs/tla/ct-reconcile NoStaleResurrection).
+/// `None` when the row is not CardTrader-linked or the raise was refused.
+pub async fn apply_ct_quantity_since(
+    db: &DbPools,
+    listing_id: &str,
+    quantity: i64,
+    export_started_at: Option<&str>,
+) -> ApiResult<Option<Value>> {
     let qty = quantity.clamp(0, 999_999);
+    let since = export_started_at.map(|at| json!(at)).unwrap_or(Value::Null);
     let rows = db
-        .write("pokemon", APPLY_CT_QUANTITY_SQL, &[json!(listing_id), json!(qty)])
+        .write("pokemon", APPLY_CT_QUANTITY_SQL, &[json!(listing_id), json!(qty), since])
         .await?;
     Ok(rows.first().cloned())
+}
+
+/// The writer's clock, the same clock that stamps `updated_at`.
+pub async fn writer_clock(db: &DbPools) -> Option<String> {
+    match db.write("pokemon", "select clock_timestamp()::text as now", &[]).await {
+        Ok(rows) => rows
+            .first()
+            .and_then(|row| row.get("now"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        Err(error) => {
+            tracing::warn!("cardtrader reconcile writer clock unavailable: {}", error.message);
+            None
+        }
+    }
+}
+
+/// Advisory-lock key serialising imports of one CardTrader product.
+pub fn import_lock_key(seller_uid: &str, source_listing_id: &str) -> String {
+    format!("ct-import:{seller_uid}:{source_listing_id}")
 }
 
 /// `delistCtListing` — seller removed it on CardTrader: inactive, not sold.
@@ -437,29 +481,33 @@ pub async fn create_imported_listing(
     };
     let stock_location = clean_text(Some(location), 120);
 
-    let existing = db
-        .query("pokemon", FIND_EXISTING_BY_SOURCE_SQL, &[json!(seller_uid), json!(source_listing_id)])
+    // Find-then-insert runs in one writer transaction under an advisory lock
+    // on (seller, product): two reconcilers (Redis lock expired or Redis down)
+    // used to both miss the row and both insert (specs/tla/ct-reconcile
+    // UniqueLink). The find reads the writer, never the lagging replica.
+    let mut tx = db.writer()?.begin().await?;
+    sqlx::query("select pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(import_lock_key(seller_uid, &source_listing_id))
+        .execute(&mut *tx)
         .await?;
+    let find_params = [json!(seller_uid), json!(source_listing_id)];
+    let existing = rows_to_json(&bound_query(FIND_EXISTING_BY_SOURCE_SQL, &find_params).fetch_all(&mut *tx).await?);
     if let Some(found) = existing.first().cloned() {
         let found_status = clean_text_value(found.get("status").unwrap_or(&Value::Null), 40);
-        if found_status == "inactive" && reactivate_hidden {
-            let rows = db
-                .write(
-                    "pokemon",
-                    REACTIVATE_HIDDEN_SQL,
-                    &[found["id"].clone(), json!(qty), json!(price_pkn), json!(stock_location)],
-                )
-                .await?;
-            return Ok(rows.first().cloned().or(Some(found)));
-        }
         let found_location = clean_text_value(found.get("location").unwrap_or(&Value::Null), 120);
-        if !stock_location.is_empty() && found_location.is_empty() {
-            let rows = db
-                .write("pokemon", PATCH_LOCATION_IF_EMPTY_SQL, &[found["id"].clone(), json!(stock_location)])
-                .await?;
-            return Ok(rows.first().cloned().or(Some(found)));
-        }
-        return Ok(Some(found));
+        let write = if found_status == "inactive" && reactivate_hidden {
+            Some((REACTIVATE_HIDDEN_SQL, vec![found["id"].clone(), json!(qty), json!(price_pkn), json!(stock_location)]))
+        } else if !stock_location.is_empty() && found_location.is_empty() {
+            Some((PATCH_LOCATION_IF_EMPTY_SQL, vec![found["id"].clone(), json!(stock_location)]))
+        } else {
+            None
+        };
+        let row = match write {
+            Some((sql, params)) => rows_to_json(&bound_query(sql, &params).fetch_all(&mut *tx).await?).first().cloned(),
+            None => None,
+        };
+        tx.commit().await?;
+        return Ok(row.or(Some(found)));
     }
 
     let card_name = if !product.name.is_empty() {
@@ -478,37 +526,37 @@ pub async fn create_imported_listing(
         }
     };
     let game = if marketplace_game.is_empty() { "pokemon" } else { marketplace_game };
-    let rows = db
-        .write(
-            game,
-            CREATE_IMPORTED_LISTING_SQL,
-            &[
-                json!(card_id),
-                json!(seller_uid),
-                json!(if clean_text(Some(seller_name), 120).is_empty() { "Pokoin seller".to_string() } else { clean_text(Some(seller_name), 120) }),
-                json!(country_code),
-                json!(product.condition),
-                json!(product.language),
-                json!(price_pkn),
-                json!(qty),
-                json!(product.signed),
-                json!(product.reverse),
-                json!(product.first_edition),
-                json!(if product.reverse { "reverse" } else { "standard" }),
-                json!(product.graded),
-                json!(if product.description.is_empty() { String::new() } else { product.description.clone() }),
-                json!(SOURCE_IMPORT),
-                json!(source_listing_id),
-                json!(if card_name.is_empty() { card_id.to_string() } else { card_name }),
-                json!(clean_text_value(meta.get("card_image_url").unwrap_or(&Value::Null), 800)),
-                json!(set_name),
-                json!(clean_text_value(meta.get("collector_number").unwrap_or(&Value::Null), 80)),
-                json!(product.altered),
-                json!(game),
-                json!(stock_location),
-            ],
-        )
-        .await?;
+    // Every game's seller listings live in the shared marketplace writer
+    // (marketplace_game column), as in Node. The port wrote non-Pokemon
+    // imports to the per-game writer, which load_seller_listings never reads,
+    // so the product was imported again on every run.
+    let insert_params = [
+        json!(card_id),
+        json!(seller_uid),
+        json!(if clean_text(Some(seller_name), 120).is_empty() { "Pokoin seller".to_string() } else { clean_text(Some(seller_name), 120) }),
+        json!(country_code),
+        json!(product.condition),
+        json!(product.language),
+        json!(price_pkn),
+        json!(qty),
+        json!(product.signed),
+        json!(product.reverse),
+        json!(product.first_edition),
+        json!(if product.reverse { "reverse" } else { "standard" }),
+        json!(product.graded),
+        json!(if product.description.is_empty() { String::new() } else { product.description.clone() }),
+        json!(SOURCE_IMPORT),
+        json!(source_listing_id),
+        json!(if card_name.is_empty() { card_id.to_string() } else { card_name }),
+        json!(clean_text_value(meta.get("card_image_url").unwrap_or(&Value::Null), 800)),
+        json!(set_name),
+        json!(clean_text_value(meta.get("collector_number").unwrap_or(&Value::Null), 80)),
+        json!(product.altered),
+        json!(game),
+        json!(stock_location),
+    ];
+    let rows = rows_to_json(&bound_query(CREATE_IMPORTED_LISTING_SQL, &insert_params).fetch_all(&mut *tx).await?);
+    tx.commit().await?;
     Ok(rows.first().cloned())
 }
 
@@ -643,6 +691,8 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
 
     emit(json!({ "phase": "export", "processed": 0, "total": 0 }));
 
+    // Taken before the export request: rows written after it may only go down.
+    let export_started_at = writer_clock(db).await;
     let export = match ct.fetch_products_export(&token).await {
         Ok(products) => products,
         Err(error) => {
@@ -657,12 +707,18 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
         }
     };
 
-    let (allow_destructive, gate_reason) = destructive_reconcile_gate(true, true, true);
     let products: Vec<NormalizedProduct> = export
         .iter()
         .map(normalize_product)
-        .filter(|p| !p.id.is_empty())
+        .filter(|p| is_ct_product_id(&p.id))
         .collect();
+    // A row whose id was not understood makes the export unable to say what
+    // is absent: no destructive step (1-Day Ready asset deletes included).
+    let (allow_destructive, gate_reason) = if export.len() > products.len() {
+        (false, "unparsed_export")
+    } else {
+        destructive_reconcile_gate(true, true, true)
+    };
     summary["inventory"].set_i64(products.len() as i64);
 
     if preview_games_only {
@@ -730,7 +786,12 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
                 PlannedAction::Noop { .. } => Ok(()),
                 PlannedAction::UpdateQty { product_id, listing_id, quantity } => {
                     summary["alreadyLinked"].incr(1);
-                    apply_ct_quantity(db, listing_id, *quantity).await?;
+                    if apply_ct_quantity_since(db, listing_id, *quantity, export_started_at.as_deref()).await?.is_none() {
+                        // Written after the export was taken (webhook, checkout):
+                        // the next complete export settles it.
+                        ensure_counter(&mut summary, "staleSkipped", 1);
+                        return Ok(());
+                    }
                     summary["updated"].incr(1);
                     let _ = product_id;
                     Ok(())
@@ -911,6 +972,9 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
     persisted["unresolvedItems"] = truncate_array(&persisted["unresolvedItems"], 25);
     persisted["errorItems"] = truncate_array(&persisted["errorItems"], 25);
 
+    // The plan's gate, not the HTTP one: an unparsed export or a blocked mass
+    // removal is an incomplete sync that the periodic job must report.
+    let (allow_destructive, gate_reason) = (plan.allow_destructive, plan.gate_reason);
     record_seller_sync(db, &seller_uid, persisted["errors"].as_i64().unwrap_or(0) == 0, !allow_destructive, if allow_destructive { "" } else { gate_reason }, &persisted, summary["inventory"].as_i64().unwrap_or(0), allow_destructive).await?;
 
     Ok(json!({
@@ -919,6 +983,7 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
         "connected": true,
         "complete": allow_destructive,
         "destructiveSkipped": !allow_destructive,
+        "gateReason": gate_reason,
         "summary": persisted,
     }))
 }

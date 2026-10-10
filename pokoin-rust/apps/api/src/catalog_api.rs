@@ -4,6 +4,7 @@ use axum::{extract::State,http::{HeaderMap,StatusCode},response::{IntoResponse,R
 use serde_json::{json,Value};
 use sqlx::PgPool;
 use pokoin_catalog::card::{text,number};
+use pokoin_api_common::compact::{self,Wanted};
 use crate::{AppState,suggest::{cors,game_from}};
 
 pub fn params(uri:&axum::http::Uri)->HashMap<String,String>{
@@ -18,6 +19,23 @@ pub fn limit(p:&HashMap<String,String>,key:&str,default:i64,max:i64)->i64{
 }
 pub fn response(status:StatusCode,body:Value,cache:&str)->Response{
  cors(status,if cache.is_empty(){None}else{Some(cache.to_owned())},Some("application/json; charset=utf-8"),serde_json::to_vec(&body).unwrap_or_default()).into_response()
+}
+/// `response` in whichever representation the request asked for. The default
+/// representation is byte-identical to [`response`]; both carry `Vary: Accept`
+/// so a shared cache keeps the two apart.
+pub fn response_c1(wanted:Wanted,status:StatusCode,body:Value,cache:&str)->Response{
+ let (content_type,bytes)=if wanted.c1(){
+  (compact::C1_CONTENT_TYPE,compact::encode::encode_to_vec(&body))
+ }else{
+  ("application/json; charset=utf-8",serde_json::to_vec(&body).unwrap_or_default())
+ };
+ let mut response=cors(status,if cache.is_empty(){None}else{Some(cache.to_owned())},Some(content_type),bytes).into_response();
+ response.headers_mut().insert(axum::http::header::VARY,axum::http::HeaderValue::from_static("Accept"));
+ response
+}
+/// What the request asked for, from its `Accept` header and `?format=`.
+pub fn wanted(headers:&HeaderMap,uri:&axum::http::Uri)->Wanted{
+ Wanted::from_request(headers,&pokoin_api_common::http::Query::from_uri(uri))
 }
 pub fn failure(error:&sqlx::Error)->Response {
  tracing::error!(%error,"catalog query failed");

@@ -1,7 +1,7 @@
 //! `GET /api/marketplace-card-versions` — port of `marketplace-card-versions.js` (handler).
 
 use axum::extract::State;
-use axum::http::{Method, StatusCode, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::Response;
 use pokoin_api_common::{http, RouteState};
 use serde_json::{Value, json};
@@ -9,11 +9,18 @@ use serde_json::{Value, json};
 use super::util;
 use crate::shared::{card_versions, image_log};
 
-pub async fn handler(State(state): State<RouteState>, method: Method, uri: Uri) -> Response {
+pub async fn handler(
+    State(state): State<RouteState>,
+    method: Method,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
     if method != Method::GET {
         return util::method_not_allowed("GET");
     }
     let q = http::Query::from_uri(&uri);
+    // Opt-in compact encoding; the default representation is unchanged.
+    let wanted = util::wanted(&headers, &q);
     let text = |k: &str| q.search_param(k).unwrap_or("").to_owned();
     let (card_id, card_slug) = card_versions::resolve_card_route(
         &text("cardId"),
@@ -38,7 +45,7 @@ pub async fn handler(State(state): State<RouteState>, method: Method, uri: Uri) 
                 None => uri.path().to_owned(),
             };
             image_log::record_version_images(&rows, &route, &card_id);
-            util::json_cache(StatusCode::OK, Value::Array(rows), "public, max-age=20, s-maxage=120")
+            util::json_cache_c1(wanted, StatusCode::OK, Value::Array(rows), "public, max-age=20, s-maxage=120")
         }
         Err(error) => {
             let _ = json!({});

@@ -461,14 +461,20 @@ fn test_router() -> Router {
 }
 
 async fn serve(method: &str, uri: &str) -> (StatusCode, Value, Vec<(String, String)>) {
+    serve_with(method, uri, None).await
+}
+
+async fn serve_with(
+    method: &str,
+    uri: &str,
+    accept: Option<&str>,
+) -> (StatusCode, Value, Vec<(String, String)>) {
+    let mut request = Request::builder().method(method).uri(uri);
+    if let Some(accept) = accept {
+        request = request.header(axum::http::header::ACCEPT, accept);
+    }
     let response = test_router()
-        .oneshot(
-            Request::builder()
-                .method(method)
-                .uri(uri)
-                .body(Body::empty())
-                .expect("request"),
-        )
+        .oneshot(request.body(Body::empty()).expect("request"))
         .await
         .expect("response");
     let status = response.status();
@@ -610,3 +616,134 @@ async fn every_route_answers_get_not_404() {
         assert!(cors_headers(&headers), "{path}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// compact (c1) encoding
+// ---------------------------------------------------------------------------
+
+/// The contract of the opt-in `c1` representation: the default JSON these
+/// handlers serve must come back byte for byte. The fixtures are the live
+/// responses the parity tests above are written against, so this covers the
+/// real shapes rather than synthetic ones.
+#[test]
+fn live_response_fixtures_round_trip_through_c1() {
+    use pokoin_api_common::compact::{decode, encode};
+
+    for name in [
+        "live-expansion-destined-rivals.json",
+        "live-expansion-no-slug.json",
+        "live-version-set.json",
+        "live-rails-new-cards.json",
+        "live-home.json",
+        "live-sales-pulse.json",
+    ] {
+        let body = fixture(name);
+        let document = encode::encode(&body);
+        let decoded = decode::decode(&document).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            serde_json::to_string(&decoded).expect("decoded"),
+            serde_json::to_string(&body).expect("default"),
+            "{name}: c1 round trip changed the body"
+        );
+    }
+}
+
+/// The handler bodies the page BFFs build, not just the captured responses.
+#[test]
+fn handler_bodies_round_trip_through_c1() {
+    use pokoin_api_common::compact::{decode, encode};
+
+    let rows = rows_fixture("expansion-destined-rivals-rows.json");
+    let cards = react_card::to_react_cards(&rows);
+    let bodies = vec![
+        (
+            "expansion success",
+            expansion_page::success_body(
+                json!({ "name": "Destined Rivals", "slug": "destined-rivals", "cardCount": 244 }),
+                cards.clone(),
+                "card",
+                200,
+                0,
+                244.0,
+                true,
+            ),
+        ),
+        (
+            "expansion no slug",
+            expansion_page::no_slug_body(rows_fixture("expansion-list-rows.json"), "pokemon", 500),
+        ),
+        ("rails tiles", super::rails::tiles_body(cards)),
+    ];
+    for (label, body) in bodies {
+        let document = encode::encode(&body);
+        let decoded = decode::decode(&document).unwrap_or_else(|e| panic!("{label}: {e}"));
+        assert_eq!(
+            serde_json::to_string(&decoded).expect("decoded"),
+            serde_json::to_string(&body).expect("default"),
+            "{label}: c1 round trip changed the body"
+        );
+    }
+}
+
+/// A route answers `c1` only when the request asks for it, and says so with
+/// `Vary: Accept` either way. Served without a database, so this asserts the
+/// negotiation and the headers, not the payload.
+#[tokio::test]
+async fn target_routes_negotiate_the_compact_representation() {
+    use pokoin_api_common::compact::{C1_CONTENT_TYPE, C1_MEDIA_TYPE};
+
+    // marketplace-home-page answers 200 without a database; the rest need one,
+    // so the count below keeps this test from quietly going vacuous.
+    let mut answered = 0;
+    for path in [
+        "/api/marketplace-expansion-page?slug=destined-rivals&limit=4",
+        "/api/marketplace-expansion-page?limit=3",
+        "/api/marketplace-home-page",
+        "/api/marketplace-rails?id=new_cards",
+    ] {
+        let separator = if path.contains('?') { '&' } else { '?' };
+        for (accept, query) in [(Some(C1_MEDIA_TYPE), false), (None, true)] {
+            let uri = if query {
+                format!("{path}{separator}format=c1")
+            } else {
+                path.to_string()
+            };
+            let (status, _, headers) = serve_with("GET", &uri, accept).await;
+            if status != StatusCode::OK {
+                // No database in the test runtime: the error bodies stay JSON
+                // on purpose, so there is nothing to assert about them here.
+                continue;
+            }
+            answered += 1;
+            assert!(
+                headers
+                    .iter()
+                    .any(|(k, v)| k == "content-type" && v == C1_CONTENT_TYPE),
+                "{uri} did not answer c1: {headers:?}"
+            );
+            assert!(
+                headers.iter().any(|(k, v)| k == "vary" && v == "Accept"),
+                "{uri} has no Vary: Accept"
+            );
+        }
+        // A browser's blanket Accept must not opt a page into c1.
+        let (status, _, headers) = serve_with("GET", path, Some("application/json, */*")).await;
+        if status == StatusCode::OK {
+            assert!(
+                headers
+                    .iter()
+                    .any(|(k, v)| k == "content-type" && v == "application/json; charset=utf-8"),
+                "{path} answered c1 for a default Accept: {headers:?}"
+            );
+            assert!(
+                headers.iter().any(|(k, v)| k == "vary" && v == "Accept"),
+                "{path} has no Vary: Accept"
+            );
+        }
+    }
+    assert!(
+        answered >= 2,
+        "no target route answered 200, so nothing about c1 was asserted"
+    );
+}
+

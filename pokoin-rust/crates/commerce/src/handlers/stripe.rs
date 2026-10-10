@@ -328,7 +328,7 @@ async fn stripe_webhook_inner(
 }
 
 /// Mark a EUR order paid, consume the PKN discount and commit the stock hold.
-async fn handle_marketplace_order_paid(
+pub(crate) async fn handle_marketplace_order_paid(
     state: &DomainState,
     order_id: &str,
     session: &Value,

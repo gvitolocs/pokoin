@@ -18,17 +18,26 @@ pub fn event_doc_id(uid: &str, order_id: &str, order_item_id: &str) -> String {
     format!("{}_{}_{}", clean_text(Some(uid), 80), clean_text(Some(order_id), 40), clean_text(Some(order_item_id), 40))
 }
 
+/// JS `??`: an explicit JSON null falls through to the next key.
+fn present(value: Option<&Value>) -> Option<&Value> {
+    value.filter(|v| !v.is_null())
+}
+
+/// `itemProductId`: the first non-null id, as text. CardTrader sends product
+/// ids as JSON numbers; reading them with `as_str()` returned "" so no webhook
+/// sale ever found its `ct:<id>` listing (the 2026-10-09 bug class).
 pub fn item_product_id(item: &Value) -> String {
     let product = item.get("product").filter(|v| v.is_object());
     clean_text(
-        item.get("product_id")
-            .or_else(|| item.get("productId"))
-            .or_else(|| item.get("seller_product_id"))
-            .or_else(|| item.get("sellerProductId"))
-            .or_else(|| product.and_then(|p| p.get("id")))
-            .or_else(|| product.and_then(|p| p.get("product_id")))
-            .or_else(|| product.and_then(|p| p.get("productId")))
-            .and_then(Value::as_str),
+        present(item.get("product_id"))
+            .or_else(|| present(item.get("productId")))
+            .or_else(|| present(item.get("seller_product_id")))
+            .or_else(|| present(item.get("sellerProductId")))
+            .or_else(|| present(product.and_then(|p| p.get("id"))))
+            .or_else(|| present(product.and_then(|p| p.get("product_id"))))
+            .or_else(|| present(product.and_then(|p| p.get("productId"))))
+            .and_then(crate::error::scalar_text)
+            .as_deref(),
         80,
     )
 }
@@ -432,6 +441,12 @@ pub async fn handle_order_payload(
     Ok(results)
 }
 
+/// A retryable miss (no linked listing yet, decrement refused) must start the
+/// complete-export fallback sync, as Node's webhook did.
+pub fn wants_fallback_sync(out: &Value) -> bool {
+    out.get("retrySync") == Some(&Value::Bool(true))
+}
+
 /// The HTTP-level webhook logic (route calls this after pulling the raw body).
 pub async fn handle_webhook(
     firestore: &dyn FirestoreStore,
@@ -550,6 +565,16 @@ mod tests {
         assert_eq!(item_product_id(&nested), "9");
         let no_id = json!({"product_id": "5"});
         assert_eq!(order_item_id(&no_id), "5");
+    }
+
+    #[test]
+    fn numeric_product_ids_are_read() {
+        assert_eq!(item_product_id(&json!({"product_id": 123456})), "123456");
+        assert_eq!(item_product_id(&json!({"product_id": null, "productId": "77"})), "77");
+        assert_eq!(item_product_id(&json!({"product": {"id": 991}})), "991");
+        assert_eq!(order_item_id(&json!({"product_id": 5})), "5");
+        assert!(wants_fallback_sync(&json!({"ok": true, "retrySync": true})));
+        assert!(!wants_fallback_sync(&json!({"ok": true, "results": []})));
     }
 
     #[test]

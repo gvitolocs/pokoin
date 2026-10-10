@@ -13,6 +13,7 @@ pub mod card_shortlink;
 pub mod card_url;
 pub mod card_versions;
 pub mod deck_lookup;
+pub mod dictionary;
 pub mod expansions;
 pub mod home;
 pub mod hot_blueprints;
@@ -22,6 +23,7 @@ pub mod util;
 /// Routes owned by this module (paths carry the full `/api/...` prefix).
 pub fn routes() -> Router<RouteState> {
     Router::new()
+        .route("/api/dictionary", any(dictionary::handler))
         .route("/api/marketplace-expansions", any(expansions::handler))
         .route("/api/marketplace-card-versions", any(card_versions::handler))
         .route("/api/marketplace-card-url", any(card_url::handler))

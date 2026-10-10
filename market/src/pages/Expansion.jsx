@@ -129,7 +129,8 @@ export default function Expansion() {
         const shortPage = (data?.cards?.length || 0) > 0 && data.cards.length < EXPANSION_PAGE;
         if (shortPage || expansionTilesReady(data, slug, data?.expansion?.name)) {
           setPayload(shortPage ? { ...data, hasMore: false } : data);
-          if (shortPage) return null;
+          // A snapshot is the whole set; only a live first page walks on.
+          if (shortPage || data?.fromSnapshot) return null;
         } else {
           setPayload({
             expansion: data?.expansion || null,

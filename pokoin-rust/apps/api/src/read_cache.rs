@@ -11,6 +11,14 @@ struct Snapshot { body: Vec<u8>, headers: HeaderMap, at: Instant }
 #[derive(Default)]
 pub struct Coordinator { flights: Mutex<HashMap<String,Weak<Flight>>> }
 struct Identity { key: String, generation: String, ttl: u64 }
+/// Routes that can answer in the compact (`c1`) representation cache each
+/// representation under its own key — otherwise a cached `c1` body would be
+/// handed to a client that asked for plain JSON.
+fn representation(req:&Request)->&'static str{
+ if req.uri().path()!="/api/marketplace-search-page"{return ""}
+ let query=pokoin_api_common::http::Query::parse(req.uri().query().unwrap_or(""));
+ if pokoin_api_common::compact::Wanted::from_request(req.headers(),&query).c1(){":c1"}else{""}
+}
 fn digest(s:&str)->String { hex::encode(&Sha256::digest(s.as_bytes())[..8]) }
 fn truth(s:Option<&str>)->bool{s.is_some_and(|s|["1","true","yes"].contains(&s.trim().to_ascii_lowercase().as_str()))}
 fn identity(req:&Request)->Option<Identity>{
@@ -41,7 +49,7 @@ fn identity(req:&Request)->Option<Identity>{
   (key,pokoin_cache::card_generation_key(&game,&id),lang.to_owned(),30)
  } else {return None};
  if key.is_empty(){return None}
- Some(Identity{key:format!("pokoin:rust:read:v1:{key}:{}",digest(&echo)),generation,ttl})
+ Some(Identity{key:format!("pokoin:rust:read:v1:{key}:{}{}",digest(&echo),representation(req)),generation,ttl})
 }
 async fn get(conn:&mut redis::aio::ConnectionManager,key:&str)->Result<Option<Vec<u8>>,()>{
  tokio::time::timeout(Duration::from_millis(180),redis::cmd("GET").arg(key).query_async::<Option<Vec<u8>>>(conn)).await.map_err(|_|())?.map_err(|_|())

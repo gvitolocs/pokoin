@@ -123,6 +123,71 @@ struct Decremented {
     remaining_quantity: i64,
 }
 
+const TAKE_SQL: &str = r#"
+    update public.marketplace_user_listings
+    set
+      quantity_available = quantity_available - $2,
+      status = case when quantity_available - $2 <= 0 then 'sold_out' else status end,
+      updated_at = now()
+    where id = $1
+      and seller_uid = $3
+      and status = 'active'
+      and quantity_available >= $2
+    returning card_id, source_listing_id, source, seller_uid, quantity_available, price_pkn
+"#;
+
+/// Insert this order's hold first; the unique (order_id, listing_id) key
+/// makes a concurrent or repeated take wait for, then see, the first one.
+const HOLD_SQL: &str = "insert into public.marketplace_checkout_holds (order_id, listing_id, quantity) \
+     values ($1, $2, $3) on conflict (order_id, listing_id) do nothing returning listing_id";
+
+const HELD_ROW_SQL: &str = "select card_id, source_listing_id, source, seller_uid, quantity_available, price_pkn \
+     from public.marketplace_user_listings where id = $1";
+
+/// Take one line. With a hold order the hold row and the decrement commit
+/// together, and a line this order already holds is not taken again: a
+/// re-take after a crash or a failed Firestore write used to decrement a
+/// second time (specs/tla/eur-fulfilment bugs/double-retake.cfg).
+async fn take_line(
+    state: &DomainState,
+    item: &OrderItem,
+    uuid: uuid::Uuid,
+    hold_order_id: Option<&str>,
+) -> Result<Option<sqlx::postgres::PgRow>, ApiError> {
+    let Some(order_id) = hold_order_id else {
+        return Ok(sqlx::query(TAKE_SQL)
+            .bind(uuid)
+            .bind(item.quantity as i32)
+            .bind(&item.seller_uid)
+            .fetch_optional(state.write_db())
+            .await?);
+    };
+    let mut tx = state.write_db().begin().await?;
+    let inserted = sqlx::query(HOLD_SQL)
+        .bind(order_id)
+        .bind(uuid)
+        .bind(item.quantity as i32)
+        .fetch_optional(&mut *tx)
+        .await?
+        .is_some();
+    let row = if inserted {
+        sqlx::query(TAKE_SQL)
+            .bind(uuid)
+            .bind(item.quantity as i32)
+            .bind(&item.seller_uid)
+            .fetch_optional(&mut *tx)
+            .await?
+    } else {
+        sqlx::query(HELD_ROW_SQL).bind(uuid).fetch_optional(&mut *tx).await?
+    };
+    if row.is_some() {
+        tx.commit().await?;
+    } else {
+        tx.rollback().await?;
+    }
+    Ok(row)
+}
+
 /// Atomic per-item decrement, rolled back together when any item fails.
 async fn verify_and_decrement_listings(
     state: &DomainState,
@@ -133,56 +198,7 @@ async fn verify_and_decrement_listings(
     for item in items {
         let uuid = uuid::Uuid::parse_str(&item.listing_id)
             .map_err(|_| ApiError::bad_request("Listing id invalid."))?;
-        let sql = if hold_order_id.is_some() {
-            r#"
-            with taken as (
-              update public.marketplace_user_listings
-              set
-                quantity_available = quantity_available - $2,
-                status = case when quantity_available - $2 <= 0 then 'sold_out' else status end,
-                updated_at = now()
-              where id = $1
-                and seller_uid = $3
-                and status = 'active'
-                and quantity_available >= $2
-              returning id, card_id, source_listing_id, source, seller_uid, quantity_available, price_pkn
-            ),
-            held as (
-              insert into public.marketplace_checkout_holds (order_id, listing_id, quantity)
-              select $4, id, $2 from taken
-              on conflict (order_id, listing_id) do update set quantity = excluded.quantity
-              returning listing_id
-            )
-            select card_id, source_listing_id, source, seller_uid, quantity_available, price_pkn
-            from taken
-            "#
-        } else {
-            r#"
-            with taken as (
-              update public.marketplace_user_listings
-              set
-                quantity_available = quantity_available - $2,
-                status = case when quantity_available - $2 <= 0 then 'sold_out' else status end,
-                updated_at = now()
-              where id = $1
-                and seller_uid = $3
-                and status = 'active'
-                and quantity_available >= $2
-              returning id, card_id, source_listing_id, source, seller_uid, quantity_available, price_pkn
-            )
-            select card_id, source_listing_id, source, seller_uid, quantity_available, price_pkn
-            from taken
-            "#
-        };
-        let mut builder = sqlx::query(sql)
-            .bind(uuid)
-            .bind(item.quantity as i32)
-            .bind(&item.seller_uid);
-        if let Some(order_id) = hold_order_id {
-            builder = builder.bind(order_id);
-        }
-        let row = builder.fetch_optional(state.write_db()).await;
-        let row = match row {
+        let row = match take_line(state, item, uuid, hold_order_id).await {
             Ok(Some(row)) => row,
             Ok(None) => {
                 rollback_decrements(state, &decremented, hold_order_id).await;
@@ -193,7 +209,7 @@ async fn verify_and_decrement_listings(
             }
             Err(error) => {
                 rollback_decrements(state, &decremented, hold_order_id).await;
-                return Err(error.into());
+                return Err(error);
             }
         };
         let stored_price: f64 = row.try_get("price_pkn").unwrap_or(0.0);
@@ -236,6 +252,8 @@ async fn verify_and_decrement_listings(
     Ok(decremented)
 }
 
+/// Give back what this call took. With a hold order, only deleting the hold
+/// row restores its quantity (one statement, like release_order_stock).
 async fn rollback_decrements(
     state: &DomainState,
     decremented: &[Decremented],
@@ -247,12 +265,25 @@ async fn rollback_decrements(
         };
         if let Some(order_id) = hold_order_id {
             let _ = sqlx::query(
-                "delete from public.marketplace_checkout_holds where order_id = $1 and listing_id = $2",
+                r#"
+                with released as (
+                  delete from public.marketplace_checkout_holds
+                  where order_id = $1 and listing_id = $2
+                  returning listing_id, quantity
+                )
+                update public.marketplace_user_listings as listing
+                set quantity_available = listing.quantity_available + released.quantity,
+                    status = case when listing.status = 'sold_out' then 'active' else listing.status end,
+                    updated_at = now()
+                from released
+                where listing.id = released.listing_id
+                "#,
             )
             .bind(order_id)
             .bind(uuid)
             .execute(state.write_db())
             .await;
+            continue;
         }
         let _ = sqlx::query(
             "update public.marketplace_user_listings
@@ -997,8 +1028,46 @@ fn release_plan(
     )
 }
 
-/// `cancel-eur` / `cancel`: only unpaid orders may be cancelled; the stock hold
-/// is released back to the listings.
+/// What `cancel-eur` may do with an order in this payment state.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CancelPlan {
+    AlreadyPaid,
+    AlreadyClosed,
+    /// Expire the Checkout session first, then release.
+    ExpireThenRelease,
+}
+
+pub fn cancel_plan(payment_status: &str) -> CancelPlan {
+    match payment_status {
+        "paid" | "escrow" | "released" | "partially_refunded" => CancelPlan::AlreadyPaid,
+        "pending_stripe" => CancelPlan::ExpireThenRelease,
+        _ => CancelPlan::AlreadyClosed,
+    }
+}
+
+/// Stripe refused to expire the session: paid => recover it as paid; an
+/// already expired session may be released; anything else is an error.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ExpireRefused {
+    Paid,
+    AlreadyExpired,
+    Unknown,
+}
+
+pub fn expire_refused(session: &Value) -> ExpireRefused {
+    if session["status"] == "complete" && session["payment_status"] != "unpaid" {
+        ExpireRefused::Paid
+    } else if session["status"] == "expired" {
+        ExpireRefused::AlreadyExpired
+    } else {
+        ExpireRefused::Unknown
+    }
+}
+
+/// `cancel-eur` / `cancel` (Node `cancelPendingEurOrder`): only an unpaid
+/// `pending_stripe` order is cancelled, and its Checkout session is expired
+/// before the stock is released, so the buyer can no longer pay for stock
+/// that went back on sale (specs/tla/eur-fulfilment bugs/cancel-then-paid.cfg).
 async fn order_cancel(
     state: &DomainState,
     claims: &Claims,
@@ -1009,25 +1078,44 @@ async fn order_cancel(
     if !buyer_owns_order(&order, &claims.uid) && !seller_on_order(&order, &claims.uid) {
         return Err(ApiError::forbidden("You are not part of this order."));
     }
-    let status = payment_status_of(&order).to_string();
-    if !matches!(
-        status.as_str(),
-        "pending_stripe" | "processing" | "expired" | "failed"
-    ) {
-        return Err(ApiError::bad_request(
-            "A paid order cannot be cancelled here.",
-        ));
+    match cancel_plan(payment_status_of(&order)) {
+        CancelPlan::AlreadyPaid => {
+            return Err(ApiError::conflict("This order is already paid.").with_code("already_paid"))
+        }
+        CancelPlan::AlreadyClosed => {
+            return Ok(private_json(json!({
+                "order": order,
+                "release": {"orderId": order_id, "outcome": "already_closed"},
+            })))
+        }
+        CancelPlan::ExpireThenRelease => {}
+    }
+    let session_id = order
+        .get("stripeCheckoutSessionId")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .chars()
+        .take(200)
+        .collect::<String>();
+    if !session_id.is_empty() {
+        let stripe = state.stripe()?;
+        if let Err(error) = stripe.expire_checkout_session(&session_id).await {
+            let session = stripe.retrieve_checkout_session(&session_id).await?;
+            match expire_refused(&session) {
+                ExpireRefused::Paid => {
+                    super::stripe::handle_marketplace_order_paid(state, &order_id, &session).await?;
+                    return Err(ApiError::conflict("Stripe already took this payment — the order is paid.")
+                        .with_code("already_paid"));
+                }
+                ExpireRefused::AlreadyExpired => {}
+                ExpireRefused::Unknown => return Err(error),
+            }
+        }
     }
     // `releaseEurReservation` owns the cancel contract: status cancelled, the
     // inventory released, the held discount returned once and the stock restored.
-    let result = release_eur_reservation(
-        state,
-        &order_id,
-        "cancelled_by_buyer",
-        "cancelled",
-        &["processing"],
-    )
-    .await?;
+    let result = release_eur_reservation(state, &order_id, "cancelled_by_buyer", "cancelled", &[]).await?;
     if result["outcome"] == json!("not_releasable") {
         return Err(ApiError::conflict("This order can no longer be cancelled."));
     }
@@ -1231,6 +1319,7 @@ pub async fn fulfil_paid_eur_order(state: &DomainState, order_id: &str) -> Resul
                     .into(),
                 quantity: line.get("quantity").and_then(Value::as_i64).unwrap_or(0),
                 source_listing_id: source_id.into(),
+                sale_key: format!("{order_id}:{listing_id}"),
             };
             match decrement_seller_ownership_for_sale(state, &owned).await {
                 Ok(result) if result["ok"] != false => {
@@ -1398,12 +1487,18 @@ pub async fn fulfil_paid_eur_order(state: &DomainState, order_id: &str) -> Resul
     fulfillment["finishedAt"] = json!(state.now_iso());
     let mut patch =
         json!({"inventory":inventory,"fulfillment":fulfillment,"updatedAt":state.now_iso()});
+    // A paid, fulfilled order is never left "cancelled" by a release that
+    // ran before the payment landed (specs/tla/eur-fulfilment
+    // NotReleasedAndFulfilled).
     if order
         .get("fulfillmentStatus")
         .and_then(Value::as_str)
-        .is_none_or(|s| s.is_empty() || s == "pending")
+        .is_none_or(|s| s.is_empty() || s == "pending" || s == "cancelled")
     {
         patch["fulfillmentStatus"] = json!("awaiting_shipment");
+        if order.get("status").and_then(Value::as_str) == Some("cancelled") {
+            patch["status"] = json!("paid");
+        }
     }
     firestore.set_document(&path, &patch).await?;
     Ok(
@@ -1611,12 +1706,29 @@ async fn retake_eur_inventory(
 }
 
 /// One sold order line for the ownership sync.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OwnershipLine {
     pub listing_id: String,
     pub seller_uid: String,
     pub quantity: i64,
     pub source_listing_id: String,
+    /// `<order>:<listing>`: when set, the decrement is applied at most once
+    /// (kept in the row's `saleKeys`, checked in the same transaction).
+    pub sale_key: String,
+}
+
+/// Keys of the sales a row already lost units to (the most recent ones).
+pub const SALE_KEYS_KEPT: usize = 50;
+
+/// The row's sale keys after applying `key` (None: already applied).
+pub fn ownership_sale_keys(row: &Value, key: &str) -> Option<Vec<Value>> {
+    let mut keys = row.get("saleKeys").and_then(Value::as_array).cloned().unwrap_or_default();
+    if keys.iter().any(|k| k.as_str() == Some(key)) {
+        return None;
+    }
+    keys.push(json!(key));
+    let excess = keys.len().saturating_sub(SALE_KEYS_KEPT);
+    Some(keys.split_off(excess))
 }
 
 /// `decrementSellerOwnershipForSale`: the seller's owned collection row for a
@@ -1667,6 +1779,9 @@ pub async fn decrement_seller_ownership_for_sale(
     let Some((doc_id, row)) = found else {
         return Ok(json!({ "ok": true, "skipped": true, "reason": "no_linked_ownership" }));
     };
+    if !line.sale_key.is_empty() {
+        return decrement_ownership_once(state, line, &doc_id).await;
+    }
     let current = row.get("quantity").and_then(Value::as_i64).unwrap_or(0);
     let next = refunds::ownership_quantity_after_sale(current, line.quantity);
     let path = firestore.document_path(store::USER_CARD_COLLECTIONS, &doc_id);
@@ -1686,6 +1801,59 @@ pub async fn decrement_seller_ownership_for_sale(
     Ok(json!({
         "ok": true, "deleted": false, "docId": doc_id, "before": current, "after": next,
     }))
+}
+
+/// The decrement and its sale key in one Firestore transaction: a fulfilment
+/// that died between the decrement and `ownershipDone`, or two fulfilments
+/// of one order, used to take the units twice (specs/tla/eur-fulfilment
+/// bugs/ownership-twice.cfg).
+async fn decrement_ownership_once(state: &DomainState, line: &OwnershipLine, doc_id: &str) -> Result<Value, ApiError> {
+    use crate::domain::order_refund as refunds;
+    let firestore = state.firestore()?;
+    let path = firestore.document_path(store::USER_CARD_COLLECTIONS, doc_id);
+    for attempt in 0..5 {
+        let transaction = firestore.begin_transaction().await?;
+        let row = match firestore.get_document_in_transaction(&path, &transaction).await {
+            Ok(row) => row,
+            Err(error) => {
+                firestore.rollback(&transaction).await;
+                return Err(error.into());
+            }
+        };
+        let Some(row) = row.filter(|row| refunds::ownership_row_is_decrementable(row, &line.seller_uid)) else {
+            firestore.rollback(&transaction).await;
+            return Ok(json!({ "ok": true, "skipped": true, "reason": "no_linked_ownership" }));
+        };
+        let Some(keys) = ownership_sale_keys(&row, &line.sale_key) else {
+            firestore.rollback(&transaction).await;
+            return Ok(json!({ "ok": true, "skipped": true, "reason": "already_decremented", "docId": doc_id }));
+        };
+        let current = row.get("quantity").and_then(Value::as_i64).unwrap_or(0);
+        let next = refunds::ownership_quantity_after_sale(current, line.quantity);
+        let write = if next <= 0 {
+            crate::firestore::FirestoreWrite::Delete { path: path.clone() }
+        } else {
+            crate::firestore::FirestoreWrite::Update {
+                path: path.clone(),
+                value: json!({ "quantity": next, "saleKeys": keys, "updatedAt": store::now_iso() }),
+                update_mask: Some(vec!["quantity".into(), "saleKeys".into(), "updatedAt".into()]),
+            }
+        };
+        match firestore.commit(Some(&transaction), &[write]).await {
+            Ok(_) => {
+                return Ok(json!({
+                    "ok": true, "deleted": next <= 0, "docId": doc_id, "before": current, "after": next.max(0),
+                }))
+            }
+            Err(error) => {
+                firestore.rollback(&transaction).await;
+                if attempt == 4 {
+                    return Err(error.into());
+                }
+            }
+        }
+    }
+    Err(ApiError::internal("Could not decrement the seller's collection."))
 }
 
 /// `syncSellerOwnershipAfterPhysicalSale`: per-line, idempotent by listing id.
@@ -2944,6 +3112,31 @@ mod tests {
         })
     }
 
+    #[test]
+    fn cancel_expires_the_session_and_never_releases_a_payable_order() {
+        // specs/tla/eur-fulfilment bugs/cancel-then-paid.cfg: Node's
+        // cancelPendingEurOrder contract.
+        assert_eq!(cancel_plan("paid"), CancelPlan::AlreadyPaid);
+        assert_eq!(cancel_plan("escrow"), CancelPlan::AlreadyPaid);
+        assert_eq!(cancel_plan("pending_stripe"), CancelPlan::ExpireThenRelease);
+        // An async payment in flight is not cancelled from Pokoin.
+        assert_eq!(cancel_plan("processing"), CancelPlan::AlreadyClosed);
+        assert_eq!(cancel_plan("expired"), CancelPlan::AlreadyClosed);
+        assert_eq!(expire_refused(&json!({"status":"complete","payment_status":"paid"})), ExpireRefused::Paid);
+        assert_eq!(expire_refused(&json!({"status":"complete","payment_status":"unpaid"})), ExpireRefused::Unknown);
+        assert_eq!(expire_refused(&json!({"status":"expired"})), ExpireRefused::AlreadyExpired);
+        assert_eq!(expire_refused(&json!({"status":"open"})), ExpireRefused::Unknown);
+    }
+    #[test]
+    fn ownership_sale_keys_apply_once_and_stay_bounded() {
+        assert_eq!(ownership_sale_keys(&json!({}), "o:l"), Some(vec![json!("o:l")]));
+        assert_eq!(ownership_sale_keys(&json!({"saleKeys": ["o:l"]}), "o:l"), None);
+        let full: Vec<Value> = (0..SALE_KEYS_KEPT).map(|i| json!(format!("o{i}:l"))).collect();
+        let next = ownership_sale_keys(&json!({"saleKeys": full}), "new:l").unwrap();
+        assert_eq!(next.len(), SALE_KEYS_KEPT);
+        assert_eq!(next.last(), Some(&json!("new:l")));
+        assert_eq!(next[0], json!("o1:l"));
+    }
     #[test]
     fn buyer_ownership_is_exact() {
         assert!(buyer_owns_order(&order(), "buyer-1"));
