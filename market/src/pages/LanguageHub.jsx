@@ -5,16 +5,8 @@ import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
 import SetGuideGrid from '../components/SetGuideGrid.jsx';
-import { printBucket } from '../locale.js';
+import { languageMatches } from '../browse-hubs.js';
 import { LANGUAGE_HUBS, languageHref } from '../seo.js';
-
-function languageMatches(row, hub) {
-  const bucket = printBucket(row.nationality);
-  if (hub.nationality === 'western') {
-    return bucket === 'western' || bucket === 'american' || bucket === 'european';
-  }
-  return bucket === hub.nationality;
-}
 
 function LanguageIndex({ lang }) {
   return (
