@@ -380,3 +380,50 @@ test('a full-art print never piles with the framed prints, even on a shared CLIP
   assert.equal(groups.length, 2);
   assert.deepEqual(groups.map((g) => g.cards.map((c) => c.id)), [['684690', '741638'], ['703348']]);
 });
+
+test('set desk Number sort follows the stored set_order across games', async () => {
+  const { compareSetDeskNumber, setOrderValue } = await import('./search-filters.js');
+  // One Piece, Magic tokens and Weiss numbers the first-digits comparator misorders.
+  const rows = [
+    { id: 'op-a', name: 'Kid', number: 'OP14-039a', productType: 'card', setOrder: 3 },
+    { id: 'tok', name: 'Soldier Token', number: 'T 29/19', productType: 'card', setOrder: 5 },
+    { id: 'op', name: 'Kid', number: 'OP14-039', productType: 'card', set_order: 2 },
+    { id: 'op40', name: 'Law', number: 'OP14-040', productType: 'card', setOrder: '4' },
+    { id: 'first', name: 'Luffy', number: 'OP14-001', productType: 'card', setOrder: 1 },
+  ];
+  assert.deepEqual(
+    filterExpansionCards(rows, { sort: 'number' }).map((row) => row.id),
+    ['first', 'op', 'op-a', 'op40', 'tok'],
+  );
+  assert.equal(setOrderValue({ set_order: 7 }), 7);
+  assert.equal(setOrderValue({ setOrder: 0 }), 0);
+  assert.equal(setOrderValue({}), 0);
+  assert.equal(compareSetDeskNumber({ setOrder: 2 }, { setOrder: 9 }) < 0, true);
+});
+
+test('set desk Number sort: unranked rows go last and keep the collector comparator', () => {
+  const rows = [
+    { id: 'new-b', name: 'Groudon', number: 'SL4', productType: 'card' },
+    { id: 'espeon', name: 'Espeon', number: '4/95', productType: 'card', setOrder: 2 },
+    { id: 'new-a', name: 'Entei', number: '2/95', productType: 'card', setOrder: 0 },
+    { id: 'abra', name: 'Abra', number: '1/95', productType: 'card', setOrder: 1 },
+  ];
+  // Matches the card-desk arrows (order by set_order = 0, set_order).
+  assert.deepEqual(
+    filterExpansionCards(rows, { sort: 'number' }).map((row) => row.id),
+    ['abra', 'espeon', 'new-a', 'new-b'],
+  );
+  // No row ranked at all: the collector-number order is unchanged.
+  assert.deepEqual(
+    filterExpansionCards(rows.map(({ setOrder, ...row }) => row), { sort: 'number' }).map((row) => row.id),
+    ['abra', 'new-a', 'espeon', 'new-b'],
+  );
+});
+
+test('set desk Official sort ignores set_order', () => {
+  const official = filterExpansionCards([
+    { id: '2', name: 'Reshiram', number: 'Holo Rare | 002/025', productType: 'card', setOrder: 1 },
+    { id: '1', name: 'Ho-Oh', number: 'Holo Rare | 001/025', productType: 'card', setOrder: 2 },
+  ], { sort: 'official', expansionSlug: 'celebrations' });
+  assert.deepEqual(official.map((row) => row.id), ['1', '2']);
+});

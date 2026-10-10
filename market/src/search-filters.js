@@ -395,8 +395,34 @@ export function filterExpansionCards(cards, {
         || String(a.name || '').localeCompare(String(b.name || ''));
     });
   } else {
-    rows.sort((a, b) => collectorSortValue(a) - collectorSortValue(b)
-      || String(a.name || '').localeCompare(String(b.name || '')));
+    rows.sort(compareSetDeskNumber);
   }
   return rows;
+}
+
+/** Stored position inside the expansion (`set_order`, scripts/sql/113_set_order.sql); 0 = not ranked yet. */
+export function setOrderValue(card) {
+  const n = Number(card?.setOrder ?? card?.set_order);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Set desk "Number" order: the stored set position, the same order as the
+ * card-desk ‹ › arrows, so every game's numbering (Magic tokens, Weiss
+ * BD/W03-001, One Piece OP14-039a) sorts like the server. Rows the build-lists
+ * job has not ranked yet go after the ranked ones (as the arrows do) and keep
+ * the collector-number comparator among themselves.
+ */
+export function compareSetDeskNumber(a, b) {
+  const ao = setOrderValue(a);
+  const bo = setOrderValue(b);
+  if (ao > 0 || bo > 0) {
+    if (!(ao > 0)) return 1;
+    if (!(bo > 0)) return -1;
+    if (ao !== bo) return ao - bo;
+  } else {
+    const byNumber = collectorSortValue(a) - collectorSortValue(b);
+    if (byNumber) return byNumber;
+  }
+  return String(a.name || '').localeCompare(String(b.name || ''));
 }

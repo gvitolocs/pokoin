@@ -358,6 +358,14 @@ pub fn to_react_card(row: &Value) -> Value {
     card.insert("number".into(), Value::String(number.clone()));
     card.insert("card_number".into(), Value::String(number));
     card.insert("rarity".into(), Value::String(rarity));
+    // Stored position inside the expansion (set rows only; 0 = not ranked yet).
+    let set_order = js::number(js::nullish_or(
+        js::get(&normalized, "set_order"),
+        js::get(&normalized, "setOrder"),
+    ));
+    if set_order.is_finite() && set_order > 0.0 {
+        card.insert("setOrder".into(), js::js_json_number(set_order));
+    }
 
     let kind_text = clean_text(
         js::truthy_chain(&[
@@ -943,5 +951,27 @@ mod tests {
         )
         .await;
         assert_eq!(slow, 9);
+    }
+
+    #[test]
+    fn to_react_card_carries_the_stored_set_order() {
+        let row = |extra: Value| {
+            let mut base = json!({
+                "card_id": 668126,
+                "name": "Levincia",
+                "set_name": "Destined Rivals",
+                "card_number": "Gold Secret Rare | 244/182",
+            });
+            base.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            to_react_card(&base)
+        };
+        assert_eq!(row(json!({ "set_order": 237 }))["setOrder"], json!(237));
+        assert_eq!(row(json!({ "setOrder": "12" }))["setOrder"], json!(12));
+        // Not ranked yet (0) or absent: no key, the client falls back to the
+        // collector number.
+        assert!(row(json!({ "set_order": 0 })).get("setOrder").is_none());
+        assert!(row(json!({})).get("setOrder").is_none());
     }
 }
