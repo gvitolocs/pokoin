@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 
 use axum::extract::State;
-use axum::http::{Method, StatusCode, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::Response;
 use pokoin_api_common::pg::{self, Bind};
 use pokoin_api_common::{http, RouteState};
@@ -460,11 +460,18 @@ async fn artist_cards_for_slug(state: &RouteState, artist_slug: Option<&str>, ar
     Ok(json!({ "artist": artist_json, "profile": profile, "cards": cards }))
 }
 
-pub async fn handler(State(state): State<RouteState>, method: Method, uri: Uri) -> Response {
+pub async fn handler(
+    State(state): State<RouteState>,
+    method: Method,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
     if method != Method::GET {
         return util::method_not_allowed("GET");
     }
     let q = http::Query::from_uri(&uri);
+    // Opt-in compact encoding; the default representation is unchanged.
+    let wanted = util::wanted(&headers, &q);
     if q.search_param("summaries") == Some("1") {
         let limit_raw = q.search_param("limit");
         let projected = artist_summary::read_artist_summary(state.api.read(), util::js_limit(limit_raw, 240, 5000)).await;
@@ -474,13 +481,13 @@ pub async fn handler(State(state): State<RouteState>, method: Method, uri: Uri) 
             Err(error) => Err(error),
         };
         return match artists {
-            Ok(artists) => util::json_cache(StatusCode::OK, json!({ "artists": artists }), "public, max-age=60, s-maxage=3600"),
+            Ok(artists) => util::json_cache_c1(wanted, StatusCode::OK, json!({ "artists": artists }), "public, max-age=60, s-maxage=3600"),
             Err(error) => util::db_error("marketplace-artist-cards", &error, "Marketplace artist cards failed."),
         };
     }
     let slug = util::first_of(&q, &["artistSlug", "slug"]);
     match artist_cards_for_slug(&state, slug, q.search_param("artist"), q.search_param("limit"), q.search_param("tiles") == Some("1")).await {
-        Ok(payload) => util::json_cache(StatusCode::OK, payload, "public, max-age=20, s-maxage=300"),
+        Ok(payload) => util::json_cache_c1(wanted, StatusCode::OK, payload, "public, max-age=20, s-maxage=300"),
         Err(error) => util::db_error("marketplace-artist-cards", &error, "Marketplace artist cards failed."),
     }
 }

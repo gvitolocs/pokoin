@@ -253,6 +253,8 @@ pub async fn handler(
 
 async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
     let q = Query::from_uri(&uri);
+    // Opt-in compact encoding; the default representation is unchanged.
+    let wanted = support::wanted(&headers, &q);
     let game = support::resolve_game(&headers, q.first("game"), q.first("marketplaceGame"));
     let is_pokemon = pokoin_api_common::game::is_pokemon_game(&game);
     let pool = match support::game_pool(&state, &game).await {
@@ -314,7 +316,8 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
                 sections.insert(key.clone(), value.clone());
             }
         }
-        return support::json_with_cache_control(
+        return support::json_with_cache_control_c1(
+            wanted,
             StatusCode::OK,
             recent_body(&merged, &game, sections),
             "private, max-age=0, no-store",
@@ -322,7 +325,8 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
     }
 
     let sections = merged_sections(&snapshot);
-    support::json_with_cache_control(
+    support::json_with_cache_control_c1(
+        wanted,
         StatusCode::OK,
         plain_body(&snapshot, &game, sections),
         "public, max-age=15, s-maxage=30, stale-while-revalidate=60",

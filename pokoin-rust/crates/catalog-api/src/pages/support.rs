@@ -4,7 +4,7 @@
 
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use pokoin_api_common::{http, RouteState};
+use pokoin_api_common::{compact, http, RouteState};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
@@ -53,6 +53,23 @@ pub fn json_with_cache_control(status: StatusCode, body: Value, cache_control: &
     let mut headers: Vec<(&str, &str)> = http::READ_CORS.to_vec();
     headers.push(("cache-control", cache_control));
     http::json_with(status, body, &headers)
+}
+
+/// [`json_with_cache_control`] in whichever representation the request asked
+/// for. The default representation is byte-identical to
+/// [`json_with_cache_control`], plus `Vary: Accept`.
+pub fn json_with_cache_control_c1(
+    wanted: compact::Wanted,
+    status: StatusCode,
+    body: Value,
+    cache_control: &str,
+) -> Response {
+    compact::json_with_cors(wanted, status, body, cache_control)
+}
+
+/// What the request asked for, from its `Accept` header and `?format=`.
+pub fn wanted(headers: &HeaderMap, q: &http::Query) -> compact::Wanted {
+    compact::Wanted::from_request(headers, q)
 }
 
 /// `error.statusCode || 500` + `error.message || fallback` — the Node catch

@@ -3,14 +3,14 @@
 //! arrives — instead of waiting on the monolithic marketplace-home vector.
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
-    catalog_api::{failure, game_pool, response},
+    catalog_api::{failure, game_pool, response, response_c1},
     suggest::{cors, game_from},
     AppState,
 };
@@ -44,19 +44,30 @@ pub async fn options() -> Response {
     cors(StatusCode::NO_CONTENT, None, None, "").into_response()
 }
 
-pub async fn new_cards(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    rail_response(&state, &headers, &NEW_CARDS).await
+pub async fn new_cards(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
+    rail_response(&state, &headers, &uri, &NEW_CARDS).await
 }
 
-pub async fn best_sellers(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    rail_response(&state, &headers, &BEST_SELLERS).await
+pub async fn best_sellers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    rail_response(&state, &headers, &uri, &BEST_SELLERS).await
 }
 
-pub async fn spotlight(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    rail_response(&state, &headers, &SPOTLIGHT).await
+pub async fn spotlight(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
+    rail_response(&state, &headers, &uri, &SPOTLIGHT).await
 }
 
-async fn rail_response(state: &AppState, headers: &HeaderMap, spec: &RailSpec) -> Response {
+async fn rail_response(
+    state: &AppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    spec: &RailSpec,
+) -> Response {
+    // Opt-in compact encoding; the default representation is unchanged.
+    let wanted = crate::catalog_api::wanted(headers, uri);
     let game = game_from(headers, None);
     if game != "pokemon" {
         return response(
@@ -73,7 +84,7 @@ async fn rail_response(state: &AppState, headers: &HeaderMap, spec: &RailSpec) -
         );
     };
     match read_rail(&pool, spec).await {
-        Ok(Some(body)) => response(StatusCode::OK, body, CACHE),
+        Ok(Some(body)) => response_c1(wanted, StatusCode::OK, body, CACHE),
         Ok(None) => response(
             StatusCode::NOT_FOUND,
             json!({"error": "Rail not found.", "id": spec.db_id}),
