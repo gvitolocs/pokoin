@@ -643,6 +643,10 @@ export function fetchCard(cardId, { lang = 'en', slug = '', includeOffers = fals
   }
   const pending = getJson(`/api/marketplace-card-page?${params}`).then((data) => {
     assertCardPageIdentity(cardId, data, { gameId: game().id });
+    // Every card page (prefetches included) widens the arrow cache.
+    if (hasNeighborArrows(data?.neighbors)) {
+      rememberNeighbors(data.card || { id: cardId }, data.neighbors);
+    }
     if (!includeOffers) {
       let next = data;
       if (!hasNeighborArrows(data?.neighbors)) {
@@ -1502,6 +1506,33 @@ export function neighborsOrPeek(cardId, neighbors) {
   return peekNeighbors(cardId) || { prev: [], next: [] };
 }
 
+const NEIGHBOR_WINDOW = 6;
+
+function neighborWindowSize(entry) {
+  return (entry?.prev?.length || 0) + (entry?.next?.length || 0);
+}
+
+/** Seed `id` only when it adds arrows: a desk's own response (6 + 6) is never
+ * replaced by a shorter window derived from a neighbour. */
+function seedNeighbors(id, prev, next) {
+  const window = {
+    prev: prev.filter((row) => neighborCardId(row) && neighborCardId(row) !== id).slice(0, NEIGHBOR_WINDOW),
+    next: next.filter((row) => neighborCardId(row) && neighborCardId(row) !== id).slice(0, NEIGHBOR_WINDOW),
+  };
+  if (!window.prev.length && !window.next.length) {
+    return;
+  }
+  if (neighborWindowSize(neighborCache.get(id)) > neighborWindowSize(window)) {
+    return;
+  }
+  neighborCache.set(id, window);
+}
+
+/**
+ * Cache the arrows for `center` and for every card in its window, so clicking
+ * through a set faster than each card page loads never lands on a desk with
+ * no arrows (it used to seed only the two direct neighbours).
+ */
 export function rememberNeighbors(center, neighbors) {
   const id = neighborCardId(center);
   if (!id) {
@@ -1512,26 +1543,17 @@ export function rememberNeighbors(center, neighbors) {
   if (!prev.length && !next.length) {
     return;
   }
+  neighborCache.delete(id);
   neighborCache.set(id, { prev, next });
-  if (next[0]) {
-    const nid = neighborCardId(next[0]);
-    if (nid) {
-      neighborCache.set(nid, {
-        prev: [center, ...prev].filter((row) => neighborCardId(row) && neighborCardId(row) !== nid).slice(0, 6),
-        next: next.slice(1).filter((row) => neighborCardId(row) !== nid).slice(0, 6),
-      });
-    }
-  }
-  if (prev[0]) {
-    const pid = neighborCardId(prev[0]);
-    if (pid) {
-      neighborCache.set(pid, {
-        prev: prev.slice(1).filter((row) => neighborCardId(row) !== pid).slice(0, 6),
-        next: [center, ...next].filter((row) => neighborCardId(row) && neighborCardId(row) !== pid).slice(0, 6),
-      });
-    }
-  }
-  while (neighborCache.size > 64) {
+  next.forEach((row, i) => {
+    const before = [...next.slice(0, i).reverse(), center, ...prev];
+    seedNeighbors(neighborCardId(row), before, next.slice(i + 1));
+  });
+  prev.forEach((row, i) => {
+    const after = [...prev.slice(0, i).reverse(), center, ...next];
+    seedNeighbors(neighborCardId(row), prev.slice(i + 1), after);
+  });
+  while (neighborCache.size > 160) {
     const oldest = neighborCache.keys().next().value;
     neighborCache.delete(oldest);
   }
