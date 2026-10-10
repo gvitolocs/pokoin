@@ -2,9 +2,10 @@
 //!
 //! Meilisearch is retired: the Node `meiliPredictedNameTokens` attempt always
 //! fails over to the Supabase name-token index, so this port goes straight to
-//! the Postgres index and then the REST fallback, like production answers.
+//! that index over Supabase REST.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::future::Future;
 use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,6 +13,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
+use futures_util::{stream, StreamExt, TryStreamExt};
 use pokoin_api_common::{http, RouteState};
 use pokoin_catalog_api::shared::js;
 use regex::Regex;
@@ -30,6 +32,12 @@ const CONTEXT_WEAK_MATCH_CONFIDENCE: f64 = 75.0;
 const PREDICTION_CONTEXT_TTL_MS: f64 = 60_000.0;
 const FIRST_CHAR_PREDICTION_CACHE_TTL_MS: u64 = 5 * 60_000;
 const FIRST_CHAR_WARMUP_CACHE_TTL_MS: u64 = 5 * 60_000;
+/// A failed warmup answers from this cache instead of retrying every letter
+/// for each visitor (the SPA sends the warmup on every home paint).
+const FIRST_CHAR_WARMUP_FAILURE_TTL_MS: u64 = 30_000;
+/// Bound on the whole warmup (26 REST lookups) so a slow index fails fast.
+const FIRST_CHAR_WARMUP_TIMEOUT_MS: u64 = 8_000;
+const WARMUP_LETTER_CONCURRENCY: usize = 6;
 const DEFAULT_WARMUP_LIMIT: i64 = 1;
 const MAX_WARMUP_LIMIT: i64 = 5;
 const ANCHOR_MIN_CONFIDENCE: f64 = 60.0;
@@ -708,6 +716,7 @@ struct CacheEntry<T> {
 
 static FIRST_CHAR_CACHE: LazyLock<Mutex<HashMap<String, CacheEntry<(String, Vec<Value>)>>>> = LazyLock::new(Default::default);
 static WARMUP_CACHE: LazyLock<Mutex<HashMap<String, CacheEntry<Value>>>> = LazyLock::new(Default::default);
+static WARMUP_FAILURES: LazyLock<Mutex<HashMap<String, CacheEntry<EngineError>>>> = LazyLock::new(Default::default);
 static ANCHOR_CACHE: LazyLock<Mutex<HashMap<String, Option<Anchor>>>> = LazyLock::new(Default::default);
 
 fn first_char_cache_key(input: &Input, fragment: &str) -> String {
@@ -1015,15 +1024,46 @@ pub async fn predict_name_tokens(ctx: &Ctx, input: &Input) -> Result<Value, Engi
 const LETTERS: &str = "abcdefghijklmnopqrstuvwxyz";
 
 async fn warmup_rest_rows(ctx: &Ctx, language: &str, limit: i64) -> Result<Vec<Value>, EngineError> {
+    warmup_rows(|letter| async move { engine::supabase_rest_predicted_name_tokens(ctx.api_http(), &letter, language, limit as usize).await }).await
+}
+
+/// One lookup per letter, `WARMUP_LETTER_CONCURRENCY` at a time, rows in
+/// letter order; the first failure ends the warmup.
+async fn warmup_rows<F, Fut>(fetch: F) -> Result<Vec<Value>, EngineError>
+where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Result<Vec<Value>, EngineError>>,
+{
+    let per_letter: Vec<(String, Vec<Value>)> = stream::iter(LETTERS.chars().map(|letter| letter.to_string()))
+        .map(|letter| {
+            let predictions = fetch(letter.clone());
+            async move { predictions.await.map(|predictions| (letter, predictions)) }
+        })
+        .buffered(WARMUP_LETTER_CONCURRENCY)
+        .try_collect()
+        .await?;
     let mut rows = Vec::new();
-    for letter in LETTERS.chars() {
-        let letter = letter.to_string();
-        let predictions = engine::supabase_rest_predicted_name_tokens(ctx.api_http(), &letter, language, limit as usize).await?;
+    for (letter, predictions) in per_letter {
         for (i, p) in predictions.iter().enumerate() {
             rows.push(with_fields(p, &[("letter", json!(letter)), ("source_rank", json!(i + 1))]));
         }
     }
     Ok(rows)
+}
+
+fn warmup_failure_get(key: &str) -> Option<EngineError> {
+    let mut failures = WARMUP_FAILURES.lock().unwrap_or_else(|p| p.into_inner());
+    let entry = failures.get(key)?;
+    if now_ms().saturating_sub(entry.created) > FIRST_CHAR_WARMUP_FAILURE_TTL_MS {
+        failures.remove(key);
+        return None;
+    }
+    Some(entry.value.clone())
+}
+
+fn warmup_failure_put(key: &str, error: &EngineError) {
+    let mut failures = WARMUP_FAILURES.lock().unwrap_or_else(|p| p.into_inner());
+    failures.insert(key.to_owned(), CacheEntry { created: now_ms(), value: error.clone() });
 }
 
 fn warmup_suggestion_from_row(row: &Value, requested: &str, source_language: &str) -> Option<Value> {
@@ -1078,8 +1118,18 @@ async fn first_char_warmup_suggestions(ctx: &Ctx, language: &str, limit: i64) ->
     if !engine::supabase_rest_name_index_configured() {
         return Err(not_configured("Supabase name-token index is not configured for first-char warmup."));
     }
+    if let Some(error) = warmup_failure_get(&key) {
+        return Err(error);
+    }
     let started = std::time::Instant::now();
-    let (source, rows) = ("supabase_rest", warmup_rest_rows(ctx, language, limit).await?);
+    let rows = engine::with_timeout(warmup_rest_rows(ctx, language, limit), FIRST_CHAR_WARMUP_TIMEOUT_MS, "first-char warmup")
+        .await
+        .map_err(|mut error| {
+            error.status = error.status.or(Some(503));
+            warmup_failure_put(&key, &error);
+            error
+        })?;
+    let source = "supabase_rest";
     let mut by_letter: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for row in &rows {
         let Some(suggestion) = warmup_suggestion_from_row(row, language, language) else { continue };
@@ -1214,6 +1264,58 @@ fn failure(input: &Input, error: &EngineError) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering as Atomic};
+
+    #[tokio::test]
+    async fn warmup_fetches_letters_concurrently_in_letter_order() {
+        let (in_flight, peak) = (AtomicUsize::new(0), AtomicUsize::new(0));
+        let rows = warmup_rows(|letter| {
+            let (in_flight, peak) = (&in_flight, &peak);
+            async move {
+                peak.fetch_max(in_flight.fetch_add(1, Atomic::SeqCst) + 1, Atomic::SeqCst);
+                // Later letters answer first; rows still come back in letter order.
+                let delay = 26 - u64::from(letter.as_bytes()[0] - b'a');
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                in_flight.fetch_sub(1, Atomic::SeqCst);
+                Ok(vec![json!({ "display_token": format!("{letter}-name") })])
+            }
+        })
+        .await
+        .unwrap();
+        let letters: String = rows.iter().map(|row| row["letter"].as_str().unwrap()).collect();
+        assert_eq!(letters, LETTERS);
+        assert_eq!(rows[0]["source_rank"], json!(1));
+        assert_eq!(peak.load(Atomic::SeqCst), WARMUP_LETTER_CONCURRENCY);
+    }
+
+    #[tokio::test]
+    async fn warmup_stops_at_the_first_failed_letter() {
+        let calls = AtomicUsize::new(0);
+        let result = warmup_rows(|letter| {
+            let calls = &calls;
+            async move {
+                calls.fetch_add(1, Atomic::SeqCst);
+                if letter == "c" {
+                    Err(EngineError::new("Network is unreachable (os error 101)"))
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+        })
+        .await;
+        assert_eq!(result.unwrap_err().message, "Network is unreachable (os error 101)");
+        assert!(calls.load(Atomic::SeqCst) < LETTERS.len());
+    }
+
+    #[test]
+    fn warmup_failures_are_remembered_briefly() {
+        let key = "test-failure:1";
+        assert!(warmup_failure_get(key).is_none());
+        warmup_failure_put(key, &EngineError::new("down"));
+        assert_eq!(warmup_failure_get(key).unwrap().message, "down");
+        WARMUP_FAILURES.lock().unwrap().get_mut(key).unwrap().created -= FIRST_CHAR_WARMUP_FAILURE_TTL_MS + 1;
+        assert!(warmup_failure_get(key).is_none());
+    }
 
     fn input(query: &str) -> Input {
         input_from_source(&json!({ "query": query }))
