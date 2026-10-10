@@ -325,6 +325,18 @@ async fn artist_identity_row(state: &RouteState, slugs: &[String], names: &[Stri
     Ok(pg::pool_rows(state.api.read(), &sql, &[bind]).await?.into_iter().next())
 }
 
+/// Header total for an artist desk. The stored `artist_card_count` belongs to
+/// one spelling of the artist, while the rows union every slug alias, so a
+/// complete list (fewer rows than the limit) is the true total: 5ban showed
+/// "of 5097" over 5,175 rows. A truncated list keeps the larger of the two.
+fn desk_card_count(stored: Option<f64>, rows: usize, limit: i64) -> f64 {
+    let rows_f = rows as f64;
+    if (rows as i64) < limit {
+        return rows_f;
+    }
+    stored.map_or(rows_f, |count| count.max(rows_f))
+}
+
 async fn artist_cards_for_slug(state: &RouteState, artist_slug: Option<&str>, artist: Option<&str>, limit_raw: Option<&str>, tiles: bool) -> Result<Value, sqlx::Error> {
     let slugs = artist_display::slug_aliases_for_artist_slug(artist_slug.map(|v| Value::String(v.to_owned())).as_ref());
     let names = artist_display::lookup_aliases_for_artist_name(artist.map(|v| Value::String(v.to_owned())).as_ref());
@@ -340,7 +352,8 @@ async fn artist_cards_for_slug(state: &RouteState, artist_slug: Option<&str>, ar
         return Ok(json!({ "artist": null, "cards": [] }));
     }
     // No cap below a whole artist: the list builder stores every card (5ban: 5,175).
-    binds.push(Bind::Int(util::js_limit(limit_raw, 240, 20_000)));
+    let limit = util::js_limit(limit_raw, 240, 20_000);
+    binds.push(Bind::Int(limit));
     let limit_placeholder = format!("${}", binds.len());
     let number_sql = projected_expansion_number_sql();
     let number_int_sql = projected_expansion_number_int_sql(&number_sql);
@@ -433,11 +446,11 @@ async fn artist_cards_for_slug(state: &RouteState, artist_slug: Option<&str>, ar
     let identity = if tiles { artist_identity_row(state, &slugs, &names).await? } else { rows.first().cloned() };
     let (artist_json, profile) = match identity.as_ref() {
         Some(first) => {
-            let count = [first.get("artist_card_count"), first.get("total_artist_card_count")]
+            let stored = [first.get("artist_card_count"), first.get("total_artist_card_count")]
                 .into_iter()
                 .find(|v| js::truthy(*v))
-                .map(|v| js::number(v))
-                .unwrap_or(rows.len() as f64);
+                .map(|v| js::number(v));
+            let count = desk_card_count(stored, rows.len(), limit);
             let slug = s(first, "artist_slug");
             (
                 json!({
@@ -496,6 +509,14 @@ pub async fn handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desk_card_count_trusts_a_complete_list() {
+        assert_eq!(desk_card_count(Some(5097.0), 5175, 20_000), 5175.0);
+        assert_eq!(desk_card_count(Some(900.0), 240, 240), 900.0);
+        assert_eq!(desk_card_count(Some(100.0), 240, 240), 240.0);
+        assert_eq!(desk_card_count(None, 12, 240), 12.0);
+    }
 
     #[test]
     fn profile_urls() {
