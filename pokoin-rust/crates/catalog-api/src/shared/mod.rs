@@ -31,6 +31,7 @@
 //! replica via `state.api.read()`) and an explicit `is_pokemon` flag where the
 //! Node helpers branched on `isPokemonGame()`. Redis helpers are fail-open.
 
+pub mod page_snapshot;
 pub mod artist_display;
 pub mod artist_summary;
 pub mod cache;

@@ -37,6 +37,8 @@ pub mod handlers;
 pub mod listing_live;
 pub mod listing_sync;
 pub mod ports;
+/// In-memory set of card ids with a Sold-on-Pokoin row (native-sales fast path).
+pub mod sales_index;
 /// Redis read-through cache for public seller profile fields.
 pub mod seller_cache;
 pub mod state;

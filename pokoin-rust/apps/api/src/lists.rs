@@ -28,8 +28,9 @@ use sqlx::PgPool;
 use tokio::{sync::Semaphore, task::JoinSet};
 use tower::ServiceExt;
 
-use crate::{catalog_api, AppState};
+use crate::{catalog_api, related, AppState};
 use pokoin_api_common::compact;
+use pokoin_catalog_api::shared::page_snapshot;
 use pokoin_shared_dictionary::SharedDictionary;
 
 /// The RFC 9842 shared dictionary for `c1v2` list snapshots: raw content
@@ -237,6 +238,8 @@ struct Options {
     kinds: Vec<String>,
     games: Vec<String>,
     key: Option<String>,
+    /// Compute, but store nothing (timing a build against a read-only database).
+    dry_run: bool,
 }
 
 fn options(args: &[String]) -> Options {
@@ -248,10 +251,12 @@ fn options(args: &[String]) -> Options {
             o.games.extend(v.split(',').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()));
         } else if let Some(v) = arg.strip_prefix("--key=") {
             o.key = clean_key(Some(v));
+        } else if arg == "--dry-run" {
+            o.dry_run = true;
         }
     }
     if o.kinds.is_empty() {
-        o.kinds = vec!["median".into(), "set".into(), "artist".into(), "name".into()];
+        o.kinds = vec!["median".into(), "set".into(), "artist".into(), "name".into(), "version".into(), "related".into()];
     }
     o
 }
@@ -287,7 +292,7 @@ fn enc(s: &str) -> &str {
     s
 }
 
-/// `pokoin-api job build-lists [--kind=median,set,artist] [--game=pokemon,magic] [--key=slug]`
+/// `pokoin-api job build-lists [--kind=median,set,artist,name,version,related,related-delta] [--game=pokemon,magic] [--key=slug] [--dry-run]`
 pub async fn build(app: Router, state: AppState, args: &[String]) -> anyhow::Result<()> {
     let o = options(args);
     let games = if o.games.is_empty() { configured_games() } else { o.games.clone() };
@@ -313,7 +318,10 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
             tracing::warn!(%game, "build-lists: no database");
             return Ok(());
         };
-        sqlx::raw_sql(DDL).execute(&pool).await?;
+        if !o.dry_run {
+            sqlx::raw_sql(DDL).execute(&pool).await?;
+            sqlx::raw_sql(page_snapshot::DDL).execute(&pool).await?;
+        }
         if o.kinds.iter().any(|k| k == "median") && game == "pokemon" {
             let n = build_medians(&pool).await?;
             tracing::info!(%game, medians = n, "build-lists medians");
@@ -335,6 +343,17 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
             let n = build_artists(app, &pool, game, o.key.as_deref()).await?;
             tracing::info!(%game, artists = n, "build-lists artists");
         }
+        if o.kinds.iter().any(|k| k == "version") && game == "pokemon" {
+            let n = build_versions(app, &pool, game, o.key.as_deref()).await?;
+            tracing::info!(%game, versions = n, "build-lists versions");
+        }
+        for (kind, delta) in [("related", false), ("related-delta", true)] {
+            if o.kinds.iter().any(|k| k == kind) && game == "pokemon" {
+                let started = std::time::Instant::now();
+                let (cards, written) = build_related(&pool, delta, o.dry_run).await?;
+                tracing::info!(%game, cards, written, delta, dry_run = o.dry_run, seconds = started.elapsed().as_secs_f64(), "build-lists related");
+            }
+        }
     }
     Ok(())
 }
@@ -342,12 +361,16 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
 async fn build_sets(app: &Router, pool: &PgPool, game: &str, only: Option<&str>) -> anyhow::Result<usize> {
     let slugs: Vec<String> = match only {
         Some(k) => vec![k.to_owned()],
-        None => get(app, game, "/api/marketplace-expansion-page?limit=2000")
-            .await?
-            .get("expansions")
-            .and_then(Value::as_array)
-            .map(|rows| rows.iter().filter_map(|r| r.get("slug").and_then(Value::as_str)).filter_map(|s| clean_key(Some(s))).collect())
-            .unwrap_or_default(),
+        None => {
+            let index = get(app, game, "/api/marketplace-expansion-page?limit=2000").await?;
+            let expansions = index.get("expansions").and_then(Value::as_array).cloned().unwrap_or_default();
+            // The set index itself: `?limit=n` is the first n of these rows.
+            if !expansions.is_empty() {
+                let page = Page { key: "all".into(), head: json!({ "game": game }), rows: expansions.iter().map(page_snapshot::text).collect(), c1: None };
+                store_pages(pool, page_snapshot::SET_INDEX, &[page]).await?;
+            }
+            expansions.iter().filter_map(|r| r.get("slug").and_then(Value::as_str)).filter_map(|s| clean_key(Some(s))).collect()
+        }
     };
     let jobs: Vec<_> = slugs.into_iter().map(|slug| {
         let app = app.clone();
@@ -372,16 +395,24 @@ async fn build_sets(app: &Router, pool: &PgPool, game: &str, only: Option<&str>)
                 offset += n;
             }
             let mut body = first.unwrap_or_else(|| json!({}));
+            // The page snapshot keeps the route's own rows: no median fill, no
+            // key sort, so `/api/marketplace-expansion-page` stays byte-identical.
+            let page = body.get("expansion").filter(|e| e.is_object()).map(|expansion| Page {
+                key: slug.clone(),
+                head: json!({ "expansion": expansion, "total": body.get("total").cloned().unwrap_or(json!(0)) }),
+                rows: cards.iter().map(page_snapshot::text).collect(),
+                c1: None,
+            });
             let total = cards.len();
             body["cards"] = Value::Array(cards);
             body["offset"] = json!(0);
             body["count"] = json!(total);
             body["total"] = json!(total);
             body["hasMore"] = json!(false);
-            anyhow::Ok((slug, body))
+            anyhow::Ok((slug, body, page))
         }
     }).collect();
-    store_all(pool, "set", game, jobs, 4).await
+    store_all(pool, "set", game, jobs, 4, None).await
 }
 
 async fn build_artists(app: &Router, pool: &PgPool, game: &str, only: Option<&str>) -> anyhow::Result<usize> {
@@ -401,10 +432,10 @@ async fn build_artists(app: &Router, pool: &PgPool, game: &str, only: Option<&st
             let body = get(&app, &game, &format!(
                 "/api/marketplace-artist-cards?artistSlug={}&limit={ARTIST_LIMIT}&tiles=1", enc(&slug)
             )).await?;
-            anyhow::Ok((slug, body))
+            anyhow::Ok((slug, body, None))
         }
     }).collect();
-    store_all(pool, "artist", game, jobs, 2).await
+    store_all(pool, "artist", game, jobs, 2, Some(artist_page)).await
 }
 
 /// `kind=name` key: hex of the trimmed, lowercased card name. Collision-free
@@ -452,10 +483,10 @@ async fn build_names(app: &Router, pool: &PgPool, game: &str) -> anyhow::Result<
                     break;
                 }
             }
-            anyhow::Ok((name_key(&name), json!({ "name": name.trim(), "cards": cards })))
+            anyhow::Ok((name_key(&name), json!({ "name": name.trim(), "cards": cards }), None))
         }
     }).collect();
-    store_all(pool, "name", game, jobs, 6).await
+    store_all(pool, "name", game, jobs, 6, None).await
 }
 
 /// application/x-www-form-urlencoded value encoding (search queries carry
@@ -504,10 +535,14 @@ pub async fn daily_medians(State(state): State<AppState>, headers: HeaderMap, ur
 
 /// Run builders with bounded concurrency; fill price gaps from the daily median
 /// and upsert. One failing list is logged and skipped, never fatal.
-async fn store_all<F>(pool: &PgPool, kind: &str, game: &str, jobs: Vec<F>, width: usize) -> anyhow::Result<usize>
+///
+/// A job may bring its own page snapshot (set desks); `page_of` derives one
+/// from the stored list body instead (artist desks serve exactly that body).
+async fn store_all<F>(pool: &PgPool, kind: &str, game: &str, jobs: Vec<F>, width: usize, page_of: Option<fn(&str, &Value) -> Option<Page>>) -> anyhow::Result<usize>
 where
-    F: std::future::Future<Output = anyhow::Result<(String, Value)>> + Send + 'static,
+    F: std::future::Future<Output = anyhow::Result<(String, Value, Option<Page>)>> + Send + 'static,
 {
+    let mut pages: Vec<Page> = Vec::new();
     let gate = Arc::new(Semaphore::new(width));
     let mut set = JoinSet::new();
     for job in jobs {
@@ -520,9 +555,15 @@ where
     let mut stored = 0;
     while let Some(done) = set.join_next().await {
         match done {
-            Ok(Ok((key, mut body))) => {
+            Ok(Ok((key, mut body, page))) => {
                 if game == "pokemon" {
                     fill_medians(pool, &mut body).await;
+                }
+                pages.extend(page.or_else(|| page_of.and_then(|f| f(&key, &canonical_rows(&body)))));
+                if pages.len() >= 100 {
+                    if let Err(error) = store_pages(pool, kind, &std::mem::take(&mut pages)).await {
+                        tracing::error!(%kind, %error, "build-lists page store failed");
+                    }
                 }
                 match upsert(pool, kind, &key, &body).await {
                     Ok(()) => stored += 1,
@@ -533,7 +574,218 @@ where
             Err(error) => tracing::error!(%kind, %error, "build-lists task failed"),
         }
     }
+    if let Err(error) = store_pages(pool, kind, &pages).await {
+        tracing::error!(%kind, %error, "build-lists page store failed");
+    }
     Ok(stored)
+}
+
+/// One `marketplace_page_snapshots` row to store.
+#[derive(Debug, Clone)]
+pub(crate) struct Page {
+    pub key: String,
+    pub head: Value,
+    pub rows: Vec<String>,
+    pub c1: Option<Vec<u8>>,
+}
+
+impl Page {
+    fn version(&self) -> String {
+        let mut hash = Sha256::new();
+        hash.update(page_snapshot::text(&self.head).as_bytes());
+        for row in &self.rows {
+            hash.update(b"\n");
+            hash.update(row.as_bytes());
+        }
+        hex::encode(&hash.finalize()[..8])
+    }
+}
+
+/// The artist desk page: the stored list body (`/api/marketplace-list`), which
+/// is what `/api/marketplace-artist-cards?tiles=1` has answered since #304.
+fn artist_page(key: &str, body: &Value) -> Option<Page> {
+    let cards = body.get("cards").and_then(Value::as_array).filter(|c| !c.is_empty())?;
+    Some(Page {
+        key: key.to_owned(),
+        head: json!({ "artist": body.get("artist").cloned().unwrap_or(Value::Null), "profile": body.get("profile").cloned().unwrap_or(Value::Null) }),
+        rows: cards.iter().map(page_snapshot::text).collect(),
+        c1: None,
+    })
+}
+
+/// Store page snapshots in batches. An unchanged page (same content hash) only
+/// has `checked_at` touched, so a rebuild writes almost no WAL for the replica.
+/// Returns how many pages were rewritten.
+pub(crate) async fn store_pages(pool: &PgPool, kind: &str, pages: &[Page]) -> anyhow::Result<usize> {
+    // One statement cannot upsert a key twice (two spellings of one artist slug).
+    let mut last: std::collections::HashMap<&str, &Page> = std::collections::HashMap::new();
+    for page in pages {
+        last.insert(page.key.as_str(), page);
+    }
+    let pages: Vec<&Page> = last.into_values().collect();
+    let mut written = 0;
+    for chunk in pages.chunks(200) {
+        let keys: Vec<&str> = chunk.iter().map(|p| p.key.as_str()).collect();
+        let versions: Vec<String> = chunk.iter().map(|p| p.version()).collect();
+        let fresh: std::collections::HashSet<String> = sqlx::query_scalar::<_, String>(
+            "update public.marketplace_page_snapshots s set checked_at = now()
+             from unnest($2::text[], $3::text[]) as u(key, version)
+             where s.kind = $1 and s.key = u.key and s.version = u.version
+             returning s.key",
+        )
+        .bind(kind)
+        .bind(&keys)
+        .bind(&versions)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .collect();
+        let todo: Vec<(&Page, &String)> = chunk.iter().copied().zip(&versions).filter(|(p, _)| !fresh.contains(&p.key)).collect();
+        if todo.is_empty() {
+            continue;
+        }
+        let keys: Vec<&str> = todo.iter().map(|(p, _)| p.key.as_str()).collect();
+        let heads: Vec<String> = todo.iter().map(|(p, _)| page_snapshot::text(&p.head)).collect();
+        // Each row travels as a JSON string, so Postgres stores its exact bytes.
+        let rows: Vec<String> = todo.iter().map(|(p, _)| serde_json::to_string(&p.rows).unwrap_or_else(|_| "[]".into())).collect();
+        let c1: Vec<Option<&[u8]>> = todo.iter().map(|(p, _)| p.c1.as_deref()).collect();
+        let versions: Vec<&str> = todo.iter().map(|(_, v)| v.as_str()).collect();
+        sqlx::query(
+            "insert into public.marketplace_page_snapshots (kind, key, head, rows, c1, version, built_at, checked_at)
+             select $1, u.key, u.head,
+               array(select e from jsonb_array_elements_text(u.rows::jsonb) with ordinality as t(e, ord) order by ord),
+               u.c1, u.version, now(), now()
+             from unnest($2::text[], $3::text[], $4::text[], $5::bytea[], $6::text[]) as u(key, head, rows, c1, version)
+             on conflict (kind, key) do update set head = excluded.head, rows = excluded.rows, c1 = excluded.c1,
+               version = excluded.version, built_at = now(), checked_at = now()",
+        )
+        .bind(kind)
+        .bind(&keys)
+        .bind(&heads)
+        .bind(&rows)
+        .bind(&c1)
+        .bind(&versions)
+        .execute(pool)
+        .await?;
+        written += todo.len();
+    }
+    Ok(written)
+}
+
+/// Snapshots of a kind the builder has not confirmed for a week are gone from
+/// the catalogue (a renamed set, a merged version set).
+async fn prune_pages(pool: &PgPool, kind: &str) {
+    let _ = sqlx::query("delete from public.marketplace_page_snapshots where kind = $1 and checked_at < now() - interval '7 days'")
+        .bind(kind)
+        .execute(pool)
+        .await;
+}
+
+/// One page per CLIP version set: the printings `/api/marketplace-version-set`
+/// answers for any member card.
+async fn build_versions(app: &Router, pool: &PgPool, game: &str, only: Option<&str>) -> anyhow::Result<usize> {
+    let members: Vec<(String, i64)> = sqlx::query_as(
+        "select c.version, min(c.card_id)
+         from public.marketplace_search_candidates c
+         join public.pokoin_version_sets s on s.version = c.version
+         where c.item_kind = 'single' and c.product_type = 'card' and ($1::text is null or lower(c.version) = $1)
+         group by c.version",
+    )
+    .bind(only)
+    .fetch_all(pool)
+    .await?;
+    let gate = Arc::new(Semaphore::new(6));
+    let mut set = JoinSet::new();
+    for (version, card_id) in members {
+        let (app, game, gate) = (app.clone(), game.to_owned(), gate.clone());
+        set.spawn(async move {
+            let _permit = gate.acquire_owned().await?;
+            let body = get(&app, &game, &format!("/api/marketplace-version-set?cardId={card_id}")).await?;
+            let printings = body.get("printings").and_then(Value::as_array).cloned().unwrap_or_default();
+            anyhow::ensure!(body.get("version").and_then(Value::as_str) == Some(version.as_str()), "version set {version} answered another key");
+            anyhow::Ok(Page {
+                key: version,
+                head: json!({ "version": body["version"], "versionCount": body["versionCount"] }),
+                rows: printings.iter().map(page_snapshot::text).collect(),
+                c1: None,
+            })
+        });
+    }
+    let mut pages = Vec::new();
+    let mut stored = 0;
+    while let Some(done) = set.join_next().await {
+        match done {
+            Ok(Ok(page)) => pages.push(page),
+            Ok(Err(error)) => tracing::warn!(%game, error = %format!("{error:#}"), "build-lists skipped a version set"),
+            Err(error) => tracing::error!(%error, "build-lists version task failed"),
+        }
+        if pages.len() >= 200 {
+            store_pages(pool, page_snapshot::VERSION, &std::mem::take(&mut pages)).await?;
+            stored += 200;
+        }
+    }
+    stored += pages.len();
+    store_pages(pool, page_snapshot::VERSION, &pages).await?;
+    if only.is_none() {
+        prune_pages(pool, page_snapshot::VERSION).await;
+    }
+    Ok(stored)
+}
+
+/// The related-cards index (see `related.rs`). Returns (cards scored, pages
+/// rewritten). A delta build scores everything too (it is seconds of CPU) but
+/// builds tile rows and writes only for the cards a change can have touched.
+async fn build_related(pool: &PgPool, delta: bool, dry_run: bool) -> anyhow::Result<(usize, usize)> {
+    let cards = related::load_cards(pool).await?;
+    let lists = related::neighbours(&cards);
+    let targets: Vec<usize> = if delta {
+        let since: Option<String> = sqlx::query_scalar(
+            "select (max(checked_at) - interval '10 minutes')::text from public.marketplace_page_snapshots where kind = $1",
+        )
+        .bind(page_snapshot::RELATED)
+        .fetch_one(pool)
+        .await?;
+        let Some(since) = since else {
+            anyhow::bail!("related-delta needs a full build first (run --kind=related)");
+        };
+        let stored: std::collections::HashSet<i64> = sqlx::query_scalar::<_, String>(
+            "select key from public.marketplace_page_snapshots where kind = $1",
+        )
+        .bind(page_snapshot::RELATED)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .filter_map(|k| k.parse().ok())
+        .collect();
+        let changed = related::changed_since(pool, &since).await?;
+        related::affected(&cards, &lists, &changed, &stored)
+    } else {
+        (0..cards.len()).collect()
+    };
+    let language: std::collections::HashMap<i64, &str> = cards.iter().map(|c| (c.id, c.language.as_str())).collect();
+    let mut written = 0;
+    for chunk in targets.chunks(2_000) {
+        let mut needed: Vec<i64> = chunk.iter().flat_map(|&i| lists[i].iter().map(|&j| cards[j as usize].id)).collect();
+        needed.sort_unstable();
+        needed.dedup();
+        let tiles = related::tile_rows(pool, &needed, &language).await?;
+        let pages: Vec<Page> = chunk
+            .iter()
+            .map(|&i| {
+                let key = cards[i].id.to_string();
+                let rows: Vec<String> = lists[i].iter().filter_map(|&j| tiles.get(&cards[j as usize].id).cloned()).collect();
+                let c1 = related::related_c1(&key, &rows);
+                Page { key, head: json!({}), rows, c1: Some(c1) }
+            })
+            .collect();
+        if !dry_run {
+            written += store_pages(pool, page_snapshot::RELATED, &pages).await?;
+        }
+    }
+    if !delta && !dry_run {
+        prune_pages(pool, page_snapshot::RELATED).await;
+    }
+    Ok((cards.len(), written))
 }
 
 fn tile_price_missing(card: &Value) -> bool {
@@ -541,7 +793,7 @@ fn tile_price_missing(card: &Value) -> bool {
 }
 
 /// `applyLastMedianPrices`: cards without a tile price show the daily median.
-async fn fill_medians(pool: &PgPool, body: &mut Value) {
+pub(crate) async fn fill_medians(pool: &PgPool, body: &mut Value) {
     let Some(cards) = body.get_mut("cards").and_then(Value::as_array_mut) else { return };
     let ids: Vec<i64> = cards
         .iter()
@@ -574,7 +826,7 @@ async fn fill_medians(pool: &PgPool, body: &mut Value) {
 /// One key order for every card. c1 only builds a column table when each row's
 /// keys are a subsequence of one order, and overlays (emoji, cheapest price)
 /// insert keys at different positions; readers never depend on key order.
-fn canonical_rows(body: &Value) -> Value {
+pub(crate) fn canonical_rows(body: &Value) -> Value {
     let mut body = body.clone();
     if let Some(cards) = body.get_mut("cards").and_then(Value::as_array_mut) {
         for card in cards.iter_mut() {
@@ -706,7 +958,8 @@ mod tests {
     #[test]
     fn options_default_to_every_kind() {
         let o = options(&["--game=magic".into(), "--key=Alpha".into()]);
-        assert_eq!(o.kinds, vec!["median", "set", "artist", "name"]);
+        assert_eq!(o.kinds, vec!["median", "set", "artist", "name", "version", "related"]);
+        assert!(!o.dry_run && options(&["--dry-run".into()]).dry_run);
         assert_eq!(o.games, vec!["magic"]);
         assert_eq!(o.key.as_deref(), Some("alpha"));
     }

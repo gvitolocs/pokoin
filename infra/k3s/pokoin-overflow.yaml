@@ -823,6 +823,378 @@ spec:
   successfulJobsHistoryLimit: 1
   suspend: false
 ---
+# Version-set desks (marketplace_page_snapshots kind=version, one per CLIP version set, prices built in): hourly.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: build-lists-versions
+  namespace: pokoin-overflow
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3000
+      backoffLimit: 0
+      template:
+        spec:
+          automountServiceAccountToken: false
+          containers:
+          - command:
+            - /app/pokoin-api
+            - job
+            - build-lists
+            - --kind=version
+            env:
+            - name: POKOIN_RUST_BIND
+              value: 127.0.0.1:18082
+            - name: POKOIN_TRUSTED_PROXY_CIDRS
+              value: 10.42.0.0/16
+            - name: POKOIN_LISTING_SYNC_WORKER
+              value: '0'
+            - name: POKOIN_RUST_RELEASE
+              value: nez-k3s
+            - name: POKOIN_CDN_ROOT
+              value: /srv/pokoin/card-images/objects
+            - name: POKOIN_CDN_NAME
+              value: nez-k3s
+            - name: POKOIN_CDN_FALLBACK_ORIGIN
+              value: https://cdn.pokoin.com
+            - name: MARKETPLACE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: MARKETPLACE_OVERFLOW_DATABASE_URL
+                  name: pokoin-api-env
+            - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: MARKETPLACE_OVERFLOW_DATABASE_URL
+                  name: pokoin-api-env
+            - name: MARKETPLACE_DATABASE_SSL
+              value: '1'
+            - name: MARKETPLACE_DATABASE_SSL_VERIFY
+              value: '1'
+            - name: MARKETPLACE_WRITER_DATABASE_SSL
+              value: '1'
+            - name: MARKETPLACE_WRITER_DATABASE_SSL_VERIFY
+              value: '1'
+            - name: MEILI_HOST
+              value: http://meili.pokoin-overflow.svc.cluster.local:7700
+            - name: REDIS_HOST
+              value: redis.pokoin-overflow.svc.cluster.local
+            - name: REDIS_PORT
+              value: '6379'
+            - name: POKOIN_CDN_HEALTH_URL
+              value: https://cdn.pokoin.com/health
+            - name: PIPELINE_HEALTH_TIMEOUT_MS
+              value: '2000'
+            - name: SCAN_PRIMARY_URL
+              value: http://172.31.250.12:18151
+            - name: SCAN_FALLBACK_URL
+              value: http://172.31.250.12:18151
+            - name: RUST_LOG
+              value: info
+            - name: POKOIN_RUST_DB_POOL_MAX
+              value: '3'
+            - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
+              value: '2'
+            envFrom:
+            - secretRef:
+                name: pokoin-api-env
+            image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+            name: build-lists-versions
+            resources:
+              limits:
+                cpu: '2'
+                memory: 1536Mi
+              requests:
+                cpu: 250m
+                memory: 256Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              readOnlyRootFilesystem: true
+              runAsGroup: 1000
+              runAsNonRoot: true
+              runAsUser: 1000
+            volumeMounts:
+            - mountPath: /etc/pokoin/pg-ca
+              name: pg-ca
+              readOnly: true
+            - mountPath: /app
+              name: app
+              readOnly: true
+            workingDir: /app
+          restartPolicy: Never
+          securityContext:
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+          - name: pg-ca
+            secret:
+              defaultMode: 292
+              secretName: pokoin-pg-ca
+          - hostPath:
+              path: /srv/pokoin-overflow/rust/current
+              type: Directory
+            name: app
+  schedule: '40 * * * *'
+  successfulJobsHistoryLimit: 1
+  suspend: false
+---
+# Related cards index (kind=related, 12 tiles per card): full rebuild daily at 05:10, after the 04:30 artists.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: build-lists-related
+  namespace: pokoin-overflow
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3000
+      backoffLimit: 0
+      template:
+        spec:
+          automountServiceAccountToken: false
+          containers:
+          - command:
+            - /app/pokoin-api
+            - job
+            - build-lists
+            - --kind=related
+            env:
+            - name: POKOIN_RUST_BIND
+              value: 127.0.0.1:18082
+            - name: POKOIN_TRUSTED_PROXY_CIDRS
+              value: 10.42.0.0/16
+            - name: POKOIN_LISTING_SYNC_WORKER
+              value: '0'
+            - name: POKOIN_RUST_RELEASE
+              value: nez-k3s
+            - name: POKOIN_CDN_ROOT
+              value: /srv/pokoin/card-images/objects
+            - name: POKOIN_CDN_NAME
+              value: nez-k3s
+            - name: POKOIN_CDN_FALLBACK_ORIGIN
+              value: https://cdn.pokoin.com
+            - name: MARKETPLACE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: MARKETPLACE_OVERFLOW_DATABASE_URL
+                  name: pokoin-api-env
+            - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: MARKETPLACE_OVERFLOW_DATABASE_URL
+                  name: pokoin-api-env
+            - name: MARKETPLACE_DATABASE_SSL
+              value: '1'
+            - name: MARKETPLACE_DATABASE_SSL_VERIFY
+              value: '1'
+            - name: MARKETPLACE_WRITER_DATABASE_SSL
+              value: '1'
+            - name: MARKETPLACE_WRITER_DATABASE_SSL_VERIFY
+              value: '1'
+            - name: MEILI_HOST
+              value: http://meili.pokoin-overflow.svc.cluster.local:7700
+            - name: REDIS_HOST
+              value: redis.pokoin-overflow.svc.cluster.local
+            - name: REDIS_PORT
+              value: '6379'
+            - name: POKOIN_CDN_HEALTH_URL
+              value: https://cdn.pokoin.com/health
+            - name: PIPELINE_HEALTH_TIMEOUT_MS
+              value: '2000'
+            - name: SCAN_PRIMARY_URL
+              value: http://172.31.250.12:18151
+            - name: SCAN_FALLBACK_URL
+              value: http://172.31.250.12:18151
+            - name: RUST_LOG
+              value: info
+            - name: POKOIN_RUST_DB_POOL_MAX
+              value: '3'
+            - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
+              value: '2'
+            envFrom:
+            - secretRef:
+                name: pokoin-api-env
+            image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+            name: build-lists-related
+            resources:
+              limits:
+                cpu: '2'
+                memory: 1536Mi
+              requests:
+                cpu: 250m
+                memory: 256Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              readOnlyRootFilesystem: true
+              runAsGroup: 1000
+              runAsNonRoot: true
+              runAsUser: 1000
+            volumeMounts:
+            - mountPath: /etc/pokoin/pg-ca
+              name: pg-ca
+              readOnly: true
+            - mountPath: /app
+              name: app
+              readOnly: true
+            workingDir: /app
+          restartPolicy: Never
+          securityContext:
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+          - name: pg-ca
+            secret:
+              defaultMode: 292
+              secretName: pokoin-pg-ca
+          - hostPath:
+              path: /srv/pokoin-overflow/rust/current
+              type: Directory
+            name: app
+  schedule: '10 5 * * *'
+  successfulJobsHistoryLimit: 1
+  suspend: false
+---
+# Related cards delta: cards whose row, price or neighbours changed since the last build, every 30 min.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: build-lists-related-delta
+  namespace: pokoin-overflow
+spec:
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1500
+      backoffLimit: 0
+      template:
+        spec:
+          automountServiceAccountToken: false
+          containers:
+          - command:
+            - /app/pokoin-api
+            - job
+            - build-lists
+            - --kind=related-delta
+            env:
+            - name: POKOIN_RUST_BIND
+              value: 127.0.0.1:18082
+            - name: POKOIN_TRUSTED_PROXY_CIDRS
+              value: 10.42.0.0/16
+            - name: POKOIN_LISTING_SYNC_WORKER
+              value: '0'
+            - name: POKOIN_RUST_RELEASE
+              value: nez-k3s
+            - name: POKOIN_CDN_ROOT
+              value: /srv/pokoin/card-images/objects
+            - name: POKOIN_CDN_NAME
+              value: nez-k3s
+            - name: POKOIN_CDN_FALLBACK_ORIGIN
+              value: https://cdn.pokoin.com
+            - name: MARKETPLACE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: MARKETPLACE_OVERFLOW_DATABASE_URL
+                  name: pokoin-api-env
+            - name: MARKETPLACE_NAME_SEARCH_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: MARKETPLACE_OVERFLOW_DATABASE_URL
+                  name: pokoin-api-env
+            - name: MARKETPLACE_DATABASE_SSL
+              value: '1'
+            - name: MARKETPLACE_DATABASE_SSL_VERIFY
+              value: '1'
+            - name: MARKETPLACE_WRITER_DATABASE_SSL
+              value: '1'
+            - name: MARKETPLACE_WRITER_DATABASE_SSL_VERIFY
+              value: '1'
+            - name: MEILI_HOST
+              value: http://meili.pokoin-overflow.svc.cluster.local:7700
+            - name: REDIS_HOST
+              value: redis.pokoin-overflow.svc.cluster.local
+            - name: REDIS_PORT
+              value: '6379'
+            - name: POKOIN_CDN_HEALTH_URL
+              value: https://cdn.pokoin.com/health
+            - name: PIPELINE_HEALTH_TIMEOUT_MS
+              value: '2000'
+            - name: SCAN_PRIMARY_URL
+              value: http://172.31.250.12:18151
+            - name: SCAN_FALLBACK_URL
+              value: http://172.31.250.12:18151
+            - name: RUST_LOG
+              value: info
+            - name: POKOIN_RUST_DB_POOL_MAX
+              value: '3'
+            - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
+              value: '2'
+            envFrom:
+            - secretRef:
+                name: pokoin-api-env
+            image: gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+            name: build-lists-related-delta
+            resources:
+              limits:
+                cpu: '2'
+                memory: 1536Mi
+              requests:
+                cpu: 250m
+                memory: 256Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              readOnlyRootFilesystem: true
+              runAsGroup: 1000
+              runAsNonRoot: true
+              runAsUser: 1000
+            volumeMounts:
+            - mountPath: /etc/pokoin/pg-ca
+              name: pg-ca
+              readOnly: true
+            - mountPath: /app
+              name: app
+              readOnly: true
+            workingDir: /app
+          restartPolicy: Never
+          securityContext:
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+          - name: pg-ca
+            secret:
+              defaultMode: 292
+              secretName: pokoin-pg-ca
+          - hostPath:
+              path: /srv/pokoin-overflow/rust/current
+              type: Directory
+            name: app
+  schedule: '25,55 * * * *'
+  successfulJobsHistoryLimit: 1
+  suspend: false
+---
 # Daily display median per sold card: once a day.
 apiVersion: batch/v1
 kind: CronJob
