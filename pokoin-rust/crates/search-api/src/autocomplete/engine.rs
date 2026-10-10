@@ -2828,17 +2828,11 @@ pub fn row_matches_category_token(row: &Value, category: &str, token: &str) -> b
                     let text = text.clone();
                     match target.as_str() {
                         "v" => contains_word(&text, "v"),
-                        "lvx" => contains_word_pattern(
-                            &text,
-                            r"(^|[^a-z0-9])(lv\.?x|level x)([^a-z0-9]|$)",
-                        ),
-                        "mega" => {
-                            contains_word_pattern(&text, r"(^|[^a-z0-9])(mega|m)([^a-z0-9]|$)")
-                        }
-                        other => contains_word_pattern(
-                            &text,
-                            &format!(r"(^|[^a-z0-9]){}([^a-z0-9]|$)", regex::escape(other)),
-                        ),
+                        "lvx" => ["lvx", "lv.x", "level x"]
+                            .iter()
+                            .any(|word| contains_word(&text, word)),
+                        "mega" => contains_word(&text, "mega") || contains_word(&text, "m"),
+                        other => contains_word(&text, other),
                     }
                 })
         }
@@ -2881,17 +2875,24 @@ pub fn row_matches_category_token(row: &Value, category: &str, token: &str) -> b
     }
 }
 
+/// `(^|[^a-z0-9])needle([^a-z0-9]|$)` without compiling a regex per row: a
+/// per-call `Regex::new` runs on a tokio worker for every candidate row.
 fn contains_word(text: &str, needle: &str) -> bool {
-    contains_word_pattern(
-        text,
-        &format!(r"(^|[^a-z0-9]){}([^a-z0-9]|$)", regex::escape(needle)),
-    )
-}
-
-fn contains_word_pattern(text: &str, pattern: &str) -> bool {
-    regex::Regex::new(pattern)
-        .map(|re| re.is_match(text))
-        .unwrap_or(false)
+    let bytes = text.as_bytes();
+    let word = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    let mut from = 0;
+    while let Some(at) = text[from..].find(needle) {
+        let start = from + at;
+        let end = start + needle.len();
+        if (start == 0 || !word(bytes[start - 1])) && (end == bytes.len() || !word(bytes[end])) {
+            return true;
+        }
+        match text[start..].chars().next() {
+            Some(ch) => from = start + ch.len_utf8(),
+            None => return false,
+        }
+    }
+    false
 }
 
 /// `buildNonNameContext(searchLanguage, categorySteps)`.
@@ -7669,6 +7670,25 @@ fn js_value_number_of(value: &Value) -> Option<f64> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn contains_word_matches_the_boundary_regex() {
+        let texts = [
+            "", "v", "pikachu v", "pikachu vmax", "vstar", "m charizard ex", "mega", "lv.x",
+            "dialga lv.x", "level x", "levelx", "lvx9", "é v é", "aaa", "café-v", "ex/gx",
+        ];
+        let needles = ["v", "m", "mega", "lvx", "lv.x", "level x", "ex", "aa", "é", ""];
+        for text in texts {
+            for needle in needles {
+                let re = regex::Regex::new(&format!(
+                    r"(^|[^a-z0-9]){}([^a-z0-9]|$)",
+                    regex::escape(needle)
+                ))
+                .unwrap();
+                assert_eq!(contains_word(text, needle), re.is_match(text), "{text:?} {needle:?}");
+            }
+        }
+    }
 
     #[test]
     fn redis_query_reuses_the_pokoin_search_port() {

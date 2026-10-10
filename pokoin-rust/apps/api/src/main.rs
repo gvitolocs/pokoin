@@ -8,6 +8,7 @@ mod rails;
 mod read_cache;
 mod request_log;
 mod search_page;
+mod stall_watchdog;
 mod suggest;
 mod system;
 mod visual_theme;
@@ -82,6 +83,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
     let booted = Instant::now();
     tracing::info!(phase = "process", elapsed_ms = 0, "startup");
+    stall_watchdog::start();
     let config = Config::from_env();
     tracing::info!(phase = "config", elapsed_ms = elapsed_ms(booted), "startup");
     let state = new_state(config.clone(), booted)?;
