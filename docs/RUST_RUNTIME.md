@@ -30,6 +30,8 @@ The Cloudflare Load Balancer also sends about 10% of `api.pokoin.com` to the nez
 
 `scripts/pokoin-pi-watchdog.sh` (every 5 min) restarts `pokoin-rust-api` when any of the four listeners is down or `/livez` fails. A degraded `/readyz` (Postgres, Redis or CDN) never reboots the host. Install it with `scripts/deploy-pokoin-pi-watchdog.sh`.
 
+A handler panic answers `500` and logs `handler panicked` with its method and path. On SIGTERM every listener stops accepting and gets at most 10 s to finish in-flight requests (open streams included), then the process exits; the unit's `TimeoutStopSec` is 20 s. A stop that never logs `shutdown` and ends in SIGKILL means the process was stuck before the signal arrived.
+
 ## Code map
 
 - `pokoin-rust/apps/api`: the binary. HTTP server by default, `job <name>` for the timers. System routes (`/livez`, `/readyz`, `/healthz`, `/api/__contract`, `/api/__routes`) are in `src/system.rs`.
@@ -47,7 +49,7 @@ Timer or job-unit changes are installed with `scripts/cutover-pi-rust.sh` (it co
 ## Rollback
 
 - **Rust release:** a failed install restores itself. To go back by hand, point `/srv/pokoin/rust/current` at the `previous` target and restart `pokoin-rust-api`.
-- **Back to Node (emergency only):** `scripts/cutover-pi-rust.sh --rollback` re-enables the Node edge, CDN, ct-deals and API container and the Node timers that are still installed (disabled) on the Pi. It needs no Node sources from this repository; it works as long as the Pi keeps `/srv/pokoin/api` and those units.
+- **Back to Node (emergency only):** `scripts/cutover-pi-rust.sh --rollback` re-enables the Node edge, CDN, ct-deals and API container and the Node timers that are still installed (disabled) on the Pi. It needs no Node sources from this repository; it works as long as the Pi keeps `/srv/pokoin/api` and those units. The cutover takes `pokoin-card-images.service` out of the data-disk udev rule (`/etc/udev/rules.d/99-pokoin-data.rules`, `SYSTEMD_WANTS`), because at boot the Node CDN took `:18081` and the Rust unit crash-looped; `--rollback` puts it back.
 
 ## Catalog identity and caching
 
