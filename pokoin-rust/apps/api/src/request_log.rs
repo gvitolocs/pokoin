@@ -21,3 +21,14 @@ pub async fn log_request(State(state):State<crate::AppState>,req:Request,next:Ne
  else{tracing::info!(%request_id,%route,%path,%method,status,duration_ms,"http_request");}
  res
 }
+
+/// `POST /api/client-error`: an SPA route crash (Solid `Errored` boundary).
+/// Logged as one structured line; never stored, never echoed. Bodies above
+/// 8 KiB are refused and every field is clipped.
+pub async fn client_error(body:axum::body::Bytes)->axum::http::StatusCode{
+ if body.len()>8192{return axum::http::StatusCode::PAYLOAD_TOO_LARGE}
+ let v:serde_json::Value=serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+ let clip=|k:&str,n:usize|->String{v.get(k).and_then(serde_json::Value::as_str).unwrap_or("").chars().filter(|c|!c.is_control()||*c=='\n').take(n).collect()};
+ tracing::warn!(route=%clip("route",200),message=%clip("message",500),stack=%clip("stack",3000),release=%clip("release",80),signed_in=%clip("signedIn",8),"client_error");
+ axum::http::StatusCode::NO_CONTENT
+}

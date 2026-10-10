@@ -11,6 +11,7 @@ import { chatDock } from './lib/chat-dock-loader.js';
 import { whenIdle } from './lib/idle.js';
 import { warmLikelyRoutes } from './lib/route-warmup.js';
 import { setLinkNavigator } from './lib/yield-nav.js';
+import { reportClientError } from './lib/client-error.js';
 import { watchAccount } from './stores/account.js';
 import { signedIn, warmAuthWhenIdle } from './stores/auth.js';
 import { ensureSellerSettings } from './stores/buyer.js';
@@ -22,9 +23,14 @@ function RoutePending() {
 }
 
 function RouteError(props) {
+  reportClientError(props.error, signedIn());
+  const detail = String(props.error?.message || props.error || '').slice(0, 200);
   return (
     <div class="page desk" style={{ padding: '2.5rem 1.25rem' }} role="alert">
       <p>Something went wrong loading this page.</p>
+      <Show when={detail}>
+        <p style={{ color: 'var(--muted)', 'font-size': '0.8rem' }}>{detail}</p>
+      </Show>
       <button type="button" class="btn" onClick={() => props.reset()}>Try again</button>
     </div>
   );
