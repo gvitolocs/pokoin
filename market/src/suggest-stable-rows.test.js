@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { withGroupKeys } from './suggest-group-keys.js';
-import { createSuggestFlip, rowMotion } from './suggest-flip.js';
+import { MOVE_MS, createSuggestFlip, rowMotion } from './suggest-flip.js';
 
 test('group keys follow the name, not the first printing', () => {
   const before = withGroupKeys([{ name: 'Dialga', printings: [{ id: '1' }, { id: '2' }] }]);
@@ -33,8 +33,8 @@ function fakeRow(id, top) {
     getAttribute: (name) => (name === 'data-suggest-id' ? id : null),
     getBoundingClientRect: () => ({ top: node.top }),
     getAnimations: () => animations.filter((a) => !a.cancelled),
-    animate(keyframes) {
-      const animation = { keyframes, cancelled: false, cancel() { this.cancelled = true; this.oncancel?.(); } };
+    animate(keyframes, options) {
+      const animation = { keyframes, options, cancelled: false, cancel() { this.cancelled = true; this.oncancel?.(); } };
       animations.push(animation);
       return animation;
     },
@@ -63,6 +63,8 @@ test('same results repaint nothing; a rising row slides, the others do not', () 
   flip.update(fakeList([c, a, b]));
   assert.equal(c.animations.length, 1);
   assert.deepEqual(c.animations[0].keyframes[0], { transform: 'translateY(100px)' });
+  assert.equal(c.animations[0].options.duration, MOVE_MS);
+  assert.ok(MOVE_MS >= 400, 'rising rows slide slowly enough to follow');
   assert.equal(c.style.zIndex, '1');
   assert.equal(a.animations.length + b.animations.length, 0);
   // A new row appears in place.
