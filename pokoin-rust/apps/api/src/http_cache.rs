@@ -121,15 +121,17 @@ pub async fn conditional(mut req: Request, next: Next) -> Response {
     validate(next.run(req).await, validator).await
 }
 
-/// `Accept: application/vnd.pokoin.c1+json` without `?format=c1` becomes
-/// `?format=c1`, the form every cache keys on.
+/// `Accept: application/vnd.pokoin.c1+json` without `?format=` becomes
+/// `?format=c1` (`?format=c1v2` for `; v=2`), the form every cache keys on.
 pub fn c1_in_url(uri: &Uri, headers: &HeaderMap) -> Option<Uri> {
     let query = uri.query().unwrap_or("");
     let parsed = Query::parse(query);
-    if parsed.first("format").is_some() || !Wanted::from_request(headers, &parsed).c1() {
+    let wanted = Wanted::from_request(headers, &parsed);
+    if parsed.first("format").is_some() || !wanted.c1() {
         return None;
     }
-    let joined = if query.is_empty() { format!("{}?format=c1", uri.path()) } else { format!("{}?{query}&format=c1", uri.path()) };
+    let format = if wanted.templates() { "c1v2" } else { "c1" };
+    let joined = if query.is_empty() { format!("{}?format={format}", uri.path()) } else { format!("{}?{query}&format={format}", uri.path()) };
     joined.parse().ok()
 }
 
@@ -222,5 +224,7 @@ mod tests {
         assert_eq!(body(call(&c1, "/api/echo").await).await, "/api/echo?format=c1");
         assert_eq!(body(call(&c1, "/api/echo?format=c1").await).await, "/api/echo?format=c1");
         assert_eq!(body(call(&[("accept", "*/*")], "/api/echo?slug=151").await).await, "/api/echo?slug=151");
+        let v2 = [("accept", "application/vnd.pokoin.c1+json; v=2")];
+        assert_eq!(body(call(&v2, "/api/echo?slug=151").await).await, "/api/echo?slug=151&format=c1v2");
     }
 }

@@ -43,4 +43,6 @@ pokoin-commerce = { path = "../../crates/commerce" }
 pokoin-external = { path = "../../crates/external" }
 
 sha2 = { workspace = true }
+brotli = "8"
+pokoin-shared-dictionary = { path = "../../crates/shared-dictionary" }
 hex = { workspace = true }

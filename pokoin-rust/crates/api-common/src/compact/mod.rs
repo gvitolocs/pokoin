@@ -27,6 +27,7 @@ use crate::public_error::sanitize_public_json;
 pub mod decode;
 pub mod dict;
 pub mod encode;
+pub mod template;
 
 #[cfg(test)]
 mod tests;
@@ -48,31 +49,45 @@ pub const C1_FORMAT_HEADER: (&str, &str) = ("x-pokoin-format", "c1");
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Wanted {
     c1: bool,
+    templates: bool,
 }
 
 impl Wanted {
     /// The default representation — what every existing client gets.
-    pub const DEFAULT: Self = Self { c1: false };
+    pub const DEFAULT: Self = Self { c1: false, templates: false };
 
     /// `true` when the client asked for `c1`.
     pub fn c1(self) -> bool {
         self.c1
     }
 
+    /// `true` when the client also reads template columns (format `2`):
+    /// `?format=c1v2`, or `v=2` on the `c1` media type in `Accept`.
+    pub fn templates(self) -> bool {
+        self.c1 && self.templates
+    }
+
+    /// The encoder options this representation allows.
+    pub fn encode_options(self) -> encode::EncodeOptions {
+        encode::EncodeOptions { templates: self.templates() }
+    }
+
     /// Read the request's preference from the `Accept` header and the query.
     pub fn from_request(headers: &HeaderMap, query: &http::Query) -> Self {
-        if query
-            .first("format")
-            .is_some_and(|value| value.eq_ignore_ascii_case("c1"))
-        {
-            return Self { c1: true };
+        match query.first("format") {
+            Some(value) if value.eq_ignore_ascii_case("c1") => return Self { c1: true, templates: false },
+            Some(value) if value.eq_ignore_ascii_case("c1v2") => return Self { c1: true, templates: true },
+            _ => {}
         }
-        let accepts_c1 = headers
+        let accepts: Vec<&str> = headers
             .get_all(axum::http::header::ACCEPT)
             .iter()
             .filter_map(|value| value.to_str().ok())
-            .any(accept_lists_c1);
-        Self { c1: accepts_c1 }
+            .collect();
+        Self {
+            c1: accepts.iter().any(|accept| accept_lists_c1(accept)),
+            templates: accepts.iter().any(|accept| accept_lists_c1_v2(accept)),
+        }
     }
 
     /// Read the preference from an `Accept` header value and a raw query string.
@@ -93,6 +108,16 @@ fn accept_lists_c1(accept: &str) -> bool {
     accept.split(',').any(|entry| {
         let media = entry.split(';').next().unwrap_or("").trim();
         media.eq_ignore_ascii_case(C1_MEDIA_TYPE)
+    })
+}
+
+/// A `c1` entry that also asks for format `2` (`; v=2`).
+fn accept_lists_c1_v2(accept: &str) -> bool {
+    accept.split(',').any(|entry| {
+        let mut parts = entry.split(';');
+        let media = parts.next().unwrap_or("").trim();
+        media.eq_ignore_ascii_case(C1_MEDIA_TYPE)
+            && parts.any(|param| param.trim().eq_ignore_ascii_case("v=2"))
     })
 }
 
@@ -138,7 +163,7 @@ pub fn json_with(
     }
     let (status, body) = sanitize_public_json(status, body);
     headers.push(C1_FORMAT_HEADER);
-    let bytes = crate::stages::timed_sync(crate::stages::SERIALIZE, || encode::encode_to_vec(&body));
+    let bytes = crate::stages::timed_sync(crate::stages::SERIALIZE, || encode::encode_to_vec_with(&body, wanted.encode_options()));
     http::raw(status, C1_CONTENT_TYPE, bytes, &headers)
 }
 
@@ -157,11 +182,12 @@ pub fn prebuilt(
         return http::raw(StatusCode::OK, "application/json; charset=utf-8", json, &headers);
     }
     headers.push(C1_FORMAT_HEADER);
-    let bytes = match c1 {
+    // Stored bytes are format 1; a format-2 request is encoded now.
+    let bytes = match c1.filter(|_| !wanted.templates()) {
         Some(bytes) => bytes,
         None => crate::stages::timed_sync(crate::stages::SERIALIZE, || {
             match serde_json::from_slice::<Value>(&json) {
-                Ok(body) => encode::encode_to_vec(&body),
+                Ok(body) => encode::encode_to_vec_with(&body, wanted.encode_options()),
                 Err(_) => json,
             }
         }),
@@ -172,6 +198,16 @@ pub fn prebuilt(
 #[cfg(test)]
 mod negotiation_tests {
     use super::*;
+
+    #[test]
+    fn c1v2_is_opt_in_on_top_of_c1() {
+        assert!(Wanted::from_parts(None, "format=c1v2").templates());
+        assert!(Wanted::from_parts(None, "format=C1V2").c1());
+        assert!(!Wanted::from_parts(None, "format=c1").templates());
+        assert!(Wanted::from_parts(Some("application/vnd.pokoin.c1+json; v=2"), "").templates());
+        assert!(!Wanted::from_parts(Some(C1_MEDIA_TYPE), "").templates());
+        assert!(!Wanted::DEFAULT.templates());
+    }
 
     #[test]
     fn query_selects_c1() {

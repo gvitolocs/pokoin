@@ -7,6 +7,7 @@ import {
   C1_FORMAT_VERSION,
   C1_MEDIA_TYPE,
   C1Error,
+  c1Slug,
   decodeC1,
   isC1,
 } from './compact.js';
@@ -78,7 +79,9 @@ test('dictionary codes are one-based and never renumbered', () => {
 test('isC1 only recognises a c1 document', () => {
   assert.equal(isC1({ c1: 1, b: {}, t: [] }), true);
   assert.equal(isC1({ cards: [] }), false);
-  assert.equal(isC1({ c1: 2 }), false);
+  // Format 2 (template columns) is a c1 document too; 3 is not.
+  assert.equal(isC1({ c1: 2 }), true);
+  assert.equal(isC1({ c1: 3 }), false);
   assert.equal(isC1([]), false);
   assert.equal(isC1(null), false);
   assert.equal(isC1(undefined), false);
@@ -202,4 +205,54 @@ test('an older bundled dictionary reports what to do about a newer code', () => 
   };
   assert.deepEqual(decodeC1(payload).map((row) => row.nationality), ['western', 'japanese']);
   assert.throws(() => decodeC1(payload, stale), /dictionary nationalities has no code 2/);
+});
+
+test("c1 format 2: template columns rebuild values from other columns of the row", () => {
+  const doc = {
+    c1: 2,
+    dict: "1",
+    b: { cards: { $c1: 0 } },
+    t: [{
+      n: 3,
+      k: ["id", "name", "path", "path2", "note"],
+      c: [
+        { c: 1, v: ["10", "11", "12"] },
+        { c: 1, v: ["Mega Lucario ex", "N’s Zekrom", "Pikachu"] },
+        {
+          c: 5,
+          s: [[0, 0], [1, 1]],
+          h: [[0, 1], [0]],
+          x: [0, 0, 1],
+          l: [
+            [{ c: 0, v: "/cards/" }, { c: 0, v: "/card-" }, { c: 0, v: "" }],
+            [{ c: 0, v: "/legacy/" }, { c: 1, v: [7], ns: 1 }],
+          ],
+        },
+        { c: 4, r: 2 },
+        { c: 0, v: "x", m: [1, 0, 1] },
+      ],
+    }],
+  };
+  assert.ok(isC1(doc));
+  assert.deepEqual(decodeC1(doc), {
+    cards: [
+      { id: "10", name: "Mega Lucario ex", path: "/cards/10/card-mega-lucario-ex", path2: "/cards/10/card-mega-lucario-ex", note: "x" },
+      { id: "11", name: "N’s Zekrom", path: "/cards/11/card-n-s-zekrom", path2: "/cards/11/card-n-s-zekrom" },
+      { id: "12", name: "Pikachu", path: "/legacy/127", path2: "/legacy/127", note: "x" },
+    ],
+  });
+});
+
+test("c1Slug matches the Rust encoder", () => {
+  assert.equal(c1Slug("Gold Secret Rare | 244/182"), "gold-secret-rare-244-182");
+  assert.equal(c1Slug("  Pokémon: Mega Lucario ex!  "), "pok-mon-mega-lucario-ex");
+  assert.equal(c1Slug("---"), "");
+});
+
+test("c1 format 2 rejects a template that reads an undecoded column", () => {
+  const doc = {
+    c1: 2, dict: "1", b: { $c1: 0 },
+    t: [{ n: 1, k: ["a", "b"], c: [{ c: 5, s: [[1, 0]], h: [[0]], l: [[{ c: 0, v: "" }, { c: 0, v: "" }]] }, { c: 5, s: [[0, 0]], h: [[0]], l: [[{ c: 0, v: "" }, { c: 0, v: "" }]] }] }],
+  };
+  assert.throws(() => decodeC1(doc), /not decoded/);
 });

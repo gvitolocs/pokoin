@@ -46,6 +46,7 @@
 //! | `2` | `p: []`, `x: []`, `t?` | palette; with `t`, an integer entry is a dictionary code |
 //! | `3` | `z`, `d: []` | integer delta: `v[0] = z`, `v[i] = v[i-1] + d[i-1]` |
 //! | `4` | `r` | same residuals and mask as column `r` |
+//! | `5` | `s`, `h`, `x?`, `l` | template built from other columns of the row (format `2`, see [`super::template`]) |
 //!
 //! Codec `4` is where the bulk of the win on Pokoin payloads comes from: after
 //! prefix/suffix stripping, `id`/`card_id`, `set`/`set_name`,
@@ -73,16 +74,47 @@ const VECTOR_MIN_LEN: usize = 8;
 /// Shortest common prefix/suffix worth hoisting out of a column.
 const MIN_AFFIX: usize = 4;
 
-/// The `c1` format version carried by every document.
+/// The `c1` format version of a document without template columns.
 pub const FORMAT_VERSION: u64 = 1;
+
+/// The version of a document that uses template columns (codec `5`). Only
+/// clients that asked for `c1v2` receive one; a document that ends up with no
+/// template is still written as version `1`.
+pub const FORMAT_VERSION_TEMPLATES: u64 = 2;
+
+/// What the encoder may emit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EncodeOptions {
+    /// Allow codec `5` (format `2`).
+    pub templates: bool,
+}
+
+struct Walk {
+    options: EncodeOptions,
+    templates_used: bool,
+}
+
+#[cfg(test)]
+impl Walk {
+    fn v1() -> Self {
+        Self { options: EncodeOptions::default(), templates_used: false }
+    }
+}
 
 /// Encode a response body. The result decodes back to `body` exactly, byte for
 /// byte, through [`super::decode::decode`].
 pub fn encode(body: &Value) -> Value {
+    encode_with(body, EncodeOptions::default())
+}
+
+/// [`encode`] with explicit options.
+pub fn encode_with(body: &Value, options: EncodeOptions) -> Value {
     let mut tables: Vec<Value> = Vec::new();
-    let skeleton = walk(body, &mut tables);
+    let mut state = Walk { options, templates_used: false };
+    let skeleton = walk(body, &mut tables, &mut state);
+    let version = if state.templates_used { FORMAT_VERSION_TEMPLATES } else { FORMAT_VERSION };
     let mut out = Map::new();
-    out.insert("c1".into(), Value::from(FORMAT_VERSION));
+    out.insert("c1".into(), Value::from(version));
     out.insert("dict".into(), Value::String(dict::VERSION.to_string()));
     out.insert("b".into(), skeleton);
     out.insert("t".into(), Value::Array(tables));
@@ -92,7 +124,12 @@ pub fn encode(body: &Value) -> Value {
 /// Encode and serialise in one step, streaming through a `serde_json` writer
 /// so the compact document is never materialised as an intermediate `String`.
 pub fn encode_to_vec(body: &Value) -> Vec<u8> {
-    let document = encode(body);
+    encode_to_vec_with(body, EncodeOptions::default())
+}
+
+/// [`encode_to_vec`] with explicit options.
+pub fn encode_to_vec_with(body: &Value, options: EncodeOptions) -> Vec<u8> {
+    let document = encode_with(body, options);
     let mut out = Vec::with_capacity(4096);
     // Infallible for a `Value` into a `Vec`, but never panic on a response path.
     if serde_json::to_writer(&mut out, &document).is_err() {
@@ -102,22 +139,22 @@ pub fn encode_to_vec(body: &Value) -> Vec<u8> {
     out
 }
 
-fn walk(value: &Value, tables: &mut Vec<Value>) -> Value {
+fn walk(value: &Value, tables: &mut Vec<Value>, state: &mut Walk) -> Value {
     match value {
         Value::Array(items) => {
-            if let Some(table) = encode_array(items) {
+            if let Some(table) = encode_array(items, state) {
                 let index = tables.len();
                 tables.push(table);
                 let mut placeholder = Map::new();
                 placeholder.insert("$c1".into(), Value::from(index as u64));
                 return Value::Object(placeholder);
             }
-            Value::Array(items.iter().map(|item| walk(item, tables)).collect())
+            Value::Array(items.iter().map(|item| walk(item, tables, state)).collect())
         }
         Value::Object(map) => {
             let mut out = Map::new();
             for (key, item) in map {
-                out.insert(key.clone(), walk(item, tables));
+                out.insert(key.clone(), walk(item, tables, state));
             }
             let out = Value::Object(out);
             if map.keys().any(|key| key.starts_with("$c1")) {
@@ -132,9 +169,9 @@ fn walk(value: &Value, tables: &mut Vec<Value>) -> Value {
 }
 
 /// A table for this array, or `None` to leave the array alone.
-fn encode_array(items: &[Value]) -> Option<Value> {
+fn encode_array(items: &[Value], state: &mut Walk) -> Option<Value> {
     if items.len() >= TABLE_MIN_ROWS && items.iter().all(Value::is_object) {
-        return encode_object_table(items);
+        return encode_object_table(items, state);
     }
     if items.len() >= VECTOR_MIN_LEN && items.iter().all(is_scalar) {
         return encode_vector(items);
@@ -156,7 +193,7 @@ fn encode_vector(items: &[Value]) -> Option<Value> {
     Some(Value::Object(table))
 }
 
-fn encode_object_table(items: &[Value]) -> Option<Value> {
+fn encode_object_table(items: &[Value], state: &mut Walk) -> Option<Value> {
     let rows: Vec<&Map<String, Value>> = items.iter().filter_map(Value::as_object).collect();
     if rows.len() != items.len() {
         return None;
@@ -187,11 +224,37 @@ fn encode_object_table(items: &[Value]) -> Option<Value> {
         }
     }
 
+    let cells: Vec<Vec<Option<&Value>>> = keys
+        .iter()
+        .map(|key| rows.iter().map(|row| row.get(*key)).collect())
+        .collect();
+    let templates = if state.options.templates && rows.len() >= super::template::MIN_ROWS {
+        // The ordinary encoding of every column, so a template must beat the
+        // column it replaces, refs included.
+        let mut dry = Builder::new(rows.len());
+        let v1_len: Vec<usize> = keys
+            .iter()
+            .zip(&cells)
+            .map(|(key, column)| serialized_len(&dry.column(key, column)))
+            .collect();
+        super::template::plan(&cells, &v1_len, &literal_column)
+    } else {
+        HashMap::new()
+    };
+    if !templates.is_empty() {
+        state.templates_used = true;
+    }
+
     let mut builder = Builder::new(rows.len());
     let mut columns = Vec::with_capacity(keys.len());
-    for key in &keys {
-        let cells: Vec<Option<&Value>> = rows.iter().map(|row| row.get(*key)).collect();
-        columns.push(builder.column(key, &cells));
+    for (index, key) in keys.iter().enumerate() {
+        match templates.get(&index) {
+            Some(template) => {
+                builder.template(&cells[index]);
+                columns.push(template.clone());
+            }
+            None => columns.push(builder.column(key, &cells[index])),
+        }
     }
 
     let mut table = Map::new();
@@ -202,6 +265,17 @@ fn encode_object_table(items: &[Value]) -> Option<Value> {
     );
     table.insert("c".into(), Value::Array(columns));
     Some(Value::Object(table))
+}
+
+fn serialized_len(value: &Value) -> usize {
+    serde_json::to_vec(value).map(|bytes| bytes.len()).unwrap_or(usize::MAX)
+}
+
+/// A run of template literal strings as an ordinary column (codec 0–3 with
+/// affixes; a fresh builder, so never a ref).
+fn literal_column(values: &[Value]) -> Value {
+    let cells: Vec<Option<&Value>> = values.iter().map(Some).collect();
+    Builder::new(values.len()).column("", &cells)
 }
 
 /// Every key of `row` appears in `keys`, in the same relative order.
@@ -224,6 +298,8 @@ struct Builder {
     seen: HashMap<[u8; 32], Vec<usize>>,
     /// `(mask, residuals)` of each emitted column, by column index.
     residuals: Vec<(Option<Vec<bool>>, Vec<Value>)>,
+    /// Template columns, by index: their residuals are their full values.
+    templates: Vec<usize>,
 }
 
 impl Builder {
@@ -232,7 +308,20 @@ impl Builder {
             rows,
             seen: HashMap::new(),
             residuals: Vec::new(),
+            templates: Vec::new(),
         }
+    }
+
+    /// Register a template column: it emits nothing here, but its values are
+    /// what a later twin (`canonical_path` after `canonicalPath`) refs.
+    fn template(&mut self, cells: &[Option<&Value>]) {
+        let mask: Option<Vec<bool>> = cells
+            .iter()
+            .any(Option::is_none)
+            .then(|| cells.iter().map(Option::is_some).collect());
+        let values: Vec<Value> = cells.iter().filter_map(|cell| cell.cloned()).collect();
+        self.templates.push(self.residuals.len());
+        self.residuals.push((mask, values));
     }
 
     fn column(&mut self, key: &str, cells: &[Option<&Value>]) -> Value {
@@ -242,6 +331,20 @@ impl Builder {
             .any(Option::is_none)
             .then(|| cells.iter().map(Option::is_some).collect());
         let present: Vec<&Value> = cells.iter().filter_map(|cell| *cell).collect();
+
+        // A twin of a template column refs it without modifiers: a template's
+        // residuals are its full values.
+        if let Some(root) = self.templates.iter().copied().find(|root| {
+            let (root_mask, root_values) = &self.residuals[*root];
+            *root_mask == mask && root_values.iter().eq(present.iter().copied())
+        }) {
+            let mut column = Map::new();
+            column.insert("c".into(), Value::from(4u64));
+            column.insert("r".into(), Value::from(root as u64));
+            let values = present.iter().map(|value| (*value).clone()).collect();
+            self.residuals.push((mask, values));
+            return Value::Object(column);
+        }
 
         // A constant column is already minimal; it neither refs nor is ref-ed.
         if let Some(first) = present.first() {
@@ -649,7 +752,7 @@ mod tests {
             json!({"a": 5, "b": 6}),
             json!({"a": 7, "b": 8}),
         ];
-        assert!(encode_array(&items).is_none());
+        assert!(encode_array(&items, &mut Walk::v1()).is_none());
     }
 
     #[test]
@@ -699,16 +802,16 @@ mod tests {
         let rows: Vec<Value> = (0..8)
             .map(|index| json!({"id": format!("{}", 100 + index), "card_id": format!("{}", 100 + index)}))
             .collect();
-        let table = encode_array(&rows).expect("table");
+        let table = encode_array(&rows, &mut Walk::v1()).expect("table");
         assert_eq!(table["c"][1]["c"], json!(4));
         assert_eq!(table["c"][1]["r"], json!(0));
     }
 
     #[test]
     fn short_arrays_are_left_alone() {
-        assert!(encode_array(&[json!({"a": 1})]).is_none());
-        assert!(encode_array(&[json!(1), json!(2)]).is_none());
-        assert!(encode_array(&[]).is_none());
+        assert!(encode_array(&[json!({"a": 1})], &mut Walk::v1()).is_none());
+        assert!(encode_array(&[json!(1), json!(2)], &mut Walk::v1()).is_none());
+        assert!(encode_array(&[], &mut Walk::v1()).is_none());
     }
 
     #[test]

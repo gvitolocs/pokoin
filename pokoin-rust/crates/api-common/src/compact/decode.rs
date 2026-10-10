@@ -34,7 +34,9 @@ pub fn decode(document: &Value) -> Result<Value> {
         return fail("document is not an object");
     };
     match map.get("c1").and_then(Value::as_u64) {
-        Some(version) if version == super::encode::FORMAT_VERSION => {}
+        Some(version)
+            if version == super::encode::FORMAT_VERSION
+                || version == super::encode::FORMAT_VERSION_TEMPLATES => {}
         Some(version) => return fail(format!("unsupported c1 version {version}")),
         None => return fail("missing c1 version"),
     }
@@ -104,13 +106,35 @@ fn decode_table(table: &Value) -> Result<Value> {
         return fail("table has no columns");
     };
 
-    // Columns are decoded left to right; a `ref` may only point backwards, so
-    // one pass resolves every reference.
-    let mut decoded: Vec<Column> = Vec::with_capacity(columns.len());
-    for column in columns {
-        let column = decode_column(column, rows, &decoded)?;
-        decoded.push(column);
+    // Plain columns first (a `ref` only points backwards), then templates,
+    // which read plain columns of the same row, then refs to templates.
+    let codec_of = |column: &Value| column.get("c").and_then(Value::as_u64);
+    let mut slots: Vec<Option<Column>> = Vec::with_capacity(columns.len());
+    let mut deferred = vec![false; columns.len()];
+    for (index, column) in columns.iter().enumerate() {
+        let waits = match codec_of(column) {
+            Some(5) => true,
+            Some(4) => column
+                .get("r")
+                .and_then(Value::as_u64)
+                .and_then(|r| usize::try_from(r).ok())
+                .is_some_and(|r| deferred.get(r).copied().unwrap_or(false)),
+            _ => false,
+        };
+        deferred[index] = waits;
+        slots.push(if waits { None } else { Some(decode_column(column, rows, &slots)?) });
     }
+    for (index, column) in columns.iter().enumerate() {
+        if codec_of(column) == Some(5) {
+            slots[index] = Some(decode_template(column, rows, &slots)?);
+        }
+    }
+    for (index, column) in columns.iter().enumerate() {
+        if slots[index].is_none() {
+            slots[index] = Some(decode_column(column, rows, &slots)?);
+        }
+    }
+    let decoded: Vec<Column> = slots.into_iter().map(|slot| slot.expect("every column decoded")).collect();
 
     match map.get("k") {
         None => {
@@ -192,7 +216,7 @@ impl Column {
     }
 }
 
-fn decode_column(column: &Value, rows: usize, earlier: &[Column]) -> Result<Column> {
+fn decode_column(column: &Value, rows: usize, earlier: &[Option<Column>]) -> Result<Column> {
     let Some(map) = column.as_object() else {
         return fail("column is not an object");
     };
@@ -222,7 +246,7 @@ fn decode_column(column: &Value, rows: usize, earlier: &[Column]) -> Result<Colu
             else {
                 return fail("ref column has no target");
             };
-            let Some(root) = earlier.get(root) else {
+            let Some(Some(root)) = earlier.get(root) else {
                 return fail("ref column points forward or out of range");
             };
             (root.mask.clone(), root.residuals.clone())
@@ -350,6 +374,119 @@ fn residuals_for(codec: u64, map: &Map<String, Value>, present: usize) -> Result
         }
         other => fail(format!("unknown codec {other}")),
     }
+}
+
+/// Codec `5`: a template over plain columns of the same row (see
+/// [`super::template`]).
+fn decode_template(column: &Value, rows: usize, columns: &[Option<Column>]) -> Result<Column> {
+    let Some(map) = column.as_object() else {
+        return fail("column is not an object");
+    };
+    let mask: Option<Vec<bool>> = match map.get("m") {
+        None => None,
+        Some(Value::Array(flags)) if flags.len() == rows => {
+            Some(flags.iter().map(|flag| flag.as_u64().unwrap_or(0) != 0).collect())
+        }
+        Some(_) => return fail("template presence mask does not match the row count"),
+    };
+    let present: Vec<usize> = match &mask {
+        Some(mask) => (0..rows).filter(|row| mask[*row]).collect(),
+        None => (0..rows).collect(),
+    };
+    let Some(Value::Array(slot_defs)) = map.get("s") else {
+        return fail("template has no slots");
+    };
+    let mut slots: Vec<(&Column, bool)> = Vec::with_capacity(slot_defs.len());
+    for slot in slot_defs {
+        let parts = slot.as_array().map(Vec::as_slice).unwrap_or_default();
+        let (Some(index), Some(form)) = (
+            parts.first().and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok()),
+            parts.get(1).and_then(Value::as_u64),
+        ) else {
+            return fail("template slot is not [column, form]");
+        };
+        let Some(Some(source)) = columns.get(index) else {
+            return fail("template slot points at a column that is not decoded");
+        };
+        slots.push((source, form == 1));
+    }
+    let Some(Value::Array(shape_defs)) = map.get("h") else {
+        return fail("template has no shapes");
+    };
+    let mut shapes: Vec<Vec<usize>> = Vec::with_capacity(shape_defs.len());
+    for shape in shape_defs {
+        let Some(items) = shape.as_array() else {
+            return fail("template shape is not an array");
+        };
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            match item.as_u64().and_then(|i| usize::try_from(i).ok()) {
+                Some(slot) if slot < slots.len() => out.push(slot),
+                _ => return fail("template shape points at an unknown slot"),
+            }
+        }
+        shapes.push(out);
+    }
+    let shape_of: Vec<usize> = match map.get("x") {
+        None if shapes.len() == 1 => vec![0; present.len()],
+        Some(Value::Array(indices)) if indices.len() == present.len() => {
+            let mut out = Vec::with_capacity(indices.len());
+            for index in indices {
+                match index.as_u64().and_then(|i| usize::try_from(i).ok()) {
+                    Some(shape) if shape < shapes.len() => out.push(shape),
+                    _ => return fail("template row points at an unknown shape"),
+                }
+            }
+            out
+        }
+        _ => return fail("template shape indices do not match the presence count"),
+    };
+    let Some(Value::Array(literal_defs)) = map.get("l") else {
+        return fail("template has no literals");
+    };
+    if literal_defs.len() != shapes.len() {
+        return fail("template literal groups do not match the shapes");
+    }
+    let mut literals: Vec<Vec<std::vec::IntoIter<Value>>> = Vec::with_capacity(shapes.len());
+    for (shape, gaps) in shapes.iter().zip(literal_defs) {
+        let count = shape_of.iter().filter(|s| **s == literals.len()).count();
+        let Some(gaps) = gaps.as_array() else {
+            return fail("template literals are not an array");
+        };
+        if gaps.len() != shape.len() + 1 {
+            return fail("template literal count does not match the shape");
+        }
+        let mut out = Vec::with_capacity(gaps.len());
+        for gap in gaps {
+            out.push(decode_column(gap, count, &[])?.values.into_iter());
+        }
+        literals.push(out);
+    }
+    let mut values = Vec::with_capacity(present.len());
+    for (&row, &shape) in present.iter().zip(&shape_of) {
+        let mut text = String::new();
+        for (gap, &slot) in shapes[shape].iter().enumerate() {
+            match literals[shape][gap].next() {
+                Some(Value::String(piece)) => text.push_str(&piece),
+                _ => return fail("template literal is not a string"),
+            }
+            let (source, slugged) = slots[slot];
+            let Some(cell) = source.at(row).and_then(super::template::cell_text) else {
+                return fail("template slot has no text in this row");
+            };
+            if slugged {
+                text.push_str(&super::template::slug(&cell));
+            } else {
+                text.push_str(&cell);
+            }
+        }
+        match literals[shape][shapes[shape].len()].next() {
+            Some(Value::String(piece)) => text.push_str(&piece),
+            _ => return fail("template literal is not a string"),
+        }
+        values.push(Value::String(text));
+    }
+    Ok(Column::new(mask, values.clone(), values))
 }
 
 fn affix(map: &Map<String, Value>, code_key: &str, literal_key: &str) -> Result<String> {

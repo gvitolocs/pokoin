@@ -10,6 +10,7 @@ mod rails;
 mod read_cache;
 mod request_log;
 mod search_page;
+mod stall_watchdog;
 mod suggest;
 mod system;
 mod visual_theme;
@@ -84,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
     let booted = Instant::now();
     tracing::info!(phase = "process", elapsed_ms = 0, "startup");
+    stall_watchdog::start();
     let config = Config::from_env();
     tracing::info!(phase = "config", elapsed_ms = elapsed_ms(booted), "startup");
     let state = new_state(config.clone(), booted)?;
@@ -366,6 +368,7 @@ fn router(state: AppState) -> Router {
             get(rails::spotlight).options(rails::options),
         )
         .route("/api/marketplace-list", get(lists::list).options(rails::options))
+        .route("/api/c1-dictionary", get(lists::dictionary).options(rails::options))
         .route("/api/marketplace-daily-medians", get(lists::daily_medians).options(rails::options))
         .route("/api/marketplace-related", get(related::handler).options(rails::options))
         .route("/api/client-error", axum::routing::post(request_log::client_error).options(rails::options))

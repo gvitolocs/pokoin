@@ -131,6 +131,9 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
 }
 
 /// `cacheKey(req, pathname, search)`: `None` when the request is personal.
+/// The key carries `Accept` and the strongest content coding the client can
+/// decode, so a `br` or `dcb` body is only ever replayed to a client that
+/// asked for it (the origin negotiates both; see `encoding_variant`).
 pub fn cache_key(method: &Method, headers: &HeaderMap, pathname: &str, search: &str) -> Option<String> {
     if method != Method::GET || pathname == "/api/marketplace-live" {
         return None;
@@ -138,7 +141,39 @@ pub fn cache_key(method: &Method, headers: &HeaderMap, pathname: &str, search: &
     if headers.contains_key(header::AUTHORIZATION) || headers.contains_key(header::COOKIE) {
         return None;
     }
-    Some(format!("{pathname}{search}\n{}\n{}", header_str(headers, "x-pokoin-game"), header_str(headers, "x-pokoin-host")))
+    Some(format!(
+        "{pathname}{search}\n{}\n{}\n{}\n{}",
+        header_str(headers, "x-pokoin-game"),
+        header_str(headers, "x-pokoin-host"),
+        header_str(headers, "accept"),
+        encoding_variant(headers),
+    ))
+}
+
+fn accepts_coding(headers: &HeaderMap, wanted: &str) -> bool {
+    headers
+        .get_all(header::ACCEPT_ENCODING)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|entry| {
+            let mut parts = entry.split(';');
+            parts.next().unwrap_or("").trim().eq_ignore_ascii_case(wanted)
+                && !parts.any(|param| param.trim().replace(' ', "") == "q=0")
+        })
+}
+
+/// The coding a cached response may use for this request: `dcb` against the
+/// dictionary the client named, else `br`, else none.
+fn encoding_variant(headers: &HeaderMap) -> String {
+    let dictionary = header_str(headers, "available-dictionary").trim();
+    if !dictionary.is_empty() && accepts_coding(headers, "dcb") {
+        format!("dcb {dictionary}")
+    } else if accepts_coding(headers, "br") {
+        "br".to_owned()
+    } else {
+        String::new()
+    }
 }
 
 fn never_storable(headers: &HeaderMap) -> bool {
@@ -628,6 +663,31 @@ mod tests {
         assert!(cache_key(&Method::GET, &h, "/api/marketplace-live", "").is_none());
         h.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer x"));
         assert!(cache_key(&Method::GET, &h, "/api/x", "").is_none());
+    }
+
+    #[test]
+    fn cache_key_separates_content_codings() {
+        let key = |pairs: &[(&'static str, &'static str)]| {
+            let mut h = HeaderMap::new();
+            for (name, value) in pairs {
+                h.append(*name, HeaderValue::from_static(value));
+            }
+            cache_key(&Method::GET, &h, "/api/marketplace-list", "?kind=set&key=sv1").unwrap()
+        };
+        let identity = key(&[]);
+        let gzip = key(&[("accept-encoding", "gzip")]);
+        let br = key(&[("accept-encoding", "gzip, br")]);
+        let br_q0 = key(&[("accept-encoding", "gzip, br;q=0")]);
+        let dcb = key(&[("accept-encoding", "gzip, br, dcb"), ("available-dictionary", ":abc=:")]);
+        let dcb_other = key(&[("accept-encoding", "gzip, br, dcb"), ("available-dictionary", ":xyz=:")]);
+        let dcb_no_dict = key(&[("accept-encoding", "gzip, br, dcb")]);
+        assert_eq!(identity, gzip);
+        assert_eq!(identity, br_q0);
+        assert_ne!(identity, br);
+        assert_eq!(br, dcb_no_dict);
+        assert_ne!(br, dcb);
+        assert_ne!(dcb, dcb_other);
+        assert_ne!(key(&[("accept", "application/json")]), key(&[("accept", "application/vnd.pokoin.c1+json")]));
     }
 
     #[test]
