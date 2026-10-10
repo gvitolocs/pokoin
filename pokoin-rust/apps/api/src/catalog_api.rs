@@ -126,15 +126,15 @@ pub async fn card_tiles(State(state):State<AppState>,headers:HeaderMap,uri:axum:
  let ids=p.get("ids").map(String::as_str).unwrap_or("").split(',').filter_map(|s|positive_id(s.trim())).filter(|id|seen.insert(*id)).take(80).collect::<Vec<_>>();
  if ids.is_empty(){return response(StatusCode::OK,json!({"source":"pi","cards":[]}),"public, max-age=30, s-maxage=120")}
  let Some(pool)=game_pool(&state,&game).await else{return response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")};
- let text_ids=ids.iter().map(i64::to_string).collect::<Vec<_>>();
- let rows=match sqlx::query_scalar::<_,sqlx::types::Json<Value>>("select payload from public.marketplace_card_tiles where card_id=any($1::text[])").bind(&text_ids).fetch_all(&pool).await{Ok(r)=>r,Err(e)=>return failure(&e)};
+ // Only the Pokemon database has a tile read model; other games answer empty.
+ let rows=match optional_rows(&pool,"marketplace_card_tiles","select payload from public.marketplace_card_tiles where card_id=any($1::bigint[]::text[])",&ids).await{Ok(r)=>r,Err(e)=>return failure(&e)};
  let meta=match cards(&pool,&ids,&game).await{Ok(r)=>r,Err(e)=>return failure(&e)};
  let packs:HashMap<_,_>=meta.iter().filter_map(|r|{
   let theme=crate::visual_theme::visual_theme(r.get("visual_theme_row").unwrap_or(&Value::Null),&text(r,&["art_shade"]),&text(r,&["current_artwork_identity"]));
   crate::visual_theme::pack_visual_theme(&theme).map(|pack|(text(r,&["card_id"]),pack))
  }).collect();
  let by_id:HashMap<_,_>=rows.into_iter().map(|r|{
-  let row=r.0;let mut card=pokoin_catalog::react_record(&row);
+  let row=r;let mut card=pokoin_catalog::react_record(&row);
   if let Some(day)=row.get("salesDay").and_then(Value::as_str).filter(|s|!s.is_empty()){
    card["salesDay"]=json!(day);
    for key in ["dailySoldQty","dailySaleSamples"]{card[key]=json!(number(&row,&[key]));}
