@@ -7,6 +7,7 @@ description = "Native catalog read BFFs (ports of the api/marketplace-* read han
 
 # Dependencies are preset for the porting workers. Ask the coordinator before adding any.
 [dependencies]
+pokoin-sort = { path = "../sort" }
 anyhow = { workspace = true }
 async-stream = "0.3"
 axum = { workspace = true }

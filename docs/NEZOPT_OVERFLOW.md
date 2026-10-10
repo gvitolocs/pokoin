@@ -30,8 +30,12 @@ The Rust edge (`pokoin-rust/crates/edge`) caches public GET responses in memory
 - **Coalescing**: concurrent misses for one key make one upstream request;
   the rest get `COALESCED`. Expired entries inside the SWR window are served
   `STALE` while one refresh runs. This removes the home-feed stampede.
+- A coalesced fetch and its waiters give up after 60 s with `504`
+  (`POKOIN_API_FLIGHT_TIMEOUT_SECS`). A `5xx` (a handler panic answers `500`)
+  goes to every waiter and is not stored; the next request fetches again. If
+  the leader's client hangs up, a waiter takes over the fetch.
 - Responses that must not be stored are streamed straight through
-  (`BYPASS`), and their path skips coalescing for 5 min.
+  (`BYPASS`); a `2xx`/`3xx` one also makes its path skip coalescing for 5 min.
 - Headers `x-pokoin-edge-cache: HIT | MISS | STALE | COALESCED | BYPASS` and
   `x-pokoin-origin: rust`; a per-minute `pokoin-api-edge minute` log line
   (`journalctl -u pokoin-rust-api` on the Pi).

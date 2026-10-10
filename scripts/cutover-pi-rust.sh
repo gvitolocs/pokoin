@@ -29,7 +29,26 @@ NODE_TIMERS="pokoin-eur-orders-sweep.timer pokoin-referral-reconcile.timer pokoi
 RUST_TIMERS="pokoin-rust-job-eur-orders-sweep.timer pokoin-rust-job-referral-reconcile.timer pokoin-rust-job-cardtrader-seller-reconcile.timer pokoin-rust-job-search-delta.timer"
 ENV=/srv/pokoin/rust/pokoin-api.env
 BACKUP_ROOT=/srv/pokoin/rollbacks
+# The pokoin-data disk rule also wanted the Node CDN at boot. With Rust owning
+# :18081 that started Node first and crash-looped the Rust unit (2026-10-10).
+UDEV_RULE=/etc/udev/rules.d/99-pokoin-data.rules
+NODE_CDN=pokoin-card-images.service
 log() { echo "{\"event\":\"cutover\",\"mode\":\"$MODE\",\"step\":\"$*\"}"; }
+
+# Boot keeps mounting the disk; only the Node CDN leaves SYSTEMD_WANTS.
+udev_drop_node_cdn() {
+  [[ -f "$UDEV_RULE" ]] && grep -q "$NODE_CDN" "$UDEV_RULE" || return 0
+  sed -i -E -e 's/[[:space:]]+pokoin-card-images\.service//g' -e 's/"pokoin-card-images\.service[[:space:]]*/"/g' "$UDEV_RULE"
+  udevadm control --reload-rules
+  log "udev: $NODE_CDN no longer wanted at boot"
+}
+
+udev_want_node_cdn() {
+  [[ -f "$UDEV_RULE" ]] && ! grep -q "$NODE_CDN" "$UDEV_RULE" || return 0
+  sed -i -E 's/(ENV\{SYSTEMD_WANTS\}="srv-pokoin\.mount)"/\1 pokoin-card-images.service"/' "$UDEV_RULE"
+  udevadm control --reload-rules
+  log "udev: $NODE_CDN wanted at boot again"
+}
 
 wait_rust() {
   for _ in $(seq 1 40); do
@@ -52,6 +71,7 @@ rollback() {
   [[ -f "$backup/pokoin-pi-watchdog.sh" ]] && install -m 0755 "$backup/pokoin-pi-watchdog.sh" /usr/local/sbin/pokoin-pi-watchdog.sh
   [[ -f "$backup/pokoin-api.env" ]] && install -m 0640 -o root -g nes "$backup/pokoin-api.env" "$ENV"
   systemctl daemon-reload
+  udev_want_node_cdn
   systemctl stop pokoin-rust-api.service
   docker update --restart=unless-stopped pokoin-oracle-api >/dev/null
   docker start pokoin-oracle-api >/dev/null
@@ -73,6 +93,7 @@ mkdir -p "$backup"
 cp -p /etc/systemd/system/pokoin-rust-api.service "$backup/"
 cp -p /usr/local/sbin/pokoin-pi-watchdog.sh "$backup/" 2>/dev/null || true
 cp -p "$ENV" "$backup/pokoin-api.env"
+[[ -f "$UDEV_RULE" ]] && cp -p "$UDEV_RULE" "$backup/"
 log "backup $backup"
 
 install -m 0644 "$STAGE/pokoin-rust-api.service" /etc/systemd/system/pokoin-rust-api.service
@@ -87,6 +108,7 @@ systemctl daemon-reload
 log "stop node"
 systemctl disable --now $NODE_TIMERS 2>/dev/null || true
 systemctl disable --now $NODE_UNITS
+udev_drop_node_cdn
 docker update --restart=no pokoin-oracle-api >/dev/null
 docker stop pokoin-oracle-api >/dev/null || true
 systemctl restart pokoin-rust-api.service

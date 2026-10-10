@@ -346,25 +346,9 @@ pub fn predictive_chunks_for_query(
         .collect()
 }
 
-/// Total order for `f64` sort keys: numbers by `partial_cmp` (optionally
-/// descending), NaN after every number. `partial_cmp(..).unwrap_or(Equal)`
-/// makes NaN equal to everything, which is not transitive and makes
-/// `sort_by` panic ("does not correctly implement a total order").
-pub fn cmp_f64_nan_last(left: f64, right: f64, descending: bool) -> std::cmp::Ordering {
-    match (left.is_nan(), right.is_nan()) {
-        (false, false) => {
-            let order = left
-                .partial_cmp(&right)
-                .unwrap_or(std::cmp::Ordering::Equal);
-            if descending {
-                order.reverse()
-            } else {
-                order
-            }
-        }
-        (left_nan, right_nan) => left_nan.cmp(&right_nan),
-    }
-}
+/// Total order for `f64` sort keys, NaN last (`partial_cmp(..).unwrap_or(Equal)`
+/// is not one, and `sort_by` panics on it).
+pub use pokoin_sort::cmp_f64_nan_last;
 
 /// JS `localeCompare` tie-breaks. ICU collation is approximated by comparing
 /// the diacritic-folded lowercase strings first (base letters), then the raw

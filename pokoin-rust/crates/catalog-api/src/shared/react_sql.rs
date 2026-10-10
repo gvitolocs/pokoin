@@ -483,14 +483,10 @@ pub fn split_neighbor_rows(rows: &[Value], radius: i64) -> (Vec<Value>, Vec<Valu
         }
     }
     next.sort_by(|a, b| {
-        js::number(js::get(a, "dist_next"))
-            .partial_cmp(&js::number(js::get(b, "dist_next")))
-            .unwrap_or(std::cmp::Ordering::Equal)
+        pokoin_sort::cmp_f64(js::number(js::get(a, "dist_next")), js::number(js::get(b, "dist_next")))
     });
     prev.sort_by(|a, b| {
-        js::number(js::get(a, "dist_prev"))
-            .partial_cmp(&js::number(js::get(b, "dist_prev")))
-            .unwrap_or(std::cmp::Ordering::Equal)
+        pokoin_sort::cmp_f64(js::number(js::get(a, "dist_prev")), js::number(js::get(b, "dist_prev")))
     });
     (prev, next)
 }

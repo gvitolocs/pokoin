@@ -17,10 +17,12 @@ Native jobs run as `pokoin-rust-job@<name>.service` (`/srv/pokoin/rust/current j
 
 | Timer | Job | Every |
 | --- | --- | --- |
-| `pokoin-rust-job-cardtrader-seller-reconcile.timer` | connected-seller CardTrader reconcile and webhook repair | 5 min |
+| `pokoin-rust-job-cardtrader-seller-reconcile.timer` | connected-seller CardTrader reconcile and webhook repair | 10 min after the last run ends |
 | `pokoin-rust-job-eur-orders-sweep.timer` | expire stale Stripe holds, recover missed payments | 5 min |
 | `pokoin-rust-job-referral-reconcile.timer` | Invite & Earn payouts | 10 min |
 | `pokoin-rust-job-search-delta.timer` | Redis Search `pokoin:cards` delta | 2 min |
+
+`MemoryMax=300M` in `pokoin-rust-job@.service` is not enforced on the Pi: its kernel command line has `cgroup_disable=memory`, so a job that grows only shows up as swap.
 
 `job search-reindex` rebuilds the Redis Search index in full; run it by hand on the Pi, or let the nezopt `search-reindex` CronJob do it for the overflow.
 
@@ -29,6 +31,8 @@ Data: reads go to the Pi streaming replica `127.0.0.1:5432`, writes to the nezop
 The Cloudflare Load Balancer also sends about 10% of `api.pokoin.com` to the nezopt k3s overflow, which runs the same commit built for x86_64: [NEZOPT_OVERFLOW.md](NEZOPT_OVERFLOW.md).
 
 `scripts/pokoin-pi-watchdog.sh` (every 5 min) restarts `pokoin-rust-api` when any of the four listeners is down or `/livez` fails. A degraded `/readyz` (Postgres, Redis or CDN) never reboots the host. Install it with `scripts/deploy-pokoin-pi-watchdog.sh`.
+
+A handler panic answers `500` and logs `handler panicked` with its method and path. On SIGTERM every listener stops accepting and gets at most 10 s to finish in-flight requests (open streams included), then the process exits; the unit's `TimeoutStopSec` is 20 s. A stop that never logs `shutdown` and ends in SIGKILL means the process was stuck before the signal arrived.
 
 ## Code map
 
@@ -47,7 +51,7 @@ Timer or job-unit changes are installed with `scripts/cutover-pi-rust.sh` (it co
 ## Rollback
 
 - **Rust release:** a failed install restores itself. To go back by hand, point `/srv/pokoin/rust/current` at the `previous` target and restart `pokoin-rust-api`.
-- **Back to Node (emergency only):** `scripts/cutover-pi-rust.sh --rollback` re-enables the Node edge, CDN, ct-deals and API container and the Node timers that are still installed (disabled) on the Pi. It needs no Node sources from this repository; it works as long as the Pi keeps `/srv/pokoin/api` and those units.
+- **Back to Node (emergency only):** `scripts/cutover-pi-rust.sh --rollback` re-enables the Node edge, CDN, ct-deals and API container and the Node timers that are still installed (disabled) on the Pi. It needs no Node sources from this repository; it works as long as the Pi keeps `/srv/pokoin/api` and those units. The cutover takes `pokoin-card-images.service` out of the data-disk udev rule (`/etc/udev/rules.d/99-pokoin-data.rules`, `SYSTEMD_WANTS`), because at boot the Node CDN took `:18081` and the Rust unit crash-looped; `--rollback` puts it back.
 
 ## Catalog identity and caching
 

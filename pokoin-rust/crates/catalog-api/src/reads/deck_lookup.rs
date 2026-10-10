@@ -210,7 +210,7 @@ pub fn rank_deck_version_rows(rows: Vec<Value>, input: &Input) -> Vec<Value> {
         })
         .collect();
     ranked.sort_by(|a, b| {
-        let score = js::number(b.get("match_score")).partial_cmp(&js::number(a.get("match_score"))).unwrap_or(Ordering::Equal);
+        let score = pokoin_sort::cmp_f64_desc(js::number(a.get("match_score")), js::number(b.get("match_score")));
         score
             .then_with(|| js::string_or_empty(a.get("expansion_name")).to_lowercase().cmp(&js::string_or_empty(b.get("expansion_name")).to_lowercase()))
             .then_with(|| natural_compare(&js::string_or_empty(a.get("expansion_number")), &js::string_or_empty(b.get("expansion_number"))))

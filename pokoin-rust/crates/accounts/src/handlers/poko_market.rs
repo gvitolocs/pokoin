@@ -1228,7 +1228,7 @@ async fn deal_check(deps: &MarketDeps, params: &Json) -> Result<Json> {
     offers.sort_by(|a, b| {
         let left = a.get("cheapestAskPkn").and_then(Json::as_f64).unwrap_or(0.0);
         let right = b.get("cheapestAskPkn").and_then(Json::as_f64).unwrap_or(0.0);
-        left.partial_cmp(&right).unwrap_or(std::cmp::Ordering::Equal)
+        pokoin_sort::cmp_f64(left, right)
     });
 
     // far_below comps are usually pulled high asks, so never headline them.
@@ -1242,7 +1242,7 @@ async fn deal_check(deps: &MarketDeps, params: &Json) -> Result<Json> {
     compared.sort_by(|a, b| {
         let left = a.get("ratio").and_then(Json::as_f64).unwrap_or(0.0);
         let right = b.get("ratio").and_then(Json::as_f64).unwrap_or(0.0);
-        left.partial_cmp(&right).unwrap_or(std::cmp::Ordering::Equal)
+        pokoin_sort::cmp_f64(left, right)
     });
     let best_value = compared.first().map(|offer| (*offer).clone()).unwrap_or(Json::Null);
     let offer_count = offers.len();
@@ -1502,13 +1502,13 @@ async fn collection_quote(deps: &MarketDeps, params: &Json) -> Result<Json> {
     priced_cards.sort_by(|a, b| {
         let left = a.get("value").and_then(Json::as_f64).unwrap_or(0.0);
         let right = b.get("value").and_then(Json::as_f64).unwrap_or(0.0);
-        right.partial_cmp(&left).unwrap_or(std::cmp::Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(left, right)
     });
     let mut lowest = priced_cards.clone();
     lowest.sort_by(|a, b| {
         let left = a.get("soldQty90d").and_then(Json::as_f64).unwrap_or(0.0);
         let right = b.get("soldQty90d").and_then(Json::as_f64).unwrap_or(0.0);
-        left.partial_cmp(&right).unwrap_or(std::cmp::Ordering::Equal)
+        pokoin_sort::cmp_f64(left, right)
     });
     let total_cards = cards.len();
     let mut body = Map::new();
@@ -1880,9 +1880,9 @@ async fn top_movers(deps: &MarketDeps, params: &Json) -> Result<Json> {
     }
     movers.sort_by(|a, b| {
         if direction == "up" {
-            b.change_pct.partial_cmp(&a.change_pct).unwrap_or(std::cmp::Ordering::Equal)
+            pokoin_sort::cmp_f64_desc(a.change_pct, b.change_pct)
         } else {
-            a.change_pct.partial_cmp(&b.change_pct).unwrap_or(std::cmp::Ordering::Equal)
+            pokoin_sort::cmp_f64(a.change_pct, b.change_pct)
         }
     });
     movers.truncate(limit);
@@ -2255,7 +2255,7 @@ async fn set_sales(deps: &MarketDeps, params: &Json) -> Result<Json> {
     by_value.sort_by(|a, b| {
         let left = a.get("medianSoldPkn").and_then(Json::as_f64).unwrap_or(0.0);
         let right = b.get("medianSoldPkn").and_then(Json::as_f64).unwrap_or(0.0);
-        right.partial_cmp(&left).unwrap_or(std::cmp::Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(left, right)
     });
 
     let joined = tokens.join(" ");
@@ -2653,12 +2653,12 @@ async fn artist_cards(deps: &MarketDeps, params: &Json) -> Result<Json> {
         });
     }
     priced.sort_by(|a, b| match sort {
-        "cheapest" => a.price.partial_cmp(&b.price).unwrap_or(std::cmp::Ordering::Equal),
+        "cheapest" => pokoin_sort::cmp_f64(a.price, b.price),
         "sold" => b
             .sold_qty
             .cmp(&a.sold_qty)
-            .then_with(|| b.price.partial_cmp(&a.price).unwrap_or(std::cmp::Ordering::Equal)),
-        _ => b.price.partial_cmp(&a.price).unwrap_or(std::cmp::Ordering::Equal),
+            .then_with(|| pokoin_sort::cmp_f64_desc(a.price, b.price)),
+        _ => pokoin_sort::cmp_f64_desc(a.price, b.price),
     });
     let cards: Vec<Json> = priced.iter().take(limit).map(|entry| entry.body.clone()).collect();
     let priced_count = rows.len();

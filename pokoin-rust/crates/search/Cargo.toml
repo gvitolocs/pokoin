@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+pokoin-sort = { path = "../sort" }
 icu_collator = "2"
 icu_locale_core = "2"
 regex = "1"
