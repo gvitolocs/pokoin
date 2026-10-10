@@ -132,3 +132,106 @@ three builds served the same way and calling the live `api.pokoin.com`.
 | typo | lt.blockingMs | 889 / 1258.9 | 741 / 964.2 |
 | typo | cpu.scriptMs | 1888.8 / 2164.6 | 1429.5 / 1722.3 |
 | typo | mem.heapPeakMB | 43.9 / 60.46 | 34.8 / 36.6 |
+
+## Run s1010 — 2026-10-10 07:19–08:01 UTC (React before vs React now vs Solid now)
+
+- Builds: **React before** = React at origin/main 5243700 (the pre-optimisation
+  baseline of ab1, built from `git archive`); **React now** = origin/main 2b6757cc
+  market/; **Solid now** = origin/main 2b6757cc solid/ (Solid owns home, search,
+  card desk and versions in production since 2026-10-09 21:00 UTC).
+- Same method as ab1: `solid/scripts/preview.mjs` per build, `bench/interleave.sh`
+  (one run of each build per round), 5 rounds per profile, fresh browser context
+  per run. Journeys: cold, warm, search, typo, printlang, langtype, card.
+  Chromium 156.0.8078.4, Playwright 1.64.0. 0 failed runs.
+- All three builds call the same live `api.pokoin.com` (native Rust since
+  2026-10-09), so the backend is constant here; the Node vs Rust API comparison
+  is in [../PI_LOAD_TEST.md](../PI_LOAD_TEST.md).
+- **Caveat: host load.** nezopt load average was 22–42 on 12 threads during both
+  profiles (ab1: 7–13). With 5 runs, read wall-clock p50 differences under ~15 %
+  as noise and p95 as "worst seen"; `cpu.*`, `net.*` and `mem.*` are the stable
+  signals. Absolute values are not comparable with ab1.
+
+### mobile (390×844, CPU ×4)
+
+| journey | metric | React before p50 / p95 | React now p50 / p95 | Solid now p50 / p95 |
+|---|---|---|---|---|
+| cold | vitals.fcp | 1444 / 5123 | 632 / 2850 | 800 / 1947 |
+| cold | vitals.lcp | 2440 / 6318 | 1060 / 3732 | 1508 / 2680 |
+| cold | vitals.cls | 0.049 / 0.405 | 0.049 / 0.049 | 0.000 / 0.000 |
+| cold | tbt | 336 / 1201 | 257 / 771 | 185 / 694 |
+| cold | cpu.scriptMs | 1903 / 3585 | 1059 / 2070 | 765 / 1225 |
+| cold | mem.heapPeakMB | 29.5 / 35.0 | 27.3 / 28.9 | 10.4 / 12.8 |
+| cold | net.bytes | 4184 KB / 4431 KB | 3930 KB / 4224 KB | 1202 KB / 2932 KB |
+| cold | net.downloads | 59.0 / 64.8 | 63.0 / 63.8 | 61.0 / 64.4 |
+| warm | vitals.lcp | 1568 / 2533 | 496 / 1181 | 760 / 975 |
+| warm | cpu.scriptMs | 993 / 2427 | 719 / 1567 | 765 / 887 |
+| search | inp | 4824 / 7309 | 240 / 491 | 120 / 162 |
+| search | keys.toRowsMs | – | 730 / 1329 | 632 / 1236 |
+| search | lt.blockingMs | 6546 / 12475 | 568 / 1692 | 1499 / 2204 |
+| search | cpu.scriptMs | 7092 / 12880 | 1211 / 2170 | 1871 / 2375 |
+| search | mem.heapPeakMB | 55.9 / 59.6 | 36.7 / 37.7 | 35.7 / 37.5 |
+| search | net.apiCalls | 20.0 / 20.8 | 20.0 / 20.8 | 19.0 / 20.0 |
+| typo | inp | 4880 / 7587 | 488 / 677 | 232 / 411 |
+| typo | keys.toRowsMs | – | 829 / 1743 | 561 / 1304 |
+| typo | cpu.scriptMs | 12106 / 15808 | 1869 / 3246 | 2763 / 3072 |
+| printlang | inp | 288 / 659 | 248 / 579 | 424 / 526 |
+| printlang | lang.toRowsMs | 249 / 563 | 204 / 444 | 284 / 438 |
+| langtype | inp | 5264 / 7168 | 456 / 702 | 320 / 459 |
+| langtype | keys.toRowsMs | 1827 / 6419 | 461 / 1570 | 399 / 1436 |
+| card | inp | 112 / 149 | 96.0 / 176 | 96.0 / 112 |
+| card | nav.toHeadingMs | 210 / 406 | 272 / 557 | 242 / 572 |
+| card | nav.toImageMs | 263 / 500 | 347 / 735 | 313 / 657 |
+| card | nav.backMs | 245 / 419 | 263 / 382 | 316 / 567 |
+| card | lt.blockingMs | 1974 / 3028 | 2255 / 3166 | 3318 / 4743 |
+| card | mem.heapPeakMB | 59.6 / 61.4 | 55.1 / 58.5 | 52.1 / 55.8 |
+
+### desktop (1440×900)
+
+| journey | metric | React before p50 / p95 | React now p50 / p95 | Solid now p50 / p95 |
+|---|---|---|---|---|
+| cold | vitals.fcp | 524 / 724 | 316 / 598 | 188 / 470 |
+| cold | vitals.lcp | 852 / 1270 | 456 / 797 | 320 / 775 |
+| cold | vitals.cls | 0.009 / 0.211 | 0.009 / 0.009 | 0.005 / 0.005 |
+| cold | tbt | 3.0 / 68.6 | 34.0 / 173 | 0.0 / 33.2 |
+| cold | cpu.scriptMs | 542 / 724 | 334 / 742 | 134 / 348 |
+| cold | mem.heapPeakMB | 24.6 / 27.3 | 20.7 / 27.0 | 15.3 / 16.1 |
+| cold | net.bytes | 4161 KB / 4565 KB | 3735 KB / 3952 KB | 1417 KB / 1422 KB |
+| cold | net.downloads | 66.0 / 71.2 | 66.0 / 67.8 | 70.0 / 71.0 |
+| warm | vitals.lcp | 532 / 1037 | 216 / 416 | 172 / 430 |
+| warm | cpu.scriptMs | 392 / 535 | 219 / 556 | 106 / 276 |
+| search | inp | 1264 / 1693 | 128 / 211 | 120 / 184 |
+| search | keys.toRowsMs | 1354 / 1659 | 225 / 516 | 224 / 483 |
+| search | lt.blockingMs | 2381 / 3627 | 28.0 / 279 | 242 / 459 |
+| search | cpu.scriptMs | 3009 / 4273 | 593 / 1037 | 689 / 957 |
+| search | mem.heapPeakMB | 46.6 / 49.0 | 35.5 / 38.0 | 34.3 / 39.7 |
+| search | net.apiCalls | 20.0 / 20.0 | 21.0 / 24.4 | 20.0 / 26.6 |
+| typo | inp | 1384 / 1800 | 136 / 320 | 176 / 384 |
+| typo | keys.toRowsMs | 1399 / 1697 | 223 / 493 | 268 / 517 |
+| typo | cpu.scriptMs | 4942 / 5948 | 644 / 1501 | 872 / 1410 |
+| printlang | inp | 176 / 234 | 160 / 277 | 352 / 424 |
+| printlang | lang.toRowsMs | 85.5 / 130 | 48.1 / 90.2 | 94.0 / 130 |
+| langtype | inp | 1456 / 1622 | 144 / 354 | 304 / 674 |
+| langtype | keys.toRowsMs | 842 / 1302 | 187 / 793 | 236 / 971 |
+| card | inp | 64.0 / 101 | 40.0 / 131 | 80.0 / 144 |
+| card | nav.toHeadingMs | 64.4 / 125 | 53.4 / 187 | 72.0 / 179 |
+| card | nav.toImageMs | 79.7 / 167 | 68.5 / 227 | 135 / 304 |
+| card | nav.backMs | 79.2 / 151 | 59.8 / 218 | 118 / 222 |
+| card | lt.blockingMs | 246 / 441 | 4.0 / 641 | 373 / 1300 |
+| card | mem.heapPeakMB | 46.6 / 60.3 | 55.4 / 59.3 | 41.9 / 50.8 |
+
+### Findings from s1010
+
+- Cold load, Solid vs React before: bytes −71 % mobile / −66 % desktop
+  (1.2 / 1.4 MB vs 4.2 MB), script CPU −60 % / −75 %, JS heap 10 vs 30 MB
+  (mobile), CLS 0. Desktop FCP 188 vs 524 ms and LCP 320 vs 852 ms.
+- Typing, React before → now: mobile `search` INP 4.8 s → 240 ms (React now) /
+  120 ms (Solid); `typo` 4.9 s → 488 / 232 ms. Most of that is the shared ranker
+  rewrite, which both current UIs carry.
+- Solid behind React now: print-language switch (INP 424 vs 248 ms mobile, 352
+  vs 160 ms desktop), `langtype` on desktop (304 vs 144 ms), and desktop card
+  navigation (image 135 vs 69 ms, back 118 vs 60 ms, 373 vs 4 ms blocking).
+  Mobile typing still costs Solid more script than React now (1.9 vs 1.2 s for
+  `search`) while answering faster, as in ab1.
+- Mobile cold FCP/LCP p50 put React now ahead of Solid in this run (632 vs 800 ms)
+  where ab1 had the opposite; with the host at 2–3× ab1's load and n = 5, that
+  difference is within the noise noted above.
