@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-// CPU profile (CDP Profiler, 200 µs sampling) of typing a query into the header search.
+// CPU profile (CDP Profiler, 200 µs sampling) of typing a query into the header search,
+// or (--switch) of a print-language switch with that query's suggestions open.
 // Prints the top self-time functions and writes a .cpuprofile (open it in Chrome
 // DevTools > Performance, or speedscope.app).
 //   node profile.mjs --base https://pokoin.com --profile desktop|mobile --query pikachu --label <sha>
+//   node profile.mjs --base http://127.0.0.1:28621 --switch japanese --sourcemap-dir ../solid/dist
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NETWORKS, PROFILES, QUERIES, ROUTES, SELECTORS, TIMING } from './config.mjs';
+import { NETWORKS, PRINT_LANG_LABELS, PROFILES, QUERIES, ROUTES, SELECTORS, TIMING } from './config.mjs';
 import { launch, openBenchPage, pressFor } from './lib/browser.mjs';
 import { settle, sleep, waitRowsStable, wallNow } from './lib/measure.mjs';
 import { decodeMappings, originalPosition } from './bundle.mjs';
@@ -18,6 +20,8 @@ const USAGE = `usage: node profile.mjs [options]
   --base <url>        (default https://pokoin.com)
   --profile <name>    desktop | mobile (default desktop)
   --query <text>      typed one key every ${TIMING.keyIntervalMs} ms (default ${QUERIES.search})
+  --switch <code>     profile only a print-language switch (${Object.keys(PRINT_LANG_LABELS).join(' | ')})
+                      made after the query's rows settle, instead of the typing
   --label <text>      used in the default output name
   --out <file>        .cpuprofile path (default results/profile-<label>-<profile>.cpuprofile)
   --interval <us>     sampling interval in microseconds (default 200)
@@ -31,7 +35,7 @@ const USAGE = `usage: node profile.mjs [options]
 
 function parseArgs(argv) {
   const opts = {
-    base: 'https://pokoin.com', profile: 'desktop', query: QUERIES.search, label: 'unlabeled', out: null,
+    base: 'https://pokoin.com', profile: 'desktop', query: QUERIES.search, label: 'unlabeled', out: null, switch: null,
     interval: 200, top: 40, net: null, channel: 'chromium', sourcemapDir: null, headed: false, help: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -53,6 +57,7 @@ function parseArgs(argv) {
   if (!PROFILES[opts.profile]) throw new Error(`unknown profile ${opts.profile}`);
   if (opts.net === 'none') opts.net = null;
   if (opts.net && !NETWORKS[opts.net]) throw new Error(`unknown --net ${opts.net}`);
+  if (opts.switch && !PRINT_LANG_LABELS[opts.switch]) throw new Error(`unknown --switch ${opts.switch}`);
   return opts;
 }
 
@@ -73,6 +78,20 @@ export function analyzeProfile(prof) {
     const dur = Math.max(0, end - stamps[i]);
     selfByNode.set(samples[i], (selfByNode.get(samples[i]) || 0) + dur);
   }
+  // Inclusive time: a node's self time counts once for every distinct function on its stack.
+  const parents = new Map();
+  for (const n of prof.nodes) for (const child of n.children || []) parents.set(child, n.id);
+  const keyOf = (cf) => `${cf.functionName || '(anonymous)'}\u0000${cf.url}\u0000${cf.lineNumber}\u0000${cf.columnNumber}`;
+  const totalByKey = new Map();
+  for (const [id, us] of selfByNode) {
+    const seen = new Set();
+    for (let at = id; at != null; at = parents.get(at)) {
+      const key = keyOf(nodes.get(at)?.callFrame || {});
+      if (seen.has(key)) continue;
+      seen.add(key);
+      totalByKey.set(key, (totalByKey.get(key) || 0) + us);
+    }
+  }
   const special = { idle: 0, program: 0, gc: 0, root: 0 };
   const fns = new Map();
   const scripts = new Map();
@@ -83,8 +102,10 @@ export function analyzeProfile(prof) {
       special[SPECIAL[name]] += us;
       continue;
     }
-    const key = `${name}\u0000${cf.url}\u0000${cf.lineNumber}\u0000${cf.columnNumber}`;
-    const row = fns.get(key) || { name, url: cf.url || '', line: (cf.lineNumber ?? -1) + 1, col: (cf.columnNumber ?? -1) + 1, selfUs: 0 };
+    const key = keyOf(cf);
+    const row = fns.get(key) || {
+      name, url: cf.url || '', line: (cf.lineNumber ?? -1) + 1, col: (cf.columnNumber ?? -1) + 1, selfUs: 0, totalUs: totalByKey.get(key) || 0,
+    };
     row.selfUs += us;
     fns.set(key, row);
     const script = cf.url || '(native)';
@@ -159,33 +180,54 @@ async function main() {
     const session = cdp.session;
     await session.send('Profiler.enable');
     await session.send('Profiler.setSamplingInterval', { interval: opts.interval });
-    await session.send('Profiler.start');
-    const t0 = wallNow();
-    await pressFor(profile)(input);
-    await sleep(200);
-    const presses = [];
-    const start = wallNow();
-    const keys = [...opts.query];
-    for (let i = 0; i < keys.length; i += 1) {
-      const wait = start + i * TIMING.keyIntervalMs - wallNow();
-      if (wait > 0) await sleep(wait);
-      presses.push(page.keyboard.press(keys[i]));
+    const typeQuery = async () => {
+      await pressFor(profile)(input);
+      await sleep(200);
+      const presses = [];
+      const start = wallNow();
+      const keys = [...opts.query];
+      for (let i = 0; i < keys.length; i += 1) {
+        const wait = start + i * TIMING.keyIntervalMs - wallNow();
+        if (wait > 0) await sleep(wait);
+        presses.push(page.keyboard.press(keys[i]));
+      }
+      await Promise.all(presses);
+      return waitRowsStable(page, TIMING.rowsStableMs, 10000);
+    };
+    let rows;
+    let t0;
+    if (opts.switch) {
+      // Same steps as the printlang journey; only the option press is profiled.
+      await typeQuery();
+      await pressFor(profile)(page.locator(SELECTORS.printLangButton).first());
+      const menu = page.locator(SELECTORS.printLangMenu).first();
+      await menu.waitFor({ state: 'visible', timeout: 5000 });
+      const option = menu.locator(SELECTORS.langOption, { hasText: PRINT_LANG_LABELS[opts.switch] }).first();
+      const button = option.locator('button');
+      const target = (await button.count()) ? button.first() : option;
+      await sleep(500);
+      await session.send('Profiler.start');
+      t0 = wallNow();
+      await pressFor(profile)(target);
+      rows = await waitRowsStable(page, 500, 5000);
+    } else {
+      await session.send('Profiler.start');
+      t0 = wallNow();
+      rows = await typeQuery();
     }
-    await Promise.all(presses);
-    const rows = await waitRowsStable(page, TIMING.rowsStableMs, 10000);
     const { profile: prof } = await session.send('Profiler.stop');
     const wall = wallNow() - t0;
 
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, JSON.stringify(prof));
     const a = analyzeProfile(prof);
-    console.log(`# CPU profile: "${opts.query}" on ${opts.base} (${opts.profile}, CPU ×${profile.cpuThrottle}, ${opts.interval} µs sampling)`);
+    console.log(`# CPU profile: ${opts.switch ? `print language -> ${opts.switch} with ` : ''}"${opts.query}" on ${opts.base} (${opts.profile}, CPU ×${profile.cpuThrottle}, ${opts.interval} µs sampling)`);
     console.log(`window ${ms(a.totalUs)} ms (wall ${wall.toFixed(0)} ms) · busy ${ms(a.busyUs)} ms · JS self ${ms(a.scriptUs)} ms · `
       + `GC ${ms(a.gcUs)} ms · program/native ${ms(a.programUs)} ms · idle ${ms(a.idleUs)} ms · final rows ${rows ? rows.count : 0}\n`);
     const symbolicate = opts.sourcemapDir ? createSymbolicator(path.resolve(opts.sourcemapDir)) : null;
     let mapped = 0;
     console.log(`Top ${opts.top} functions by self time:`);
-    console.log(`${'self ms'.padStart(9)}  ${'% busy'.padStart(6)}  function  (script:line:col)${symbolicate ? '  => original' : ''}`);
+    console.log(`${'self ms'.padStart(9)}  ${'total ms'.padStart(9)}  ${'% busy'.padStart(6)}  function  (script:line:col)${symbolicate ? '  => original' : ''}`);
     for (const f of a.functions.slice(0, opts.top)) {
       let orig = '';
       if (symbolicate && f.url && f.line > 0) {
@@ -195,7 +237,7 @@ async function main() {
           orig = `  => ${pos.name || f.name} ${pos.source}:${pos.line}:${pos.column}`;
         }
       }
-      console.log(`${ms(f.selfUs).padStart(9)}  ${((f.selfUs / a.busyUs) * 100).toFixed(1).padStart(6)}  ${f.name}  (${shortUrl(f.url, opts.base)}:${f.line}:${f.col})${orig}`);
+      console.log(`${ms(f.selfUs).padStart(9)}  ${ms(f.totalUs).padStart(9)}  ${((f.selfUs / a.busyUs) * 100).toFixed(1).padStart(6)}  ${f.name}  (${shortUrl(f.url, opts.base)}:${f.line}:${f.col})${orig}`);
     }
     if (symbolicate && !mapped) console.log('(no frame matched a map in --sourcemap-dir: maps must come from the exact build being profiled)');
     console.log('\nSelf time by script:');
