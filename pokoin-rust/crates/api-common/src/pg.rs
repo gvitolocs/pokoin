@@ -52,7 +52,7 @@ pub async fn node_rows<'e, E>(executor: E, sql: &str, binds: &[Bind]) -> Result<
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-    let rows = sqlx::query_with(sql, arguments(binds)).fetch_all(executor).await?;
+    let rows = crate::stages::timed(crate::stages::SQL, sqlx::query_with(sql, arguments(binds)).fetch_all(executor)).await?;
     Ok(rows.iter().map(row_to_node_json).collect())
 }
 

@@ -11,7 +11,8 @@ pub async fn log_request(State(state):State<crate::AppState>,req:Request,next:Ne
  let method=req.method().as_str().to_owned();
  let path:String=req.uri().path().chars().take(160).collect();
  let request_id=format!("rust-{:x}-{:x}",SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),SEQUENCE.fetch_add(1,Ordering::Relaxed));
- let mut res=next.run(req).await;
+ let (mut res,timing)=pokoin_api_common::stages::scope(next.run(req)).await;
+ if let Ok(v)=HeaderValue::from_str(&timing){res.headers_mut().insert("server-timing",v);}
  let status=res.status().as_u16();let duration_ms=started.elapsed().as_millis() as u64;
  res.headers_mut().insert("x-pokoin-runtime",HeaderValue::from_static("rust"));
  if let Ok(v)=HeaderValue::from_str(&state.config.release){res.headers_mut().insert("x-pokoin-release",v);}
