@@ -368,6 +368,7 @@ fn router(state: AppState) -> Router {
         .route("/api/marketplace-list", get(lists::list).options(rails::options))
         .route("/api/marketplace-daily-medians", get(lists::daily_medians).options(rails::options))
         .route("/api/marketplace-related", get(related::handler).options(rails::options))
+        .route("/api/client-error", axum::routing::post(request_log::client_error).options(rails::options))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             read_cache::read_cache,
