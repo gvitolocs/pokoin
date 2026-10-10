@@ -7,6 +7,7 @@ import { subscribeOriginDown } from '@market/working-page.js';
 import Chrome from './components/Chrome.jsx';
 import CookieBanner from './components/CookieBanner.jsx';
 import WorkingOnIt from './components/WorkingOnIt.jsx';
+import { isBarePath } from './lib/bare-pages.js';
 import { chatDock } from './lib/chat-dock-loader.js';
 import { whenIdle } from './lib/idle.js';
 import { warmLikelyRoutes } from './lib/route-warmup.js';
@@ -89,23 +90,31 @@ export default function App(props) {
   });
   watchAccount();
 
-  if (isDashboardHost()) {
+  // Test boards and the extension sign-in bridge are bare pages (a React
+  // "board"): no header, no origin-down page, and they stay on the legacy
+  // dashboard host.
+  const bare = () => isBarePath(location.pathname);
+  const route = () => (
+    <Errored fallback={(err, reset) => <RouteError error={err()} reset={reset} />}>
+      <Loading fallback={<RoutePending />}>{props.children}</Loading>
+    </Errored>
+  );
+
+  if (isDashboardHost() && !untrack(bare)) {
     return <DashboardMarketHandoff target={untrack(() => legacyDashboardHref(location.pathname, location.search))} />;
   }
 
   return (
-    <Show when={!(originDown() && !framed)} fallback={<WorkingOnIt />}>
-      <Chrome>
-        <Errored fallback={(err, reset) => <RouteError error={err()} reset={reset} />}>
-          <Loading fallback={<RoutePending />}>{props.children}</Loading>
-        </Errored>
-      </Chrome>
-      <CookieBanner />
-      <Show when={chatDock.mod()}>
-        {(mod) => {
-          const Dock = untrack(mod).default;
-          return <Dock />;
-        }}
+    <Show when={!bare()} fallback={route()}>
+      <Show when={!(originDown() && !framed)} fallback={<WorkingOnIt />}>
+        <Chrome>{route()}</Chrome>
+        <CookieBanner />
+        <Show when={chatDock.mod()}>
+          {(mod) => {
+            const Dock = untrack(mod).default;
+            return <Dock />;
+          }}
+        </Show>
       </Show>
     </Show>
   );
