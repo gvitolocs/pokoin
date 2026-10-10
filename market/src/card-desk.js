@@ -89,9 +89,11 @@ export function formatChange72h(pct) {
   };
 }
 
-export function matchDeal(rows, language, condition) {
+export function matchDeal(rows, language, condition, card = null) {
   return pricedOffers(rows).find((offer) => {
-    if (language && offerLang(offer) !== language) {
+    // Same language reading as the chips (listedDealLanguages): an empty
+    // CardTrader language is the print language, JA/CN/TW are JP/ZH/ZHT.
+    if (language && offerLanguage(offer, card) !== language) {
       return false;
     }
     // Same grades as the condition chips: LP / Lightly Played is SP.
@@ -100,6 +102,25 @@ export function matchDeal(rows, language, condition) {
     }
     return true;
   }) || null;
+}
+
+/** Best grade with a priced offer in `language`, Near Mint first, or ''. */
+export function bestDealCondition(rows, language, card = null) {
+  for (let index = DEAL_CONDS.length - 1; index >= 0; index -= 1) {
+    const { value } = DEAL_CONDS[index];
+    if (matchDeal(rows, language, value, card)) return value;
+  }
+  return '';
+}
+
+/**
+ * Grade the Best Deal shows: the chosen one when it is listed in this
+ * language, otherwise the best grade that is, so picking a language never
+ * lands on an empty deal while that language has offers.
+ */
+export function shownDealCondition(rows, language, wanted, card = null) {
+  if (matchDeal(rows, language, wanted, card)) return wanted;
+  return bestDealCondition(rows, language, card) || wanted;
 }
 
 /** Next inventory slot for a box, or the bare box when it has no stack yet. */
@@ -198,8 +219,12 @@ export function listedDealLanguages(offers, card) {
   return LIST_LANGS.filter((code) => allowed.has(code));
 }
 
-export function listedDealConditions(offers) {
-  const present = new Set((offers || []).map((row) => moodCondition(row)));
+/** Grades with offers, in `language` when one is given (the chips grey out per language). */
+export function listedDealConditions(offers, language = '', card = null) {
+  const rows = language
+    ? (offers || []).filter((row) => offerLanguage(row, card) === language)
+    : (offers || []);
+  const present = new Set(rows.map((row) => moodCondition(row)));
   return DEAL_CONDS.filter((row) => present.has(row.value));
 }
 
