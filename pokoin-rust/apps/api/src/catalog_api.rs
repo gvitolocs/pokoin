@@ -18,19 +18,21 @@ pub fn limit(p:&HashMap<String,String>,key:&str,default:i64,max:i64)->i64{
  p.get(key).and_then(|v|v.trim().parse::<f64>().ok()).filter(|v|v.is_finite()).map(|v|(v.trunc() as i64).clamp(1,max)).unwrap_or(default)
 }
 pub fn response(status:StatusCode,body:Value,cache:&str)->Response{
- cors(status,if cache.is_empty(){None}else{Some(cache.to_owned())},Some("application/json; charset=utf-8"),serde_json::to_vec(&body).unwrap_or_default()).into_response()
+ let bytes=pokoin_api_common::stages::timed_sync(pokoin_api_common::stages::SERIALIZE,||serde_json::to_vec(&body).unwrap_or_default());
+ cors(status,if cache.is_empty(){None}else{Some(cache.to_owned())},Some("application/json; charset=utf-8"),bytes).into_response()
 }
 /// `response` in whichever representation the request asked for. The default
 /// representation is byte-identical to [`response`]; both carry `Vary: Accept`
 /// so a shared cache keeps the two apart.
 pub fn response_c1(wanted:Wanted,status:StatusCode,body:Value,cache:&str)->Response{
- let (content_type,bytes)=if wanted.c1(){
+ let (content_type,bytes)=pokoin_api_common::stages::timed_sync(pokoin_api_common::stages::SERIALIZE,||if wanted.c1(){
   (compact::C1_CONTENT_TYPE,compact::encode::encode_to_vec_with(&body,wanted.encode_options()))
  }else{
   ("application/json; charset=utf-8",serde_json::to_vec(&body).unwrap_or_default())
- };
+ });
  let mut response=cors(status,if cache.is_empty(){None}else{Some(cache.to_owned())},Some(content_type),bytes).into_response();
  response.headers_mut().insert(axum::http::header::VARY,axum::http::HeaderValue::from_static("Accept"));
+ if wanted.c1(){response.headers_mut().insert(compact::C1_FORMAT_HEADER.0,axum::http::HeaderValue::from_static(compact::C1_FORMAT_HEADER.1));}
  response
 }
 /// What the request asked for, from its `Accept` header and `?format=`.
@@ -150,21 +152,26 @@ pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::
  let p=params(&uri);let game=game_from(&headers,p.get("game").map(String::as_str));
  let Some(id)=positive_id(p.get("cardId").or_else(||p.get("id")).map(String::as_str).unwrap_or("")) else{return response(StatusCode::BAD_REQUEST,json!({"error":"cardId is required (public marketplace id)."}),"")};
  let Some(pool)=game_pool(&state,&game).await else{return response(StatusCode::SERVICE_UNAVAILABLE,json!({"error":"Marketplace database unavailable."}),"no-store")};
- let primary=match cards(&pool,&[id],&game).await{Ok(mut r)=>match r.pop(){Some(r)=>r,None=>return response(StatusCode::NOT_FOUND,json!({"error":"Card not found.","cardId":id.to_string()}),"")},Err(e)=>return failure(&e)};
+ use pokoin_api_common::stages::{timed,SQL};
+ let primary=match timed(SQL,cards(&pool,&[id],&game)).await{Ok(mut r)=>match r.pop(){Some(r)=>r,None=>return response(StatusCode::NOT_FOUND,json!({"error":"Card not found.","cardId":id.to_string()}),"")},Err(e)=>return failure(&e)};
  let name=text(&primary,&["name"]);let set=text(&primary,&["set_name"]);
  let version=text(&primary,&["version"]);
- let (version_ids,rarity_ids,neighbors,meta)=tokio::join!(
-  version_ids(&pool,id,&name,&set,&version,&game),
-  name_set_ids(&pool,&name,&set,24),
-  neighbors(&pool,&set,id,6),
-  version_meta(&pool,id,&game)
+ // `related` rides along: one primary-key read of the prebuilt neighbours.
+ let ((version_ids,rarity_ids,neighbors,meta),related)=tokio::join!(
+  timed(SQL,async{tokio::join!(
+   version_ids(&pool,id,&name,&set,&version,&game),
+   name_set_ids(&pool,&name,&set,24),
+   neighbors(&pool,&set,id,6),
+   version_meta(&pool,id,&game)
+  )}),
+  crate::related::for_card_page(&pool,id,&game)
  );
  let version_ids=match version_ids{Ok(r)=>r,Err(e)=>return failure(&e)};
  let rarity_ids=match rarity_ids{Ok(mut r)=>{if r.is_empty(){r.push(id)}r},Err(e)=>return failure(&e)};
  let neighbors=match neighbors{Ok(r)=>r,Err(e)=>return failure(&e)};
  let meta=match meta{Ok(r)=>r,Err(e)=>return failure(&e)};
  let mut wanted=version_ids.clone();wanted.extend(&rarity_ids);wanted.extend(neighbors.iter().map(|(id,_,_)|*id));wanted.sort_unstable();wanted.dedup();
- let packed=match cards(&pool,&wanted,&game).await{Ok(r)=>r,Err(e)=>return failure(&e)};
+ let packed=match timed(SQL,cards(&pool,&wanted,&game)).await{Ok(r)=>r,Err(e)=>return failure(&e)};
  let map:HashMap<i64,Value>=packed.into_iter().filter_map(|r|Some((positive_id(&text(&r,&["card_id"]))?,pokoin_catalog::react_record(&r)))).collect();
  let mut card=pokoin_catalog::react_record(&primary);
  let version_count=meta.as_ref().map(|m|number(m,&["member_count"]) as usize).filter(|n|*n>0).unwrap_or(version_ids.len());
@@ -207,7 +214,8 @@ pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::
   "sameAs":same_as,"neighbors":{"prev":prev.iter().filter_map(|(_,id)|map.get(id)).collect::<Vec<_>>(),"next":next.iter().filter_map(|(_,id)|map.get(id)).collect::<Vec<_>>()},
   "offers":offers,"sales":sales,"cheapest":cheapest,"artist":{"name":card["artist"],"illustrator":card["illustrator"]},
   "canonicalPath":path,"seo":{"title":format!("{title} Price & Cards for Sale | Pokoin"),"description":description,"imageUrl":card["heroImageUrl"],"canonicalPath":path},
-  "lookup":{"cardId":id.to_string(),"lang":lang,"slug":slug}
+  "lookup":{"cardId":id.to_string(),"lang":lang,"slug":slug},
+  "related":related
  }),"public, max-age=10, s-maxage=30, stale-while-revalidate=60")
 }
 async fn name_set_ids(pool:&PgPool,name:&str,set:&str,cap:i64)->Result<Vec<i64>,sqlx::Error>{

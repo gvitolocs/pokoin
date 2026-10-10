@@ -11,7 +11,7 @@ use pokoin_api_common::RouteState;
 use serde_json::{json, Value};
 
 use super::support;
-use crate::shared::{card_versions, expansions, js, react_card, react_sql};
+use crate::shared::{card_versions, expansions, js, page_snapshot, react_card, react_sql};
 
 /// `slugify(value)` of the reference handler (NFKD fold, `&` -> ` and `,
 /// 140-unit cap).
@@ -83,8 +83,14 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
     let limit = react_card::parse_limit(q.search_param("limit"), 200, 400);
     let offset = react_card::parse_offset(q.search_param("offset"));
 
+    let live_only = headers.contains_key(page_snapshot::BUILD_HEADER);
     if slug.is_empty() && expansion_name.is_empty() {
         let expansions_limit = react_card::parse_limit(q.search_param("limit"), 500, 2000);
+        if !live_only {
+            if let Some(page) = page_snapshot::read(&pool, page_snapshot::SET_INDEX, "all", 0, expansions_limit, false).await {
+                return support::prebuilt(wanted, index_bytes(&page.rows, &game, limit), None, SET_INDEX_CACHE);
+            }
+        }
         // `listExpansions`: satellite games list from their set counts, not
         // the Pokemon-only marketplace_card_versions table.
         let listed = if is_pokemon {
@@ -103,8 +109,19 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
             wanted,
             StatusCode::OK,
             no_slug_body(expansions, &game, limit),
-            "public, max-age=60, s-maxage=300",
+            SET_INDEX_CACHE,
         );
+    }
+
+    // One set, singles: the prebuilt desk, cut to this page by Postgres.
+    if product_type == "card" && !live_only {
+        if let Some(key) = page_snapshot::clean_key(&slug) {
+            if let Some(page) = page_snapshot::read(&pool, page_snapshot::SET, &key, offset, limit, false).await {
+                if let Some(bytes) = set_bytes(&page, limit, offset) {
+                    return support::prebuilt(wanted, bytes, None, SET_CACHE);
+                }
+            }
+        }
     }
 
     let mut expansion = if !slug.is_empty() {
@@ -230,8 +247,45 @@ async fn handle(state: RouteState, headers: HeaderMap, uri: Uri) -> Response {
             total,
             has_more,
         ),
-        "public, max-age=30, s-maxage=120, stale-while-revalidate=300",
+        SET_CACHE,
     )
+}
+
+/// Set desks are rebuilt every 15 minutes (`build-lists-sets`); the live
+/// fallback sends the same policy so one URL never flips between two.
+const SET_CACHE: &str = "public, max-age=60, s-maxage=600, stale-while-revalidate=3600";
+const SET_INDEX_CACHE: &str = "public, max-age=60, s-maxage=600, stale-while-revalidate=3600";
+
+/// [`success_body`] from a `set` snapshot window, byte for byte.
+fn set_bytes(page: &page_snapshot::Page, limit: i64, offset: i64) -> Option<Vec<u8>> {
+    let expansion = page.head.get("expansion").filter(|v| v.is_object())?;
+    let total = page.head.get("total")?;
+    let has_more = page.row_count as i64 > offset + limit;
+    Some(
+        page_snapshot::Body::with_capacity(&page.rows)
+            .value("expansion", expansion)
+            .rows("cards", &page.rows)
+            .value("productType", &json!("card"))
+            .value("limit", &json!(limit))
+            .value("offset", &json!(offset))
+            .value("count", &json!(page.rows.len()))
+            .value("total", total)
+            .value("hasMore", &json!(has_more))
+            .finish(),
+    )
+}
+
+/// [`no_slug_body`] from the `set-index` snapshot, byte for byte.
+fn index_bytes(rows: &[String], game: &str, limit: i64) -> Vec<u8> {
+    page_snapshot::Body::with_capacity(rows)
+        .rows("expansions", rows)
+        .value("expansion", &Value::Null)
+        .rows("cards", &[])
+        .value("game", &json!(game))
+        .value("limit", &json!(limit))
+        .value("offset", &json!(0))
+        .value("hasMore", &json!(false))
+        .finish()
 }
 
 /// The browse-page success body (`jsonOk` payload of the reference).
@@ -303,4 +357,39 @@ async fn read_set_cards(
 /// 405 for every method the reference rejects.
 pub async fn method_not_allowed() -> Response {
     support::method_not_allowed_get_options().await
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    fn cards(n: usize) -> Vec<Value> {
+        (0..n).map(|i| json!({"id": i.to_string(), "card_id": i.to_string(), "name": "Pikachu", "price": 12.5, "nationality": ""})).collect()
+    }
+
+    #[test]
+    fn a_snapshot_page_is_the_live_body() {
+        let all = cards(5);
+        let expansion = json!({"name": "Base Set", "slug": "base-set", "cardCount": 102});
+        for (limit, offset) in [(2_i64, 0_i64), (2, 2), (2, 4), (400, 0), (2, 9)] {
+            let window: Vec<Value> = all.iter().skip(offset as usize).take(limit as usize).cloned().collect();
+            let page = page_snapshot::Page {
+                head: json!({"expansion": expansion, "total": 102}),
+                rows: window.iter().map(page_snapshot::text).collect(),
+                row_count: all.len(),
+                c1: None,
+            };
+            let has_more = all.len() as i64 > offset + limit;
+            let live = success_body(expansion.clone(), window, "card", limit, offset, 102.0, has_more);
+            assert_eq!(String::from_utf8(set_bytes(&page, limit, offset).unwrap()).unwrap(), live.to_string());
+        }
+    }
+
+    #[test]
+    fn the_snapshot_index_is_the_live_body() {
+        let expansions = cards(3);
+        let rows: Vec<String> = expansions.iter().map(page_snapshot::text).collect();
+        let live = no_slug_body(expansions, "pokemon", 400);
+        assert_eq!(String::from_utf8(index_bytes(&rows, "pokemon", 400)).unwrap(), live.to_string());
+    }
 }

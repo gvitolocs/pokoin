@@ -35,8 +35,15 @@ mod tests;
 /// The `c1` media type.
 pub const C1_MEDIA_TYPE: &str = "application/vnd.pokoin.c1+json";
 
-/// The `c1` content type sent on the wire.
-pub const C1_CONTENT_TYPE: &str = "application/vnd.pokoin.c1+json; charset=utf-8";
+/// The content type a `c1` body is sent with. It is `application/json`, not
+/// the `c1` media type: Cloudflare only compresses the content types it knows,
+/// and an uncompressed `c1` body is larger on the wire than brotli'd JSON. The
+/// payload marks itself (`{"c1":1,…}`) and the response carries
+/// [`C1_FORMAT_HEADER`].
+pub const C1_CONTENT_TYPE: &str = "application/json; charset=utf-8";
+
+/// `x-pokoin-format: c1` on every compact response.
+pub const C1_FORMAT_HEADER: (&str, &str) = ("x-pokoin-format", "c1");
 
 /// Which representation a request asked for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -155,12 +162,37 @@ pub fn json_with(
         return http::json_with(status, body, &headers);
     }
     let (status, body) = sanitize_public_json(status, body);
-    http::raw(
-        status,
-        C1_CONTENT_TYPE,
-        encode::encode_to_vec_with(&body, wanted.encode_options()),
-        &headers,
-    )
+    headers.push(C1_FORMAT_HEADER);
+    let bytes = crate::stages::timed_sync(crate::stages::SERIALIZE, || encode::encode_to_vec_with(&body, wanted.encode_options()));
+    http::raw(status, C1_CONTENT_TYPE, bytes, &headers)
+}
+
+/// A 200 whose default body is already serialised (a prebuilt snapshot).
+/// The default representation sends `json` untouched; `c1` sends the stored
+/// compact bytes when the snapshot has them, else encodes `json` now.
+pub fn prebuilt(
+    wanted: Wanted,
+    json: Vec<u8>,
+    c1: Option<Vec<u8>>,
+    headers: &[(&str, &str)],
+) -> Response {
+    let mut headers: Vec<(&str, &str)> = headers.to_vec();
+    headers.push(VARY_ACCEPT);
+    if !wanted.c1 {
+        return http::raw(StatusCode::OK, "application/json; charset=utf-8", json, &headers);
+    }
+    headers.push(C1_FORMAT_HEADER);
+    // Stored bytes are format 1; a format-2 request is encoded now.
+    let bytes = match c1.filter(|_| !wanted.templates()) {
+        Some(bytes) => bytes,
+        None => crate::stages::timed_sync(crate::stages::SERIALIZE, || {
+            match serde_json::from_slice::<Value>(&json) {
+                Ok(body) => encode::encode_to_vec_with(&body, wanted.encode_options()),
+                Err(_) => json,
+            }
+        }),
+    };
+    http::raw(StatusCode::OK, C1_CONTENT_TYPE, bytes, &headers)
 }
 
 #[cfg(test)]

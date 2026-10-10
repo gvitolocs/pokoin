@@ -162,7 +162,8 @@ pub fn json(status: StatusCode, body: Value) -> Response {
 /// JSON response plus explicit headers (`res.setHeader` calls of the handler).
 pub fn json_with(status: StatusCode, body: Value, headers: &[(&str, &str)]) -> Response {
     let (status, body) = sanitize_public_json(status, body);
-    let mut response = (status, Body::from(body.to_string())).into_response();
+    let text = crate::stages::timed_sync(crate::stages::SERIALIZE, || body.to_string());
+    let mut response = (status, Body::from(text)).into_response();
     let map = response.headers_mut();
     map.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json; charset=utf-8"));
     for (name, value) in headers {

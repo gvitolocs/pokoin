@@ -477,6 +477,7 @@ pub async fn marketplace_orders_post(
             object.insert("soldAt".into(), json!(store::now_iso()));
             object.insert("updatedAt".into(), json!(store::now_iso()));
         }
+        crate::sales_index::note_sale(data.get("cardId").and_then(Value::as_str).unwrap_or_default());
         let _ = firestore
             .set_document(
                 &firestore.document_path(store::SALES_COLLECTION, &row.id),
@@ -1456,6 +1457,7 @@ pub async fn fulfil_paid_eur_order(state: &DomainState, order_id: &str) -> Resul
             let mut data = row.data.clone();
             data["soldAt"] = json!(state.now_iso());
             data["updatedAt"] = json!(state.now_iso());
+            crate::sales_index::note_sale(data.get("cardId").and_then(Value::as_str).unwrap_or_default());
             let sale_path = firestore.document_path(store::SALES_COLLECTION, &row.id);
             if firestore.set_document(&sale_path, &data).await.is_err() {
                 failed = true;
@@ -2731,11 +2733,19 @@ pub async fn marketplace_native_sales(
         .and_then(|value| value.parse::<f64>().ok())
         .map(|value| (value.trunc() as i64).clamp(1, 50))
         .unwrap_or(20);
-    let sales = read_card_sales(&state, &card_id, limit).await?;
+    // Most cards never sold natively: the in-memory index answers those
+    // without a Firestore round trip.
+    let sales = match crate::sales_index::has_sales(&state, &card_id) {
+        Some(false) => {
+            pokoin_api_common::stages::source("index");
+            Vec::new()
+        }
+        _ => read_card_sales(&state, &card_id, limit).await?,
+    };
     let mut response = public_json(json!({ "cardId": card_id, "sales": sales }), 60);
     response.headers_mut().insert(
         "cache-control",
-        axum::http::HeaderValue::from_static("public, max-age=60"),
+        axum::http::HeaderValue::from_static("public, max-age=60, s-maxage=60, stale-while-revalidate=600"),
     );
     Ok(response)
 }

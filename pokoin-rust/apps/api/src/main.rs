@@ -1,5 +1,7 @@
 mod body_validation;
 mod card_identity;
+mod http_cache;
+mod related;
 mod ct_deals;
 mod jobs;
 mod lists;
@@ -368,6 +370,7 @@ fn router(state: AppState) -> Router {
         .route("/api/marketplace-list", get(lists::list).options(rails::options))
         .route("/api/c1-dictionary", get(lists::dictionary).options(rails::options))
         .route("/api/marketplace-daily-medians", get(lists::daily_medians).options(rails::options))
+        .route("/api/marketplace-related", get(related::handler).options(rails::options))
         .route("/api/client-error", axum::routing::post(request_log::client_error).options(rails::options))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -496,6 +499,7 @@ async fn build_full_router(state: AppState) -> Router {
         // unwinding the connection task.
         .layer(axum::middleware::from_fn(pokoin_api_common::panic::catch_panic))
         .layer(axum::middleware::from_fn_with_state(state, request_log::log_request))
+        .layer(axum::middleware::from_fn(http_cache::conditional))
 }
 
 async fn security_middleware(
@@ -518,7 +522,7 @@ async fn spawn_edge_listeners(api: Router, servers: &mut tokio::task::JoinSet<()
     if edge_bind.is_some()||cdn_bind.is_some(){
         let cdn=pokoin_edge::Cdn::start(pokoin_edge::CdnConfig::from_env()).await;
         if let Some(bind)=cdn_bind{let listener=tokio::net::TcpListener::bind(&bind).await?;listeners.push(("cdn",bind,listener,cdn.router()));}
-        if let Some(bind)=edge_bind{let listener=tokio::net::TcpListener::bind(&bind).await?;let edge=pokoin_edge::edge_router(pokoin_edge::EdgeConfig::from_env(),api.clone(),cdn.router());listeners.push(("edge",bind,listener,edge));}
+        if let Some(bind)=edge_bind{let listener=tokio::net::TcpListener::bind(&bind).await?;let edge=pokoin_edge::edge_router(pokoin_edge::EdgeConfig::from_env(),api.clone(),cdn.router()).layer(axum::middleware::from_fn(http_cache::edge));listeners.push(("edge",bind,listener,edge));}
     }
     if let Some(bind)=env("POKOIN_CT_DEALS_BIND"){
         let listener=tokio::net::TcpListener::bind(&bind).await?;listeners.push(("ct-deals",bind,listener,ct_deals::router(api)));

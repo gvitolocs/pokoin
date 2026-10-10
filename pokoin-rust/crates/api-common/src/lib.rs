@@ -6,6 +6,7 @@
 //! (`oracle-api-server.js`): query maps, body decoding, JSON responses.
 //! `public_error` is the port of `api/_public_error.js`. `compact` is the
 //! opt-in `c1` response encoding and the append-only code dictionary behind it.
+//! `stages` collects the per-request `Server-Timing` stages.
 //! `panic` turns a handler panic into a `500` instead of an unwound request.
 
 pub mod compact;
@@ -18,6 +19,7 @@ pub mod pg;
 pub mod public_error;
 pub mod route_state;
 pub mod security;
+pub mod stages;
 pub mod state;
 
 pub use route_state::RouteState;

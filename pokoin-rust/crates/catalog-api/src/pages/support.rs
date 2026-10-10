@@ -67,6 +67,14 @@ pub fn json_with_cache_control_c1(
     compact::json_with_cors(wanted, status, body, cache_control)
 }
 
+/// A prebuilt (snapshot) 200 body with the read CORS headers and its cache
+/// policy, in the requested representation.
+pub fn prebuilt(wanted: compact::Wanted, json: Vec<u8>, c1: Option<Vec<u8>>, cache_control: &str) -> Response {
+    let mut headers: Vec<(&str, &str)> = http::READ_CORS.to_vec();
+    headers.push(("cache-control", cache_control));
+    compact::prebuilt(wanted, json, c1, &headers)
+}
+
 /// What the request asked for, from its `Accept` header and `?format=`.
 pub fn wanted(headers: &HeaderMap, q: &http::Query) -> compact::Wanted {
     compact::Wanted::from_request(headers, q)

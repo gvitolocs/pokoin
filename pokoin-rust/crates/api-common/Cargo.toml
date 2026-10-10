@@ -22,7 +22,7 @@ serde_urlencoded = "0.7"
 sqlx = { workspace = true, features = ["json", "chrono", "uuid", "bigdecimal"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "rt"] }
 tracing = { workspace = true }
 
 [dev-dependencies]

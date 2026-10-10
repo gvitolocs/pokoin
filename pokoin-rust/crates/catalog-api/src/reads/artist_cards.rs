@@ -8,7 +8,7 @@ use pokoin_api_common::{http, RouteState};
 use serde_json::{json, Value};
 
 use super::util;
-use crate::shared::{artist_display, artist_summary, card_emoji, card_rarity, js, react_sql};
+use crate::shared::{artist_display, artist_summary, card_emoji, card_rarity, js, page_snapshot, react_sql};
 
 fn slug_sql(column: &str) -> String {
     format!("trim(both '-' from regexp_replace(lower(coalesce({column}, '')), '[^a-z0-9]+', '-', 'g'))")
@@ -472,32 +472,34 @@ async fn artist_cards_for_slug(state: &RouteState, artist_slug: Option<&str>, ar
 
 /// Sent by the list builder (`pokoin-api job build-lists`) so it reads the
 /// live query instead of the snapshot it is about to replace.
-pub const LIST_BUILD_HEADER: &str = "x-pokoin-list-build";
+pub const LIST_BUILD_HEADER: &str = page_snapshot::BUILD_HEADER;
 
-/// Prebuilt whole-artist desk (`marketplace_list_snapshots`, kind=artist),
-/// cut to the request limit. The live query sorts every card of the artist on
-/// a computed collector number (p50 3 s on the Pi); the snapshot is the same
-/// tiles=1 answer, rebuilt daily. `None` falls back to the live query.
-async fn artist_snapshot(state: &RouteState, slug: &str, limit_raw: Option<&str>) -> Option<Value> {
-    let key = slug.trim().to_ascii_lowercase();
-    if key.is_empty() {
+/// Prebuilt whole-artist desk (`marketplace_page_snapshots`, kind=artist),
+/// cut to the request limit by Postgres. The live query sorts every card of
+/// the artist on a computed collector number (p50 3 s on the Pi); the snapshot
+/// is the same tiles=1 answer the list builder stores for
+/// `/api/marketplace-list`. `None` falls back to the live query.
+async fn artist_snapshot(state: &RouteState, slug: &str, limit_raw: Option<&str>) -> Option<Vec<u8>> {
+    let key = page_snapshot::clean_key(slug)?;
+    let limit = util::js_limit(limit_raw, 240, 20_000).max(1);
+    let page = page_snapshot::read(state.api.read(), page_snapshot::ARTIST, &key, 0, limit, false).await?;
+    if page.rows.is_empty() {
         return None;
     }
-    let rows = pg::pool_rows(
-        state.api.read(),
-        "select body from public.marketplace_list_snapshots where kind = 'artist' and key = $1",
-        &[Bind::Text(key)],
-    )
-    .await
-    .ok()?;
-    let mut payload: Value = serde_json::from_str(rows.first()?.get("body")?.as_str()?).ok()?;
-    let limit = util::js_limit(limit_raw, 240, 20_000).max(1) as usize;
-    match payload.get_mut("cards") {
-        Some(Value::Array(cards)) if !cards.is_empty() => cards.truncate(limit),
-        _ => return None,
-    }
-    Some(payload)
+    Some(artist_bytes(&page))
 }
+
+fn artist_bytes(page: &page_snapshot::Page) -> Vec<u8> {
+    let null = Value::Null;
+    page_snapshot::Body::with_capacity(&page.rows)
+        .value("artist", page.head.get("artist").unwrap_or(&null))
+        .value("profile", page.head.get("profile").unwrap_or(&null))
+        .rows("cards", &page.rows)
+        .finish()
+}
+
+/// Artist desks are rebuilt daily (`build-lists-artists`).
+const ARTIST_CACHE: &str = "public, max-age=60, s-maxage=900, stale-while-revalidate=3600";
 
 pub async fn handler(
     State(state): State<RouteState>,
@@ -527,15 +529,15 @@ pub async fn handler(
     let slug = util::first_of(&q, &["artistSlug", "slug"]);
     let tiles = q.search_param("tiles") == Some("1");
     if tiles && !headers.contains_key(LIST_BUILD_HEADER) {
-        if let Some(payload) = match slug {
+        if let Some(bytes) = match slug {
             Some(slug) => artist_snapshot(&state, slug, q.search_param("limit")).await,
             None => None,
         } {
-            return util::json_cache_c1(wanted, StatusCode::OK, payload, "public, max-age=20, s-maxage=300");
+            return pokoin_api_common::compact::prebuilt(wanted, bytes, None, &[("cache-control", ARTIST_CACHE)]);
         }
     }
     match artist_cards_for_slug(&state, slug, q.search_param("artist"), q.search_param("limit"), tiles).await {
-        Ok(payload) => util::json_cache_c1(wanted, StatusCode::OK, payload, "public, max-age=20, s-maxage=300"),
+        Ok(payload) => util::json_cache_c1(wanted, StatusCode::OK, payload, ARTIST_CACHE),
         Err(error) => util::db_error("marketplace-artist-cards", &error, "Marketplace artist cards failed."),
     }
 }
@@ -550,6 +552,20 @@ mod tests {
         assert_eq!(desk_card_count(Some(900.0), 240, 240), 900.0);
         assert_eq!(desk_card_count(Some(100.0), 240, 240), 240.0);
         assert_eq!(desk_card_count(None, 12, 240), 12.0);
+    }
+
+    #[test]
+    fn a_snapshot_desk_is_the_live_body() {
+        let cards = vec![json!({"card_id": "2", "name": "Eevee"}), json!({"card_id": "4", "name": "Mew"})];
+        let artist = json!({"name": "Ken Sugimori", "slug": "ken-sugimori", "cardCount": 2});
+        let page = page_snapshot::Page {
+            head: json!({"artist": artist, "profile": null}),
+            rows: cards.iter().map(page_snapshot::text).collect(),
+            row_count: 2,
+            c1: None,
+        };
+        let live = json!({ "artist": artist, "profile": null, "cards": cards });
+        assert_eq!(String::from_utf8(artist_bytes(&page)).unwrap(), live.to_string());
     }
 
     #[test]

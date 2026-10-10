@@ -11,7 +11,7 @@ use pokoin_api_common::RouteState;
 use serde_json::{json, Value};
 
 use super::support;
-use crate::shared::{js, react_card, react_sql, sql_json};
+use crate::shared::{js, page_snapshot, react_card, react_sql, sql_json};
 
 /// `PRINTING_SQL` — verbatim.
 pub const PRINTING_SQL: &str = "
@@ -57,18 +57,40 @@ pub const PRINTING_SQL: &str = "
 /// Route handler — the route is registered with `any()` and dispatches
 /// itself so the 405 has no `Allow` header, exactly like the reference
 /// (`setCorsHeaders`, OPTIONS 204, GET/HEAD, everything else 405).
-pub async fn handler(method: Method, State(state): State<RouteState>, uri: Uri) -> Response {
+pub async fn handler(
+    method: Method,
+    State(state): State<RouteState>,
+    headers: axum::http::HeaderMap,
+    uri: Uri,
+) -> Response {
     if method == Method::OPTIONS {
         return pokoin_api_common::http::read_preflight();
     }
     if method != Method::GET && method != Method::HEAD {
         return support::method_not_allowed_get_only().await;
     }
-    support::timing_scope("/api/marketplace-version-set", "GET", handle(state, uri)).await
+    support::timing_scope("/api/marketplace-version-set", "GET", handle(state, headers, uri)).await
 }
 
-async fn handle(state: RouteState, uri: Uri) -> Response {
+/// Version sets are rebuilt hourly (`build-lists-versions`).
+const VERSION_CACHE: &str = "public, max-age=60, s-maxage=600, stale-while-revalidate=3600";
+
+/// [`success_body`] from a `version` snapshot, byte for byte.
+fn version_bytes(card_id: &str, page: &page_snapshot::Page) -> Option<Vec<u8>> {
+    Some(
+        page_snapshot::Body::with_capacity(&page.rows)
+            .value("cardId", &json!(card_id))
+            .value("version", page.head.get("version")?)
+            .value("versionCount", page.head.get("versionCount")?)
+            .rows("printings", &page.rows)
+            .finish(),
+    )
+}
+
+async fn handle(state: RouteState, headers: axum::http::HeaderMap, uri: Uri) -> Response {
     let q = Query::from_uri(&uri);
+    // Opt-in compact encoding; the default representation is unchanged.
+    let wanted = support::wanted(&headers, &q);
     let card_id = react_card::parse_public_card_id(q.search_param("cardId").unwrap_or(""));
     if card_id.is_empty() {
         return support::json_with_cors(
@@ -92,6 +114,14 @@ async fn handle(state: RouteState, uri: Uri) -> Response {
             )
         }
     };
+
+    if !headers.contains_key(page_snapshot::BUILD_HEADER) {
+        if let Some(page) = page_snapshot::read_version_of_card(&pool, id).await {
+            if let Some(bytes) = version_bytes(&card_id, &page).filter(|_| !page.rows.is_empty()) {
+                return support::prebuilt(wanted, bytes, None, VERSION_CACHE);
+            }
+        }
+    }
 
     let rows = match sql_json::rows_json(&pool, PRINTING_SQL, &[sql_json::SqlBind::Int(id)]).await {
         Ok(rows) => rows,
@@ -136,10 +166,11 @@ async fn handle(state: RouteState, uri: Uri) -> Response {
         json!(printings.len())
     };
     let version = js::string_or_empty(js::get(&rows[0], "version"));
-    support::json_with_cache_control(
+    support::json_with_cache_control_c1(
+        wanted,
         StatusCode::OK,
         success_body(&card_id, &version, version_count, printings),
-        "public, max-age=30, s-maxage=60, stale-while-revalidate=300",
+        VERSION_CACHE,
     )
 }
 
@@ -161,4 +192,22 @@ pub fn success_body(
 /// 405 (`GET only.`).
 pub async fn method_not_allowed() -> Response {
     support::method_not_allowed_get_only().await
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn a_snapshot_version_set_is_the_live_body() {
+        let printings = vec![json!({"id": "2", "nationality": "japanese", "version": "v1"}), json!({"id": "4", "nationality": "western", "version": "v1"})];
+        let page = page_snapshot::Page {
+            head: json!({"version": "v1", "versionCount": 2}),
+            rows: printings.iter().map(page_snapshot::text).collect(),
+            row_count: 2,
+            c1: None,
+        };
+        let live = success_body("4", "v1", json!(2), printings);
+        assert_eq!(String::from_utf8(version_bytes("4", &page).unwrap()).unwrap(), live.to_string());
+    }
 }

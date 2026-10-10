@@ -319,9 +319,17 @@ cargo run --quiet --example c1_dictionary > ../market/src/compact-dictionary.jso
 
 ### 3.2 Negotiation and HTTP semantics
 
-- **Opt in** with `Accept: application/vnd.pokoin.c1+json` or `?format=c1`.
-  `*/*` is deliberately **not** a match — every browser sends it.
-- Content type `application/vnd.pokoin.c1+json; charset=utf-8`.
+- **Opt in** with `?format=c1` (preferred) or `Accept: application/vnd.pokoin.c1+json`.
+  `*/*` is deliberately **not** a match — every browser sends it. Browsers
+  should use `?format=c1`: Cloudflare and the edge micro-cache key on the URL
+  and ignore `Vary`, so only the query parameter keeps the two representations
+  in separate cache entries. The edge rewrites an `Accept`-only request to
+  `?format=c1` before its own cache (`apps/api/src/http_cache.rs`).
+- Content type `application/json; charset=utf-8` plus `x-pokoin-format: c1`
+  (since 2026-10-10; before, `application/vnd.pokoin.c1+json`). Cloudflare only
+  brotli-compresses content types it knows, and an uncompressed `c1` body was
+  larger on the wire than brotli'd JSON. The payload marks itself (`{"c1":1,…}`),
+  so a client branches on `isC1(payload)`.
 - Same status code and same `Cache-Control` as the default response.
 - **`Vary: Accept` on both representations**, so a shared cache can never hand a
   `c1` body to a client that asked for plain JSON.
@@ -350,6 +358,18 @@ cargo run --quiet --example c1_dictionary > ../market/src/compact-dictionary.jso
 | `GET /api/marketplace-rails` | `catalog-api` `pages::rails` |
 | `GET /api/marketplace-search-page` | `apps/api` `search_page` |
 | `GET /api/marketplace-home/{new-cards,best-sellers,spotlight}` | `apps/api` `rails` |
+| `GET /api/marketplace-list?kind=set\|artist\|name` | `apps/api` `lists` (stored `c1`) |
+| `GET /api/marketplace-version-set` | `catalog-api` `pages::version_set` |
+| `GET /api/marketplace-related` | `apps/api` `related` (stored `c1`) |
+
+Not wired: `GET /api/marketplace-card-page` (its Redis read cache checks the
+card identity in the JSON body; the related tiles inside it are available as
+`c1` from `/api/marketplace-related`).
+
+Prebuilt bodies (`marketplace_page_snapshots`, see
+[RUST_RUNTIME.md](../RUST_RUNTIME.md#prebuilt-pages)) answer `c1` by encoding
+the assembled JSON, or send the stored `c1` bytes when the builder kept them
+(`related`).
 
 ### 3.4 What is not done
 
