@@ -91,34 +91,82 @@ async fn main() -> anyhow::Result<()> {
     });
     let app = build_full_router(state.clone()).await;
     let listener = tokio::net::TcpListener::bind(&config.bind).await?;
-    spawn_edge_listeners(app.clone()).await?;
+    let (stop, stopping) = tokio::sync::watch::channel(false);
+    let mut servers = tokio::task::JoinSet::new();
+    spawn_edge_listeners(app.clone(), &mut servers, &stopping).await?;
     tracing::info!(
         phase = "bind",
         bind = %config.bind,
         elapsed_ms = elapsed_ms(booted),
         "startup"
     );
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .with_graceful_shutdown(async {
-            let ctrl_c = tokio::signal::ctrl_c();
-            #[cfg(unix)]
-            {
-                let mut terminate =
-                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                        .expect("install SIGTERM handler");
-                tokio::select! {
-                    _ = ctrl_c => {}
-                    _ = terminate.recv() => {}
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = ctrl_c.await;
-            }
-            tracing::info!("shutdown");
-        })
-        .await?;
-    Ok(())
+    servers.spawn(serve_listener("api", listener, app, stopping));
+    shutdown_signal().await;
+    tracing::info!("shutdown");
+    let _ = stop.send(true);
+    // Every listener stops accepting and finishes its in-flight requests, but an
+    // open stream or a stuck request must not hold the stop until systemd's
+    // TimeoutStopSec SIGKILL.
+    if !drain(&mut servers, SHUTDOWN_DRAIN).await {
+        tracing::warn!(
+            listeners = servers.len(),
+            drain_s = SHUTDOWN_DRAIN.as_secs(),
+            "shutdown drain deadline passed; dropping open connections"
+        );
+    }
+    // Returning would drop the runtime, which waits for every blocking-pool task
+    // (a CDN read on a stalled disk) without a deadline.
+    std::process::exit(0);
+}
+
+/// How long a stop waits for in-flight requests (the unit's TimeoutStopSec is 20 s).
+const SHUTDOWN_DRAIN: Duration = Duration::from_secs(10);
+
+/// Wait up to `deadline` for every listener to finish its graceful stop;
+/// `false` when some are still open.
+async fn drain(servers: &mut tokio::task::JoinSet<()>, deadline: Duration) -> bool {
+    tokio::time::timeout(deadline, async { while servers.join_next().await.is_some() {} })
+        .await
+        .is_ok()
+}
+
+/// SIGTERM (systemd stop) or Ctrl-C.
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install SIGTERM handler");
+        tokio::select! {
+            _ = ctrl_c => {}
+            _ = terminate.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = ctrl_c.await;
+    }
+}
+
+/// Serve until `stopping` turns true, then drain gracefully. A listener that
+/// fails is fatal, so health can never claim a cutover a dead port cannot serve.
+async fn serve_listener(
+    name: &'static str,
+    listener: tokio::net::TcpListener,
+    app: Router,
+    mut stopping: tokio::sync::watch::Receiver<bool>,
+) {
+    let stop = async move {
+        let _ = stopping.wait_for(|stop| *stop).await;
+    };
+    if let Err(error) = axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+        .with_graceful_shutdown(stop)
+        .await
+    {
+        tracing::error!(listener = name, %error, "required listener stopped");
+        std::process::exit(1);
+    }
 }
 
 fn new_state(config: Config, booted: Instant) -> anyhow::Result<AppState> {
@@ -440,6 +488,9 @@ async fn build_full_router(state: AppState) -> Router {
     let normalized = tower::Layer::layer(&axum::middleware::from_fn(system::normalize_request), inner);
     Router::new()
         .fallback_service(normalized)
+        // A panicking handler answers 500 (logged with its path) instead of
+        // unwinding the connection task.
+        .layer(axum::middleware::from_fn(pokoin_api_common::panic::catch_panic))
         .layer(axum::middleware::from_fn_with_state(state, request_log::log_request))
 }
 
@@ -454,7 +505,7 @@ async fn security_middleware(
 /// The public edge (api.pokoin.com origin, `POKOIN_EDGE_BIND`, Pi :18079) and the
 /// disk CDN (cdn.pokoin.com origin, `POKOIN_CDN_BIND`, Pi :18081). Both are off
 /// unless their bind variable is set, so the binary can run beside the Node edge.
-async fn spawn_edge_listeners(api: Router) -> anyhow::Result<()> {
+async fn spawn_edge_listeners(api: Router, servers: &mut tokio::task::JoinSet<()>, stopping: &tokio::sync::watch::Receiver<bool>) -> anyhow::Result<()> {
     let env=|key:&str|std::env::var(key).ok().filter(|v|!v.trim().is_empty());
     let edge_bind=env("POKOIN_EDGE_BIND");let cdn_bind=env("POKOIN_CDN_BIND");
     // Bind every requested listener before announcing startup. A failed edge/CDN
@@ -470,12 +521,7 @@ async fn spawn_edge_listeners(api: Router) -> anyhow::Result<()> {
     }
     for (name,bind,listener,app) in listeners{
         tracing::info!(phase="bind",listener=name,%bind,"startup");
-        tokio::spawn(async move{
-            if let Err(error)=axum::serve(listener,app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await{
-                tracing::error!(listener=name,%error,"required listener stopped");
-                std::process::exit(1);
-            }
-        });
+        servers.spawn(serve_listener(name,listener,app,stopping.clone()));
     }
     Ok(())
 }
@@ -604,6 +650,49 @@ async fn domain_unavailable() -> axum::response::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn get_over(stream: &mut tokio::net::TcpStream, path: &str) {
+        let request = format!("GET {path} HTTP/1.1\r\nhost: test\r\n\r\n");
+        stream.write_all(request.as_bytes()).await.unwrap();
+    }
+
+    /// Start `app` on an ephemeral port under `serve_listener`.
+    async fn listen(app: Router) -> (std::net::SocketAddr, tokio::sync::watch::Sender<bool>, tokio::task::JoinSet<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (stop, stopping) = tokio::sync::watch::channel(false);
+        let mut servers = tokio::task::JoinSet::new();
+        servers.spawn(serve_listener("test", listener, app, stopping));
+        (addr, stop, servers)
+    }
+
+    #[tokio::test]
+    async fn stop_drains_idle_connections_and_bounds_hung_requests() {
+        let app = || {
+            Router::new()
+                .route("/ok", get(|| async { "ok" }))
+                .route("/hang", get(|| std::future::pending::<&'static str>()))
+        };
+        // An idle keep-alive connection does not hold the stop.
+        let (addr, stop, mut servers) = listen(app()).await;
+        let mut idle = tokio::net::TcpStream::connect(addr).await.unwrap();
+        get_over(&mut idle, "/ok").await;
+        let mut buf = [0u8; 64];
+        let n = idle.read(&mut buf).await.unwrap();
+        assert!(buf[..n].starts_with(b"HTTP/1.1 200"));
+        stop.send(true).unwrap();
+        assert!(drain(&mut servers, Duration::from_secs(5)).await);
+        // A request stuck in its handler would hold it forever; the deadline ends the wait.
+        let (addr, stop, mut servers) = listen(app()).await;
+        let mut hung = tokio::net::TcpStream::connect(addr).await.unwrap();
+        get_over(&mut hung, "/hang").await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        stop.send(true).unwrap();
+        let started = Instant::now();
+        assert!(!drain(&mut servers, Duration::from_millis(300)).await);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 
     #[tokio::test]
     async fn full_router_builds() {

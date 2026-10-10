@@ -269,13 +269,9 @@ pub(crate) fn build_stats(
         let b_views = b["views"].as_f64().unwrap_or(0.0);
         let a_imp = a["impressions"].as_f64().unwrap_or(0.0);
         let b_imp = b["impressions"].as_f64().unwrap_or(0.0);
-        b_views
-            .partial_cmp(&a_views)
-            .unwrap_or(std::cmp::Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(a_views, b_views)
             .then(
-                b_imp
-                    .partial_cmp(&a_imp)
-                    .unwrap_or(std::cmp::Ordering::Equal),
+                pokoin_sort::cmp_f64_desc(a_imp, b_imp),
             )
     });
 

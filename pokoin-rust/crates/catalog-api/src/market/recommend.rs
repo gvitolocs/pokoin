@@ -210,7 +210,7 @@ pub fn affinity_score(card: &Value, affinity: &Affinity) -> Score {
     if hits.is_empty() {
         return Score { score: 0.0, reason: String::new(), matches: Vec::new() };
     }
-    hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| pokoin_sort::cmp_f64_desc(a.1, b.1));
     Score { score: hits.iter().map(|h| h.1).sum(), reason: hits[0].2.clone(), matches: hits.iter().map(|h| h.0).collect() }
 }
 
@@ -239,7 +239,7 @@ pub struct Ranked {
 }
 
 fn cmp_desc(a: f64, b: f64) -> std::cmp::Ordering {
-    b.partial_cmp(&a).unwrap_or(std::cmp::Ordering::Equal)
+    pokoin_sort::cmp_f64_desc(a, b)
 }
 
 pub fn rank_by_affinity(pool: &[Value], affinity: &Affinity, want: impl Fn(&[&str]) -> bool, exclude: &HashSet<String>, limit: usize) -> Vec<Ranked> {
@@ -258,7 +258,7 @@ pub fn rank_by_affinity(pool: &[Value], affinity: &Affinity, want: impl Fn(&[&st
     }
     scored.sort_by(|a, b| {
         cmp_desc(a.score, b.score).then_with(|| {
-            js::number(a.card.get("min_price")).partial_cmp(&js::number(b.card.get("min_price"))).unwrap_or(std::cmp::Ordering::Equal)
+            pokoin_sort::cmp_f64(js::number(a.card.get("min_price")), js::number(b.card.get("min_price")))
         })
     });
     scored.truncate(limit);
@@ -476,7 +476,7 @@ pub fn rank_seller_shelf(
             reason,
         });
     }
-    scored.sort_by(|a, b| cmp_desc(a.score, b.score).then_with(|| a.price.partial_cmp(&b.price).unwrap_or(std::cmp::Ordering::Equal)));
+    scored.sort_by(|a, b| cmp_desc(a.score, b.score).then_with(|| pokoin_sort::cmp_f64(a.price, b.price)));
     scored.truncate(limit);
     scored
 }
@@ -506,12 +506,12 @@ pub fn pick_offer(offers: &[Value]) -> Option<Value> {
         .collect();
     let cheapest = |list: Vec<&Value>| -> Option<Value> {
         let mut list = list;
-        list.sort_by(|a, b| price(a).partial_cmp(&price(b)).unwrap_or(std::cmp::Ordering::Equal));
+        list.sort_by(|a, b| pokoin_sort::cmp_f64(price(a), price(b)));
         list.first().map(|v| (*v).clone())
     };
     let best = |list: Vec<&Value>| -> Option<Value> {
         let mut list = list;
-        list.sort_by(|a, b| condition_rank(a).cmp(&condition_rank(b)).then_with(|| price(a).partial_cmp(&price(b)).unwrap_or(std::cmp::Ordering::Equal)));
+        list.sort_by(|a, b| condition_rank(a).cmp(&condition_rank(b)).then_with(|| pokoin_sort::cmp_f64(price(a), price(b))));
         list.first().map(|v| (*v).clone())
     };
     let home: Vec<&Value> = rows.iter().copied().filter(|o| is_english(o)).collect();
@@ -553,7 +553,7 @@ pub fn bought_card_ids(orders: &[Value], max: usize) -> Vec<Bought> {
         .iter()
         .filter(|o| matches!(o.get("paymentStatus").map(js::js_string).as_deref(), Some("paid" | "escrow" | "released" | "partially_refunded")))
         .collect();
-    paid.sort_by(|a, b| stamp(b.get("createdAt")).partial_cmp(&stamp(a.get("createdAt"))).unwrap_or(std::cmp::Ordering::Equal));
+    paid.sort_by(|a, b| pokoin_sort::cmp_f64_desc(stamp(a.get("createdAt")), stamp(b.get("createdAt"))));
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for order in paid {

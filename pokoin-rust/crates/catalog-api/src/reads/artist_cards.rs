@@ -1,7 +1,5 @@
 //! `GET /api/marketplace-artist-cards` — port of `marketplace-artist-cards.js`.
 
-use std::cmp::Ordering;
-
 use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::Response;
@@ -264,9 +262,7 @@ async fn artist_summaries(state: &RouteState, limit_raw: Option<&str>) -> Result
     let rows = pg::pool_rows(state.api.read(), &sql, &[Bind::Int(util::js_limit(limit_raw, 1000, 5000))]).await?;
     let mut artists: Vec<Value> = rows.iter().map(summary_artist).filter(usable).collect();
     artists.sort_by(|a, b| {
-        js::number(b.get("cardCount"))
-            .partial_cmp(&js::number(a.get("cardCount")))
-            .unwrap_or(Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(js::number(a.get("cardCount")), js::number(b.get("cardCount")))
             .then_with(|| s(a, "name").to_lowercase().cmp(&s(b, "name").to_lowercase()))
     });
     Ok(artists)

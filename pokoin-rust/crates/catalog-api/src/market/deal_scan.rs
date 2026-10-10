@@ -429,7 +429,7 @@ async fn scan_seller_deals(state: &RouteState, account_id: &str) -> Result<Vec<R
         "expensive_vs_sold" => row.ask_over_sold.unwrap_or(0.0),
         _ => 0.0,
     };
-    out.sort_by(|a, b| score(b).partial_cmp(&score(a)).unwrap_or(std::cmp::Ordering::Equal));
+    out.sort_by(|a, b| pokoin_sort::cmp_f64_desc(score(a), score(b)));
     Ok(out)
 }
 
@@ -531,8 +531,8 @@ pub async fn handler(State(state): State<RouteState>, method: Method, headers: H
         }
     }
     let key = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(0.0);
-    cheap.sort_by(|a, b| key(b, "soldOverAsk").partial_cmp(&key(a, "soldOverAsk")).unwrap_or(std::cmp::Ordering::Equal));
-    expensive.sort_by(|a, b| key(b, "askOverSold").partial_cmp(&key(a, "askOverSold")).unwrap_or(std::cmp::Ordering::Equal));
+    cheap.sort_by(|a, b| pokoin_sort::cmp_f64_desc(key(a, "soldOverAsk"), key(b, "soldOverAsk")));
+    expensive.sort_by(|a, b| pokoin_sort::cmp_f64_desc(key(a, "askOverSold"), key(b, "askOverSold")));
     reply(
         StatusCode::OK,
         json!({

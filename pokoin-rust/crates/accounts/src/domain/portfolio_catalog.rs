@@ -680,7 +680,7 @@ pub fn rollup_sets(items: &[Json]) -> Vec<Json> {
     rows.sort_by(|a, b| {
         let left = a.get("pkn").and_then(Json::as_f64).unwrap_or(0.0);
         let right = b.get("pkn").and_then(Json::as_f64).unwrap_or(0.0);
-        right.partial_cmp(&left).unwrap_or(std::cmp::Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(left, right)
     });
     rows
 }

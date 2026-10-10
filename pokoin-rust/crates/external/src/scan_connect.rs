@@ -417,9 +417,7 @@ pub fn candidates_from_hits(hits: &[Value], limit: usize) -> Vec<Value> {
         }));
     }
     out.sort_by(|a, b| {
-        b.get("score").and_then(Value::as_f64).unwrap_or(0.0)
-            .partial_cmp(&a.get("score").and_then(Value::as_f64).unwrap_or(0.0))
-            .unwrap_or(std::cmp::Ordering::Equal)
+        pokoin_sort::cmp_f64_desc(a.get("score").and_then(Value::as_f64).unwrap_or(0.0), b.get("score").and_then(Value::as_f64).unwrap_or(0.0))
     });
     out.truncate(limit);
     out

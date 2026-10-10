@@ -172,7 +172,7 @@ fn median_of(values: &[f64]) -> f64 {
     if list.is_empty() {
         return 0.0;
     }
-    list.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    list.sort_by(|a, b| pokoin_sort::cmp_f64(*a, *b));
     let mid = (list.len() - 1) / 2;
     if list.len() % 2 == 1 { list[mid] } else { (list[mid] + list[mid + 1]) / 2.0 }
 }
