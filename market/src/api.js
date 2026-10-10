@@ -1369,11 +1369,16 @@ export function fetchListSnapshot(kind, key) {
 
 let listDictionaryPrimed = false;
 
+/** Off while Cloudflare cannot cache `dcb` per dictionary: its passthrough mode
+ * replays one cached `dcb` body to every client, so the zone setting stays
+ * disabled and the edge never forwards `dcb` (docs/rust-migration/COMPACT_ENCODING.md). */
+export const LIST_DICTIONARY_ENABLED = false;
+
 /** Once per page: let browsers with RFC 9842 shared dictionaries (Chromium
  * 130+) fetch the c1v2 list dictionary at idle. Later list snapshots then come
  * back as `Content-Encoding: dcb`, decoded natively. Others skip it. */
-export function primeListDictionary(doc = typeof document === 'undefined' ? null : document) {
-  if (listDictionaryPrimed || !doc?.head) {
+export function primeListDictionary(doc = typeof document === 'undefined' ? null : document, enabled = LIST_DICTIONARY_ENABLED) {
+  if (!enabled || listDictionaryPrimed || !doc?.head) {
     return false;
   }
   listDictionaryPrimed = true;
