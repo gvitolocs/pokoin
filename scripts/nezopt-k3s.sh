@@ -19,6 +19,8 @@ set -euo pipefail
 K3S_IMAGE="${K3S_IMAGE:-rancher/k3s:v1.36.4-k3s1}"
 CONTAINER="${K3S_CONTAINER:-pokoin-k3s}"
 BASE="${POKOIN_OVERFLOW_HOME:-$HOME/pokoin-overflow}"
+# Leftover card-image mirror served as the cdn.pokoin.com second origin.
+CDN_OBJECTS="${POKOIN_CDN_OBJECTS:-$HOME/data/pokoin-leftovers/objects}"
 PI="${PI_HOST:-pi-home}"
 PI_UNIT="${PI_RUST_UNIT:-pokoin-rust-api}"
 # Builds come from this repository's objects (a detached worktree, never a checkout someone works in).
@@ -51,8 +53,11 @@ up() {
       --tmpfs /run --tmpfs /var/run \
       -v "$BASE/k3s:/var/lib/rancher/k3s" \
       -v "$BASE/data:/srv/pokoin-overflow" \
+      -v "$CDN_OBJECTS:/srv/pokoin-cdn:ro" \
       "$K3S_IMAGE" server --disable traefik --disable servicelb \
-      --write-kubeconfig-mode 600 --secrets-encryption --resolv-conf /var/lib/rancher/k3s/upstream-resolv.conf --node-name nezopt >/dev/null
+      --write-kubeconfig-mode 600 --secrets-encryption --resolv-conf /var/lib/rancher/k3s/upstream-resolv.conf --node-name nezopt \
+      --kubelet-arg=eviction-hard=imagefs.available\<20Gi,nodefs.available\<20Gi \
+      --kubelet-arg=eviction-minimum-reclaim=imagefs.available=2Gi,nodefs.available=2Gi >/dev/null
   fi
   timeout 180 bash -c "until docker exec $CONTAINER kubectl get nodes 2>/dev/null | grep -q ' Ready'; do sleep 3; done" \
     || die "k3s did not become Ready"
@@ -298,5 +303,8 @@ case "${1:-status}" in
   status) status ;;
   install) install_timer ;;
   down) docker stop "$CONTAINER" ;;
-  *) die "usage: $0 up|network|sync|secret|apply|reindex|install|status|down" ;;
+  # Container flags (mounts, kubelet args) only apply at creation; cluster
+  # state lives in $BASE/k3s and survives.
+  recreate) docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; up ;;
+  *) die "usage: $0 up|network|sync|secret|apply|reindex|install|status|down|recreate" ;;
 esac

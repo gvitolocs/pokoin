@@ -199,13 +199,17 @@ spec:
           value: '0'
         - name: POKOIN_RUST_RELEASE
           value: nez-k3s
-        # No card images here: CDN paths on api.pokoin.com go to the public CDN.
+        # cdn.pokoin.com second origin (Cloudflare LB with the Pi): the
+        # nezopt leftover mirror, read-only. No fallback origin: the mirror is
+        # complete, and cdn.pokoin.com would route back here.
         - name: POKOIN_CDN_ROOT
           value: /srv/pokoin/card-images/objects
         - name: POKOIN_CDN_NAME
           value: nez-k3s
+        - name: POKOIN_CDN_BIND
+          value: 0.0.0.0:8081
         - name: POKOIN_CDN_FALLBACK_ORIGIN
-          value: https://cdn.pokoin.com
+          value: ''
         - name: MARKETPLACE_DATABASE_URL
           valueFrom:
             secretKeyRef:
@@ -263,6 +267,9 @@ spec:
         - containerPort: 8080
           name: http
           protocol: TCP
+        - containerPort: 8081
+          name: cdn
+          protocol: TCP
         readinessProbe:
           failureThreshold: 3
           httpGet:
@@ -298,6 +305,9 @@ spec:
         - mountPath: /srv/pokoin/seo
           name: seo
           readOnly: true
+        - mountPath: /srv/pokoin/card-images/objects
+          name: cdn
+          readOnly: true
         - mountPath: /tmp
           name: tmp
         workingDir: /app
@@ -325,6 +335,11 @@ spec:
           path: /srv/pokoin-overflow/seo
           type: DirectoryOrCreate
         name: seo
+      # nezopt-k3s.sh up binds ~/data/pokoin-leftovers/objects here (ro).
+      - hostPath:
+          path: /srv/pokoin-cdn
+          type: Directory
+        name: cdn
 ---
 apiVersion: v1
 kind: Service
@@ -337,6 +352,10 @@ spec:
     port: 8080
     protocol: TCP
     targetPort: 8080
+  - name: cdn
+    port: 8081
+    protocol: TCP
+    targetPort: 8081
   selector:
     app: pokoin-api
   type: ClusterIP
