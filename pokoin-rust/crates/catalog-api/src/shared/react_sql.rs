@@ -353,9 +353,13 @@ pub async fn read_cards_for_set(
     if name.is_empty() {
         return Ok(Vec::new());
     }
+    // set_order (scripts/sql/113_set_order.sql) rides along so the set desk
+    // and its list snapshots sort by the stored position, like the card-desk
+    // arrows, instead of re-parsing collector numbers in the browser.
     let sql = format!(
         "
-      select {}
+      select {},
+        c.set_order
       from public.marketplace_search_candidates c
       where c.item_kind = 'single'
         and c.product_type in ('card', 'jumbo')

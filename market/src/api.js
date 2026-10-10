@@ -1103,6 +1103,7 @@ export function cardFromCatalogRow(row = {}) {
     pokedexNum: Number(row.pokedex_num || row.pokedexNum) || 0,
     expansionSort: Number(row.expansion_sort || row.expansionSort) || 0,
     collectorSort: Number(row.collector_sort || row.collectorSort) || 0,
+    setOrder: Number(row.set_order || row.setOrder) || 0,
     artworkClusterSort: Number(row.artwork_cluster_sort || row.artworkClusterSort) || 0,
     pokedexSort: Number(row.pokedex_sort || row.pokedexSort) || 0,
     price: row.price || row.lowest_price_pkn || null,
