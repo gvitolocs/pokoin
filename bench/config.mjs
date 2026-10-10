@@ -31,6 +31,8 @@ export const SELECTORS = {
   deskSkeleton: '.skel-line',
   deskArtFrame: '.art-frame',
   deskImage: '.art-frame img',
+  // "Related cards" panel tiles (market/src/components/RelatedCards.jsx).
+  relatedImage: '.related-panel a.tile img',
   deskNext: 'a[aria-label="Next card in set"]',
   deskPrev: 'a[aria-label="Previous card in set"]',
 };
@@ -76,6 +78,7 @@ export const TIMING = {
   cardTiles: 8,
   rapidNavs: 20,
   navTimeoutMs: 15000,
+  relatedTimeoutMs: 4000,     // desk painted -> first related tile image decoded, else null
   readyTimeoutMs: 20000,
   gotoTimeoutMs: 60000,
   heapSampleMs: 500,

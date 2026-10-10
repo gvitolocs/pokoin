@@ -40,6 +40,12 @@ node bundle.mjs /tmp/pokoin-dist-maps --top 40 --json /tmp/bundle.json
 # CPU profile while typing a query (writes a .cpuprofile, gitignored)
 node profile.mjs --profile mobile --query pikachu --label abc123
 node profile.mjs --base http://127.0.0.1:4173 --sourcemap-dir /tmp/pokoin-dist-maps   # symbolicated
+# ... or of one print-language switch with that query's rows open (self + inclusive time)
+node profile.mjs --base http://127.0.0.1:28621 --switch japanese --sourcemap-dir ../solid/dist
+
+# Chrome trace of the same switch: main-thread time split into script / style / layout /
+# paint, the worst Event Timing entry, and what ran inside the longest tasks
+node trace-switch.mjs --base http://127.0.0.1:28621 --profile mobile --switch japanese
 ```
 
 `run.mjs` options: `--base` (origin, default `https://pokoin.com`), `--profile desktop|mobile`,
@@ -64,7 +70,7 @@ drift on the host or the network spreads across journeys instead of piling onto 
 | `typo` | same with `pikahcu` | as search |
 | `printlang` | with `pikachu` suggestions open, print language → Japanese, then → Western | `lang.toRowsMs`, `inp*` |
 | `langtype` | type `char`, switch print language to Japanese, click back into the box, type `izard` | `keys.*`, `lang.toRowsMs` |
-| `card` | click the first 8 distinct home tiles in turn, `history.back()` between them | `nav.toUrlMs/toHeadingMs/toImageMs`, `nav.backMs` |
+| `card` | click the first 8 distinct home tiles in turn, `history.back()` between them | `nav.toUrlMs/toHeadingMs/toImageMs/toRelatedImageMs`, `nav.backMs` |
 | `back` | `/marketplace/search?q=pikachu`, scroll 1.5 viewports, open a card, `history.back()` | `back.*` |
 | `rapid20` | open a card, then click "Next card in set" 20 times, each as soon as the heading paints | `nav.toHeadingMs` ×20, `rapid.totalMs` |
 | `scroll` | `/marketplace/search?q=energy`, mouse-wheel down for 8 s, pressing "Load more" at the bottom | `scroll.*` |
@@ -132,6 +138,9 @@ with Playwright round trips.
   `location.pathname` contains `/cards/<id>` → the desk `h1` has text and no skeleton
   (and the art frame carries that `data-card-id`, or the heading text changed) → the art
   frame's `img` is complete and `decode()` resolved.
+- `nav.toRelatedImageMs` (card): the same pointerdown → the first "Related cards" tile
+  image (`.related-panel a.tile img`) is complete and `decode()` resolved. `null` when no
+  related tile decodes within 4 s of the desk painting (no panel, or images still loading).
 - `nav.backMs` (card) and `back.toResultsMs`: `history.back()` → target page tiles
   present and the desk gone.
 - `back.scrollDeltaAtPaintPx` / `back.scrollDeltaPx`: |scrollY − saved| when results first
