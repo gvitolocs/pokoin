@@ -888,6 +888,9 @@ pub async fn reconcile_cardtrader_inventory(args: ReconcileArgs<'_>) -> ApiResul
                         status: String::new(),
                         source_listing_id: source_id.clone(),
                     });
+                if listing_already_settled(&row) {
+                    continue;
+                }
                 vanished.push((product_id.clone(), row));
             }
         }
@@ -1015,6 +1018,32 @@ fn sale_evidence_from(days: &i64) -> String {
     crate::time_util::utc_day_key_from_ms(from_ms)
 }
 
+/// A vanished listing an earlier run already settled: sold out at zero, its
+/// sale claimed. Re-checking it rewrote the same rows and re-downloaded 30
+/// days of CardTrader orders on every run (401 rows, ~1.7 GB heap on the Pi).
+fn listing_already_settled(row: &ListingRow) -> bool {
+    row.status == "sold_out" && row.quantity_available <= 0
+}
+
+/// Start day of the 1-Day Ready order read: two days before the last
+/// successful sync (late-confirmed orders still land), never older than the
+/// evidence window. A first sync, or an unreadable record, reads the window.
+fn incremental_evidence_from(last_ok_sync_ms: Option<i64>, now_ms: i64) -> String {
+    let window_ms = now_ms - SALE_EVIDENCE_DAYS * 86_400_000;
+    let from_ms = last_ok_sync_ms
+        .map(|ms| (ms - 2 * 86_400_000).max(window_ms))
+        .unwrap_or(window_ms);
+    crate::time_util::utc_day_key_from_ms(from_ms)
+}
+
+async fn last_ok_sync_ms(db: &DbPools, seller_uid: &str) -> Option<i64> {
+    let row = read_seller_sync(db, seller_uid).await.ok().flatten()?;
+    if row.get("last_sync_ok") != Some(&Value::Bool(true)) {
+        return None;
+    }
+    crate::time_util::ms_from_iso(row.get("last_sync_at")?.as_str()?)
+}
+
 /// 1-Day Ready pass: assets table + hide public copies + record 1dr sales.
 #[allow(clippy::too_many_arguments)]
 async fn reconcile_one_day_ready_assets(
@@ -1123,10 +1152,11 @@ async fn reconcile_one_day_ready_assets(
     summary["assetCards"] = totals["cards"].clone();
     summary["assetValuePkn"] = totals["valuePkn"].clone();
 
-    // 1dr sales from the evidence window, once each.
+    // 1dr sales since the last successful sync, once each.
     let mut one_day_ready_sales = 0i64;
+    let evidence_from = incremental_evidence_from(last_ok_sync_ms(db, seller_uid).await, crate::time_util::now_ms());
     if let Ok(orders) = ct
-        .fetch_seller_orders(token, &sale_evidence_from(&SALE_EVIDENCE_DAYS), "", 100, 50)
+        .fetch_seller_orders(token, &evidence_from, "", 100, 50)
         .await
     {
         let sales = sale_items_by_product(&orders);
@@ -1242,6 +1272,30 @@ pub async fn with_last_sold(db: &DbPools, rows: Vec<Value>) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settled_listings_are_not_vanished_again() {
+        let row = |status: &str, quantity_available: i64| ListingRow {
+            id: "l".into(),
+            card_id: "c".into(),
+            quantity_available,
+            status: status.into(),
+            source_listing_id: "s".into(),
+        };
+        assert!(listing_already_settled(&row("sold_out", 0)));
+        assert!(!listing_already_settled(&row("sold_out", 2)));
+        assert!(!listing_already_settled(&row("active", 0)));
+        assert!(!listing_already_settled(&row("paused", 1)));
+    }
+
+    #[test]
+    fn incremental_evidence_reads_since_the_last_good_sync() {
+        let day = 86_400_000i64;
+        let now = crate::time_util::ms_from_iso("2026-10-10T08:00:00Z").unwrap();
+        assert_eq!(incremental_evidence_from(Some(now - day / 24), now), "2026-10-08");
+        assert_eq!(incremental_evidence_from(None, now), "2026-09-10");
+        assert_eq!(incremental_evidence_from(Some(now - 90 * day), now), "2026-09-10");
+    }
 
     #[test]
     fn sale_evidence_from_is_a_utc_day_30_days_back() {
