@@ -17,7 +17,8 @@ struct Identity { key: String, generation: String, ttl: u64 }
 fn representation(req:&Request)->&'static str{
  if req.uri().path()!="/api/marketplace-search-page"{return ""}
  let query=pokoin_api_common::http::Query::parse(req.uri().query().unwrap_or(""));
- if pokoin_api_common::compact::Wanted::from_request(req.headers(),&query).c1(){":c1"}else{""}
+ let wanted=pokoin_api_common::compact::Wanted::from_request(req.headers(),&query);
+ if wanted.templates(){":c1v2"}else if wanted.c1(){":c1"}else{""}
 }
 fn digest(s:&str)->String { hex::encode(&Sha256::digest(s.as_bytes())[..8]) }
 fn truth(s:Option<&str>)->bool{s.is_some_and(|s|["1","true","yes"].contains(&s.trim().to_ascii_lowercase().as_str()))}

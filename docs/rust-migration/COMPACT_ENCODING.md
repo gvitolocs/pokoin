@@ -367,6 +367,66 @@ cargo run --quiet --example c1_dictionary > ../market/src/compact-dictionary.jso
 
 ---
 
+### 3.5 Format 2: template columns (`c1v2`)
+
+> Added 2026-10-10 after the compression benchmark
+> (`bench/c1-compression/` on branch `bench/c1-compression`).
+
+The benchmark showed where C1 still leaves bytes on the table: URL and slug
+columns are a deterministic function of other columns of the same row, but C1
+stores their residuals literally, and every LZ match back to the `name` column
+still costs brotli bytes per row. `canonicalPath`, for example, is
+`"/marketplace/en/cards/" + {id} + "/card-" + slug{name} + "-" + slug{card_number} + "-" + slug{set}`.
+
+Codec `5` stores such a column as a recipe (`compact/template.rs`):
+
+```text
+{ "c": 5, "s": [[col, form], …], "h": [[slot, …], …], "x": [shape, …], "l": [[<column>, …], …], "m"? }
+```
+
+- `s` — slots: another column of the row, form `0` its text (a string or a safe
+  integer in decimal), form `1` its ASCII slug (lowercase ASCII alphanumerics;
+  every other run between two of them becomes one `-`).
+- `h` — shapes: the slots a value is made of, in order; `x` picks a shape per
+  present row (omitted when there is one shape).
+- `l` — per shape, the literal before each slot and after the last one, each an
+  ordinary codec-0–3 column over that shape's rows.
+
+A slot is never a template, nor a reference to one, so a decoder resolves plain
+columns, then templates, then references to templates (`canonical_path` refs
+the `canonicalPath` template). The encoder keeps a template only when it
+serialises smaller than that column's own codec-0–4 encoding, refs included.
+
+A document that uses codec `5` declares `"c1": 2`; one that does not stays
+`"c1": 1`. Format 2 is opt-in on top of `c1`: `?format=c1v2`, or `v=2` on the
+`c1` media type in `Accept`. Clients that ask for `c1` keep getting format 1, so
+a cached bundle never meets a codec it cannot read. The Redis read cache keys
+`:c1v2` separately.
+
+List snapshots (`/api/marketplace-list`) also store brotli-11 copies of every
+representation and serve them with `Content-Encoding: br` when the client
+accepts it (`Vary: Accept, Accept-Encoding`). Cloudflare passes origin brotli
+through; its own on-the-fly level is far lower (the 5ban artist snapshot: 288,557
+B from Cloudflare vs 221,562 B at quality 11, −23%).
+
+Measured on the 4,505-payload test split of the benchmark (real list snapshots of
+22 TCGs plus live search and card responses), all round-trip verified byte for
+byte in Rust, and 639 of them through `market/src/compact.js` in Node:
+
+| | wire | vs `c1+br11` |
+| --- | ---: | ---: |
+| `c1` + brotli 11 | 13.10 MB | — |
+| `c1v2` + brotli 11 | 10.76 MB | −17.9% |
+| `c1v2` + brotli 5 | 12.34 MB | −5.8% |
+| `c1v2` raw | 42.62 MB | (raw `c1` 58.85 MB, −27.6%) |
+
+Encode p50 rises from 0.33 ms to 1.2 ms per payload (template planning), decode
+p50 from 0.37 ms to 0.44 ms; snapshots pay the encode once per build.
+
+Not in format 2 yet (measured, follow-ups): numeric split, front coding and a
+trained value dictionary (about 7 more points), and RFC 9842 shared brotli
+dictionaries (`dcb`, −14.6% on `c1`, Chromium only).
+
 ## 4. Measurements
 
 Reproduce with:

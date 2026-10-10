@@ -1349,7 +1349,9 @@ function mergeExpansionPayload(base, page) {
 
 /**
  * Prebuilt list snapshot (`kind` set or artist): the whole desk with prices,
- * built on nezopt every 15 min / hourly and served as c1 from one key read.
+ * built on nezopt every 15 min / daily and served from one key read as c1
+ * format 2 (template columns; a snapshot built before format 2 answers c1),
+ * pre-compressed with brotli 11.
  * Null when that list is not built yet; callers then use the live routes.
  */
 export function fetchListSnapshot(kind, key) {
@@ -1357,7 +1359,7 @@ export function fetchListSnapshot(kind, key) {
   if (!k) {
     return Promise.resolve(null);
   }
-  return getJson(`/api/marketplace-list?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(k)}&format=c1`)
+  return getJson(`/api/marketplace-list?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(k)}&format=c1v2`)
     .then((payload) => (isC1(payload) ? decodeC1(payload) : payload))
     .catch(() => null);
 }
