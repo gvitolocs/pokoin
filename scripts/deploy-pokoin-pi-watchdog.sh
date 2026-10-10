@@ -1,9 +1,10 @@
 #!/bin/bash
-# From nezopt: recover pi-home origin, install 5-minute watchdog, ship pipeline /healthz.
+# From nezopt: recover pi-home origin and install the 5-minute watchdog.
+# The API, edge, CDN and ct-deals are one native Rust unit (pokoin-rust-api);
+# /healthz and /readyz ship inside the Rust release (scripts/deploy-pokoin-rust.sh).
 set -euo pipefail
 HOST="${1:-pi-home}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-API_SRC="${POKOIN_API_SRC:-/home/nez/Projects/cardvault/pokemon_card_vault}"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=20)
 
 echo "copying watchdog"
@@ -16,32 +17,13 @@ scp "${SSH_OPTS[@]}" \
   "$ROOT/install-pokoin-pi-watchdog.sh" \
   "$HOST:/tmp/"
 
-echo "copying pipeline health"
-scp "${SSH_OPTS[@]}" \
-  "$ROOT/../server/pokoin-api/_pipeline_health.js" \
-  "$API_SRC/server/oracle-api-server.js" \
-  "$HOST:/tmp/"
-
 ssh "${SSH_OPTS[@]}" "$HOST" 'bash -s' <<'REMOTE'
 set -euo pipefail
-systemctl reset-failed docker.service cloudflared.service pokoin-card-images.service pokoin-api-edge.service ssh.service sshd.service 2>/dev/null || true
+systemctl reset-failed docker.service cloudflared.service pokoin-rust-api.service ssh.service sshd.service 2>/dev/null || true
 systemctl start docker.service
 sleep 2
-docker start pokoin-marketplace-postgres-replica pokoin-oracle-api pokoin-redis pokoin-rust-api 2>/dev/null || true
-# Do not start pokoin-card-images docker; CDN is systemd Node on :18081.
-systemctl start pokoin-card-images.service pokoin-api-edge.service cloudflared.service ssh.service 2>/dev/null || true
-
-# Ship pipeline /healthz into the live API bind-mount if present.
-mount_src="$(docker inspect pokoin-oracle-api --format '{{range .Mounts}}{{if eq .Destination "/app"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
-if [ -n "${mount_src:-}" ] && [ -d "$mount_src" ]; then
-  mkdir -p "$mount_src/api" "$mount_src/server"
-  cp /tmp/_pipeline_health.js "$mount_src/api/_pipeline_health.js"
-  cp /tmp/oracle-api-server.js "$mount_src/server/oracle-api-server.js"
-  docker restart pokoin-oracle-api >/dev/null
-  echo "pipeline health copied to $mount_src"
-else
-  echo "pokoin-oracle-api bind-mount not found; healthz not updated yet"
-fi
+docker start pokoin-marketplace-postgres-replica pokoin-redis 2>/dev/null || true
+systemctl start pokoin-rust-api.service cloudflared.service ssh.service 2>/dev/null || true
 
 install -o root -g root -m 755 /tmp/pokoin-pi-watchdog.sh /usr/local/sbin/pokoin-pi-watchdog.sh
 install -o root -g root -m 755 /tmp/pokoin-pi-ro-watch.sh /usr/local/sbin/pokoin-pi-ro-watch.sh
@@ -52,10 +34,10 @@ bash /tmp/install-pokoin-pi-watchdog.sh
 
 sleep 3
 echo '--- ports ---'
-ss -tlnp | grep -E '5432|18079|18080|18081|6379|7700' || true
-echo '--- healthz ---'
-curl -sS --max-time 8 http://127.0.0.1:18080/healthz || true
+ss -tlnp | grep -E '5432|6380|18079|18081|18082|18090' || true
+echo '--- readyz ---'
+curl -sS --max-time 8 http://127.0.0.1:18079/readyz || true
 echo
 echo '--- units ---'
-systemctl is-active docker cloudflared pokoin-card-images pokoin-api-edge pokoin-pi-watchdog.timer || true
+systemctl is-active docker cloudflared pokoin-rust-api pokoin-pi-watchdog.timer || true
 REMOTE

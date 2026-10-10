@@ -1,7 +1,7 @@
 -- 096: Pokoin Ambassador program (missions + City Ambassadors).
 --
 -- Ambassadors are no longer a copy of the distributor royalty deal: they
--- progress by completing missions (server/pokoin-api/_ambassador_core.js).
+-- progress by completing missions (pokoin-rust/crates/accounts/src/domain/ambassador.rs).
 -- "Bring 3 collectors" counts itself from rewarded Firestore referrals; every
 -- other mission is a row here, added by the Pokoin team once verified.
 -- marketplace_associates.city promotes a roster ambassador to City Ambassador.

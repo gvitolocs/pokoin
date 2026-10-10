@@ -1,4 +1,4 @@
-//! Public origin of api.pokoin.com / api2.pokoin.com — port of `pokoin-api-edge.js`.
+//! Public origin of api.pokoin.com / api2.pokoin.com — port of the retired Node `pokoin-api-edge.js`.
 //!
 //! API paths go to the in-process API router, everything else to the in-process
 //! disk CDN (`/card-images/*` is stripped like the old Oracle api2 Caddy site).

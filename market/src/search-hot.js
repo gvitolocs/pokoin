@@ -2,8 +2,8 @@
  * PIPELINE BLOCK: hot search page (SPA)
  * -------------------------------------
  * After typeahead returns, prefetch GET /api/marketplace-search-page for the
- * same q+lang+tab so Enter paints the grid from memory. The API also keeps the
- * Meili ID pool hot (`_suggest_hot_query.js`); this block is the client half.
+ * same q+lang+tab so Enter paints the grid from memory. (The retired Node API
+ * also kept a Meili ID pool hot; the Rust search page has no server half.)
  *
  * Revert: stop calling prefetchSearchPage from Chrome.jsx. Search.jsx already
  * falls back to fetchSearch when the cache misses.

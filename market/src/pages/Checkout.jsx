@@ -233,7 +233,7 @@ export default function Checkout() {
       ? sum
       : sum + Math.max(0, Number(row.pricePkn) || 0) * Math.max(0, Number(row.qty) || 0)
   ), 0);
-  // 1 PKN = €0.005 → 2 PKN per euro-cent, rounded down (server: _checkout_core).
+  // 1 PKN = €0.005 → 2 PKN per euro-cent, rounded down (server: pokoin-rust/crates/commerce/src/domain/money.rs).
   // Opt-in: nothing is discounted until the buyer ticks the voucher box.
   const voucher = pknBalanceVoucher({
     availablePkn,

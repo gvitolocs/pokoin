@@ -1,5 +1,5 @@
 // Shared seam for "does the current user have unread direct messages?".
-// Single source of truth: GET /api/chat?action=list (server/pokoin-api/chat.js),
+// Single source of truth: GET /api/chat?action=list (pokoin-rust/crates/accounts/src/handlers/chat.rs),
 // which already returns per-conversation `unread` counts for the signed-in user.
 
 export const MESSAGES_UNREAD_REFRESH_MS = 60000;

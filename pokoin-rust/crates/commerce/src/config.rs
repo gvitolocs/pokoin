@@ -248,8 +248,8 @@ impl CommerceConfig {
     }
 }
 
-/// Silver membership price in site PKN (one year). Node `unlock-silver.js`
-/// and `market/src/silver.js` charge 100; keep them equal.
+/// Silver membership price in site PKN (one year). `market/src/silver.js`
+/// shows the same price; keep them equal.
 pub const SILVER_PRICE_PKN: i64 = 100;
 
 impl Default for CommerceConfig {

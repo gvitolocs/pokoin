@@ -3,7 +3,7 @@
  * PKN") price and read their listings in their local currency: the card-page
  * list tile, the scan desk and MyPokoin default to it. Listings are still
  * stored in PKN (1 PKN = €0.005) — this only changes what the seller types
- * and sees. Buyers of those sellers pay by card (server/pokoin-api/_seller_pkn_policy.js).
+ * and sees. Buyers of those sellers pay by card (pokoin-rust/crates/commerce/src/handlers/seller.rs).
  */
 import { currencyForCountry, currencyFromLocale, fiatFromPkn, formatFiatFromPkn, formatLocalFromPkn, formatPkn, formatPknNumber, listingPriceToPkn, localAndPknFromPkn } from './pkn.js';
 

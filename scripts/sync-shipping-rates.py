@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Build server/pokoin-api/shipping-rates.json (+ SPA copy) from live online sources.
+"""Build the API shipping-rates.json (+ SPA copy) from live online sources.
+
+The API copy is pokoin-rust/crates/commerce/assets/shipping-rates.json, compiled
+into the binary: new rates reach production with the next Rust release.
 
 Providers (smoke-tested each run):
   - PackZoo GET https://packzoo.com/api/prices  (multi-carrier EU compare)
@@ -28,7 +31,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-API_JSON = ROOT / "server" / "pokoin-api" / "shipping-rates.json"
+API_JSON = ROOT / "pokoin-rust" / "crates" / "commerce" / "assets" / "shipping-rates.json"
 SPA_JSON = ROOT / "market" / "src" / "shipping-rates.json"
 CARDVAULT_JSON = (
     Path.home() / "Projects" / "cardvault" / "pokemon_card_vault" / "api" / "shipping-rates.json"
@@ -692,11 +695,6 @@ def main() -> int:
         CARDVAULT_JSON.write_text(text, encoding="utf-8")
         print(f"wrote {CARDVAULT_JSON}")
 
-    # Remove obsolete override + old script name note
-    old_overrides = ROOT / "server" / "pokoin-api" / "shipping-rates.overrides.json"
-    if old_overrides.is_file():
-        old_overrides.unlink()
-        print(f"removed {old_overrides.relative_to(ROOT)}")
     return 0
 
 

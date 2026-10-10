@@ -1,4 +1,4 @@
-//! System paths of the retired Node runtime (`server/oracle-api-server.js`):
+//! System paths of the retired Node runtime (`oracle-api-server.js`):
 //! liveness/readiness (`api/_pipeline_health.js`), the staging page, the
 //! opt-in route manifest (`api-route-families.js`), the client contract, the
 //! JSON 404, and Node's path normalisation (trailing slash, `/api/x.js`, path

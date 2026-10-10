@@ -1,5 +1,5 @@
 //! Request/response conventions of the retired Node runtime
-//! (`server/oracle-api-server.js` + `api/_marketplace_react_card.js`).
+//! (`oracle-api-server.js` + `api/_marketplace_react_card.js`).
 
 use axum::{
     body::Body,

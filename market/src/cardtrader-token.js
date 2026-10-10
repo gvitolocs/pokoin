@@ -1,7 +1,7 @@
 // CardTrader API tokens are RS256 JWTs. A copy from CardTrader's wrapped
 // textarea, a "Bearer " prefix, or a password manager filling the field can
 // surround a valid token with extra text, and CardTrader then answers 401.
-// Mirrors cleanToken / tokenFingerprint in server/pokoin-api/_cardtrader_client.js.
+// Mirrors cleanToken / tokenFingerprint in pokoin-rust/crates/external/src/cardtrader/client.rs.
 
 const TOKEN_NOISE_RE = /[\s\u00AD\u200B-\u200D\u2060\uFEFF]/g;
 const JWT_RE = /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;

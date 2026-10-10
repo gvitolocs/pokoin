@@ -1,5 +1,5 @@
 -- Seed stub for production Postgres when rates move off JSON.
--- Quote service currently loads server/pokoin-api/shipping-rates.json (fail closed).
+-- Quote service currently loads pokoin-rust/crates/commerce/assets/shipping-rates.json (fail closed).
 
 create table if not exists public.shipping_rates (
   id text primary key,

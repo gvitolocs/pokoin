@@ -94,7 +94,7 @@ function pointsAttr(coords) {
  * Collection value chart, laid out like a multi-asset portfolio tracker:
  * cards stacked on liquidity (wallet PKN), one point per day. Cards are worth
  * each printing slice's last sold median, carried across days without a sale
- * (server/pokoin-api/_portfolio_history_core.js). A window that ends today
+ * (pokoin-rust/crates/accounts/src/domain/portfolio_history.rs). A window that ends today
  * fills two thirds with realized days; the hatched last third is the
  * projection (projectPortfolio) on the same day scale. Opens on the last
  * month; longer windows appear when stored history reaches them.

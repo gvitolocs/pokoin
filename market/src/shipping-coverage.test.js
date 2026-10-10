@@ -8,7 +8,7 @@ import { SHIP_FROM_COUNTRIES, SHIP_TO_COUNTRIES } from './ship-countries.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(root, '..', '..');
-const apiRates = JSON.parse(fs.readFileSync(path.join(repo, 'server/pokoin-api/shipping-rates.json'), 'utf8'));
+const apiRates = JSON.parse(fs.readFileSync(path.join(repo, 'pokoin-rust/crates/commerce/assets/shipping-rates.json'), 'utf8'));
 const syncSrc = fs.readFileSync(path.join(repo, 'scripts/sync-shipping-rates.py'), 'utf8');
 
 function pythonTuple(name) {

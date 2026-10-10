@@ -1,6 +1,6 @@
 -- 099: Durable fixed-window rate-limit buckets for security-sensitive routes.
 --
--- Backs limitSecurityCritical() in server/pokoin-api/_rate_limit.js: the same
+-- Backs limit_security_critical() in pokoin-rust/crates/api-common/src/limits.rs: the same
 -- fail-closed Postgres window pattern as scan_rate_limits, for brute-force,
 -- payment, and paid-external-API paths that must never rely on the fail-open
 -- Redis limiter. Buckets are rl:{scope}:{sha256(identity)[0:32]} so raw IPs
@@ -16,5 +16,5 @@ create table if not exists public.marketplace_rate_limits (
   primary key (bucket, window_start)
 );
 
--- Fully-expired windows are removed by purgeExpiredSecurityRateLimits()
--- (server/pokoin-api/_rate_limit.js) once a route is wired to this class.
+-- Fully-expired windows are removed by the limiter itself: about 1 in 200
+-- limit_security_critical calls deletes every window before the last three.

@@ -3,7 +3,7 @@
 //! `ApiState` owns the lazily connected Postgres pools (replica read, writer),
 //! a shared Redis connection and per-game catalog pools. `http` mirrors the
 //! request/response conventions of the retired Node runtime
-//! (`server/oracle-api-server.js`): query maps, body decoding, JSON responses.
+//! (`oracle-api-server.js`): query maps, body decoding, JSON responses.
 //! `public_error` is the port of `api/_public_error.js`.
 
 pub mod game;

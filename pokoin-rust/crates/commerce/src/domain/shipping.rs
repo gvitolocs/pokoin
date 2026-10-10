@@ -1,9 +1,9 @@
 //! Shipping rates, package tiers and checkout quoting, ported from
 //! `_checkout_core.js` and the seed half of `marketplace-shipping-options.js`.
 //!
-//! The rate catalog is vendored at `assets/shipping-rates.json` — the same file
-//! the Node quote service loads (`server/pokoin-api/shipping-rates.json`) — so
-//! quoting fails closed on exactly the same routes.
+//! The rate catalog is `assets/shipping-rates.json`, written by
+//! `scripts/sync-shipping-rates.py` with the SPA copy, so quoting fails closed
+//! on exactly the routes the retired Node quote service did.
 
 use std::sync::OnceLock;
 
