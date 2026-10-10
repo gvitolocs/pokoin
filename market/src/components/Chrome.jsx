@@ -30,6 +30,7 @@ import { pickSuggestHoverSrc, sameSuggestHoverBox, suggestHoverAllowed, suggestH
 import { compactQuery, suggestLiveReady } from '../compact-query.js';
 import { useProgressiveSuggest } from '../use-progressive-suggest.js';
 import { useSuggestEngine, useSuggestFlip, useSuggestTitleFit } from '../suggest-hooks.js';
+import { withGroupKeys } from '../suggest-group-keys.js';
 import { loadSuggestEngineAfterPaint, peekSuggestEngine } from '../suggest-engine-loader.js';
 import {
   SUGGEST_THUMB_EAGER,
@@ -1134,8 +1135,8 @@ export default function Chrome({ children }) {
                   </ul>
                 ) : (
                 <ul className="suggest-list" role="listbox" aria-label="Card suggestions" ref={listRef}>
-                  {visibleGroups.length ? visibleGroups.map((group) => (
-                      <li key={`${group.name}:${group.printings?.[0]?.id || ''}`} className="suggest-group">
+                  {visibleGroups.length ? withGroupKeys(visibleGroups).map((group) => (
+                      <li key={group.key} className="suggest-group">
                         <ul>
                           {(group.printings || []).map((printing) => {
                             if (!printing || typeof printing !== 'object') return null;

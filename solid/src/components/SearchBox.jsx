@@ -34,6 +34,7 @@ import { fetchSearchRecall } from '@market/search-recall.js';
 import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '@market/search-kind.js';
 import { warmupSearchUniverse } from '@market/search-warmup.js';
 import { createSuggestFlip } from '@market/suggest-flip.js';
+import { withGroupKeys } from '@market/suggest-group-keys.js';
 import { pickSuggestHoverSrc, sameSuggestHoverBox, suggestHoverAllowed, suggestHoverBox } from '@market/suggest-hover.js';
 import { SUGGEST_THUMB_EAGER, SUGGEST_THUMB_HIGH, collectPrintingThumbUrls, preloadSuggestThumbs } from '@market/suggest-images.js';
 import { fitSuggestTitles } from '@market/suggest-title-fit.js';
@@ -423,6 +424,8 @@ export default function SearchBox(props) {
     return live.paintCatalogGroups(text, { printLang: printLang(), searchLang: searchLang(), kind: catalogTab() });
   });
   const flat = createMemo(() => flattenPrintings(visibleGroups()));
+  // Groups keyed by name: a re-rank inside a group keeps its rows mounted.
+  const keyedGroups = createMemo(() => withGroupKeys(visibleGroups()));
   // The one frame where `term` trails the input also reads as pending, never as "no match".
   const suggestPending = () => (pokemon && searchTab() !== 'users'
     ? progressivePending() || !engine() || term() !== query()
@@ -686,7 +689,7 @@ export default function SearchBox(props) {
                   </li>
                 )}
               >
-                <For each={visibleGroups()} keyed={(group) => `${group.name}:${group.printings?.[0]?.id || ''}`}>
+                <For each={keyedGroups()} keyed={(group) => group.key}>
                   {(group) => (
                     <li class="suggest-group">
                       <ul>
