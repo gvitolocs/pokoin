@@ -158,7 +158,10 @@ fn configured_games() -> Vec<String> {
 
 /// In-process GET through the full API router (same body the SPA receives).
 async fn get(app: &Router, game: &str, path: &str) -> anyhow::Result<Value> {
-    let mut req = Request::builder().method("GET").uri(path);
+    let mut req = Request::builder()
+        .method("GET")
+        .uri(path)
+        .header(pokoin_catalog_api::reads::artist_cards::LIST_BUILD_HEADER, "1");
     if game != "pokemon" {
         req = req.header("x-pokoin-game", game);
     }

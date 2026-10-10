@@ -470,6 +470,35 @@ async fn artist_cards_for_slug(state: &RouteState, artist_slug: Option<&str>, ar
     Ok(json!({ "artist": artist_json, "profile": profile, "cards": cards }))
 }
 
+/// Sent by the list builder (`pokoin-api job build-lists`) so it reads the
+/// live query instead of the snapshot it is about to replace.
+pub const LIST_BUILD_HEADER: &str = "x-pokoin-list-build";
+
+/// Prebuilt whole-artist desk (`marketplace_list_snapshots`, kind=artist),
+/// cut to the request limit. The live query sorts every card of the artist on
+/// a computed collector number (p50 3 s on the Pi); the snapshot is the same
+/// tiles=1 answer, rebuilt daily. `None` falls back to the live query.
+async fn artist_snapshot(state: &RouteState, slug: &str, limit_raw: Option<&str>) -> Option<Value> {
+    let key = slug.trim().to_ascii_lowercase();
+    if key.is_empty() {
+        return None;
+    }
+    let rows = pg::pool_rows(
+        state.api.read(),
+        "select body from public.marketplace_list_snapshots where kind = 'artist' and key = $1",
+        &[Bind::Text(key)],
+    )
+    .await
+    .ok()?;
+    let mut payload: Value = serde_json::from_str(rows.first()?.get("body")?.as_str()?).ok()?;
+    let limit = util::js_limit(limit_raw, 240, 20_000).max(1) as usize;
+    match payload.get_mut("cards") {
+        Some(Value::Array(cards)) if !cards.is_empty() => cards.truncate(limit),
+        _ => return None,
+    }
+    Some(payload)
+}
+
 pub async fn handler(
     State(state): State<RouteState>,
     method: Method,
@@ -496,7 +525,16 @@ pub async fn handler(
         };
     }
     let slug = util::first_of(&q, &["artistSlug", "slug"]);
-    match artist_cards_for_slug(&state, slug, q.search_param("artist"), q.search_param("limit"), q.search_param("tiles") == Some("1")).await {
+    let tiles = q.search_param("tiles") == Some("1");
+    if tiles && !headers.contains_key(LIST_BUILD_HEADER) {
+        if let Some(payload) = match slug {
+            Some(slug) => artist_snapshot(&state, slug, q.search_param("limit")).await,
+            None => None,
+        } {
+            return util::json_cache_c1(wanted, StatusCode::OK, payload, "public, max-age=20, s-maxage=300");
+        }
+    }
+    match artist_cards_for_slug(&state, slug, q.search_param("artist"), q.search_param("limit"), tiles).await {
         Ok(payload) => util::json_cache_c1(wanted, StatusCode::OK, payload, "public, max-age=20, s-maxage=300"),
         Err(error) => util::db_error("marketplace-artist-cards", &error, "Marketplace artist cards failed."),
     }
