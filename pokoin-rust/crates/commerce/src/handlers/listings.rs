@@ -33,14 +33,14 @@ fn clean_text(value: &str, max: usize) -> String {
     live::text(&json!(value), max)
 }
 fn clean_listing_id(value: &str) -> String {
+    static LISTING_ID: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        )
+        .expect("valid regex")
+    });
     let s = clean_text(value, 80);
-    if regex::Regex::new(
-        r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-    )
-    .ok()
-    .map(|r| r.is_match(&s))
-    .unwrap_or(false)
-    {
+    if LISTING_ID.is_match(&s) {
         s
     } else {
         String::new()

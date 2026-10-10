@@ -8,6 +8,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 use sqlx::Row;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use unicode_normalization::UnicodeNormalization;
 pub const RESERVE: &str = "pknreserve";
 fn js_string(value: &Value) -> String {
@@ -93,13 +94,40 @@ pub fn json_number(n: f64) -> Value {
             .unwrap_or(Value::Null)
     }
 }
+// Every regex here is compiled once. `listing_row` runs per listing, and
+// compiling USERNAME (a Unicode class repeated 64 times) costs ~65 ms on the
+// Pi: a 408-listing MyPokoin read spent ~55 s compiling on one tokio worker
+// and froze the whole runtime (2026-10-10 19:37 UTC).
+static USERNAME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[\p{L}\p{N} .'_-]{3,64}$").expect("valid regex"));
+static PROFILE_UID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9:_-]{4,160}$").expect("valid regex"));
+static COMMENT_MARKUP: LazyLock<[Regex; 3]> = LazyLock::new(|| {
+    [
+        r"(?is)<script\b[^>]*>.*?</script>",
+        r"(?is)<style\b[^>]*>.*?</style>",
+        r"<[^>]*>",
+    ]
+    .map(|p| Regex::new(p).expect("valid regex"))
+});
+static COMMENT_NON_WORD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[^a-z0-9@./:_+\-]+").expect("valid regex"));
+static COMMENT_PROMOTION: LazyLock<[Regex; 8]> = LazyLock::new(|| {
+    [
+        r"\bcheck\s+(?:out\s+)?my\s+(?:store|shop|profile|page|cards|listings|other\s+items)\b",
+        r"\bvisit\s+my\s+(?:store|shop|profile|page)\b",
+        r"\bsee\s+my\s+(?:store|shop|profile|page|other\s+cards|listings)\b",
+        r"\bmore\s+(?:cards|items|listings|products)\s+available\b",
+        r"\b(?:other|more)\s+(?:cards|items|listings|products)\s+(?:in|on)\s+my\s+(?:store|shop|profile|page)\b",
+        r"\b(?:message|contact|dm|pm)\s+me\b",
+        r"\b(?:whatsapp|telegram|instagram|facebook|discord|ebay|vinted)\b",
+        r"(?:https?://|www\.|(?:^|\s)[a-z0-9-]+\.(?:com|it|net|org|shop)\b)",
+    ]
+    .map(|p| Regex::new(p).expect("valid regex"))
+});
 pub fn clean_username(value: &str) -> String {
     let s = text(&json!(value), 64).to_lowercase();
-    let valid = Regex::new(r"^[\p{L}\p{N} .'_-]{3,64}$")
-        .ok()
-        .map(|r| r.is_match(&s))
-        .unwrap_or(false);
-    if valid && s.chars().any(char::is_alphabetic) {
+    if USERNAME.is_match(&s) && s.chars().any(char::is_alphabetic) {
         s
     } else {
         String::new()
@@ -121,14 +149,8 @@ pub fn reserve_row(row: &Value) -> bool {
 }
 pub fn public_comment(value: &Value) -> String {
     let mut s = text(value, 500);
-    for pattern in [
-        r"(?is)<script\b[^>]*>.*?</script>",
-        r"(?is)<style\b[^>]*>.*?</style>",
-        r"<[^>]*>",
-    ] {
-        if let Ok(re) = Regex::new(pattern) {
-            s = re.replace_all(&s, "").into_owned();
-        }
+    for re in COMMENT_MARKUP.iter() {
+        s = re.replace_all(&s, "").into_owned();
     }
     s = s
         .chars()
@@ -142,26 +164,8 @@ pub fn public_comment(value: &Value) -> String {
         .filter(|c| !(('\u{0300}'..='\u{036f}').contains(c)))
         .collect::<String>()
         .to_lowercase();
-    let normalized = Regex::new(r"[^a-z0-9@./:_+\-]+")
-        .ok()
-        .map(|r| r.replace_all(&normalized, " ").into_owned())
-        .unwrap_or(normalized);
-    let patterns = [
-        r"\bcheck\s+(?:out\s+)?my\s+(?:store|shop|profile|page|cards|listings|other\s+items)\b",
-        r"\bvisit\s+my\s+(?:store|shop|profile|page)\b",
-        r"\bsee\s+my\s+(?:store|shop|profile|page|other\s+cards|listings)\b",
-        r"\bmore\s+(?:cards|items|listings|products)\s+available\b",
-        r"\b(?:other|more)\s+(?:cards|items|listings|products)\s+(?:in|on)\s+my\s+(?:store|shop|profile|page)\b",
-        r"\b(?:message|contact|dm|pm)\s+me\b",
-        r"\b(?:whatsapp|telegram|instagram|facebook|discord|ebay|vinted)\b",
-        r"(?:https?://|www\.|(?:^|\s)[a-z0-9-]+\.(?:com|it|net|org|shop)\b)",
-    ];
-    if patterns.iter().any(|p| {
-        Regex::new(p)
-            .ok()
-            .map(|r| r.is_match(&normalized))
-            .unwrap_or(false)
-    }) {
+    let normalized = COMMENT_NON_WORD.replace_all(&normalized, " ");
+    if COMMENT_PROMOTION.iter().any(|re| re.is_match(&normalized)) {
         String::new()
     } else {
         s
@@ -354,11 +358,7 @@ pub async fn seller_profile(
     if let Some(c) = &cache {
         if let Some(raw) = c.get(&key).await {
             if let Ok(v) = serde_json::from_str::<Value>(&raw) {
-                if Regex::new(r"^[A-Za-z0-9:_-]{4,160}$")
-                    .ok()
-                    .map(|r| r.is_match(&field(&v, "uid", 160)))
-                    .unwrap_or(false)
-                {
+                if PROFILE_UID.is_match(&field(&v, "uid", 160)) {
                     return Ok(
                         json!({"uid":v["uid"],"username":clean,"displayName":field(&v,"displayName",120)}),
                     );
@@ -530,6 +530,18 @@ mod tests {
             assert_eq!(p["sellerName"], RESERVE);
             assert_eq!(p["sellerUsername"], RESERVE);
         }
+    }
+    #[test]
+    fn serializing_a_big_seller_book_stays_cheap() {
+        // Per-row regex compilation made 408 listings take ~55 s on the Pi and
+        // froze the runtime. Compiled once, 2,000 rows take milliseconds even
+        // in a debug build; the budget only catches a per-row compile coming back.
+        let row = json!({"id":"id-1","card_id":"220962","seller_name":"Raffaella Sabatino","profile_username":"raffaella","seller_comment":"Near mint, check photos","price_pkn":10});
+        let started = std::time::Instant::now();
+        for _ in 0..2000 {
+            listing_row(&row, true);
+        }
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
     }
     #[test]
     fn username_validation_accepts_native_seller_names() {
