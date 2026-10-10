@@ -106,12 +106,30 @@ enum Claim {
     Complete,
     Busy,
 }
+/// What a marker status means for a new attempt. `purchase_unknown`: the
+/// purchase request was sent and its outcome is not known, so only a person
+/// reconciling the CardTrader order may retry it.
+fn claim_for(status: &str) -> Option<Claim> {
+    match status {
+        "purchased" | "applied" | "skipped" => Some(Claim::Complete),
+        "claimed" | "cart_added" | "purchase_unknown" => Some(Claim::Busy),
+        _ => None,
+    }
+}
+/// The Pokoin CardTrader buyer account has one cart: one buy-through uses it
+/// at a time, across processes (specs/tla/eur-fulfilment bugs/buy-shared-cart).
+const CART_LOCK_DOC: &str = "cardtrader_purchase_locks/cart";
+/// Covers cart + add + purchase (20 s HTTP timeouts) and the marker writes.
+const CART_LOCK_TTL_MS: i64 = 5 * 60 * 1000;
 #[async_trait]
 trait Store: Send + Sync {
     async fn order(&self, id: &str) -> Result<Value, ApiError>;
     async fn integration_token(&self, uid: &str) -> Result<Option<String>, ApiError>;
     async fn claim(&self, collection: &str, id: &str, payload: Value) -> Result<Claim, ApiError>;
     async fn mark(&self, collection: &str, id: &str, payload: Value) -> Result<(), ApiError>;
+    /// Take the cart lock for `owner` unless another owner holds a live one.
+    async fn lock_cart(&self, owner: &str, ttl_ms: i64) -> Result<bool, ApiError>;
+    async fn unlock_cart(&self, owner: &str) -> Result<(), ApiError>;
 }
 struct NativeStore {
     accounts: Firestore,
@@ -153,11 +171,8 @@ impl Store for NativeStore {
                     let reference = tx.doc(&path);
                     let old = tx.get_doc(&reference).await?;
                     let status = old.map(|d| d.get_str("status")).unwrap_or_default();
-                    if matches!(status.as_str(), "purchased" | "applied" | "skipped") {
-                        return Ok(Claim::Complete);
-                    }
-                    if matches!(status.as_str(), "claimed" | "cart_added") {
-                        return Ok(Claim::Busy);
+                    if let Some(claim) = claim_for(&status) {
+                        return Ok(claim);
                     }
                     tx.set(
                         &reference,
@@ -180,6 +195,55 @@ impl Store for NativeStore {
                 DocData::from_json(&payload).server_timestamp("updatedAt"),
                 true,
             )
+            .await
+            .map_err(external_error)
+    }
+    async fn lock_cart(&self, owner: &str, ttl_ms: i64) -> Result<bool, ApiError> {
+        let owner = owner.to_string();
+        self.accounts
+            .run_transaction(move |tx| {
+                let owner = owner.clone();
+                Box::pin(async move {
+                    let reference = tx.doc(CART_LOCK_DOC);
+                    let now = chrono::Utc::now().timestamp_millis();
+                    if let Some(doc) = tx.get_doc(&reference).await? {
+                        let held = doc.get_str("owner");
+                        if !held.is_empty() && held != owner && doc.get_i64("expiresAtMs").unwrap_or(0) > now {
+                            return Ok(false);
+                        }
+                    }
+                    tx.set(
+                        &reference,
+                        DocData::from_json(&json!({"owner": owner, "expiresAtMs": now + ttl_ms}))
+                            .server_timestamp("updatedAt"),
+                        true,
+                    )?;
+                    Ok(true)
+                })
+            })
+            .await
+            .map_err(external_error)
+    }
+    async fn unlock_cart(&self, owner: &str) -> Result<(), ApiError> {
+        let owner = owner.to_string();
+        self.accounts
+            .run_transaction(move |tx| {
+                let owner = owner.clone();
+                Box::pin(async move {
+                    let reference = tx.doc(CART_LOCK_DOC);
+                    if let Some(doc) = tx.get_doc(&reference).await? {
+                        if doc.get_str("owner") == owner {
+                            tx.set(
+                                &reference,
+                                DocData::from_json(&json!({"owner": "", "expiresAtMs": 0}))
+                                    .server_timestamp("updatedAt"),
+                                true,
+                            )?;
+                        }
+                    }
+                    Ok(())
+                })
+            })
             .await
             .map_err(external_error)
     }
@@ -403,9 +467,33 @@ impl CardTraderPort for NativeCardTrader {
                     .with_code("CARDTRADER_BUY_TOKEN_MISSING"),
             );
         }
+        // One buy-through at a time on the shared Pokoin cart, then the
+        // per-line marker. Busy => the fulfilment stays partial and the sweep
+        // retries it.
+        let owner = uuid::Uuid::new_v4().to_string();
+        if !self.store.lock_cart(&owner, CART_LOCK_TTL_MS).await? {
+            return Err(ApiError::conflict(
+                "Another CardTrader purchase is using the cart; this one is retried.",
+            )
+            .with_code("CARDTRADER_CART_BUSY"));
+        }
+        let result = self.buy_in_cart(request, &item, &product, &marker, payload).await;
+        let _ = self.store.unlock_cart(&owner).await;
+        result
+    }
+}
+impl NativeCardTrader {
+    async fn buy_in_cart(
+        &self,
+        request: &CardTraderBuyThrough,
+        item: &Value,
+        product: &str,
+        marker: &str,
+        payload: Value,
+    ) -> Result<CardTraderOutcome, ApiError> {
         match self
             .store
-            .claim("cardtrader_purchase_markers", &marker, payload)
+            .claim("cardtrader_purchase_markers", marker, payload)
             .await?
         {
             Claim::Complete => {
@@ -420,36 +508,49 @@ impl CardTraderPort for NativeCardTrader {
             }
             Claim::Acquired => {}
         }
-        let result=async {
-            let cart=self.http.cart(&self.buy.token).await?;
+        // The bool: whether the purchase request was sent. After that, any
+        // failure (a lost answer, a failed marker write) may hide a completed
+        // purchase, and marking it "failed" let the next attempt buy again
+        // (specs/tla/eur-fulfilment bugs/buy-lost-answer).
+        let result: Result<CardTraderOutcome, (ApiError, bool)> = async {
+            let cart = self.http.cart(&self.buy.token).await.map_err(|e| (e, false))?;
             if !cart_items(&cart).is_empty() {
-                return Err(ApiError::conflict("CardTrader cart is not empty; refusing automatic purchase.").with_code("CARDTRADER_CART_NOT_EMPTY"));
+                return Err((ApiError::conflict("CardTrader cart is not empty; refusing automatic purchase.").with_code("CARDTRADER_CART_NOT_EMPTY"), false));
             }
-            let product_id=product.parse::<u64>().map_err(|_|ApiError::conflict("CardTrader listing metadata is incomplete."))?;
-            let zero=item.pointer("/sourceMetadata/shippingMode").and_then(Value::as_str)==Some("zero");
-            self.http.add(&self.buy.token,json!({"product_id":product_id,"quantity":request.quantity,"via_cardtrader_zero":zero})).await?;
-            self.store.mark("cardtrader_purchase_markers",&marker,json!({"status":"cart_added","viaCardTraderZero":zero})).await?;
-            let purchase=self.http.purchase(&self.buy.token).await?;
-            let order_id=value_text(purchase.get("id").or_else(||purchase.get("order_id")).or_else(||purchase.get("uuid")));
-            self.store.mark("cardtrader_purchase_markers",&marker,json!({"status":"purchased","purchasedAt":crate::store::now_iso(),"cardtraderOrderId":order_id.chars().take(160).collect::<String>()})).await?;
-            Ok::<_,ApiError>(CardTraderOutcome::Applied{detail:json!({"ok":true,"status":"purchased","productId":product,"quantity":request.quantity})})
-        }.await;
-        if let Err(error) = &result {
-            let status = if error.code.as_deref() == Some("CARDTRADER_CART_NOT_EMPTY") {
-                "blocked_non_empty_cart"
-            } else {
-                "failed"
-            };
-            let _ = self
-                .store
-                .mark(
-                    "cardtrader_purchase_markers",
-                    &marker,
-                    json!({"status":status,"error":error.message}),
-                )
-                .await;
+            let product_id = product.parse::<u64>().map_err(|_| (ApiError::conflict("CardTrader listing metadata is incomplete."), false))?;
+            let zero = item.pointer("/sourceMetadata/shippingMode").and_then(Value::as_str) == Some("zero");
+            self.http.add(&self.buy.token, json!({"product_id":product_id,"quantity":request.quantity,"via_cardtrader_zero":zero})).await.map_err(|e| (e, false))?;
+            self.store.mark("cardtrader_purchase_markers", marker, json!({"status":"cart_added","viaCardTraderZero":zero})).await.map_err(|e| (e, false))?;
+            let purchase = self.http.purchase(&self.buy.token).await.map_err(|e| (e, true))?;
+            let order_id = value_text(purchase.get("id").or_else(|| purchase.get("order_id")).or_else(|| purchase.get("uuid")));
+            self.store.mark("cardtrader_purchase_markers", marker, json!({"status":"purchased","purchasedAt":crate::store::now_iso(),"cardtraderOrderId":order_id.chars().take(160).collect::<String>()})).await.map_err(|e| (e, true))?;
+            Ok(CardTraderOutcome::Applied{detail:json!({"ok":true,"status":"purchased","productId":product,"quantity":request.quantity})})
         }
-        result
+        .await;
+        match result {
+            Ok(outcome) => Ok(outcome),
+            Err((error, sent)) => {
+                let _ = self
+                    .store
+                    .mark(
+                        "cardtrader_purchase_markers",
+                        marker,
+                        json!({"status": purchase_failure_status(&error, sent), "error": error.message}),
+                    )
+                    .await;
+                Err(error)
+            }
+        }
+    }
+}
+/// Marker status after a failed buy-through step.
+fn purchase_failure_status(error: &ApiError, sent: bool) -> &'static str {
+    if sent {
+        "purchase_unknown"
+    } else if error.code.as_deref() == Some("CARDTRADER_CART_NOT_EMPTY") {
+        "blocked_non_empty_cart"
+    } else {
+        "failed"
     }
 }
 #[cfg(test)]
@@ -461,6 +562,7 @@ mod tests {
     struct Memory {
         order: Value,
         markers: Mutex<HashMap<String, Value>>,
+        lock: Mutex<String>,
     }
     #[async_trait]
     impl Store for Memory {
@@ -483,11 +585,8 @@ mod tests {
                 .and_then(|v| v.get("status"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            if matches!(status, "purchased" | "applied" | "skipped") {
-                return Ok(Claim::Complete);
-            }
-            if matches!(status, "claimed" | "cart_added") {
-                return Ok(Claim::Busy);
+            if let Some(claim) = claim_for(status) {
+                return Ok(claim);
             }
             payload["status"] = json!("claimed");
             rows.insert(key, payload);
@@ -502,11 +601,27 @@ mod tests {
             }
             Ok(())
         }
+        async fn lock_cart(&self, owner: &str, _: i64) -> Result<bool, ApiError> {
+            let mut held = self.lock.lock().await;
+            if !held.is_empty() && *held != owner {
+                return Ok(false);
+            }
+            *held = owner.to_string();
+            Ok(true)
+        }
+        async fn unlock_cart(&self, owner: &str) -> Result<(), ApiError> {
+            let mut held = self.lock.lock().await;
+            if *held == owner {
+                held.clear();
+            }
+            Ok(())
+        }
     }
     #[derive(Default)]
     struct MockHttp {
         calls: Mutex<Vec<String>>,
         fail: Mutex<bool>,
+        purchase_lost: Mutex<bool>,
         cart: Value,
     }
     #[async_trait]
@@ -534,6 +649,9 @@ mod tests {
         }
         async fn purchase(&self, _: &str) -> Result<Value, ApiError> {
             self.calls.lock().await.push("purchase".into());
+            if *self.purchase_lost.lock().await {
+                return Err(ApiError::unavailable("CardTrader request failed: timeout"));
+            }
             Ok(json!({"id":123}))
         }
     }
@@ -634,6 +752,41 @@ mod tests {
             .await
             .unwrap();
         assert!(adapter.buy_through(&request).await.is_err());
+    }
+    fn live_request() -> (Value, CardTraderBuyThrough) {
+        (
+            json!({"items":[{"listingId":"l","source":"cardtrader_live","sourceMetadata":{"cardtraderProductId":7}}]}),
+            CardTraderBuyThrough { order_id: "o".into(), listing_id: "l".into(), quantity: 1, total_pkn: 10.0 },
+        )
+    }
+    #[tokio::test]
+    async fn a_lost_purchase_answer_is_never_bought_again() {
+        // specs/tla/eur-fulfilment bugs/buy-lost-answer.cfg: the purchase went
+        // through but its answer was lost; "failed" let the sweep buy again.
+        let (order, request) = live_request();
+        let (adapter, store, http) = adapter(order);
+        *http.purchase_lost.lock().await = true;
+        assert!(adapter.buy_through(&request).await.is_err());
+        assert_eq!(store.markers.lock().await["cardtrader_purchase_markers/o__7"]["status"], "purchase_unknown");
+        *http.purchase_lost.lock().await = false;
+        assert!(adapter.buy_through(&request).await.is_err(), "in doubt is busy, not retried");
+        assert_eq!(http.calls.lock().await.iter().filter(|s| *s == "purchase").count(), 1);
+        assert!(store.lock.lock().await.is_empty(), "the cart lock is released");
+    }
+    #[tokio::test]
+    async fn a_held_cart_is_never_shared_by_two_purchases() {
+        // bugs/buy-shared-cart.cfg: two orders interleaving on the one cart.
+        let (order, request) = live_request();
+        let (adapter, store, http) = adapter(order);
+        *store.lock.lock().await = "another-purchase".into();
+        let error = adapter.buy_through(&request).await.unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("CARDTRADER_CART_BUSY"));
+        assert!(store.markers.lock().await.is_empty(), "the marker is untouched, so the retry is not busy");
+        assert!(http.calls.lock().await.is_empty());
+        store.lock.lock().await.clear();
+        assert!(adapter.buy_through(&request).await.unwrap().is_complete());
+        assert_eq!(purchase_failure_status(&ApiError::unavailable("x"), false), "failed");
+        assert_eq!(claim_for("purchase_unknown"), Some(Claim::Busy));
     }
     #[tokio::test]
     async fn disabled_buy_records_explicit_dry_run_and_does_not_call_http() {

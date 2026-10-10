@@ -209,7 +209,7 @@ impl DbPools {
 }
 
 /// Build a query with serde_json params bound like node-postgres would.
-fn bound_query<'q>(sql: &'q str, params: &'q [Value]) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
+pub(crate) fn bound_query<'q>(sql: &'q str, params: &'q [Value]) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
     let mut query = sqlx::query(sql);
     for value in params {
         query = query.bind(BindValue(value));

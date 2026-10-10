@@ -143,25 +143,95 @@ pub fn product_body(listing: &Value) -> ApiResult<Value> {
     Ok(body)
 }
 
-/// `pushListingToCardTrader`: create the product with the seller's token.
-pub async fn push_product(fs: &dyn FirestoreStore, ct: &CardTraderClient, uid: &str, listing: &Value) -> ApiResult<Value> {
-    let doc = integration::read_integration_doc(fs, uid).await?;
-    if integration::is_one_day_ready_integration(&doc) {
-        return Err(ApiError::conflict(
-            "CardTrader 1-Day Ready accounts are stocked by CardTrader. List this card on Pokoin only.",
-        ));
+/// What a CardTrader create did, as far as Pokoin can know.
+#[derive(Debug)]
+pub enum PushOutcome {
+    /// Created: `{"productId", "sourceListingId"}`.
+    Created(Value),
+    /// Nothing was created (bad listing, no token, a 4xx answer).
+    Rejected(ApiError),
+    /// The product may exist (no answer, a 5xx, or no id in the answer). Its
+    /// `user_data_field` (`pokoin:<listing id>`) lets the reconcile link it.
+    InDoubt(ApiError),
+}
+
+/// `pushListingToCardTrader`, telling a rejected create from one in doubt.
+pub async fn push_product_outcome(fs: &dyn FirestoreStore, ct: &CardTraderClient, uid: &str, listing: &Value) -> PushOutcome {
+    let prepared = async {
+        let doc = integration::read_integration_doc(fs, uid).await?;
+        if integration::is_one_day_ready_integration(&doc) {
+            return Err(ApiError::conflict(
+                "CardTrader 1-Day Ready accounts are stocked by CardTrader. List this card on Pokoin only.",
+            ));
+        }
+        let token = integration::decrypt_integration_token(fs, uid).await?;
+        Ok((token, product_body(listing)?))
     }
-    let token = integration::decrypt_integration_token(fs, uid).await?;
-    let payload = ct.create_product(&token, product_body(listing)?).await?;
+    .await;
+    let (token, body) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => return PushOutcome::Rejected(error),
+    };
+    let payload = match ct.create_product(&token, body).await {
+        Ok(payload) => payload,
+        Err(error) if crate::cardtrader::client::write_in_doubt(&error) => return PushOutcome::InDoubt(error),
+        Err(error) => return PushOutcome::Rejected(error),
+    };
     let resource = payload.get("resource").or_else(|| payload.get("product")).unwrap_or(&payload);
     let mut id = first(resource, &["id"], 80);
     if id.is_empty() {
         id = field(&payload, "id", 80);
     }
     if id.is_empty() {
-        return Err(ApiError::new(502, "CardTrader did not return a product id."));
+        return PushOutcome::InDoubt(ApiError::new(502, "CardTrader did not return a product id."));
     }
-    Ok(json!({ "productId": id, "sourceListingId": format!("ct:{id}") }))
+    PushOutcome::Created(json!({ "productId": id, "sourceListingId": format!("ct:{id}") }))
+}
+
+/// `pushListingToCardTrader`: create the product with the seller's token.
+pub async fn push_product(fs: &dyn FirestoreStore, ct: &CardTraderClient, uid: &str, listing: &Value) -> ApiResult<Value> {
+    match push_product_outcome(fs, ct, uid, listing).await {
+        PushOutcome::Created(pushed) => Ok(pushed),
+        PushOutcome::Rejected(error) | PushOutcome::InDoubt(error) => Err(error),
+    }
+}
+
+/// `source_listing_id` of a listing whose CardTrader push is claimed by outbox
+/// event `event_id` and not yet linked. Not a `ct:<digits>` id, so no reconcile
+/// removal, destroy or sale sync ever acts on it.
+pub fn pending_source(event_id: i64) -> String {
+    format!("ct:pending:{event_id}")
+}
+
+pub fn is_pending_source(source: &str) -> bool {
+    source.starts_with("ct:pending:")
+}
+
+/// Statuses in which a listing must not stay for sale on CardTrader.
+pub fn off_sale(status: &str) -> bool {
+    matches!(status, "inactive" | "sold_out")
+}
+
+/// Upsert the push link row (`marketplace_cardtrader_product_links`).
+pub async fn upsert_push_link(writer: &PgPool, uid: &str, listing: &Value, pushed: &Value, id: uuid::Uuid, seller: &str, qty: i32) -> ApiResult<()> {
+    let bp = blueprint(&first(listing, &["cardId", "card_id"], 80)).map(|n| n.to_string()).unwrap_or_default();
+    let linked = sqlx::query(
+        "insert into public.marketplace_cardtrader_product_links (seller_uid, ct_product_id, listing_id, blueprint_id, last_ct_quantity, last_seen_at, origin, missing_from_ct, updated_at) \
+         values ($1, $2, $3::uuid, $4, $5, now(), 'push', false, now()) \
+         on conflict (seller_uid, ct_product_id) do update set listing_id = excluded.listing_id, blueprint_id = excluded.blueprint_id, \
+         last_ct_quantity = excluded.last_ct_quantity, last_seen_at = now(), origin = 'push', missing_from_ct = false, updated_at = now()",
+    )
+    .bind(if uid.is_empty() { seller } else { uid })
+    .bind(field(pushed, "productId", 80))
+    .bind(id)
+    .bind(bp)
+    .bind(qty)
+    .execute(writer)
+    .await;
+    match linked {
+        Err(error) if !is_missing_table(&error) => Err(error.into()),
+        _ => Ok(()),
+    }
 }
 
 fn is_missing_table(error: &sqlx::Error) -> bool {
@@ -194,25 +264,7 @@ pub async fn push_and_link(
         use sqlx::Row;
         let qty = row.try_get::<i32, _>("quantity_available").unwrap_or(0);
         let seller = row.try_get::<String, _>("seller_uid").unwrap_or_default();
-        let bp = blueprint(&first(listing, &["cardId", "card_id"], 80)).map(|n| n.to_string()).unwrap_or_default();
-        let linked = sqlx::query(
-            "insert into public.marketplace_cardtrader_product_links (seller_uid, ct_product_id, listing_id, blueprint_id, last_ct_quantity, last_seen_at, origin, missing_from_ct, updated_at) \
-             values ($1, $2, $3::uuid, $4, $5, now(), 'push', false, now()) \
-             on conflict (seller_uid, ct_product_id) do update set listing_id = excluded.listing_id, blueprint_id = excluded.blueprint_id, \
-             last_ct_quantity = excluded.last_ct_quantity, last_seen_at = now(), origin = 'push', missing_from_ct = false, updated_at = now()",
-        )
-        .bind(if uid.is_empty() { seller.as_str() } else { uid })
-        .bind(field(&pushed, "productId", 80))
-        .bind(id)
-        .bind(bp)
-        .bind(qty)
-        .execute(writer)
-        .await;
-        if let Err(error) = linked {
-            if !is_missing_table(&error) {
-                return Err(error.into());
-            }
-        }
+        upsert_push_link(writer, uid, listing, &pushed, id, &seller, qty).await?;
     }
     Ok(pushed)
 }
@@ -220,6 +272,54 @@ pub async fn push_and_link(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Same key as the webhook tests: the test binary shares one environment.
+    const KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[tokio::test]
+    async fn create_outcomes_tell_rejected_from_in_doubt() {
+        use axum::{routing::post, Json, Router};
+        // CardTrader stand-in: the blueprint id picks the answer.
+        let app = Router::new().route(
+            "/products",
+            post(|Json(body): Json<Value>| async move {
+                match body["blueprint_id"].as_i64() {
+                    Some(1) => (axum::http::StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error":"bad"}))),
+                    Some(2) => (axum::http::StatusCode::SERVICE_UNAVAILABLE, Json(json!({}))),
+                    Some(3) => (axum::http::StatusCode::OK, Json(json!({"resource":{"id":9}}))),
+                    _ => (axum::http::StatusCode::OK, Json(json!({}))),
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        std::env::set_var("CARDTRADER_TOKEN_ENCRYPTION_KEY", KEY);
+        let fs = crate::firebase::MemoryFirestore::new();
+        fs.seed(
+            "seller_integrations",
+            &integration::integration_doc_id("u1"),
+            json!({"enabled": true, "encryptedToken": crate::crypto::encrypt_secret("test-push-token-0123456789", Some(KEY))}),
+        )
+        .await;
+        let ct = CardTraderClient::with_base(format!("http://{address}"));
+        let listing = |card: &str| json!({"id": "6f1c", "cardId": card, "pricePkn": 200, "quantityAvailable": 1});
+        assert!(matches!(push_product_outcome(&fs, &ct, "u1", &listing("2")).await, PushOutcome::Rejected(_)));
+        assert!(matches!(push_product_outcome(&fs, &ct, "u1", &listing("4")).await, PushOutcome::InDoubt(_)));
+        assert!(matches!(push_product_outcome(&fs, &ct, "u1", &listing("8")).await, PushOutcome::InDoubt(_)));
+        match push_product_outcome(&fs, &ct, "u1", &listing("6")).await {
+            PushOutcome::Created(pushed) => assert_eq!(pushed["sourceListingId"], "ct:9"),
+            other => panic!("expected Created, got {other:?}"),
+        }
+        server.abort();
+        // No answer at all (nothing listening): the product may exist.
+        let closed = CardTraderClient::with_base("http://127.0.0.1:1".into());
+        assert!(matches!(push_product_outcome(&fs, &closed, "u1", &listing("6")).await, PushOutcome::InDoubt(_)));
+        // A listing that cannot be sent was never created.
+        assert!(matches!(push_product_outcome(&fs, &ct, "u1", &json!({"cardId": "x", "pricePkn": 200})).await, PushOutcome::Rejected(_)));
+        assert!(is_pending_source(&pending_source(41)) && !is_pending_source("ct:41"));
+        assert!(off_sale("inactive") && off_sale("sold_out") && !off_sale("active") && !off_sale("paused"));
+    }
 
     #[test]
     fn product_body_matches_node() {

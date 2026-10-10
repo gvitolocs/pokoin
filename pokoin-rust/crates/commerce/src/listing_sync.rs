@@ -2,13 +2,19 @@
 use crate::listing_live::{field, first, json_number, number};
 use crate::{error::ApiError, state::DomainState};
 use pokoin_external::{
-    cardtrader::{client::CardTraderClient, integration},
+    cardtrader::{
+        client::CardTraderClient,
+        integration,
+        push::{self as ct_push, PushOutcome},
+    },
     firebase::{FirestoreRest, FirestoreStore},
 };
 use serde_json::{json, Value};
 use sqlx::{Postgres, Row, Transaction};
 use std::sync::atomic::{AtomicBool, Ordering};
 pub const INSERT_SQL:&str="insert into public.marketplace_outbox (event_type, aggregate_id, payload, idempotency_key) values ($1, $2, $3::jsonb, $4) on conflict (idempotency_key) where processed_at is null and idempotency_key is not null do nothing returning id";
+/// CLAIM_SQL's `attempts < 8`.
+pub const MAX_ATTEMPTS: i32 = 8;
 pub const CLAIM_SQL:&str="update public.marketplace_outbox as outbox set attempts = outbox.attempts + 1, available_at = now() + interval '30 seconds' where outbox.id = (select id from public.marketplace_outbox where processed_at is null and available_at <= now() and attempts < 8 order by id for update skip locked limit 1) returning id, event_type, aggregate_id, payload, attempts";
 fn external_error(e: pokoin_external::ApiError) -> ApiError {
     ApiError::new(
@@ -87,9 +93,20 @@ pub async fn destroy_product(
     if quantity.is_finite() && quantity > 0.0 {
         let _ = ct.update_product(&token, id, json!({"quantity":0})).await;
     }
-    match ct.destroy_product(&token, id).await {
+    destroy_result(id, ct.destroy_product(&token, id).await)
+}
+
+/// A product CardTrader no longer has (404) is destroyed; any other failure
+/// is an error so the outbox retries it. Reporting it as done (Node did) left
+/// a deactivated listing for sale on CardTrader for good: the reconcile finds
+/// the inactive row by its source and leaves it alone
+/// (specs/tla/listing-outbox bugs/ghost-destroy-failure.cfg).
+pub fn destroy_result(id: &str, result: Result<Value, pokoin_external::ApiError>) -> Result<Value, ApiError> {
+    let gone = format!("{}404", pokoin_external::cardtrader::client::HTTP_ERROR_PREFIX);
+    match result {
         Ok(_) => Ok(json!({"ok":true,"productId":id})),
-        Err(e) => Ok(json!({"ok":false,"productId":id,"error":e.message})),
+        Err(e) if e.code.as_deref() == Some(gone.as_str()) => Ok(json!({"ok":true,"productId":id,"alreadyGone":true})),
+        Err(e) => Err(external_error(e)),
     }
 }
 pub fn mutation(existing: &Value, body: &Value, status: &str) -> &'static str {
@@ -309,7 +326,168 @@ pub async fn invalidate(state: &DomainState, game: &str, card: &str, seller: &st
         .query_async::<i64>(&mut redis)
         .await;
 }
-pub async fn apply_event(state: &DomainState, payload: &mut Value) -> Result<(), ApiError> {
+/// How long the consumer waits for the read replica before bumping anyway.
+pub const REPLICA_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Wait until the read replica has replayed the writer's current WAL position
+/// (the event's commit and its price refresh). A generation bumped earlier
+/// lets a reader re-cache the replica's old row under the new generation
+/// (specs/tla/listing-outbox NoStaleCacheAfterSync). Gives up after
+/// REPLICA_WAIT; a read pool that is the writer itself has nothing to wait for.
+pub async fn await_replica(state: &DomainState) -> bool {
+    let target = match sqlx::query_scalar::<_, String>("select pg_current_wal_lsn()::text")
+        .fetch_one(state.write_db())
+        .await
+    {
+        Ok(lsn) => lsn,
+        Err(_) => return false,
+    };
+    let deadline = std::time::Instant::now() + REPLICA_WAIT;
+    loop {
+        match sqlx::query_scalar::<_, Option<bool>>("select pg_last_wal_replay_lsn() >= $1::pg_lsn")
+            .bind(&target)
+            .fetch_one(state.read_db())
+            .await
+        {
+            Ok(Some(true)) | Ok(None) => return true,
+            Ok(Some(false)) => {}
+            Err(_) => return false,
+        }
+        if std::time::Instant::now() >= deadline {
+            tracing::warn!(lsn = %target, "listing sync: replica still behind; bumping read generations anyway");
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+/// What the CardTrader step does once the push claim was attempted.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PushPlan {
+    /// The row had no source and is now `ct:pending:<event>`: create it.
+    Push,
+    /// Linked already. Its product is destroyed by whoever saw it off sale:
+    /// the deactivation's own event, or the destroy event the link enqueued.
+    AlreadyLinked,
+    /// Another push of this listing is in doubt; the reconcile links it.
+    InDoubt,
+    /// The listing row is gone.
+    Missing,
+}
+
+/// Decide from the claim result and the row's source as it is now.
+pub fn push_plan(claimed: bool, current_source: Option<&str>) -> PushPlan {
+    match (claimed, current_source) {
+        (true, _) => PushPlan::Push,
+        (false, None) => PushPlan::Missing,
+        (false, Some(source)) if ct_push::is_pending_source(source) => PushPlan::InDoubt,
+        (false, Some(_)) => PushPlan::AlreadyLinked,
+    }
+}
+
+const LINK_PUSH_SQL: &str = "with written as (update public.marketplace_user_listings set source_listing_id = $2, updated_at = now() where id = $1 and source_listing_id = $3 returning *) select to_jsonb(written) as listing from written";
+
+const CLAIM_PUSH_SQL: &str = "update public.marketplace_user_listings set source_listing_id = $2, updated_at = now() where id = $1 and source_listing_id = '' returning id";
+const RELEASE_PUSH_SQL: &str = "update public.marketplace_user_listings set source_listing_id = '', updated_at = now() where id = $1 and source_listing_id = $2";
+
+/// The CardTrader push of a listing.changed event, at most once per listing:
+/// the row moves from no source to `ct:pending:<event>` before CardTrader is
+/// called (two workers, a lease that expired under a slow worker, or a retry
+/// after a crash all lose that compare-and-set), and the product is linked over
+/// that claim only. A listing deactivated while its push was in flight gets a
+/// destroy event (specs/tla/listing-outbox AtMostOncePush, NoGhostProduct).
+fn card_of(payload: &Value) -> String {
+    field(payload, "cardId", 80)
+}
+
+async fn push_cardtrader(state: &DomainState, event_id: i64, seller: &str, payload: &mut Value) -> Result<(), ApiError> {
+    let Ok(listing_id) = uuid::Uuid::parse_str(&field(payload, "listingId", 80)) else {
+        // No row to claim (never produced by the handlers): the old push.
+        let pushed = push_listing(state, seller, &payload["listing"], true).await?;
+        payload["sourceListingId"] = json!(field(&pushed, "sourceListingId", 160));
+        payload["steps"]["cardtrader"] = json!("pushed");
+        return Ok(());
+    };
+    let pending = ct_push::pending_source(event_id);
+    let claimed = sqlx::query_scalar::<_, uuid::Uuid>(CLAIM_PUSH_SQL)
+        .bind(listing_id)
+        .bind(&pending)
+        .fetch_optional(state.write_db())
+        .await?
+        .is_some();
+    let current = if claimed {
+        None
+    } else {
+        sqlx::query_scalar::<_, String>("select source_listing_id from public.marketplace_user_listings where id = $1")
+            .bind(listing_id)
+            .fetch_optional(state.write_db())
+            .await?
+    };
+    let plan = push_plan(claimed, current.as_deref());
+    if plan != PushPlan::Push {
+        payload["sourceListingId"] = json!(current.unwrap_or_default());
+        payload["steps"]["cardtrader"] = json!(match plan {
+            PushPlan::InDoubt => "push_in_doubt",
+            PushPlan::Missing => "listing_missing",
+            _ => "already_linked",
+        });
+        return Ok(());
+    }
+    let fs = FirestoreRest::from_env()
+        .ok_or_else(|| ApiError::internal("Firebase Admin credentials are not configured."))?;
+    let ct = CardTraderClient::new();
+    match ct_push::push_product_outcome(&fs, &ct, seller, &payload["listing"]).await {
+        PushOutcome::Created(pushed) => {
+            let source = field(&pushed, "sourceListingId", 160);
+            // Link over our claim and, when the listing went off sale while
+            // CardTrader created it (or the claim is gone), queue its destroy
+            // in the same transaction: an event of its own, retried by the
+            // outbox, so it outlives this worker and its lease.
+            let mut tx = state.write_db().begin().await?;
+            let linked: Option<Value> = sqlx::query_scalar(LINK_PUSH_SQL)
+                .bind(listing_id)
+                .bind(&source)
+                .bind(&pending)
+                .fetch_optional(&mut *tx)
+                .await?;
+            let off_sale = linked.as_ref().is_none_or(|row| ct_push::off_sale(&field(row, "status", 20)));
+            if off_sale {
+                let row = linked.clone().unwrap_or_else(|| json!({"id": listing_id.to_string(), "card_id": card_of(payload), "seller_uid": seller}));
+                let destroy = event(
+                    &row,
+                    &json!({"game": field(payload, "game", 40), "sellerUid": seller, "mutation": "LISTING_DELETED",
+                            "destroyCardtrader": true, "sourceListingId": source}),
+                    state.now_ms(),
+                );
+                enqueue(&mut tx, destroy).await?;
+            }
+            tx.commit().await?;
+            if let Some(row) = &linked {
+                let qty = row["quantity_available"].as_i64().unwrap_or(0) as i32;
+                ct_push::upsert_push_link(state.write_db(), seller, &payload["listing"], &pushed, listing_id, seller, qty)
+                    .await
+                    .map_err(external_error)?;
+            }
+            payload["sourceListingId"] = json!(source);
+            payload["steps"]["cardtrader"] = json!(if off_sale { "pushed_destroy_queued" } else { "pushed" });
+            Ok(())
+        }
+        PushOutcome::Rejected(error) => {
+            // Nothing was created: free the claim so a retry pushes again.
+            sqlx::query(RELEASE_PUSH_SQL)
+                .bind(listing_id)
+                .bind(&pending)
+                .execute(state.write_db())
+                .await?;
+            Err(external_error(error))
+        }
+        // The product may exist: keep ct:pending:<event>. The reconcile links
+        // it by user_data_field; a retry never pushes a second one.
+        PushOutcome::InDoubt(error) => Err(external_error(error)),
+    }
+}
+
+pub async fn apply_event(state: &DomainState, event_id: i64, payload: &mut Value) -> Result<(), ApiError> {
     let card = field(payload, "cardId", 80);
     let game = field(payload, "game", 40);
     let seller = field(payload, "sellerUid", 160);
@@ -321,6 +499,7 @@ pub async fn apply_event(state: &DomainState, payload: &mut Value) -> Result<(),
     // home and seller-shop generations when it committed the mutation.
     if std::env::var("POKOIN_READ_CACHE").as_deref() != Ok("0") {
         if let Some(mut redis) = state.redis() {
+            await_replica(state).await;
             let game = if game.is_empty() { "pokemon" } else { &game };
             for scope in [format!("card:{game}:{card}"), format!("search:{game}")] {
                 let _ = redis::cmd("INCR")
@@ -339,27 +518,11 @@ pub async fn apply_event(state: &DomainState, payload: &mut Value) -> Result<(),
     );
     payload["steps"]["publishedAt"] = json!(state.now_ms());
     if payload["wantsCardtrader"] == true && payload["steps"]["cardtrader"].is_null() {
-        let mut source = field(payload, "sourceListingId", 160);
-        if source.is_empty() {
-            if let Ok(id) = uuid::Uuid::parse_str(&field(payload, "listingId", 80)) {
-                source = sqlx::query_scalar::<_, Option<String>>(
-                    "select source_listing_id from public.marketplace_user_listings where id = $1",
-                )
-                .bind(id)
-                .fetch_optional(state.write_db())
-                .await?
-                .flatten()
-                .unwrap_or_default();
-            }
-        }
-        if source.is_empty() {
-            let pushed = push_listing(state, &seller, &payload["listing"], true).await?;
-            source = field(&pushed, "sourceListingId", 160);
-            payload["steps"]["cardtrader"] = json!("pushed");
+        if field(payload, "sourceListingId", 160).is_empty() {
+            push_cardtrader(state, event_id, &seller, payload).await?;
         } else {
             payload["steps"]["cardtrader"] = json!("already_linked");
         }
-        payload["sourceListingId"] = json!(source);
     }
     if payload["destroyCardtrader"] == true
         && !field(payload, "sourceListingId", 160).is_empty()
@@ -394,9 +557,10 @@ pub async fn drain_once(state: &DomainState) -> Result<bool, ApiError> {
         .await?;
     let Some(row) = row else { return Ok(false) };
     let id: i64 = row.try_get("id")?;
+    let attempts: i32 = row.try_get("attempts").unwrap_or(0);
     let mut payload: Value = row.try_get("payload")?;
     let result = if row.try_get::<String, _>("event_type")? == "listing.changed" {
-        apply_event(state, &mut payload).await
+        apply_event(state, id, &mut payload).await
     } else {
         Ok(())
     };
@@ -406,6 +570,10 @@ pub async fn drain_once(state: &DomainState) -> Result<bool, ApiError> {
             Ok(true)
         }
         Err(e) => {
+            if attempts >= MAX_ATTEMPTS {
+                // CLAIM_SQL never picks it again (Node logged the same line).
+                tracing::warn!(msg = "pokoin_sync_dead_letter", id, attempts, error = %e.message);
+            }
             sqlx::query("update public.marketplace_outbox set last_error = $2, payload = coalesce($3::jsonb, payload) where id = $1").bind(id).bind(e.message.chars().take(500).collect::<String>()).bind(row.try_get::<Value,_>("payload")?).execute(state.write_db()).await?;
             Ok(false)
         }
@@ -499,6 +667,30 @@ mod tests {
         assert_eq!(e["payload"]["listing"]["cardId"], "22");
         assert_eq!(e["payload"]["merchantListing"]["quantityAvailable"], 2);
         assert!(event(&json!({}), &json!({}), 0).is_none());
+    }
+    #[test]
+    fn push_claim_is_decided_from_the_row_as_it_is_now() {
+        // specs/tla/listing-outbox: one push per listing, in-doubt pushes
+        // left to the reconcile, off-sale listings lose their product.
+        assert_eq!(push_plan(true, None), PushPlan::Push);
+        assert_eq!(push_plan(false, None), PushPlan::Missing);
+        assert_eq!(push_plan(false, Some("ct:pending:41")), PushPlan::InDoubt);
+        assert_eq!(push_plan(false, Some("ct:444")), PushPlan::AlreadyLinked);
+        assert!(LINK_PUSH_SQL.contains("source_listing_id = $3"), "link only over our own claim");
+        assert_eq!(ct_push::pending_source(41), "ct:pending:41");
+        // A pending marker is never a product id for removal, destroy or sync.
+        assert_eq!(pokoin_external::cardtrader::sync_core::parse_ct_product_id("ct:pending:41"), "");
+        assert!(CLAIM_SQL.contains("attempts < 8") && MAX_ATTEMPTS == 8);
+    }
+    #[test]
+    fn destroy_failures_are_retried_unless_the_product_is_gone() {
+        let gone = pokoin_external::ApiError::new(502, "CardTrader request failed with HTTP 404.").with_code("cardtrader_http_404");
+        assert_eq!(destroy_result("7", Err(gone)).unwrap()["alreadyGone"], true);
+        let down = pokoin_external::ApiError::new(502, "CardTrader request failed with HTTP 503.").with_code("cardtrader_http_503");
+        assert!(destroy_result("7", Err(down)).is_err());
+        let timeout = pokoin_external::ApiError::new(502, "CardTrader request failed: timeout").with_code("cardtrader_transport");
+        assert!(destroy_result("7", Err(timeout)).is_err());
+        assert_eq!(destroy_result("7", Ok(json!({}))).unwrap()["ok"], true);
     }
     #[test]
     fn mutation_cache_keys_match_shared_node_namespace() {
