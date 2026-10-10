@@ -1,4 +1,5 @@
-//! Request diagnostics contain route templates and counters only, never query/body/auth.
+//! Request diagnostics contain the route template, the URI path and counters only, never query/body/auth.
+//! The layer wraps the whole router, so `route` is often "unmatched"; `path` says which endpoint it was.
 use std::sync::atomic::{AtomicU64,Ordering};
 use std::time::{Instant,SystemTime,UNIX_EPOCH};
 use axum::{extract::{Request,MatchedPath,State},middleware::Next,response::Response,http::HeaderValue};
@@ -8,14 +9,15 @@ pub async fn log_request(State(state):State<crate::AppState>,req:Request,next:Ne
  let started=Instant::now();
  let route=req.extensions().get::<MatchedPath>().map(|p|p.as_str()).unwrap_or("unmatched").to_owned();
  let method=req.method().as_str().to_owned();
+ let path:String=req.uri().path().chars().take(160).collect();
  let request_id=format!("rust-{:x}-{:x}",SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),SEQUENCE.fetch_add(1,Ordering::Relaxed));
  let mut res=next.run(req).await;
  let status=res.status().as_u16();let duration_ms=started.elapsed().as_millis() as u64;
  res.headers_mut().insert("x-pokoin-runtime",HeaderValue::from_static("rust"));
  if let Ok(v)=HeaderValue::from_str(&state.config.release){res.headers_mut().insert("x-pokoin-release",v);}
  if let Ok(v)=HeaderValue::from_str(&request_id){res.headers_mut().insert("x-request-id",v);}
- if status>=500{state.errors.fetch_add(1,Ordering::Relaxed);tracing::error!(%request_id,%route,%method,status,duration_ms,"http_request");}
- else if duration_ms>=500{tracing::warn!(%request_id,%route,%method,status,duration_ms,"slow_http_request");}
- else{tracing::info!(%request_id,%route,%method,status,duration_ms,"http_request");}
+ if status>=500{state.errors.fetch_add(1,Ordering::Relaxed);tracing::error!(%request_id,%route,%path,%method,status,duration_ms,"http_request");}
+ else if duration_ms>=500{tracing::warn!(%request_id,%route,%path,%method,status,duration_ms,"slow_http_request");}
+ else{tracing::info!(%request_id,%route,%path,%method,status,duration_ms,"http_request");}
  res
 }
