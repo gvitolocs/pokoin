@@ -5182,6 +5182,27 @@ span.shop-flag {
 .shop-txt { color: var(--muted); display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .shop-px { font-weight: 700; font-size: 0.85rem; color: var(--yellow); }
 .shop-offer { display: contents; }
+
+/* Desktop card-desk shop rows are a table: seller | condition + language |
+   price | qty | actions, so the fields share the row instead of the seller
+   sitting alone on the left and everything else pushed to the far right. */
+@media (min-width: 721px) {
+  .shop-panel .shop-row:not(.is-profile) {
+    display: grid;
+    grid-template-columns: minmax(9rem, 1.6fr) minmax(0, 1.3fr) minmax(5.5rem, 1fr) minmax(2.5rem, 0.5fr) 4.25rem;
+    column-gap: 1rem;
+  }
+  .shop-panel .shop-row:not(.is-profile) .shop-facets {
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+  .shop-panel .shop-row:not(.is-profile) .ct-qty { justify-self: start; }
+  .shop-panel .shop-row:not(.is-profile) .shop-row-actions,
+  .shop-panel .shop-row:not(.is-profile) .shop-owner-actions {
+    grid-column: 5;
+    justify-self: end;
+  }
+}
 .shop-act { text-align: right; color: var(--muted); }
 
 .ct-qty {
