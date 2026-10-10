@@ -360,6 +360,23 @@ spec:
     app: pokoin-api
   type: ClusterIP
 ---
+# The pokoin-cdn tunnel's origin name: on the Pi it resolves to 127.0.0.1
+# (/etc/hosts), here to the API pods' CDN listener.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pokoin-cdn-origin
+  namespace: pokoin-overflow
+spec:
+  ports:
+  - name: cdn
+    port: 18081
+    protocol: TCP
+    targetPort: 8081
+  selector:
+    app: pokoin-api
+  type: ClusterIP
+---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
