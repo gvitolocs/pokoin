@@ -71,6 +71,11 @@ create table if not exists public.marketplace_card_daily_median (
 const KINDS: [&str; 3] = ["set", "artist", "name"];
 /// Static between builds; the builder runs every 15 min (sets) / hourly (artists).
 const LIST_CACHE: &str = "public, max-age=120, s-maxage=900, stale-while-revalidate=86400";
+/// A `dcb` body is never stored by a shared cache: Cloudflare's dictionary
+/// passthrough does not key its cache on `Available-Dictionary` (tested
+/// 2026-10-10: one cached `dcb` body was replayed to `br`, gzip and identity
+/// clients).
+const LIST_CACHE_DCB: &str = "private, max-age=120";
 /// The SPA's set-desk page size; a set is complete when a page comes back short.
 const SET_PAGE: usize = 400;
 const ARTIST_LIMIT: usize = 20_000;
@@ -139,7 +144,8 @@ pub async fn list(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -
             let tag = format!("\"{version}-{format}{}\"", coding.map(|c| format!("-{c}")).unwrap_or_default());
             // application/json, not the c1 media type: Cloudflare only
             // brotli-compresses known types. The payload marks itself c1.
-            let mut response = crate::suggest::cors(StatusCode::OK, Some(LIST_CACHE.to_owned()), Some("application/json; charset=utf-8"), bytes).into_response();
+            let cache = if coding == Some("dcb") { LIST_CACHE_DCB } else { LIST_CACHE };
+            let mut response = crate::suggest::cors(StatusCode::OK, Some(cache.to_owned()), Some("application/json; charset=utf-8"), bytes).into_response();
             let h = response.headers_mut();
             h.insert(axum::http::header::VARY, HeaderValue::from_static("Accept, Accept-Encoding, Available-Dictionary"));
             if format != "json" {

@@ -445,8 +445,16 @@ by `brotlic-sys`) because the pure-Rust crate has no raw shared dictionary.
   names the current id.
 - Snapshots record `dcb_c1v2` and `dcb_dict`; a row built with an older
   dictionary is rebuilt by the next list job and falls back to `br` meanwhile.
-- Cloudflare zone setting `shared_dictionary_mode` is `passthrough`, so the edge
-  forwards `Available-Dictionary` and keeps the origin's `dcb` body.
+- **Not live.** Cloudflare's `shared_dictionary_mode = passthrough` (beta) does
+  not key its cache on `Available-Dictionary`: on 2026-10-10 one cached `dcb`
+  body was replayed to `br`, gzip and identity clients, so the setting was set
+  back to `disabled` within a minute and the list cache purged. With it disabled
+  Cloudflare never forwards `dcb`, so the origin serves `br`. The SPA prime is
+  off (`LIST_DICTIONARY_ENABLED`); `dcb` responses are `Cache-Control: private`
+  and the Rust edge cache keys on `Accept` and the negotiated coding, so turning
+  passthrough on again cannot poison a shared cache. Bypassing Cloudflare's
+  cache for `dcb` would cost an origin round trip (~50–150 ms) to save ~15% of a
+  list body, so it waits for a variant-aware Cloudflare cache.
 
 On the benchmark's 469-payload test subset `dcb` on top of `c1v2` is a further
 −18.3% (−36.6% vs `c1` + brotli 11).
