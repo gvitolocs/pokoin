@@ -33,16 +33,21 @@ pub struct EdgeConfig {
     pub seo_dir: PathBuf,
     pub cache_max_bytes: usize,
     pub cache_max_ttl: u64,
+    /// Longest a coalesced fetch may run, and a follower may wait for it,
+    /// before both answer `504`. Below Cloudflare's 100 s origin timeout.
+    pub flight_timeout: Duration,
 }
 
 impl EdgeConfig {
-    /// `POKOIN_SEO_DIR` (/srv/pokoin/seo), `POKOIN_API_CACHE_MB` (64), `POKOIN_API_CACHE_MAX_TTL` (300).
+    /// `POKOIN_SEO_DIR` (/srv/pokoin/seo), `POKOIN_API_CACHE_MB` (64), `POKOIN_API_CACHE_MAX_TTL` (300),
+    /// `POKOIN_API_FLIGHT_TIMEOUT_SECS` (60).
     pub fn from_env() -> Self {
         let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         Self {
             seo_dir: PathBuf::from(env("POKOIN_SEO_DIR").unwrap_or_else(|| "/srv/pokoin/seo".into())),
             cache_max_bytes: env("POKOIN_API_CACHE_MB").and_then(|v| v.parse::<f64>().ok()).map(|mb| (mb * 1024.0 * 1024.0) as usize).unwrap_or(64 * 1024 * 1024),
             cache_max_ttl: env("POKOIN_API_CACHE_MAX_TTL").and_then(|v| v.parse().ok()).unwrap_or(300),
+            flight_timeout: Duration::from_secs(env("POKOIN_API_FLIGHT_TIMEOUT_SECS").and_then(|v| v.parse().ok()).filter(|s| *s > 0).unwrap_or(60)),
         }
     }
 }
@@ -206,9 +211,49 @@ impl ResponseCache {
 #[derive(Clone, Debug)]
 enum Flight {
     Pending,
+    /// Stored response: followers replay it.
     Entry(Arc<CacheEntry>),
+    /// The leader's 5xx: followers replay it, nothing is stored.
+    Error(Arc<CacheEntry>),
+    /// Personal or not storable: each follower forwards its own request.
     Uncacheable,
-    Failed,
+    /// The leader went away without an answer (client disconnect): elect a new one.
+    Abandoned,
+    /// No upstream answer (timeout, unreadable body, edge panic): followers send this status.
+    Failed(StatusCode),
+}
+
+/// The leader's claim on a key in `flights`. Every way out of the leader —
+/// `finish`, a timeout, an unwinding panic, the client hanging up — settles
+/// the flight, so followers never wait on a key nobody is fetching.
+struct FlightGuard {
+    edge: Edge,
+    key: String,
+    tx: Option<watch::Sender<Flight>>,
+}
+
+impl FlightGuard {
+    fn finish(mut self, outcome: Flight) {
+        self.settle(outcome);
+    }
+
+    fn settle(&mut self, outcome: Flight) {
+        let Some(tx) = self.tx.take() else { return };
+        self.edge.inner.flights.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.key);
+        let _ = tx.send(outcome);
+    }
+}
+
+impl Drop for FlightGuard {
+    fn drop(&mut self) {
+        let outcome = if std::thread::panicking() { Flight::Failed(StatusCode::BAD_GATEWAY) } else { Flight::Abandoned };
+        self.settle(outcome);
+    }
+}
+
+enum Role {
+    Lead(FlightGuard),
+    Follow(watch::Receiver<Flight>),
 }
 
 #[derive(Default)]
@@ -223,7 +268,8 @@ struct Inner {
     api: Router,
     cdn: Router,
     cache: Mutex<ResponseCache>,
-    flights: Mutex<HashMap<String, (watch::Sender<Flight>, watch::Receiver<Flight>)>>,
+    /// Running fetches by cache key; the sender lives in the leader's [`FlightGuard`].
+    flights: Mutex<HashMap<String, watch::Receiver<Flight>>>,
     uncacheable: Mutex<HashMap<String, Instant>>,
     stats: Stats,
 }
@@ -235,17 +281,7 @@ struct Edge {
 
 /// `edge_router(cfg, api, cdn)`: every path of api.pokoin.com.
 pub fn edge_router(cfg: EdgeConfig, api: Router, cdn: Router) -> Router {
-    let edge = Edge {
-        inner: Arc::new(Inner {
-            cache: Mutex::new(ResponseCache::new(cfg.cache_max_bytes)),
-            cfg,
-            api,
-            cdn,
-            flights: Mutex::new(HashMap::new()),
-            uncacheable: Mutex::new(HashMap::new()),
-            stats: Stats::default(),
-        }),
-    };
+    let edge = Edge::new(cfg, api, cdn);
     let stats = edge.clone();
     tokio::spawn(async move {
         loop {
@@ -319,6 +355,22 @@ async fn proxy(State(edge): State<Edge>, req: Request) -> Response {
 }
 
 impl Edge {
+    /// The API router is called in-process, so its panics are caught here: a
+    /// panic answers `500` (never cached) instead of unwinding through a flight.
+    fn new(cfg: EdgeConfig, api: Router, cdn: Router) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                cache: Mutex::new(ResponseCache::new(cfg.cache_max_bytes)),
+                cfg,
+                api: api.layer(axum::middleware::from_fn(pokoin_api_common::panic::catch_panic)),
+                cdn,
+                flights: Mutex::new(HashMap::new()),
+                uncacheable: Mutex::new(HashMap::new()),
+                stats: Stats::default(),
+            }),
+        }
+    }
+
     fn known_uncacheable(&self, pathname: &str) -> bool {
         let mut map = self.inner.uncacheable.lock().unwrap_or_else(|e| e.into_inner());
         match map.get(pathname) {
@@ -358,84 +410,84 @@ impl Edge {
             }
             if now < hit.stale_until {
                 self.inner.stats.hits.fetch_add(1, Ordering::Relaxed);
-                let (parts, _) = req.into_parts();
-                let me = self.clone();
-                let (key, pathname, target) = (key.clone(), pathname.to_owned(), target.to_owned());
-                tokio::spawn(async move {
-                    if me.start_flight(&key).is_some() {
-                        return; // a refresh for this key is already running
-                    }
-                    let request = rebuild(&parts, &target);
-                    let _ = me.lead(request, &key, &pathname, false).await;
-                });
+                // Refresh in the background unless a fetch for this key is already running.
+                if let Role::Lead(flight) = self.start_flight(&key) {
+                    let (parts, _) = req.into_parts();
+                    let request = rebuild(&parts, target);
+                    let (me, pathname) = (self.clone(), pathname.to_owned());
+                    tokio::spawn(async move {
+                        let _ = me.lead(request, flight, &pathname).await;
+                    });
+                }
                 return send_entry(hit, "STALE");
             }
         }
         self.inner.stats.misses.fetch_add(1, Ordering::Relaxed);
-        match self.start_flight(&key) {
-            None => {
+        let deadline = tokio::time::Instant::now() + self.inner.cfg.flight_timeout;
+        let outcome = loop {
+            match self.start_flight(&key) {
                 // Leader: fetch, store, answer (or stream an uncacheable answer straight through).
-                self.lead(req, &key, pathname, true).await.unwrap_or_else(bad_gateway)
+                Role::Lead(flight) => return self.lead(req, flight, pathname).await,
+                Role::Follow(rx) => match follow(rx, deadline).await {
+                    Flight::Abandoned => continue,
+                    outcome => break outcome,
+                },
             }
-            Some(mut rx) => {
-                let outcome = loop {
-                    let current = rx.borrow().clone();
-                    if !matches!(current, Flight::Pending) {
-                        break current;
-                    }
-                    if rx.changed().await.is_err() {
-                        break rx.borrow().clone();
-                    }
-                };
-                match outcome {
-                    Flight::Entry(entry) => send_entry(&entry, "COALESCED"),
-                    Flight::Uncacheable | Flight::Pending => self.forward_api(req, target).await,
-                    Flight::Failed => bad_gateway(()),
-                }
-            }
+        };
+        match outcome {
+            Flight::Entry(entry) | Flight::Error(entry) => send_entry(&entry, "COALESCED"),
+            Flight::Failed(status) => gateway_error(status),
+            Flight::Uncacheable | Flight::Pending | Flight::Abandoned => self.forward_api(req, target).await,
         }
     }
 
-    /// `None` = caller becomes the leader (a pending flight was registered);
-    /// `Some(rx)` = join the running flight.
-    fn start_flight(&self, key: &str) -> Option<watch::Receiver<Flight>> {
+    /// Register a pending flight for `key` (the caller leads it) or join the running one.
+    fn start_flight(&self, key: &str) -> Role {
         let mut flights = self.inner.flights.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((_, rx)) = flights.get(key) {
-            return Some(rx.clone());
+        if let Some(rx) = flights.get(key) {
+            return Role::Follow(rx.clone());
         }
-        flights.insert(key.to_owned(), watch::channel(Flight::Pending));
-        None
+        let (tx, rx) = watch::channel(Flight::Pending);
+        flights.insert(key.to_owned(), rx);
+        Role::Lead(FlightGuard { edge: self.clone(), key: key.to_owned(), tx: Some(tx) })
     }
 
-    fn finish_flight(&self, key: &str, outcome: Flight) {
-        let flight = self.inner.flights.lock().unwrap_or_else(|e| e.into_inner()).remove(key);
-        if let Some((tx, _)) = flight {
-            let _ = tx.send(outcome);
-        }
-    }
-
-    /// One buffered upstream fetch for a cacheable key (`fetchEntry` + `refresh`).
-    /// `answer=false` is a background stale refresh: nothing is returned.
-    async fn lead(&self, req: Request, key: &str, pathname: &str, answer: bool) -> Result<Response, ()> {
+    /// One buffered upstream fetch for a cacheable key (`fetchEntry` + `refresh`),
+    /// bounded by `flight_timeout`. A background stale refresh drops the answer.
+    async fn lead(&self, req: Request, flight: FlightGuard, pathname: &str) -> Response {
+        let deadline = tokio::time::Instant::now() + self.inner.cfg.flight_timeout;
         let target = format!("{}{}", pathname, req.uri().query().map(|q| format!("?{q}")).unwrap_or_default());
         let req = with_uri(req, &target);
-        let response = self.inner.api.clone().oneshot(req).await.unwrap_or_else(|never| match never {});
-        let Some(policy) = cache_policy(response.status(), response.headers(), self.inner.cfg.cache_max_ttl) else {
-            if never_storable(response.headers()) {
+        let Ok(response) = tokio::time::timeout_at(deadline, self.inner.api.clone().oneshot(req)).await else {
+            tracing::warn!(path = pathname, timeout_s = self.inner.cfg.flight_timeout.as_secs(), "edge flight timed out");
+            flight.finish(Flight::Failed(StatusCode::GATEWAY_TIMEOUT));
+            return gateway_error(StatusCode::GATEWAY_TIMEOUT);
+        };
+        let response = response.unwrap_or_else(|never| match never {});
+        let status = response.status();
+        let policy = cache_policy(status, response.headers(), self.inner.cfg.cache_max_ttl);
+        if policy.is_none() && !status.is_server_error() {
+            // An error says nothing about the path, so only answers mark it uncacheable.
+            if status.as_u16() < 400 && never_storable(response.headers()) {
                 self.mark_uncacheable(pathname);
             }
-            self.finish_flight(key, Flight::Uncacheable);
+            flight.finish(Flight::Uncacheable);
             let mut response = response;
             response.headers_mut().insert(HeaderName::from_static("x-pokoin-origin"), HeaderValue::from_static(ORIGIN_LABEL));
             response.headers_mut().insert(HeaderName::from_static("x-pokoin-edge-cache"), HeaderValue::from_static("BYPASS"));
-            return Ok(response);
-        };
+            return response;
+        }
         let (parts, body) = response.into_parts();
-        let body = match to_bytes(body, usize::MAX).await {
-            Ok(body) => body,
+        let body = match tokio::time::timeout_at(deadline, to_bytes(body, usize::MAX)).await {
+            Ok(Ok(body)) => body,
+            Ok(Err(_)) => {
+                flight.finish(Flight::Failed(StatusCode::BAD_GATEWAY));
+                return gateway_error(StatusCode::BAD_GATEWAY);
+            }
             Err(_) => {
-                self.finish_flight(key, Flight::Failed);
-                return Err(());
+                tracing::warn!(path = pathname, timeout_s = self.inner.cfg.flight_timeout.as_secs(), "edge flight body timed out");
+                flight.finish(Flight::Failed(StatusCode::GATEWAY_TIMEOUT));
+                return gateway_error(StatusCode::GATEWAY_TIMEOUT);
             }
         };
         let mut headers = HeaderMap::new();
@@ -446,6 +498,12 @@ impl Edge {
         }
         headers.insert(HeaderName::from_static("x-robots-tag"), HeaderValue::from_static("noindex"));
         let now = Instant::now();
+        let Some(policy) = policy else {
+            // 5xx: every waiting follower gets this answer; the next request fetches again.
+            let entry = Arc::new(CacheEntry { status: parts.status, headers, body, stored_at: now, fresh_until: now, stale_until: now });
+            flight.finish(Flight::Error(entry.clone()));
+            return send_entry(&entry, "BYPASS");
+        };
         let entry = Arc::new(CacheEntry {
             status: parts.status,
             headers,
@@ -455,14 +513,20 @@ impl Edge {
             stale_until: now + Duration::from_secs(policy.ttl + policy.swr),
         });
         if entry.body.len() <= CACHE_MAX_ENTRY {
-            self.inner.cache.lock().unwrap_or_else(|e| e.into_inner()).set(key, entry.clone());
+            self.inner.cache.lock().unwrap_or_else(|e| e.into_inner()).set(&flight.key, entry.clone());
         }
-        self.finish_flight(key, Flight::Entry(entry.clone()));
-        if answer {
-            Ok(send_entry(&entry, "MISS"))
-        } else {
-            Ok(Response::new(Body::empty()))
-        }
+        flight.finish(Flight::Entry(entry.clone()));
+        send_entry(&entry, "MISS")
+    }
+}
+
+/// A follower's wait for the leader, bounded by the follower's own deadline.
+async fn follow(mut rx: watch::Receiver<Flight>, deadline: tokio::time::Instant) -> Flight {
+    match tokio::time::timeout_at(deadline, rx.wait_for(|flight| !matches!(flight, Flight::Pending))).await {
+        Ok(Ok(outcome)) => outcome.clone(),
+        // The sender is gone without an outcome (cannot happen with FlightGuard): fetch it yourself.
+        Ok(Err(_)) => Flight::Uncacheable,
+        Err(_) => Flight::Failed(StatusCode::GATEWAY_TIMEOUT),
     }
 }
 
@@ -486,9 +550,12 @@ fn send_entry(entry: &CacheEntry, label: &'static str) -> Response {
     response
 }
 
-fn bad_gateway(_: ()) -> Response {
-    let mut response = Response::new(Body::from("Bad Gateway"));
-    *response.status_mut() = StatusCode::BAD_GATEWAY;
+/// `502` / `504` when no upstream answer came back; never cached.
+fn gateway_error(status: StatusCode) -> Response {
+    let mut response = Response::new(Body::from(status.canonical_reason().unwrap_or("Bad Gateway")));
+    *response.status_mut() = status;
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(HeaderName::from_static("x-pokoin-origin"), HeaderValue::from_static(ORIGIN_LABEL));
     response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
     response
 }
@@ -609,9 +676,47 @@ mod tests {
             .route("/api/private", get(|| async { ([(header::CACHE_CONTROL, "private, no-store")], "{}") }))
     }
 
+    fn config(seo: PathBuf, flight_timeout: Duration) -> EdgeConfig {
+        EdgeConfig { seo_dir: seo, cache_max_bytes: 1 << 20, cache_max_ttl: 300, flight_timeout }
+    }
+
     fn edge(counter: Arc<AtomicU64>, seo: PathBuf) -> Router {
         let cdn = Router::new().fallback(|req: Request| async move { format!("cdn:{}", req.uri()) });
-        edge_router(EdgeConfig { seo_dir: seo, cache_max_bytes: 1 << 20, cache_max_ttl: 300 }, counting_api(counter), cdn)
+        edge_router(config(seo, Duration::from_secs(30)), counting_api(counter), cdn)
+    }
+
+    /// `/api/flaky`: the first call panics after 50 ms, later calls answer a cacheable 200.
+    /// `/api/stuck`: the first call never answers, later calls answer a cacheable 200.
+    fn first_call_fails_api(calls: Arc<AtomicU64>) -> Router {
+        let (flaky, stuck) = (calls.clone(), calls);
+        let ok = || ([(header::CACHE_CONTROL, "public, s-maxage=60"), (header::CONTENT_TYPE, "application/json")], "{\"ok\":true}");
+        Router::new()
+            .route(
+                "/api/flaky",
+                get(move || {
+                    let calls = flaky.clone();
+                    async move {
+                        let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        if first {
+                            panic!("user-provided comparison function does not correctly implement a total order");
+                        }
+                        ok()
+                    }
+                }),
+            )
+            .route(
+                "/api/stuck",
+                get(move || {
+                    let calls = stuck.clone();
+                    async move {
+                        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                            std::future::pending::<()>().await;
+                        }
+                        ok()
+                    }
+                }),
+            )
     }
 
     fn req(method: &str, uri: &str, headers: &[(&str, &str)]) -> Request {
@@ -644,6 +749,93 @@ mod tests {
         assert_eq!(pre.status(), StatusCode::NO_CONTENT);
         assert_eq!(pre.headers()["access-control-allow-credentials"], "true");
         assert_eq!(pre.headers()["vary"], "Origin");
+    }
+
+    #[tokio::test]
+    async fn panicking_handler_fails_fast_and_frees_the_key() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let dir = tempfile::tempdir().unwrap();
+        let app = edge_router(config(dir.path().to_path_buf(), Duration::from_secs(30)), first_call_fails_api(calls.clone()), Router::new());
+        let get = || app.clone().oneshot(req("GET", "/api/flaky?warmup=1", &[]));
+        let (leader, follower) = tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(get(), get()) })
+            .await
+            .expect("leader and follower answer instead of waiting on the flight");
+        let labels: Vec<String> = [leader.unwrap(), follower.unwrap()]
+            .iter()
+            .map(|r| {
+                assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(r.headers()["cache-control"], "no-store");
+                r.headers()["x-pokoin-edge-cache"].to_str().unwrap().to_owned()
+            })
+            .collect();
+        assert!(labels.contains(&"BYPASS".to_owned()) && labels.contains(&"COALESCED".to_owned()), "{labels:?}");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "the follower replays the leader's error");
+        let next = tokio::time::timeout(Duration::from_secs(5), get()).await.unwrap().unwrap();
+        assert_eq!(next.status(), StatusCode::OK);
+        assert_eq!(next.headers()["x-pokoin-edge-cache"], "MISS", "a 500 does not mark the path uncacheable");
+        let hit = get().await.unwrap();
+        assert_eq!(hit.headers()["x-pokoin-edge-cache"], "HIT");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn hung_handler_times_out_and_frees_the_key() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let dir = tempfile::tempdir().unwrap();
+        let app = edge_router(config(dir.path().to_path_buf(), Duration::from_millis(200)), first_call_fails_api(calls.clone()), Router::new());
+        let get = || app.clone().oneshot(req("GET", "/api/stuck", &[]));
+        let (leader, follower) = tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(get(), get()) }).await.unwrap();
+        assert_eq!(leader.unwrap().status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(follower.unwrap().status(), StatusCode::GATEWAY_TIMEOUT);
+        let next = tokio::time::timeout(Duration::from_secs(5), get()).await.unwrap().unwrap();
+        assert_eq!(next.status(), StatusCode::OK);
+        assert_eq!(next.headers()["x-pokoin-edge-cache"], "MISS");
+    }
+
+    #[tokio::test]
+    async fn follower_takes_over_when_the_leader_hangs_up() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let dir = tempfile::tempdir().unwrap();
+        let app = edge_router(config(dir.path().to_path_buf(), Duration::from_secs(30)), first_call_fails_api(calls.clone()), Router::new());
+        let leader = tokio::spawn(app.clone().oneshot(req("GET", "/api/stuck", &[])));
+        while calls.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+        let follower = tokio::spawn(app.clone().oneshot(req("GET", "/api/stuck", &[])));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        leader.abort(); // the leader's client disconnects
+        let response = tokio::time::timeout(Duration::from_secs(5), follower).await.unwrap().unwrap().unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["x-pokoin-edge-cache"], "MISS");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn every_way_out_of_a_leader_settles_the_flight() {
+        let dir = tempfile::tempdir().unwrap();
+        let edge = Edge::new(config(dir.path().to_path_buf(), Duration::from_secs(30)), Router::new(), Router::new());
+        let deadline = || tokio::time::Instant::now() + Duration::from_secs(1);
+        // Unwinding through the leader (a panic the router layer did not catch): followers answer 502.
+        let Role::Lead(flight) = edge.start_flight("k") else { panic!("the first caller leads") };
+        let Role::Follow(rx) = edge.start_flight("k") else { panic!("the second caller follows") };
+        let leader = tokio::spawn(async move {
+            let _flight = flight;
+            panic!("bug in the leader");
+        });
+        assert!(leader.await.unwrap_err().is_panic());
+        assert!(matches!(follow(rx, deadline()).await, Flight::Failed(StatusCode::BAD_GATEWAY)));
+        assert!(edge.inner.flights.lock().unwrap().is_empty());
+        // Dropped without an answer (client gone): followers elect a new leader.
+        let Role::Lead(flight) = edge.start_flight("k") else { panic!("the key is free again") };
+        let Role::Follow(rx) = edge.start_flight("k") else { panic!("the second caller follows") };
+        drop(flight);
+        assert!(matches!(follow(rx, deadline()).await, Flight::Abandoned));
+        assert!(matches!(edge.start_flight("k"), Role::Lead(_)));
+        // A follower's own wait is bounded too.
+        let Role::Lead(_flight) = edge.start_flight("k") else { panic!("the key is free again") };
+        let Role::Follow(rx) = edge.start_flight("k") else { panic!("the second caller follows") };
+        let waited = tokio::time::timeout(Duration::from_secs(5), follow(rx, tokio::time::Instant::now() + Duration::from_millis(50))).await;
+        assert!(matches!(waited, Ok(Flight::Failed(StatusCode::GATEWAY_TIMEOUT))));
     }
 
     #[tokio::test]
