@@ -12,7 +12,6 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use pokoin_api_common::pg::{self, Bind};
 use pokoin_api_common::{http, RouteState};
 use pokoin_catalog_api::shared::js;
 use regex::Regex;
@@ -763,29 +762,16 @@ async fn fetch_supabase_prediction_tokens(ctx: &Ctx, input: &Input, prediction_f
             return Ok(Fetched { source, tokens, first_char_cache: first_char_meta(&key, true), alternate_fragments: Vec::new() });
         }
     }
-    let has_postgres = engine::supabase_name_index_configured();
-    let has_rest = engine::supabase_rest_name_index_configured();
-    if !has_postgres && !has_rest {
+    if !engine::supabase_rest_name_index_configured() {
         return Err(not_configured("Supabase name-token index is not configured for token prediction."));
     }
-    let postgres = if has_postgres {
-        engine::supabase_predicted_name_tokens(ctx, prediction_fragment, &input.search_language, PREDICTION_CONTEXT_MAX_CANDIDATES).await
-    } else {
-        Err(not_configured("Supabase name-token index is not configured for token prediction."))
-    };
-    let (source, tokens) = match postgres {
-        Ok(tokens) => ("supabase_postgres", tokens),
-        Err(error) => {
-            if !has_rest {
-                let mut error = error;
-                error.status = error.status.or(Some(503));
-                return Err(error);
-            }
-            tracing::warn!(message = %error.message, "supabase name-token postgres failed; using REST");
-            let tokens = engine::supabase_rest_predicted_name_tokens(ctx.api_http(), prediction_fragment, &input.search_language, PREDICTION_CONTEXT_MAX_CANDIDATES).await?;
-            ("supabase_rest", tokens)
-        }
-    };
+    let tokens = engine::supabase_rest_predicted_name_tokens(ctx.api_http(), prediction_fragment, &input.search_language, PREDICTION_CONTEXT_MAX_CANDIDATES)
+        .await
+        .map_err(|mut error| {
+            error.status = error.status.or(Some(503));
+            error
+        })?;
+    let source = "supabase_rest";
     if !key.is_empty() {
         first_char_cache_put(&key, source, &tokens);
     }
@@ -1026,83 +1012,6 @@ pub async fn predict_name_tokens(ctx: &Ctx, input: &Input) -> Result<Value, Engi
     }))
 }
 
-const WARMUP_SQL: &str = r#"
-      with input as (
-        select
-          $1::text as language,
-          least(greatest($2::integer, 1), 5) as per_letter_limit
-      ),
-      ranked as (
-        select
-          lower(substr(i.compact_name, 1, 1)) as letter,
-          i.display_name,
-          i.canonical_name,
-          i.compact_name,
-          i.language,
-          greatest(
-            coalesce(i.row_count, 0),
-            coalesce(array_length(i.card_ids, 1), 0)
-          )::integer as card_count,
-          coalesce(array_length(i.card_ids, 1), 0)::integer as ids_count,
-          least(
-            100,
-            greatest(72, 96 - greatest(length(i.compact_name) - 1, 0)) +
-              least(
-                8,
-                case
-                  when greatest(coalesce(i.row_count, 0), coalesce(array_length(i.card_ids, 1), 0)) > 1
-                    then ln(greatest(coalesce(i.row_count, 0), coalesce(array_length(i.card_ids, 1), 0)) + 1) / ln(2) * 1.2
-                  else 0
-                end
-              )
-          )::real as confidence,
-          (
-            120000 +
-            case when i.display_name = i.canonical_name then 800 else 0 end +
-            least(greatest(i.search_weight, 0), 5000) +
-            least(
-              greatest(
-                greatest(
-                  coalesce(i.row_count, 0),
-                  coalesce(array_length(i.card_ids, 1), 0)
-                ),
-                0
-              ),
-              1000
-            ) * 900
-          )::real as score,
-          row_number() over (
-            partition by lower(substr(i.compact_name, 1, 1))
-            order by
-              (
-                120000 +
-                case when i.display_name = i.canonical_name then 800 else 0 end +
-                least(greatest(i.search_weight, 0), 5000) +
-                least(
-                  greatest(
-                    greatest(
-                      coalesce(i.row_count, 0),
-                      coalesce(array_length(i.card_ids, 1), 0)
-                    ),
-                    0
-                  ),
-                  1000
-                ) * 900
-              ) desc,
-              length(i.compact_name),
-              i.display_name
-          )::integer as source_rank
-        from input
-        join public.marketplace_card_name_tokens i
-          on i.language = input.language
-        where i.compact_name ~ '^[a-z]'
-      )
-      select *
-      from ranked, input
-      where ranked.source_rank <= input.per_letter_limit
-      order by ranked.letter, ranked.source_rank
-    "#;
-
 const LETTERS: &str = "abcdefghijklmnopqrstuvwxyz";
 
 async fn warmup_rest_rows(ctx: &Ctx, language: &str, limit: i64) -> Result<Vec<Value>, EngineError> {
@@ -1166,30 +1075,11 @@ async fn first_char_warmup_suggestions(ctx: &Ctx, language: &str, limit: i64) ->
             cache.remove(&key);
         }
     }
-    let has_postgres = engine::supabase_name_index_configured();
-    let has_rest = engine::supabase_rest_name_index_configured();
-    if !has_postgres && !has_rest {
+    if !engine::supabase_rest_name_index_configured() {
         return Err(not_configured("Supabase name-token index is not configured for first-char warmup."));
     }
     let started = std::time::Instant::now();
-    let mut loaded = None;
-    if has_postgres {
-        if let Some(pool) = ctx.pools.supabase.as_ref() {
-            match pg::pool_rows(pool, WARMUP_SQL, &[Bind::Text(language.to_owned()), Bind::Int(limit)]).await {
-                Ok(rows) => loaded = Some(("supabase_postgres", rows)),
-                Err(error) => {
-                    if !has_rest {
-                        return Err(EngineError::new(error.to_string()));
-                    }
-                    tracing::warn!(%error, "first-char warmup postgres failed; using REST");
-                }
-            }
-        }
-    }
-    let (source, rows) = match loaded {
-        Some(loaded) => loaded,
-        None => ("supabase_rest", warmup_rest_rows(ctx, language, limit).await?),
-    };
+    let (source, rows) = ("supabase_rest", warmup_rest_rows(ctx, language, limit).await?);
     let mut by_letter: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for row in &rows {
         let Some(suggestion) = warmup_suggestion_from_row(row, language, language) else { continue };

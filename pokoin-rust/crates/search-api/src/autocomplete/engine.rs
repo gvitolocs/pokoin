@@ -317,22 +317,12 @@ pub fn marketplace_name_search_database_url() -> String {
     marketplace_database_url()
 }
 
-/// `supabaseNameIndexDatabaseUrl()`.
-pub fn supabase_name_index_database_url() -> String {
-    let url = env_s("SUPABASE_NAME_INDEX_DATABASE_URL");
-    if !url.is_empty() {
-        return url;
-    }
-    let pooler = env_s("SUPABASE_DB_POOLER_URL");
-    if !pooler.is_empty() {
-        return pooler;
-    }
-    env_s("SUPABASE_DB_URL")
-}
-
-/// `supabaseNameIndexConfigured()`.
+/// `supabaseNameIndexConfigured()`. The name-token index is read over
+/// Supabase REST only; the direct Postgres pool was removed because the Pi
+/// cannot reach the Supabase database host (os error 101) and every request
+/// paid a failed connect before falling back to REST.
 pub fn supabase_name_index_configured() -> bool {
-    !supabase_name_index_database_url().is_empty()
+    supabase_rest_name_index_configured()
 }
 
 /// `supabaseRestNameIndexConfigured()`.
@@ -523,7 +513,6 @@ pub struct Pools {
     pub primary: PgPool,
     pub primary_url: String,
     pub name_search: PgPool,
-    pub supabase: Option<PgPool>,
     variation: Vec<PgPool>,
     analytics: Vec<PgPool>,
     dimension: HashMap<&'static str, PgPool>,
@@ -540,12 +529,6 @@ impl Pools {
             } else {
                 pooled(&name_url)
             };
-        let supabase_url = supabase_name_index_database_url();
-        let supabase = if supabase_url.is_empty() {
-            None
-        } else {
-            Some(pooled(&supabase_url))
-        };
         let variation_urls = marketplace_variation_search_database_urls();
         let variation: Vec<PgPool> = if variation_urls.len() == 1
             && (variation_urls[0] == primary_url || primary_url.is_empty())
@@ -613,7 +596,6 @@ impl Pools {
             primary,
             primary_url,
             name_search,
-            supabase,
             variation,
             analytics,
             dimension,
@@ -627,12 +609,6 @@ impl Pools {
 
     pub fn name_search(&self) -> &PgPool {
         &self.name_search
-    }
-
-    pub fn supabase(&self) -> Result<&PgPool, EngineError> {
-        self.supabase.as_ref().ok_or_else(|| {
-            EngineError::new("SUPABASE_NAME_INDEX_DATABASE_URL is not configured.").with_status(500)
-        })
     }
 
     /// `marketplaceVariationSearchQuery` (round-robin).
@@ -3659,7 +3635,7 @@ pub fn should_try_supabase_one_char_name_index(search_term: &str) -> bool {
 
 /// `supabasePredictionConfigured()`.
 pub fn supabase_prediction_configured() -> bool {
-    supabase_name_index_configured() || supabase_rest_name_index_configured()
+    supabase_name_index_configured()
 }
 
 /// `supabaseNameIndexDecision(searchTerm, previousContext)`.
@@ -3724,121 +3700,6 @@ async fn supabase_fetch(ctx_http: &reqwest::Client, path: &str) -> Result<Value,
 /// `encodeFilterValue(value)`.
 fn encode_filter_value(value: &str) -> String {
     urlencoding::encode(&value.replace('"', "\\\"")).into_owned()
-}
-
-/// `supabaseNameIndexCandidateRows(searchTerm, poolLimit, searchLanguage,
-/// query)` — Postgres pool path.
-pub async fn supabase_name_index_candidate_rows(
-    ctx: &Ctx,
-    search_term: &str,
-    pool_limit: i64,
-    search_language: &str,
-) -> Result<Vec<Value>, EngineError> {
-    let compact_query = compact(search_term);
-    if compact_query.is_empty() {
-        return Ok(Vec::new());
-    }
-    let normalized_language = clean_language(Some(&json!(search_language)));
-    let clean_pool_limit = pool_limit.clamp(1, AUTOCOMPLETE_SQL_SAFE_POOL_CAP as i64);
-    let sql = r#"
-        with input as (
-          select
-            $1::text as compact_q,
-            $2::text as language,
-            least(greatest($3::integer, 1), 5000) as clean_limit
-        ),
-        matched_names as (
-          select
-            i.language,
-            i.display_name,
-            i.canonical_name,
-            i.search_name,
-            i.compact_name,
-            i.name_tokens,
-            i.card_ids,
-            i.representative_labels,
-            i.row_count,
-            i.search_weight,
-            i.updated_at,
-            (
-              case
-                when i.compact_name = input.compact_q then 240000
-                when public.marketplace_search_compact(i.search_name) = input.compact_q then 240000
-                when i.compact_name like input.compact_q || '%' then 120000
-                when public.marketplace_search_compact(i.search_name) like input.compact_q || '%' then 120000
-                when input.compact_q = any(i.name_tokens) then 60000
-                else 2500
-              end +
-              case
-                when i.display_name = i.canonical_name then 100000
-                else 0
-              end +
-              least(greatest(i.search_weight, 0), 5000)
-            )::real as search_rank
-          from input
-          join public.marketplace_card_name_tokens i
-            on i.language = input.language
-            and (
-              i.compact_name = input.compact_q
-              or public.marketplace_search_compact(i.search_name) = input.compact_q
-              or i.compact_name like input.compact_q || '%'
-              or public.marketplace_search_compact(i.search_name) like input.compact_q || '%'
-              or input.compact_q = any(i.name_tokens)
-            )
-          where input.compact_q <> ''
-          order by
-            search_rank desc,
-            length(i.compact_name),
-            i.display_name
-          limit 80
-        ),
-        expanded as (
-          select distinct on (card_id)
-            card_id::text as card_id,
-            display_name as name,
-            ''::text as set_name,
-            ''::text as card_number,
-            ''::text as product_variant,
-            ''::text as rarity,
-            ''::text as card_type,
-            'single'::text as item_kind,
-            'card'::text as product_type,
-            ''::text as trainer_name,
-            canonical_name,
-            null::text as image_url,
-            null::text as cdn_image_url,
-            null::text as preview_image_url,
-            null::jsonb as card_palette,
-            ''::text as emoji,
-            updated_at as imported_at,
-            (search_rank - (ordinality::real * 0.01))::real as search_rank
-          from matched_names
-          cross join lateral unnest(card_ids) with ordinality as cards(card_id, ordinality)
-          order by card_id, search_rank desc, ordinality
-        )
-        select *
-        from expanded
-        order by search_rank desc, name, card_number
-        limit (select clean_limit from input)
-      "#;
-    let result = with_timeout(
-        run_query(
-            ctx.pools.supabase()?,
-            sql,
-            vec![
-                Bind::S(compact_query),
-                Bind::S(normalized_language),
-                Bind::I(clean_pool_limit),
-            ],
-        ),
-        ladder::name_search_timeout_ms(),
-        "supabase name-index search",
-    )
-    .await?;
-    Ok(super::rank::expand_supabase_name_index_rows(
-        &result,
-        AUTOCOMPLETE_SQL_SAFE_POOL_CAP,
-    ))
 }
 
 const SUPABASE_NAME_TOKEN_SELECT: &str = "display_name,canonical_name,search_name,language,card_ids,representative_labels,row_count,compact_name,name_tokens,search_weight,updated_at";
@@ -3917,127 +3778,6 @@ pub async fn supabase_rest_name_index_candidate_rows(
     Ok(rows)
 }
 
-/// `supabaseOneCharNameTokenRows(nameFragment, poolLimit, searchLanguage)`.
-pub async fn supabase_one_char_name_token_rows(
-    ctx: &Ctx,
-    name_fragment: &str,
-    pool_limit: i64,
-    search_language: &str,
-) -> Result<Vec<Value>, EngineError> {
-    let compact_query = compact(name_fragment);
-    if compact_query.chars().count() != 1 {
-        return Ok(Vec::new());
-    }
-    let normalized_language = clean_language(Some(&json!(search_language)));
-    let scan_limit = ((pool_limit * 2).max(ladder::SUPABASE_PREDICTED_NAME_SCAN_LIMIT as i64))
-        .min(ladder::SUPABASE_ONE_CHAR_NAME_SCAN_LIMIT as i64);
-    let sql = r#"
-        with input as (
-          select
-            $1::text as compact_q,
-            public.marketplace_search_normalize($1::text) as normalized_q,
-            $2::text as language,
-            least(greatest($3::integer, 20), 1000) as scan_limit
-        ),
-        matched as (
-          select
-            i.display_name,
-            i.canonical_name,
-            i.search_name,
-            i.compact_name,
-            i.normalized_name,
-            i.name_tokens,
-            i.language,
-            i.card_ids,
-            i.representative_labels,
-            i.row_count,
-            i.search_weight,
-            i.updated_at,
-            (
-              case
-                when i.compact_name = input.compact_q then 100
-                when public.marketplace_search_compact(i.search_name) = input.compact_q then 100
-                when i.compact_name like input.compact_q || '%' then greatest(72, 96 - greatest(length(i.compact_name) - length(input.compact_q), 0))
-                when public.marketplace_search_compact(i.search_name) like input.compact_q || '%' then greatest(72, 96 - greatest(length(public.marketplace_search_compact(i.search_name)) - length(input.compact_q), 0))
-                when i.normalized_name = input.normalized_q then 100
-                when i.normalized_name like input.normalized_q || '%' then 88
-                when exists (
-                  select 1
-                  from unnest(i.name_tokens) token
-                  where public.marketplace_search_compact(token) like input.compact_q || '%'
-                ) then 84
-                else 0
-              end
-            )::real as confidence,
-            (
-              case
-                when i.compact_name = input.compact_q then 240000
-                when public.marketplace_search_compact(i.search_name) = input.compact_q then 240000
-                when i.compact_name like input.compact_q || '%' then 120000
-                when public.marketplace_search_compact(i.search_name) like input.compact_q || '%' then 120000
-                when i.normalized_name = input.normalized_q then 90000
-                when i.normalized_name like input.normalized_q || '%' then 70000
-                when exists (
-                  select 1
-                  from unnest(i.name_tokens) token
-                  where public.marketplace_search_compact(token) like input.compact_q || '%'
-                ) then 60000
-                else 0
-              end +
-              case when i.display_name = i.canonical_name then 800 else 0 end +
-              least(greatest(i.search_weight, 0), 5000) +
-              least(
-                greatest(
-                  greatest(
-                    coalesce(i.row_count, 0),
-                    coalesce(array_length(i.card_ids, 1), 0)
-                  ),
-                  0
-                ),
-                1000
-              ) * 900
-            )::real as score
-          from input
-          join public.marketplace_card_name_tokens i
-            on i.language = input.language
-            and (
-              i.compact_name = input.compact_q
-              or public.marketplace_search_compact(i.search_name) = input.compact_q
-              or i.compact_name like input.compact_q || '%'
-              or public.marketplace_search_compact(i.search_name) like input.compact_q || '%'
-              or i.normalized_name = input.normalized_q
-              or i.normalized_name like input.normalized_q || '%'
-              or exists (
-                select 1
-                from unnest(i.name_tokens) token
-                where public.marketplace_search_compact(token) like input.compact_q || '%'
-              )
-            )
-          where input.compact_q <> ''
-          order by score desc, confidence desc, length(i.compact_name), i.display_name
-          limit (select scan_limit from input)
-        )
-        select *
-        from matched
-        where confidence > 0
-        order by score desc, confidence desc, length(compact_name), display_name
-      "#;
-    with_timeout(
-        run_query(
-            ctx.pools.supabase()?,
-            sql,
-            vec![
-                Bind::S(compact_query),
-                Bind::S(normalized_language),
-                Bind::I(scan_limit),
-            ],
-        ),
-        ladder::name_search_timeout_ms(),
-        "supabase one-character name-token search",
-    )
-    .await
-}
-
 /// `supabaseRestOneCharNameTokenRows(nameFragment, poolLimit, searchLanguage)`.
 pub async fn supabase_rest_one_char_name_token_rows(
     ctx_http: &reqwest::Client,
@@ -4083,157 +3823,6 @@ pub async fn supabase_rest_one_char_name_token_rows(
         })
         .filter(|row| num_field(row, &["confidence"]) > 0.0)
         .collect())
-}
-
-/// `supabasePredictedNameTokens(nameFragment, searchLanguage, limit)`.
-pub async fn supabase_predicted_name_tokens(
-    ctx: &Ctx,
-    name_fragment: &str,
-    search_language: &str,
-    limit: usize,
-) -> Result<Vec<Value>, EngineError> {
-    let compact_query = compact(name_fragment);
-    if compact_query.is_empty() {
-        return Ok(Vec::new());
-    }
-    let normalized_language = clean_language(Some(&json!(search_language)));
-    let clean_limit = limit.clamp(1, ladder::SUPABASE_PREDICTED_NAME_TOKEN_LIMIT);
-    let scan_limit = (clean_limit as i64 * 8)
-        .max(ladder::SUPABASE_PREDICTED_NAME_SCAN_LIMIT as i64)
-        .min(500);
-    let sql = r#"
-        with input as (
-          select
-            $1::text as compact_q,
-            $2::text as language,
-            least(greatest($3::integer, 1), 20) as clean_limit,
-            least(greatest($4::integer, 20), 500) as scan_limit
-        ),
-        matched as (
-          select
-            i.display_name,
-            i.canonical_name,
-            i.compact_name,
-            i.name_tokens,
-            i.language,
-            i.search_name,
-            i.card_ids,
-            i.representative_labels,
-            i.row_count,
-            (
-              case
-                when i.compact_name = input.compact_q then 100
-                when public.marketplace_search_compact(i.search_name) = input.compact_q then 100
-                when i.compact_name like input.compact_q || '%' then greatest(72, 96 - greatest(length(i.compact_name) - length(input.compact_q), 0))
-                when public.marketplace_search_compact(i.search_name) like input.compact_q || '%' then greatest(72, 96 - greatest(length(public.marketplace_search_compact(i.search_name)) - length(input.compact_q), 0))
-                when input.compact_q = any(i.name_tokens) then 100
-                when exists (
-                  select 1
-                  from unnest(i.name_tokens) token
-                  where public.marketplace_search_compact(token) like input.compact_q || '%'
-                ) then 84
-                when length(input.compact_q) >= 3 and exists (
-                  select 1
-                  from unnest(i.name_tokens) token
-                  where left(public.marketplace_search_compact(token), 2) = left(input.compact_q, 2)
-                    and public.marketplace_edit_distance(
-                      left(public.marketplace_search_compact(token), length(input.compact_q)),
-                      input.compact_q
-                    ) <= 1
-                ) then 76
-                else 0
-              end
-            )::real as confidence,
-            (
-              case
-                when i.compact_name = input.compact_q then 240000
-                when public.marketplace_search_compact(i.search_name) = input.compact_q then 240000
-                when i.compact_name like input.compact_q || '%' then 120000
-                when public.marketplace_search_compact(i.search_name) like input.compact_q || '%' then 120000
-                when input.compact_q = any(i.name_tokens) then 60000
-                else 2500
-              end +
-              case when i.display_name = i.canonical_name then 800 else 0 end +
-              least(greatest(i.search_weight, 0), 5000) +
-              least(
-                greatest(
-                  greatest(
-                    coalesce(i.row_count, 0),
-                    coalesce(array_length(i.card_ids, 1), 0)
-                  ),
-                  0
-                ),
-                1000
-              ) *
-                case
-                  when length(input.compact_q) <= 1 then 900
-                  when length(input.compact_q) = 2 then 320
-                  else 80
-                end
-            )::real as score
-          from input
-          join public.marketplace_card_name_tokens i
-            on i.language = input.language
-            and (
-              i.compact_name = input.compact_q
-              or public.marketplace_search_compact(i.search_name) = input.compact_q
-              or i.compact_name like input.compact_q || '%'
-              or public.marketplace_search_compact(i.search_name) like input.compact_q || '%'
-              or input.compact_q = any(i.name_tokens)
-              or (
-                length(input.compact_q) >= 3
-                and exists (
-                  select 1
-                  from unnest(i.name_tokens) token
-                  where left(public.marketplace_search_compact(token), 2) = left(input.compact_q, 2)
-                    and public.marketplace_edit_distance(
-                      left(public.marketplace_search_compact(token), length(input.compact_q)),
-                      input.compact_q
-                    ) <= 1
-                )
-              )
-            )
-          where input.compact_q <> ''
-          order by score desc, length(i.compact_name), i.display_name
-          limit (select scan_limit from input)
-        )
-        select
-          canonical_name,
-          display_name,
-          compact_name,
-          name_tokens,
-          language,
-          confidence,
-          score,
-          row_count,
-          card_ids as representative_card_ids,
-          representative_labels
-        from matched
-        where confidence > 0
-        order by confidence desc, score desc, length(compact_name), canonical_name
-        limit (select clean_limit from input)
-      "#;
-    let result = with_timeout(
-        run_query(
-            ctx.pools.supabase()?,
-            sql,
-            vec![
-                Bind::S(compact_query.clone()),
-                Bind::S(normalized_language.clone()),
-                Bind::I(clean_limit as i64),
-                Bind::I(scan_limit),
-            ],
-        ),
-        ladder::name_search_timeout_ms(),
-        "supabase predicted name tokens",
-    )
-    .await?;
-    Ok(normalize_prediction_rows(
-        &result,
-        &compact_query,
-        &normalized_language,
-        clean_limit,
-    ))
 }
 
 /// `supabaseRestPredictedNameTokens(nameFragment, searchLanguage, limit)`.
@@ -4310,9 +3899,8 @@ pub async fn predicted_name_tokens_from_supabase(
     if compact_query.is_empty() {
         return Ok(Vec::new());
     }
-    let mut source = "postgres";
-    let predictions = match supabase_predicted_name_tokens(
-        ctx,
+    let predictions = match supabase_rest_predicted_name_tokens(
+        ctx.api_http(),
         name_fragment,
         search_language,
         ladder::SUPABASE_PREDICTED_NAME_TOKEN_LIMIT,
@@ -4321,34 +3909,13 @@ pub async fn predicted_name_tokens_from_supabase(
     {
         Ok(predictions) => predictions,
         Err(error) => {
-            if !supabase_rest_name_index_configured() {
-                disable_supabase_name_index_temporarily();
-                if strict {
-                    return Err(error);
-                }
-                return Ok(Vec::new());
+            disable_supabase_name_index_temporarily();
+            if strict {
+                return Err(error);
             }
-            source = "rest_fallback";
-            match supabase_rest_predicted_name_tokens(
-                ctx.api_http(),
-                name_fragment,
-                search_language,
-                ladder::SUPABASE_PREDICTED_NAME_TOKEN_LIMIT,
-            )
-            .await
-            {
-                Ok(predictions) => predictions,
-                Err(rest_error) => {
-                    disable_supabase_name_index_temporarily();
-                    if strict {
-                        return Err(rest_error);
-                    }
-                    return Ok(Vec::new());
-                }
-            }
+            return Ok(Vec::new());
         }
     };
-    let _ = source;
     if predictions.is_empty() && strict {
         return Err(EngineError::new(
             "Supabase predicted name token search returned no candidates.",
@@ -4382,57 +3949,32 @@ pub async fn rows_from_supabase_name_index(
     strict: bool,
 ) -> Result<Option<Vec<Value>>, EngineError> {
     let supabase_started = now_ms();
-    let result =
-        supabase_name_index_candidate_rows(ctx, search_term, pool_limit, search_language).await;
-    let supabase_rows = match result {
+    let supabase_rows = match supabase_rest_name_index_candidate_rows(
+        ctx.api_http(),
+        search_term,
+        pool_limit,
+        search_language,
+    )
+    .await
+    {
         Ok(rows) => rows,
         Err(error) => {
-            if !supabase_rest_name_index_configured() {
-                disable_supabase_name_index_temporarily();
-                if strict {
-                    return Err(error);
-                }
-                debug_set(
-                    ctx,
-                    "supabaseNameIndex",
-                    json!({
-                        "used": false,
-                        "fallback": true,
-                        "reason": error.message,
-                        "code": error.code,
-                        "durationMs": now_ms() - supabase_started,
-                    }),
-                );
-                return Ok(None);
+            disable_supabase_name_index_temporarily();
+            if strict {
+                return Err(error);
             }
-            match supabase_rest_name_index_candidate_rows(
-                ctx.api_http(),
-                search_term,
-                pool_limit,
-                search_language,
-            )
-            .await
-            {
-                Ok(rows) => rows,
-                Err(rest_error) => {
-                    disable_supabase_name_index_temporarily();
-                    if strict {
-                        return Err(rest_error);
-                    }
-                    debug_set(
-                        ctx,
-                        "supabaseNameIndex",
-                        json!({
-                            "used": false,
-                            "fallback": true,
-                            "reason": rest_error.message,
-                            "code": rest_error.code,
-                            "durationMs": now_ms() - supabase_started,
-                        }),
-                    );
-                    return Ok(None);
-                }
-            }
+            debug_set(
+                ctx,
+                "supabaseNameIndex",
+                json!({
+                    "used": false,
+                    "fallback": true,
+                    "reason": error.message,
+                    "code": error.code,
+                    "durationMs": now_ms() - supabase_started,
+                }),
+            );
+            return Ok(None);
         }
     };
     if supabase_rows.is_empty() {
@@ -4449,7 +3991,7 @@ pub async fn rows_from_supabase_name_index(
                 "used": true,
                 "fallback": true,
                 "reason": "empty_candidate_pool",
-                "source": "postgres",
+                "source": "rest",
                 "candidateRowCount": 0,
                 "durationMs": now_ms() - supabase_started,
             }),
@@ -4503,7 +4045,7 @@ pub async fn rows_from_supabase_name_index(
         json!({
             "used": true,
             "fallback": false,
-            "source": "postgres",
+            "source": "rest",
             "candidateRowCount": rows.len(),
             "hydratedRowCount": rows_by_id.len(),
             "visibleHydrationLimit": visible_hydration_limit,
@@ -4515,7 +4057,7 @@ pub async fn rows_from_supabase_name_index(
         "tokenPlan",
         json!({
             "strategy": "supabase_name_index",
-            "source": "postgres",
+            "source": "rest",
             "candidateRowCount": rows.len(),
             "hydratedRowCount": rows_by_id.len(),
             "visibleHydrationLimit": visible_hydration_limit,
@@ -4543,8 +4085,8 @@ pub async fn rows_from_supabase_one_char_name_index(
     if compact_query.chars().count() != 1 {
         return Ok(None);
     }
-    let token_rows = match supabase_one_char_name_token_rows(
-        ctx,
+    let token_rows = match supabase_rest_one_char_name_token_rows(
+        ctx.api_http(),
         search_term,
         pool_limit,
         search_language,
@@ -4553,32 +4095,19 @@ pub async fn rows_from_supabase_one_char_name_index(
     {
         Ok(rows) => rows,
         Err(error) => {
-            if !supabase_rest_name_index_configured() {
-                disable_supabase_name_index_temporarily();
-                debug_set(
-                    ctx,
-                    "supabaseOneCharNameIndex",
-                    json!({
-                        "used": false,
-                        "fallback": true,
-                        "reason": error.message,
-                        "code": error.code,
-                        "durationMs": now_ms() - started,
-                    }),
-                );
-                return Ok(None);
-            }
-            supabase_rest_one_char_name_token_rows(
-                ctx.api_http(),
-                search_term,
-                pool_limit,
-                search_language,
-            )
-            .await
-            .unwrap_or_else(|_| {
-                disable_supabase_name_index_temporarily();
-                Vec::new()
-            })
+            disable_supabase_name_index_temporarily();
+            debug_set(
+                ctx,
+                "supabaseOneCharNameIndex",
+                json!({
+                    "used": false,
+                    "fallback": true,
+                    "reason": error.message,
+                    "code": error.code,
+                    "durationMs": now_ms() - started,
+                }),
+            );
+            return Ok(None);
         }
     };
     if token_rows.is_empty() {
@@ -4588,7 +4117,7 @@ pub async fn rows_from_supabase_one_char_name_index(
             json!({
                 "used": true,
                 "fallback": true,
-                "source": "postgres",
+                "source": "rest",
                 "reason": "empty_candidate_pool",
                 "tokenRowCount": 0,
                 "candidateRowCount": 0,
@@ -4627,7 +4156,7 @@ pub async fn rows_from_supabase_one_char_name_index(
                 "fallbackToPrimary": false,
             },
             "row_count": predictions.len(),
-            "source_kind": "postgres",
+            "source_kind": "rest",
             "duration_ms": duration_ms,
         }],
     });
@@ -4638,7 +4167,7 @@ pub async fn rows_from_supabase_one_char_name_index(
         json!({
             "used": true,
             "fallback": false,
-            "source": "postgres",
+            "source": "rest",
             "compactFragment": compact_query,
             "tokenRowCount": token_rows.len(),
             "candidateRowCount": rows.len(),
@@ -4672,7 +4201,7 @@ pub async fn rows_from_supabase_one_char_name_index(
         "tokenPlan",
         json!({
             "strategy": "supabase_one_char_name_index",
-            "source": "postgres",
+            "source": "rest",
             "compactFragment": compact_query,
             "tokenRowCount": token_rows.len(),
             "candidateRowCount": rows.len(),
