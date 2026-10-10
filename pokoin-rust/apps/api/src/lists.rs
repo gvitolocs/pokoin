@@ -209,6 +209,11 @@ async fn build_game(app: &Router, state: &AppState, o: &Options, game: &str) -> 
             tracing::info!(%game, medians = n, "build-lists medians");
         }
         if o.kinds.iter().any(|k| k == "set") {
+            // Stored set positions first (card desk arrows, set lists).
+            match sqlx::query_scalar::<_, i32>("select public.marketplace_refresh_set_order()").fetch_one(&pool).await {
+                Ok(moved) => tracing::info!(%game, moved, "build-lists set_order"),
+                Err(error) => tracing::warn!(%game, %error, "build-lists set_order refresh failed"),
+            }
             let n = build_sets(app, &pool, game, o.key.as_deref()).await?;
             tracing::info!(%game, sets = n, "build-lists sets");
         }

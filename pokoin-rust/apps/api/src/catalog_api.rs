@@ -226,8 +226,11 @@ async fn version_meta(pool:&PgPool,id:i64,game:&str)->Result<Option<Value>,sqlx:
  Ok(sqlx::query_scalar::<_,sqlx::types::Json<Value>>("select jsonb_build_object('version',s.version,'member_count',s.member_count) from public.marketplace_search_candidates c join public.pokoin_version_sets s on s.version=c.version where c.card_id=$1 limit 1").bind(id).fetch_optional(pool).await?.map(|r|r.0))
 }
 async fn neighbors(pool:&PgPool,set:&str,id:i64,radius:i64)->Result<Vec<(i64,i64,i64)>,sqlx::Error>{
+ // Stored set position (scripts/sql/113_set_order.sql, refreshed by the
+ // build-lists job): natural collector order, so SL3 no longer sits between
+ // 3/95 and 4/95. Rows not ranked yet (0) go last until the next refresh.
  sqlx::query_as(r#"with ordered as (
- select card_id,row_number() over(order by coalesce((regexp_match(coalesce(card_number::text,''),'[0-9]+'))[1]::int,2147483647),card_id) rn,count(*) over() n
+ select card_id,row_number() over(order by set_order=0,set_order,card_id) rn,count(*) over() n
  from public.marketplace_search_candidates where item_kind='single' and product_type='card' and set_name=$1 and coalesce(cdn_image_url,image_url) is not null),
  cur as(select card_id,rn,n from ordered where card_id=$2)
  select o.card_id,((o.rn-cur.rn+cur.n)%cur.n)::bigint,((cur.rn-o.rn+cur.n)%cur.n)::bigint

@@ -339,6 +339,12 @@ function CardDesk(props) {
     /* Keep marketplace-card-page `versions` so 2–6 reprints still paint. */
   });
   if (cached) rememberNeighbors(cached.card, cached.neighbors);
+  // Arrows painted from the cache: warm the next hop now, not after this
+  // card's own page loads, so fast clicking keeps finding neighbours.
+  if (!cached) {
+    const painted = untrack(page)?.neighbors;
+    if (painted?.prev?.length || painted?.next?.length) warmupNeighbors(painted, { lang });
+  }
   const landedWithoutSlug = !untrack(() => props.slug);
   const knownPath = landedWithoutSlug
     ? (peekCanonicalPath(cardId, { lang }) || firstStub?.canonicalPath || firstStub?.canonical_path || '')
