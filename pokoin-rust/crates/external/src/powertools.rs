@@ -802,20 +802,6 @@ pub fn stock_match_key(name: &str, collector: &str, condition: &str, language: &
     format!("{}|{}|{}", name, compact_collector(collector), facet_bits(condition, language, reverse, first_edition))
 }
 
-fn collector_from_product(product: &NormalizedProduct) -> String {
-    let props = product
-        .raw
-        .get("properties_hash")
-        .filter(|v| v.is_object())
-        .or_else(|| product.raw.get("properties").filter(|v| v.is_object()));
-    clean_text(
-        props
-            .and_then(|p| p.get("collector_number").or_else(|| p.get("pokemon_number")))
-            .and_then(Value::as_str),
-        40,
-    )
-}
-
 /// Pair CT products with PT rows (`reconcilePowerToolsWithCardTrader`).
 pub struct CtMatch {
     pub matched: Vec<(NormalizedProduct, PowerToolsRow)>,
@@ -838,21 +824,12 @@ pub fn reconcile_power_tools_with_cardtrader(products: &[NormalizedProduct], pt_
         if product.id.is_empty() {
             continue;
         }
-        let collector = collector_from_product(product);
-        let key = stock_match_key(&product.name, &collector, product.condition, product.language, product.reverse, product.first_edition);
+        let key = stock_match_key(&product.name, &product.collector_number, product.condition, product.language, product.reverse, product.first_edition);
         if key.is_empty() {
             ct_only.push(product.clone());
             continue;
         }
-        let set_hint = {
-            let expansion_name = product
-                .raw
-                .pointer("/expansion/name_en")
-                .or_else(|| product.raw.get("expansion_name"))
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            compact_key(expansion_name)
-        };
+        let set_hint = compact_key(&product.expansion_name);
         let bucket = by_key.get_mut(&key);
         let hit = match bucket {
             None => None,

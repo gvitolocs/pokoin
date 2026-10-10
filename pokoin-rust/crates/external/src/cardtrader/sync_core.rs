@@ -6,6 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::Deserializer as _;
 use serde_json::{json, Value};
 
 use crate::error::{clean_text, clean_text_value, f64_field, i64_field, truthy, ValueExt};
@@ -87,13 +89,12 @@ pub fn empty_summary() -> Value {
     })
 }
 
-fn properties_of(product: &Value) -> Value {
+fn properties_of(product: &Value) -> &Value {
     product
         .get("properties_hash")
         .filter(|v| v.is_object())
         .or_else(|| product.get("properties").filter(|v| v.is_object()))
-        .cloned()
-        .unwrap_or(json!({}))
+        .unwrap_or(&Value::Null)
 }
 
 /// `eurPriceFromProduct` — EUR number, price_cents object (EUR first), cents.
@@ -188,6 +189,8 @@ pub fn parse_pokoin_listing_id(user_data_field: &str) -> String {
 }
 
 /// The normalized product the reconcile works with (`normalizeProduct`).
+/// It holds only what Pokoin reads, never the export row: a 12,523-product
+/// export kept as JSON took the job from 25 MB to 1.77 GB (Pi, 2026-10-10).
 #[derive(Clone, Debug)]
 pub struct NormalizedProduct {
     pub id: String,
@@ -205,7 +208,12 @@ pub struct NormalizedProduct {
     pub price_pkn: Option<f64>,
     pub user_data_field: String,
     pub description: String,
-    pub raw: Value,
+    /// Properties name a Pokémon facet (pokemon_language / pokemon_reverse).
+    pub pokemon_properties: bool,
+    /// Property collector_number / pokemon_number (Power Tools matching).
+    pub collector_number: String,
+    /// expansion.name_en / expansion_name (Power Tools set hint).
+    pub expansion_name: String,
 }
 
 pub fn normalize_product(product: &Value) -> NormalizedProduct {
@@ -261,18 +269,202 @@ pub fn normalize_product(product: &Value) -> NormalizedProduct {
             160,
         ),
         description: clean_text(product.get("description").and_then(Value::as_str), 500),
-        raw: product.clone(),
+        pokemon_properties: props.get("pokemon_language").is_some() || props.get("pokemon_reverse").is_some(),
+        collector_number: clean_text(
+            props.get("collector_number").or_else(|| props.get("pokemon_number")).and_then(Value::as_str),
+            40,
+        ),
+        expansion_name: product
+            .pointer("/expansion/name_en")
+            .or_else(|| product.get("expansion_name"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
     }
 }
 
 pub fn is_pokemon_product(product: &NormalizedProduct) -> bool {
     match product.game_id {
-        None => {
-            let props = properties_of(&product.raw);
-            props.get("pokemon_language").is_some() || props.get("pokemon_reverse").is_some()
-                || !product.blueprint_id.is_empty()
-        }
+        None => product.pokemon_properties || !product.blueprint_id.is_empty(),
         Some(id) => id == POKEMON_GAME_ID,
+    }
+}
+
+/// Top-level keys of a `/products/export` row that Pokoin reads
+/// (`normalize_product`, the dry-run sample). Any other key is skipped while
+/// the body is parsed, never built as JSON.
+pub const EXPORT_ROW_KEYS: &[&str] = &[
+    "id", "blueprint_id", "blueprintId", "game_id", "gameId", "quantity", "qty", "name_en", "name",
+    "blueprint", "properties_hash", "properties", "graded", "price", "price_cents", "priceCents",
+    "user_data_field", "userDataField", "description", "expansion", "expansion_name", "state",
+];
+
+/// Export rows kept as slim JSON for the dry-run sample.
+pub const EXPORT_SAMPLE_ROWS: usize = 10;
+
+/// A `/products/export` read row by row (`fetchProductsExport`).
+#[derive(Debug, Default)]
+pub struct ProductsExport {
+    /// Rows whose id is a CardTrader product id, normalized.
+    pub products: Vec<NormalizedProduct>,
+    /// Rows whose id was not understood. Such an export cannot say which
+    /// products are absent, so it never allows a destructive step.
+    pub unparsed_rows: usize,
+    /// The first rows, cut to [`EXPORT_ROW_KEYS`].
+    pub sample: Vec<Value>,
+}
+
+impl ProductsExport {
+    /// Every row of the export, parsed or not.
+    pub fn rows(&self) -> usize {
+        self.products.len() + self.unparsed_rows
+    }
+
+    /// An export already held as JSON rows (tests, fixtures).
+    pub fn from_rows(rows: &[Value]) -> Self {
+        let mut export = Self::default();
+        for row in rows {
+            export.push(slim_export_row(row));
+        }
+        export
+    }
+
+    /// Parse a JSON array one row at a time; only one row is ever held as
+    /// JSON. Errs when the body is not exactly one JSON array.
+    pub fn from_reader(reader: impl std::io::Read) -> serde_json::Result<Self> {
+        let mut deserializer = serde_json::Deserializer::from_reader(reader);
+        let export = (&mut deserializer).deserialize_seq(ExportVisitor)?;
+        deserializer.end()?;
+        Ok(export)
+    }
+
+    fn push(&mut self, row: Value) {
+        if self.sample.len() < EXPORT_SAMPLE_ROWS {
+            self.sample.push(row.clone());
+        }
+        let product = normalize_product(&row);
+        if is_ct_product_id(&product.id) {
+            self.products.push(product);
+        } else {
+            self.unparsed_rows += 1;
+        }
+    }
+}
+
+/// An export row cut to [`EXPORT_ROW_KEYS`]; a row that is not an object
+/// has no readable id and becomes `null`.
+pub fn slim_export_row(row: &Value) -> Value {
+    match row.as_object() {
+        Some(map) => Value::Object(
+            map.iter()
+                .filter(|(key, _)| EXPORT_ROW_KEYS.contains(&key.as_str()))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        ),
+        None => Value::Null,
+    }
+}
+
+struct ExportVisitor;
+
+impl<'de> Visitor<'de> for ExportVisitor {
+    type Value = ProductsExport;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("an array of CardTrader products")
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut rows: A) -> Result<ProductsExport, A::Error> {
+        let mut export = ProductsExport::default();
+        while let Some(row) = rows.next_element_seed(ExportRowSeed)? {
+            export.push(row);
+        }
+        Ok(export)
+    }
+}
+
+/// One export row as [`slim_export_row`] would cut it, built straight from
+/// the parser.
+struct ExportRowSeed;
+
+impl<'de> DeserializeSeed<'de> for ExportRowSeed {
+    type Value = Value;
+
+    fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
+        deserializer.deserialize_any(ExportRowSeed)
+    }
+}
+
+impl<'de> Visitor<'de> for ExportRowSeed {
+    type Value = Value;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a CardTrader product")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut fields: A) -> Result<Value, A::Error> {
+        let mut row = serde_json::Map::new();
+        while let Some(ExportRowKey(key)) = fields.next_key()? {
+            match key {
+                Some(key) => {
+                    row.insert(key.to_string(), fields.next_value()?);
+                }
+                None => {
+                    fields.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+        Ok(Value::Object(row))
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut items: A) -> Result<Value, A::Error> {
+        while items.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(Value::Null)
+    }
+
+    fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_unit<E: serde::de::Error>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+}
+
+/// A row key: its [`EXPORT_ROW_KEYS`] entry, or `None` to skip the value.
+struct ExportRowKey(Option<&'static str>);
+
+impl<'de> serde::Deserialize<'de> for ExportRowKey {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct KeyVisitor;
+        impl Visitor<'_> for KeyVisitor {
+            type Value = ExportRowKey;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a product field name")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, key: &str) -> Result<ExportRowKey, E> {
+                Ok(ExportRowKey(EXPORT_ROW_KEYS.iter().copied().find(|known| *known == key)))
+            }
+        }
+        deserializer.deserialize_str(KeyVisitor)
     }
 }
 
@@ -317,6 +509,8 @@ pub struct ListingRow {
     pub quantity_available: i64,
     pub status: String,
     pub source_listing_id: String,
+    /// created_at as unix ms (the sale-evidence lower bound).
+    pub created_ms: Option<i64>,
 }
 
 pub fn listing_row(value: &Value) -> ListingRow {
@@ -326,7 +520,16 @@ pub fn listing_row(value: &Value) -> ListingRow {
         quantity_available: i64_field(value, &["quantity_available"]).unwrap_or(0),
         status: clean_text_value(value.get("status").unwrap_or(&Value::Null), 40),
         source_listing_id: clean_text_value(value.get("source_listing_id").unwrap_or(&Value::Null), 160),
+        created_ms: value.get("created_at").and_then(Value::as_str).and_then(crate::time_util::ms_from_iso),
     }
+}
+
+/// A linked listing an earlier complete run already settled as gone from
+/// CardTrader: sold out at zero, its product link already marked missing.
+/// Removing it again changes nothing, yet it re-fetched up to 5,000 CardTrader
+/// orders and rewrote every such row on every run (2026-10-10: 400 rows).
+pub fn settled_absent(listing: &ListingRow, product_id: &str, link_missing: &HashMap<String, bool>) -> bool {
+    listing.status == "sold_out" && listing.quantity_available <= 0 && link_missing.get(product_id) == Some(&true)
 }
 
 /// `destructiveReconcileGate`.
@@ -359,12 +562,12 @@ pub struct AttachmentIndex {
 }
 
 impl AttachmentIndex {
-    pub fn build(listings: &[Value]) -> Self {
+    pub fn build(listings: &[ListingRow]) -> Self {
         let mut by_source_id = HashMap::new();
         let mut by_listing_id = HashMap::new();
         let mut unlinked_by_facet: HashMap<String, Vec<ListingRow>> = HashMap::new();
-        for value in listings {
-            let row = listing_row(value);
+        for row in listings {
+            let row = row.clone();
             by_listing_id.insert(row.id.clone(), row.clone());
             if is_ct_linked_source(&row.source_listing_id) {
                 by_source_id.insert(row.source_listing_id.clone(), row);
@@ -464,37 +667,40 @@ pub struct ReconcilePlan {
     pub pokoin_only_ids: Vec<String>,
 }
 
-pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_complete: bool, export_ok: bool) -> ReconcilePlan {
+/// `link_missing`: CardTrader product id → its product link's
+/// `missing_from_ct`, for [`settled_absent`].
+pub fn plan_inventory_reconcile(
+    export: &ProductsExport,
+    listings: &[ListingRow],
+    link_missing: &HashMap<String, bool>,
+    export_complete: bool,
+    export_ok: bool,
+) -> ReconcilePlan {
     let (allow_destructive, gate_reason) = destructive_reconcile_gate(export_complete, export_ok, true);
     let mut summary = empty_summary();
-    let mut set_count = |key: &str, value: i64| {
-        summary[key] = json!(value);
-    };
-    set_count("inventory", products.len() as i64);
+    summary["inventory"] = json!(export.products.len());
 
     let mut index = AttachmentIndex::build(listings);
     // Listings linked before this run: the mass-removal guard's denominator.
-    // Planned imports and links must not dilute it (specs/tla/ct-reconcile).
-    let linked_before = index.by_source_id.len();
+    // Planned imports and links must not dilute it (specs/tla/ct-reconcile),
+    // and neither may rows already settled as sold out.
+    let linked_before = index
+        .by_source_id
+        .iter()
+        .filter(|(source_id, row)| !settled_absent(row, &parse_ct_product_id(source_id), link_missing))
+        .count();
     let mut pokoin_only_ids: HashSet<String> = HashSet::new();
-    for value in listings {
-        let row = listing_row(value);
+    for row in listings {
         if !is_ct_linked_source(&row.source_listing_id) {
-            pokoin_only_ids.insert(row.id);
+            pokoin_only_ids.insert(row.id.clone());
         }
     }
 
     let mut actions = Vec::new();
     let mut seen_product_ids: HashSet<String> = HashSet::new();
-    let normalized: Vec<NormalizedProduct> = products
-        .iter()
-        .map(normalize_product)
-        .filter(|p| is_ct_product_id(&p.id))
-        .collect();
-    let unparsed_rows = products.len() - normalized.len();
-    set_count("inventory", normalized.len() as i64);
+    let unparsed_rows = export.unparsed_rows;
 
-    for product in &normalized {
+    for product in &export.products {
         // Present in the export, whatever its game: a skipped product is not
         // a vanished one, so its linked listing must never be removed.
         seen_product_ids.insert(product.id.clone());
@@ -553,6 +759,7 @@ pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_c
                         quantity_available: 0,
                         status: String::new(),
                         source_listing_id: source_id.clone(),
+                        created_ms: None,
                     },
                 );
                 actions.push(PlannedAction::Import {
@@ -586,6 +793,9 @@ pub fn plan_inventory_reconcile(products: &[Value], listings: &[Value], export_c
                 continue;
             }
             if !is_ct_linked_source(if listing.source_listing_id.is_empty() { &source_id } else { &listing.source_listing_id }) {
+                continue;
+            }
+            if settled_absent(&listing, &product_id, link_missing) {
                 continue;
             }
             summary["removed"].incr(1);
@@ -629,14 +839,64 @@ pub fn order_is_sale(order: &Value) -> bool {
     !matches!(state.as_str(), "pending" | "canceled" | "cancelled" | "request_for_cancel_accepted")
 }
 
-/// productId → [{order, item}] for every real CardTrader seller sale.
+/// Order keys sale evidence and sale records read.
+const SALE_ORDER_KEYS: &[&str] = &["id", "code", "state", "order_items"];
+/// Order item keys sale evidence and sale records read.
+const SALE_ITEM_KEYS: &[&str] = &[
+    "id", "order_item_id", "orderItemId", "product_id", "productId", "seller_product_id", "sellerProductId",
+    "product", "quantity", "qty", "seller_price", "name", "created_at", "blueprint_id", "blueprintId",
+];
+
+/// A seller order cut to what the reconcile reads (`sale_items_by_product`,
+/// `record_cardtrader_sale`); buyer, addresses and totals are dropped.
+pub fn slim_sale_order(order: Value) -> Value {
+    let Value::Object(fields) = order else {
+        return order;
+    };
+    Value::Object(
+        fields
+            .into_iter()
+            .filter(|(key, _)| SALE_ORDER_KEYS.contains(&key.as_str()))
+            .map(|(key, value)| match value {
+                Value::Array(items) if key == "order_items" => {
+                    (key, Value::Array(items.into_iter().map(|item| keep_keys(item, SALE_ITEM_KEYS)).collect()))
+                }
+                value => (key, value),
+            })
+            .collect(),
+    )
+}
+
+fn keep_keys(value: Value, keys: &[&str]) -> Value {
+    match value {
+        Value::Object(fields) => Value::Object(fields.into_iter().filter(|(key, _)| keys.contains(&key.as_str())).collect()),
+        other => other,
+    }
+}
+
+/// productId → [{order, item}] for every real CardTrader seller sale. The
+/// pair's order is the order without its items: each item used to carry a
+/// copy of every other item of its order.
 pub fn sale_items_by_product(orders: &[Value]) -> HashMap<String, Vec<(Value, Value)>> {
     let mut by_product: HashMap<String, Vec<(Value, Value)>> = HashMap::new();
     for order in orders {
         if !order_is_sale(order) {
             continue;
         }
-        for item in order.get("order_items").and_then(Value::as_array).unwrap_or(&Vec::new()) {
+        let Some(items) = order.get("order_items").and_then(Value::as_array) else {
+            continue;
+        };
+        let header = match order.as_object() {
+            Some(fields) => Value::Object(
+                fields
+                    .iter()
+                    .filter(|(key, _)| key.as_str() != "order_items")
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            ),
+            None => order.clone(),
+        };
+        for item in items {
             let product_id = crate::error::clean_text_value(
                 item.get("product_id")
                     .or_else(|| item.get("productId"))
@@ -647,7 +907,7 @@ pub fn sale_items_by_product(orders: &[Value]) -> HashMap<String, Vec<(Value, Va
             if product_id.is_empty() {
                 continue;
             }
-            by_product.entry(product_id).or_default().push((order.clone(), item.clone()));
+            by_product.entry(product_id).or_default().push((header.clone(), item.clone()));
         }
     }
     by_product
@@ -845,6 +1105,159 @@ mod tests {
         plan.actions.iter().filter(|a| matches!(a, PlannedAction::Remove { .. })).count()
     }
 
+    fn rows(listings: &[Value]) -> Vec<ListingRow> {
+        listings.iter().map(listing_row).collect()
+    }
+
+    fn plan_of(products: &[Value], listings: &[Value], complete: bool) -> ReconcilePlan {
+        plan_inventory_reconcile(&ProductsExport::from_rows(products), &rows(listings), &HashMap::new(), complete, true)
+    }
+
+    fn removed_ids(plan: &ReconcilePlan) -> Vec<String> {
+        let mut ids: Vec<String> = plan
+            .actions
+            .iter()
+            .filter_map(|a| match a {
+                PlannedAction::Remove { listing_id, .. } => Some(listing_id.clone()),
+                _ => None,
+            })
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    #[test]
+    fn export_parser_streams_rows_and_keeps_only_read_fields() {
+        let rows = vec![
+            json!({
+                "id": 105513071, "blueprint_id": 16, "game_id": 5, "quantity": 3, "price_cents": 250,
+                "price_currency": "EUR", "name_en": "Pikachu", "description": "  mint  ", "graded": false,
+                "user_data_field": "pokoin:9f8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d", "tag": "BOX-1",
+                "properties_hash": {"condition": "Slightly Played", "pokemon_language": "jp", "pokemon_reverse": true, "collector_number": "025/102"},
+                "expansion": {"id": 1, "code": "bs", "name_en": "Base Set"},
+                "uploaded_images": [{"url": "https://example.test/a.jpg", "variants": ["x".repeat(4096)]}],
+            }),
+            json!({"id": null, "blueprint_id": 17, "quantity": 1}),
+            json!({"id": 4.0, "blueprint_id": 18, "quantity": 1}),
+            json!(7),
+            json!(["not", "a", "product"]),
+            json!({"id": "42", "blueprintId": "19", "qty": "2", "price": 1.5, "properties": {"pokemon_number": "7"}, "expansion_name": "Jungle"}),
+        ];
+        let body = serde_json::to_vec(&rows).unwrap();
+        let export = ProductsExport::from_reader(body.as_slice()).unwrap();
+        assert_eq!((export.products.len(), export.unparsed_rows, export.rows()), (2, 4, 6));
+
+        // Streaming yields exactly what normalize_product gives the full row.
+        let full: Vec<NormalizedProduct> = rows.iter().map(normalize_product).filter(|p| is_ct_product_id(&p.id)).collect();
+        assert_eq!(format!("{:?}", export.products), format!("{full:?}"));
+        assert_eq!(format!("{:?}", ProductsExport::from_rows(&rows).products), format!("{full:?}"));
+
+        let first = &export.products[0];
+        assert_eq!((first.id.as_str(), first.blueprint_id.as_str(), first.quantity), ("105513071", "16", 3));
+        assert_eq!((first.condition, first.language, first.reverse), ("SP", "JP", true));
+        assert_eq!((first.collector_number.as_str(), first.expansion_name.as_str()), ("025/102", "Base Set"));
+        assert_eq!(first.price_pkn, Some(500.0));
+        assert!(first.pokemon_properties);
+        let second = &export.products[1];
+        assert_eq!((second.id.as_str(), second.quantity, second.collector_number.as_str(), second.expansion_name.as_str()), ("42", 2, "7", "Jungle"));
+
+        // The sample keeps read keys only: no images, no tag.
+        assert_eq!(export.sample.len(), 6);
+        assert!(export.sample[0].get("uploaded_images").is_none() && export.sample[0].get("tag").is_none());
+        assert_eq!(export.sample[0]["properties_hash"]["collector_number"], "025/102");
+        assert_eq!(export.sample[3], Value::Null);
+    }
+
+    #[test]
+    fn export_parser_never_coerces_a_non_array() {
+        for body in ["", "{}", "null", "{\"products\": []}", "[{\"id\": 1}", "[] trailing", "[{\"id\": 1},]"] {
+            assert!(ProductsExport::from_reader(body.as_bytes()).is_err(), "{body:?}");
+        }
+        let empty = ProductsExport::from_reader(" [ ] ".as_bytes()).unwrap();
+        assert_eq!(empty.rows(), 0);
+    }
+
+    #[test]
+    fn settled_sold_out_listings_are_not_removed_again() {
+        // 2026-10-10: the seller's 400 sold_out listings were removed again
+        // on every run (orders refetched, rows rewritten). Settled = sold out
+        // at zero with the link already missing_from_ct.
+        let products = vec![product("1", "100", 1, 2.0)];
+        let listings = vec![
+            listing("present", "200", 1, "ct:1", "active"),
+            listing("vanished", "202", 2, "ct:2", "active"),          // newly gone: remove
+            listing("settled", "204", 0, "ct:3", "sold_out"),         // gone, settled last run
+            listing("webhook-sold", "206", 0, "ct:4", "sold_out"),    // sold out by the webhook, link not yet missing
+            listing("restocked", "208", 1, "ct:5", "sold_out"),       // link missing but stock is back: not settled
+            listing("paused", "210", 0, "ct:6", "paused"),            // link missing, not sold out: not settled
+        ];
+        let link_missing: HashMap<String, bool> = [("3", true), ("4", false), ("5", true), ("6", true)]
+            .into_iter()
+            .map(|(id, missing)| (id.to_string(), missing))
+            .collect();
+        let plan = plan_inventory_reconcile(&ProductsExport::from_rows(&products), &rows(&listings), &link_missing, true, true);
+        assert!(plan.allow_destructive);
+        assert_eq!(removed_ids(&plan), vec!["paused", "restocked", "vanished", "webhook-sold"]);
+        assert_eq!(plan.summary["removed"], json!(4));
+
+        // The next run, once those settled: only the sold-out ones settle
+        // (delisted ones become inactive and are no longer loaded).
+        let next: Vec<Value> = vec![
+            listing("present", "200", 1, "ct:1", "active"),
+            listing("vanished", "202", 0, "ct:2", "sold_out"),
+            listing("settled", "204", 0, "ct:3", "sold_out"),
+            listing("webhook-sold", "206", 0, "ct:4", "sold_out"),
+        ];
+        let settled: HashMap<String, bool> = ["2", "3", "4"].into_iter().map(|id| (id.to_string(), true)).collect();
+        let plan = plan_inventory_reconcile(&ProductsExport::from_rows(&products), &rows(&next), &settled, true, true);
+        assert_eq!(removes(&plan), 0);
+        assert_eq!(plan.summary["removed"], json!(0));
+        assert_eq!(plan.gate_reason, "complete_ok");
+
+        // A settled listing whose product is back in the export is updated.
+        let back = vec![product("3", "102", 2, 2.0)];
+        let plan = plan_inventory_reconcile(&ProductsExport::from_rows(&back), &rows(&next[2..3]), &settled, true, true);
+        assert!(matches!(&plan.actions[..], [PlannedAction::UpdateQty { listing_id, quantity: 2, .. }] if listing_id == "settled"));
+    }
+
+    #[test]
+    fn settled_listings_do_not_dilute_the_mass_removal_guard() {
+        // 150 live linked listings vanish at once next to 900 settled ones:
+        // still most of what is live, so the guard must hold.
+        let mut listings: Vec<Value> = (1..=150)
+            .map(|i| listing(&format!("live{i}"), "200", 1, &format!("ct:{i}"), "active"))
+            .collect();
+        listings.extend((1000..1900).map(|i| listing(&format!("gone{i}"), "200", 0, &format!("ct:{i}"), "sold_out")));
+        let link_missing: HashMap<String, bool> = (1000..1900).map(|i| (i.to_string(), true)).collect();
+        let products = vec![product("99999", "100", 1, 2.0)];
+        let plan = plan_inventory_reconcile(&ProductsExport::from_rows(&products), &rows(&listings), &link_missing, true, true);
+        assert_eq!((plan.gate_reason, plan.allow_destructive, removes(&plan)), ("mass_removal_guard", false, 0));
+        assert_eq!(plan.summary["massRemovalBlocked"], json!(150));
+    }
+
+    #[test]
+    fn sale_orders_are_slim_and_pairs_skip_the_item_list() {
+        let order = json!({
+            "id": 55, "code": "A1", "state": "paid", "order_as": "seller",
+            "buyer": {"id": 1, "email": "b@x.test"}, "order_shipping_address": {"street": "x"},
+            "order_items": [
+                {"id": 1, "product_id": 7, "quantity": 2, "name": "Pikachu", "created_at": "2026-10-01T00:00:00.000Z",
+                 "seller_price": {"cents": 100, "currency": "EUR"}, "properties": {"condition": "Near Mint"}, "mkm_id": "9"},
+                {"id": 2, "product_id": 8, "quantity": 1},
+            ],
+        });
+        let slim = slim_sale_order(order);
+        assert!(slim.get("buyer").is_none() && slim.get("order_shipping_address").is_none() && slim.get("order_as").is_none());
+        assert_eq!(slim["order_items"][0]["seller_price"]["cents"], 100);
+        assert!(slim["order_items"][0].get("properties").is_none() && slim["order_items"][0].get("mkm_id").is_none());
+        let sales = sale_items_by_product(&[slim]);
+        let (header, item) = &sales["7"][0];
+        assert_eq!((header["id"].clone(), header["code"].clone()), (json!(55), json!("A1")));
+        assert!(header.get("order_items").is_none());
+        assert_eq!(item["quantity"], 2);
+        assert_eq!(sales["8"].len(), 1);
+    }
+
     #[test]
     fn numeric_cardtrader_ids_keep_every_linked_listing() {
         // The real /products/export sends ids as JSON numbers (2026-10-09
@@ -861,7 +1274,7 @@ mod tests {
         let listings: Vec<Value> = (1..=150)
             .map(|i| listing(&format!("l{i}"), &((100 + i) * 2).to_string(), 1, &format!("ct:{i}"), "active"))
             .collect();
-        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        let plan = plan_of(&products, &listings, true);
         assert_eq!(removes(&plan), 0);
         assert_eq!(plan.gate_reason, "complete_ok");
     }
@@ -872,11 +1285,11 @@ mod tests {
             .map(|i| listing(&format!("l{i}"), "200", 1, &format!("ct:{i}"), "active"))
             .collect();
         let garbage = vec![json!({"unexpected": true})];
-        let plan = plan_inventory_reconcile(&garbage, &listings, true, true);
+        let plan = plan_of(&garbage, &listings, true);
         assert_eq!((plan.gate_reason, plan.allow_destructive, removes(&plan)), ("unparsed_export", false, 0));
 
         let few: Vec<Value> = (1..=10).map(|i| product(&i.to_string(), "100", 1, 2.0)).collect();
-        let plan = plan_inventory_reconcile(&few, &listings, true, true);
+        let plan = plan_of(&few, &listings, true);
         assert_eq!((plan.gate_reason, plan.allow_destructive, removes(&plan)), ("mass_removal_guard", false, 0));
         assert_eq!(plan.summary["massRemovalBlocked"], json!(140));
     }
@@ -899,7 +1312,7 @@ mod tests {
             listing("l2", "204", 1, "ct:2", "active"),
         ];
         let products = vec![numeric_product(json!(null), 101, 5), numeric_product(json!(2), 102, 5)];
-        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        let plan = plan_of(&products, &listings, true);
         assert_eq!((plan.gate_reason, plan.allow_destructive, removes(&plan)), ("unparsed_export", false, 0));
         assert_eq!(plan.summary["unparsedRows"], json!(1));
     }
@@ -913,7 +1326,7 @@ mod tests {
             listing("l2", "204", 1, "ct:2", "active"),
         ];
         let products = vec![numeric_product(json!(1.0), 101, 5), numeric_product(json!(2), 102, 5)];
-        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        let plan = plan_of(&products, &listings, true);
         assert_eq!((plan.gate_reason, removes(&plan)), ("unparsed_export", 0));
         assert_eq!(plan.summary["imported"], json!(0));
         assert!(is_ct_product_id("42") && !is_ct_product_id("") && !is_ct_product_id("4.0") && !is_ct_product_id("-4"));
@@ -928,7 +1341,7 @@ mod tests {
             listing("l2", "204", 1, "ct:2", "active"),
         ];
         let products = vec![numeric_product(json!(1), 101, 2), numeric_product(json!(2), 102, 5)];
-        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        let plan = plan_of(&products, &listings, true);
         assert_eq!(plan.summary["skippedNonPokemon"], json!(1));
         assert_eq!(removes(&plan), 0);
         assert!(plan.allow_destructive);
@@ -943,7 +1356,7 @@ mod tests {
             .map(|i| listing(&format!("l{i}"), &((100 + i) * 2).to_string(), 1, &format!("ct:{i}"), "active"))
             .collect();
         let products: Vec<Value> = (1..=150).map(|i| numeric_product(json!(10_000 + i), 100 + i, 5)).collect();
-        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        let plan = plan_of(&products, &listings, true);
         assert_eq!((plan.gate_reason, plan.allow_destructive, removes(&plan)), ("mass_removal_guard", false, 0));
         assert_eq!(plan.summary["massRemovalBlocked"], json!(150));
     }
@@ -961,7 +1374,7 @@ mod tests {
             listing("l4", "208", 2, "ct:9", "active"), // linked but absent from export → removed
             listing("l3", "204", 7, "", "active"),      // unlinked, facet == card 204 NM EN
         ];
-        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        let plan = plan_of(&products, &listings, true);
         assert!(plan.allow_destructive);
         assert_eq!(plan.summary["imported"], 2);
         assert_eq!(plan.summary["alreadyLinked"], 1);
@@ -976,7 +1389,7 @@ mod tests {
     fn plan_never_removes_without_complete_export() {
         let products = vec![product("1", "100", 3, 2.0)];
         let listings = vec![listing("l4", "208", 2, "ct:9", "active")];
-        let plan = plan_inventory_reconcile(&products, &listings, false, true);
+        let plan = plan_of(&products, &listings, false);
         assert!(!plan.allow_destructive);
         assert_eq!(plan.gate_reason, "incomplete_snapshot");
         assert!(!plan.actions.iter().any(|a| matches!(a, PlannedAction::Remove { .. })));
@@ -989,7 +1402,7 @@ mod tests {
             listing("la", "200", 1, "", "active"),
             listing("lb", "200", 1, "", "active"),
         ];
-        let plan = plan_inventory_reconcile(&products, &listings, true, true);
+        let plan = plan_of(&products, &listings, true);
         assert_eq!(plan.summary["unresolved"], 1);
         let unresolved = plan
             .summary["unresolvedItems"]
@@ -1007,7 +1420,7 @@ mod tests {
         let products = vec![product("1", "100", 1, 2.0)];
         let mut products = products;
         products[0]["game_id"] = json!(2); // unsupported game id
-        let plan = plan_inventory_reconcile(&products, &[], true, true);
+        let plan = plan_of(&products, &[], true);
         assert_eq!(plan.summary["skippedNonPokemon"], 1);
         assert_eq!(plan.summary["supportedInventory"], 0);
     }

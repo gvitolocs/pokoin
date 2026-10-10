@@ -46,8 +46,9 @@ Registration health is stored as non-secret `webhookRegistration` metadata on
 the seller integration. Failures do not discard a valid encrypted token, but
 they are no longer silently forgotten. Every periodic run retries registration.
 
-`pokoin-rust-job-cardtrader-seller-reconcile.timer` runs on `pi-home` every
-five minutes. Its oneshot service (`pokoin-rust-job@cardtrader-seller-reconcile`)
+`pokoin-rust-job-cardtrader-seller-reconcile.timer` runs on `pi-home` ten
+minutes after the previous run ends (`OnUnitInactiveSec`; counted from the
+start, 7-minute runs chained back to back). Its oneshot service (`pokoin-rust-job@cardtrader-seller-reconcile`)
 uses `flock` to prevent overlap and runs the native job
 `/srv/pokoin/rust/current job cardtrader-seller-reconcile`. Each run:
 
@@ -56,9 +57,14 @@ uses `flock` to prevent overlap and runs the native job
 3. reconciles the complete export.
 
 Unchanged product links are not rewritten, keeping frequent safety runs cheap.
+A linked listing an earlier run already settled (sold out at zero, its link
+`missing_from_ct`) is not removed again, and seller orders are fetched only
+when a product newly left the export. The export is parsed while it downloads
+and only the fields the reconcile reads are kept: read whole as JSON, a
+12,523-product export took the job to 1.77 GB on the 4 GB Pi (2026-10-10).
 
 The sync ships in the Rust release (`scripts/deploy-pokoin-rust.sh`). The
-five-minute run is the native job `pokoin-rust-job@cardtrader-seller-reconcile`
+periodic run is the native job `pokoin-rust-job@cardtrader-seller-reconcile`
 (`deploy/systemd/pokoin-rust-job-cardtrader-seller-reconcile.timer`, installed
 by `scripts/cutover-pi-rust.sh`); see [RUST_RUNTIME.md](RUST_RUNTIME.md).
 

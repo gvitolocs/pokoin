@@ -94,8 +94,8 @@ pub async fn import_dry_run(
 ) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
     let token = state.require_cardtrader_token(&identity.uid).await?;
-    let products = state.cardtrader.fetch_products_export(&token).await?;
-    let mut summary = client::import_dry_run_summary(&products);
+    let export = state.cardtrader.fetch_products_export(&token).await?;
+    let mut summary = client::import_dry_run_summary(&export);
     summary["dryRun"] = json!(true);
     summary["sampleLimit"] = json!(IMPORT_DRY_RUN_LIMIT);
     Ok(json_response(200, summary))

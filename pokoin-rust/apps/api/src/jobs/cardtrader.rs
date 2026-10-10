@@ -378,6 +378,23 @@ mod tests {
         assert_eq!(backend.synced, 1);
         assert_eq!(backend.released, 2);
     }
+    #[test]
+    fn timer_waits_after_each_run_ends() {
+        // OnUnitActiveSec counts from the start of a run: 7-minute runs every
+        // 5 minutes chained back to back on the Pi (2026-10-10).
+        let timer = include_str!(
+            "../../../../../deploy/systemd/pokoin-rust-job-cardtrader-seller-reconcile.timer"
+        );
+        let settings: Vec<&str> = timer
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with('#'))
+            .collect();
+        assert!(settings.contains(&"OnUnitInactiveSec=10min"));
+        assert!(!settings.iter().any(|line| line.starts_with("OnUnitActiveSec")));
+        // The first run after boot still needs a start of its own.
+        assert!(settings.contains(&"OnBootSec=2min"));
+    }
     #[tokio::test]
     async fn incomplete_export_is_failure() {
         let mut backend = Mock {

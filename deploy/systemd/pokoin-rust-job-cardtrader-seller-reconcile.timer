@@ -4,7 +4,9 @@ Description=Pokoin native job cardtrader-seller-reconcile (CardTrader seller rec
 [Timer]
 OnBootSec=2min
 OnActiveSec=1min
-OnUnitActiveSec=5min
+# Counted from the end of the previous run. OnUnitActiveSec=5min counted from
+# its start, so 7-minute runs chained back to back on the Pi (2026-10-10).
+OnUnitInactiveSec=10min
 RandomizedDelaySec=20s
 Persistent=true
 Unit=pokoin-rust-job@cardtrader-seller-reconcile.service
