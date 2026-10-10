@@ -1,7 +1,7 @@
 import { createEffect, createSignal } from 'solid-js';
 import { profileFromSession, writeAuthSession } from '@market/auth-session.js';
 import { whenIdle } from '../lib/idle.js';
-import { authUser, getBearer, signedIn } from './auth.js';
+import { authUid, authUser, getBearer, signedIn } from './auth.js';
 import { authSession, refreshSession } from './session.js';
 
 /**
@@ -27,7 +27,7 @@ function savedWalletAddress() {
 }
 
 function currentUid() {
-  return String(authUser()?.uid || authSession()?.uid || '');
+  return String(authUser()?.uid || authUid() || authSession()?.uid || '');
 }
 
 /** useAuth().profile: the users/{uid} doc once read, else the session hint. */
@@ -83,6 +83,22 @@ async function readAccount() {
     photoUrl: profile.photoUrl,
   });
   refreshSession();
+}
+
+/**
+ * Optimistic profile edits (React setProfilePhoto / setProfileUsername /
+ * setProfileDisplayName): the API already stored the value; the next
+ * users/{uid} read confirms it.
+ */
+export function patchAccountProfile(partial) {
+  const uid = currentUid();
+  const base = accountProfile();
+  if (!uid || !base) return;
+  setLive({ uid, profile: { ...base, ...partial }, availablePkn: availablePkn() });
+  if ('photoUrl' in partial) {
+    writeAuthSession({ ...authSession(), uid, signedIn: true, photoUrl: partial.photoUrl });
+    refreshSession();
+  }
 }
 
 export function refreshAccount() {
