@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { filterExpansionCards, filterSearchCards, uniqueSearchOptions, searchPrintLang, searchRarity, searchSet, isLegendCard, legendVersionPairKey, legendHalfOrder } from './search-filters.js';
+import { filterSearchCards, uniqueSearchOptions, searchPrintLang, searchRarity, searchSet, isLegendCard, legendVersionPairKey, legendHalfOrder } from './search-filters.js';
+import { filterExpansionCards } from './expansion-filters.js';
 
 const mimikyu = {
   name: 'Mimikyu',

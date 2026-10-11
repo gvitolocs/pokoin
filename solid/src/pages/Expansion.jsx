@@ -4,7 +4,8 @@ import { EXPANSION_PAGE, fetchExpansion, fetchExpansionCards, peekExpansion, pre
 import { bundleReference, writeListingDrag } from '@market/chat-listing.js';
 import { resolveExpansionNationality } from '@market/expansion-print.js';
 import { printFlagFromNationality } from '@market/locale.js';
-import { filterExpansionCards, isSetDeskCard, searchPrintLang, searchRarity, uniqueSearchOptions } from '@market/search-filters.js';
+import { isSetDeskCard, searchPrintLang, searchRarity, uniqueSearchOptions } from '@market/search-filters.js';
+import { filterExpansionCards } from '@market/expansion-filters.js';
 import { setSeoTitle } from '@market/seo.js';
 import { setDeskSkeletonCount } from '@market/set-desk-preview.js';
 import { expansionLogoSrc, expansionSymbolSrc, eraHref, tcgEra } from '@market/set-logos.js';
