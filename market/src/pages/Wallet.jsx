@@ -1,51 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import jsQR from 'jsqr';
 import {
   ensureUsername,
-  fetchChainAddressActivity,
   formatPknNumber,
   requestPknWithdraw,
-  searchRecipientUsernames,
   topUpAccountBalance,
   transferAccountBalance,
 } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
-import { fetchFirestoreDocument, fetchOwnedCollectionDocuments } from '../firestore-rest.js';
+import { fetchFirestoreDocument } from '../firestore-rest.js';
 import { encodeQr, qrPath } from '../qr.js';
+import { activityTimeLabel, shortChainAddress } from '../wallet-activity.js';
 import {
-  activityFromChainTx,
-  activityFromLedgerRow,
-  activityFromWalletRow,
-  activityTimeLabel,
-  mergeActivity,
-  shortChainAddress,
-} from '../wallet-activity.js';
-import {
-  activityCacheIsFresh,
-  activityFingerprint,
-  activityNewestMs,
-  readActivityCache,
-  writeActivityCache,
-} from '../wallet-activity-cache.js';
-import { buildReceiveQr, parseScannedQr, parseWalletSendLink } from '../wallet-qr.js';
-import {
-  compactRecipientQuery,
-  counterpartiesFromActivity,
-  mergeUsernameSuggestions,
-} from '../recipient-suggest.js';
+  ACTIVITY_ROW_COUNT,
+  IS_ADDRESS,
+  RECIPIENT_SEARCH_DELAY_MS,
+  TREASURY_ADDRESS,
+  cachedActivityRows,
+  loadWalletActivity,
+  recipientQuery,
+  searchRecipients,
+  startQrScanner,
+} from '../wallet-feed.js';
+import { buildReceiveQr, parseWalletSendLink } from '../wallet-qr.js';
+import { counterpartiesFromActivity, mergeUsernameSuggestions } from '../recipient-suggest.js';
 import { sendPkn, switchToPokoin, useWallet } from '../wallet.jsx';
 import {
   createMoneyRequest,
   newClientToken,
 } from '../money-requests.js';
-
-/** Bank wallet that funds account top-ups (same treasury as cardvault). */
-const TREASURY_ADDRESS = '0xb4029F68E360280aa4Ad21D8aE5AD8896b8768B2';
-const ACTIVITY_ROW_COUNT = 12;
-const ACTIVITY_QUERY_LIMIT = 60;
-const IS_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 function Icon({ name, size = 22 }) {
   const paths = {
@@ -210,10 +194,8 @@ export default function Wallet() {
       setActivity([]);
       return;
     }
-    const cached = readActivityCache(uid, address);
-    if (cached?.rows?.length) {
-      setActivity(cached.rows);
-    }
+    const rows = cachedActivityRows(uid, address);
+    if (rows) setActivity(rows);
   }, [uid, address]);
 
   const refreshActivity = useCallback(async ({ force = false } = {}) => {
@@ -222,56 +204,15 @@ export default function Wallet() {
       setActivityLoading(false);
       return;
     }
-    const cached = readActivityCache(uid, address);
-    if (!force && activityCacheIsFresh(cached)) {
-      setActivity(cached.rows);
-      setActivityLoading(false);
-      return;
-    }
-    const showSpinner = !(cached?.rows?.length || false);
-    if (showSpinner) setActivityLoading(true);
-    // Overlap one minute so clock skew / same-second writes are not missed.
-    const sinceMs = !force && cached?.rows?.length
-      ? Math.max(0, activityNewestMs(cached.rows) - 60_000)
-      : 0;
     try {
-      const groups = await Promise.allSettled([
-        (async () => {
-          const token = await getBearer();
-          const rows = await fetchOwnedCollectionDocuments('ledger_entries', uid, token, {
-            limit: ACTIVITY_QUERY_LIMIT,
-            sinceMs,
-          });
-          return rows.map(activityFromLedgerRow);
-        })(),
-        (async () => {
-          const token = await getBearer();
-          const rows = await fetchOwnedCollectionDocuments('wallet_activity', uid, token, {
-            limit: ACTIVITY_QUERY_LIMIT,
-            sinceMs,
-          });
-          return rows.map(activityFromWalletRow);
-        })(),
-        (async () => {
-          if (!address) return [];
-          const txs = await fetchChainAddressActivity(address, { limit: ACTIVITY_QUERY_LIMIT });
-          return txs.map((tx) => activityFromChainTx(tx, address));
-        })(),
-      ]);
-      const fetched = groups.map((row) => (row.status === 'fulfilled' ? row.value : []));
-      // Delta fetch: fold new rows onto the cached feed. Full fetch: replace.
-      const next = mergeActivity(
-        sinceMs > 0 && cached?.rows?.length ? [cached.rows, ...fetched] : fetched,
-        { limit: ACTIVITY_QUERY_LIMIT },
-      );
-      const prevFp = cached?.fingerprint || activityFingerprint(cached?.rows || []);
-      const nextFp = activityFingerprint(next);
-      writeActivityCache(uid, address, next);
-      if (nextFp !== prevFp) {
-        setActivity(next);
-      } else if (!cached?.rows?.length && next.length) {
-        setActivity(next);
-      }
+      const next = await loadWalletActivity({
+        uid,
+        address,
+        getBearer,
+        force,
+        onLoading: setActivityLoading,
+      });
+      if (next) setActivity(next);
     } finally {
       setActivityLoading(false);
     }
@@ -575,9 +516,7 @@ export default function Wallet() {
  */
 function useRecipientSuggestions({ value, getBearer, recentActivity = [], selfUsername = '' }) {
   const [search, setSearch] = useState({ status: 'idle', rows: [] });
-  const query = String(value || '').trim();
-  const compactQuery = compactRecipientQuery(query);
-  const searchable = compactQuery.length >= 2 && !query.includes('@') && !IS_ADDRESS.test(query);
+  const { query, compactQuery, searchable } = recipientQuery(value);
   const localNames = useMemo(
     () => counterpartiesFromActivity(recentActivity),
     [recentActivity],
@@ -602,29 +541,14 @@ function useRecipientSuggestions({ value, getBearer, recentActivity = [], selfUs
     const timer = setTimeout(() => {
       setSearch((prev) => ({ status: 'searching', rows: prev.rows }));
       getBearer()
-        .then((token) => {
-          if (cancelled) {
-            return undefined;
-          }
-          if (!token) {
-            setSearch({ status: 'signedout', rows: [] });
-            return undefined;
-          }
-          return searchRecipientUsernames(compactQuery || query, token).then((data) => {
-            if (cancelled) {
-              return;
-            }
-            const fromResults = Array.isArray(data.results) ? data.results : [];
-            const rows = fromResults.length
-              ? fromResults.slice(0, 8)
-              : (data.usernames || []).slice(0, 8).map((username) => ({ username, displayName: '' }));
-            setSearch({ status: rows.length ? 'results' : 'none', rows });
-          });
+        .then((token) => (cancelled ? null : searchRecipients({ query, compactQuery }, token)))
+        .then((next) => {
+          if (!cancelled && next) setSearch(next);
         })
         .catch(() => {
           if (!cancelled) setSearch({ status: 'error', rows: [] });
         });
-    }, 180);
+    }, RECIPIENT_SEARCH_DELAY_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -706,74 +630,17 @@ function SendSheet({
     if (!scanning) {
       return () => {};
     }
-    let cancelled = false;
-    let timer = 0;
-    let stream = null;
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    let detector = null;
-    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
-      try {
-        detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      } catch (_) {
-        detector = null;
-      }
-    }
-    setScanMsg('');
-    (async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-        });
-      } catch (_) {
-        if (!cancelled) setScanMsg('Camera unavailable — allow camera access and try again.');
-        return;
-      }
-      if (cancelled) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-      const video = videoRef.current;
-      if (video) {
-        video.srcObject = stream;
-        video.play().catch(() => {});
-      }
-      timer = setInterval(async () => {
-        const el = videoRef.current;
-        if (!el || el.readyState < 2) return;
-        try {
-          let text = '';
-          if (detector) {
-            const codes = await detector.detect(el);
-            text = codes?.[0]?.rawValue || '';
-          } else if (el.videoWidth && el.videoHeight) {
-            canvas.width = el.videoWidth;
-            canvas.height = el.videoHeight;
-            ctx.drawImage(el, 0, 0);
-            const code = jsQR(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
-            text = code?.data || '';
-          }
-          if (!text) return;
-          const parsed = parseScannedQr(text);
-          if (!parsed) {
-            setScanMsg('Not a Pokoin payment code — keep the code inside the frame.');
-            return;
-          }
-          setScanning(false);
-          setRecipient(parsed.recipient);
-          setAmount(parsed.amountPkn || '');
-          setScanned(parsed.recipient);
-          setScanMsg('');
-        } catch (_) {
-          // frame skipped — keep scanning
-        }
-      }, 180);
-    })();
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-      stream?.getTracks().forEach((track) => track.stop());
-    };
+    return startQrScanner({
+      getVideo: () => videoRef.current,
+      onMessage: setScanMsg,
+      onScan: (parsed) => {
+        setScanning(false);
+        setRecipient(parsed.recipient);
+        setAmount(parsed.amountPkn || '');
+        setScanned(parsed.recipient);
+        setScanMsg('');
+      },
+    });
   }, [scanning]);
 
   function submit() {

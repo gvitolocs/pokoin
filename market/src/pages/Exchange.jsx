@@ -11,25 +11,7 @@ import {
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { POKOIN_RPC, poolIdFor, sendSwapTransaction, useWallet } from '../wallet.jsx';
-
-function poolsOf(data) {
-  const rows = Array.isArray(data) ? data : (data?.pools || data?.items || []);
-  const mapped = rows.map((row) => {
-    const id = String(row.id || row.poolId || row.pool_id || '');
-    let asset = String(row.otherAsset || row.asset || row.quote || row.assetB || '').toUpperCase();
-    if (!asset && id) {
-      asset = id.replace(/^PKN-/, '').replace(/-PKN$/, '').toUpperCase();
-    }
-    if (asset === 'PKN') {
-      asset = '';
-    }
-    return { id: id || poolIdFor(asset), asset: asset || '' };
-  }).filter((row) => row.asset);
-  if (!mapped.some((row) => row.asset === 'WPKN')) {
-    mapped.push({ id: poolIdFor('WPKN'), asset: 'WPKN' });
-  }
-  return mapped;
-}
+import { swapPoolsOf as poolsOf } from '../wallet-tx.js';
 
 export default function Exchange() {
   const { address, connect } = useWallet();

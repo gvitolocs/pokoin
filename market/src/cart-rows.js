@@ -156,3 +156,4 @@ export function setCartRowQty(current, id, qty) {
 export function removeCartRow(current, id) {
   return current.filter((row) => row.id !== id);
 }
+

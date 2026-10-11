@@ -28,6 +28,7 @@ import {
 import { tilePricePkn } from '../pkn.js';
 import { authFrom } from '../punchouts.js';
 import AuthLink from './AuthLink.jsx';
+import { listingStub, offerStub, tileStub } from '../basket-format.js';
 import { BigPrice } from './Basket.jsx';
 import CardArt from './CardArt.jsx';
 
@@ -111,19 +112,6 @@ export function Shelf({ title, extra, count, children, className = '' }) {
   );
 }
 
-function tileStub(card) {
-  return {
-    id: String(card.id),
-    name: card.name || 'Card',
-    canonicalPath: card.canonicalPath || card.canonical_path || '',
-    imageUrl: card.imageUrl || card.image_url || '',
-    gridImageUrl: card.gridImageUrl || card.grid_image_url || '',
-    heroImageUrl: card.heroImageUrl || '',
-    homepageImageUrl: card.homepageImageUrl || card.homepage_image_url || '',
-    set: card.set || card.expansion || card.setName || '',
-  };
-}
-
 /** Same pick as dropping a card on the cart: English NM first, then cheapest. */
 export function AddCardButton({ card, className = 'bk-btn-y is-small' }) {
   const { addItem } = useCart();
@@ -193,19 +181,6 @@ export function TileCard({ card, note }) {
   );
 }
 
-function listingStub(offer) {
-  const id = String(offer.cardId || offer.card_id || '');
-  return {
-    id,
-    name: offer.cardName || offer.name || 'Card',
-    canonicalPath: offer.canonicalPath || offer.canonical_path || `/marketplace/en/cards/${id}`,
-    imageUrl: offer.cardImageUrl || offer.imageUrl || '',
-    homepageImageUrl: offer.homepageImageUrl || '',
-    gridImageUrl: offer.gridImageUrl || '',
-    set: offer.setName || '',
-  };
-}
-
 /** One live listing from a seller already in the cart: adds that exact copy. */
 export function ListingCard({ offer, inCart }) {
   const { addItem } = useCart();
@@ -253,20 +228,6 @@ export function ListingCard({ offer, inCart }) {
       </button>
     </div>
   );
-}
-
-function offerStub(card, offer) {
-  const id = String(card?.id || card?.card_id || offer?.cardId || '');
-  return {
-    id,
-    name: card?.name || offer?.cardName || 'Card',
-    canonicalPath: card?.canonicalPath || card?.canonical_path || offer?.canonicalPath || `/marketplace/en/cards/${id}`,
-    imageUrl: card?.imageUrl || card?.image_url || offer?.cardImageUrl || '',
-    gridImageUrl: card?.gridImageUrl || '',
-    heroImageUrl: card?.heroImageUrl || '',
-    homepageImageUrl: card?.homepageImageUrl || '',
-    set: card?.set || card?.set_name || offer?.setName || '',
-  };
 }
 
 /** Adds exactly the recommended listing; no second lookup. */
