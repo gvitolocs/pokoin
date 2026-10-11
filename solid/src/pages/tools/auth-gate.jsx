@@ -6,14 +6,15 @@ import { authReady, signedIn } from '../../stores/auth.js';
 
 /**
  * React's `if (!ready) <SessionWait />; if (!signedIn) <Navigate to={authFrom(path)} replace />`
- * guard: children mount only for a signed-in member.
+ * guard: children mount only for a signed-in member. `to` overrides the
+ * sign-in URL (ScanDesk links /auth?from= directly, without authFrom).
  */
 export function RequireSignIn(props) {
   const navigate = useNavigate();
   createEffect(
     () => authReady() && !signedIn(),
     (out) => {
-      if (out) navigate(authFrom(props.from), { replace: true });
+      if (out) navigate(props.to || authFrom(props.from), { replace: true });
     },
   );
   return (

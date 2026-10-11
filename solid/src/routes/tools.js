@@ -19,6 +19,7 @@ const Admin = lazy(() => import('../pages/Admin.jsx'));
 const Scan = lazy(() => import('../pages/Scan.jsx'));
 const Forum = lazy(() => import('../pages/Forum.jsx'));
 const SyncReview = lazy(() => import('../pages/SyncReview.jsx'));
+const ScanDesk = lazy(() => import('../pages/ScanDesk.jsx'));
 const About = lazy(() => import('../pages/About.jsx'));
 const Careers = lazy(() => import('../pages/Careers.jsx'));
 
@@ -38,6 +39,8 @@ export default [
   { path: '/scan', component: Scan },
   { path: '/cardscan', component: Scan },
   { path: '/scancard', component: Scan },
+  { path: '/dashboard/scan', component: ScanDesk },
+  { path: '/inventory/scan', component: ScanDesk },
   { path: '/inventory/sync-review', component: SyncReview },
   { path: '/forum', component: Forum },
   { path: '/forum/category/:categoryId', component: Forum },
