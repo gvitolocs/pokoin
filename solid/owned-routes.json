@@ -5,6 +5,21 @@
     "^/marketplace/?$",
     "^/marketplace/search/?$",
     "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/?$",
-    "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/versions/?$"
+    "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/versions/?$",
+    "^/auth/?$",
+    "^/extension/auth-bridge/?$",
+    "^/profile/?$",
+    "^/dashboard/?$",
+    "^/stock/?$",
+    "^/messages(?:/[^/]+)?/?$",
+    "^/associate/?$",
+    "^/mypokoin(?:/(?:zero|1dr|spreadsheet|import|settings|collection|location/[^/]+))?/?$",
+    "^/inventory/?$",
+    "^/collection/?$",
+    "^/marketplace/portfolio(?:/[^/]+)?/?$",
+    "^/invite/?$",
+    "^/join/[^/]+/?$",
+    "^/ambassador(?:program)?/?$",
+    "^/email-preferences/?$"
   ]
 }

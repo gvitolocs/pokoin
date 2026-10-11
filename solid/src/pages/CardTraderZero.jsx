@@ -120,7 +120,7 @@ function PowerToolsPanel(props) {
                     name="powertools-session"
                     class="is-masked"
                     autocomplete="off"
-                    spellcheck={false}
+                    spellcheck="false"
                     data-1p-ignore=""
                     data-lpignore="true"
                     placeholder="Power Tools session (jwt cookie value)"

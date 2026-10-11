@@ -68,7 +68,7 @@ function HoldingRow(props) {
     <article
       class="collection-tile"
       data-ownership={nft() ? 'nft' : 'physical'}
-      draggable={Boolean(props.draggable)}
+      draggable={props.draggable ? 'true' : undefined}
       onDragStart={(event) => { if (props.draggable) props.onDragCard(event, row()); }}
     >
       <CardArt class="collection-tile-art" src={cardPicture(row())} alt={cardLabel(row())} full />
@@ -126,7 +126,7 @@ function ListedRow(props) {
   const meta = () => listingMeta(listing()).filter((part) => !String(part).endsWith(' PKN'));
   const price = () => Number(listing()?.pricePkn ?? listing()?.price_pkn ?? 0);
   return (
-    <article class="collection-tile" data-ownership="listed" draggable={true} onDragStart={(event) => props.onDragCard(event, props.entry)}>
+    <article class="collection-tile" data-ownership="listed" draggable="true" onDragStart={(event) => props.onDragCard(event, props.entry)}>
       <CardArt class="collection-tile-art" src={cardPicture(row())} alt={name()} full />
       <div class="collection-tile-body">
         <strong class="thread-title">{name()}</strong>

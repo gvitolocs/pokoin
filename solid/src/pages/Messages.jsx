@@ -633,7 +633,7 @@ function HumanConversation(props) {
             ref={thread.setLog}
             onScroll={thread.onScroll}
             aria-live="polite"
-            aria-busy={!thread.settled() && !thread.events().length}
+            aria-busy={String(!thread.settled() && !thread.events().length)}
           >
             <Switch>
               <Match when={!thread.settled() && !thread.events().length}><p class="chat-muted">Loading conversation…</p></Match>

@@ -68,7 +68,7 @@ export function ZeroLine(props) {
   return (
     <div
       class={['thread', 'zero-line', { 'is-picked': Boolean(props.picked) }]}
-      draggable={Boolean(props.onMove)}
+      draggable={props.onMove ? 'true' : undefined}
       onDragStart={(event) => props.onDragStart?.(event, item().itemId)}
     >
       <Show when={props.place != null}>
@@ -96,7 +96,7 @@ export function ZeroLine(props) {
         <button
           class="btn ghost zero-move"
           type="button"
-          draggable={false}
+          draggable="false"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={() => props.onMove(item().itemId, !props.picked)}
         >

@@ -259,7 +259,7 @@ function InventoryDesk() {
                 <button
                   type="button"
                   class={row.id === previewFormat() ? 'btn' : 'btn ghost'}
-                  aria-pressed={row.id === previewFormat()}
+                  aria-pressed={String(row.id === previewFormat())}
                   disabled={Boolean(busy()) && row.id !== previewFormat()}
                   onClick={() => setPreviewFormat(row.id)}
                 >

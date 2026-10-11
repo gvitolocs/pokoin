@@ -136,7 +136,7 @@ function OneDayDesk() {
             type="button"
             class={['metric', 'dr-stock-open', { 'is-open': showStock() }]}
             onClick={() => setShowStock((open) => !open)}
-            aria-expanded={showStock()}
+            aria-expanded={String(showStock())}
           >
             <strong class="metric-value">{warehouseCards()}</strong>
             <span class="metric-label">Cards at CardTrader</span>

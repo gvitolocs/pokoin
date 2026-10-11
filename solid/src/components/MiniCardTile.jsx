@@ -51,14 +51,14 @@ export default function MiniCardTile(props) {
   return (
     <Show
       when={props.href}
-      fallback={<span class="seller-listing-tile" title={label()} aria-label={name()} draggable={true} onDragStart={onDragStart}>{art()}</span>}
+      fallback={<span class="seller-listing-tile" title={label()} aria-label={name()} draggable="true" onDragStart={onDragStart}>{art()}</span>}
     >
       <a
         class="seller-listing-tile"
         href={props.href}
         title={label()}
         aria-label={name()}
-        draggable={true}
+        draggable="true"
         onDragStart={onDragStart}
         onClick={(event) => {
           if (!String(props.href).startsWith('http')) return;

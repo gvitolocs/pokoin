@@ -19,6 +19,10 @@ const Messages = lazy(() => import('../pages/Messages.jsx'));
 const Conversation = lazy(() => import('../pages/Messages.jsx').then((m) => ({ default: m.Conversation })));
 const Inventory = lazy(() => import('../pages/Inventory.jsx'));
 const SellSpreadsheet = lazy(() => import('../pages/SellSpreadsheet.jsx'));
+const Associate = lazy(() => import('../pages/Associate.jsx'));
+const Portfolio = lazy(() => import('../pages/Portfolio.jsx'));
+const Profile = lazy(() => import('../pages/Profile.jsx'));
+const SellerHome = lazy(() => import('../pages/SellerHome.jsx'));
 
 export default [
   { path: '/stock', component: Stock },
@@ -38,7 +42,13 @@ export default [
   { path: '/mypokoin/collection', component: Inventory },
   { path: '/mypokoin/location/:location', component: Inventory },
   { path: '/mypokoin', component: Inventory },
+  { path: '/associate', component: Associate },
+  { path: '/marketplace/portfolio/:listingId?', component: Portfolio },
+  { path: '/profile', component: Profile },
+  { path: '/dashboard', component: SellerHome },
   { path: '/inventory', component: RedirectTo, info: { to: '/mypokoin' } },
   { path: '/collection', component: RedirectTo, info: { to: '/mypokoin/collection' } },
   { path: '/ambassador', component: RedirectTo, info: { to: '/ambassadorprogram' } },
+  // Dev-only fixture layout of the dashboard, as in React.
+  ...(import.meta.env.DEV ? [{ path: '/dash-preview', component: SellerHome }] : []),
 ];
