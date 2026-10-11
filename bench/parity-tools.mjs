@@ -33,6 +33,9 @@ if (!A || !B) {
 }
 const ONLY = arg('only', '').split(',').filter(Boolean);
 const SIGNED_IN = arg('signed-in', '0') === '1';
+// React reads the admin flag over a Firestore Listen channel (not faked here), Solid over the
+// REST read: parity runs as a non-admin; `--admin 1` renders the editor on build B alone.
+const ADMIN = arg('admin', '0') === '1';
 const browser = await chromium.launch();
 
 // ---------------------------------------------------------------- fixtures (signed-in mode)
@@ -112,20 +115,20 @@ const ROUTES = [
 
 async function signedInContext(context, log) {
   // Firebase persisted user (browserLocalPersistence → IndexedDB) before any script runs.
-  await context.addInitScript(({ uid, apiKey, token }) => {
+  await context.addInitScript(({ uid, apiKey, token, admin }) => {
     const user = {
       uid, email: 'parity@example.test', emailVerified: true, isAnonymous: false, providerData: [],
       stsTokenManager: { refreshToken: 'fixture-refresh', accessToken: token, expirationTime: Date.now() + 3600 * 1000 },
       createdAt: String(Date.now()), lastLoginAt: String(Date.now()), apiKey, appName: '[DEFAULT]',
     };
-    localStorage.setItem('pokoin.auth.session', JSON.stringify({ uid, signedIn: true, admin: true, at: Date.now() }));
+    localStorage.setItem('pokoin.auth.session', JSON.stringify({ uid, signedIn: true, admin, at: Date.now() }));
     const open = indexedDB.open('firebaseLocalStorageDb', 1);
     open.onupgradeneeded = () => open.result.createObjectStore('firebaseLocalStorage', { keyPath: 'fbase_key' });
     open.onsuccess = () => {
       const tx = open.result.transaction('firebaseLocalStorage', 'readwrite');
       tx.objectStore('firebaseLocalStorage').put({ fbase_key: `firebase:authUser:${apiKey}:[DEFAULT]`, value: user });
     };
-  }, { uid: UID, apiKey: API_KEY, token: ID_TOKEN });
+  }, { uid: UID, apiKey: API_KEY, token: ID_TOKEN, admin: ADMIN });
   await context.route(/identitytoolkit\.googleapis\.com|securetoken\.googleapis\.com/, (route) => route.fulfill({
     status: 200, contentType: 'application/json',
     body: JSON.stringify({ users: [{ localId: UID, email: 'parity@example.test', emailVerified: true, providerUserInfo: [] }], id_token: ID_TOKEN, refresh_token: 'fixture-refresh', expires_in: '3600', user_id: UID }),
@@ -135,7 +138,7 @@ async function signedInContext(context, log) {
     if (/documents\/users\//.test(url)) {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
         name: `projects/pokoin/databases/(default)/documents/users/${UID}`,
-        fields: { uid: { stringValue: UID }, admin: { booleanValue: true }, username: { stringValue: 'parity' } },
+        fields: { uid: { stringValue: UID }, admin: { booleanValue: ADMIN }, username: { stringValue: 'parity' } },
       }) });
     }
     return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
@@ -174,12 +177,12 @@ async function snapshot(page) {
     for (const el of root ? root.querySelectorAll('[class]') : []) {
       for (const name of el.classList) histogram[name] = (histogram[name] || 0) + 1;
     }
-    const text = (sel) => [...document.querySelectorAll(sel)].map((n) => n.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const text = (sel) => [...(root || document).querySelectorAll(sel)].map((n) => n.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
     return {
       title: document.title,
       url: location.pathname + location.search,
-      h1: text('#root h1').slice(0, 5),
-      h2: text('#root h2').slice(0, 40),
+      h1: text('h1').slice(0, 5),
+      h2: text('h2').slice(0, 40),
       histogram,
     };
   });
@@ -216,7 +219,10 @@ async function withPage(base, fn) {
   let navigations = 0;
   page.on('pageerror', (error) => errors.push(String(error).slice(0, 160)));
   page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(msg.text().slice(0, 160));
+    // Resource failures are reported (and filtered) through the response handler.
+    // Signed-in mode stubs Firestore: its "could not reach backend" noise is the fixture, not the page.
+    if (SIGNED_IN && /@firebase\/firestore/.test(msg.text())) return;
+    if (msg.type() === 'error' && !/^Failed to load resource/.test(msg.text())) errors.push(msg.text().slice(0, 160));
   });
   page.on('requestfailed', (request) => {
     const reason = request.failure()?.errorText || '';
@@ -224,11 +230,12 @@ async function withPage(base, fn) {
     failed.push(`${request.method()} ${request.url().slice(0, 120)} ${reason}`);
   });
   page.on('response', (response) => {
-    if (response.status() >= 400) failed.push(`${response.status()} ${response.url().slice(0, 120)}`);
+    // The local preview has no /card-images (production serves them): both UIs 404 alike.
+    if (SIGNED_IN && /firestore\.googleapis\.com/.test(response.url())) return;
+    if (response.status() >= 400 && !/\/card-images\/|\/review\/espurr-art\//.test(response.url())) failed.push(`${response.status()} ${response.url().slice(0, 120)}`);
   });
-  page.on('framenavigated', (frame) => {
-    if (frame === page.mainFrame()) navigations += 1;
-  });
+  // Full document loads only: a NotMigrated handoff reloads, SPA navigations do not.
+  page.on('load', () => { navigations += 1; });
   try {
     const value = await fn(page, base);
     return { value, errors, failed, navigations, log };
@@ -256,7 +263,9 @@ const BOARD = ['.test-dock a', '.sanitize-bar', '.sanitize-main h1'];
 const jobs = SIGNED_IN ? [
   check('/admin', ['.thread', '.empty-desk']),
   check('/marketplace/admin/edit', ['form.desk-panel', '.sell-field input'], async (page) => {
-    await page.check('input[type="checkbox"]');
+    const box = page.locator('input[type="checkbox"]');
+    if (!(await box.count())) return null;
+    await box.check();
     return settle(page, () => counts(page, ['form.desk-panel']));
   }),
   check('/inventory/sync-review', ['.order-row', '.stock-nav a', '.ct-pt-inline input'], async (page) => {
@@ -318,8 +327,8 @@ const jobs = SIGNED_IN ? [
     return settle(page, read(page, ['.forum-cat.on', '.forum-topic']));
   }),
   check('/forum/topic/does-not-exist', ['.forum-post', '.forum-empty', '.desk-alert']),
-  check('/scan', ['.scan-stage', '.file-pill', '.scan-fields input'], async (page) => {
-    await page.fill('.scan-fields input', 'umbreon');
+  check('/scan', ['.scan-stage', '.file-pill', '.scan-fields .sell-field input'], async (page) => {
+    await page.fill('.scan-fields .sell-field input', 'umbreon');
     await page.locator('.desk-actions button.ghost').click();
     await page.waitForURL(/search/, { timeout: 10000 }).catch(() => {});
     return page.evaluate(() => location.pathname + location.search);
@@ -355,6 +364,16 @@ function comparable(value) {
 
 let failures = 0;
 const table = [];
+if (ADMIN) {
+  for (const job of jobs.filter((j) => j.name.includes('admin'))) {
+    const b = await withPage(B, job.run);
+    console.log(`B ${job.name}: ${JSON.stringify({ h1: b.value?.load?.h1, counts: b.value?.load?.counts, after: b.value?.after })}`);
+    for (const line of [...b.errors, ...b.failed]) console.log(`  ${line}`);
+    for (const line of b.log) console.log(`  · ${line}`);
+  }
+  await browser.close();
+  process.exit(0);
+}
 for (const job of jobs.filter((j) => !ONLY.length || ONLY.includes(j.name))) {
   let a;
   let b;
