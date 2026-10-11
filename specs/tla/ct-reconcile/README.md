@@ -3,8 +3,9 @@
 `Model.tla` models one connected seller: CardTrader products with a quantity,
 Pokoin listings linked to them (`source_listing_id = ct:<id>`), two reconcilers
 and the CardTrader order webhook, all interleaved one SQL or Firestore call at a
-time. `Fixed = FALSE` is origin/main at `00bc3d2c`; `Fixed = TRUE` is this
-branch. Findings and their resolutions: [`../FINDINGS.md`](../FINDINGS.md).
+time. `Fixed = FALSE` is origin/main at `00bc3d2c`; `Fixed = TRUE` is the
+fixed code; `SkipSettled = TRUE` adds PR #309 (settled rows skipped and not
+counted by the guard). Findings and their resolutions: [`../FINDINGS.md`](../FINDINGS.md).
 
 ## What is modelled
 
@@ -16,7 +17,7 @@ branch. Findings and their resolutions: [`../FINDINGS.md`](../FINDINGS.md).
 | `Start`, `LoseLock`, `Finish` | Redis lock `SET NX EX 900`, owner-checked release: `async_sync.rs:22`, `:47`, `:62`; the timer job's copy `apps/api/src/jobs/cardtrader.rs:173`. `LoseLock` is the 15-minute TTL expiring under a long run (no renewal) or Redis being down (`acquire` then hands out a degraded lock) |
 | `Fetch`, `FetchFailed` | `fetch_products_export` (`sync.rs:696`); `ReadModes` is how `normalize_product` read each row's id: `ok`, `empty` (the 2026-10-09 class), `alien` (non-integer text such as `12.0`), `nogame` (game unreadable/unsupported), `wrong` (a valid but wrong integer) |
 | `Load` | `load_seller_listings` (`sync.rs:750`) — a snapshot, taken after the export |
-| `Plan` / `PlanOf` | `plan_inventory_reconcile` (`sync_core.rs:467`): id filter `:492`, `seen_product_ids` `:500`, `AlreadyLinked`/`UpdateQty` `:522`, `Import` `:544`, unparsed gate `:572`, removal candidates `:577`, `mass_removal_guard` `:603` (`MASS_REMOVAL_MIN` `:624`, scaled to `MassMin`) |
+| `Plan` / `PlanOf` | `plan_inventory_reconcile` (`sync_core.rs:678`): `linked_before` `:693`, `seen_product_ids` `:712`, `AlreadyLinked`/`UpdateQty` `:734`, `Import` `:759`, unparsed gate `:788`, removal candidates `:793`, `settled_absent` `:531` (PR #309, `SkipSettled`), `mass_removal_guard` `:823` (`MASS_REMOVAL_MIN` `:843`, scaled to `MassMin`); line numbers at this branch |
 | `ApplyStep` `update` / `ApplyQty` | `apply_ct_quantity_since` / `APPLY_CT_QUANTITY_SQL` (`sync.rs:396`, `:95`, raise guard `:116`), export start from `writer_clock` (`sync.rs:411`, `:695`) |
 | `ApplyStep` `import_find` + `import_insert` (origin) / `import_atomic` (fixed) | `create_imported_listing` (`sync.rs:455`): find by source then insert; fixed: one writer transaction under `pg_advisory_xact_lock` (`sync.rs:489`); `Reactivate` = `REACTIVATE_HIDDEN_SQL` |
 | `Orders`, `Remove` | destructive pass (`sync.rs:870`): `fetch_seller_orders` (`:901`), `Sold` → quantity 0 + claim the missed sales (`:911`), `Delisted`/`Unknown` → `delist_ct_listing` (`:953`) |
@@ -41,6 +42,7 @@ written after reconciler `r` fetched its export (`updated_at > export start`).
 | `NonNegative` | `quantity_available >= 0`. |
 | `NoStaleResurrection` | A reconcile never raises a listing back above a sale the webhook already took off. |
 | `UniqueLink` | At most one live Pokoin listing per CardTrader product (no duplicate imports by racing reconcilers). |
+| `NoReplanSettled` | PR #309: a row an earlier run settled as gone (sold out at 0, link `missing_from_ct`) is not planned for removal again. |
 | `NoDoubleDecrement`, `NoDoubleRestore` | A webhook sale/cancel is not applied on top of an export that already reflected it. **Accepted design race**, see FINDINGS (checked by `design/*.cfg`). |
 | witnesses `Never*` | Must be *violated* by the fixed model: delisting, importing, quantity updates and webhook sales all still happen. |
 
@@ -48,13 +50,14 @@ written after reconciler `r` fetched its export (`updated_at > export start`).
 
 | Config | Expectation | Result on nezopt (12 cores) |
 | --- | --- | --- |
-| `Model.cfg` | fixed, all safety invariants hold | 48,360,531 distinct states, depth 31, ~7 min |
+| `Model.cfg` | fixed + PR #309, all safety invariants hold | 48,360,531 distinct states, depth 31, ~7 min alone (16 min next to other jobs) |
 | `bugs/empty-ids-partial.cfg` | origin: `NoFalseDeactivation` violated | counterexample, 8 states |
 | `bugs/alien-ids.cfg` | origin: `NoFalseDeactivation` violated | counterexample |
 | `bugs/nogame-not-seen.cfg` | origin: `NoFalseDeactivation` violated | counterexample |
 | `bugs/guard-dilution.cfg` | origin: `GuardBound` violated | counterexample, 14 states |
 | `bugs/duplicate-import.cfg` | origin: `UniqueLink` violated | counterexample, 14 states |
 | `bugs/stale-resurrection.cfg` | origin: `NoStaleResurrection` violated | counterexample, 10 states |
+| `bugs/replans-settled.cfg` | fixed code without PR #309 (`SkipSettled = FALSE`): `NoReplanSettled` violated | counterexample, 15 states |
 | `design/double-decrement.cfg`, `design/double-restore.cfg` | fixed: accepted race reproduced | counterexamples |
 | `witness/*.cfg` | fixed: behaviour reachable | violations found |
 

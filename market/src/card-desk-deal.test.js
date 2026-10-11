@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bestDealCondition, listedDealConditions, matchDeal, shownDealCondition } from './card-desk.js';
+import { bestDealCondition, listedDealConditions, listedDealLanguages, matchDeal, shownDealCondition } from './card-desk.js';
 
 const offer = (id, language, condition, pricePkn) => ({ id, language, condition, pricePkn });
 const card = { nationality: 'western' };
@@ -33,4 +33,14 @@ test('the deal matches languages the way the chips list them', () => {
 test('condition chips grey out per language', () => {
   assert.deepEqual(listedDealConditions(offers, 'ES', card).map((row) => row.value), ['PL', 'MP']);
   assert.deepEqual(listedDealConditions(offers).map((row) => row.value).sort(), ['MP', 'NM', 'PL', 'SP'].sort());
+});
+
+test('language chips list only languages with a priced offer', () => {
+  const offers = [
+    offer('a', 'en', 'Near Mint', 900),
+    offer('b', 'de', 'Near Mint', 0),
+    offer('c', 'fr', 'Near Mint', null),
+  ];
+  const card = { nationality: 'western' };
+  assert.deepEqual(listedDealLanguages(offers, card), ['EN']);
 });
