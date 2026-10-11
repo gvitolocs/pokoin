@@ -9,7 +9,7 @@ import {
   resetScrollRestoreForTests,
   restoreWindowY,
   restoredPageView,
-} from './scroll-restore.js';
+} from './scroll-memory.js';
 
 test('history keys keep independent scroll slots and drop the oldest', () => {
   resetScrollRestoreForTests();
