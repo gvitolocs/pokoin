@@ -13,6 +13,7 @@ import Avatar from '../components/Avatar.jsx';
 import { DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
 import CardTraderConnectPanel, { CT_TOKEN_DOCS } from '../components/profile/CardTraderConnectPanel.jsx';
 import DisplayNameEditor from '../components/profile/DisplayNameEditor.jsx';
+import SellerApiPanel from '../components/profile/SellerApiPanel.jsx';
 import { PknPayoutToggle, ShipFromCountrySelect, StripeConnectButton } from '../components/profile/SellerShippingSettings.jsx';
 import TelegramConnectPanel from '../components/profile/TelegramConnectPanel.jsx';
 import UsernameEditor from '../components/profile/UsernameEditor.jsx';
@@ -416,6 +417,10 @@ function ProfileDesk() {
 
         <DeskPanel title="Poko on Telegram & Discord" class="profile-poko">
           <TelegramConnectPanel />
+        </DeskPanel>
+
+        <DeskPanel title="Card Rails & API tokens" class="profile-seller-api">
+          <SellerApiPanel />
         </DeskPanel>
       </div>
 
