@@ -1,7 +1,7 @@
 import { createSignal } from 'solid-js';
 import { fetchSellerSettings } from '@market/api.js';
 import { currencyForCountry, currencyFromLocale, LIST_CURRENCIES } from '@market/pkn.js';
-import { buyerPriceLabel, buyerPriceParts, sellerListCurrency } from '@market/seller-currency.js';
+import { buyerPrefersFiat, buyerPriceLabel, buyerPriceParts, sellerListCurrency } from '@market/seller-currency.js';
 import { getBearer, signedIn } from './auth.js';
 import { authSession } from './session.js';
 
@@ -82,3 +82,18 @@ export function buyerFormat(pricePkn, sellerAcceptsPkn = true, pinned = '') {
   if (pending) return '';
   return buyerPriceLabel({ pricePkn, currency, balancePkn, sellerAcceptsPkn, pinned: pin });
 }
+
+/** useBuyerCurrency().currency: '' while the signed-in buyer's country is still loading. */
+export function buyerCurrency(pinned = '') {
+  const { pending, currency } = buyerContext(pinned);
+  return pending ? '' : currency;
+}
+
+/** useBuyerCurrency().fiat: true when this price shows in local fiat (balance cannot cover it). */
+export function buyerFiat(pricePkn, sellerAcceptsPkn = true, pinned = '') {
+  const { pending, balancePkn } = buyerContext(pinned);
+  return !pending && buyerPrefersFiat(balancePkn, pricePkn, sellerAcceptsPkn);
+}
+
+/** useBuyerCurrency().pinned: the `?currency=` pin, or ''. */
+export const buyerPinned = pinOf;

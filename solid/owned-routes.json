@@ -20,6 +20,20 @@
     "^/invite/?$",
     "^/join/[^/]+/?$",
     "^/ambassador(?:program)?/?$",
-    "^/email-preferences/?$"
+    "^/email-preferences/?$",
+    "^/cart/?$",
+    "^/checkout/?$",
+    "^/orders/?$",
+    "^/bought/?$",
+    "^/buy/?$",
+    "^/sales/?$",
+    "^/wallet/?$",
+    "^/exchange/?$",
+    "^/swap/?$",
+    "^/nft/?$",
+    "^/flex/?$",
+    "^/shipping/?$",
+    "^/protection/?$",
+    "^/marketplace/signal/?$"
   ]
 }

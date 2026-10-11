@@ -7,6 +7,8 @@ const page = fs.readFileSync(new URL('./pages/CardTraderOneDay.jsx', import.meta
 const zero = fs.readFileSync(new URL('./pages/CardTraderZero.jsx', import.meta.url), 'utf8');
 const app = fs.readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
 const sales = fs.readFileSync(new URL('./pages/Sales.jsx', import.meta.url), 'utf8');
+// Sale-row labels are shared with the Solid page (order-rows.js).
+const saleRows = fs.readFileSync(new URL('./order-rows.js', import.meta.url), 'utf8');
 
 test('1-Day Ready has its own tab and Zero stays a separate tab', () => {
   assert.match(nav, /\/mypokoin\/1dr/);
@@ -22,5 +24,5 @@ test('1-Day Ready has its own tab and Zero stays a separate tab', () => {
   assert.match(page, /MiniCardTile/);
   assert.match(sales, /className="sale-thumb"/);
   assert.match(zero, /Navigate to="\/mypokoin\/1dr"/);
-  assert.match(sales, /CardTrader 1-DR/);
+  assert.match(saleRows, /CardTrader 1-DR/);
 });

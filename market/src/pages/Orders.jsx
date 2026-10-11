@@ -3,13 +3,11 @@ import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   cancelEurOrder,
   confirmMarketplaceDelivery,
-  formatPkn,
   markMarketplaceShipped,
   reportMarketplaceProblem,
   revealMarketplaceShipping,
 } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { loadFirestore } from '../firebase-client.js';
 import { useCart } from '../cart.jsx';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { estimatedDeliveryDate, optInFields, showReviewsOptIn } from '../google-reviews.js';
@@ -26,44 +24,14 @@ import {
 } from '../order-status.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
 import StockNav from '../components/StockNav.jsx';
-
-function stamp(value) {
-  if (!value) return '';
-  if (typeof value.toDate === 'function') return value.toDate().toISOString().slice(0, 10);
-  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000).toISOString().slice(0, 10);
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
-}
-
-function mergeOrders(...lists) {
-  const byId = new Map();
-  for (const list of lists) {
-    for (const row of list || []) {
-      byId.set(row.id, row);
-    }
-  }
-  return [...byId.values()].sort((a, b) => stamp(b.createdAt).localeCompare(stamp(a.createdAt)));
-}
-
-function formatEurCents(cents) {
-  const n = Number(cents) || 0;
-  return `€${(n / 100).toFixed(2)}`;
-}
-
-function moneyLabel(row) {
-  if (isEurOrder(row)) {
-    return formatEurCents(row.totalEURCents);
-  }
-  return formatPkn(row.totalPkn);
-}
-
-function itemsTitle(row) {
-  const items = Array.isArray(row.items) ? row.items : [];
-  const first = items[0]?.card?.name || items[0]?.cardName || '';
-  if (!first) return row.id;
-  const more = items.length - 1;
-  return more > 0 ? `${first} +${more}` : first;
-}
+import {
+  orderStamp as stamp,
+  mergeOrders,
+  orderItemsTitle as itemsTitle,
+  orderMoneyLabel as moneyLabel,
+  ORDER_CLOCK_MS,
+  watchOrders,
+} from '../order-rows.js';
 
 export default function Orders() {
   const location = useLocation();
@@ -94,33 +62,26 @@ export default function Orders() {
       setSold(null);
       return undefined;
     }
-    let cancelled = false;
-    let unsubBuy = null;
-    let unsubSell = null;
-    loadFirestore().then(({ firestore, collection, onSnapshot, query, where }) => {
-      if (cancelled) return;
-      const buys = query(collection(firestore, 'orders'), where('uid', '==', uid));
-      const sales = query(collection(firestore, 'orders'), where('sellerUids', 'array-contains', uid));
-      unsubBuy = onSnapshot(buys, (snap) => {
-        setBought(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+    const stopBuys = watchOrders(uid, 'uid', {
+      onRows: (rows) => {
+        setBought(rows);
         setError('');
-      }, (err) => setError(err.message || 'Orders failed.'));
-      unsubSell = onSnapshot(sales, (snap) => {
-        setSold(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-      }, (err) => setError(err.message || 'Orders failed.'));
-    }, (err) => {
-      if (!cancelled) setError(err.message || 'Orders failed.');
+      },
+      onError: (err) => setError(err.message || 'Orders failed.'),
+    });
+    const stopSales = watchOrders(uid, 'sellerUids', {
+      onRows: setSold,
+      onError: (err) => setError(err.message || 'Orders failed.'),
     });
     return () => {
-      cancelled = true;
-      unsubBuy?.();
-      unsubSell?.();
+      stopBuys();
+      stopSales();
     };
   }, [user?.uid, profile?.uid]);
 
   // Hold countdowns on unpaid EUR orders.
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30000);
+    const timer = setInterval(() => setNow(Date.now()), ORDER_CLOCK_MS);
     return () => clearInterval(timer);
   }, []);
 
