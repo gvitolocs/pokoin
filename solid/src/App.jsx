@@ -69,9 +69,9 @@ export default function App(props) {
   // Idle: the chat dock, invite-code claims, the account cart sync and the
   // Google reviews badge — none of them is on the first paint.
   onSettled(() => {
-    // React legacy tripwire (scripts/build-ui-shell.mjs): the boot script names
-    // whatever would once have picked the React UI; report it so the console,
-    // test crawls and the API journal show where React is still referenced.
+    // React legacy tripwire (lib/react-legacy.js): the entry names whatever
+    // would once have picked the React UI; report it so the console, test
+    // crawls and the API journal show where React is still referenced.
     const legacy = window.__POKOIN_REACT_LEGACY__;
     if (legacy) reportClientError(new Error(`[react-legacy] ${legacy} ${location.pathname}`));
     warmAuthWhenIdle();
