@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   reactDependencies,
   reactImports,
   reactLegacyReport,
 } from '../../scripts/react-legacy-report.mjs';
 
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 // Built at runtime: a literal import in this file would be a hit itself.
 const R = ['re', 'act'].join('');
 
@@ -61,4 +64,10 @@ test('the report names file:line for imports, market/src .jsx files and dependen
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
+});
+
+test('the repo has no React left: the report prints nothing and exits 0', () => {
+  const run = spawnSync(process.execPath, [path.join(REPO, 'scripts/react-legacy-report.mjs')], { encoding: 'utf8' });
+  assert.equal(run.stderr + run.stdout, '', 'every [react-legacy] line names a leftover to remove');
+  assert.equal(run.status, 0);
 });
