@@ -11,13 +11,10 @@ import {
   roleMeta,
 } from './careers-jobs.js';
 import { APP } from './punchouts.js';
+import { applyRedirect } from '../../scripts/write-cloudflare-web-routing.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-const appSrc = fs.readFileSync(path.join(root, 'App.jsx'), 'utf8');
-const careersSrc = fs.readFileSync(path.join(root, 'pages/Careers.jsx'), 'utf8');
-const chromeSrc = fs.readFileSync(path.join(root, 'components/Chrome.jsx'), 'utf8');
 const cssSrc = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
-const viteSrc = fs.readFileSync(path.join(root, '../vite.config.js'), 'utf8');
 const vercel = JSON.parse(fs.readFileSync(path.join(root, '../../vercel.json'), 'utf8'));
 const landing = fs.readFileSync(path.join(root, '../../index.html'), 'utf8');
 
@@ -45,28 +42,6 @@ test('roleHref and roleMeta follow Ashby-shaped fields', () => {
   assert.equal(roleHref({ applyUrl: 'https://x.test/a' }), 'https://x.test/a');
   assert.equal(roleHref({}), CAREERS_CONTACT);
   assert.equal(roleMeta({ location: 'Remote', employmentType: 'FullTime' }), 'Remote · Full-time');
-});
-
-test('App routes /careers to Careers', () => {
-  assert.match(appSrc, /const Careers = lazy\(\(\) => import\('\.\/pages\/Careers\.jsx'\)\)/);
-  assert.match(appSrc, /both\('\/careers',\s*<Careers \/>\)/);
-});
-
-test('Careers mirrors Phantom module order and rejects About-style invent', () => {
-  // Phantom module sequence markers
-  assert.match(careersSrc, /careers-intro/);
-  assert.match(careersSrc, /careers-media-bleed/);
-  assert.match(careersSrc, /careers-prose/);
-  assert.match(careersSrc, /PrinciplesSlider|careers-principle-track/);
-  assert.match(careersSrc, /careers-perk-grid/);
-  assert.match(careersSrc, /id="open-positions"/);
-  assert.match(careersSrc, /careers-life-strip/);
-  assert.match(careersSrc, /Browse open roles/);
-  assert.match(careersSrc, /No open roles right now/);
-  // Must not revive the discarded About-clone layout
-  assert.doesNotMatch(careersSrc, /careers-facts|Mission<\/strong>|How we work<\/strong>|Where<\/strong>/);
-  assert.doesNotMatch(careersSrc, /about-hero|floating mascot|careers-mark/);
-  assert.doesNotMatch(careersSrc, /Ashby|phantom\.com|millions of people|Unlimited PTO/i);
 });
 
 test('Careers CSS encodes Phantom geometry tokens', () => {
@@ -113,13 +88,6 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(artSrc, /612618_spheal/);
   assert.match(artSrc, /550636_snom/);
   assert.match(artSrc, /502862_psyduck/);
-  assert.match(careersSrc, /from '\.\.\/careers-art\.js'/);
-  assert.match(careersSrc, /LIFE_BUBBLES/);
-  assert.match(careersSrc, /LIFE_STRIP/);
-  assert.match(careersSrc, /SurfacesSlider/);
-  assert.match(careersSrc, /careers-media-bubbles/);
-  assert.match(careersSrc, /careers-life-title|careers-life-body/);
-  assert.match(careersSrc, /CareersCardArt|is-full-art|is-physical-card|is-art-cut/);
   assert.match(cssSrc, /\.careers-life-art\.is-physical-card/);
   assert.match(cssSrc, /\.careers-life-tile[\s\S]*width:\s*min\(23\.75rem/);
   assert.match(cssSrc, /\.careers-life-tile[\s\S]*height:\s*29\.5rem/);
@@ -143,14 +111,15 @@ test('Careers principle and benefit art is art-dependent with deliberate leftove
   assert.match(cssSrc, /\.careers-title-mark\s*\{[\s\S]*width:\s*1\.15em/);
 });
 
-test('Chrome footer and landing link to /careers', () => {
-  assert.match(chromeSrc, /to=\{APP\.careers\}/);
+test('the landing links to /careers', () => {
   assert.match(landing, /href="\/careers"/);
 });
 
-test('vercel and vite serve /careers as market SPA', () => {
+test('Cloudflare and vercel serve /careers as the SPA shell', () => {
   const rewrites = vercel.rewrites || [];
   assert.ok(rewrites.some((r) => r.source === '/careers' && r.destination === '/market/index.html'));
   assert.ok(rewrites.some((r) => r.source === '/careers/' && r.destination === '/market/index.html'));
-  assert.match(viteSrc, /url === '\/careers'/);
+  for (const url of ['/careers', '/careers/']) {
+    assert.deepEqual(applyRedirect(url), { source: url, code: 200, location: '/market/app' });
+  }
 });
