@@ -7,25 +7,8 @@ import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
-import { searchRarity } from '../search-filters.js';
-import { RARITY_HUBS, rarityFromSlug, rarityHref, raritySlug } from '../seo.js';
-
-function rarityMatches(card, hub) {
-  const value = raritySlug(searchRarity(card));
-  if (!value) {
-    return false;
-  }
-  if (value === hub.slug) {
-    return true;
-  }
-  if (hub.slug === 'promo') {
-    return value.includes('promo');
-  }
-  if (hub.slug === 'full-art') {
-    return value.includes('full-art') || value.includes('fullart');
-  }
-  return value.includes(hub.slug);
-}
+import { rarityMatches } from '../browse-hubs.js';
+import { RARITY_HUBS, rarityFromSlug, rarityHref } from '../seo.js';
 
 function RarityIndex({ lang }) {
   return (

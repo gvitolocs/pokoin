@@ -8,13 +8,14 @@ import { flagSrc } from '@market/locale.js';
  * each slot is resolved once (`children`) so testing it does not build it twice.
  */
 export function PageHead(props) {
+  const kicker = children(() => props.kicker);
   const leading = children(() => props.leading);
   const meta = children(() => props.meta);
   const lede = children(() => props.lede);
   const actions = children(() => props.children);
   const text = (
     <div>
-      <Show when={props.kicker}><p class="page-kicker">{props.kicker}</p></Show>
+      <Show when={kicker()}><p class="page-kicker">{kicker()}</p></Show>
       <h1 class={props.printFlag ? 'page-title has-print-flag' : 'page-title'}>
         <Show when={props.printFlag}>
           <span class="page-print-flag">

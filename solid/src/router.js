@@ -10,6 +10,7 @@ import RedirectTo from './pages/RedirectTo.jsx';
 import { preloadSearch } from './lib/search-preload.js';
 import accountRoutes from './routes/account.js';
 import commerceRoutes from './routes/commerce.js';
+import browseRoutes from './routes/browse.js';
 
 const Search = lazy(() => import('./pages/Search.jsx'));
 
@@ -54,6 +55,7 @@ export const Router = createRouter({
     { path: '/marketplace/:lang/cards/:cardId/:slug?', component: Card, preload: preloadCard },
     ...accountRoutes,
     ...commerceRoutes,
+    ...browseRoutes,
     { path: '*404', component: NotMigrated },
   ],
 });
