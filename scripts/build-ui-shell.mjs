@@ -21,7 +21,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Vite's entry tags: module script, modulepreload / stylesheet / prefetch links. */
 const ENTRY_TAG = /<script\b[^>]*\btype="module"[^>]*><\/script>|<link\b[^>]*\brel="(?:modulepreload|stylesheet|prefetch)"[^>]*>/g;
@@ -37,10 +37,21 @@ export function entryTags(html) {
   return { tags, rest, at };
 }
 
+/**
+ * The path an owned-route pattern is tested against: other games' sites live
+ * under a basename (/one-piece/marketplace), where both UIs route the rest.
+ * Mirrors the boot script below.
+ */
+export function routePath(pathname, games = []) {
+  const path = String(pathname || '');
+  const slug = path.split('/')[1] || '';
+  return slug && games.includes(slug) ? path.slice(slug.length + 1) || '/' : path;
+}
+
 /** The inline boot script. Kept small and ES5-safe: it runs before any bundle. */
-export function bootScript({ owned = [], canary = 0, tags }) {
+export function bootScript({ owned = [], canary = 0, tags, games = [] }) {
   // `</` would end the inline <script> early (the tags contain </script>).
-  const config = JSON.stringify({ owned, canary: Number(canary) || 0, tags }).replace(/<\//g, '<\\/');
+  const config = JSON.stringify({ owned, canary: Number(canary) || 0, games, tags }).replace(/<\//g, '<\\/');
   return `(function(){var c=${config},w=window,ui="react",k="pokoin.ui";try{`
     + 'var q=new URLSearchParams(location.search).get("ui");'
     + 'if(q==="solid"||q==="react")localStorage.setItem(k,q);'
@@ -48,7 +59,8 @@ export function bootScript({ owned = [], canary = 0, tags }) {
     + 'var pref=localStorage.getItem(k)||"";'
     + 'if(!pref&&c.canary>0){pref=Math.random()*100<c.canary?"solid-auto":"react-auto";localStorage.setItem(k,pref)}'
     + 'if(pref==="solid-auto"&&c.canary<=0)pref="react";'
-    + 'var owns=c.owned.some(function(r){return new RegExp(r).test(location.pathname)});'
+    + 'var p=location.pathname,g=p.split("/")[1]||"";if(g&&c.games.indexOf(g)>=0)p=p.slice(g.length+1)||"/";'
+    + 'var owns=c.owned.some(function(r){return new RegExp(r).test(p)});'
     + 'if(pref.indexOf("solid")===0&&once!=="react"&&w.self===w.top&&owns)ui="solid"'
     + '}catch(e){}w.__POKOIN_UI__=ui;w.__POKOIN_UI_SWITCH__=1;document.write(c.tags[ui])})();';
 }
@@ -63,8 +75,14 @@ export function cspHash(script) {
   return `sha256-${crypto.createHash('sha256').update(script, 'utf8').digest('base64')}`;
 }
 
+/** Basename slugs of the other games' sites (market/src/game.js). */
+export async function gameSlugs(repo) {
+  const { GAMES } = await import(pathToFileURL(path.join(repo, 'market', 'src', 'game.js')).href);
+  return Object.values(GAMES).map((row) => row.slug).filter(Boolean);
+}
+
 /** React shell with its entry tags replaced by the boot script that writes either UI's tags. */
-export function buildShell(reactHtml, solidHtml, { owned, canary = 0 } = {}) {
+export function buildShell(reactHtml, solidHtml, { owned, canary = 0, games = [] } = {}) {
   const react = entryTags(reactHtml);
   const solid = entryTags(solidHtml);
   if (!react.tags.length || !solid.tags.some((tag) => tag.includes('type="module"'))) {
@@ -73,13 +91,14 @@ export function buildShell(reactHtml, solidHtml, { owned, canary = 0 } = {}) {
   const script = bootScript({
     owned,
     canary,
+    games,
     tags: { react: react.tags.join(''), solid: solid.tags.join('') },
   });
   const html = `${react.rest.slice(0, react.at)}<script>${script}</script>${react.rest.slice(react.at)}`;
   return { html, script, hash: cspHash(script) };
 }
 
-function main(outRoot) {
+async function main(outRoot) {
   const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const out = path.resolve(outRoot || path.join(repo, 'dist-web'));
   const marketIndex = path.join(out, 'market', 'index.html');
@@ -87,19 +106,20 @@ function main(outRoot) {
   const config = JSON.parse(fs.readFileSync(path.join(repo, 'solid', 'owned-routes.json'), 'utf8'));
   const owned = config.patterns;
   const canary = canaryPercent(process.env.POKOIN_UI_CANARY, config.canary);
+  const games = await gameSlugs(repo);
   const shell = buildShell(
     fs.readFileSync(marketIndex, 'utf8'),
     fs.readFileSync(path.join(solidDist, 'index.html'), 'utf8'),
-    { owned, canary },
+    { owned, canary, games },
   );
   fs.cpSync(path.join(solidDist, 's'), path.join(out, 'market', 's'), { recursive: true });
   fs.writeFileSync(marketIndex, shell.html);
   fs.writeFileSync(
     path.join(out, 'market', 'ui-switch.json'),
-    `${JSON.stringify({ hash: shell.hash, canary, owned }, null, 2)}\n`,
+    `${JSON.stringify({ hash: shell.hash, canary, owned, games }, null, 2)}\n`,
   );
-  console.log(`ui switch: canary ${canary}%, ${owned.length} Solid routes, ${shell.hash}`);
+  console.log(`ui switch: canary ${canary}%, ${owned.length} Solid routes, ${games.length} game basenames, ${shell.hash}`);
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) main(process.argv[2]);
+if (isMain) await main(process.argv[2]);

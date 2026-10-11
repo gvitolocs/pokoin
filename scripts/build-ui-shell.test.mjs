@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import { readFileSync } from 'node:fs';
-import { bootScript, buildShell, canaryPercent, cspHash, entryTags } from './build-ui-shell.mjs';
+import { bootScript, buildShell, canaryPercent, cspHash, entryTags, gameSlugs, routePath } from './build-ui-shell.mjs';
 
 const REACT = `<!DOCTYPE html><html><head><meta charset="utf-8" />
 <script src="/market/card-url-boot.js"></script>
@@ -183,25 +183,38 @@ test('owned routes cover the Solid pages and nothing React still serves', () => 
     '/careers',
   ]) assert.ok(owns(pathname), pathname);
   for (const pathname of [
+    '/cart', '/checkout', '/orders', '/bought', '/buy', '/sales', '/wallet', '/exchange', '/swap', '/nft',
+    '/flex', '/shipping', '/protection', '/marketplace/signal', '/auth', '/extension/auth-bridge', '/profile',
+    '/dashboard', '/stock', '/messages', '/messages/poko', '/associate', '/mypokoin', '/mypokoin/collection',
+    '/mypokoin/location/box1', '/inventory', '/collection', '/marketplace/portfolio', '/marketplace/portfolio/abc',
+    '/invite', '/join/code', '/ambassador', '/ambassadorprogram', '/email-preferences', '/marketplace/en/users/seller',
+  ]) assert.ok(owns(pathname), pathname);
+  // Nothing React routes is left; these are unknown paths (Solid's catch-all).
+  for (const pathname of [
     '/',
-    '/cart',
-    '/checkout',
-    '/orders',
-    '/profile',
     '/marketplace/en/users',
     '/marketplace/competitive/decklists',
-    '/marketplace/portfolio',
-    '/marketplace/signal',
-    '/about',
-    '/careers',
     '/marketplace/search/extra',
     '/marketplace/en/cards/806390/slug/other',
-    '/cyberpunk/marketplace',
-    '/dashboard',
-    '/inventory',
     '/ocr/artists/x',
     '/forum/topic',
     '/scan/extra',
-    '/extension/auth-bridge',
+    '/dash-preview',
   ]) assert.ok(!owns(pathname), pathname);
+});
+
+test('other games route under their basename like the Pokemon site', async () => {
+  const games = await gameSlugs(new URL('..', import.meta.url).pathname);
+  assert.ok(games.includes('one-piece') && games.includes('magic') && !games.includes(''));
+  assert.equal(routePath('/one-piece/marketplace', games), '/marketplace');
+  assert.equal(routePath('/one-piece', games), '/');
+  assert.equal(routePath('/one-piece-fan/marketplace', games), '/one-piece-fan/marketplace');
+  assert.equal(routePath('/marketplace/sets', games), '/marketplace/sets');
+  const tags = { react: '<r>', solid: '<s>' };
+  const script = bootScript({ owned: OWNED, canary: 100, games, tags });
+  assert.equal(boot(script, { path: '/one-piece/marketplace', random: 0 }).ui, 'solid');
+  assert.equal(boot(script, { path: '/magic/marketplace/en/cards/12/x', random: 0 }).ui, 'solid');
+  assert.equal(boot(script, { path: '/one-piece', random: 0 }).ui, 'react');
+  assert.equal(boot(script, { path: '/unknown-game/marketplace', random: 0 }).ui, 'react');
+  assert.equal(boot(bootScript({ owned: OWNED, canary: 100, tags }), { path: '/one-piece/marketplace', random: 0 }).ui, 'react');
 });
