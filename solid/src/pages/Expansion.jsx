@@ -6,7 +6,7 @@ import { resolveExpansionNationality } from '@market/expansion-print.js';
 import { printFlagFromNationality } from '@market/locale.js';
 import { filterExpansionCards, isSetDeskCard, searchPrintLang, searchRarity, uniqueSearchOptions } from '@market/search-filters.js';
 import { setSeoTitle } from '@market/seo.js';
-import { firstSetPreviewCount, nextSetPreviewCount, setDeskSkeletonCount } from '@market/set-desk-preview.js';
+import { setDeskSkeletonCount } from '@market/set-desk-preview.js';
 import { expansionLogoSrc, expansionSymbolSrc, eraHref, tcgEra } from '@market/set-logos.js';
 import { defaultExpansionSort, expansionTilesReady, hasOfficialSetList } from '@market/set-official-lists.js';
 import { Action, track } from '@market/track.js';
@@ -17,7 +17,6 @@ import { SkeletonTile } from '../components/Carousel.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import SeoHead from '../components/SeoHead.jsx';
-import { afterPaint } from '../lib/after-paint.js';
 import { rememberView, restoreScroll, restoredView } from '../lib/scroll-restore.js';
 import { syncSelect } from '../lib/select-sync.js';
 
@@ -72,9 +71,9 @@ function infoOf(payload) {
 
 /**
  * Set desk (market/src/pages/Expansion.jsx). Waits for the whole set walk
- * before painting tiles, then mounts them 12 at a time per scroll; Official
- * order where a printed checklist exists (D00003F). Back restores the
- * filters, view and mounted count of that history entry (D00005C).
+ * (or the prebuilt snapshot) before painting tiles, then renders every loaded
+ * card; Official order where a printed checklist exists (D00003F). Back
+ * restores the filters and view of that history entry (D00005C).
  */
 function SetDesk(props) {
   const slug = untrack(() => props.slug);
@@ -138,7 +137,8 @@ function SetDesk(props) {
       const shortPage = (data?.cards?.length || 0) > 0 && data.cards.length < EXPANSION_PAGE;
       if (shortPage || expansionTilesReady(data, slug, data?.expansion?.name)) {
         putPayload(shortPage ? { ...data, hasMore: false } : data);
-        if (shortPage) return null;
+        // A snapshot is the whole set; only a live first page walks on.
+        if (shortPage || data?.fromSnapshot) return null;
       } else {
         putPayload(notReady(data));
       }
@@ -265,35 +265,10 @@ function SetDesk(props) {
   const lede = () => (loading()
     ? 'Loading cards…'
     : `${(deskTotal() || shown().length).toLocaleString()} cards${eraName() ? ` in ${eraName()}` : ''}.`);
-  const walkSkeletons = () => setDeskSkeletonCount(info()?.expansion);
-
-  // Mounted tiles (React previewCount): a filter change starts over at the
-  // first batch; once tiles are ready the count is at least the first batch
-  // (or a back arrival's saved count); a scroll adds a batch (written below).
-  const restoredCount = Number(restoredHere?.previewCount) || 0;
-  const filterKey = createMemo(() => [sort(), query(), rarity(), language(), reverse(), firstEdition(), listed()].join('\u0001'));
-  let suppressPreviewReset = Boolean(restoredHere);
-  let seenFilters;
-  const [previewCount, setPreviewCount] = createSignal((prev) => {
-    const key = filterKey();
-    const ready = tilesReady();
-    const total = shown().length;
-    let count = prev ?? restoredCount;
-    if (seenFilters !== undefined && key !== seenFilters && !suppressPreviewReset) {
-      count = firstSetPreviewCount(total);
-    }
-    seenFilters = key;
-    if (ready && total) {
-      const saved = suppressPreviewReset ? restoredCount : 0;
-      count = Math.min(Math.max(count, saved, firstSetPreviewCount(total)), total);
-      suppressPreviewReset = false;
-    }
-    return count;
-  });
-  const previewCards = createMemo(() => (loading() ? [] : shown().slice(0, previewCount())));
-  const pendingSkeletons = () => (loading()
-    ? walkSkeletons()
-    : Math.max(0, shown().length - previewCards().length));
+  // Skeletons only while the set is really loading, at most three rows. Loaded
+  // cards always render (images are loading="lazy"); off-screen tiles skip
+  // layout via content-visibility (.set-desk .grid > .tile).
+  const walkSkeletons = () => Math.min(21, setDeskSkeletonCount(info()?.expansion, 14));
 
   // Back arrival: chase the saved offset once the restored tiles are mounted.
   let restoreArmed = Boolean(restoredHere);
@@ -316,30 +291,9 @@ function SetDesk(props) {
       reverse: reverse(),
       firstEdition: firstEdition(),
       listed: listed(),
-      previewCount: previewCount(),
     }),
     (state) => {
       rememberView(href, state);
-    },
-  );
-
-  // Sentinel sits in the first rows after the current batch. Observing it
-  // with a fat rootMargin mounted the rest of the set in one frame. One
-  // extra batch per scroll; skeletons stay until the user moves. The
-  // listener is armed after paint (React useEffect timing), so a single
-  // wheel gesture's burst of scroll events still adds one batch per frame.
-  createEffect(
-    () => [loading(), previewCount(), shown().length],
-    ([busy, count, total]) => {
-      if (busy || count >= total) return undefined;
-      const advance = () => {
-        setPreviewCount((current) => nextSetPreviewCount(current, total));
-      };
-      const cancel = afterPaint(() => window.addEventListener('scroll', advance, { passive: true, once: true }));
-      return () => {
-        cancel();
-        window.removeEventListener('scroll', advance);
-      };
     },
   );
 
@@ -498,18 +452,14 @@ function SetDesk(props) {
           </EmptyDesk>
         )}
       >
-        <CardSelectGrid class={view() === 'list' ? 'grid is-list' : 'grid'} cards={previewCards()}>
+        <CardSelectGrid class={view() === 'list' ? 'grid is-list' : 'grid'} cards={loading() ? [] : shown()}>
           <Show
             when={!loading()}
             fallback={<Repeat count={walkSkeletons()}>{() => <SkeletonTile layout={view()} />}</Repeat>}
           >
-            <For each={previewCards()} keyed={(card) => card.id}>
-              {(card, index) => <CardTile card={card()} rank={index()} layout={view()} />}
+            <For each={shown()} keyed={(card) => card.id}>
+              {(card, index) => <CardTile card={card()} rank={index()} layout={view()} eagerLimit={14} />}
             </For>
-            <Show when={previewCount() < shown().length}>
-              <div class="set-preview-sentinel" aria-hidden="true" />
-            </Show>
-            <Repeat count={pendingSkeletons()}>{() => <SkeletonTile layout={view()} />}</Repeat>
           </Show>
         </CardSelectGrid>
       </Show>

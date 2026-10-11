@@ -5,6 +5,14 @@
     "^/marketplace/?$",
     "^/marketplace/search/?$",
     "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/?$",
-    "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/versions/?$"
+    "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/versions/?$",
+    "^/marketplace/(?:explore|watchlist)/?$",
+    "^/favorites/?$",
+    "^/product(?:/[^/]+)?/?$",
+    "^/marketplace/competitive(?:/(?:tournaments|decks|players|cards)(?:/[^/]+)?|/decklists/[^/]+)?/?$",
+    "^/marketplace/(?:sets|eras)(?:/[^/]+)?/?$",
+    "^/marketplace/[a-z]{2,3}/(?:artists|pokemon|rarities|languages|guides)(?:/[^/]+)?/?$",
+    "^/marketplace/[a-z]{2,3}/users/[^/]+/?$",
+    "^/(?:docs|contact|privacy|earn|whitepaper|health|sitemap)/?$"
   ]
 }

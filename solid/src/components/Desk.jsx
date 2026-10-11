@@ -53,6 +53,24 @@ export function MetricGrid(props) {
   return <div class="metric-grid">{props.children}</div>;
 }
 
+/** Titled desk section; `extra` (JSX) sits right of the title, `actions` below the body. */
+export function DeskPanel(props) {
+  const extra = children(() => props.extra);
+  const actions = children(() => props.actions);
+  return (
+    <section class={['desk-panel', props.class, { flush: props.flush }]}>
+      <Show when={props.title || extra()}>
+        <div class="desk-panel-head">
+          <Show when={props.title} fallback={<span />}><h2>{props.title}</h2></Show>
+          {extra()}
+        </div>
+      </Show>
+      <div class="desk-body">{props.children}</div>
+      <Show when={actions()}><div class="desk-actions">{actions()}</div></Show>
+    </section>
+  );
+}
+
 const EMPTY_ICON = {
   mark: 'M7 3h10a2 2 0 0 1 2 2v14l-7-3-7 3V5a2 2 0 0 1 2-2zm0 2v11.2l5-2.1 5 2.1V5H7z',
   cart: 'M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0 0 20 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z',
