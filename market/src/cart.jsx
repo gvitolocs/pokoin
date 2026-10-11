@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { cartTotals, isSelected, moveRow, reconcileRow, settleCheckoutRows } from './cart-model.js';
-import { listingStock, nextCartQty } from './cart-qty.js';
+import { cartTotals, isSelected, moveRow, patchLiveRows, settleCheckoutRows } from './cart-model.js';
 import {
   CART_KEY,
   CART_MAX,
@@ -19,6 +18,17 @@ import {
   writeCartRows,
   writeSavedRows,
 } from './cart-rows.js';
+import {
+  mergeShippingChoice,
+  moveSavedIntoCart,
+  readPendingCheckoutIds,
+  replaceCartRow,
+  restoreCartRow,
+  restoreCartRows,
+  selectAllCartRows,
+  selectCartRow,
+  writePendingCheckout,
+} from './cart-row-edits.js';
 import { useAccountCartSync } from './cart-sync.js';
 import {
   readInsurance,
@@ -33,9 +43,6 @@ import {
 
 export { cartItemFromOffer };
 
-const PENDING_KEY = 'pokoin.cartCheckout';
-const PENDING_TTL_MS = 3 * 24 * 60 * 60 * 1000;
-
 const readRows = readCartRows;
 const writeCart = writeCartRows;
 const writeSaved = writeSavedRows;
@@ -44,18 +51,6 @@ const readGift = readCartGift;
 
 function readCart() {
   return readRows(CART_KEY);
-}
-
-/** Row ids a Stripe checkout took to the payment page; settled on /orders?eur_session. */
-function readPendingIds(now = Date.now()) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null');
-    if (!parsed || !Array.isArray(parsed.ids)) return [];
-    if (!(now - Number(parsed.at || 0) < PENDING_TTL_MS)) return [];
-    return parsed.ids.map(String);
-  } catch (_) {
-    return [];
-  }
 }
 
 /** Snapshot for Poko personal context (no React). Caps at 24 lines. */
@@ -108,20 +103,7 @@ const CartContext = createContext({
   clear: () => {},
 });
 
-export const CHECKOUT_SHIPPING_PKN = 2000;
-
-function patchRows(rows, cardId, entry, options) {
-  const id = String(cardId || '');
-  let changed = false;
-  const next = rows.map((row) => {
-    if (String(row.cardId) !== id) return row;
-    const { patch } = reconcileRow(row, entry?.listings, { complete: entry?.complete !== false, ...options });
-    if (!patch || !Object.keys(patch).length) return row;
-    changed = true;
-    return { ...row, ...patch };
-  });
-  return changed ? next : rows;
-}
+export { CHECKOUT_SHIPPING_PKN } from './checkout-model.js';
 
 export function CartProvider({ children }) {
   const [items, setItems] = useState(() => (typeof window === 'undefined' ? [] : readCart()));
@@ -211,56 +193,22 @@ export function CartProvider({ children }) {
       /** Undo for Delete: the row goes back where it was. */
       restoreItem(row, index = 0) {
         if (!row?.id) return;
-        setItems((current) => {
-          if (current.some((item) => item.id === row.id)) return current;
-          const at = Math.max(0, Math.min(current.length, Number(index) || 0));
-          return [...current.slice(0, at), row, ...current.slice(at)].slice(0, CART_MAX);
-        });
+        setItems((current) => restoreCartRow(current, row, index));
       },
       /** Undo for Delete all: the whole cart comes back, merged with anything added since. */
       restoreAll(rows) {
-        const list = Array.isArray(rows) ? rows : [];
-        setItems((current) => {
-          const ids = new Set(current.map((row) => row.id));
-          return [...current, ...list.filter((row) => row?.id && !ids.has(row.id))].slice(0, CART_MAX);
-        });
+        setItems((current) => restoreCartRows(current, rows));
       },
       /** Swap a row for another copy (cheaper or still in stock), keeping its place and tick. */
       replaceItem(id, next) {
         if (!next?.id) return;
-        setItems((current) => {
-          const index = current.findIndex((row) => row.id === id);
-          if (index < 0) return current;
-          const old = current[index];
-          const stock = listingStock(next);
-          const swapped = {
-            ...next,
-            qty: Math.max(1, Math.min(stock, Number(old.qty) || 1)),
-            selected: true,
-            addedPricePkn: Number(old.addedPricePkn || old.pricePkn) || next.pricePkn,
-            addedAt: old.addedAt || next.addedAt,
-          };
-          const rest = current.filter((row, at) => at !== index);
-          const twin = rest.find((row) => row.id === swapped.id);
-          if (twin) {
-            return rest.map((row) => (row.id === swapped.id
-              ? { ...row, qty: nextCartQty(row.qty, swapped.qty, listingStock(row)), selected: true }
-              : row));
-          }
-          return [...rest.slice(0, index), swapped, ...rest.slice(index)];
-        });
+        setItems((current) => replaceCartRow(current, id, next));
       },
       setSelected(id, on) {
-        setItems((current) => current.map((row) => (
-          row.id === id ? { ...row, selected: Boolean(on) } : row
-        )));
+        setItems((current) => selectCartRow(current, id, on));
       },
       selectAll(on) {
-        setItems((current) => current.map((row) => ({
-          ...row,
-          // A sold-out copy stays unticked: checkout would refuse it.
-          selected: Boolean(on) && !row.unavailable,
-        })));
+        setItems((current) => selectAllCartRows(current, on));
       },
       saveForLater(id) {
         const moved = moveRow(items, saved, id, SAVED_MAX);
@@ -273,23 +221,15 @@ export function CartProvider({ children }) {
         if (!moved.row) return;
         const row = moved.row;
         setSaved(moved.from);
-        setItems((current) => {
-          const twin = current.find((item) => item.id === row.id);
-          if (twin) {
-            return current.map((item) => (item.id === row.id
-              ? { ...item, qty: nextCartQty(item.qty, row.qty, listingStock(item)), selected: true }
-              : item));
-          }
-          return [{ ...row, selected: !row.unavailable }, ...current].slice(0, CART_MAX);
-        });
+        setItems((current) => moveSavedIntoCart(current, row));
       },
       removeSaved(id) {
         setSaved((current) => current.filter((row) => row.id !== id));
       },
       /** Live listings for one card → price, stock, qty cap, sold-out flag on its rows. */
       applyLive(cardId, entry, options = {}) {
-        setItems((current) => patchRows(current, cardId, entry, options));
-        setSaved((current) => patchRows(current, cardId, entry, options));
+        setItems((current) => patchLiveRows(current, cardId, entry, options));
+        setSaved((current) => patchLiveRows(current, cardId, entry, options));
       },
       setGift(on) {
         setGiftState(Boolean(on));
@@ -303,16 +243,11 @@ export function CartProvider({ children }) {
       },
       /** Merge { country?, service? } into the buyer's shipping choice. */
       setShippingChoice(patch) {
-        setShippingChoiceState((current) => {
-          const next = { ...current, ...(patch || {}) };
-          if (next.country === current.country && next.service === current.service) return current;
-          return { country: String(next.country || '').toUpperCase(), service: String(next.service || '') };
-        });
+        setShippingChoiceState((current) => mergeShippingChoice(current, patch));
       },
       /** Stripe leaves the SPA: remember which rows that payment covers. */
       markCheckoutPending(ids) {
-        const list = (ids || []).map(String).filter(Boolean);
-        writeFlag(PENDING_KEY, list.length ? JSON.stringify({ ids: list, at: Date.now() }) : '');
+        writePendingCheckout(ids);
       },
       /**
        * Paid: drop the rows that checkout sent and keep the unticked ones.
@@ -320,10 +255,10 @@ export function CartProvider({ children }) {
        * listing ids. Returns false when it had neither to go on.
        */
       settleCheckout({ listingIds = [] } = {}) {
-        const rowIds = readPendingIds();
+        const rowIds = readPendingCheckoutIds();
         if (!rowIds.length && !(listingIds || []).length) return false;
         setItems((current) => settleCheckoutRows(current, { rowIds, listingIds }));
-        writeFlag(PENDING_KEY, '');
+        writePendingCheckout([]);
         setGiftState(false);
         return true;
       },

@@ -4,18 +4,12 @@ import { createPknCheckout } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { authFrom } from '../punchouts.js';
 import { Alert, DeskPanel, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
-import { formatPknNumber, PKN_USDT_PRICE } from '../pkn.js';
+import { formatPknNumber } from '../pkn.js';
+import { PKN_PACKAGE_RATE, PKN_PACKAGES, buyReturnPath, pknPackageAmount } from '../pkn-packages.js';
 
-const RATE = PKN_USDT_PRICE;
-const PACKAGES = [
-  { label: 'Starter', fiatCents: 500, lookupKey: 'pkn_starter_1000_pkn_500_eur' },
-  { label: 'Collector', fiatCents: 2500, lookupKey: 'pkn_collector_5000_pkn_2500_eur' },
-  { label: 'Validator', fiatCents: 10000, lookupKey: 'pkn_validator_20000_pkn_10000_eur' },
-];
-
-function pknAmount(item) {
-  return Math.round(item.fiatCents / 100 / RATE);
-}
+const RATE = PKN_PACKAGE_RATE;
+const PACKAGES = PKN_PACKAGES;
+const pknAmount = pknPackageAmount;
 
 export default function Buy() {
   const navigate = useNavigate();
@@ -27,7 +21,7 @@ export default function Buy() {
   const [error, setError] = useState('');
 
   const sessionId = params.get('session_id') || '';
-  const from = sessionId ? `/buy?session_id=${encodeURIComponent(sessionId)}` : '/buy';
+  const from = buyReturnPath(sessionId);
 
   useEffect(() => {
     document.title = 'Buy PKN · Pokoin';

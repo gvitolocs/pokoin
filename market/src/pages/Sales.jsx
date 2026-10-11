@@ -14,28 +14,19 @@ import {
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead, SessionWait } from '../components/Desk.jsx';
 import StockNav from '../components/StockNav.jsx';
+import {
+  SALES_SOURCES as SOURCES,
+  saleDay as day,
+  saleLineMoney as lineMoney,
+  saleNeedsShip,
+  saleStatus,
+  saleTitle,
+  saleUnitCount as unitCount,
+  salesRefundedLine,
+  salesTotals,
+  shippedSale,
+} from '../order-rows.js';
 import '../sales-row.css';
-
-const SOURCES = [
-  { id: 'all', label: 'All sales' },
-  { id: 'pokoin', label: 'Pokoin checkout' },
-  { id: 'cardtrader', label: 'CardTrader' },
-];
-
-function day(value) {
-  const parsed = value ? new Date(value) : null;
-  return parsed && !Number.isNaN(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : '—';
-}
-
-function saleTitle(row) {
-  const items = row.items || [];
-  const first = items[0]?.cardName || 'Card';
-  return items.length > 1 ? `${first} +${items.length - 1}` : first;
-}
-
-function unitCount(row) {
-  return (row.items || []).reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
-}
 
 function SaleThumb({ item }) {
   if (!item) return null;
@@ -45,12 +36,6 @@ function SaleThumb({ item }) {
   const art = src ? <CardArt src={src} alt="" /> : <span className="tile-ph" />;
   if (!href) return <span className="sale-thumb">{art}</span>;
   return <Link className="sale-thumb" to={href} aria-label={name}>{art}</Link>;
-}
-
-function lineMoney(item, currency) {
-  return currency === 'EUR'
-    ? formatOrderMoney((Number(item.unitPriceEURCents) || 0) * (Number(item.quantity) || 1), 'EUR')
-    : formatOrderMoney((Number(item.unitPricePkn) || 0) * (Number(item.quantity) || 1), 'PKN');
 }
 
 function RefundForm({ row, onDone, onCancel }) {
@@ -163,19 +148,7 @@ export default function Sales() {
     [sales, source],
   );
 
-  const totals = useMemo(() => {
-    const live = (sales || []).filter((row) => row.paymentStatus !== 'cancelled' && row.paymentStatus !== 'refunded');
-    const eur = live.filter((row) => row.currency === 'EUR');
-    const pkn = live.filter((row) => row.currency !== 'EUR');
-    return {
-      count: live.length,
-      units: live.reduce((sum, row) => sum + unitCount(row), 0),
-      eurNet: eur.reduce((sum, row) => sum + (row.gross - row.refunded), 0),
-      pknNet: pkn.reduce((sum, row) => sum + (row.gross - row.refunded), 0),
-      eurRefunded: eur.reduce((sum, row) => sum + row.refunded, 0),
-      pknRefunded: pkn.reduce((sum, row) => sum + row.refunded, 0),
-    };
-  }, [sales]);
+  const totals = useMemo(() => salesTotals(sales), [sales]);
 
   if (!ready) return <SessionWait />;
   if (!signedIn) return <Navigate to={authFrom(location.pathname || '/sales')} replace />;
@@ -203,12 +176,7 @@ export default function Sales() {
       const result = await markMarketplaceShipped(orderId, token, { trackingCode });
       setSales((current) => (current || []).map((row) => (
         row.orderId === orderId && row.source !== 'cardtrader'
-          ? {
-            ...row,
-            fulfillmentStatus: result.order?.fulfillmentStatus || 'shipped',
-            shippedAt: result.order?.shippedAt || new Date().toISOString(),
-            trackingCode: result.order?.trackingCode || trackingCode,
-          }
+          ? shippedSale(row, result, trackingCode)
           : row
       )));
       setShipId('');
@@ -220,10 +188,7 @@ export default function Sales() {
     }
   }
 
-  const refundedLine = [
-    totals.eurRefunded ? formatOrderMoney(totals.eurRefunded, 'EUR') : '',
-    totals.pknRefunded ? formatOrderMoney(totals.pknRefunded, 'PKN') : '',
-  ].filter(Boolean).join(' · ') || '—';
+  const refundedLine = salesRefundedLine(totals);
 
   return (
     <div className="page desk">
@@ -279,21 +244,10 @@ export default function Sales() {
           <div className="thread-list">
             {shown.map((row) => {
               const ct = row.source === 'cardtrader';
-              const status = ct
-                ? {
-                  label: row.paymentStatus === 'cancelled'
-                    ? 'Cancelled'
-                    : (row.channel === '1dr' ? 'CardTrader 1-DR' : 'CardTrader'),
-                  tone: row.paymentStatus === 'cancelled' ? 'muted' : 'ct',
-                }
-                : orderStatus(row);
+              const status = saleStatus(row, orderStatus);
               const open = openId === row.orderId && !ct;
               const shipping = shipId === row.orderId && !ct;
-              const needsShip = !ct
-                && ['paid', 'escrow'].includes(row.paymentStatus)
-                && row.fulfillmentStatus !== 'shipped'
-                && row.fulfillmentStatus !== 'delivered'
-                && !row.shippedAt;
+              const needsShip = saleNeedsShip(row);
               return (
                 <article
                   className={`thread sale-row${open || shipping ? ' is-focus' : ''}`}

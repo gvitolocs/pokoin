@@ -3,11 +3,9 @@ import { Link, Navigate, useLocation } from 'react-router-dom';
 import {
   cancelEurOrder,
   confirmMarketplaceDelivery,
-  formatPkn,
   reportMarketplaceProblem,
 } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { loadFirestore } from '../firebase-client.js';
 import { ESCROW_LINE, NO_SHIP_GUARANTEE } from '../buyer-protection.js';
 import { authFrom } from '../punchouts.js';
 import {
@@ -21,32 +19,14 @@ import {
 } from '../order-status.js';
 import { Alert, DeskPanel, EmptyDesk, PageHead, SessionWait } from '../components/Desk.jsx';
 import StockNav from '../components/StockNav.jsx';
-
-function stamp(value) {
-  if (!value) return '';
-  if (typeof value.toDate === 'function') return value.toDate().toISOString().slice(0, 10);
-  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000).toISOString().slice(0, 10);
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
-}
-
-function formatEurCents(cents) {
-  const n = Number(cents) || 0;
-  return `€${(n / 100).toFixed(2)}`;
-}
-
-function moneyLabel(row) {
-  if (isEurOrder(row)) return formatEurCents(row.totalEURCents);
-  return formatPkn(row.totalPkn);
-}
-
-function itemsTitle(row) {
-  const items = Array.isArray(row.items) ? row.items : [];
-  const first = items[0]?.card?.name || items[0]?.cardName || '';
-  if (!first) return row.id;
-  const more = items.length - 1;
-  return more > 0 ? `${first} +${more}` : first;
-}
+import {
+  orderItemsTitle as itemsTitle,
+  orderMoneyLabel as moneyLabel,
+  orderStamp as stamp,
+  ORDER_CLOCK_MS,
+  sortOrdersByDate,
+  watchOrders,
+} from '../order-rows.js';
 
 export default function Bought() {
   const location = useLocation();
@@ -64,29 +44,17 @@ export default function Bought() {
       setRows(null);
       return undefined;
     }
-    let cancelled = false;
-    let unsub = null;
-    loadFirestore().then(({ firestore, collection, onSnapshot, query, where }) => {
-      if (cancelled) return;
-      const buys = query(collection(firestore, 'orders'), where('uid', '==', uid));
-      unsub = onSnapshot(buys, (snap) => {
-        const list = snap.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() }))
-          .sort((a, b) => stamp(b.createdAt).localeCompare(stamp(a.createdAt)));
-        setRows(list);
+    return watchOrders(uid, 'uid', {
+      onRows: (rows) => {
+        setRows(sortOrdersByDate(rows));
         setError('');
-      }, (err) => setError(err.message || 'Buy history failed.'));
-    }, (err) => {
-      if (!cancelled) setError(err.message || 'Buy history failed.');
+      },
+      onError: (err) => setError(err.message || 'Buy history failed.'),
     });
-    return () => {
-      cancelled = true;
-      unsub?.();
-    };
   }, [user?.uid, profile?.uid]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30000);
+    const timer = setInterval(() => setNow(Date.now()), ORDER_CLOCK_MS);
     return () => clearInterval(timer);
   }, []);
 
