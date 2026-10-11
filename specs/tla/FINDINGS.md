@@ -313,3 +313,155 @@ recovery is the sweep's `recover_paid` plus C22.
 - `listing-outbox` was split into `Model.cfg` (CardTrader side) and `cache.cfg`:
   together the state space did not finish (over 120 million states and growing),
   and the read cache does not interact with the CardTrader push.
+
+---
+
+# Formal verification pass — 2026-10-11
+
+After the 2026-10-10 fixes (edge coalescing #307, CardTrader reconcile #309,
+regex stall #324, Best Deal #317, NaN-safe sorts), against origin/main
+`2fc7ea48`. TLA+/TLC for the concurrent parts, Sireum Logika
+([`../logika/`](../logika/README.md)) for the pure rules that decide money or
+what a buyer sees.
+
+## Results
+
+TLC from `~/.local/share/tla/tla2tools.jar`, Java 21, 12 workers on nezopt.
+Logika: Sireum 4.20260810.80aad0c2 (Z3/CVC5 installed by `sireum --init`).
+
+| Check | Result |
+| --- | --- |
+| Every config of the three models above, on origin/main before any change | 7 pass (state counts unchanged from the table above), all 35 bug/design/witness configs reproduce |
+| `ct-reconcile/Model.cfg` with PR #309 (`SkipSettled`, `NoReplanSettled`) | pass, 48,360,531 distinct states, depth 31 (939 s) |
+| `ct-reconcile/bugs/replans-settled.cfg` | `NoReplanSettled` violated without #309 (15-step trace) |
+| `ct-reconcile/witness/NeverSettled.cfg` | a sold-out row gets settled (reachable) |
+| `edge-coalesce/Model.cfg` (new) | pass, 798,324 distinct states, depth 25 (22 s) |
+| `edge-coalesce/liveness.cfg`, `liveness-guard.cfg` | pass (liveness), 110,286 and 20,372 distinct states |
+| `edge-coalesce/bugs/*.cfg` (3) | each reproduces the pre-#307 hang (or the hang without a timeout) |
+| `edge-coalesce/witness/*.cfg` (4) | each behaviour reachable |
+| `specs/CardTraderSellerInventory` | pass, 14 distinct states |
+| `specs/GestureExclusivity` (`scripts/check-gesture-tlc.sh`) | G1 safety and G2 liveness pass (2,596 distinct states); W1–W5 witnesses reachable |
+| `specs/SearchRanking` (`scripts/check-search-ranking-tlc.sh`) | current scorer passes (47,232 distinct states); the three legacy configs still fail as recorded |
+| Logika `PokoinSort.sc`, `BestDeal.sc`, `ReconcilePlan.sc` | verified (44 s, 9 s, 24 s); all 17 `// reachable` probes reachable |
+| Logika `bugs/*.sc` (3) | each fails as recorded |
+
+`specs/tla/run.sh --regressions` and `specs/logika/run.sh` re-run all of it.
+Rust: `cargo test -p pokoin-external --lib` 154 passed. JS:
+`node --test src/card-desk-deal.test.js src/card-desk-layout.test.js` 6 passed.
+
+## CardTrader reconcile after PR #309 (`ct-reconcile`, updated)
+
+The model now carries each listing's product-link `missing_from_ct` flag (set
+by a removal, cleared by an import or re-activation) and, with
+`SkipSettled = TRUE`, plans like `plan_inventory_reconcile` after #309: a row
+already settled as gone (`sold_out`, quantity ≤ 0, link missing) is neither a
+removal candidate nor in the mass-removal guard's denominator. All seven
+safety invariants still hold; `GuardBound` is now measured against the
+unsettled linked rows, the stricter reading. "Removed counted once" is the
+model's `removed` counter, one per applied removal, which `GuardBound` reads.
+`OnUnitInactiveSec=10min` and the 900 s lock TTL are timing, outside an
+untimed model; runs may overlap at any point (`LoseLock`), which covers both.
+
+## Edge request coalescing (`edge-coalesce`, new)
+
+No violation in PR #307: one leader per key, no follower stranded by any exit
+of its leader (answer, 5xx, unreadable body, timeout, edge panic, client
+hang-up), errors never stored, every request ends under weak fairness.
+`liveness-guard.cfg` shows the guard alone gives liveness when the upstream
+answers; the timeout is needed only for an upstream that never answers
+(`bugs/no-timeout-hang.cfg`). The pre-#307 code strands followers when the
+leader's client hangs up and holds the key forever after a leader panic.
+
+### E1 — A re-elected follower can wait two flight timeouts (TLC, accepted)
+`LeadsOnce` holds, so a request follows (bounded by its own deadline) and leads
+at most once, with a fresh deadline: a follower whose leader hangs up just
+before its deadline then leads with a new 60 s budget, about 120 s in all.
+Bounded; passing the remaining deadline into `lead` would make followers of a
+late leader time out early, so it is documented, not changed.
+
+## Reconcile planning rules (Logika, `ReconcilePlan.sc`)
+
+Proved for the destructive half of `plan_inventory_reconcile`: a Remove is
+planned only for a listing whose CardTrader product id is absent from the
+export; a settled row is never re-planned; an export with an unreadable id, or
+a failed or incomplete one, removes nothing; the guard lets every candidate go
+or none (it blocks exactly when removals exceed `MASS_REMOVAL_MIN` and half of
+the unsettled linked listings); and no plan links and removes one listing.
+
+### L1 — A listing linked to one product was re-linked to another (Logika + test)
+`resolve_product_attachment` linked a product to the listing named by its
+`user_data_field` without checking that the listing was already linked to a
+*different* CardTrader product. One plan could then hold `Link(222 → L)` and
+`Remove(111 → L)` (111 left the export): the import loop re-links L to 222,
+which is for sale, and the destructive pass zeroes or delists L. A delisted L
+is never loaded again, so 222 stays for sale on CardTrader with no Pokoin
+listing. With both products in the export, L's link flipped between them on
+every run (the flip C11 mentions). Two products naming one pokoin-only listing
+both linked it in one run. Duplicate products carrying one `pokoin:<listing>`
+are what C11's double pushes created before its fix, so they exist.
+The contract of `attachFixed` (only listings not linked to a CardTrader
+product, each at most once) cannot be proved for the origin rule
+(`bugs/ReconcilePlanOrigin.sc`).
+**Fix** (`sync_core.rs`): such a product is `Unresolved { reason:
+"listing_linked_elsewhere" }`, and a planned link records the new source in
+`by_listing_id`, so a second product naming the same listing is unresolved
+too. A `ct:pending:<event>` claim parses to no product id and still links
+(C11's recovery path).
+**Tests**: `sync_core::tests::user_data_field_never_relinks_a_listing_linked_elsewhere`,
+`a_listing_is_linked_at_most_once_per_plan` (both failed on origin).
+
+## Best Deal (Logika, `BestDeal.sc`)
+
+Proved for `matchDeal` / `bestDealCondition` / `shownDealCondition` after
+PR #317: a chosen grade listed in the chosen language is never replaced;
+whenever the language has priced offers, the shown grade is listed in it and is
+the best listed one; a language with none keeps the chosen grade;
+`bestDealCondition` returns `''` exactly when the language has no priced offer.
+The pre-#317 rule (show the chosen grade) fails the second property
+(`bugs/BestDealOrigin.sc`).
+
+### L2 — Language chips offered languages with no priced offer (Logika + test)
+`listedDealLanguages` built the chips from every offer, while the deal reads
+only priced ones (`pricePkn > 0`). A language whose offers all lack a PKN price
+got a chip, and choosing it showed an empty deal, which #317 set out to remove.
+**Fix** (`card-desk.js`): the chips come from `pricedOffers`.
+**Test**: `card-desk-deal.test.js` "language chips list only languages with a
+priced offer" (old code returns `['EN', 'FR', 'DE']`).
+
+Not changed: `resolveDealLanguage` keeps a selected language with no offers
+when the buyer's country language has none either, so the deal can open on an
+unlisted language while others are listed. That is the language default, a
+product decision, not a grade rule.
+
+## Sort keys (Logika, `PokoinSort.sc`)
+
+Proved over IEEE-754 binary64 (SMT floating point; NaN, ±0 and infinities
+included) for `cmp_f64`, `cmp_f64_desc` and `cmp_f64_nan_last`: values in
+{-1, 0, 1}, reflexive, antisymmetric, transitive (also strictly and for
+equality), numbers in order both ways, NaN after every number both ways. That
+is the total order `sort_by` needs. The old `partial_cmp(..).unwrap_or(Equal)`
+fails transitivity of equality (`bugs/OldSortComparator.sc`). No finding.
+
+## Spec correction (the proof was wrong, not the code)
+
+The first `ReconcilePlan.sc` "verified" on an unsatisfiable path: indexing with
+a computed index under `||`/`&&` inside a quantified invariant made every
+obligation in the link loop hold vacuously (an `assert(F)` there verified, and
+so did the origin rule). Contracts now index only through total accessors
+(`srcAt`, `zAt`, `bAt`), and `specs/logika/run.sh` turns each `// reachable`
+marker into `assert(F)` and requires it to fail.
+
+## Out of reach
+
+- **Runtime stall watchdog (PR #324)**: it only logs (`runtime_stall` with the
+  in-flight requests and `/proc` thread states); there is no protocol to model.
+  It logs through the same `tracing` → stdout path whose blocking is one of the
+  open stall hypotheses, so a stdout stall would silence the watchdog too.
+  Writing its line to stderr or a file would separate them (not done here).
+- **Graceful shutdown** (10 s drain): a timer around axum's own drain; a model
+  adds nothing.
+- **`megaAliasCompact` / `rowMotion`** (optional): string and layout code, not
+  money; not ported.
+- **The Rust and JS themselves**: Logika checks Slang ports. Each port follows
+  its source (comments name it), states its abstraction at the top, and each
+  finding was reproduced by a failing test on the real code.

@@ -617,6 +617,12 @@ pub fn resolve_product_attachment(product: &NormalizedProduct, index: &mut Attac
     let pokoin_id = parse_pokoin_listing_id(&product.user_data_field);
     if !pokoin_id.is_empty() {
         if let Some(listing) = index.by_listing_id.get(&pokoin_id).cloned() {
+            // A listing sells one CardTrader product; re-linking it here made one plan link
+            // and remove it, or flip the link every run; see specs/logika/ReconcilePlan.sc.
+            let linked_ct_id = parse_ct_product_id(&listing.source_listing_id);
+            if !linked_ct_id.is_empty() && linked_ct_id != product.id {
+                return Attachment::Unresolved { reason: "listing_linked_elsewhere", candidates: 0 };
+            }
             return Attachment::LinkExisting { listing, facet_key: None };
         }
     }
@@ -744,6 +750,9 @@ pub fn plan_inventory_reconcile(
                     index.unlinked_by_facet.insert(facet, Vec::new());
                 }
                 index.by_source_id.insert(source_id.clone(), listing.clone());
+                if let Some(entry) = index.by_listing_id.get_mut(&listing.id) {
+                    entry.source_listing_id = source_id.clone();
+                }
                 pokoin_only_ids.remove(&listing.id);
                 actions.push(PlannedAction::Link { product_id: product.id.clone(), listing_id: listing.id.clone() });
             }
@@ -1502,5 +1511,52 @@ mod tests {
         assert_eq!(marketplace_game_by_cardtrader_id(1), "magic");
         assert_eq!(marketplace_game_by_cardtrader_id(15), "one_piece");
         assert_eq!(marketplace_game_by_cardtrader_id(99), "");
+    }
+
+    /// specs/logika/ReconcilePlan.sc: a product whose user_data_field names a
+    /// listing already linked to another CardTrader product must not re-link
+    /// it. Origin planned Link(222 -> L) and Remove(111 -> L) in one run, so
+    /// L was linked to a product that is for sale and then zeroed/delisted.
+    #[test]
+    fn user_data_field_never_relinks_a_listing_linked_elsewhere() {
+        let l = "9f8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d";
+        let mut dup = product("222", "16", 2, 3.0);
+        dup["user_data_field"] = json!(format!("pokoin:{l}"));
+        let listings = [listing(l, "32", 2, "ct:111", "active")];
+        let plan = plan_of(&[dup.clone()], &listings, true);
+        let linked: Vec<&String> = plan
+            .actions
+            .iter()
+            .filter_map(|a| match a {
+                PlannedAction::Link { listing_id, .. } => Some(listing_id),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !(linked.contains(&&l.to_string()) && removed_ids(&plan).contains(&l.to_string())),
+            "one plan links and removes {l}"
+        );
+        assert!(linked.is_empty(), "{l} stays linked to ct:111: {linked:?}");
+        assert!(plan.actions.iter().any(|a| matches!(a, PlannedAction::Unresolved { product_id, reason: "listing_linked_elsewhere" } if product_id == "222")));
+        // The vanished product still settles its own listing.
+        assert_eq!(removed_ids(&plan), vec![l.to_string()]);
+
+        // Both products present: no flip of the link between them.
+        let plan = plan_of(&[product("111", "16", 2, 3.0), dup], &listings, true);
+        assert!(!plan.actions.iter().any(|a| matches!(a, PlannedAction::Link { .. })));
+        assert_eq!(removes(&plan), 0);
+    }
+
+    /// Two products naming the same pokoin-only listing link it once.
+    #[test]
+    fn a_listing_is_linked_at_most_once_per_plan() {
+        let l = "9f8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d";
+        let mut a = product("301", "16", 1, 3.0);
+        a["user_data_field"] = json!(format!("pokoin:{l}"));
+        let mut b = product("302", "16", 1, 3.0);
+        b["user_data_field"] = json!(format!("pokoin:{l}"));
+        let plan = plan_of(&[a, b], &[listing(l, "32", 1, "", "active")], true);
+        let links = plan.actions.iter().filter(|x| matches!(x, PlannedAction::Link { .. })).count();
+        assert_eq!(links, 1);
     }
 }
