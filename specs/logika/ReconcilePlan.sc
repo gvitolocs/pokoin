@@ -45,6 +45,14 @@ object ReconcilePlan {
 
   @strictpure def validIndex(ls: ISZ[Listing], i: Z): B = 0 <= i & i < ls.size
 
+  // Total accessors. Indexing with a computed index under || / && inside a
+  // quantifier made the Logika path condition unsatisfiable (every later
+  // obligation "verified" vacuously), so contracts and invariants index
+  // only through these. specs/logika/run.sh probes reachability.
+  @strictpure def srcAt(ls: ISZ[Listing], x: Z): Z = if (0 <= x & x < ls.size) ls(x).src else 0
+  @strictpure def zAt(zs: ISZ[Z], x: Z): Z = if (0 <= x & x < zs.size) zs(x) else 0
+  @strictpure def bAt(bs: ISZ[B], x: Z): B = if (0 <= x & x < bs.size) bs(x) else F
+
   // ---------------------------------------------------------------------
   // Attachment by user_data_field (resolve_product_attachment's second
   // branch) for every product of the export. Returns, per product, the
@@ -57,8 +65,8 @@ object ReconcilePlan {
       Ensures(
         Res[ISZ[Z]].size == ps.size,
         // only listings that were not linked to a CardTrader product
-        ∀(ps.indices)(i => Res[ISZ[Z]](i) == -1 ||
-          (validIndex(ls, Res[ISZ[Z]](i)) && ls(Res[ISZ[Z]](i)).src <= 0)),
+        ∀(ps.indices)(i => Res[ISZ[Z]](i) == -1 |
+          (validIndex(ls, Res[ISZ[Z]](i)) & srcAt(ls, Res[ISZ[Z]](i)) <= 0)),
         // and each at most once
         ∀(ps.indices)(i => ∀(ps.indices)(j =>
           (i != j & Res[ISZ[Z]](i) != -1) ->: (Res[ISZ[Z]](i) != Res[ISZ[Z]](j))))
@@ -74,6 +82,7 @@ object ReconcilePlan {
         ∀(0 until k)(m => src(m) == ls(m).src)
       )
       src = src(k ~> ls(k).src)
+      // reachable
       k = k + 1
     }
     var link: ISZ[Z] = ISZ.create(ps.size, -1)
@@ -85,15 +94,17 @@ object ReconcilePlan {
         // a row's source is still the loaded one, or a product id we linked
         ∀(ls.indices)(m => src(m) > 0 | src(m) == ls(m).src),
         ∀(i until ps.size)(j => link(j) == -1),
-        ∀(0 until i)(j => link(j) == -1 ||
-          (validIndex(ls, link(j)) && ls(link(j)).src <= 0 && src(link(j)) > 0)),
+        ∀(0 until i)(j => link(j) == -1 |
+          (validIndex(ls, link(j)) & srcAt(ls, link(j)) <= 0 & zAt(src, link(j)) > 0)),
         ∀(0 until i)(a => ∀(0 until i)(b =>
           (a != b & link(a) != -1) ->: (link(a) != link(b))))
       )
       val p = ps(i)
+      // reachable
       if (!alreadyLinked(ls, p.id) & validIndex(ls, p.udf)) {
         if (src(p.udf) <= 0) {
           link = link(i ~> p.udf)
+          // reachable
           src = src(p.udf ~> p.id)
         }
       }
@@ -140,6 +151,7 @@ object ReconcilePlan {
       }
       if (allow & candidate(ps, ls(l))) {
         remove = remove(l ~> T)
+        // reachable
         planned = planned + 1
       }
       l = l + 1
@@ -147,6 +159,7 @@ object ReconcilePlan {
     // mass_removal_guard
     if (planned > MASS_REMOVAL_MIN & planned * 2 > before) {
       remove = ISZ.create(ls.size, F)
+      // reachable
     }
     return remove
   }
@@ -159,12 +172,13 @@ object ReconcilePlan {
       Ensures(
         Res[(ISZ[Z], ISZ[B])]._1.size == ps.size,
         Res[(ISZ[Z], ISZ[B])]._2.size == ls.size,
-        ∀(ps.indices)(i => Res[(ISZ[Z], ISZ[B])]._1(i) == -1 ||
-          (validIndex(ls, Res[(ISZ[Z], ISZ[B])]._1(i)) && !Res[(ISZ[Z], ISZ[B])]._2(Res[(ISZ[Z], ISZ[B])]._1(i))))
+        ∀(ps.indices)(i => Res[(ISZ[Z], ISZ[B])]._1(i) == -1 |
+          (validIndex(ls, Res[(ISZ[Z], ISZ[B])]._1(i)) & !bAt(Res[(ISZ[Z], ISZ[B])]._2, Res[(ISZ[Z], ISZ[B])]._1(i))))
       )
     )
     val link = attachFixed(ps, ls)
     val remove = removals(ps, ls, unparsed, gateOk)
+    // reachable
     return (link, remove)
   }
 }

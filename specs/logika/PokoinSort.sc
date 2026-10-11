@@ -25,14 +25,17 @@ import org.sireum._
 
 @pure def rangeOk(a: F64, b: F64, d: B): Unit = {
   Contract(Ensures(-1 <= cmpNanLast(a, b, d) & cmpNanLast(a, b, d) <= 1))
+  // reachable
 }
 
 @pure def reflexive(a: F64, d: B): Unit = {
   Contract(Ensures(cmpNanLast(a, a, d) == 0))
+  // reachable
 }
 
 @pure def antisymmetric(a: F64, b: F64, d: B): Unit = {
   Contract(Ensures(cmpNanLast(a, b, d) == -cmpNanLast(b, a, d)))
+  // reachable
 }
 
 @pure def transitive(a: F64, b: F64, c: F64, d: B): Unit = {
@@ -40,6 +43,7 @@ import org.sireum._
     Requires(cmpNanLast(a, b, d) <= 0, cmpNanLast(b, c, d) <= 0),
     Ensures(cmpNanLast(a, c, d) <= 0)
   )
+  // reachable
 }
 
 @pure def strictTransitive(a: F64, b: F64, c: F64, d: B): Unit = {
@@ -47,6 +51,7 @@ import org.sireum._
     Requires(cmpNanLast(a, b, d) < 0, cmpNanLast(b, c, d) < 0),
     Ensures(cmpNanLast(a, c, d) < 0)
   )
+  // reachable
 }
 
 @pure def equalIsTransitive(a: F64, b: F64, c: F64, d: B): Unit = {
@@ -54,6 +59,7 @@ import org.sireum._
     Requires(cmpNanLast(a, b, d) == 0, cmpNanLast(b, c, d) == 0),
     Ensures(cmpNanLast(a, c, d) == 0)
   )
+  // reachable
 }
 
 // Numbers keep their order; NaN is last in both directions.
@@ -62,6 +68,7 @@ import org.sireum._
     Requires(!a.isNaN, !b.isNaN, a < b),
     Ensures(cmpF64(a, b) == -1, cmpF64Desc(a, b) == 1)
   )
+  // reachable
 }
 
 @pure def nanLast(a: F64, n: F64): Unit = {
@@ -69,4 +76,5 @@ import org.sireum._
     Requires(n.isNaN, !a.isNaN),
     Ensures(cmpF64(n, a) == 1, cmpF64Desc(n, a) == 1)
   )
+  // reachable
 }

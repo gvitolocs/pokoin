@@ -68,11 +68,13 @@ object BestDeal {
         ∀(index + 1 to NM)(g => !matchDeal(rows, lang, g))
       )
       if (matchDeal(rows, lang, index)) {
+        // reachable
         return index
       }
       index = index - 1
     }
     noGradeNoOffer(rows, lang)
+    // reachable
     return ANY
   }
 
@@ -99,6 +101,7 @@ object BestDeal {
       return wanted
     }
     val best = bestDealCondition(rows, lang)
+    // reachable
     if (best != ANY) {
       return best
     }

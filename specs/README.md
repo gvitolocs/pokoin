@@ -27,3 +27,13 @@ java -cp /path/to/tla2tools.jar tlc2.TLC \
   -config specs/CardTraderSellerInventory.cfg \
   specs/CardTraderSellerInventory.tla
 ```
+
+## Other models
+
+- `GestureExclusivity.tla` (+ `G2-liveness.cfg`, `W1`–`W5` witnesses):
+  `scripts/check-gesture-tlc.sh`, see `GESTURE-PROOF-2026-09-27.md`.
+- `SearchRanking.tla`: `scripts/check-search-ranking-tlc.sh` (it generates the
+  fixtures module from the real scorer first; TLC alone cannot parse the spec).
+- `tla/`: the native Rust API models (`tla/run.sh`); `logika/`: Sireum Logika
+  proofs (`logika/run.sh`). Last full re-run of all of them: 2026-10-11,
+  results in `tla/FINDINGS.md`.
