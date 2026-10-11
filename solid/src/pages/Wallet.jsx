@@ -749,7 +749,7 @@ const ACTIONS = [
   { key: 'swap', icon: 'swap', label: 'Exchange', to: '/exchange' },
 ];
 
-/** /wallet (market/src/pages/Wallet.jsx): site balance + PokoinPoS, activity and the money sheets. */
+/** /wallet: site balance + PokoinPoS, activity and the money sheets. */
 export default function Wallet() {
   const navigate = useNavigate();
   const location = useLocation();

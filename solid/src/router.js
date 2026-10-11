@@ -16,7 +16,7 @@ import toolsRoutes from './routes/tools.js';
 const Search = lazy(() => import('./pages/Search.jsx'));
 
 /**
- * Every page of the site (market/src/App.jsx routes, ported group by group in
+ * Every page of the site (the URLs the React app served, grouped in
  * routes/*.js). Any other URL renders UnknownPath: a numeric short link opens
  * its card, the rest goes to the marketplace. Home stays eager — it is the
  * landing; every other page is its own chunk.
@@ -29,7 +29,7 @@ const Versions = lazy(() => import('./pages/Versions.jsx'));
 
 /**
  * Card desk data: a hovered/focused tile (intent "preload") warms the page,
- * listings and hero scan like React's tile warmup; a navigation starts the
+ * listings and hero scan; a navigation starts the
  * card-page request while the desk chunk loads, and the desk adopts it
  * (fetchCard dedupes in-flight requests).
  */

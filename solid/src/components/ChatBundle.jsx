@@ -38,7 +38,7 @@ async function sellerCardIds(username) {
   return ids;
 }
 
-/** A whole artist / Pokémon / set dropped into a chat (market/src/components/ChatBundle.jsx). */
+/** A whole artist / Pokémon / set dropped into a chat. */
 export default function ChatBundle(props) {
   const bundle = () => bundleOf(props.row);
   const [cards, setCards] = createSignal([]);

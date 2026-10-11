@@ -24,7 +24,7 @@ function accountIsOneDayReady(data) {
   return meta?.oneDayReady === true || mode === 'one_day_ready';
 }
 
-/** Shared Listings / Collection / Sold / Bought / import strip under the MyPokoin desk (market/src/components/StockNav.jsx). */
+/** Shared Listings / Collection / Sold / Bought / import strip under the MyPokoin desk. */
 export default function StockNav(props) {
   const location = useLocation();
   const [oneDayReady, setOneDayReady] = createSignal(cachedOneDayReady);

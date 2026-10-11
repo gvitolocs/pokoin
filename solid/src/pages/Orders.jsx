@@ -313,7 +313,7 @@ function OrdersDesk(props) {
   );
 }
 
-/** /orders (market/src/pages/Orders.jsx): bought and sold orders, live from Firestore. */
+/** /orders: bought and sold orders, live from Firestore. */
 export default function Orders() {
   const location = useLocation();
   const [, setSearchParams] = useSearchParams();

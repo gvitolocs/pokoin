@@ -70,7 +70,7 @@ import { RequireSignIn } from './tools/auth-gate.jsx';
 import { usePageTitle } from './tools/board.jsx';
 
 /**
- * Scan Connect desk (market/src/pages/ScanDesk.jsx): the phone pairs with a
+ * Scan Connect desk: the phone pairs with a
  * PIN/QR, scans stream into the queue over SSE, and the seller fixes
  * printings, prices and box slots with PowerTools shortcuts before adding the
  * batch to inventory or the collection. Behaviour follows the React desk
@@ -1579,7 +1579,7 @@ function ScanDeskDesk() {
   );
 }
 
-/** /inventory/scan and /dashboard/scan (market/src/pages/ScanDesk.jsx). */
+/** /inventory/scan and /dashboard/scan. */
 export default function ScanDesk() {
   const location = useLocation();
   usePageTitle('Scan · Pokoin');

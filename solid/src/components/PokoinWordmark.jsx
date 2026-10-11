@@ -1,6 +1,6 @@
 import mascotUrl from '@market/assets/pokoin-mascot@8x.png';
 
-/** The official Pokoin wordmark (same markup as market/src/components/PokoinWordmark.jsx). */
+/** The official Pokoin wordmark. */
 export default function PokoinWordmark(props) {
   return (
     <span class={['brand-word', props.class]} aria-hidden="true">

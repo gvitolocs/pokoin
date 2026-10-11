@@ -5,7 +5,7 @@ import CardTile from '../components/CardTile.jsx';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
 
 /**
- * /marketplace/watchlist and /favorites (market/src/pages/Watchlist.jsx):
+ * /marketplace/watchlist and /favorites:
  * the starred card ids saved in this browser, hydrated to tiles.
  */
 export default function Watchlist() {

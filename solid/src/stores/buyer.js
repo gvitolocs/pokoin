@@ -6,7 +6,7 @@ import { getBearer, signedIn } from './auth.js';
 import { authSession } from './session.js';
 
 /**
- * Buyer display currency (market/src/use-buyer-currency.js + use-seller-currency.js):
+ * Buyer display currency:
  * profile country fiat once the PKN balance cannot cover a price, PKN
  * otherwise; signed-out buyers see PKN. One settings request per page load.
  * Labels only — settlement is always PKN.

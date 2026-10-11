@@ -104,7 +104,7 @@ function SoldGraphFilters(props) {
 }
 
 /**
- * Daily sold median (market/src/pages/Card.jsx SoldPriceGraph). One section
+ * Daily sold median. One section
  * element across the empty, measuring and plotted states; the plot appears
  * once a ResizeObserver has measured it, like the React layout effect.
  */

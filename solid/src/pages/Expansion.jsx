@@ -71,7 +71,7 @@ function infoOf(payload) {
 }
 
 /**
- * Set desk (market/src/pages/Expansion.jsx). Waits for the whole set walk
+ * Set desk. Waits for the whole set walk
  * (or the prebuilt snapshot) before painting tiles, then renders every loaded
  * card; Official order where a printed checklist exists (D00003F). Back
  * restores the filters and view of that history entry (D00005C).

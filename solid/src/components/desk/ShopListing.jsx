@@ -21,7 +21,7 @@ import { ThumbZoom } from '../ArtworkZoom.jsx';
 import PriceStack from '../PriceStack.jsx';
 
 /**
- * Shop rows wrapper (market/src/components/ShopList.jsx). The select band
+ * Shop rows wrapper. The select band
  * (lib/select-band*.js) selects rows; `offers` registers them so the desk card,
  * related tiles and selected listings drag as one pile.
  */
@@ -128,7 +128,7 @@ function TrashIcon() {
 }
 
 /**
- * One shop listing (market/src/components/ShopListing.jsx). Same markup and
+ * One shop listing. Same markup and
  * drag payloads: a mixed desk pile when tiles and listings are selected, the
  * selected listings (`dragOffers`), else the row itself.
  */

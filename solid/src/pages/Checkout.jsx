@@ -863,7 +863,7 @@ function CheckoutDesk() {
   );
 }
 
-/** /checkout (market/src/pages/Checkout.jsx): the ticked cart rows, paid by Stripe or site PKN. */
+/** /checkout: the ticked cart rows, paid by Stripe or site PKN. */
 export default function Checkout() {
   onSettled(() => {
     document.title = 'Checkout · Pokoin';

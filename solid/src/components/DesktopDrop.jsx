@@ -15,7 +15,7 @@ import QtyStepper from './QtyStepper.jsx';
 const DESKTOP_ICON = 'M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 2v8h14V7H5zm-1 12h16v2H4v-2z';
 
 /**
- * Header Desktop hold tray (market/src/components/DesktopDrop.jsx): park
+ * Header Desktop hold tray: park
  * cards, export them as a PDF, or send every listed one to the cart. Its own
  * chunk — mounts only while hovered/clicked or while a card is dragged.
  */

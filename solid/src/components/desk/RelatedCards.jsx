@@ -13,7 +13,7 @@ function copies(rows) {
 }
 
 /**
- * Related cards panel (market/src/components/RelatedCards.jsx). The tiles live
+ * Related cards panel. The tiles live
  * in a store reconciled by id: a new related list with the same ids keeps every
  * tile, and the price overlay only patches the price fields that changed.
  */

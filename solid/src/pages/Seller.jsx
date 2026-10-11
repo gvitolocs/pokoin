@@ -66,7 +66,7 @@ function SkeletonRows() {
 }
 
 /**
- * Public seller shop (market/src/pages/Seller.jsx). The first page comes from
+ * Public seller shop. The first page comes from
  * a small paged query (or the listings cache); once it settles, the whole
  * book downloads and every filter / sort / page runs locally on it. A fresh
  * stamp check refetches the book when the seller's listings changed.

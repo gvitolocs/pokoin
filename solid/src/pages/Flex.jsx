@@ -349,7 +349,7 @@ function LaneTable() {
   );
 }
 
-/** /flex (market/src/pages/Flex.jsx): Pokoin Flex shipping, calculator and partner shops. */
+/** /flex: Pokoin Flex shipping, calculator and partner shops. */
 export default function Flex() {
   const [stores, setStores] = createSignal(FLEX_PLACEHOLDER_STORES);
   const average = flexAverageSaving();

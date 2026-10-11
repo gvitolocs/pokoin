@@ -88,7 +88,7 @@ function streamOf(topic, posts) {
   }, ...rows];
 }
 
-/** /forum, /forum/category/:categoryId, /forum/topic/:topicId (market/src/pages/Forum.jsx). */
+/** /forum, /forum/category/:categoryId, /forum/topic/:topicId. */
 export default function Forum() {
   const params = useParams();
   const navigate = useNavigate();

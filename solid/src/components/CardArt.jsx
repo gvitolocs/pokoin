@@ -20,7 +20,7 @@ function logCardArt(event, detail) {
 }
 
 /**
- * Card scan with CDN sibling fallback (market/src/components/CardArt.jsx):
+ * Card scan with CDN sibling fallback:
  * each failed URL, or a CardTrader grey placeholder size, steps to the next
  * raster sibling, then the Pokoin missing-card scan. Only the <img> src
  * changes on a fallback — nothing else re-renders.

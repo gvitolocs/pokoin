@@ -227,7 +227,7 @@ function MaskCase(props) {
   );
 }
 
-/** Pokémon-only album hover mask review board (market/src/pages/ArtworkHover.jsx). */
+/** Pokémon-only album hover mask review board. */
 export default function ArtworkHover() {
   usePageTitle('Artwork hover masks · test.pokoin.com');
 

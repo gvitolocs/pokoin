@@ -55,7 +55,7 @@ function powerToolsLine(pt) {
 }
 
 /**
- * One pack line (market/src/zero-pack.jsx ZeroLine). Without `onMove` it is a
+ * One pack line. Without `onMove` it is a
  * read-only line (the "waiting for the next merge" list): no drag, no button.
  */
 export function ZeroLine(props) {

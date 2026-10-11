@@ -156,7 +156,7 @@ function offerCopies(rows) {
 }
 
 /**
- * Card desk route (market/src/pages/Card.jsx). One desk per `lang:cardId`:
+ * Card desk route. One desk per `lang:cardId`:
  * ‹ › and the version select remount it, which resets the per-card state the
  * React page resets by hand. The theme and the Poko desk card are cleared only
  * when the route itself unmounts, so a neighbour step never flashes untinted.

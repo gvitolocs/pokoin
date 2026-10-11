@@ -5,12 +5,12 @@ import { catalogLinks } from '@market/catalog-links.js';
 import { authAnchorRel, marketUrl } from '@market/punchouts.js';
 import Avatar from './Avatar.jsx';
 
-// Phone drawer behind the burger (market/src/components/MobileMenu.jsx):
+// Phone drawer behind the burger:
 // account card, four quick actions, then grouped lists (Shop / Catalog /
 // Account). Its own chunk: Chrome imports it on the first burger press and
 // keeps it mounted after that so the slide transition still plays.
 
-/** Drawer icon paths (market/src/components/Chrome.jsx ICO, passed as `ico` there). */
+/** Drawer icon paths. */
 const ICO = {
   market: 'M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z',
   search: 'M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',

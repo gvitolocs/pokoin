@@ -35,8 +35,8 @@ function reserveStripeTab() {
 }
 
 /**
- * Brand purple Connect button — the Stripe row of the Profile seller setup
- * (market/src/components/SellerShippingSettings.jsx). Mounted only for a
+ * Brand purple Connect button — the Stripe row of the Profile seller setup.
+ * Mounted only for a
  * signed-in seller (the Profile gate).
  */
 export function StripeConnectButton(props) {

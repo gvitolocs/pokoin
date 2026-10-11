@@ -8,7 +8,7 @@ import { Alert, DeskPanel, Metric, MetricGrid, PageHead } from '../components/De
 import { availablePkn } from '../stores/account.js';
 import { getBearer, signedIn } from '../stores/auth.js';
 
-/** /buy (market/src/pages/Buy.jsx): fixed Stripe PKN packages, credited to site balance. */
+/** /buy: fixed Stripe PKN packages, credited to site balance. */
 export default function Buy() {
   const navigate = useNavigate();
   const location = useLocation();

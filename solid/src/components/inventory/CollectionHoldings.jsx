@@ -183,7 +183,7 @@ function readDrag(event) {
 }
 
 /**
- * MyPokoin Collection tab (market/src/components/CollectionHoldings.jsx):
+ * MyPokoin Collection tab:
  * what you own, physical + NFT. Listed copies stay owned and sit on the
  * right; drag a card across to list it or to hold it.
  */

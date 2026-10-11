@@ -169,7 +169,7 @@ function ConversationList(props) {
 }
 
 /**
- * Floating messages dock (market/src/components/ChatDock.jsx): the chat
+ * Floating messages dock: the chat
  * button, the conversation list, person threads and the Poko assistant, with
  * card drops onto conversations. A lazy chunk the shell loads once the page
  * is idle — never on the first paint.

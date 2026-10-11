@@ -5,7 +5,7 @@ import { goMarket } from '@market/punchouts.js';
 import ThumbZoom from './ThumbZoom.jsx';
 
 /**
- * One card in a dashboard miniature sheet (market/src/components/MiniCardTile.jsx):
+ * One card in a dashboard miniature sheet:
  * the 240px `_homepage.webp` thumbnail, falling back to the full art; hover
  * floats the full card beside the cursor. `badge` marks quantity.
  */

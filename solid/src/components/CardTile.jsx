@@ -15,7 +15,7 @@ import { useCardSelect } from './CardSelectGrid.jsx';
 import PriceStack from './PriceStack.jsx';
 
 /**
- * Grid / rail / list tile (market/src/components/CardTile.jsx). A plain anchor:
+ * Grid / rail / list tile. A plain anchor:
  * the router claims the click and intent-preloads the desk chunk + data on
  * hover, focus or touchstart. Inside a CardSelectGrid, Ctrl/Cmd/Shift-click
  * selects instead of opening, and dragging a selected tile carries the whole

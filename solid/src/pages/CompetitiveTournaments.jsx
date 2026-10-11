@@ -390,7 +390,7 @@ function Missing() {
   return <NotInSnapshot>That tournament is not in the snapshot.</NotInSnapshot>;
 }
 
-/** /marketplace/competitive/tournaments[/:id] (market/src/pages/CompetitiveTournaments.jsx). */
+/** /marketplace/competitive/tournaments[/:id]. */
 export default function CompetitiveTournaments() {
   const params = useParams();
   return (

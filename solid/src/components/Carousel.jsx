@@ -33,7 +33,7 @@ export function SkeletonTile(props) {
 }
 
 /**
- * Horizontal rail (market/src/components/Carousel.jsx). Tiles are keyed by
+ * Horizontal rail. Tiles are keyed by
  * card identity, so a rail that gains cards (progressive paint, priced
  * refresh) only inserts or patches the changed tiles.
  */

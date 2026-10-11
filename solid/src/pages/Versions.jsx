@@ -64,7 +64,7 @@ function TileGrid(props) {
   );
 }
 
-/** Rarity Lineup + artwork-era groups for one printing (market/src/pages/Versions.jsx). */
+/** Rarity Lineup + artwork-era groups for one printing. */
 export default function Versions() {
   const params = useParams();
   const location = useLocation();

@@ -2,7 +2,7 @@ import { DeskPanel, PageHead, Thread } from '../components/Desk.jsx';
 import SignedIn from '../components/SignedIn.jsx';
 import StockNav from '../components/StockNav.jsx';
 
-/** /stock (market/src/pages/Stock.jsx). */
+/** /stock. */
 export default function Stock() {
   return (
     <SignedIn from="/stock">

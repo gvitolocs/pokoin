@@ -2,7 +2,7 @@ import { For } from 'solid-js';
 import { useLocation } from '@solidjs/router';
 import tests from '@market/../public/review/tests.json';
 
-/** Bottom strip linking every test board (market/src/components/TestDock.jsx). */
+/** Bottom strip linking every test board. */
 export default function TestDock() {
   const location = useLocation();
   const here = () => location.pathname.replace(/\/+$/, '') || '/';

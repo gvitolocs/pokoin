@@ -1,7 +1,7 @@
 import { For, Show } from 'solid-js';
 import { SEARCH_TABS, normalizeSearchTab } from '@market/search-kind.js';
 
-/** Singles / Product / Users tabs (market/src/components/SearchTabs.jsx). */
+/** Singles / Product / Users tabs. */
 export default function SearchTabs(props) {
   const current = () => normalizeSearchTab(props.value);
   return (

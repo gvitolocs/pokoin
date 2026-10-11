@@ -44,7 +44,7 @@ function Group(props) {
 const PAIRED = data.groups.filter((group) => group.paired);
 const UNPAIRED = data.groups.filter((group) => !group.paired);
 
-/** Espurr same-artwork clusters across languages (market/src/pages/Espurr.jsx). */
+/** Espurr same-artwork clusters across languages. */
 export default function Espurr() {
   usePageTitle('Espurr versions · test.pokoin.com');
 

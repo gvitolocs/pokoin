@@ -192,7 +192,7 @@ function BoughtDesk() {
   );
 }
 
-/** /bought (market/src/pages/Bought.jsx): the signed-in buyer's purchases. */
+/** /bought: the signed-in buyer's purchases. */
 export default function Bought() {
   onSettled(() => {
     document.title = 'Buy history · Pokoin';

@@ -2,8 +2,8 @@ import { For, Show } from 'solid-js';
 import { SHIP_FROM_COUNTRIES, shipFromCountryOptionLabel } from '@market/ship-countries.js';
 
 /**
- * First listing without a ship-from country (market/src/components/
- * SellerShippingSettings.jsx ShipFromCountryGate, with Desk.jsx Alert inline).
+ * First listing without a ship-from country: ask for it before the listing
+ * form (the Desk.jsx Alert markup inline).
  */
 export default function ShipFromCountryGate(props) {
   return (

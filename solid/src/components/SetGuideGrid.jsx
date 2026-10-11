@@ -74,7 +74,7 @@ function SetGuideCard(props) {
 }
 
 /**
- * Expansion tiles (market/src/components/SetGuideGrid.jsx). Rows are the
+ * Expansion tiles. Rows are the
  * catalog's own objects, so the keyed list keeps a tile when a filter or era
  * chip only reorders or narrows the set list.
  */

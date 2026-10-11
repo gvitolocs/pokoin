@@ -2,7 +2,7 @@ import { lazy } from 'solid-js';
 import RedirectTo from '../pages/RedirectTo.jsx';
 
 /**
- * Buying and money pages (React URL map: market/src/App.jsx). Every page is
+ * Buying and money pages (the React app's URLs). Every page is
  * its own chunk; React registered each path with and without a trailing
  * slash, and the Solid router matches both.
  */

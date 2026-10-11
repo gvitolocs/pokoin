@@ -9,7 +9,7 @@ import SeoHead from '../components/SeoHead.jsx';
 import SetGuideGrid, { SetGuideSkeleton } from '../components/SetGuideGrid.jsx';
 
 /**
- * /marketplace/sets (market/src/pages/Sets.jsx): every expansion grouped by
+ * /marketplace/sets: every expansion grouped by
  * TCG era (Pokémon) or one A → Z list (satellite games), with the era chips
  * and a name filter. Era membership and in-era order are set-logos.js rules.
  */

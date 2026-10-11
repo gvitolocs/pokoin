@@ -6,12 +6,10 @@ import { authSession, refreshSession } from './session.js';
 
 /**
  * Who is signed in, for the header (avatar, PKN chip, menu account card):
- * the React AuthProvider's profile + availablePkn and WalletProvider's
- * balance. First paint reads the cached session (`pokoin.auth.session`);
+ * the profile, availablePkn and the wallet balance. First paint reads the cached session (`pokoin.auth.session`);
  * after it, one REST read of users/{uid} + balances/{uid}
- * (market/src/firestore-rest.js — the same read React's extension desk
- * uses) refreshes them without the Firestore SDK, and again whenever the
- * tab comes back. The fresh values are persisted to the session like React.
+ * (market/src/firestore-rest.js) refreshes them without the Firestore SDK, and again whenever the
+ * tab comes back. The fresh values are persisted to the session.
  * The readers (REST, profile shaping, wallet RPC) load with that first read.
  */
 const [live, setLive] = createSignal(null);

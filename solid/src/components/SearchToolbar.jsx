@@ -30,7 +30,7 @@ function syncSelect(value, options) {
   };
 }
 
-/** Print / Sort / (Type) / Rarity / Set selects (market/src/components/SearchToolbar.jsx). */
+/** Print / Sort / (Type) / Rarity / Set selects. */
 export default function SearchToolbar(props) {
   const rarities = () => props.rarities || [];
   const sets = () => props.sets || [];

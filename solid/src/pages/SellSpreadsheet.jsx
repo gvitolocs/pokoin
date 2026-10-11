@@ -353,7 +353,7 @@ function SpreadsheetDesk() {
   );
 }
 
-/** /mypokoin/spreadsheet (market/src/pages/SellSpreadsheet.jsx). Dev `?sheetPreview` skips the sign-in gate. */
+/** /mypokoin/spreadsheet. Dev `?sheetPreview` skips the sign-in gate. */
 export default function SellSpreadsheet() {
   const location = useLocation();
   document.title = 'Sell via spreadsheet · Pokoin';

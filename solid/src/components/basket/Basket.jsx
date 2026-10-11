@@ -1,4 +1,4 @@
-// Amazon-layout cart pieces (market/src/components/Basket.jsx): big price,
+// Amazon-layout cart pieces: big price,
 // basket row, seller parcel bar, "Important messages", the Subtotal box and
 // the Flex card. Same markup and classes; market/src/cart.css styles them.
 

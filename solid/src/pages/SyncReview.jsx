@@ -388,7 +388,7 @@ function SyncReviewDesk() {
   );
 }
 
-/** CardTrader ↔ Power Tools reconcile review (market/src/pages/SyncReview.jsx). */
+/** CardTrader ↔ Power Tools reconcile review. */
 export default function SyncReview() {
   const location = useLocation();
   usePageTitle('CardTrader ↔ Power Tools · Pokoin');

@@ -32,7 +32,7 @@ export function Chevron(props) {
 }
 
 /**
- * The large desk scan (market/src/pages/Card.jsx DeskArtFrame): click or
+ * The large desk scan: click or
  * Enter/Space zooms. It joins the page multi-select (data-card-id), so a drag
  * carries the mixed desk pile or the selected cards when it is part of one,
  * else the card (or the open chat's listing).

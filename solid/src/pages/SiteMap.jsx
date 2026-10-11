@@ -759,7 +759,7 @@ function MarketLegend(props) {
   );
 }
 
-/** /sitemap (market/src/pages/SiteMap.jsx): the interactive map of every page and link. */
+/** /sitemap: the interactive map of every page and link. */
 export default function SiteMap() {
   const [search, setSearch] = useSearchParams();
   const [data, setData] = createSignal(null);

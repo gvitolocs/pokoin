@@ -47,7 +47,7 @@ function payloadTotal(payload) {
   return Number.isFinite(total) ? total : null;
 }
 
-// Same markup as EmptyDesk / Alert in market/src/components/Desk.jsx. Local
+// Same markup as EmptyDesk / Alert in components/Desk.jsx. Local
 // until the card-desk port lands a shared components/Desk.jsx.
 const EMPTY_ICON = 'M7 3h10a2 2 0 0 1 2 2v14l-7-3-7 3V5a2 2 0 0 1 2-2zm0 2v11.2l5-2.1 5 2.1V5H7z';
 
@@ -75,7 +75,7 @@ function Alert(props) {
 }
 
 /**
- * /marketplace/search (market/src/pages/Search.jsx). Same URL semantics: q,
+ * /marketplace/search. Same URL semantics: q,
  * tab (singles / product / users), resolved chips, the print chip and the
  * title language from the header stores. Results live in a store reconciled
  * by card id and the grid is keyed by id, so "Load more" appends tiles and a
