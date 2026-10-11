@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
 use sqlx::Row;
@@ -18,7 +18,11 @@ use crate::store;
 use pokoin_api_common::pg::{number_f64, number_i64};
 
 const PAGE_DEFAULT: i64 = 60;
-const BOOK_MAX: usize = 6000;
+/// The largest shop sent whole to the browser, which then filters, sorts and
+/// pages it without asking again. Past it the page filters on the server.
+/// (20000 is what the Node handler allowed; 6000 left a 10k shop on a server
+/// round trip for every filter click.)
+const BOOK_MAX: usize = 20000;
 
 fn clean_username(value: &str) -> String {
     value
@@ -252,6 +256,47 @@ fn listing_row(row: &sqlx::postgres::PgRow, seller: &Seller) -> Value {
         "createdAt": created.map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
         "updatedAt": updated.map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
     })
+}
+
+/// The whole-book answer, serialized.
+fn book_body(
+    rows: &[sqlx::postgres::PgRow],
+    seller: &Seller,
+    game: &str,
+    stamp: &str,
+) -> Result<Vec<u8>, serde_json::Error> {
+    let listings: Vec<Value> = rows.iter().map(|row| listing_row(row, seller)).collect();
+    let copies: i64 = listings
+        .iter()
+        .filter_map(|row| row.get("quantityAvailable").and_then(Value::as_i64))
+        .sum();
+    serde_json::to_vec(&json!({
+        "book": true,
+        "game": game,
+        "seller": seller_payload(seller, None),
+        "listings": listings,
+        "total": rows.len(),
+        "unique": rows.len(),
+        "copies": copies,
+        "maxUpdatedAt": stamp,
+        "limit": rows.len(),
+        "offset": 0,
+    }))
+}
+
+/// `private_json` for a body that is already serialized.
+fn private_json_bytes(body: Vec<u8>) -> Response {
+    let mut response = (axum::http::StatusCode::OK, body).into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    response
 }
 
 #[derive(Debug, Clone)]
@@ -571,25 +616,24 @@ pub async fn marketplace_seller_shop(
                 "maxUpdatedAt": "",
             })));
         }
-        let listings: Vec<Value> = rows.iter().map(|row| listing_row(row, &seller)).collect();
-        let copies: i64 = listings
-            .iter()
-            .filter_map(|row| row.get("quantityAvailable").and_then(Value::as_i64))
-            .sum();
-        return Ok(private_json(json!({
-            "book": true,
-            "game": catalog_game,
-            "seller": seller_payload(&seller, None),
-            "listings": listings,
-            "total": rows.len(),
-            "unique": rows.len(),
-            "copies": copies,
-            "maxUpdatedAt": seller_activity_stamp(read_db, &seller.uid)
-                .await
-                .map_err(|error| crate::game::catalog_error(catalog_game, error))?,
-            "limit": rows.len(),
-            "offset": 0,
-        })));
+        let stamp = seller_activity_stamp(read_db, &seller.uid)
+            .await
+            .map_err(|error| crate::game::catalog_error(catalog_game, error))?;
+        // Thousands of rows to shape and serialize: off the request workers,
+        // so a big book never holds the three the Pi runs everything on.
+        let game = catalog_game.to_string();
+        let seller = seller.clone();
+        let body = tokio::task::spawn_blocking(move || book_body(&rows, &seller, &game, &stamp))
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, "seller book task failed");
+                ApiError::internal("Seller shop failed.")
+            })?
+            .map_err(|error| {
+                tracing::error!(%error, "seller book did not serialize");
+                ApiError::internal("Seller shop failed.")
+            })?;
+        return Ok(private_json_bytes(body));
     }
 
     let totals_rows = run_shop_sql(
@@ -1021,5 +1065,57 @@ mod tests {
         fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
             self
         }
+    }
+}
+
+#[cfg(test)]
+mod book_tests {
+    use super::*;
+
+    /// A 10,000-listing shop comes back whole, as one valid JSON book.
+    /// `POKOIN_TEST_DATABASE_URL=postgres://… cargo test -p pokoin-commerce book_of_ten_thousand -- --nocapture`
+    #[tokio::test]
+    async fn book_of_ten_thousand_listings_is_complete() {
+        let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+            eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new().max_connections(2).connect(&url).await.unwrap();
+        // Temp tables are per connection: create and read on the same one.
+        let mut conn = pool.acquire().await.unwrap();
+        sqlx::raw_sql(
+            "drop table if exists pg_temp.book_rows;
+             create temp table book_rows as
+             select gen_random_uuid() as id, (200000 + n)::text as card_id, 'IT'::text as seller_country,
+                    'pokemon'::text as marketplace_game, 'NM'::text as condition, 'EN'::text as language,
+                    (100 + n)::numeric as price_pkn, 2::integer as quantity_available,
+                    false as signed, (n % 7 = 0) as reverse, false as first_edition, false as altered,
+                    'standard'::text as foil_state, ''::text as variant_state, false as sealed, false as graded,
+                    true as shipping_available, ('Card name number ' || n)::text as card_name,
+                    ('https://cdn.pokoin.com/leftovers/' || n || '.jpg')::text as card_image_url,
+                    'Some Expansion Name'::text as set_name, (n % 200 || '/200')::text as collector_number,
+                    'active'::text as status, now() as created_at, now() as updated_at
+               from generate_series(1, 10000) n",
+        )
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+        let rows = sqlx::query("select * from book_rows order by price_pkn").fetch_all(&mut *conn).await.unwrap();
+        assert_eq!(rows.len(), 10000);
+        let seller = Seller { uid: "u1".into(), username: "alice".into(), display_name: "Alice".into(), accepts_pkn: true };
+        let started = std::time::Instant::now();
+        let body = book_body(&rows, &seller, "pokemon", "2026-10-11T00:00:00Z").unwrap();
+        let took = started.elapsed();
+        let book: Value = serde_json::from_slice(&body).unwrap();
+        eprintln!("book of {} rows: {} bytes, shaped and serialized in {:?}", rows.len(), body.len(), took);
+        assert_eq!(book["book"], true);
+        assert_eq!(book["total"], 10000);
+        assert_eq!(book["listings"].as_array().unwrap().len(), 10000);
+        assert_eq!(book["copies"], 20000);
+        assert_eq!(book["listings"][0]["pricePkn"], 101.0);
+        assert_eq!(book["listings"][0]["quantityAvailable"], 2);
+        assert_eq!(book["listings"][9999]["cardName"], "Card name number 10000");
+        assert_eq!(book["seller"]["username"], "alice");
+        assert!(BOOK_MAX >= 10000);
     }
 }
