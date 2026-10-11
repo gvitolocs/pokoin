@@ -12,6 +12,7 @@
  * pokoin.com Origin (see sameOriginApi; --same-origin-api 0 turns it off).
  */
 import { chromium } from 'playwright';
+import { fixtureResponse, signInWithFixtures } from './lib/account-fixtures.mjs';
 
 const args = process.argv.slice(2);
 const arg = (name, fallback) => {
@@ -39,6 +40,9 @@ async function sameOriginApi(context) {
   await context.route('https://api.pokoin.com/**', async (route) => {
     try {
       const request = route.request();
+      const fixture = fixtureResponse(request);
+      if (fixture?.abort) return await route.abort();
+      if (fixture) return await route.fulfill(fixture);
       const response = await route.fetch({ headers: { ...request.headers(), origin: 'https://pokoin.com' } });
       await route.fulfill({ response, headers: { ...response.headers(), 'access-control-allow-origin': '*' } });
     } catch (_) {
@@ -47,12 +51,23 @@ async function sameOriginApi(context) {
   });
 }
 
-async function withPage(base, fn) {
+async function withPage(base, fn, { signedIn = false } = {}) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  if (arg('same-origin-api', '1') !== '0') await sameOriginApi(context);
+  if (signedIn) await signInWithFixtures(context, base);
+  if (arg('same-origin-api', '1') !== '0' || signedIn) await sameOriginApi(context);
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error).slice(0, 200)));
+  page.on('console', (message) => {
+    if (message.type() === 'error' && arg('console-errors', '0') === '1') errors.push(`console: ${message.text().slice(0, 160)}`);
+  });
+  page.on('requestfailed', (request) => {
+    // Aborted fixture channels (Firestore SDK) are expected; everything else counts.
+    const url = request.url();
+    if (!/firestore\.googleapis\.com|google-analytics|googletagmanager/.test(url) && arg('failed-requests', '1') === '1') {
+      errors.push(`failed: ${request.method()} ${url.slice(0, 120)} ${request.failure()?.errorText || ''}`);
+    }
+  });
   try {
     return { ...(await fn(page, base)), errors };
   } finally {
@@ -104,6 +119,42 @@ async function suggest(page, base, query) {
   return { value };
 }
 
+/** Account, seller and onboarding pages (solid/src/routes/account.js). */
+const ACCOUNT_URLS = arg('urls', [
+  '/auth', '/auth?mode=signup', '/extension/auth-bridge', '/profile', '/dashboard', '/stock', '/messages',
+  '/messages/poko', '/messages/friend1', '/associate', '/mypokoin', '/mypokoin/import', '/mypokoin/settings',
+  '/mypokoin/collection', '/mypokoin/location/box1', '/mypokoin/spreadsheet', '/mypokoin/zero', '/mypokoin/1dr',
+  '/inventory', '/collection', '/marketplace/portfolio', '/invite', '/join/parityfixture', '/ambassador',
+  '/ambassadorprogram', '/email-preferences',
+].join(',')).split(',');
+
+/** What a visitor sees on an account page: where it landed, headings, structure counts. */
+async function accountPage(page, base, url) {
+  await page.goto(`${base}${url}`, { waitUntil: 'load' });
+  const value = await settle(page, () => page.evaluate(() => {
+    const text = (sel) => [...document.querySelectorAll(sel)].map((n) => n.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const count = (sel) => document.querySelectorAll(sel).length;
+    const main = document.querySelector('.page, main');
+    return {
+      at: `${location.pathname}${location.search}`,
+      title: document.title,
+      h1: text('main h1, .page h1'),
+      h2: text('main h2, .page h2'),
+      notMigrated: /is not in the Solid UI yet/.test(document.body.textContent),
+      counts: {
+        panels: count('.desk-panel'),
+        metrics: count('.metric, .seller-metric'),
+        threads: count('.thread, .messages-row'),
+        tiles: count('.seller-listing-tile, .inv-row, .collection-tile, .quick-tile'),
+        buttons: main ? main.querySelectorAll('button').length : 0,
+        inputs: main ? main.querySelectorAll('input, select, textarea').length : 0,
+        links: main ? main.querySelectorAll('a[href]').length : 0,
+      },
+    };
+  }), { quietMs: 2000, maxMs: 20000 });
+  return { value };
+}
+
 /** Up to `limit` paths where two JSON values differ (`carousels[1].tiles[3]: a → b`). */
 function differences(a, b, at = '$', out = [], limit = 6) {
   if (out.length >= limit) return out;
@@ -123,19 +174,25 @@ if (CHECKS.includes('suggest')) {
   for (const query of QUERIES) jobs.push({ name: `suggest:${query}`, run: (page, base) => suggest(page, base, query) });
 }
 
+for (const [check, signedIn] of [['account', false], ['account-in', true]]) {
+  if (!CHECKS.includes(check)) continue;
+  for (const url of ACCOUNT_URLS) jobs.push({ name: `${check}:${url}`, signedIn, run: (page, base) => accountPage(page, base, url) });
+}
+
 let failures = 0;
 for (const job of jobs) {
   let a;
   let b;
   let same = false;
   for (let attempt = 0; attempt < 2 && !same; attempt += 1) {
-    a = await withPage(A, job.run);
-    b = await withPage(B, job.run);
+    a = await withPage(A, job.run, { signedIn: job.signedIn });
+    b = await withPage(B, job.run, { signedIn: job.signedIn });
     same = JSON.stringify(a.value) === JSON.stringify(b.value);
   }
   const errors = [...a.errors.map((e) => `A ${e}`), ...b.errors.map((e) => `B ${e}`)];
   if (!same || errors.length) failures += 1;
   console.log(`${same ? 'SAME' : 'DIFF'} ${job.name}${errors.length ? `  errors: ${errors.join(' | ')}` : ''}`);
+  if (arg('verbose', '0') === '1') console.log(`  A ${JSON.stringify(a.value)}\n  B ${JSON.stringify(b.value)}`);
   if (!same) {
     for (const line of differences(a.value, b.value)) console.log(`  ${line}`);
   }
