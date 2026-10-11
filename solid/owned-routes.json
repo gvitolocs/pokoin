@@ -5,6 +5,13 @@
     "^/marketplace/?$",
     "^/marketplace/search/?$",
     "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/?$",
-    "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/versions/?$"
+    "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/versions/?$",
+    "^/(?:tests|sanitize|espurr|ocr|ocr/artists|artwork|jumbos|poko|poko/archive)/?$",
+    "^/(?:admin|marketplace/admin|marketplace/admin/edit)/?$",
+    "^/(?:scan|cardscan|scancard)/?$",
+    "^/(?:dashboard|inventory)/scan/?$",
+    "^/inventory/sync-review/?$",
+    "^/forum(?:/(?:category|topic)/[^/]+)?/?$",
+    "^/(?:about|careers)/?$"
   ]
 }
