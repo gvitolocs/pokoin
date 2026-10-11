@@ -5,6 +5,20 @@
     "^/marketplace/?$",
     "^/marketplace/search/?$",
     "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/?$",
-    "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/versions/?$"
+    "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/versions/?$",
+    "^/cart/?$",
+    "^/checkout/?$",
+    "^/orders/?$",
+    "^/bought/?$",
+    "^/buy/?$",
+    "^/sales/?$",
+    "^/wallet/?$",
+    "^/exchange/?$",
+    "^/swap/?$",
+    "^/nft/?$",
+    "^/flex/?$",
+    "^/shipping/?$",
+    "^/protection/?$",
+    "^/marketplace/signal/?$"
   ]
 }
