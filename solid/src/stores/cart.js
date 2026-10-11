@@ -1,5 +1,5 @@
 import { createEffect, createRoot, createSignal, runWithOwner } from 'solid-js';
-import { cartTotals } from '@market/cart-model.js';
+import { cartTotals } from '@market/cart-totals.js';
 import {
   CART_KEY,
   CART_MAX,
@@ -105,6 +105,16 @@ export function setCartQty(id, qty) {
 /** useCart().removeItem. */
 export function removeCartItem(id) {
   commit(removeCartRow(rows, id));
+}
+
+/**
+ * For stores/cart-actions.js (the rest of useCart(), loaded with the commerce
+ * pages only): apply `fn(items, saved, gift)` → `[items, saved?, gift?]` to
+ * the current lists in one commit.
+ */
+export function updateCart(fn) {
+  const [nextItems, nextSaved = savedRows, nextGift = giftOn] = fn(rows, savedRows, giftOn);
+  commit(nextItems, nextSaved, nextGift);
 }
 
 // ---------------------------------------------------------------------------
