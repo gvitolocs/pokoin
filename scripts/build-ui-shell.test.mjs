@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import { readFileSync } from 'node:fs';
-import { bootScript, buildShell, canaryPercent, cspHash, entryTags } from './build-ui-shell.mjs';
+import { bootScript, buildShell, canaryPercent, cspHash, entryTags, gameSlugs, routePath } from './build-ui-shell.mjs';
 
 const REACT = `<!DOCTYPE html><html><head><meta charset="utf-8" />
 <script src="/market/card-url-boot.js"></script>
@@ -140,19 +140,81 @@ test('owned routes cover the Solid pages and nothing React still serves', () => 
     '/marketplace/en/cards/806390/card-mega-rayquaza-ex-gold-secret-rare-113-076-storm-emeralda',
     '/marketplace/zht/cards/806390/versions',
     '/marketplace/it/cards/806390/some-slug/versions',
-  ]) assert.ok(owns(pathname), pathname);
-  for (const pathname of [
-    '/',
-    '/cart',
-    '/checkout',
-    '/orders',
-    '/profile',
+    '/marketplace/eras',
     '/marketplace/eras/ex',
     '/marketplace/sets',
+    '/marketplace/sets/base-set/',
+    '/marketplace/en/artists',
     '/marketplace/en/artists/mitsuhiro-arita',
     '/marketplace/en/users/seller',
+    '/marketplace/en/pokemon/pikachu',
+    '/marketplace/en/rarities',
+    '/marketplace/jp/languages/japanese',
+    '/marketplace/en/guides/grading',
+    '/marketplace/explore',
+    '/marketplace/watchlist',
+    '/favorites',
+    '/product',
+    '/product/graded',
+    '/marketplace/competitive',
+    '/marketplace/competitive/decks/abc',
+    '/marketplace/competitive/decklists/123',
+    '/marketplace/competitive/tournaments',
+    '/docs',
+    '/privacy/',
+    '/health',
+    '/sitemap',
+    '/tests',
+    '/sanitize/',
+    '/ocr/artists',
+    '/poko/archive',
+    '/jumbos',
+    '/admin',
+    '/marketplace/admin/edit',
+    '/scan',
+    '/cardscan/',
+    '/inventory/scan',
+    '/dashboard/scan',
+    '/inventory/sync-review',
+    '/forum',
+    '/forum/category/general',
+    '/forum/topic/abc123/',
+    '/about',
+    '/careers',
+  ]) assert.ok(owns(pathname), pathname);
+  for (const pathname of [
+    '/cart', '/checkout', '/orders', '/bought', '/buy', '/sales', '/wallet', '/exchange', '/swap', '/nft',
+    '/flex', '/shipping', '/protection', '/marketplace/signal', '/auth', '/extension/auth-bridge', '/profile',
+    '/dashboard', '/stock', '/messages', '/messages/poko', '/associate', '/mypokoin', '/mypokoin/collection',
+    '/mypokoin/location/box1', '/inventory', '/collection', '/marketplace/portfolio', '/marketplace/portfolio/abc',
+    '/invite', '/join/code', '/ambassador', '/ambassadorprogram', '/email-preferences', '/marketplace/en/users/seller',
+  ]) assert.ok(owns(pathname), pathname);
+  // Nothing React routes is left; these are unknown paths (Solid's catch-all).
+  for (const pathname of [
+    '/',
+    '/marketplace/en/users',
+    '/marketplace/competitive/decklists',
     '/marketplace/search/extra',
     '/marketplace/en/cards/806390/slug/other',
-    '/cyberpunk/marketplace',
+    '/ocr/artists/x',
+    '/forum/topic',
+    '/scan/extra',
+    '/dash-preview',
   ]) assert.ok(!owns(pathname), pathname);
+});
+
+test('other games route under their basename like the Pokemon site', async () => {
+  const games = await gameSlugs(new URL('..', import.meta.url).pathname);
+  assert.ok(games.includes('one-piece') && games.includes('magic') && !games.includes(''));
+  assert.equal(routePath('/one-piece/marketplace', games), '/marketplace');
+  assert.equal(routePath('/one-piece', games), '/');
+  assert.equal(routePath('/one-piece-fan/marketplace', games), '/one-piece-fan/marketplace');
+  assert.equal(routePath('/marketplace/sets', games), '/marketplace/sets');
+  const tags = { react: '<r>', solid: '<s>' };
+  const script = bootScript({ owned: OWNED, canary: 100, games, tags });
+  assert.equal(boot(script, { path: '/one-piece/marketplace', random: 0 }).ui, 'solid');
+  assert.equal(boot(script, { path: '/magic/marketplace/en/cards/12/x', random: 0 }).ui, 'solid');
+  assert.equal(boot(script, { path: '/one-piece', random: 0 }).ui, 'react');
+  assert.equal(boot(script, { path: '/unknown-game/marketplace', random: 0 }).ui, 'react');
+  assert.equal(boot(bootScript({ owned: OWNED, canary: 100, tags }), { path: '/one-piece/marketplace', random: 0 }).ui, 'react');
 });

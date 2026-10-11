@@ -1,19 +1,22 @@
 import { createEffect, createSignal, Errored, getOwner, Loading, onSettled, runWithOwner, Show, untrack } from 'solid-js';
 import { useLocation, useNavigate } from '@solidjs/router';
 import { framedByChromeExtension } from '@market/extension-auth-bridge.js';
+import { gameBasename } from '@market/game.js';
+import { isGamePrivatePath } from '@market/game-private-path.js';
 import { legacyDashboardHref } from '@market/punchouts.js';
 import { isDashboardHost } from '@market/scan-api.js';
 import { subscribeOriginDown } from '@market/working-page.js';
 import Chrome from './components/Chrome.jsx';
 import CookieBanner from './components/CookieBanner.jsx';
 import WorkingOnIt from './components/WorkingOnIt.jsx';
+import { isBarePath } from './lib/bare-pages.js';
 import { chatDock } from './lib/chat-dock-loader.js';
 import { whenIdle } from './lib/idle.js';
 import { warmLikelyRoutes } from './lib/route-warmup.js';
 import { setLinkNavigator } from './lib/yield-nav.js';
 import { reportClientError } from './lib/client-error.js';
-import { watchAccount } from './stores/account.js';
-import { signedIn, warmAuthWhenIdle } from './stores/auth.js';
+import { refreshAccount, watchAccount } from './stores/account.js';
+import { signedIn, warmAuthWhenIdle, watchDeskSession } from './stores/auth.js';
 import { ensureSellerSettings } from './stores/buyer.js';
 import { startCartSync } from './stores/cart.js';
 
@@ -36,7 +39,7 @@ function RouteError(props) {
   );
 }
 
-/** Leave dashboard.pokoin.com for the same path on pokoin.com (React DashboardMarketHandoff). */
+/** Leave this host or game prefix for the same page elsewhere (React DashboardMarketHandoff). */
 function DashboardMarketHandoff(props) {
   onSettled(() => {
     window.location.replace(props.target);
@@ -67,6 +70,7 @@ export default function App(props) {
   // Google reviews badge — none of them is on the first paint.
   onSettled(() => {
     warmAuthWhenIdle();
+    const stopDeskSession = watchDeskSession(() => refreshAccount());
     const unsubscribe = subscribeOriginDown(() => setOriginDown(true));
     document.documentElement.classList.toggle('is-extension-desk', framed);
     const cancelIdle = whenIdle(() => {
@@ -79,6 +83,7 @@ export default function App(props) {
       import('@market/google-reviews.js').then(({ showReviewsBadge }) => showReviewsBadge()).catch(() => {});
     });
     return () => {
+      stopDeskSession();
       unsubscribe();
       cancelIdle();
       document.documentElement.classList.remove('is-extension-desk');
@@ -89,24 +94,39 @@ export default function App(props) {
   });
   watchAccount();
 
-  if (isDashboardHost()) {
+  // Test boards and the extension sign-in bridge are bare pages (a React
+  // "board"): no header, no origin-down page, and they stay on the legacy
+  // dashboard host.
+  const bare = () => isBarePath(location.pathname);
+  // Account and site pages live on the Pokemon apex: /one-piece/wallet reloads
+  // as /wallet (React AppShell). The router keeps the game prefix in pathname.
+  const gameBase = gameBasename();
+  const routerPath = () => location.pathname.slice(gameBase.length) || '/';
+  const gamePrivate = () => Boolean(gameBase) && isGamePrivatePath(routerPath());
+  const route = () => (
+    <Errored fallback={(err, reset) => <RouteError error={err()} reset={reset} />}>
+      <Loading fallback={<RoutePending />}>{props.children}</Loading>
+    </Errored>
+  );
+
+  if (isDashboardHost() && !untrack(bare)) {
     return <DashboardMarketHandoff target={untrack(() => legacyDashboardHref(location.pathname, location.search))} />;
   }
 
   return (
-    <Show when={!(originDown() && !framed)} fallback={<WorkingOnIt />}>
-      <Chrome>
-        <Errored fallback={(err, reset) => <RouteError error={err()} reset={reset} />}>
-          <Loading fallback={<RoutePending />}>{props.children}</Loading>
-        </Errored>
-      </Chrome>
-      <CookieBanner />
-      <Show when={chatDock.mod()}>
-        {(mod) => {
-          const Dock = untrack(mod).default;
-          return <Dock />;
-        }}
+    <Show when={!gamePrivate()} fallback={<DashboardMarketHandoff target={`${routerPath()}${location.search || ''}`} />}>
+    <Show when={!bare()} fallback={route()}>
+      <Show when={!(originDown() && !framed)} fallback={<WorkingOnIt />}>
+        <Chrome>{route()}</Chrome>
+        <CookieBanner />
+        <Show when={chatDock.mod()}>
+          {(mod) => {
+            const Dock = untrack(mod).default;
+            return <Dock />;
+          }}
+        </Show>
       </Show>
+    </Show>
     </Show>
   );
 }

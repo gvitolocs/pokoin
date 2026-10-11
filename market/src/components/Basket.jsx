@@ -3,11 +3,18 @@
 
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  LOW_STOCK,
+  basketMessageText,
+  basketSellerOf as sellerOf,
+  cheaperSavePercent,
+  fiatParts,
+  shareCartRow,
+} from '../basket-format.js';
 import { brandSrc } from '../brand-assets.js';
 import { isSelected, priceDrop } from '../cart-model.js';
 import { listingStock } from '../cart-qty.js';
 import { looseCardReference, writeListingDrag } from '../chat-listing.js';
-import { gameBasename } from '../game.js';
 import { printingIdentity } from '../identity.js';
 import { homepageDerivativeUrl } from '../image-urls.js';
 import { authFrom } from '../punchouts.js';
@@ -18,26 +25,14 @@ import {
   conditionTone,
   listingExtraTags,
   listingLanguageFlag,
-  publicShopSellerLabel,
   sellerCountryFlag,
   sellerCountryLabel,
   sellerHref,
 } from '../listing-meta.js';
-import { formatLocalFromEurCents, formatPkn, formatPknNumber, moneyFromPkn } from '../pkn.js';
+import { formatLocalFromEurCents, formatPkn, formatPknNumber } from '../pkn.js';
 import { SHIP_TO_COUNTRIES, shipFromCountryName, shipFromCountryOptionLabel } from '../ship-countries.js';
 import { useBuyerCurrency } from '../use-buyer-currency.js';
 import CardArt from './CardArt.jsx';
-
-const LOW_STOCK = 3;
-
-function fiatParts(pricePkn, currency) {
-  const money = moneyFromPkn(pricePkn, currency);
-  if (!money?.amount) return null;
-  const [int, dec] = money.amount.split('.');
-  if (currency === 'DKK') return { pre: '', int, dec, post: 'DKK' };
-  if (currency === 'USD') return { pre: '$', int, dec, post: '' };
-  return { pre: '€', int, dec, post: '' };
-}
 
 /**
  * Amazon's price: small symbol, big whole part, small raised cents. PKN stays
@@ -149,28 +144,6 @@ export function QtyPill({ qty, max, name, onChange, onDelete }) {
   );
 }
 
-async function shareLink(row) {
-  const url = new URL(`${gameBasename()}${row.href || '/marketplace'}`, window.location.origin).href;
-  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-    try {
-      await navigator.share({ title: row.name, url });
-      return 'Shared';
-    } catch (err) {
-      if (err?.name === 'AbortError') return '';
-    }
-  }
-  try {
-    await navigator.clipboard.writeText(url);
-    return 'Link copied';
-  } catch (_) {
-    return '';
-  }
-}
-
-function sellerOf(offer) {
-  return publicShopSellerLabel(offer) || offer?.sellerName || 'Pokoin';
-}
-
 /** One basket line: tick, scan, details + actions, price column. */
 export function BasketRow({ row, live, checking, onSelect, onQty, onDelete, onSave, onSwap }) {
   const buyer = useBuyerCurrency();
@@ -199,7 +172,7 @@ export function BasketRow({ row, live, checking, onSelect, onQty, onDelete, onSa
   }).tileLine;
 
   async function share() {
-    const result = await shareLink(row);
+    const result = await shareCartRow(row);
     setShared(result);
     if (result) window.setTimeout(() => setShared(''), 2200);
   }
@@ -319,7 +292,7 @@ export function BasketRow({ row, live, checking, onSelect, onQty, onDelete, onSa
         ) : cheaper ? (
           <div className="bk-offer">
             <span className="bk-save-badge">
-              Save {Math.max(1, Math.round((1 - Number(cheaper.pricePkn) / Number(row.pricePkn)) * 100))}%
+              Save {cheaperSavePercent(cheaper, row)}%
             </span>
             {' '}Same card, condition and language for {buyer.format(cheaper.pricePkn, cheaper.sellerAcceptsPkn)} from {sellerOf(cheaper)}.{' '}
             <button type="button" className="bk-link" onClick={() => onSwap(cheaper)}>Swap to it</button>
@@ -388,13 +361,6 @@ export function SellerBar({ group, estimate, currency }) {
   );
 }
 
-const MESSAGE_TEXT = {
-  price_up: (note, fmt) => `The price of ${note.name} from ${sellerOf(note)} went up from ${fmt(note.from)} to ${fmt(note.to)}.`,
-  price_down: (note, fmt) => `${note.name} from ${sellerOf(note)} dropped from ${fmt(note.from)} to ${fmt(note.to)}.`,
-  qty: (note) => `${sellerOf(note)} has only ${note.to} of ${note.name} left, so the quantity went from ${note.from} to ${note.to}.`,
-  gone: (note) => `${note.name} from ${sellerOf(note)} is no longer available. It is unticked and stays below until you delete it.`,
-};
-
 /** Amazon's "Important messages about items in your basket". */
 export function ImportantMessages({ messages, onDismiss }) {
   const buyer = useBuyerCurrency();
@@ -406,7 +372,7 @@ export function ImportantMessages({ messages, onDismiss }) {
       <ul>
         {messages.map((note) => (
           <li key={note.id} className={`is-${note.kind}`}>
-            <span>{(MESSAGE_TEXT[note.kind] || (() => ''))(note, fmt)}</span>
+            <span>{basketMessageText(note, fmt)}</span>
             <button type="button" className="bk-x" aria-label="Dismiss" onClick={() => onDismiss(note.id)}>×</button>
           </li>
         ))}

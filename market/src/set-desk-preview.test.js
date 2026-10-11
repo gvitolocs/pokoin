@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { filterExpansionCards } from './search-filters.js';
+import { filterExpansionCards } from './expansion-filters.js';
 import {
   SET_PREVIEW_BATCH,
   firstSetPreviewCount,
