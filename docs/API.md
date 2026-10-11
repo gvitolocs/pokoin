@@ -58,6 +58,8 @@ databases. Pokemon stays on this Pi map. Plan: [MULTIGAME_REIMPORT.md](MULTIGAME
 | `GET /api/cardtrader-status` / `GET /api/cardtrader-sync` | Connection + last sync summary |
 | `POST /api/cardtrader-sync` | Full inventory reconcile (`GET /products/export`) |
 | `POST /api/cardtrader-webhook/:uid` | Order sale stock gate → linked Pokoin qty (idempotent) |
+| `GET\|POST /api/seller-api-grants` | Signed-in seller creates and revokes API tokens for inventory apps ([SELLER_API.md](SELLER_API.md)) |
+| `POST /api/cardrails/connector` / `POST /api/seller-api/v1` | An app with a seller's `pkn_` grant: connect, locations, listings, stock, list, sales, webhook URL. Pokoin posts signed stock and order webhooks back |
 | `GET /api/cardtrader-assets` | Signed-in seller's CardTrader 1-Day Ready inventory as dashboard assets |
 | `GET /api/cardtrader-zero` | CardTrader Zero picking list: weekly merged `paid` Zero order + `hub_pending` Zero sales, with MyPokoin locations ([CARDTRADER_ZERO.md](CARDTRADER_ZERO.md)) |
 | `GET/POST/DELETE /api/powertools-connect` | Optional Power Tools session (encrypted jwt only) for the Zero list's Power Tools overlay |

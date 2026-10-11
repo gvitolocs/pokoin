@@ -12,6 +12,7 @@ import { PknPayoutToggle, ShipFromCountrySelect, StripeConnectButton } from '../
 import { publishSellerSettings, useSellerCurrency } from '../use-seller-currency.js';
 import { sellerListCurrency } from '../seller-currency.js';
 import CardTraderConnectPanel, { CT_TOKEN_DOCS } from '../components/CardTraderConnectPanel.jsx';
+import SellerApiPanel from '../components/SellerApiPanel.jsx';
 import TelegramConnectPanel from '../components/TelegramConnectPanel.jsx';
 import WipeAllInventory from '../components/WipeAllInventory.jsx';
 import { formatPknNumber } from '../pkn.js';
@@ -412,6 +413,10 @@ export default function Profile() {
 
         <DeskPanel title="Poko on Telegram & Discord" className="profile-poko">
           <TelegramConnectPanel />
+        </DeskPanel>
+
+        <DeskPanel title="Card Rails & API tokens" className="profile-seller-api">
+          <SellerApiPanel />
         </DeskPanel>
       </div>
 

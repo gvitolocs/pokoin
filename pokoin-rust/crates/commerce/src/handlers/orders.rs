@@ -491,6 +491,8 @@ pub async fn marketplace_orders_post(
             )
             .await;
     }
+    let sold: Vec<Value> = sale_rows.iter().map(|row| row.data.clone()).collect();
+    crate::seller_api::log_order_paid(&state, &order_id, &sold).await;
 
     let payload = json!({
         "orderId": order_id,
@@ -1459,6 +1461,7 @@ pub async fn fulfil_paid_eur_order(state: &DomainState, order_id: &str) -> Resul
     }
     if steps.get("sales").and_then(Value::as_str) != Some("done") {
         let mut failed = false;
+        let mut sold: Vec<Value> = Vec::new();
         for row in crate::domain::order_refund::sale_docs_from_order(order_id, &order) {
             let mut data = row.data.clone();
             data["soldAt"] = json!(state.now_iso());
@@ -1468,6 +1471,10 @@ pub async fn fulfil_paid_eur_order(state: &DomainState, order_id: &str) -> Resul
             if firestore.set_document(&sale_path, &data).await.is_err() {
                 failed = true;
             }
+            sold.push(data);
+        }
+        if !failed {
+            crate::seller_api::log_order_paid(state, order_id, &sold).await;
         }
         if failed {
             failures.push("sales".into());
@@ -2716,6 +2723,9 @@ async fn void_native_sales(
             )
             .await;
         voided += 1;
+    }
+    if voided > 0 {
+        crate::seller_api::log_order_cancelled(state, order_id, seller_uid).await;
     }
     Ok(voided)
 }
