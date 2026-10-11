@@ -5,7 +5,7 @@ import { Router } from './router.js';
 import App from './App.jsx';
 import { installYieldingLinks } from './lib/yield-nav.js';
 
-// Same numeric short-link handoff as the React entry (market/src/main.jsx).
+// Numeric short links (/806390, /marketplace/806390/slug) open the card.
 const shortLink = window.location.pathname.match(/^\/(?:marketplace\/)?(\d+)(?:\/[^/]+)?$/);
 if (shortLink) {
   window.location.replace(`/marketplace/en/cards/${shortLink[1]}`);
