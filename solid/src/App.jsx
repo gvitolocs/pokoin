@@ -1,6 +1,8 @@
 import { createEffect, createSignal, Errored, getOwner, Loading, onSettled, runWithOwner, Show, untrack } from 'solid-js';
 import { useLocation, useNavigate } from '@solidjs/router';
 import { framedByChromeExtension } from '@market/extension-auth-bridge.js';
+import { gameBasename } from '@market/game.js';
+import { isGamePrivatePath } from '@market/game-private-path.js';
 import { legacyDashboardHref } from '@market/punchouts.js';
 import { isDashboardHost } from '@market/scan-api.js';
 import { subscribeOriginDown } from '@market/working-page.js';
@@ -37,7 +39,7 @@ function RouteError(props) {
   );
 }
 
-/** Leave dashboard.pokoin.com for the same path on pokoin.com (React DashboardMarketHandoff). */
+/** Leave this host or game prefix for the same page elsewhere (React DashboardMarketHandoff). */
 function DashboardMarketHandoff(props) {
   onSettled(() => {
     window.location.replace(props.target);
@@ -96,6 +98,11 @@ export default function App(props) {
   // "board"): no header, no origin-down page, and they stay on the legacy
   // dashboard host.
   const bare = () => isBarePath(location.pathname);
+  // Account and site pages live on the Pokemon apex: /one-piece/wallet reloads
+  // as /wallet (React AppShell). The router keeps the game prefix in pathname.
+  const gameBase = gameBasename();
+  const routerPath = () => location.pathname.slice(gameBase.length) || '/';
+  const gamePrivate = () => Boolean(gameBase) && isGamePrivatePath(routerPath());
   const route = () => (
     <Errored fallback={(err, reset) => <RouteError error={err()} reset={reset} />}>
       <Loading fallback={<RoutePending />}>{props.children}</Loading>
@@ -107,6 +114,7 @@ export default function App(props) {
   }
 
   return (
+    <Show when={!gamePrivate()} fallback={<DashboardMarketHandoff target={`${routerPath()}${location.search || ''}`} />}>
     <Show when={!bare()} fallback={route()}>
       <Show when={!(originDown() && !framed)} fallback={<WorkingOnIt />}>
         <Chrome>{route()}</Chrome>
@@ -118,6 +126,7 @@ export default function App(props) {
           }}
         </Show>
       </Show>
+    </Show>
     </Show>
   );
 }
