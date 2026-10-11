@@ -57,8 +57,9 @@ async fn limit_hits(
         .bind(window_start(now_ms, limit.window_ms))
         .fetch_optional(&mut *conn)
         .await?;
+    // `hits` is integer: try_get::<i64> read it as 0 and no limit ever tripped.
     Ok(row
-        .and_then(|row| row.try_get::<i64, _>("hits").ok())
+        .and_then(|row| pokoin_api_common::pg::number_i64(&row, "hits"))
         .unwrap_or(0))
 }
 
@@ -78,7 +79,7 @@ async fn limit_increment(
     .bind(window_start(now_ms, limit.window_ms))
     .fetch_one(&mut *conn)
     .await?;
-    Ok(row.try_get::<i64, _>("hits").unwrap_or(0))
+    Ok(pokoin_api_common::pg::number_i64(&row, "hits").unwrap_or(0))
 }
 
 async fn enforce_limit(
@@ -787,8 +788,8 @@ pub async fn bump_batch(
     .fetch_one(&mut *conn)
     .await?;
     Ok((
-        row.try_get::<i64, _>("item_seq").unwrap_or(0),
-        row.try_get::<i64, _>("item_position").unwrap_or(0),
+        pokoin_api_common::pg::number_i64(&row, "item_seq").unwrap_or(0),
+        pokoin_api_common::pg::number_i64(&row, "item_position").unwrap_or(0),
     ))
 }
 

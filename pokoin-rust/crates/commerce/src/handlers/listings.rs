@@ -1020,7 +1020,7 @@ async fn load_seller_listings(
                 .ok()
                 .flatten()
                 .unwrap_or_default(),
-            price_pkn: row.try_get::<f64, _>("price_pkn").unwrap_or(0.0),
+            price_pkn: pokoin_api_common::pg::number_f64(row, "price_pkn").unwrap_or(0.0),
             quantity: row.try_get::<i32, _>("quantity_available").unwrap_or(0) as i64,
             signed: row
                 .try_get::<Option<bool>, _>("signed")

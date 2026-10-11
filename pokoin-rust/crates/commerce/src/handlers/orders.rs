@@ -212,7 +212,13 @@ async fn verify_and_decrement_listings(
                 return Err(error);
             }
         };
-        let stored_price: f64 = row.try_get("price_pkn").unwrap_or(0.0);
+        let Some(stored_price) = pokoin_api_common::pg::number_f64(&row, "price_pkn") else {
+            rollback_decrements(state, &decremented, hold_order_id).await;
+            return Err(ApiError::internal(format!(
+                "Listing {} has no readable price.",
+                item.listing_id
+            )));
+        };
         decremented.push(Decremented {
             listing_id: item.listing_id.clone(),
             quantity: item.quantity,

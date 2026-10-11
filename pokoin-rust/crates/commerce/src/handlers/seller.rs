@@ -15,6 +15,7 @@ use crate::domain::country::{normalize_country, ship_from_country_from_request};
 use crate::error::ApiError;
 use crate::state::{AuthedUser, DomainState};
 use crate::store;
+use pokoin_api_common::pg::{number_f64, number_i64};
 
 const PAGE_DEFAULT: i64 = 60;
 const BOOK_MAX: usize = 6000;
@@ -188,16 +189,20 @@ pub const RARITY_BODY_MARKER: &str = "__RARITY_BODY__";
 pub const HOLO_MARKER: &str = "HOLO_MARKER";
 
 fn pokemon_singles_where() -> &'static str {
+    // `card_id` is bigint on the candidates: compare as bigint (its primary key)
+    // behind a digits-only guard, which also keeps `::bigint` from overflowing.
+    // Non-numeric listing ids never matched either branch before.
     r#"(
+        marketplace_user_listings.card_id ~ '^[0-9]{1,18}$'
+        and (
         exists (
           select 1 from public.marketplace_search_candidates c
-          where c.card_id::text = marketplace_user_listings.card_id
+          where c.card_id = marketplace_user_listings.card_id::bigint
             and c.product_type = 'card'
             and c.item_kind = 'single'
         )
         or (
-          marketplace_user_listings.card_id ~ '^[0-9]+$'
-          and (marketplace_user_listings.card_id::bigint % 2) = 0
+          (marketplace_user_listings.card_id::bigint % 2) = 0
           and exists (
             select 1 from public.cardtrader_pokemon_blueprints b
             where b.category_id = 73
@@ -205,14 +210,15 @@ fn pokemon_singles_where() -> &'static str {
           )
           and not exists (
             select 1 from public.marketplace_search_candidates c
-            where c.card_id::text = marketplace_user_listings.card_id
+            where c.card_id = marketplace_user_listings.card_id::bigint
           )
+        )
         )
       )"#
 }
 
 fn listing_row(row: &sqlx::postgres::PgRow, seller: &Seller) -> Value {
-    let quantity: i64 = row.try_get("quantity_available").unwrap_or(0);
+    let quantity = number_i64(row, "quantity_available").unwrap_or(0);
     let created: Option<chrono::DateTime<chrono::Utc>> = row.try_get("created_at").ok();
     let updated: Option<chrono::DateTime<chrono::Utc>> = row.try_get("updated_at").ok();
     json!({
@@ -226,7 +232,7 @@ fn listing_row(row: &sqlx::postgres::PgRow, seller: &Seller) -> Value {
         "marketplaceGame": row.try_get::<Option<String>, _>("marketplace_game").ok().flatten().unwrap_or_else(|| "pokemon".into()),
         "condition": row.try_get::<Option<String>, _>("condition").ok().flatten(),
         "language": row.try_get::<Option<String>, _>("language").ok().flatten(),
-        "pricePkn": row.try_get::<f64, _>("price_pkn").unwrap_or(0.0),
+        "pricePkn": number_f64(row, "price_pkn").unwrap_or(0.0),
         "sellerAcceptsPkn": seller.accepts_pkn,
         "quantityAvailable": quantity,
         "signed": row.try_get::<Option<bool>, _>("signed").ok().flatten().unwrap_or(false),
@@ -504,9 +510,41 @@ pub async fn marketplace_seller_shop(
 
     let order = if book { sort_sql(Some(&"price-asc".into())) } else { sort_sql(sort.as_ref()) };
 
+    let totals_sql = format!(
+        "select count(*)::int as total, coalesce(sum(quantity_available), 0)::int as copies
+           from public.marketplace_user_listings where {where_sql}"
+    );
     if book {
+        let counted = run_shop_sql(
+            read_db,
+            catalog_game,
+            &totals_sql,
+            &values,
+            &where_sql,
+            optional_visual_clause.as_deref(),
+        )
+        .await?;
+        let counted_total = counted
+            .first()
+            .and_then(|row| number_i64(row, "total"))
+            .unwrap_or(0);
+        if counted_total as usize > BOOK_MAX {
+            return Ok(private_json(json!({
+                "book": false,
+                "game": catalog_game,
+                "seller": seller_payload(&seller, None),
+                "listings": [],
+                "total": 0,
+                "unique": 0,
+                "copies": 0,
+                "maxUpdatedAt": "",
+            })));
+        }
+        // The whole book or nothing: one row past BOOK_MAX says "too big".
+        // (It used the page limit, 60 by default, so a 10k shop came back as a
+        // complete 60-row book and the page swapped its listings for those.)
         let mut page_values = values.clone();
-        page_values.push(json!(limit));
+        page_values.push(json!(BOOK_MAX as i64 + 1));
         let sql = format!(
             "select * from public.marketplace_user_listings
               where {where_sql} order by {order} limit ${}",
@@ -554,10 +592,6 @@ pub async fn marketplace_seller_shop(
         })));
     }
 
-    let totals_sql = format!(
-        "select count(*)::int as total, coalesce(sum(quantity_available), 0)::int as copies
-           from public.marketplace_user_listings where {where_sql}"
-    );
     let totals_rows = run_shop_sql(
         read_db,
         catalog_game,
