@@ -213,8 +213,9 @@ export function listingFormFromOffer(offer, card) {
   };
 }
 
+/** Language chips list languages with a priced offer, like the deal. */
 export function listedDealLanguages(offers, card) {
-  const codes = [...new Set((offers || []).map((row) => offerLanguage(row, card)).filter(Boolean))];
+  const codes = [...new Set(pricedOffers(offers).map((row) => offerLanguage(row, card)).filter(Boolean))];
   const allowed = new Set(languagesForNationality(card?.nationality, codes));
   return LIST_LANGS.filter((code) => allowed.has(code));
 }

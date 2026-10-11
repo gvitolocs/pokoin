@@ -8,12 +8,13 @@ and a README that maps every action to the Rust code with `file:line`.
 | [`ct-reconcile/`](ct-reconcile/README.md) | CardTrader seller reconcile (export, plan, guards, Redis lock) racing the order webhook |
 | [`listing-outbox/`](listing-outbox/README.md) | Listings outbox: claim/lease/retry, price refresh, cache generations, CardTrader push/link/destroy |
 | [`eur-fulfilment/`](eur-fulfilment/README.md) | EUR orders: reservation, Stripe webhook, buyer cancel, sweep, fulfilment lease, CardTrader buy-through |
+| [`edge-coalesce/`](edge-coalesce/README.md) | Edge request coalescing (PR #307): FlightGuard, leader panic/hang-up/timeout, re-election, stale refresh |
 
 [`FINDINGS.md`](FINDINGS.md) records every counterexample TLC found, whether
 the code or the spec was wrong, and how it was resolved.
 
 ```bash
-specs/tla/run.sh                 # every model's top-level *.cfg: must pass (~21 min on 12 cores)
+specs/tla/run.sh                 # every model's top-level *.cfg: must pass (~45 min on 12 cores)
 specs/tla/run.sh --regressions   # also bugs/, design/ and witness/ configs: must each report a violation
 specs/tla/run.sh eur-fulfilment  # one model
 ```
@@ -30,6 +31,9 @@ Config layout per model:
 - `bugs/*.cfg`: origin/main (`Fixed = FALSE`); each reproduces one finding.
 - `design/*.cfg`: races accepted and documented in FINDINGS.md.
 - `witness/*.cfg`: behaviour the fixed model must still reach (not vacuous).
+
+Sireum Logika proofs of the pure rules (sort keys, Best Deal, reconcile
+planning) live in [`../logika/`](../logika/README.md) (`specs/logika/run.sh`).
 
 The older specs one level up (`specs/*.tla`) model the front end and an
 earlier, more abstract CardTrader inventory model; they are not run here.

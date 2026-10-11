@@ -13,7 +13,10 @@
 (* with every reconcile write.                                             *)
 (*                                                                         *)
 (* Fixed = FALSE models origin/main (00bc3d2c); Fixed = TRUE models the     *)
-(* code after the fixes recorded in specs/tla/FINDINGS.md.                 *)
+(* code after the fixes recorded in specs/tla/FINDINGS.md. SkipSettled =   *)
+(* TRUE adds PR #309 (2026-10-10): a linked row already settled as gone    *)
+(* (sold_out at 0, product link missing_from_ct) is not planned for       *)
+(* removal again and is not in the mass-removal guard's denominator.       *)
 (* See README.md for the line-by-line mapping to the Rust code.            *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets, Sequences, TLC
@@ -32,7 +35,8 @@ CONSTANTS
     MaxRedeliver,   \* webhook redeliveries by CardTrader
     ReadModes,      \* how the export parser can read a product (see ReadId)
     MassMin,        \* MASS_REMOVAL_MIN, scaled to the model
-    Fixed           \* FALSE = origin/main, TRUE = fixed code
+    Fixed,          \* FALSE = origin/main, TRUE = fixed code
+    SkipSettled     \* PR #309: settled_absent rows are neither removed again nor counted
 
 Products    == {p1, p2}
 InitQty     == [p \in Products |-> IF p = p1 THEN QtyP1 ELSE QtyP2]
@@ -88,17 +92,17 @@ Loaded(l) == lst[l].st \in {"active", "sold_out"}        \* LOAD_SELLER_LISTINGS
 InExport(p) == ct[p].live /\ ct[p].qty > 0
 
 EmptyRc == [pc |-> "idle", runs |-> 0, exp |-> [p \in Products |-> [in |-> FALSE, qty |-> 0, mode |-> "ok"]],
-            expSales |-> {}, snap |-> [l \in Lids |-> [src |-> "", qty |-> 0, st |-> "free"]],
+            expSales |-> {}, snap |-> [l \in Lids |-> [src |-> "", qty |-> 0, st |-> "free", miss |-> FALSE]],
             plan |-> <<>>, rem |-> <<>>, orders |-> {}, ordersOk |-> FALSE,
-            removed |-> 0, preLinked |-> 0, allow |-> FALSE]
+            removed |-> 0, preLinked |-> 0, allow |-> FALSE, replanned |-> FALSE]
 
 Init ==
     /\ ct = [p \in Products |-> [qty |-> InitQty[p], live |-> TRUE]]
     /\ sales = [s \in SaleIds |-> [p |-> p1, st |-> "none"]]
     /\ nextSale = 1 /\ cancels = 0 /\ delists = 0
-    /\ lst = [l \in Lids |-> IF l = l1 /\ p1 \in InitLinked THEN [src |-> p1, qty |-> InitQty[p1], st |-> "active"]
-                       ELSE IF l = l2 /\ p2 \in InitLinked THEN [src |-> p2, qty |-> InitQty[p2], st |-> "active"]
-                       ELSE [src |-> "", qty |-> 0, st |-> "free"]]
+    /\ lst = [l \in Lids |-> IF l = l1 /\ p1 \in InitLinked THEN [src |-> p1, qty |-> InitQty[p1], st |-> "active", miss |-> FALSE]
+                       ELSE IF l = l2 /\ p2 \in InitLinked THEN [src |-> p2, qty |-> InitQty[p2], st |-> "active", miss |-> FALSE]
+                       ELSE [src |-> "", qty |-> 0, st |-> "free", miss |-> FALSE]]
     /\ links = [i \in Ids |-> IF i = p1 /\ p1 \in InitLinked THEN l1
                              ELSE IF i = p2 /\ p2 \in InitLinked THEN l2 ELSE NoL]
     /\ claims = {} /\ claimL = [s \in SaleIds |-> NoL] /\ restored = {}
@@ -294,7 +298,7 @@ Load(r) ==
     /\ rc[r].pc = "load"
     /\ rc' = [rc EXCEPT ![r].pc = "plan",
                         ![r].snap = [l \in Lids |-> IF Loaded(l) THEN lst[l]
-                                                    ELSE [src |-> "", qty |-> 0, st |-> "free"]]]
+                                                    ELSE [src |-> "", qty |-> 0, st |-> "free", miss |-> FALSE]]]
     /\ UNCHANGED <<lst, links, claims, claimL, restored, saleDocs, lock, lockLoss,
                    acc, dirty, falseDeact, resurrect, guardBreach>>
     /\ RcUnchangedCt
@@ -322,16 +326,21 @@ PlanOf(r) ==
         imports == {p \in supported : ReadId(p, e[p].mode) \notin linkedSrc}
         unparsed == IF Fixed THEN rows # normalized
                              ELSE rows # {} /\ normalized = {}
-        cands == {src \in linkedSrc : ParsesAsCtId(src) /\ src \notin seen}
+        \* settled_absent (PR #309): sold out at zero, link already missing_from_ct
+        settledRow(src) == LET row == snap[BySource(snap, src)] IN
+                             ParsesAsCtId(src) /\ row.st = "sold_out" /\ row.qty <= 0 /\ row.miss
+        live == {src \in linkedSrc : ~(SkipSettled /\ settledRow(src))}
+        cands == {src \in live : ParsesAsCtId(src) /\ src \notin seen}
         nrem == Cardinality(cands)
         \* mass_removal_guard: origin/main divides by by_source_id.len() after
         \* imports were inserted; Fixed divides by the pre-run linked listings.
-        total == IF Fixed THEN Cardinality(linkedSrc)
+        total == IF Fixed THEN Cardinality(live)
                           ELSE Cardinality(linkedSrc \cup {ReadId(p, e[p].mode) : p \in imports})
         blocked == nrem > MassMin /\ 2 * nrem > total
         allow == ~unparsed /\ ~blocked
     IN [updates |-> updates, imports |-> imports, allow |-> allow,
-        removals |-> IF allow THEN cands ELSE {}, preLinked |-> Cardinality(linkedSrc)]
+        removals |-> IF allow THEN cands ELSE {}, preLinked |-> Cardinality(live),
+        replanned |-> allow /\ \E src \in cands : settledRow(src)]
 
 SetToSeq(S) == LET f[T \in SUBSET S] == IF T = {} THEN <<>>
                                          ELSE LET x == CHOOSE x \in T : TRUE
@@ -354,7 +363,8 @@ Plan(r) ==
                     LET src == SetToSeq(pl.removals)[i] IN
                     [k |-> "remove", p |-> TrueProduct(src), l |-> BySource(snap, src), q |-> 0, src |-> src]]
        IN rc' = [rc EXCEPT ![r].pc = "apply", ![r].plan = ups \o ims, ![r].rem = rems,
-                           ![r].allow = pl.allow, ![r].preLinked = pl.preLinked]
+                           ![r].allow = pl.allow, ![r].preLinked = pl.preLinked,
+                           ![r].replanned = pl.replanned]
     /\ UNCHANGED <<lst, links, claims, claimL, restored, saleDocs, lock, lockLoss,
                    acc, dirty, falseDeact, resurrect, guardBreach>>
     /\ RcUnchangedCt
@@ -370,7 +380,7 @@ ExistingBySource(src) == {l \in Lids : lst[l].st # "free" /\ lst[l].src = src}
 Reactivate(r, a) ==
     LET l == CHOOSE k \in ExistingBySource(a.src) : TRUE IN
     IF lst[l].st = "inactive"
-    THEN /\ lst' = [lst EXCEPT ![l].st = "active", ![l].qty = a.q]
+    THEN /\ lst' = [lst EXCEPT ![l].st = "active", ![l].qty = a.q, ![l].miss = FALSE]
          /\ links' = [links EXCEPT ![a.src] = l]
          /\ acc' = [acc EXCEPT ![l] = {s \in rc[r].expSales : sales[s].p = a.p}]
          /\ Touch(l)
@@ -407,7 +417,7 @@ ApplyStep(r) ==
               /\ UNCHANGED resurrect
          [] a.k = "import_insert" ->     \* CREATE_IMPORTED_LISTING_SQL + upsert link
               /\ HasFree
-              /\ lst' = [lst EXCEPT ![FreeLid] = [src |-> a.src, qty |-> a.q, st |-> "active"]]
+              /\ lst' = [lst EXCEPT ![FreeLid] = [src |-> a.src, qty |-> a.q, st |-> "active", miss |-> FALSE]]
               /\ links' = [links EXCEPT ![a.src] = FreeLid]
               /\ acc' = [acc EXCEPT ![FreeLid] = {s \in rc[r].expSales : sales[s].p = a.p}]
               /\ Touch(FreeLid)
@@ -416,7 +426,7 @@ ApplyStep(r) ==
          [] a.k = "import_atomic" ->     \* Fixed: advisory xact lock + find + insert
               /\ IF ExistingBySource(a.src) = {}
                  THEN /\ HasFree
-                      /\ lst' = [lst EXCEPT ![FreeLid] = [src |-> a.src, qty |-> a.q, st |-> "active"]]
+                      /\ lst' = [lst EXCEPT ![FreeLid] = [src |-> a.src, qty |-> a.q, st |-> "active", miss |-> FALSE]]
                       /\ links' = [links EXCEPT ![a.src] = FreeLid]
                       /\ acc' = [acc EXCEPT ![FreeLid] = {s \in rc[r].expSales : sales[s].p = a.p}]
                       /\ Touch(FreeLid)
@@ -452,12 +462,14 @@ Remove(r) ==
            sold == {s \in rc[r].orders : rc[r].ordersOk /\ sales[s].p = a.p}
            present == a.p \in Products /\ rc[r].exp[a.p].in
        IN /\ IF sold # {}
-             THEN /\ lst' = [lst EXCEPT ![l].qty = 0, ![l].st = IF @ = "inactive" THEN @ ELSE "sold_out"]
+             THEN /\ lst' = [lst EXCEPT ![l].qty = 0, ![l].st = IF @ = "inactive" THEN @ ELSE "sold_out",
+                                          ![l].miss = TRUE]
                   /\ claims' = claims \cup sold
                   /\ claimL' = [s \in SaleIds |-> IF s \in sold /\ s \notin claims THEN l ELSE claimL[s]]
                   /\ saleDocs' = [s \in SaleIds |-> IF s \in sold /\ s \notin claims THEN 1 ELSE saleDocs[s]]
              ELSE /\ lst' = IF lst[l].st \in {"active", "sold_out"}
-                            THEN [lst EXCEPT ![l].qty = 0, ![l].st = "inactive"] ELSE lst
+                            THEN [lst EXCEPT ![l].qty = 0, ![l].st = "inactive", ![l].miss = TRUE]
+                            ELSE [lst EXCEPT ![l].miss = TRUE]
                   /\ UNCHANGED <<claims, claimL, saleDocs>>
           /\ falseDeact' = (falseDeact \/ present)
           /\ acc' = [acc EXCEPT ![l] = {}]
@@ -533,10 +545,15 @@ NoDoubleRestore == ~doubleRestore
 LiveFor(l, p) == /\ lst[l].st \in {"active", "sold_out"}
                  /\ lst[l].src \in {p, <<"alien", p>>}
 UniqueLink == \A p \in Products : Cardinality({l \in Lids : LiveFor(l, p)}) <= 1
+\* PR #309: a row settled as gone by an earlier run is not planned for removal
+\* again (it re-fetched up to 5,000 CardTrader orders and rewrote the row).
+NoReplanSettled == \A r \in Reconcilers : ~rc[r].replanned
+
 (* Witnesses (must be VIOLATED by the fixed model: the behaviour is reachable). *)
 NeverDelists == \A l \in Lids : lst[l].st # "inactive"
 NeverImports == lst[l2].st = "free" /\ lst[l3].st = "free"
 NeverWebhookSale == \A s \in SaleIds : saleDocs[s] = 0
+NeverSettled == \A l \in Lids : ~(lst[l].st = "sold_out" /\ lst[l].qty = 0 /\ lst[l].miss)
 NeverQuantityUpdate == \A r \in Reconcilers : rc[r].plan = <<>> \/ Head(rc[r].plan).k # "update"
 
 =============================================================================
