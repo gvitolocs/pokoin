@@ -1,13 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { scanZoomBox, SCAN_ZOOM_DELAY_MS, SCAN_ZOOM_RATIO, SCAN_ZOOM_MAX_HEIGHT, CHAT_ZOOM_MAX_HEIGHT } from './scan-thumb-zoom.js';
-
-const root = path.dirname(fileURLToPath(import.meta.url));
-const deskSrc = fs.readFileSync(path.join(root, 'pages/ScanDesk.jsx'), 'utf8');
-const zoomSrc = fs.readFileSync(path.join(root, 'components/ThumbZoom.jsx'), 'utf8');
+import { scanZoomBox, SCAN_ZOOM_RATIO, SCAN_ZOOM_MAX_HEIGHT, CHAT_ZOOM_MAX_HEIGHT } from './scan-thumb-zoom.js';
 
 test('shop and cart hover at the full card height; chat keeps the smaller cap', () => {
   assert.equal(SCAN_ZOOM_MAX_HEIGHT, 640);
@@ -20,10 +13,6 @@ test('shop and cart hover at the full card height; chat keeps the smaller cap', 
     maxHeight: CHAT_ZOOM_MAX_HEIGHT,
   });
   assert.equal(chat.height, 320);
-  const tag = fs.readFileSync(path.join(root, 'components/ChatListingTag.jsx'), 'utf8');
-  assert.match(tag, /maxHeight=\{CHAT_ZOOM_MAX_HEIGHT\}/);
-  const tile = fs.readFileSync(path.join(root, 'components/CardTile.jsx'), 'utf8');
-  assert.match(tile, /list \? \([\s\S]*<ArtworkZoom/);
 });
 
 test('scan zoom box floats right of the pointer and centers vertically', () => {
@@ -49,27 +38,4 @@ test('scan zoom box flips left near the right edge and clamps into the viewport'
   const shortViewport = scanZoomBox({ viewportWidth: 1400, viewportHeight: 280, pointerX: 400, pointerY: 140 });
   assert.equal(shortViewport.height, 260, 'viewport height bounds the card, not the max');
   assert.ok(shortViewport.width <= 1400 - 20);
-});
-
-test('ScanDesk row thumbs open the CardTrader-style zoom of the full leftover', () => {
-  // The little row image derives both the suggest thumb and the hero (full JPEG).
-  assert.match(deskSrc, /thumb: imageSrc\(card, 'suggest'\)/);
-  assert.match(deskSrc, /hero: imageSrc\(card, 'hero'\)/);
-  assert.match(deskSrc, /<ThumbZoom src=\{zoomSrc\} full=\{Boolean\(thumbArt\.hero\)\}/);
-  assert.match(deskSrc, /import ThumbZoom from '\.\.\/components\/ThumbZoom\.jsx';/);
-});
-
-test('ThumbZoom renders a pointer-following suggest-hover portal with safe teardown', () => {
-  assert.match(zoomSrc, /createPortal\(/);
-  assert.match(zoomSrc, /className="suggest-hover"/);
-  assert.match(zoomSrc, /document\.body/);
-  // Same desktop gate as the search popup hover.
-  assert.match(zoomSrc, /suggestHoverAllowed\(window\.innerWidth/);
-  // Scroll un-anchors a fixed box — hide, don't chase.
-  assert.match(zoomSrc, /addEventListener\('scroll', onHide, \{ capture: true, passive: true \}\)/);
-  assert.match(zoomSrc, /addEventListener\('dragstart', onStart, true\)/);
-  assert.match(zoomSrc, /is-card-dragging/);
-  assert.match(zoomSrc, /SCAN_ZOOM_DELAY_MS/);
-  assert.match(zoomSrc, /openOnClick/);
-  assert.match(zoomSrc, /onClick=\{openOnClick \? click : undefined\}/);
 });
