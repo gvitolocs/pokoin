@@ -62,9 +62,10 @@ async function withPage(base, fn, { signedIn = false } = {}) {
     if (message.type() === 'error' && arg('console-errors', '0') === '1') errors.push(`console: ${message.text().slice(0, 160)}`);
   });
   page.on('requestfailed', (request) => {
-    // Aborted fixture channels (Firestore SDK) are expected; everything else counts.
+    // Aborted fixture channels (Firestore SDK) and Google's CSP report beacon
+    // (Firebase auth iframe) are expected; everything else counts.
     const url = request.url();
-    if (!/firestore\.googleapis\.com|google-analytics|googletagmanager/.test(url) && arg('failed-requests', '1') === '1') {
+    if (!/firestore\.googleapis\.com|csp\.withgoogle\.com|google-analytics|googletagmanager/.test(url) && arg('failed-requests', '1') === '1') {
       errors.push(`failed: ${request.method()} ${url.slice(0, 120)} ${request.failure()?.errorText || ''}`);
     }
   });
