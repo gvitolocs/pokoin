@@ -517,6 +517,12 @@ pub async fn apply_event(state: &DomainState, event_id: i64, payload: &mut Value
         payload["status"].as_str(),
     );
     payload["steps"]["publishedAt"] = json!(state.now_ms());
+    // Seller API event log and webhook queue. One insert here; delivery is
+    // the seller_api worker, so a slow receiver never holds this outbox.
+    if payload["steps"]["sellerApi"] != true {
+        crate::seller_api::log_listing_event(state, event_id, payload).await?;
+        payload["steps"]["sellerApi"] = json!(true);
+    }
     if payload["wantsCardtrader"] == true && payload["steps"]["cardtrader"].is_null() {
         if field(payload, "sourceListingId", 160).is_empty() {
             push_cardtrader(state, event_id, &seller, payload).await?;

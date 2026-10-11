@@ -596,7 +596,7 @@ fn create_values(
     ])
 }
 const CREATE_SQL:&str="insert into public.marketplace_user_listings (card_id, seller_uid, seller_name, seller_country, seller_reputation_label, condition, language, price_pkn, quantity_available, signed, reverse, first_edition, foil_state, variant_state, sealed, graded, grading_company, grade, certification_id, shipping_available, reserve_available, nft_available, seller_comment, source, source_listing_id, card_name, card_image_url, set_name, collector_number, location, altered, marketplace_game) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32) returning *";
-async fn create_listing(
+pub(crate) async fn create_listing(
     state: &DomainState,
     claims: &crate::Claims,
     body: &Value,
@@ -828,7 +828,7 @@ pub async fn marketplace_listings_patch(
     }
     out
 }
-async fn update_listing(
+pub(crate) async fn update_listing(
     state: &DomainState,
     claims: &crate::Claims,
     id: &str,

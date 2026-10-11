@@ -865,6 +865,28 @@ export function connectCardTrader(token, cardTraderToken) {
   });
 }
 
+/** The seller's live API tokens (Card Rails and other inventory apps). */
+export function fetchSellerApiGrants(token) {
+  return getJson('/api/seller-api-grants', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/** `{ action: 'create' | 'revoke' | 'webhook' | 'test', … }` on the seller's API tokens. */
+export function sellerApiGrantAction(token, body) {
+  return getJson('/api/seller-api-grants', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body || {}),
+  });
+}
+
 /** CardTrader Zero picking list (weekly merged shipment + Zero sales waiting for the next merge). */
 export function fetchCardTraderZero(token) {
   return getJson('/api/cardtrader-zero', {
