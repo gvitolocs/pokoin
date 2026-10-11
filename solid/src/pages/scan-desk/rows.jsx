@@ -503,7 +503,7 @@ function suggestKeyDown(e, { results, active, setActive, onPick, onEscape }) {
 function createScanPrintingSuggest(query) {
   const results = createLiveSuggest(query, { kind: 'singles', limit: 20 });
   const [active, setActive] = createSignal(0);
-  createEffect(query, () => setActive(0), { defer: true });
+  createEffect(query, () => { setActive(0); }, { defer: true });
   createEffect(results, (list) => {
     setActive((i) => (list.length ? Math.min(i, list.length - 1) : 0));
   });

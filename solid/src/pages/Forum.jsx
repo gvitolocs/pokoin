@@ -136,7 +136,7 @@ export default function Forum() {
 
   createEffect(
     () => categoryId() || data()?.categories?.[0]?.id || 'general',
-    (next) => setComposeCategory(next),
+    (next) => { setComposeCategory(next); },
   );
   createEffect(
     () => topic()?.title,

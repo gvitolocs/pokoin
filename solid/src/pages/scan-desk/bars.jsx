@@ -78,10 +78,10 @@ export function DefaultsBar(props) {
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   });
-  createEffect(() => d().location, (location) => setLocationDraft(location));
-  createEffect(() => [d().stack, d().location], ([stack]) => setStackDraft(String(stack ?? 1)));
-  createEffect(() => [d().startPosition, d().location, d().stack], ([start]) => setPosDraft(String(start ?? 1)));
-  createEffect(size, (next) => setSizeDraft(String(next)));
+  createEffect(() => d().location, (location) => { setLocationDraft(location); });
+  createEffect(() => [d().stack, d().location], ([stack]) => { setStackDraft(String(stack ?? 1)); });
+  createEffect(() => [d().startPosition, d().location, d().stack], ([start]) => { setPosDraft(String(start ?? 1)); });
+  createEffect(size, (next) => { setSizeDraft(String(next)); });
 
   const commitLocation = () => {
     if (locationDraft() !== d().location) props.onChange({ location: locationDraft() });
