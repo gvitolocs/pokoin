@@ -42,6 +42,13 @@
     "^/marketplace/(?:sets|eras)(?:/[^/]+)?/?$",
     "^/marketplace/[a-z]{2,3}/(?:artists|pokemon|rarities|languages|guides)(?:/[^/]+)?/?$",
     "^/marketplace/[a-z]{2,3}/users/[^/]+/?$",
-    "^/(?:docs|contact|privacy|earn|whitepaper|health|sitemap)/?$"
+    "^/(?:docs|contact|privacy|earn|whitepaper|health|sitemap)/?$",
+    "^/(?:tests|sanitize|espurr|ocr|ocr/artists|artwork|jumbos|poko|poko/archive)/?$",
+    "^/(?:admin|marketplace/admin|marketplace/admin/edit)/?$",
+    "^/(?:scan|cardscan|scancard)/?$",
+    "^/(?:dashboard|inventory)/scan/?$",
+    "^/inventory/sync-review/?$",
+    "^/forum(?:/(?:category|topic)/[^/]+)?/?$",
+    "^/(?:about|careers)/?$"
   ]
 }

@@ -1,12 +1,13 @@
 import { createEffect, createSignal, Errored, getOwner, Loading, onSettled, runWithOwner, Show, untrack } from 'solid-js';
 import { useLocation, useNavigate } from '@solidjs/router';
-import { EXTENSION_AUTH_PATH, framedByChromeExtension } from '@market/extension-auth-bridge.js';
+import { framedByChromeExtension } from '@market/extension-auth-bridge.js';
 import { legacyDashboardHref } from '@market/punchouts.js';
 import { isDashboardHost } from '@market/scan-api.js';
 import { subscribeOriginDown } from '@market/working-page.js';
 import Chrome from './components/Chrome.jsx';
 import CookieBanner from './components/CookieBanner.jsx';
 import WorkingOnIt from './components/WorkingOnIt.jsx';
+import { isBarePath } from './lib/bare-pages.js';
 import { chatDock } from './lib/chat-dock-loader.js';
 import { whenIdle } from './lib/idle.js';
 import { warmLikelyRoutes } from './lib/route-warmup.js';
@@ -91,9 +92,10 @@ export default function App(props) {
   });
   watchAccount();
 
-  // The extension sign-in bridge is a bare page (a React "board"): no header,
-  // no origin-down page, and it stays on the legacy dashboard host.
-  const bare = () => location.pathname.replace(/\/$/, '') === EXTENSION_AUTH_PATH;
+  // Test boards and the extension sign-in bridge are bare pages (a React
+  // "board"): no header, no origin-down page, and they stay on the legacy
+  // dashboard host.
+  const bare = () => isBarePath(location.pathname);
   const route = () => (
     <Errored fallback={(err, reset) => <RouteError error={err()} reset={reset} />}>
       <Loading fallback={<RoutePending />}>{props.children}</Loading>

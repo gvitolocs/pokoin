@@ -11,6 +11,7 @@ import { preloadSearch } from './lib/search-preload.js';
 import accountRoutes from './routes/account.js';
 import commerceRoutes from './routes/commerce.js';
 import browseRoutes from './routes/browse.js';
+import toolsRoutes from './routes/tools.js';
 
 const Search = lazy(() => import('./pages/Search.jsx'));
 
@@ -56,6 +57,7 @@ export const Router = createRouter({
     ...accountRoutes,
     ...commerceRoutes,
     ...browseRoutes,
+    ...toolsRoutes,
     { path: '*404', component: NotMigrated },
   ],
 });

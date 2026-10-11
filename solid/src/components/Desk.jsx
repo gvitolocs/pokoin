@@ -107,7 +107,7 @@ export function Alert(props) {
 export function SkeletonThreads(props) {
   return (
     <div class="skeleton-thread" aria-hidden="true">
-      <For each={Array.from({ length: props.rows ?? 4 })}>
+      <For each={Array.from({ length: props.rows ?? 4 }, (_, index) => index)}>
         {() => (
           <div class="skeleton-row">
             <span class="skeleton-line" />
@@ -156,6 +156,7 @@ export function FilePill(props) {
         accept={props.accept}
         multiple={props.multiple}
         disabled={props.disabled}
+        capture={props.capture}
         onChange={(event) => props.onChange?.(event)}
       />
       <span>{props.children}</span>
