@@ -29,6 +29,8 @@ const extra = [
   '/yugioh/marketplace/search?q=dark%20magician', '/one-piece/wallet', '/806390', '/806390/some-slug',
   '/does-not-exist', '/marketplace/does-not-exist', '/one-piece/does-not-exist',
 ];
+/** Top-level paths no _redirects rule serves: Workers Static Assets 404s them (not_found_handling none). */
+const EDGE_404 = new Set(['/does-not-exist']);
 /** Visits that must trip the [react-legacy] wire: { url, pref } (pref = stored pokoin.ui). */
 const TRIPWIRES = [
   { url: '/marketplace?ui=react', pref: '', reason: 'ui=react' },
@@ -90,6 +92,8 @@ async function visit(url, { framed = false, pref = '', expectLegacy = '' } = {})
       if (!expectLegacy) console.error(`[react-legacy] ${BASE}${url}: ${text.slice(0, 200)}`);
       return;
     }
+    // HTTP errors are reported with their URL by the response listener below.
+    if (/^Failed to load resource: the server responded with a status of \d+/.test(text)) return;
     if (!BENIGN.test(text)) problems.push(`console: ${text.slice(0, 180)}`);
   });
   page.on('pageerror', (e) => problems.push(`pageerror: ${String(e).slice(0, 180)}`));
@@ -100,6 +104,11 @@ async function visit(url, { framed = false, pref = '', expectLegacy = '' } = {})
   });
   page.on('response', async (response) => {
     const href = response.url();
+    const code = response.status();
+    const document = response.request().resourceType() === 'document' && response.request().frame() === page.mainFrame();
+    if (code >= 400 && !(document && EDGE_404.has(url) && code === 404) && !BENIGN.test(href)) {
+      problems.push(`HTTP ${code} ${response.request().method()} ${href.slice(0, 160)}`);
+    }
     if (!href.startsWith(BASE) || !/\.js(\?|$)/.test(href)) return;
     try {
       const body = await response.text();
@@ -140,6 +149,7 @@ async function visit(url, { framed = false, pref = '', expectLegacy = '' } = {})
   })).catch((e) => ({ legacy: '', at: '?', h1: '', root: false, landing: false, err: String(e).slice(0, 120) }));
   const landing = url === '/' && shape.landing;
   const notFound = status === 404;
+  if (EDGE_404.has(url) !== notFound) problems.push(notFound ? 'unexpected 404' : 'expected the edge 404');
   if (!landing && !notFound) {
     if (!solidEntry) problems.push('no Solid entry loaded');
     if (!shape.root) problems.push('empty page');
