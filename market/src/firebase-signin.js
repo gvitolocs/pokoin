@@ -8,5 +8,6 @@ export {
   signInWithPopup,
   signInWithRedirect,
   signOut,
+  updateProfile,
 } from 'firebase/auth';
 export { firebaseAuth } from './firebase-client.js';

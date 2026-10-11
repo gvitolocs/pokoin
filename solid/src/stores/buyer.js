@@ -38,6 +38,19 @@ export function buyerPending() {
 /** The signed-in seller's settings (ship-from country, PKN payouts); null until fetched. */
 export const sellerSettings = settings;
 
+/** useSellerCurrency().failed: the settings read failed (callers fall back to defaults). */
+export const sellerSettingsFailed = failed;
+
+/**
+ * use-seller-currency.js publishSellerSettings: Profile pushes a fresh value
+ * when the seller flips "Get paid in PKN" or the ship-from country.
+ */
+export function publishSellerSettings(next) {
+  requested = Promise.resolve();
+  setSettings(() => next);
+  setFailed(false);
+}
+
 /** useSellerCurrency().currency: PKN, or local fiat for sellers who turned PKN payments off. */
 export const sellerCurrency = () => sellerListCurrency(settings());
 
