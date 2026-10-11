@@ -1,9 +1,10 @@
 import { lazy } from 'solid-js';
-import { createRouter, intentPreload } from '@solidjs/router';
+import { createRouter } from '@solidjs/router';
 import { fetchCard, warmupCard } from '@market/api.js';
 import { realPublicCardId } from '@market/card-stub.js';
 import { gameBasename } from '@market/game.js';
 import { peekHandoffCard } from './lib/card-handoff.js';
+import { localIntentPreload, localViewportPreload, prefetchAfterDesk } from './lib/local-prefetch.js';
 import Home from './pages/Home.jsx';
 import NotMigrated from './pages/NotMigrated.jsx';
 import RedirectTo from './pages/RedirectTo.jsx';
@@ -17,17 +18,19 @@ const Search = lazy(() => import('./pages/Search.jsx'));
  * docs/frontend-perf/PLAN.md "Coexistence". Home stays eager — it is the
  * landing; every other page is its own chunk.
  *
- * Preloading: intent (hover 40 ms / focus / touchstart) warms the route chunk
- * and runs its `preload` so the desk request is in flight before the click.
+ * Preloading (lib/local-prefetch.js): intent (hover 60 ms / focus / touchstart)
+ * warms the route chunk and puts the page's data in the local store before the
+ * click; the first visible tiles and a desk's related cards prefetch at idle.
  */
 const Card = lazy(() => import('./pages/Card.jsx'));
 const Versions = lazy(() => import('./pages/Versions.jsx'));
 
 /**
- * Card desk data: a hovered/focused tile (intent "preload") warms the page,
+ * Card desk data: an explicit route preload (intent "preload") warms the page,
  * listings and hero scan like React's tile warmup; a navigation starts the
  * card-page request while the desk chunk loads, and the desk adopts it
- * (fetchCard dedupes in-flight requests).
+ * (fetchCard dedupes in-flight requests). Once it lands, the desk's related
+ * cards and its set prefetch at idle.
  */
 function preloadCard({ params, intent }) {
   const id = realPublicCardId(params.cardId);
@@ -37,12 +40,12 @@ function preloadCard({ params, intent }) {
     warmupCard(peekHandoffCard(id) || { id }, { lang, listings: true });
     return;
   }
-  fetchCard(id, { lang, slug: params.slug || '' }).catch(() => {});
+  fetchCard(id, { lang, slug: params.slug || '' }).then((page) => prefetchAfterDesk(page, { lang })).catch(() => {});
 }
 
 export const Router = createRouter({
   base: gameBasename(),
-  preloadLinks: intentPreload({ delay: 40 }),
+  preloadLinks: [localIntentPreload(), localViewportPreload()],
   routes: [
     { path: '/', component: RedirectTo, info: { to: '/marketplace' } },
     { path: '/marketplace', component: Home },

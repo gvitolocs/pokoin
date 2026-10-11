@@ -1868,23 +1868,32 @@ function preloadCardArt(card) {
   img.src = url;
 }
 
-export function warmupCard(card, { lang = 'en', listings = false } = {}) {
+/**
+ * Warm one card desk before it opens: its page (local store, low priority,
+ * abortable by `signal`), with `art` its hero scan, and with `listings` its
+ * live listings (the desk adopts a read this recent instead of asking again).
+ */
+export function prefetchCardDesk(card, { lang = 'en', slug = '', art = true, listings = false, signal } = {}) {
   const id = neighborCardId(card);
   if (!id) {
-    return;
+    return Promise.resolve(null);
   }
-  preloadCardArt(card);
-  fetchCard(id, { lang, slug: slugFromCard(card), prefetch: true })
-    .then((data) => {
-      if (hasNeighborArrows(data.neighbors)) {
-        rememberNeighbors(data.card, data.neighbors);
-      }
-      preloadCardArt(data.card);
-    })
-    .catch(() => {});
+  if (art) {
+    preloadCardArt(card);
+  }
   if (listings) {
     fetchListings(id).catch(() => {});
   }
+  return fetchCard(id, { lang, slug: slug || slugFromCard(card), prefetch: true, signal }).then((data) => {
+    if (art) {
+      preloadCardArt(data.card);
+    }
+    return data;
+  });
+}
+
+export function warmupCard(card, { lang = 'en', listings = false } = {}) {
+  prefetchCardDesk(card, { lang, listings }).catch(() => {});
 }
 
 export function warmupNeighbors(neighbors, { lang = 'en' } = {}) {
