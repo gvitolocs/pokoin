@@ -4,7 +4,7 @@ import { fetchCard, warmupCard } from '@market/api.js';
 import { realPublicCardId } from '@market/card-stub.js';
 import { gameBasename } from '@market/game.js';
 import { peekHandoffCard } from './lib/card-handoff.js';
-import { localIntentPreload, localViewportPreload, prefetchAfterDesk } from './lib/local-prefetch.js';
+import { localPreload, prefetchAfterDesk } from './lib/local-preload.js';
 import Home from './pages/Home.jsx';
 import NotMigrated from './pages/NotMigrated.jsx';
 import RedirectTo from './pages/RedirectTo.jsx';
@@ -45,7 +45,7 @@ function preloadCard({ params, intent }) {
 
 export const Router = createRouter({
   base: gameBasename(),
-  preloadLinks: [localIntentPreload(), localViewportPreload()],
+  preloadLinks: localPreload(),
   routes: [
     { path: '/', component: RedirectTo, info: { to: '/marketplace' } },
     { path: '/marketplace', component: Home },

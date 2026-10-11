@@ -1,7 +1,6 @@
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
 import { C1_DICTIONARY, C1Error, decodeC1, isC1 } from './compact.js';
 import { createLocalReader, FRESH_MS, localStorable, MAX_STALE_MS } from './local-read.js';
-import { configureLocalStore, localConfirm, localDelete, localGet, localPut, localWipe } from './local-store.js';
 import { createExpansionCardsFetcher } from './expansion-cards.js';
 import { createNamePrintingsFetcher } from './name-printings.js';
 import { resolveExpansionNationality } from './expansion-print.js';
@@ -167,7 +166,23 @@ export async function getJson(path, options = {}) {
 
 /** The c1 dictionary decodes use: the bundled one, or a newer /api/dictionary. */
 let c1Dictionary = C1_DICTIONARY;
-configureLocalStore({ dictionaryVersion: C1_DICTIONARY.version });
+
+/**
+ * The IndexedDB code is its own chunk (it is not needed to paint), fetched as
+ * soon as this module runs so it is there before the first catalogue read.
+ */
+let storeModule = null;
+function localStore() {
+  storeModule ||= import('./local-store.js').then((store) => {
+    store.configureLocalStore({ dictionaryVersion: C1_DICTIONARY.version });
+    return store;
+  });
+  return storeModule;
+}
+if (typeof window !== 'undefined') {
+  localStore().catch(() => {});
+}
+const viaStore = (name) => (...args) => localStore().then((store) => store[name](...args));
 
 function decodeApiText(text) {
   const payload = parseApiText(text);
@@ -176,7 +191,7 @@ function decodeApiText(text) {
 
 const localReader = createLocalReader({
   fetchText: (url, init) => fetchApiText(url, init),
-  store: { get: localGet, put: localPut, confirm: localConfirm, remove: localDelete },
+  store: { get: viaStore('localGet'), put: viaStore('localPut'), confirm: viaStore('localConfirm'), remove: viaStore('localDelete') },
   decode: decodeApiText,
 });
 
@@ -193,8 +208,8 @@ async function refreshC1Dictionary() {
     if (doc?.tables && Number(doc.version) > Number(c1Dictionary.version)) {
       c1Dictionary = doc;
       if (fresh) {
-        await localWipe();
-        await localPut(url, JSON.stringify(doc));
+        await viaStore('localWipe')();
+        await viaStore('localPut')(url, JSON.stringify(doc));
       }
       return true;
     }
