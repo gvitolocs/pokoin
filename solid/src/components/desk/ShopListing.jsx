@@ -1,4 +1,4 @@
-import { createSignal, For, Repeat, Show } from 'solid-js';
+import { createEffect, createSignal, For, Repeat, Show, untrack } from 'solid-js';
 import { artCutVars } from '@market/art-cut.js';
 import { openListingChat } from '@market/chat-dock-store.js';
 import { listingReference, listingsReference, writeListingDrag } from '@market/chat-listing.js';
@@ -15,12 +15,25 @@ import {
 } from '@market/listing-meta.js';
 import { listingSelectId } from '@market/shop-marquee.js';
 import { chatPhotoDisplayUrl } from '@market/user-photo-urls.js';
+import { deskDragReference, registerShop, unregisterShop } from '../../lib/select-band.js';
 import { buyerParts } from '../../stores/buyer.js';
 import { ThumbZoom } from '../ArtworkZoom.jsx';
 import PriceStack from '../PriceStack.jsx';
 
-/** Shop rows wrapper (market/src/components/ShopList.jsx, without the select band). */
+/**
+ * Shop rows wrapper (market/src/components/ShopList.jsx). The select band
+ * (lib/select-band*.js) selects rows; `offers` registers them so the desk card,
+ * related tiles and selected listings drag as one pile.
+ */
 export function ShopList(props) {
+  createEffect(
+    () => (props.offers ? { offers: props.offers, deskCard: props.deskCard || null } : null),
+    (shop) => {
+      if (!shop) return undefined;
+      untrack(() => registerShop(shop));
+      return () => unregisterShop();
+    },
+  );
   return <div class={['shop-list', props.class]}>{props.children}</div>;
 }
 
@@ -116,8 +129,8 @@ function TrashIcon() {
 
 /**
  * One shop listing (market/src/components/ShopListing.jsx). Same markup and
- * drag payloads; the rubber-band multi-select is not ported yet, so a row
- * drags itself (or `dragOffers` when the desk passes a pile).
+ * drag payloads: a mixed desk pile when tiles and listings are selected, the
+ * selected listings (`dragOffers`), else the row itself.
  */
 export default function ShopListingRow(props) {
   const offer = () => props.offer;
@@ -162,6 +175,22 @@ export default function ShopListingRow(props) {
 
   function dragStart(event) {
     const row = offer();
+    const mixed = deskDragReference({ heldOffer: row, heldCard: props.card });
+    if (mixed) {
+      // Stamp the held row's qty onto the matching listing in the pile.
+      if (mixed.kind === 'cards' && Array.isArray(mixed.cards)) {
+        const heldId = String(row?.id || '');
+        writeListingDrag(event, {
+          ...mixed,
+          cards: mixed.cards.map((item) => (
+            item.listingId === heldId ? { ...item, qty: pick(), stock: choices() } : item
+          )),
+        });
+        return;
+      }
+      writeListingDrag(event, { ...mixed, qty: pick(), stock: choices() });
+      return;
+    }
     const pile = props.dragOffers;
     if (pile?.length > 1) {
       const cards = pile.map((item) => listingReference({

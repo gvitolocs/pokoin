@@ -110,7 +110,7 @@ import {
   rarityHref,
 } from '@market/seo.js';
 import { eraHref, expansionLogoSrc, tcgEra } from '@market/set-logos.js';
-import { shopDragOffers } from '@market/shop-marquee.js';
+import { listingSelectId, shopDragOffers } from '@market/shop-marquee.js';
 import { peekCardSales, rememberStaleCardSales, saveCardSales } from '@market/sold-sales-cache.js';
 import { soldGraphView, soldTraitsForGraphDay } from '@market/sold-sales.js';
 import { Action, track } from '@market/track.js';
@@ -132,6 +132,7 @@ import { authUser, getBearer } from '../stores/auth.js';
 import { buyerFormat, buyerParts, buyerPending, sellerSettings } from '../stores/buyer.js';
 import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
+import { listingSelected } from '../lib/select-band.js';
 import { afterPaint } from '../lib/yield-nav.js';
 
 /** A hover / intent prefetch this recent counts as the desk's own first read. */
@@ -1193,15 +1194,15 @@ function CardDesk(props) {
                     </div>
                   )}
                 >
-                  <ShopList>
+                  <ShopList offers={offers()} deskCard={card()}>
                     <For each={offers()}>
                       {(offer) => (
                         <ShopListingRow
                           offer={offer}
                           card={card()}
                           mine={mineIds().includes(offer.id)}
-                          selected={false}
-                          dragOffers={shopDragOffers(offers(), new Set(), offer)}
+                          selected={listingSelected().has(listingSelectId(offer))}
+                          dragOffers={shopDragOffers(offers(), listingSelected(), offer)}
                           listingBusy={listingBusy()}
                           editing={editingOffer()?.id === offer.id}
                           onCart={(qty) => addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 })}
