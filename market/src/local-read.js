@@ -13,8 +13,9 @@
  *   `subscribe` listeners and the read's `onUpdate`.
  * - A copy older than `maxStaleMs` waits for the network, and still answers
  *   when the network fails.
- * - Prefetch reads (`prefetch: true`) can be aborted by their `signal` until a
- *   real read joins the same request.
+ * - Prefetch reads (`prefetch: true`) take a stored copy of any age without
+ *   asking the network again (the view revalidates when it opens), and can be
+ *   aborted by their `signal` until a real read joins the same request.
  *
  * Framework-free and I/O-injected; api.js wires it to fetch and IndexedDB.
  */
@@ -140,8 +141,9 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now }) 
     return job;
   }
 
-  function serve(url, row, onUpdate) {
-    if (now() - row.savedAt > FRESH_MS) {
+  /** A prefetch only needs a copy: the view revalidates when it opens. */
+  function serve(url, row, onUpdate, prefetch) {
+    if (!prefetch && now() - row.savedAt > FRESH_MS) {
       const job = revalidate(url);
       if (onUpdate) job.then((value) => value !== undefined && onUpdate(value));
     }
@@ -196,21 +198,21 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now }) 
       if (!fresh && now() - hit.savedAt <= maxStaleMs) {
         memory.delete(url);
         memory.set(url, hit);
-        return serve(url, hit, onUpdate);
+        return serve(url, hit, onUpdate, prefetch);
       }
       fallback = hit;
     }
     if (!fresh && !hit) {
       const row = await quietly(() => store.get(url));
       const raced = memory.get(url);
-      if (raced && now() - raced.savedAt <= maxStaleMs) return serve(url, raced, onUpdate);
+      if (raced && now() - raced.savedAt <= maxStaleMs) return serve(url, raced, onUpdate, prefetch);
       if (row && typeof row.body === 'string') {
         const decoded = tryDecode(row.body);
         if (!decoded) {
           quietly(() => store.remove(url));
         } else if (now() - row.savedAt <= maxStaleMs) {
           remember(url, row.body, row.savedAt, decoded.value);
-          return serve(url, memory.get(url), onUpdate);
+          return serve(url, memory.get(url), onUpdate, prefetch);
         } else {
           fallback = { text: row.body, savedAt: row.savedAt };
         }

@@ -226,3 +226,15 @@ test('a failing store is a miss, never an error', async () => {
   assert.deepEqual(await reader.read(URL_A), { ok: true });
   assert.equal(fetched.length, 1);
 });
+
+test('a prefetch takes any stored copy without asking the network: the view revalidates on open', async () => {
+  const t = setup({ answers: { [URL_A]: '{"v":2}' } });
+  t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 20 });
+  assert.deepEqual(await t.reader.read(URL_A, { prefetch: true }), { v: 1 });
+  await flush();
+  assert.equal(t.fetched.length, 0);
+  assert.equal(t.reader.fresh(URL_A), false);
+  // The page's own read (no onUpdate) then waits for the network.
+  assert.deepEqual(await t.reader.read(URL_A), { v: 2 });
+  assert.equal(t.fetched.length, 1);
+});
