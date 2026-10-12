@@ -15,3 +15,18 @@ A paired ROCm benchmark on the 7900 XTX used the same reference MOV, 1,536 MB GP
 Validation: 118 Python recognition tests with the native Rust matcher; six multilingual export tests; 56 phone JS unit tests; two database planner tests; primary database transaction tested with ROLLBACK; artifact hashes/row alignment verified, zero filler rows and distinct original LEGEND halves. Language/expansion accuracy is separate from the 19/19 name measurement. No live phone performance claim follows from this server-video benchmark.
 
 Apply/deploy evidence and exact revisions are recorded after rollout in the same 15T review directory and Honcho. Database backups and guarded rollback SQL are written before any update. Updates run on the writable nezopt primary; Pi receives them through streaming replication.
+
+
+## Completed rollout
+
+Scanner code merged/pushed and bulk + public GPU workers deployed at c295e13486941f13f005f581b46ce23082fa848e. Bulk native library was built with the committed CPU flags; health confirms Rust geometry and ROCm inference. The private candidate was stopped.
+
+Database changes committed: 273 memberships; 673 rows checked against their backups. All other card fields are preserved, apart from intended derived sort fields/timestamps. The sorting helper's automatic artist/illustrator fill on 24 rows was restored from backup; the committed job now prevents that side effect. The guarded forward and reverse transactions were exercised successfully without leaving test changes. Database job code: bf63482d on pokoin-web main.
+
+The Pi replica confirms Top 824982→v260108, Bottom 824984→v260110, Japanese Top 293014→v260108; Houndoom 776446/776452→v776444; Lucario 665064→v239552. Public marketplace-version-set returned HTTP 200 and the new Top family. A real public scan of Houndoom 776446 returned HTTP 200, X-Scan-Worker: nezopt and artwork v776444. Public health confirms both GPU and Pi workers.
+
+Installed-worker reference benchmark: 19/19 names in order in every run, 7.467, 7.831, 6.854 seconds (median 7.467). The server also had an unrelated FFmpeg process consuming roughly seven CPU cores at inspection. These production runs do not establish a speed improvement over the earlier paired test. Timings include automatic frame selection and printing checks.
+
+Language remains unresolved: 18 ambiguous_language and one language_reference_unavailable, so all 19 final language fields were unknown, exactly as on the preceding baseline/candidate runs. Classifier guesses are not accepted as verified language. Expansion accuracy was not separately validated. This release corrects artwork/version associations and bad references; it does not make language/expansion auto recognition complete.
+
+All evidence, immutable gallery manifests, database backups and rollback scripts are on the 15T volume in artwork-first-side/merge-review-20261012. Bulk remains loopback port 38877; exposing its route through the public Rust gateway is a separate deployment.
