@@ -959,6 +959,14 @@
       "destination": "/market/index.html"
     },
     {
+      "source": "/connect/cardrails/",
+      "destination": "/market/index.html"
+    },
+    {
+      "source": "/connect/cardrails",
+      "destination": "/market/index.html"
+    },
+    {
       "source": "/extension/auth-bridge/",
       "destination": "/market/index.html"
     },

@@ -8,6 +8,7 @@
     "^/marketplace/[a-z]{2,3}/cards/[^/]+(?:/[^/]+)?/versions/?$",
     "^/auth/?$",
     "^/extension/auth-bridge/?$",
+    "^/connect/cardrails/?$",
     "^/profile/?$",
     "^/dashboard/?$",
     "^/stock/?$",
