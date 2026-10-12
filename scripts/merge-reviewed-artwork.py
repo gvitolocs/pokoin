@@ -78,6 +78,7 @@ CREATE TEMP TABLE old_gameplay_names AS SELECT DISTINCT gameplay_name FROM pokoi
 CREATE TEMP TABLE redirects(old_version text PRIMARY KEY,new_version text) ON COMMIT DROP;
 INSERT INTO redirects VALUES {values};
 SELECT c.card_id FROM marketplace_search_candidates c JOIN expected e USING(card_id) FOR UPDATE OF c;
+CREATE TEMP TABLE preserved_artists AS SELECT c.card_id,c.artist,c.illustrator FROM marketplace_search_candidates c JOIN expected e USING(card_id);
 DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM expected e LEFT JOIN marketplace_search_candidates c USING(card_id) WHERE c.version IS DISTINCT FROM e.version)
  OR (SELECT count(*) FROM marketplace_search_candidates WHERE version IN ({versions})) <> {len(cards)}
@@ -90,6 +91,8 @@ UPDATE pokoin_version_sets s SET member_count=(SELECT count(*) FROM marketplace_
 DELETE FROM pokoin_version_sets s USING redirects r WHERE s.version=r.old_version
  AND NOT EXISTS(SELECT 1 FROM marketplace_search_candidates c WHERE c.version=s.version);
 SELECT marketplace_refresh_artwork_cluster_sort(ARRAY[{roots}]::text[]);
+UPDATE marketplace_search_candidates c SET artist=p.artist,illustrator=p.illustrator FROM preserved_artists p
+WHERE c.card_id=p.card_id AND (c.artist IS DISTINCT FROM p.artist OR c.illustrator IS DISTINCT FROM p.illustrator);
 UPDATE pokoin_card_version_groups g SET version_count=(SELECT count(*) FROM pokoin_version_sets s WHERE s.gameplay_name=g.gameplay_name),updated_at=now()
  WHERE g.gameplay_name IN (SELECT gameplay_name FROM old_gameplay_names);
 DO $$ BEGIN
