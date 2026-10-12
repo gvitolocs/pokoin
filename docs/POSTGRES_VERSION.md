@@ -8,7 +8,7 @@
 | Writer image pin | `postgres:17.11-alpine` (`scripts/install-pokoin-postgres-nvme.sh`). Before this pin it was the floating `postgres:17-alpine`, so the running minor depends on when that tag was last pulled: check it (step 0 below). |
 | Latest 17.x | 17.11, released 2026-08-13. Next scheduled minor release: 2026-11-12. |
 | Latest stable major | 18.6 |
-| Next major | 19: beta4 on 2026-09-24 (Docker `postgres:19beta4-alpine`), GA planned for October 2026 |
+| Next major | 19: beta4 on 2026-09-24 (Docker `postgres:19beta4-alpine`), GA planned for October 2026. Upgrade tooling ready and rehearsed against beta4 (below). |
 | 17 end of life | November 2029 |
 
 **Decision (Giuseppe, 2026-10-12):** stay on 17 and keep it on the latest
@@ -94,37 +94,75 @@ command): `docker rm -f <name> && docker rename <name>-pre-<tag> <name> && docke
 then reconnect `pokoin-overflow` on the writer. Minor releases share the
 on-disk format, so the old binaries read the data as it is.
 
-## Major upgrade to 19 (plan, for when 19.1 or 19.2 is out)
+## Major upgrade to 19 (prepared; cut over once 19.1 or 19.2 is out)
 
 `postgres-recreate.py` refuses this on purpose: a major upgrade has to
-rewrite the system catalogs.
+rewrite the system catalogs. The tooling below is ready and was rehearsed
+against 19beta4; only the production cutover waits for a stable 19.
 
-- **Before the window**
-  - Run `cd pokoin-rust && cargo test --workspace` against a scratch 19
-    (`POKOIN_TEST_DATABASE_URL`), and run the `scripts/sql/` migrations on
-    it.
-  - Check that `pg_trgm`, `unaccent` and `pgcrypto` load in the 19 image.
-  - Rehearse `pg_upgrade` on a copy of the writer's PGDATA (the NVMe has
-    room) and time it.
-- **Data path:** since Postgres 18, the official Docker images keep data in
-  `/var/lib/postgresql/<major>/docker` and expect the volume at
-  `/var/lib/postgresql`. An old-style mount at `/var/lib/postgresql/data` is
-  rejected. The new writer either mounts the parent directory at
-  `/var/lib/postgresql` or sets `PGDATA` explicitly. Update
-  `scripts/install-pokoin-postgres-nvme.sh` (or a successor script) in the
-  same PR.
-- **Writer:**
-  1. Stop the writes: the Oracle dump tunnel, `pokoin-overflow-sync.timer`
-     and the overflow pods.
-  2. Keep a file-level copy of PGDATA.
-  3. Run `pg_upgrade --link`, which needs the 17 and 19 binaries side by
-     side, for example the docker-library `postgres-upgrade` images.
-  4. Start 19 and refresh planner statistics (`vacuumdb --all --analyze-in-stages`,
-     following the 19 release notes on what `pg_upgrade` carries over).
-  5. Run `pokoin-rust` and the overflow against it before reopening writes.
-- **Pi replica:** a standby cannot stream from another major. Rebuild it
-  with `pg_basebackup` from the upgraded writer, with the watchdog timer
-  stopped (`docs/GAMES.md`). The Pi API returns 503 until the replica is
-  back; the overflow on nezopt reads the writer.
-- **Rollback:** after `--link` has started the new cluster, the old one is no
-  longer usable. Roll back from the file-level copy taken before the upgrade.
+| Piece | What it does |
+| --- | --- |
+| `infra/postgres-upgrade/Dockerfile` | The new official Alpine image plus the old release's binaries under `/opt/pg-old`, which `pg_upgrade` needs side by side. Both images on the writer's Alpine release; a passwd entry for the host uid that owns the data. |
+| `infra/postgres-upgrade/upgrade-cluster.sh` | Runs inside that image: refuses an old cluster that is not cleanly shut down, `initdb`s the new one with the old checksum setting, encoding and locale, runs `pg_upgrade --check` and then `--copy` / `--clone` / `--link` / `--swap`, and carries over `pg_hba.conf`, `pg_ident.conf`, `postgresql.auto.conf` and any certificate files. `postgresql.conf` is only diffed. |
+| `scripts/postgres-major-upgrade.sh rehearse <version>` | On nezopt, without touching the live writer: base backup of it, recovery and clean shutdown with its own 17 image, the upgrade in the image above, 19 started on the result with no network, extension updates, statistics, and a row-count check of the 12 largest tables against the 17 copy. Copy mode keeps the 17 copy, so `bench/postgres/run.py` can compare the two on the real catalogue. |
+| `bench/postgres/` | Schema replay, synthetic data and the 17-vs-19 benchmark ([README](../bench/postgres/README.md)). |
+
+### What the 19beta4 rehearsal found (2026-10-12)
+
+Done twice: with source builds of 17.11 and 19beta4 on the replayed schema
+and 2.5 GB of synthetic data (181 functions, 137 tables, 384 indexes), and
+with the official `postgres:17.11-alpine3.24` and `19beta4-alpine3.24`
+images (musl, `en_US.utf8`, as the writer was created) through
+`upgrade-cluster.sh`.
+
+- **Checksums.** `initdb` turns data checksums on by default since 18; the
+  writer has them off, and `pg_upgrade --check` stops with "old cluster
+  does not use data checksums but the new one does". The new cluster must be
+  created with `--no-data-checksums` (`upgrade-cluster.sh` reads the old
+  setting from `pg_controldata`).
+- **Compatible.** With that, `pg_upgrade --check` reports *Clusters are
+  compatible* and the upgrade completes: 3.4 s with `--link`, 5 s with
+  `--copy` on the small official-image cluster. The time grows with the
+  number of catalogue objects (every game database on the writer), not with
+  data size in link mode; the rehearsal on production measures it.
+- **Extensions.** `pgcrypto` goes 1.3 → 1.4 through the generated
+  `update_extensions.sql`; `pg_trgm` 1.6, `unaccent` 1.1 and `plpgsql` are
+  unchanged. Trigram search and `refresh_cardtrader_sold_daily` run on 19.
+- **Statistics** come across: `vacuumdb --analyze-in-stages
+  --missing-stats-only` finishes immediately.
+- **Data.** Row counts and a hash over every removed-listing id match
+  between 17 and the upgraded 19.
+- **Configuration.** The only `postgresql.conf` difference is 19's new
+  `autovacuum_worker_slots = 16` default. Replication slots are not carried
+  over: recreate `pokoin_pi_replica` on the new writer before rebuilding the
+  Pi replica.
+- **Data path.** The 19 image keeps data in `/var/lib/postgresql/19/docker`
+  with the volume at `/var/lib/postgresql`; an old-style mount at
+  `/var/lib/postgresql/data` is rejected. The new writer mounts a new host
+  directory at `/var/lib/postgresql` and the old data directory stays where
+  it is, untouched in copy mode.
+
+### Cutover (when 19 is stable)
+
+1. Rehearse on production first: `scripts/postgres-major-upgrade.sh
+   rehearse 19.N` (copy mode; the NVMe has room), then
+   `cd pokoin-rust && cargo test --workspace` against the rehearsal copy.
+2. Stop the writes: the Oracle dump tunnel, `pokoin-overflow-sync.timer`
+   and the overflow pods; the Pi API keeps reading its replica.
+3. Stop the writer cleanly and run the upgrade image on its data directory
+   (`upgrade-cluster.sh upgrade`, `MODE=copy` unless the rehearsal shows the
+   copy is too slow; with `--link` the old cluster is unusable once 19
+   starts, so keep a file-level copy first).
+4. Start the writer on `postgres:19.N-alpine` with its usual flags, the new
+   host directory mounted at `/var/lib/postgresql`, the old ports and the
+   `pokoin-overflow` attachment (`scripts/nezopt-k3s.sh up`). Run
+   `update_extensions.sql`, `vacuumdb --all --analyze-in-stages
+   --missing-stats-only`, and recreate the slot `pokoin_pi_replica`.
+5. Pi replica: a standby cannot stream from another major. Stop the
+   watchdog timer, rebuild the replica with `pg_basebackup -R -S
+   pokoin_pi_replica` from the writer into a new directory, start it on the
+   19 image, check `pg_stat_wal_receiver` is streaming, start the timer
+   (`docs/GAMES.md`). The Pi API returns 503 until the replica is back; the
+   overflow on nezopt reads the writer.
+6. Reopen writes. Rollback until then: stop 19 and start the old container
+   on the untouched 17 data directory.
