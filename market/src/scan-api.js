@@ -58,6 +58,9 @@ async function request(path, { method = 'GET', body, token }) {
 
 const post = (path, body, token) => request(path, { method: 'POST', body: body || {}, token });
 const get = (path, token) => request(path, { token });
+// Row actions resolve the batch from the seller-owned row; batchId is sent
+// too because older API builds reject a mutation without it.
+const withBatch = (body, batchId) => (batchId ? { batchId, ...body } : body);
 
 export const scanApi = {
   start: (token, batchId) => post('/api/scan-session?action=start', batchId ? { batchId } : {}, token),
@@ -69,12 +72,12 @@ export const scanApi = {
   batch: (token, batchId) => get(`/api/scan-batch?batchId=${encodeURIComponent(batchId)}`, token),
   openBatches: (token) => get('/api/scan-batch?list=open', token),
   defaults: (token, batchId, defaults) => post('/api/scan-batch?action=defaults', { batchId, defaults }, token),
-  patch: (token, itemId, patch) => post('/api/scan-batch?action=item', { itemId, patch }, token),
+  patch: (token, itemId, patch, batchId) => post('/api/scan-batch?action=item', withBatch({ itemId, patch }, batchId), token),
   add: (token, batchId, body) => post('/api/scan-batch?action=add', { batchId, ...body }, token),
-  remove: (token, itemId) => post('/api/scan-batch?action=remove', { itemId }, token),
-  restore: (token, itemId) => post('/api/scan-batch?action=restore', { itemId }, token),
-  duplicate: (token, itemId) => post('/api/scan-batch?action=duplicate', { itemId }, token),
-  unmerge: (token, itemId) => post('/api/scan-batch?action=unmerge', { itemId }, token),
+  remove: (token, itemId, batchId) => post('/api/scan-batch?action=remove', withBatch({ itemId }, batchId), token),
+  restore: (token, itemId, batchId) => post('/api/scan-batch?action=restore', withBatch({ itemId }, batchId), token),
+  duplicate: (token, itemId, batchId) => post('/api/scan-batch?action=duplicate', withBatch({ itemId }, batchId), token),
+  unmerge: (token, itemId, batchId) => post('/api/scan-batch?action=unmerge', withBatch({ itemId }, batchId), token),
   submit: (token, batchId, submitKey, intent = 'list', targets = null) => post('/api/scan-batch?action=submit', {
     batchId,
     submitKey,
