@@ -140,6 +140,15 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
 
     let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.expect("test database");
     run_sql(&pool, LISTINGS_SQL).await;
+    run_sql(&pool, "drop table if exists public.scan_batches cascade;
+        create table public.scan_batches (id uuid primary key default gen_random_uuid(), seller_uid text not null,
+        defaults jsonb not null, status text not null default 'open', updated_at timestamptz not null default now());").await;
+    sqlx::query("insert into public.scan_batches (seller_uid, defaults) values ($1, $2), ($3, $4)")
+        .bind("seller-1")
+        .bind(json!({"language":"IT", "condition":"Poor", "foilState":"reverse", "location":"BIN-07",
+            "stackSize":100, "stack":3, "startPosition":42, "quantity":2, "firstEdition":true, "mergeRepeats":false}))
+        .bind("seller-2").bind(json!({"language":"DE", "location":"PRIVATE-BOX"}))
+        .execute(&pool).await.unwrap();
     run_sql(&pool, include_str!("../../../../scripts/sql/096_marketplace_outbox.sql")).await;
     run_sql(&pool, include_str!("../../../../scripts/sql/115_seller_api_grants.sql")).await;
     let mine: uuid::Uuid = sqlx::query_scalar(
@@ -196,6 +205,19 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
     assert_eq!(info["cardmarketLinked"], false);
     assert_eq!(info["sharedSecret"], secret);
     assert_eq!(info["locations"], json!([{"label":"BIN-07"}]));
+    let (status, settings) = connector(&app, &token, json!({"action":"scan-settings"})).await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings["scanSettings"]["language"], "IT");
+    assert_eq!(settings["scanSettings"]["storageLabel"], "BIN-07");
+    assert_eq!(settings["scanSettings"]["printing"], "Reverse Holo");
+    assert_eq!(settings["scanSettings"]["condition"], "PO");
+    assert_eq!(settings["scanSettings"]["stack"], 3);
+    assert_eq!(settings["scanSettings"]["startPosition"], 42);
+    assert_eq!(settings["scanSettings"]["quantity"], 2);
+    assert_eq!(settings["scanSettings"]["firstEdition"], true);
+    assert_eq!(settings["scanSettings"]["mergeRepeats"], false);
+    let (_, refused_settings) = connector(&app, "pkn_not-a-real-token", json!({"action":"scan-settings"})).await;
+    assert!(refused_settings.get("scanSettings").is_none());
 
     // A generic grant works on the generic path only.
     let (_, other) = call(&app, "POST", "/api/seller-api-grants", "seller-1", json!({"action":"create","client":"My Tool"})).await;
