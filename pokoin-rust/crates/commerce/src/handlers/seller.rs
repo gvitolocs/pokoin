@@ -15,10 +15,17 @@ use crate::domain::country::{normalize_country, ship_from_country_from_request};
 use crate::error::ApiError;
 use crate::state::{AuthedUser, DomainState};
 use crate::store;
+use pokoin_api_common::compact::{encode as compact_encode, Wanted, C1_CONTENT_TYPE, C1_FORMAT_HEADER};
 use pokoin_api_common::pg::{number_f64, number_i64};
 
 const PAGE_DEFAULT: i64 = 60;
-const BOOK_MAX: usize = 6000;
+/// The columns a shop row is built from. The book reads exactly these: a
+/// `select *` of ten thousand listings also carried comments, photos and
+/// source metadata nobody shows in a shop.
+const BOOK_COLUMNS: &str = "id, card_id, seller_country, marketplace_game, condition, language, \
+     price_pkn, quantity_available, signed, reverse, first_edition, altered, foil_state, \
+     variant_state, sealed, graded, shipping_available, card_name, card_image_url, set_name, \
+     collector_number, status, created_at, updated_at";
 
 fn clean_username(value: &str) -> String {
     value
@@ -252,6 +259,110 @@ fn listing_row(row: &sqlx::postgres::PgRow, seller: &Seller) -> Value {
         "createdAt": created.map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
         "updatedAt": updated.map(|value| value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
     })
+}
+
+/// The printed rarity of a listing's card, as one column of the book query.
+fn book_rarity_column(pokemon: bool) -> String {
+    if pokemon {
+        // Same expression and join the rarity filter uses, by the candidates'
+        // bigint key behind the digits guard the singles filter relies on.
+        format!(
+            "(case when marketplace_user_listings.card_id ~ '^[0-9]{{1,18}}$' then (
+                select {label} from public.marketplace_search_candidates c {join}
+                 where c.card_id = marketplace_user_listings.card_id::bigint limit 1) end)",
+            label = catalog_rarity_expr("c", "b"),
+            join = pokemon_blueprint_join("c", "b"),
+        )
+    } else {
+        "(select c.rarity from public.marketplace_search_candidates c
+           where c.card_id::text = marketplace_user_listings.card_id limit 1)"
+            .to_string()
+    }
+}
+
+/// The whole-book answer, serialized: plain JSON, or the `c1` columnar form
+/// when the page asked for it (a tenth of the bytes for a big shop).
+fn book_body(
+    rows: &[sqlx::postgres::PgRow],
+    seller: &Seller,
+    game: &str,
+    stamp: &str,
+    compact: Wanted,
+) -> Vec<u8> {
+    let mut copies: i64 = 0;
+    let listings: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            let mut listing = listing_row(row, seller);
+            copies += listing["quantityAvailable"].as_i64().unwrap_or(0);
+            listing["rarity"] = json!(row.try_get::<Option<String>, _>("rarity").ok().flatten());
+            listing
+        })
+        .collect();
+    let book = json!({
+        "book": true,
+        "game": game,
+        "seller": seller_payload(seller, None),
+        "listings": listings,
+        "total": rows.len(),
+        "unique": rows.len(),
+        "copies": copies,
+        "maxUpdatedAt": stamp,
+        "limit": rows.len(),
+        "offset": 0,
+    });
+    if compact.c1() {
+        compact_encode::encode_to_vec_with(&book, compact.encode_options())
+    } else {
+        serde_json::to_vec(&book).unwrap_or_default()
+    }
+}
+
+/// Serialized books kept between requests, newest last.
+const BOOK_CACHE_ENTRIES: usize = 12;
+/// A book past this size is rebuilt every time rather than held in memory.
+const BOOK_CACHE_MAX_BYTES: usize = 4 * 1024 * 1024;
+
+type BookCache = std::sync::Mutex<std::collections::VecDeque<(String, std::sync::Arc<Vec<u8>>)>>;
+
+fn book_cache() -> &'static BookCache {
+    static CACHE: std::sync::OnceLock<BookCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+fn book_cache_get(key: &str) -> Option<std::sync::Arc<Vec<u8>>> {
+    let cache = book_cache().lock().ok()?;
+    cache.iter().find(|(stored, _)| stored == key).map(|(_, body)| body.clone())
+}
+
+fn book_cache_put(key: String, body: std::sync::Arc<Vec<u8>>) {
+    if body.len() > BOOK_CACHE_MAX_BYTES {
+        return;
+    }
+    let Ok(mut cache) = book_cache().lock() else { return };
+    // One book per seller, game and form: a new stamp replaces the old one.
+    let scope = |key: &str| {
+        let mut parts = key.split('|');
+        (parts.next().map(str::to_owned), parts.next().map(str::to_owned), parts.nth(1).map(str::to_owned), parts.next().map(str::to_owned))
+    };
+    let mine = scope(&key);
+    cache.retain(|(stored, _)| scope(stored) != mine);
+    cache.push_back((key, body));
+    while cache.len() > BOOK_CACHE_ENTRIES {
+        cache.pop_front();
+    }
+}
+
+/// `private_json` for a book that is already serialized.
+fn book_response(body: std::sync::Arc<Vec<u8>>, compact: Wanted) -> Response {
+    let mut headers = vec![("cache-control", "private, no-store"), ("vary", "Accept")];
+    let content_type = if compact.c1() {
+        headers.push(C1_FORMAT_HEADER);
+        C1_CONTENT_TYPE
+    } else {
+        "application/json"
+    };
+    pokoin_api_common::http::raw(axum::http::StatusCode::OK, content_type, body.as_ref().clone(), &headers)
 }
 
 #[derive(Debug, Clone)]
@@ -515,81 +626,68 @@ pub async fn marketplace_seller_shop(
            from public.marketplace_user_listings where {where_sql}"
     );
     if book {
-        let counted = run_shop_sql(
+        // The whole shop, whatever its size: the page filters, sorts and
+        // pages it locally. Rarity rides along so the rarity filter is local
+        // too; a catalog without those tables sends the book without it.
+        let compact = Wanted::from_parts(None, &format!("format={}", query.get("format").map(String::as_str).unwrap_or("")));
+        // The seller's last change names the book: until it moves, the bytes
+        // built for one visitor serve the next without touching the listings.
+        let stamp = seller_activity_stamp(read_db, &seller.uid)
+            .await
+            .map_err(|error| crate::game::catalog_error(catalog_game, error))?;
+        let cache_key = format!(
+            "{}|{}|{}|{}|{}|{}|{}",
+            seller.uid, catalog_game, stamp, compact.c1(), compact.templates(), seller.display_name, seller.accepts_pkn
+        );
+        if let Some(body) = book_cache_get(&cache_key) {
+            return Ok(book_response(body, compact));
+        }
+        let rarity_column = book_rarity_column(catalog_game == "pokemon");
+        let with_rarity = format!(
+            "select {BOOK_COLUMNS}, {rarity_column} as rarity from public.marketplace_user_listings
+              where {where_sql} order by {order}"
+        );
+        let plain = format!(
+            "select {BOOK_COLUMNS} from public.marketplace_user_listings
+              where {where_sql} order by {order}"
+        );
+        let rows = match run_shop_sql(
             read_db,
             catalog_game,
-            &totals_sql,
+            &with_rarity,
             &values,
             &where_sql,
             optional_visual_clause.as_deref(),
         )
-        .await?;
-        let counted_total = counted
-            .first()
-            .and_then(|row| number_i64(row, "total"))
-            .unwrap_or(0);
-        if counted_total as usize > BOOK_MAX {
-            return Ok(private_json(json!({
-                "book": false,
-                "game": catalog_game,
-                "seller": seller_payload(&seller, None),
-                "listings": [],
-                "total": 0,
-                "unique": 0,
-                "copies": 0,
-                "maxUpdatedAt": "",
-            })));
-        }
-        // The whole book or nothing: one row past BOOK_MAX says "too big".
-        // (It used the page limit, 60 by default, so a 10k shop came back as a
-        // complete 60-row book and the page swapped its listings for those.)
-        let mut page_values = values.clone();
-        page_values.push(json!(BOOK_MAX as i64 + 1));
-        let sql = format!(
-            "select * from public.marketplace_user_listings
-              where {where_sql} order by {order} limit ${}",
-            page_values.len()
-        );
-        let rows = run_shop_sql(
-            read_db,
-            catalog_game,
-            &sql,
-            &page_values,
-            &where_sql,
-            optional_visual_clause.as_deref(),
-        )
-        .await?;
-        if rows.len() > BOOK_MAX {
-            return Ok(private_json(json!({
-                "book": false,
-                "game": catalog_game,
-                "seller": seller_payload(&seller, None),
-                "listings": [],
-                "total": 0,
-                "unique": 0,
-                "copies": 0,
-                "maxUpdatedAt": "",
-            })));
-        }
-        let listings: Vec<Value> = rows.iter().map(|row| listing_row(row, &seller)).collect();
-        let copies: i64 = listings
-            .iter()
-            .filter_map(|row| row.get("quantityAvailable").and_then(Value::as_i64))
-            .sum();
-        return Ok(private_json(json!({
-            "book": true,
-            "game": catalog_game,
-            "seller": seller_payload(&seller, None),
-            "listings": listings,
-            "total": rows.len(),
-            "unique": rows.len(),
-            "copies": copies,
-            "maxUpdatedAt": seller_activity_stamp(read_db, &seller.uid)
-                .await
-                .map_err(|error| crate::game::catalog_error(catalog_game, error))?,
-            "limit": rows.len(),
-            "offset": 0,
-        })));
+        .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::warn!(catalog_game, error = %error.message, "seller book without rarity");
+                run_shop_sql(
+                    read_db,
+                    catalog_game,
+                    &plain,
+                    &values,
+                    &where_sql,
+                    optional_visual_clause.as_deref(),
+                )
+                .await?
+            }
+        };
+        // Thousands of rows to shape and serialize: off the request workers,
+        // so a big book never holds the three the Pi runs everything on.
+        let game = catalog_game.to_string();
+        let seller = seller.clone();
+        let body = tokio::task::spawn_blocking(move || book_body(&rows, &seller, &game, &stamp, compact))
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, "seller book task failed");
+                ApiError::internal("Seller shop failed.")
+            })?;
+        let body = std::sync::Arc::new(body);
+        book_cache_put(cache_key, body.clone());
+        return Ok(book_response(body, compact));
     }
 
     let totals_rows = run_shop_sql(
@@ -1021,5 +1119,79 @@ mod tests {
         fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
             self
         }
+    }
+}
+
+#[cfg(test)]
+mod book_tests {
+    use super::*;
+
+    /// A 10,000-listing shop comes back whole, as one valid JSON book.
+    /// `POKOIN_TEST_DATABASE_URL=postgres://… cargo test -p pokoin-commerce book_of_ten_thousand -- --nocapture`
+    #[tokio::test]
+    async fn book_of_ten_thousand_listings_is_complete() {
+        let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+            eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new().max_connections(2).connect(&url).await.unwrap();
+        // Temp tables are per connection: create and read on the same one.
+        let mut conn = pool.acquire().await.unwrap();
+        sqlx::raw_sql(
+            "drop table if exists pg_temp.book_rows;
+             create temp table book_rows as
+             select gen_random_uuid() as id, (200000 + n)::text as card_id, (case when n % 3 = 0 then 'Common' else 'Rare Holo' end)::text as rarity, 'IT'::text as seller_country,
+                    'pokemon'::text as marketplace_game, 'NM'::text as condition, 'EN'::text as language,
+                    (100 + n)::numeric as price_pkn, 2::integer as quantity_available,
+                    false as signed, (n % 7 = 0) as reverse, false as first_edition, false as altered,
+                    'standard'::text as foil_state, ''::text as variant_state, false as sealed, false as graded,
+                    true as shipping_available, ('Card name number ' || n)::text as card_name,
+                    ('https://cdn.pokoin.com/leftovers/' || n || '.jpg')::text as card_image_url,
+                    'Some Expansion Name'::text as set_name, (n % 200 || '/200')::text as collector_number,
+                    'active'::text as status, now() as created_at, now() as updated_at
+               from generate_series(1, 10000) n",
+        )
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+        let rows = sqlx::query("select * from book_rows order by price_pkn").fetch_all(&mut *conn).await.unwrap();
+        assert_eq!(rows.len(), 10000);
+        let seller = Seller { uid: "u1".into(), username: "alice".into(), display_name: "Alice".into(), accepts_pkn: true };
+        let started = std::time::Instant::now();
+        let body = book_body(&rows, &seller, "pokemon", "2026-10-11T00:00:00Z", Wanted::DEFAULT);
+        let took = started.elapsed();
+        let book: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(book["book"], true);
+        assert_eq!(book["total"], 10000);
+        assert_eq!(book["listings"].as_array().unwrap().len(), 10000);
+        assert_eq!(book["copies"], 20000);
+        assert_eq!(book["listings"][0]["pricePkn"], 101.0);
+        assert_eq!(book["listings"][0]["quantityAvailable"], 2);
+        assert_eq!(book["listings"][0]["rarity"], "Rare Holo");
+        assert_eq!(book["listings"][2]["rarity"], "Common");
+        assert_eq!(book["listings"][9999]["cardName"], "Card name number 10000");
+        assert_eq!(book["seller"]["username"], "alice");
+
+        // The compact form is the same book, exactly, in a fraction of the bytes.
+        let wanted = Wanted::from_parts(None, "format=c1v2");
+        let started = std::time::Instant::now();
+        let compact = book_body(&rows, &seller, "pokemon", "2026-10-11T00:00:00Z", wanted);
+        let compact_took = started.elapsed();
+        let decoded = pokoin_api_common::compact::decode::decode(&serde_json::from_slice(&compact).unwrap()).unwrap();
+        assert_eq!(decoded, book);
+        assert!(compact.len() * 3 < body.len(), "{} vs {}", compact.len(), body.len());
+        // One book per seller, game and form: a newer stamp replaces the older.
+        let key = |stamp: &str| format!("u-cache|pokemon|{stamp}|true|true|Alice|true");
+        book_cache_put(key("s1"), std::sync::Arc::new(vec![1]));
+        assert_eq!(book_cache_get(&key("s1")).as_deref(), Some(&vec![1]));
+        book_cache_put(key("s2"), std::sync::Arc::new(vec![2]));
+        assert!(book_cache_get(&key("s1")).is_none());
+        assert_eq!(book_cache_get(&key("s2")).as_deref(), Some(&vec![2]));
+        book_cache_put(key("s3"), std::sync::Arc::new(vec![0; BOOK_CACHE_MAX_BYTES + 1]));
+        assert!(book_cache_get(&key("s3")).is_none(), "an oversized book is not held");
+        eprintln!(
+            "book of {} rows: json {} bytes in {:?}; c1 {} bytes in {:?}",
+            rows.len(), body.len(), took, compact.len(), compact_took
+        );
     }
 }

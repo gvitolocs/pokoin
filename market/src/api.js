@@ -2733,6 +2733,9 @@ export function fetchSellerShop(username, {
     if (sellerUid) params.set('sellerUid', String(sellerUid));
   } else if (book) {
     params.set('book', '1');
+    // A whole shop as columns against the bundled dictionary: about a tenth
+    // of the JSON. An answer this build cannot decode counts as no book.
+    params.set('format', 'c1v2');
     if (sellerUid) params.set('sellerUid', String(sellerUid));
   } else {
     params.set('limit', String(limit));
@@ -2747,9 +2750,10 @@ export function fetchSellerShop(username, {
     if (sellerUid) params.set('sellerUid', String(sellerUid));
   }
   if (marketplaceGame) params.set('game', String(marketplaceGame));
-  const run = () => getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) => (
-    book || fresh ? data : rememberSellerListings(handle, data, opts)
-  ));
+  const run = () => getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) => {
+    if (book) return isC1(data) ? decodeC1(data) : data;
+    return fresh ? data : rememberSellerListings(handle, data, opts);
+  });
   if (book || fresh) return run();
   const key = sellerCacheKey(handle, opts);
   const pending = sellerShopInflight.get(key);
