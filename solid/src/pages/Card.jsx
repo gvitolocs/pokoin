@@ -1,3 +1,4 @@
+import { noteCardView } from '@market/interest-profile.js';
 import {
   createEffect,
   createMemo,
@@ -291,6 +292,8 @@ function CardDesk(props) {
     const { offers: _pageOffers, ...rest } = data;
     const merged = mergeDeskCard(current?.card, data.card);
     rememberCardId(merged);
+    // The visitor's own view history, on their device, for search predictions.
+    noteCardView(merged, { print: merged?.nationality });
     setPage({
       ...rest,
       card: merged,

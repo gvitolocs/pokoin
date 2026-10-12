@@ -11553,3 +11553,15 @@ html:has(.wallet-page) .brand span {
   content-visibility: auto;
   contain-intrinsic-size: auto 360px;
 }
+
+/* Search popup: why a one-letter prediction is showing (interest-profile.js) */
+.suggest-hint {
+  margin: 0;
+  padding: 8px 16px 2px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+.suggest-hint strong {
+  opacity: 1;
+  font-weight: 600;
+}
