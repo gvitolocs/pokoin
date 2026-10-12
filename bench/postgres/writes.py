@@ -75,8 +75,11 @@ def setup(servers, source_db, dump_dir):
             psql(parts, "postgres", "alter database pokoin_tpl is_template false")
         psql(parts, "postgres", "drop database if exists pokoin_tpl with (force)")
         psql(parts, "postgres", "create database pokoin_tpl")
-        subprocess.run([os.path.join(parts["bin"], "pg_restore"), "-j4", "--no-owner", "-d", conninfo(parts, "pokoin_tpl"),
-                        dump_dir], check=True, env=env_for(parts), capture_output=True)
+        restore = subprocess.run([os.path.join(parts["bin"], "pg_restore"), "-j4", "--no-owner", "-d",
+                                  conninfo(parts, "pokoin_tpl"), dump_dir], env=env_for(parts), capture_output=True, text=True)
+        if restore.returncode != 0:
+            errors = [line for line in restore.stderr.splitlines() if "error" in line.lower()]
+            raise SystemExit(f"{label}: pg_restore failed:\n  " + "\n  ".join(errors[:20]))
         psql(parts, "pokoin_tpl", "create extension if not exists pg_prewarm")
         psql(parts, "pokoin_tpl", "vacuum analyze")
         psql(parts, "postgres", "alter database pokoin_tpl is_template true")

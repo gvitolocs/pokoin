@@ -8,9 +8,13 @@
 #   6. back to production-like settings on both
 # Every configuration's relevant settings are saved next to its results.
 #
-#   bench/postgres/sequence.sh <work dir with data17/ data19/ run sockets> <inst17> <inst19> <results dir> <date tag>
+# Disk: the template and the per-run copy add about 2 x the database per
+# server, so the generic pgbench database and pokoin_marketplace are dropped
+# while they are not needed (step 3 recreates pokoin_marketplace).
+#
+#   bench/postgres/sequence.sh <work dir with data17/ data19/ run sockets> <inst17> <inst19> <results dir> <date tag> [first step]
 set -euo pipefail
-W=${1:?work dir} I17=${2:?inst17} I19=${3:?inst19} R=${4:?results dir} TAG=${5:?date tag}
+W=${1:?work dir} I17=${2:?inst17} I19=${3:?inst19} R=${4:?results dir} TAG=${5:?date tag} FROM=${6:-1}
 HERE=$(cd "$(dirname "$0")" && pwd)
 export LD_LIBRARY_PATH=$I19/lib
 PSQL=$I19/bin/psql PGBENCH=$I19/bin/pgbench
@@ -34,20 +38,26 @@ settings() {  # settings <out.json>
   } >"$1"
 }
 
-say "1. verify (production-like settings)"
-settings "$R/$TAG-settings-production-like.json"
-python3 "$HERE/verify.py" --pgbench "$PGBENCH" --psql "$PSQL" --server "$S17" --server "$S19" --out "$R/$TAG-verify.json"
+on_both() { for port in 54317 54319; do "$PSQL" "host=$W port=$port user=pokoin_marketplace dbname=postgres" -Xq "$@"; done; }
 
-say "2. writes from identical snapshots"
-python3 "$HERE/writes.py" --setup --server "$S17" --server "$S19" --dump-dir "$W/dump"
-python3 "$HERE/writes.py" --pgbench "$PGBENCH" --server "$S17" --server "$S19" --rounds 3 --out "$R/$TAG-writes.json"
+if (( FROM <= 1 )); then
+  say "1. verify (production-like settings)"
+  settings "$R/$TAG-settings-production-like.json"
+  python3 "$HERE/verify.py" --pgbench "$PGBENCH" --psql "$PSQL" --server "$S17" --server "$S19" --out "$R/$TAG-verify.json"
+fi
+
+if (( FROM <= 2 )); then
+  say "2. writes from identical snapshots"
+  on_both -c "drop database if exists pgbench with (force)"
+  python3 "$HERE/writes.py" --setup --server "$S17" --server "$S19" --dump-dir "$W/dump"
+  on_both -c "drop database if exists pokoin_marketplace with (force)" -c "checkpoint"
+  python3 "$HERE/writes.py" --pgbench "$PGBENCH" --server "$S17" --server "$S19" --rounds 3 --out "$R/$TAG-writes.json"
+  on_both -c "drop database if exists pokoin_write with (force)"
+fi
 
 say "3. reset pokoin_marketplace to the same snapshot on both servers"
-for port in 54317 54319; do
-  "$PSQL" "host=$W port=$port user=pokoin_marketplace dbname=postgres" -Xq \
-    -c "drop database if exists pokoin_marketplace with (force)" \
-    -c "create database pokoin_marketplace template pokoin_tpl strategy file_copy"
-done
+on_both -c "drop database if exists pokoin_marketplace with (force)" \
+  -c "create database pokoin_marketplace template pokoin_tpl strategy file_copy"
 
 say "4. default vs default"
 for v in 17 19; do
