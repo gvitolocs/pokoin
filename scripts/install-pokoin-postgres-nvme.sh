@@ -2,12 +2,14 @@
 # Move marketplace writer Postgres PGDATA onto nezopt NVMe.
 # Keep container name pokoin-marketplace-postgres-15t and host port 25432
 # so Oracle :15543, Pi replica LAN, and listing writes stay on the same hop.
+# One-shot move: never rerun it to change the image. It rsyncs the stale HDD
+# PGDATA over the live NVMe copy. Image updates: docs/POSTGRES_VERSION.md.
 set -euo pipefail
 
 SRC="${POKOIN_PG_HDD:-/home/nez/mnt/mybook/pokoin-marketplace-postgres}"
 DST="${POKOIN_PG_NVME:-/home/nez/data/pokoin-marketplace-postgres}"
 NAME="${POKOIN_MARKETPLACE_POSTGRES:-pokoin-marketplace-postgres-15t}"
-IMAGE="${POKOIN_POSTGRES_IMAGE:-postgres:17-alpine}"
+IMAGE="${POKOIN_POSTGRES_IMAGE:-postgres:17.11-alpine}"
 
 if [[ ! -d "$SRC/data" ]]; then
   echo "missing HDD PGDATA $SRC/data" >&2
