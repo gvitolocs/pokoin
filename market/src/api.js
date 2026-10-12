@@ -154,13 +154,14 @@ export async function getJson(path, options = {}) {
 }
 
 /**
- * Off until the edge compresses c1. Production serves it as
- * `application/vnd.pokoin.c1+json`, which Cloudflare does not brotli: on
- * 2026-10-10 the expansion index was 57.7 KB as c1 vs 15.3 KB as brotli JSON
- * (search-page 13.8 vs 6.2 KB). c1 only wins once the server sends it
- * compressed (origin brotli, or an `application/json` content type).
+ * On. The API sends c1 as `application/json`, so the edge compresses it like
+ * any JSON: measured 2026-10-12 after brotli, search-page 6.2 → 3.6 KB, a set
+ * desk 9.8 → 4.8 KB, the expansion index 24.3 → 18.1 KB, with the same
+ * decode time as `JSON.parse` of the plain body and identical data.
+ * (It was off while c1 went out as `application/vnd.pokoin.c1+json`, which
+ * Cloudflare does not compress.)
  */
-const C1_READS = false;
+const C1_READS = true;
 
 /**
  * Read a big catalogue route in the compact `c1` encoding
@@ -380,7 +381,7 @@ export function fetchSuggest(query, {
   if (match === 'all') {
     params.set('match', 'all');
   }
-  return getJson(`/api/marketplace-suggest?${params}`, { signal });
+  return getJsonC1(`/api/marketplace-suggest?${params}`, { signal });
 }
 
 const SEARCH_WARMUP_TTL_MS = 5 * 60 * 1000;
