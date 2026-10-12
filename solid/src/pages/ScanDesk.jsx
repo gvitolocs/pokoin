@@ -491,7 +491,7 @@ function ScanDeskDesk() {
     setToasts((current) => [...current.filter((t) => t.id !== id), { ...toast, id }].slice(-4));
     setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), toast.ms || 6000);
     if (toast.itemId) {
-      undoStack.push({ label: toast.text, undo: () => runApi((t) => scanApi.unmerge(t, toast.itemId)) });
+      undoStack.push({ label: toast.text, undo: () => runApi((t) => scanApi.unmerge(t, toast.itemId, batch()?.id)) });
     }
   }
 
@@ -592,7 +592,7 @@ function ScanDeskDesk() {
       // server applies them out of order and wipes the fresh suggestion.
       await Promise.all(targets.map((row) => patchChain(
         row.id,
-        () => runApi((t) => scanApi.patch(t, row.id, changes)),
+        () => runApi((t) => scanApi.patch(t, row.id, changes, batch()?.id)),
       )));
     } catch (err) {
       setError(err.message || 'Change not saved.');
@@ -739,27 +739,38 @@ function ScanDeskDesk() {
   }
 
   async function removeRows(ids) {
-    for (const id of ids) {
-      await runApi((t) => scanApi.remove(t, id));
+    try {
+      for (const id of ids) {
+        await runApi((t) => scanApi.remove(t, id, batch()?.id));
+      }
+    } catch (err) {
+      setError(err.message || 'Row not removed.');
+      return;
     }
     undoStack.push({
       label: 'Remove',
-      undo: () => Promise.all(ids.map((id) => runApi((t) => scanApi.restore(t, id)))),
+      undo: () => Promise.all(ids.map((id) => runApi((t) => scanApi.restore(t, id, batch()?.id)))),
       redo: () => removeRows(ids),
     });
     pushToast({
       text: `${ids.length} removed`,
       action: 'Undo',
-      run: () => Promise.all(ids.map((id) => runApi((t) => scanApi.restore(t, id)))),
+      run: () => Promise.all(ids.map((id) => runApi((t) => scanApi.restore(t, id, batch()?.id)))),
     });
   }
 
   async function duplicate(row) {
-    const data = await runApi((t) => scanApi.duplicate(t, row.id));
+    let data;
+    try {
+      data = await runApi((t) => scanApi.duplicate(t, row.id, batch()?.id));
+    } catch (err) {
+      setError(err.message || 'Row not copied.');
+      return;
+    }
     const copy = data?.items?.[0];
     if (copy) {
       setFocusId(copy.id);
-      undoStack.push({ label: 'Copy', undo: () => runApi((t) => scanApi.remove(t, copy.id)) });
+      undoStack.push({ label: 'Copy', undo: () => runApi((t) => scanApi.remove(t, copy.id, batch()?.id)) });
     }
   }
 
@@ -855,7 +866,7 @@ function ScanDeskDesk() {
       if (item) {
         followTail = true;
         setFocusId(item.id);
-        undoStack.push({ label: 'Add', undo: () => runApi((t) => scanApi.remove(t, item.id)) });
+        undoStack.push({ label: 'Add', undo: () => runApi((t) => scanApi.remove(t, item.id, batch()?.id)) });
         redoStack = [];
       }
       if (keep) {
@@ -1550,7 +1561,7 @@ function ScanDeskDesk() {
                   </Show>
                 )}
               >
-                <button type="button" onClick={() => runApi((t) => scanApi.unmerge(t, toast.itemId))}>Undo</button>
+                <button type="button" onClick={() => runApi((t) => scanApi.unmerge(t, toast.itemId, batch()?.id))}>Undo</button>
               </Show>
             </div>
           )}

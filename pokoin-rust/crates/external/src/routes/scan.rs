@@ -144,6 +144,12 @@ pub async fn preflight() -> Response {
     response
 }
 
+/// Row actions find their batch through the seller-owned row (`lock_item`),
+/// so the desk sends only `itemId` for them.
+fn is_row_action(action: &str) -> bool {
+    matches!(action, "item" | "remove" | "restore" | "duplicate" | "unmerge")
+}
+
 /// `GET|POST /api/scan-batch` — staged batch snapshot, image and row actions.
 pub async fn batch(state: State<DomainState>, headers: HeaderMap, uri: Uri, body: Bytes) -> ApiResult<Response> {
     batch_inner(state, headers, uri, body).await.map_err(scan_error)
@@ -185,7 +191,7 @@ async fn batch_inner(
         let batches = crate::scan_store::list_open_batches(&state.db, &identity.uid).await?;
         return Ok(json_response(200, json!({ "ok": true, "batches": batches })));
     }
-    if batch_id.is_empty() {
+    if batch_id.is_empty() && !is_row_action(&action) {
         return Err(ApiError::bad_request("batchId is required."));
     }
     if action.is_empty() {
@@ -362,4 +368,19 @@ async fn stream_inner(
     Ok(Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_row_action;
+
+    #[test]
+    fn row_actions_do_not_need_batch_id() {
+        for action in ["item", "remove", "restore", "duplicate", "unmerge"] {
+            assert!(is_row_action(action), "{action}");
+        }
+        for action in ["", "defaults", "add", "discard", "submit"] {
+            assert!(!is_row_action(action), "{action}");
+        }
+    }
 }
