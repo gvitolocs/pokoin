@@ -7,6 +7,9 @@ import { gameBasename } from './game.js';
 import './styles.css';
 import './desk.css';
 import { showReviewsBadge } from './google-reviews.js';
+import { installScanOrientation } from './scan-orientation.js';
+
+installScanOrientation();
 
 const shortLink = window.location.pathname.match(/^\/(?:marketplace\/)?(\d+)(?:\/[^/]+)?$/);
 if (shortLink) {

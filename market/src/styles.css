@@ -701,6 +701,15 @@ button, input, select { font: inherit; color: inherit; }
   border-radius: 0;
 }
 
+/* A leftover stored already landscape (scan-orientation.js) is upright as is:
+ * rotating it would squash it and put the name bar on the right. Same below
+ * for the album, desk and zoom. */
+.suggest-art.is-landscape img[data-scan-orient="landscape"] {
+  width: var(--suggest-art-w);
+  height: calc(var(--suggest-art-w) * 63 / 88);
+  transform: none;
+}
+
 .suggest-art.is-bleed {
   --suggest-art-w: 8.75rem;
   width: var(--suggest-art-w);
@@ -2992,6 +3001,16 @@ html.is-card-banding * {
   transform: translate(-50%, -50%) rotate(90deg) !important;
 }
 
+.tile-album.is-landscape .tile-art img[data-scan-orient="landscape"] {
+  width: 100cqw;
+  height: 100cqh;
+}
+
+.tile.tile-album.is-landscape img[data-scan-orient="landscape"],
+.tile.tile-album.is-landscape:hover img[data-scan-orient="landscape"] {
+  transform: translate(-50%, -50%) !important;
+}
+
 .tile-album.tile-skel .tile-ph,
 .tile-album.tile-skel .skel-line {
   animation: none;
@@ -3624,6 +3643,12 @@ select.collector-badge.version-badge option {
   aspect-ratio: auto;
   object-fit: fill;
   transform: translate(-50%, -50%) rotate(90deg);
+}
+
+.art-frame.is-landscape img[data-scan-orient="landscape"] {
+  width: 100cqw;
+  height: 100cqh;
+  transform: translate(-50%, -50%);
 }
 
 .art-frame img.missing-card,
@@ -5460,6 +5485,12 @@ dialog.zoom:not([open]) {
   transform: rotate(90deg);
   max-width: min(92vh, 58rem);
   max-height: min(96vw, 42rem);
+}
+
+.zoom.is-landscape img[data-scan-orient="landscape"] {
+  transform: none;
+  max-width: min(96vw, 58rem);
+  max-height: min(92vh, 42rem);
 }
 
 .more { display: block; margin: 1.5rem auto; }
