@@ -65,8 +65,8 @@ function SkeletonRows() {
 
 /**
  * Public seller shop (market/src/pages/Seller.jsx). The first page comes from
- * a small paged query (or the listings cache); once it settles, the whole
- * book downloads and every filter / sort / page runs locally on it. A fresh
+ * a small paged query (or the listings cache) while the whole book downloads
+ * beside it; every filter / sort / page then runs locally on the book. A fresh
  * stamp check refetches the book when the seller's listings changed.
  * Not ported yet: the rubber-band multi-select of shop rows (rows drag
  * themselves).
@@ -148,9 +148,9 @@ function SellerShop(props) {
     },
   );
 
-  // The whole book, once the first page has settled.
-  createEffect(pageSettled, (settled) => {
-    if (!settled) return undefined;
+  // The whole book, asked for with the first page: it is what makes the
+  // filters instant, so it does not wait behind the page it replaces.
+  createEffect(() => true, () => {
     let cancelled = false;
     setBook(null);
     setBookPhase('loading');
