@@ -408,12 +408,12 @@ fn book_cache() -> &'static BookCache {
     CACHE.get_or_init(Default::default)
 }
 
-fn book_cache_get(key: &str) -> Option<std::sync::Arc<Vec<u8>>> {
+pub(super) fn book_cache_get(key: &str) -> Option<std::sync::Arc<Vec<u8>>> {
     let cache = book_cache().lock().ok()?;
     cache.iter().find(|(stored, _)| stored == key).map(|(_, body)| body.clone())
 }
 
-fn book_cache_put(key: String, body: std::sync::Arc<Vec<u8>>) {
+pub(super) fn book_cache_put(key: String, body: std::sync::Arc<Vec<u8>>) {
     if body.len() > BOOK_CACHE_MAX_BYTES {
         return;
     }
@@ -444,11 +444,12 @@ fn book_response(body: std::sync::Arc<Vec<u8>>, compact: Wanted) -> Response {
 }
 
 #[derive(Debug, Clone)]
-struct Seller {
-    uid: String,
-    username: String,
-    display_name: String,
-    accepts_pkn: bool,
+/// A seller as a shop shows them.
+pub struct Seller {
+    pub uid: String,
+    pub username: String,
+    pub display_name: String,
+    pub accepts_pkn: bool,
 }
 
 async fn seller_profile_for_username(
@@ -524,6 +525,98 @@ async fn seller_profile_for_username(
     })
 }
 
+/// The listings that are a seller's shop in one game: the WHERE clauses, their
+/// bound values, and the singles clause a catalog without those tables drops.
+async fn shop_scope(
+    read_db: &sqlx::PgPool,
+    seller_uid: &str,
+    catalog_game: &str,
+) -> Result<(Vec<String>, Vec<Value>, Option<String>), ApiError> {
+    let mut values: Vec<Value> = vec![json!(seller_uid)];
+    let mut where_clauses: Vec<String> = vec![
+        "seller_uid = $1".into(),
+        "status = 'active'".into(),
+        "quantity_available > 0".into(),
+    ];
+    // The singles filter reads optional catalog/blueprint tables. It is a
+    // visual facet, not a financial contract, so a replica that has not been
+    // provisioned with those tables degrades to the unfiltered book instead of
+    // failing the whole shop.
+    let mut optional_visual_clause: Option<String> = None;
+    if catalog_game == "pokemon" {
+        let clause = pokemon_singles_where().to_string();
+        where_clauses.push(clause.clone());
+        optional_visual_clause = Some(clause);
+    } else {
+        // Satellite shops scope by the game catalog's card ids and game tag,
+        // matching `sellerCardIdsForGame` in the Node handler.
+        let listed = sqlx::query_scalar::<_, String>(
+            "select distinct card_id from public.marketplace_user_listings
+              where seller_uid = $1 and nullif(card_id, '') is not null",
+        )
+        .bind(seller_uid)
+        .fetch_all(read_db)
+        .await
+        .map_err(|error| crate::game::catalog_error(catalog_game, error))?;
+        let catalog_ids: Vec<String> = if listed.is_empty() {
+            Vec::new()
+        } else {
+            sqlx::query_scalar::<_, String>(
+                "select card_id::text from public.marketplace_search_candidates
+                  where card_id::text = any($1::text[])",
+            )
+            .bind(&listed)
+            .fetch_all(read_db)
+            .await
+            .map_err(|error| crate::game::catalog_error(catalog_game, error))?
+        };
+        values.push(json!(catalog_ids));
+        let index = values.len();
+        where_clauses.push(format!("card_id = any(${index}::text[])"));
+        values.push(json!(catalog_game));
+        let index = values.len();
+        where_clauses.push(format!("marketplace_game = ${index}"));
+    }
+    Ok((where_clauses, values, optional_visual_clause))
+}
+
+/// Build a seller's whole book from the listings as they are now:
+/// `(stamp, body, listings)`. Rarity rides along so the page's rarity filter
+/// is local. The rows are shaped and serialized off the request workers, so
+/// a big book never holds the three the Pi runs everything on.
+pub(super) async fn build_book(
+    state: &DomainState,
+    seller: &Seller,
+    catalog_game: &str,
+    compact: Wanted,
+) -> Result<(String, Vec<u8>, usize), ApiError> {
+    let Some(pools) = state.game_pools(catalog_game).await else {
+        return Err(DomainState::game_catalog_unconfigured(catalog_game));
+    };
+    let read_db = &pools.read;
+    let stamp = seller_activity_stamp(read_db, &seller.uid)
+        .await
+        .map_err(|error| crate::game::catalog_error(catalog_game, error))?;
+    let (where_clauses, values, optional_visual_clause) = shop_scope(read_db, &seller.uid, catalog_game).await?;
+    let where_sql = where_clauses.join(" and ");
+    let sql = format!(
+        "select {BOOK_COLUMNS} from public.marketplace_user_listings
+          where {where_sql} order by {order}",
+        order = sort_sql(Some(&"price-asc".into())),
+    );
+    let rows = run_shop_sql(read_db, catalog_game, &sql, &values, &where_sql, optional_visual_clause.as_deref()).await?;
+    let rarities = book_rarities(read_db, &rows, catalog_game == "pokemon").await;
+    let listings = rows.len();
+    let (game, seller, built_stamp) = (catalog_game.to_string(), seller.clone(), stamp.clone());
+    let body = tokio::task::spawn_blocking(move || book_body(&rows, &seller, &game, &built_stamp, &rarities, compact))
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "seller book task failed");
+            ApiError::internal("Seller shop failed.")
+        })?;
+    Ok((stamp, body, listings))
+}
+
 pub async fn marketplace_seller_shop(
     State(state): State<DomainState>,
     Query(query): Query<HashMap<String, String>>,
@@ -566,51 +659,7 @@ pub async fn marketplace_seller_shop(
     };
     let read_db = &pools.read;
 
-    let mut values: Vec<Value> = vec![json!(seller.uid)];
-    let mut where_clauses: Vec<String> = vec![
-        "seller_uid = $1".into(),
-        "status = 'active'".into(),
-        "quantity_available > 0".into(),
-    ];
-    // The singles filter reads optional catalog/blueprint tables. It is a
-    // visual facet, not a financial contract, so a replica that has not been
-    // provisioned with those tables degrades to the unfiltered book instead of
-    // failing the whole shop.
-    let mut optional_visual_clause: Option<String> = None;
-    if catalog_game == "pokemon" {
-        let clause = pokemon_singles_where().to_string();
-        where_clauses.push(clause.clone());
-        optional_visual_clause = Some(clause);
-    } else {
-        // Satellite shops scope by the game catalog's card ids and game tag,
-        // matching `sellerCardIdsForGame` in the Node handler.
-        let listed = sqlx::query_scalar::<_, String>(
-            "select distinct card_id from public.marketplace_user_listings
-              where seller_uid = $1 and nullif(card_id, '') is not null",
-        )
-        .bind(&seller.uid)
-        .fetch_all(read_db)
-        .await
-        .map_err(|error| crate::game::catalog_error(catalog_game, error))?;
-        let catalog_ids: Vec<String> = if listed.is_empty() {
-            Vec::new()
-        } else {
-            sqlx::query_scalar::<_, String>(
-                "select card_id::text from public.marketplace_search_candidates
-                  where card_id::text = any($1::text[])",
-            )
-            .bind(&listed)
-            .fetch_all(read_db)
-            .await
-            .map_err(|error| crate::game::catalog_error(catalog_game, error))?
-        };
-        values.push(json!(catalog_ids));
-        let index = values.len();
-        where_clauses.push(format!("card_id = any(${index}::text[])"));
-        values.push(json!(catalog_game));
-        let index = values.len();
-        where_clauses.push(format!("marketplace_game = ${index}"));
-    }
+    let (mut where_clauses, mut values, optional_visual_clause) = shop_scope(read_db, &seller.uid, catalog_game).await?;
     if !book && !q.is_empty() {
         values.push(json!(format!("%{q}%")));
         let index = values.len();
@@ -701,13 +750,17 @@ pub async fn marketplace_seller_shop(
     );
     if book {
         // The whole shop, whatever its size: the page filters, sorts and
-        // pages it locally. Rarity rides along so the rarity filter is local.
+        // pages it locally. The seller's last change names the book.
         let compact = Wanted::from_parts(None, &format!("format={}", query.get("format").map(String::as_str).unwrap_or("")));
-        // The seller's last change names the book: until it moves, the bytes
-        // built for one visitor serve the next without touching the listings.
         let stamp = seller_activity_stamp(read_db, &seller.uid)
             .await
             .map_err(|error| crate::game::catalog_error(catalog_game, error))?;
+        if compact.templates() {
+            // The form the page asks for is stored: built once, off the
+            // request path, and shared by every API instance.
+            let body = super::seller_book::serve(&state, &seller, catalog_game, &stamp).await?;
+            return Ok(book_response(body, compact));
+        }
         let cache_key = format!(
             "{}|{}|{}|{}|{}|{}|{}",
             seller.uid, catalog_game, stamp, compact.c1(), compact.templates(), seller.display_name, seller.accepts_pkn
@@ -715,30 +768,7 @@ pub async fn marketplace_seller_shop(
         if let Some(body) = book_cache_get(&cache_key) {
             return Ok(book_response(body, compact));
         }
-        let sql = format!(
-            "select {BOOK_COLUMNS} from public.marketplace_user_listings
-              where {where_sql} order by {order}"
-        );
-        let rows = run_shop_sql(
-            read_db,
-            catalog_game,
-            &sql,
-            &values,
-            &where_sql,
-            optional_visual_clause.as_deref(),
-        )
-        .await?;
-        let rarities = book_rarities(read_db, &rows, catalog_game == "pokemon").await;
-        // Thousands of rows to shape and serialize: off the request workers,
-        // so a big book never holds the three the Pi runs everything on.
-        let game = catalog_game.to_string();
-        let seller = seller.clone();
-        let body = tokio::task::spawn_blocking(move || book_body(&rows, &seller, &game, &stamp, &rarities, compact))
-            .await
-            .map_err(|error| {
-                tracing::error!(%error, "seller book task failed");
-                ApiError::internal("Seller shop failed.")
-            })?;
+        let (_, body, _) = build_book(&state, &seller, catalog_game, compact).await?;
         let body = std::sync::Arc::new(body);
         book_cache_put(cache_key, body.clone());
         return Ok(book_response(body, compact));
@@ -879,7 +909,7 @@ fn bind_json<'a>(
     }
 }
 
-async fn seller_activity_stamp(
+pub(super) async fn seller_activity_stamp(
     read_db: &sqlx::PgPool,
     uid: &str,
 ) -> Result<String, sqlx::Error> {
