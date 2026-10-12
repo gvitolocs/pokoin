@@ -5,7 +5,8 @@ A difference is called only when it is at least 5% AND the two servers'
 rounds do not overlap (every round of one beats every round of the other);
 anything else is reported as inconclusive, with every round shown.
 
-  bench/postgres/report.py results/<run>.json [results/<verify>.json] > results/<date>.md
+  bench/postgres/report.py results/<run>.json [results/<verify>.json] [results/<writes>.json] > results/<date>.md
+  bench/postgres/report.py results/<writes>.json > results/<date>-writes.md
 """
 import json, statistics, sys
 
@@ -35,14 +36,47 @@ def spread(values):
     return (max(values) - min(values)) / m if m else 0.0
 
 
+def render_writes(data, w):
+    old, new = list(data["meta"]["servers"])
+    meta = data["meta"]
+    w(f"## Writes from identical snapshots: {meta['servers'][old]} vs {meta['servers'][new]}\n")
+    w(f"Every run starts from the same database (recreated from one template, checkpointed, touched tables "
+      f"prewarmed) and runs the same seeded transactions: {meta['clients']} clients, seed {meta['seed']}, "
+      f"{meta['rounds']} rounds alternating which server goes first.\n")
+    rows = [("tps", "tps", True, 0), ("p50 ms", "p50_ms", False, 2), ("p95 ms", "p95_ms", False, 2),
+            ("p99 ms", "p99_ms", False, 2), ("server CPU ms/tx", "cpu_ms_per_tx", False, 3),
+            ("WAL bytes/tx", "wal_bytes_per_tx", False, 0), ("table growth MB", "table_growth_mb", False, 2),
+            ("index growth MB", "index_growth_mb", False, 2), ("dead tuples after", "dead_tuples_after", False, 0),
+            ("autovacuum runs", "autovacuum_runs", False, 0), ("checkpoints", "checkpoints", False, 0)]
+    for name, workload in data["workloads"].items():
+        runs = workload["runs"]
+        w(f"### `{name}`: {runs[old][0]['transactions']:,} transactions per run, end state identical everywhere: "
+          f"{'yes' if workload['same_end_state_everywhere'] else '**NO**'}\n")
+        w(f"| measure | {old} rounds | {new} rounds | {new} vs {old} |")
+        w("| --- | --- | --- | --- |")
+        for label, key, higher, digits in rows:
+            a, b = [r[key] for r in runs[old]], [r[key] for r in runs[new]]
+            text = verdict(a, b, higher)[0] if any(a) and key in ("tps", "p50_ms", "p95_ms", "p99_ms", "cpu_ms_per_tx", "wal_bytes_per_tx") else "–"
+            w(f"| {label} | {', '.join(fmt(x, digits) for x in a)} | {', '.join(fmt(x, digits) for x in b)} | {text} |")
+        failed = sum(r["failed"] for side in runs.values() for r in side)
+        w(f"\nFailed transactions: {failed}. End state: `{workload['end_states'][0][:160]}`\n")
+
+
 def main():
-    run = json.load(open(sys.argv[1]))
-    verify = json.load(open(sys.argv[2])) if len(sys.argv) > 2 else None
+    first = json.load(open(sys.argv[1]))
+    extra = [json.load(open(path)) for path in sys.argv[2:]]
+    out = []
+    w = out.append
+    if "workloads" in first:
+        render_writes(first, w)
+        print("\n".join(out))
+        return
+    run = first
+    verify = next((x for x in extra if "outputs" in x), None)
+    writes = next((x for x in extra if "workloads" in x), None)
     labels = list(run["meta"]["servers"])
     old, new = labels
     meta = run["meta"]
-    out = []
-    w = out.append
     w(f"# Postgres {meta['servers'][old]} vs {meta['servers'][new]}: Pokoin workloads\n")
     w(f"Started {meta['started']}. {meta['rounds']} rounds per workload, servers alternating first; "
       f"pgbench {meta['clients']} clients / {meta['threads']} threads, {meta['seconds']} s measured after a warm-up; "
@@ -109,6 +143,9 @@ def main():
         w("| --- | --- | --- |")
         for name, values in verify["settings"].items():
             w(f"| `{name}` | {values.get(old) or '(absent)'} | {values.get(new) or '(absent)'} |")
+    if writes:
+        w("")
+        render_writes(writes, w)
     print("\n".join(out))
 
 
