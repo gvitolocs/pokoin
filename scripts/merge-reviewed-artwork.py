@@ -115,9 +115,9 @@ DO $$ BEGIN
  OR (SELECT count(*) FROM marketplace_search_candidates WHERE version IN ({versions})) <> {len(cards)}
  THEN RAISE EXCEPTION 'refusing rollback after independent membership changes'; END IF;
 END $$;
-UPDATE marketplace_search_candidates c SET version=r.version,artwork_cluster_sort=r.artwork_cluster_sort,pokedex_sort=r.pokedex_sort,projected_at=now() FROM restore r WHERE c.card_id=r.card_id;
 INSERT INTO pokoin_version_sets SELECT * FROM json_populate_recordset(NULL::pokoin_version_sets,'{set_json}'::json)
 ON CONFLICT(version) DO UPDATE SET gameplay_name=excluded.gameplay_name,member_count=excluded.member_count,source=excluded.source,updated_at=excluded.updated_at,art_layout=excluded.art_layout,art_layout_source=excluded.art_layout_source;
+UPDATE marketplace_search_candidates c SET version=r.version,artwork_cluster_sort=r.artwork_cluster_sort,pokedex_sort=r.pokedex_sort,projected_at=now() FROM restore r WHERE c.card_id=r.card_id;
 UPDATE pokoin_card_version_groups g SET version_count=(SELECT count(*) FROM pokoin_version_sets s WHERE s.gameplay_name=g.gameplay_name),updated_at=now()
 WHERE g.gameplay_name IN(SELECT gameplay_name FROM json_populate_recordset(NULL::pokoin_version_sets,'{set_json}'::json));
 COMMIT;
