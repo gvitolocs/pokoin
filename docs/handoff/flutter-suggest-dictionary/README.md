@@ -176,8 +176,9 @@ because there is no `brotli` CLI in the container):
 | PKD1 shipping every compact | 557.9 KB | 195.1 KB | 146.0 KB | rejected: ASCII compacts are cheap to derive |
 
 PLAN.md's entry-bundle attribution counts "suggest name/set/artist data 537 KB"
-as minified JS (`docs/frontend-perf/PLAN.md`, Phase A). The coordinator's
-minified-JS measurement is 526.3 KB raw / 94.4 KB gzip / 74.7 KB brotli.
+as minified JS (`docs/frontend-perf/PLAN.md`, Phase A). Re-serialised as
+minified JS objects (unquoted keys), the three files measure 526.3 KB raw /
+94.4 KB gzip / 74.7 KB brotli.
 
 Decode in Node, p50 of 60 runs (20 for the last row). Three runs on a shared
 cloud container gave these ranges:
@@ -848,7 +849,6 @@ Why these thresholds:
 
 ```sh
 # pokoin, branch claude/jolly-ramanujan-glkn4h at 43d2bf4 (= origin/main)
-node /…/scratchpad/measure.mjs /home/user/pokoin                       # coordinator's size script
 node docs/handoff/flutter-suggest-dictionary/measure-dictionary.mjs     # §2.3, §2.4, §4.2 (run 3×)
 node docs/handoff/flutter-suggest-dictionary/export-golden.mjs          # fixtures/ (run 2×, identical)
 # scratch copy (git archive HEAD), so the checkout stays clean:
