@@ -706,12 +706,34 @@ pub async fn read_batch_snapshot(db: &DbPools, seller_uid: &str, batch_id: &str)
         .bind(batch_id)
         .fetch_all(&pool)
         .await?;
-    let items: Vec<Value> = items.iter().map(row_value).collect();
+    let items: Vec<Value> = items.iter().map(|row| rules::item_view(&row_value(row))).collect();
+    let now_ms = crate::time_util::now_ms();
+    let session = latest_session(db, batch_id)
+        .await?
+        .map(|row| rules::session_view(&row, now_ms))
+        .unwrap_or(Value::Null);
     Ok(json!({
         "batch": rules::batch_view(&batch),
         "items": items,
-        "cursor": batch.get("item_seq").and_then(Value::as_i64).unwrap_or(0),
+        "session": session,
+        "serverTime": now_ms,
+        "cursor": rules::row_i64(&batch, "item_seq").unwrap_or(0),
     }))
+}
+
+/// `batchForStream`: the seller's batch row, without its items.
+pub async fn batch_for_stream(db: &DbPools, seller_uid: &str, batch_id: &str) -> ApiResult<Value> {
+    if !rules::is_uuid(batch_id) {
+        return Err(ApiError::not_found("Batch not found."));
+    }
+    let pool = writer(db).await?;
+    sqlx::query("select * from public.scan_batches where id = $1::uuid and seller_uid = $2")
+        .bind(batch_id)
+        .bind(seller_uid)
+        .fetch_optional(&pool)
+        .await?
+        .map(|row| row_value(&row))
+        .ok_or_else(|| ApiError::not_found("Batch not found."))
 }
 
 /// Items changed after `cursor` (stream replay).
@@ -725,7 +747,7 @@ pub async fn items_after(db: &DbPools, batch_id: &str, cursor: i64, limit: i64) 
     .bind(limit.clamp(1, 500))
     .fetch_all(&pool)
     .await?;
-    Ok(Value::Array(rows.iter().map(row_value).collect()))
+    Ok(Value::Array(rows.iter().map(|row| rules::item_view(&row_value(row))).collect()))
 }
 
 /// `latestSession` for a batch (stream header).
