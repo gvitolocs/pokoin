@@ -223,7 +223,7 @@ pub(crate) fn family_for_path(path: &str) -> &'static str {
             (r"cardtrader|/api/ingest", "cardtrader"),
             (r"cardmarket", "cardmarket"),
             (r"listings|marketplace-cart|marketplace-orders|watchlist|marketplace-recents|marketplace-event", "commerce"),
-            (r"auth-login|user-current-page|cache-google|ensure-username", "auth"),
+            (r"auth-login|user-current-page|cache-google|ensure-username|cardrails-(authorize|token)", "auth"),
             (r"stripe|create-pkn|crypto-pkn|earn-pkn|top-up|wpkn|bitcoin", "payments"),
             (r"pokoin-assistant|trainingai", "assistant"),
             (r"social", "social"),
@@ -382,12 +382,16 @@ mod tests {
 
     #[test]
     fn manifest_and_families() {
-        assert_eq!(route_count(), 149);
+        assert_eq!(route_count(), 151);
         assert_eq!(route_rows("page-bff").len(), 5);
         assert_eq!(family_for_path("/api/marketplace-card-page"), "page-bff");
         assert_eq!(family_for_path("/api/searchbar-cards"), "search");
         assert_eq!(family_for_path("/api/cardtrader-webhook/:uid"), "cardtrader");
         assert_eq!(family_for_path("/api/forum"), "other");
+        // The Card Rails sign-in routes group with auth; the seller connector
+        // stays with its own family.
+        assert_eq!(family_for_path("/api/cardrails-authorize"), "auth");
+        assert_eq!(family_for_path("/api/cardrails-token"), "auth");
         let grouped = group_routes(&route_rows(""));
         assert_eq!(grouped[0]["id"], "page-bff");
     }
