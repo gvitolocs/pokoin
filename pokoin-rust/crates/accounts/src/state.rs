@@ -9,6 +9,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use sqlx::postgres::{PgConnectOptions, PgSslMode};
+
 use crate::config::AccountsConfig;
 use crate::email::{EmailConfig, EmailSender, NullEmailSender, ResendEmailSender};
 use crate::firebase::{FirebaseVerifier, ServiceAccount, TokenVerifier};
@@ -33,6 +35,46 @@ impl Clock for SystemClock {
     }
 }
 
+/// Which database URL backs the Card Rails one-time codes: the writer URL
+/// when set, else the read URL for single-database deployments. Inputs may be
+/// raw env values; empty/whitespace counts as unset. `None` when neither is
+/// configured (the store then reports "not configured" truthfully).
+fn cardrails_database_url(writer_url: Option<&str>, read_url: Option<&str>) -> Option<String> {
+    writer_url
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .or_else(|| read_url.map(str::trim).filter(|url| !url.is_empty()))
+        .map(str::to_owned)
+}
+
+/// TLS mode for the writer pool, mirroring `external::game_ingest`'s handling
+/// of the marketplace SSL envs: `MARKETPLACE_WRITER_DATABASE_SSL=0` (or
+/// `sslmode=disable` in the URL) disables TLS,
+/// `MARKETPLACE_WRITER_DATABASE_SSL_VERIFY=1` verifies the server certificate,
+/// everything else still encrypts (`Require`).
+fn writer_ssl_mode(ssl: Option<&str>, ssl_verify: Option<&str>, url: &str) -> PgSslMode {
+    if ssl == Some("0") || url.to_ascii_lowercase().contains("sslmode=disable") {
+        PgSslMode::Disable
+    } else if ssl_verify == Some("1") {
+        PgSslMode::VerifyFull
+    } else {
+        PgSslMode::Require
+    }
+}
+
+/// Connect options for `MARKETPLACE_WRITER_DATABASE_URL` with the writer TLS
+/// envs applied (see [`writer_ssl_mode`]).
+fn writer_connect_options(url: &str) -> Result<PgConnectOptions, sqlx::Error> {
+    let options: PgConnectOptions = url.parse()?;
+    let ssl = std::env::var("MARKETPLACE_WRITER_DATABASE_SSL").ok();
+    let ssl_verify = std::env::var("MARKETPLACE_WRITER_DATABASE_SSL_VERIFY").ok();
+    Ok(options.ssl_mode(writer_ssl_mode(
+        ssl.as_deref(),
+        ssl_verify.as_deref(),
+        url,
+    )))
+}
+
 #[derive(Clone)]
 pub struct DomainState {
     inner: Arc<DomainStateInner>,
@@ -55,10 +97,18 @@ pub struct DomainStateInner {
     /// no database URL is configured; the SQL-backed routes then report that
     /// truthfully instead of starting a broken half-state.
     pub marketplace_db: Option<MarketplaceDb>,
+    /// Writer pool for the Card Rails one-time codes
+    /// (`MARKETPLACE_WRITER_DATABASE_URL`). The Pi read pool is a hot standby
+    /// where every INSERT fails read-only, and a code minted milliseconds
+    /// earlier must be readable back, so these routes never share the read
+    /// pool. `None` (no writer URL) falls back to `marketplace_db` — only
+    /// correct when both URLs point at one writable database.
+    pub marketplace_writer_db: Option<MarketplaceDb>,
     /// The chat/listing user-photos bucket (separate env from forum media).
     pub photo_store: Option<R2MediaStore>,
     /// Card Rails one-time sign-in codes. `None` resolves to the Postgres
-    /// store over the marketplace database; tests inject the in-memory store.
+    /// store over the marketplace writer database; tests inject the
+    /// in-memory store.
     pub cardrails_store: Option<Arc<dyn crate::domain::cardrails::CardRailsCodeStore>>,
 }
 
@@ -114,18 +164,44 @@ impl DomainState {
         let media_store: Option<Arc<dyn MediaStore>> = R2MediaStore::from_env(transport.clone())
             .map(|store| Arc::new(store) as Arc<dyn MediaStore>);
         let photo_store = R2MediaStore::for_user_photos(transport.clone());
-        let marketplace_db = std::env::var("MARKETPLACE_DATABASE_URL")
+        let read_url = std::env::var("MARKETPLACE_DATABASE_URL")
             .ok()
             .or_else(|| std::env::var("DATABASE_URL").ok())
             .map(|url| url.trim().to_string())
-            .filter(|url| !url.is_empty())
-            .and_then(|url| match MarketplaceDb::connect_lazy(&url, 4) {
+            .filter(|url| !url.is_empty());
+        let marketplace_db = read_url.clone().and_then(|url| {
+            match MarketplaceDb::connect_lazy(&url, 4) {
                 Ok(db) => Some(db),
                 Err(error) => {
                     tracing::error!(%error, "marketplace read model pool could not be created");
                     None
                 }
-            });
+            }
+        });
+        let writer_url = std::env::var("MARKETPLACE_WRITER_DATABASE_URL")
+            .ok()
+            .map(|url| url.trim().to_string())
+            .filter(|url| !url.is_empty());
+        // The Card Rails codes are INSERTed and consumed within seconds, and
+        // the read URL on the Pi is a hot standby: the pick is the writer URL
+        // when set, else the read URL (single-database deployments). Pure and
+        // unit-tested at the bottom of this file.
+        let cardrails_url = cardrails_database_url(writer_url.as_deref(), read_url.as_deref());
+        // Only the writer pick gets its own small pool, with the writer TLS
+        // envs applied; the read-URL pick leaves `marketplace_writer_db`
+        // empty so `cardrails_store()` reuses the existing read pool instead
+        // of a second pool at the same address.
+        let marketplace_writer_db = if writer_url.is_some() {
+            cardrails_url.and_then(|url| match writer_connect_options(&url) {
+                Ok(options) => Some(MarketplaceDb::connect_lazy_with(options, 2)),
+                Err(error) => {
+                    tracing::error!(%error, "marketplace writer pool could not be created");
+                    None
+                }
+            })
+        } else {
+            None
+        };
         let emails: Arc<dyn EmailSender> = Arc::new(ResendEmailSender::new(
             std::env::var("RESEND_API_KEY").ok(),
             transport.clone(),
@@ -150,6 +226,7 @@ impl DomainState {
                 clock: Arc::new(SystemClock),
                 media_store,
                 marketplace_db,
+                marketplace_writer_db,
                 photo_store,
                 cardrails_store: None,
             }),
@@ -204,15 +281,24 @@ impl DomainState {
     }
 
     /// The Card Rails one-time code store: an injected store (tests), else the
-    /// Postgres store over the marketplace database.
+    /// Postgres store over the writer pool (`MARKETPLACE_WRITER_DATABASE_URL`).
+    /// Both the insert and the consume go to the writer — the codes are read
+    /// back milliseconds after they are minted, so replication lag on the
+    /// read pool would fail live codes, and the standby cannot take the
+    /// INSERT/DELETE at all. Falls back to the read-model pool only when no
+    /// writer URL is configured (single writable database).
     pub fn cardrails_store(
         &self,
     ) -> crate::error::Result<Arc<dyn crate::domain::cardrails::CardRailsCodeStore>> {
         if let Some(store) = self.inner.cardrails_store.as_ref() {
             return Ok(store.clone());
         }
+        let db = match self.inner.marketplace_writer_db.clone() {
+            Some(db) => db,
+            None => self.marketplace_db()?,
+        };
         Ok(Arc::new(
-            crate::domain::cardrails::PostgresCardRailsCodeStore::new(self.marketplace_db()?),
+            crate::domain::cardrails::PostgresCardRailsCodeStore::new(db),
         ))
     }
 
@@ -391,5 +477,55 @@ mod tests {
         let now = state.clock().now();
         let delta = (chrono::Utc::now() - now).num_seconds().abs();
         assert!(delta < 5);
+    }
+
+    #[test]
+    fn cardrails_codes_pick_the_writer_url_when_set_and_the_read_url_when_not() {
+        assert_eq!(
+            cardrails_database_url(Some("postgres://writer/db"), Some("postgres://replica/db")),
+            Some("postgres://writer/db".to_string()),
+            "the writer URL wins when it is set"
+        );
+        assert_eq!(
+            cardrails_database_url(None, Some("postgres://replica/db")),
+            Some("postgres://replica/db".to_string()),
+            "no writer URL falls back to the read URL"
+        );
+        // An empty or whitespace writer URL counts as unset, too.
+        assert_eq!(
+            cardrails_database_url(Some("   "), Some("postgres://replica/db")),
+            Some("postgres://replica/db".to_string())
+        );
+        // Neither configured: the store reports that truthfully.
+        assert_eq!(cardrails_database_url(None, None), None);
+        assert_eq!(cardrails_database_url(Some(""), Some("")), None);
+    }
+
+    #[test]
+    fn writer_tls_envs_pick_the_ssl_mode() {
+        // Production (k3s) exports SSL=1 + SSL_VERIFY=1: verify the server cert.
+        assert!(matches!(
+            writer_ssl_mode(Some("1"), Some("1"), "postgres://writer/db"),
+            PgSslMode::VerifyFull
+        ));
+        // SSL_VERIFY=1 alone still verifies; unset envs keep encrypting.
+        assert!(matches!(
+            writer_ssl_mode(None, Some("1"), "postgres://writer/db"),
+            PgSslMode::VerifyFull
+        ));
+        assert!(matches!(
+            writer_ssl_mode(None, None, "postgres://writer/db"),
+            PgSslMode::Require
+        ));
+        // SSL=0 turns TLS off; an sslmode=disable URL does the same even when
+        // the verify flag is set.
+        assert!(matches!(
+            writer_ssl_mode(Some("0"), Some("1"), "postgres://writer/db"),
+            PgSslMode::Disable
+        ));
+        assert!(matches!(
+            writer_ssl_mode(None, Some("1"), "postgres://writer/db?sslmode=disable"),
+            PgSslMode::Disable
+        ));
     }
 }
