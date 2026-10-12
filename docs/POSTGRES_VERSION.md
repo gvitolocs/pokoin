@@ -142,6 +142,30 @@ images (musl, `en_US.utf8`, as the writer was created) through
   directory at `/var/lib/postgresql` and the old data directory stays where
   it is, untouched in copy mode.
 
+### Performance on Pokoin's workloads (19beta4, 2026-10-12)
+
+The full results, with every round, are in
+[bench/postgres/results/2026-10-12-summary.md](../bench/postgres/results/2026-10-12-summary.md).
+They come from synthetic data, 3 rounds per workload, and a difference counts
+only at ≥5% with no overlap between rounds.
+
+- **Reads:** the card desk is 7–10% faster on 19, and search and the set
+  page use about 8% less CPU per request. This is an engine gain: it holds
+  with `io_method=sync`.
+- **Nightly `sold_daily` rebuild:** no meaningful change, about 25 s on
+  both. Its output is identical, row for row.
+- **19's default `io_method = worker`:** vacuum is 17–23% slower and CardTrader
+  book upserts 7% slower, and on stock memory settings the card desk loses
+  23%. With `io_method=sync`, those costs go away and listing writes become
+  28% faster than on 17.
+- **Generic TPC-B** is 16–17% slower on 19beta4 with either I/O mode; Pokoin's
+  own write paths don't show it. Check it again on GA.
+
+So a performance gain alone doesn't justify a beta. At GA, set `io_method`
+and `jit` explicitly (step 4 below) and repeat the comparison on production
+data with `bench/postgres/run.py`, pointed at the rehearsal's 17 copy and its
+19 upgrade.
+
 ### Cutover (when 19 is stable)
 
 1. Rehearse on production first: `scripts/postgres-major-upgrade.sh
@@ -153,9 +177,12 @@ images (musl, `en_US.utf8`, as the writer was created) through
    (`upgrade-cluster.sh upgrade`, `MODE=copy` unless the rehearsal shows the
    copy is too slow; with `--link` the old cluster is unusable once 19
    starts, so keep a file-level copy first).
-4. Start the writer on `postgres:19.N-alpine` with its usual flags, the new
-   host directory mounted at `/var/lib/postgresql`, the old ports and the
-   `pokoin-overflow` attachment (`scripts/nezopt-k3s.sh up`). Run
+4. Start the writer on `postgres:19.N-alpine` with its usual flags plus
+   `-c io_method=sync` (unless a GA re-run shows `worker` or `io_uring` doing
+   better) and an explicit `-c jit=on|off` (17 runs with JIT on, 19 defaults
+   to off). Mount the new host directory at `/var/lib/postgresql`, and keep
+   the old ports and the `pokoin-overflow` attachment
+   (`scripts/nezopt-k3s.sh up`). Run
    `update_extensions.sql`, `vacuumdb --all --analyze-in-stages
    --missing-stats-only`, and recreate the slot `pokoin_pi_replica`.
 5. Pi replica: a standby cannot stream from another major. Stop the
