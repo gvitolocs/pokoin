@@ -258,6 +258,41 @@ async fn connect(state: &DomainState, grant: &Grant) -> Result<Value, ApiError> 
     }))
 }
 
+/// Read-only defaults for this grant's seller, using the same normalization
+/// as Scan Connect. Never creates a batch or changes the seller's defaults.
+async fn scan_settings(state: &DomainState, grant: &Grant) -> Result<Value, ApiError> {
+    use pokoin_external::scan_connect as rules;
+    let row = sqlx::query(
+        "select id::text as id, defaults from public.scan_batches where seller_uid = $1 \
+         and status <> 'discarded' order by (status = 'open') desc, updated_at desc, id desc limit 1"
+    )
+    .bind(&grant.seller_uid)
+    .fetch_optional(state.write_db())
+    .await?;
+    let raw = row.as_ref().and_then(|r| r.try_get::<Value, _>("defaults").ok())
+        .unwrap_or_else(rules::default_batch_defaults);
+    let defaults = rules::normalize_defaults(&raw, &rules::default_batch_defaults());
+    let batch_id = row.as_ref().and_then(|r| r.try_get::<String, _>("id").ok());
+    Ok(json!({ "batchId": batch_id, "scanSettings": cardrails_settings(&defaults) }))
+}
+
+fn cardrails_settings(defaults: &Value) -> Value {
+    let printing = match defaults["foilState"].as_str().unwrap_or("standard") {
+        "standard" => "Standard", "holo" => "Holo", "reverse" => "Reverse Holo",
+        other => other,
+    };
+    let condition = if defaults["condition"] == "Poor" { json!("PO") } else { defaults["condition"].clone() };
+    json!({
+        "game": defaults["game"], "language": defaults["language"], "condition": condition,
+        "printing": printing, "firstEdition": defaults["firstEdition"], "signed": defaults["signed"],
+        "altered": defaults["altered"], "storageLabel": defaults["location"],
+        "stackSize": defaults["stackSize"], "stack": defaults["stack"],
+        "startPosition": defaults["startPosition"], "quantity": defaults["quantity"],
+        "mergeRepeats": defaults["mergeRepeats"], "paused": false,
+        "locationConfigured": defaults["location"].as_str().is_some_and(|s| !s.is_empty()),
+    })
+}
+
 fn tool_listing(row: &Value) -> Value {
     let price_pkn = live::number(&row["price_pkn"]);
     json!({
@@ -574,6 +609,7 @@ async fn connector(state: &DomainState, headers: &HeaderMap, bytes: &Bytes, card
     let body = parse_json_body(bytes)?;
     let out = match text_field(&body, &["action"], 20).as_str() {
         "connect" | "info" => connect(state, &grant).await?,
+        "scan-settings" => scan_settings(state, &grant).await?,
         "locations" => json!({ "locations": locations(state, &grant.seller_uid).await? }),
         "webhook" => {
             let url = set_webhook(state, grant.id, &grant.seller_uid, &text_field(&body, &["url", "webhookUrl"], 600)).await?;

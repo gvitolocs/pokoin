@@ -50,6 +50,7 @@ Header `Authorization: Bearer pkn_…`, JSON body `{ "action": … }`:
 | action | Body | Answer |
 | --- | --- | --- |
 | `connect` / `info` | — | `{ scope, client, accountRef, accountName, cardmarketLinked: false, webhookUrl, sharedSecret, locations }` |
+| `scan-settings` | — | `{ batchId, scanSettings }` — latest open (otherwise latest submitted) scan batch defaults, normalized for Card Rails; read-only and seller-scoped. Includes game, language, finish, condition, flags, quantity, merge policy and the exact location/stack/start position. |
 | `locations` | — | `{ locations: [{ label }] }` — storage locations on the seller's live stock |
 | `webhook` | `url` | `{ webhookUrl, sharedSecret }` — like CardTrader's `PATCH /app` |
 | `listings` | `cursor?`, `limit?` (≤ 500) | `{ listings: [{ listingId, cardId, game, name, setName, collectorNumber, condition, language, quantity, status, pricePkn, priceEurCents, reverse, firstEdition, foilState, location, updatedAt }], cursor }` |
