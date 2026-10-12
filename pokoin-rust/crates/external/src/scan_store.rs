@@ -539,7 +539,7 @@ pub async fn claim_pairing(
                   or ($1 <> '' and $2 = '' and pin = $1)
                   or ($1 = '' and $2 <> '' and qr_secret = $2)
                 )
-              returning session_id",
+              returning session_id::text as session_id",
         )
         .bind(&code)
         .bind(&secret)
@@ -1076,7 +1076,7 @@ pub async fn ingest_scan(db: &DbPools, token: &str, body: &Value) -> ApiResult<V
             _ => {}
         }
     }
-    let last_event_id = sqlx::query("select id from public.scan_items where batch_id = $1::uuid order by position desc limit 1")
+    let last_event_id = sqlx::query("select id::text as id from public.scan_items where batch_id = $1::uuid order by position desc limit 1")
         .bind(&batch_id)
         .fetch_optional(&mut *tx)
         .await?
@@ -1806,7 +1806,7 @@ pub async fn submit_batch(
                    collector_number = excluded.collector_number, location = excluded.location, altered = excluded.altered,
                    status = 'inactive', updated_at = now()
                  where public.marketplace_user_listings.status = 'inactive'
-                 returning id, status",
+                 returning id::text as id, status",
             )
             .bind(row.get("card_id").and_then(Value::as_str).unwrap_or_default())
             .bind(seller_uid)
@@ -1840,7 +1840,7 @@ pub async fn submit_batch(
                 ),
                 None => {
                     let existing = sqlx::query(
-                        "select id, status from public.marketplace_user_listings
+                        "select id::text as id, status from public.marketplace_user_listings
                           where source = 'pokoin_scan_batch' and source_listing_id = $1",
                     )
                     .bind(&source_listing_id)
