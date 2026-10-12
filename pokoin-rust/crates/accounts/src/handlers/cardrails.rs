@@ -1,6 +1,8 @@
 //! Card Rails sign-in routes:
 //! `cardrails-authorize` (the consent page's browser call) and
-//! `cardrails-token` (the Card Rails API's server-to-server code exchange).
+//! `cardrails-token` (the Card Rails API's server-to-server code exchange,
+//! which also hands over a seller grant when asked — see
+//! [`crate::domain::cardrails`]).
 //!
 //! The one-time code is stored only as its SHA-256 hash, shared by every API
 //! instance through the marketplace **writer** database
@@ -171,11 +173,41 @@ async fn cardrails_token_inner(
         return Err(ApiError::bad_request("invalid_grant"));
     }
 
-    Ok(no_store_json(
-        StatusCode::OK,
-        json!({ "uid": uid, "email": email, "email_verified": email_verified }),
-        false,
-    ))
+    let mut identity = json!({ "uid": uid, "email": email, "email_verified": email_verified });
+    if body.get("grant").and_then(JsonValue::as_bool) == Some(true) {
+        if let Some(grant) = sign_in_grant(state, store.as_ref(), &uid).await {
+            identity["grant"] = json!(grant);
+        }
+    }
+    Ok(no_store_json(StatusCode::OK, identity, false))
+}
+
+/// The seller grant for a Card Rails sign-in, replacing the previous one. The
+/// sign-in itself never fails on it: Card Rails only loses the stock mirror.
+async fn sign_in_grant(
+    state: &DomainState,
+    store: &dyn domain::CardRailsCodeStore,
+    uid: &str,
+) -> Option<String> {
+    let Some(key) = state.config().seller_grant_key.as_deref() else {
+        tracing::warn!("cardrails sign-in grant skipped: no seller grant key");
+        return None;
+    };
+    let Some((token, grant)) = domain::new_seller_grant(key) else {
+        tracing::error!("cardrails sign-in grant skipped: unusable seller grant key");
+        return None;
+    };
+    match store.replace_sign_in_grant(uid, grant).await {
+        Ok(true) => Some(token),
+        Ok(false) => {
+            tracing::warn!("cardrails sign-in grant skipped: seller at the live grant limit");
+            None
+        }
+        Err(error) => {
+            tracing::error!(?error, "cardrails sign-in grant could not be stored");
+            None
+        }
+    }
 }
 
 /// The value after a `Bearer `/`bearer `/`BEARER ` prefix, like the Poko

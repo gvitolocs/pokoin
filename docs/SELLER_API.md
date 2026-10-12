@@ -25,6 +25,14 @@ to CardTrader.
 Scopes: a grant created for Card Rails has `cardrails:stock`; any other app
 gets `seller:stock`. A seller holds at most 10 live grants.
 
+"Accedi con Pokoin" in Card Rails also issues one: the Card Rails API passes
+`"grant": true` to `POST /api/cardrails-token`, and the answer carries
+`grant` (`pkn_…`) next to the identity. It is a `cardrails` grant labelled
+**Accedi con Pokoin**; each sign-in revokes the previous one, and a seller
+already at 10 hand-made grants gets the identity without a grant. The shared
+secret is sealed with `CARDTRADER_TOKEN_ENCRYPTION_KEY`, so the Pi API needs
+that variable (it already has it for CardTrader).
+
 ## Managing grants (signed-in seller)
 
 `GET /api/seller-api-grants` → `{ grants: [{ id, client, label, scope, tokenPrefix, webhookUrl, createdAt, lastUsedAt }] }`

@@ -27,6 +27,10 @@ pub struct AccountsConfig {
     /// presents on `POST /api/cardrails-token`. Unset/empty answers a truthful
     /// `503 not_configured` from that route only.
     pub cardrails_client_secret: Option<String>,
+    /// `CARDTRADER_TOKEN_ENCRYPTION_KEY` — seals the shared secret of the
+    /// seller grant a Card Rails sign-in hands over, exactly like the seller
+    /// API (`commerce::seller_api::seal_secret`). Unset: no grant is issued.
+    pub seller_grant_key: Option<String>,
     /// Google JWKS endpoint (overridable for tests and private deploys).
     pub jwks_url: String,
     /// OAuth 2.0 token endpoint.
@@ -86,6 +90,7 @@ impl AccountsConfig {
                 .unwrap_or(false),
             pending_signup_key: env_first(&["POKOIN_PENDING_SIGNUP_KEY", "PENDING_SIGNUP_KEY"]),
             cardrails_client_secret: env_first(&["POKOIN_CARDRAILS_CLIENT_SECRET"]),
+            seller_grant_key: env_first(&["CARDTRADER_TOKEN_ENCRYPTION_KEY"]),
             jwks_url: env_first(&["POKOIN_FIREBASE_JWKS_URL"]).unwrap_or_else(|| {
                 "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
                     .into()
@@ -147,6 +152,7 @@ impl Default for AccountsConfig {
             require_verified_password: false,
             pending_signup_key: None,
             cardrails_client_secret: None,
+            seller_grant_key: None,
             jwks_url:
                 "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
                     .into(),

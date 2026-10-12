@@ -8,6 +8,12 @@
 //! `/api/cardrails-token` for the Pokoin identity. OAuth authorization-code
 //! with PKCE S256; the code is a bearer secret, so it is stored only as its
 //! SHA-256 hash with a 120 second lifetime.
+//!
+//! When the Card Rails API asks for it (`"grant": true`), a successful
+//! exchange also issues a `cardrails:stock` seller grant (the token a seller
+//! would otherwise create by hand under Profile → Card Rails & API tokens),
+//! so a Pokoin sign-in mirrors the seller's Pokoin stock in Card Rails. Each
+//! sign-in replaces the previous sign-in grant; hand-made grants are untouched.
 
 use base64::Engine;
 use serde_json::Value as Json;
@@ -103,6 +109,78 @@ pub fn cancel_url(state: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Seller grant handed over with the identity
+// ---------------------------------------------------------------------------
+
+/// The `seller_api_grants` row a sign-in grant is stored as. These values
+/// mirror `commerce::seller_api` (`CLIENT_CARDRAILS`, `SCOPE_CARDRAILS`,
+/// `MAX_GRANTS`, `TOKEN_PREFIX`), which this crate cannot depend on.
+pub const GRANT_CLIENT: &str = "cardrails";
+pub const GRANT_SCOPE: &str = "cardrails:stock";
+pub const GRANT_LABEL: &str = "Accedi con Pokoin";
+pub const GRANT_TOKEN_PREFIX: &str = "pkn_";
+pub const MAX_LIVE_GRANTS: i64 = 10;
+
+/// A freshly minted grant: the token goes to Card Rails once, the rest is stored.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewSellerGrant {
+    pub token_hash: String,
+    pub token_prefix: String,
+    /// The `{version, algorithm, iv, tag, ciphertext}` envelope of the shared secret.
+    pub shared_secret: Json,
+}
+
+/// `CARDTRADER_TOKEN_ENCRYPTION_KEY` like `external::crypto::parse_encryption_key`:
+/// 64 hex characters, base64, or 32 raw bytes.
+fn grant_key(raw: &str) -> Option<Vec<u8>> {
+    let value = raw.trim();
+    if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return hex::decode(value).ok();
+    }
+    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(value) {
+        if decoded.len() == 32 {
+            return Some(decoded);
+        }
+    }
+    (value.len() == 32).then(|| value.as_bytes().to_vec())
+}
+
+/// The seller API's secret envelope (`external::crypto::encrypt_secret`), so
+/// the connector's `connect` action reads it back like any other grant's.
+pub fn seal_grant_secret(plaintext: &str, raw_key: &str) -> Option<Json> {
+    use aes_gcm::aead::{Aead, KeyInit, Payload};
+    use aes_gcm::{Aes256Gcm, Nonce};
+    let key = grant_key(raw_key)?;
+    let iv: [u8; 12] = rand::random();
+    let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
+    let mut sealed = cipher
+        .encrypt(Nonce::from_slice(&iv), Payload { msg: plaintext.as_bytes(), aad: &[] })
+        .ok()?;
+    let tag = sealed.split_off(sealed.len() - 16);
+    let b64 = base64::engine::general_purpose::STANDARD;
+    Some(serde_json::json!({
+        "version": 1,
+        "algorithm": "aes-256-gcm",
+        "iv": b64.encode(iv),
+        "tag": b64.encode(tag),
+        "ciphertext": b64.encode(sealed),
+    }))
+}
+
+/// `pkn_` + 32 random bytes base64url, and what the grants table keeps of it.
+/// `None` when the encryption key is unusable.
+pub fn new_seller_grant(raw_key: &str) -> Option<(String, NewSellerGrant)> {
+    let token = format!("{GRANT_TOKEN_PREFIX}{}", b64url().encode(rand::random::<[u8; 32]>()));
+    let secret = b64url().encode(rand::random::<[u8; 32]>());
+    let grant = NewSellerGrant {
+        token_hash: hex::encode(Sha256::digest(token.as_bytes())),
+        token_prefix: token.chars().take(GRANT_TOKEN_PREFIX.len() + 6).collect(),
+        shared_secret: seal_grant_secret(&secret, raw_key)?,
+    };
+    Some((token, grant))
+}
+
+// ---------------------------------------------------------------------------
 // Code storage
 // ---------------------------------------------------------------------------
 
@@ -139,6 +217,10 @@ pub trait CardRailsCodeStore: Send + Sync + 'static {
     async fn insert(&self, code: NewCardRailsCode) -> crate::error::Result<()>;
     async fn consume(&self, code_hash: &str)
         -> crate::error::Result<Option<ConsumedCardRailsCode>>;
+    /// Revokes the seller's previous sign-in grant and stores `grant` in its
+    /// place. `false` when the seller is at the live-grant limit.
+    async fn replace_sign_in_grant(&self, uid: &str, grant: NewSellerGrant)
+        -> crate::error::Result<bool>;
 }
 
 /// Postgres backing store. The consume statement is the whole contract: one
@@ -210,12 +292,56 @@ impl CardRailsCodeStore for PostgresCardRailsCodeStore {
             live: row.get("live").and_then(Json::as_bool).unwrap_or(false),
         }))
     }
+
+    /// One statement: under the live-grant limit (hand-made grants only, the
+    /// one being replaced does not count), the old sign-in grant is revoked
+    /// (its undelivered webhooks dropped, as `revoke` does) and the new one
+    /// inserted. At the limit nothing changes, so the old grant keeps working.
+    async fn replace_sign_in_grant(
+        &self,
+        uid: &str,
+        grant: NewSellerGrant,
+    ) -> crate::error::Result<bool> {
+        let rows = self
+            .db
+            .query_json(
+                "with allowed as ( \
+                   select count(*) < $8 as ok from public.seller_api_grants where seller_uid = $1 \
+                   and revoked_at is null and not (client = $2 and label = $3)), \
+                 revoked as ( \
+                   update public.seller_api_grants set revoked_at = now(), webhook_url = '' \
+                   where seller_uid = $1 and client = $2 and label = $3 and revoked_at is null \
+                   and (select ok from allowed) \
+                   returning id), \
+                 dropped as ( \
+                   delete from public.seller_webhook_deliveries \
+                   where grant_id in (select id from revoked) and delivered_at is null) \
+                 insert into public.seller_api_grants \
+                   (seller_uid, client, label, scope, token_hash, token_prefix, shared_secret) \
+                 select $1, $2, $3, $4, $5, $6, $7::jsonb where (select ok from allowed) \
+                 returning id::text as id",
+                &[
+                    crate::sql::SqlParam::Text(uid.to_string()),
+                    crate::sql::SqlParam::Text(GRANT_CLIENT.into()),
+                    crate::sql::SqlParam::Text(GRANT_LABEL.into()),
+                    crate::sql::SqlParam::Text(GRANT_SCOPE.into()),
+                    crate::sql::SqlParam::Text(grant.token_hash),
+                    crate::sql::SqlParam::Text(grant.token_prefix),
+                    crate::sql::SqlParam::Text(grant.shared_secret.to_string()),
+                    crate::sql::SqlParam::Int(MAX_LIVE_GRANTS),
+                ],
+            )
+            .await?;
+        Ok(!rows.is_empty())
+    }
 }
 
 /// In-process store for tests: same single-use/expiry contract, no database.
 #[derive(Default)]
 pub struct MemoryCardRailsCodeStore {
     codes: std::sync::Mutex<std::collections::HashMap<String, NewCardRailsCode>>,
+    /// The live sign-in grant per uid.
+    grants: std::sync::Mutex<std::collections::HashMap<String, NewSellerGrant>>,
 }
 
 impl MemoryCardRailsCodeStore {
@@ -229,6 +355,11 @@ impl MemoryCardRailsCodeStore {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// The live sign-in grant of `uid`, if one was issued.
+    pub fn sign_in_grant(&self, uid: &str) -> Option<NewSellerGrant> {
+        self.grants.lock().expect("grant map").get(uid).cloned()
     }
 }
 
@@ -256,6 +387,15 @@ impl CardRailsCodeStore for MemoryCardRailsCodeStore {
             code_challenge: code.code_challenge,
             live: chrono::Utc::now() < code.expires_at,
         }))
+    }
+
+    async fn replace_sign_in_grant(
+        &self,
+        uid: &str,
+        grant: NewSellerGrant,
+    ) -> crate::error::Result<bool> {
+        self.grants.lock().expect("grant map").insert(uid.to_string(), grant);
+        Ok(true)
     }
 }
 
@@ -376,6 +516,34 @@ mod tests {
         assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
         assert_eq!(code_hash(&code), code_hash(&code));
         assert_ne!(code_hash(&code), code_hash("other"));
+    }
+
+    #[test]
+    fn sign_in_grants_look_like_seller_api_tokens_and_seal_their_secret() {
+        let key = "0123456789abcdef0123456789abcdef";
+        let (token, grant) = new_seller_grant(key).expect("a usable key mints a grant");
+        assert!(token.starts_with("pkn_") && token.len() == 47, "{token}");
+        assert_eq!(grant.token_hash, hex::encode(Sha256::digest(token.as_bytes())));
+        assert_eq!(grant.token_prefix, token[..10]);
+        assert_ne!(new_seller_grant(key).unwrap().0, token, "tokens are random");
+
+        // The envelope opens with the same key, like `external::crypto::decrypt_secret`.
+        use aes_gcm::aead::{Aead, KeyInit, Payload};
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let envelope = &grant.shared_secret;
+        assert_eq!((envelope["version"].as_i64(), envelope["algorithm"].as_str()), (Some(1), Some("aes-256-gcm")));
+        let field = |name: &str| b64.decode(envelope[name].as_str().unwrap()).unwrap();
+        let mut sealed = field("ciphertext");
+        sealed.extend(field("tag"));
+        let cipher = aes_gcm::Aes256Gcm::new_from_slice(key.as_bytes()).unwrap();
+        let plain = cipher
+            .decrypt(aes_gcm::Nonce::from_slice(&field("iv")), Payload { msg: &sealed, aad: &[] })
+            .unwrap();
+        assert_eq!(plain.len(), 43, "a 32-byte base64url shared secret");
+
+        let hex_key = "ab".repeat(32);
+        assert!(new_seller_grant(&hex_key).is_some());
+        assert!(new_seller_grant("too-short").is_none());
     }
 
     #[test]

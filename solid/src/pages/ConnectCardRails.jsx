@@ -52,8 +52,8 @@ export default function ConnectCardRails() {
 
   const email = () => String(authUser()?.email || '');
   const lede = () => (email()
-    ? `Card Rails userà il tuo account Pokoin ${email()} per farti accedere.`
-    : 'Card Rails userà il tuo account Pokoin per farti accedere.');
+    ? `Card Rails userà il tuo account Pokoin ${email()} per farti accedere e mostrerà le carte che vendi su Pokoin nel suo inventario.`
+    : 'Card Rails userà il tuo account Pokoin per farti accedere e mostrerà le carte che vendi su Pokoin nel suo inventario.');
 
   async function continua(event) {
     event?.preventDefault?.();
