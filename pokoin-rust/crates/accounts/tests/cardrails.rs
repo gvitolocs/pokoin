@@ -387,3 +387,49 @@ async fn authorize_reports_a_missing_database_truthfully() {
         serde_json::json!({ "error": "Marketplace database is not configured." })
     );
 }
+
+/// Authorize, then exchange with `extra` merged into the token body; returns
+/// the token answer and the store, to look at the grant it kept.
+async fn exchange_with(
+    grant_key: Option<&str>,
+    extra: serde_json::Value,
+) -> (StatusCode, serde_json::Value, Arc<MemoryCardRailsCodeStore>) {
+    let transport = ScriptedTransport::new();
+    script_firebase(&transport);
+    let mut config = test_config();
+    config.cardrails_client_secret = Some(CLIENT_SECRET.into());
+    config.seller_grant_key = grant_key.map(str::to_string);
+    let store = Arc::new(MemoryCardRailsCodeStore::new());
+    let state = DomainState::with_transport(config, transport.as_transport())
+        .with_cardrails_store(Some(store.clone()));
+    let app = router(state);
+    let (_, authorized, _) = authorize(&app).await;
+    let mut body = serde_json::json!({ "code": authorized["code"], "code_verifier": VERIFIER });
+    for (key, value) in extra.as_object().unwrap() {
+        body[key] = value.clone();
+    }
+    let (status, answer, _) =
+        call(&app, "POST", "/api/cardrails-token", Some(CLIENT_SECRET), Some(body)).await;
+    (status, answer, store)
+}
+
+#[tokio::test]
+async fn the_exchange_hands_card_rails_a_seller_grant_when_asked() {
+    let key = "0123456789abcdef0123456789abcdef";
+    let (status, answer, store) = exchange_with(Some(key), serde_json::json!({ "grant": true })).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["uid"], "user-1");
+    let token = answer["grant"].as_str().expect("a grant token");
+    assert!(token.starts_with("pkn_"), "{token}");
+    let stored = store.sign_in_grant("user-1").expect("grant stored for the seller");
+    assert_eq!(stored.token_hash, pokoin_accounts::domain::cardrails::code_hash(token));
+    assert_eq!(stored.shared_secret["algorithm"], "aes-256-gcm");
+
+    // Older callers that do not ask, and servers without the key, get the identity only.
+    let (status, answer, store) = exchange_with(Some(key), serde_json::json!({})).await;
+    assert_eq!((status, answer.get("grant")), (StatusCode::OK, None));
+    assert!(store.sign_in_grant("user-1").is_none());
+    let (status, answer, _) = exchange_with(None, serde_json::json!({ "grant": true })).await;
+    assert_eq!((status, answer.get("grant")), (StatusCode::OK, None));
+    assert_eq!(answer["email"], "ash@pokoin.com");
+}
