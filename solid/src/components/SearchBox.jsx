@@ -30,6 +30,7 @@ import { sellerHref } from '@market/listing-meta.js';
 import { flagSrc, printFlagFromNationality, rowPrintBucket } from '@market/locale.js';
 import { prefersArtworkDelta, rarityRowTheme } from '@market/rarity-theme.js';
 import { prefetchSearchPage } from '@market/search-hot.js';
+import { createPageMemo } from '@market/suggest-page-memo.js';
 import { fetchSearchRecall } from '@market/search-recall.js';
 import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '@market/search-kind.js';
 import { warmupSearchUniverse } from '@market/search-warmup.js';
@@ -67,6 +68,11 @@ export function loadSuggestEngine() {
   }
   return enginePromise;
 }
+
+/** Printing pages already fetched for a lookup, shared by every keystroke (suggest-page-memo.js). */
+const suggestPage = createPageMemo(fetchSuggest);
+/** How long typing must pause before the results-page total is asked for. */
+const RESULTS_COUNT_DELAY_MS = 150;
 
 /**
  * Evaluate the engine on search intent (pointer down, focus, first key), after
@@ -256,7 +262,7 @@ export default function SearchBox(props) {
             const size = live.chunkSize(chunks);
             let page;
             try {
-              page = await fetchSuggest(lookup, {
+              page = await suggestPage(lookup, {
                 limit: size, offset, progressive: true, hydrate: true, signal: controller.signal, lang, printLang: print,
               });
             } catch (error) {
@@ -411,21 +417,28 @@ export default function SearchBox(props) {
     };
   });
 
-  // "View all N": the search-page total for this exact query + tab + print family.
+  // "View all N": the search-page total for this exact query + tab + print
+  // family, asked once typing pauses. Each keystroke used to fetch a results
+  // page (and its recall lookups) for a prefix nobody would open; the count
+  // shows the suggest estimate until the real one lands, and Enter prefetches
+  // on its own (goSearch).
   createEffect(() => [open(), term().trim(), searchTab(), searchLang(), printLang()], ([isOpen, text, tab, lang, print]) => {
     if (!isOpen || !pokemon || tab === 'users' || !liveReady(text) || text.length < 2) return undefined;
     let cancelled = false;
-    prefetchSearchPage(text, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print })
-      .then((payload) => {
-        const total = Number(payload?.total);
-        if (!cancelled && Number.isFinite(total) && total > 0) {
-          countedQuery = text;
-          setHitCount(total);
-        }
-      })
-      .catch(() => {});
+    const timer = setTimeout(() => {
+      prefetchSearchPage(text, lang, { fetchSearchPage: fetchSearchRecall, tab, printLang: print })
+        .then((payload) => {
+          const total = Number(payload?.total);
+          if (!cancelled && Number.isFinite(total) && total > 0) {
+            countedQuery = text;
+            setHitCount(total);
+          }
+        })
+        .catch(() => {});
+    }, RESULTS_COUNT_DELAY_MS);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   });
 

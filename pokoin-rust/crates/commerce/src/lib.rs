@@ -63,6 +63,7 @@ use axum::Router;
 pub fn router(state: DomainState) -> Router {
     listing_sync::start(&state);
     seller_api::start(&state);
+    handlers::seller_book::start(&state);
     Router::new()
         // listings + inventory + stock CSV
         .route(

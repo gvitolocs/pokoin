@@ -14,8 +14,8 @@ function reader(getJson, decode = decodeC1, enabled = true) {
   return new Function('getJson', 'isC1', 'decodeC1', 'C1_READS', `${readerSource}\nreturn getJsonC1;`)(getJson, isC1, decode, enabled);
 }
 
-test('c1 reads stay off until the edge compresses them', async () => {
-  assert.match(source, /const C1_READS = false;/);
+test('c1 reads are on, and a reader with them off asks for plain JSON', async () => {
+  assert.match(source, /const C1_READS = true;/);
   const asked = [];
   const getJsonC1 = reader(async (path) => {
     asked.push(path);
