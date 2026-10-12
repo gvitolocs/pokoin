@@ -3,8 +3,9 @@
 //! `cardrails-token` (the Card Rails API's server-to-server code exchange).
 //!
 //! The one-time code is stored only as its SHA-256 hash, shared by every API
-//! instance through the marketplace database (see
-//! [`crate::domain::cardrails`]); the client secret lives in
+//! instance through the marketplace **writer** database
+//! (`MARKETPLACE_WRITER_DATABASE_URL` — the Pi read pool is a read-only
+//! standby; see [`crate::domain::cardrails`]); the client secret lives in
 //! `POKOIN_CARDRAILS_CLIENT_SECRET`. Neither the code, the verifier nor the
 //! secret is ever logged.
 
