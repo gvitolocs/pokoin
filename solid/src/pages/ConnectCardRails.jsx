@@ -1,5 +1,5 @@
-import { createSignal, Match, onSettled, Show, Switch } from 'solid-js';
-import { useLocation } from '@solidjs/router';
+import { createEffect, createSignal, Match, onSettled, Show, Switch } from 'solid-js';
+import { useLocation, useNavigate } from '@solidjs/router';
 import { cardRailsAuthorize } from '@market/api.js';
 import {
   cardRailsAuthFrom,
@@ -16,7 +16,8 @@ import { authConfirmed, authUid, authUser, getBearer, loadAuth } from '../stores
  * ?state=&code_challenge=&code_challenge_method=S256; the signed-in user taps
  * Continua (the tap is the consent) and the one-time code deep-links back to
  * cardrails://auth/pokoin. No auto-continue, and an invalid request never
- * redirects anywhere.
+ * redirects anywhere. A signed-out visitor goes straight to the Pokoin
+ * sign-in screen and comes back here afterwards.
  */
 export default function ConnectCardRails() {
   const location = useLocation();
@@ -27,8 +28,18 @@ export default function ConnectCardRails() {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal('');
   const [redirected, setRedirected] = createSignal(false);
+  const [target, setTarget] = createSignal('');
+  const navigate = useNavigate();
   document.title = 'Accedi a Card Rails · Pokoin';
   loadAuth().catch(() => {});
+
+  // Signed out: the Pokoin sign-in screen itself, not a card asking for it.
+  createEffect(
+    () => valid() && authConfirmed() && !authUid(),
+    (out) => {
+      if (out) navigate(cardRailsAuthFrom(here()), { replace: true });
+    },
+  );
 
   onSettled(() => {
     const el = document.createElement('meta');
@@ -58,6 +69,7 @@ export default function ConnectCardRails() {
         code_challenge_method: params().get('code_challenge_method') || '',
       });
       const target = String(data?.redirect || cardRailsRedirectUrl(data?.code, params().get('state') || ''));
+      setTarget(target);
       setRedirected(true);
       window.location.assign(target);
     } catch (err) {
@@ -98,6 +110,10 @@ export default function ConnectCardRails() {
             <Match when={redirected()}>
               <h1>Accedi a Card Rails</h1>
               <p>Torna all'app Card Rails.</p>
+              {/* Some browsers drop an app link that is not a direct tap. */}
+              <Show when={target()}>
+                <p><a class="btn" href={target()}>Apri Card Rails</a></p>
+              </Show>
             </Match>
             <Match when={true}>
               <h1>Accedi a Card Rails</h1>
