@@ -950,6 +950,18 @@ export function pokoConnectAction(bearer, body) {
   });
 }
 
+/** Sign in with Pokoin for Card Rails: mint the one-time code (/connect/cardrails consent tap). */
+export function cardRailsAuthorize(bearer, body) {
+  return getJson('/api/cardrails-authorize', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearer}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 export function disconnectCardTrader(token) {
   return getJson('/api/cardtrader-disconnect', {
     method: 'POST',

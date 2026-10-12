@@ -57,6 +57,9 @@ pub struct DomainStateInner {
     pub marketplace_db: Option<MarketplaceDb>,
     /// The chat/listing user-photos bucket (separate env from forum media).
     pub photo_store: Option<R2MediaStore>,
+    /// Card Rails one-time sign-in codes. `None` resolves to the Postgres
+    /// store over the marketplace database; tests inject the in-memory store.
+    pub cardrails_store: Option<Arc<dyn crate::domain::cardrails::CardRailsCodeStore>>,
 }
 
 impl DomainState {
@@ -148,6 +151,7 @@ impl DomainState {
                 media_store,
                 marketplace_db,
                 photo_store,
+                cardrails_store: None,
             }),
         }
     }
@@ -197,6 +201,19 @@ impl DomainState {
         self.inner.marketplace_db.clone().ok_or_else(|| {
             crate::error::ApiError::internal("Marketplace database is not configured.")
         })
+    }
+
+    /// The Card Rails one-time code store: an injected store (tests), else the
+    /// Postgres store over the marketplace database.
+    pub fn cardrails_store(
+        &self,
+    ) -> crate::error::Result<Arc<dyn crate::domain::cardrails::CardRailsCodeStore>> {
+        if let Some(store) = self.inner.cardrails_store.as_ref() {
+            return Ok(store.clone());
+        }
+        Ok(Arc::new(
+            crate::domain::cardrails::PostgresCardRailsCodeStore::new(self.marketplace_db()?),
+        ))
     }
 
     pub fn service_account(&self) -> Option<&Arc<ServiceAccount>> {
@@ -290,6 +307,15 @@ impl DomainState {
     pub fn with_marketplace_db(mut self, marketplace_db: Option<MarketplaceDb>) -> Self {
         let inner = Arc::get_mut(&mut self.inner).expect("unique state");
         inner.marketplace_db = marketplace_db;
+        self
+    }
+
+    pub fn with_cardrails_store(
+        mut self,
+        cardrails_store: Option<Arc<dyn crate::domain::cardrails::CardRailsCodeStore>>,
+    ) -> Self {
+        let inner = Arc::get_mut(&mut self.inner).expect("unique state");
+        inner.cardrails_store = cardrails_store;
         self
     }
 

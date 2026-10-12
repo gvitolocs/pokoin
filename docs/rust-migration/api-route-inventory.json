@@ -23,6 +23,55 @@
     }
   },
   {
+    "path": "/api/cardrails-authorize",
+    "file": "new (native Rust: pokoin-rust/crates/accounts/src/handlers/cardrails.rs; no Node origin)",
+    "methods": [
+      "POST",
+      "OPTIONS"
+    ],
+    "purpose": "Sign in with Pokoin for the Card Rails apps (com.pokoin.cardrails): the consent page /connect/cardrails mints a one-time OAuth authorization code (PKCE S256) for the signed-in user and returns the cardrails://auth/pokoin deep link.",
+    "auth": "Required Firebase bearer token (same verification as /api/auth-login). Best-effort rate limit 10/min per uid. Body validation: state ^[A-Za-z0-9_-]{16,128}$, code_challenge ^[A-Za-z0-9_-]{43}$, code_challenge_method S256, else 400 invalid_request; no email claim is 403 email_required.",
+    "params": {
+      "body": "{ state, code_challenge, code_challenge_method: 'S256' }.",
+      "response": "200 no-store { code, redirect } — the code is 32 random bytes base64url-nopad, stored only as its SHA-256 hash."
+    },
+    "dependencies": {
+      "env": [
+        "FIREBASE_*",
+        "MARKETPLACE_DATABASE_URL",
+        "MARKETPLACE_WRITER_DATABASE_URL",
+        "VALKEY_URL"
+      ],
+      "services": [
+        "Firebase Admin",
+        "Postgres cardrails_auth_codes (scripts/sql/117_cardrails_auth_codes.sql, 120 s expiry)"
+      ]
+    }
+  },
+  {
+    "path": "/api/cardrails-token",
+    "file": "new (native Rust: pokoin-rust/crates/accounts/src/handlers/cardrails.rs; no Node origin)",
+    "methods": [
+      "POST"
+    ],
+    "purpose": "Server-to-server OAuth token exchange for Card Rails: consumes the one-time code (single use, atomically deleted) and verifies the PKCE S256 verifier, returning the Pokoin identity to the Card Rails API.",
+    "auth": "Authorization: Bearer POKOIN_CARDRAILS_CLIENT_SECRET, compared in constant time. Secret unset/empty: 503 not_configured. Wrong/missing bearer: 401 invalid_client. Unknown/used/expired code or verifier mismatch: 400 invalid_grant (a failed PKCE attempt burns the code).",
+    "params": {
+      "body": "{ code, code_verifier }.",
+      "response": "200 no-store { uid, email, email_verified }. Codes, verifiers and the secret are never logged."
+    },
+    "dependencies": {
+      "env": [
+        "POKOIN_CARDRAILS_CLIENT_SECRET",
+        "MARKETPLACE_DATABASE_URL",
+        "MARKETPLACE_WRITER_DATABASE_URL"
+      ],
+      "services": [
+        "Postgres cardrails_auth_codes"
+      ]
+    }
+  },
+  {
     "path": "/api/chat",
     "file": "chat.js",
     "vercelFallback": false,
