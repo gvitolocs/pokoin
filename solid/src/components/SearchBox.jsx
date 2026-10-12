@@ -31,6 +31,7 @@ import { flagSrc, printFlagFromNationality, rowPrintBucket } from '@market/local
 import { prefersArtworkDelta, rarityRowTheme } from '@market/rarity-theme.js';
 import { prefetchSearchPage } from '@market/search-hot.js';
 import { createPageMemo } from '@market/suggest-page-memo.js';
+import { buildInterestProfile, personalPopup, predictInterest, readInterestEvents } from '@market/interest-profile.js';
 import { fetchSearchRecall } from '@market/search-recall.js';
 import { normalizeSearchTab, printingMatchesSearchTab, searchHref, uniqueSellers } from '@market/search-kind.js';
 import { warmupSearchUniverse } from '@market/search-warmup.js';
@@ -173,6 +174,26 @@ export default function SearchBox(props) {
 
   const catalogTab = () => (searchTab() === 'users' ? 'singles' : searchTab());
 
+  // Personal predictions (interest-profile.js): this visitor's own recent
+  // views, read from their device each time the popup opens, under the
+  // current print chip. One or two letters search for the name they have
+  // been viewing; three or more search for what was typed, as always.
+  const [interestTick, setInterestTick] = createSignal(0);
+  const interest = createMemo(() => {
+    interestTick();
+    if (!pokemon) return null;
+    return buildInterestProfile(readInterestEvents('pokemon'), { print: printLang(), eraOf: engine()?.matchTcgEra || null });
+  });
+  const predicted = createMemo(() => {
+    const text = term().trim();
+    if (!pokemon || !text || searchTab() === 'users' || liveReady(text)) return null;
+    return predictInterest(text, interest());
+  });
+  const searchTerm = () => predicted()?.text || term();
+  createEffect(open, (isOpen) => {
+    if (isOpen) setInterestTick((tick) => tick + 1);
+  });
+
   function commitTerm(value) {
     nextTerm = value;
     if (termTimer) return;
@@ -227,7 +248,7 @@ export default function SearchBox(props) {
   let pool = null;
   let clock = null;
   createEffect(
-    () => [engine(), term(), searchLang(), rankPrint(), catalogTab(), pokemon && searchTab() !== 'users'],
+    () => [engine(), searchTerm(), searchLang(), rankPrint(), catalogTab(), pokemon && searchTab() !== 'users'],
     ([live, typed, lang, print, kind, enabled]) => {
       if (!live || !enabled) {
         setProgressivePending(false);
@@ -302,7 +323,7 @@ export default function SearchBox(props) {
   // Catalog hydration (name / artist / set printings the local resolver points
   // at), and the satellite-game suggest path (no local catalog).
   createEffect(
-    () => [engine(), term().trim(), searchLang(), rankPrint(), searchTab()],
+    () => [engine(), searchTerm().trim(), searchLang(), rankPrint(), searchTab()],
     ([live, text, lang, , tab]) => {
       if (!text) {
         setOtherPending(false);
@@ -379,7 +400,7 @@ export default function SearchBox(props) {
       live.rememberPrintings(key, cards);
       if (remember) live.rememberSuggestGroups(live.groupsFromCards(cards));
       preloadSuggestThumbs(collectPrintingThumbUrls(live.groupsFromCards(cards), suggestThumbSrc));
-      if (liveReady(String(untrack(term) || '').trim())) setLiveTick((tick) => tick + 1);
+      if (liveReady(String(untrack(searchTerm) || '').trim())) setLiveTick((tick) => tick + 1);
     };
     for (const target of targets) {
       if (seen.has(target.key) || live.cachedPrintings(target.key).length) continue;
@@ -422,7 +443,7 @@ export default function SearchBox(props) {
   // page (and its recall lookups) for a prefix nobody would open; the count
   // shows the suggest estimate until the real one lands, and Enter prefetches
   // on its own (goSearch).
-  createEffect(() => [open(), term().trim(), searchTab(), searchLang(), printLang()], ([isOpen, text, tab, lang, print]) => {
+  createEffect(() => [open(), searchTerm().trim(), searchTab(), searchLang(), printLang()], ([isOpen, text, tab, lang, print]) => {
     if (!isOpen || !pokemon || tab === 'users' || !liveReady(text) || text.length < 2) return undefined;
     let cancelled = false;
     const timer = setTimeout(() => {
@@ -445,11 +466,16 @@ export default function SearchBox(props) {
   const visibleGroups = createMemo(() => {
     if (!pokemon) return otherGroups();
     const live = engine();
-    const text = term();
+    const text = searchTerm();
     if (!live || !live.suggestLiveReady(text) || searchTab() === 'users') return [];
     epoch();
     liveTick();
-    return live.paintCatalogGroups(text, { printLang: rankPrint(), searchLang: searchLang(), kind: catalogTab() });
+    // The visitor's own order on top of the ranking: viewed names first among
+    // names that start with the text, their era first within a name.
+    const paint = (limit) => live.paintCatalogGroups(text, {
+      printLang: rankPrint(), searchLang: searchLang(), kind: catalogTab(), limit,
+    });
+    return personalPopup(paint, text, interest(), { eraOf: live.matchTcgEra });
   });
   const flat = createMemo(() => flattenPrintings(visibleGroups()));
   // Groups keyed by name: a re-rank inside a group keeps its rows mounted.
@@ -458,7 +484,7 @@ export default function SearchBox(props) {
   const suggestPending = () => (pokemon && searchTab() !== 'users'
     ? progressivePending() || !engine() || term() !== query() || rankPrint() !== printLang()
     : otherPending() || term() !== query());
-  const suggestVisible = () => open() && liveReady(query()) && (pokemon || visibleGroups().length > 0 || suggestPending());
+  const suggestVisible = () => open() && (liveReady(query()) || Boolean(predicted())) && (pokemon || visibleGroups().length > 0 || suggestPending());
   const activeOption = () => (activeIndex() >= 0 ? flat()[activeIndex()] : null);
   const suggestIds = () => (open() ? flat().map((row) => String(row.card.id)).join('|') : '');
 
@@ -704,6 +730,13 @@ export default function SearchBox(props) {
               </ul>
             )}
           >
+            <Show when={predicted()}>
+              {(guess) => (
+                <p class="suggest-hint">
+                  Because you viewed <strong>{guess().text}</strong>
+                </p>
+              )}
+            </Show>
             <ul class="suggest-list" role="listbox" aria-label="Card suggestions" ref={(node) => { list = node; }}>
               <Show
                 when={visibleGroups().length}
