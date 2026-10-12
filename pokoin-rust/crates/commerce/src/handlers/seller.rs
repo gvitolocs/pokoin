@@ -193,6 +193,23 @@ pub fn rarity_clause(key: &str, pokemon: bool) -> Option<(String, Vec<String>)> 
     ))
 }
 
+/// The rarity test over `bound` placeholders starting at `$first`: the first
+/// `wanted` patterns must match, the rest must not. ("common" is every label
+/// containing "common" except the ones containing "uncommon"; rendering the
+/// exclusions as matches made it mean exactly the uncommons.)
+pub fn rarity_body(label: &str, first: usize, wanted: usize, bound: usize) -> String {
+    if bound == 0 {
+        return "true".to_string();
+    }
+    (0..bound)
+        .map(|offset| {
+            let test = if offset < wanted { "like" } else { "not like" };
+            format!("lower(coalesce({label}, '')) {test} ${}", first + offset)
+        })
+        .collect::<Vec<_>>()
+        .join(" and ")
+}
+
 /// Rendered by [`rarity_clause`]; the caller substitutes the placeholders.
 pub const RARITY_BODY_MARKER: &str = "__RARITY_BODY__";
 /// Marker for the `holo` special case.
@@ -596,14 +613,8 @@ pub async fn marketplace_seller_shop(
                     b = first + 1,
                 )
             } else {
-                let likes: Vec<String> = (0..bound.len())
-                    .map(|offset| format!("lower(coalesce({label}, '')) like ${}", first + offset))
-                    .collect();
-                let body = if likes.is_empty() {
-                    "true".to_string()
-                } else {
-                    likes.join(" and ")
-                };
+                let wanted = rarity_patterns(&rarity).map(|(likes, _)| likes.len()).unwrap_or(bound.len());
+                let body = rarity_body(&label, first, wanted, bound.len());
                 let from = if pokemon {
                     format!(
                         "from public.marketplace_search_candidates c {}",
@@ -1128,6 +1139,58 @@ mod tests {
 #[cfg(test)]
 mod book_tests {
     use super::*;
+
+    #[test]
+    fn rarity_exclusions_are_not_like() {
+        assert_eq!(
+            rarity_body("c.rarity", 4, 1, 2),
+            "lower(coalesce(c.rarity, '')) like $4 and lower(coalesce(c.rarity, '')) not like $5"
+        );
+        assert_eq!(rarity_body("c.rarity", 2, 1, 1), "lower(coalesce(c.rarity, '')) like $2");
+        assert_eq!(rarity_body("c.rarity", 2, 0, 0), "true");
+        // Every key: its likes first, then its exclusions.
+        for key in ["common", "uncommon", "rare", "ultra", "illustration", "secret", "promo", "no-rarity"] {
+            let (likes, excludes) = rarity_patterns(key).unwrap();
+            let body = rarity_body("r", 1, likes.len(), likes.len() + excludes.len());
+            assert_eq!(body.matches(" not like ").count(), excludes.len(), "{key}");
+            assert_eq!(body.matches(" like ").count(), likes.len() + excludes.len(), "{key}");
+        }
+    }
+
+    /// The rarity keys pick the rows the shop's local filter picks.
+    #[tokio::test]
+    async fn rarity_keys_select_the_right_labels() {
+        let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+            eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new().max_connections(1).connect(&url).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        sqlx::raw_sql(
+            "drop table if exists pg_temp.labels;
+             create temp table labels as select * from (values ('Common'), ('Uncommon'), ('Rare'), ('Holo Rare'),
+               ('Ultra Rare'), ('Secret Rare'), ('Illustration Rare'), ('Amazing Rare'), ('Promo'), (null)) v(rarity);",
+        )
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+        for (key, expected) in [
+            ("common", vec!["Common"]),
+            ("uncommon", vec!["Uncommon"]),
+            ("rare", vec!["Holo Rare", "Rare"]),
+            ("ultra", vec!["Ultra Rare"]),
+            ("promo", vec!["Promo"]),
+        ] {
+            let (likes, excludes) = rarity_patterns(key).unwrap();
+            let body = rarity_body("rarity", 1, likes.len(), likes.len() + excludes.len());
+            let sql = format!("select rarity from labels where {body} order by 1");
+            let mut query = sqlx::query_scalar::<_, String>(&sql);
+            for pattern in likes.iter().chain(excludes.iter()) {
+                query = query.bind(*pattern);
+            }
+            assert_eq!(query.fetch_all(&mut *conn).await.unwrap(), expected, "{key}");
+        }
+    }
 
     #[test]
     fn rarity_expression_keeps_its_keywords_apart() {
