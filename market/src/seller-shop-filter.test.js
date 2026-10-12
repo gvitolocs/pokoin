@@ -137,17 +137,25 @@ test('the indexed book gives the same rows in the same order as filtering then s
   assert.notEqual(filterSellerBook(book, {}).rows, filterSellerBook(book, {}).rows);
 });
 
-test('a ten-thousand-row shop answers a filter click in a few milliseconds once indexed', () => {
-  const book = bigBook(10000);
-  filterSellerBook(book, { sort: 'price-desc' });
-  const started = performance.now();
-  let rows = 0;
-  for (const condition of ['NM', 'LP', 'MP', 'PO', '']) {
-    for (const language of ['EN', 'IT', '']) rows += filterSellerBook(book, { condition, language, sort: 'price-desc' }).rows.length;
+test('a book is indexed and sorted once, however many filter clicks follow', () => {
+  const book = bigBook(2000);
+  const sort = Array.prototype.sort;
+  let sorts = 0;
+  Array.prototype.sort = function counted(...args) {
+    if (this.length === book.length) sorts += 1;
+    return sort.apply(this, args);
+  };
+  try {
+    for (const condition of ['NM', 'LP', 'MP', 'PO', '']) {
+      for (const language of ['EN', 'IT', '']) filterSellerBook(book, { condition, language, sort: 'price-desc' });
+    }
+    assert.equal(sorts, 1, 'fifteen clicks in one order sort the book once');
+    filterSellerBook(book, { sort: 'name' });
+    filterSellerBook(book, { sort: 'name', reverse: true });
+    assert.equal(sorts, 2, 'a new order sorts it once more');
+  } finally {
+    Array.prototype.sort = sort;
   }
-  const perClick = (performance.now() - started) / 15;
-  assert.ok(rows > 0);
-  assert.ok(perClick < 25, `a filter click took ${perClick.toFixed(1)} ms`);
 });
 
 test('anything that is not a book filters to nothing', () => {

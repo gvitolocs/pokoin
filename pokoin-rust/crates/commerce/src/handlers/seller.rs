@@ -89,20 +89,23 @@ fn sort_sql(sort: Option<&String>) -> &'static str {
 /// The stored column is "Card" for almost every single; the real label is the
 /// collector-line prefix, otherwise CardTrader `fixed_properties.pokemon_rarity`.
 pub fn catalog_rarity_expr(alias: &str, blueprint_alias: &str) -> String {
+    // Plain newlines, not `\` continuations: a continuation eats the line
+    // break and the indent, which turned `case` + `when` into `casewhen` and
+    // made every Pokémon rarity filter a syntax error.
     format!(
-        "coalesce(\
-    nullif(case\
-      when {alias}.card_number like '%|%'\
-        and lower(coalesce({alias}.rarity, '')) in ('', 'card')\
-      then btrim(split_part({alias}.card_number, '|', 1))\
-      else null\
-    end, ''),\
-    nullif(case\
-      when lower(coalesce({alias}.rarity, '')) not in ('', 'card') then {alias}.rarity\
-      else null\
-    end, ''),\
-    nullif({blueprint_alias}.blueprint#>>'{{fixed_properties,pokemon_rarity}}', ''),\
-    nullif({alias}.rarity, '')\
+        "coalesce(
+    nullif(case
+      when {alias}.card_number like '%|%'
+        and lower(coalesce({alias}.rarity, '')) in ('', 'card')
+      then btrim(split_part({alias}.card_number, '|', 1))
+      else null
+    end, ''),
+    nullif(case
+      when lower(coalesce({alias}.rarity, '')) not in ('', 'card') then {alias}.rarity
+      else null
+    end, ''),
+    nullif({blueprint_alias}.blueprint#>>'{{fixed_properties,pokemon_rarity}}', ''),
+    nullif({alias}.rarity, '')
   )"
     )
 }
@@ -1125,6 +1128,63 @@ mod tests {
 #[cfg(test)]
 mod book_tests {
     use super::*;
+
+    #[test]
+    fn rarity_expression_keeps_its_keywords_apart() {
+        let sql = catalog_rarity_expr("c", "b");
+        let words: Vec<&str> = sql.split_whitespace().collect();
+        for keyword in ["when", "and", "then", "else", "end,"] {
+            assert!(words.contains(&keyword), "{keyword} is not a word of its own in: {sql}");
+        }
+        assert!(!sql.contains("casewhen") && !sql.contains("nullthen") && !sql.contains("nullend"));
+        let column = book_rarity_column(true);
+        assert!(column.contains("c.card_id = marketplace_user_listings.card_id::bigint"));
+    }
+
+    /// The rarity expression and the book's rarity column run on Postgres and
+    /// pick the collector-line prefix, then the stored rarity, then the
+    /// CardTrader blueprint.
+    #[tokio::test]
+    async fn rarity_sql_runs_and_reads_the_printed_rarity() {
+        let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+            eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+            return;
+        };
+        let pool = sqlx::postgres::PgPoolOptions::new().max_connections(1).connect(&url).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        sqlx::raw_sql(
+            "create schema if not exists public;
+             drop table if exists public.marketplace_search_candidates, public.cardtrader_pokemon_blueprints cascade;
+             create table public.marketplace_search_candidates (card_id bigint primary key, card_number text, rarity text);
+             create table public.cardtrader_pokemon_blueprints (id bigint primary key, blueprint jsonb);
+             insert into public.marketplace_search_candidates values
+               (10, 'Rare | 119/214', 'Card'), (12, '4/102', 'Holo Rare'), (14, '7/62', 'Card'), (16, '1/1', null);
+             insert into public.cardtrader_pokemon_blueprints values
+               (7, '{\"fixed_properties\": {\"pokemon_rarity\": \"Uncommon\"}}');
+             drop table if exists pg_temp.shop;
+             create temp table shop as select * from (values ('10'), ('12'), ('14'), ('16'), ('abc'), ('99')) v(card_id);",
+        )
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+        let column = book_rarity_column(true).replace("marketplace_user_listings", "shop");
+        let rows: Vec<(String, Option<String>)> =
+            sqlx::query_as(&format!("select card_id, {column} as rarity from shop order by card_id"))
+                .fetch_all(&mut *conn)
+                .await
+                .unwrap();
+        let rarity = |id: &str| rows.iter().find(|row| row.0 == id).unwrap().1.clone();
+        assert_eq!(rarity("10").as_deref(), Some("Rare"), "collector-line prefix");
+        assert_eq!(rarity("12").as_deref(), Some("Holo Rare"), "stored rarity");
+        assert_eq!(rarity("14").as_deref(), Some("Uncommon"), "CardTrader blueprint");
+        assert_eq!(rarity("16"), None);
+        assert_eq!(rarity("abc"), None, "a non-numeric listing id has no candidate");
+        assert_eq!(rarity("99"), None);
+        sqlx::raw_sql("drop table public.marketplace_search_candidates, public.cardtrader_pokemon_blueprints cascade")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+    }
 
     /// A 10,000-listing shop comes back whole, as one valid JSON book.
     /// `POKOIN_TEST_DATABASE_URL=postgres://… cargo test -p pokoin-commerce book_of_ten_thousand -- --nocapture`
