@@ -26,9 +26,14 @@ The report gives the median round, with min and max.
 ## Data
 
 `load-schema.sh` replays every migration from CardVault's
-`oracle-postgres/schema` and this repo's `scripts/sql` in order (138 of 142
-files apply on an empty database; the rest need production rows or objects
-only production has, see the report it writes), after `base-stubs.sql`.
+`oracle-postgres/schema` and this repo's `scripts/sql` in order, after
+`base-stubs.sql`. Files that fail are retried until nothing more applies,
+then every applied file is replayed in name order so the newest definition
+wins (`refresh_cardtrader_sold_daily` is redefined five times; without the
+replay an older, much slower body ended up installed). 134 of 142 files go
+through: 4 need production rows or objects only production has, and 4 apply
+once but are not idempotent, so their replay stops early. The report it
+writes lists each one.
 `seed.sql` then fills the tables the workloads touch, deterministically:
 70,728 printings built from the real typeahead dictionary (one per unit of a
 name's prior, which is its printing count), a 1.5M-listing CardTrader book,

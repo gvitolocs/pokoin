@@ -28,12 +28,11 @@ done
 "$psql" "$conn" -X -q -v ON_ERROR_STOP=1 -f "$here/base-stubs.sql" >/dev/null || exit 1
 
 declare -A error
-applied=0
+
 for pass in 1 2 3 4 5; do
   next=()
   for name in "${pending[@]}"; do
     if out=$("$psql" "$conn" -X -q -v ON_ERROR_STOP=1 -f "${pick[$name]}" 2>&1 >/dev/null); then
-      applied=$((applied + 1))
       unset 'error[$name]'
     else
       error[$name]=$(grep -m1 'ERROR' <<<"$out" | sed 's/^.*ERROR: *//' | cut -c1-160)
@@ -42,6 +41,19 @@ for pass in 1 2 3 4 5; do
   done
   [[ ${#next[@]} -eq ${#pending[@]} ]] && break
   pending=("${next[@]}")
+done
+
+# A file retried in a later pass ran after newer files that redefine the same
+# objects (refresh_cardtrader_sold_daily is redefined by 071, 086, 087, 101
+# and 102), so the older body would win. Replay every applied file once more
+# in name order; the newest definition is then the one installed.
+replay_failed=0
+for name in $(printf '%s\n' "${!pick[@]}" | sort -V); do
+  [[ -v "error[$name]" ]] && continue
+  if ! out=$("$psql" "$conn" -X -q -v ON_ERROR_STOP=1 -f "${pick[$name]}" 2>&1 >/dev/null); then
+    error[$name]="replay: $(grep -m1 'ERROR' <<<"$out" | sed 's/^.*ERROR: *//' | cut -c1-150)"
+    replay_failed=$((replay_failed + 1))
+  fi
 done
 
 {
@@ -53,4 +65,4 @@ done
     fi
   done
 } >"$report"
-echo "schema: $applied of ${#pick[@]} files applied, ${#error[@]} still fail on an empty database (see $report)"
+echo "schema: $((${#pick[@]} - ${#error[@]})) of ${#pick[@]} files applied and replayed in order, ${#error[@]} fail on an empty database ($replay_failed of them on the in-order replay; see $report)"
