@@ -968,7 +968,7 @@ pub fn submit_problem(row: &Value, intent: &str) -> &'static str {
         return "bad_quantity";
     }
     if intent != "collection" {
-        let price = row.get("price_pkn").and_then(Value::as_f64).unwrap_or(0.0);
+        let price = row_f64(row, "price_pkn").unwrap_or(0.0);
         if !price.is_finite() || price <= 0.0 {
             return "no_price";
         }
@@ -976,13 +976,30 @@ pub fn submit_problem(row: &Value, intent: &str) -> &'static str {
     ""
 }
 
+/// A numeric row column as an integer. Rows are typed like node-pg
+/// (`pg::row_to_node_json`): int8 and numeric arrive as strings, so
+/// `Value::as_i64` reads them as absent.
+pub fn row_i64(row: &Value, column: &str) -> Option<i64> {
+    row_f64(row, column).map(|n| n as i64)
+}
+
+/// A numeric row column as a float; `None` when null, absent or not a number.
+pub fn row_f64(row: &Value, column: &str) -> Option<f64> {
+    let n = match row.get(column)? {
+        Value::Number(n) => n.as_i64().map(|i| i as f64).or_else(|| n.as_f64())?,
+        Value::String(text) => text.trim().parse::<f64>().ok()?,
+        _ => return None,
+    };
+    n.is_finite().then_some(n)
+}
+
 /// `itemView`.
 pub fn item_view(row: &Value) -> Value {
     json!({
         "id": row.get("id"),
         "batchId": row.get("batch_id"),
-        "seq": row.get("seq").and_then(Value::as_i64).unwrap_or(0),
-        "position": row.get("position").and_then(Value::as_i64).unwrap_or(0),
+        "seq": row_i64(row, "seq").unwrap_or(0),
+        "position": pokoin_api_common::pg::js_number(row_f64(row, "position").unwrap_or(0.0)),
         "status": row.get("status"),
         "mergedInto": row.get("merged_into").cloned().unwrap_or(Value::Null),
         "scanEventId": row.get("scan_event_id").cloned().unwrap_or(Value::Null),
@@ -1014,7 +1031,7 @@ pub fn item_view(row: &Value) -> Value {
         "certificationId": row.get("certification_id").and_then(Value::as_str).unwrap_or(""),
         "location": row.get("location").and_then(Value::as_str).unwrap_or(""),
         "quantity": row.get("quantity").and_then(Value::as_i64).unwrap_or(0),
-        "pricePkn": row.get("price_pkn").and_then(Value::as_f64),
+        "pricePkn": row_f64(row, "price_pkn").map(pokoin_api_common::pg::js_number),
         "priceSuggested": row.get("price_suggested") == Some(&Value::Bool(true)),
         "sellerComment": row.get("seller_comment").and_then(Value::as_str).unwrap_or(""),
         "listingId": row.get("listing_id").cloned().unwrap_or(Value::Null),
@@ -1036,7 +1053,7 @@ pub fn batch_view(row: &Value) -> Value {
         "title": row.get("title").cloned().unwrap_or(json!("")),
         "defaults": normalize_defaults(row.get("defaults").unwrap_or(&default_batch_defaults()), &default_batch_defaults()),
         "defaultsVersion": row.get("defaults_version").and_then(Value::as_i64).unwrap_or(1),
-        "cursor": row.get("item_seq").and_then(Value::as_i64).unwrap_or(0),
+        "cursor": row_i64(row, "item_seq").unwrap_or(0),
         "submitResult": row.get("submit_result").cloned().unwrap_or(Value::Null),
         "createdAt": row.get("created_at").cloned().unwrap_or(Value::Null),
         "updatedAt": row.get("updated_at").cloned().unwrap_or(Value::Null),
@@ -1077,7 +1094,7 @@ pub fn session_view(row: &Value, now_ms: i64) -> Value {
         "lastScanAt": row.get("last_scan_at").cloned().unwrap_or(Value::Null),
         "phoneScans": row.get("phone_scans").and_then(Value::as_i64).unwrap_or(0),
         "lastActivityAt": row.get("last_activity_at").cloned().unwrap_or(Value::Null),
-        "version": row.get("version").and_then(Value::as_i64).unwrap_or(1),
+        "version": row_i64(row, "version").unwrap_or(1),
         "createdAt": row.get("created_at").cloned().unwrap_or(Value::Null),
         "endedAt": row.get("ended_at").cloned().unwrap_or(Value::Null),
     })
@@ -1128,6 +1145,26 @@ fn ms_of(value: Option<&Value>) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Rows as `pg::row_to_node_json` hands them over: int8 and numeric are
+    // strings. Read as 0, a row's `seq` made the scan desk ignore every
+    // answer to a row action (it keeps the row with the higher seq).
+    #[test]
+    fn views_read_string_typed_numbers() {
+        let row = json!({"id": "i1", "batch_id": "b1", "seq": "19", "position": 2.5, "status": "removed",
+            "price_pkn": "12.50", "quantity": 1});
+        let view = item_view(&row);
+        assert_eq!(view["seq"], json!(19));
+        assert_eq!(view["position"], json!(2.5));
+        assert_eq!(view["pricePkn"], json!(12.5));
+        assert_eq!(item_view(&json!({"seq": 7, "position": 3, "price_pkn": null}))["seq"], json!(7));
+        assert_eq!(item_view(&json!({"position": 3}))["position"], json!(3));
+        assert_eq!(item_view(&json!({"price_pkn": null}))["pricePkn"], Value::Null);
+        assert_eq!(batch_view(&json!({"id": "b1", "item_seq": "42"}))["cursor"], json!(42));
+        assert_eq!(session_view(&json!({"id": "s1", "version": "5"}), 0)["version"], json!(5));
+        assert_eq!(row_i64(&json!({"n": "x"}), "n"), None);
+        assert_eq!(row_i64(&json!({"n": true}), "n"), None);
+    }
 
     #[test]
     fn uuid_and_pin_rules() {

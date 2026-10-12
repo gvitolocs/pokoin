@@ -300,6 +300,45 @@ async fn session_inner(
     Ok(json_response(200, out))
 }
 
+const STREAM_PAGE: i64 = 500;
+
+struct StreamState {
+    db: crate::db::DbPools,
+    uid: String,
+    batch_id: String,
+    cursor: i64,
+    batch_sig: String,
+    session_sig: String,
+    deadline: std::time::Instant,
+    queue: std::collections::VecDeque<axum::response::sse::Event>,
+    done: bool,
+}
+
+fn batch_signature(row: &Value) -> String {
+    format!(
+        "{}:{}",
+        row.get("status").and_then(Value::as_str).unwrap_or(""),
+        crate::scan_connect::row_i64(row, "defaults_version").unwrap_or(1)
+    )
+}
+
+/// `sessionSignature` over a session view.
+fn session_signature(session: &Value) -> String {
+    if session.is_null() {
+        return "none".into();
+    }
+    format!("{}:{}:{}:{}", session["id"], session["version"], session["phase"], session["phoneLastSeenAt"])
+}
+
+async fn stream_session(db: &crate::db::DbPools, batch_id: &str) -> Value {
+    crate::scan_store::latest_session(db, batch_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|row| crate::scan_connect::session_view(&row, crate::time_util::now_ms()))
+        .unwrap_or(Value::Null)
+}
+
 /// `GET /api/scan-stream` — SSE change stream, closes after 55 s.
 pub async fn stream(state: State<DomainState>, headers: HeaderMap, uri: Uri) -> ApiResult<Response> {
     stream_inner(state, headers, uri).await.map_err(scan_error)
@@ -320,51 +359,79 @@ async fn stream_inner(
         return Err(ApiError::bad_request("batchId is required."));
     }
     let cursor = crate::routes::util::query_i64(&uri, "after", 0, 0, i64::MAX);
-    let db = state.db.clone();
-    let uid = identity.uid.clone();
-    let deadline = Instant::now() + Duration::from_secs(55);
-    let initial = json!({ "batchId": batch_id, "after": cursor });
-    let stream = futures_util::stream::unfold(
-        (db, uid, batch_id, cursor, deadline, Some(initial)),
-        |(db, uid, batch_id, mut cursor, deadline, initial)| async move {
-            if let Some(initial) = initial {
-                let event = Event::default().event("hello").data(initial.to_string());
-                return Some((Ok::<Event, Infallible>(event), (db, uid, batch_id, cursor, deadline, None)));
+    // Ownership is checked before the stream opens: an unknown batch is a 404,
+    // which the desk reads as "gone" and stops reconnecting.
+    let batch_row = crate::scan_store::batch_for_stream(&state.db, &identity.uid, &batch_id).await?;
+    let batch_id = batch_row.get("id").and_then(Value::as_str).unwrap_or(&batch_id).to_string();
+    let session = stream_session(&state.db, &batch_id).await;
+    let hello = json!({
+        "serverTime": crate::time_util::now_ms(),
+        "batch": crate::scan_connect::batch_view(&batch_row),
+        "session": session,
+        "cursor": cursor,
+    });
+    let start = StreamState {
+        db: state.db.clone(),
+        uid: identity.uid.clone(),
+        batch_id,
+        cursor,
+        batch_sig: batch_signature(&batch_row),
+        session_sig: session_signature(&session),
+        deadline: Instant::now() + Duration::from_secs(55),
+        queue: std::collections::VecDeque::from([Event::default().event("hello").data(hello.to_string())]),
+        done: false,
+    };
+    // Frames are the desk's protocol (market/src/scan-stream.js): `hello`,
+    // `items` {items, cursor}, `batch`, `session`, then `bye` at the lifetime.
+    let stream = futures_util::stream::unfold(start, |mut st| async move {
+        loop {
+            if let Some(event) = st.queue.pop_front() {
+                return Some((Ok::<Event, Infallible>(event), st));
             }
-            if Instant::now() >= deadline {
+            if st.done {
                 return None;
             }
+            if Instant::now() >= st.deadline {
+                st.done = true;
+                let bye = json!({ "cursor": st.cursor, "reconnect": true });
+                st.queue.push_back(Event::default().event("bye").data(bye.to_string()));
+                continue;
+            }
             tokio::time::sleep(Duration::from_millis(1000)).await;
-            let batch = crate::scan_store::read_batch_snapshot(&db, &uid, &batch_id)
-                .await
-                .ok()
-                .and_then(|snapshot| snapshot.get("batch").cloned())
-                .unwrap_or(Value::Null);
-            let items = crate::scan_store::items_after(&db, &batch_id, cursor, 500)
-                .await
-                .unwrap_or_else(|_| json!([]));
-            let session = crate::scan_store::latest_session(&db, &batch_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|row| crate::scan_connect::session_view(&row, crate::time_util::now_ms()))
-                .unwrap_or(Value::Null);
-            if let Some(rows) = items.as_array() {
-                if let Some(last) = rows.iter().filter_map(|row| row.get("seq").and_then(Value::as_i64)).max() {
-                    cursor = cursor.max(last);
+            loop {
+                let items = crate::scan_store::items_after(&st.db, &st.batch_id, st.cursor, STREAM_PAGE)
+                    .await
+                    .unwrap_or_else(|_| json!([]));
+                let rows = items.as_array().map(Vec::len).unwrap_or(0);
+                let last = items
+                    .as_array()
+                    .and_then(|rows| rows.iter().filter_map(|row| row.get("seq").and_then(Value::as_i64)).max());
+                // No readable seq would replay the same page forever.
+                let Some(last) = last.filter(|last| *last > st.cursor) else { break };
+                st.cursor = last;
+                let frame = json!({ "items": items, "cursor": st.cursor });
+                st.queue.push_back(Event::default().event("items").id(st.cursor.to_string()).data(frame.to_string()));
+                if (rows as i64) < STREAM_PAGE {
+                    break;
                 }
             }
-            let payload = json!({
-                "batchId": batch_id,
-                "batch": batch,
-                "items": items,
-                "session": session,
-                "cursor": cursor,
-            });
-            let event = Event::default().event("change").data(payload.to_string());
-            Some((Ok::<Event, Infallible>(event), (db, uid, batch_id, cursor, deadline, None)))
-        },
-    );
+            if let Ok(fresh) = crate::scan_store::batch_for_stream(&st.db, &st.uid, &st.batch_id).await {
+                let sig = batch_signature(&fresh);
+                if sig != st.batch_sig {
+                    st.batch_sig = sig;
+                    let frame = json!({ "batch": crate::scan_connect::batch_view(&fresh) });
+                    st.queue.push_back(Event::default().event("batch").data(frame.to_string()));
+                }
+            }
+            let session = stream_session(&st.db, &st.batch_id).await;
+            let sig = session_signature(&session);
+            if sig != st.session_sig {
+                st.session_sig = sig;
+                let frame = json!({ "session": session, "serverTime": crate::time_util::now_ms() });
+                st.queue.push_back(Event::default().event("session").data(frame.to_string()));
+            }
+        }
+    });
     Ok(Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
         .into_response())
