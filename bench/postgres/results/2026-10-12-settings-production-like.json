@@ -1,0 +1,5 @@
+{
+"17.11": { "checkpoint_timeout" : "900s", "data_checksums" : "off", "effective_cache_size" : "7864328kB", "effective_io_concurrency" : "1", "io_combine_limit" : "168kB", "jit" : "on", "maintenance_io_concurrency" : "10", "maintenance_work_mem" : "1048576kB", "max_parallel_workers_per_gather" : "2", "max_wal_size" : "4096MB", "random_page_cost" : "4", "shared_buffers" : "2621448kB", "wal_buffers" : "20488kB", "work_mem" : "65536kB" }
+,
+"19beta4": { "autovacuum_worker_slots" : "16", "checkpoint_timeout" : "900s", "data_checksums" : "off", "effective_cache_size" : "7864328kB", "effective_io_concurrency" : "16", "io_combine_limit" : "168kB", "io_max_combine_limit" : "168kB", "io_method" : "worker", "jit" : "off", "maintenance_io_concurrency" : "16", "maintenance_work_mem" : "1048576kB", "max_parallel_workers_per_gather" : "2", "max_wal_size" : "4096MB", "random_page_cost" : "4", "shared_buffers" : "2621448kB", "wal_buffers" : "20488kB", "work_mem" : "65536kB" }
+}
