@@ -213,12 +213,48 @@ fn elapsed_ms(booted: Instant) -> u64 {
     booted.elapsed().as_millis() as u64
 }
 
+/// Outer deadline for the startup Postgres connect; longer than the pool's
+/// own acquire timeout so sqlx reports the real error, not our timeout.
+const WARM_POSTGRES_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Startup retry delay: 2 s doubling to a 30 s cap, ±25 % jitter, so pods
+/// restarting together do not hammer a full database in lockstep.
+#[derive(Debug)]
+struct WarmBackoff {
+    next: Duration,
+}
+
+impl WarmBackoff {
+    const FIRST: Duration = Duration::from_secs(2);
+    const CAP: Duration = Duration::from_secs(30);
+
+    fn new() -> Self {
+        Self { next: Self::FIRST }
+    }
+
+    /// The delay to sleep now; `unit` in [0, 1) picks the jitter.
+    fn delay(&mut self, unit: f64) -> Duration {
+        let base = self.next;
+        self.next = (base * 2).min(Self::CAP);
+        base.mul_f64(0.75 + 0.5 * unit.clamp(0.0, 1.0))
+    }
+}
+
+/// A process-random value in [0, 1) without a rand dependency.
+fn jitter_unit() -> f64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    (hasher.finish() >> 11) as f64 / (1u64 << 53) as f64
+}
+
 async fn warm_dependencies(state: AppState) {
+    let mut backoff = WarmBackoff::new();
     loop {
         if state.db.read().await.is_none() {
             if let Some(url) = state.config.database_url.clone() {
                 match tokio::time::timeout(
-                    Duration::from_secs(2),
+                    WARM_POSTGRES_TIMEOUT,
                     pokoin_db::pool(&url, state.config.db_pool_max),
                 )
                 .await
@@ -269,7 +305,7 @@ async fn warm_dependencies(state: AppState) {
             );
             break;
         }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(backoff.delay(jitter_unit())).await;
     }
 }
 
@@ -684,6 +720,28 @@ mod tests {
         let mut servers = tokio::task::JoinSet::new();
         servers.spawn(serve_listener("test", listener, app, stopping));
         (addr, stop, servers)
+    }
+
+    #[test]
+    fn warm_backoff_doubles_to_30s_with_25_percent_jitter() {
+        let mut backoff = WarmBackoff::new();
+        let mid: Vec<u64> = (0..7).map(|_| backoff.delay(0.5).as_secs()).collect();
+        assert_eq!(mid, [2, 4, 8, 16, 30, 30, 30]);
+        let mut low = WarmBackoff::new();
+        assert_eq!(low.delay(0.0), Duration::from_millis(1500));
+        let mut high = WarmBackoff::new();
+        assert_eq!(high.delay(1.0), Duration::from_millis(2500));
+        let mut capped = WarmBackoff::new();
+        for _ in 0..10 {
+            capped.delay(0.5);
+        }
+        assert_eq!(capped.delay(1.0), Duration::from_millis(37_500));
+        assert!((0..100).map(|_| jitter_unit()).all(|unit| (0.0..1.0).contains(&unit)));
+    }
+
+    #[test]
+    fn warm_deadline_outlasts_the_pool_acquire_timeout() {
+        assert!(WARM_POSTGRES_TIMEOUT > pokoin_db::POOL_ACQUIRE_TIMEOUT);
     }
 
     #[tokio::test]

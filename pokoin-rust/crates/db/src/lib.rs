@@ -5,12 +5,20 @@ use std::time::Duration;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
-pub async fn pool(url: &str, max: u32) -> Result<PgPool, sqlx::Error> {
+/// How long the eager main pool connect may take. It must cover TLS
+/// verify-full + SCRAM to the writer; at 200 ms a busy or full writer turned
+/// every pod restart into a tight retry loop (sqlx retries SQLSTATE 53300
+/// "too many clients" inside the window).
+pub const POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(3);
+
+pub fn pool_options(max: u32) -> PgPoolOptions {
     PgPoolOptions::new()
         .max_connections(max.max(1))
-        .acquire_timeout(std::time::Duration::from_millis(200))
-        .connect(url)
-        .await
+        .acquire_timeout(POOL_ACQUIRE_TIMEOUT)
+}
+
+pub async fn pool(url: &str, max: u32) -> Result<PgPool, sqlx::Error> {
+    pool_options(max).connect(url).await
 }
 
 /// Per-pool cap for one satellite game database (`pokoin_magic`, …).
@@ -136,6 +144,13 @@ mod tests {
         assert_eq!(zero, SatelliteBudget { max_connections: 1, idle_timeout: Duration::from_secs(5) });
         let junk = SatelliteBudget::from_lookup(lookup(&[(GAME_POOL_MAX_ENV, "lots"), (GAME_POOL_IDLE_ENV, "")]));
         assert_eq!(junk, SatelliteBudget::from_lookup(lookup(&[])));
+    }
+
+    #[test]
+    fn main_pool_waits_long_enough_for_a_tls_connect() {
+        let options = pool_options(0);
+        assert_eq!(options.get_max_connections(), 1);
+        assert_eq!(options.get_acquire_timeout(), Duration::from_secs(3));
     }
 
     #[test]

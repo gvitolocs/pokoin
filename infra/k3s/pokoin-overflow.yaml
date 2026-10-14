@@ -452,6 +452,15 @@ spec:
               value: '6379'
             - name: RUST_LOG
               value: info
+            # The search jobs open fixed 2-connection job pools (one pool when
+            # read and writer URLs are equal); these caps keep them from
+            # inheriting the Pi's 16/12 from pokoin-api-env if that changes.
+            - name: POKOIN_RUST_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
                 name: pokoin-api-env
@@ -534,6 +543,15 @@ spec:
               value: '6379'
             - name: RUST_LOG
               value: info
+            # The search jobs open fixed 2-connection job pools (one pool when
+            # read and writer URLs are equal); these caps keep them from
+            # inheriting the Pi's 16/12 from pokoin-api-env if that changes.
+            - name: POKOIN_RUST_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_DOMAIN_DB_POOL_MAX
+              value: '2'
+            - name: POKOIN_RUST_GAME_DB_POOL_MAX
+              value: '1'
             envFrom:
             - secretRef:
                 name: pokoin-api-env
