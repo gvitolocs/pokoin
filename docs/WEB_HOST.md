@@ -31,7 +31,7 @@ Host checks for those names left in code (`game.js`, the recents API,
 - Static root: `/srv/pokoin/web/current` (release `f3aef6a` of `origin/main`)
 - Serves:
   - Landing page (`/`)
-  - React SPA (`/marketplace*`, `/wallet`, `/auth`, `/cart`, `/forum`, `/scan`, `/docs`, …)
+  - The SPA (`/marketplace*`, `/wallet`, `/auth`, `/cart`, `/forum`, `/scan`, `/docs`, …)
   - Numeric shortlinks without slug (e.g. `/239324`)
   - Bot OG HTML (`/marketplace/{lang}/cards/{id}...`)
   - Homepage rails vector (`GET /api/marketplace-home`)
@@ -53,11 +53,15 @@ Host checks for those names left in code (`game.js`, the recents API,
 - `workers/pokoin-web-assets.js`
 - `scripts/write-cloudflare-web-routing.mjs`
 
-**Build:** `scripts/build-web.sh` → `dist-web/`
-- `/` → landing (`index.html` copy)
+**Build:** `scripts/build-web.sh [out]` → `dist-web/` (or `out`), then `node scripts/write-cloudflare-web-routing.mjs <out>`
+- `/` → landing (`index.html` copy of `landing.html`)
+- `/market/*` is the Solid app (`solid/dist`; `market/public` is its Vite publicDir): `index.html`
+  (copied to `app.html`) is the SPA shell, `/market/s/*` the hashed chunks. There is no React build.
 - App routes rewrite to `/market/app.html` via `dist-web/_redirects`
-- Hashed `/market/assets/*` are immutable
-- HTML: `Cache-Control: max-age=0, must-revalidate`
+- Hashed `/market/s/*` are immutable
+- HTML: `Cache-Control: max-age=0, must-revalidate`; no inline scripts, so the CSP `script-src` carries no hashes
+- Local check: `node solid/scripts/preview.mjs --dist-web <out> --port <port>` serves the output with the
+  same `_redirects` rules (redirects, rewrites, 404 otherwise)
 
 **Worker execution (`run_worker_first`):**
 Only these paths run the Worker script:
@@ -117,7 +121,7 @@ The Vercel project `web` (team `giuseppevitolo17s-projects`) and its environment
 
 - [LANDING.md](LANDING.md) — Landing pipeline, copy, deploy
 - [DEPLOY.md](DEPLOY.md) — Production deploy rules
-- [MARKET.md](MARKET.md) — React marketplace pipeline and APIs
+- [MARKET.md](MARKET.md) — Marketplace pipeline and APIs
 - [SEO.md](SEO.md) — Marketplace SEO, sitemaps, crawler policy
 - [NEWS.md](NEWS.md) — Hypemeter / news.pokoin.com pipeline
 - [GAMES.md](GAMES.md) — Multi-game catalog, Pi API, CDN
