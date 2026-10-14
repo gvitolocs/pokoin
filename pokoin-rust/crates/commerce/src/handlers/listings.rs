@@ -876,16 +876,17 @@ pub(crate) async fn update_listing(
     // The CardTrader product this listing is linked to right now, read on the
     // writer under the row lock. `existing` comes from the replica and can
     // predate the push that linked it: the product then outlived the listing
-    // (specs/tla/listing-outbox NoGhostProduct).
-    let source = sqlx::query_scalar::<_, String>(
-        "select source_listing_id from public.marketplace_user_listings where id = $1 and seller_uid = $2 for update",
+    // (specs/tla/listing-outbox NoGhostProduct). Price and quantity too: the
+    // edit CardTrader gets is measured from them, not from the replica.
+    let before = sqlx::query_scalar::<_, Value>(
+        "select to_jsonb(v) from (select source_listing_id, price_pkn, quantity_available, status from public.marketplace_user_listings where id = $1 and seller_uid = $2 for update) v",
     )
     .bind(uuid)
     .bind(&claims.uid)
     .fetch_optional(&mut *tx)
     .await?
-    .map(|s| s.trim().chars().take(160).collect::<String>())
-    .unwrap_or_default();
+    .unwrap_or_else(|| json!({}));
+    let source = live::field(&before, "source_listing_id", 160);
     let mut builder = sqlx::query(&sql);
     for value in &values {
         builder = bind_json(builder, value);
@@ -895,7 +896,7 @@ pub(crate) async fn update_listing(
         .await?
         .ok_or_else(|| ApiError::not_found("Listing not found for this seller."))?;
     let row: Value = row.try_get("listing")?;
-    let queued=sync::enqueue(&mut tx,sync::event(&row,&json!({"sellerUid":claims.uid,"mutation":sync::mutation(&existing,body,&status),"destroyCardtrader":inactive&&!source.is_empty(),"sourceListingId":source}),state.now_ms())).await?;
+    let queued=sync::enqueue(&mut tx,sync::event(&row,&json!({"sellerUid":claims.uid,"mutation":sync::mutation(&existing,body,&status),"destroyCardtrader":inactive&&!source.is_empty(),"sourceListingId":source,"cardtraderEdit":sync::cardtrader_edit(&before,&row)}),state.now_ms())).await?;
     tx.commit().await?;
     let game = live::field(&row, "marketplace_game", 40);
     let listing = finish_write(

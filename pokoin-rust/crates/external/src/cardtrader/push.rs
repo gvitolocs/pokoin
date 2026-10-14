@@ -76,15 +76,24 @@ pub fn blueprint(card: &str) -> Option<i64> {
     (n > 0).then_some(if n % 2 == 0 { n / 2 } else { n })
 }
 
+/// EUR price CardTrader gets for a PKN price (200 PKN = 1 EUR), to the cent.
+/// `None` when that is not a positive amount.
+pub fn eur_price(pkn: f64) -> Option<f64> {
+    let price = (pkn * 0.005 * 100.0).round() / 100.0;
+    (price.is_finite() && price > 0.0).then_some(price)
+}
+
+/// CardTrader `PUT /products/:id` body for a Pokoin price edit.
+pub fn price_body(pkn: f64) -> Option<Value> {
+    eur_price(pkn).map(|price| json!({ "price": json_number(price) }))
+}
+
 /// CardTrader `POST /products` body for a Pokoin listing.
 pub fn product_body(listing: &Value) -> ApiResult<Value> {
     let id = blueprint(&first(listing, &["cardId", "card_id"], 80))
         .ok_or_else(|| ApiError::bad_request("CardTrader listing needs a CardTrader blueprint id."))?;
     let pkn = number(listing.get("pricePkn").or_else(|| listing.get("price_pkn")).unwrap_or(&Value::Null));
-    let price = (pkn * 0.005 * 100.0).round() / 100.0;
-    if !price.is_finite() || price <= 0.0 {
-        return Err(ApiError::bad_request("CardTrader listing needs a positive EUR price."));
-    }
+    let price = eur_price(pkn).ok_or_else(|| ApiError::bad_request("CardTrader listing needs a positive EUR price."))?;
     let qty = number(
         listing
             .get("quantityAvailable")
@@ -353,5 +362,15 @@ mod tests {
         assert_eq!(body["description"], json!("mint"));
         assert!(product_body(&json!({ "cardId": "238", "pricePkn": 0 })).is_err());
         assert!(product_body(&json!({ "cardId": "x", "pricePkn": 10 })).is_err());
+    }
+
+    #[test]
+    fn edit_price_uses_the_push_conversion() {
+        assert_eq!(price_body(200.0), Some(json!({ "price": 1 })));
+        assert_eq!(price_body(333.0), Some(json!({ "price": 1.67 })));
+        assert_eq!(eur_price(1.0), Some(0.01), "half a cent rounds up");
+        assert_eq!(eur_price(0.5), None, "a quarter cent rounds to nothing");
+        assert_eq!(price_body(0.0), None);
+        assert_eq!(price_body(f64::NAN), None);
     }
 }

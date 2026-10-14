@@ -9,8 +9,10 @@
 //!   CardTrader (a capped batch per run) and imports nothing.
 //! - `both`: both of the above.
 //!
-//! Either way, linked rows stay in sync both ways (webhook + reconcile on a
-//! CardTrader sale, `increment -n` on a Pokoin sale).
+//! Either way, linked rows stay in sync both ways on a sale (webhook +
+//! reconcile on a CardTrader sale, `increment -n` on a Pokoin sale). A seller's
+//! price or quantity edit on Pokoin reaches CardTrader in the push directions
+//! only ([`edit_skip_reason`]; the outbox step is `listing_sync::edit_cardtrader`).
 //!
 //! Also here: the Power Tools CSV location import (`powerToolsCsv` on
 //! `POST /api/cardtrader-sync`), ported from the Node `cardtrader-sync.js`.
@@ -76,6 +78,24 @@ pub fn direction_from_data(data: &Value) -> Direction {
 
 pub fn direction_from_doc(doc: &FirestoreDoc) -> Direction {
     if doc.exists { direction_from_data(&doc.data) } else { Direction::default() }
+}
+
+/// Why a seller's Pokoin edit of a linked listing is not sent to CardTrader;
+/// `None` when it is: connected, not 1-Day Ready (CardTrader stocks those),
+/// and the seller chose `pokoin_to_ct` or `both`. In `ct_to_pokoin`
+/// CardTrader stays the source of truth and the reconcile copies its quantity
+/// back onto the listing.
+pub fn edit_skip_reason(doc: &FirestoreDoc) -> Option<&'static str> {
+    if !doc.exists || doc.data.get("enabled") != Some(&Value::Bool(true)) {
+        return Some("not_connected");
+    }
+    if crate::cardtrader::integration::is_one_day_ready_integration(doc) {
+        return Some("one_day_ready");
+    }
+    if !direction_from_doc(doc).pushes() {
+        return Some("ct_to_pokoin");
+    }
+    None
 }
 
 /// The stored direction; an unreadable doc is the default (import only), which
@@ -636,6 +656,20 @@ mod tests {
         assert!(Direction::CtToPokoin.imports() && !Direction::CtToPokoin.pushes());
         assert!(!Direction::PokoinToCt.imports() && Direction::PokoinToCt.pushes());
         assert!(Direction::Both.imports() && Direction::Both.pushes());
+    }
+
+    #[test]
+    fn edits_reach_cardtrader_only_in_the_push_directions() {
+        let doc = |data: Value| FirestoreDoc { exists: true, data };
+        assert_eq!(edit_skip_reason(&FirestoreDoc { exists: false, data: json!({}) }), Some("not_connected"));
+        assert_eq!(edit_skip_reason(&doc(json!({"enabled": false, "inventorySync": {"direction": "both"}}))), Some("not_connected"));
+        assert_eq!(edit_skip_reason(&doc(json!({"enabled": true}))), Some("ct_to_pokoin"));
+        assert_eq!(edit_skip_reason(&doc(json!({"enabled": true, "inventorySync": {"direction": "ct_to_pokoin"}}))), Some("ct_to_pokoin"));
+        assert_eq!(edit_skip_reason(&doc(json!({"enabled": true, "inventorySync": {"direction": "pokoin_to_ct"}}))), None);
+        assert_eq!(edit_skip_reason(&doc(json!({"enabled": true, "inventorySync": {"direction": "both"}}))), None);
+        // A 1-Day Ready account never gets a write, whatever the doc says.
+        let one_day = json!({"enabled": true, "metadata": {"oneDayReady": true}, "inventorySync": {"direction": "both"}});
+        assert_eq!(edit_skip_reason(&doc(one_day)), Some("one_day_ready"));
     }
 
     #[tokio::test]
