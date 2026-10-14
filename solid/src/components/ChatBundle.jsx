@@ -3,6 +3,7 @@ import { fetchArtist, fetchExpansionCards, fetchSellerShop, imageSrc } from '@ma
 import { bundleOf, tagKey } from '@market/chat-listing.js';
 import { fetchSpeciesCards } from '@market/species-cards.js';
 import { endTrayDrag, startTrayDrag } from '@market/tray-drag.js';
+import { gameHref } from '@market/game.js';
 
 function cardId(card) {
   return String(card?.id || card?.card_id || '');
@@ -110,7 +111,7 @@ export default function ChatBundle(props) {
               const href = card.canonicalPath || card.canonical_path || (id ? `/marketplace/en/cards/${id}` : props.row?.path || '/marketplace');
               return (
                 <a
-                  href={href}
+                  href={gameHref(href)}
                   class={ready() && props.peer?.username && !listed().has(id) ? 'is-missing' : undefined}
                   title={card.name || ''}
                   draggable="false"

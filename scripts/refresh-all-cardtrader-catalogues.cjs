@@ -41,7 +41,6 @@ async function project(pool,target,categories){
   sql=insertOnly(await definition(pool,'refresh_marketplace_card_urls'),'marketplace_card_urls');
   sql=sql.replace('on sc.card_id = c.card_id','on sc.card_id = c.card_id WHERE NOT EXISTS (SELECT 1 FROM public.marketplace_card_urls old WHERE old.card_id=c.card_id)');
   console.log('PROJECT',sql.slice(0,65));await pool.query(sql);
-  await pool.query('select refresh_marketplace_set_catalog_counts()');
  }else{
   const def=await definition(pool,'refresh_multigame_marketplace_projections');
   let sql=def.split('execute format($sql$')[1]?.split('$sql$, qualified_raw)')[0];
@@ -57,6 +56,8 @@ async function project(pool,target,categories){
   urls=urls.replace(/;\s*$/,' on conflict (card_id) do nothing;');
   await pool.query(urls);
  }
+ // Every game: a set without a count row has no set page and is missing from the set index.
+ await pool.query('select refresh_marketplace_set_catalog_counts()');
 }
 async function main(){
  const admin=poolFor('pokoin_marketplace'), games=await api.get('/games'), categories=await api.get('/categories');

@@ -1,7 +1,7 @@
 import { createMemo, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
 import { useParams } from '@solidjs/router';
 import { fetchExpansions } from '@market/api.js';
-import { game, isPokemonGame } from '@market/game.js';
+import { game, gameHref, isPokemonGame } from '@market/game.js';
 import { TCG_ERA_ORDER, eraFromParam, eraHref, expansionsForEraPage } from '@market/set-logos.js';
 import { tcgEraYears } from '@market/tcg-eras.js';
 import { Alert, EmptyDesk, PageHead } from '../components/Desk.jsx';
@@ -30,7 +30,7 @@ function SatelliteEras() {
         title={`${site.name} eras`}
         lede={`${site.name} does not use Pokémon TCG blocks. Open Sets for this game’s expansions.`}
       >
-        <a class="btn" href="/marketplace/sets">Sets</a>
+        <a class="btn" href={gameHref('/marketplace/sets')}>Sets</a>
       </EmptyDesk>
     </div>
   );
@@ -42,7 +42,7 @@ function UnknownEra() {
     <div class="page desk set-guide-page">
       <SeoCrumbs items={[...CRUMBS_TO_ERAS, { name: 'Eras', href: '/marketplace/eras' }]} />
       <EmptyDesk title="Unknown era" lede="Open the set catalog and pick a TCG block.">
-        <a class="btn" href="/marketplace/sets">Sets</a>
+        <a class="btn" href={gameHref('/marketplace/sets')}>Sets</a>
       </EmptyDesk>
     </div>
   );
@@ -67,7 +67,7 @@ function EraIndex() {
         <For each={TCG_ERA_ORDER}>
           {(name) => (
             <li>
-              <a class="era-link era-index-link" href={eraHref(name)}>
+              <a class="era-link era-index-link" href={gameHref(eraHref(name))}>
                 <strong>{name}</strong>
                 <Show when={tcgEraYears(name)}><span>{tcgEraYears(name)}</span></Show>
               </a>

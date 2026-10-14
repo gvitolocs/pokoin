@@ -21,6 +21,7 @@ import {
 import CardArt from '../components/CardArt.jsx';
 import CompetitiveNav, { Flag, NotInSnapshot, Sprite } from '../components/CompetitiveNav.jsx';
 import { DeskPanel, EmptyDesk } from '../components/Desk.jsx';
+import { gameHref } from '@market/game.js';
 
 const TABS = [
   { id: 'completed', label: 'Completed' },
@@ -65,7 +66,7 @@ function TournamentTable(props) {
                     <td>{event.date}</td>
                     <td><Flag cc={event.country} /></td>
                     <td>
-                      <a href={`/marketplace/competitive/tournaments/${event.id}`}>{event.name}</a>
+                      <a href={gameHref(`/marketplace/competitive/tournaments/${event.id}`)}>{event.name}</a>
                     </td>
                     <td>
                       <Show when={event.format}>
@@ -79,7 +80,7 @@ function TournamentTable(props) {
                           <span class="comp-winner">
                             <Flag cc={event.winnerFlag} />
                             <Show when={event.winnerId} fallback={event.winner}>
-                              <a href={`/marketplace/competitive/players/${event.winnerId}`}>{event.winner}</a>
+                              <a href={gameHref(`/marketplace/competitive/players/${event.winnerId}`)}>{event.winner}</a>
                             </Show>
                           </span>
                         </Show>
@@ -192,7 +193,7 @@ function TournamentList() {
 
 function PlayerCell(props) {
   return (
-    <a href={`/marketplace/competitive/players/${props.row.playerId}`}>
+    <a href={gameHref(`/marketplace/competitive/players/${props.row.playerId}`)}>
       <Flag cc={props.row.flag} />
       {props.row.player}
     </a>
@@ -215,7 +216,7 @@ function TournamentDetail(props) {
     <div class="page desk comp-page">
       <CompetitiveNav />
       <nav class="crumbs">
-        <a href="/marketplace/competitive/tournaments">Tournaments</a>
+        <a href={gameHref('/marketplace/competitive/tournaments')}>Tournaments</a>
         <span>/</span>
         <span>{event.name}</span>
       </nav>
@@ -271,7 +272,7 @@ function TournamentDetail(props) {
                           <td>{row.place}</td>
                           <td><PlayerCell row={row} /></td>
                           <td>
-                            <a href={`/marketplace/competitive/decklists/${row.id}`}>
+                            <a href={gameHref(`/marketplace/competitive/decklists/${row.id}`)}>
                               <Sprite deck={deck} />
                               {deck?.name || 'Deck'}
                             </a>
@@ -311,7 +312,7 @@ function TournamentDetail(props) {
                       <tr>
                         <td>
                           <Show when={row.deck} fallback={row.deckId}>
-                            <a href={`/marketplace/competitive/decks/${row.deck.id}`}>
+                            <a href={gameHref(`/marketplace/competitive/decks/${row.deck.id}`)}>
                               <Sprite deck={row.deck} />
                               {row.deck.name}
                             </a>
@@ -365,7 +366,7 @@ function TournamentDetail(props) {
                               when={row.list && listById(row.list)}
                               fallback={<span><Sprite deck={deck} />{deck?.name || '—'}</span>}
                             >
-                              <a href={`/marketplace/competitive/decklists/${row.list}`}>
+                              <a href={gameHref(`/marketplace/competitive/decklists/${row.list}`)}>
                                 <Sprite deck={deck} />
                                 {deck?.name || 'Deck'}
                               </a>

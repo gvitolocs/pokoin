@@ -1,5 +1,6 @@
 import { children, For, Show } from 'solid-js';
 import { flagSrc } from '@market/locale.js';
+import { gameHref } from '@market/game.js';
 
 /**
  * Desk building blocks: same markup and
@@ -143,7 +144,7 @@ export function Thread(props) {
   );
   return (
     <Show when={props.to} fallback={<article class="thread">{inner()}</article>}>
-      <a class="thread" href={props.to}>{inner()}</a>
+      <a class="thread" href={gameHref(props.to)}>{inner()}</a>
     </Show>
   );
 }

@@ -11,6 +11,7 @@ import { addCartItem } from '../stores/cart.js';
 import { desktopItems } from '../stores/desktop.js';
 import CardArt from './CardArt.jsx';
 import QtyStepper from './QtyStepper.jsx';
+import { gameHref } from '@market/game.js';
 
 const DESKTOP_ICON = 'M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 2v8h14V7H5zm-1 12h16v2H4v-2z';
 
@@ -150,7 +151,7 @@ export default function DesktopDrop() {
                 }}
                 onDragEnd={() => endTrayDrag()}
               >
-                <a href={row().path || '/marketplace'} title={row().name} draggable="false">
+                <a href={gameHref(row().path || '/marketplace')} title={row().name} draggable="false">
                   <Show when={row().imageUrl} fallback={<span class="suggest-ph" />}>
                     <CardArt src={row().imageUrl} alt="" card={row()} full={fullArt()} />
                   </Show>

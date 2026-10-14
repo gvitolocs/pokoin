@@ -1,7 +1,7 @@
 import { createEffect, createSignal, Errored, getOwner, Loading, onSettled, runWithOwner, Show, untrack } from 'solid-js';
 import { useLocation, useNavigate } from '@solidjs/router';
 import { framedByChromeExtension } from '@market/extension-auth-bridge.js';
-import { gameBasename } from '@market/game.js';
+import { gameBasename, gameHref } from '@market/game.js';
 import { isGamePrivatePath } from '@market/game-private-path.js';
 import { legacyDashboardHref } from '@market/punchouts.js';
 import { isDashboardHost } from '@market/scan-api.js';
@@ -59,7 +59,10 @@ function DashboardMarketHandoff(props) {
  * and the chat dock — its own chunk, loaded when the page goes idle.
  */
 export default function App(props) {
-  setLinkNavigator(useNavigate());
+  // Claimed clicks navigate to the full URL path: an unprefixed link the hrefs missed
+  // still stays on this game (gameHref) instead of leaving the router base.
+  const navigate = useNavigate();
+  setLinkNavigator((path, options) => navigate(gameHref(path), options));
   const location = useLocation();
   const framed = framedByChromeExtension();
   const [originDown, setOriginDown] = createSignal(typeof window !== 'undefined' && Boolean(window.__pokoinOriginDown));

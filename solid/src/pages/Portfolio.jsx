@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, For, Match, onSettled, Show, Switch, untrack } from 'solid-js';
 import { useLocation, useParams } from '@solidjs/router';
 import { cardHref, fetchPortfolio, formatPkn, imageSrc } from '@market/api.js';
-import { game } from '@market/game.js';
+import { game, gameHref } from '@market/game.js';
 import { bindRailControls, stepRail } from '@market/rail-scroll.js';
 import CardArt from '../components/CardArt.jsx';
 import { Alert, DeskPanel, EmptyDesk, Metric, MetricGrid, PageHead } from '../components/Desk.jsx';
@@ -42,7 +42,7 @@ function createCountUp(target) {
 
 function Mini(props) {
   return (
-    <a class="port-mini" href={holdingHref(props.item)}>
+    <a class="port-mini" href={gameHref(holdingHref(props.item))}>
       <CardArt src={imageSrc(props.item, 'hero')} alt="" loading="lazy" />
       <strong>{props.item.name}</strong>
       <span class="muted">{props.item.expansion}</span>
@@ -205,7 +205,7 @@ function PortfolioList() {
               <div class="port-holdings">
                 <For each={visible()}>
                   {(item) => (
-                    <a class="port-hold" href={holdingHref(item)}>
+                    <a class="port-hold" href={gameHref(holdingHref(item))}>
                       <CardArt src={imageSrc(item, 'hero')} alt="" loading="lazy" />
                       <div>
                         <strong>{item.name}</strong>
@@ -229,7 +229,7 @@ function PortfolioList() {
               when={ranked().holdings.length}
               fallback={(
                 <EmptyDesk nested title="No Pokoin cards" lede="Catalog is empty for this game.">
-                  <a class="btn" href="/marketplace">Shop</a>
+                  <a class="btn" href={gameHref('/marketplace')}>Shop</a>
                 </EmptyDesk>
               )}
             >
@@ -281,14 +281,14 @@ function HoldingDetail(props) {
       <Match when={!item()}>
         <div class="page desk">
           <Alert>No Pokoin card for that id.</Alert>
-          <a class="btn ghost" href="/marketplace/portfolio">Back to portfolio</a>
+          <a class="btn ghost" href={gameHref('/marketplace/portfolio')}>Back to portfolio</a>
         </div>
       </Match>
       <Match when={item()}>
         {(row) => (
           <div class="page desk port-page">
             <nav class="crumbs">
-              <a href="/marketplace/portfolio">Portfolio</a>
+              <a href={gameHref('/marketplace/portfolio')}>Portfolio</a>
               <span>/</span>
               <span>{row().name}</span>
             </nav>
@@ -311,8 +311,8 @@ function HoldingDetail(props) {
                 </p>
                 <p class="muted">Pokoin PKN. Catalog art from cdn.pokoin.com. Not USD. Not a CardTrader leftover image.</p>
                 <p class="comp-subnav">
-                  <a href={row().canonicalPath || cardHref(row())}>Open card desk</a>
-                  <a href="/marketplace/portfolio">All holdings</a>
+                  <a href={gameHref(row().canonicalPath || cardHref(row()))}>Open card desk</a>
+                  <a href={gameHref('/marketplace/portfolio')}>All holdings</a>
                 </p>
               </div>
             </div>

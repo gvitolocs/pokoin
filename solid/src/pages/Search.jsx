@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from '@solidjs/router';
 import { fetchSearch, fetchSellerSearchWithAssociates } from '@market/api.js';
 import { fetchSearchRecall } from '@market/search-recall.js';
 import { associateRoleLabel } from '@market/associate-roles.js';
-import { isPokemonGame } from '@market/game.js';
+import { gameHref, isPokemonGame } from '@market/game.js';
 import { sellerHref } from '@market/listing-meta.js';
 import { filterSearchCards, searchRarity, searchSet, uniqueSearchOptions } from '@market/search-filters.js';
 import { takeHotSearchPage } from '@market/search-hot.js';
@@ -614,7 +614,7 @@ export default function Search() {
             when={loading() || results.sellers.length || error()}
             fallback={(
               <EmptyDesk title={emptyTitle()} lede={emptyLede()}>
-                <a class="btn" href={marketUrl('/marketplace')}>Browse marketplace</a>
+                <a class="btn" href={gameHref(marketUrl('/marketplace'))}>Browse marketplace</a>
               </EmptyDesk>
             )}
           >
@@ -622,7 +622,7 @@ export default function Search() {
               <For each={results.sellers}>
                 {(seller) => (
                   <li>
-                    <a class="seller-result" href={marketUrl(sellerHref({ sellerName: seller.username }))}>
+                    <a class="seller-result" href={gameHref(marketUrl(sellerHref({ sellerName: seller.username })))}>
                       <span class="suggest-user-mark" aria-hidden="true">{seller.name.slice(0, 1).toUpperCase()}</span>
                       <span>
                         <strong>{seller.name}</strong>
@@ -644,7 +644,7 @@ export default function Search() {
         </Match>
         <Match when={!loading() && !results.cards.length && !error()}>
           <EmptyDesk title={emptyTitle()} lede={emptyLede()}>
-            <a class="btn" href={marketUrl('/marketplace')}>Browse marketplace</a>
+            <a class="btn" href={gameHref(marketUrl('/marketplace'))}>Browse marketplace</a>
           </EmptyDesk>
         </Match>
         <Match when={!loading() && results.cards.length && !shown().length}>

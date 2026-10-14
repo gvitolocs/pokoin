@@ -1,5 +1,6 @@
 import { useLinkState } from '@solidjs/router';
 import { authAnchorRel, goMarket, marketUrl } from '@market/punchouts.js';
+import { gameHref } from '@market/game.js';
 
 /**
  * Same-origin router link, or an absolute pokoin.com anchor when the SPA runs
@@ -15,7 +16,7 @@ export default function AppLink(props) {
   return (
     <a
       class={[props.class, { active: !external() && link.active() }]}
-      href={href()}
+      href={gameHref(href())}
       title={props.title}
       aria-label={props['aria-label']}
       rel={rel()}

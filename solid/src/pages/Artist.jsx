@@ -29,6 +29,7 @@ import SeoHead from '../components/SeoHead.jsx';
 import { afterPaint } from '../lib/after-paint.js';
 import { rememberView, restoreScroll, restoredView } from '../lib/scroll-restore.js';
 import { addCartItem } from '../stores/cart.js';
+import { gameHref } from '@market/game.js';
 
 const ALBUM_PAGE = 24;
 const PRELOAD_AHEAD = 20;
@@ -136,7 +137,7 @@ function ArtistsIndex(props) {
                     <a
                       class="tile artist-tile tile-cut tile-album"
                       draggable="true"
-                      href={`/marketplace/${props.lang}/artists/${slug}`}
+                      href={gameHref(`/marketplace/${props.lang}/artists/${slug}`)}
                       style={albumShadeStyle(row)}
                       onDragStart={(event) => writeListingDrag(event, bundleReference({
                         kind: 'artist',
@@ -451,7 +452,7 @@ function ArtistDesk(props) {
       fallback={(
         <div class="page desk">
           <EmptyDesk title="No illustrator" lede="That URL is not a leftover artist. Open the catalog.">
-            <a class="btn" href={`/marketplace/${lang}/artists`}>Artists</a>
+            <a class="btn" href={gameHref(`/marketplace/${lang}/artists`)}>Artists</a>
           </EmptyDesk>
         </div>
       )}
@@ -464,7 +465,7 @@ function ArtistDesk(props) {
         />
         <SeoCrumbs items={crumbs()} />
         <PageHead
-          kicker={<a class="page-kicker-link" href={`/marketplace/${lang}/artists`}>Artist</a>}
+          kicker={<a class="page-kicker-link" href={gameHref(`/marketplace/${lang}/artists`)}>Artist</a>}
           title={(
             <>
               <svg class="page-title-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">

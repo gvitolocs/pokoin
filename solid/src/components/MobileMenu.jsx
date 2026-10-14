@@ -4,6 +4,7 @@ import { accountHeading } from '@market/auth-session.js';
 import { catalogLinks } from '@market/catalog-links.js';
 import { authAnchorRel, marketUrl } from '@market/punchouts.js';
 import Avatar from './Avatar.jsx';
+import { gameHref } from '@market/game.js';
 
 // Phone drawer behind the burger:
 // account card, four quick actions, then grouped lists (Shop / Catalog /
@@ -50,7 +51,7 @@ function MenuLink(props) {
   return (
     <a
       class={[props.class, { 'is-active': !external() && link.active() }]}
-      href={target()}
+      href={gameHref(target())}
       rel={rel()}
       target={props.href ? '_self' : undefined}
       onClick={() => props.onClick?.()}

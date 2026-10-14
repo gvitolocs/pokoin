@@ -23,7 +23,7 @@ import {
 import { realPublicCardId } from '@market/card-stub.js';
 import { isNameReprintCard, mergePrintingRows, printLangBadge, splitVersionPage } from '@market/card-versions.js';
 import { filterExactNameRows } from '@market/exact-name.js';
-import { game, publicGamePath } from '@market/game.js';
+import { game, gameHref, publicGamePath } from '@market/game.js';
 import { applyLastMedianPrices } from '@market/pkn.js';
 import { eraHref } from '@market/set-logos.js';
 import CardSelectGrid from '../components/CardSelectGrid.jsx';
@@ -218,7 +218,7 @@ function VersionsPage(props) {
     <>
       <SeoHead title="Versions" description="Card versions." canonical={publicGamePath(parentPath(), game().id)} noindex />
       <nav class="crumbs">
-        <a href="/marketplace">Marketplace</a>
+        <a href={gameHref('/marketplace')}>Marketplace</a>
         <span>/</span>
         <span>{slug || cardId}</span>
         <span>/</span>
@@ -241,10 +241,10 @@ function VersionsPage(props) {
           noindex
         />
         <nav class="crumbs">
-          <a href="/marketplace">Marketplace</a>
+          <a href={gameHref('/marketplace')}>Marketplace</a>
           <span>/</span>
           <Show when={current()} fallback={<span>{slug || cardId}</span>}>
-            <a href={cardHref(current())}>{current().name}</a>
+            <a href={gameHref(cardHref(current()))}>{current().name}</a>
           </Show>
           <span>/</span>
           <span>Versions</span>
@@ -277,7 +277,7 @@ function VersionsPage(props) {
           {(group) => (
             <section class="versions-section" id={group.id}>
               <h2>
-                <a class="era-link" href={eraHref(group.label)}>{group.label}</a>
+                <a class="era-link" href={gameHref(eraHref(group.label))}>{group.label}</a>
               </h2>
               <TileGrid rows={group.rows} cardId={cardId} flags />
             </section>
