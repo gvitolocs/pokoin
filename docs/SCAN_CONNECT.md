@@ -312,7 +312,7 @@ The dev server's fake auth (`Bearer seller:<uid>`) only exists with
 | `pokoin-rust/crates/external/src/scan_store.rs` | SQL (writer), transactions, rate limits |
 | `pokoin-rust/crates/external/src/routes/scan.rs` | Handlers: `scan-session`, `scan-pair`, `scan-phone`, `scan-batch`, `scan-stream` |
 | `cargo test -p pokoin-external` (in `pokoin-rust/`) | Tests |
-| `market/src/pages/ScanDesk.jsx`, `market/src/scan-*.js`, `market/src/scan-desk.css` | Desktop |
+| `solid/src/pages/ScanDesk.jsx`, `market/src/scan-*.js`, `market/src/scan-desk.css` | Desktop |
 | BattleScan `web/static/scan-connect.js`, `web/index.html`, `server/app.py` (`/connect`) | Phone |
 | CardVault `oracle-postgres/schema/082_scan_connect.grants.sql` | Grants for the API writer role |
 | CardVault `scripts/scan-connect-dev-server.js` | Local scan API for E2E |

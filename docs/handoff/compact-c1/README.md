@@ -15,7 +15,7 @@ Saved from the nezopt session "Compact c1 JSON dictionary encoding" (stopped 202
 - No Rust code had been written yet.
 
 ## Task (continue from here)
-Repository gvitolocs/pokoin. Rust workspace: pokoin-rust/ (the binary is pokoin-rust/apps/api; route crates are in pokoin-rust/crates). React SPA: market/.
+Repository gvitolocs/pokoin. Rust workspace: pokoin-rust/ (the binary is pokoin-rust/apps/api; route crates are in pokoin-rust/crates). Solid SPA: solid/ (shared modules: market/).
 
 Goal: make the API's big read responses much smaller and faster to load with an OPT-IN compact encoding called "c1". The default JSON must stay byte-for-byte unchanged, because it is a frozen contract shared with the SPA and the CardVault apps.
 

@@ -138,16 +138,16 @@ Publisher: `/srv/pokoin/scripts/sync-marketplace-rails.py` (timer
 
 | File | Job |
 | --- | --- |
-| `market/src/pages/Home.jsx` | Paint recents from local compact tiles even before the rails vector. `fetchHome` in an effect that does **not** list `ready`. New/Best/Featured skeletons wait on rails, not recents. Second effect: account merge after `ready`. Network tiles only for `missingRecentIds`. Pokemon Marketplace grid is `home-browse.js` (shuffled western sets, 14 + Show more), not the rails vector. |
+| `solid/src/pages/Home.jsx` | Paint recents from local compact tiles even before the rails vector. `fetchHome` in an effect that does **not** list `ready`. New/Best/Featured skeletons wait on rails, not recents. Second effect: account merge after `ready`. Network tiles only for `missingRecentIds`. Pokemon Marketplace grid is `home-browse.js` (shuffled western sets, 14 + Show more), not the rails vector. |
 | `market/src/lists.js` | `fetchHomeFromLists` (Pi `/api/marketplace-rails` only, no `Promise.all` with tiles). `attachRecentsToHome` is sync and returns `missingRecentIds`. |
 | `market/src/api.js` | `fetchHome`: Worker (prod) → lists → home-page. Never treat Flutter hydrate as success. |
 | `market/src/home-cache.js` | `sessionStorage pokoin.homeVector.{game}.rising`, 10 min, recents stripped. |
 | `market/src/recents.js` | Local 24 ids **per game**. Signed-in list is shared Pi API `/api/marketplace-recents?game=` (`pokoin-rust/crates/commerce`). Compact rail tiles live in `localStorage pokoin.recentCardTiles.{game}`. **Do not** dump desk `card-page` JSON there. Desk identity is `pokoin.cardPage.v1.` (`card-page-cache.js`). `syncRemoteRecentCardIds` is the account merge for the current host game — do not call it on LCP. Unscoped legacy storage is ignored. |
 | `market/src/auth-session.js` | Last uid / Silver / site PKN snapshot. **Not** on LCP. Paints CT/CM/VT from `pokoin.auth.session` after first paint while Firebase catches up. |
 | `market/src/image-urls.js` | `homepageDerivativeUrl` for grid. `preferFullImage` for desk (strips `_homepage.webp` → JPEG). `rasterSiblings` only falls back webp→JPEG, never upgrades a JPEG src. |
-| `market/src/components/CardTile.jsx` | `imageSrc(card, 'grid')`. First 8 `loading=eager`, first 4 `fetchPriority=high`. Full 63:88 scan — never `cut`. Map: [CARD_ART.md](CARD_ART.md). |
-| `market/src/components/CardArt.jsx` | Grid: walk webp then JPEG. `full` (desk, zoom, promo fan): leftover JPEG only. `cut` is search-suggest only. |
-| `market/src/components/PromoCarousel.jsx` | Fan leftover JPEG (`CardArt full`). Pool from `set:{slug}` rails (`fetchPromoFanPool`) — no `fillMissingTilePrices`. First slug starts at module load. Rise stagger stays 0 / 0.42s / 0.84s. |
+| `solid/src/components/CardTile.jsx` | `imageSrc(card, 'grid')`. First 8 `loading=eager`, first 4 `fetchPriority=high`. Full 63:88 scan — never `cut`. Map: [CARD_ART.md](CARD_ART.md). |
+| `solid/src/components/CardArt.jsx` | Grid: walk webp then JPEG. `full` (desk, zoom, promo fan): leftover JPEG only. `cut` is search-suggest only. |
+| `solid/src/components/PromoCarousel.jsx` | Fan leftover JPEG (`CardArt full`). Pool from `set:{slug}` rails (`fetchPromoFanPool`) — no `fillMissingTilePrices`. First slug starts at module load. Rise stagger stays 0 / 0.42s / 0.84s. |
 | `market/src/art-cut.js` | Pokemon illustration window (landscape, `top` 0.125). Used on the **right** of search suggest, not home tiles. Print flags sit left of that rectangle on desktop and overlay it on phone. Set desk title uses the same flags left of `h1.page-title` ([PRINT_FLAGS.md](PRINT_FLAGS.md)). |
 | `workers/marketplace-home.js` | `stableHomeCacheRequest`, match-before-origin, `waitUntil` revalidate. Origin is `https://api.pokoin.com`. |
 | `workers/pokoin-origin.js` | Dispatches home before `fetch` to origin. |

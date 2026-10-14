@@ -24,11 +24,11 @@ Chrome DevTools → device toolbar, or Playwright:
 
 ```bash
 playwright-cli close
-playwright-cli open http://127.0.0.1:5174/marketplace
+playwright-cli open http://127.0.0.1:5175/marketplace
 playwright-cli resize 393 852
 ```
 
-Vite market: `cd market && npm run dev` → `/marketplace`.
+Solid dev server: `cd solid && npm run dev` → `/marketplace`.
 
 Landing is not on the Vite port. Serve the repo root or use `https://pokoin.com/`
 at the same 393×852 viewport.
@@ -47,7 +47,7 @@ at the same 393×852 viewport.
 ## Phone-only (`≤480px`) — market
 
 Source: `market/src/styles.css` (block at the bottom). Chrome markup:
-`market/src/components/Chrome.jsx`.
+`solid/src/components/Chrome.jsx`.
 
 | Surface | What changes | Why |
 | --- | --- | --- |
@@ -85,9 +85,9 @@ drawer) were already there and still apply.
 
 | File | Role |
 | --- | --- |
-| `market/index.html`, `index.html` | `viewport-fit=cover` |
+| `solid/index.html`, `index.html` | `viewport-fit=cover` |
 | `market/src/styles.css` | `≤720px` top-bar grid; `≤480px` phone sheet |
-| `market/src/components/Chrome.jsx` | Mag glass opens print-language; search is Enter; CardTrader-style suggest rows |
+| `solid/src/components/Chrome.jsx` | Mag glass opens print-language; search is Enter; CardTrader-style suggest rows |
 | `home/landing.css` | `≤480px` safe-area nav / hero / CTA |
 | `docs/MARKET.md` | Card stack exception on phone |
 

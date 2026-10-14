@@ -65,7 +65,7 @@ is rollback-only Meilisearch, not Node.
 
 | Area | Files | Why it stays |
 | --- | --- | --- |
-| Web frontends | `market/` (React, Vite), `solid/` (Solid 2 shell), `home/`, `news/`, `explorer/` | Frontend build and unit tests (`node --test market/src/*.test.js`). Not a server. |
+| Web frontends | `solid/` (Solid 2 + Vite), `market/` (shared modules), `home/`, `news/`, `explorer/` | Frontend build and unit tests (`node --test market/src/*.test.js`, `cd solid && npm test`). Not a server. |
 | Cloudflare Workers | `workers/*.js`, `wrangler.*.jsonc` | Run on Cloudflare (V8 isolates, not Node). Their tests use `node --test`. |
 | Build-time generators | `scripts/build-{card-sitemaps,catalog-discovery,seo-sitemaps,site-map,ui-shell,news-site}.mjs`, `card-sitemap.mjs`, `write-cloudflare-web-routing.mjs`, `export-expansion-nationality.mjs`, `refresh-pokedex-sort.mjs` | Run by `build-web.sh`, `deploy-web.sh`, `publish-news.sh` and `refresh-site-map.sh` to produce static files. |
 | Operator data scripts (nezopt, run by hand) | `fill-missing-artists-from-ocr-io.js`, `fill-missing-artists-from-pkmncards.js`, `pkmncards-artists.js`, `build-western-ocr-artists.js`, `import-catalog-languages.js`, `catalog-languages.js`, `import-set-release-languages.js`, `report-listing-collection-backfill.js` (dry-run report) | One-off catalogue maintenance against the writer, not scheduled. Port one to Rust only if it becomes scheduled. |
