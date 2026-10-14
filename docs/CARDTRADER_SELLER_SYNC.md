@@ -114,6 +114,13 @@ uses `flock` to prevent overlap and runs the native job
 3. reconciles the complete export.
 
 Unchanged product links are not rewritten, keeping frequent safety runs cheap.
+A listing can carry a `ct:<product>` source that another channel set (Card
+Rails' own CardTrader push) with no `marketplace_cardtrader_product_links` row:
+the webhook still finds it by source, but the first reconcile that sees its
+product in the export records the row (`origin = 'match'`, summary
+`linksRecorded`), so link counts and settled removals include it. On
+2026-10-14 2 of PeppeV's 1,463 linked listings had no row; both products were
+in his export, so they were never stale.
 A linked listing an earlier run already settled (sold out at zero, its link
 `missing_from_ct`) is not removed again, and seller orders are fetched only
 when a product newly left the export. The export is parsed while it downloads
