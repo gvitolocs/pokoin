@@ -70,13 +70,32 @@ pub async fn connect(
 }
 
 /// `POST /api/cardtrader-disconnect` (and the DELETE half of connect).
+/// Unlinking removes the CardTrader-imported stock from Pokoin for good:
+/// imported listings and 1-Day Ready assets are deleted (sold rows stay as
+/// sales history); reconnect re-imports from the CardTrader export.
 pub async fn disconnect(
     State(state): State<DomainState>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let identity = require_token(&state, &headers).await?;
     integration::disconnect_integration(state.firestore.as_ref(), &identity.uid).await?;
-    Ok(json_response(200, json!({ "ok": true, "connected": false })))
+    let (removed_listings, removed_assets) =
+        match sync::delete_imported_cardtrader_stock(&state.db, &identity.uid).await {
+            Ok(counts) => counts,
+            Err(error) => {
+                tracing::warn!(uid = %identity.uid, "cardtrader disconnect stock cleanup failed: {}", error.message);
+                (0, 0)
+            }
+        };
+    Ok(json_response(
+        200,
+        json!({
+            "ok": true,
+            "connected": false,
+            "removedListings": removed_listings,
+            "removedAssets": removed_assets,
+        }),
+    ))
 }
 
 /// `GET /api/cardtrader-status`.

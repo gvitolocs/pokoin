@@ -205,7 +205,7 @@ export default function CardTraderConnectPanel(props) {
     try {
       const bearer = await getBearer();
       const data = await connectCardTrader(bearer, pasted().token);
-      setStatus(() => data?.status || { connected: true });
+      setStatus(() => data?.status || data?.integration || { connected: true });
       setToken('');
       setTokenVisible(false);
       const sync = data?.inventorySync;
@@ -233,8 +233,9 @@ export default function CardTraderConnectPanel(props) {
 
   async function onDisconnect() {
     if (busy()) return;
-    // Without the token Pokoin can't see CardTrader sales, so imported stock comes off Pokoin.
-    if (!window.confirm('Disconnect CardTrader? Cards imported from CardTrader come off Pokoin (nothing changes on CardTrader). Reconnect any time to bring them back.')) {
+    // Without the token Pokoin can't see CardTrader sales, so imported stock is
+    // deleted (sold cards stay as sales history; nothing changes on CardTrader).
+    if (!window.confirm('Disconnect CardTrader? Cards imported from CardTrader are deleted from Pokoin — your listings on CardTrader stay. Reconnect any time to import them again.')) {
       return;
     }
     setBusy(true);
@@ -247,9 +248,10 @@ export default function CardTraderConnectPanel(props) {
       const data = await disconnectCardTrader(bearer);
       setStatus(() => data?.status || { connected: false });
       setSyncSummary(null);
-      const hidden = Number(data?.hiddenListings) || 0;
-      setMessage(hidden > 0
-        ? `CardTrader disconnected. ${hidden} imported listing${hidden === 1 ? '' : 's'} taken off Pokoin — reconnect to bring them back.`
+      const removed = Number(data?.removedListings ?? data?.hiddenListings) || 0;
+      const assets = Number(data?.removedAssets) || 0;
+      setMessage(removed > 0 || assets > 0
+        ? `CardTrader disconnected. ${removed} imported listing${removed === 1 ? '' : 's'} and ${assets} 1-Day Ready asset${assets === 1 ? '' : 's'} deleted from Pokoin — reconnect to import them again.`
         : 'CardTrader disconnected.');
     } catch (err) {
       setError(err.message || 'Could not disconnect CardTrader.');

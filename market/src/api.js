@@ -1,5 +1,6 @@
 import { exactNameQuery, filterExactNameRows } from './exact-name.js';
-import { decodeC1, isC1 } from './compact.js';
+import { C1_DICTIONARY, C1Error, decodeC1, isC1 } from './compact.js';
+import { createLocalReader, FRESH_MS, localStorable, MAX_STALE_MS } from './local-read.js';
 import { createExpansionCardsFetcher } from './expansion-cards.js';
 import { createNamePrintingsFetcher } from './name-printings.js';
 import { resolveExpansionNationality } from './expansion-print.js';
@@ -101,10 +102,11 @@ function readIdList(key) {
   }
 }
 
-export async function getJson(path, options = {}) {
+/** One API request with the SPA's headers: the body text, and its ETag when CORS exposes it. */
+async function fetchApiText(url, options = {}, path = url) {
   let response;
   try {
-    response = await fetch(publicApiUrl(withGameQuery(path)), {
+    response = await fetch(url, {
       headers: {
         Accept: 'application/json',
         ...gameRequestHeaders(),
@@ -114,6 +116,7 @@ export async function getJson(path, options = {}) {
       body: options.body,
       signal: options.signal,
       cache: options.cache,
+      priority: options.priority,
     });
   } catch (err) {
     if (isApiRequestPath(path) && isNetworkError(err)) {
@@ -142,7 +145,10 @@ export async function getJson(path, options = {}) {
     error.body = body;
     throw error;
   }
-  const raw = await response.text();
+  return { text: await response.text(), etag: response.headers.get('etag') || '' };
+}
+
+function parseApiText(raw) {
   try {
     return JSON.parse(raw);
   } catch (err) {
@@ -151,6 +157,88 @@ export async function getJson(path, options = {}) {
     }
     throw err;
   }
+}
+
+export async function getJson(path, options = {}) {
+  const { text } = await fetchApiText(publicApiUrl(withGameQuery(path)), options, path);
+  return parseApiText(text);
+}
+
+/** The c1 dictionary decodes use: the bundled one, or a newer /api/dictionary. */
+let c1Dictionary = C1_DICTIONARY;
+
+/**
+ * The IndexedDB code is its own chunk (it is not needed to paint), fetched as
+ * soon as this module runs so it is there before the first catalogue read.
+ */
+let storeModule = null;
+function localStore() {
+  storeModule ||= import('./local-store.js').then((store) => {
+    store.configureLocalStore({ dictionaryVersion: C1_DICTIONARY.version });
+    return store;
+  });
+  return storeModule;
+}
+if (typeof window !== 'undefined') {
+  localStore().catch(() => {});
+}
+const viaStore = (name) => (...args) => localStore().then((store) => store[name](...args));
+
+function decodeApiText(text) {
+  const payload = parseApiText(text);
+  return isC1(payload) ? decodeC1(payload, c1Dictionary) : payload;
+}
+
+const localReader = createLocalReader({
+  fetchText: (url, init) => fetchApiText(url, init),
+  store: { get: viaStore('localGet'), put: viaStore('localPut'), confirm: viaStore('localConfirm'), remove: viaStore('localDelete') },
+  decode: decodeApiText,
+});
+
+/**
+ * A c1 document used a code this build does not know: adopt a newer
+ * /api/dictionary (a stored copy first) and say whether one was found. A
+ * network copy newer than anything stored empties the store: every row was
+ * written under the old dictionary.
+ */
+async function refreshC1Dictionary() {
+  const url = publicApiUrl('/api/dictionary');
+  for (const fresh of [false, true]) {
+    const doc = await localReader.read(url, { fresh, maxStaleMs: Infinity }).catch(() => null);
+    if (doc?.tables && Number(doc.version) > Number(c1Dictionary.version)) {
+      c1Dictionary = doc;
+      if (fresh) {
+        await viaStore('localWipe')();
+        await viaStore('localPut')(url, JSON.stringify(doc));
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Public catalogue GETs (local-read.js `localStorable`): memory, then the
+ * IndexedDB store, then the network, stale-while-revalidate. Options as
+ * local-read `read` (`fresh`, `onUpdate`, `prefetch`, `signal`, `priority`,
+ * `maxStaleMs`). Anything else, or any request with its own method, body,
+ * headers or cache mode, is a plain getJson.
+ */
+function getJsonLocal(path, options = {}) {
+  const url = publicApiUrl(withGameQuery(path));
+  if (!localStorable(url) || options.method || options.body || options.headers || options.cache) {
+    // Not stored, but a `format=c1` answer still decodes to the default JSON.
+    return getJson(path, options).then((payload) => (isC1(payload) ? decodeC1(payload, c1Dictionary) : payload));
+  }
+  return localReader.read(url, options).catch(async (err) => {
+    if (!(err instanceof C1Error) || !(await refreshC1Dictionary())) throw err;
+    return localReader.read(url, { ...options, fresh: true });
+  });
+}
+
+/** Run `fn(value)` whenever a stored public read of `path` comes back changed. Returns unsubscribe. */
+export function subscribeLocal(path, fn) {
+  return localReader.subscribe(publicApiUrl(withGameQuery(path)), fn);
 }
 
 /**
@@ -164,26 +252,22 @@ export async function getJson(path, options = {}) {
 const C1_READS = true;
 
 /**
- * Read a big catalogue route in the compact `c1` encoding
- * (docs/rust-migration/COMPACT_ENCODING.md): 20-45% fewer bytes after brotli,
- * decoded back to exactly the default JSON, so callers do not change.
+ * Read a catalogue route in the compact `c1` encoding (C1_READS), decoded
+ * back to exactly the default JSON, so callers do not change.
  * `?format=c1` rather than the Accept header: the URL is the cache key at the
  * edge. Safe either way: a plain JSON answer passes through, and a document
- * this build cannot decode (a newer dictionary) is read again as JSON.
- * Decoded rows share interned objects: treat them as read-only.
+ * this build cannot decode (even after a dictionary refresh) is read again as
+ * JSON. Decoded rows share interned objects: treat them as read-only.
  */
 export async function getJsonC1(path, options = {}) {
   if (!C1_READS) {
-    return getJson(path, options);
-  }
-  const payload = await getJson(`${path}${path.includes('?') ? '&' : '?'}format=c1`, options);
-  if (!isC1(payload)) {
-    return payload;
+    return getJsonLocal(path, options);
   }
   try {
-    return decodeC1(payload);
-  } catch (_) {
-    return getJson(path, options);
+    return await getJsonLocal(`${path}${path.includes('?') ? '&' : '?'}format=c1`, options);
+  } catch (err) {
+    if (!(err instanceof C1Error) && !(err instanceof TypeError)) throw err;
+    return getJsonLocal(path, options);
   }
 }
 
@@ -659,14 +743,73 @@ export async function fillMissingTilePrices(cards) {
   return fillMissingLastMedianPrices(fromTiles);
 }
 
-export function fetchCard(cardId, { lang = 'en', slug = '', includeOffers = false, fresh = false } = {}) {
+/**
+ * Page caches (cards, sets, artists) may hold a stored copy older than
+ * FRESH_MS: a prefetch puts it there so the page's synchronous peek paints at
+ * once. The page's own fetch then asks the network and resolves with the
+ * answer, so the view updates in place without subscribing.
+ */
+const storedCopies = new WeakMap();
+
+function markStored(value, url) {
+  if (value && typeof value === 'object' && !localReader.fresh(url)) {
+    storedCopies.set(value, url);
+  }
+  return value;
+}
+
+function cachedFresh(value) {
+  const url = storedCopies.get(value);
+  return !url || localReader.fresh(url);
+}
+
+/** How old a stored copy a read may show before the network answers. */
+function staleLimit({ onUpdate, prefetch } = {}) {
+  return onUpdate || prefetch ? MAX_STALE_MS : FRESH_MS;
+}
+
+function localUrl(path) {
+  return publicApiUrl(withGameQuery(path));
+}
+
+/** A card-page payload into the desk caches: arrows, memory, and (desk reads) the sync localStorage copy. */
+function acceptCardPage(cardId, data, { lang, persist }) {
+  assertCardPageIdentity(cardId, data, { gameId: game().id });
+  // Every card page (prefetches included) widens the arrow cache.
+  if (hasNeighborArrows(data?.neighbors)) {
+    rememberNeighbors(data.card || { id: cardId }, data.neighbors);
+  }
+  let next = data;
+  if (!hasNeighborArrows(data?.neighbors)) {
+    const peeked = peekNeighbors(cardId);
+    if (hasNeighborArrows(peeked)) {
+      next = { ...data, neighbors: peeked };
+    }
+  }
+  rememberMap(cardCache, cardCacheKey(cardId, lang), next, 24);
+  if (persist) {
+    rememberStoredCardPage(cardId, next, { lang });
+  }
+  return next;
+}
+
+/**
+ * `fresh` reads the network (the desk does when it painted from a peek).
+ * `prefetch` warms the caches at low cost: a stored copy of any age is kept,
+ * nothing goes to localStorage, and `signal` may abort it. `onUpdate` hears a
+ * newer page when a stored copy shown first is revalidated.
+ */
+export function fetchCard(cardId, {
+  lang = 'en',
+  slug = '',
+  includeOffers = false,
+  fresh = false,
+  prefetch = false,
+  signal,
+  priority,
+  onUpdate,
+} = {}) {
   const key = cardCacheKey(cardId, lang);
-  if (!fresh && !includeOffers && cardCache.has(key)) {
-    return Promise.resolve(cardCache.get(key));
-  }
-  if (!fresh && !includeOffers && cardInflight.has(key)) {
-    return cardInflight.get(key);
-  }
   const params = new URLSearchParams({ cardId: String(cardId) });
   if (lang) {
     params.set('lang', lang);
@@ -676,44 +819,56 @@ export function fetchCard(cardId, { lang = 'en', slug = '', includeOffers = fals
   }
   if (includeOffers) {
     params.set('includeOffers', '1');
-  }
-  const pending = getJson(`/api/marketplace-card-page?${params}`).then((data) => {
-    assertCardPageIdentity(cardId, data, { gameId: game().id });
-    // Every card page (prefetches included) widens the arrow cache.
-    if (hasNeighborArrows(data?.neighbors)) {
-      rememberNeighbors(data.card || { id: cardId }, data.neighbors);
-    }
-    if (!includeOffers) {
-      let next = data;
-      if (!hasNeighborArrows(data?.neighbors)) {
-        const peeked = peekNeighbors(cardId);
-        if (hasNeighborArrows(peeked)) {
-          next = { ...data, neighbors: peeked };
-        }
+    // Live offers: never cached or stored.
+    return getJson(`/api/marketplace-card-page?${params}`).then((data) => {
+      assertCardPageIdentity(cardId, data, { gameId: game().id });
+      if (hasNeighborArrows(data?.neighbors)) {
+        rememberNeighbors(data.card || { id: cardId }, data.neighbors);
       }
-      rememberMap(cardCache, key, next, 24);
-      rememberStoredCardPage(cardId, next, { lang });
-      cardInflight.delete(key);
-      return next;
-    }
-    return data;
-  }, (err) => {
-    cardInflight.delete(key);
-    throw err;
-  });
-  const settled = pending.finally(() => { cardInflight.delete(key); });
-  if (!includeOffers) {
-    cardInflight.set(key, settled);
+      return data;
+    });
   }
+  const hit = cardCache.get(key);
+  if (!fresh && hit && (prefetch || cachedFresh(hit))) {
+    return Promise.resolve(hit);
+  }
+  if (!fresh && !prefetch && cardInflight.has(key)) {
+    return cardInflight.get(key);
+  }
+  const path = `/api/marketplace-card-page?${params}`;
+  const url = localUrl(path);
+  const persist = !prefetch;
+  const pending = getJsonLocal(path, {
+    fresh,
+    prefetch,
+    signal,
+    priority,
+    maxStaleMs: staleLimit({ onUpdate, prefetch }),
+    onUpdate: (data) => {
+      try {
+        const next = acceptCardPage(cardId, data, { lang, persist });
+        onUpdate?.(next);
+      } catch (_) {
+        /* a mismatched revalidation keeps the page it has */
+      }
+    },
+  }).then((data) => markStored(acceptCardPage(cardId, data, { lang, persist }), url));
+  if (prefetch) {
+    return pending;
+  }
+  const settled = pending.finally(() => { cardInflight.delete(key); });
+  cardInflight.set(key, settled);
   return settled;
 }
 
-export function fetchVersionSet(cardId) {
+export function fetchVersionSet(cardId, { onUpdate, prefetch = false, signal, priority } = {}) {
   const id = String(cardId || '').trim();
   if (!id) {
     return Promise.reject(new Error('cardId is required.'));
   }
-  return getJson(`/api/marketplace-version-set?cardId=${encodeURIComponent(id)}`);
+  return getJsonLocal(`/api/marketplace-version-set?cardId=${encodeURIComponent(id)}`, {
+    onUpdate, prefetch, signal, priority,
+  });
 }
 
 export {
@@ -1159,13 +1314,13 @@ export function peekArtist(slug, limit = 5000) {
   return artistPageCache.get(artistPageKey(slug, limit)) || null;
 }
 
-export function fetchArtist(slug, { limit = 240 } = {}) {
+export function fetchArtist(slug, { limit = 240, onUpdate, prefetch = false, signal } = {}) {
   const key = artistPageKey(slug, limit);
   const hit = artistPageCache.get(key);
-  if (hit) {
+  if (hit && (prefetch || cachedFresh(hit))) {
     return Promise.resolve(hit);
   }
-  if (artistPageInflight.has(key)) {
+  if (!prefetch && artistPageInflight.has(key)) {
     return artistPageInflight.get(key);
   }
   const params = new URLSearchParams({
@@ -1176,33 +1331,48 @@ export function fetchArtist(slug, { limit = 240 } = {}) {
     // to send before the API ships.
     tiles: '1',
   });
+  const remember = (data) => {
+    const mapped = {
+      ...data,
+      cards: (data.cards || []).map(cardFromCatalogRow).filter((card) => card.id),
+    };
+    artistPageCache.delete(key);
+    artistPageCache.set(key, mapped);
+    while (artistPageCache.size > 8) {
+      artistPageCache.delete(artistPageCache.keys().next().value);
+    }
+    return mapped;
+  };
   // The whole artist (no cap) comes from its snapshot; the live route is the fallback.
-  const fromSnapshot = limit >= 1000 ? fetchListSnapshot('artist', slug) : Promise.resolve(null);
+  const fromSnapshot = limit >= 1000
+    ? fetchListSnapshot('artist', slug, {
+      prefetch,
+      signal,
+      maxStaleMs: staleLimit({ onUpdate, prefetch }),
+      onUpdate: (snapshot) => {
+        if (snapshot?.cards?.length) onUpdate?.(remember(snapshot));
+      },
+    }).then((snapshot) => (snapshot?.cards?.length
+      ? markStored(remember(snapshot), localUrl(listSnapshotPath('artist', slug)))
+      : null))
+    : Promise.resolve(null);
   if (limit >= 5000) {
     params.set('limit', '20000');
   }
-  const pending = fromSnapshot
-    .then((snapshot) => (snapshot?.cards?.length ? snapshot : getJsonC1(`/api/marketplace-artist-cards?${params}`)))
-    .then((data) => {
-      const mapped = {
-        ...data,
-        cards: (data.cards || []).map(cardFromCatalogRow).filter((card) => card.id),
-      };
-      artistPageCache.delete(key);
-      artistPageCache.set(key, mapped);
-      while (artistPageCache.size > 8) {
-        artistPageCache.delete(artistPageCache.keys().next().value);
-      }
-      return mapped;
-    })
-    .finally(() => {
-      artistPageInflight.delete(key);
-    });
-  artistPageInflight.set(key, pending);
-  return pending;
+  const pending = fromSnapshot.then((mapped) => mapped
+    || (prefetch ? null : getJsonC1(`/api/marketplace-artist-cards?${params}`).then(remember)));
+  if (prefetch) {
+    return pending;
+  }
+  const tracked = pending.finally(() => {
+    artistPageInflight.delete(key);
+  });
+  artistPageInflight.set(key, tracked);
+  return tracked;
 }
 
-export function fetchArtistSummaries({ limit = 1000 } = {}) {
+/** Artist index (names, counts, covers; no prices): a stored copy answers at once. */
+export function fetchArtistSummaries({ limit = 1000, onUpdate } = {}) {
   if (artistSummariesCache) {
     return Promise.resolve(artistSummariesCache);
   }
@@ -1210,7 +1380,13 @@ export function fetchArtistSummaries({ limit = 1000 } = {}) {
     summaries: '1',
     limit: String(limit),
   });
-  return getJsonC1(`/api/marketplace-artist-cards?${params}`).then((data) => {
+  return getJsonC1(`/api/marketplace-artist-cards?${params}`, {
+    maxStaleMs: MAX_STALE_MS,
+    onUpdate: (data) => {
+      artistSummariesCache = data;
+      onUpdate?.(data);
+    },
+  }).then((data) => {
     artistSummariesCache = data;
     return data;
   });
@@ -1222,20 +1398,21 @@ export function resetArtistCacheForTests() {
   artistSummariesCache = null;
 }
 
-export async function fetchExpansions({ limit = 500 } = {}) {
+/**
+ * Set index: names and counts, no prices, so a stored copy of any age answers
+ * at once and is revalidated behind it (`onUpdate`). The set_index rail held
+ * 80 sets on 2026-10-11, fewer than any caller asks for (500 / 2000), so it is
+ * only the fallback now instead of a round trip before every index read.
+ */
+export async function fetchExpansions({ limit = 500, onUpdate } = {}) {
   const cap = Number(limit) || 500;
-  let cached = null;
   try {
-    cached = await fetchSetIndexFromLists();
-    if (cached?.expansions?.length >= cap) {
-      return { ...cached, expansions: cached.expansions.slice(0, cap) };
-    }
-  } catch (_) {
-    /* Oracle fallback below */
-  }
-  try {
-    return await getJsonC1(`/api/marketplace-expansion-page?limit=${encodeURIComponent(String(cap))}`);
+    return await getJsonC1(`/api/marketplace-expansion-page?limit=${encodeURIComponent(String(cap))}`, {
+      maxStaleMs: MAX_STALE_MS,
+      onUpdate,
+    });
   } catch (err) {
+    const cached = await fetchSetIndexFromLists().catch(() => null);
     if (cached?.expansions?.length) {
       return { ...cached, expansions: cached.expansions.slice(0, cap) };
     }
@@ -1299,7 +1476,8 @@ export function fetchPrintNationality(slug) {
     return printNationalityInflight.get(key);
   }
   const params = new URLSearchParams({ slug: key, limit: '1' });
-  const pending = getJsonC1(`/api/marketplace-expansion-page?${params}`)
+  // A set's print nationality never changes: any stored copy will do.
+  const pending = getJsonC1(`/api/marketplace-expansion-page?${params}`, { maxStaleMs: MAX_STALE_MS })
     .then((data) => {
       const value = String(data?.expansion?.nationality || '').trim();
       printNationalityCache.set(key, value);
@@ -1431,22 +1609,28 @@ function mergeExpansionPayload(base, page) {
   };
 }
 
+/** The URL of a prebuilt list snapshot, or '' without a key. */
+export function listSnapshotPath(kind, key) {
+  const k = String(key || '').trim().toLowerCase();
+  return k ? `/api/marketplace-list?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(k)}&format=c1v2` : '';
+}
+
 /**
- * Prebuilt list snapshot (`kind` set or artist): the whole desk with prices,
- * built on nezopt every 15 min / daily and served from one key read as c1
- * format 2 (template columns; a snapshot built before format 2 answers c1),
- * pre-compressed with brotli 11.
+ * Prebuilt list snapshot (`kind` set, artist or name): the whole desk with
+ * prices, built on nezopt every 15 min / daily and served from one key read as
+ * c1 format 2 (template columns; a snapshot built before format 2 answers c1),
+ * pre-compressed with brotli 11. Read local-first (getJsonLocal options).
  * Null when that list is not built yet; callers then use the live routes.
  */
-export function fetchListSnapshot(kind, key) {
-  const k = String(key || '').trim().toLowerCase();
-  if (!k) {
+export function fetchListSnapshot(kind, key, options = {}) {
+  const path = listSnapshotPath(kind, key);
+  if (!path) {
     return Promise.resolve(null);
   }
-  return getJson(`/api/marketplace-list?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(k)}&format=c1v2`)
+  return getJsonLocal(path, options)
     .then((payload) => {
       primeListDictionary();
-      return isC1(payload) ? decodeC1(payload) : payload;
+      return payload;
     })
     .catch(() => null);
 }
@@ -1476,30 +1660,53 @@ export function primeListDictionary(doc = typeof document === 'undefined' ? null
   return true;
 }
 
-/** Set desk page: the whole set from its snapshot, else the live routes. */
+/**
+ * Set desk page: the whole set from its snapshot, else the live routes. A
+ * revalidated snapshot reaches `onUpdate`; `prefetch` only warms the cache.
+ */
 export function fetchExpansion(opts = {}) {
-  const { slug = '', expansionName = '', limit = 48, offset = 0 } = opts;
+  const { slug = '', expansionName = '', limit = 48, offset = 0, onUpdate, prefetch = false, signal } = opts;
   if (offset !== 0 || !slug) {
     return fetchExpansionLive(opts);
   }
   const key = expansionCacheKey({ slug, expansionName, limit, offset });
-  if (expansionCache.has(key)) {
-    return Promise.resolve(expansionCache.get(key));
+  const hit = expansionCache.get(key);
+  if (hit && (prefetch || cachedFresh(hit))) {
+    return Promise.resolve(hit);
   }
-  if (expansionInflight.has(key)) {
+  if (!prefetch && expansionInflight.has(key)) {
     return expansionInflight.get(key);
   }
-  const pending = fetchListSnapshot('set', slug).then((snapshot) => {
+  const toPage = (snapshot) => {
     const page = snapshot?.cards?.length ? mapExpansionCards(snapshot) : null;
-    expansionInflight.delete(key);
     if (!page?.cards?.length) {
-      return fetchExpansionLive(opts);
+      return null;
     }
     const data = { ...page, hasMore: false, fromSnapshot: true };
     expansionCache.set(key, data);
     return data;
+  };
+  const pending = fetchListSnapshot('set', slug, {
+    prefetch,
+    signal,
+    maxStaleMs: staleLimit(opts),
+    onUpdate: (snapshot) => {
+      const data = toPage(snapshot);
+      if (data) onUpdate?.(data);
+    },
+  }).then((snapshot) => {
+    if (!prefetch) {
+      expansionInflight.delete(key);
+    }
+    const data = toPage(snapshot);
+    if (data) {
+      return markStored(data, localUrl(listSnapshotPath('set', slug)));
+    }
+    return prefetch ? null : fetchExpansionLive(opts);
   });
-  expansionInflight.set(key, pending);
+  if (!prefetch) {
+    expansionInflight.set(key, pending);
+  }
   return pending;
 }
 
@@ -1705,23 +1912,32 @@ function preloadCardArt(card) {
   img.src = url;
 }
 
-export function warmupCard(card, { lang = 'en', listings = false } = {}) {
+/**
+ * Warm one card desk before it opens: its page (local store, low priority,
+ * abortable by `signal`), with `art` its hero scan, and with `listings` its
+ * live listings (the desk adopts a read this recent instead of asking again).
+ */
+export function prefetchCardDesk(card, { lang = 'en', slug = '', art = true, listings = false, signal } = {}) {
   const id = neighborCardId(card);
   if (!id) {
-    return;
+    return Promise.resolve(null);
   }
-  preloadCardArt(card);
-  fetchCard(id, { lang, slug: slugFromCard(card), includeOffers: false })
-    .then((data) => {
-      if (hasNeighborArrows(data.neighbors)) {
-        rememberNeighbors(data.card, data.neighbors);
-      }
-      preloadCardArt(data.card);
-    })
-    .catch(() => {});
+  if (art) {
+    preloadCardArt(card);
+  }
   if (listings) {
     fetchListings(id).catch(() => {});
   }
+  return fetchCard(id, { lang, slug: slug || slugFromCard(card), prefetch: true, signal }).then((data) => {
+    if (art) {
+      preloadCardArt(data.card);
+    }
+    return data;
+  });
+}
+
+export function warmupCard(card, { lang = 'en', listings = false } = {}) {
+  prefetchCardDesk(card, { lang, listings }).catch(() => {});
 }
 
 export function warmupNeighbors(neighbors, { lang = 'en' } = {}) {

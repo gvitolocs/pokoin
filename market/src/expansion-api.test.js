@@ -24,6 +24,12 @@ function expansionAdapter(getJson, fetchExpansionFromLists = async () => null, f
     mapExpansionCards: (payload) => payload && { ...payload, cards: payload.cards || [] },
     overlayCatalogTilePrices: async (cards) => cards,
     mergeExpansionPayload: (_, page) => page,
+    // Local-first bookkeeping (api.js): every cached page counts as fresh here.
+    cachedFresh: () => true,
+    markStored: (value) => value,
+    staleLimit: () => 0,
+    localUrl: (path) => path,
+    listSnapshotPath: (kind, key) => `/api/marketplace-list?kind=${kind}&key=${key}&format=c1v2`,
   };
   return new Function(...Object.keys(dependencies), `${adapterSource}\nreturn fetchExpansion;`)(
     ...Object.values(dependencies),
@@ -92,5 +98,38 @@ test('a built set snapshot is the whole set and skips the live routes', async ()
   assert.equal(data.cards.length, 113);
   assert.equal(data.hasMore, false);
   assert.equal(data.fromSnapshot, true);
+  assert.deepEqual(live, []);
+});
+
+test('a revalidated set snapshot reaches the page through onUpdate', async () => {
+  let deliver;
+  const updates = [];
+  const fetchPage = expansionAdapter(
+    async () => ({ cards: [] }),
+    async () => null,
+    async (kind, key, options) => {
+      deliver = options.onUpdate;
+      return { cards: [{ id: '1' }], expansion: { name: 'Example' } };
+    },
+  );
+  const data = await fetchPage({ slug: 'example', limit: 400, offset: 0, onUpdate: (next) => updates.push(next) });
+  assert.equal(data.cards.length, 1);
+  deliver({ cards: [{ id: '1' }, { id: '2' }], expansion: { name: 'Example' } });
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].cards.length, 2);
+  assert.equal(updates[0].fromSnapshot, true);
+});
+
+test('a set prefetch warms only the snapshot, never the live routes', async () => {
+  const live = [];
+  const fetchPage = expansionAdapter(
+    async (path) => { live.push(path); return { cards: [] }; },
+    async () => { live.push('rail'); return null; },
+    async (kind, key, options) => {
+      assert.equal(options.prefetch, true);
+      return null;
+    },
+  );
+  assert.equal(await fetchPage({ slug: 'unbuilt', limit: 400, offset: 0, prefetch: true }), null);
   assert.deepEqual(live, []);
 });
