@@ -124,6 +124,7 @@ import NativeSales from '../components/desk/NativeSales.jsx';
 import RelatedCards from '../components/desk/RelatedCards.jsx';
 import SeoCrumbs from '../components/desk/SeoCrumbs.jsx';
 import ShopListingRow, { ShopList } from '../components/desk/ShopListing.jsx';
+import { splitVaultOffers } from '@market/vault.js';
 import SilverHead from '../components/desk/SilverHead.jsx';
 import SoldPriceGraph from '../components/desk/SoldPriceGraph.jsx';
 import ExpansionMark from '../components/ExpansionMark.jsx';
@@ -660,6 +661,8 @@ function CardDesk(props) {
     });
     return sortOffers(filtered, offerSort());
   });
+  // The Vault (Pokoin's own stock) gets its own panel; the Shop lists everyone else.
+  const split = createMemo(() => splitVaultOffers(offers()));
   const mineIds = createMemo(() => {
     const uid = String(authUser()?.uid || '');
     if (!uid) return [];
@@ -1159,6 +1162,41 @@ function CardDesk(props) {
                 </section>
               </div>
 
+              <div class="shop-split">
+              <section class="panel shop-panel vault-panel">
+                <header class="panel-head shop-head">
+                  <h2>Vault</h2>
+                </header>
+                <Show
+                  when={split().vault.length}
+                  fallback={(
+                    <div class="empty-shop">
+                      <p class="status">{offersReady() ? 'Nothing in the Vault' : ' '}</p>
+                    </div>
+                  )}
+                >
+                  <ShopList offers={split().vault} deskCard={card()}>
+                    <For each={split().vault}>
+                      {(offer) => (
+                        <ShopListingRow
+                          offer={offer}
+                          anonymous
+                          card={card()}
+                          mine={mineIds().includes(offer.id)}
+                          selected={listingSelected().has(listingSelectId(offer))}
+                          dragOffers={shopDragOffers(split().vault, listingSelected(), offer)}
+                          listingBusy={listingBusy()}
+                          editing={editingOffer()?.id === offer.id}
+                          onCart={(qty) => addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 })}
+                          onInspect={openZoom}
+                          onEdit={() => setEditingOffer(editingOffer()?.id === offer.id ? null : snapshot(offer))}
+                          onCancel={() => cancelMine([offer.id])}
+                        />
+                      )}
+                    </For>
+                  </ShopList>
+                </Show>
+              </section>
               <section class="panel shop-panel shop-terminal">
                 <header class="panel-head shop-head">
                   <h2>Shop</h2>
@@ -1197,22 +1235,22 @@ function CardDesk(props) {
                 </header>
                 <Show when={shopError()}><p class="sell-msg error">{shopError()}</p></Show>
                 <Show
-                  when={offers().length}
+                  when={split().shop.length}
                   fallback={(
                     <div class="empty-shop">
                       <p class="status">{offersReady() ? 'No items found' : ' '}</p>
                     </div>
                   )}
                 >
-                  <ShopList offers={offers()} deskCard={card()}>
-                    <For each={offers()}>
+                  <ShopList offers={split().shop} deskCard={card()}>
+                    <For each={split().shop}>
                       {(offer) => (
                         <ShopListingRow
                           offer={offer}
                           card={card()}
                           mine={mineIds().includes(offer.id)}
                           selected={listingSelected().has(listingSelectId(offer))}
-                          dragOffers={shopDragOffers(offers(), listingSelected(), offer)}
+                          dragOffers={shopDragOffers(split().shop, listingSelected(), offer)}
                           listingBusy={listingBusy()}
                           editing={editingOffer()?.id === offer.id}
                           onCart={(qty) => addToCart({ ...cartItemFromOffer(card(), snapshot(offer)), qty: qty || 1 })}
@@ -1225,6 +1263,7 @@ function CardDesk(props) {
                   </ShopList>
                 </Show>
               </section>
+              </div>
             </div>
 
             <Show when={later()}>
