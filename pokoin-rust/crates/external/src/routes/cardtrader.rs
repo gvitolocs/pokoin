@@ -131,6 +131,12 @@ pub async fn sync_status(State(state): State<DomainState>, headers: HeaderMap) -
     Ok(json_response(200, sync_status_payload(status, &progress)))
 }
 
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> ApiResult<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| ApiError::new(500, "Power Tools CSV processing failed."))
+}
+
 fn sync_status_payload(status: Value, progress: &Value) -> Value {
     let running = progress["running"] == true;
     let phase = progress["phase"].clone();
@@ -222,8 +228,11 @@ pub async fn sync_start(
         ));
     }
 
-    let import = link::parse_power_tools_body(&payload)?;
-    if payload["previewPowerTools"] == true {
+    // CSV parsing (up to the 10 MB body) is synchronous CPU work: keep it off
+    // the API's few async workers.
+    let preview_power_tools = payload["previewPowerTools"] == true;
+    let import = blocking(move || link::parse_power_tools_body(&payload)).await??;
+    if preview_power_tools {
         let Some(import) = import else {
             return Ok(json_response(
                 400,
@@ -240,7 +249,7 @@ pub async fn sync_start(
             Ok(token) => state.cardtrader.fetch_products_export(&token).await.map(|export| export.products).unwrap_or_default(),
             Err(_) => Vec::new(),
         };
-        let mut preview = link::power_tools_preview(&import, &products);
+        let mut preview = blocking(move || link::power_tools_preview(&import, &products)).await?;
         preview["connected"] = json!(true);
         preview["status"] = status;
         return Ok(json_response(200, preview));
