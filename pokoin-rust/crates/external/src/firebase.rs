@@ -308,6 +308,22 @@ pub struct FirestoreRest {
 
 const FIRESTORE_SCOPE: &str = "https://www.googleapis.com/auth/datastore";
 
+/// Percent-encode a query parameter value (everything outside RFC 3986
+/// unreserved characters — field names are plain identifiers today, this keeps
+/// any future `.`/space oddity safe).
+fn urlencode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 impl FirestoreRest {
     pub fn from_env() -> Option<Self> {
         let project_id = std::env::var("FIREBASE_PROJECT_ID").ok()?.trim().to_string();
@@ -383,53 +399,40 @@ impl FirestoreRest {
         )
     }
 
-    /// REST documents use dot paths; we flatten objects into dot paths.
-    fn flatten(fields: &Value, prefix: &str, out: &mut Map<String, Value>) {
-        match fields {
-            Value::Object(map) => {
-                for (key, value) in map {
-                    let path = if prefix.is_empty() { key.clone() } else { format!("{prefix}.{key}") };
-                    if value.is_object() {
-                        Self::flatten(value, &path, out);
-                    } else {
-                        out.insert(path, firestore_value(value));
-                    }
-                }
-            }
-            other => {
-                out.insert(prefix.to_string(), firestore_value(other));
+    /// Body + update mask for a merge/patch write.
+    ///
+    /// The mask names whole top-level fields and the body carries each one as a
+    /// full nested `mapValue` document. Dotted leaf keys in the body do NOT
+    /// work: Firestore resolves only the mask paths against nested body fields,
+    /// and a body keyed by literal dotted names silently clears every masked
+    /// nested field to an empty map instead of writing it (this destroyed
+    /// stored CardTrader tokens on reconnect, 2026-10-14). Callers pass
+    /// complete sub-objects, so replacing whole top-level fields keeps merge
+    /// semantics.
+    fn patch_body(fields: &Value) -> (Value, String) {
+        let mut body = Map::new();
+        let mut paths = Vec::new();
+        if let Some(map) = fields.as_object() {
+            for (key, value) in map {
+                body.insert(key.clone(), firestore_value(value));
+                paths.push(format!("updateMask.fieldPaths={}", urlencode(key)));
             }
         }
+        (json!({ "fields": Value::Object(body) }), paths.join("&"))
     }
 
+    /// REST GET responses carry each field as a typed wrapper (nested
+    /// `mapValue`s included); `plain_value` decodes them per top-level field.
     fn unflatten(raw: &Value) -> Value {
-        let mut root = Map::new();
         let Some(fields) = raw.get("fields").and_then(Value::as_object) else {
             return json!({});
         };
-        for (path, wrapper) in fields {
-            let segments: Vec<&str> = path.split('.').collect();
-            let mut cursor = &mut root;
-            for segment in &segments[..segments.len().saturating_sub(1)] {
-                cursor = cursor
-                    .entry(segment.to_string())
-                    .or_insert_with(|| Value::Object(Map::new()))
-                    .as_object_mut()
-                    .expect("flattening only creates objects");
-            }
-            cursor.insert(segments[segments.len() - 1].to_string(), plain_value(wrapper));
-        }
-        Value::Object(root)
-    }
-
-    fn update_mask(fields: &Value) -> String {
-        let mut flattened = Map::new();
-        Self::flatten(fields, "", &mut flattened);
-        flattened
-            .keys()
-            .map(|path| format!("updateMask.fieldPaths={path}"))
-            .collect::<Vec<_>>()
-            .join("&")
+        Value::Object(
+            fields
+                .iter()
+                .map(|(key, wrapper)| (key.clone(), plain_value(wrapper)))
+                .collect(),
+        )
     }
 }
 
@@ -530,15 +533,13 @@ impl FirestoreStore for FirestoreRest {
     fn merge_doc<'a>(&'a self, collection: &'a str, id: &'a str, fields: Value) -> futures_util::future::BoxFuture<'a, ApiResult<()>> {
         Box::pin(async move {
             let token = self.access_token().await?;
-            let mut flattened = Map::new();
-            Self::flatten(&fields, "", &mut flattened);
-            let mask = Self::update_mask(&fields);
+            let (body, mask) = Self::patch_body(&fields);
             let url = format!("{}?{}", self.doc_url(collection, id), mask);
             let response = self
                 .http
                 .patch(&url)
                 .bearer_auth(token)
-                .json(&json!({ "fields": Value::Object(flattened) }))
+                .json(&body)
                 .send()
                 .await?
                 .error_for_status()?;
@@ -550,14 +551,13 @@ impl FirestoreStore for FirestoreRest {
     fn create_doc<'a>(&'a self, collection: &'a str, id: &'a str, fields: Value) -> futures_util::future::BoxFuture<'a, ApiResult<()>> {
         Box::pin(async move {
             let token = self.access_token().await?;
-            let mut flattened = Map::new();
-            Self::flatten(&fields, "", &mut flattened);
+            let (body, _) = Self::patch_body(&fields);
             let url = format!("{}?currentDocument.exists=false", self.doc_url(collection, id));
             let status = self
                 .http
                 .post(&url)
                 .bearer_auth(token)
-                .json(&json!({ "fields": Value::Object(flattened) }))
+                .json(&body)
                 .send()
                 .await?
                 .status();
@@ -652,6 +652,67 @@ mod tests {
         let value = json!({"a": 1, "b": "x", "c": [1, "y"], "d": {"e": true}});
         let wrapped = firestore_value(&value);
         assert_eq!(plain_value(&wrapped), value);
+    }
+
+    #[test]
+    fn patch_body_writes_nested_fields_not_dotted_keys() {
+        // The exact payload store_connected_integration sends for a reconnect.
+        // The old writer keyed the body with literal dotted paths; Firestore
+        // ignored them and cleared every masked nested field to an empty map,
+        // which destroyed stored tokens ("CardTrader is not connected for this
+        // seller" while status still said connected). The body must nest
+        // mapValues and the mask must name top-level fields only.
+        let fields = json!({
+            "uid": "u1",
+            "enabled": true,
+            "metadata": {
+                "app": { "id": "7", "name": "App" },
+                "user": { "id": "5", "username": "sel" },
+                "scopes": ["openid"],
+                "seller": { "id": "9", "name": "Sel Shop" },
+                "oneDayReady": false,
+            },
+            "encryptedToken": {
+                "version": 1,
+                "algorithm": "aes-256-gcm",
+                "iv": "IVIVIVIVIVIVIVIV",
+                "tag": "TA==",
+                "ciphertext": "CIPHERTEXT",
+            },
+            "encryptedSharedSecret": Value::Null,
+        });
+        let (body, mask) = FirestoreRest::patch_body(&fields);
+        let body_fields = body.get("fields").and_then(Value::as_object).expect("body fields");
+        for key in body_fields.keys() {
+            assert!(!key.contains('.'), "body key {key} must not be a dotted path");
+        }
+        let token = body_fields
+            .get("encryptedToken")
+            .and_then(|w| w.get("mapValue"))
+            .and_then(|m| m.get("fields"))
+            .and_then(Value::as_object)
+            .expect("encryptedToken stored as a nested mapValue");
+        assert_eq!(token.len(), 5, "envelope fields must survive the write body");
+        assert_eq!(token["ciphertext"]["stringValue"], "CIPHERTEXT");
+
+        let mask_paths: Vec<&str> = mask.split("&").collect();
+        assert_eq!(mask_paths.len(), 5, "one mask path per top-level field");
+        assert!(mask_paths.contains(&"updateMask.fieldPaths=encryptedToken"));
+        assert!(mask_paths.contains(&"updateMask.fieldPaths=metadata"));
+        for path in &mask_paths {
+            let name = path.split('=').nth(1).expect("mask path=value");
+            assert!(!name.contains('.'), "mask path {name} must be top-level");
+        }
+
+        // The stored body reads back to the same data plain_value hands to the
+        // API layer — the write shape and the read shape agree.
+        let read_back: Map<String, Value> = body_fields
+            .iter()
+            .map(|(key, wrapper)| (key.clone(), plain_value(wrapper)))
+            .collect();
+        assert_eq!(read_back["metadata"]["user"]["username"], "sel");
+        assert_eq!(read_back["encryptedToken"]["ciphertext"], "CIPHERTEXT");
+        assert_eq!(read_back["encryptedSharedSecret"], Value::Null);
     }
 
     #[test]

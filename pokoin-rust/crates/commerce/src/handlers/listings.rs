@@ -984,9 +984,13 @@ async fn load_seller_listings(
     state: &DomainState,
     uid: &str,
 ) -> Result<Vec<SellerListing>, ApiError> {
+    // CardTrader-imported rows (1-Day Ready stock and listings already live on
+    // CardTrader) are CardTrader's, never this CSV's audience: exporting them
+    // would double-list them on Cardmarket/TCGPlayer/Power Tools.
     let rows = sqlx::query(
         "select * from public.marketplace_user_listings
           where seller_uid = $1 and status in ('active', 'paused', 'inactive')
+            and coalesce(source, '') <> 'cardtrader_seller_import'
           order by updated_at desc limit 10000",
     )
     .bind(uid)

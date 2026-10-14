@@ -42,16 +42,27 @@ pub fn safe_status_from_doc(doc: &FirestoreDoc) -> Value {
     }
     let data = &doc.data;
     let enabled = data.get("enabled") == Some(&Value::Bool(true));
+    // Connected means the seller can actually use CardTrader: enabled AND a
+    // stored token. A doc left enabled with a missing/empty token (e.g. by an
+    // older corrupted write) must show the paste-token form, not a Sync button
+    // that fails with "not connected".
+    let connected = enabled && has_secret(data, "encryptedToken");
     json!({
-        "connected": enabled,
+        "connected": connected,
         "provider": PROVIDER,
-        "metadata": if enabled { data.get("metadata").cloned().filter(|v| !v.is_null()).unwrap_or(Value::Null) } else { Value::Null },
+        "metadata": if connected { data.get("metadata").cloned().filter(|v| !v.is_null()).unwrap_or(Value::Null) } else { Value::Null },
         "connectedAt": data.get("connectedAt").cloned().unwrap_or(Value::Null),
         "updatedAt": data.get("updatedAt").cloned().unwrap_or(Value::Null),
         "lastValidatedAt": data.get("lastValidatedAt").cloned().unwrap_or(Value::Null),
         "disconnectedAt": data.get("disconnectedAt").cloned().unwrap_or(Value::Null),
         "webhook": data.get("webhookRegistration").cloned().filter(|v| !v.is_null()).unwrap_or(Value::Null),
     })
+}
+
+/// A non-null decrypted-ready secret (an empty Firestore map reads back as
+/// Null after `plain_value`, which is exactly the corrupted-envelope shape).
+fn has_secret(data: &Value, field: &str) -> bool {
+    !data.get(field).cloned().unwrap_or(Value::Null).is_null()
 }
 
 pub async fn read_integration_doc(firestore: &dyn FirestoreStore, uid: &str) -> ApiResult<FirestoreDoc> {
