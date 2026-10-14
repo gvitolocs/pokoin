@@ -35,6 +35,11 @@ WRITER_NET_IP=172.31.250.10
 TCGCSV_CONTAINER="${TCGCSV_CONTAINER:-tcgprices-postgres-15t}"
 TCGCSV_NET_IP=172.31.250.11
 K3S_NET_IP=172.31.250.20
+# Hermes (Poko chat): the host reaches it through oracle-poko-tunnel.service on
+# loopback :18789; pods reach that through this socat bridge (see hermes_bridge).
+HERMES_BRIDGE_CONTAINER="${HERMES_BRIDGE_CONTAINER:-pokoin-hermes-bridge}"
+HERMES_BRIDGE_IP=172.31.250.13
+HERMES_PORT=18789
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST="$HERE/infra/k3s/pokoin-overflow.yaml"
 [[ -f "$MANIFEST" ]] || MANIFEST="$(cd "$HERE/.." && pwd)/infra/k3s/pokoin-overflow.yaml"
@@ -65,6 +70,20 @@ up() {
   say "k3s ready"
 }
 
+# UFW drops container → host traffic, so the bridge enters the host network
+# namespace per connection (same pattern as pokoin-scan-bridge on .12:18151).
+hermes_bridge() {
+  if docker inspect "$HERMES_BRIDGE_CONTAINER" >/dev/null 2>&1; then
+    [[ "$(docker inspect -f '{{.State.Running}}' "$HERMES_BRIDGE_CONTAINER")" == true ]] \
+      || docker start "$HERMES_BRIDGE_CONTAINER" >/dev/null
+    return 0
+  fi
+  docker run -d --name "$HERMES_BRIDGE_CONTAINER" --restart unless-stopped --privileged --pid host \
+    --network "$NET" --ip "$HERMES_BRIDGE_IP" alpine:3.20 sh -c \
+    "apk add --no-cache socat >/dev/null && printf '%s\n' '#!/bin/sh' 'exec nsenter -t 1 -n socat STDIO TCP:127.0.0.1:$HERMES_PORT' > /bridge.sh && chmod +x /bridge.sh && exec socat TCP-LISTEN:$HERMES_PORT,fork,reuseaddr,bind=$HERMES_BRIDGE_IP EXEC:/bridge.sh" \
+    >/dev/null
+}
+
 network() {
   docker network inspect "$NET" >/dev/null 2>&1 || docker network create --subnet "$NET_SUBNET" "$NET" >/dev/null
   local attached
@@ -74,6 +93,7 @@ network() {
   if docker inspect "$TCGCSV_CONTAINER" >/dev/null 2>&1; then
     [[ " $attached " == *" $TCGCSV_CONTAINER "* ]] || docker network connect --ip "$TCGCSV_NET_IP" "$NET" "$TCGCSV_CONTAINER"
   fi
+  hermes_bridge
 }
 
 # The running Pi Rust service's real environment (/proc/<pid>/environ: the
@@ -155,10 +175,17 @@ if quotes:
     netloc = f"{netloc[0]}@{host}" if len(netloc) == 2 else host
     data["TCGCSV_DATABASE_URL"] = base64.b64encode(
         urlunsplit(parts._replace(netloc=netloc)).encode()).decode()
+# The Pi reaches Hermes through its own localhost SSH tunnel; overflow pods reach the
+# same Hermes through the hermes bridge on the overflow Docker network.
+for key in ("POKO_CHAT_URL", "POKONTACT_SERVICE_URL"):
+    raw = base64.b64decode(data.get(key, "")).decode()
+    parts = urlsplit(raw)
+    if raw and (parts.hostname or "") in {"127.0.0.1", "localhost", "::1"}:
+        data[key] = base64.b64encode(urlunsplit(parts._replace(netloc=sys.argv[3])).encode()).decode()
 print(json.dumps({"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
                   "metadata": {"name": "pokoin-api-env", "namespace": "pokoin-overflow"},
                   "data": data}))
-' "$WRITER_NET_IP" "$TCGCSV_NET_IP" | kc apply -f - >/dev/null
+' "$WRITER_NET_IP" "$TCGCSV_NET_IP" "$HERMES_BRIDGE_IP:$HERMES_PORT" | kc apply -f - >/dev/null
   say "secret pokoin-api-env synced from the Pi Rust service ($(kc -n "$NS" get secret pokoin-api-env -o jsonpath='{.data}' | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') keys)"
 }
 
