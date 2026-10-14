@@ -61,7 +61,7 @@ Header `Authorization: Bearer pkn_…`, JSON body `{ "action": … }`:
 | `scan-settings` | — | `{ batchId, scanSettings }` — latest open (otherwise latest submitted) scan batch defaults, normalized for Card Rails; read-only and seller-scoped. Includes game, language, finish, condition, flags, quantity, merge policy and the exact location/stack/start position. |
 | `locations` | — | `{ locations: [{ label }] }` — storage locations on the seller's live stock |
 | `webhook` | `url` | `{ webhookUrl, sharedSecret }` — like CardTrader's `PATCH /app` |
-| `listings` | `cursor?`, `limit?` (≤ 500) | `{ listings: [{ listingId, cardId, game, name, setName, collectorNumber, condition, language, quantity, status, pricePkn, priceEurCents, reverse, firstEdition, foilState, location, updatedAt }], cursor }` |
+| `listings` | `cursor?`, `limit?` (≤ 500) | `{ listings: [{ listingId, cardId, game, name, setName, collectorNumber, condition, language, quantity, status, pricePkn, priceEurCents, reverse, firstEdition, foilState, location, updatedAt, lastSoldMinEurCents }], cursor }` |
 | `stock` | `listingId`, `targetQuantity` (0–99), `channel?` | `{ confirmed: true, listingId, quantity, status, changed }` |
 | `list` | `item`, `idempotencyKey`, `channel?` | `{ confirmed: true, listingId, stockMode: "absolute", created }` |
 | `sales` | `cursor?` | `{ orders: [order], sales: [{ channel, externalId, quantity, orderRef, lineId, occurredAt }], cursor, more }` — order events only; `sales` are the paid orders' lines, `externalId` being the listing id |
@@ -79,6 +79,11 @@ Rules worth knowing:
   `item` is the Card Rails inventory item: `identity.publicId` is the Pokoin
   card id (required), `price` is EUR (200 PKN per euro) or pass `pricePkn`,
   `quantity`, `condition`, `language`, `finish`, `location`.
+- **`lastSoldMinEurCents`** is the lowest confirmed Pokoin sale price for
+  that exact card version/printing (same blueprint, condition, language,
+  reverse and first-edition state — never a graded slab, never mixed) over
+  the last 30 days, from `cardtrader_sold_daily`. Absent, not zero, when
+  nothing matching sold in that window.
 - **`channel`** is `pokoin` or absent. `cardmarket` answers
   `409 cardmarket_unlinked`: Pokoin has no Cardmarket account link.
 - Another seller's listing is `404`, exactly like one that does not exist.
