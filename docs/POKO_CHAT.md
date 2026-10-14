@@ -60,7 +60,7 @@ the LLM, and may call `POST /api/poko-market` for sold/ask/liquidity tools
 | `POKONTACT_SERVICE_TOKEN` | Bearer Hermes accepts |
 | `POKO_CHAT_URL` | Optional override of the base / full chat URL |
 | `POKO_API_TOKEN` | Optional override of the bearer |
-| `POKO_CHAT_TIMEOUT_MS` | Optional (default 45000) |
+| `POKO_CHAT_TIMEOUT_MS` | Optional Hermes timeout (default 90000, kept within 5000–95000). Photo download / scan workers use 8 s / 12 s / 25 s; every other accounts call keeps the shared 4 s transport timeout. |
 
 ### Network (important)
 
