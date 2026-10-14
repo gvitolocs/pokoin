@@ -3,6 +3,7 @@ import { artCutVars } from '@market/art-cut.js';
 import { artworkFigureMaskSrc } from '@market/art-figure-mask.js';
 import { cardReference, writeListingDrag } from '@market/chat-listing.js';
 import { cdnFetchUrl, rasterSiblings } from '@market/image-urls.js';
+import { heroOpen, onHeroGate } from '@market/hero-gate.js';
 import { isCardTraderPlaceholderSize, MISSING_CARD_SRC } from '@market/missing-card.js';
 
 function artDebugEnabled() {
@@ -34,6 +35,14 @@ export default function CardArt(props) {
   const cardId = () => props.card?.id || props.card?.card_id || '';
   let errorSent = false;
   let img;
+  // Thumbnails wait while a desk hero loads (market/src/hero-gate.js); full
+  // scans never do.
+  const [gateOpen, setGateOpen] = createSignal(heroOpen());
+  onSettled(() => {
+    const stop = onHeroGate(setGateOpen);
+    setGateOpen(heroOpen());
+    return stop;
+  });
 
   function failCurrent() {
     const list = urls();
@@ -115,7 +124,7 @@ export default function CardArt(props) {
       decoding={props.full ? 'sync' : 'async'}
       // src last, like React DOM does for <img>: loading / decoding /
       // fetchpriority must be on the element before the URL is.
-      src={current()}
+      src={props.full || gateOpen() ? current() : undefined}
       // Enumerated attribute, not boolean: "false" stops the native image ghost.
       draggable={props.dragCard ? 'true' : 'false'}
       onClick={(event) => props.onClick?.(event)}
