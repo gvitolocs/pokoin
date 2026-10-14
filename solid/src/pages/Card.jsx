@@ -21,6 +21,7 @@ import {
   cancelListing,
   cardFromCatalogRow,
   cardHref,
+  deskArtUrl,
   dropListing,
   fetchArtistSummaries,
   fetchCanonicalPath,
@@ -30,7 +31,6 @@ import {
   fetchListings,
   fetchPrintNationality,
   fetchVersionSet,
-  imageSrc,
   invalidateListings,
   mergeCreatedListing,
   neighborsOrPeek,
@@ -522,7 +522,9 @@ function CardDesk(props) {
   // Strings children key their own work on (hero <img>, links) are memos, so a
   // hydrate that only adds fields does not re-run it.
   const fromPath = createMemo(() => card().canonicalPath || window.location.pathname);
-  const art = createMemo(() => imageSrc(card(), 'hero'));
+  // The exact URL the boot script and the router preloaded (card.deskArtUrl
+  // from the card page), so this <img> reuses that download.
+  const art = createMemo(() => deskArtUrl(card()));
   // A new hero closes the gate until DeskArtFrame reports it loaded or failed.
   createEffect(art, (url) => {
     if (url) holdForHero();

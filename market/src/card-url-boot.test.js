@@ -210,3 +210,37 @@ test('a card URL starts exactly one card-page prefetch and one canonical prefetc
   }));
   assert.deepEqual(idle, []);
 });
+
+function bootWithPage(pathname, card) {
+  const images = [];
+  const context = createContext({
+    navigator: {},
+    URLSearchParams,
+    encodeURIComponent,
+    location: { pathname, hostname: 'pokoin.com' },
+    history: { state: null, replaceState() {} },
+    fetch(url) {
+      const page = String(url).includes('marketplace-card-page');
+      return Promise.resolve({ ok: page, json: () => Promise.resolve({ card }) });
+    },
+    Image: function Image() { images.push(this); },
+  });
+  context.window = context;
+  runInContext(source, context);
+  return new Promise((resolve) => { setTimeout(() => resolve(images), 0); });
+}
+
+test('the card page names the desk hero and the boot starts it at high priority', async () => {
+  const url = 'https://cdn.pokoin.com/111227_defender-80-102-base-set.jpg?v=bsu2';
+  const images = await bootWithPage('/marketplace/en/cards/222454/defender', { id: '222454', deskArtUrl: url });
+  assert.equal(images.length, 1);
+  assert.equal(images[0].src, url);
+  assert.equal(images[0].fetchPriority, 'high');
+  assert.equal(images[0].decoding, 'async');
+});
+
+test('no hero preload without a CDN deskArtUrl', async () => {
+  assert.equal((await bootWithPage('/marketplace/en/cards/222454/defender', { id: '222454' })).length, 0);
+  assert.equal((await bootWithPage('/marketplace/en/cards/222454/defender', { deskArtUrl: '/card-images/1_x.jpg' })).length, 0);
+  assert.equal((await bootWithPage('/marketplace', { deskArtUrl: 'https://cdn.pokoin.com/1_x.jpg' })).length, 0);
+});

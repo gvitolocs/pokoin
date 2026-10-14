@@ -178,6 +178,8 @@ pub async fn card_page(State(state):State<AppState>,headers:HeaderMap,uri:axum::
  card["versionCount"]=json!(version_count);
  let version=meta.as_ref().map(|m|text(m,&["version"])).filter(|v|!v.is_empty()).unwrap_or(version);
  card["version"]=json!(version);
+ // The exact hero scan URL the desk requests, so card-url-boot.js preloads it.
+ card["deskArtUrl"]=json!(pokoin_catalog::desk_art::desk_art_url(&card,&game));
  let versions=version_ids.iter().filter_map(|i|map.get(i).cloned()).collect::<Vec<_>>();
  let rarities=rarity_ids.iter().filter_map(|i|map.get(i).cloned()).collect::<Vec<_>>();
  let mut prev=neighbors.iter().filter(|(_,_,d)|*d<=6).map(|(id,_,d)|(*d,*id)).collect::<Vec<_>>();prev.sort_unstable();

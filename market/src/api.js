@@ -1901,8 +1901,19 @@ function slugFromCard(card) {
 const preloadedArt = new Set();
 
 /** The URL the desk scan requests first (CardArt `full`): preloading any other
- * spelling of it, or its fallback siblings, is a second download. */
+ * spelling of it, or its fallback siblings, is a second download. The card
+ * page sends it as `card.deskArtUrl` (pokoin-rust desk_art.rs, the same rules
+ * and tables), so the boot script can start it before this chunk runs. */
 export function deskArtUrl(card) {
+  const served = card?.deskArtUrl;
+  if (typeof served === 'string' && served) {
+    return served;
+  }
+  return clientDeskArtUrl(card);
+}
+
+/** `deskArtUrl` from the card's image fields alone (the Rust parity golden). */
+export function clientDeskArtUrl(card) {
   const src = imageSrc(card, 'hero') || imageSrc(card, 'grid');
   return cdnFetchUrl(rasterSiblings(src, { full: true })[0] || '');
 }

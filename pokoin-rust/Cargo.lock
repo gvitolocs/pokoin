@@ -1920,9 +1920,11 @@ name = "pokoin-catalog"
 version = "0.1.0"
 dependencies = [
  "pokoin-search",
+ "regex",
  "serde_json",
  "thiserror",
  "unicode-segmentation",
+ "url",
 ]
 
 [[package]]
