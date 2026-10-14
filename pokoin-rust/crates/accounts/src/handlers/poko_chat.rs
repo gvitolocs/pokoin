@@ -299,25 +299,14 @@ fn multipart_body(boundary: &str, bytes: &[u8]) -> Vec<u8> {
     body
 }
 
-/// `identifyOnePhoto(url, {primary, fallback})` — YOLO + Milo on every box.
-async fn identify_one_photo(
+/// YOLO + Milo on every box of one JPEG photo (primary worker, then fallback).
+async fn identify_photo_bytes(
     state: &DomainState,
-    url: &str,
+    bytes: Vec<u8>,
     primary: &str,
     fallback: &str,
 ) -> Vec<Json> {
     let transport = state.transport().clone();
-    let image = match send_with_retry(
-        &transport,
-        HttpRequest::new("GET", url.to_string()).timeout(PHOTO_FETCH_TIMEOUT),
-        RetryPolicy::none(),
-    )
-    .await
-    {
-        Ok(response) if response.is_success() => response,
-        _ => return Vec::new(),
-    };
-    let bytes = image.body;
     if bytes.len() < 32 || bytes.len() > 4_000_000 {
         return Vec::new();
     }
@@ -357,18 +346,62 @@ async fn identify_one_photo(
     Vec::new()
 }
 
-/// `identifyChatPhotos(urls)` — only our own R2 chat photos, at most four.
-async fn identify_chat_photos(state: &DomainState, urls: &[String]) -> Vec<Json> {
-    let own: Vec<String> = urls
-        .iter()
-        .filter(|url| crate::domain::poko_chat::is_user_photo_url(url))
-        .take(4)
-        .cloned()
-        .collect();
+/// `identifyOnePhoto(url, {primary, fallback})` — YOLO + Milo on every box.
+async fn identify_one_photo(
+    state: &DomainState,
+    url: &str,
+    primary: &str,
+    fallback: &str,
+) -> Vec<Json> {
+    let transport = state.transport().clone();
+    let image = match send_with_retry(
+        &transport,
+        HttpRequest::new("GET", url.to_string()).timeout(PHOTO_FETCH_TIMEOUT),
+        RetryPolicy::none(),
+    )
+    .await
+    {
+        Ok(response) if response.is_success() => response,
+        _ => return Vec::new(),
+    };
+    identify_photo_bytes(state, image.body, primary, fallback).await
+}
+
+/// `identifyChatPhotos(urls)` — at most four photos: the caller's own chat
+/// photos, read straight from storage (the /api/user-photos proxy needs the
+/// user's sign-in), and legacy public R2 photo URLs. Never another user's photo.
+async fn identify_chat_photos(state: &DomainState, urls: &[String], uid: &str) -> Vec<Json> {
     let mut found: Vec<Json> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    for url in own {
-        let cards = identify_one_photo(state, &url, &scan_primary(), &scan_fallback()).await;
+    let mut used = 0;
+    for url in urls {
+        if used == 4 {
+            break;
+        }
+        let cards = if let Some(key) = crate::domain::poko_chat::own_chat_photo_key(url, uid) {
+            used += 1;
+            match state.photo_store() {
+                Some(store) => match store.get_object(&key).await {
+                    Ok(Some(bytes)) => {
+                        identify_photo_bytes(state, bytes, &scan_primary(), &scan_fallback()).await
+                    }
+                    Ok(None) => Vec::new(),
+                    Err(error) => {
+                        tracing::warn!(
+                            message = %error.message().chars().take(160).collect::<String>(),
+                            "poko-chat photo read failed"
+                        );
+                        Vec::new()
+                    }
+                },
+                None => Vec::new(),
+            }
+        } else if crate::domain::poko_chat::is_user_photo_url(url) {
+            used += 1;
+            identify_one_photo(state, url, &scan_primary(), &scan_fallback()).await
+        } else {
+            continue;
+        };
         for card in cards {
             let key = {
                 let id = card.get("cardId").and_then(Json::as_str).unwrap_or("");
@@ -586,7 +619,7 @@ async fn poko_chat_inner(
     let photo_cards = if images.is_empty() {
         Vec::new()
     } else {
-        identify_chat_photos(state, &images).await
+        identify_chat_photos(state, &images, &claims.uid).await
     };
 
     // The prompt stands in for the user's turn when only attachments were sent.
