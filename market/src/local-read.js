@@ -292,10 +292,12 @@ export function createLocalReader({ fetchText, store, decode, now = Date.now, st
       // Prefetches wait for the store: they are not in a hurry, and a stored copy
       // saves a request. A read that only takes a copy younger than FRESH_MS asks
       // the network at once (the store still wins when it holds one, and still
-      // stands in when the network fails); the others give the store a head start.
+      // stands in when the network fails); the others give the store a head start,
+      // cut short when a request already in flight for this URL lands first.
+      const running = inflight.get(url)?.promise.then(() => SLOW, () => SLOW);
       const row = prefetch
         ? await pending
-        : maxStaleMs <= FRESH_MS ? SLOW : await Promise.race([pending, wait(storeWaitMs)]);
+        : maxStaleMs <= FRESH_MS ? SLOW : await Promise.race([pending, wait(storeWaitMs), running].filter(Boolean));
       // A read in flight (the route preload) may have landed while the store was asked.
       const raced = memory.get(url);
       if (raced && now() - raced.savedAt <= maxStaleMs) return serve(url, raced, onUpdate, prefetch);

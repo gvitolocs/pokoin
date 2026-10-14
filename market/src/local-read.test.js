@@ -4,7 +4,7 @@ import { createLocalReader, FRESH_MS, localStorable, MAX_STALE_MS } from './loca
 
 const URL_A = 'https://api.pokoin.com/api/marketplace-list?kind=set&key=surging-sparks&format=c1v2';
 
-function setup({ rows = {}, answers = {}, storeDelayMs = 0 } = {}) {
+function setup({ rows = {}, answers = {}, storeDelayMs = 0, storeWaitMs } = {}) {
   let clock = 1_000_000_000;
   const fetched = [];
   const puts = [];
@@ -13,6 +13,7 @@ function setup({ rows = {}, answers = {}, storeDelayMs = 0 } = {}) {
   const stored = new Map(Object.entries(rows));
   const reader = createLocalReader({
     now: () => clock,
+    storeWaitMs,
     decode: (text) => JSON.parse(text),
     store: {
       get: async (url) => {
@@ -192,6 +193,25 @@ test('a slow store does not send a second request when the read in flight landed
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(t.fetched.length, 1);
   assert.deepEqual(updates, []);
+});
+
+test('the store head start ends when the request in flight for the URL lands first', async () => {
+  let release;
+  const t = setup({
+    storeDelayMs: 1500,
+    storeWaitMs: 1000,
+    answers: { [URL_A]: () => new Promise((resolve) => { release = () => resolve({ text: '{"v":2}' }); }) },
+  });
+  t.stored.set(URL_A, { body: '{"v":1}', savedAt: t.now() - FRESH_MS * 10 });
+  const plain = t.reader.read(URL_A);
+  await flush();
+  const started = performance.now();
+  const desk = t.reader.read(URL_A, { onUpdate: () => {} });
+  setTimeout(() => release(), 10);
+  assert.deepEqual(await desk, { v: 2 });
+  assert.ok(performance.now() - started < 500, 'answered by the landing, not after the 1 s head start');
+  assert.deepEqual(await plain, { v: 2 });
+  assert.equal(t.fetched.length, 1);
 });
 
 test('a revalidation that finds the copy gone drops it: the next read shows the 404', async () => {
