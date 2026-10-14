@@ -469,7 +469,7 @@ async fn record_cart_change(
         .fetch_one(state.write_db())
         .await?
     };
-    Ok(row.try_get::<i64, _>("cart_holder_count").unwrap_or(0))
+    Ok(pokoin_api_common::pg::number_i64(&row, "cart_holder_count").unwrap_or(0))
 }
 
 async fn record_watchlist_change(
@@ -545,7 +545,7 @@ async fn record_watchlist_change(
         .fetch_one(state.write_db())
         .await?
     };
-    Ok(row.try_get::<i64, _>("watchlist_count").unwrap_or(0))
+    Ok(pokoin_api_common::pg::number_i64(&row, "watchlist_count").unwrap_or(0))
 }
 
 // ---------------------------------------------------------------------------

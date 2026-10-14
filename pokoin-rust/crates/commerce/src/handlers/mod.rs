@@ -6,6 +6,8 @@ pub mod crypto;
 pub mod listings;
 pub mod orders;
 pub mod seller;
+pub mod seller_api;
+pub mod seller_book;
 pub mod stripe;
 pub mod wallet;
 pub mod earn_pkn;

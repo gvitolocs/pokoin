@@ -10,6 +10,7 @@ use pokoin_search::{
     group_suggest_hits, parse_limit, redis_search_query, suggest_meili_hit_limit, SuggestHitPage,
     SuggestParts,
 };
+use pokoin_api_common::compact::{encode as compact_encode, Wanted, C1_CONTENT_TYPE, C1_FORMAT_HEADER};
 use serde_json::{json, Value};
 
 use crate::AppState;
@@ -53,6 +54,8 @@ pub async fn suggest(
 
     let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("");
     let query_string = path.split_once('?').map(|(_, q)| q).unwrap_or("");
+    // `?format=c1` / `c1v2`, or the c1 media type in `Accept`: the same body, columnar.
+    let wanted = Wanted::from_parts(headers.get(header::ACCEPT).and_then(|value| value.to_str().ok()), query_string);
     let params: Vec<(String, String)> =
         serde_urlencoded::from_str(query_string).unwrap_or_default();
     let param = |name: &str| {
@@ -97,13 +100,13 @@ pub async fn suggest(
             .unwrap_or("all"),
     );
     if query.is_empty() {
-        return json_ok(
+        return json_as(wanted, 
             &empty_suggest(&query, &game, "empty_query"),
             "public, max-age=5, s-maxage=30",
         );
     }
     if !language_ok(&search_language) {
-        return json_ok(
+        return json_as(wanted, 
             &empty_suggest(&query, &game, "meili_unavailable"),
             "public, max-age=5, s-maxage=15",
         );
@@ -117,7 +120,7 @@ pub async fn suggest(
             Ok(page) => page,
             Err(error) => {
                 tracing::error!(%error, "redis suggest failed");
-                return json_ok(
+                return json_as(wanted, 
                     &empty_suggest(&query, &game, "redis_error"),
                     "public, max-age=5, s-maxage=15",
                 );
@@ -128,14 +131,14 @@ pub async fn suggest(
             Ok(page) => page,
             Err(error) => {
                 tracing::error!(%error, "marketplace-suggest failed");
-                return json_ok(
+                return json_as(wanted, 
                     &empty_suggest(&query, &game, "meili_error"),
                     "public, max-age=5, s-maxage=15",
                 );
             }
         }
     } else {
-        return json_ok(
+        return json_as(wanted, 
             &empty_suggest(&query, &game, "meili_unavailable"),
             "public, max-age=5, s-maxage=15",
         );
@@ -189,7 +192,7 @@ pub async fn suggest(
     body["offset"] = json!(offset);
     body["nextOffset"] = json!(offset + incoming);
     body["exhaustive"] = json!(incoming < hit_limit || offset + incoming >= estimated);
-    json_ok(
+    json_as(wanted, 
         &body,
         "public, max-age=5, s-maxage=30, stale-while-revalidate=120",
     )
@@ -609,6 +612,26 @@ fn title_language(value: &str) -> String {
 
 
 
+/// `json_ok` in the representation the client asked for. The compact form is
+/// sent as `application/json` so the edge compresses it, marks itself with
+/// `x-pokoin-format: c1`, and decodes back to exactly the default body.
+fn json_as(wanted: Wanted, body: &Value, cache: &str) -> Response {
+    if !wanted.c1() {
+        return json_ok(body, cache);
+    }
+    let mut response = cors(
+        StatusCode::OK,
+        Some(cache.to_string()),
+        Some(C1_CONTENT_TYPE),
+        compact_encode::encode_to_vec_with(body, wanted.encode_options()),
+    )
+    .into_response();
+    let headers = response.headers_mut();
+    headers.insert(C1_FORMAT_HEADER.0, C1_FORMAT_HEADER.1.parse().unwrap());
+    headers.insert(header::VARY, "Accept".parse().unwrap());
+    response
+}
+
 fn json_ok(body: &Value, cache: &str) -> Response {
     cors(
         StatusCode::OK,
@@ -682,4 +705,30 @@ async fn multigame_suggest(state:AppState,headers:HeaderMap,uri:axum::http::Uri)
  }
  let shown=groups.iter().map(|g|g["printings"].as_array().unwrap().len()).sum::<usize>();
  json_ok(&json!({"query":query,"game":game,"groups":groups,"count":shown,"shown":shown}),"public, max-age=5, s-maxage=30")
+}
+
+#[cfg(test)]
+mod c1_tests {
+    use super::*;
+    async fn bytes_of(response: Response) -> Vec<u8> {
+        axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()
+    }
+
+    #[tokio::test]
+    async fn a_suggest_body_is_the_same_data_in_either_form() {
+        let printing = |n: i64| json!({"id": n.to_string(), "name": "Mimikyu GX", "set": "Lost Thunder", "number": format!("{n}/214"), "imageUrl": format!("https://cdn.pokoin.com/leftovers/{n}.jpg")});
+        let body = json!({"query": "mimikyu", "count": 148, "groups": [{"name": "Mimikyu GX", "printings": (1..=40).map(printing).collect::<Vec<_>>()}]});
+        let plain = json_as(Wanted::DEFAULT, &body, "public, max-age=5");
+        assert!(plain.headers().get("x-pokoin-format").is_none());
+        assert_eq!(serde_json::from_slice::<Value>(&bytes_of(plain).await).unwrap(), body);
+
+        let compact = json_as(Wanted::from_parts(None, "q=mimikyu&format=c1"), &body, "public, max-age=5");
+        assert_eq!(compact.headers().get("x-pokoin-format").unwrap(), "c1");
+        assert_eq!(compact.headers().get(header::CACHE_CONTROL).unwrap(), "public, max-age=5");
+        assert_eq!(compact.headers().get(header::CONTENT_TYPE).unwrap(), "application/json; charset=utf-8");
+        let packed = bytes_of(compact).await;
+        assert!(packed.len() * 2 < serde_json::to_vec(&body).unwrap().len(), "{} bytes", packed.len());
+        let decoded = pokoin_api_common::compact::decode::decode(&serde_json::from_slice(&packed).unwrap()).unwrap();
+        assert_eq!(decoded, body);
+    }
 }

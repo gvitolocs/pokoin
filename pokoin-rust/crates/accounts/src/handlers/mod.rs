@@ -2,6 +2,7 @@
 
 pub mod associate;
 pub mod auth;
+pub mod cardrails;
 pub mod chat;
 pub mod collection;
 pub mod forum;

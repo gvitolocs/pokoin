@@ -9,6 +9,31 @@
   "purpose": "Validate the current Firebase bearer token and return safe auth metadata."
  },
  {
+  "path": "/api/cardrails-authorize",
+  "methods": [
+   "POST",
+   "OPTIONS"
+  ],
+  "file": "new (native Rust: crates/accounts/src/handlers/cardrails.rs; no Node origin)",
+  "purpose": "Sign in with Pokoin for Card Rails: the /connect/cardrails consent tap mints a one-time PKCE S256 code for the signed-in user and returns the cardrails://auth/pokoin deep link. Firebase bearer, 10/min per uid; codes stored hashed (cardrails_auth_codes, 120 s)."
+ },
+ {
+  "path": "/api/cardrails-token",
+  "methods": [
+   "POST"
+  ],
+  "file": "new (native Rust: crates/accounts/src/handlers/cardrails.rs; no Node origin)",
+  "purpose": "Server-to-server Card Rails token exchange: atomically consumes the one-time code (single use), verifies the PKCE S256 verifier and returns { uid, email, email_verified }. Bearer POKOIN_CARDRAILS_CLIENT_SECRET."
+ },
+ {
+  "path": "/api/cardrails/connector",
+  "methods": [
+   "POST"
+  ],
+  "file": "seller_api.rs",
+  "purpose": "Card Rails connector: a seller's cardrails:stock grant connects, reads locations and listings, sets stock, lists cards, reads sales and registers its webhook."
+ },
+ {
   "path": "/api/chat",
   "methods": [
    "GET",
@@ -128,6 +153,23 @@
   ],
   "file": "client-country.js",
   "purpose": "ISO country from the edge IP header, for local eBay and Vinted links."
+ },
+ {
+  "path": "/api/seller-api-grants",
+  "methods": [
+   "GET",
+   "POST"
+  ],
+  "file": "seller_api.rs",
+  "purpose": "Signed-in seller lists, creates and revokes API tokens for inventory apps, sets a webhook URL or sends a test webhook."
+ },
+ {
+  "path": "/api/seller-api/v1",
+  "methods": [
+   "POST"
+  ],
+  "file": "seller_api.rs",
+  "purpose": "Seller API for any inventory app holding a seller grant: same actions as the Card Rails connector."
  },
  {
   "path": "/api/tcgplayer-redirect",

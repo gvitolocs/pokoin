@@ -27,6 +27,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }
+tokio = { workspace = true }
 
 [lints.rust]
 unsafe_code = "forbid"

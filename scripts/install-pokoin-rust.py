@@ -80,7 +80,10 @@ def install(args):
             atomic_bytes(backup / path.name, saved[path][0], saved[path][1])
     atomic_bytes(backup / "release.json", json.dumps({"previous": old_target, "next": args.commit, "sha256": args.sha256}).encode(), 0o600)
     values = env_values(saved[ENV][0].decode()) if saved[ENV] else {}
-    deployed = json.loads(run("docker", "inspect", "pokoin-oracle-api"))[0]["Config"]["Env"]
+    probe = subprocess.run(["docker", "inspect", "pokoin-oracle-api"], capture_output=True, text=True)
+    if probe.returncode != 0 and not saved[ENV]:
+        raise RuntimeError("Neither native settings nor legacy settings are available")
+    deployed = json.loads(probe.stdout)[0]["Config"]["Env"] if probe.returncode == 0 else []
     # Existing native settings win; the legacy image supplies configured service bindings.
     for entry in deployed:
         key, sep, value = entry.partition("=")

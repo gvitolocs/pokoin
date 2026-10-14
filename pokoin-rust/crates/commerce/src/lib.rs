@@ -40,6 +40,8 @@ pub mod ports;
 /// In-memory set of card ids with a Sold-on-Pokoin row (native-sales fast path).
 pub mod sales_index;
 /// Redis read-through cache for public seller profile fields.
+/// Seller API grants, the seller event log and signed outbound webhooks.
+pub mod seller_api;
 pub mod seller_cache;
 pub mod state;
 pub mod store;
@@ -60,6 +62,8 @@ use axum::Router;
 /// with the search/catalog routers via `Router::with_state`.
 pub fn router(state: DomainState) -> Router {
     listing_sync::start(&state);
+    seller_api::start(&state);
+    handlers::seller_book::start(&state);
     Router::new()
         // listings + inventory + stock CSV
         .route(
@@ -109,6 +113,17 @@ pub fn router(state: DomainState) -> Router {
             get(handlers::seller::marketplace_seller_settings_get)
                 .post(handlers::seller::marketplace_seller_settings_post),
         )
+        // seller API: grants for the signed-in seller, connector for their tools
+        .route(
+            "/api/seller-api-grants",
+            get(handlers::seller_api::seller_api_grants_get)
+                .post(handlers::seller_api::seller_api_grants_post),
+        )
+        .route(
+            "/api/cardrails/connector",
+            post(handlers::seller_api::cardrails_connector),
+        )
+        .route("/api/seller-api/v1", post(handlers::seller_api::seller_api_v1))
         // addresses + shipping
         .route(
             "/api/account-addresses",

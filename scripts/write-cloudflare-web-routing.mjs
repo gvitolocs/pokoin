@@ -13,7 +13,7 @@ const games = Object.values(GAMES).map((game) => game.slug).filter(Boolean);
 
 const spa = [
   'about', 'admin', 'ambassador', 'ambassadorprogram', 'artwork', 'associate', 'auth',
-  'bought', 'buy', 'cardscan', 'careers', 'cart', 'checkout', 'collection', 'contact',
+  'bought', 'buy', 'cardscan', 'careers', 'cart', 'checkout', 'collection', 'connect/cardrails', 'contact',
   'dashboard', 'docs', 'earn', 'email-preferences', 'espurr', 'exchange', 'extension',
   'favorites', 'flex', 'forum', 'health', 'inventory', 'invite', 'join', 'jumbos',
   'marketplace', 'messages', 'mypokoin', 'nft', 'ocr', 'orders', 'poko', 'privacy', 'product',

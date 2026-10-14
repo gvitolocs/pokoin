@@ -51,19 +51,29 @@ function matchesRarity(row, rarity) {
   return true;
 }
 
-function matchesRow(row, filters) {
-  const q = String(filters.q || '').trim().toLowerCase();
-  if (q) {
-    const hay = `${row.cardName || ''} ${row.setName || ''} ${row.collectorNumber || ''}`.toLowerCase();
-    if (!hay.includes(q)) return false;
-  }
-  const codes = conditionCodes(filters.condition);
-  if (codes && !codes.includes(String(row.condition || '').trim().toUpperCase())) return false;
-  const language = String(filters.language || '').trim().toUpperCase();
-  if (language && !String(row.language || '').trim().toUpperCase().startsWith(language)) return false;
-  if (filters.reverse && row.reverse !== true) return false;
-  if (filters.firstEdition && row.firstEdition !== true) return false;
-  if (!matchesRarity(row, filters.rarity)) return false;
+/** What a filter or a sort reads from a row, worked out once per book. */
+function rowKey(row) {
+  const price = Number(row.pricePkn);
+  return {
+    row,
+    price: Number.isFinite(price) ? price : Number.POSITIVE_INFINITY,
+    name: String(row.cardName || '').toLowerCase(),
+    qty: Number(row.quantityAvailable) || 0,
+    updated: timeValue(row.updatedAt),
+    created: timeValue(row.createdAt),
+    hay: `${row.cardName || ''} ${row.setName || ''} ${row.collectorNumber || ''}`.toLowerCase(),
+    condition: String(row.condition || '').trim().toUpperCase(),
+    language: String(row.language || '').trim().toUpperCase(),
+  };
+}
+
+function matchesKey(key, filters) {
+  if (filters.q && !key.hay.includes(filters.q)) return false;
+  if (filters.codes && !filters.codes.includes(key.condition)) return false;
+  if (filters.language && !key.language.startsWith(filters.language)) return false;
+  if (filters.reverse && key.row.reverse !== true) return false;
+  if (filters.firstEdition && key.row.firstEdition !== true) return false;
+  if (filters.rarity && !matchesRarity(key.row, filters.rarity)) return false;
   return true;
 }
 
@@ -72,33 +82,69 @@ function timeValue(value) {
   return Number.isFinite(ms) ? ms : 0;
 }
 
-function compareRows(sort, a, b) {
-  const priceA = Number(a.pricePkn);
-  const priceB = Number(b.pricePkn);
-  const pa = Number.isFinite(priceA) ? priceA : Number.POSITIVE_INFINITY;
-  const pb = Number.isFinite(priceB) ? priceB : Number.POSITIVE_INFINITY;
-  const nameA = String(a.cardName || '').toLowerCase();
-  const nameB = String(b.cardName || '').toLowerCase();
-  const qtyA = Number(a.quantityAvailable) || 0;
-  const qtyB = Number(b.quantityAvailable) || 0;
-  const updated = timeValue(b.updatedAt) - timeValue(a.updatedAt);
-  const created = timeValue(b.createdAt) - timeValue(a.createdAt);
-  switch (String(sort || '').toLowerCase()) {
+const collator = new Intl.Collator();
+
+function compareKeys(sort, a, b) {
+  const updated = b.updated - a.updated;
+  switch (sort) {
     case 'price-desc':
-      return (pb - pa) || updated || created;
+      return (b.price - a.price) || updated || (b.created - a.created);
     case 'qty':
-      return (qtyB - qtyA) || (pa - pb) || updated;
+      return (b.qty - a.qty) || (a.price - b.price) || updated;
     case 'name':
-      return nameA.localeCompare(nameB) || (pa - pb);
+      return collator.compare(a.name, b.name) || (a.price - b.price);
     case 'price-asc':
     default:
-      return (pa - pb) || updated || created;
+      return (a.price - b.price) || updated || (b.created - a.created);
   }
 }
 
+const SORTS = new Set(['price-desc', 'qty', 'name', 'price-asc']);
+/** listings array → { keys, sorted: Map<sort, keys in that order> }. */
+const INDEXES = new WeakMap();
+
+function indexFor(listings) {
+  let index = INDEXES.get(listings);
+  if (!index) {
+    index = { keys: listings.map(rowKey), sorted: new Map() };
+    INDEXES.set(listings, index);
+  }
+  return index;
+}
+
+function sortedKeys(index, sort) {
+  let keys = index.sorted.get(sort);
+  if (!keys) {
+    // Infinity - Infinity is NaN: two unpriced rows keep their order.
+    keys = index.keys.slice().sort((a, b) => compareKeys(sort, a, b) || 0);
+    index.sorted.set(sort, keys);
+  }
+  return keys;
+}
+
+/**
+ * Filter and sort a seller's book. The book is indexed once (lowercased text,
+ * numeric price and dates) and each order is sorted once, so a filter click
+ * on a ten-thousand-row shop is one pass over ready keys.
+ */
 export function filterSellerBook(listings, filters = {}) {
-  const rows = (Array.isArray(listings) ? listings : []).filter((row) => matchesRow(row, filters));
-  rows.sort((a, b) => compareRows(filters.sort, a, b));
-  const copies = rows.reduce((sum, row) => sum + (Number(row.quantityAvailable) || 0), 0);
+  if (!Array.isArray(listings)) return { rows: [], unique: 0, copies: 0 };
+  const requested = String(filters.sort || '').toLowerCase();
+  const sort = SORTS.has(requested) ? requested : 'price-asc';
+  const wanted = {
+    q: String(filters.q || '').trim().toLowerCase(),
+    codes: conditionCodes(filters.condition),
+    language: String(filters.language || '').trim().toUpperCase(),
+    reverse: Boolean(filters.reverse),
+    firstEdition: Boolean(filters.firstEdition),
+    rarity: String(filters.rarity || '').trim(),
+  };
+  const rows = [];
+  let copies = 0;
+  for (const key of sortedKeys(indexFor(listings), sort)) {
+    if (!matchesKey(key, wanted)) continue;
+    rows.push(key.row);
+    copies += key.qty;
+  }
   return { rows, unique: rows.length, copies };
 }

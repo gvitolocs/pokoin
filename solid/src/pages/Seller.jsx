@@ -28,6 +28,10 @@ import { authUser, signedIn } from '../stores/auth.js';
 import { addCartItem } from '../stores/cart.js';
 import { authSession } from '../stores/session.js';
 
+/** A changed shop's new book is built behind the request: how often and how soon to ask again. */
+const BOOK_RETRIES = 3;
+const BOOK_RETRY_MS = 2500;
+
 function ShopToggle(props) {
   return (
     <button
@@ -67,8 +71,8 @@ function SkeletonRows() {
 
 /**
  * Public seller shop. The first page comes from
- * a small paged query (or the listings cache); once it settles, the whole
- * book downloads and every filter / sort / page runs locally on it. A fresh
+ * a small paged query (or the listings cache) while the whole book downloads
+ * beside it; every filter / sort / page then runs locally on the book. A fresh
  * stamp check refetches the book when the seller's listings changed.
  * Not ported yet: the rubber-band multi-select of shop rows (rows drag
  * themselves).
@@ -150,9 +154,9 @@ function SellerShop(props) {
     },
   );
 
-  // The whole book, once the first page has settled.
-  createEffect(pageSettled, (settled) => {
-    if (!settled) return undefined;
+  // The whole book, asked for with the first page: it is what makes the
+  // filters instant, so it does not wait behind the page it replaces.
+  createEffect(() => true, () => {
     let cancelled = false;
     setBook(null);
     setBookPhase('loading');
@@ -175,13 +179,18 @@ function SellerShop(props) {
     };
   });
 
-  // Fresh stamp: refetch the book when the seller's listings moved.
+  // Fresh stamp: refetch the book when the seller's listings moved. The
+  // server answers with the book it has while it builds the new one behind
+  // the request, so an unchanged book is asked for again a little later,
+  // a few times, instead of being painted or fetched in a loop.
   createEffect(
     () => [book(), filters()],
     ([current]) => {
       if (!current?.seller?.uid) return undefined;
       let cancelled = false;
-      const timer = setTimeout(() => {
+      let timer = 0;
+      let retries = 0;
+      const check = () => {
         fetchSellerShop(handle, { fresh: true, sellerUid: current.seller.uid, game: selectedGame })
           .then((stamp) => {
             const next = String(stamp?.maxUpdatedAt || '');
@@ -191,11 +200,20 @@ function SellerShop(props) {
           })
           .then((data) => {
             if (cancelled || !data?.book || !Array.isArray(data.listings)) return;
+            if (String(data.maxUpdatedAt || '') === String(current.maxUpdatedAt || '')) {
+              // Still the book on screen: the new one is being built.
+              if (retries < BOOK_RETRIES) {
+                retries += 1;
+                timer = setTimeout(check, BOOK_RETRY_MS);
+              }
+              return;
+            }
             setBook(() => data);
             putSeller((value) => sellerFromPayload(data, handle, data.listings[0], value));
           })
           .catch(() => {});
-      }, 250);
+      };
+      timer = setTimeout(check, 250);
       return () => {
         cancelled = true;
         clearTimeout(timer);

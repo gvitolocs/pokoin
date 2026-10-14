@@ -94,6 +94,54 @@ fn is_null(row: &PgRow, i: usize) -> bool {
     row.try_get_raw(i).map(|v| v.is_null()).unwrap_or(true)
 }
 
+/// A numeric cell as `f64`, whatever its Postgres type: `numeric`
+/// (BigDecimal), `float4/float8` or `int2/int4/int8`. `row.try_get::<f64>`
+/// accepts float8 only, so `try_get::<f64>("price_pkn").unwrap_or(0.0)` turned
+/// every `numeric` price into 0 (seller shops showed no prices; native checkout
+/// compared the cart price with 0 and refused every order). `None` for NULL, a
+/// missing column, or a non-numeric type.
+pub fn number_f64(row: &PgRow, column: &str) -> Option<f64> {
+    let ty = numeric_type(row, column)?;
+    match ty.as_str() {
+        "FLOAT8" => row.try_get::<f64, _>(column).ok(),
+        "FLOAT4" => row.try_get::<f32, _>(column).ok().map(f64::from),
+        "INT2" => row.try_get::<i16, _>(column).ok().map(f64::from),
+        "INT4" => row.try_get::<i32, _>(column).ok().map(f64::from),
+        "INT8" => row.try_get::<i64, _>(column).ok().map(|value| value as f64),
+        "NUMERIC" => row
+            .try_get::<sqlx::types::BigDecimal, _>(column)
+            .ok()
+            .and_then(|value| value.to_string().parse::<f64>().ok())
+            .filter(|value| value.is_finite()),
+        _ => None,
+    }
+}
+
+/// A whole-number cell as `i64`: `int2/int4/int8`, or a `numeric`/float that
+/// holds an integer. `row.try_get::<i64>` accepts int8 only, so an `integer`
+/// column (`quantity_available`, `hits`, counters) read as 0.
+pub fn number_i64(row: &PgRow, column: &str) -> Option<i64> {
+    let ty = numeric_type(row, column)?;
+    match ty.as_str() {
+        "INT2" => row.try_get::<i16, _>(column).ok().map(i64::from),
+        "INT4" => row.try_get::<i32, _>(column).ok().map(i64::from),
+        "INT8" => row.try_get::<i64, _>(column).ok(),
+        "NUMERIC" | "FLOAT4" | "FLOAT8" => number_f64(row, column)
+            .filter(|value| value.fract() == 0.0 && value.abs() < 9.0e15)
+            .map(|value| value as i64),
+        _ => None,
+    }
+}
+
+/// The column's type name, or `None` when it is missing or NULL.
+fn numeric_type(row: &PgRow, column: &str) -> Option<String> {
+    let raw = row.try_get_raw(column).ok()?;
+    if raw.is_null() {
+        return None;
+    }
+    Some(raw.type_info().name().to_ascii_uppercase())
+}
+
 fn cell(row: &PgRow, i: usize, ty: &str) -> Value {
     if is_null(row, i) {
         return Value::Null;
@@ -175,5 +223,44 @@ mod tests {
         assert_eq!(js_number(f64::NAN), Value::Null);
         let dt = DateTime::parse_from_rfc3339("2026-10-08T22:09:31.097123+00:00").unwrap().with_timezone(&Utc);
         assert_eq!(iso(dt), "2026-10-08T22:09:31.097Z");
+    }
+
+    /// Real Postgres decoding (sqlx checks the column type, so a fake row would
+    /// prove nothing). Skipped without a database:
+    /// POKOIN_TEST_DATABASE_URL=postgres://… cargo test -p pokoin-api-common number_
+    #[tokio::test]
+    async fn number_readers_accept_every_numeric_column_type() {
+        let Ok(url) = std::env::var("POKOIN_TEST_DATABASE_URL") else {
+            eprintln!("skipped: POKOIN_TEST_DATABASE_URL is not set");
+            return;
+        };
+        let pool = PgPool::connect(&url).await.expect("test database");
+        let row = sqlx::query(
+            "select 12.50::numeric as price, 3::int4 as qty, 4::int2 as small, 5::int8 as big,
+                    6.5::float4 as f4, 7.25::float8 as f8, 8::numeric as whole, 2.5::numeric as half,
+                    null::numeric as missing, 'x'::text as word, 'NaN'::numeric as nan",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("query");
+        // The bug: the strict decoders refuse these columns, and unwrap_or(0) hid it.
+        assert!(row.try_get::<f64, _>("price").is_err());
+        assert!(row.try_get::<i64, _>("qty").is_err());
+
+        assert_eq!(number_f64(&row, "price"), Some(12.5));
+        assert_eq!(number_f64(&row, "qty"), Some(3.0));
+        assert_eq!(number_f64(&row, "small"), Some(4.0));
+        assert_eq!(number_f64(&row, "big"), Some(5.0));
+        assert_eq!(number_f64(&row, "f4"), Some(6.5));
+        assert_eq!(number_f64(&row, "f8"), Some(7.25));
+        assert_eq!(number_i64(&row, "qty"), Some(3));
+        assert_eq!(number_i64(&row, "small"), Some(4));
+        assert_eq!(number_i64(&row, "big"), Some(5));
+        assert_eq!(number_i64(&row, "whole"), Some(8));
+        assert_eq!(number_i64(&row, "half"), None, "a fraction is not a whole number");
+        for column in ["missing", "word", "nan", "no_such_column"] {
+            assert_eq!(number_f64(&row, column), None, "{column}");
+            assert_eq!(number_i64(&row, column), None, "{column}");
+        }
     }
 }

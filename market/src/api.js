@@ -154,13 +154,14 @@ export async function getJson(path, options = {}) {
 }
 
 /**
- * Off until the edge compresses c1. Production serves it as
- * `application/vnd.pokoin.c1+json`, which Cloudflare does not brotli: on
- * 2026-10-10 the expansion index was 57.7 KB as c1 vs 15.3 KB as brotli JSON
- * (search-page 13.8 vs 6.2 KB). c1 only wins once the server sends it
- * compressed (origin brotli, or an `application/json` content type).
+ * On. The API sends c1 as `application/json`, so the edge compresses it like
+ * any JSON: measured 2026-10-12 after brotli, search-page 6.2 → 3.6 KB, a set
+ * desk 9.8 → 4.8 KB, the expansion index 24.3 → 18.1 KB, with the same
+ * decode time as `JSON.parse` of the plain body and identical data.
+ * (It was off while c1 went out as `application/vnd.pokoin.c1+json`, which
+ * Cloudflare does not compress.)
  */
-const C1_READS = false;
+const C1_READS = true;
 
 /**
  * Read a big catalogue route in the compact `c1` encoding
@@ -380,7 +381,7 @@ export function fetchSuggest(query, {
   if (match === 'all') {
     params.set('match', 'all');
   }
-  return getJson(`/api/marketplace-suggest?${params}`, { signal });
+  return getJsonC1(`/api/marketplace-suggest?${params}`, { signal });
 }
 
 const SEARCH_WARMUP_TTL_MS = 5 * 60 * 1000;
@@ -865,6 +866,28 @@ export function connectCardTrader(token, cardTraderToken) {
   });
 }
 
+/** The seller's live API tokens (Card Rails and other inventory apps). */
+export function fetchSellerApiGrants(token) {
+  return getJson('/api/seller-api-grants', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: 'no-store',
+  });
+}
+
+/** `{ action: 'create' | 'revoke' | 'webhook' | 'test', … }` on the seller's API tokens. */
+export function sellerApiGrantAction(token, body) {
+  return getJson('/api/seller-api-grants', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body || {}),
+  });
+}
+
 /** CardTrader Zero picking list (weekly merged shipment + Zero sales waiting for the next merge). */
 export function fetchCardTraderZero(token) {
   return getJson('/api/cardtrader-zero', {
@@ -918,6 +941,18 @@ export function askPoko(bearer, message, sessionId) {
 
 export function pokoConnectAction(bearer, body) {
   return getJson('/api/poko-connect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${bearer}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Sign in with Pokoin for Card Rails: mint the one-time code (/connect/cardrails consent tap). */
+export function cardRailsAuthorize(bearer, body) {
+  return getJson('/api/cardrails-authorize', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -2711,6 +2746,9 @@ export function fetchSellerShop(username, {
     if (sellerUid) params.set('sellerUid', String(sellerUid));
   } else if (book) {
     params.set('book', '1');
+    // A whole shop as columns against the bundled dictionary: about a tenth
+    // of the JSON. An answer this build cannot decode counts as no book.
+    params.set('format', 'c1v2');
     if (sellerUid) params.set('sellerUid', String(sellerUid));
   } else {
     params.set('limit', String(limit));
@@ -2725,9 +2763,10 @@ export function fetchSellerShop(username, {
     if (sellerUid) params.set('sellerUid', String(sellerUid));
   }
   if (marketplaceGame) params.set('game', String(marketplaceGame));
-  const run = () => getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) => (
-    book || fresh ? data : rememberSellerListings(handle, data, opts)
-  ));
+  const run = () => getJson(`/api/marketplace-seller-shop?${params}`, { signal }).then((data) => {
+    if (book) return isC1(data) ? decodeC1(data) : data;
+    return fresh ? data : rememberSellerListings(handle, data, opts);
+  });
   if (book || fresh) return run();
   const key = sellerCacheKey(handle, opts);
   const pending = sellerShopInflight.get(key);

@@ -74,6 +74,9 @@ The paths inside the router already carry the `/api/...` prefix, so `merge` or
     FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY   (required for anything Firebase)
     POKOIN_REQUIRE_VERIFIED_PASSWORD=1                                 (the password-email gate)
     POKOIN_PENDING_SIGNUP_KEY | PENDING_SIGNUP_KEY                     (falls back to the SA key, exactly like Node)
+    POKOIN_CARDRAILS_CLIENT_SECRET                                     (Card Rails /api/cardrails-token bearer; unset/empty = 503 not_configured)
+    MARKETPLACE_WRITER_DATABASE_URL                                    (Card Rails one-time codes need this WRITER: /api/cardrails-authorize INSERTs and /api/cardrails-token DELETE…RETURNINGs here — the Pi read URL is a read-only standby; unset/empty falls back to MARKETPLACE_DATABASE_URL, single-database deployments only)
+    MARKETPLACE_WRITER_DATABASE_SSL / _SSL_VERIFY                      (Card Rails writer pool TLS: SSL=0 disables, SSL_VERIFY=1 verifies the server certificate, otherwise Require)
     PUBLIC_SITE_URL, EMAIL_FROM, NO_REPLY_EMAIL_FROM, ADMIN_SIGNUP_EMAIL, RESEND_API_KEY
     SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
     VALKEY_URL | REDIS_URL                                             (rate limiting; allow-all when absent)
