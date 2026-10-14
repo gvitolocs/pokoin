@@ -111,6 +111,7 @@ ssh oracle-peer1 'systemctl restart hermes-poko.service'
   (↑ send, + photos, drag-drop card tags, mascot avatar).
 - Conversation title stays pinned at the top; Poko is otherwise a normal peer thread.
 - Attached cards → `cards[]`; photos → `images[]` (https URLs only).
+- Photo search (YOLO + Milo multi-card) reads the sender's own chat photos (`https://api.pokoin.com/api/user-photos/chat/<uid>/…`) straight from the R2 user-photos bucket; another user's photo or a listing photo is never read. Legacy public `*.r2.dev/user-photos/…` URLs are still fetched over HTTPS.
 
 ## Deploy
 

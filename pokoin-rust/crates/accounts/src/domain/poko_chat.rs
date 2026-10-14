@@ -257,6 +257,46 @@ pub fn is_user_photo_url(value: &str) -> bool {
     host.ends_with(".r2.dev") && path.starts_with("/user-photos/")
 }
 
+/// The storage key of the caller's OWN chat photo behind the auth-aware proxy
+/// (`https://api.pokoin.com/api/user-photos/chat/<uid>/<hex id>.jpg`, as
+/// `POST /api/chat?action=photo` returns it). Another user's photo, a listing
+/// photo or any other URL is `None`: Poko only reads photos their owner sent.
+pub fn own_chat_photo_key(value: &str, uid: &str) -> Option<String> {
+    let rest = value.trim().strip_prefix("https://")?;
+    let (authority, path) = rest.split_once('/')?;
+    let host = authority
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if host != "pokoin.com" && !host.ends_with(".pokoin.com") {
+        return None;
+    }
+    let path = path.split(['?', '#']).next().unwrap_or("");
+    let mut parts = path.split('/');
+    if parts.next() != Some("api") || parts.next() != Some("user-photos") || parts.next() != Some("chat") {
+        return None;
+    }
+    let owner = parts.next()?;
+    let file = parts.next()?;
+    if parts.next().is_some() || owner.is_empty() || owner != uid {
+        return None;
+    }
+    if owner.len() < 8 || owner.len() > 128 || !owner.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let id = file
+        .strip_suffix(".jpg")
+        .or_else(|| file.strip_suffix(".JPG"))?;
+    if id.len() < 12 || id.len() > 64 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!(
+        "user-photos/chat/{owner}/{}.jpg",
+        id.to_ascii_lowercase()
+    ))
+}
+
 /// `hitToPhotoCard(hit)`.
 pub fn hit_to_photo_card(hit: &Json) -> Option<Json> {
     if !hit.is_object() {
@@ -1043,6 +1083,35 @@ mod tests {
         ));
         assert!(!is_user_photo_url("not a url"));
         assert!(!is_user_photo_url(""));
+    }
+
+    #[test]
+    fn only_the_callers_own_chat_photos_are_read_from_storage() {
+        let uid = "Ax7G1IOIOvZUd7mrIc5gsw0Fcgt2";
+        let url = format!(
+            "https://api.pokoin.com/api/user-photos/chat/{uid}/5962F78B9AACB6BCF053ABAB.jpg"
+        );
+        assert_eq!(
+            own_chat_photo_key(&url, uid).as_deref(),
+            Some("user-photos/chat/Ax7G1IOIOvZUd7mrIc5gsw0Fcgt2/5962f78b9aacb6bcf053abab.jpg")
+        );
+        assert!(own_chat_photo_key(&url, "SomeoneElse1234").is_none());
+        assert!(own_chat_photo_key(&url, "").is_none());
+        assert!(own_chat_photo_key(&url.replace("/chat/", "/listing/"), uid).is_none());
+        assert!(own_chat_photo_key(&url.replace("https://", "http://"), uid).is_none());
+        assert!(own_chat_photo_key(&url.replace("api.pokoin.com", "evil.com"), uid).is_none());
+        assert!(own_chat_photo_key(&url.replace("api.pokoin.com", "evilpokoin.com"), uid).is_none());
+        assert!(own_chat_photo_key(
+            &format!("https://api.pokoin.com/api/user-photos/chat/{uid}/../x/5962f78b9aacb6bcf053abab.jpg"),
+            uid
+        )
+        .is_none());
+        assert!(own_chat_photo_key(
+            &format!("https://api.pokoin.com/api/user-photos/chat/{uid}/not-hex.jpg"),
+            uid
+        )
+        .is_none());
+        assert!(own_chat_photo_key("", uid).is_none());
     }
 
     #[test]
