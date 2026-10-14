@@ -356,6 +356,35 @@ async fn a_grant_connects_sets_stock_lists_and_hears_every_event() {
         sqlx::query("update public.seller_api_grants set webhook_url = 'https://hooks.example.com/x?workspace=w1' where webhook_url <> ''").execute(&pool).await.unwrap();
     }
 
+    // New scans get the same exact-facet sold minimum, otherwise the CardTrader tile minimum.
+    run_sql(&pool,"DROP TABLE IF EXISTS cardtrader_sold_daily; CREATE TABLE cardtrader_sold_daily(blueprint_id bigint,condition text,language text,reverse bool,first_edition bool,graded bool,sold_qty int,min_pkn numeric,observed_day date); INSERT INTO cardtrader_sold_daily VALUES(370796,'NM','IT',false,false,false,1,38,current_date);").await;
+    run_sql(&pool,"CREATE OR REPLACE VIEW cheapest_homepage_cache_blueprint AS SELECT 370796::bigint AS blueprint_id,'cardtrader'::text AS provider,44::numeric AS cheapest_price_pkn;").await;
+    let (_, quotes)=connector(&app,&token,json!({"action":"sold-prices","items":[
+      {"id":"it","identity":{"publicId":"741592"},"condition":"NM","language":"IT"},
+      {"id":"en","identity":{"publicId":"741592"},"condition":"NM","language":"EN"},
+      {"id":"absent","identity":{"publicId":"2"},"condition":"NM","language":"IT"}]})).await;
+    assert_eq!(quotes["prices"][0]["minEurCents"],19);assert_eq!(quotes["prices"][0]["priceSource"],"sold_exact_30d");
+    assert_eq!(quotes["prices"][1]["minEurCents"],22);assert_eq!(quotes["prices"][1]["priceSource"],"cardtrader_tile_minimum");
+    assert_eq!(quotes["prices"][2]["minEurCents"],Value::Null);
+
+    // Unpriced stock is inventory, never a free public sale; retries and restocks preserve it.
+    run_sql(&pool, include_str!("../../../../scripts/sql/118_unpriced_paused_inventory.sql")).await;
+    let body=json!({"action":"list","idempotencyKey":"unpriced-copy","item":{
+      "identity":{"publicId":"741592","game":"pokemon"},"quantity":2,"priceEurCents":0,
+      "status":"paused","condition":"NM","language":"IT","printing":"Reverse Holo",
+      "firstEdition":true,"location":"box·2·42"}});
+    let (status, saved)=connector(&app,&token,body.clone()).await;
+    assert_eq!(status,StatusCode::OK,"{saved}");let id=saved["listingId"].as_str().unwrap();
+    let (_,again)=connector(&app,&token,body).await;assert_eq!(again["listingId"],id);assert_eq!(again["created"],false);
+    let row:Value=sqlx::query_scalar("SELECT to_jsonb(l) FROM marketplace_user_listings l WHERE id=$1").bind(uuid::Uuid::parse_str(id).unwrap()).fetch_one(&pool).await.unwrap();
+    assert_eq!(row["status"],"paused");assert_eq!(row["price_pkn"],0);assert_eq!(row["reverse"],true);
+    assert_eq!(row["first_edition"],true);assert_eq!(row["location"],"box·2·42");
+    let (_,empty)=connector(&app,&token,json!({"action":"stock","listingId":id,"targetQuantity":0})).await;
+    assert_eq!(empty["quantity"],0);
+    let (status,restock)=connector(&app,&token,json!({"action":"stock","listingId":id,"targetQuantity":2})).await;
+    assert_eq!(status,StatusCode::OK,"{restock}");assert_eq!(restock["status"],"paused");
+    assert!(sqlx::query("UPDATE marketplace_user_listings SET status='active' WHERE id=$1").bind(uuid::Uuid::parse_str(id).unwrap()).execute(&pool).await.is_err());
+
     // --- test webhook and revoke --------------------------------------------
     let (status, _) = call(&app, "POST", "/api/seller-api-grants", "seller-1", json!({"action":"test","id":other["grant"]["id"]})).await;
     assert_eq!(status, StatusCode::CONFLICT, "a grant with no webhook URL has nothing to test");

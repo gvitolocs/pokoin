@@ -62,6 +62,7 @@ Header `Authorization: Bearer pkn_…`, JSON body `{ "action": … }`:
 | `locations` | — | `{ locations: [{ label }] }` — storage locations on the seller's live stock |
 | `webhook` | `url` | `{ webhookUrl, sharedSecret }` — like CardTrader's `PATCH /app` |
 | `listings` | `cursor?`, `limit?` (≤ 500) | `{ listings: [{ listingId, cardId, game, name, setName, collectorNumber, condition, language, quantity, status, pricePkn, priceEurCents, reverse, firstEdition, foilState, location, updatedAt, lastSoldMinEurCents }], cursor }` |
+| `sold-prices` | `items` (≤ 500, id, identity.publicId, condition, language, printing, firstEdition) | `{ prices: [{ itemId, publicId, minEurCents, priceSource }], windowDays: 30 }`; exact sold facets first, CardTrader tile minimum if absent, null if neither exists |
 | `stock` | `listingId`, `targetQuantity` (0–99), `channel?` | `{ confirmed: true, listingId, quantity, status, changed }` |
 | `list` | `item`, `idempotencyKey`, `channel?` | `{ confirmed: true, listingId, stockMode: "absolute", created }` |
 | `sales` | `cursor?` | `{ orders: [order], sales: [{ channel, externalId, quantity, orderRef, lineId, occurredAt }], cursor, more }` — order events only; `sales` are the paid orders' lines, `externalId` being the listing id |
@@ -78,7 +79,7 @@ Rules worth knowing:
   the answer is `409 list_in_doubt`: read `listings` instead of retrying.
   `item` is the Card Rails inventory item: `identity.publicId` is the Pokoin
   card id (required), `price` is EUR (200 PKN per euro) or pass `pricePkn`,
-  `quantity`, `condition`, `language`, `finish`, `location`.
+  `quantity`, `condition`, `language`, `finish`/`printing`, explicit `firstEdition`, `signed`, `altered`, `location`. `priceEurCents` is also supported. An unpriced item must explicitly use `status: "paused"`; it cannot become an active zero-price sale. Apply `scripts/sql/118_unpriced_paused_inventory.sql` before deploying this support.
 - **`lastSoldMinEurCents`** is the lowest confirmed Pokoin sale price for
   that exact card version/printing (same blueprint, condition, language,
   reverse and first-edition state — never a graded slab, never mixed) over
