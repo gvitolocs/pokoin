@@ -5,7 +5,7 @@
  * in market/src/api.js, for real card-page payloads plus synthetic edge cases
  * (previews, CardTrader hosts, cache-buster ids, slugs, satellites).
  *
- *   node scripts/export-desk-art-golden.mjs --origin <api origin> --ids <file> [--rps 2] [--out <json>]
+ *   node scripts/export-desk-art-golden.mjs --origin <api origin> --ids <file> [--rps 2] [--concurrency 1] [--out <json>]
  *
  * `--ids` lists `<game> <public card id>` per line. Read card pages from a
  * local candidate API or from https://api.pokoin.com at a low --rps; never
@@ -23,6 +23,7 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((out, arg, i, all) 
 }, []));
 const origin = String(args.origin || '').replace(/\/$/, '');
 const rps = Math.max(0.2, Number(args.rps || 2));
+const concurrency = Math.max(1, Math.min(8, Number(args.concurrency || 1)));
 const outPath = args.out || `${root}pokoin-rust/crates/catalog/fixtures/desk-art-golden.json`;
 if (!origin || !args.ids) {
   console.error('usage: export-desk-art-golden.mjs --origin <api origin> --ids <file> [--rps 2] [--out <json>]');
@@ -52,12 +53,25 @@ function golden(game, card) {
   return clientDeskArtUrl(card);
 }
 
-/** Only the fields deskArtUrl reads; '' and null read like a missing field. */
+/** Only the fields deskArtUrl can read; '' and null read like a missing field. */
 function subset(card) {
   const out = {};
   for (const key of KEYS) {
     const value = card?.[key];
     if (value !== undefined && value !== null && value !== '') out[key] = value;
+  }
+  // `a || b` chains never reach b when a is set: hero reads heroImageUrl first,
+  // the grid gridImageUrl, the tile tileImageUrl, ids id, paths canonicalPath.
+  if (out.id) delete out.card_id;
+  if (out.canonicalPath) delete out.canonical_path;
+  if (out.heroImageUrl && out.gridImageUrl) {
+    delete out.imageUrl;
+    delete out.cdn_image_url;
+    delete out.image_url;
+  }
+  if (out.tileImageUrl) {
+    delete out.homepageImageUrl;
+    delete out.homepage_image_url;
   }
   return out;
 }
@@ -73,7 +87,7 @@ async function fetchPage(game, id) {
   }
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      const res = await fetch(`${origin}/api/marketplace-card-page?${params}`, { headers });
+      const res = await fetch(`${origin}/api/marketplace-card-page?${params}`, { headers, signal: AbortSignal.timeout(30000) });
       if (res.status === 404) return null;
       if (res.ok) return await res.json();
     } catch {
@@ -85,19 +99,33 @@ async function fetchPage(game, id) {
 }
 
 const ids = readFileSync(args.ids, 'utf8').split('\n').map((line) => line.trim().split(/\s+/)).filter((p) => p.length === 2 && /^\d+$/.test(p[1]));
+const pages = new Array(ids.length);
+const started = Date.now();
+let next = 0;
+let done = 0;
+async function worker() {
+  while (next < ids.length) {
+    const i = next;
+    next += 1;
+    const due = started + (i * 1000) / rps;
+    if (due > Date.now()) await sleep(due - Date.now());
+    pages[i] = await fetchPage(...ids[i]);
+    done += 1;
+    if (done % 250 === 0) console.error(`${done}/${ids.length}`);
+  }
+}
+await Promise.all(Array.from({ length: concurrency }, worker));
+
 const real = [];
 let served = 0;
 let serverMismatch = 0;
 let stubAgrees = 0;
 let idempotent = 0;
-const started = Date.now();
 for (const [i, [game, id]] of ids.entries()) {
-  const due = started + (i * 1000) / rps;
-  if (due > Date.now()) await sleep(due - Date.now());
-  const page = await fetchPage(game, id);
-  const card = page?.card;
+  const card = pages[i]?.card;
   if (!card) continue;
-  const url = golden(game, subset(card));
+  const url = golden(game, card);
+  if (golden(game, subset(card)) !== url) console.error(`subset changes the answer ${game} ${id}`);
   real.push({ game, card: subset(card), url });
   // The desk <img> asks for rasterSiblings(deskArtUrl, full)[0]: it must be the same string.
   if (!url || cdnFetchUrl(rasterSiblings(url, { full: true })[0] || '') === url) idempotent += 1;
@@ -112,7 +140,6 @@ for (const [i, [game, id]] of ids.entries()) {
       console.error(`server mismatch ${game} ${id}: rust ${card.deskArtUrl} js ${url}`);
     }
   }
-  if ((i + 1) % 250 === 0) console.error(`${i + 1}/${ids.length}`);
 }
 
 // Synthetic edge cases around real cards.
